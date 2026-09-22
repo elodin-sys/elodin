@@ -52,6 +52,20 @@ def _assets_http_url(db: str, key: str) -> str:
     return f"http://{host}:{int(port) + 1}/{key}"
 
 
+_DEFAULT_SCHEMATIC_KEY = "schematics/main.kdl"
+
+
+def _active_schematic_key(db: str) -> str:
+    import elodin.ui as ui
+
+    # Save Layout stores `schematics/<stem>.overlay.kdl` for `schematic.active`.
+    # A missing pointer is a fresh DB, which still lives at the default key.
+    key = ui.schematic_active(db)
+    if isinstance(key, str) and key:
+        return key
+    return _DEFAULT_SCHEMATIC_KEY
+
+
 def _fetch_overlay_kdl(db: str, schematic_key: str) -> str | None:
     import elodin.ui as ui
 
@@ -71,12 +85,13 @@ def run_once(path: Path, db: str, *, quiet: bool = False) -> bool:
 
     try:
         schematic = _build_schematic(path)
-        if overlay := _fetch_overlay_kdl(db, "schematics/main.kdl"):
+        key = _active_schematic_key(db)
+        if overlay := _fetch_overlay_kdl(db, key):
             schematic = ui.apply_overlay(schematic, overlay)
-        ui.push(schematic, db)
+        ui.push(schematic, db, key=key)
         _set_build_error(db, None)
         if not quiet:
-            print(f"[ui watch] pushed {path.name} → {db}", flush=True)
+            print(f"[ui watch] pushed {path.name} → {key} @ {db}", flush=True)
         return True
     except Exception as exc:  # noqa: BLE001
         err = "".join(traceback.format_exception_only(type(exc), exc)).strip()

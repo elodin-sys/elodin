@@ -192,6 +192,79 @@ def test_world_schematic_accepts_ui_schematic():
     world.schematic(s.emit_kdl())
 
 
+def _wait_for(predicate, timeout: float = 5.0) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def test_watch_follows_active_schematic_and_overlay(tmp_path):
+    """Save As + Save Layout must survive the next watch rebuild.
+
+    The editor stores the layout at ``schematics/<active>.overlay.kdl``.
+    Watch used to always read and write ``schematics/main.kdl``, which
+    reapplied the wrong overlay and repointed ``schematic.active``.
+    """
+    from elodin.ui.watch import run_once
+
+    addr = "127.0.0.1:23553"
+    db_path = tmp_path / "db"
+    script = tmp_path / "schematic.py"
+    script.write_text(
+        "import elodin.ui as ui\n"
+        "def build():\n"
+        "    return ui.schematic(\n"
+        "        ui.hsplit(\n"
+        '            ui.graph("a", name="A", share=0.5),\n'
+        '            ui.graph("b", name="B", share=0.5),\n'
+        "        )\n"
+        "    )\n"
+    )
+    foo_key = "schematics/foo.kdl"
+    server = edb.Server.start(str(db_path), addr)
+    time.sleep(0.3)
+    try:
+        assert ui.schematic_active(addr) is None
+        assert run_once(script, addr, quiet=True)
+        assert _wait_for(lambda: ui.schematic_active(addr) == "schematics/main.kdl")
+        main_asset = db_path / "assets" / "schematics" / "main.kdl"
+        assert _wait_for(main_asset.exists)
+        main_body = main_asset.read_text()
+
+        saved = ui.schematic(
+            ui.hsplit(
+                ui.graph("a", name="A", share=0.5),
+                ui.graph("b", name="B", share=0.5),
+            )
+        )
+        ui.push(saved, addr, key=foo_key)
+        assert _wait_for(lambda: ui.schematic_active(addr) == foo_key)
+
+        assets = db_path / "assets" / "schematics"
+        # Distinct shares: 0.25 is the layout saved against foo; 0.75 is a
+        # decoy on main that the old watch path would have reapplied.
+        (assets / "foo.overlay.kdl").write_text(
+            'layout schematic="schematics/foo.kdl" {\n    split path="0" child=0 share=0.25\n}\n'
+        )
+        (assets / "main.overlay.kdl").write_text(
+            'layout schematic="schematics/main.kdl" {\n    split path="0" child=0 share=0.75\n}\n'
+        )
+
+        assert run_once(script, addr, quiet=True)
+        assert _wait_for(lambda: ui.schematic_active(addr) == foo_key)
+        foo_asset = assets / "foo.kdl"
+        assert _wait_for(foo_asset.exists)
+        foo_body = foo_asset.read_text()
+        assert "share=0.25" in foo_body
+        assert "share=0.75" not in foo_body
+        assert main_asset.read_text() == main_body
+    finally:
+        server.stop()
+
+
 def test_push_to_embedded_server(tmp_path):
     import urllib.error
     import urllib.request
