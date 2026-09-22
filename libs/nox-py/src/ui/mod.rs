@@ -15,7 +15,9 @@ use impeller2_kdl::{
     apply_overlay as apply_overlay_model, extract_overlay as extract_overlay_model,
     overlay_asset_key, parse_overlay, parse_schematic, serialize_overlay, serialize_schematic,
 };
-use impeller2_wkt::{DISPLAY_KERNEL_ASSET_PREFIX, Schematic, SetDbConfig, StoreAsset};
+use impeller2_wkt::{
+    DISPLAY_KERNEL_ASSET_PREFIX, DumpMetadata, DumpMetadataResp, Schematic, SetDbConfig, StoreAsset,
+};
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 
@@ -233,6 +235,23 @@ fn write(schematic: &PySchematic, path: PathBuf) -> PyResult<()> {
     Ok(())
 }
 
+/// Asset key currently pointed at by `schematic.active`, if one is set.
+#[pyfunction]
+fn schematic_active(db: &str) -> PyResult<Option<String>> {
+    let addr = SocketAddr::from_str(db)
+        .map_err(|e| PyValueError::new_err(format!("invalid db address {db:?}: {e}")))?;
+    crate::db::block_on(move || async move {
+        let mut client = impeller2_stellar::Client::connect(addr)
+            .await
+            .map_err(|e| PyRuntimeError::new_err(format!("connect to {addr}: {e}")))?;
+        let resp: DumpMetadataResp = client
+            .request(&DumpMetadata)
+            .await
+            .map_err(|e| PyRuntimeError::new_err(format!("DumpMetadata: {e}")))?;
+        Ok(resp.db_config.schematic_active().map(str::to_owned))
+    })
+}
+
 /// Push schematic to a live DB: StoreAsset + set `schematic.active` (FR-5).
 #[pyfunction]
 #[pyo3(signature = (schematic, db, key = None))]
@@ -367,6 +386,7 @@ pub fn register(parent_module: &Bound<'_, PyModule>) -> PyResult<()> {
     child.add_function(wrap_pyfunction!(to_python, &child)?)?;
     child.add_function(wrap_pyfunction!(write, &child)?)?;
     child.add_function(wrap_pyfunction!(push, &child)?)?;
+    child.add_function(wrap_pyfunction!(schematic_active, &child)?)?;
     child.add_function(wrap_pyfunction!(set_build_error, &child)?)?;
     child.add_function(wrap_pyfunction!(validate_stablehlo, &child)?)?;
     child.add_function(wrap_pyfunction!(overlay_key, &child)?)?;

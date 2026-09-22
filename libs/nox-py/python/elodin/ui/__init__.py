@@ -47,6 +47,7 @@ from_kdl = _native.from_kdl
 to_python = _native.to_python
 write = _native.write
 push = _native.push
+schematic_active = _native.schematic_active
 set_build_error = _native.set_build_error
 overlay_key = _native.overlay_key
 apply_overlay = _native.apply_overlay
@@ -136,6 +137,7 @@ __all__ = [
     "to_python",
     "write",
     "push",
+    "schematic_active",
     "set_build_error",
     "overlay_key",
     "apply_overlay",
