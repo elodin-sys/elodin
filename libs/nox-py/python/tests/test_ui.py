@@ -97,6 +97,8 @@ def test_extended_typed_builders_roundtrip():
             frustums_color=ui.color(1, 2, 3, 4),
             projection_color=ui.color(5, 6, 7),
             frustums_thickness=0.01,
+            frustums_up_marker="highlight",
+            frustums_up_marker_overlay=True,
             view_cube_frame="NED",
             smoothing=1.0,
             arrows=[arrow],
@@ -143,6 +145,41 @@ def test_extended_typed_builders_roundtrip():
         ),
     )
     assert ui.from_kdl(built.emit_kdl()) == built
+
+
+def test_viewport_frustums_up_marker_roundtrip():
+    built = ui.schematic(
+        ui.viewport(
+            create_frustum=True,
+            frustums_up_marker="highlight",
+            frustums_up_marker_overlay=True,
+        )
+    )
+    kdl = built.emit_kdl()
+    assert "frustums_up_marker=" in kdl
+    assert "frustums_up_marker_overlay=" in kdl
+    assert ui.from_kdl(kdl) == built
+
+    generated = ui.to_python(
+        'viewport create_frustum=#true frustums_up_marker="highlight" frustums_up_marker_overlay=#true'
+    )
+    assert 'frustums_up_marker="highlight"' in generated
+    assert "frustums_up_marker_overlay=True" in generated
+    namespace = {}
+    exec(compile(generated, "<frustum-marker>", "exec"), namespace)
+    assert _canonical(namespace["build"]()) == _canonical(built)
+
+
+def test_viewport_frustums_up_marker_defaults_omitted():
+    kdl = ui.schematic(ui.viewport()).emit_kdl()
+    assert "frustums_up_marker" not in kdl
+    generated = ui.to_python("viewport")
+    assert "frustums_up_marker" not in generated
+
+
+def test_viewport_rejects_invalid_frustums_up_marker():
+    with pytest.raises(ValueError, match="frustums_up_marker"):
+        ui.viewport(frustums_up_marker="triangle")
 
 
 def test_write_roundtrip(tmp_path):

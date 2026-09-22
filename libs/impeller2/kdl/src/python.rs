@@ -367,7 +367,17 @@ fn viewport_expr(viewport: &Viewport, share: Option<f32>) -> PyExpr {
         .kw("show_frustums", py_bool(viewport.show_frustums))
         .kw("frustums_color", py_color(viewport.frustums_color))
         .kw("projection_color", py_color(viewport.projection_color))
-        .kw("frustums_thickness", py_f32(viewport.frustums_thickness))
+        .kw("frustums_thickness", py_f32(viewport.frustums_thickness));
+    if viewport.frustums_up_marker != FrustumUpMarker::None {
+        call = call.kw(
+            "frustums_up_marker",
+            py_str(viewport.frustums_up_marker.as_str()),
+        );
+    }
+    if viewport.frustums_up_marker_overlay {
+        call = call.kw("frustums_up_marker_overlay", py_bool(true));
+    }
+    call = call
         .kw("show_view_cube", py_bool(viewport.show_view_cube))
         .kw_opt(
             "view_cube_frame",
@@ -794,6 +804,22 @@ mod tests {
         assert!(python.contains("ui.viewport("));
         assert!(!python.contains("SOURCE_KDL"));
         assert!(!python.contains("ui.from_kdl"));
+    }
+
+    #[test]
+    fn generates_viewport_frustums_up_marker() {
+        let python = schematic_to_python(
+            r#"viewport create_frustum=#true frustums_up_marker="highlight" frustums_up_marker_overlay=#true"#,
+            None,
+        )
+        .unwrap();
+        assert!(python.contains(r#"frustums_up_marker="highlight""#));
+        assert!(python.contains("frustums_up_marker_overlay=True"));
+        assert!(
+            !schematic_to_python("viewport", None)
+                .unwrap()
+                .contains("frustums_up_marker")
+        );
     }
 
     #[test]
