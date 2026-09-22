@@ -677,6 +677,8 @@ fn graph(
     frustums_color=None,
     projection_color=None,
     frustums_thickness=0.006,
+    frustums_up_marker="none",
+    frustums_up_marker_overlay=false,
     show_view_cube=true,
     view_cube_frame=None,
     effects=true,
@@ -707,6 +709,8 @@ fn viewport(
     frustums_color: Option<&Bound<'_, PyAny>>,
     projection_color: Option<&Bound<'_, PyAny>>,
     frustums_thickness: f32,
+    frustums_up_marker: &str,
+    frustums_up_marker_overlay: bool,
     show_view_cube: bool,
     view_cube_frame: Option<&str>,
     effects: bool,
@@ -727,6 +731,11 @@ fn viewport(
             "frustums_thickness must be greater than zero",
         ));
     }
+    let frustums_up_marker = FrustumUpMarker::from_str(frustums_up_marker).map_err(|_| {
+        PyValueError::new_err(format!(
+            "viewport frustums_up_marker must be 'none' or 'highlight', got '{frustums_up_marker}'"
+        ))
+    })?;
     if !smoothing.is_finite() || smoothing < 0.0 {
         return Err(PyValueError::new_err(
             "smoothing must be a finite non-negative number",
@@ -753,6 +762,8 @@ fn viewport(
             projection_color: extract_optional_color(projection_color)?
                 .unwrap_or_else(default_viewport_projection_color),
             frustums_thickness,
+            frustums_up_marker,
+            frustums_up_marker_overlay,
             show_view_cube,
             view_cube_frame: view_cube_frame.map(parse_frame).transpose()?,
             effects,
