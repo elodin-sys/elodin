@@ -2,10 +2,7 @@ use crate::ui::schematic::ElementAffine;
 use crate::ui::widgets::SystemStateExt;
 use crate::{
     SelectedTimeRange,
-    ui::plot::{
-        Line,
-        gpu::{INDEX_BUFFER_LEN, INDEX_BUFFER_SIZE},
-    },
+    ui::plot::{Line, gpu::INDEX_BUFFER_LEN},
     ui::timeline::TimelineSettings,
 };
 use bevy::camera::visibility::RenderLayers;
@@ -62,8 +59,6 @@ const LINE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("bfffa3c4-9401-4b6e-b3ab
 /// Dense line-local XYZ buffers: one `f32` per strip sample plus a leading NaN sentinel.
 /// Sized to the index budget so a full-fidelity short window still fits.
 const LOCAL_VALUE_BUFFER_LEN: usize = INDEX_BUFFER_LEN;
-const LOCAL_VALUE_BUFFER_SIZE: NonZeroU64 =
-    NonZeroU64::new((LOCAL_VALUE_BUFFER_LEN * size_of::<f32>()) as u64).unwrap();
 
 #[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum PlotSystem {
@@ -122,9 +117,9 @@ impl Plugin for Plot3dGpuPlugin {
         let layout_entries = BindGroupLayoutEntries::sequential(
             ShaderStages::VERTEX,
             (
-                storage_buffer_read_only_sized(false, Some(LOCAL_VALUE_BUFFER_SIZE)),
-                storage_buffer_read_only_sized(false, Some(LOCAL_VALUE_BUFFER_SIZE)),
-                storage_buffer_read_only_sized(false, Some(LOCAL_VALUE_BUFFER_SIZE)),
+                storage_buffer_read_only_sized(false, None),
+                storage_buffer_read_only_sized(false, None),
+                storage_buffer_read_only_sized(false, None),
             ),
         );
         let values_descriptor =
@@ -135,9 +130,9 @@ impl Plugin for Plot3dGpuPlugin {
         let index_layout_entries = BindGroupLayoutEntries::sequential(
             ShaderStages::VERTEX,
             (
-                storage_buffer_read_only_sized(false, Some(INDEX_BUFFER_SIZE)),
-                storage_buffer_read_only_sized(false, Some(INDEX_BUFFER_SIZE)),
-                storage_buffer_read_only_sized(false, Some(INDEX_BUFFER_SIZE)),
+                storage_buffer_read_only_sized(false, None),
+                storage_buffer_read_only_sized(false, None),
+                storage_buffer_read_only_sized(false, None),
             ),
         );
         let index_descriptor =
@@ -662,7 +657,7 @@ fn write_anchor_local_line_buffers(
     anchor: DVec3,
     render_device: &RenderDevice,
     render_queue: &RenderQueue,
-) -> Option<([Buffer; 3], [Buffer; 3], u32, bool)> {
+) -> Option<([Buffer; 3], [Buffer; 3], NonZeroU64, NonZeroU64, u32, bool)> {
     let n = xs.len().min(ys.len()).min(zs.len());
     if n < 2 {
         return None;
@@ -698,31 +693,34 @@ fn write_anchor_local_line_buffers(
         return None;
     }
 
+    let value_size = NonZeroU64::new(((n + 1) * size_of::<f32>()) as u64)?;
     let value_bufs = [x_local, y_local, z_local].map(|data| {
-        let mut bytes = vec![0u8; LOCAL_VALUE_BUFFER_SIZE.get() as usize];
-        let src = data.as_bytes();
-        bytes[..src.len()].copy_from_slice(src);
         render_device.create_buffer_with_data(&BufferInitDescriptor {
             label: Some("line_3d anchor-local values"),
-            contents: &bytes,
+            contents: data.as_bytes(),
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
         })
     });
 
+    let index_size = NonZeroU64::new((indices.len() * size_of::<u32>()) as u64)?;
     let index_bufs = ['x', 'y', 'z'].map(|_| {
-        let mut bytes = vec![0u8; INDEX_BUFFER_LEN * size_of::<u32>()];
-        let src = indices.as_bytes();
-        bytes[..src.len()].copy_from_slice(src);
         render_device.create_buffer_with_data(&BufferInitDescriptor {
             label: Some("line_3d anchor-local indices"),
-            contents: &bytes,
+            contents: indices.as_bytes(),
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
         })
     });
 
     let _ = render_queue;
 
-    Some((value_bufs, index_bufs, count, residual_too_large))
+    Some((
+        value_bufs,
+        index_bufs,
+        value_size,
+        index_size,
+        count,
+        residual_too_large,
+    ))
 }
 
 fn extract_lines(
@@ -895,7 +893,14 @@ fn extract_lines(
                 let ys = axis_values(1);
                 let zs = axis_values(2);
 
-                let (value_buffers, index_buffers, count, residual_too_large) =
+                let (
+                    value_buffers,
+                    index_buffers,
+                    value_size,
+                    index_size,
+                    count,
+                    residual_too_large,
+                ) =
                     write_anchor_local_line_buffers(
                         &xs,
                         &ys,
@@ -916,7 +921,7 @@ fn extract_lines(
                     resource: BindingResource::Buffer(BufferBinding {
                         buffer: &value_buffers[i],
                         offset: 0,
-                        size: Some(LOCAL_VALUE_BUFFER_SIZE),
+                        size: Some(value_size),
                     }),
                 });
                 let values_bind_group = render_device.create_bind_group(
@@ -930,7 +935,7 @@ fn extract_lines(
                     resource: BindingResource::Buffer(BufferBinding {
                         buffer: &index_buffers[i],
                         offset: 0,
-                        size: Some(INDEX_BUFFER_SIZE),
+                        size: Some(index_size),
                     }),
                 });
                 let index_bind_group = render_device.create_bind_group(

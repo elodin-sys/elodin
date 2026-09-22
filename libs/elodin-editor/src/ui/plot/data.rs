@@ -136,21 +136,11 @@ impl PlotDataComponent {
         earliest_timestamp: Timestamp,
         archive_enabled: bool,
     ) {
-        let element_names = self
-            .element_names
-            .iter()
-            .filter(|s| !s.is_empty())
-            .map(|s| Some(s.as_str()))
-            .chain(std::iter::repeat(None));
-        for (i, (new_value, name)) in component_view.iter().zip(element_names).enumerate() {
+        for (i, new_value) in component_view.iter().enumerate() {
+            let Some(line) = self.lines.get(&i) else {
+                continue;
+            };
             let new_value = new_value.as_f32();
-            let line = self.lines.entry(i).or_insert_with(|| {
-                let label = name.map(str::to_string).unwrap_or_else(|| format!("[{i}]"));
-                assets.add(Line {
-                    label,
-                    ..Default::default()
-                })
-            });
             let mut line = assets.get_mut(line.id()).expect("missing line asset");
             // Only accept data at timestamps beyond all existing data for this
             // line. Live FixedRate snapshots can repeat the playhead timestamp;
@@ -798,20 +788,7 @@ pub fn sync_plot_lines_from_series_store(
             continue;
         }
         let has_samples_in_window = series_store.has_samples_in_range(&component_id, sync_range);
-        let num_elements = component.element_names.len().max(1);
-        for element_index in 0..num_elements {
-            let handle = component.lines.entry(element_index).or_insert_with(|| {
-                let label = component
-                    .element_names
-                    .get(element_index)
-                    .filter(|s| !s.is_empty())
-                    .cloned()
-                    .unwrap_or_else(|| format!("[{element_index}]"));
-                lines.add(Line {
-                    label,
-                    ..Default::default()
-                })
-            });
+        for (&element_index, handle) in &component.lines {
             let Some(mut line) = lines.get_mut(handle) else {
                 continue;
             };
@@ -3043,6 +3020,31 @@ mod tests {
         let adapter = ComponentId(7);
         let ids = build_series_store_allowlist(HashSet::new(), [adapter]);
         assert_eq!(ids, [adapter].into_iter().collect());
+    }
+
+    #[test]
+    fn tuple_array_access_eql_component_is_allowlisted() {
+        use impeller2::schema::Schema;
+        use impeller2::types::PrimType;
+
+        let name = "effector.cube_pos_ecef";
+        let component = Arc::new(eql::Component::new(
+            name.to_string(),
+            ComponentId::new(name),
+            Schema::new(PrimType::F64, vec![1950_u64]).expect("valid schema"),
+        ));
+        let eql_ctx = EqlContext(eql::Context::from_leaves(
+            [component],
+            Timestamp(0),
+            Timestamp(1),
+        ));
+        let mut ids = HashSet::new();
+        collect_eql_component_ids(
+            "(effector.cube_pos_ecef[0],effector.cube_pos_ecef[650],effector.cube_pos_ecef[1300])",
+            &eql_ctx,
+            &mut ids,
+        );
+        assert_eq!(ids, [ComponentId::new(name)].into_iter().collect());
     }
 
     #[test]

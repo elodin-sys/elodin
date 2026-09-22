@@ -409,6 +409,14 @@ pub fn commit_world_head_unified(
     commit_world_head_for_world(state, exec.world_mut(), timestamp, exclusions)
 }
 
+fn should_record_component(
+    metadata: &ComponentMetadata,
+    latest: Option<&[u8]>,
+    value: &[u8],
+) -> bool {
+    !metadata.record_on_change() || latest != Some(value)
+}
+
 fn commit_world_head_for_world(
     state: &State,
     world: &mut crate::world::World,
@@ -444,6 +452,10 @@ fn commit_world_head_for_world(
                 continue;
             };
             let buf = &column.buffer[offset..offset + size];
+            let latest = component.time_series.latest().map(|(_, head)| head);
+            if !should_record_component(component_metadata, latest, buf) {
+                continue;
+            }
             component.time_series.push_buf(timestamp, buf)?;
         }
     }
@@ -884,6 +896,46 @@ pub fn timestamps_changed(db: &DB, components: &mut [(PairId, Timestamp)]) -> Op
         }
         changed
     })
+}
+
+#[cfg(test)]
+mod commit_tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    fn metadata(record_on_change: bool) -> ComponentMetadata {
+        let mut values = HashMap::new();
+        if record_on_change {
+            values.insert("record_on_change".into(), "true".into());
+        }
+        ComponentMetadata {
+            component_id: ComponentId::new("value"),
+            name: "value".into(),
+            metadata: values,
+        }
+    }
+
+    #[test]
+    fn record_on_change_skips_only_equal_existing_values() {
+        let value = [1, 2, 3];
+        let changed = [1, 2, 4];
+        assert!(!should_record_component(
+            &metadata(true),
+            Some(&value),
+            &value,
+        ));
+        assert!(should_record_component(
+            &metadata(true),
+            Some(&value),
+            &changed,
+        ));
+        assert!(should_record_component(&metadata(true), None, &value,));
+        assert!(should_record_component(
+            &metadata(false),
+            Some(&value),
+            &value,
+        ));
+    }
 }
 
 #[cfg(test)]

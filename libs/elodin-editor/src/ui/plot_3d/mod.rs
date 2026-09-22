@@ -22,6 +22,28 @@ use crate::{EqlContext, ui::schematic::EqlExt};
 
 pub mod gpu;
 
+fn ensure_line_handle(
+    data: &mut PlotDataComponent,
+    index: usize,
+    line_assets: &mut Assets<Line>,
+) -> Handle<Line> {
+    let label = data
+        .element_names
+        .get(index)
+        .filter(|name| !name.is_empty())
+        .cloned()
+        .unwrap_or_else(|| format!("[{index}]"));
+    data.lines
+        .entry(index)
+        .or_insert_with(|| {
+            line_assets.add(Line {
+                label,
+                ..Default::default()
+            })
+        })
+        .clone()
+}
+
 /// Convert a schematic (sRGB) color into the linear RGBA the line pipeline
 /// renders, keeping it consistent with meshes/gizmos. Alpha is preserved so a
 /// KDL `color`/`future_color` can set per-line opacity. An explicit
@@ -93,6 +115,7 @@ pub fn sync_line_plot_3d(
     mut commands: Commands,
     eql_ctx: Res<EqlContext>,
     mut collected_graph_data: ResMut<CollectedGraphData>,
+    mut line_assets: ResMut<Assets<Line>>,
     metadata_store: Res<ComponentMetadataRegistry>,
     #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
 ) {
@@ -132,7 +155,7 @@ pub fn sync_line_plot_3d(
                             .collect(),
                     )
                 });
-            handles[i] = data.lines.get(index).cloned();
+            handles[i] = Some(ensure_line_handle(data, *index, &mut line_assets));
             sources[i] = Some(gpu::LineAxisSource {
                 component_id: c.id,
                 element: *index,
@@ -237,6 +260,15 @@ mod tests {
         // this alpha as-is; fallback futures get the default fade in `resolve`.
         let color = impeller2_wkt::Color::rgba(1.0, 1.0, 1.0, 0.25);
         assert_eq!(line_color_linear(&color).w, 0.25);
+    }
+
+    #[test]
+    fn line_handle_supports_unnamed_sparse_array_indices() {
+        let mut data = PlotDataComponent::new("cube_pos_ecef", Vec::new());
+        let mut assets = Assets::<Line>::default();
+        let handle = ensure_line_handle(&mut data, 1300, &mut assets);
+        assert_eq!(data.lines.get(&1300), Some(&handle));
+        assert_eq!(assets.get(&handle).unwrap().label, "[1300]");
     }
 
     #[test]

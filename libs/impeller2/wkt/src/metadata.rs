@@ -49,6 +49,12 @@ impl ComponentMetadata {
             .map(|v| v == "true")
             .unwrap_or(false)
     }
+
+    pub fn record_on_change(&self) -> bool {
+        self.metadata
+            .get("record_on_change")
+            .is_some_and(|value| value == "true")
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Schema)]
