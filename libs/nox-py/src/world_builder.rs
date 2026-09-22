@@ -29,6 +29,7 @@ use std::{
     iter,
     net::SocketAddr,
     path::{Path, PathBuf},
+    str::FromStr,
     sync::Arc,
     time,
 };
@@ -488,6 +489,8 @@ impl WorldBuilder {
         frustums_color = None,
         projection_color = None,
         frustums_thickness = 0.006,
+        frustums_up_marker = "none",
+        frustums_up_marker_overlay = true,
         fps = None,
         cinematic = false,
         ev100 = None,
@@ -516,6 +519,8 @@ impl WorldBuilder {
         frustums_color: Option<Vec<f32>>,
         projection_color: Option<Vec<f32>>,
         frustums_thickness: f32,
+        frustums_up_marker: &str,
+        frustums_up_marker_overlay: bool,
         fps: Option<f32>,
         cinematic: bool,
         ev100: Option<f32>,
@@ -676,6 +681,12 @@ impl WorldBuilder {
                 )),
             ));
         }
+        let frustums_up_marker = impeller2_wkt::FrustumUpMarker::from_str(frustums_up_marker)
+            .map_err(|_| {
+                Error::PyO3(PyValueError::new_err(format!(
+                    "sensor_camera frustums_up_marker must be 'none' or 'highlight', got '{frustums_up_marker}'"
+                )))
+            })?;
         if !cinematic_look_requires_cinematic(
             cinematic,
             environment.is_some(),
@@ -744,6 +755,8 @@ impl WorldBuilder {
                     "projection_color",
                 )?,
                 frustums_thickness,
+                frustums_up_marker,
+                frustums_up_marker_overlay,
                 fps,
                 cinematic,
                 ev100,

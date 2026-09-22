@@ -27,9 +27,13 @@ use std::time::Instant;
 
 use super::{
     PaneName,
-    colors::{ColorExt, get_scheme},
+    colors::{ColorExt, EColor, get_scheme},
 };
+use crate::plugins::frustum_common::frustum_up_marker_color;
+use crate::sensor_camera::SensorCameraConfigs;
+use crate::ui::up_marker::paint_up_marker;
 use crate::ui::widgets::SystemStateExt;
+use impeller2_wkt::FrustumUpMarker;
 
 // ---------------------------------------------------------------------------
 // Public pane types (unchanged API)
@@ -743,6 +747,7 @@ pub struct VideoStreamWidget<'w, 's> {
     current_time: Res<'w, CurrentTimestamp>,
     images: ResMut<'w, Assets<Image>>,
     window_settings: Query<'w, 's, &'static bevy_egui::EguiContextSettings>,
+    sensor_camera_configs: Option<Res<'w, SensorCameraConfigs>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1131,6 +1136,36 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                                 .size(16.0)
                                 .color(get_scheme().highlight),
                         ),
+                    );
+                }
+
+                if let Some(config) = state
+                    .sensor_camera_configs
+                    .as_ref()
+                    .and_then(|configs| {
+                        configs
+                            .0
+                            .iter()
+                            .find(|config| config.camera_name == stream.msg_name)
+                    })
+                    // Gated on create_frustum like the 3D marker, so deleting the
+                    // frustum cannot strand a bar the inspector no longer exposes.
+                    .filter(|config| {
+                        config.create_frustum
+                            && config.frustums_up_marker_overlay
+                            && config.frustums_up_marker != FrustumUpMarker::None
+                    })
+                {
+                    let image_rect = egui::Rect::from_min_size(
+                        egui::pos2(viewport_pos.x + x_offset, viewport_pos.y + y_offset),
+                        Vec2::new(width, height),
+                    );
+                    paint_up_marker(
+                        ui.painter(),
+                        image_rect,
+                        config.frustums_up_marker,
+                        config.frustums_color.into_color32(),
+                        frustum_up_marker_color(config.frustums_color).into_color32(),
                     );
                 }
             }
