@@ -180,20 +180,5 @@
     "mode": "dark",
     "scheme": "default"
   },
-  "timeline": {
-    "follow_latest": false,
-    "future_color": {
-      "a": 1.0,
-      "b": 1.0,
-      "g": 1.0,
-      "r": 1.0
-    },
-    "played_color": {
-      "a": 1.0,
-      "b": 0.20000000298023224,
-      "g": 0.8999999761581421,
-      "r": 1.0
-    },
-    "range": null
-  }
+  "timeline": null
 }
