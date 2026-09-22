@@ -919,7 +919,7 @@ impl EqlExt for eql::Expr {
             eql::Expr::ArrayAccess(expr, _)
             | eql::Expr::Last(expr, _)
             | eql::Expr::First(expr, _) => expr.requires_plot_evaluation(),
-            eql::Expr::Tuple(_) => true,
+            eql::Expr::Tuple(exprs) => exprs.iter().any(|e| e.requires_plot_evaluation()),
             eql::Expr::ComponentPart(_)
             | eql::Expr::Time(_)
             | eql::Expr::FloatLiteral(_)
@@ -1201,6 +1201,10 @@ mod element_affine_tests {
 
         let sqrt = eql::Expr::Formula(Arc::new(eql::formulas::Sqrt), Box::new(plain.clone()));
         assert!(sqrt.requires_plot_evaluation());
+
+        // Comma graphs are tuples of components and must stay independent series.
+        let comma = eql::Expr::Tuple(vec![plain.clone(), element("ball.vel", 0)]);
+        assert!(!comma.requires_plot_evaluation());
 
         let tuple = eql::Expr::Tuple(vec![plain, sqrt]);
         assert!(tuple.requires_plot_evaluation());
