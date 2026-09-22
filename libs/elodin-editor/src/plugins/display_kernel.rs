@@ -208,26 +208,21 @@ pub fn evaluate_kernel_series(
     range: std::ops::Range<Timestamp>,
     max_points: Option<usize>,
 ) -> Result<EvaluatedSeries, String> {
-    let Some(driver_id) = binding
+    let input_ids: Vec<ComponentId> = binding
         .inputs
-        .first()
+        .iter()
         .map(|input| ComponentId::new(&input.component))
-    else {
+        .collect();
+    let sample_times = cache.union_timestamps(&input_ids, range);
+    if sample_times.is_empty() {
         return Ok(EvaluatedSeries {
             timestamps: Vec::new(),
             values: Vec::new(),
         });
-    };
-    let Some(driver) = cache.series(&driver_id) else {
-        return Ok(EvaluatedSeries {
-            timestamps: Vec::new(),
-            values: Vec::new(),
-        });
-    };
-    let sample_count = driver.range(range.clone()).count();
+    }
     let stride = max_points
         .filter(|&limit| limit > 0)
-        .map(|limit| sample_count.div_ceil(limit))
+        .map(|limit| sample_times.len().div_ceil(limit))
         .unwrap_or(1)
         .max(1);
     let batch_size = compiled.artifact.batch_size as usize;
@@ -237,7 +232,7 @@ pub fn evaluate_kernel_series(
 
     let mut timestamps = Vec::new();
     let mut packed_inputs: Vec<Vec<Vec<u8>>> = vec![Vec::new(); compiled.artifact.inputs.len()];
-    for (sample_index, (&timestamp, _)) in driver.range(range).enumerate() {
+    for (sample_index, timestamp) in sample_times.into_iter().enumerate() {
         if sample_index % stride != 0 {
             continue;
         }

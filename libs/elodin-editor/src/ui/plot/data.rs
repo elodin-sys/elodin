@@ -235,27 +235,21 @@ pub(crate) fn evaluate_series(
     range: Range<Timestamp>,
     max_points: Option<usize>,
 ) -> Result<EvaluatedSeries, eql::eval::EvalError> {
-    let Some(driver_id) = dependencies.first() else {
+    let sample_times = cache.union_timestamps(dependencies, range);
+    if sample_times.is_empty() {
         return Ok(EvaluatedSeries {
             timestamps: Vec::new(),
             values: Vec::new(),
         });
-    };
-    let Some(driver) = cache.series(driver_id) else {
-        return Ok(EvaluatedSeries {
-            timestamps: Vec::new(),
-            values: Vec::new(),
-        });
-    };
-    let sample_count = driver.range(range.clone()).count();
+    }
     let stride = max_points
         .filter(|&limit| limit > 0)
-        .map(|limit| sample_count.div_ceil(limit))
+        .map(|limit| sample_times.len().div_ceil(limit))
         .unwrap_or(1)
         .max(1);
     let mut timestamps = Vec::new();
     let mut output: Vec<Vec<f32>> = Vec::new();
-    for (sample_index, (&timestamp, _)) in driver.range(range).enumerate() {
+    for (sample_index, timestamp) in sample_times.into_iter().enumerate() {
         if sample_index % stride != 0 {
             continue;
         }
@@ -3447,6 +3441,57 @@ mod tests {
             evaluate_series(&cache, &expr, &[id], Timestamp(0)..Timestamp(2), None).unwrap();
 
         assert_eq!(evaluated.values, vec![vec![5.0, 13.0]]);
+    }
+
+    #[test]
+    fn evaluate_series_unions_mixed_rate_timestamps() {
+        // Sparse series listed first so a hashed/first clock would drop the dense samples.
+        let fast = ComponentId::new("fast.value");
+        let slow = ComponentId::new("slow.value");
+        let schema =
+            impeller2::schema::Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new())
+                .unwrap();
+        let context = eql::Context::from_leaves(
+            [
+                Arc::new(eql::Component::new(
+                    "fast.value".to_string(),
+                    fast,
+                    schema.clone(),
+                )),
+                Arc::new(eql::Component::new("slow.value".to_string(), slow, schema)),
+            ],
+            Timestamp(0),
+            Timestamp(5),
+        );
+        let expr = context.parse_str("fast.value + slow.value").unwrap();
+        let mut cache = TelemetryCache::default();
+        insert_f64(&mut cache, slow, 0, 10.0);
+        insert_f64(&mut cache, slow, 4, 20.0);
+        for t in 0..=4 {
+            insert_f64(&mut cache, fast, t, t as f64);
+        }
+
+        let evaluated = evaluate_series(
+            &cache,
+            &expr,
+            &[slow, fast],
+            Timestamp(0)..Timestamp(5),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            evaluated.timestamps,
+            vec![
+                Timestamp(0),
+                Timestamp(1),
+                Timestamp(2),
+                Timestamp(3),
+                Timestamp(4)
+            ]
+        );
+        // Zero-order hold on slow: 10 until t=4, then 20.
+        assert_eq!(evaluated.values, vec![vec![10.0, 11.0, 12.0, 13.0, 24.0]]);
     }
 
     #[test]
