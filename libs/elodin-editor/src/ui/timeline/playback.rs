@@ -64,6 +64,57 @@ pub fn same_playback_speed(a: f64, b: f64) -> bool {
     (a - b).abs() < 1e-9
 }
 
+/// Bounds for a typed speed. Wider than the presets so `0.02` or `250` work,
+/// narrow enough that a stray keystroke cannot stall or fling the playhead.
+pub const MIN_PLAYBACK_SPEED: f64 = 0.01;
+pub const MAX_PLAYBACK_SPEED: f64 = 1000.0;
+
+pub const SPEED_INPUT_MAX_CHARS: usize = 6;
+
+/// Keep what the speed field accepts: digits and a single `.` or `,`
+/// separator, so `0.5`, `2,4`, and `.25` type naturally and nothing else does.
+pub fn sanitize_speed_input(text: &str) -> String {
+    let mut separator_seen = false;
+    text.chars()
+        .filter(|c| match c {
+            '0'..='9' => true,
+            '.' | ',' if !separator_seen => {
+                separator_seen = true;
+                true
+            }
+            _ => false,
+        })
+        .take(SPEED_INPUT_MAX_CHARS)
+        .collect()
+}
+
+/// Filter one keystroke or paste before it reaches the speed field, so a
+/// rejected character never shows. `separator_allowed` is false while the
+/// field already holds a separator that the edit does not replace, and flips
+/// off once this input supplies one.
+pub fn filter_speed_keystrokes(typed: &str, separator_allowed: &mut bool) -> String {
+    typed
+        .chars()
+        .filter(|c| match c {
+            '0'..='9' => true,
+            '.' | ',' if *separator_allowed => {
+                *separator_allowed = false;
+                true
+            }
+            _ => false,
+        })
+        .collect()
+}
+
+/// Parse a typed speed, accepting either decimal separator and clamping to
+/// [`MIN_PLAYBACK_SPEED`]..=[`MAX_PLAYBACK_SPEED`]. `None` for empty or zero
+/// input, which leaves the current speed alone.
+pub fn parse_playback_speed(text: &str) -> Option<f64> {
+    let normalized = sanitize_speed_input(text).replace(',', ".");
+    let speed: f64 = normalized.parse().ok()?;
+    (speed.is_finite() && speed > 0.0).then(|| speed.clamp(MIN_PLAYBACK_SPEED, MAX_PLAYBACK_SPEED))
+}
+
 /// When true, [`advance_playback`](crate::advance_playback) wraps inside
 /// [`PlaybackRegion`], or inside the whole recording when no region is set.
 #[derive(Resource, Default, Clone, Copy, Debug)]
@@ -418,6 +469,43 @@ mod tests {
         assert_eq!(adjacent_playback_speed(0.05, -1), 0.05);
         assert_eq!(adjacent_playback_speed(1.5, 1), 2.0);
         assert_eq!(adjacent_playback_speed(1.5, -1), 1.0);
+    }
+
+    #[test]
+    fn speed_input_keeps_digits_and_one_separator() {
+        assert_eq!(sanitize_speed_input("2.4"), "2.4");
+        assert_eq!(sanitize_speed_input("2,4"), "2,4");
+        assert_eq!(sanitize_speed_input("1.2.3"), "1.23");
+        assert_eq!(sanitize_speed_input("0,5.1"), "0,51");
+        assert_eq!(sanitize_speed_input("-3x "), "3");
+        assert_eq!(sanitize_speed_input("12345678"), "123456");
+    }
+
+    #[test]
+    fn keystrokes_other_than_digits_and_a_free_separator_are_dropped() {
+        let mut allowed = true;
+        assert_eq!(filter_speed_keystrokes("a", &mut allowed), "");
+        assert_eq!(filter_speed_keystrokes("2", &mut allowed), "2");
+        assert_eq!(filter_speed_keystrokes(",", &mut allowed), ",");
+        assert!(!allowed);
+        assert_eq!(filter_speed_keystrokes(".", &mut allowed), "");
+        assert_eq!(filter_speed_keystrokes("4x", &mut allowed), "4");
+
+        let mut allowed = true;
+        assert_eq!(filter_speed_keystrokes(" 2.4.5x ", &mut allowed), "2.45");
+    }
+
+    #[test]
+    fn typed_speed_parses_either_separator_and_clamps() {
+        assert_eq!(parse_playback_speed("0.5"), Some(0.5));
+        assert_eq!(parse_playback_speed("2,4"), Some(2.4));
+        assert_eq!(parse_playback_speed(".25"), Some(0.25));
+        assert_eq!(parse_playback_speed("3."), Some(3.0));
+        assert_eq!(parse_playback_speed("0.001"), Some(MIN_PLAYBACK_SPEED));
+        assert_eq!(parse_playback_speed("5000"), Some(MAX_PLAYBACK_SPEED));
+        assert_eq!(parse_playback_speed(""), None);
+        assert_eq!(parse_playback_speed("0"), None);
+        assert_eq!(parse_playback_speed("."), None);
     }
 
     #[test]

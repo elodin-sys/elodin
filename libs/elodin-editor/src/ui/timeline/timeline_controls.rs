@@ -31,7 +31,7 @@ use crate::{
 use super::{
     AutoFollowLatestState, LatestFollow, PlaybackSpeed, StreamTickOrigin, TimelineIcons,
     TimelineSettings,
-    playback::{self, PLAYBACK_SPEED_PRESETS, PlaybackLoop, PlaybackRegion, set_playback_speed},
+    playback::{self, PlaybackLoop, PlaybackRegion, set_playback_speed},
 };
 use crate::ui::widgets::SystemStateExt;
 
@@ -348,11 +348,14 @@ impl WidgetSystem for TimelineControls<'_, '_> {
 
                                     ui.add_space(24.0);
 
+                                    let playback_leads = !latest_follow.0 && !paused.0;
                                     speed_control(
                                         ui,
                                         &mut playback_speed,
                                         &mut latest_follow,
                                         &mut auto_follow_latest_state,
+                                        playback_leads,
+                                        played_color,
                                     );
 
                                     ui.add_space(16.0);
@@ -381,23 +384,180 @@ impl WidgetSystem for TimelineControls<'_, '_> {
     }
 }
 
+/// Speed field drawn as the same pill as [`live_follow_button`]. Whichever of
+/// the two drives the playhead is lit in `played_color`: LIVE while it
+/// follows, the speed pill while playback runs on its own clock.
 fn speed_control(
     ui: &mut egui::Ui,
     playback_speed: &mut PlaybackSpeed,
     latest_follow: &mut LatestFollow,
     auto_follow: &mut AutoFollowLatestState,
+    playback_leads: bool,
+    played_color: egui::Color32,
 ) {
-    let speed_text = egui::RichText::new(format_playback_speed(playback_speed.0))
-        .color(get_scheme().text_primary);
-    let response = ui
-        .add(
-            egui::Label::new(speed_text)
-                .sense(egui::Sense::click())
-                .selectable(false),
-        )
-        .on_hover_text("Playback speed. Scroll to step, click for presets");
+    let scheme = get_scheme();
+    let edit_id = ui.make_persistent_id("playback_speed_edit");
+    let buffer_id = edit_id.with("buffer");
+    let rect_id = edit_id.with("rect");
+    let editing = ui.memory(|memory| memory.has_focus(edit_id));
+    // The pill is drawn before its response exists, so hover reads last frame's rect.
+    let hovered = ui
+        .data(|data| data.get_temp::<egui::Rect>(rect_id))
+        .is_some_and(|rect| ui.rect_contains_pointer(rect));
 
-    if response.hovered() {
+    let (text_color, fill_color, stroke_color) = if playback_leads {
+        (
+            played_color,
+            scheme.bg_secondary.opacity(0.7),
+            played_color.opacity(if hovered { 0.75 } else { 0.45 }),
+        )
+    } else {
+        (
+            scheme.text_primary,
+            scheme.bg_secondary.opacity(0.6),
+            scheme
+                .border_primary
+                .opacity(if hovered { 0.9 } else { 0.55 }),
+        )
+    };
+    let stroke_color = if editing {
+        played_color.opacity(0.9)
+    } else {
+        stroke_color
+    };
+
+    let font_id = egui::TextStyle::Button.resolve(ui.style());
+    let text_height = ui
+        .painter()
+        .layout_no_wrap("0".to_owned(), font_id.clone(), text_color)
+        .size()
+        .y;
+    // Hug the value like LIVE hugs its label; the caret needs a sliver more.
+    let painter = ui.painter().clone();
+    let field_width = |text: &str| {
+        let shown = if text.is_empty() {
+            format_speed_value(playback_speed.0)
+        } else {
+            text.to_owned()
+        };
+        painter
+            .layout_no_wrap(shown, font_id.clone(), text_color)
+            .size()
+            .x
+            .max(8.0)
+            + 2.0
+    };
+    let height = (text_height + 8.0).max(22.0);
+    const MARGIN_Y: i8 = 3;
+
+    let frame = egui::Frame::NONE
+        .fill(fill_color)
+        .stroke(egui::Stroke::new(1.0_f32, stroke_color))
+        .corner_radius(egui::CornerRadius::same(10))
+        .inner_margin(egui::Margin::symmetric(10, MARGIN_Y))
+        .show(ui, |ui| {
+            ui.set_min_height(height - 2.0 * f32::from(MARGIN_Y));
+            ui.spacing_mut().item_spacing.x = 1.0;
+            // The parent row is right-to-left, so the suffix goes in first.
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new("x")
+                        .font(font_id.clone())
+                        .color(text_color.opacity(0.6)),
+                )
+                .selectable(false),
+            );
+            let current = format_speed_value(playback_speed.0);
+            let mut text = if editing {
+                let text = ui
+                    .data(|data| data.get_temp::<String>(buffer_id))
+                    .unwrap_or_else(|| current.clone());
+                filter_speed_events(ui, edit_id, &text);
+                text
+            } else {
+                current.clone()
+            };
+            let width = field_width(&text);
+            let response = ui.add(
+                egui::TextEdit::singleline(&mut text)
+                    .id(edit_id)
+                    .frame(egui::Frame::NONE)
+                    .font(font_id.clone())
+                    .text_color(text_color)
+                    .hint_text(egui::RichText::new(current).color(text_color.opacity(0.45)))
+                    .char_limit(playback::SPEED_INPUT_MAX_CHARS)
+                    .desired_width(width)
+                    .horizontal_align(egui::Align::RIGHT)
+                    .margin(egui::Margin::ZERO),
+            );
+            (response, text)
+        });
+    let (field, mut text) = frame.inner;
+
+    if field.changed() {
+        text = playback::sanitize_speed_input(&text);
+    }
+    if field.gained_focus() {
+        select_all(ui.ctx(), edit_id, text.chars().count());
+    }
+
+    if field.has_focus() {
+        let step = ui.input_mut(|input| {
+            if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+                1
+            } else if input.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+                -1
+            } else {
+                0
+            }
+        });
+        if step != 0 {
+            let from = playback::parse_playback_speed(&text).unwrap_or(playback_speed.0);
+            let speed = playback::adjacent_playback_speed(from, step);
+            set_playback_speed(speed, playback_speed, latest_follow, auto_follow);
+            text = format_speed_value(speed);
+            select_all(ui.ctx(), edit_id, text.chars().count());
+        }
+        ui.data_mut(|data| data.insert_temp(buffer_id, text));
+    } else if field.lost_focus() {
+        let (cancelled, submitted) = ui.input(|input| {
+            (
+                input.key_pressed(egui::Key::Escape),
+                input.key_pressed(egui::Key::Enter),
+            )
+        });
+        // In LIVE the stored speed is stale, so Enter on the same value must
+        // still hand the lead back to playback.
+        if !cancelled
+            && let Some(speed) = playback::parse_playback_speed(&text)
+            && (!playback::same_playback_speed(speed, playback_speed.0)
+                || (submitted && latest_follow.0))
+        {
+            set_playback_speed(speed, playback_speed, latest_follow, auto_follow);
+        }
+        ui.data_mut(|data| data.remove::<String>(buffer_id));
+    }
+
+    ui.data_mut(|data| data.insert_temp(rect_id, frame.response.rect));
+    // At rest the whole pill is the click target, not just the digits. While
+    // editing the overlay is dropped so clicks place the caret in the field.
+    let response = if editing {
+        frame.response
+    } else {
+        let pill = ui.interact(
+            frame.response.rect,
+            edit_id.with("pill"),
+            egui::Sense::click(),
+        );
+        if pill.clicked() {
+            ui.memory_mut(|memory| memory.request_focus(edit_id));
+        }
+        pill.on_hover_cursor(egui::CursorIcon::Text).on_hover_text(
+            "Type a speed like 0.5 or 2.4, Enter to apply, Esc to cancel. ↑/↓ or scroll steps presets",
+        )
+    };
+
+    if response.hovered() && !editing {
         // egui keeps `smooth_scroll_delta` nonzero for several frames after one
         // wheel notch, so stepping a preset per nonzero frame jumps several
         // presets per gesture. Accumulate the delta and step once the summed
@@ -422,29 +582,51 @@ fn speed_control(
         }
     }
 
-    let popup_id = ui.make_persistent_id("playback_speed");
-    egui::Popup::from_toggle_button_response(&response)
-        .id(popup_id)
-        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-        .show(|ui| {
-            ui.set_min_width(72.0);
-            for speed in PLAYBACK_SPEED_PRESETS {
-                let selected = playback::same_playback_speed(speed, playback_speed.0);
-                if ui
-                    .selectable_label(selected, format_playback_speed(speed))
-                    .clicked()
-                {
-                    set_playback_speed(speed, playback_speed, latest_follow, auto_follow);
-                }
-            }
-        });
-
-    let speed_label = egui::RichText::new("SPEED").color(get_scheme().text_secondary);
+    let speed_label = egui::RichText::new("SPEED").color(scheme.text_secondary);
     ui.add_space(8.0);
     ui.add(egui::Label::new(speed_label).selectable(false));
 }
 
-fn format_playback_speed(speed: f64) -> String {
+/// Drop typed or pasted characters the speed field rejects before the
+/// `TextEdit` sees them. A separator is only let through when the field has
+/// none, or the selection about to be replaced holds it.
+fn filter_speed_events(ui: &mut egui::Ui, edit_id: egui::Id, text: &str) {
+    let is_separator = |c: char| c == '.' || c == ',';
+    let selection = egui::TextEdit::load_state(ui.ctx(), edit_id)
+        .and_then(|state| state.cursor.char_range())
+        .map(|range| range.as_sorted_char_range())
+        .unwrap_or(0..0);
+    let selected_separator = text
+        .chars()
+        .skip(selection.start)
+        .take(selection.len())
+        .any(is_separator);
+    let mut separator_allowed = !text.contains(is_separator) || selected_separator;
+    ui.input_mut(|input| {
+        input.events.retain_mut(|event| match event {
+            egui::Event::Text(typed) | egui::Event::Paste(typed) => {
+                *typed = playback::filter_speed_keystrokes(typed, &mut separator_allowed);
+                !typed.is_empty()
+            }
+            _ => true,
+        });
+    });
+}
+
+/// Select the whole field so the next keystroke replaces the value.
+fn select_all(ctx: &egui::Context, id: egui::Id, len: usize) {
+    if let Some(mut state) = egui::TextEdit::load_state(ctx, id) {
+        state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                egui::text::CCursor::new(len),
+            )));
+        state.store(ctx, id);
+    }
+}
+
+fn format_speed_value(speed: f64) -> String {
     if !speed.is_finite() || speed < 0.0 {
         return "-".to_string();
     }
@@ -456,7 +638,7 @@ fn format_playback_speed(speed: f64) -> String {
     if value.ends_with('.') {
         value.pop();
     }
-    format!("{value}x")
+    value
 }
 
 fn format_lag_counter(micros: i64) -> String {
