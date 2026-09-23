@@ -398,10 +398,27 @@ fn speed_control(
         .on_hover_text("Playback speed. Scroll to step, click for presets");
 
     if response.hovered() {
+        // egui keeps `smooth_scroll_delta` nonzero for several frames after one
+        // wheel notch, so stepping a preset per nonzero frame jumps several
+        // presets per gesture. Accumulate the delta and step once the summed
+        // scroll crosses a notch's worth of points.
         let scroll = ui.input(|input| input.smooth_scroll_delta.y);
-        if scroll.abs() > 0.0 {
-            let next = playback::adjacent_playback_speed(playback_speed.0, scroll.signum() as i32);
-            set_playback_speed(next, playback_speed, latest_follow, auto_follow);
+        if scroll != 0.0 {
+            const POINTS_PER_STEP: f32 = 50.0;
+            let acc_id = ui.make_persistent_id("playback_speed_scroll_acc");
+            let mut acc = ui.data(|data| data.get_temp::<f32>(acc_id).unwrap_or(0.0)) + scroll;
+            let mut speed = playback_speed.0;
+            let mut changed = false;
+            while acc.abs() >= POINTS_PER_STEP {
+                let direction = acc.signum();
+                speed = playback::adjacent_playback_speed(speed, direction as i32);
+                acc -= direction * POINTS_PER_STEP;
+                changed = true;
+            }
+            ui.data_mut(|data| data.insert_temp(acc_id, acc));
+            if changed {
+                set_playback_speed(speed, playback_speed, latest_follow, auto_follow);
+            }
         }
     }
 

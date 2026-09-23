@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use impeller2::types::{ComponentId, Timestamp};
 use impeller2_bevy::{CurrentStreamId, SeriesFetchPriority, TelemetryCache};
-use impeller2_wkt::{CurrentTimestamp, DbConfig};
+use impeller2_wkt::{CurrentTimestamp, DbConfig, EarliestTimestamp, LastUpdated};
 
 use super::{AutoFollowLatestState, LatestFollow, PlaybackSpeed};
 
@@ -192,11 +192,28 @@ pub(crate) fn apply_recorded_playback_speed(
     playback_speed.0 = speed;
 }
 
+/// Where the playhead lands when skipping a gap that ends at `end`. When a loop
+/// is active and the gap reaches or passes the loop's end, wrap to the loop
+/// start instead of jumping outside it: leaving the region would only make the
+/// next frame's [`step_loop`] snap the playhead back, so the loop would bounce
+/// at the gap and never play through.
+fn skip_target(end: i64, loop_bounds: Option<(i64, i64)>) -> i64 {
+    match loop_bounds {
+        Some((start, loop_end)) if end >= loop_end => start,
+        _ => end,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn skip_discontinuities(
     cache: Res<TelemetryCache>,
     priority: Res<SeriesFetchPriority>,
     paused: Res<crate::ui::Paused>,
     latest_follow: Res<LatestFollow>,
+    playback_loop: Res<PlaybackLoop>,
+    region: Res<PlaybackRegion>,
+    earliest: Res<EarliestTimestamp>,
+    last_updated: Res<LastUpdated>,
     mut current: ResMut<CurrentTimestamp>,
     mut index: ResMut<PlaybackDiscontinuities>,
 ) {
@@ -206,7 +223,8 @@ pub fn skip_discontinuities(
         && !latest_follow.0
         && let Some((_, end)) = imminent
     {
-        current.0 = Timestamp(end);
+        let bounds = loop_bounds(playback_loop.0, region.0, earliest.0, last_updated.0);
+        current.0 = Timestamp(skip_target(end, bounds));
     }
     if let Some(gap) = imminent
         && !index
@@ -265,13 +283,19 @@ impl PlaybackDiscontinuities {
                 continue;
             };
             let origin = series.keys().next().map(|ts| ts.0);
+            let last = series.keys().next_back().map(|ts| ts.0);
             let scan = self.scans.entry(*id).or_insert_with(|| SeriesScan {
                 origin,
                 cursor: None,
                 holes: Vec::new(),
                 done: false,
             });
-            if scan.origin != origin {
+            // Reset when the series was replaced or rewound — a new stream can
+            // reuse this id with earlier data, and a cursor past the current
+            // tail would freeze the scan and keep holes that no longer exist.
+            let rewound =
+                matches!((scan.cursor, last), (Some(cursor), Some(last)) if last < cursor);
+            if scan.origin != origin || rewound {
                 *scan = SeriesScan {
                     origin,
                     cursor: None,
@@ -279,9 +303,12 @@ impl PlaybackDiscontinuities {
                     done: false,
                 };
             }
-            if scan.done || origin.is_none() {
+            if origin.is_none() {
                 continue;
             }
+            // Resume from where the last scan stopped: live appends and backfill
+            // extend `last` past the cursor, and those new samples are scanned
+            // here rather than skipped forever once the series first caught up.
             let mut prev = scan.cursor;
             let start = scan
                 .cursor
@@ -300,7 +327,6 @@ impl PlaybackDiscontinuities {
                     break;
                 }
             }
-            let last = series.keys().next_back().map(|ts| ts.0);
             scan.done = scan.cursor == last;
         }
 
@@ -468,6 +494,77 @@ mod tests {
             imminent_gap(&cache, &ids, 2_000_000),
             Some((1_000_000, 5_000_000)),
             "once that sample is behind the playhead, the remaining hole is the gap"
+        );
+    }
+
+    #[test]
+    fn a_skip_stays_inside_an_active_loop() {
+        assert_eq!(skip_target(500, None), 500, "no loop: land on the gap end");
+        assert_eq!(
+            skip_target(500, Some((0, 1_000))),
+            500,
+            "gap ends inside the loop: land on it"
+        );
+        assert_eq!(
+            skip_target(1_000, Some((0, 1_000))),
+            0,
+            "gap ends at the loop end: wrap rather than bounce"
+        );
+        assert_eq!(
+            skip_target(1_500, Some((0, 1_000))),
+            0,
+            "gap runs past the loop end: wrap to the start"
+        );
+    }
+
+    #[test]
+    fn the_scan_resumes_when_later_samples_arrive() {
+        use impeller2_bevy::ComponentValue;
+        let sample = || ComponentValue::F64(nox::array![0.0f64].to_dyn());
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("imu");
+        cache.insert(id, Timestamp(0), sample());
+        cache.insert(id, Timestamp(1_000_000), sample());
+
+        let mut ids = std::collections::HashSet::new();
+        ids.insert(id);
+        let mut index = PlaybackDiscontinuities::default();
+        index.scan(&cache, &ids);
+        assert!(index.gaps.is_empty(), "contiguous samples have no gap");
+
+        // A late append opens a >2 s hole after the scan already caught up.
+        cache.insert(id, Timestamp(5_000_000), sample());
+        index.scan(&cache, &ids);
+        assert_eq!(
+            index.gaps,
+            vec![(1_000_000, 5_000_000)],
+            "the resumed scan must find the new hole"
+        );
+    }
+
+    #[test]
+    fn the_scan_drops_holes_from_a_rewound_series() {
+        use impeller2_bevy::ComponentValue;
+        let sample = || ComponentValue::F64(nox::array![0.0f64].to_dyn());
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("imu");
+        cache.insert(id, Timestamp(0), sample());
+        cache.insert(id, Timestamp(5_000_000), sample());
+
+        let mut ids = std::collections::HashSet::new();
+        ids.insert(id);
+        let mut index = PlaybackDiscontinuities::default();
+        index.scan(&cache, &ids);
+        assert_eq!(index.gaps, vec![(0, 5_000_000)]);
+
+        // A new stream reuses the id with earlier, contiguous data.
+        cache.remove_series(&id);
+        cache.insert(id, Timestamp(0), sample());
+        cache.insert(id, Timestamp(1_000), sample());
+        index.scan(&cache, &ids);
+        assert!(
+            index.gaps.is_empty(),
+            "the rewound series must not keep the old stream's hole"
         );
     }
 }
