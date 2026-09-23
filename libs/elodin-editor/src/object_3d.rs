@@ -2778,11 +2778,16 @@ pub fn update_object_3d_kernels(
                 .iter()
                 .find(|child| mesh_child_markers.contains(*child))
         });
-        if let Some(child) = mesh_child
-            && let Ok(mut params) = mat3_params.get_mut(child)
-        {
-            params.set_if_neq(Mat3Params { linear });
-        }
+        // The mesh child is spawned with a deferred command, so it can be
+        // missing on the frame the kernel first succeeds. Stamp the input
+        // only after Mat3Params is written, or later frames skip the apply.
+        let Some(child) = mesh_child else {
+            continue;
+        };
+        let Ok(mut params) = mat3_params.get_mut(child) else {
+            continue;
+        };
+        params.set_if_neq(Mat3Params { linear });
         ellipse.max_extent = max_linear_extent(&linear);
         ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
         object_3d.last_cov_kernel_input = Some(fingerprint);
