@@ -348,7 +348,8 @@ impl WidgetSystem for TimelineControls<'_, '_> {
 
                                     ui.add_space(24.0);
 
-                                    let playback_leads = !latest_follow.0 && !paused.0;
+                                    let was_following = latest_follow.0;
+                                    let playback_leads = !was_following && !paused.0;
                                     speed_control(
                                         ui,
                                         &mut playback_speed,
@@ -371,7 +372,9 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                     );
                                     if latest_enabled && latest_response.clicked() {
                                         auto_follow_latest_state.cancel();
-                                        latest_follow.0 = !latest_follow.0;
+                                        // The speed field may have committed on
+                                        // this same click and dropped LIVE already.
+                                        latest_follow.0 = !was_following;
                                         if latest_follow.0 {
                                             playback_loop.0 = false;
                                         }

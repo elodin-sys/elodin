@@ -255,13 +255,13 @@ pub(crate) fn apply_recorded_playback_speed(
 /// loop start rather than jumping outside — leaving the region would only make
 /// the next frame's [`step_loop`] snap it back, bouncing at the gap.
 ///
-/// The one case that must not wrap is a gap that covers the loop start too: the
+/// The one case that must not wrap is a gap that starts at or before the loop start: the
 /// whole region is quiet, so wrapping would land back inside the gap and freeze
 /// the playhead. Then skip nothing and let `step_loop` advance through it.
 fn skip_target(gap: (i64, i64), loop_bounds: Option<(i64, i64)>) -> Option<i64> {
     let (gap_start, gap_end) = gap;
     match loop_bounds {
-        Some((start, loop_end)) if gap_end >= loop_end => (start <= gap_start).then_some(start),
+        Some((start, loop_end)) if gap_end >= loop_end => (start < gap_start).then_some(start),
         _ => Some(gap_end),
     }
 }
@@ -643,6 +643,11 @@ mod tests {
             skip_target((0, 2_000), Some((500, 1_000))),
             None,
             "gap covers the whole loop: stay put instead of wrapping back into it"
+        );
+        assert_eq!(
+            skip_target((0, 1_000), Some((0, 1_000))),
+            None,
+            "gap starts at the loop start: wrapping would re-enter it"
         );
     }
 
