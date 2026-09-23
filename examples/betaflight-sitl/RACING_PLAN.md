@@ -1090,7 +1090,7 @@ then restored.
 
 | Date | Decision | Reason and affected packages |
 |---|---|---|
-| 2026-09-23 | Count FPV frames by the `read_msg_at` selected timestamp, and exit nonzero when `RACE_CAMERA=1` gets no valid frames or FPS below 15. | Pixel hashes mis-counted near-uniform frames. `#851` already returns the selected message timestamp. Guidance still stores the requested sample time. Affects B and later G, H, and J. |
+| 2026-09-23 | Count FPV frames by the `read_msg_at` selected timestamp, and exit nonzero when `RACE_CAMERA=1` gets no valid frames or FPS below 15. | Pixel hashes undercounted near-uniform frames. `#851` already returns the selected message timestamp. Guidance still stores the requested sample time. Affects B and later G, H, and J. |
 | 2026-09-03 | Run headless recipes once while retaining watched recipes in the editor. | Package A exposed that a failed simulation child was logged and then waited for source reload, so `elodin run` could not return nonzero. The approved shared fixes (`301ae367`, `#837`; lifecycle follow-up `36ee3431`, `#838`) make headless execution one-shot without changing interactive editor recovery, centralize recipe execution dispatch in s10, and add an end-to-end lifecycle CI check. This enables failure contracts in A, F, K, and L. |
 | 2026-09-01 | Keep the current ENU/FLU world, Gazebo-bridge conventions, native motor order, and 8 kHz lockstep. | These are the implemented baseline; changing them is not required for racing. A–L rely on them. |
 | 2026-09-01 | Preserve scripted takeoff as the default and make other control modes opt-in. | Allows every package to merge independently without replacing the reference SITL example prematurely. |
