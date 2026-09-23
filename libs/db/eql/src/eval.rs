@@ -176,9 +176,22 @@ fn formula_eval(
             let value = evaluate(&elements[0], component)?;
             let min = scalar(evaluate(&elements[1], component)?, "clip")?;
             let max = scalar(evaluate(&elements[2], component)?, "clip")?;
-            Ok(value.map(|value| value.clamp(min, max)))
+            Ok(value.map(|value| clip_sample(value, min, max)))
         }
         _ => Err(EvalError::UnsupportedFormula(name)),
+    }
+}
+
+/// Sample `clip`. `f64::clamp` panics when `min > max` or either bound is NaN.
+/// Inverted bounds follow SQL `GREATEST(min, LEAST(value, max))`.
+fn clip_sample(value: f64, min: f64, max: f64) -> f64 {
+    if min.is_nan() || max.is_nan() {
+        return f64::NAN;
+    }
+    if min <= max {
+        value.clamp(min, max)
+    } else {
+        value.min(max).max(min)
     }
 }
 
@@ -269,5 +282,35 @@ mod tests {
             evaluate_with_vector(&expr),
             Err(EvalError::Broadcast { left: 2, right: 3 })
         );
+    }
+
+    #[test]
+    fn clip_matches_ordered_bounds_and_does_not_panic() {
+        let expr = context()
+            .parse_str("sample.vector[0].clip(1.0, 2.0)")
+            .unwrap();
+        assert_eq!(evaluate_with_vector(&expr).unwrap(), EvalValue::Scalar(2.0));
+
+        // SQL GREATEST(10, LEAST(3, 1)) == 10. f64::clamp would panic here.
+        let expr = context()
+            .parse_str("sample.vector[0].clip(10.0, 1.0)")
+            .unwrap();
+        assert_eq!(
+            evaluate_with_vector(&expr).unwrap(),
+            EvalValue::Scalar(10.0)
+        );
+
+        let expr = Expr::Formula(
+            std::sync::Arc::new(crate::formulas::Clip),
+            Box::new(Expr::Tuple(vec![
+                Expr::FloatLiteral(3.0),
+                Expr::FloatLiteral(f64::NAN),
+                Expr::FloatLiteral(1.0),
+            ])),
+        );
+        let EvalValue::Scalar(value) = evaluate(&expr, &|_| unreachable!()).unwrap() else {
+            panic!("clip of a scalar should stay scalar");
+        };
+        assert!(value.is_nan());
     }
 }
