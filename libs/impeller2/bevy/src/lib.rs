@@ -526,6 +526,17 @@ pub fn backfill_cache(
     }
 }
 
+/// Half-open coverage span `[start, end)` to record for a completed backfill
+/// page. Starts at the page's requested `page_start`, *not* the first returned
+/// sample: the DB scanned `[page_start, ..)`, so nothing hides in
+/// `[page_start, first_sample)`. Because each subsequent page is requested from
+/// the previous `last_ts + 1`, chaining these spans leaves no unvouched seam —
+/// otherwise frame stepping would stall at every chunk boundary for sparse
+/// series (see [`TelemetryCache::next_sample_after`]).
+fn backfill_page_coverage(page_start: Timestamp, last_ts: Timestamp) -> (Timestamp, Timestamp) {
+    (page_start, Timestamp(last_ts.0.saturating_add(1)))
+}
+
 fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start: Timestamp) {
     let page_start = start;
     let msg = GetTimeSeries {
@@ -584,8 +595,7 @@ fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start:
             }
 
             if count > 0 {
-                let cover_start = timestamps.first().copied().unwrap_or(page_start);
-                let cover_end = Timestamp(last_ts.0.saturating_add(1));
+                let (cover_start, cover_end) = backfill_page_coverage(page_start, last_ts);
                 cache.mark_covered(component_id, cover_start, cover_end);
                 load_state.samples_loaded = load_state.samples_loaded.saturating_add(count as u64);
             }
@@ -2348,6 +2358,49 @@ mod series_store_allowlist_tests {
         assert_eq!(
             next_subscribed_sample(&cache, &priority, Timestamp(0)),
             Some(Timestamp(999))
+        );
+    }
+
+    // Coverage seam regression (PR #861): backfill pages are requested
+    // sequentially from the previous page's `last_ts + 1`. Recording each
+    // page's coverage from its requested `page_start` (via
+    // `backfill_page_coverage`) rather than its first returned sample keeps the
+    // spans contiguous, so frame stepping crosses the boundary between pages of
+    // a sparse series instead of stalling at every chunk.
+    #[test]
+    fn sequential_backfill_pages_leave_no_coverage_seam() {
+        let id = ComponentId(1);
+        let mut cache = TelemetryCache::default();
+
+        // Page 1: requested from series start, samples 1 ms apart.
+        for micros in [0i64, 1000, 2000] {
+            sample(&mut cache, id, micros);
+        }
+        let (start, end) = backfill_page_coverage(Timestamp(i64::MIN), Timestamp(2000));
+        cache.mark_covered(id, start, end);
+
+        // Page 2: requested from the previous page's last_ts + 1 (2001), even
+        // though its first sample lands later at 3000 µs.
+        for micros in [3000i64, 4000] {
+            sample(&mut cache, id, micros);
+        }
+        let (start, end) = backfill_page_coverage(Timestamp(2001), Timestamp(4000));
+        cache.mark_covered(id, start, end);
+
+        // Stepping crosses the page boundary: 2000 (end of page 1) -> 3000
+        // (start of page 2). With per-sample cover starts the seam
+        // [2001, 3000) would be unvouched and this would be `None`.
+        assert_eq!(
+            cache.next_sample_after(&id, Timestamp(2000)),
+            Some(Timestamp(3000))
+        );
+        assert_eq!(
+            cache.prev_sample_before(&id, Timestamp(3000)),
+            Some(Timestamp(2000))
+        );
+        assert_eq!(
+            cache.next_sample_after(&id, Timestamp(3000)),
+            Some(Timestamp(4000))
         );
     }
 
