@@ -148,18 +148,19 @@ struct SeriesScan {
     tail: Option<i64>,
 }
 
-/// Advance `current` by `delta`, wrapping into `[start, end)` when that lands
-/// past the end. A playhead already outside the region is pulled to `start`.
+/// Advance `current` by `delta`, wrapping to `start` when that lands past the
+/// end. The band is `[start, end]`, matching the overlay and seek, so the end
+/// sample holds. A playhead already outside the region is pulled to `start`.
 pub fn step_loop(current: i64, delta: i64, start: i64, end: i64) -> i64 {
     if start >= end {
         return current.saturating_add(delta);
     }
     let span = end - start;
-    if current < start || current >= end {
+    if current < start || current > end {
         return start;
     }
     let next = current.saturating_add(delta.max(0));
-    if next < end {
+    if next <= end {
         return next;
     }
     let over = next - end;
@@ -526,6 +527,13 @@ mod tests {
         assert_eq!(step_loop(0, 30, 0, 100), 30);
         assert_eq!(step_loop(90, 30, 0, 100), 20);
         assert_eq!(step_loop(250, 10, 0, 100), 0);
+    }
+
+    #[test]
+    fn loop_end_is_inside_the_band() {
+        assert_eq!(step_loop(90, 10, 0, 100), 100);
+        assert_eq!(step_loop(100, 0, 0, 100), 100);
+        assert_eq!(step_loop(100, 30, 0, 100), 30);
     }
 
     #[test]
