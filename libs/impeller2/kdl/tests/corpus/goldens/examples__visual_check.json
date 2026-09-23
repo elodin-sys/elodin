@@ -28,6 +28,8 @@
                 "r": 1.0
               },
               "frustums_thickness": 0.006000000052154064,
+              "frustums_up_marker": "none",
+              "frustums_up_marker_overlay": false,
               "hdr": true,
               "local_arrows": [],
               "look_at": "booster.world_pos.translate_world(1.433, -8.661, 4.788)",
@@ -74,6 +76,8 @@
                 "r": 1.0
               },
               "frustums_thickness": 0.006000000052154064,
+              "frustums_up_marker": "none",
+              "frustums_up_marker_overlay": false,
               "hdr": true,
               "local_arrows": [],
               "look_at": "lz1.world_pos",
