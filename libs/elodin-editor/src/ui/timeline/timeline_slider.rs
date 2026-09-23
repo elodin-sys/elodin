@@ -177,6 +177,17 @@ impl<'a> Timeline<'a> {
     }
 }
 
+/// The playback region after a plain seek to `pos`. Seeking outside the band
+/// clears it (so it can be dismissed and the loop falls back to the whole
+/// recording); seeking inside keeps it, so the playhead can be repositioned
+/// within an active loop.
+fn region_after_seek(region: Option<(i64, i64)>, pos: i64) -> Option<(i64, i64)> {
+    match region {
+        Some((start, end)) if pos < start || pos > end => None,
+        other => other,
+    }
+}
+
 impl Timeline<'_> {
     fn allocate_slider_space(&self, ui: &mut egui::Ui) -> egui::Response {
         ui.allocate_response(
@@ -240,6 +251,13 @@ impl Timeline<'_> {
                 }
             } else {
                 self.set_value(new_value);
+                // A plain seek away from the band dismisses it. Without a path
+                // to clear the region, loop_bounds would keep preferring that
+                // stale range over the full recording forever, even though the
+                // loop button still advertises "Loop recording".
+                if let Some(selection) = self.selection.as_deref_mut() {
+                    *selection = region_after_seek(*selection, new_value.round() as i64);
+                }
             }
         }
         self.full_range =
@@ -574,4 +592,20 @@ impl WidgetSystem for TimelineSlider<'_> {
 
 pub fn sync_ui_tick(tick: Res<CurrentTimestamp>, mut ui_tick: ResMut<UITick>) {
     ui_tick.0 = tick.0.0;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::region_after_seek;
+
+    #[test]
+    fn seeking_outside_the_band_clears_it_and_inside_keeps_it() {
+        let region = Some((100, 200));
+        assert_eq!(region_after_seek(region, 150), region, "inside: keep");
+        assert_eq!(region_after_seek(region, 100), region, "on the edge: keep");
+        assert_eq!(region_after_seek(region, 200), region, "on the edge: keep");
+        assert_eq!(region_after_seek(region, 50), None, "before: dismiss");
+        assert_eq!(region_after_seek(region, 250), None, "after: dismiss");
+        assert_eq!(region_after_seek(None, 150), None, "nothing to clear");
+    }
 }
