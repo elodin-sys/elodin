@@ -17,15 +17,40 @@ This example is a work in progress. Right now the simulated probes do
 not make it to Saturn. Future work is needed to isolate the error
 sources and improve the simulation.
 
+## Current model limits
+
 The current dynamics are still gravity-only, so there are real effects
-missing from the model. One of them is solar radiation pressure (SRP),
-the small push from sunlight on the spacecraft. It is much weaker than
-gravity, but over longer propagation arcs it can still build up and show
-up in the remaining position and velocity error. SRP was tested separately
-during the Voyager validation work, but it is not being added to the
-simulation here yet. For now this just documents that limitation so the
-remaining SPICE disagreement is not assumed to come only from gravity or
-the integrator.
+missing from the model.
+
+One of them is solar radiation pressure (SRP), the small push from
+sunlight on the spacecraft. It is much weaker than gravity, but over
+longer propagation arcs it can still build up and show up in the
+remaining position and velocity error.
+
+SRP was tested separately during the Voyager validation work and moved
+the residual in the right direction, but it is not being added to the
+simulation here yet. For now this is just documented as one likely
+missing effect instead of mixing another force-model change into the
+same validation work.
+
+There are other limits too:
+
+- historical trajectory-correction and attitude-control thrust are not
+  modeled by the current gravity-only propagation;
+- the interactive example uses SPICE trajectories as the reference, but
+  matching those trajectories does not mean every real mission force or
+  maneuver has been reconstructed;
+- error over a long arc can come from more than one source, so a remaining
+  SPICE difference should not automatically be blamed on gravity or the
+  integrator alone;
+- the goal right now is to improve the model one piece at a time and keep
+  each change small enough to validate separately.
+
+This also means a short clean arc is more useful for testing one physics
+change than treating the full mission trajectory as a single pass/fail
+check. The Voyager validation work is using that approach so changes can
+be compared against the same SPICE reference without mixing several new
+effects together.
 
 The editor exposes that divergence numerically as two telemetry signals
 for each simulated probe:
