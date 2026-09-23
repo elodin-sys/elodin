@@ -90,6 +90,11 @@ struct SeriesScan {
     cursor: Option<i64>,
     holes: Vec<(i64, i64)>,
     done: bool,
+    /// Samples and tail observed on the last pass, so a sample landing inside
+    /// the already-scanned span (backfill, prefetch) is told apart from a live
+    /// append and forces the holes to be rebuilt.
+    seen: usize,
+    tail: Option<i64>,
 }
 
 /// Advance `current` by `delta`, wrapping into `[start, end)` when that lands
@@ -291,31 +296,41 @@ impl PlaybackDiscontinuities {
             };
             let origin = series.keys().next().map(|ts| ts.0);
             let last = series.keys().next_back().map(|ts| ts.0);
+            let len = series.len();
             let scan = self.scans.entry(*id).or_insert_with(|| SeriesScan {
                 origin,
                 cursor: None,
                 holes: Vec::new(),
                 done: false,
+                seen: 0,
+                tail: None,
             });
-            // Reset when the series was replaced or rewound — a new stream can
-            // reuse this id with earlier data, and a cursor past the current
-            // tail would freeze the scan and keep holes that no longer exist.
+            // A live append only ever adds samples past the tail, so the scan
+            // resumes from its cursor. Anything else — a sample landing inside
+            // the span already scanned (backfill or prefetch filling a hole), a
+            // removal, a rewind, or a new stream reusing this id — invalidates
+            // the holes, which are rebuilt from the start.
             let rewound =
                 matches!((scan.cursor, last), (Some(cursor), Some(last)) if last < cursor);
-            if scan.origin != origin || rewound {
+            let appended_at_tail = match scan.tail {
+                Some(tail) if len > scan.seen => {
+                    series.range(Timestamp(tail.saturating_add(1))..).count() == len - scan.seen
+                }
+                _ => false,
+            };
+            if scan.origin != origin || rewound || (len != scan.seen && !appended_at_tail) {
                 *scan = SeriesScan {
                     origin,
                     cursor: None,
                     holes: Vec::new(),
                     done: false,
+                    seen: 0,
+                    tail: None,
                 };
             }
             if origin.is_none() {
                 continue;
             }
-            // Resume from where the last scan stopped: live appends and backfill
-            // extend `last` past the cursor, and those new samples are scanned
-            // here rather than skipped forever once the series first caught up.
             let mut prev = scan.cursor;
             let start = scan
                 .cursor
@@ -334,6 +349,8 @@ impl PlaybackDiscontinuities {
                     break;
                 }
             }
+            scan.seen = len;
+            scan.tail = last;
             scan.done = scan.cursor == last;
         }
 
@@ -581,6 +598,31 @@ mod tests {
         assert!(
             index.gaps.is_empty(),
             "the rewound series must not keep the old stream's hole"
+        );
+    }
+
+    #[test]
+    fn backfill_into_a_scanned_span_drops_the_stale_hole() {
+        use impeller2_bevy::ComponentValue;
+        let sample = || ComponentValue::F64(nox::array![0.0f64].to_dyn());
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("imu");
+        cache.insert(id, Timestamp(0), sample());
+        cache.insert(id, Timestamp(3_000_000), sample());
+
+        let mut ids = std::collections::HashSet::new();
+        ids.insert(id);
+        let mut index = PlaybackDiscontinuities::default();
+        index.scan(&cache, &ids);
+        assert_eq!(index.gaps, vec![(0, 3_000_000)]);
+
+        // Backfill lands a sample inside the hole, splitting it into two
+        // stretches that are each too short to be a discontinuity.
+        cache.insert(id, Timestamp(1_500_000), sample());
+        index.scan(&cache, &ids);
+        assert!(
+            index.gaps.is_empty(),
+            "a hole that backfill has filled in must not stay drawn"
         );
     }
 }
