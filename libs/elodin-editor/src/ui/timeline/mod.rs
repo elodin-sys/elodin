@@ -159,9 +159,11 @@ fn reset_latest_follow_on_stream_change(
     mut latest_follow: ResMut<LatestFollow>,
     mut playback_loop: ResMut<playback::PlaybackLoop>,
     mut playback_region: ResMut<playback::PlaybackRegion>,
+    mut discontinuities: ResMut<playback::PlaybackDiscontinuities>,
 ) {
     if current_stream_id.is_changed() {
         latest_follow.0 = false;
+        *discontinuities = playback::PlaybackDiscontinuities::default();
         // Loop and region belong to one recording. Kept across a connect they
         // name timestamps the new stream does not have, so step_loop pulls the
         // playhead outside the new range on every frame.
@@ -547,6 +549,7 @@ mod tests {
             .init_resource::<LatestFollow>()
             .init_resource::<playback::PlaybackLoop>()
             .init_resource::<playback::PlaybackRegion>()
+            .init_resource::<playback::PlaybackDiscontinuities>()
             .add_systems(Update, reset_latest_follow_on_stream_change);
 
         // The first run consumes the change from inserting the stream id.

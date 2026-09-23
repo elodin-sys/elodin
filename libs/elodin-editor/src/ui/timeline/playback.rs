@@ -45,18 +45,19 @@ pub(crate) fn set_playback_speed(
 }
 
 /// Next preset above `current`, or the previous one when `direction` is negative.
+/// With no preset that way (a typed speed beyond the presets) `current` stays.
 pub fn adjacent_playback_speed(current: f64, direction: i32) -> f64 {
     if direction >= 0 {
         PLAYBACK_SPEED_PRESETS
             .into_iter()
             .find(|speed| *speed > current + 1e-9)
-            .unwrap_or(PLAYBACK_SPEED_PRESETS[PLAYBACK_SPEED_PRESETS.len() - 1])
+            .unwrap_or(current)
     } else {
         PLAYBACK_SPEED_PRESETS
             .into_iter()
             .rev()
             .find(|speed| *speed < current - 1e-9)
-            .unwrap_or(PLAYBACK_SPEED_PRESETS[0])
+            .unwrap_or(current)
     }
 }
 
@@ -406,17 +407,16 @@ impl PlaybackDiscontinuities {
             scan.done = scan.cursor == last;
         }
 
+        let filled = |id: &&ComponentId| cache.series(id).is_some_and(|series| !series.is_empty());
         let complete: Vec<&Vec<(i64, i64)>> = ids
             .iter()
+            .filter(filled)
             .filter_map(|id| {
                 let scan = self.scans.get(id)?;
                 scan.done.then_some(&scan.holes)
             })
             .collect();
-        let subscribed = ids
-            .iter()
-            .filter(|id| cache.series(id).is_some_and(|series| !series.is_empty()))
-            .count();
+        let subscribed = ids.iter().filter(filled).count();
         self.gaps = if complete.len() == subscribed && subscribed > 0 {
             intersect_holes(&complete)
         } else {
@@ -470,6 +470,10 @@ mod tests {
         assert_eq!(adjacent_playback_speed(0.05, -1), 0.05);
         assert_eq!(adjacent_playback_speed(1.5, 1), 2.0);
         assert_eq!(adjacent_playback_speed(1.5, -1), 1.0);
+        assert_eq!(adjacent_playback_speed(250.0, 1), 250.0);
+        assert_eq!(adjacent_playback_speed(250.0, -1), 100.0);
+        assert_eq!(adjacent_playback_speed(0.02, -1), 0.02);
+        assert_eq!(adjacent_playback_speed(0.02, 1), 0.05);
     }
 
     #[test]
@@ -674,6 +678,29 @@ mod tests {
             vec![(1_000_000, 5_000_000)],
             "the resumed scan must find the new hole"
         );
+    }
+
+    #[test]
+    fn a_stale_scan_for_an_unfilled_id_does_not_hide_gaps() {
+        use impeller2_bevy::ComponentValue;
+        let sample = || ComponentValue::F64(nox::array![0.0f64].to_dyn());
+        let a = ComponentId::new("a");
+        let b = ComponentId::new("b");
+        let mut ids = std::collections::HashSet::new();
+        ids.insert(a);
+        ids.insert(b);
+
+        let mut old = TelemetryCache::default();
+        old.insert(a, Timestamp(0), sample());
+        let mut index = PlaybackDiscontinuities::default();
+        index.scan(&old, &ids);
+
+        // A new stream fills only `b`; `a`'s finished scan is left behind.
+        let mut cache = TelemetryCache::default();
+        cache.insert(b, Timestamp(0), sample());
+        cache.insert(b, Timestamp(5_000_000), sample());
+        index.scan(&cache, &ids);
+        assert_eq!(index.gaps, vec![(0, 5_000_000)]);
     }
 
     #[test]
