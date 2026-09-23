@@ -17,9 +17,15 @@ This example is a work in progress. Right now the simulated probes do
 not make it to Saturn. Future work is needed to isolate the error
 sources and improve the simulation.
 
-The current dynamics are gravity-only. Non-gravitational effects such as
-solar radiation pressure are not modeled, so they can contribute to
-residual trajectory error over longer arcs.
+The current dynamics are still gravity-only, so there are real effects
+missing from the model. One of them is solar radiation pressure (SRP),
+the small push from sunlight on the spacecraft. It is much weaker than
+gravity, but over longer propagation arcs it can still build up and show
+up in the remaining position and velocity error. SRP was tested separately
+during the Voyager validation work, but it is not being added to the
+simulation here yet. For now this just documents that limitation so the
+remaining SPICE disagreement is not assumed to come only from gravity or
+the integrator.
 
 The editor exposes that divergence numerically as two telemetry signals
 for each simulated probe:
