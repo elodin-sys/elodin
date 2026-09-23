@@ -192,15 +192,20 @@ pub(crate) fn apply_recorded_playback_speed(
     playback_speed.0 = speed;
 }
 
-/// Where the playhead lands when skipping a gap that ends at `end`. When a loop
-/// is active and the gap reaches or passes the loop's end, wrap to the loop
-/// start instead of jumping outside it: leaving the region would only make the
-/// next frame's [`step_loop`] snap the playhead back, so the loop would bounce
-/// at the gap and never play through.
-fn skip_target(end: i64, loop_bounds: Option<(i64, i64)>) -> i64 {
+/// Where the playhead lands when skipping the gap `(gap_start, gap_end)`, or
+/// `None` to leave it where it is. Without a loop it lands on the gap end. When
+/// a loop is active and the gap reaches or passes the loop end, it wraps to the
+/// loop start rather than jumping outside — leaving the region would only make
+/// the next frame's [`step_loop`] snap it back, bouncing at the gap.
+///
+/// The one case that must not wrap is a gap that covers the loop start too: the
+/// whole region is quiet, so wrapping would land back inside the gap and freeze
+/// the playhead. Then skip nothing and let `step_loop` advance through it.
+fn skip_target(gap: (i64, i64), loop_bounds: Option<(i64, i64)>) -> Option<i64> {
+    let (gap_start, gap_end) = gap;
     match loop_bounds {
-        Some((start, loop_end)) if end >= loop_end => start,
-        _ => end,
+        Some((start, loop_end)) if gap_end >= loop_end => (start <= gap_start).then_some(start),
+        _ => Some(gap_end),
     }
 }
 
@@ -221,10 +226,12 @@ pub fn skip_discontinuities(
     index.scan(&cache, &priority.high);
     if !paused.0
         && !latest_follow.0
-        && let Some((_, end)) = imminent
+        && let Some((gap_start, end)) = imminent
     {
         let bounds = loop_bounds(playback_loop.0, region.0, earliest.0, last_updated.0);
-        current.0 = Timestamp(skip_target(end, bounds));
+        if let Some(target) = skip_target((gap_start, end), bounds) {
+            current.0 = Timestamp(target);
+        }
     }
     if let Some(gap) = imminent
         && !index
@@ -499,21 +506,30 @@ mod tests {
 
     #[test]
     fn a_skip_stays_inside_an_active_loop() {
-        assert_eq!(skip_target(500, None), 500, "no loop: land on the gap end");
         assert_eq!(
-            skip_target(500, Some((0, 1_000))),
-            500,
+            skip_target((0, 500), None),
+            Some(500),
+            "no loop: land on the gap end"
+        );
+        assert_eq!(
+            skip_target((100, 500), Some((0, 1_000))),
+            Some(500),
             "gap ends inside the loop: land on it"
         );
         assert_eq!(
-            skip_target(1_000, Some((0, 1_000))),
-            0,
+            skip_target((100, 1_000), Some((0, 1_000))),
+            Some(0),
             "gap ends at the loop end: wrap rather than bounce"
         );
         assert_eq!(
-            skip_target(1_500, Some((0, 1_000))),
-            0,
+            skip_target((100, 1_500), Some((0, 1_000))),
+            Some(0),
             "gap runs past the loop end: wrap to the start"
+        );
+        assert_eq!(
+            skip_target((0, 2_000), Some((500, 1_000))),
+            None,
+            "gap covers the whole loop: stay put instead of wrapping back into it"
         );
     }
 
