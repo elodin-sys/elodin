@@ -17,6 +17,10 @@ This example is a work in progress. Right now the simulated probes do
 not make it to Saturn. Future work is needed to isolate the error
 sources and improve the simulation.
 
+The current dynamics are gravity-only. Non-gravitational effects such as
+solar radiation pressure are not modeled, so they can contribute to
+residual trajectory error over longer arcs.
+
 The editor exposes that divergence numerically as two telemetry signals
 for each simulated probe:
 
