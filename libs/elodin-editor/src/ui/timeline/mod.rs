@@ -6,9 +6,7 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::{EguiContexts, EguiTextureHandle, egui};
 use impeller2_bevy::CurrentStreamId;
-use impeller2_wkt::{
-    CurrentTimestamp, EarliestTimestamp, LastUpdated, SimulationTimeStep, StreamId,
-};
+use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated, StreamId};
 use timeline_controls::TimelineControls;
 
 use std::ops::RangeInclusive;
@@ -252,7 +250,6 @@ pub struct TimelineArgs {
     pub available_width: f32,
     pub line_height: f32,
     pub segment_count: u8,
-    pub frames_per_second: f64,
     pub active_range: RangeInclusive<i64>,
     pub focus_range: Option<RangeInclusive<i64>>,
 }
@@ -411,7 +408,6 @@ pub struct TimelineIcons {
 pub struct TimelinePanel<'w, 's> {
     contexts: EguiContexts<'w, 's>,
     images: Local<'s, images::Images>,
-    tick_time: Res<'w, SimulationTimeStep>,
     selected_time_range: Res<'w, SelectedTimeRange>,
     full_time_range: Res<'w, FullTimeRange>,
     time_range_behavior: Res<'w, TimeRangeBehavior>,
@@ -434,7 +430,6 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
         };
         let mut contexts = state_mut.contexts;
         let images = state_mut.images;
-        let tick_time = state_mut.tick_time;
         let active_range = state_mut.full_time_range.0.start.0..=state_mut.full_time_range.0.end.0;
         let is_full = *state_mut.time_range_behavior == TimeRangeBehavior::default();
         let focus_range = if is_full {
@@ -442,8 +437,6 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
         } else {
             Some(state_mut.selected_time_range.0.start.0..=state_mut.selected_time_range.0.end.0)
         };
-
-        let frames_per_second = 1.0 / tick_time.0;
 
         let timeline_icons = TimelineIcons {
             jump_to_start: contexts
@@ -481,7 +474,6 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
                     available_width,
                     line_height: 40.0,
                     segment_count: (available_width / 90.0) as u8,
-                    frames_per_second,
                     active_range,
                     focus_range,
                 };

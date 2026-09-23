@@ -47,7 +47,6 @@ pub struct Timeline<'a> {
     active_range: RangeInclusive<f64>,
     full_range: RangeInclusive<f64>,
     focus_range: Option<RangeInclusive<f64>>,
-    fps: f64,
     handle_image_id: Option<egui::TextureId>,
     handle_image_tint: egui::Color32,
     max_handle_image_tint: egui::Color32,
@@ -66,15 +65,13 @@ impl<'a> Timeline<'a> {
     /// ```ignore
     /// let mut current_frame = 17;
     /// let frame_count = 3600;
-    /// let frames_per_second = 30.0;
     /// ui.add(
     ///     Timeline::new(&mut current_frame, 0..=frame_count)
     ///         .width(400.0)
     ///         .height(40.0)
     ///         .handle_aspect_ratio(12.0 / 30.0)
     ///         .segments(8)
-    ///         .end(frame_count as f64)
-    ///         .fps(frames_per_second),
+    ///         .end(frame_count as f64),
     /// );
     /// ```
     pub fn new<Num: egui::emath::Numeric>(
@@ -105,7 +102,6 @@ impl<'a> Timeline<'a> {
             handle_aspect_ratio: 0.5,
             segments: 12,
             label_font_size: 10.0,
-            fps: 60.0,
             height: 40.0,
             width: 400.0,
         }
@@ -138,11 +134,6 @@ impl<'a> Timeline<'a> {
 
     pub fn segments(mut self, segments: u8) -> Self {
         self.segments = segments;
-        self
-    }
-
-    pub fn fps(mut self, fps: f64) -> Self {
-        self.fps = fps;
         self
     }
 
@@ -451,7 +442,6 @@ impl WidgetSystem for TimelineSlider<'_> {
                     .max_handle_image_tint(latest_color)
                     .handle_aspect_ratio(12.0 / 30.0)
                     .segments(timeline_args.segment_count)
-                    .fps(timeline_args.frames_per_second)
                     .focus_range(timeline_args.focus_range),
                 )
                 .on_hover_cursor(egui::CursorIcon::PointingHand);
