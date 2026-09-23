@@ -1,7 +1,7 @@
 # Vision-Guided Gate Racing Plan
 
 **Document status:** Authoritative living specification  
-**Last verified against repository:** 2026-09-11  
+**Last verified against repository:** 2026-09-23  
 **Current resume point:** Package D — manual hardware qualification (Package B complete)
 
 ## 1. Purpose and authority
@@ -423,12 +423,12 @@ degrees and horizontal FoV 90 degrees. Package G must derive and test this
 rather than duplicating unexplained constants.
 
 A frame sample is offered to guidance at most once per nominal 30 Hz camera
-period. The current `read_msg` API returns only the payload, not the DB message's
-actual capture timestamp, so the adapter records the requested sample time
-(`ctx.timestamp - latency`) and must not invent a capture time. A repeated
-payload is valid sample-and-hold behavior when the renderer lags. Until the
-renderer produces a frame, guidance receives `None`. A future timestamp-aware
-API would be a material contract change and must follow Section 2.
+period. `GuidanceUpdate.frame_sample_time` is the requested sample time
+(`ctx.timestamp - latency`), not a renderer capture time. Frame identity for
+counts and observed FPS comes from the timestamp selected by `read_msg_at`:
+the same sample-and-hold lookup as `read_msg`, plus the selected message's
+timestamp. A repeated selected timestamp is sample-and-hold, not a new frame.
+Until the renderer produces a frame, guidance receives `None`.
 
 ### 7.5 Courses and gates
 
@@ -645,25 +645,30 @@ The default camera-disabled run does not start or require the render server.
 **Handoff:** Record the DB path, export command, observed FPS, and any GPU-specific
 limitations.
 
-**Verified 2026-09-11 (ported onto post-A/D `main` at `354fc41a`; WSL2, NVIDIA
+**Verified 2026-09-23 (review follow-up on `pkg-b-fpv-camera`; WSL2, NVIDIA
 GeForce RTX 3050 6GB Laptop GPU):**
 
 - Default: `RACE_CAMERA=0 elodin run examples/betaflight-sitl/main.py` →
-  `FPV camera: disabled`, C0 `status=PASS`, lockstep_steps `119995`
-  (DB `betaflight_db006`).
+  `FPV camera: disabled`, no render-server, C0 `status=PASS`,
+  lockstep_steps `119995`, exit 0 (DB `betaflight_db017`).
 - Camera: `RACE_CAMERA=1 elodin run examples/betaflight-sitl/main.py` →
-  `drone.fpv` 640×360 RGBA uint8, first frame at `t≈0.065s`,
-  `sample_count=449`, `offered_sample_fps≈30.06`,
-  `observed_sim_fps≈16.69` after warmup (≥15), `shape_ok=True`,
-  C0 still `PASS` with lockstep_steps `119995` (DB `betaflight_db007`).
+  `drone.fpv` `(360, 640, 4)` uint8, first frame at `t≈0.693s`,
+  `sample_count=430`, `offered_sample_fps≈30.06`,
+  `unique_selected_timestamps=388` after warmup,
+  `observed_sim_fps≈30.08` (≥15), `shape_ok=True`, C0 `PASS`,
+  lockstep_steps `119995`, exit 0 (DB `betaflight_db018`).
+- Frame count and FPS use distinct `read_msg_at` selected timestamps.
+  `GuidanceUpdate.frame_sample_time` remains the requested time
+  (`ctx.timestamp - 33000`).
+- A deliberate 1000 FPS floor exited 1 with
+  `FAIL: observed FPS below Package B acceptance floor (1000 FPS)`.
+  The shipped floor is 15. Missing or wrongly shaped frames also exit 1.
 - Export:
-  `elodin-db export-videos betaflight_db007 --output /tmp/bf_fpv_videos_b007 --fps 30`
-  → nonempty `drone.fpv.mp4` (413 frames, 640×360 H.264).
-- Frames are offered into `GuidanceUpdate.frame` / `frame_sample_time` /
-  `frame_fresh` after the motor lockstep exchange; scripted/manual sources do
-  not act on imagery.
-- Limitations: wall-clock RTF ~0.8× without camera and ~0.4× with camera on this
-  host; no `/dev/dri`, NVIDIA path still produced frames.
+  `elodin-db export-videos betaflight_db018 --output /tmp/bf_fpv_videos_b018 --fps 30`
+  → nonempty `drone.fpv.mp4` (432 frames, 640×360 H.264).
+- Limitations: wall-clock realtime factor is still below 1× with the camera
+  on this host. The local venv must import the WSL `nox-py` build that
+  contains `read_msg_at`.
 
 ### [ ] C — Course and referee vertical slice
 
@@ -1085,6 +1090,7 @@ then restored.
 
 | Date | Decision | Reason and affected packages |
 |---|---|---|
+| 2026-09-23 | Count FPV frames by the `read_msg_at` selected timestamp, and exit nonzero when `RACE_CAMERA=1` gets no valid frames or FPS below 15. | Pixel hashes mis-counted near-uniform frames. `#851` already returns the selected message timestamp. Guidance still stores the requested sample time. Affects B and later G, H, and J. |
 | 2026-09-03 | Run headless recipes once while retaining watched recipes in the editor. | Package A exposed that a failed simulation child was logged and then waited for source reload, so `elodin run` could not return nonzero. The approved shared fixes (`301ae367`, `#837`; lifecycle follow-up `36ee3431`, `#838`) make headless execution one-shot without changing interactive editor recovery, centralize recipe execution dispatch in s10, and add an end-to-end lifecycle CI check. This enables failure contracts in A, F, K, and L. |
 | 2026-09-01 | Keep the current ENU/FLU world, Gazebo-bridge conventions, native motor order, and 8 kHz lockstep. | These are the implemented baseline; changing them is not required for racing. A–L rely on them. |
 | 2026-09-01 | Preserve scripted takeoff as the default and make other control modes opt-in. | Allows every package to merge independently without replacing the reference SITL example prematurely. |

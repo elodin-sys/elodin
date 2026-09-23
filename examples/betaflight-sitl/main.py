@@ -105,6 +105,8 @@ FPV_FAR = 100.0
 FPV_FOV_DEG = 2.0 * math.degrees(math.atan((FPV_HEIGHT / 2.0) / 320.0))
 FPV_PERIOD_US = int(round(1_000_000.0 / FPV_FPS))
 FPV_FRAME_BYTES = FPV_WIDTH * FPV_HEIGHT * 4
+FPV_MIN_FPS = 15.0
+FPV_WARMUP_US = 2_000_000
 
 
 # --- Betaflight Binary Path ---
@@ -342,9 +344,11 @@ class FpvCameraStats:
     sample_count: int = 0
     first_frame_sim_s: float | None = None
     last_requested_sample_us: int | None = None
+    last_selected_ts: int | None = None
     shape_ok: bool = True
-    last_frame_sig: object = None
     unique_samples: int = 0
+    observed_fps: float = 0.0
+    accepted: bool = False
     # Latest sample offered to guidance this tick (or None).
     latest_frame: np.ndarray | None = None
     latest_sample_us: int | None = None
@@ -372,14 +376,6 @@ _barometer_tick_interval = config.baro_tick_interval
 _magnetometer_tick_interval = config.mag_tick_interval
 
 
-def _frame_fingerprint(arr: np.ndarray, *, dense: bool = False) -> int:
-    flat = np.ascontiguousarray(arr).reshape(-1)
-    if dense:
-        return hash(flat.tobytes())
-    stride = max(flat.size // 4096, 1)
-    return hash(flat[::stride].tobytes())
-
-
 def _read_fpv_frame(ctx: el.StepContext, stats: FpvCameraStats) -> None:
     """Non-blocking latency-adjusted FPV read, at most once per camera period."""
     stats.latest_frame = None
@@ -393,10 +389,12 @@ def _read_fpv_frame(ctx: el.StepContext, stats: FpvCameraStats) -> None:
 
     requested = ctx.timestamp - FPV_LATENCY_US
     stats.last_requested_sample_us = requested
+    # Guidance records the requested sample time, not the renderer timestamp.
     stats.latest_sample_us = requested
-    payload = ctx.read_msg(FPV_MSG, timestamp=requested)
-    if payload is None:
+    selected = ctx.read_msg_at(FPV_MSG, requested)
+    if selected is None:
         return
+    selected_ts, payload = selected
 
     arr = np.asarray(payload)
     if arr.size != FPV_FRAME_BYTES:
@@ -415,12 +413,12 @@ def _read_fpv_frame(ctx: el.StepContext, stats: FpvCameraStats) -> None:
         stats.first_frame_sim_s = ctx.tick * config.dt
         print(
             f"[fpv] first frame at t={stats.first_frame_sim_s:.3f}s "
-            f"(requested_sample_us={requested}, shape={rgba.shape}, dtype={rgba.dtype})"
+            f"(requested_sample_us={requested}, selected_ts={selected_ts}, "
+            f"shape={rgba.shape}, dtype={rgba.dtype})"
         )
 
-    sig = _frame_fingerprint(arr)
-    if sig != stats.last_frame_sig:
-        stats.last_frame_sig = sig
+    if selected_ts != stats.last_selected_ts:
+        stats.last_selected_ts = int(selected_ts)
         stats.unique_samples += 1
 
 
@@ -428,49 +426,54 @@ def _report_fpv_stats(ctx: el.StepContext, stats: FpvCameraStats, sim_time: floa
     """Shutdown report: first-frame time, counts, observed simulated FPS."""
     print()
     print("--- FPV camera (Package B) ---")
+    stats.accepted = False
     if stats.first_frame_sim_s is None:
-        print("  first_frame: none (render-server produced no frames)")
         print(f"  sample_count: {stats.sample_count}")
-        print("  observed_fps: 0.0")
+        print("  FAIL: render-server produced no valid FPV frames")
+        return
+    if not stats.shape_ok:
+        print(f"  sample_count: {stats.sample_count}")
+        print(f"  FAIL: FPV frame was not ({FPV_HEIGHT}, {FPV_WIDTH}, 4) uint8")
         return
 
-    warmup_us = 2_000_000
+    # Count distinct renderer messages after warmup. read_msg_at returns the
+    # selected DB timestamp; a repeated timestamp is sample-and-hold, not a new frame.
+    sim_start_us = ctx.timestamp - int(sim_time * 1_000_000)
     sweep_end = ctx.timestamp - 100_000
-    sweep_start = max(warmup_us, sweep_end - int(max(sim_time - 2.0, 0.1) * 1_000_000))
+    sweep_start = sim_start_us + FPV_WARMUP_US
     sweep_window_us = max(sweep_end - sweep_start, 1)
     sweep_seconds = sweep_window_us / 1_000_000.0
     step_us = max(int(FPV_PERIOD_US / 2), 100)
-    seen_sig = None
-    unique_frames = 0
+    selected_times: set[int] = set()
     cursor = sweep_start
     while cursor <= sweep_end:
-        frame = ctx.read_msg(FPV_MSG, timestamp=cursor)
-        if frame is not None:
-            sig = _frame_fingerprint(np.asarray(frame), dense=True)
-            if sig != seen_sig:
-                unique_frames += 1
-                seen_sig = sig
+        selected = ctx.read_msg_at(FPV_MSG, cursor)
+        if selected is not None:
+            selected_times.add(int(selected[0]))
         cursor += step_us
 
+    unique_frames = len(selected_times)
     observed_fps = unique_frames / sweep_seconds if sweep_seconds > 0 else 0.0
+    stats.observed_fps = observed_fps
     offered_fps = 0.0
     if sim_time > stats.first_frame_sim_s:
         offered_fps = stats.sample_count / (sim_time - stats.first_frame_sim_s)
 
     print(f"  first_frame_sim_s: {stats.first_frame_sim_s:.3f}")
     print(f"  sample_count: {stats.sample_count}")
-    print(f"  unique_samples_at_period: {stats.unique_samples}")
+    print(f"  unique_selected_timestamps: {unique_frames}")
     print(f"  offered_sample_fps≈{offered_fps:.2f} (non-None latency reads / sim-s)")
     print(f"  shape_ok: {stats.shape_ok} (expect ({FPV_HEIGHT}, {FPV_WIDTH}, 4) uint8)")
     print(f"  last_requested_sample_us: {stats.last_requested_sample_us}")
     print(
         f"  observed_sim_fps≈{observed_fps:.2f} "
-        f"(unique_frames={unique_frames} in {sweep_seconds:.2f}s after warmup)"
+        f"(unique_selected_timestamps={unique_frames} in {sweep_seconds:.2f}s after warmup)"
     )
-    if observed_fps < 15.0:
-        print("  WARNING: observed FPS below Package B acceptance floor (15 FPS)")
+    stats.accepted = observed_fps >= FPV_MIN_FPS
+    if stats.accepted:
+        print(f"  OK: observed FPS meets Package B acceptance (>= {FPV_MIN_FPS:.0f} FPS)")
     else:
-        print("  OK: observed FPS meets Package B acceptance (>= 15 FPS)")
+        print(f"  FAIL: observed FPS below Package B acceptance floor ({FPV_MIN_FPS:.0f} FPS)")
 
 
 def sitl_post_step(tick: int, ctx: el.StepContext):
@@ -800,9 +803,13 @@ world.run(
 print(f"Wrote database to: {db_filename}")
 
 if not bridge[0]:
+    # `elodin run` also evaluates this file in the s10 parent, which never
+    # executes ticks. Only the simulation process can judge the camera.
     print("\nNo simulation ticks executed.")
     print("Usage: python3 examples/betaflight-sitl/main.py run")
 elif c0_result[0] is not None and not c0_result[0].passed:
     sys.exit(1)
 elif axis_audit is not None and not axis_audit.passed:
+    sys.exit(1)
+elif fpv_stats is not None and not fpv_stats.accepted:
     sys.exit(1)
