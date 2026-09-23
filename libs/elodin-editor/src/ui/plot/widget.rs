@@ -1909,11 +1909,11 @@ pub fn sync_kernel_graphs(
         let compiled = match kernels.poll(&binding, &fetch) {
             KernelStatus::Ready(compiled) => compiled,
             KernelStatus::Loading => continue,
+            // Do not stamp last_generation. `poll` retries a fetch miss on
+            // its own backoff; stamping skips that until telemetry or the
+            // visible range changes.
             KernelStatus::Failed(err) => {
                 warn_once!(?err, "display kernel graph failed to load");
-                let kernel = graph_state.kernel.as_mut().expect("checked above");
-                kernel.last_generation = generation;
-                kernel.last_range = Some(range_key);
                 continue;
             }
         };
@@ -1922,9 +1922,8 @@ pub fn sync_kernel_graphs(
                 Ok(evaluated) => evaluated,
                 Err(err) => {
                     warn_once!(?err, "display kernel graph evaluation failed");
-                    let kernel = graph_state.kernel.as_mut().expect("checked above");
-                    kernel.last_generation = generation;
-                    kernel.last_range = Some(range_key);
+                    // Leave the cursor unset so a later sample can succeed
+                    // without waiting for a telemetry generation bump.
                     continue;
                 }
             };
