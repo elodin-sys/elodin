@@ -15,7 +15,8 @@ use impeller2_bevy::{
     PacketGrantR, PacketHandlerInput, PacketHandlers, SeriesFetchPriority, TelemetryCache,
 };
 use impeller2_wkt::{
-    ComponentValue, CurrentTimestamp, EarliestTimestamp, GetTimeSeries, Line3d, VectorArrow3d,
+    ComponentValue, CurrentTimestamp, EarliestTimestamp, GetTimeSeries, Line3d, PointTrails,
+    VectorArrow3d,
 };
 use itertools::{Itertools, MinMaxResult};
 use nodit::NoditMap;
@@ -481,6 +482,7 @@ pub fn queue_timestamp_read(
     earliest_timestamp: Res<EarliestTimestamp>,
     graph_states: Query<&GraphState>,
     line_3ds: Query<&Line3d>,
+    point_trails: Query<&PointTrails>,
     object_3ds: Query<&Object3DState>,
     eql_ctx: Res<EqlContext>,
     series_store: Res<TelemetryCache>,
@@ -501,6 +503,7 @@ pub fn queue_timestamp_read(
         range_key,
         &graph_states,
         &line_3ds,
+        &point_trails,
         &object_3ds,
         &eql_ctx,
         &series_store,
@@ -517,6 +520,7 @@ pub fn queue_timestamp_read(
         earliest_timestamp.0,
         &graph_states,
         &line_3ds,
+        &point_trails,
         &object_3ds,
         &eql_ctx,
         &series_store,
@@ -570,6 +574,7 @@ fn prefetch_visible_window(
     range_key: (i64, i64),
     graph_states: &Query<&GraphState>,
     line_3ds: &Query<&Line3d>,
+    point_trails: &Query<&PointTrails>,
     object_3ds: &Query<&Object3DState>,
     eql_ctx: &EqlContext,
     series_store: &TelemetryCache,
@@ -579,7 +584,8 @@ fn prefetch_visible_window(
 ) {
     // Prefetch only plot/3D consumers; monitors/viewport/arrows are allowlisted
     // in `update_series_fetch_priority` and filled by live + begin→end backfill.
-    let fetch_ids = plot_fetch_component_ids(graph_states, line_3ds, object_3ds, eql_ctx);
+    let fetch_ids =
+        plot_fetch_component_ids(graph_states, line_3ds, point_trails, object_3ds, eql_ctx);
     if fetch_ids.is_empty() {
         return;
     }
@@ -751,12 +757,14 @@ pub fn sync_plot_lines_from_series_store(
     earliest: Timestamp,
     graph_states: &Query<&GraphState>,
     line_3ds: &Query<&Line3d>,
+    point_trails: &Query<&PointTrails>,
     object_3ds: &Query<&Object3DState>,
     eql_ctx: &EqlContext,
     series_store: &TelemetryCache,
     sync_state: &mut PlotSyncState,
 ) {
-    let fetch_ids = plot_fetch_component_ids(graph_states, line_3ds, object_3ds, eql_ctx);
+    let fetch_ids =
+        plot_fetch_component_ids(graph_states, line_3ds, point_trails, object_3ds, eql_ctx);
     let range_changed = sync_state.last_range != Some(range_key);
     let enabled_changed = sync_state.last_enabled != fetch_ids;
     let gen_changed = series_store.generation() != sync_state.last_generation;
@@ -1067,11 +1075,18 @@ fn collect_object_3d_mesh_component_ids(
     }
 }
 
+fn point_trails_component_ids(trails: &PointTrails) -> impl Iterator<Item = ComponentId> {
+    std::iter::once(trails.component.as_str())
+        .chain(trails.status.as_deref())
+        .map(|name| ComponentId::new(name.trim()))
+}
+
 /// Component IDs for plot LineTree sync / visible-window prefetch
-/// (graphs + Line3d + object_3d only).
+/// (graphs + Line3d + point_trails + object_3d only).
 fn plot_fetch_component_ids(
     graph_states: &Query<&GraphState>,
     line_3ds: &Query<&Line3d>,
+    point_trails: &Query<&PointTrails>,
     object_3ds: &Query<&Object3DState>,
     eql_ctx: &EqlContext,
 ) -> HashSet<ComponentId> {
@@ -1084,6 +1099,7 @@ fn plot_fetch_component_ids(
     for line in line_3ds.iter() {
         collect_eql_component_ids(&line.eql, eql_ctx, &mut ids);
     }
+    ids.extend(point_trails.iter().flat_map(point_trails_component_ids));
     for obj in object_3ds.iter() {
         collect_eql_component_ids(&obj.data.eql, eql_ctx, &mut ids);
         collect_object_3d_mesh_component_ids(&obj.data.mesh, eql_ctx, &mut ids);
@@ -1097,16 +1113,19 @@ fn plot_fetch_component_ids(
 
 /// Full SeriesStore consumer set: plots/3D plus monitors, viewport cameras,
 /// and vector arrows.
+#[allow(clippy::too_many_arguments)]
 fn enabled_fetch_component_ids(
     graph_states: &Query<&GraphState>,
     line_3ds: &Query<&Line3d>,
+    point_trails: &Query<&PointTrails>,
     object_3ds: &Query<&Object3DState>,
     monitors: &Query<&MonitorData>,
     viewports: &Query<&Viewport>,
     vector_arrows: &Query<&VectorArrow3d>,
     eql_ctx: &EqlContext,
 ) -> HashSet<ComponentId> {
-    let mut ids = plot_fetch_component_ids(graph_states, line_3ds, object_3ds, eql_ctx);
+    let mut ids =
+        plot_fetch_component_ids(graph_states, line_3ds, point_trails, object_3ds, eql_ctx);
     for monitor in monitors.iter() {
         if !monitor.component_name.trim().is_empty() {
             ids.insert(ComponentId::new(&monitor.component_name));
@@ -1168,6 +1187,7 @@ pub(crate) fn sensor_camera_world_pos_ids(configs: &SensorCameraConfigs) -> Hash
 pub fn update_series_fetch_priority(
     graph_states: Query<&GraphState>,
     line_3ds: Query<&Line3d>,
+    point_trails: Query<&PointTrails>,
     object_3ds: Query<&Object3DState>,
     monitors: Query<&MonitorData>,
     viewports: Query<&Viewport>,
@@ -1189,6 +1209,7 @@ pub fn update_series_fetch_priority(
         enabled_fetch_component_ids(
             &graph_states,
             &line_3ds,
+            &point_trails,
             &object_3ds,
             &monitors,
             &viewports,
@@ -3045,6 +3066,32 @@ mod tests {
             &mut ids,
         );
         assert_eq!(ids, [ComponentId::new(name)].into_iter().collect());
+    }
+
+    #[test]
+    fn point_trails_components_are_allowlisted() {
+        let trails = PointTrails {
+            component: "effector.cube_pos_ecef".to_string(),
+            status: Some("effector.cube_hit_tick".to_string()),
+            head_size: 0.15,
+            head_shape: Default::default(),
+            line_width: 4.0,
+            max_length: Some(3.0),
+            color: None,
+            hit_color: None,
+            frame: None,
+            node_id: Default::default(),
+        };
+        let ids: HashSet<_> = point_trails_component_ids(&trails).collect();
+        assert_eq!(
+            ids,
+            [
+                ComponentId::new("effector.cube_pos_ecef"),
+                ComponentId::new("effector.cube_hit_tick"),
+            ]
+            .into_iter()
+            .collect()
+        );
     }
 
     #[test]

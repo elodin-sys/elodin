@@ -21,6 +21,7 @@ use super::plot::{CollectedGraphData, Line, PlotDataComponent, queue_timestamp_r
 use crate::{EqlContext, ui::schematic::EqlExt};
 
 pub mod gpu;
+mod point_trails;
 
 fn ensure_line_handle(
     data: &mut PlotDataComponent,
@@ -221,7 +222,7 @@ pub struct LinePlot3dPlugin;
 impl bevy::app::Plugin for LinePlot3dPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.init_resource::<CollectedGraphData>()
-            .add_plugins(gpu::Plot3dGpuPlugin)
+            .add_plugins((gpu::Plot3dGpuPlugin, point_trails::PointTrailsPlugin))
             .add_systems(Update, sync_line_plot_3d)
             // After SeriesStore→LineTree projection so rolling windows update
             // the anchor in the same frame the tree's first sample slides.

@@ -15,7 +15,8 @@ use egui_tiles::{Container, Tile, TileId};
 use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry, ConnectionAddr};
 use impeller2_kdl::FromKdl;
 use impeller2_wkt::{
-    Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport, WindowSchematic,
+    Graph, Line3d, Object3D, Panel, PointTrails, Schematic, VectorArrow3d, Viewport,
+    WindowSchematic,
 };
 use miette::{Diagnostic, miette};
 use std::{
@@ -546,6 +547,13 @@ impl LoadSchematicParams<'_, '_> {
                     }
                     self.spawn_line_3d(line);
                 }
+                impeller2_wkt::SchematicElem::PointTrails(point_trails) => {
+                    let mut trails = point_trails.clone();
+                    if trails.frame.is_none() {
+                        trails.frame = fallback_frame;
+                    }
+                    self.spawn_point_trails(trails);
+                }
                 impeller2_wkt::SchematicElem::VectorArrow(vector_arrow) => {
                     let mut arrow = vector_arrow.clone();
                     if arrow.frame.is_none() {
@@ -1032,6 +1040,24 @@ impl LoadSchematicParams<'_, '_> {
             // Absolute: vertex data is frame-relative; GeoRotation carries
             // the frame → Bevy basis. GeoPosition tracks the LineTree's first
             // sample (visible-window anchor; see sync_line_3d_anchor).
+            bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
+            bevy_geo_frames::GeoRotation::absolute(frame, bevy::math::DQuat::IDENTITY),
+            #[cfg(feature = "big_space")]
+            crate::spatial::GridCell::default(),
+        ));
+        #[cfg(feature = "big_space")]
+        crate::spatial::parent_under_big_space(&mut spawn, self.big_space_root.as_deref());
+        spawn.insert(SchematicSpawned);
+    }
+
+    pub fn spawn_point_trails(&mut self, point_trails: PointTrails) {
+        let frame = point_trails.frame.or_default().unwrap_or_default();
+        let mut spawn = self.commands.spawn(point_trails);
+        spawn.insert((
+            Name::new("point_trails"),
+            Transform::default(),
+            GlobalTransform::default(),
+            Visibility::default(),
             bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
             bevy_geo_frames::GeoRotation::absolute(frame, bevy::math::DQuat::IDENTITY),
             #[cfg(feature = "big_space")]
@@ -2169,6 +2195,27 @@ mod tests {
             .expect("line_3d should spawn");
 
         assert_eq!(line.frame, Some(GeoFrame::ECEF));
+        assert_eq!(geo_pos.0, GeoFrame::ECEF);
+        assert_eq!(geo_rot.0, GeoFrame::ECEF);
+    }
+
+    #[test]
+    fn point_trails_spawns_with_frame_components() {
+        let mut app = test_app();
+        let schematic =
+            Schematic::from_kdl(r#"point_trails frame="ECEF" "effector.cube_pos_ecef""#)
+                .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app
+            .world_mut()
+            .query::<(&impeller2_wkt::PointTrails, &GeoPosition, &GeoRotation)>();
+        let (trails, geo_pos, geo_rot) = query
+            .iter(app.world())
+            .next()
+            .expect("point_trails should spawn");
+        assert_eq!(trails.frame, Some(GeoFrame::ECEF));
         assert_eq!(geo_pos.0, GeoFrame::ECEF);
         assert_eq!(geo_rot.0, GeoFrame::ECEF);
     }

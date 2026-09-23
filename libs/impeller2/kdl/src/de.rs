@@ -359,6 +359,7 @@ fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlS
         "timeline" => Ok(SchematicElem::Timeline(parse_timeline(node, src)?)),
         "object_3d" => Ok(SchematicElem::Object3d(parse_object_3d(node, src)?)),
         "line_3d" => Ok(SchematicElem::Line3d(parse_line_3d(node, src)?)),
+        "point_trails" => Ok(SchematicElem::PointTrails(parse_point_trails(node, src)?)),
         "vector_arrow" => Ok(SchematicElem::VectorArrow(parse_vector_arrow(node, src)?)),
         "world_mesh" => Ok(SchematicElem::WorldMesh(parse_world_mesh(node, src)?)),
         "coordinate" => Ok(SchematicElem::Coordinate(parse_coordinate(node, src)?)),
@@ -2165,6 +2166,68 @@ fn parse_line_3d(node: &KdlNode, src: &str) -> Result<Line3d, KdlSchematicError>
     })
 }
 
+fn parse_point_trails(node: &KdlNode, src: &str) -> Result<PointTrails, KdlSchematicError> {
+    let component = node
+        .entries()
+        .iter()
+        .find(|e| e.name().is_none())
+        .and_then(|e| e.value().as_string())
+        .ok_or_else(|| KdlSchematicError::MissingProperty {
+            property: "component".to_string(),
+            node: "point_trails".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        })?
+        .to_string();
+    let float = |name: &str| node.get(name).and_then(|v| v.as_float()).unwrap_or(1.0) as f32;
+    let frame = node
+        .get("frame")
+        .and_then(|v| v.as_string())
+        .and_then(|s| GeoFrame::from_str(s).ok());
+    let head_shape = match node.get("head_shape").and_then(|v| v.as_string()) {
+        None | Some("cube") => PointTrailsHeadShape::Cube,
+        Some("sphere") => PointTrailsHeadShape::Sphere,
+        Some(_) => {
+            return Err(KdlSchematicError::InvalidValue {
+                property: "head_shape".to_string(),
+                node: "point_trails".to_string(),
+                expected: r#""cube" or "sphere""#.to_string(),
+                src: src.to_string(),
+                span: node.span(),
+            });
+        }
+    };
+    let max_length = node
+        .get("max_length")
+        .and_then(|v| v.as_float())
+        .map(|value| value as f32);
+    if max_length.is_some_and(|value| !value.is_finite() || value <= 0.0) {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "max_length".to_string(),
+            node: "point_trails".to_string(),
+            expected: "a positive distance in meters".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        });
+    }
+
+    Ok(PointTrails {
+        component,
+        status: node
+            .get("status")
+            .and_then(|v| v.as_string())
+            .map(str::to_string),
+        head_size: float("head_size"),
+        head_shape,
+        line_width: float("line_width"),
+        max_length,
+        color: parse_color_from_node_or_children(node, None),
+        hit_color: parse_named_color_field(node, "hit_color"),
+        frame,
+        node_id: NodeId::default(),
+    })
+}
+
 /// Parses a named color field (e.g. `future_color`) from a property string or a
 /// matching child node. Unlike [`parse_color_from_node_or_children`], this never
 /// reads the node's own positional color args.
@@ -3914,6 +3977,37 @@ tabs {
         } else {
             panic!("Expected line_3d");
         }
+    }
+
+    #[test]
+    fn test_parse_point_trails() {
+        let schematic = parse_schematic(
+            r#"point_trails "effector.cube_pos_ecef" status="effector.cube_hit_tick" frame="ECEF" head_size=0.15 head_shape="sphere" line_width=4.0 max_length=3.0 { color 0 255 0; hit_color 255 255 255 }"#,
+        )
+        .unwrap();
+        let SchematicElem::PointTrails(trails) = &schematic.elems[0] else {
+            panic!("Expected point_trails");
+        };
+        assert_eq!(trails.component, "effector.cube_pos_ecef");
+        assert_eq!(trails.status.as_deref(), Some("effector.cube_hit_tick"));
+        assert!((trails.head_size - 0.15).abs() < 1e-6);
+        assert_eq!(trails.head_shape, PointTrailsHeadShape::Sphere);
+        assert_eq!(trails.line_width, 4.0);
+        assert_eq!(trails.max_length, Some(3.0));
+        assert_eq!(trails.color, Some(Color::GREEN));
+        assert_eq!(trails.hit_color, Some(Color::WHITE));
+        assert_eq!(trails.frame, Some(GeoFrame::ECEF));
+
+        let schematic = parse_schematic(r#"point_trails "cloud.pos""#).unwrap();
+        let SchematicElem::PointTrails(trails) = &schematic.elems[0] else {
+            panic!("Expected point_trails");
+        };
+        assert_eq!((trails.head_size, trails.line_width), (1.0, 1.0));
+        assert_eq!(trails.head_shape, PointTrailsHeadShape::Cube);
+        assert_eq!(trails.max_length, None);
+        assert_eq!((trails.color, trails.hit_color), (None, None));
+        assert_eq!(trails.status, None);
+        assert_eq!(trails.frame, None);
     }
 
     #[test]

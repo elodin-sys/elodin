@@ -1,6 +1,7 @@
 # Changelog
 
 ## unreleased
+- **(feat)** Add the `point_trails` schematic node: batched trails and cube/sphere heads for every point in one flat `3 × N` component, with status colors and an optional path-length cap.
 
 ## v0.19
 
