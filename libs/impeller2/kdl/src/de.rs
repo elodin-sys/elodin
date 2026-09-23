@@ -12,6 +12,18 @@ use impeller2_wkt::*;
 
 use crate::KdlSchematicError;
 
+fn parse_kernel_shape(text: &str) -> Option<Vec<u64>> {
+    let mut shape = Vec::new();
+    for part in text.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        shape.push(part.parse().ok()?);
+    }
+    Some(shape)
+}
+
 fn parse_kernel_inputs(node: &KdlNode) -> Vec<DisplayKernelInput> {
     let Some(children) = node.children() else {
         return Vec::new();
@@ -27,10 +39,20 @@ fn parse_kernel_inputs(node: &KdlNode) -> Vec<DisplayKernelInput> {
                 .find(|entry| entry.name().is_none())
                 .and_then(|entry| entry.value().as_string())
                 .map(str::to_string)?;
+            let dtype = child
+                .get("dtype")
+                .and_then(|value| value.as_string())
+                .unwrap_or("")
+                .to_string();
+            let shape = child
+                .get("shape")
+                .and_then(|value| value.as_string())
+                .and_then(parse_kernel_shape)
+                .unwrap_or_default();
             Some(DisplayKernelInput {
                 component,
-                shape: Vec::new(),
-                dtype: String::new(),
+                shape,
+                dtype,
             })
         })
         .collect()
@@ -3278,6 +3300,55 @@ graph kernel="schematics/kernels/abc123" name="Cholesky" {
         assert_eq!(kernel.asset, "schematics/kernels/abc123");
         assert_eq!(kernel.hash, "abc123");
         assert_eq!(kernel.inputs[0].component, "drone.nav.covariance");
+        let roundtrip = crate::serialize_schematic(&schematic);
+        let parsed = parse_schematic(&roundtrip).unwrap();
+        assert_eq!(parsed, schematic);
+    }
+
+    #[test]
+    fn test_kernel_input_dtype_and_shape_roundtrip() {
+        let kdl = r#"
+graph kernel="schematics/kernels/abc123" name="Cholesky" {
+    input "drone.nav.covariance" dtype="f32" shape="3,3"
+}
+object_3d kernel="schematics/kernels/poseabc" {
+    input "drone.world_pos" dtype="f64" shape="7"
+    sphere radius=0.2
+}
+object_3d "drone.world_pos" {
+    ellipsoid error_covariance_cholesky_kernel="schematics/kernels/cholabc" {
+        input "drone.nav.covariance" dtype="f32" shape="3,3"
+    }
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        let SchematicElem::Panel(Panel::Graph(graph)) = &schematic.elems[0] else {
+            panic!("Expected graph panel");
+        };
+        let graph_input = &graph.kernel.as_ref().expect("kernel").inputs[0];
+        assert_eq!(graph_input.dtype, "f32");
+        assert_eq!(graph_input.shape, vec![3, 3]);
+
+        let SchematicElem::Object3d(pose) = &schematic.elems[1] else {
+            panic!("expected pose object");
+        };
+        let pose_input = &pose.kernel.as_ref().expect("pose kernel").inputs[0];
+        assert_eq!(pose_input.dtype, "f64");
+        assert_eq!(pose_input.shape, vec![7]);
+
+        let SchematicElem::Object3d(ellip) = &schematic.elems[2] else {
+            panic!("expected ellipsoid object");
+        };
+        let impeller2_wkt::Object3DMesh::Ellipsoid {
+            error_covariance_cholesky_kernel: Some(chol),
+            ..
+        } = &ellip.mesh
+        else {
+            panic!("expected cholesky kernel");
+        };
+        assert_eq!(chol.inputs[0].dtype, "f32");
+        assert_eq!(chol.inputs[0].shape, vec![3, 3]);
+
         let roundtrip = crate::serialize_schematic(&schematic);
         let parsed = parse_schematic(&roundtrip).unwrap();
         assert_eq!(parsed, schematic);

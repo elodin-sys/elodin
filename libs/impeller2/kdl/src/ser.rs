@@ -23,12 +23,30 @@ fn push_kernel_prop(
     node.entries_mut()
         .push(KdlEntry::new_prop(prop, kernel.asset.clone()));
     for input in &kernel.inputs {
-        let mut child = KdlNode::new("input");
+        push_kernel_input(children, input);
+    }
+}
+
+fn push_kernel_input(children: &mut KdlDocument, input: &DisplayKernelInput) {
+    let mut child = KdlNode::new("input");
+    child
+        .entries_mut()
+        .push(KdlEntry::new(input.component.clone()));
+    if !input.dtype.is_empty() {
         child
             .entries_mut()
-            .push(KdlEntry::new(input.component.clone()));
-        children.nodes_mut().push(child);
+            .push(KdlEntry::new_prop("dtype", input.dtype.clone()));
     }
+    if !input.shape.is_empty() {
+        let shape = input
+            .shape
+            .iter()
+            .map(u64::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        child.entries_mut().push(KdlEntry::new_prop("shape", shape));
+    }
+    children.nodes_mut().push(child);
 }
 
 pub fn serialize_schematic(schematic: &Schematic) -> String {
@@ -1011,11 +1029,7 @@ fn serialize_object_3d(obj: &Object3D) -> KdlNode {
     let mut children = KdlDocument::new();
     if let Some(kernel) = &obj.kernel {
         for input in &kernel.inputs {
-            let mut child = KdlNode::new("input");
-            child
-                .entries_mut()
-                .push(KdlEntry::new(input.component.clone()));
-            children.nodes_mut().push(child);
+            push_kernel_input(&mut children, input);
         }
     }
     let (mut mesh_node, sibling_nodes) = serialize_object_3d_mesh(&obj.mesh);
