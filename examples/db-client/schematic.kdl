@@ -2,7 +2,6 @@
 // All components below are written by a plain-Python elodin.db process.
 coordinate frame=ENU
 theme mode=dark scheme=default
-timeline
 
 tabs {
     hsplit name="Flight" {

@@ -45,8 +45,6 @@ with pkgs; let
         fd # Better find
         ripgrep # Better grep
         zoxide # Smart cd
-        direnv # Directory environments
-        nix-direnv # Nix integration for direnv
         vim # Editor
         less # Pager
 
@@ -149,6 +147,8 @@ with pkgs; let
 
     LLDB_DEBUGSERVER_PATH = lib.optionalString pkgs.stdenv.isDarwin "/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/Resources/debugserver";
 
+    UV_PYTHON = "${pythonBase}/bin/python3";
+
     # Set up library paths for Linux graphics/audio
     LD_LIBRARY_PATH = lib.optionalString pkgs.stdenv.isLinux (
       lib.makeLibraryPath [
@@ -167,7 +167,100 @@ with pkgs; let
           ${common.linuxEditorShellHook}
         ;;
       esac
-      # start the shell if we're in an interactive shell
+
+      export ELODIN_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+      if [ -z "''${ELODIN_SHELL_ID:-}" ]; then
+        if [ "$(uname -s)" = Linux ]; then
+          ELODIN_SHELL_ID="$(ps -o sid= -p $$ | tr -d '[:space:]')"
+        else
+          ELODIN_SHELL_ID="$$"
+        fi
+      fi
+      export ELODIN_SHELL_ID
+      shell_dir="$ELODIN_ROOT/target/shells/$ELODIN_SHELL_ID"
+      export ELODIN_SHELL_BIN="$shell_dir/bin"
+      mkdir -p "$ELODIN_SHELL_BIN"
+      export VIRTUAL_ENV="$shell_dir/venv"
+      export UV_PROJECT_ENVIRONMENT="$VIRTUAL_ENV"
+      if [ ! -x "$VIRTUAL_ENV/bin/python" ]; then
+        uv venv --quiet --python 3.13 --python-preference only-system --allow-existing "$VIRTUAL_ENV"
+      fi
+      PATH="$ELODIN_SHELL_BIN:$VIRTUAL_ENV/bin:$PATH"
+      export UV_PYTHON="$VIRTUAL_ENV/bin/python"
+      export PATH
+
+      if [ -d "$ELODIN_ROOT/target/shells" ]; then
+        for dir in "$ELODIN_ROOT/target/shells"/[0-9]*; do
+          [ -d "$dir" ] || continue
+          dead_id="''${dir##*/}"
+          case "$dead_id" in
+            *[!0-9]*) continue ;;
+          esac
+          if ! kill -0 "$dead_id" 2>/dev/null; then
+            rm -rf "$dir"
+          fi
+        done
+        unset dir dead_id
+      fi
+
+      alias zar='gtar --zstd --sparse'
+
+      find_parent_shell() {
+        local pid=$PPID n=0 comm
+        while [ "$n" -lt 16 ]; do
+          [ -n "$pid" ] || return 1
+          case "$pid" in
+            0|1) return 1 ;;
+            *[!0-9]*) return 1 ;;
+          esac
+          comm=$(ps -o comm= -p "$pid" 2>/dev/null | tr -d '[:space:]')
+          comm=''${comm##*/}
+          comm=''${comm#-}
+          case "$comm" in
+            zsh|bash)
+              printf '%s\n' "$comm"
+              return 0
+              ;;
+          esac
+          pid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d '[:space:]')
+          n=$((n + 1))
+        done
+        return 1
+      }
+
+      if [ -z "''${ELODIN_SHELL:-}" ]; then
+        ELODIN_SHELL=auto
+      fi
+      if [ "$ELODIN_SHELL" = auto ]; then
+        if found=$(find_parent_shell); then
+          ELODIN_SHELL=$found
+        else
+          echo "warn: The parent shell was not found. Defaulting to bash." >&2;
+          ELODIN_SHELL=bash
+        fi
+        unset found
+      fi
+      unset -f find_parent_shell
+      export ELODIN_SHELL
+
+      # Set SHELL/ZDOTDIR here so -c env and interactive agree.
+      if [ "$ELODIN_SHELL" = zsh ]; then
+        export SHELL=${pkgs.zsh}/bin/zsh
+        export ELODIN_NIX_PATH="$PATH"
+        export ZDOTDIR="$shell_dir/zdot"
+        mkdir -p "$ZDOTDIR"
+        printf '%s\n' \
+          'ZDOTDIR="$HOME"' \
+          '[ -f "$HOME/.zshenv" ] && . "$HOME/.zshenv"' \
+          '[ -f "$HOME/.zshrc" ] && . "$HOME/.zshrc"' \
+          'typeset -U path' \
+          'path=(''${(s.:.)ELODIN_NIX_PATH} $path)' \
+          "alias zar='gtar --zstd --sparse'" \
+          > "$ZDOTDIR/.zshrc"
+      fi
+      unset shell_dir
+
       if [[ $- == *i* ]]; then
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo "🚀 Elodin Development Shell (Nix)"
@@ -176,13 +269,18 @@ with pkgs; let
         echo "Environment ready:"
         echo "  • Rust: cargo, clippy, nextest"
         echo "  • Tools: uv, maturin, ruff, just, alejandra"
+        echo "  • Venv: $VIRTUAL_ENV (auto-active; no source needed)"
+        echo "  • Local bins: $ELODIN_SHELL_BIN"
+        echo "  • Shell: $ELODIN_SHELL"
         echo ""
         echo "Development flow:"
-        echo "  • Run 'just install' to build: elodin-py, elodin, and elodin-db"
-        echo "  • don't forget to source the venv with 'source .venv/bin/activate'"
+        echo "  • just install             — this shell only"
+        echo "  • ELODIN_SHELL=bash|zsh    — override auto shell detect"
         echo ""
 
-        exec ${pkgs.zsh}/bin/zsh
+        if [ "$ELODIN_SHELL" != bash ]; then
+          exec "$SHELL" -i
+        fi
       fi
     '';
   };

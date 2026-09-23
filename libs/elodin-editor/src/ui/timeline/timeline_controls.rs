@@ -6,7 +6,10 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 use egui::{Ui, load::SizedTexture};
 use impeller2::types::Timestamp;
-use impeller2_bevy::CurrentStreamId;
+use impeller2_bevy::{
+    CurrentStreamId, SeriesFetchPriority, TelemetryCache, next_subscribed_sample,
+    prev_subscribed_sample,
+};
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated, SimulationTimeStep};
 use std::convert::TryFrom;
 use std::time::Duration;
@@ -41,6 +44,8 @@ pub struct TimelineControls<'w, 's> {
     tick: ResMut<'w, CurrentTimestamp>,
     max_tick: Res<'w, LastUpdated>,
     tick_time: Res<'w, SimulationTimeStep>,
+    series: Res<'w, TelemetryCache>,
+    series_priority: Res<'w, SeriesFetchPriority>,
     playback_speed: Res<'w, PlaybackSpeed>,
     stream_id: Res<'w, CurrentStreamId>,
     earliest_timestamp: Res<'w, EarliestTimestamp>,
@@ -78,6 +83,8 @@ impl WidgetSystem for TimelineControls<'_, '_> {
             mut tick,
             max_tick,
             tick_time,
+            series,
+            series_priority,
             playback_speed,
             stream_id,
             earliest_timestamp,
@@ -99,6 +106,14 @@ impl WidgetSystem for TimelineControls<'_, '_> {
         let tick_step_duration = hifitime::Duration::from_seconds(tick_time.0);
         let tick_step_micros_i128 = tick_step_duration.total_nanoseconds() / 1000;
         let tick_step_micros = i64::try_from(tick_step_micros_i128).unwrap_or(0);
+        // Prefer the real sample boundaries of the displayed series: a nominal
+        // step lands between samples on irregular data, and on a recording that
+        // declares no rate it is the only thing that can step at all.
+        let nominal_step = |delta: i64| (tick_step_micros > 0).then(|| Timestamp(tick.0.0 + delta));
+        let step_forward_to = next_subscribed_sample(&series, &series_priority, tick.0)
+            .or_else(|| nominal_step(tick_step_micros));
+        let step_back_to = prev_subscribed_sample(&series, &series_priority, tick.0)
+            .or_else(|| nominal_step(-tick_step_micros));
         let played_color = timeline_settings.played_color.into_color32();
         ui.set_height(50.0);
         let typical_mouse_click = Duration::from_millis(85);
@@ -135,7 +150,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
 
                             if frame_back_btn.is_pointer_button_down_on()
                                 && tick.0 > earliest_timestamp.0
-                                && tick_step_micros > 0
+                                && let Some(target) = step_back_to
                             {
                                 auto_follow_latest_state.cancel();
                                 latest_follow.0 = false;
@@ -146,7 +161,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 });
 
                                 if first || down.elapsed() > wait_before_advancing {
-                                    tick.0.0 -= tick_step_micros;
+                                    tick.0 = target;
                                     if tick.0 <= earliest_timestamp.0 {
                                         tick_origin.request_rebase();
                                     }
@@ -181,7 +196,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
 
                             if frame_forward_btn.is_pointer_button_down_on()
                                 && tick.0 < max_tick.0
-                                && tick_step_micros > 0
+                                && let Some(target) = step_forward_to
                             {
                                 auto_follow_latest_state.cancel();
                                 latest_follow.0 = false;
@@ -192,7 +207,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 });
 
                                 if first || down.elapsed() > wait_before_advancing {
-                                    tick.0.0 += tick_step_micros;
+                                    tick.0 = target;
                                 }
                             } else {
                                 let _ = step_buttons.forward.take();

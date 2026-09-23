@@ -4,6 +4,14 @@
 
 ## v0.19
 
+### v0.19.2
+- **(feat)** Add `StepContext.read_msg_at()` to read a message at a given timestamp. (#851)
+- **(feat)** Add an orientation-sense argument to EQL body-frame offsets: `.translate(x, y, z, true)`, `.translate_x/y/z(d, true)`, and `.direction(x, y, z, true)`. (#850)
+- **(feat:examples)** Add manual piloting to Betaflight SITL, with a gamepad/RC controller bridge and a real-time flight audit. (#847)
+- **(fix)** Restore `orientation=absolute` and glTF Y-up handling in schematics, fixing Apollo lander RCS torque axes, the Falcon 9 barge, and the rc-jet sensor camera. (#845)
+- **(test:examples)** Cover Betaflight SITL packet, FDM, motor-layout, and baseline contracts, and run those tests in CI. (#840)
+- **(chore)** Build release artifacts on self-hosted Linux, macOS, and Windows runners. (#854, #855, #856, #857)
+
 ### v0.19.1
 - **(feat)** Add H.264 and gray8 sensor-camera outputs, with hardware-accelerated live encoding (NVENC, VideoToolbox) and an OpenH264 fallback. (#827)
 - **(feat)** Add `StepContext.read_msg_latest()` and the `sensor_visible` flag on `Object3D`. (#827)

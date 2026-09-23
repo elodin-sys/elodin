@@ -23,7 +23,7 @@ use egui::UiBuilder;
 use egui::response::Flags;
 use egui_material_icons::{icon_button, icons::*};
 use egui_tiles::{Container, Tile, TileId, Tiles};
-use impeller2_wkt::{BloomConfig, BloomPreset, Graph, Viewport, WindowRect};
+use impeller2_wkt::{BloomConfig, BloomPreset, FrustumUpMarker, Graph, Viewport, WindowRect};
 use smallvec::{SmallVec, smallvec};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::{
@@ -76,10 +76,12 @@ use crate::{
     },
     sensor_camera::SensorCameraConfigs,
     ui::colors::ColorExt,
+    ui::up_marker::paint_up_marker,
 };
 
 pub(crate) mod sidebar;
 
+use crate::plugins::frustum_common::frustum_up_marker_color;
 use crate::ui::widgets::SystemStateExt;
 use sidebar::tab_add_visible;
 
@@ -296,6 +298,10 @@ pub struct ViewportConfig {
     /// Color for this viewport's source frustum 2D projection in target viewports.
     pub projection_color: impeller2_wkt::Color,
     pub frustums_thickness: f32,
+    /// Marks the image-up direction on this viewport's frustum.
+    pub frustums_up_marker: FrustumUpMarker,
+    /// Repeats the up marker along the top of this viewport's own pane.
+    pub frustums_up_marker_overlay: bool,
     pub cinematic: bool,
     /// Authored bloom; `None` keeps house defaults.
     pub bloom: Option<BloomConfig>,
@@ -1358,6 +1364,24 @@ impl Pane {
                             rect,
                             PointerOwner::Viewport { camera: cam },
                         );
+
+                        // Same marker the sensor camera panes paint, since this
+                        // pane is likewise the image of a camera carrying a
+                        // frustum — but opt-in, and gated on create_frustum so
+                        // deleting the frustum cannot strand it.
+                        if let Some(config) = world.get::<ViewportConfig>(cam).filter(|config| {
+                            config.create_frustum
+                                && config.frustums_up_marker_overlay
+                                && config.frustums_up_marker != FrustumUpMarker::None
+                        }) {
+                            paint_up_marker(
+                                ui.painter(),
+                                rect,
+                                config.frustums_up_marker,
+                                config.frustums_color.into_color32(),
+                                frustum_up_marker_color(config.frustums_color).into_color32(),
+                            );
+                        }
                     }
                 } else {
                     register_ui_blocker(
@@ -1872,6 +1896,8 @@ impl ViewportPane {
                 frustums_color: viewport.frustums_color,
                 projection_color: viewport.projection_color,
                 frustums_thickness: viewport.frustums_thickness,
+                frustums_up_marker: viewport.frustums_up_marker,
+                frustums_up_marker_overlay: viewport.frustums_up_marker_overlay,
                 cinematic: viewport.cinematic,
                 bloom: viewport.bloom.clone(),
             },

@@ -21,7 +21,13 @@ pub fn serialize_schematic(schematic: &Schematic) -> String {
         doc.nodes_mut().push(serialize_theme(theme));
     }
     if let Some(timeline) = schematic.timeline.as_ref() {
-        doc.nodes_mut().push(serialize_timeline(timeline));
+        let node = serialize_timeline(timeline);
+        // Check the serialized properties rather than TimelineConfig equality:
+        // an explicit full range also normalizes to the default behavior.
+        // The loader restores defaults when the timeline node is absent.
+        if !node.entries().is_empty() {
+            doc.nodes_mut().push(node);
+        }
     }
     if schematic.telemetry_mode {
         let mut node = KdlNode::new("telemetry_mode");
@@ -587,6 +593,18 @@ fn serialize_viewport(viewport: &Viewport) -> KdlNode {
             "frustums_thickness",
             viewport.frustums_thickness as f64,
         );
+    }
+
+    if viewport.frustums_up_marker != FrustumUpMarker::None {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "frustums_up_marker",
+            viewport.frustums_up_marker.as_str(),
+        ));
+    }
+
+    if viewport.frustums_up_marker_overlay {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("frustums_up_marker_overlay", true));
     }
 
     if !viewport.show_view_cube {
@@ -1443,6 +1461,80 @@ mod tests {
     }
 
     #[test]
+    fn test_serialize_skips_bare_timeline_node() {
+        let schematic = Schematic {
+            timeline: Some(TimelineConfig::default()),
+            ..Default::default()
+        };
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            !serialized.contains("timeline"),
+            "default timeline settings should not emit a node: {serialized}"
+        );
+
+        // Omitting the node must load back to the same settings.
+        let parsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(
+            parsed.timeline.unwrap_or_default(),
+            TimelineConfig::default()
+        );
+    }
+
+    #[test]
+    fn test_serialize_timeline_preserves_each_non_default_setting() {
+        for timeline in [
+            TimelineConfig {
+                played_color: Color::MINT,
+                ..Default::default()
+            },
+            TimelineConfig {
+                future_color: Color::HYPERBLUE,
+                ..Default::default()
+            },
+            TimelineConfig {
+                follow_latest: true,
+                ..Default::default()
+            },
+            TimelineConfig {
+                range: Some("last_5s".to_string()),
+                ..Default::default()
+            },
+        ] {
+            let schematic = Schematic {
+                timeline: Some(timeline.clone()),
+                ..Default::default()
+            };
+            let serialized = serialize_schematic(&schematic);
+            let parsed = parse_schematic(&serialized).unwrap();
+            assert_eq!(parsed.timeline, Some(timeline), "{serialized}");
+        }
+    }
+
+    #[test]
+    fn test_serialize_timeline_normalizes_default_inputs() {
+        for source in [
+            "",
+            "timeline",
+            "timeline follow_latest=#false",
+            "timeline played_color=yalk future_color=white",
+            "timeline range=full",
+            "timeline range=full_range",
+            "timeline range=fullrange",
+        ] {
+            let schematic = parse_schematic(source).unwrap();
+            let serialized = serialize_schematic(&schematic);
+            let parsed = parse_schematic(&serialized).unwrap();
+            assert!(parsed.timeline.is_none(), "{source:?}: {serialized}");
+            assert_eq!(serialize_schematic(&parsed), serialized);
+            assert_eq!(
+                parsed.timeline.unwrap_or_default(),
+                TimelineConfig::default()
+            );
+        }
+    }
+
+    #[test]
     fn test_serialize_timeline_range_and_telemetry_mode() {
         let schematic = Schematic {
             timeline: Some(TimelineConfig {
@@ -1862,6 +1954,8 @@ viewport name="main" cinematic=#true ev100=13.5
                 frustums_color: default_viewport_frustums_color(),
                 projection_color: default_viewport_projection_color(),
                 frustums_thickness: default_viewport_frustums_thickness(),
+                frustums_up_marker: FrustumUpMarker::None,
+                frustums_up_marker_overlay: false,
                 show_view_cube: true,
                 view_cube_frame: None,
                 effects: true,
@@ -1895,6 +1989,36 @@ viewport name="main" cinematic=#true ev100=13.5
     }
 
     #[test]
+    fn test_serialize_viewport_frustums_up_marker() {
+        let viewport_line = |marker| {
+            let mut schematic = Schematic::default();
+            schematic
+                .elems
+                .push(SchematicElem::Panel(Panel::Viewport(Viewport {
+                    create_frustum: true,
+                    frustums_up_marker: marker,
+                    ..Default::default()
+                })));
+            serialize_schematic(&schematic)
+        };
+
+        assert!(!viewport_line(FrustumUpMarker::None).contains("frustums_up_marker"));
+        for (marker, expected) in [(FrustumUpMarker::Highlight, "highlight")] {
+            let serialized = viewport_line(marker);
+            assert!(
+                serialized.contains(&format!("frustums_up_marker={expected}"))
+                    || serialized.contains(&format!(r#"frustums_up_marker="{expected}""#)),
+                "expected frustums_up_marker={expected}, got:\n{serialized}"
+            );
+            let reparsed = parse_schematic(&serialized).unwrap();
+            let SchematicElem::Panel(Panel::Viewport(viewport)) = &reparsed.elems[0] else {
+                panic!("Expected viewport panel");
+            };
+            assert_eq!(viewport.frustums_up_marker, marker);
+        }
+    }
+
+    #[test]
     fn test_viewport_property_order() {
         let mut schematic = Schematic::default();
         schematic
@@ -1913,6 +2037,8 @@ viewport name="main" cinematic=#true ev100=13.5
                 frustums_color: Color::YALK,
                 projection_color: Color::MINT,
                 frustums_thickness: 0.012,
+                frustums_up_marker: FrustumUpMarker::Highlight,
+                frustums_up_marker_overlay: true,
                 show_view_cube: false,
                 view_cube_frame: None,
                 effects: true,
@@ -1951,6 +2077,8 @@ viewport name="main" cinematic=#true ev100=13.5
             "frustums_color=",
             "projection_color=",
             "frustums_thickness=",
+            "frustums_up_marker=",
+            "frustums_up_marker_overlay=",
             "show_view_cube=",
             "active=",
         ];
@@ -1965,7 +2093,7 @@ viewport name="main" cinematic=#true ev100=13.5
         for window in indices.windows(2) {
             assert!(
                 window[0] < window[1],
-                "expected viewport properties in order name → fov → near → far → aspect → pos → look_at → hdr → show_grid → show_arrows → create_frustum → show_frustums → frustums_color → projection_color → frustums_thickness → show_view_cube → active: `{viewport_line}`"
+                "expected viewport properties in order name → fov → near → far → aspect → pos → look_at → hdr → show_grid → show_arrows → create_frustum → show_frustums → frustums_color → projection_color → frustums_thickness → frustums_up_marker → frustums_up_marker_overlay → show_view_cube → active: `{viewport_line}`"
             );
         }
     }
@@ -2668,6 +2796,8 @@ object_3d lander.world_pos {
                 frustums_color: default_viewport_frustums_color(),
                 projection_color: default_viewport_projection_color(),
                 frustums_thickness: default_viewport_frustums_thickness(),
+                frustums_up_marker: FrustumUpMarker::None,
+                frustums_up_marker_overlay: false,
                 show_view_cube: true,
                 view_cube_frame: None,
                 effects: true,
