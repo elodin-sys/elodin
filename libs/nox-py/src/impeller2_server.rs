@@ -317,6 +317,10 @@ pub fn init_db(
     );
     db.with_state_mut(|state| {
         state.db_config.default_stream_time_step = default_stream_time_step;
+        state.db_config.metadata.insert(
+            impeller2_wkt::DbConfig::DEFAULT_PLAYBACK_SPEED_KEY.to_string(),
+            world.metadata.default_playback_speed.to_string(),
+        );
     });
     let _ = db.save_db_state();
 
