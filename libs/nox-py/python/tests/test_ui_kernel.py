@@ -93,6 +93,17 @@ def test_kernel_captures_closure_constants():
     assert "3." in artifact.scalar_mlir or "3" in artifact.scalar_mlir
 
 
+def test_kernel_rejects_extra_arguments():
+    schema = _schema()
+
+    @ui.kernel
+    def scale_speed(speed):
+        return speed * 2.0
+
+    with pytest.raises(KernelError, match=r"expected 1 inputs, got 2"):
+        scale_speed(schema["drone.nav.speed"], schema["drone.nav.position"])
+
+
 def test_kernel_rejects_unknown_component():
     schema = Schema.from_json({"components": {}}, strict=True)
 

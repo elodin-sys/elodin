@@ -108,13 +108,12 @@ class _KernelDecorator:
     def __call__(self, *args: Any, **kwargs: Any) -> KernelExpr:
         if kwargs:
             raise KernelError("@ui.kernel does not accept keyword bindings")
+        expected = _positional_count(self._func)
+        if len(args) != expected:
+            raise KernelError(f"{self._func.__name__} expected {expected} inputs, got {len(args)}")
         inputs = [
-            _bind_input(arg, name) for arg, name in zip(args, _arg_names(self._func), strict=False)
+            _bind_input(arg, name) for arg, name in zip(args, _arg_names(self._func), strict=True)
         ]
-        if len(inputs) != _positional_count(self._func):
-            raise KernelError(
-                f"{self._func.__name__} expected {_positional_count(self._func)} inputs, got {len(args)}"
-            )
         return KernelExpr(self._func, inputs, self._func.__name__)
 
 
