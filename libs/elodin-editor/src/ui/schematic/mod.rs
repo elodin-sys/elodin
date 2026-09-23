@@ -218,6 +218,11 @@ impl SchematicParam<'_, '_> {
                         let frustums_thickness = vp_config
                             .map(|c| c.frustums_thickness)
                             .unwrap_or_else(impeller2_wkt::default_viewport_frustums_thickness);
+                        let frustums_up_marker =
+                            vp_config.map(|c| c.frustums_up_marker).unwrap_or_default();
+                        let frustums_up_marker_overlay = vp_config
+                            .map(|c| c.frustums_up_marker_overlay)
+                            .unwrap_or(false);
                         let show_view_cube = viewport.view_cube_layer.is_some();
                         let cinematic = vp_config.map(|c| c.cinematic).unwrap_or(false);
                         let view_cube_frame = viewport.view_cube_layer.and_then(|layer| {
@@ -260,6 +265,8 @@ impl SchematicParam<'_, '_> {
                             frustums_color,
                             projection_color,
                             frustums_thickness,
+                            frustums_up_marker,
+                            frustums_up_marker_overlay,
                             show_view_cube,
                             view_cube_frame,
                             // ViewportConfig does not yet track `effects`; default

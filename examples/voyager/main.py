@@ -14,9 +14,7 @@ from dynamics import heliocentric_relative_acceleration
 # SIM_TIME_STEP = 1.0 / 120.0
 SIM_TIME_STEP = 3600.0
 # SIM_TIME_STEP = 86400.0
-# Set the gravitational constant for Newton's law of universal gravitation
 SIMULATION_RATE_HZ = 1 / SIM_TIME_STEP
-G = 6.6743e-11
 DEFAULT_DB_PATH = "dbs/voyager"
 DB_PATH_ENV = "DB_PATH"
 MAX_TICKS_ENV = "MAX_TICKS"
@@ -26,6 +24,7 @@ SPICE_DIR = Path(__file__).resolve().parent / "nasa_spice_data"
 SPICE_KERNELS = [
     SPICE_DIR / "naif0012.tls",
     SPICE_DIR / "de440.bsp",
+    SPICE_DIR / "gm_de440.tpc",
     SPICE_DIR / "Voyager_1.a54206u_V0.2_merged.bsp",
     SPICE_DIR / "Voyager_2.m05016u.merged.bsp",
 ]
@@ -35,6 +34,11 @@ for kernel in SPICE_KERNELS:
 
 start_time_et = spice.utc2et("1978-01-01T00:00:00")
 start_time_epoch_us = 252_452_400_000_000
+
+
+def gravitational_parameter_m3_s2(spice_name: str) -> float:
+    return float(spice.bodvrd(spice_name, "GM", 1)[1][0]) * 1.0e9
+
 
 PLANETS = [
     {
@@ -102,6 +106,9 @@ PLANETS = [
         "mass": 1.02413e26,
     },
 ]
+for planet in PLANETS:
+    planet["gm"] = gravitational_parameter_m3_s2(planet["spice_name"])
+
 PROBE_RADIUS = 4000000000.0
 PROBES = [
     {
@@ -139,6 +146,13 @@ TRUTH_PROBES = [
         "mass": 825.0,
     },
 ]
+GravitationalParameter = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "gravitational_parameter_m3_s2",
+        el.ComponentType(el.PrimitiveType.F64, (1,)),
+    ),
+]
 PositionErrorKm = ty.Annotated[
     jax.Array,
     el.Component(
@@ -159,6 +173,7 @@ VelocityErrorMps = ty.Annotated[
 EPHEMERIS_BODIES = PLANETS
 DISPLAY_BODIES = PLANETS + PROBES + TRUTH_PROBES
 SUN_MASS = 1.9885e30
+SUN_GM = gravitational_parameter_m3_s2("SUN")
 
 
 w = el.World()
@@ -170,6 +185,7 @@ sun = w.spawn(
             world_vel=el.WorldVel(linear=jnp.array([0.0, 0.0, 0.0])),
             inertia=el.Inertia(SUN_MASS),
         ),
+        el.C(GravitationalParameter, jnp.array([SUN_GM], dtype=jnp.float64)),
     ],
     name="Sun",
 )
@@ -193,6 +209,13 @@ for body in EPHEMERIS_BODIES + PROBES + TRUTH_PROBES:
             inertia=el.Inertia(body["mass"]),
         ),
     ]
+    if body in EPHEMERIS_BODIES:
+        components.append(
+            el.C(
+                GravitationalParameter,
+                jnp.array([body["gm"]], dtype=jnp.float64),
+            )
+        )
     if body in PROBES:
         components.extend(
             [
@@ -272,19 +295,20 @@ class GravityConstraint(el.Archetype):
 @el.system
 def gravity(
     graph: el.GraphQuery[GravityEdge],
-    query: el.Query[el.WorldPos, el.Inertia],
+    probe_query: el.Query[el.WorldPos, el.Inertia],
+    source_query: el.Query[el.WorldPos, GravitationalParameter],
 ) -> el.Query[el.Force]:
-    def gravity_fn(force, a_pos, a_inertia, b_pos, b_inertia):
-        r = a_pos.linear() - b_pos.linear()
-        m = a_inertia.mass()
-        M = b_inertia.mass()
+    def gravity_fn(force, probe_pos, probe_inertia, source_pos, source_gm):
+        r = probe_pos.linear() - source_pos.linear()
+        mass = probe_inertia.mass()
+        mu = source_gm[0]
         norm = la.norm(r)
-        f = G * M * m * r / (norm * norm * norm)
+        f = mu * mass * r / (norm * norm * norm)
         return el.Force(linear=force.force() - f)
 
     return graph.edge_fold(
-        left_query=query,
-        right_query=query,
+        left_query=probe_query,
+        right_query=source_query,
         return_type=el.Force,
         init_value=el.Force(),
         fold_fn=gravity_fn,
@@ -294,17 +318,18 @@ def gravity(
 @el.system
 def heliocentric_gravity(
     graph: el.GraphQuery[GravityEdge],
-    query: el.Query[el.WorldPos, el.Inertia],
+    probe_query: el.Query[el.WorldPos, el.Inertia],
+    source_query: el.Query[el.WorldPos, GravitationalParameter],
 ) -> el.Query[el.Force]:
-    def gravity_fn(force, probe_pos, probe_inertia, source_pos, source_inertia):
+    def gravity_fn(force, probe_pos, probe_inertia, source_pos, source_gm):
         acc = heliocentric_relative_acceleration(
-            probe_pos.linear(), source_pos.linear(), G * source_inertia.mass()
+            probe_pos.linear(), source_pos.linear(), source_gm[0]
         )
         return el.Force(linear=force.force() + probe_inertia.mass() * acc)
 
     return graph.edge_fold(
-        left_query=query,
-        right_query=query,
+        left_query=probe_query,
+        right_query=source_query,
         return_type=el.Force,
         init_value=el.Force(),
         fold_fn=gravity_fn,

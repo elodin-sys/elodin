@@ -1,6 +1,7 @@
 use super::frustum_common::{
     MainViewportQueryItem, SensorCameraFrustumQueryItem, color_component_to_u8,
-    frustum_local_points, presentation_perspective,
+    frustum_image_origin_ball, frustum_local_points, frustum_segments, frustum_up_marker_color,
+    presentation_perspective,
 };
 use crate::MainCamera;
 use crate::sensor_camera::SensorCameraConfigs;
@@ -33,6 +34,7 @@ impl Plugin for FrustumPlugin {
 #[derive(Resource, Clone)]
 struct FrustumLineAssets {
     edge_mesh: Handle<Mesh>,
+    marker_ball_mesh: Handle<Mesh>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -63,6 +65,13 @@ struct CameraFrustumLineVisual {
 
 #[derive(Component, Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct CameraFrustumFaceVisual {
+    source: Entity,
+    target: Entity,
+}
+
+/// Ball sitting on the frustum corner that holds the image origin.
+#[derive(Component, Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct CameraFrustumMarkerBallVisual {
     source: Entity,
     target: Entity,
 }
@@ -162,11 +171,16 @@ struct FrustumDrawParams<'w, 's> {
     existing_roots: Query<'w, 's, (Entity, &'static CameraFrustumRootVisual)>,
     existing_lines: Query<'w, 's, (Entity, &'static CameraFrustumLineVisual)>,
     existing_faces: Query<'w, 's, (Entity, &'static CameraFrustumFaceVisual, &'static Mesh3d)>,
+    existing_marker_balls: Query<'w, 's, (Entity, &'static CameraFrustumMarkerBallVisual)>,
 }
 
 fn frustum_mesh_setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
     let edge_mesh = meshes.add(Mesh::from(Cylinder::new(1.0, 1.0)));
-    commands.insert_resource(FrustumLineAssets { edge_mesh });
+    let marker_ball_mesh = meshes.add(Mesh::from(Sphere::new(1.0)));
+    commands.insert_resource(FrustumLineAssets {
+        edge_mesh,
+        marker_ball_mesh,
+    });
 }
 
 fn frustum_material_for_color(
@@ -202,23 +216,6 @@ fn frustum_material_for_color(
     material
 }
 
-fn frustum_segments(points: [Vec3; 8]) -> [(Vec3, Vec3); 12] {
-    [
-        (points[0], points[1]),
-        (points[1], points[2]),
-        (points[2], points[3]),
-        (points[3], points[0]),
-        (points[4], points[5]),
-        (points[5], points[6]),
-        (points[6], points[7]),
-        (points[7], points[4]),
-        (points[0], points[4]),
-        (points[1], points[5]),
-        (points[2], points[6]),
-        (points[3], points[7]),
-    ]
-}
-
 fn frustum_segment_transform_local(
     start_local: Vec3,
     end_local: Vec3,
@@ -245,6 +242,9 @@ fn cleanup_frustum_entities(params: &FrustumDrawParams<'_, '_>, commands: &mut C
         commands.entity(entity).despawn();
     }
     for (entity, _, _) in params.existing_faces.iter() {
+        commands.entity(entity).despawn();
+    }
+    for (entity, _) in params.existing_marker_balls.iter() {
         commands.entity(entity).despawn();
     }
     for (entity, _) in params.existing_roots.iter() {
@@ -293,6 +293,7 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
             points,
             config.frustums_color,
             config.frustums_thickness,
+            config.frustums_up_marker,
         ));
     }
 
@@ -317,6 +318,7 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
             points,
             config.frustums_color,
             config.frustums_thickness,
+            config.frustums_up_marker,
         ));
     }
 
@@ -345,15 +347,31 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
     }
     let mut desired_faces: Vec<DesiredFace> = Vec::new();
 
-    for (source_camera, points, color, thickness) in sources {
+    let mut desired_marker_balls: HashMap<
+        CameraFrustumMarkerBallVisual,
+        (
+            CameraFrustumRootVisual,
+            Transform,
+            RenderLayers,
+            MeshMaterial3d<StandardMaterial>,
+        ),
+    > = HashMap::new();
+
+    for (source_camera, points, color, thickness, up_marker) in sources {
         let material =
             frustum_material_for_color(color, &mut params.materials, &mut params.material_cache);
+        let marker_material = frustum_material_for_color(
+            frustum_up_marker_color(color),
+            &mut params.materials,
+            &mut params.material_cache,
+        );
         let face_material = frustum_face_material_for_color(
             color,
             &mut params.materials,
             &mut params.material_cache,
         );
-        let segments = frustum_segments(points);
+        let segments = frustum_segments(points, thickness, up_marker);
+        let image_origin = frustum_image_origin_ball(&points, thickness, up_marker);
         for (target_camera, render_layers) in &targets {
             if source_camera == *target_camera {
                 continue;
@@ -371,9 +389,9 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
             };
             desired_roots.insert(root_key);
 
-            for (segment_idx, (start_local, end_local)) in segments.iter().enumerate() {
+            for (segment_idx, edge) in segments.iter().enumerate() {
                 let Some(local_transform) =
-                    frustum_segment_transform_local(*start_local, *end_local, thickness)
+                    frustum_segment_transform_local(edge.start, edge.end, edge.thickness)
                 else {
                     continue;
                 };
@@ -388,6 +406,25 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
                         local_transform,
                         render_layers.clone(),
                         MeshMaterial3d(material.clone()),
+                    ),
+                );
+            }
+
+            if let Some((center, radius)) = image_origin {
+                desired_marker_balls.insert(
+                    CameraFrustumMarkerBallVisual {
+                        source: source_camera,
+                        target: *target_camera,
+                    },
+                    (
+                        root_key,
+                        Transform {
+                            translation: center,
+                            rotation: Quat::IDENTITY,
+                            scale: Vec3::splat(radius),
+                        },
+                        render_layers.clone(),
+                        MeshMaterial3d(marker_material.clone()),
                     ),
                 );
             }
@@ -475,6 +512,44 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
     }
 
     for entity in existing_lines_by_key.into_values() {
+        commands.entity(entity).despawn();
+    }
+
+    let mut existing_marker_balls_by_key: HashMap<CameraFrustumMarkerBallVisual, Entity> =
+        HashMap::new();
+    for (entity, key) in params.existing_marker_balls.iter() {
+        existing_marker_balls_by_key.insert(*key, entity);
+    }
+
+    for (key, (root_key, transform, render_layers, material)) in desired_marker_balls {
+        let Some(&root_entity) = root_entities.get(&root_key) else {
+            continue;
+        };
+
+        if let Some(entity) = existing_marker_balls_by_key.remove(&key) {
+            commands.entity(entity).insert((
+                transform,
+                render_layers,
+                material,
+                ChildOf(root_entity),
+            ));
+            continue;
+        }
+
+        commands.spawn((
+            Mesh3d(line_assets.marker_ball_mesh.clone()),
+            material,
+            transform,
+            GlobalTransform::default(),
+            render_layers,
+            NoFrustumCulling,
+            key,
+            ChildOf(root_entity),
+            Name::new("viewport_frustum_marker_ball"),
+        ));
+    }
+
+    for entity in existing_marker_balls_by_key.into_values() {
         commands.entity(entity).despawn();
     }
 
