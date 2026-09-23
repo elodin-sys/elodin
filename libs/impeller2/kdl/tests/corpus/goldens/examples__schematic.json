@@ -28,6 +28,8 @@
                       "r": 1.0
                     },
                     "frustums_thickness": 0.006000000052154064,
+                    "frustums_up_marker": "none",
+                    "frustums_up_marker_overlay": false,
                     "hdr": false,
                     "local_arrows": [],
                     "look_at": "drone.world_pos",

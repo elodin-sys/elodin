@@ -35,6 +35,8 @@
                                 "r": 1.0
                               },
                               "frustums_thickness": 0.006000000052154064,
+                              "frustums_up_marker": "none",
+                              "frustums_up_marker_overlay": false,
                               "hdr": false,
                               "local_arrows": [],
                               "look_at": "MFNAVELODINENUMESSAGE.WORLD_POS",
@@ -80,6 +82,8 @@
                                 "r": 1.0
                               },
                               "frustums_thickness": 0.006000000052154064,
+                              "frustums_up_marker": "none",
+                              "frustums_up_marker_overlay": false,
                               "hdr": false,
                               "local_arrows": [],
                               "look_at": "(0,0,0,1,MFNAVELODINENUMESSAGE.TARG_POS_ENU[0], MFNAVELODINENUMESSAGE.TARG_POS_ENU[1], MFNAVELODINENUMESSAGE.TARG_POS_ENU[2])",
@@ -499,6 +503,8 @@
                 "r": 1.0
               },
               "frustums_thickness": 0.006000000052154064,
+              "frustums_up_marker": "none",
+              "frustums_up_marker_overlay": false,
               "hdr": false,
               "local_arrows": [],
               "look_at": "MFNAVELODINENUMESSAGE.WORLD_POS",

@@ -43,6 +43,8 @@
                                         "r": 1.0
                                       },
                                       "frustums_thickness": 0.006000000052154064,
+                                      "frustums_up_marker": "none",
+                                      "frustums_up_marker_overlay": false,
                                       "hdr": false,
                                       "local_arrows": [],
                                       "look_at": "(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
@@ -84,6 +86,8 @@
                                         "r": 1.0
                                       },
                                       "frustums_thickness": 0.006000000052154064,
+                                      "frustums_up_marker": "none",
+                                      "frustums_up_marker_overlay": false,
                                       "hdr": false,
                                       "local_arrows": [],
                                       "look_at": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
@@ -136,6 +140,8 @@
                                             "r": 1.0
                                           },
                                           "frustums_thickness": 0.006000000052154064,
+                                          "frustums_up_marker": "none",
+                                          "frustums_up_marker_overlay": false,
                                           "hdr": false,
                                           "local_arrows": [],
                                           "look_at": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-4,0,0)",
@@ -177,6 +183,8 @@
                                             "r": 1.0
                                           },
                                           "frustums_thickness": 0.006000000052154064,
+                                          "frustums_up_marker": "none",
+                                          "frustums_up_marker_overlay": false,
                                           "hdr": false,
                                           "local_arrows": [],
                                           "look_at": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-4,0,0)",
@@ -220,6 +228,8 @@
                                         "r": 1.0
                                       },
                                       "frustums_thickness": 0.009999999776482582,
+                                      "frustums_up_marker": "none",
+                                      "frustums_up_marker_overlay": false,
                                       "hdr": false,
                                       "local_arrows": [],
                                       "look_at": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(0.9925,0,0.1218)",
@@ -1076,6 +1086,8 @@
                       "r": 1.0
                     },
                     "frustums_thickness": 0.006000000052154064,
+                    "frustums_up_marker": "none",
+                    "frustums_up_marker_overlay": false,
                     "hdr": false,
                     "local_arrows": [],
                     "look_at": "(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
@@ -1135,6 +1147,8 @@
                             "r": 1.0
                           },
                           "frustums_thickness": 0.006000000052154064,
+                          "frustums_up_marker": "none",
+                          "frustums_up_marker_overlay": false,
                           "hdr": false,
                           "local_arrows": [],
                           "look_at": "(0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])",
@@ -1176,6 +1190,8 @@
                             "r": 1.0
                           },
                           "frustums_thickness": 0.006000000052154064,
+                          "frustums_up_marker": "none",
+                          "frustums_up_marker_overlay": false,
                           "hdr": false,
                           "local_arrows": [],
                           "look_at": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
@@ -1226,6 +1242,8 @@
                             "r": 1.0
                           },
                           "frustums_thickness": 0.006000000052154064,
+                          "frustums_up_marker": "none",
+                          "frustums_up_marker_overlay": false,
                           "hdr": false,
                           "local_arrows": [],
                           "look_at": "(0,0,0,1,-2450,-870,0)",
@@ -1267,6 +1285,8 @@
                             "r": 1.0
                           },
                           "frustums_thickness": 0.006000000052154064,
+                          "frustums_up_marker": "none",
+                          "frustums_up_marker_overlay": false,
                           "hdr": false,
                           "local_arrows": [],
                           "look_at": "(0,0,0,1,-2450,-870,1000)",
@@ -1326,6 +1346,8 @@
                             "r": 1.0
                           },
                           "frustums_thickness": 0.006000000052154064,
+                          "frustums_up_marker": "none",
+                          "frustums_up_marker_overlay": false,
                           "hdr": false,
                           "local_arrows": [],
                           "look_at": "(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
@@ -1369,6 +1391,8 @@
                                 "r": 1.0
                               },
                               "frustums_thickness": 0.006000000052154064,
+                              "frustums_up_marker": "none",
+                              "frustums_up_marker_overlay": false,
                               "hdr": false,
                               "local_arrows": [],
                               "look_at": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
@@ -1410,6 +1434,8 @@
                                 "r": 1.0
                               },
                               "frustums_thickness": 0.006000000052154064,
+                              "frustums_up_marker": "none",
+                              "frustums_up_marker_overlay": false,
                               "hdr": false,
                               "local_arrows": [],
                               "look_at": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
@@ -1464,6 +1490,8 @@
                                 "r": 1.0
                               },
                               "frustums_thickness": 0.006000000052154064,
+                              "frustums_up_marker": "none",
+                              "frustums_up_marker_overlay": false,
                               "hdr": false,
                               "local_arrows": [],
                               "look_at": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-4,0,0)",
@@ -1505,6 +1533,8 @@
                                 "r": 1.0
                               },
                               "frustums_thickness": 0.006000000052154064,
+                              "frustums_up_marker": "none",
+                              "frustums_up_marker_overlay": false,
                               "hdr": false,
                               "local_arrows": [],
                               "look_at": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-4,0,0)",
@@ -1548,6 +1578,8 @@
                             "r": 1.0
                           },
                           "frustums_thickness": 0.009999999776482582,
+                          "frustums_up_marker": "none",
+                          "frustums_up_marker_overlay": false,
                           "hdr": false,
                           "local_arrows": [],
                           "look_at": "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(0.9925,0,0.1218)",
@@ -1593,6 +1625,8 @@
                       "r": 1.0
                     },
                     "frustums_thickness": 0.006000000052154064,
+                    "frustums_up_marker": "none",
+                    "frustums_up_marker_overlay": false,
                     "hdr": false,
                     "local_arrows": [],
                     "look_at": "(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
@@ -1652,6 +1686,8 @@
                             "r": 1.0
                           },
                           "frustums_thickness": 0.006000000052154064,
+                          "frustums_up_marker": "none",
+                          "frustums_up_marker_overlay": false,
                           "hdr": false,
                           "local_arrows": [],
                           "look_at": "(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
@@ -1693,6 +1729,8 @@
                             "r": 1.0
                           },
                           "frustums_thickness": 0.006000000052154064,
+                          "frustums_up_marker": "none",
+                          "frustums_up_marker_overlay": false,
                           "hdr": false,
                           "local_arrows": [],
                           "look_at": "(0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])",
@@ -2517,6 +2555,8 @@
                 "r": 1.0
               },
               "frustums_thickness": 0.006000000052154064,
+              "frustums_up_marker": "none",
+              "frustums_up_marker_overlay": false,
               "hdr": false,
               "local_arrows": [],
               "look_at": "(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])",
