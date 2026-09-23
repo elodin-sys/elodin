@@ -2309,6 +2309,48 @@ mod series_store_allowlist_tests {
         );
     }
 
+    // Anders' scenario (PR #861): under partial backfill a fast series can hold
+    // a nearer sample whose adjacent gap is not yet covered, while a slower
+    // series is covered out to a farther boundary. The uncovered nearer sample
+    // is deliberately not trusted as adjacent — the DB may hold something
+    // between it and the playhead — so the covered farther boundary wins. The
+    // caller's nominal step stays the floor whenever nothing is vouched.
+    #[test]
+    fn mixed_coverage_prefers_the_vouched_boundary_over_a_nearer_uncovered_sample() {
+        let fast = ComponentId(1);
+        let slow = ComponentId(2);
+        let mut cache = TelemetryCache::default();
+
+        // Fast series: a sample sits at 999 µs but only [0, 1) is covered, so
+        // the span up to it is not vouched.
+        sample(&mut cache, fast, 0);
+        sample(&mut cache, fast, 999);
+        cache.mark_covered(fast, Timestamp(0), Timestamp(1));
+
+        // Slow series: covered out to a boundary at 5000 µs.
+        sample(&mut cache, slow, 0);
+        sample(&mut cache, slow, 5000);
+        cache.mark_covered(slow, Timestamp(0), Timestamp(5001));
+
+        let priority = SeriesFetchPriority {
+            high: [fast, slow].into_iter().collect(),
+        };
+
+        // The uncovered fast sample at 999 is skipped; the vouched slow
+        // boundary at 5000 is chosen even though it is farther away.
+        assert_eq!(
+            next_subscribed_sample(&cache, &priority, Timestamp(0)),
+            Some(Timestamp(5000))
+        );
+
+        // Once the fast gap is covered, its nearer sample wins.
+        cache.mark_covered(fast, Timestamp(1), Timestamp(1000));
+        assert_eq!(
+            next_subscribed_sample(&cache, &priority, Timestamp(0)),
+            Some(Timestamp(999))
+        );
+    }
+
     #[test]
     fn remove_series_drops_samples_and_coverage() {
         let mut cache = TelemetryCache::default();
