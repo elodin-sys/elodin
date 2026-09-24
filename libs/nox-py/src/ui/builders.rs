@@ -1339,6 +1339,7 @@ fn thruster(
     icon=None,
     thrusters=None,
     visibility=None,
+    sensor_visible=true,
 ))]
 #[allow(clippy::too_many_arguments)]
 fn object_3d(
@@ -1351,6 +1352,7 @@ fn object_3d(
     icon: Option<Bound<'_, PyAny>>,
     thrusters: Option<Vec<Bound<'_, PyAny>>>,
     visibility: Option<Bound<'_, PyAny>>,
+    sensor_visible: bool,
 ) -> PyResult<PyObject3D> {
     let (eql, kernel) = match extract_value_binding(eql)? {
         ValueBinding::Eql(eql) => (eql, None),
@@ -1406,7 +1408,7 @@ fn object_3d(
             frame: frame.map(parse_frame).transpose()?,
             frame_orientation: frame_orientation.map(parse_frame).transpose()?,
             orientation,
-            sensor_visible: true,
+            sensor_visible,
             kernel,
             icon: icon
                 .map(|obj| -> PyResult<_> { Ok(obj.extract::<PyRef<'_, PyIcon>>()?.inner.clone()) })

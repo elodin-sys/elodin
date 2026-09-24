@@ -81,14 +81,20 @@ Launch the Elodin editor (default)
 
   Default value: `[::]:2240`
 
-* `--kdl <KDL>` — Open this KDL schematic after connecting to the database.
+* `--schematic <PATH>` — Open this schematic after connecting. Accepts a
+  `.kdl` file or a Python script that defines `build() -> elodin.ui.Schematic`.
+  Relative paths are resolved from the current directory, then from a
+  database directory when one is given.
+
+* `--kdl <KDL>` — Deprecated alias for `--schematic`.
 
 * `--replay` — Reveal recorded data progressively as the playback marker
   advances, simulating a live session.
 
 ```bash
 elodin editor dbs/apollo --replay
-elodin editor dbs/apollo --kdl schematics/review.kdl
+elodin editor dbs/apollo --schematic schematics/review.kdl
+elodin editor dbs/apollo --schematic assets/schematics/main.py
 ```
 
 ###### **Environment**
