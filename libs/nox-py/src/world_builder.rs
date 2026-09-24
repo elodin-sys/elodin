@@ -1806,7 +1806,8 @@ impl WorldBuilder {
     /// If a `path` is given and the file exists, the file's contents will be
     /// used as the schematic.
     ///
-    /// In all other cases, `default_content` is used as the schematic.
+    /// In all other cases, `default_content` is used as the schematic. Accepts a
+    /// KDL `str` or an `elodin.ui.Schematic` object (serialized to KDL).
     ///
     /// Primarily this affords the code a means of specifying a default
     /// schematic and location for saving custom schematics. It is expected that
@@ -1815,9 +1816,16 @@ impl WorldBuilder {
     #[pyo3(signature = (default_content = None, path = None,))]
     pub fn schematic(
         &mut self,
-        default_content: Option<String>,
+        default_content: Option<&Bound<'_, PyAny>>,
         path: Option<String>,
     ) -> Result<(), Error> {
+        let (default_content, kernel_assets) = match default_content {
+            None => (None, HashMap::new()),
+            Some(obj) => {
+                let (kdl, kernels) = crate::ui::extract_schematic_content(obj)?;
+                (Some(kdl), kernels)
+            }
+        };
         let requested_path = path.map(PathBuf::from);
         let file_contents = requested_path
             .as_ref()
@@ -1849,9 +1857,12 @@ impl WorldBuilder {
                 }
             });
         let previous = self.world.metadata.schematic.clone();
+        let previous_kernels = self.world.metadata.schematic_kernels.clone();
         self.world.metadata.schematic = file_contents.or(default_content);
+        self.world.metadata.schematic_kernels = kernel_assets;
         if let Err(err) = self.validate_cinematic_owners() {
             self.world.metadata.schematic = previous;
+            self.world.metadata.schematic_kernels = previous_kernels;
             return Err(err);
         }
         Ok(())

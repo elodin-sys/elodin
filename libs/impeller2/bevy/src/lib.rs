@@ -31,7 +31,7 @@ use impeller2_wkt::{
 };
 use serde::de::DeserializeOwned;
 use std::{
-    collections::{BTreeMap, HashMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     convert::Infallible,
     marker::PhantomData,
     ops::Bound,
@@ -180,6 +180,25 @@ impl TelemetryCache {
         component_id: &ComponentId,
     ) -> Option<&BTreeMap<Timestamp, ComponentValue>> {
         self.components.get(component_id)
+    }
+
+    /// Sorted unique sample times from any of `component_ids` in `[range.start, range.end)`.
+    ///
+    /// Mixed-rate formulas and kernels sample on this union and hold other inputs
+    /// with [`Self::get_at_or_before`].
+    pub fn union_timestamps<'a>(
+        &self,
+        component_ids: impl IntoIterator<Item = &'a ComponentId>,
+        range: std::ops::Range<Timestamp>,
+    ) -> Vec<Timestamp> {
+        let mut timestamps = BTreeSet::new();
+        for id in component_ids {
+            let Some(series) = self.components.get(id) else {
+                continue;
+            };
+            timestamps.extend(series.range(range.clone()).map(|(&ts, _)| ts));
+        }
+        timestamps.into_iter().collect()
     }
 
     /// Drop all samples and coverage for a component (unsubscribe / reclaim RAM).

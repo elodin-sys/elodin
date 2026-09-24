@@ -126,6 +126,8 @@ pub struct Object3DState {
     pub error_covariance_cholesky_expr: Option<CompiledExpr>,
     /// When set, ellipsoid shape is driven by symmetric error covariance P; Cholesky-decomposed each frame.
     pub error_covariance_expr: Option<CompiledExpr>,
+    pub last_pose_kernel_input: Option<Vec<u8>>,
+    pub last_cov_kernel_input: Option<Vec<u8>>,
     pub joint_animations: Vec<(String, String)>, // (joint_name, eql_expr) - compiled in attach_joint_animations
     pub data: Object3D,
 }
@@ -1113,9 +1115,17 @@ fn ellipsoid_shape_mode(mesh: &impeller2_wkt::Object3DMesh) -> Option<EllipsoidS
         impeller2_wkt::Object3DMesh::Ellipsoid {
             error_covariance_cholesky: Some(_),
             ..
+        }
+        | impeller2_wkt::Object3DMesh::Ellipsoid {
+            error_covariance_cholesky_kernel: Some(_),
+            ..
         } => Some(EllipsoidShapeMode::Cholesky),
         impeller2_wkt::Object3DMesh::Ellipsoid {
             error_covariance: Some(_),
+            ..
+        }
+        | impeller2_wkt::Object3DMesh::Ellipsoid {
+            error_covariance_kernel: Some(_),
             ..
         } => Some(EllipsoidShapeMode::Covariance),
         impeller2_wkt::Object3DMesh::Ellipsoid { .. } => Some(EllipsoidShapeMode::Scale),
@@ -1919,6 +1929,7 @@ pub fn create_object_3d_entity(
             (
                 impeller2_wkt::Object3DMesh::Ellipsoid {
                     error_covariance_cholesky: Some(cholesky),
+                    error_covariance_cholesky_kernel: None,
                     ..
                 },
                 Some(EllipsoidShapeMode::Cholesky),
@@ -1926,6 +1937,7 @@ pub fn create_object_3d_entity(
             (
                 impeller2_wkt::Object3DMesh::Ellipsoid {
                     error_covariance: Some(covariance),
+                    error_covariance_kernel: None,
                     ..
                 },
                 Some(EllipsoidShapeMode::Covariance),
@@ -1973,14 +1985,20 @@ pub fn create_object_3d_entity(
     let entity_id = commands
         .spawn((
             Object3DState {
-                compiled_expr: Some(compile_eql_expr_with_ctx(
-                    expr,
-                    &EqlCompileCtx::new(geo_context).with_frame(geo_frame),
-                )?),
+                compiled_expr: if data.kernel.is_some() {
+                    None
+                } else {
+                    Some(compile_eql_expr_with_ctx(
+                        expr,
+                        &EqlCompileCtx::new(geo_context).with_frame(geo_frame),
+                    )?)
+                },
                 scale_expr,
                 scale_error,
                 error_covariance_cholesky_expr,
                 error_covariance_expr,
+                last_pose_kernel_input: None,
+                last_cov_kernel_input: None,
                 joint_animations,
                 data: data.clone(),
             },
@@ -2169,6 +2187,8 @@ pub fn spawn_mesh(
             color,
             error_covariance_cholesky,
             error_covariance,
+            error_covariance_cholesky_kernel,
+            error_covariance_kernel,
             error_confidence_interval: _error_confidence_interval,
             show_grid,
             grid_color,
@@ -2182,13 +2202,17 @@ pub fn spawn_mesh(
                 AlphaMode::Opaque
             };
 
-            if error_covariance_cholesky.is_some() || error_covariance.is_some() {
+            if error_covariance_cholesky.is_some()
+                || error_covariance.is_some()
+                || error_covariance_cholesky_kernel.is_some()
+                || error_covariance_kernel.is_some()
+            {
                 let initial_linear = Mat3::IDENTITY;
                 let mat3_material = mat3_material_assets.add(Mat3Material {
                     base: StandardMaterial {
                         base_color: bevy_color,
                         alpha_mode,
-                        unlit: false,
+                        unlit: color.a < 1.0,
                         double_sided: true,
                         cull_mode: None,
                         perceptual_roughness: 0.6,
@@ -2604,6 +2628,248 @@ pub fn apply_glb_material_overrides(
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::too_many_lines
+)]
+pub fn update_object_3d_kernels(
+    mut commands: Commands,
+    mut objects_query: Query<(
+        Entity,
+        &mut Object3DState,
+        &mut impeller2_wkt::WorldPos,
+        Option<&mut EllipsoidVisual>,
+        Has<WorldPosReceived>,
+        Option<&Children>,
+    )>,
+    mut mat3_params: Query<&mut Mat3Params>,
+    mesh_child_markers: Query<(), With<Object3DMeshChild>>,
+    entity_map: Res<EntityMap>,
+    component_value_maps: Query<&'static ComponentValue>,
+    geo_context: Res<GeoContext>,
+    coordinate: Res<Coordinate>,
+    mut kernels: ResMut<crate::plugins::display_kernel::DisplayKernelCache>,
+    connection_addr: Option<Res<impeller2_bevy::ConnectionAddr>>,
+    initial_kdl: Option<Res<crate::plugins::kdl_document::InitialKdlPath>>,
+) {
+    use crate::plugins::display_kernel::{
+        KernelStatus, current_kernel_inputs, invoke_scalar, kernel_fetch_ctx, output_floats,
+    };
+
+    let fetch = kernel_fetch_ctx(connection_addr, initial_kdl);
+
+    for (entity, mut object_3d, mut pos, ellipse, has_received, children_maybe) in
+        objects_query.iter_mut()
+    {
+        if let Some(binding) = object_3d.data.kernel.clone()
+            && let Some(inputs) =
+                current_kernel_inputs(&binding, &entity_map, &component_value_maps)
+        {
+            let fingerprint: Vec<u8> = inputs.iter().flatten().copied().collect();
+            if object_3d.last_pose_kernel_input.as_deref() != Some(fingerprint.as_slice()) {
+                match kernels.poll(&binding, &fetch) {
+                    KernelStatus::Ready(compiled) => match invoke_scalar(compiled, &inputs) {
+                        Ok(outputs) => {
+                            if let Some(world_pos) = kernel_outputs_to_world_pos(&outputs) {
+                                *pos = world_pos;
+                                if !has_received {
+                                    commands.entity(entity).insert(WorldPosReceived);
+                                }
+                                object_3d.last_pose_kernel_input = Some(fingerprint);
+                            }
+                        }
+                        Err(err) => {
+                            warn_once!(?err, "object_3d display kernel failed");
+                        }
+                    },
+                    KernelStatus::Loading => {}
+                    KernelStatus::Failed(err) => {
+                        warn_once!(?err, "object_3d display kernel failed");
+                    }
+                }
+            }
+        }
+
+        let Some(mut ellipse) = ellipse else {
+            continue;
+        };
+        let Some(shape_mode) = ellipsoid_shape_mode(&object_3d.data.mesh) else {
+            continue;
+        };
+        let impeller2_wkt::Object3DMesh::Ellipsoid {
+            error_confidence_interval,
+            error_covariance_cholesky_kernel,
+            error_covariance_kernel,
+            ..
+        } = &object_3d.data.mesh
+        else {
+            continue;
+        };
+        let binding = match shape_mode {
+            EllipsoidShapeMode::Cholesky => error_covariance_cholesky_kernel.clone(),
+            EllipsoidShapeMode::Covariance => error_covariance_kernel.clone(),
+            EllipsoidShapeMode::Scale => None,
+        };
+        let Some(binding) = binding else {
+            continue;
+        };
+        let Some(inputs) = current_kernel_inputs(&binding, &entity_map, &component_value_maps)
+        else {
+            continue;
+        };
+        let fingerprint: Vec<u8> = inputs.iter().flatten().copied().collect();
+        if object_3d.last_cov_kernel_input.as_deref() == Some(fingerprint.as_slice()) {
+            continue;
+        }
+        let compiled = match kernels.poll(&binding, &fetch) {
+            KernelStatus::Ready(compiled) => compiled,
+            KernelStatus::Loading => continue,
+            KernelStatus::Failed(err) => {
+                warn_once!(?err, "ellipsoid display kernel failed to load");
+                continue;
+            }
+        };
+        let dtype = compiled
+            .artifact
+            .outputs
+            .first()
+            .map(|tensor| tensor.dtype.clone())
+            .unwrap_or_else(|| "f64".into());
+        let Ok(outputs) = invoke_scalar(compiled, &inputs) else {
+            continue;
+        };
+        let Some(values) = outputs
+            .first()
+            .and_then(|bytes| output_floats(bytes, &dtype).ok())
+        else {
+            continue;
+        };
+        let Some(packed) = (match shape_mode {
+            EllipsoidShapeMode::Cholesky => floats_to_cholesky_6(&values),
+            EllipsoidShapeMode::Covariance => floats_to_6(&values),
+            EllipsoidShapeMode::Scale => None,
+        }) else {
+            warn_once!("ellipsoid kernel output must be 6 packed values or a 3x3 matrix");
+            continue;
+        };
+        let covariance_frame = resolve_covariance_frame(&object_3d.data, &coordinate);
+        let l = match shape_mode {
+            EllipsoidShapeMode::Cholesky => packed,
+            EllipsoidShapeMode::Covariance => {
+                let p_mat = symmetric_6_to_mat3(&packed);
+                let Some(l) = cholesky_3x3_spd(&p_mat) else {
+                    warn_once!("ellipsoid kernel covariance is not positive-definite");
+                    continue;
+                };
+                l
+            }
+            EllipsoidShapeMode::Scale => continue,
+        };
+        let linear = covariance_linear_from_l(
+            &l,
+            *error_confidence_interval,
+            covariance_frame,
+            &geo_context,
+        );
+        let mesh_child = children_maybe.and_then(|children| {
+            children
+                .iter()
+                .find(|child| mesh_child_markers.contains(*child))
+        });
+        // The mesh child is spawned with a deferred command, so it can be
+        // missing on the frame the kernel first succeeds. Stamp the input
+        // only after Mat3Params is written, or later frames skip the apply.
+        let Some(child) = mesh_child else {
+            continue;
+        };
+        let Ok(mut params) = mat3_params.get_mut(child) else {
+            continue;
+        };
+        params.set_if_neq(Mat3Params { linear });
+        ellipse.max_extent = max_linear_extent(&linear);
+        ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
+        object_3d.last_cov_kernel_input = Some(fingerprint);
+    }
+}
+
+fn kernel_outputs_to_world_pos(outputs: &[Vec<u8>]) -> Option<impeller2_wkt::WorldPos> {
+    let bytes = outputs.first()?;
+    let values = output_f64s(bytes)?;
+    match values.as_slice() {
+        [x, y, z] => Some(impeller2_wkt::WorldPos {
+            att: nox::Quaternion::identity(),
+            pos: nox::Vector3::new(*x, *y, *z),
+        }),
+        [qx, qy, qz, qw, x, y, z] => Some(impeller2_wkt::WorldPos {
+            att: nox::Quaternion::new(*qw, *qx, *qy, *qz),
+            pos: nox::Vector3::new(*x, *y, *z),
+        }),
+        _ => None,
+    }
+}
+
+fn output_f64s(bytes: &[u8]) -> Option<Vec<f64>> {
+    let (chunks8, rest8) = bytes.as_chunks::<8>();
+    if rest8.is_empty() {
+        return Some(
+            chunks8
+                .iter()
+                .map(|&chunk| f64::from_le_bytes(chunk))
+                .collect(),
+        );
+    }
+    let (chunks4, rest4) = bytes.as_chunks::<4>();
+    if rest4.is_empty() {
+        return Some(
+            chunks4
+                .iter()
+                .map(|&chunk| f32::from_le_bytes(chunk) as f64)
+                .collect(),
+        );
+    }
+    None
+}
+
+fn floats_to_6(values: &[f64]) -> Option<[f32; 6]> {
+    match values {
+        [a, b, c, d, e, f] => Some([
+            *a as f32, *b as f32, *c as f32, *d as f32, *e as f32, *f as f32,
+        ]),
+        [p00, p10, p20, p01, p11, p21, p02, p12, p22] => {
+            let _ = (p01, p02, p12);
+            Some([
+                *p00 as f32,
+                *p10 as f32,
+                *p20 as f32,
+                *p11 as f32,
+                *p21 as f32,
+                *p22 as f32,
+            ])
+        }
+        _ => None,
+    }
+}
+
+/// Packed Cholesky `[l00, l10, l11, l20, l21, l22]`, or a row-major 3×3 L (JAX).
+fn floats_to_cholesky_6(values: &[f64]) -> Option<[f32; 6]> {
+    match values {
+        [a, b, c, d, e, f] => Some([
+            *a as f32, *b as f32, *c as f32, *d as f32, *e as f32, *f as f32,
+        ]),
+        [l00, _u01, _u02, l10, l11, _u12, l20, l21, l22] => Some([
+            *l00 as f32,
+            *l10 as f32,
+            *l11 as f32,
+            *l20 as f32,
+            *l21 as f32,
+            *l22 as f32,
+        ]),
+        _ => None,
+    }
+}
+
 pub struct Object3DPlugin;
 
 impl Plugin for Object3DPlugin {
@@ -2846,7 +3112,7 @@ mod ellipsoid_covariance_tests {
     use bevy::prelude::Mat3;
     use bevy_geo_frames::{GeoContext, GeoFrame, Present};
 
-    use crate::Coordinate;
+    use crate::{Coordinate, WorldPosExt};
 
     use super::{
         EllipsoidShapeMode, cholesky_3x3_spd, covariance_linear_from_l, ellipsoid_shape_mode,
@@ -2869,6 +3135,8 @@ mod ellipsoid_covariance_tests {
             color: default_ellipsoid_color(),
             error_covariance_cholesky: cholesky.map(str::to_string),
             error_covariance: covariance.map(str::to_string),
+            error_covariance_cholesky_kernel: None,
+            error_covariance_kernel: None,
             error_confidence_interval: default_ellipsoid_confidence_interval(),
             show_grid: default_ellipsoid_show_grid(),
             grid_color: default_ellipsoid_grid_color(),
@@ -2947,11 +3215,56 @@ mod ellipsoid_covariance_tests {
             thrusters: Vec::new(),
             mesh_visibility_range: None,
             node_id: Default::default(),
+            kernel: None,
         };
         assert_eq!(
             resolve_covariance_frame(&object, &Coordinate(None)),
             GeoFrame::NED
         );
+    }
+
+    #[test]
+    fn kernel_pose_accepts_3_or_7_values() {
+        let pos = super::kernel_outputs_to_world_pos(&[16.0_f64
+            .to_le_bytes()
+            .into_iter()
+            .chain(0.0_f64.to_le_bytes())
+            .chain(2.0_f64.to_le_bytes())
+            .collect()]);
+        let pos = pos.expect("xyz pose");
+        assert!((pos.pos().x - 16.0).abs() < 1e-12);
+
+        let mut seven = Vec::new();
+        for value in [0.0_f64, 0.0, 0.0, 1.0, 1.0, 2.0, 3.0] {
+            seven.extend_from_slice(&value.to_le_bytes());
+        }
+        let pose = super::kernel_outputs_to_world_pos(&[seven]).expect("7-value pose");
+        assert!((pose.pos().z - 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn kernel_covariance_accepts_packed_or_matrix() {
+        let packed = super::floats_to_6(&[1.0, 0.0, 0.0, 2.0, 0.0, 3.0]).unwrap();
+        assert_eq!(packed[3], 2.0);
+        let matrix = super::floats_to_6(&[1.0, 0.1, 0.2, 0.1, 2.0, 0.3, 0.2, 0.3, 3.0]).unwrap();
+        assert_eq!(matrix[0], 1.0);
+        assert_eq!(matrix[3], 2.0);
+        assert_eq!(matrix[5], 3.0);
+        assert!(super::floats_to_6(&[1.0, 2.0]).is_none());
+    }
+
+    #[test]
+    fn kernel_cholesky_accepts_row_major_matrix() {
+        // JAX row-major L = [[2, 0, 0], [0, 1, 0], [0, 0, 3]]
+        let packed =
+            super::floats_to_cholesky_6(&[2.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 3.0]).unwrap();
+        assert_eq!(packed, [2.0, 0.0, 1.0, 0.0, 0.0, 3.0]);
+        let linear = super::lower_cholesky_pack_to_mat3(&packed);
+        let cols = linear.to_cols_array();
+        assert!((cols[0] - 2.0).abs() < 1e-6);
+        assert!((cols[4] - 1.0).abs() < 1e-6);
+        assert!((cols[8] - 3.0).abs() < 1e-6);
+        assert!(cols[3].abs() < 1e-6);
     }
 }
 

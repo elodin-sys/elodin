@@ -1,5 +1,4 @@
 use pyo3::prelude::*;
-use pyo3::types::PyModule;
 use std::collections::HashSet;
 use std::time::Instant;
 
@@ -35,61 +34,8 @@ pub fn compile_cranelift_module(
         input_arrays.push(arr.unbind());
     }
 
-    let py_code = r#"
-import jax
-import os
-import re
-import json
-import numpy as np
-os.environ["JAX_ENABLE_X64"] = "1"
-jax.config.update("jax_enable_x64", True)
-
-def lower_to_stablehlo(func, input_arrays):
-    jit_fn = jax.jit(func, keep_unused=True)
-    lowered = jit_fn.lower(*input_arrays)
-    stablehlo_module = lowered.compiler_ir(dialect="stablehlo")
-    stablehlo_mlir = str(stablehlo_module)
-    stablehlo_mlir = re.sub(r'module @\S+', 'module @module', stablehlo_mlir, count=1)
-
-    debug_dir = os.environ.get('ELODIN_CRANELIFT_DEBUG_DIR')
-    if debug_dir:
-        os.makedirs(debug_dir, exist_ok=True)
-        with open(os.path.join(debug_dir, 'stablehlo.mlir'), 'w') as f:
-            f.write(stablehlo_mlir)
-        input_summaries = [
-            {'shape': [int(d) for d in arr.shape], 'dtype': str(arr.dtype)}
-            for arr in input_arrays
-        ]
-        with open(os.path.join(debug_dir, 'compile_context.json'), 'w') as f:
-            json.dump({'inputs': input_summaries}, f, indent=2)
-        import sys
-        print(f'[elodin-cranelift] dumped StableHLO to {debug_dir}', file=sys.stderr)
-
-    return stablehlo_mlir
-
-def run_xla_reference(func, real_input_arrays, debug_dir):
-    """Run the function with XLA and save reference outputs."""
-    import sys
-    try:
-        os.makedirs(debug_dir, exist_ok=True)
-        jit_fn = jax.jit(func, keep_unused=True)
-        results = jit_fn(*real_input_arrays)
-        if not isinstance(results, (list, tuple)):
-            results = (results,)
-        for i, r in enumerate(results):
-            arr = np.asarray(r)
-            path = os.path.join(debug_dir, f'xla_output_{i}.bin')
-            arr.tofile(path)
-        print(f'[elodin-cranelift] checkpoint: saved {len(results)} XLA reference outputs to {debug_dir}', file=sys.stderr)
-    except Exception as e:
-        print(f'[elodin-cranelift] checkpoint: XLA reference failed: {e}', file=sys.stderr)
-"#;
-
-    let module = PyModule::new(py, "cranelift_compile")?;
-    let globals = module.dict();
-    let code_cstr = std::ffi::CString::new(py_code).expect("Python code C string");
-    py.run(code_cstr.as_ref(), Some(&globals), None)?;
-    let lower_fn: Py<PyAny> = module.getattr("lower_to_stablehlo")?.into();
+    let stablehlo = py.import("elodin.stablehlo")?;
+    let lower_fn: Py<PyAny> = stablehlo.getattr("lower_to_stablehlo")?.into();
 
     let py_input_arrays = pyo3::types::PyList::new(py, input_arrays.iter().map(|a| a.bind(py)))?;
     let func_for_xla = func.clone_ref(py);
@@ -125,7 +71,7 @@ def run_xla_reference(func, real_input_arrays, debug_dir):
     );
 
     if let Ok(debug_dir) = std::env::var("ELODIN_CRANELIFT_DEBUG_DIR") {
-        let xla_ref_fn: Py<PyAny> = module.getattr("run_xla_reference")?.into();
+        let xla_ref_fn: Py<PyAny> = stablehlo.getattr("run_xla_reference")?.into();
         let np = py.import("numpy")?;
         let jnp = py.import("jax.numpy")?;
         let mut real_inputs = vec![];

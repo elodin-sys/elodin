@@ -126,6 +126,8 @@ impl Plugin for HeadlessEditorPlugin {
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(crate::plugins::world_mesh::EditorWorldMeshPlugin)
             .add_plugins(crate::rim_glow_material::RimGlowMaterialPlugin);
+        #[cfg(not(target_family = "wasm"))]
+        app.add_plugins(crate::plugins::display_kernel::DisplayKernelPlugin);
         app.add_plugins(crate::plugins::scene_environment::SceneEnvironmentPlugin);
         #[cfg(not(target_family = "wasm"))]
         {
@@ -149,6 +151,8 @@ impl Plugin for HeadlessEditorPlugin {
             (
                 impeller2_bevy::apply_cached_data,
                 crate::object_3d::update_object_3d_system,
+                #[cfg(not(target_family = "wasm"))]
+                crate::object_3d::update_object_3d_kernels,
                 crate::sync_object_3d,
                 // `sync_pos` writes `WorldPos` into `GeoPosition`/`GeoRotation`;
                 // the geo systems below propagate those into `Transform`. Running
@@ -463,9 +467,14 @@ fn load_headless_scene(
                 if obj.frame.is_none() {
                     obj.frame = fallback_frame;
                 }
-                let Ok(expr) = eql.0.parse_str(&obj.eql) else {
-                    tracing::warn!("Failed to parse EQL for object_3d: {}", obj.eql);
-                    continue;
+                let expr = if obj.kernel.is_some() {
+                    eql.0.parse_str("0").unwrap_or(eql::Expr::FloatLiteral(0.0))
+                } else {
+                    let Ok(expr) = eql.0.parse_str(&obj.eql) else {
+                        tracing::warn!("Failed to parse EQL for object_3d: {}", obj.eql);
+                        continue;
+                    };
+                    expr
                 };
                 if let Ok(entity) = create_object_3d_entity(
                     &mut commands,

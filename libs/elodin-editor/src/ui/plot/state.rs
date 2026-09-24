@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::ops::Range;
 
+use bevy::asset::Handle;
 use bevy::camera::ScalingMode;
 use bevy::camera::visibility::RenderLayers;
 use bevy::core_pipeline::tonemapping::Tonemapping;
@@ -10,8 +11,9 @@ use bevy_egui::egui::{self, Color32};
 use impeller2::schema::Schema;
 use impeller2::types::{ComponentId, Timestamp};
 use impeller2_bevy::ComponentPath;
-use impeller2_wkt::{ComponentMetadata, GraphType};
+use impeller2_wkt::{ComponentMetadata, DisplayKernelBinding, GraphType};
 
+use super::Line;
 use super::gpu::LineVisibleRange;
 use crate::MainCamera;
 use crate::plugins::render_layer_alloc::{RenderLayerAllocator, RenderLayerLease};
@@ -21,6 +23,29 @@ use bevy::ecs::world::DeferredWorld;
 
 pub type GraphStateComponent = Vec<(bool, egui::Color32)>;
 pub type GraphStateEntity = BTreeMap<ComponentId, GraphStateComponent>;
+
+#[derive(Clone, Debug)]
+pub struct DerivedGraph {
+    pub source: String,
+    pub expr: eql::Expr,
+    pub dependencies: Vec<ComponentId>,
+    pub lines: Vec<Handle<Line>>,
+    pub colors: Vec<Color32>,
+    pub path: ComponentPath,
+    pub last_generation: u64,
+    pub last_range: Option<(i64, i64)>,
+}
+
+#[derive(Clone, Debug)]
+pub struct KernelGraph {
+    pub binding: DisplayKernelBinding,
+    pub dependencies: Vec<ComponentId>,
+    pub lines: Vec<Handle<Line>>,
+    pub colors: Vec<Color32>,
+    pub path: ComponentPath,
+    pub last_generation: u64,
+    pub last_range: Option<(i64, i64)>,
+}
 
 #[derive(Bundle, Clone)]
 pub struct GraphBundle {
@@ -39,6 +64,8 @@ pub struct GraphBundle {
 #[component(on_remove = on_graph_state_remove)]
 pub struct GraphState {
     pub components: BTreeMap<ComponentPath, GraphStateComponent>,
+    pub derived: Option<DerivedGraph>,
+    pub kernel: Option<KernelGraph>,
     pub enabled_lines: BTreeMap<(ComponentPath, usize), (Entity, Color32)>,
     pub render_layers: RenderLayers,
     pub line_width: f32,
@@ -91,6 +118,8 @@ impl GraphBundle {
         let render_layers = allocated_layer.render_layers();
         let graph_state = GraphState {
             components,
+            derived: None,
+            kernel: None,
             enabled_lines: BTreeMap::new(),
             render_layers: render_layers.clone(),
             line_width: 2.0,

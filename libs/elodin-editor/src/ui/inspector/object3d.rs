@@ -230,6 +230,8 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                             color: impeller2_wkt::Color::WHITE,
                             error_covariance_cholesky: None,
                             error_covariance: None,
+                            error_covariance_cholesky_kernel: None,
+                            error_covariance_kernel: None,
                             error_confidence_interval: default_ellipsoid_confidence_interval(),
                             show_grid: default_ellipsoid_show_grid(),
                             grid_color: default_ellipsoid_grid_color(),
@@ -460,6 +462,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                     error_confidence_interval,
                     show_grid,
                     grid_color,
+                    ..
                 } => {
                     changed |= node_color_picker(ui, "Ellipse Color", color);
                     changed |= ui.checkbox(show_grid, "Show grid").changed();

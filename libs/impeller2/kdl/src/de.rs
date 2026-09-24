@@ -12,6 +12,69 @@ use impeller2_wkt::*;
 
 use crate::KdlSchematicError;
 
+fn parse_kernel_shape(text: &str) -> Option<Vec<u64>> {
+    let mut shape = Vec::new();
+    for part in text.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        shape.push(part.parse().ok()?);
+    }
+    Some(shape)
+}
+
+fn parse_kernel_inputs(node: &KdlNode) -> Vec<DisplayKernelInput> {
+    let Some(children) = node.children() else {
+        return Vec::new();
+    };
+    children
+        .nodes()
+        .iter()
+        .filter(|child| child.name().value() == "input")
+        .filter_map(|child| {
+            let component = child
+                .entries()
+                .iter()
+                .find(|entry| entry.name().is_none())
+                .and_then(|entry| entry.value().as_string())
+                .map(str::to_string)?;
+            let dtype = child
+                .get("dtype")
+                .and_then(|value| value.as_string())
+                .unwrap_or("")
+                .to_string();
+            let shape = child
+                .get("shape")
+                .and_then(|value| value.as_string())
+                .and_then(parse_kernel_shape)
+                .unwrap_or_default();
+            Some(DisplayKernelInput {
+                component,
+                shape,
+                dtype,
+            })
+        })
+        .collect()
+}
+
+fn parse_kernel_binding(node: &KdlNode, prop: &str) -> Option<DisplayKernelBinding> {
+    let asset = node
+        .get(prop)
+        .and_then(|value| value.as_string())?
+        .to_string();
+    let hash = asset
+        .rsplit('/')
+        .next()
+        .unwrap_or(asset.as_str())
+        .to_string();
+    Some(DisplayKernelBinding {
+        hash,
+        asset,
+        inputs: parse_kernel_inputs(node),
+    })
+}
+
 pub fn parse_schematic(input: &str) -> Result<Schematic, KdlSchematicError> {
     let doc = input
         .parse::<KdlDocument>()
@@ -1193,18 +1256,22 @@ fn parse_viewport_bloom(
 }
 
 fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
+    let kernel = parse_kernel_binding(node, "kernel");
     let eql = node
         .entries()
         .iter()
         .find(|e| e.name().is_none())
         .and_then(|e| e.value().as_string())
-        .ok_or_else(|| KdlSchematicError::MissingProperty {
+        .map(str::to_string)
+        .unwrap_or_default();
+    if kernel.is_none() && eql.is_empty() {
+        return Err(KdlSchematicError::MissingProperty {
             property: "eql".to_string(),
             node: "graph".to_string(),
             src: src.to_string(),
             span: node.span(),
-        })?
-        .to_string();
+        });
+    }
 
     let name = parse_name(node);
 
@@ -1238,6 +1305,7 @@ fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
 
     Ok(Panel::Graph(Graph {
         eql,
+        kernel,
         name,
         graph_type,
         locked,
@@ -1580,18 +1648,22 @@ fn parse_query_plot(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicErro
 }
 
 fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicError> {
+    let kernel = parse_kernel_binding(node, "kernel");
     let eql = node
         .entries()
         .iter()
         .find(|e| e.name().is_none())
         .and_then(|e| e.value().as_string())
-        .ok_or_else(|| KdlSchematicError::MissingProperty {
+        .map(str::to_string)
+        .unwrap_or_default();
+    if kernel.is_none() && eql.is_empty() {
+        return Err(KdlSchematicError::MissingProperty {
             property: "eql".to_string(),
             node: "object_3d".to_string(),
             src: src.to_string(),
             span: node.span(),
-        })?
-        .to_string();
+        });
+    }
 
     let frame = node
         .get("frame")
@@ -1696,6 +1768,7 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         frame_orientation,
         orientation,
         sensor_visible,
+        kernel,
         icon,
         thrusters,
         mesh_visibility_range,
@@ -2132,6 +2205,11 @@ fn parse_object_3d_mesh(
                 color,
                 error_covariance_cholesky,
                 error_covariance,
+                error_covariance_cholesky_kernel: parse_kernel_binding(
+                    node,
+                    "error_covariance_cholesky_kernel",
+                ),
+                error_covariance_kernel: parse_kernel_binding(node, "error_covariance_kernel"),
                 error_confidence_interval,
                 show_grid,
                 grid_color,
@@ -3208,6 +3286,183 @@ viewport name="Chase" cinematic=#true
     }
 
     #[test]
+    fn test_parse_graph_kernel_binding() {
+        let kdl = r#"
+graph kernel="schematics/kernels/abc123" name="Cholesky" {
+    input "drone.nav.covariance"
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        let SchematicElem::Panel(Panel::Graph(graph)) = &schematic.elems[0] else {
+            panic!("Expected graph panel");
+        };
+        let kernel = graph.kernel.as_ref().expect("kernel binding");
+        assert_eq!(kernel.asset, "schematics/kernels/abc123");
+        assert_eq!(kernel.hash, "abc123");
+        assert_eq!(kernel.inputs[0].component, "drone.nav.covariance");
+        let roundtrip = crate::serialize_schematic(&schematic);
+        let parsed = parse_schematic(&roundtrip).unwrap();
+        assert_eq!(parsed, schematic);
+    }
+
+    #[test]
+    fn test_kernel_input_dtype_and_shape_roundtrip() {
+        let kdl = r#"
+graph kernel="schematics/kernels/abc123" name="Cholesky" {
+    input "drone.nav.covariance" dtype="f32" shape="3,3"
+}
+object_3d kernel="schematics/kernels/poseabc" {
+    input "drone.world_pos" dtype="f64" shape="7"
+    sphere radius=0.2
+}
+object_3d "drone.world_pos" {
+    ellipsoid error_covariance_cholesky_kernel="schematics/kernels/cholabc" {
+        input "drone.nav.covariance" dtype="f32" shape="3,3"
+    }
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        let SchematicElem::Panel(Panel::Graph(graph)) = &schematic.elems[0] else {
+            panic!("Expected graph panel");
+        };
+        let graph_input = &graph.kernel.as_ref().expect("kernel").inputs[0];
+        assert_eq!(graph_input.dtype, "f32");
+        assert_eq!(graph_input.shape, vec![3, 3]);
+
+        let SchematicElem::Object3d(pose) = &schematic.elems[1] else {
+            panic!("expected pose object");
+        };
+        let pose_input = &pose.kernel.as_ref().expect("pose kernel").inputs[0];
+        assert_eq!(pose_input.dtype, "f64");
+        assert_eq!(pose_input.shape, vec![7]);
+
+        let SchematicElem::Object3d(ellip) = &schematic.elems[2] else {
+            panic!("expected ellipsoid object");
+        };
+        let impeller2_wkt::Object3DMesh::Ellipsoid {
+            error_covariance_cholesky_kernel: Some(chol),
+            ..
+        } = &ellip.mesh
+        else {
+            panic!("expected cholesky kernel");
+        };
+        assert_eq!(chol.inputs[0].dtype, "f32");
+        assert_eq!(chol.inputs[0].shape, vec![3, 3]);
+
+        let roundtrip = crate::serialize_schematic(&schematic);
+        let parsed = parse_schematic(&roundtrip).unwrap();
+        assert_eq!(parsed, schematic);
+    }
+
+    #[test]
+    fn test_parse_object_and_ellipsoid_kernel_bindings() {
+        let kdl = r#"
+object_3d kernel="schematics/kernels/poseabc" {
+    input "drone.world_pos"
+    sphere radius=0.2
+}
+object_3d "drone.world_pos" {
+    ellipsoid error_covariance_cholesky_kernel="schematics/kernels/cholabc" {
+        input "drone.nav.covariance"
+    }
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        let SchematicElem::Object3d(pose) = &schematic.elems[0] else {
+            panic!("expected object");
+        };
+        let pose_kernel = pose.kernel.as_ref().expect("pose kernel");
+        assert_eq!(pose_kernel.hash, "poseabc");
+        assert_eq!(pose_kernel.inputs[0].component, "drone.world_pos");
+        let SchematicElem::Object3d(ellip) = &schematic.elems[1] else {
+            panic!("expected ellipsoid object");
+        };
+        let impeller2_wkt::Object3DMesh::Ellipsoid {
+            error_covariance_cholesky_kernel: Some(chol),
+            ..
+        } = &ellip.mesh
+        else {
+            panic!("expected cholesky kernel");
+        };
+        assert_eq!(chol.hash, "cholabc");
+        assert_eq!(chol.inputs[0].component, "drone.nav.covariance");
+        let roundtrip = crate::serialize_schematic(&schematic);
+        let parsed = parse_schematic(&roundtrip).unwrap();
+        assert_eq!(parsed, schematic);
+    }
+
+    #[test]
+    fn test_ellipsoid_kernel_preserves_translucent_color() {
+        let kdl = r#"
+object_3d "drone.world_pos" {
+    ellipsoid error_covariance_cholesky_kernel="schematics/kernels/cholabc" {
+        input "drone.nav.covariance"
+        color 64 180 255 40
+    }
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+        let SchematicElem::Object3d(ellip) = &schematic.elems[0] else {
+            panic!("expected ellipsoid object");
+        };
+        let impeller2_wkt::Object3DMesh::Ellipsoid {
+            color,
+            error_covariance_cholesky_kernel: Some(_),
+            ..
+        } = &ellip.mesh
+        else {
+            panic!("expected cholesky kernel ellipsoid");
+        };
+        assert!((color.a - 40.0 / 255.0).abs() < f32::EPSILON);
+        let roundtrip = crate::serialize_schematic(&schematic);
+        assert!(
+            roundtrip.contains("color 64 180 255 40"),
+            "kernel inputs must not drop ellipsoid color: {roundtrip}"
+        );
+        let parsed = parse_schematic(&roundtrip).unwrap();
+        let SchematicElem::Object3d(ellip) = &parsed.elems[0] else {
+            panic!("expected ellipsoid object");
+        };
+        let impeller2_wkt::Object3DMesh::Ellipsoid { color, .. } = &ellip.mesh else {
+            panic!("expected ellipsoid");
+        };
+        assert!((color.r - 64.0 / 255.0).abs() < f32::EPSILON);
+        assert!((color.g - 180.0 / 255.0).abs() < f32::EPSILON);
+        assert!((color.b - 255.0 / 255.0).abs() < f32::EPSILON);
+        assert!((color.a - 40.0 / 255.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_display_kernel_hash_payload_is_canonical() {
+        let artifact = DisplayKernelArtifact {
+            version: 1,
+            hash: "should-not-appear".into(),
+            batch_size: 256,
+            inputs: vec![DisplayKernelTensor {
+                name: "cov".into(),
+                component: "drone.nav.covariance".into(),
+                shape: vec![6],
+                dtype: "f64".into(),
+            }],
+            outputs: vec![DisplayKernelTensor {
+                name: String::new(),
+                component: String::new(),
+                shape: vec![3, 3],
+                dtype: "f64".into(),
+            }],
+            scalar_mlir: "module {}".into(),
+            batched_mlir: "module {}".into(),
+        };
+        let payload = String::from_utf8(artifact.hash_payload().unwrap()).unwrap();
+        assert!(!payload.contains("should-not-appear"));
+        assert!(!payload.contains("\"version\""));
+        assert_eq!(
+            payload,
+            r#"{"batch_size":256,"batched_mlir":"module {}","inputs":[{"component":"drone.nav.covariance","dtype":"f64","name":"cov","shape":[6]}],"outputs":[{"dtype":"f64","shape":[3,3]}],"scalar_mlir":"module {}"}"#
+        );
+    }
+
+    #[test]
     fn test_parse_graph() {
         let kdl = r#"graph "a.world_pos" name="Position Graph" type="line""#;
         let schematic = parse_schematic(kdl).unwrap();
@@ -3821,10 +4076,9 @@ object_3d "rocket.world_pos" {
                     scale,
                     color,
                     error_covariance_cholesky,
-                    error_covariance: _,
                     error_confidence_interval,
                     show_grid,
-                    grid_color: _,
+                    ..
                 } => {
                     assert_eq!(scale, "rocket.scale");
                     assert!((color.r - 64.0 / 255.0).abs() < f32::EPSILON);
@@ -3859,13 +4113,11 @@ object_3d "satellite.world_pos" {
             assert_eq!(obj.eql, "satellite.world_pos");
             match &obj.mesh {
                 Object3DMesh::Ellipsoid {
-                    scale: _,
                     color,
                     error_covariance_cholesky,
-                    error_covariance: _,
                     error_confidence_interval,
                     show_grid,
-                    grid_color: _,
+                    ..
                 } => {
                     assert_eq!(
                         error_covariance_cholesky.as_deref(),

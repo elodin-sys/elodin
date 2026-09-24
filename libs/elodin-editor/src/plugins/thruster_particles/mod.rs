@@ -1477,6 +1477,8 @@ mod tests {
             scale_error: None,
             error_covariance_cholesky_expr: None,
             error_covariance_expr: None,
+            last_pose_kernel_input: None,
+            last_cov_kernel_input: None,
             joint_animations: Vec::new(),
             data: impeller2_wkt::Object3D {
                 eql: "lander.world_pos".to_string(),
@@ -1489,6 +1491,7 @@ mod tests {
                 thrusters,
                 mesh_visibility_range: None,
                 node_id: Default::default(),
+                kernel: None,
             },
         }
     }

@@ -44,7 +44,7 @@ use crate::{
         data_overview::DataOverviewPane,
         modal::ModalDialog,
         monitor::MonitorPane,
-        plot::GraphBundle,
+        plot::{DerivedGraph, GraphBundle, KernelGraph},
         query_plot::QueryPlotData,
         schematic::{CurrentSchematic, EqlExt},
         tiles::{
@@ -969,11 +969,21 @@ impl LoadSchematicParams<'_, '_> {
     }
 
     pub fn spawn_object_3d(&mut self, object_3d: Object3D) {
-        let Ok(expr) = self.eql.0.parse_str(&object_3d.eql) else {
-            if let Some(pending) = self.pending_object_3d.as_mut() {
-                pending.objects.push(object_3d);
-            }
-            return;
+        let expr = if object_3d.kernel.is_some() {
+            self.eql.0.parse_str("0").unwrap_or_else(|_| {
+                self.eql
+                    .0
+                    .parse_str(&object_3d.eql)
+                    .unwrap_or(eql::Expr::FloatLiteral(0.0))
+            })
+        } else {
+            let Ok(expr) = self.eql.0.parse_str(&object_3d.eql) else {
+                if let Some(pending) = self.pending_object_3d.as_mut() {
+                    pending.objects.push(object_3d);
+                }
+                return;
+            };
+            expr
         };
         let icon = object_3d.icon.clone();
         let mesh_vr = object_3d.mesh_visibility_range.clone();
@@ -1226,6 +1236,49 @@ impl LoadSchematicParams<'_, '_> {
                 tile_id
             }
             Panel::Graph(graph) => {
+                let graph_label = graph_label(graph);
+                if let Some(binding) = graph.kernel.clone() {
+                    let mut dependencies: Vec<_> = binding
+                        .inputs
+                        .iter()
+                        .map(|input| impeller2::types::ComponentId::new(&input.component))
+                        .collect();
+                    dependencies.sort();
+                    dependencies.dedup();
+                    let mut bundle = GraphBundle::new(
+                        &mut self.render_layer_alloc,
+                        BTreeMap::new(),
+                        graph_label.clone(),
+                    );
+                    bundle.graph_state.locked = force_graph_lock || graph.locked;
+                    if matches!(context, PanelContext::Window(_)) {
+                        bundle.camera.is_active = false;
+                    }
+                    bundle.graph_state.auto_y_range = graph.auto_y_range;
+                    bundle.graph_state.y_range = graph.y_range.clone();
+                    bundle.graph_state.graph_type = graph.graph_type;
+                    bundle.graph_state.kernel = Some(KernelGraph {
+                        binding,
+                        dependencies,
+                        lines: Vec::new(),
+                        colors: graph
+                            .colors
+                            .iter()
+                            .copied()
+                            .map(EColor::into_color32)
+                            .collect(),
+                        path: ComponentPath::from_name(&format!("kernel.{graph_label}")),
+                        last_generation: u64::MAX,
+                        last_range: None,
+                    });
+                    let entity_cmds = self.commands.spawn(bundle);
+                    let graph_id = entity_cmds.id();
+                    if matches!(context, PanelContext::Window(_)) {
+                        self.commands.entity(graph_id).remove::<MainCamera>();
+                    }
+                    let pane = GraphPane::new(graph_id, graph_label);
+                    return tile_state.insert_tile(Tile::Pane(Pane::Graph(pane)), parent_id, false);
+                }
                 let eql = self
                     .eql
                     .0
@@ -1264,12 +1317,13 @@ impl LoadSchematicParams<'_, '_> {
                         }
                     })
                     .ok()?;
-                let graph_label = graph_label(graph);
-                let uses_sql = eql.frame_conversion_name().is_some();
+                let requires_evaluation = eql.requires_plot_evaluation();
+                let uses_derived_plot = requires_evaluation && eql::eval::supports(&eql);
+                let uses_query_plot = requires_evaluation && !uses_derived_plot;
 
                 let mut components_tree: BTreeMap<ComponentPath, Vec<(bool, Color32)>> =
                     BTreeMap::new();
-                if !uses_sql {
+                if !requires_evaluation {
                     let mut component_vec = eql.to_graph_components();
                     component_vec.sort();
                     for (j, (component, i)) in component_vec.iter().enumerate() {
@@ -1306,9 +1360,33 @@ impl LoadSchematicParams<'_, '_> {
                 bundle.graph_state.auto_y_range = graph.auto_y_range;
                 bundle.graph_state.y_range = graph.y_range.clone();
                 bundle.graph_state.graph_type = graph.graph_type;
+                if uses_derived_plot {
+                    let mut dependencies: Vec<_> = eql
+                        .to_graph_components()
+                        .into_iter()
+                        .map(|(path, _)| path.id)
+                        .collect();
+                    dependencies.sort();
+                    dependencies.dedup();
+                    bundle.graph_state.derived = Some(DerivedGraph {
+                        source: graph.eql.clone(),
+                        expr: eql.clone(),
+                        dependencies,
+                        lines: Vec::new(),
+                        colors: graph
+                            .colors
+                            .iter()
+                            .copied()
+                            .map(EColor::into_color32)
+                            .collect(),
+                        path: ComponentPath::from_name(&format!("derived.{graph_label}")),
+                        last_generation: u64::MAX,
+                        last_range: None,
+                    });
+                }
 
                 let mut entity_cmds = self.commands.spawn(bundle);
-                if uses_sql {
+                if uses_query_plot {
                     let series_colors: Vec<_> = graph
                         .colors
                         .iter()
@@ -2628,6 +2706,65 @@ mod tests {
                 .0,
             "clearing should disable telemetry mode"
         );
+    }
+
+    fn install_scalar_eql_component(app: &mut App) {
+        let component = std::sync::Arc::new(eql::Component::new(
+            "sample.value".to_string(),
+            impeller2::types::ComponentId::new("sample.value"),
+            impeller2::schema::Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new())
+                .expect("schema"),
+        ));
+        app.insert_resource(EqlContext(eql::Context::from_leaves(
+            [component],
+            impeller2::types::Timestamp(0),
+            impeller2::types::Timestamp(1),
+        )));
+    }
+
+    #[test]
+    fn formula_graph_uses_sample_evaluation() {
+        let mut app = test_app();
+        install_scalar_eql_component(&mut app);
+        let schematic = Schematic::from_kdl(r#"graph "sample.value.sqrt()" name="Square root""#)
+            .expect("schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut graph_query = app.world_mut().query::<&crate::ui::plot::GraphState>();
+        let graphs: Vec<_> = graph_query.iter(app.world()).collect();
+        assert_eq!(graphs.len(), 1);
+        assert!(graphs[0].components.is_empty());
+        let derived = graphs[0].derived.as_ref().expect("derived graph");
+        assert_eq!(
+            derived.dependencies,
+            vec![impeller2::types::ComponentId::new("sample.value")]
+        );
+
+        let mut query_plot = app
+            .world_mut()
+            .query::<&crate::ui::query_plot::QueryPlotData>();
+        assert_eq!(query_plot.iter(app.world()).count(), 0);
+
+        let saved = save_schematic(&mut app);
+        assert!(
+            impeller2_kdl::serialize_schematic(&saved)
+                .contains(r#"graph "sample.value.sqrt()" name="Square root""#)
+        );
+    }
+
+    #[test]
+    fn invalid_formula_graph_is_not_loaded() {
+        let mut app = test_app();
+        install_scalar_eql_component(&mut app);
+        let schematic =
+            Schematic::from_kdl(r#"graph "sample.value.sqrt(1.0)" name="Invalid square root""#)
+                .expect("schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app.world_mut().query::<&crate::ui::plot::GraphState>();
+        assert_eq!(query.iter(app.world()).count(), 0);
     }
 
     #[test]

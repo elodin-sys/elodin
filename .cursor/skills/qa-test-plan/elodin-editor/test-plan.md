@@ -101,7 +101,7 @@ If this file is still the suite template (`elodin-editor/test-plan.md`), copy it
 | 12 | EDITOR-117 | cube-sat — spacecraft + graphs | Editor | P1 | agent+visual | |
 | 13 | EDITOR-118 | video-stream — H.264 tile decode | Editor | P1 | agent+visual | |
 | 14 | EDITOR-119 | voyager — deep-space + SPICE | Editor | P2 | agent+visual | |
-| 15 | EDITOR-120 | --kdl schematic preload | Editor | P2 | agent+visual | |
+| 15 | EDITOR-120 | --schematic preload | Editor | P2 | agent+visual | |
 | 16 | EDITOR-130 | Feature flag builds (inspector) | Editor | P2 | agent | |
 | 17 | EDITOR-190 | Command palette interactions | Editor | P1 | manual | |
 | 18 | EDITOR-191 | Theme / color scheme switching | Editor | P2 | manual | |
@@ -522,10 +522,10 @@ bash .cursor/skills/qa-test-plan/elodin-editor/capture.sh voyager /tmp/qa-editor
 
 ### Schematics & builds
 
-#### - [ ] EDITOR-120 — --kdl schematic preload
+#### - [ ] EDITOR-120 — --schematic preload
 
 - **Priority:** P2 | **Mode:** agent+visual | **Requires:** EDITOR-100
-- **Description:** CLI `--kdl` preloads a schematic path (§16.1 / §16.3 document lifecycle).
+- **Description:** CLI `--schematic` preloads a KDL or Python schematic path (§16.1 / §16.3 document lifecycle). `--kdl` is a deprecated alias.
 - **Expected duration:** < 1.5 min
 
 **Steps**
@@ -538,7 +538,7 @@ rm -f /tmp/qa-editor/EDITOR-120.png
 ELODIN_SCREENSHOT=/tmp/qa-editor/EDITOR-120.png \
 ELODIN_SCREENSHOT_DELAY=18 \
 ELODIN_SCREENSHOT_EXIT=1 \
-  ./target/release/elodin editor examples/drone/main.py --kdl "$KDL" \
+  ./target/release/elodin editor examples/drone/main.py --schematic "$KDL" \
   > /tmp/qa-editor/EDITOR-120.log 2>&1
 test -s /tmp/qa-editor/EDITOR-120.png
 rg -n "screenshot written|schematic|kdl|panic" /tmp/qa-editor/EDITOR-120.log | head -20
@@ -546,7 +546,7 @@ rg -n "screenshot written|schematic|kdl|panic" /tmp/qa-editor/EDITOR-120.log | h
 
 **Pass criteria**
 
-- [ ] `--kdl examples/drone/motor-panel.kdl` was used and the editor captured a PNG
+- [ ] `--schematic examples/drone/motor-panel.kdl` was used and the editor captured a PNG
 - [ ] Non-empty screenshot; editor did not panic on load
 - [ ] Screenshot shows a populated schematic (viewport and/or motor panel content present)
 

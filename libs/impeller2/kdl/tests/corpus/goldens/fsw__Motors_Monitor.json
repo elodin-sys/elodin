@@ -1,0 +1,429 @@
+{
+  "body": null,
+  "elems": [
+    {
+      "Panel": {
+        "VSplit": {
+          "active": false,
+          "name": null,
+          "panels": [
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "MOTORMESSAGE0.TIME_MONOTONIC",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "STATEMACHINE.MISSILE_MODE",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.21176470816135406,
+                              "g": 0.6431372761726379,
+                              "r": 0.8392156958580017
+                            }
+                          ],
+                          "eql": "MOTORMESSAGE0.MOTOR_CURRENT[0]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.18039216101169586,
+                              "g": 0.08627451211214066,
+                              "r": 0.062745101749897
+                            }
+                          ],
+                          "eql": "MOTORMESSAGE0.COMMANDED_SETPOINT[0]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.11764705926179886,
+                              "g": 0.2078431397676468,
+                              "r": 0.34117648005485535
+                            }
+                          ],
+                          "eql": "MOTORMESSAGE0.MOTOR_POSITION[0]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {
+                  "0": 0.5,
+                  "1": 0.5
+                }
+              }
+            },
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "MOTORMESSAGE1.TIME_MONOTONIC",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.21176470816135406,
+                              "g": 0.16078431904315948,
+                              "r": 0.11764705926179886
+                            }
+                          ],
+                          "eql": "MOTORMESSAGE1.MOTOR_CURRENT[0]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.10196078568696976,
+                              "g": 0.1411764770746231,
+                              "r": 0.2705882489681244
+                            }
+                          ],
+                          "eql": "MOTORMESSAGE1.COMMANDED_SETPOINT[0]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.10196078568696976,
+                              "g": 0.1411764770746231,
+                              "r": 0.2705882489681244
+                            }
+                          ],
+                          "eql": "MOTORMESSAGE1.MOTOR_POSITION[0]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {}
+              }
+            },
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "MOTORMESSAGE2.TIME_MONOTONIC",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.16470588743686676,
+                              "g": 0.29411765933036804,
+                              "r": 0.615686297416687
+                            }
+                          ],
+                          "eql": "MOTORMESSAGE2.MOTOR_CURRENT[0]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.054901961237192154,
+                              "g": 0.09803921729326248,
+                              "r": 0.2235294133424759
+                            }
+                          ],
+                          "eql": "MOTORMESSAGE2.COMMANDED_SETPOINT[0]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.1725490242242813,
+                              "g": 0.125490203499794,
+                              "r": 0.08627451211214066
+                            }
+                          ],
+                          "eql": "MOTORMESSAGE2.MOTOR_POSITION[0]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {}
+              }
+            },
+            {
+              "HSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "MOTORMESSAGE3.TIME_MONOTONIC",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.1764705926179886,
+                              "g": 0.32156863808631897,
+                              "r": 0.7137255072593689
+                            }
+                          ],
+                          "eql": "MOTORMESSAGE3.MOTOR_CURRENT[0]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.37254902720451355,
+                              "g": 0.5411764979362488,
+                              "r": 0.37254902720451355
+                            }
+                          ],
+                          "eql": "MOTORMESSAGE3.COMMANDED_SETPOINT[0]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.13333334028720856,
+                              "g": 0.27450981736183167,
+                              "r": 0.38823530077934265
+                            }
+                          ],
+                          "eql": "MOTORMESSAGE3.MOTOR_POSITION[0]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {}
+              }
+            }
+          ],
+          "shares": {
+            "0": 0.6080150008201599,
+            "1": 0.6624919772148132,
+            "2": 0.6147459745407104,
+            "3": 0.6147459745407104
+          }
+        }
+      }
+    }
+  ],
+  "environment": null,
+  "frame": null,
+  "origin": null,
+  "skybox": null,
+  "telemetry_mode": false,
+  "theme": null,
+  "timeline": null
+}

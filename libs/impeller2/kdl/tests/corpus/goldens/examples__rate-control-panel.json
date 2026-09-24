@@ -1,0 +1,77 @@
+{
+  "body": null,
+  "elems": [
+    {
+      "Panel": {
+        "HSplit": {
+          "active": false,
+          "name": "Rate Control Panel",
+          "panels": [
+            {
+              "VSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Graph": {
+                      "auto_y_range": true,
+                      "colors": [],
+                      "eql": "drone.rate_pid_state",
+                      "graph_type": "Line",
+                      "locked": false,
+                      "name": null,
+                      "node_id": 0,
+                      "y_range": {
+                        "end": 1.0,
+                        "start": 0.0
+                      }
+                    }
+                  },
+                  {
+                    "ComponentMonitor": {
+                      "component_name": "drone.rate_pid_state",
+                      "name": null
+                    }
+                  }
+                ],
+                "shares": {}
+              }
+            },
+            {
+              "VSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Graph": {
+                      "auto_y_range": true,
+                      "colors": [],
+                      "eql": "drone.gyro, drone.ang_vel_setpoint",
+                      "graph_type": "Line",
+                      "locked": false,
+                      "name": "Drone: rate_control",
+                      "node_id": 0,
+                      "y_range": {
+                        "end": 1.0,
+                        "start": 0.0
+                      }
+                    }
+                  }
+                ],
+                "shares": {}
+              }
+            }
+          ],
+          "shares": {}
+        }
+      }
+    }
+  ],
+  "environment": null,
+  "frame": null,
+  "origin": null,
+  "skybox": null,
+  "telemetry_mode": false,
+  "theme": null,
+  "timeline": null
+}

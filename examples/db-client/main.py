@@ -285,7 +285,7 @@ def main() -> int:
                     return 1
                 print("[editor] launching; close the window to stop the demo")
                 subprocess.run(
-                    ["elodin", "editor", args.addr, "--kdl", str(SCHEMATIC)],
+                    ["elodin", "editor", args.addr, "--schematic", str(SCHEMATIC)],
                     env={**os.environ, "ELODIN_ASSETS_DIR": str(REPO_ROOT / "assets")},
                     check=False,
                 )

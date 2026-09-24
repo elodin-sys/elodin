@@ -309,6 +309,8 @@ impl Plugin for EditorPlugin {
             .add_plugins(plugins::gpu_info::GpuInfoPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::hw_stats::HardwareStatsPlugin);
+        #[cfg(not(target_family = "wasm"))]
+        app.add_plugins(plugins::display_kernel::DisplayKernelPlugin);
         app.add_plugins(plugins::kdl_document::plugin)
             .add_plugins(skybox_asset_plugin())
             .add_plugins(skybox_generation_plugin())
@@ -396,6 +398,8 @@ impl Plugin for EditorPlugin {
                     // Keep Object3D WorldPos in lock-step with cached component values
                     // before transforms are synchronized for rendering.
                     object_3d::update_object_3d_system,
+                    #[cfg(not(target_family = "wasm"))]
+                    object_3d::update_object_3d_kernels,
                     sync_object_3d,
                     set_viewport_pos,
                     sync_pos,
@@ -1420,6 +1424,7 @@ pub fn sync_object_3d(
                 orientation: Default::default(),
                 sensor_visible: true,
                 node_id: Default::default(),
+                kernel: None,
             },
             expr,
             &ctx.0,

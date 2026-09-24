@@ -1,0 +1,28 @@
+theme mode=dark scheme=default
+timeline
+vsplit {
+    hsplit {
+        component_monitor name=PCDUMESSAGE.ADC_12V component_name=PCDUMESSAGE.ADC_12V share=0.125
+        component_monitor name=PCDUMESSAGE.AVIONICS_V component_name=PCDUMESSAGE.AVIONICS_V share=0.14765
+        component_monitor name=PCDUMESSAGE.RADIO_V component_name=PCDUMESSAGE.RADIO_V share=0.139365
+        component_monitor name=PCDUMESSAGE.MOTOR_V component_name=PCDUMESSAGE.MOTOR_V share=0.135623
+        component_monitor name=PCDUMESSAGE.ESAD component_name=PCDUMESSAGE.ESAD share=0.127072
+        component_monitor name=PCDUMESSAGE.VBUS component_name=PCDUMESSAGE.VBUS share=0.32529
+        vsplit share=0.5 {
+            component_monitor name=PCDUMESSAGE.CHARGE component_name=PCDUMESSAGE.CHARGE share=0.5
+            component_monitor name=PCDUMESSAGE.MOTOR component_name=PCDUMESSAGE.MOTOR share=0.5
+            component_monitor name=PCDUMESSAGE.DISCHARGE component_name=PCDUMESSAGE.DISCHARGE share=0.5
+            component_monitor name=PCDUMESSAGE.VIPER_FIRED component_name=PCDUMESSAGE.VIPER_FIRED share=0.5
+        }
+    }
+    hsplit {
+        component_monitor name=PCDUMESSAGE.BOARD_TEMP component_name=PCDUMESSAGE.BOARD_TEMP share=0.5
+        component_monitor name=PCDUMESSAGE.AVIONICS_I component_name=PCDUMESSAGE.AVIONICS_I share=0.5
+        component_monitor name=PCDUMESSAGE.DISCHARGE_I component_name=PCDUMESSAGE.DISCHARGE_I share=0.611714
+        component_monitor name=PCDUMESSAGE.ESAD_I component_name=PCDUMESSAGE.ESAD_I share=0.553183
+        component_monitor name=PCDUMESSAGE.MOTOR_I component_name=PCDUMESSAGE.MOTOR_I share=0.595941
+        component_monitor name=PCDUMESSAGE.RADIO_I component_name=PCDUMESSAGE.RADIO_I share=0.617321
+        component_monitor name=PCDUMESSAGE.VIPER_I component_name=PCDUMESSAGE.VIPER_I share=2.621842
+    }
+}
+window

@@ -2,6 +2,8 @@ mod asset_cache;
 pub(crate) mod camera_anchor;
 #[cfg(not(target_family = "wasm"))]
 pub mod cinematic_earth;
+#[cfg(not(target_family = "wasm"))]
+pub(crate) mod display_kernel;
 pub mod editor_cam_input;
 pub mod editor_cam_touch;
 pub(crate) mod env_asset_source;

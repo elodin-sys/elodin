@@ -37,7 +37,7 @@
 
 ## 3. `elodin` CLI
 
-- **`elodin editor <target>`** — Launch the editor against: a Python sim file, a DB address (`127.0.0.1:2240`, `[fde1:2240:a1ef::1]:2240`), an `s10.toml`, a directory containing `main.py`/`s10.toml`, or a legacy replay directory; optional `--kdl <file>` loads a schematic at startup.
+- **`elodin editor <target>`** — Launch the editor against: a Python sim file, a DB address (`127.0.0.1:2240`, `[fde1:2240:a1ef::1]:2240`), an `s10.toml`, a directory containing `main.py`/`s10.toml`, or a legacy replay directory; optional `--schematic <file>` loads a KDL or Python schematic at startup (`--kdl` is a deprecated alias).
 - **`elodin run <target>`** — Headless simulation runner (same target types); keeps serving the DB after `max_ticks` (never exits on its own — QA must use bench mode for terminating runs).
 - **`elodin monte-carlo` subcommands** — `quickstart` (scaffold spec/campaign/hooks from the sim's `params_spec()`), `template`, `sample` (regenerate LHS plan CSV), `run` (`--campaign`, `--spec`, `--out`, `--plan`, `--workers`, `--scratch-dir`, `--cache-dir`, `--clean`, `--memory-probe`, `--keep-existing`), `resume` (re-run missing/failed runs), `report` (rebuild reports).
 - **CLI environment variables** — `BLOCKADE_API_KEY` (skybox AI generation), `ELODIN_ASSETS` (asset root incl. skyboxes), `ELODIN_KDL_DIR` (schematic search + hot-reload), `ELODIN_DB_PATH` (DB location override), `ELODIN_BACKEND` (execution backend).
@@ -155,7 +155,7 @@
 
 ### 16.1 Startup & Connectivity
 - **Startup screen** — Connect to IP address, or run a simulation from file.
-- **Connection targets** — Live sim (spawns via s10), running DB (local, remote, Aleph over IPv6), recorded DB, legacy replay dir; `--kdl` schematic preload.
+- **Connection targets** — Live sim (spawns via s10), running DB (local, remote, Aleph over IPv6), recorded DB, legacy replay dir; `--schematic` preload (KDL or Python).
 - **Editor dev loop** — `cargo run -p elodin -- editor ...`, `cargo watch` hot-reload, cargo features `big_space`, `inspector`, `debug`, `tracy`.
 
 ### 16.2 Viewport & 3D Rendering

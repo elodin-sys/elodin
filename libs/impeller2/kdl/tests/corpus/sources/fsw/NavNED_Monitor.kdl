@@ -1,0 +1,55 @@
+vsplit {
+    hsplit {
+        tabs {
+            component_monitor component_name=NAVNED.YPR_NED2IMU
+        }
+        tabs {
+            component_monitor component_name=NAVNED.STD_YPR_NED2IMU
+        }
+        tabs {
+            graph "NAVNED.YPR_NED2IMU[0],NAVNED.YPR_NED2IMU[1],NAVNED.YPR_NED2IMU[2]" name=Graph {
+                color 156 88 58
+                color 182 136 48
+                color 130 54 33
+            }
+        }
+    }
+    hsplit {
+        tabs {
+            component_monitor component_name=NAVNED.POS_NED
+        }
+        tabs {
+            component_monitor component_name=NAVNED.STD_POS_NED
+        }
+        tabs {
+            graph "NAVNED.POS_NED[0],NAVNED.POS_NED[1],NAVNED.POS_NED[2]" name=Graph {
+                color 28 42 88
+                color 61 104 61
+                color 44 58 72
+            }
+        }
+    }
+    hsplit {
+        tabs {
+            component_monitor component_name=NAVNED.VEL_NED
+        }
+        tabs {
+            component_monitor component_name=NAVNED.STD_VEL_NED
+        }
+        tabs {
+            graph "NAVNED.VEL_NED[0],NAVNED.VEL_NED[1],NAVNED.VEL_NED[2]" name=Graph {
+                color 55 72 90
+                color 58 37 134
+                color 108 60 40
+            }
+        }
+    }
+    hsplit {
+        tabs {
+            component_monitor component_name=NAVNED.TIME_MONOTONIC
+        }
+        tabs {
+            component_monitor component_name=STATEMACHINEOUTPUT.MISSILE_MODE
+        }
+    }
+}

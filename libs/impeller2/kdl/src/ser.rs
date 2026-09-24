@@ -6,6 +6,49 @@ use kdl::{KdlDocument, KdlEntry, KdlNode};
 // Default precision for float properties emitted to KDL.
 const KDL_FLOAT_PRECISION: u32 = 6;
 
+fn push_kernel_binding(
+    node: &mut KdlNode,
+    children: &mut KdlDocument,
+    kernel: &DisplayKernelBinding,
+) {
+    push_kernel_prop(node, children, "kernel", kernel);
+}
+
+fn push_kernel_prop(
+    node: &mut KdlNode,
+    children: &mut KdlDocument,
+    prop: &str,
+    kernel: &DisplayKernelBinding,
+) {
+    node.entries_mut()
+        .push(KdlEntry::new_prop(prop, kernel.asset.clone()));
+    for input in &kernel.inputs {
+        push_kernel_input(children, input);
+    }
+}
+
+fn push_kernel_input(children: &mut KdlDocument, input: &DisplayKernelInput) {
+    let mut child = KdlNode::new("input");
+    child
+        .entries_mut()
+        .push(KdlEntry::new(input.component.clone()));
+    if !input.dtype.is_empty() {
+        child
+            .entries_mut()
+            .push(KdlEntry::new_prop("dtype", input.dtype.clone()));
+    }
+    if !input.shape.is_empty() {
+        let shape = input
+            .shape
+            .iter()
+            .map(u64::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        child.entries_mut().push(KdlEntry::new_prop("shape", shape));
+    }
+    children.nodes_mut().push(child);
+}
+
 pub fn serialize_schematic(schematic: &Schematic) -> String {
     let mut doc = KdlDocument::new();
 
@@ -748,9 +791,13 @@ fn serialize_timeline(timeline: &TimelineConfig) -> KdlNode {
 
 fn serialize_graph(graph: &Graph) -> KdlNode {
     let mut node = KdlNode::new("graph");
+    let mut children = KdlDocument::new();
 
-    // Add the EQL query as the first unnamed entry
-    node.entries_mut().push(KdlEntry::new(graph.eql.clone()));
+    if let Some(kernel) = &graph.kernel {
+        push_kernel_binding(&mut node, &mut children, kernel);
+    } else {
+        node.entries_mut().push(KdlEntry::new(graph.eql.clone()));
+    }
 
     push_optional_name_prop(&mut node, graph.name.as_deref());
 
@@ -781,6 +828,15 @@ fn serialize_graph(graph: &Graph) -> KdlNode {
 
     for color in &graph.colors {
         serialize_color_to_node(&mut node, color);
+    }
+
+    if !children.nodes().is_empty() {
+        if let Some(existing) = node.children() {
+            for child in existing.nodes() {
+                children.nodes_mut().push(child.clone());
+            }
+        }
+        node.set_children(children);
     }
 
     node
@@ -941,7 +997,12 @@ fn serialize_query_plot(query_plot: &QueryPlot) -> KdlNode {
 fn serialize_object_3d(obj: &Object3D) -> KdlNode {
     let mut node = KdlNode::new("object_3d");
 
-    node.entries_mut().push(KdlEntry::new(obj.eql.clone()));
+    if let Some(kernel) = &obj.kernel {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("kernel", kernel.asset.clone()));
+    } else {
+        node.entries_mut().push(KdlEntry::new(obj.eql.clone()));
+    }
 
     // Add frame attribute if not default (Bevy)
     if let Some(frame) = obj.frame {
@@ -966,6 +1027,11 @@ fn serialize_object_3d(obj: &Object3D) -> KdlNode {
     }
 
     let mut children = KdlDocument::new();
+    if let Some(kernel) = &obj.kernel {
+        for input in &kernel.inputs {
+            push_kernel_input(&mut children, input);
+        }
+    }
     let (mut mesh_node, sibling_nodes) = serialize_object_3d_mesh(&obj.mesh);
 
     if let Some(vr) = &obj.mesh_visibility_range {
@@ -1220,13 +1286,28 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> (KdlNode, Vec<KdlNode>) {
             color,
             error_covariance_cholesky,
             error_covariance,
+            error_covariance_cholesky_kernel,
+            error_covariance_kernel,
             error_confidence_interval,
             show_grid,
             grid_color,
         } => {
             let mut node = KdlNode::new("ellipsoid");
-            let uses_covariance = error_covariance_cholesky.is_some() || error_covariance.is_some();
-            if let Some(cholesky) = error_covariance_cholesky {
+            let uses_covariance = error_covariance_cholesky.is_some()
+                || error_covariance.is_some()
+                || error_covariance_cholesky_kernel.is_some()
+                || error_covariance_kernel.is_some();
+            let mut children = KdlDocument::new();
+            if let Some(kernel) = error_covariance_cholesky_kernel {
+                push_kernel_prop(
+                    &mut node,
+                    &mut children,
+                    "error_covariance_cholesky_kernel",
+                    kernel,
+                );
+            } else if let Some(kernel) = error_covariance_kernel {
+                push_kernel_prop(&mut node, &mut children, "error_covariance_kernel", kernel);
+            } else if let Some(cholesky) = error_covariance_cholesky {
                 node.entries_mut().push(KdlEntry::new_prop(
                     "error_covariance_cholesky",
                     cholesky.clone(),
@@ -1250,6 +1331,9 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> (KdlNode, Vec<KdlNode>) {
             if *show_grid {
                 node.entries_mut()
                     .push(KdlEntry::new_prop("show_grid", true));
+            }
+            if !children.nodes().is_empty() {
+                node.set_children(children);
             }
             if color != &default_ellipsoid_color() {
                 serialize_color_to_node(&mut node, color);
@@ -2105,6 +2189,7 @@ viewport name="main" cinematic=#true ev100=13.5
             .elems
             .push(SchematicElem::Panel(Panel::Graph(Graph {
                 eql: "a.world_pos".to_string(),
+                kernel: None,
                 name: Some("Position Graph".to_string()),
                 graph_type: GraphType::Line,
                 locked: false,
@@ -2141,6 +2226,7 @@ viewport name="main" cinematic=#true ev100=13.5
                 y_range: 0.0..1.0,
                 node_id: NodeId::default(),
                 colors: vec![Color::rgb(1.0, 0.0, 0.0), Color::rgb(0.0, 1.0, 0.0)],
+                kernel: None,
             })));
 
         let serialized = serialize_schematic(&schematic);
@@ -2196,6 +2282,7 @@ graph "value" {
             orientation: Default::default(),
             sensor_visible: true,
             node_id: NodeId::default(),
+            kernel: None,
         }));
 
         let serialized = serialize_schematic(&schematic);
@@ -2241,6 +2328,7 @@ graph "value" {
             orientation: Default::default(),
             sensor_visible: true,
             node_id: NodeId::default(),
+            kernel: None,
         }));
 
         let serialized = serialize_schematic(&schematic);
@@ -2425,6 +2513,7 @@ object_3d lander.world_pos {
             orientation: Default::default(),
             sensor_visible: true,
             node_id: NodeId::default(),
+            kernel: None,
         }));
 
         let serialized = serialize_schematic(&schematic);
@@ -2453,6 +2542,8 @@ object_3d lander.world_pos {
                 color: Color::rgba(64.0 / 255.0, 128.0 / 255.0, 1.0, 96.0 / 255.0),
                 error_covariance_cholesky: None,
                 error_covariance: None,
+                error_covariance_cholesky_kernel: None,
+                error_covariance_kernel: None,
                 error_confidence_interval: impeller2_wkt::default_ellipsoid_confidence_interval(),
                 show_grid: impeller2_wkt::default_ellipsoid_show_grid(),
                 grid_color: impeller2_wkt::default_ellipsoid_grid_color(),
@@ -2465,6 +2556,7 @@ object_3d lander.world_pos {
             orientation: Default::default(),
             sensor_visible: true,
             node_id: NodeId::default(),
+            kernel: None,
         }));
 
         let serialized = serialize_schematic(&schematic);
@@ -2478,10 +2570,7 @@ object_3d lander.world_pos {
                     scale,
                     color,
                     error_covariance_cholesky,
-                    error_covariance: _,
-                    error_confidence_interval: _,
-                    show_grid: _,
-                    grid_color: _,
+                    ..
                 } => {
                     assert_eq!(scale, "rocket.scale");
                     assert!((color.r - 64.0 / 255.0).abs() < f32::EPSILON);
@@ -2514,6 +2603,7 @@ object_3d lander.world_pos {
             icon: None,
             thrusters: Vec::new(),
             node_id: NodeId::next(),
+            kernel: None,
         }));
 
         let serialized = serialize_schematic(&schematic);
@@ -2549,6 +2639,7 @@ object_3d lander.world_pos {
             icon: None,
             thrusters: Vec::new(),
             node_id: NodeId::next(),
+            kernel: None,
         }));
 
         let serialized = serialize_schematic(&schematic);
@@ -2584,6 +2675,7 @@ object_3d lander.world_pos {
             icon: None,
             thrusters: Vec::new(),
             node_id: NodeId::next(),
+            kernel: None,
         }));
 
         let serialized = serialize_schematic(&schematic);
@@ -2610,6 +2702,7 @@ object_3d lander.world_pos {
             icon: None,
             thrusters: Vec::new(),
             node_id: NodeId::next(),
+            kernel: None,
         }));
 
         let serialized = serialize_schematic(&schematic);
@@ -2645,6 +2738,7 @@ object_3d lander.world_pos {
             thrusters: Vec::new(),
             mesh_visibility_range: None,
             node_id: NodeId::next(),
+            kernel: None,
         }));
 
         let serialized = serialize_schematic(&schematic);
@@ -2822,6 +2916,7 @@ object_3d lander.world_pos {
                 y_range: 0.0..1.0,
                 node_id: NodeId::default(),
                 colors: vec![],
+                kernel: None,
             }),
         ])));
 

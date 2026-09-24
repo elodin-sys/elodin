@@ -61,6 +61,9 @@ pub struct WorldMetadata {
     pub default_playback_speed: f64,
     pub max_tick: u64,
     pub schematic: Option<String>,
+    /// Content-addressed display-kernel sidecars (`schematics/kernels/<sha256>`).
+    #[serde(default)]
+    pub schematic_kernels: HashMap<String, Vec<u8>>,
     #[serde(default)]
     pub sensor_cameras: Vec<SensorCameraConfig>,
     #[serde(default)]
@@ -82,6 +85,7 @@ impl Default for WorldMetadata {
             default_playback_speed: 1.0,
             max_tick: u64::MAX,
             schematic: None,
+            schematic_kernels: HashMap::new(),
             sensor_cameras: Vec::new(),
             thermal_tags: Vec::new(),
         }
