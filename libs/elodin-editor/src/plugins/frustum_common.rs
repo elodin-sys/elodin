@@ -2,6 +2,7 @@ use crate::plugins::render_layer_alloc::RenderLayerLease;
 use crate::sensor_camera::SensorCameraFrustumSource;
 use crate::ui::tiles::{DEFAULT_VIEWPORT_FAR, ViewportConfig};
 use bevy::prelude::*;
+use impeller2_wkt::FrustumUpMarker;
 
 pub type MainViewportQueryItem = (
     Entity,
@@ -69,6 +70,98 @@ pub fn frustum_local_points(perspective: &PerspectiveProjection) -> Option<[Vec3
     ])
 }
 
+/// Edge-width multiplier for the highlighted top edge, so it reads apart from
+/// the plain frustum edges.
+pub const FRUSTUM_UP_MARKER_SCALE: f32 = 3.0;
+
+/// Radius of the image-origin ball, relative to the frustum edge radius.
+pub const FRUSTUM_IMAGE_ORIGIN_SCALE: f32 = 9.0;
+
+/// Index of the far-plane top edge within [`frustum_segments`].
+const FAR_TOP_SEGMENT: usize = 4;
+
+/// A frustum edge in camera-local space.
+pub struct FrustumEdge {
+    pub start: Vec3,
+    pub end: Vec3,
+    pub thickness: f32,
+}
+
+/// Frustum edges in camera-local space, thickening the top edge when
+/// `up_marker` asks for it.
+pub fn frustum_segments(
+    points: [Vec3; 8],
+    thickness: f32,
+    up_marker: FrustumUpMarker,
+) -> Vec<FrustumEdge> {
+    let mut segments: Vec<FrustumEdge> = [
+        (points[0], points[1]),
+        (points[1], points[2]),
+        (points[2], points[3]),
+        (points[3], points[0]),
+        (points[4], points[5]),
+        (points[5], points[6]),
+        (points[6], points[7]),
+        (points[7], points[4]),
+        (points[0], points[4]),
+        (points[1], points[5]),
+        (points[2], points[6]),
+        (points[3], points[7]),
+    ]
+    .into_iter()
+    .map(|(start, end)| FrustumEdge {
+        start,
+        end,
+        thickness,
+    })
+    .collect();
+
+    if up_marker == FrustumUpMarker::Highlight {
+        segments[FAR_TOP_SEGMENT].thickness = thickness * FRUSTUM_UP_MARKER_SCALE;
+    }
+
+    segments
+}
+
+/// Channel floor above which a frustum color counts as near-white.
+const FRUSTUM_NEAR_WHITE: f32 = 0.7;
+
+/// Color for the image-origin ball. The thickened edge keeps the frustum's own
+/// color, which is what tells several frustums apart; the ball is white so it
+/// stays legible against that color, falling back to its complement when the
+/// frustum is itself near-white. Always opaque, so the ball still reads on a
+/// translucent or fully clear frustum.
+pub fn frustum_up_marker_color(frustum_color: impeller2_wkt::Color) -> impeller2_wkt::Color {
+    let darkest_channel = frustum_color
+        .r
+        .min(frustum_color.g)
+        .min(frustum_color.b)
+        .clamp(0.0, 1.0);
+    if darkest_channel > FRUSTUM_NEAR_WHITE {
+        impeller2_wkt::Color::rgba(
+            1.0 - frustum_color.r.clamp(0.0, 1.0),
+            1.0 - frustum_color.g.clamp(0.0, 1.0),
+            1.0 - frustum_color.b.clamp(0.0, 1.0),
+            1.0,
+        )
+    } else {
+        impeller2_wkt::Color::rgba(1.0, 1.0, 1.0, 1.0)
+    }
+}
+
+/// Ball marking the image origin — the far-plane corner holding pixel (0, 0),
+/// i.e. top-left as seen through the camera — as `(center, radius)` in
+/// camera-local space. With the thickened top edge it says which way up the
+/// image is, and which end of that edge it starts from.
+pub fn frustum_image_origin_ball(
+    points: &[Vec3; 8],
+    thickness: f32,
+    up_marker: FrustumUpMarker,
+) -> Option<(Vec3, f32)> {
+    (up_marker == FrustumUpMarker::Highlight)
+        .then(|| (points[4], thickness * FRUSTUM_IMAGE_ORIGIN_SCALE))
+}
+
 pub fn color_component_to_u8(value: f32) -> u8 {
     (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
@@ -106,6 +199,8 @@ mod tests {
             frustums_color: default(),
             projection_color: default(),
             frustums_thickness: 0.006,
+            frustums_up_marker: FrustumUpMarker::None,
+            frustums_up_marker_overlay: false,
             cinematic: false,
             bloom: None,
         }
@@ -183,6 +278,86 @@ mod tests {
             ((near_width / near_height) - 2.0).abs() < 1e-5,
             "aspect ratio should be reflected in near plane dimensions"
         );
+    }
+
+    #[test]
+    fn frustum_segments_marker_none_leaves_edges_untouched() {
+        let points = frustum_local_points(&perspective(1.0, 1.6, 0.1, 10.0)).unwrap();
+        let segments = frustum_segments(points, 0.01, FrustumUpMarker::None);
+        assert_eq!(segments.len(), 12);
+        assert!(segments.iter().all(|edge| edge.thickness == 0.01));
+    }
+
+    #[test]
+    fn frustum_segments_highlight_thickens_far_top_edge() {
+        let points = frustum_local_points(&perspective(1.0, 1.6, 0.1, 10.0)).unwrap();
+        let segments = frustum_segments(points, 0.01, FrustumUpMarker::Highlight);
+        assert_eq!(segments.len(), 12);
+
+        let top = &segments[4];
+        assert_eq!(top.start, points[4]);
+        assert_eq!(top.end, points[5]);
+        assert_eq!(top.thickness, 0.01 * FRUSTUM_UP_MARKER_SCALE);
+        for (idx, edge) in segments.iter().enumerate() {
+            if idx != 4 {
+                assert_eq!(edge.thickness, 0.01);
+            }
+        }
+    }
+
+    #[test]
+    fn up_marker_color_is_white_against_ordinary_frustums() {
+        use impeller2_wkt::Color as FrustumColor;
+
+        let white = FrustumColor::rgba(1.0, 1.0, 1.0, 1.0);
+        for color in [
+            FrustumColor::YELLOW,
+            FrustumColor::RED,
+            FrustumColor::BLACK,
+            FrustumColor::MINT,
+            FrustumColor::PEACH,
+        ] {
+            assert_eq!(frustum_up_marker_color(color), white);
+        }
+    }
+
+    #[test]
+    fn up_marker_color_complements_near_white_frustums() {
+        use impeller2_wkt::Color as FrustumColor;
+
+        assert_eq!(
+            frustum_up_marker_color(FrustumColor::WHITE),
+            FrustumColor::rgba(0.0, 0.0, 0.0, 1.0)
+        );
+
+        let complement = frustum_up_marker_color(FrustumColor::rgba(0.9, 0.8, 1.0, 0.4));
+        assert!((complement.r - 0.1).abs() < 1e-6);
+        assert!((complement.g - 0.2).abs() < 1e-6);
+        assert!(complement.b.abs() < 1e-6);
+        assert_eq!(complement.a, 1.0, "marker stays opaque on a faint frustum");
+    }
+
+    #[test]
+    fn up_marker_color_is_opaque_on_a_clear_frustum() {
+        use impeller2_wkt::Color as FrustumColor;
+
+        assert_eq!(
+            frustum_up_marker_color(FrustumColor::rgba(0.2, 0.3, 0.4, 0.0)),
+            FrustumColor::rgba(1.0, 1.0, 1.0, 1.0)
+        );
+    }
+
+    #[test]
+    fn frustum_image_origin_ball_only_for_highlight() {
+        let points = frustum_local_points(&perspective(1.0, 1.6, 0.1, 10.0)).unwrap();
+
+        assert!(frustum_image_origin_ball(&points, 0.01, FrustumUpMarker::None).is_none());
+
+        let (center, radius) =
+            frustum_image_origin_ball(&points, 0.01, FrustumUpMarker::Highlight).unwrap();
+        assert_eq!(center, points[4], "ball sits on the far top-left corner");
+        assert!(center.x < 0.0 && center.y > 0.0, "left of and above center");
+        assert_eq!(radius, 0.01 * FRUSTUM_IMAGE_ORIGIN_SCALE);
     }
 
     #[test]

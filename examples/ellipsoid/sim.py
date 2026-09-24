@@ -55,6 +55,7 @@ def world() -> tuple[el.World, el.EntityId]:
         frustums_color=[1.0, 0.0, 0.0, 1.0],
         projection_color=[1.0, 0.0, 0.0, 0.35],
         frustums_thickness=0.004,
+        frustums_up_marker="highlight",
     )
 
     object_mesh = f"""
@@ -75,7 +76,7 @@ def world() -> tuple[el.World, el.EntityId]:
 
         tabs {
             hsplit name="Frustums" {
-                viewport name="Viewport Source" pos="(0,0,0,1, -3,-0.5,2)" look_at="(0,0,0,0, 0,0,0)" create_frustum=#true frustums_color="yalk" projection_color="mint" frustums_thickness=0.006 show_grid=#true active=#true near=0.05 far=6.0
+                viewport name="Viewport Source" pos="(0,0,0,1, -3,-0.5,2)" look_at="(0,0,0,0, 0,0,0)" create_frustum=#true frustums_color="yalk" projection_color="mint" frustums_thickness=0.006 frustums_up_marker="highlight" show_grid=#true active=#true near=0.05 far=6.0
                 viewport name="Target View" pos="(0,0,0,1, 2,2,1.5)" look_at="(0,0,0,0, 0,0,0)" show_frustums=#true show_grid=#true active=#true
                 sensor_view "drone.scene_cam" name="Sensor Camera"
             }

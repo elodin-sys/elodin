@@ -14,8 +14,8 @@ use bevy::{
 };
 use bevy_egui::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use impeller2::types::{ComponentId, Timestamp};
-use impeller2_bevy::CommandsExt;
-use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery, SparklineQuery};
+use impeller2_bevy::{CommandsExt, SimTimeStepFetch, SimTimeStepSource};
+use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery, SimulationTimeStep, SparklineQuery};
 
 use crate::{
     EqlContext, SelectedTimeRange,
@@ -81,6 +81,51 @@ pub struct ComponentTimeRanges {
     /// Current batch index for processing
     pub current_batch: usize,
     pub row_settings: HashMap<ComponentId, DataOverviewRowSettings>,
+    /// Bumped by [`ComponentTimeRanges::reset`] to disown replies in flight.
+    generation: u64,
+}
+
+impl ComponentTimeRanges {
+    /// Drop everything measured for the previous recording. Returning `state`
+    /// to `NotStarted` is what re-arms [`trigger_time_range_queries`]; leaving
+    /// stale ranges behind would let the timeline step keep the old
+    /// recording's rate.
+    pub fn reset(&mut self) {
+        let disowned = self.generation.wrapping_add(1);
+        *self = Self::default();
+        self.generation = disowned;
+    }
+
+    /// Stamp to hand a query, so its reply can be matched back to the
+    /// recording that asked for it.
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    /// Whether a reply still belongs to the current recording.
+    pub fn accepts(&self, generation: u64) -> bool {
+        self.generation == generation
+    }
+}
+
+/// Account for one finished time-range query.
+///
+/// Reaching zero pending moves the batch on to sparklines. Note that a reply
+/// arriving after a reset would satisfy `completed >= total` immediately,
+/// since a reset leaves `total_queries` at zero — which is why callers must
+/// check [`ComponentTimeRanges::accepts`] first. Moving off `NotStarted` is
+/// unrecoverable: [`trigger_time_range_queries`] only ever starts from there.
+fn finish_time_range_query(time_ranges: &mut ComponentTimeRanges) {
+    time_ranges.pending_queries = time_ranges.pending_queries.saturating_sub(1);
+    time_ranges.completed_queries += 1;
+
+    if time_ranges.pending_queries == 0
+        && time_ranges.completed_queries >= time_ranges.total_queries
+    {
+        time_ranges.state = TimeRangeQueryState::QueryingSparklines(Instant::now());
+        time_ranges.current_batch = 0;
+        time_ranges.completed_queries = 0;
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -276,98 +321,8 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
             }
         }
 
-        // Initialize Phase 1 when state is NotStarted and we have components
-        if matches!(params.time_ranges.state, TimeRangeQueryState::NotStarted)
-            && !component_list.is_empty()
-        {
-            params.time_ranges.state = TimeRangeQueryState::QueryingTimeRanges(Instant::now());
-            params.time_ranges.total_queries = component_list.len();
-            params.time_ranges.completed_queries = 0;
-            params.time_ranges.current_batch = 0;
-            params.time_ranges.tables_to_query =
-                component_list.iter().map(|(_, _, t)| t.clone()).collect();
-        }
-
-        // Phase 1: Query time ranges in batches to avoid RequestId overflow
-        if matches!(
-            params.time_ranges.state,
-            TimeRangeQueryState::QueryingTimeRanges(_)
-        ) && params.time_ranges.pending_queries == 0
-        {
-            let batch_start = params.time_ranges.current_batch * MAX_CONCURRENT_QUERIES;
-            let batch_end = (batch_start + MAX_CONCURRENT_QUERIES)
-                .min(params.time_ranges.tables_to_query.len());
-
-            if batch_start < params.time_ranges.tables_to_query.len() {
-                // Start next batch
-                let batch_size = batch_end - batch_start;
-                params.time_ranges.pending_queries = batch_size;
-                params.time_ranges.current_batch += 1;
-
-                for table_name in params.time_ranges.tables_to_query[batch_start..batch_end].iter()
-                {
-                    let table_name_clone = table_name.clone();
-                    let query = format!(
-                        "SELECT min(time) as min_time, max(time) as max_time, count(*) as row_count FROM {}",
-                        table_name
-                    );
-
-                    params.commands.send_req_reply(
-                        SQLQuery(query),
-                        move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
-                              mut time_ranges: ResMut<ComponentTimeRanges>| {
-                            // Only process data batches; completion markers (batch: None) are ignored
-                            // since the handler is removed immediately after processing data.
-                            // This prevents request ID collisions when IDs wrap around.
-                            match res {
-                                Ok(ipc) => {
-                                    if let Some(batch_data) = ipc.batch {
-                                        // Data batch - process it
-                                        let mut decoder = arrow::ipc::reader::StreamDecoder::new();
-                                        let mut buffer =
-                                            arrow::buffer::Buffer::from(batch_data.into_owned());
-                                        if let Some(batch) =
-                                            decoder.decode(&mut buffer).ok().and_then(|b| b)
-                                        {
-                                            process_time_range_and_count(
-                                                &table_name_clone,
-                                                &batch,
-                                                &mut time_ranges,
-                                            );
-                                        }
-                                        // Decrement pending_queries now that we have the data
-                                        time_ranges.pending_queries =
-                                            time_ranges.pending_queries.saturating_sub(1);
-                                        time_ranges.completed_queries += 1;
-                                    }
-                                    // If batch is None (completion marker), just ignore it
-                                    // The handler will be removed either way
-                                }
-                                Err(_) => {
-                                    // Error response - query is done
-                                    time_ranges.pending_queries =
-                                        time_ranges.pending_queries.saturating_sub(1);
-                                    time_ranges.completed_queries += 1;
-                                }
-                            }
-
-                            // Transition to Phase 2 when ALL Phase 1 queries complete
-                            if time_ranges.pending_queries == 0
-                                && time_ranges.completed_queries >= time_ranges.total_queries
-                            {
-                                time_ranges.state =
-                                    TimeRangeQueryState::QueryingSparklines(Instant::now());
-                                time_ranges.current_batch = 0;
-                                time_ranges.completed_queries = 0;
-                            }
-                            // Always return true to remove handler immediately, freeing the request ID
-                            true
-                        },
-                    );
-                }
-            }
-            // Note: Phase 2 transition now happens inside the query handler when all queries complete
-        }
+        // Phase 1 (time ranges) is sent by `dispatch_time_range_queries`, which
+        // runs whether or not this panel is open.
 
         // Phase 2: Query sparkline data in batches
         if matches!(
@@ -387,6 +342,7 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                 params.time_ranges.pending_queries = batch_size;
                 params.time_ranges.current_batch += 1;
 
+                let generation = params.time_ranges.generation();
                 for table_name in params.time_ranges.tables_to_query[batch_start..batch_end].iter()
                 {
                     let table_name_clone = table_name.clone();
@@ -404,6 +360,9 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                         query,
                         move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
                               mut time_ranges: ResMut<ComponentTimeRanges>| {
+                            if !time_ranges.accepts(generation) {
+                                return true;
+                            }
                             // Only process data batches; completion markers (batch: None) are ignored
                             // since the handler is removed immediately after processing data.
                             // This prevents request ID collisions when IDs wrap around.
@@ -1178,11 +1137,9 @@ fn process_sparkline_result(
 }
 
 /// System that triggers component time range queries when components become available.
-/// This ensures filtering happens even if the Data Overview panel isn't displayed.
 /// Queries are run once on load - no periodic refresh.
-/// Initialize time range queries by collecting table names.
-/// The actual batched queries are handled by DataOverviewPane::ui_system to avoid
-/// RequestId overflow (RequestId is u8, max 255 concurrent requests).
+/// Initialize time range queries by collecting table names; the batches
+/// themselves are sent by [`dispatch_time_range_queries`].
 pub fn trigger_time_range_queries(
     eql_context: Res<EqlContext>,
     mut time_ranges: ResMut<ComponentTimeRanges>,
@@ -1214,10 +1171,305 @@ pub fn trigger_time_range_queries(
         return;
     }
 
-    // Initialize query state - actual queries handled by DataOverviewPane::ui_system
     time_ranges.state = TimeRangeQueryState::QueryingTimeRanges(Instant::now());
     time_ranges.total_queries = table_names.len();
     time_ranges.completed_queries = 0;
     time_ranges.current_batch = 0;
     time_ranges.tables_to_query = table_names.into_iter().map(|(_a, b)| b).collect();
+}
+
+/// Send the time range and row count queries, in batches bounded by
+/// [`MAX_CONCURRENT_QUERIES`] because `RequestId` is a `u8`.
+///
+/// These ranges drive component filtering and the timeline step, neither of
+/// which should depend on the Data Overview panel being open, so this runs as a
+/// plain system rather than from the panel's widget.
+pub fn dispatch_time_range_queries(
+    mut time_ranges: ResMut<ComponentTimeRanges>,
+    mut commands: Commands,
+) {
+    if !matches!(
+        time_ranges.state,
+        TimeRangeQueryState::QueryingTimeRanges(_)
+    ) || time_ranges.pending_queries > 0
+    {
+        return;
+    }
+    let batch_start = time_ranges.current_batch * MAX_CONCURRENT_QUERIES;
+    if batch_start >= time_ranges.tables_to_query.len() {
+        return;
+    }
+    let batch_end = (batch_start + MAX_CONCURRENT_QUERIES).min(time_ranges.tables_to_query.len());
+    time_ranges.pending_queries = batch_end - batch_start;
+    time_ranges.current_batch += 1;
+
+    // These requests are queued as commands and so outlive the frame. A
+    // session reset in between cancels the registered handlers, but not ones
+    // whose registration is still sitting in the command queue.
+    let generation = time_ranges.generation();
+    let batch: Vec<String> = time_ranges.tables_to_query[batch_start..batch_end].to_vec();
+    for table_name in batch {
+        let query = format!(
+            "SELECT min(time) as min_time, max(time) as max_time, count(*) as row_count FROM {}",
+            table_name
+        );
+        commands.send_req_reply(
+            SQLQuery(query),
+            move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
+                  mut time_ranges: ResMut<ComponentTimeRanges>| {
+                if !time_ranges.accepts(generation) {
+                    return true;
+                }
+                // Completion markers (batch: None) are ignored; the handler is
+                // removed either way, freeing the request id.
+                match res {
+                    Ok(ipc) => {
+                        if let Some(batch_data) = ipc.batch {
+                            let mut decoder = arrow::ipc::reader::StreamDecoder::new();
+                            let mut buffer = arrow::buffer::Buffer::from(batch_data.into_owned());
+                            if let Some(batch) = decoder.decode(&mut buffer).ok().and_then(|b| b) {
+                                process_time_range_and_count(&table_name, &batch, &mut time_ranges);
+                            }
+                            finish_time_range_query(&mut time_ranges);
+                        }
+                    }
+                    Err(_) => finish_time_range_query(&mut time_ranges),
+                }
+                true
+            },
+        );
+    }
+}
+
+/// A recording that declares no `simulation_time_step` still has an implicit
+/// one: the finest spacing at which any of its components was sampled, which is
+/// the resolution the timeline can actually be advanced at.
+///
+/// Spacing is taken over each series as a whole rather than a leading window.
+/// The opening samples of a real recording are an ingest burst — on FT27 flight
+/// data the first 64 IMU samples imply 9 µs where the series really runs at
+/// 1 ms — and since the finest component wins, the worst-biased one would
+/// otherwise decide the result every time.
+///
+/// Measuring does not wait to see whether the sim will declare a rate: a
+/// declared one wins by overriding this, not by holding it back. Waiting meant
+/// reading the leftover `simulation_time_step` entry in the schema registry as
+/// proof the current recording publishes a rate, but that registry accumulates
+/// across connections and is never cleared, so a recording opened after a
+/// declaring one would sit at `N/A` with an inert step until the declared
+/// fetch ran out of retries.
+pub fn estimate_sim_time_step_from_ranges(
+    time_ranges: Res<ComponentTimeRanges>,
+    mut fetch: ResMut<SimTimeStepFetch>,
+    mut time_step: ResMut<SimulationTimeStep>,
+) {
+    if fetch.source() == SimTimeStepSource::Declared {
+        return;
+    }
+    // Once a rate is published, only fresh ranges can refine it.
+    if fetch.source() == SimTimeStepSource::Estimated && !time_ranges.is_changed() {
+        return;
+    }
+    let Some(micros) = finest_sample_spacing_micros(&time_ranges) else {
+        return;
+    };
+    if let Some(dt) = fetch.record_estimate(micros) {
+        time_step.0 = dt;
+    }
+}
+
+/// Finest mean sample spacing across every measured component, in micros.
+fn finest_sample_spacing_micros(time_ranges: &ComponentTimeRanges) -> Option<i64> {
+    time_ranges
+        .ranges
+        .iter()
+        .filter_map(|(table, (min, max))| {
+            // A single sample spans no interval.
+            let intervals =
+                i64::try_from(time_ranges.row_counts.get(table)?.checked_sub(1)?).ok()?;
+            let span = max.0.checked_sub(min.0)?;
+            (intervals > 0 && span > 0).then(|| span / intervals)
+        })
+        .filter(|micros| *micros > 0)
+        .min()
+}
+
+#[cfg(test)]
+mod sample_spacing_tests {
+    use super::*;
+    use impeller2_bevy::{ComponentPathRegistry, ComponentSchemaRegistry};
+
+    fn ranges(entries: &[(&str, i64, i64, usize)]) -> ComponentTimeRanges {
+        let mut time_ranges = ComponentTimeRanges::default();
+        for (table, min, max, count) in entries {
+            time_ranges
+                .ranges
+                .insert(table.to_string(), (Timestamp(*min), Timestamp(*max)));
+            time_ranges.row_counts.insert(table.to_string(), *count);
+        }
+        time_ranges
+    }
+
+    #[test]
+    fn the_finest_component_sets_the_step() {
+        // FT27 flight data: a 1 kHz IMU alongside much slower channels.
+        let time_ranges = ranges(&[
+            ("mfimumessage_gyro", 0, 837_856_000, 837_857),
+            ("cn0message_cn0", 0, 837_768_000, 56_814),
+            ("controlmessage_aileron_cmd_deg", 0, 72_402_000, 69_352),
+        ]);
+
+        assert_eq!(finest_sample_spacing_micros(&time_ranges), Some(1_000));
+    }
+
+    #[test]
+    fn a_leading_burst_does_not_shrink_the_step() {
+        // Same series, whose first samples arrive microseconds apart before
+        // settling: whole-series spacing must ignore that opening.
+        let time_ranges = ranges(&[("mfimumessage_gyro", 1_000, 1_000_001_000, 1_000_001)]);
+
+        assert_eq!(finest_sample_spacing_micros(&time_ranges), Some(1_000));
+    }
+
+    #[test]
+    fn components_that_measure_nothing_are_skipped() {
+        let time_ranges = ranges(&[
+            ("empty", 0, 0, 0),
+            ("one_sample", 500, 500, 1),
+            ("all_at_once", 700, 700, 64),
+            ("real", 0, 4_000, 5),
+        ]);
+
+        assert_eq!(finest_sample_spacing_micros(&time_ranges), Some(1_000));
+        assert_eq!(finest_sample_spacing_micros(&ranges(&[])), None);
+    }
+
+    #[test]
+    fn a_count_without_a_range_is_ignored() {
+        let mut time_ranges = ranges(&[("real", 0, 4_000, 5)]);
+        time_ranges.row_counts.insert("orphan".to_string(), 10_000);
+
+        assert_eq!(finest_sample_spacing_micros(&time_ranges), Some(1_000));
+    }
+
+    #[test]
+    fn a_reset_disowns_queries_already_in_flight() {
+        let mut time_ranges = ranges(&[("gyro", 0, 1_000_000, 1_001)]);
+        let in_flight = time_ranges.generation();
+        assert!(time_ranges.accepts(in_flight));
+
+        time_ranges.reset();
+
+        assert!(
+            !time_ranges.accepts(in_flight),
+            "cancelling handlers cannot reach requests still sitting in the command queue"
+        );
+        assert!(time_ranges.accepts(time_ranges.generation()));
+    }
+
+    #[test]
+    fn one_unguarded_reply_would_strand_the_new_recording() {
+        // What the generation guard exists to prevent: a reset leaves
+        // `total_queries` at zero, so the very first reply to land satisfies
+        // `completed >= total` and moves the state on. Since
+        // `trigger_time_range_queries` only ever starts from `NotStarted`,
+        // nothing would re-measure the new recording.
+        let mut time_ranges = ComponentTimeRanges::default();
+        time_ranges.reset();
+        assert!(matches!(time_ranges.state, TimeRangeQueryState::NotStarted));
+
+        finish_time_range_query(&mut time_ranges);
+
+        assert!(!matches!(
+            time_ranges.state,
+            TimeRangeQueryState::NotStarted
+        ));
+    }
+
+    #[test]
+    fn a_full_batch_moves_on_to_sparklines() {
+        let mut time_ranges = ComponentTimeRanges {
+            state: TimeRangeQueryState::QueryingTimeRanges(Instant::now()),
+            pending_queries: 2,
+            total_queries: 2,
+            ..Default::default()
+        };
+
+        finish_time_range_query(&mut time_ranges);
+        assert!(matches!(
+            time_ranges.state,
+            TimeRangeQueryState::QueryingTimeRanges(_)
+        ));
+
+        finish_time_range_query(&mut time_ranges);
+        assert!(matches!(
+            time_ranges.state,
+            TimeRangeQueryState::QueryingSparklines(_)
+        ));
+    }
+
+    fn estimate_app() -> App {
+        let mut app = App::new();
+        app.init_resource::<ComponentTimeRanges>()
+            .init_resource::<ComponentPathRegistry>()
+            .init_resource::<ComponentSchemaRegistry>()
+            .init_resource::<SimTimeStepFetch>()
+            .insert_resource(SimulationTimeStep(0.0))
+            .add_systems(Update, estimate_sim_time_step_from_ranges);
+        app
+    }
+
+    fn declare_a_rate(app: &mut App) {
+        use impeller2::component::Component;
+        let id = <SimulationTimeStep as Component>::COMPONENT_ID;
+        let schema = impeller2::schema::Schema::new(impeller2::types::PrimType::F64, [0usize; 0])
+            .expect("schema");
+        app.world_mut()
+            .resource_mut::<ComponentSchemaRegistry>()
+            .0
+            .insert(id, schema);
+    }
+
+    #[test]
+    fn a_leftover_schema_entry_does_not_hold_back_the_measurement() {
+        // The schema registry accumulates across connections and is never
+        // cleared, so an entry left by a previously connected sim says nothing
+        // about whether this recording publishes a rate. Measuring goes ahead
+        // on its own schedule; a declared rate asserts itself by overriding.
+        let mut app = estimate_app();
+        declare_a_rate(&mut app);
+        {
+            let mut time_ranges = app.world_mut().resource_mut::<ComponentTimeRanges>();
+            *time_ranges = ranges(&[("gyro", 0, 1_000_000, 1_001)]);
+        }
+        app.update();
+
+        assert_eq!(app.world().resource::<SimulationTimeStep>().0, 0.001);
+        assert_eq!(
+            app.world().resource::<SimTimeStepFetch>().source(),
+            SimTimeStepSource::Estimated
+        );
+    }
+
+    #[test]
+    fn later_query_batches_refine_the_rate() {
+        let mut app = estimate_app();
+        {
+            let mut time_ranges = app.world_mut().resource_mut::<ComponentTimeRanges>();
+            *time_ranges = ranges(&[("slow", 0, 1_000_000, 1_001)]);
+        }
+        app.update();
+        assert_eq!(app.world().resource::<SimulationTimeStep>().0, 0.001);
+
+        {
+            let mut time_ranges = app.world_mut().resource_mut::<ComponentTimeRanges>();
+            time_ranges
+                .ranges
+                .insert("fast".into(), (Timestamp(0), Timestamp(1_000_000)));
+            time_ranges.row_counts.insert("fast".into(), 8_001);
+        }
+        app.update();
+
+        assert_eq!(app.world().resource::<SimulationTimeStep>().0, 0.000125);
+    }
 }

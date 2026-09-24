@@ -595,6 +595,18 @@ fn serialize_viewport(viewport: &Viewport) -> KdlNode {
         );
     }
 
+    if viewport.frustums_up_marker != FrustumUpMarker::None {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "frustums_up_marker",
+            viewport.frustums_up_marker.as_str(),
+        ));
+    }
+
+    if viewport.frustums_up_marker_overlay {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("frustums_up_marker_overlay", true));
+    }
+
     if !viewport.show_view_cube {
         node.entries_mut()
             .push(KdlEntry::new_prop("show_view_cube", false));
@@ -1942,6 +1954,8 @@ viewport name="main" cinematic=#true ev100=13.5
                 frustums_color: default_viewport_frustums_color(),
                 projection_color: default_viewport_projection_color(),
                 frustums_thickness: default_viewport_frustums_thickness(),
+                frustums_up_marker: FrustumUpMarker::None,
+                frustums_up_marker_overlay: false,
                 show_view_cube: true,
                 view_cube_frame: None,
                 effects: true,
@@ -1975,6 +1989,36 @@ viewport name="main" cinematic=#true ev100=13.5
     }
 
     #[test]
+    fn test_serialize_viewport_frustums_up_marker() {
+        let viewport_line = |marker| {
+            let mut schematic = Schematic::default();
+            schematic
+                .elems
+                .push(SchematicElem::Panel(Panel::Viewport(Viewport {
+                    create_frustum: true,
+                    frustums_up_marker: marker,
+                    ..Default::default()
+                })));
+            serialize_schematic(&schematic)
+        };
+
+        assert!(!viewport_line(FrustumUpMarker::None).contains("frustums_up_marker"));
+        for (marker, expected) in [(FrustumUpMarker::Highlight, "highlight")] {
+            let serialized = viewport_line(marker);
+            assert!(
+                serialized.contains(&format!("frustums_up_marker={expected}"))
+                    || serialized.contains(&format!(r#"frustums_up_marker="{expected}""#)),
+                "expected frustums_up_marker={expected}, got:\n{serialized}"
+            );
+            let reparsed = parse_schematic(&serialized).unwrap();
+            let SchematicElem::Panel(Panel::Viewport(viewport)) = &reparsed.elems[0] else {
+                panic!("Expected viewport panel");
+            };
+            assert_eq!(viewport.frustums_up_marker, marker);
+        }
+    }
+
+    #[test]
     fn test_viewport_property_order() {
         let mut schematic = Schematic::default();
         schematic
@@ -1993,6 +2037,8 @@ viewport name="main" cinematic=#true ev100=13.5
                 frustums_color: Color::YALK,
                 projection_color: Color::MINT,
                 frustums_thickness: 0.012,
+                frustums_up_marker: FrustumUpMarker::Highlight,
+                frustums_up_marker_overlay: true,
                 show_view_cube: false,
                 view_cube_frame: None,
                 effects: true,
@@ -2031,6 +2077,8 @@ viewport name="main" cinematic=#true ev100=13.5
             "frustums_color=",
             "projection_color=",
             "frustums_thickness=",
+            "frustums_up_marker=",
+            "frustums_up_marker_overlay=",
             "show_view_cube=",
             "active=",
         ];
@@ -2045,7 +2093,7 @@ viewport name="main" cinematic=#true ev100=13.5
         for window in indices.windows(2) {
             assert!(
                 window[0] < window[1],
-                "expected viewport properties in order name → fov → near → far → aspect → pos → look_at → hdr → show_grid → show_arrows → create_frustum → show_frustums → frustums_color → projection_color → frustums_thickness → show_view_cube → active: `{viewport_line}`"
+                "expected viewport properties in order name → fov → near → far → aspect → pos → look_at → hdr → show_grid → show_arrows → create_frustum → show_frustums → frustums_color → projection_color → frustums_thickness → frustums_up_marker → frustums_up_marker_overlay → show_view_cube → active: `{viewport_line}`"
             );
         }
     }
@@ -2748,6 +2796,8 @@ object_3d lander.world_pos {
                 frustums_color: default_viewport_frustums_color(),
                 projection_color: default_viewport_projection_color(),
                 frustums_thickness: default_viewport_frustums_thickness(),
+                frustums_up_marker: FrustumUpMarker::None,
+                frustums_up_marker_overlay: false,
                 show_view_cube: true,
                 view_cube_frame: None,
                 effects: true,
