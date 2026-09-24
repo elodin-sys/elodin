@@ -67,10 +67,11 @@ Without `--replay`, the full recorded time range is available immediately.
 ## Choose a schematic
 
 By default, the editor opens the active schematic stored in the database.
-Override it with a local KDL file:
+Override it with a local KDL or Python schematic:
 
 ```bash
-elodin editor dbs/apollo --replay --kdl schematics/review.kdl
+elodin editor dbs/apollo --replay --schematic schematics/review.kdl
+elodin editor dbs/apollo --schematic assets/schematics/main.py
 ```
 
 For details about bundled GLB files, images, skyboxes, and schematics, see

@@ -193,7 +193,7 @@ object_3d drone.world_pos {
 Open the Editor against the database with the schematic:
 
 ```sh
-elodin editor 127.0.0.1:2240 --kdl drone.kdl
+elodin editor 127.0.0.1:2240 --schematic drone.kdl
 ```
 
 The `object_3d` element accepts any EQL expression that evaluates to a

@@ -134,6 +134,7 @@ def test_extended_typed_builders_roundtrip():
                 )
             ],
             visibility=visibility,
+            sensor_visible=False,
         ),
         ui.window(rect=(0, 0, 50, 100)),
         environment=ui.environment(

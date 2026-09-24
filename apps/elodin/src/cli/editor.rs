@@ -5,7 +5,8 @@ use elodin_editor::EditorPlugin;
 use miette::{IntoDiagnostic, miette};
 use std::io::{Read, Seek, Write};
 use std::net::{Ipv6Addr, SocketAddr};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::thread::JoinHandle;
 #[cfg(not(target_os = "windows"))]
 use std::time::Duration;
@@ -33,7 +34,14 @@ pub struct Args {
     #[clap(long, default_value = "[::]:2240")]
     addr: SocketAddr,
 
-    /// Open this KDL schematic file after connecting to the database.
+    /// Open this schematic after connecting. Accepts a `.kdl` file or a Python
+    /// script that defines `build() -> elodin.ui.Schematic`. Relative paths are
+    /// resolved from the current directory, then from a database directory when
+    /// one is given.
+    #[clap(long)]
+    pub schematic: Option<PathBuf>,
+
+    /// Deprecated alias for `--schematic`.
     #[clap(long)]
     pub kdl: Option<PathBuf>,
 
@@ -67,6 +75,7 @@ impl Default for Args {
         Self {
             sim: DEFAULT_SIM,
             addr: default_sim_addr(),
+            schematic: None,
             kdl: None,
             replay: false,
         }
@@ -76,6 +85,147 @@ impl Default for Args {
 impl Default for Simulator {
     fn default() -> Self {
         DEFAULT_SIM
+    }
+}
+
+fn is_python_schematic(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("py"))
+}
+
+fn selected_schematic_arg(args: &Args) -> miette::Result<Option<PathBuf>> {
+    match (&args.schematic, &args.kdl) {
+        (Some(schematic), Some(kdl)) if schematic != kdl => Err(miette!(
+            "use either --schematic or --kdl, not both (--kdl is deprecated)"
+        )),
+        (Some(path), kdl) => {
+            if kdl.is_some() {
+                eprintln!("warning: --kdl is deprecated; use --schematic instead");
+            }
+            Ok(Some(path.clone()))
+        }
+        (None, Some(path)) => {
+            eprintln!("warning: --kdl is deprecated; use --schematic instead");
+            Ok(Some(path.clone()))
+        }
+        (None, None) => Ok(None),
+    }
+}
+
+fn resolve_schematic_path(path: &Path, sim: &Simulator) -> miette::Result<PathBuf> {
+    if path.exists() {
+        return Ok(path.to_path_buf());
+    }
+    if let Simulator::Db(db) = sim {
+        let nested = db.join(path);
+        if nested.exists() {
+            return Ok(nested);
+        }
+        return Err(miette!(
+            "schematic not found: {} (also tried {})",
+            path.display(),
+            nested.display()
+        ));
+    }
+    Err(miette!("schematic not found: {}", path.display()))
+}
+
+fn python_bin() -> miette::Result<String> {
+    std::env::var("ELODIN_PYTHON")
+        .ok()
+        .or_else(|| which_bin("python3"))
+        .or_else(|| which_bin("python"))
+        .ok_or_else(|| miette!("python3 not found on PATH (needed to load a Python schematic)"))
+}
+
+fn which_bin(bin: &str) -> Option<String> {
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join(bin);
+        if candidate.is_file() {
+            return Some(candidate.display().to_string());
+        }
+    }
+    None
+}
+
+const COMPILE_PYTHON_SCHEMATIC: &str = r#"
+from pathlib import Path
+import importlib.util
+import sys
+path = Path(sys.argv[1]).resolve()
+sys.path.insert(0, str(path.parent))
+spec = importlib.util.spec_from_file_location("_elodin_cli_schematic", path)
+if spec is None or spec.loader is None:
+    raise SystemExit(f"cannot load {path}")
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+if not hasattr(mod, "build"):
+    raise SystemExit(f"{path} must define build() -> Schematic")
+schematic = mod.build()
+emit = getattr(schematic, "emit_kdl", None)
+if not callable(emit):
+    raise SystemExit("build() must return an elodin.ui.Schematic")
+sys.stdout.write(emit())
+"#;
+
+struct PreparedSchematic {
+    path: PathBuf,
+    generated: bool,
+}
+
+fn compile_python_schematic(script: &Path) -> miette::Result<PathBuf> {
+    let script = script.canonicalize().into_diagnostic()?;
+    let mut cmd = Command::new(python_bin()?);
+    if let Some(dir) = script.parent() {
+        cmd.current_dir(dir);
+    }
+    let output = cmd
+        .arg("-c")
+        .arg(COMPILE_PYTHON_SCHEMATIC)
+        .arg(&script)
+        .output()
+        .into_diagnostic()?;
+    if !output.status.success() {
+        return Err(miette!(
+            "failed to build schematic from {}:\n{}",
+            script.display(),
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    let kdl = String::from_utf8(output.stdout).into_diagnostic()?;
+    let stem = script
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or("schematic");
+    let name = format!(".elodin-schematic-{}-{stem}.kdl", std::process::id());
+    let sibling = script.with_file_name(&name);
+    match std::fs::write(&sibling, &kdl) {
+        Ok(()) => Ok(sibling),
+        Err(_) => {
+            let out = std::env::temp_dir().join(name.trim_start_matches('.'));
+            std::fs::write(&out, kdl).into_diagnostic()?;
+            Ok(out)
+        }
+    }
+}
+
+fn prepare_initial_schematic(args: &Args) -> miette::Result<Option<PreparedSchematic>> {
+    let Some(requested) = selected_schematic_arg(args)? else {
+        return Ok(None);
+    };
+    let resolved = resolve_schematic_path(&requested, &args.sim)?;
+    if is_python_schematic(&resolved) {
+        Ok(Some(PreparedSchematic {
+            path: compile_python_schematic(&resolved)?,
+            generated: true,
+        }))
+    } else {
+        Ok(Some(PreparedSchematic {
+            path: resolved,
+            generated: false,
+        }))
     }
 }
 
@@ -256,12 +406,12 @@ impl Cli {
             elodin_editor::run::RecipeExecution::Watch,
         )?;
         let mut app = self.editor_app()?;
-        match args.sim {
+        match &args.sim {
             Simulator::None => {
                 app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(None));
             }
             Simulator::Addr(addr) => {
-                app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(Some(addr)));
+                app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(Some(*addr)));
             }
             Simulator::File(_) | Simulator::Db(_) => {
                 app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(Some(args.addr)));
@@ -272,12 +422,20 @@ impl Cli {
         if args.replay {
             app.init_resource::<elodin_editor::ReplayMode>();
         }
-        if let Some(path) = &args.kdl {
-            app.insert_resource(elodin_editor::ui::schematic::InitialKdlPath(Some(
-                path.clone(),
-            )));
-        }
+        let generated_kdl = match prepare_initial_schematic(&args)? {
+            Some(prepared) => {
+                let generated = prepared.generated.then(|| prepared.path.clone());
+                app.insert_resource(elodin_editor::ui::schematic::InitialKdlPath(Some(
+                    prepared.path,
+                )));
+                generated
+            }
+            None => None,
+        };
         app.run();
+        if let Some(path) = generated_kdl {
+            let _ = std::fs::remove_file(path);
+        }
         cancel_token.cancel();
         let sim_result = thread
             .join()
@@ -517,5 +675,73 @@ mod tests {
         let cancel = CancelToken::new();
         wait_for_shutdown(cancel.clone(), std::future::ready(Ok(()))).await;
         assert!(cancel.is_cancelled());
+    }
+
+    #[test]
+    fn schematic_arg_prefers_schematic_over_kdl_when_equal() {
+        let path = PathBuf::from("main.kdl");
+        let args = Args {
+            schematic: Some(path.clone()),
+            kdl: Some(path.clone()),
+            ..Args::default()
+        };
+        assert_eq!(selected_schematic_arg(&args).unwrap(), Some(path));
+    }
+
+    #[test]
+    fn schematic_and_kdl_conflict_when_different() {
+        let args = Args {
+            schematic: Some(PathBuf::from("a.py")),
+            kdl: Some(PathBuf::from("b.kdl")),
+            ..Args::default()
+        };
+        let error = selected_schematic_arg(&args).unwrap_err();
+        assert!(error.to_string().contains("not both"));
+    }
+
+    #[test]
+    fn kdl_flag_still_selects_a_schematic() {
+        let path = PathBuf::from("legacy.kdl");
+        let args = Args {
+            kdl: Some(path.clone()),
+            ..Args::default()
+        };
+        assert_eq!(selected_schematic_arg(&args).unwrap(), Some(path));
+    }
+
+    #[test]
+    fn resolves_schematic_relative_to_database_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("db_state"), []).unwrap();
+        let nested = dir.path().join("assets/schematics");
+        std::fs::create_dir_all(&nested).unwrap();
+        let schematic = nested.join("main.py");
+        std::fs::write(&schematic, "def build():\n    pass\n").unwrap();
+        let sim = Simulator::Db(dir.path().to_path_buf());
+        assert_eq!(
+            resolve_schematic_path(Path::new("assets/schematics/main.py"), &sim).unwrap(),
+            schematic
+        );
+    }
+
+    #[test]
+    fn python_schematic_detected_by_extension() {
+        assert!(is_python_schematic(Path::new("schematics/main.py")));
+        assert!(is_python_schematic(Path::new("Main.PY")));
+        assert!(!is_python_schematic(Path::new("schematics/main.kdl")));
+    }
+
+    #[test]
+    fn prepare_kdl_schematic_passthrough() {
+        let dir = tempfile::tempdir().unwrap();
+        let kdl = dir.path().join("panel.kdl");
+        std::fs::write(&kdl, "viewport {}\n").unwrap();
+        let args = Args {
+            schematic: Some(kdl.clone()),
+            ..Args::default()
+        };
+        let prepared = prepare_initial_schematic(&args).unwrap().unwrap();
+        assert_eq!(prepared.path, kdl);
+        assert!(!prepared.generated);
     }
 }

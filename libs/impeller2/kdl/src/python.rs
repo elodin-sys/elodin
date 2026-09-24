@@ -515,6 +515,9 @@ fn object_expr(object: &Object3D) -> PyExpr {
             "visibility",
             object.mesh_visibility_range.as_ref().map(vis_range_expr),
         );
+    if !object.sensor_visible {
+        call = call.kw("sensor_visible", py_bool(false));
+    }
     if let Object3DMesh::Glb { animations, .. } = &object.mesh
         && !animations.is_empty()
     {
