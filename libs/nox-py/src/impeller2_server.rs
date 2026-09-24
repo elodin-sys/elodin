@@ -418,7 +418,7 @@ fn should_record_component(
     latest: Option<&[u8]>,
     value: &[u8],
 ) -> bool {
-    !metadata.record_on_change() || latest != Some(value)
+    metadata.record_every_tick() || latest != Some(value)
 }
 
 fn commit_world_head_for_world(
@@ -907,10 +907,10 @@ mod commit_tests {
     use super::*;
     use std::collections::HashMap;
 
-    fn metadata(record_on_change: bool) -> ComponentMetadata {
+    fn metadata(record_every_tick: bool) -> ComponentMetadata {
         let mut values = HashMap::new();
-        if record_on_change {
-            values.insert("record_on_change".into(), "true".into());
+        if record_every_tick {
+            values.insert("record_every_tick".into(), "true".into());
         }
         ComponentMetadata {
             component_id: ComponentId::new("value"),
@@ -920,22 +920,22 @@ mod commit_tests {
     }
 
     #[test]
-    fn record_on_change_skips_only_equal_existing_values() {
+    fn sparse_by_default_with_dense_opt_in() {
         let value = [1, 2, 3];
         let changed = [1, 2, 4];
         assert!(!should_record_component(
-            &metadata(true),
+            &metadata(false),
             Some(&value),
             &value,
         ));
         assert!(should_record_component(
-            &metadata(true),
+            &metadata(false),
             Some(&value),
             &changed,
         ));
-        assert!(should_record_component(&metadata(true), None, &value,));
+        assert!(should_record_component(&metadata(false), None, &value,));
         assert!(should_record_component(
-            &metadata(false),
+            &metadata(true),
             Some(&value),
             &value,
         ));

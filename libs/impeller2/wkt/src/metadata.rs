@@ -50,9 +50,11 @@ impl ComponentMetadata {
             .unwrap_or(false)
     }
 
-    pub fn record_on_change(&self) -> bool {
+    /// Returns true when every telemetry commit should be recorded even if the
+    /// component bytes are unchanged. Components are sparse by default.
+    pub fn record_every_tick(&self) -> bool {
         self.metadata
-            .get("record_on_change")
+            .get("record_every_tick")
             .is_some_and(|value| value == "true")
     }
 }
@@ -102,6 +104,29 @@ impl MetadataExt for EntityMetadata {
     }
     fn metadata(&self) -> &HashMap<String, String> {
         &self.metadata
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn metadata(values: &[(&str, &str)]) -> ComponentMetadata {
+        ComponentMetadata {
+            component_id: ComponentId::new("value"),
+            name: "value".into(),
+            metadata: values
+                .iter()
+                .map(|(key, value)| ((*key).into(), (*value).into()))
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn sparse_recording_is_default() {
+        assert!(!metadata(&[]).record_every_tick());
+        assert!(!metadata(&[("record_every_tick", "false")]).record_every_tick());
+        assert!(metadata(&[("record_every_tick", "true")]).record_every_tick());
     }
 }
 

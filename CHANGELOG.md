@@ -2,6 +2,7 @@
 
 ## unreleased
 - **(feat)** Add the `point_trails` schematic node: batched trails and cube/sphere heads for every point in one flat `3 × N` component, with status colors and an optional path-length cap.
+- **(feat)** Record component samples only when their bytes change by default; use `record_every_tick="true"` to opt into dense telemetry.
 
 ## v0.19
 

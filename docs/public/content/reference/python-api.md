@@ -630,7 +630,12 @@ A container of component metadata.
     | `element_names` | comma-separated string (e.g. `"x,y,z"`, `"q0,q1,q2,q3"`) | Labels for each element of a vector or matrix component. Used by the component inspector and as column suffixes when exporting with `elodin-db export --flatten`. |
     | `private` | `"true"` | Component is omitted from `elodin-db export` by default (pass `--include-private` to include it). Useful for marking internal scratch state (e.g. large covariance matrices) that downstream consumers shouldn't see. |
     | `external_control` | `"true"` | Component is writable from external clients (e.g. Betaflight or a HITL bridge) over the Impeller2 protocol. The simulation will not overwrite values written externally. |
-    | `record_on_change` | `"true"` | The simulation records a new sample only when its bytes differ from the latest sample. |
+    | `record_every_tick` | `"true"` | Opt out of sparse recording and write a sample at every telemetry commit even when its bytes are unchanged. |
+
+    Component recording is sparse by default: the simulation writes a sample
+    only when its bytes differ from the latest recorded value. This preserves
+    state semantics while avoiding duplicate rows. Set
+    `record_every_tick="true"` only for consumers that require dense samples.
 
     Example combining a label hint with the export-skip flag:
 
