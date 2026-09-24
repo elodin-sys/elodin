@@ -145,9 +145,7 @@ def evaluate_referee_audit(evidence: RefereeAuditEvidence) -> RefereeAuditResult
     if event_gate != 0:
         failures.append("event_gate")
     if event_time is None or not (
-        AUDIT_EXPECTED_PASS_TIME_RANGE_S[0]
-        <= event_time
-        <= AUDIT_EXPECTED_PASS_TIME_RANGE_S[1]
+        AUDIT_EXPECTED_PASS_TIME_RANGE_S[0] <= event_time <= AUDIT_EXPECTED_PASS_TIME_RANGE_S[1]
     ):
         failures.append("pass_time_window")
 

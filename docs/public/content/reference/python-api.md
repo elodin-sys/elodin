@@ -52,7 +52,7 @@ The Elodin simulation world.
     Load a GLB asset as an Elodin Scene Archetype.
     - `url`: the URL or filepath of the GLB asset
 
-- `sensor_camera(entity, name, width=None, height=None, fov=None, near=0.01, far=1000.0, pos_offset=[0,0,0], rot_offset=[0,0,0], format="rgba", effect="normal", effect_params={}, camera_model=None, lens_hfov=None, create_frustum=False, show_ellipsoids=False, frustums_color=None, projection_color=None, frustums_thickness=0.006, fps=None, cinematic=False, ev100=None, bloom=None, environment=None)` -> None
+- `sensor_camera(entity, name, width=None, height=None, fov=None, near=0.01, far=1000.0, pos_offset=[0,0,0], rot_offset=[0,0,0], format="rgba", effect="normal", effect_params={}, camera_model=None, lens_hfov=None, create_frustum=False, show_ellipsoids=False, frustums_color=None, projection_color=None, frustums_thickness=0.006, frustums_up_marker="none", frustums_up_marker_overlay=True, fps=None, cinematic=False, ev100=None, bloom=None, environment=None)` -> None
 
     Register a virtual sensor camera on an entity. The headless GPU render-server emits one frame per camera every `1 / fps` µs of simulation time and pushes the bytes back to the database. The simulation reads frames asynchronously with `ctx.read_msg("entity.name", timestamp=...)`.
 

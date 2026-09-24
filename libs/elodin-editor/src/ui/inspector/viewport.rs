@@ -17,7 +17,7 @@ use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation, OrDefault, RotationKind
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::{
     BloomPreset, ComponentValue, EarthAirglowConfig, EarthCityLightsConfig, EarthNightMapConfig,
-    EarthStarsConfig, QueryType, WorldPos,
+    EarthStarsConfig, FrustumUpMarker, QueryType, WorldPos,
 };
 use nox::ArrayBuf;
 
@@ -46,6 +46,13 @@ const ANCHOR_DEPTH_EPSILON: f64 = 1.0e-9;
 pub struct ViewportFocusPickTarget;
 
 /// Extract a 3-vector from a ComponentValue (e.g. F64 array of length >= 3). Returns None if not a numeric array or length < 3.
+pub fn frustum_up_marker_label(marker: FrustumUpMarker) -> &'static str {
+    match marker {
+        FrustumUpMarker::None => "None",
+        FrustumUpMarker::Highlight => "Highlight top edge",
+    }
+}
+
 fn extract_vec3(val: &ComponentValue) -> Option<DVec3> {
     let ComponentValue::F64(array) = val else {
         return None;
@@ -1007,6 +1014,32 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                             }
                         });
                     });
+
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new("UP MARKER").color(scheme.text_secondary));
+                    ui.add_space(4.0);
+                    theme::configure_combo_box(ui.style_mut());
+                    ui.style_mut().spacing.combo_width = ui.available_size().x;
+                    egui::ComboBox::from_id_salt("frustums_up_marker")
+                        .selected_text(frustum_up_marker_label(viewport_config.frustums_up_marker))
+                        .show_ui(ui, |ui| {
+                            theme::configure_combo_item(ui.style_mut());
+                            for marker in [FrustumUpMarker::None, FrustumUpMarker::Highlight] {
+                                ui.selectable_value(
+                                    &mut viewport_config.frustums_up_marker,
+                                    marker,
+                                    frustum_up_marker_label(marker),
+                                );
+                            }
+                        });
+
+                    if viewport_config.frustums_up_marker != FrustumUpMarker::None {
+                        ui.add_space(4.0);
+                        ui.checkbox(
+                            &mut viewport_config.frustums_up_marker_overlay,
+                            "Show on this pane",
+                        );
+                    }
                 }
 
                 ui.add_space(8.0);

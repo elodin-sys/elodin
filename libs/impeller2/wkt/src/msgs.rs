@@ -412,6 +412,20 @@ impl DbConfig {
         );
     }
 
+    /// Recorded by a simulation as `playback.default_speed`. Absent on a
+    /// database that never declared one: the 10 ms stream step is a server
+    /// default, not a playback speed, so it must not be inverted into one.
+    pub const DEFAULT_PLAYBACK_SPEED_KEY: &'static str = "playback.default_speed";
+
+    pub fn default_playback_speed(&self) -> Option<f64> {
+        let speed: f64 = self
+            .metadata
+            .get(Self::DEFAULT_PLAYBACK_SPEED_KEY)?
+            .parse()
+            .ok()?;
+        (speed.is_finite() && speed > 0.0).then_some(speed)
+    }
+
     pub fn time_start_timestamp_micros(&self) -> Option<i64> {
         self.metadata
             .get(Self::TIME_START_TIMESTAMP_KEY)
@@ -827,5 +841,18 @@ mod skybox_metadata_tests {
             config.skybox_active_desired(),
             Some(Some("seaport".to_string()))
         );
+    }
+
+    #[test]
+    fn default_playback_speed_ignores_a_database_that_never_declared_one() {
+        let config = DbConfig::default();
+        assert!(config.default_playback_speed().is_none());
+
+        let mut declared = DbConfig::default();
+        declared.metadata.insert(
+            DbConfig::DEFAULT_PLAYBACK_SPEED_KEY.to_string(),
+            "30".to_string(),
+        );
+        assert_eq!(declared.default_playback_speed(), Some(30.0));
     }
 }

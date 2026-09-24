@@ -506,9 +506,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
                 referee_audit_first_position[0] = current_truth_position
             referee_audit_final_position[0] = current_truth_position
         if audit_telemetry_poll:
-            referee_audit_telemetry_last_gate[0] = int(
-                sensor_data["drone.last_gate_passed"][0]
-            )
+            referee_audit_telemetry_last_gate[0] = int(sensor_data["drone.last_gate_passed"][0])
             referee_audit_telemetry_times[0] = tuple(
                 float(value) for value in sensor_data["drone.gate_pass_times"]
             )
