@@ -1191,6 +1191,7 @@ impl WorldPosExt for WorldPos {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn advance_playback(
     time: Res<Time>,
     mut current_ts: ResMut<CurrentTimestamp>,
@@ -1198,6 +1199,8 @@ pub fn advance_playback(
     speed: Res<ui::timeline::PlaybackSpeed>,
     last_updated: Res<LastUpdated>,
     earliest: Res<EarliestTimestamp>,
+    playback_loop: Res<ui::timeline::playback::PlaybackLoop>,
+    region: Res<ui::timeline::playback::PlaybackRegion>,
 ) {
     if paused.0 {
         return;
@@ -1206,8 +1209,22 @@ pub fn advance_playback(
         return;
     }
     let delta_micros = (time.delta_secs_f64() * speed.0 * 1_000_000.0) as i64;
-    let new_ts = Timestamp(current_ts.0.0.saturating_add(delta_micros));
-    current_ts.0 = Timestamp(new_ts.0.clamp(earliest.0.0, last_updated.0.0));
+    let next = match ui::timeline::playback::loop_bounds(
+        playback_loop.0,
+        region.0,
+        earliest.0,
+        last_updated.0,
+    ) {
+        Some((start, end)) => {
+            ui::timeline::playback::step_loop(current_ts.0.0, delta_micros, start, end)
+        }
+        None => current_ts
+            .0
+            .0
+            .saturating_add(delta_micros)
+            .clamp(earliest.0.0, last_updated.0.0),
+    };
+    current_ts.0 = Timestamp(next);
 }
 
 pub fn follow_latest(
@@ -1215,6 +1232,7 @@ pub fn follow_latest(
     latest: Res<LastUpdated>,
     earliest: Res<EarliestTimestamp>,
     latest_follow: Res<ui::timeline::LatestFollow>,
+    mut paused: ResMut<ui::Paused>,
     replay: Option<Res<ReplayMode>>,
 ) {
     if replay.is_some() || !latest_follow.0 {
@@ -1223,6 +1241,10 @@ pub fn follow_latest(
     if earliest.0 >= latest.0 {
         return;
     }
+    // Sole writer of the playhead while live follow is on. The timeline
+    // widget used to pin it a second time, a frame later, which discarded
+    // whatever advance_playback had just done.
+    paused.0 = false;
     current_ts.0 = latest.0;
 }
 
