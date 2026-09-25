@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from referee import (
     CORE_COURSE_GATE_CAPACITY,
     PASS_TIME_UNSET_S,
     GatePassEvent,
     RaceResult,
+    Vec3,
 )
 
 AUDIT_ENV = "RACE_REFEREE_AUDIT"
@@ -99,6 +100,64 @@ class RefereeAuditEvidence:
     final_position: tuple[float, float, float] | None
     race_line_count: int
     audit_line_count: int
+
+
+@dataclass(slots=True)
+class RefereeAuditCollector:
+    """Collect live audit observations without changing post-step ordering."""
+
+    previous_position: Vec3
+    events: list[GatePassEvent] = field(default_factory=list)
+    event_tick: int | None = None
+    first_position: Vec3 | None = None
+    crossing_previous_position: Vec3 | None = None
+    crossing_current_position: Vec3 | None = None
+    final_position: Vec3 | None = None
+    telemetry_last_gate_passed: int | None = None
+    telemetry_pass_times: tuple[float, ...] | None = None
+    telemetry_verified_on_later_tick: bool = False
+
+    def record_truth_read(self, position: Vec3) -> None:
+        if self.first_position is None:
+            self.first_position = position
+        self.final_position = position
+
+    def telemetry_due(self, tick: int) -> bool:
+        return (
+            self.event_tick is not None
+            and tick > self.event_tick
+            and not self.telemetry_verified_on_later_tick
+        )
+
+    def record_telemetry(self, last_gate_passed: int, pass_times: tuple[float, ...]) -> None:
+        self.telemetry_last_gate_passed = last_gate_passed
+        self.telemetry_pass_times = pass_times
+        self.telemetry_verified_on_later_tick = True
+
+    def record_scoring_tick(self, position: Vec3, tick: int, event: GatePassEvent | None) -> None:
+        if event is not None:
+            self.events.append(event)
+            self.event_tick = tick
+            self.crossing_previous_position = self.previous_position
+            self.crossing_current_position = position
+        self.previous_position = position
+
+    def evidence(
+        self, race_result: RaceResult, race_line_count: int, audit_line_count: int
+    ) -> RefereeAuditEvidence:
+        return RefereeAuditEvidence(
+            events=tuple(self.events),
+            telemetry_last_gate_passed=self.telemetry_last_gate_passed,
+            telemetry_pass_times=self.telemetry_pass_times,
+            telemetry_verified_on_later_tick=self.telemetry_verified_on_later_tick,
+            race_result=race_result,
+            first_position=self.first_position,
+            crossing_previous_position=self.crossing_previous_position,
+            crossing_current_position=self.crossing_current_position,
+            final_position=self.final_position,
+            race_line_count=race_line_count,
+            audit_line_count=audit_line_count,
+        )
 
 
 @dataclass(frozen=True, slots=True)

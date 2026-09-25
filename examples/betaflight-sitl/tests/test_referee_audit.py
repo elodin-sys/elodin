@@ -6,6 +6,7 @@ from referee_audit import (
     AUDIT_DURATION_S,
     AUDIT_INITIAL_POSITION,
     AUDIT_INITIAL_VELOCITY,
+    RefereeAuditCollector,
     RefereeAuditEvidence,
     audit_initial_condition,
     evaluate_referee_audit,
@@ -88,6 +89,35 @@ def test_referee_audit_rejects_invalid_combinations(
             guidance_mode=guidance,
             manual_audit_requested=manual_audit,
         )
+
+
+def test_referee_audit_collector_preserves_tick_order_and_evidence() -> None:
+    collector = RefereeAuditCollector(AUDIT_INITIAL_POSITION)
+    first = (5.001, 0.0, 4.9)
+    before = (9.9999, 0.0, 1.8002)
+    after = (10.0001, 0.0, 1.7998)
+    final = (11.7, 0.0, 0.0)
+    event = GatePassEvent(gate_index=0, pass_time=1.08525)
+
+    assert not collector.telemetry_due(1)
+    collector.record_truth_read(first)
+    collector.record_scoring_tick(first, tick=1, event=None)
+    collector.record_truth_read(before)
+    collector.record_scoring_tick(before, tick=2, event=None)
+    collector.record_truth_read(after)
+    collector.record_scoring_tick(after, tick=3, event=event)
+    assert not collector.telemetry_due(3)
+    assert collector.telemetry_due(4)
+    collector.record_telemetry(0, (1.08525, -1.0, -1.0))
+    assert not collector.telemetry_due(5)
+    collector.record_truth_read(final)
+    collector.record_scoring_tick(final, tick=4, event=None)
+
+    expected = _passing_evidence()
+    assert (
+        collector.evidence(expected.race_result, race_line_count=1, audit_line_count=1) == expected
+    )
+    assert evaluate_referee_audit(collector.evidence(expected.race_result, 1, 1)).passed
 
 
 def test_referee_audit_evaluator_accepts_complete_live_evidence() -> None:

@@ -46,9 +46,9 @@ from controls import (
     semantic_to_rc,
 )
 from course import course_from_env, gate_schematic
-from referee import GatePassEvent, Referee, world_position_from_transform
+from referee import Referee, world_position_from_transform
 from referee_audit import (
-    RefereeAuditEvidence,
+    RefereeAuditCollector,
     RefereeAuditResult,
     audit_initial_condition,
     evaluate_referee_audit,
@@ -340,18 +340,11 @@ race_result_emitted = [False]
 race_result_line_count = [0]
 referee_audit_result: list[RefereeAuditResult | None] = [None]
 referee_audit_result_emitted = [False]
-referee_audit_events: list[GatePassEvent] = []
-referee_audit_event_tick: list[int | None] = [None]
-referee_audit_first_position: list[tuple[float, float, float] | None] = [None]
-referee_audit_previous_position: list[tuple[float, float, float] | None] = [
-    tuple(float(value) for value in config.initial_position)
-]
-referee_audit_crossing_previous: list[tuple[float, float, float] | None] = [None]
-referee_audit_crossing_current: list[tuple[float, float, float] | None] = [None]
-referee_audit_final_position: list[tuple[float, float, float] | None] = [None]
-referee_audit_telemetry_last_gate: list[int | None] = [None]
-referee_audit_telemetry_times: list[tuple[float, ...] | None] = [None]
-referee_audit_telemetry_later_tick = [False]
+referee_audit_collector = (
+    RefereeAuditCollector(tuple(float(value) for value in config.initial_position))
+    if referee_audit_requested
+    else None
+)
 
 
 def emit_race_result() -> None:
@@ -368,16 +361,9 @@ def emit_final_results() -> None:
 
     emit_race_result()
     if referee_audit_requested and not referee_audit_result_emitted[0]:
-        evidence = RefereeAuditEvidence(
-            events=tuple(referee_audit_events),
-            telemetry_last_gate_passed=referee_audit_telemetry_last_gate[0],
-            telemetry_pass_times=referee_audit_telemetry_times[0],
-            telemetry_verified_on_later_tick=referee_audit_telemetry_later_tick[0],
+        assert referee_audit_collector is not None
+        evidence = referee_audit_collector.evidence(
             race_result=referee.result(),
-            first_position=referee_audit_first_position[0],
-            crossing_previous_position=referee_audit_crossing_previous[0],
-            crossing_current_position=referee_audit_crossing_current[0],
-            final_position=referee_audit_final_position[0],
             race_line_count=race_result_line_count[0],
             # This is the single line emitted immediately below.
             audit_line_count=1,
@@ -486,10 +472,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
     if manual_input_poll:
         reads.append("drone.manual_control")
     audit_telemetry_poll = (
-        referee_audit_requested
-        and referee_audit_event_tick[0] is not None
-        and tick > referee_audit_event_tick[0]
-        and not referee_audit_telemetry_later_tick[0]
+        referee_audit_collector is not None and referee_audit_collector.telemetry_due(tick)
     )
     if audit_telemetry_poll:
         reads.extend(["drone.last_gate_passed", "drone.gate_pass_times"])
@@ -501,16 +484,14 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         world_pos = sensor_data["drone.world_pos"]
         world_vel = sensor_data["drone.world_vel"]
         current_truth_position = world_position_from_transform(world_pos)
-        if referee_audit_requested:
-            if referee_audit_first_position[0] is None:
-                referee_audit_first_position[0] = current_truth_position
-            referee_audit_final_position[0] = current_truth_position
+        if referee_audit_collector is not None:
+            referee_audit_collector.record_truth_read(current_truth_position)
         if audit_telemetry_poll:
-            referee_audit_telemetry_last_gate[0] = int(sensor_data["drone.last_gate_passed"][0])
-            referee_audit_telemetry_times[0] = tuple(
-                float(value) for value in sensor_data["drone.gate_pass_times"]
+            assert referee_audit_collector is not None
+            referee_audit_collector.record_telemetry(
+                int(sensor_data["drone.last_gate_passed"][0]),
+                tuple(float(value) for value in sensor_data["drone.gate_pass_times"]),
             )
-            referee_audit_telemetry_later_tick[0] = True
         if barometer_fresh:
             s.barometer = float(sensor_data["drone.baro"][0])
             barometer = s.barometer
@@ -602,12 +583,9 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
     # snapshot constructed above (therefore a pass becomes visible next tick).
     if race_course.gates and current_truth_position is not None:
         gate_event = referee.observe_truth(current_truth_position, t)
+        if referee_audit_collector is not None:
+            referee_audit_collector.record_scoring_tick(current_truth_position, tick, gate_event)
         if gate_event is not None:
-            if referee_audit_requested:
-                referee_audit_events.append(gate_event)
-                referee_audit_event_tick[0] = tick
-                referee_audit_crossing_previous[0] = referee_audit_previous_position[0]
-                referee_audit_crossing_current[0] = current_truth_position
             ctx.component_batch_operation(
                 writes={
                     "drone.last_gate_passed": np.array([gate_event.gate_index], dtype=np.int64),
@@ -616,8 +594,6 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
                     ),
                 }
             )
-        if referee_audit_requested:
-            referee_audit_previous_position[0] = current_truth_position
 
     # Print status every second
     if t - last_print[0] >= 1.0:
