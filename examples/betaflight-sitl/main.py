@@ -45,7 +45,8 @@ from controls import (
     guidance_mode_from_env,
     semantic_to_rc,
 )
-from course import course_from_env, gate_schematic
+from course import course_from_env
+from schematic import build_schematic
 from referee import Referee, world_position_from_transform
 from referee_audit import (
     RefereeAuditCollector,
@@ -177,49 +178,8 @@ gate_entities = spawn_course(world, race_course)
 
 # Editor schematic for visualization. Procedural gate boxes use the editor's
 # standard non-emissive material; their entity poses supply the gate yaw.
-schematic = """
-    tabs {
-        hsplit name = "Viewport" {
-            viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 10,10,5)" look_at="drone.world_pos" show_grid=#true active=#true
-            vsplit share=0.3 {
-                graph "drone.motor_command" name="Motor Commands (from Betaflight)"
-                graph "drone.motor_thrust" name="Motor Thrust"
-                graph "drone.accel" name="Accelerometer"
-            }
-            vsplit share=0.3 {
-                graph "drone.world_pos.linear()" name="Position (ENU)"
-                graph "drone.world_vel.linear()" name="Velocity"
-                graph "drone.gyro" name="Gyroscope"
-            }
-        }
-    }
-    object_3d drone.world_pos {
-        glb path="edu-450-v2-drone.glb" scale=10.0
-    }
-    """
-if race_course.gates:
-    # Keep the opt-in course framed during scripted bring-up; the default
-    # schematic retains its existing chase camera unchanged.
-    course_camera = 'pos="(0,0,0,1, 4,-2,3)" look_at="(10,0,1.8)"'
-    if referee_audit_requested:
-        # An oblique audit view keeps the full vertical opening visible while
-        # making the drone's world-X approach and departure visually obvious.
-        course_camera = 'pos="(0,0,0,1, 3,-4,3.5)" look_at="(9,0,2)"'
-    schematic = schematic.replace(
-        'pos="drone.world_pos + (0,0,0,0, 10,10,5)" look_at="drone.world_pos"',
-        course_camera,
-    )
-    schematic += "\n" + gate_schematic(race_course) + "\n"
-if referee_audit_requested:
-    schematic = schematic.replace(
-        'graph "drone.accel" name="Accelerometer"',
-        'graph "drone.last_gate_passed" name="Referee: Last Gate Passed"',
-    ).replace(
-        'graph "drone.gyro" name="Gyroscope"',
-        'graph "drone.gate_pass_times" name="Referee: Gate Pass Times"',
-    )
 world.schematic(
-    schematic,
+    build_schematic(race_course, audit_enabled=referee_audit_requested),
     "betaflight-sitl.kdl",
 )
 
