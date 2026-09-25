@@ -1429,7 +1429,10 @@ The semi-implicit integrator is a numerical method used to solve ordinary differ
 <p>Component recording is sparse by default: the simulation writes a sample
 only when its bytes differ from the latest recorded value. This preserves
 state semantics while avoiding duplicate rows. Set
-<code>record_every_tick="true"</code> only for consumers that require dense samples.</p>
+<code>record_every_tick="true"</code> only for consumers that require dense samples.
+Editor plots and <code>Exec.history()</code> carry values forward while aligning
+sparse components; raw database exports remain change streams with
+per-component row counts.</p>
 <p>Example combining a label hint with the export-skip flag:</p>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> elodin</span><span style="color: light-dark(#859900, #859900);"> as</span><span> el</span></span>
 <span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> jax</span></span>
