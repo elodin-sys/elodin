@@ -602,6 +602,7 @@ pub struct VisiblePrefetchState {
 }
 
 impl VisiblePrefetchState {
+    /// Cancels requests while retaining probes that match the soft-preserved cache.
     pub fn clear_in_flight(&mut self) {
         self.in_flight.clear();
         self.anchor_in_flight.clear();
@@ -615,6 +616,10 @@ impl VisiblePrefetchState {
 
 const VISIBLE_PREFETCH_LIMIT: usize = 8192;
 const HOLD_ANCHOR_RETRY_DELAY: Duration = Duration::from_millis(100);
+
+fn visible_prefetch_packet_id() -> PacketId {
+    fastrand::u16(1..=u16::MAX).to_le_bytes()
+}
 
 #[derive(Debug, PartialEq, Eq)]
 enum HoldAnchorDecision {
@@ -836,7 +841,7 @@ fn prefetch_visible_window(
         prefetch.in_flight.insert(key);
         let start = sync_range.start;
         let end = sync_range.end;
-        let packet_id = fastrand::u16(..).to_le_bytes();
+        let packet_id = visible_prefetch_packet_id();
         let msg = GetTimeSeries {
             id: packet_id,
             range: start..end,
@@ -940,7 +945,7 @@ fn apply_visible_prefetch_page(
         && last_ts.0.saturating_add(1) < req_end.0
     {
         let next_start = Timestamp(last_ts.0.saturating_add(1));
-        let packet_id = fastrand::u16(..).to_le_bytes();
+        let packet_id = visible_prefetch_packet_id();
         let msg = GetTimeSeries {
             id: packet_id,
             range: next_start..req_end,
@@ -3686,6 +3691,33 @@ mod tests {
         );
         assert_eq!(line.first_timestamp(), Some(Timestamp(10)));
         assert_eq!(line.latest_sample_timestamp(), Some(Timestamp(19)));
+    }
+
+    #[test]
+    fn visible_prefetch_reserves_zero_packet_id() {
+        for _ in 0..1024 {
+            assert_ne!(u16::from_le_bytes(visible_prefetch_packet_id()), 0);
+        }
+    }
+
+    #[test]
+    fn reconnect_probe_state_matches_cache_policy() {
+        let id = ComponentId::new("test.reconnect");
+        let mut soft = VisiblePrefetchState::default();
+        soft.in_flight.insert((id, 10, 20));
+        soft.anchor_in_flight.insert(id, 10);
+        soft.anchor_probed.insert(id, 10);
+        soft.anchor_retry_after
+            .insert(id, (10, Instant::now() + HOLD_ANCHOR_RETRY_DELAY));
+        soft.clear_in_flight();
+
+        assert!(soft.in_flight.is_empty());
+        assert!(soft.anchor_in_flight.is_empty());
+        assert!(soft.anchor_retry_after.is_empty());
+        assert_eq!(soft.anchor_probed.get(&id), Some(&10));
+
+        let hard = VisiblePrefetchState::default();
+        assert!(hard.anchor_probed.is_empty());
     }
 
     #[test]
