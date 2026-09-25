@@ -2202,7 +2202,7 @@ fn parse_point_trails(node: &KdlNode, src: &str) -> Result<PointTrails, KdlSchem
             span: node.span(),
         })?
         .to_string();
-    let float = |name: &str| node.get(name).and_then(|v| v.as_float()).unwrap_or(1.0) as f32;
+    let float = |name: &str| float_prop(node, name).unwrap_or(1.0);
     let frame = node
         .get("frame")
         .and_then(|v| v.as_string())
@@ -2220,10 +2220,7 @@ fn parse_point_trails(node: &KdlNode, src: &str) -> Result<PointTrails, KdlSchem
             });
         }
     };
-    let max_length = node
-        .get("max_length")
-        .and_then(|v| v.as_float())
-        .map(|value| value as f32);
+    let max_length = float_prop(node, "max_length");
     if max_length.is_some_and(|value| !value.is_finite() || value <= 0.0) {
         return Err(KdlSchematicError::InvalidValue {
             property: "max_length".to_string(),
@@ -2238,6 +2235,10 @@ fn parse_point_trails(node: &KdlNode, src: &str) -> Result<PointTrails, KdlSchem
         component,
         status: node
             .get("status")
+            .and_then(|v| v.as_string())
+            .map(str::to_string),
+        start: node
+            .get("start")
             .and_then(|v| v.as_string())
             .map(str::to_string),
         head_size: float("head_size"),
@@ -4055,7 +4056,7 @@ tabs {
     #[test]
     fn test_parse_point_trails() {
         let schematic = parse_schematic(
-            r#"point_trails "effector.cube_pos_ecef" status="effector.cube_hit_tick" frame="ECEF" head_size=0.15 head_shape="sphere" line_width=4.0 max_length=3.0 { color 0 255 0; hit_color 255 255 255 }"#,
+            r#"point_trails "effector.cube_pos_ecef" status="effector.cube_hit_tick" start="effector.cube_cloud_fired" frame="ECEF" head_size=0.15 head_shape="sphere" line_width=4.0 max_length=3.0 { color 0 255 0; hit_color 255 255 255 }"#,
         )
         .unwrap();
         let SchematicElem::PointTrails(trails) = &schematic.elems[0] else {
@@ -4063,6 +4064,7 @@ tabs {
         };
         assert_eq!(trails.component, "effector.cube_pos_ecef");
         assert_eq!(trails.status.as_deref(), Some("effector.cube_hit_tick"));
+        assert_eq!(trails.start.as_deref(), Some("effector.cube_cloud_fired"));
         assert!((trails.head_size - 0.15).abs() < 1e-6);
         assert_eq!(trails.head_shape, PointTrailsHeadShape::Sphere);
         assert_eq!(trails.line_width, 4.0);
@@ -4080,7 +4082,18 @@ tabs {
         assert_eq!(trails.max_length, None);
         assert_eq!((trails.color, trails.hit_color), (None, None));
         assert_eq!(trails.status, None);
+        assert_eq!(trails.start, None);
         assert_eq!(trails.frame, None);
+
+        let schematic =
+            parse_schematic(r#"point_trails "cloud.pos" head_size=2 line_width=4 max_length=3"#)
+                .unwrap();
+        let SchematicElem::PointTrails(trails) = &schematic.elems[0] else {
+            panic!("Expected point_trails");
+        };
+        assert_eq!(trails.head_size, 2.0);
+        assert_eq!(trails.line_width, 4.0);
+        assert_eq!(trails.max_length, Some(3.0));
     }
 
     #[test]

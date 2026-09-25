@@ -37,7 +37,14 @@ use crate::{
 };
 
 /// Position window, status sample, and geometry settings behind the strips.
-type SyncKey = (Timestamp, Timestamp, usize, Option<Timestamp>, Option<u32>);
+type SyncKey = (
+    Timestamp,
+    Timestamp,
+    usize,
+    Option<Timestamp>,
+    Option<Timestamp>,
+    Option<u32>,
+);
 
 #[derive(Clone, Copy, PartialEq)]
 struct PointTrailsStyle {
@@ -69,6 +76,8 @@ fn head_mesh_index(shape: PointTrailsHeadShape) -> usize {
 struct PointTrailsState {
     component_id: ComponentId,
     status_id: Option<ComponentId>,
+    start_id: Option<ComponentId>,
+    start_timestamp: Option<Timestamp>,
     meshes: [Handle<Mesh>; 2],
     /// Normal and hit head materials.
     materials: [Handle<StandardMaterial>; 2],
@@ -111,35 +120,41 @@ fn downsample(count: usize, budget: usize) -> Vec<usize> {
     (0..budget).map(|k| k * last / (budget - 1)).collect()
 }
 
-/// Carries the preceding sparse sample into `(start, end]`, unless its gap is
-/// over 100× the recent cadence and therefore marks a trajectory reset.
+/// Carries the preceding sparse sample into `(start, end]`, bounded by an
+/// optional explicit start event.
 fn window_samples<'a>(
     series: &'a BTreeMap<Timestamp, ComponentValue>,
     range: &Range<Timestamp>,
+    start: Option<Timestamp>,
 ) -> Vec<(Timestamp, &'a [f64])> {
-    let mut samples: Vec<_> = series
-        .range(..=range.start)
+    let start = start.unwrap_or(Timestamp(i64::MIN));
+    let window_start = range.start.max(start);
+    if window_start > range.end {
+        return Vec::new();
+    }
+    series
+        .range(start..=window_start)
         .next_back()
         .into_iter()
-        .chain(series.range((Bound::Excluded(range.start), Bound::Included(range.end))))
+        .chain(series.range((Bound::Excluded(window_start), Bound::Included(range.end))))
         .filter_map(|(ts, value)| match value {
             ComponentValue::F64(array) => Some((*ts, array.buf.as_buf())),
             _ => None,
         })
-        .collect();
-    if samples.len() >= 3 {
-        let carried_gap = samples[1].0.0.saturating_sub(samples[0].0.0);
-        let recent_gap = samples[2..]
+        .collect()
+}
+
+fn trail_start_timestamp(
+    series: &BTreeMap<Timestamp, ComponentValue>,
+    end: Timestamp,
+) -> Option<Timestamp> {
+    series.range(..=end).find_map(|(timestamp, value)| {
+        value
             .iter()
-            .zip(&samples[1..])
-            .map(|(newer, older)| newer.0.0.saturating_sub(older.0.0))
-            .filter(|gap| *gap > 0)
-            .min();
-        if recent_gap.is_some_and(|gap| carried_gap > gap.saturating_mul(100)) {
-            samples.remove(0);
-        }
-    }
-    samples
+            .next()
+            .is_some_and(|element| element.as_f64() != 0.0)
+            .then_some(*timestamp)
+    })
 }
 
 fn point(values: &[f64], n: usize, i: usize) -> DVec3 {
@@ -209,6 +224,8 @@ fn init_point_trails(
             PointTrailsState {
                 component_id: ComponentId::new(trails.component.trim()),
                 status_id: trails.status.as_deref().map(|s| ComponentId::new(s.trim())),
+                start_id: trails.start.as_deref().map(|s| ComponentId::new(s.trim())),
+                start_timestamp: None,
                 meshes: [
                     meshes.add(Cuboid::from_length(1.0)),
                     meshes.add(Sphere::new(0.5)),
@@ -294,8 +311,20 @@ fn sync_point_trails(
             uniform.color = super::line_color_linear(&style.color);
             strips.hit_color = super::line_color_linear(&style.hit_color);
         }
-        let samples = match (&range, cache.series(&state.component_id)) {
-            (Some(range), Some(series)) => window_samples(series, range),
+        if let (Some(range), Some(start_id)) = (&range, state.start_id)
+            && let Some(series) = cache.series(&start_id)
+            && let Some(found) = trail_start_timestamp(series, range.end)
+            && state.start_timestamp.is_none_or(|current| found < current)
+        {
+            state.start_timestamp = Some(found);
+        }
+        let start = match state.start_id {
+            Some(_) => state.start_timestamp,
+            None => None,
+        };
+        let samples = match (&range, start, cache.series(&state.component_id)) {
+            (_, None, _) if state.start_id.is_some() => Vec::new(),
+            (Some(range), start, Some(series)) => window_samples(series, range, start),
             _ => Vec::new(),
         };
         let n = samples.last().map_or(0, |(_, values)| values.len() / 3);
@@ -318,6 +347,7 @@ fn sync_point_trails(
             samples[samples.len() - 1].0,
             samples.len(),
             status.map(|(ts, _)| *ts),
+            start,
             trails.max_length.map(f32::to_bits),
         );
         if state.key == Some(key) && state.heads.len() == n && !style_changed {
@@ -499,6 +529,7 @@ mod tests {
         let mut trails = PointTrails {
             component: "points".into(),
             status: None,
+            start: None,
             head_size: 0.1,
             head_shape: PointTrailsHeadShape::Sphere,
             line_width: 2.0,
@@ -603,13 +634,13 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        let samples = window_samples(&series, &(Timestamp(10)..Timestamp(60)));
+        let samples = window_samples(&series, &(Timestamp(10)..Timestamp(60)), None);
         let xs: Vec<f64> = samples.iter().map(|(_, v)| v[0]).collect();
         assert_eq!(xs, vec![1.0, 2.0]);
     }
 
     #[test]
-    fn sparse_series_drops_stale_predecessor_before_a_new_cadence() {
+    fn explicit_start_preserves_holds_and_excludes_initialization() {
         let value = |x: f64| ComponentValue::F64(nox::array![x, 0.0, 0.0].to_dyn());
         let series: BTreeMap<_, _> = [
             (Timestamp(0), value(1.0)),
@@ -618,8 +649,42 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        let samples = window_samples(&series, &(Timestamp(500_000)..Timestamp(1_001_000)));
-        let xs: Vec<f64> = samples.iter().map(|(_, values)| values[0]).collect();
-        assert_eq!(xs, vec![2.0, 3.0]);
+        let range = Timestamp(500_000)..Timestamp(1_001_000);
+        let held: Vec<f64> = window_samples(&series, &range, None)
+            .iter()
+            .map(|(_, values)| values[0])
+            .collect();
+        assert_eq!(held, vec![1.0, 2.0, 3.0]);
+
+        let started: Vec<f64> = window_samples(&series, &range, Some(Timestamp(1_000_000)))
+            .iter()
+            .map(|(_, values)| values[0])
+            .collect();
+        assert_eq!(started, vec![2.0, 3.0]);
+    }
+
+    #[test]
+    fn start_component_uses_first_nonzero_sample() {
+        let series: BTreeMap<_, _> = [
+            (
+                Timestamp(0),
+                ComponentValue::U64(nox::array![0u64].to_dyn()),
+            ),
+            (
+                Timestamp(100),
+                ComponentValue::U64(nox::array![1u64].to_dyn()),
+            ),
+            (
+                Timestamp(200),
+                ComponentValue::U64(nox::array![1u64].to_dyn()),
+            ),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(trail_start_timestamp(&series, Timestamp(50)), None);
+        assert_eq!(
+            trail_start_timestamp(&series, Timestamp(250)),
+            Some(Timestamp(100))
+        );
     }
 }

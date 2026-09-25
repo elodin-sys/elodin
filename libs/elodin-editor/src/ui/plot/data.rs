@@ -1345,6 +1345,7 @@ fn collect_object_3d_mesh_component_ids(
 fn point_trails_component_ids(trails: &PointTrails) -> impl Iterator<Item = ComponentId> {
     std::iter::once(trails.component.as_str())
         .chain(trails.status.as_deref())
+        .chain(trails.start.as_deref())
         .map(|name| ComponentId::new(name.trim()))
 }
 
@@ -3379,6 +3380,7 @@ mod tests {
         let trails = PointTrails {
             component: "effector.cube_pos_ecef".to_string(),
             status: Some("effector.cube_hit_tick".to_string()),
+            start: Some("effector.cube_cloud_fired".to_string()),
             head_size: 0.15,
             head_shape: Default::default(),
             line_width: 4.0,
@@ -3394,6 +3396,7 @@ mod tests {
             [
                 ComponentId::new("effector.cube_pos_ecef"),
                 ComponentId::new("effector.cube_hit_tick"),
+                ComponentId::new("effector.cube_cloud_fired"),
             ]
             .into_iter()
             .collect()

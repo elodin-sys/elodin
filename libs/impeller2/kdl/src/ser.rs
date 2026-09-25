@@ -1303,6 +1303,10 @@ fn serialize_point_trails(trails: &PointTrails) -> KdlNode {
         node.entries_mut()
             .push(KdlEntry::new_prop("status", status.clone()));
     }
+    if let Some(start) = &trails.start {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("start", start.clone()));
+    }
     push_float_prop_if_ne(&mut node, "head_size", trails.head_size, 1.0);
     if trails.head_shape == PointTrailsHeadShape::Sphere {
         node.entries_mut()
@@ -2916,6 +2920,7 @@ object_3d lander.world_pos {
             .push(SchematicElem::PointTrails(PointTrails {
                 component: "effector.cube_pos_ecef".to_string(),
                 status: Some("effector.cube_hit_tick".to_string()),
+                start: Some("effector.cube_cloud_fired".to_string()),
                 head_size: 0.15,
                 head_shape: PointTrailsHeadShape::Sphere,
                 line_width: 4.0,
@@ -2934,6 +2939,7 @@ object_3d lander.world_pos {
         };
         assert_eq!(trails.component, "effector.cube_pos_ecef");
         assert_eq!(trails.status.as_deref(), Some("effector.cube_hit_tick"));
+        assert_eq!(trails.start.as_deref(), Some("effector.cube_cloud_fired"));
         assert!((trails.head_size - 0.15).abs() < 1e-6);
         assert_eq!(trails.head_shape, PointTrailsHeadShape::Sphere);
         assert_eq!(trails.line_width, 4.0);

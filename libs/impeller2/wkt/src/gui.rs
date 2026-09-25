@@ -1009,6 +1009,9 @@ pub struct PointTrails {
     /// trail and head in `hit_color`.
     #[serde(default)]
     pub status: Option<String>,
+    /// Optional scalar component whose first nonzero sample starts the trails.
+    #[serde(default)]
+    pub start: Option<String>,
     pub head_size: f32,
     #[serde(default)]
     pub head_shape: PointTrailsHeadShape,
