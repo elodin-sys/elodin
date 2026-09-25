@@ -58,6 +58,9 @@ impl Reactor for PollingReactor {
                 *state = OpState::Ready;
             }
         }
+        // `Poller::wait` appends to `events`. Left full, it hands kevent zero
+        // slots, which returns at once even with a timeout: the reactor spins.
+        self.events.clear();
         Ok(())
     }
 
@@ -230,5 +233,42 @@ impl Executor<PollingReactor> {
             scheduler,
             timer: Timer::new(crate::os::os_clock()),
         })
+    }
+}
+
+#[cfg(all(test, not(target_os = "windows")))]
+mod tests {
+    use std::{net::SocketAddr, time::Duration};
+
+    use rustix::time::{ClockId, clock_gettime};
+
+    use crate::{net::UdpSocket, test};
+
+    fn thread_cpu_time() -> Duration {
+        let t = clock_gettime(ClockId::ThreadCPUTime);
+        Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
+    }
+
+    #[test]
+    async fn idle_reactor_blocks_after_more_events_than_its_buffer_holds() {
+        let a = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let b = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let b_addr = b.local_addr().unwrap();
+        // Each round trip delivers at least one readiness event; the poller's
+        // event buffer holds 1024.
+        let mut buf = vec![0u8; 16];
+        for _ in 0..2048 {
+            a.send_to(b"x", b_addr).await.0.unwrap();
+            let (n, out) = b.recv(buf).await;
+            assert_eq!(n.unwrap(), 1);
+            buf = out;
+        }
+        let before = thread_cpu_time();
+        crate::sleep(Duration::from_millis(100)).await;
+        let spent = thread_cpu_time() - before;
+        assert!(
+            spent < Duration::from_millis(20),
+            "the reactor ran for {spent:?} of an idle 100 ms sleep"
+        );
     }
 }
