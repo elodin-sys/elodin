@@ -63,6 +63,79 @@ mod tests {
     }
 
     #[test]
+    async fn test_time_series_predecessor_request() {
+        let (addr, _db) = setup_test_db().await.unwrap();
+        let mut client = Client::connect(addr).await.unwrap();
+        let component_id = ComponentId::new("predecessor.value");
+        client
+            .send(&SetComponentMetadata::new(
+                component_id,
+                "predecessor.value",
+            ))
+            .await
+            .0
+            .unwrap();
+
+        let vtable_id = 1u16.to_le_bytes();
+        client
+            .send(&VTableMsg {
+                id: vtable_id,
+                vtable: vtable([raw_field(
+                    0,
+                    8,
+                    timestamp(
+                        raw_table(8, 8),
+                        schema(PrimType::U64, &[], component(component_id)),
+                    ),
+                )]),
+            })
+            .await
+            .0
+            .unwrap();
+
+        let request = |timestamp| GetTimeSeriesPredecessor {
+            id: vtable_id,
+            timestamp: Timestamp(timestamp),
+            component_id,
+        };
+        let empty = client.request(&request(10)).await.unwrap();
+        assert!(empty.timestamps().unwrap().is_empty());
+        assert!(empty.data().unwrap().is_empty());
+
+        for (timestamp, value) in [(20, 2u64), (40, 4u64)] {
+            let mut packet = LenPacket::table(vtable_id, 16);
+            packet.extend_from_slice(&value.to_le_bytes());
+            packet.extend_aligned(&[i64::from(timestamp)]);
+            client.send(packet).await.0.unwrap();
+        }
+        sleep(Duration::from_millis(100)).await;
+
+        for (query, expected_timestamp, expected_value) in [
+            (19, None, None),
+            (20, Some(20), Some(2u64)),
+            (30, Some(20), Some(2u64)),
+            (40, Some(40), Some(4u64)),
+            (50, Some(40), Some(4u64)),
+        ] {
+            let response = client.request(&request(query)).await.unwrap();
+            assert_eq!(
+                response
+                    .timestamps()
+                    .unwrap()
+                    .first()
+                    .map(|timestamp| timestamp.0),
+                expected_timestamp
+            );
+            let value = response
+                .data()
+                .unwrap()
+                .get(..8)
+                .map(|data| u64::from_le_bytes(data.try_into().unwrap()));
+            assert_eq!(value, expected_value);
+        }
+    }
+
+    #[test]
     async fn test_silent_connection_does_not_emit_replies_or_errors() {
         let (addr, _db) = setup_test_db().await.unwrap();
         let mut client = Client::connect(addr).await.unwrap();

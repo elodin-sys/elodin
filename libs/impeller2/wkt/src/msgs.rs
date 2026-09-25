@@ -180,6 +180,21 @@ impl Request for GetTimeSeries {
     type Reply<B: IoBuf + Clone> = OwnedTimeSeries<B>;
 }
 
+#[derive(Serialize, Deserialize, Debug)]
+pub struct GetTimeSeriesPredecessor {
+    pub id: PacketId,
+    pub timestamp: Timestamp,
+    pub component_id: ComponentId,
+}
+
+impl Msg for GetTimeSeriesPredecessor {
+    const ID: PacketId = [224, 7];
+}
+
+impl Request for GetTimeSeriesPredecessor {
+    type Reply<B: IoBuf + Clone> = OwnedTimeSeries<B>;
+}
+
 #[derive(Serialize, Deserialize)]
 pub struct SchemaMsg(pub Schema<Vec<u64>>);
 impl Msg for SchemaMsg {

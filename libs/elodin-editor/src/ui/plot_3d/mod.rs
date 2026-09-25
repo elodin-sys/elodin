@@ -23,28 +23,6 @@ use crate::{EqlContext, ui::schematic::EqlExt};
 pub mod gpu;
 mod point_trails;
 
-fn ensure_line_handle(
-    data: &mut PlotDataComponent,
-    index: usize,
-    line_assets: &mut Assets<Line>,
-) -> Handle<Line> {
-    let label = data
-        .element_names
-        .get(index)
-        .filter(|name| !name.is_empty())
-        .cloned()
-        .unwrap_or_else(|| format!("[{index}]"));
-    data.lines
-        .entry(index)
-        .or_insert_with(|| {
-            line_assets.add(Line {
-                label,
-                ..Default::default()
-            })
-        })
-        .clone()
-}
-
 /// Convert a schematic (sRGB) color into the linear RGBA the line pipeline
 /// renders, keeping it consistent with meshes/gizmos. Alpha is preserved so a
 /// KDL `color`/`future_color` can set per-line opacity. An explicit
@@ -143,7 +121,7 @@ pub fn sync_line_plot_3d(
             let Some(metadata) = metadata_store.get_metadata(&c.id) else {
                 continue;
             };
-            let data = collected_graph_data
+            collected_graph_data
                 .components
                 .entry(c.id)
                 .or_insert_with(|| {
@@ -157,7 +135,7 @@ pub fn sync_line_plot_3d(
                             .collect(),
                     )
                 });
-            handles[i] = Some(ensure_line_handle(data, *index, &mut line_assets));
+            handles[i] = collected_graph_data.ensure_line_handle(c.id, *index, &mut line_assets);
             sources[i] = Some(gpu::LineAxisSource {
                 component_id: c.id,
                 element: *index,
@@ -224,7 +202,7 @@ impl bevy::app::Plugin for LinePlot3dPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.init_resource::<CollectedGraphData>()
             .add_plugins((gpu::Plot3dGpuPlugin, point_trails::PointTrailsPlugin))
-            .add_systems(Update, sync_line_plot_3d)
+            .add_systems(Update, sync_line_plot_3d.before(queue_timestamp_read))
             // After SeriesStore→LineTree projection so rolling windows update
             // the anchor in the same frame the tree's first sample slides.
             .add_systems(
@@ -266,11 +244,17 @@ mod tests {
 
     #[test]
     fn line_handle_supports_unnamed_sparse_array_indices() {
-        let mut data = PlotDataComponent::new("cube_pos_ecef", Vec::new());
+        let id = impeller2::types::ComponentId::new("cube_pos_ecef");
+        let mut data = CollectedGraphData::default();
+        data.components
+            .insert(id, PlotDataComponent::new("cube_pos_ecef", Vec::new()));
         let mut assets = Assets::<Line>::default();
-        let handle = ensure_line_handle(&mut data, 1300, &mut assets);
-        assert_eq!(data.lines.get(&1300), Some(&handle));
+        let handle = data.ensure_line_handle(id, 1300, &mut assets).unwrap();
+        assert_eq!(data.get_line(&id, 1300), Some(&handle));
         assert_eq!(assets.get(&handle).unwrap().label, "[1300]");
+        assert_eq!(data.line_layout_generation(), 1);
+        assert_eq!(data.ensure_line_handle(id, 1300, &mut assets), Some(handle));
+        assert_eq!(data.line_layout_generation(), 1);
     }
 
     #[test]

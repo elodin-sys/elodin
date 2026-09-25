@@ -1594,7 +1594,7 @@ pub fn sync_graphs(
             let Some(component_metadata) = metadata_store.get_metadata(component_id) else {
                 continue;
             };
-            let component = collected_graph_data
+            collected_graph_data
                 .components
                 .entry(*component_id)
                 .or_insert_with(|| {
@@ -1617,19 +1617,9 @@ pub fn sync_graphs(
             for (value_index, (enabled, color)) in component_values.iter().enumerate() {
                 // Ensure a Line asset exists so we can spawn GPU entities before
                 // SeriesStore has projected samples into the tree.
-                let line_handle = component.lines.entry(value_index).or_insert_with(|| {
-                    let label = component
-                        .element_names
-                        .get(value_index)
-                        .filter(|s| !s.is_empty())
-                        .cloned()
-                        .unwrap_or_else(|| format!("[{value_index}]"));
-                    lines.add(Line {
-                        label,
-                        ..Default::default()
-                    })
-                });
-                let line = line_handle.clone();
+                let line = collected_graph_data
+                    .ensure_line_handle(*component_id, value_index, &mut lines)
+                    .expect("component was inserted above");
 
                 let entity = graph_state
                     .enabled_lines
