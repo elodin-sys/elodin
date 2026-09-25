@@ -39,13 +39,40 @@ use crate::{
 /// Position window, status sample, and geometry settings behind the strips.
 type SyncKey = (Timestamp, Timestamp, usize, Option<Timestamp>, Option<u32>);
 
+#[derive(Clone, Copy, PartialEq)]
+struct PointTrailsStyle {
+    head_size: f32,
+    head_shape: PointTrailsHeadShape,
+    line_width: f32,
+    color: impeller2_wkt::Color,
+    hit_color: impeller2_wkt::Color,
+}
+
+fn point_trails_style(trails: &PointTrails, timeline: &TimelineSettings) -> PointTrailsStyle {
+    PointTrailsStyle {
+        head_size: trails.head_size,
+        head_shape: trails.head_shape,
+        line_width: trails.line_width,
+        color: trails.color.unwrap_or(timeline.played_color),
+        hit_color: trails.hit_color.unwrap_or(impeller2_wkt::Color::RED),
+    }
+}
+
+fn head_mesh_index(shape: PointTrailsHeadShape) -> usize {
+    match shape {
+        PointTrailsHeadShape::Cube => 0,
+        PointTrailsHeadShape::Sphere => 1,
+    }
+}
+
 #[derive(Component)]
 struct PointTrailsState {
     component_id: ComponentId,
     status_id: Option<ComponentId>,
-    mesh: Handle<Mesh>,
+    meshes: [Handle<Mesh>; 2],
     /// Normal and hit head materials.
     materials: [Handle<StandardMaterial>; 2],
+    style: PointTrailsStyle,
     heads: Vec<Entity>,
     key: Option<SyncKey>,
 }
@@ -162,30 +189,29 @@ fn init_point_trails(
     mut commands: Commands,
 ) {
     for (entity, trails) in &trails {
-        let color = trails.color.unwrap_or(timeline.played_color);
-        let hit_color = trails.hit_color.unwrap_or(impeller2_wkt::Color::RED);
-        let head_mesh: Mesh = match trails.head_shape {
-            PointTrailsHeadShape::Cube => Cuboid::from_length(1.0).into(),
-            PointTrailsHeadShape::Sphere => Sphere::new(0.5).into(),
-        };
+        let style = point_trails_style(trails, &timeline);
         let mut material =
             |color| materials.add(impeller2_wkt::Material::with_color(color).into_bevy());
         commands.entity(entity).insert((
             PointTrailsState {
                 component_id: ComponentId::new(trails.component.trim()),
                 status_id: trails.status.as_deref().map(|s| ComponentId::new(s.trim())),
-                mesh: meshes.add(head_mesh),
-                materials: [material(color), material(hit_color)],
+                meshes: [
+                    meshes.add(Cuboid::from_length(1.0)),
+                    meshes.add(Sphere::new(0.5)),
+                ],
+                materials: [material(style.color), material(style.hit_color)],
+                style,
                 heads: Vec::new(),
                 key: None,
             },
             PointTrailsStrips {
-                hit_color: super::line_color_linear(&hit_color),
+                hit_color: super::line_color_linear(&style.hit_color),
                 ..default()
             },
             LineUniform::new(
-                trails.line_width,
-                Color::srgba(color.r, color.g, color.b, color.a),
+                style.line_width,
+                Color::srgba(style.color.r, style.color.g, style.color.b, style.color.a),
             ),
             LineConfig {
                 render_layers: RenderLayers::layer(crate::plugins::gizmos::GIZMO_RENDER_LAYER),
@@ -212,7 +238,7 @@ fn played_range(
     (selected.start <= end).then_some(selected.start..end)
 }
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn sync_point_trails(
     mut trails: Query<(
         Entity,
@@ -221,16 +247,40 @@ fn sync_point_trails(
         &mut PointTrailsStrips,
         &mut GeoPosition,
         &mut Visibility,
+        &mut LineUniform,
     )>,
-    mut heads: Query<(&mut Transform, &mut MeshMaterial3d<StandardMaterial>), Without<PointTrails>>,
+    mut heads: Query<
+        (
+            &mut Transform,
+            &mut Mesh3d,
+            &mut MeshMaterial3d<StandardMaterial>,
+        ),
+        Without<PointTrails>,
+    >,
     cache: Res<TelemetryCache>,
     selected: Res<SelectedTimeRange>,
     current: Res<CurrentTimestamp>,
     live_follow: Res<LatestFollow>,
+    timeline: Res<TimelineSettings>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     mut commands: Commands,
 ) {
     let range = played_range(&selected, &current, &live_follow);
-    for (entity, trails, mut state, mut strips, mut geo, mut visibility) in &mut trails {
+    for (entity, trails, mut state, mut strips, mut geo, mut visibility, mut uniform) in &mut trails
+    {
+        let style = point_trails_style(trails, &timeline);
+        let style_changed = state.style != style;
+        if style_changed {
+            state.style = style;
+            for (handle, color) in state.materials.iter().zip([style.color, style.hit_color]) {
+                if let Some(mut material) = materials.get_mut(handle) {
+                    *material = impeller2_wkt::Material::with_color(color).into_bevy();
+                }
+            }
+            uniform.line_width = style.line_width;
+            uniform.color = super::line_color_linear(&style.color);
+            strips.hit_color = super::line_color_linear(&style.hit_color);
+        }
         let samples = match (&range, cache.series(&state.component_id)) {
             (Some(range), Some(series)) => window_samples(series, range),
             _ => Vec::new(),
@@ -257,7 +307,7 @@ fn sync_point_trails(
             status.map(|(ts, _)| *ts),
             trails.max_length.map(f32::to_bits),
         );
-        if state.key == Some(key) && state.heads.len() == n {
+        if state.key == Some(key) && state.heads.len() == n && !style_changed {
             continue;
         }
         state.key = Some(key);
@@ -273,10 +323,15 @@ fn sync_point_trails(
 
         let latest = samples[samples.len() - 1].1;
         let head_offset = |i: usize| (point(latest, n, i) - anchor).as_vec3();
+        let mesh = state.meshes[head_mesh_index(style.head_shape)].clone();
         if state.heads.len() == n {
             for (i, &head) in state.heads.iter().enumerate() {
-                if let Ok((mut transform, mut material)) = heads.get_mut(head) {
+                if let Ok((mut transform, mut head_mesh, mut material)) = heads.get_mut(head) {
                     transform.translation = head_offset(i);
+                    transform.scale = Vec3::splat(style.head_size);
+                    if head_mesh.0 != mesh {
+                        head_mesh.0 = mesh.clone();
+                    }
                     if material.0 != state.materials[group_of[i]] {
                         material.0 = state.materials[group_of[i]].clone();
                     }
@@ -286,12 +341,12 @@ fn sync_point_trails(
             for head in state.heads.drain(..) {
                 commands.entity(head).despawn();
             }
-            let scale = Vec3::splat(trails.head_size);
+            let scale = Vec3::splat(style.head_size);
             state.heads = (0..n)
                 .map(|i| {
                     commands
                         .spawn((
-                            Mesh3d(state.mesh.clone()),
+                            Mesh3d(mesh.clone()),
                             MeshMaterial3d(state.materials[group_of[i]].clone()),
                             Transform::from_translation(head_offset(i)).with_scale(scale),
                             ChildOf(entity),
@@ -365,9 +420,7 @@ fn extract_point_trails(
                     Some((_, gpu_line)) => gpu_line.clone(),
                     None => {
                         let Some((gpu_line, residual_too_large)) = build_gpu_line(
-                            &group.xs,
-                            &group.ys,
-                            &group.zs,
+                            [&group.xs, &group.ys, &group.zs],
                             &group.strip_ends,
                             strips.anchor,
                             &render_device,
@@ -427,6 +480,43 @@ impl Plugin for PointTrailsPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn style_tracks_timeline_color_until_overridden() {
+        let mut trails = PointTrails {
+            component: "points".into(),
+            status: None,
+            head_size: 0.1,
+            head_shape: PointTrailsHeadShape::Sphere,
+            line_width: 2.0,
+            max_length: None,
+            color: None,
+            hit_color: None,
+            frame: None,
+            node_id: default(),
+        };
+        let mut timeline = TimelineSettings {
+            played_color: impeller2_wkt::Color::GREEN,
+            ..default()
+        };
+        assert_eq!(
+            point_trails_style(&trails, &timeline).color,
+            impeller2_wkt::Color::GREEN
+        );
+
+        trails.color = Some(impeller2_wkt::Color::BLUE);
+        trails.hit_color = Some(impeller2_wkt::Color::YELLOW);
+        trails.head_size = 0.2;
+        trails.head_shape = PointTrailsHeadShape::Cube;
+        trails.line_width = 3.0;
+        timeline.played_color = impeller2_wkt::Color::RED;
+        let style = point_trails_style(&trails, &timeline);
+        assert_eq!(style.color, impeller2_wkt::Color::BLUE);
+        assert_eq!(style.hit_color, impeller2_wkt::Color::YELLOW);
+        assert_eq!(style.head_size, 0.2);
+        assert_eq!(style.head_shape, PointTrailsHeadShape::Cube);
+        assert_eq!(style.line_width, 3.0);
+    }
 
     #[test]
     fn full_census_fits_one_index_buffer() {

@@ -102,6 +102,7 @@ fn sync_line_3d_anchor(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn sync_line_plot_3d(
     line_plot_3d_query: Query<(Entity, &Line3d), Without<gpu::LineHandles>>,
     mut uniforms: Query<

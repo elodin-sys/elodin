@@ -690,15 +690,14 @@ fn anchor_local_strips(
 /// Upload [`anchor_local_strips`] and bind it for [`DrawLine`]. The flag
 /// reports an anchor residual large enough for visible f32 ULP.
 pub(super) fn build_gpu_line(
-    xs: &[f64],
-    ys: &[f64],
-    zs: &[f64],
+    values: [&[f64]; 3],
     strip_ends: &[usize],
     anchor: DVec3,
     render_device: &RenderDevice,
     values_layout: &LineValuesLayout,
     index_layout: &LineIndexLayout,
 ) -> Option<(GpuLine, bool)> {
+    let [xs, ys, zs] = values;
     if xs.len().min(ys.len()).min(zs.len()) < 2 {
         return None;
     }
@@ -938,9 +937,7 @@ fn extract_lines(
                 let zs = axis_values(2);
 
                 let (mut gpu_line, residual_too_large) = build_gpu_line(
-                    &xs,
-                    &ys,
-                    &zs,
+                    [&xs, &ys, &zs],
                     &[xs.len()],
                     line_anchor,
                     &render_device,

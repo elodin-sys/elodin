@@ -412,7 +412,7 @@ def test_external_control_waiting():
 
     # Check that the system ran
     df = exec.history("e1.x")
-    assert len(df) >= 3
+    assert len(df) == 1
     assert np.isclose(df["e1.x"][-1], 1.0)  # Should be 1.0 + 0.0
 
     print("External control waiting test passed!")

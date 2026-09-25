@@ -27,7 +27,7 @@ use zerocopy::{Immutable, IntoBytes};
 use std::any::type_name;
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU64;
-use std::ops::RangeInclusive;
+use std::ops::{Bound, RangeInclusive};
 use std::sync::Arc;
 use std::sync::atomic::{self, AtomicBool};
 use std::time::{Duration, Instant};
@@ -597,7 +597,7 @@ fn prefetch_visible_window(
         if !schema_reg.0.contains_key(&component_id) {
             continue;
         }
-        if series_store.has_samples_in_range(&component_id, sync_range) {
+        if series_store.is_covered(&component_id, sync_range) {
             prefetch
                 .in_flight
                 .remove(&(component_id, range_key.0, range_key.1));
@@ -694,8 +694,14 @@ fn apply_visible_prefetch_page(
             last_ts = timestamp;
         }
     }
-    if let Some(&first) = timestamps.first() {
-        series_store.mark_covered(component_id, first, Timestamp(last_ts.0.saturating_add(1)));
+    if timestamps.len() < VISIBLE_PREFETCH_LIMIT {
+        series_store.mark_covered(component_id, req_start, req_end);
+    } else if !timestamps.is_empty() {
+        series_store.mark_covered(
+            component_id,
+            req_start,
+            Timestamp(last_ts.0.saturating_add(1)),
+        );
     }
     if !priority.high.contains(&component_id) {
         series_store.remove_series(&component_id);
@@ -795,12 +801,14 @@ pub fn sync_plot_lines_from_series_store(
         if !fetch_ids.contains(&component_id) {
             continue;
         }
-        let has_samples_in_window = series_store.has_samples_in_range(&component_id, sync_range);
+        let has_state_in_window = series_store
+            .series(&component_id)
+            .is_some_and(|series| series.range(..sync_range.end).next_back().is_some());
         for (&element_index, handle) in &component.lines {
             let Some(mut line) = lines.get_mut(handle) else {
                 continue;
             };
-            if !has_samples_in_window {
+            if !has_state_in_window {
                 if should_clear_line_on_empty_store(
                     line.data.stored_exclusive_span(),
                     sync_range,
@@ -979,30 +987,16 @@ fn plot_line_matches_store_interior(
         return true;
     }
     let inspect = start..end;
-    let store_count =
-        store_element_count_in_range(series_store, component_id, element_index, &inspect);
-    let tree_count = tree.sample_count_in_range(&inspect);
-    // `0 <= tree_count` would treat leftover tree samples as a match and leave
-    // a phantom trace after a seek into a gap or a sparse element hole.
-    if store_count == 0 {
-        return tree_count == 0;
-    }
-    store_count <= tree_count
-}
-
-fn store_element_count_in_range(
-    series_store: &TelemetryCache,
-    component_id: ComponentId,
-    element_index: usize,
-    range: &Range<Timestamp>,
-) -> usize {
     let Some(series) = series_store.series(&component_id) else {
-        return 0;
+        return !tree.has_samples();
     };
     series
-        .range(range.start..range.end)
-        .filter(|(_, val)| val.get(element_index).is_some())
-        .count()
+        .range(inspect)
+        .filter(|(_, value)| value.get(element_index).is_some())
+        .all(|(timestamp, _)| {
+            tree.get_nearest(*timestamp)
+                .is_some_and(|(actual, _)| actual == *timestamp)
+        })
 }
 
 fn padded_sync_keep_range(sync_range: &Range<Timestamp>) -> Range<Timestamp> {
@@ -1228,6 +1222,54 @@ pub fn update_series_fetch_priority(
     priority.high = next;
 }
 
+/// Zero-order-held samples spanning the requested window.
+fn held_element_samples(
+    cache: &TelemetryCache,
+    component_id: ComponentId,
+    element_index: usize,
+    range: &Range<Timestamp>,
+) -> Vec<(Timestamp, f32)> {
+    if range.start >= range.end {
+        return Vec::new();
+    }
+    let Some(series) = cache.series(&component_id) else {
+        return Vec::new();
+    };
+
+    let mut samples = Vec::new();
+    let mut held = series
+        .range(..=range.start)
+        .rev()
+        .find_map(|(_, value)| value.get(element_index).map(|element| element.as_f32()));
+    if let Some(value) = held {
+        samples.push((range.start, value));
+    }
+
+    for (timestamp, value) in
+        series.range((Bound::Excluded(range.start), Bound::Excluded(range.end)))
+    {
+        let Some(value) = value.get(element_index).map(|element| element.as_f32()) else {
+            continue;
+        };
+        if let Some(previous) = held {
+            let before = Timestamp(timestamp.0.saturating_sub(1));
+            if samples.last().is_none_or(|(last, _)| before > *last) {
+                samples.push((before, previous));
+            }
+        }
+        samples.push((*timestamp, value));
+        held = Some(value);
+    }
+
+    if let Some(value) = held {
+        let end = Timestamp(range.end.0.saturating_sub(1));
+        if samples.last().is_none_or(|(last, _)| end > *last) {
+            samples.push((end, value));
+        }
+    }
+    samples
+}
+
 /// Project SeriesStore samples into a plot `LineTree` for one element.
 /// When `max_points` is set, stride-downsample so long windows stay GPU-friendly.
 pub(crate) fn project_series_element_to_line(
@@ -1239,10 +1281,8 @@ pub(crate) fn project_series_element_to_line(
     line: &mut LineTree<f32>,
     max_points: Option<usize>,
 ) -> usize {
-    let Some(series) = cache.series(&component_id) else {
-        return 0;
-    };
-    let count = series.range(range.start..range.end).count();
+    let samples = held_element_samples(cache, component_id, element_index, range);
+    let count = samples.len();
     if count == 0 {
         return 0;
     }
@@ -1253,15 +1293,12 @@ pub(crate) fn project_series_element_to_line(
     let mut timestamps = Vec::new();
     let mut values = Vec::new();
     let mut total = 0usize;
-    for (i, (ts, val)) in series.range(range.start..range.end).enumerate() {
+    for (i, (timestamp, value)) in samples.into_iter().enumerate() {
         if i % stride != 0 && i + 1 != count {
             continue;
         }
-        let Some(elem) = val.get(element_index) else {
-            continue;
-        };
-        timestamps.push(*ts);
-        values.push(elem.as_f32());
+        timestamps.push(timestamp);
+        values.push(value);
         if timestamps.len() >= CHUNK_LEN {
             let n = timestamps.len();
             if let Some(chunk) = Chunk::from_iter(&timestamps, earliest, values.iter().copied()) {
@@ -1296,29 +1333,22 @@ fn append_series_element_to_line(
     earliest: Timestamp,
     line: &mut LineTree<f32>,
 ) -> usize {
-    let Some(series) = cache.series(&component_id) else {
-        return 0;
-    };
     let mut total = 0usize;
-    for (ts, val) in series.range(range.start..range.end) {
-        let Some(elem) = val.get(element_index) else {
-            continue;
-        };
-        let new_value = elem.as_f32();
+    for (timestamp, new_value) in held_element_samples(cache, component_id, element_index, range) {
         let mut accepted = false;
         if let Some(last) = line.last() {
-            if *ts <= last.summary.end_timestamp {
+            if timestamp <= last.summary.end_timestamp {
                 continue;
             }
             if last.timestamps.len() < CHUNK_LEN {
                 line.update_last(|c| {
-                    c.push(*ts, earliest, new_value);
+                    c.push(timestamp, earliest, new_value);
                 });
                 accepted = true;
             }
         }
         if !accepted {
-            line.insert(Chunk::from_initial_value(*ts, earliest, new_value));
+            line.insert(Chunk::from_initial_value(timestamp, earliest, new_value));
         }
         total += 1;
     }
@@ -3311,6 +3341,46 @@ mod tests {
     }
 
     #[test]
+    fn held_element_samples_span_constant_window() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.constant");
+        insert_f64(&mut cache, id, 0, 4.0);
+        let range = Timestamp(10)..Timestamp(20);
+
+        assert_eq!(
+            held_element_samples(&cache, id, 0, &range),
+            vec![(Timestamp(10), 4.0), (Timestamp(19), 4.0)]
+        );
+
+        let mut line = LineTree::<f32>::default();
+        assert_eq!(
+            project_series_element_to_line(&cache, id, 0, &range, Timestamp(0), &mut line, None,),
+            2
+        );
+        assert_eq!(line.first_timestamp(), Some(Timestamp(10)));
+        assert_eq!(line.latest_sample_timestamp(), Some(Timestamp(19)));
+    }
+
+    #[test]
+    fn held_element_samples_make_sparse_changes_stepwise() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.steps");
+        insert_f64(&mut cache, id, 0, 1.0);
+        insert_f64(&mut cache, id, 10, 2.0);
+        insert_f64(&mut cache, id, 20, 3.0);
+
+        assert_eq!(
+            held_element_samples(&cache, id, 0, &(Timestamp(5)..Timestamp(16))),
+            vec![
+                (Timestamp(5), 1.0),
+                (Timestamp(9), 1.0),
+                (Timestamp(10), 2.0),
+                (Timestamp(15), 2.0),
+            ]
+        );
+    }
+
+    #[test]
     fn apply_plot_sync_plan_rebuilds_holes_inside_a_covered_span() {
         // Partial first project: only the endpoints. The exclusive span already
         // covers the window, so endpoint-only planning would Keep forever.
@@ -3321,7 +3391,7 @@ mod tests {
         let need = Timestamp(0)..Timestamp(15_000_001);
         let mut tree = LineTree::<f32>::default();
         apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
-        assert_eq!(tree.total_points(), 2);
+        assert_eq!(tree.total_points(), 3);
         assert_eq!(
             plot_sync_plan(tree.stored_exclusive_span(), &need, false),
             PlotSyncPlan::Keep
@@ -3335,10 +3405,10 @@ mod tests {
             &cache, id, 0, &need, &tree
         ));
         apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
-        assert_eq!(tree.total_points(), 3);
+        assert_eq!(tree.total_points(), 5);
         assert_eq!(
-            tree.sample_count_in_range(&need),
-            cache.sample_count_in_range(&id, &need)
+            tree.get_nearest(Timestamp(7_500_000)).map(|(ts, _)| ts),
+            Some(Timestamp(7_500_000))
         );
     }
 
@@ -3355,11 +3425,11 @@ mod tests {
         let need = Timestamp(0)..Timestamp(15_000_000);
         let mut tree = LineTree::<f32>::default();
         apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
-        assert_eq!(tree.total_points(), 20);
+        assert_eq!(tree.total_points(), 40);
 
         insert_f64(&mut cache, id, 7_000_000, 50.0);
         apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
-        assert_eq!(tree.total_points(), 21);
+        assert_eq!(tree.total_points(), 42);
         assert!(tree.get_nearest(Timestamp(7_000_000)).is_some());
     }
 
@@ -3373,7 +3443,7 @@ mod tests {
         let first = Timestamp(0)..Timestamp(15_000_001);
         let mut tree = LineTree::<f32>::default();
         apply_plot_sync_plan(&cache, id, 0, &first, Timestamp(0), None, false, &mut tree);
-        assert_eq!(tree.total_points(), 16);
+        assert_eq!(tree.total_points(), 31);
         assert_eq!(tree.first_timestamp(), Some(Timestamp(0)));
 
         insert_f64(&mut cache, id, 15_100_000, 15.1);
@@ -3391,7 +3461,7 @@ mod tests {
         apply_plot_sync_plan(&cache, id, 0, &slid, Timestamp(0), None, false, &mut tree);
         assert_eq!(tree.first_timestamp(), Some(Timestamp(0)));
         assert_eq!(tree.latest_sample_timestamp(), Some(Timestamp(15_100_000)));
-        assert_eq!(tree.total_points(), 17);
+        assert_eq!(tree.total_points(), 34);
     }
 
     #[test]
@@ -3823,15 +3893,15 @@ mod tests {
         // Tip window: last 5s
         let tip = Timestamp(5_000_000)..Timestamp(10_000_000);
         let n = project_series_element_to_line(&cache, id, 0, &tip, earliest, &mut line, None);
-        assert_eq!(n, 500);
-        assert_eq!(line.total_points(), 500);
+        assert_eq!(n, 1000);
+        assert_eq!(line.total_points(), 1000);
 
         // Jump to start: first 5s — clear and rebuild
         line.clear();
         let start = Timestamp(0)..Timestamp(5_000_000);
         let n2 = project_series_element_to_line(&cache, id, 0, &start, earliest, &mut line, None);
-        assert_eq!(n2, 500);
-        assert_eq!(line.total_points(), 500);
+        assert_eq!(n2, 1000);
+        assert_eq!(line.total_points(), 1000);
         // Store still holds full history
         assert_eq!(cache.total_sample_count(), 1000);
     }
