@@ -9,7 +9,7 @@ import spiceypy as spice
 import numpy as np
 from pathlib import Path
 
-from dynamics import heliocentric_relative_acceleration
+from dynamics import heliocentric_relative_acceleration, state_error
 
 # SIM_TIME_STEP = 1.0 / 120.0
 SIM_TIME_STEP = 3600.0
@@ -268,8 +268,12 @@ def post_step(tick: int, ctx: el.StepContext) -> None:
         truth_pos = np.asarray(truth_state[:3], dtype=np.float64) * 1000.0
         truth_vel = np.asarray(truth_state[3:], dtype=np.float64) * 1000.0
 
-        position_error_km = np.linalg.norm(simulated_pos - truth_pos) / 1000.0
-        velocity_error_mps = np.linalg.norm(simulated_vel - truth_vel)
+        position_error_km, velocity_error_mps = state_error(
+            simulated_pos,
+            simulated_vel,
+            truth_pos,
+            truth_vel,
+        )
 
         ctx.write_component(
             f"{probe['entity_name']}.position_error_km",
