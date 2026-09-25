@@ -9,7 +9,7 @@ use bevy::{
 };
 use bevy_render::render_resource::{Buffer, BufferDescriptor, BufferSlice, BufferUsages};
 use bevy_render::renderer::{RenderDevice, RenderQueue};
-use impeller2::types::{ComponentId, ComponentView, OwnedPacket, Timestamp};
+use impeller2::types::{ComponentId, ComponentView, OwnedPacket, PacketId, Timestamp};
 use impeller2_bevy::{
     BackfillState, CommandsExt, ComponentAdapters, ComponentPathRegistry, ComponentSchemaRegistry,
     PacketGrantR, PacketHandlerInput, PacketHandlers, SeriesFetchPriority, TelemetryCache,
@@ -598,12 +598,14 @@ pub struct VisiblePrefetchState {
     pub(crate) in_flight: HashSet<(ComponentId, i64, i64)>,
     anchor_in_flight: HashMap<ComponentId, i64>,
     anchor_probed: HashMap<ComponentId, i64>,
+    anchor_retry_after: HashMap<ComponentId, (i64, Instant)>,
 }
 
 impl VisiblePrefetchState {
     pub fn clear_in_flight(&mut self) {
         self.in_flight.clear();
         self.anchor_in_flight.clear();
+        self.anchor_retry_after.clear();
     }
 
     fn request_count(&self) -> usize {
@@ -612,6 +614,7 @@ impl VisiblePrefetchState {
 }
 
 const VISIBLE_PREFETCH_LIMIT: usize = 8192;
+const HOLD_ANCHOR_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 #[derive(Debug, PartialEq, Eq)]
 enum HoldAnchorDecision {
@@ -637,6 +640,15 @@ fn hold_anchor_decision(
     {
         return HoldAnchorDecision::Pending;
     }
+    if prefetch
+        .anchor_retry_after
+        .get(&component_id)
+        .is_some_and(|(retry_start, retry_at)| {
+            *retry_start == start.0 && Instant::now() < *retry_at
+        })
+    {
+        return HoldAnchorDecision::Pending;
+    }
     if let Some(&probed) = prefetch.anchor_probed.get(&component_id)
         && probed < start.0
         && series_store.is_covered(
@@ -647,6 +659,81 @@ fn hold_anchor_decision(
         return HoldAnchorDecision::Pending;
     }
     HoldAnchorDecision::Request
+}
+
+fn finish_hold_anchor_probe(
+    prefetch: &mut VisiblePrefetchState,
+    component_id: ComponentId,
+    start: Timestamp,
+    confirmed: bool,
+) {
+    if prefetch.anchor_in_flight.get(&component_id) != Some(&start.0) {
+        return;
+    }
+    prefetch.anchor_in_flight.remove(&component_id);
+    if confirmed {
+        prefetch.anchor_probed.insert(component_id, start.0);
+        prefetch.anchor_retry_after.remove(&component_id);
+    } else {
+        prefetch.anchor_probed.remove(&component_id);
+        prefetch.anchor_retry_after.insert(
+            component_id,
+            (start.0, Instant::now() + HOLD_ANCHOR_RETRY_DELAY),
+        );
+    }
+}
+
+fn apply_hold_anchor_payload(
+    timestamps: &[Timestamp],
+    buf: &[u8],
+    component_id: ComponentId,
+    start: Timestamp,
+    series_store: &mut TelemetryCache,
+    schema_reg: &ComponentSchemaRegistry,
+) -> bool {
+    if timestamps.is_empty() {
+        return buf.is_empty();
+    }
+    let (Some(&timestamp), Some(schema)) = (timestamps.first(), schema_reg.0.get(&component_id))
+    else {
+        return false;
+    };
+    let size = schema.size();
+    if timestamps.len() != 1 || timestamp > start || buf.len() != size {
+        return false;
+    }
+    let Ok(view) = impeller2::types::ComponentView::try_from_bytes_shape(
+        buf,
+        schema.shape(),
+        schema.prim_type(),
+    ) else {
+        return false;
+    };
+    series_store.insert(component_id, timestamp, ComponentValue::from_view(view));
+    true
+}
+
+fn apply_hold_anchor_reply(
+    packet: &OwnedPacket<PacketGrantR>,
+    component_id: ComponentId,
+    start: Timestamp,
+    series_store: &mut TelemetryCache,
+    schema_reg: &ComponentSchemaRegistry,
+) -> bool {
+    let OwnedPacket::TimeSeries(time_series) = packet else {
+        return false;
+    };
+    let (Ok(timestamps), Ok(buf)) = (time_series.timestamps(), time_series.data()) else {
+        return false;
+    };
+    apply_hold_anchor_payload(
+        timestamps,
+        buf,
+        component_id,
+        start,
+        series_store,
+        schema_reg,
+    )
 }
 
 fn prefetch_hold_anchor(
@@ -660,6 +747,7 @@ fn prefetch_hold_anchor(
         HoldAnchorDecision::Satisfied => {
             prefetch.anchor_in_flight.remove(&component_id);
             prefetch.anchor_probed.remove(&component_id);
+            prefetch.anchor_retry_after.remove(&component_id);
             return false;
         }
         HoldAnchorDecision::Pending => return false,
@@ -668,50 +756,29 @@ fn prefetch_hold_anchor(
 
     prefetch.anchor_in_flight.insert(component_id, start.0);
     prefetch.anchor_probed.remove(&component_id);
-    let packet_id = fastrand::u16(..).to_le_bytes();
-    commands.send_req_with_handler(
+    prefetch.anchor_retry_after.remove(&component_id);
+    commands.send_req_reply_raw(
         GetTimeSeriesPredecessor {
-            id: packet_id,
+            id: PacketId::default(),
             timestamp: start,
             component_id,
         },
-        packet_id,
         move |pkt: InRef<OwnedPacket<PacketGrantR>>,
               mut series_store: ResMut<TelemetryCache>,
               schema_reg: Res<ComponentSchemaRegistry>,
               priority: Res<SeriesFetchPriority>,
-              mut prefetch: ResMut<VisiblePrefetchState>| {
-            prefetch.anchor_in_flight.remove(&component_id);
+              mut prefetch: ResMut<VisiblePrefetchState>|
+              -> bool {
             if !priority.high.contains(&component_id) {
+                prefetch.anchor_in_flight.remove(&component_id);
                 prefetch.anchor_probed.remove(&component_id);
-                return;
+                prefetch.anchor_retry_after.remove(&component_id);
+                return true;
             }
-            prefetch.anchor_probed.insert(component_id, start.0);
-            let OwnedPacket::TimeSeries(time_series) = &*pkt else {
-                return;
-            };
-            let (Ok(timestamps), Ok(buf)) = (time_series.timestamps(), time_series.data()) else {
-                return;
-            };
-            let (Some(&timestamp), Some(schema)) =
-                (timestamps.first(), schema_reg.0.get(&component_id))
-            else {
-                return;
-            };
-            if timestamp > start {
-                return;
-            }
-            let size = schema.size();
-            if buf.len() < size {
-                return;
-            }
-            if let Ok(view) = impeller2::types::ComponentView::try_from_bytes_shape(
-                &buf[..size],
-                schema.shape(),
-                schema.prim_type(),
-            ) {
-                series_store.insert(component_id, timestamp, ComponentValue::from_view(view));
-            }
+            let confirmed =
+                apply_hold_anchor_reply(&pkt, component_id, start, &mut series_store, &schema_reg);
+            finish_hold_anchor_probe(&mut prefetch, component_id, start, confirmed);
+            true
         },
     );
     true
@@ -1420,6 +1487,7 @@ pub fn update_series_fetch_priority(
             prefetch.in_flight.retain(|(cid, _, _)| *cid != id);
             prefetch.anchor_in_flight.remove(&id);
             prefetch.anchor_probed.remove(&id);
+            prefetch.anchor_retry_after.remove(&id);
         }
     }
     priority.high = next;
@@ -3636,12 +3704,24 @@ mod tests {
             hold_anchor_decision(id, start, &cache, &prefetch),
             HoldAnchorDecision::Pending
         );
-        prefetch.clear_in_flight();
-        prefetch.anchor_probed.insert(id, start.0);
+        finish_hold_anchor_probe(&mut prefetch, id, start, false);
+        assert!(!prefetch.anchor_probed.contains_key(&id));
+        assert!(!prefetch.anchor_in_flight.contains_key(&id));
         assert_eq!(
             hold_anchor_decision(id, start, &cache, &prefetch),
             HoldAnchorDecision::Pending
         );
+        prefetch
+            .anchor_retry_after
+            .insert(id, (start.0, Instant::now() - Duration::from_millis(1)));
+        assert_eq!(
+            hold_anchor_decision(id, start, &cache, &prefetch),
+            HoldAnchorDecision::Request
+        );
+        prefetch.anchor_in_flight.insert(id, start.0);
+        finish_hold_anchor_probe(&mut prefetch, id, start, true);
+        assert_eq!(prefetch.anchor_probed.get(&id), Some(&start.0));
+        assert!(!prefetch.anchor_retry_after.contains_key(&id));
 
         cache.mark_covered(id, start, Timestamp(201));
         assert_eq!(
@@ -3653,6 +3733,60 @@ mod tests {
         assert_eq!(
             hold_anchor_decision(id, start, &cache, &prefetch),
             HoldAnchorDecision::Request
+        );
+    }
+
+    #[test]
+    fn hold_anchor_payload_confirms_only_empty_or_valid_replies() {
+        use impeller2::schema::Schema;
+        use impeller2::types::PrimType;
+
+        let id = ComponentId::new("test.anchor.payload");
+        let mut schemas = ComponentSchemaRegistry::default();
+        schemas.0.insert(
+            id,
+            Schema::new(PrimType::F64, Vec::<u64>::new()).expect("valid schema"),
+        );
+        let mut cache = TelemetryCache::default();
+
+        assert!(apply_hold_anchor_payload(
+            &[],
+            &[],
+            id,
+            Timestamp(10),
+            &mut cache,
+            &schemas,
+        ));
+        assert!(!apply_hold_anchor_payload(
+            &[Timestamp(5)],
+            &[],
+            id,
+            Timestamp(10),
+            &mut cache,
+            &schemas,
+        ));
+        assert!(!apply_hold_anchor_payload(
+            &[Timestamp(11)],
+            &1.0f64.to_le_bytes(),
+            id,
+            Timestamp(10),
+            &mut cache,
+            &schemas,
+        ));
+        assert!(apply_hold_anchor_payload(
+            &[Timestamp(5)],
+            &1.0f64.to_le_bytes(),
+            id,
+            Timestamp(10),
+            &mut cache,
+            &schemas,
+        ));
+        assert_eq!(
+            cache
+                .get_at_or_before(&id, Timestamp(10))
+                .and_then(|value| value.get(0))
+                .map(|value| value.as_f64()),
+            Some(1.0)
         );
     }
 
