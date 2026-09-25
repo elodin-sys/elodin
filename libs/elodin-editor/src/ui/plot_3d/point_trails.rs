@@ -111,13 +111,13 @@ fn downsample(count: usize, budget: usize) -> Vec<usize> {
     (0..budget).map(|k| k * last / (budget - 1)).collect()
 }
 
-/// Samples in `(start, end]` plus the last one at or before `start`, so sparse
-/// (record-on-change) series still draw from the window start.
+/// Carries the preceding sparse sample into `(start, end]`, unless its gap is
+/// over 100× the recent cadence and therefore marks a trajectory reset.
 fn window_samples<'a>(
     series: &'a BTreeMap<Timestamp, ComponentValue>,
     range: &Range<Timestamp>,
 ) -> Vec<(Timestamp, &'a [f64])> {
-    series
+    let mut samples: Vec<_> = series
         .range(..=range.start)
         .next_back()
         .into_iter()
@@ -126,7 +126,20 @@ fn window_samples<'a>(
             ComponentValue::F64(array) => Some((*ts, array.buf.as_buf())),
             _ => None,
         })
-        .collect()
+        .collect();
+    if samples.len() >= 3 {
+        let carried_gap = samples[1].0.0.saturating_sub(samples[0].0.0);
+        let recent_gap = samples[2..]
+            .iter()
+            .zip(&samples[1..])
+            .map(|(newer, older)| newer.0.0.saturating_sub(older.0.0))
+            .filter(|gap| *gap > 0)
+            .min();
+        if recent_gap.is_some_and(|gap| carried_gap > gap.saturating_mul(100)) {
+            samples.remove(0);
+        }
+    }
+    samples
 }
 
 fn point(values: &[f64], n: usize, i: usize) -> DVec3 {
@@ -593,5 +606,20 @@ mod tests {
         let samples = window_samples(&series, &(Timestamp(10)..Timestamp(60)));
         let xs: Vec<f64> = samples.iter().map(|(_, v)| v[0]).collect();
         assert_eq!(xs, vec![1.0, 2.0]);
+    }
+
+    #[test]
+    fn sparse_series_drops_stale_predecessor_before_a_new_cadence() {
+        let value = |x: f64| ComponentValue::F64(nox::array![x, 0.0, 0.0].to_dyn());
+        let series: BTreeMap<_, _> = [
+            (Timestamp(0), value(1.0)),
+            (Timestamp(1_000_000), value(2.0)),
+            (Timestamp(1_001_000), value(3.0)),
+        ]
+        .into_iter()
+        .collect();
+        let samples = window_samples(&series, &(Timestamp(500_000)..Timestamp(1_001_000)));
+        let xs: Vec<f64> = samples.iter().map(|(_, values)| values[0]).collect();
+        assert_eq!(xs, vec![2.0, 3.0]);
     }
 }
