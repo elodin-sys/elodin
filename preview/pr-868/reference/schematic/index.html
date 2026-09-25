@@ -876,8 +876,10 @@ larger the error confidence interval, the larger the ellipsoid.</li>
 <li><code>line_width</code>: screen-space trail width (default 1.0).</li>
 <li><code>max_length</code>: optional positive cumulative trail length in meters. The oldest segment is interpolated so sparse samples still end at the requested length.</li>
 <li><code>status</code>: optional <code>(N,)</code> integer component. Nonzero points use <code>hit_color</code>.</li>
+<li><code>start</code>: optional scalar component. The first nonzero sample starts the trails; earlier position samples are ignored.</li>
 <li><code>color</code>: trail and head color. When omitted, falls back to the timeline <code>played_color</code>.</li>
 <li><code>hit_color</code>: status-highlighted trail and head color (default red).</li>
+<li><code>head_size</code>, <code>line_width</code>, and <code>max_length</code> accept integer or decimal KDL numbers.</li>
 <li>Long windows are downsampled so all trails fit one GPU index buffer (187 samples per trail at <code>N = 695</code>).</li>
 </ul>
 <h3 id="vector-arrow">vector_arrow</h3>
@@ -1126,6 +1128,7 @@ suffix, .e.g., "0.3m" for 0.3 meters from origin (default "0.1m").</li>
 <span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">             &lt;component&gt;</span></span>
 <span class="giallo-l"><span>             [</span><span style="color: light-dark(#93A1A1, #93A1A1);">frame</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">ENU|NED|ECEF</span><span>]</span></span>
 <span class="giallo-l"><span>             [</span><span style="color: light-dark(#93A1A1, #93A1A1);">status</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">component</span><span>]</span></span>
+<span class="giallo-l"><span>             [</span><span style="color: light-dark(#93A1A1, #93A1A1);">start</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">component</span><span>]</span></span>
 <span class="giallo-l"><span>             [</span><span style="color: light-dark(#93A1A1, #93A1A1);">head_size</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">float</span><span>]</span></span>
 <span class="giallo-l"><span>             [</span><span style="color: light-dark(#93A1A1, #93A1A1);">head_shape</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">cube|sphere</span><span>]</span></span>
 <span class="giallo-l"><span>             [</span><span style="color: light-dark(#93A1A1, #93A1A1);">line_width</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">float</span><span>]</span></span>
