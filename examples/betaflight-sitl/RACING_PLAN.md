@@ -1,7 +1,7 @@
 # Vision-Guided Gate Racing Plan
 
 **Document status:** Authoritative living specification  
-**Last verified against repository:** 2026-09-08
+**Last verified against repository:** 2026-09-21
 **Current resume point:** Package D — manual hardware qualification
 
 ## 1. Purpose and authority
@@ -123,11 +123,19 @@ The default 8 kHz build busy-waits in Betaflight and consumes approximately one
 CPU core to avoid scheduler wakeup latency. The build-time
 `VIRTUAL_GYRO_SAMPLE_RATE_HZ` and Python `simulation_rate` must remain equal.
 
-The example does **not** currently contain a camera, gates, course selection,
-referee, guidance interface, ANGLE-mode guidance, racing controller, perception,
-race tests, or race CI. The README refers to `test_comms.py`, but that file is
-not present; Package A must repair this documentation or supply its supported
-replacement.
+The example now additionally contains:
+
+- Package A's pure protocol/convention tests and machine-readable C0 result;
+- Package C's opt-in `none`/`single` course geometry, four-bar gate rendering,
+  ordered truth referee, fixed-width race telemetry, final race result, and
+  deterministic live positive-crossing qualification; and
+- Package D's command seam, manual-controller integration, ANGLE configuration,
+  one-tick RC latch, and automated physical sign audit. Package D remains open
+  only for operator hardware qualification.
+
+The example does **not** currently contain a camera, autonomous truth/vision
+guidance, the three-gate course, perception/tracking, race completion tests, or
+race CI.
 
 ### 3.1 Current conventions
 
@@ -467,6 +475,12 @@ Only the next gate in sequence can count. For each physics tick:
 4. Test interpolated local y/z against `±inner_size/2`.
 5. On success, record gate index and simulation time exactly once.
 
+The pass timestamp is linearly interpolated between the previous and current
+simulation sample times using the same plane-crossing fraction; it never uses
+wall-clock time. Lap time runs from simulation time zero through the final
+ordered crossing. An enabled course emits exactly one final result on complete,
+incomplete, or interrupted simulation shutdown after execution starts.
+
 Tests must cover centered, edge-inside, edge-outside, backward, yawed, and fast
 diagonal crossings. The end-of-run output contract is:
 
@@ -646,7 +660,7 @@ The default camera-disabled run does not start or require the render server.
 **Handoff:** Record the DB path, export command, observed FPS, and any GPU-specific
 limitations.
 
-### [ ] C — Course and referee vertical slice
+### [x] C — Course and referee vertical slice
 
 **Objective:** Provide independently tested course geometry, rendering, pass
 scoring, and race results without autonomous guidance.
@@ -672,6 +686,24 @@ prove valid, missed, backward, yawed, and diagonal behavior.
 
 **Handoff:** Record final gate coordinate/yaw conventions and the race result
 example.
+
+Additional positive-path qualification (2026-09-16):
+
+```bash
+RACE_COURSE=single RACE_REFEREE_AUDIT=1 \
+  elodin run examples/betaflight-sitl/main.py
+```
+
+This separate integration fixture leaves the contract course unchanged, starts
+the disarmed drone at `(5, 0, 4.9)` m with `+10 m/s` world-X velocity, and ends
+at 2.5 simulated seconds before scripted guidance leaves its safe boot phase.
+Six-DOF gravity and drag produced one gate-0 pass at interpolated simulation
+time `1.085149 s` near `(10.0, 0.0, 1.7958)` m and finished at X=`11.7776 m`;
+telemetry read back on the following callback tick matched the event and
+retained both unused `-1.0` slots. The process emitted exactly one complete
+`[RACE]` line and one passing `[C-REFEREE-AUDIT]` line and returned zero. This
+qualifies the live truth/referee/telemetry/result path, not steering or powered
+autonomous flight.
 
 ### [ ] D — Manual piloting, control seam, and ANGLE mode
 
@@ -1017,10 +1049,10 @@ branch for later resumption.
 
 | Package | Status | Evidence / notes |
 |---|---|---|
-| A | Complete | 24 pure tests pass; C0 returned 0 with 119,995 simulation-loop lockstep responses, max motor 0.574, and 56.837 m takeoff rise in 29 wall-clock seconds after rebuilding latest main. Deliberate 100 m criterion returned 1. Shared headless propagation fixes: `301ae367` (`#837`) and lifecycle follow-up `36ee3431` (`#838`). |
+| A | Complete | 24 pure tests pass; the recorded C0 acceptance run returned 0 with 119,995 simulation-loop lockstep responses, max motor 0.574, and 56.837 m takeoff rise in 29 wall-clock seconds. A deliberate 100 m criterion returned 1. Shared headless propagation fixes: `301ae367` (`#837`) and lifecycle follow-up `36ee3431` (`#838`). |
 | B | Not started | Platform camera API exists; no Betaflight integration |
-| C | Not started | No course or referee code |
-| D | In progress | Command seam, one-tick ordering, AUX2 ANGLE configuration, s10 manual controller, 250 ms heartbeat failsafe, DB telemetry, and simulation-time physical sign audit implemented. The audit bypasses the external controller but retains the common semantic-to-RC/Betaflight path. 50 pure tests and 5 controller tests pass; live audit passes with roll 0.446, pitch 0.444, yaw 1.480 rad/s and max motor 0.391. Manual hardware qualification remains. |
+| C | Complete | `none`/`single` startup selection, static four-bar orange rendering, ordered truth referee, Package D progress integration, fixed-width referee telemetry, exactly one final enabled-course result, and an opt-in positive live audit are implemented. The qualification suite passed 96 tests. The live audit used the unchanged vertical 2.5 m gate, reported one complete pass at 1.085149 s, and verified later-tick telemetry readback. Default C0 and ordinary incomplete `single` behavior were preserved. A 1280×720 H.264 recording and crossing frame were reviewed as qualification evidence; a PR should attach or upload those artifacts separately rather than rely on a host-local path. |
+| D | In progress | Command seam, one-tick ordering, AUX2 ANGLE configuration, s10 manual controller, 250 ms heartbeat failsafe, DB telemetry, and simulation-time physical sign audit implemented. The audit bypasses the external controller but retains the common semantic-to-RC/Betaflight path. The combined qualification passed with roll 1.006, pitch 1.011, yaw 1.479 rad/s and accepted max motor 0.391; 5 controller tests also pass. Manual hardware qualification remains. |
 | E | Blocked by C, D | No truth guidance |
 | F | Blocked by E | No course controller |
 | G | Blocked by B | No racing camera geometry contract in code |
@@ -1037,28 +1069,14 @@ gamepad or keyboard controls. The implementation and deterministic physical
 audit are complete, but Package D must remain open until an operator has armed,
 taken off, exercised roll/pitch/yaw/throttle, landed, and disarmed.
 
-After recording that result in the Package D handoff, Package E is the
-recommended implementation continuation. Packages B and C remain valid
-independent alternatives if camera or course work is prioritized first.
+Record that result in this plan. Package E is then the recommended implementation
+continuation because its C and D code prerequisites are present. Package B
+remains the next fully independent implementation option.
 
-Package A verification from the repository root, with the Elodin Python
-environment active and the current release CLI on `PATH`:
-
-```bash
-python3 -m pytest examples/betaflight-sitl/tests -q
-elodin run examples/betaflight-sitl/main.py
-```
-
-The verified C0 result was:
-
-```text
-[C0] lockstep_steps=119995 motor_response=true max_motor=0.574 takeoff_delta_m=56.837 status=PASS
-```
-
-The pure suite passed 24 tests in 0.15 seconds and C0 completed in 29 wall-clock
-seconds. Raising the takeoff criterion temporarily to 100 m emitted
-`status=FAIL` and returned process status 1; the required 0.1 m criterion was
-then restored.
+Package C's durable qualification command, output contract, measured result, and
+scope are recorded with its work-package acceptance evidence above. User-facing
+headless/editor audit and reproducible video-capture instructions, including the
+recoverable MPEG-TS fallback, are maintained in `README.md`.
 
 ## 13. Decision log
 
