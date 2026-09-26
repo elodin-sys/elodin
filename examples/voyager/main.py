@@ -38,7 +38,7 @@ def gravitational_parameter_m3_s2(spice_name: str) -> float:
     return float(spice.bodvrd(spice_name, "GM", 1)[1][0]) * 1.0e9
 
 
-def spice_state_mks(spice_name: str, time_et: float) -> tuple[np.ndarray, np.ndarray]:
+def spice_state_si(spice_name: str, time_et: float) -> tuple[np.ndarray, np.ndarray]:
     state, _ = spice.spkezr(spice_name, time_et, "ECLIPJ2000", "NONE", "SUN")
     state = np.asarray(state, dtype=np.float64)
     return state[:3] * 1000.0, state[3:] * 1000.0
@@ -196,7 +196,7 @@ sun = w.spawn(
 body_entity_ids = {"Sun": sun}
 
 for body in PLANETS + PROBES + TRUTH_PROBES:
-    init_pos_m, init_vel_mps = spice_state_mks(body["spice_name"], start_time_et)
+    init_pos_m, init_vel_mps = spice_state_si(body["spice_name"], start_time_et)
 
     components = [
         el.Body(
@@ -230,7 +230,7 @@ def pre_step(tick: int, ctx: el.StepContext):
     current_time_et = start_time_et + tick * SIM_TIME_STEP
 
     for body in PLANETS + TRUTH_PROBES:
-        pos_m, vel_mps = spice_state_mks(body["spice_name"], current_time_et)
+        pos_m, vel_mps = spice_state_si(body["spice_name"], current_time_et)
 
         ctx.write_component(
             f"{body['entity_name']}.world_pos",
@@ -256,7 +256,7 @@ def post_step(tick: int, ctx: el.StepContext) -> None:
             dtype=np.float64,
         )[3:6]
 
-        truth_pos, truth_vel = spice_state_mks(probe["spice_name"], current_time_et)
+        truth_pos, truth_vel = spice_state_si(probe["spice_name"], current_time_et)
 
         position_error_km, velocity_error_mps = state_error(
             simulated_pos,
