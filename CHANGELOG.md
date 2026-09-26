@@ -1,7 +1,7 @@
 # Changelog
 
 ## unreleased
-- **(fix)** Stop stellarator's kqueue reactor (macOS and other non-Linux hosts) from busy-spinning once its 1024-entry event buffer fills, which kept every stellarator thread in an Elodin process at 100 % CPU and delayed 1 kHz loops by milliseconds.
+- **(fix)** Stop stellarator's kqueue reactor (macOS and other non-Linux hosts) from busy-spinning once its 1024-entry event buffer fills, which kept every stellarator thread in an Elodin process at 100 % CPU and delayed 1 kHz loops by milliseconds. The reactor also no longer keeps every completed op registered, which made each event slower over a process's lifetime, and a waiting reader no longer drops a waiting writer's registration on the same socket, a stall the busy-spin had hidden.
 
 ## v0.19
 
