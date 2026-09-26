@@ -1542,10 +1542,11 @@ pub fn auto_y_bounds(
             let gpu::LineMut::Timeseries(line) = line else {
                 continue;
             };
-            let summary = line.data.range_summary(selected_range.0.clone());
+            let zoh_range = line.data.range_with_predecessor(selected_range.0.clone());
+            let summary = line.data.range_summary(zoh_range.clone());
             let (line_min, line_max) = if summary.len > OVERVIEW_MAX_POINTS {
                 line.data
-                    .percentile_bounds(selected_range.0.clone(), 1.0, 99.0)
+                    .percentile_bounds(zoh_range, 1.0, 99.0)
                     .unwrap_or((summary.min.unwrap_or(0.0), summary.max.unwrap_or(1.0)))
             } else {
                 (summary.min.unwrap_or(0.0), summary.max.unwrap_or(1.0))

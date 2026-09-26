@@ -5,7 +5,7 @@
 struct LineUniform {
     line_width : f32,
                  color : vec4<f32>,
-                         chunk_size : f32,
+                         zoh : f32,
 #ifdef SIXTEEN_BYTE_ALIGNMENT
                                       // WebGL2 structs must be 16 byte aligned.
                                       _padding : vec2<f32>,

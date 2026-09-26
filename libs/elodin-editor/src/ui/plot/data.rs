@@ -27,7 +27,7 @@ use zerocopy::{Immutable, IntoBytes};
 use std::any::type_name;
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU64;
-use std::ops::{Bound, RangeInclusive};
+use std::ops::RangeInclusive;
 use std::sync::Arc;
 use std::sync::atomic::{self, AtomicBool};
 use std::time::{Duration, Instant};
@@ -1167,7 +1167,7 @@ pub fn sync_plot_lines_from_series_store(
                 max_points.is_some() || new_layout.contains(&(component_id, element_index));
             if !has_state_in_window {
                 if should_clear_line_on_empty_store(
-                    line.data.stored_exclusive_span(),
+                    line.data.projected_span(),
                     sync_range,
                     range_changed,
                     series_store.is_covered(&component_id, sync_range),
@@ -1289,7 +1289,7 @@ fn apply_plot_sync_plan(
             sync_range,
             tree,
         );
-    match plot_sync_plan(tree.stored_exclusive_span(), sync_range, rebuild) {
+    match plot_sync_plan(tree.projected_span(), sync_range, rebuild) {
         PlotSyncPlan::FullRebuild => {
             tree.clear();
             project_series_element_to_line(
@@ -1319,6 +1319,7 @@ fn apply_plot_sync_plan(
             tree.evict_chunks_outside(padded_sync_keep_range(sync_range));
         }
     }
+    tree.set_projected_range(sync_range.clone());
 }
 
 /// True when every in-store sample inside the tree's already-covered span is
@@ -1335,7 +1336,7 @@ fn plot_line_matches_store_interior(
     need: &Range<Timestamp>,
     tree: &LineTree<f32>,
 ) -> bool {
-    let Some(stored) = tree.stored_exclusive_span() else {
+    let Some(stored) = tree.projected_span() else {
         return true;
     };
     let start = stored.start.max(need.start);
@@ -1582,8 +1583,8 @@ pub fn update_series_fetch_priority(
     priority.high = next;
 }
 
-/// Zero-order-held samples spanning the requested window.
-fn held_element_samples(
+/// Stored samples in the window plus the latest preceding value.
+fn element_samples_with_predecessor(
     cache: &TelemetryCache,
     component_id: ComponentId,
     element_index: usize,
@@ -1596,38 +1597,25 @@ fn held_element_samples(
         return Vec::new();
     };
 
-    let mut samples = Vec::new();
-    let mut held = series
-        .range(..=range.start)
+    series
+        .range(..range.start)
         .rev()
-        .find_map(|(_, value)| value.get(element_index).map(|element| element.as_f32()));
-    if let Some(value) = held {
-        samples.push((range.start, value));
-    }
-
-    for (timestamp, value) in
-        series.range((Bound::Excluded(range.start), Bound::Excluded(range.end)))
-    {
-        let Some(value) = value.get(element_index).map(|element| element.as_f32()) else {
-            continue;
-        };
-        if let Some(previous) = held {
-            let before = Timestamp(timestamp.0.saturating_sub(1));
-            if samples.last().is_none_or(|(last, _)| before > *last) {
-                samples.push((before, previous));
-            }
-        }
-        samples.push((*timestamp, value));
-        held = Some(value);
-    }
-
-    if let Some(value) = held {
-        let end = Timestamp(range.end.0.saturating_sub(1));
-        if samples.last().is_none_or(|(last, _)| end > *last) {
-            samples.push((end, value));
-        }
-    }
-    samples
+        .find_map(|(&timestamp, value)| {
+            value
+                .get(element_index)
+                .map(|element| (timestamp, element.as_f32()))
+        })
+        .into_iter()
+        .chain(
+            series
+                .range(range.clone())
+                .filter_map(|(&timestamp, value)| {
+                    value
+                        .get(element_index)
+                        .map(|element| (timestamp, element.as_f32()))
+                }),
+        )
+        .collect()
 }
 
 /// Project SeriesStore samples into a plot `LineTree` for one element.
@@ -1641,7 +1629,7 @@ pub(crate) fn project_series_element_to_line(
     line: &mut LineTree<f32>,
     max_points: Option<usize>,
 ) -> usize {
-    let samples = held_element_samples(cache, component_id, element_index, range);
+    let samples = element_samples_with_predecessor(cache, component_id, element_index, range);
     let count = samples.len();
     if count == 0 {
         return 0;
@@ -1694,7 +1682,9 @@ fn append_series_element_to_line(
     line: &mut LineTree<f32>,
 ) -> usize {
     let mut total = 0usize;
-    for (timestamp, new_value) in held_element_samples(cache, component_id, element_index, range) {
+    for (timestamp, new_value) in
+        element_samples_with_predecessor(cache, component_id, element_index, range)
+    {
         let mut accepted = false;
         if let Some(last) = line.last() {
             if timestamp <= last.summary.end_timestamp {
@@ -2270,6 +2260,7 @@ impl<D: Clone + BoundOrd> ChunkSummary<D> {
 
 pub struct LineTree<D: Clone + BoundOrd> {
     tree: NoditMap<i64, nodit::Interval<i64>, Chunk<D>>,
+    projected_range: Option<Range<Timestamp>>,
     data_buffer_shard_alloc: Option<BufferShardAlloc>,
     timestamp_buffer_shard_alloc: Option<BufferShardAlloc>,
     /// Append-only archive of raw `(timestamp, value)` samples ingested live.
@@ -2300,6 +2291,7 @@ impl<D: Clone + BoundOrd> Default for LineTree<D> {
     fn default() -> Self {
         Self {
             tree: Default::default(),
+            projected_range: None,
             data_buffer_shard_alloc: None,
             timestamp_buffer_shard_alloc: None,
             raw_timestamps: Vec::new(),
@@ -2573,20 +2565,52 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         Some(start..Timestamp(end.0.saturating_add(1)))
     }
 
+    fn projected_span(&self) -> Option<Range<Timestamp>> {
+        self.projected_range
+            .clone()
+            .or_else(|| self.stored_exclusive_span())
+    }
+
+    fn set_projected_range(&mut self, range: Range<Timestamp>) {
+        self.projected_range = Some(range);
+    }
+
+    pub fn range_with_predecessor(&self, range: Range<Timestamp>) -> Range<Timestamp> {
+        self.last_timestamp_strictly_before(range.start)
+            .unwrap_or(range.start)..range.end
+    }
+
     /// Drop chunks that lie entirely outside `keep`. Overlapping chunks stay so
     /// a slide cannot punch a hole in the still-visible strip.
     pub fn evict_chunks_outside(&mut self, keep: Range<Timestamp>) {
+        let predecessor = self.projected_range.as_ref().and_then(|_| {
+            keep.start.0.checked_sub(1).and_then(|end| {
+                self.tree
+                    .overlapping(ii(i64::MIN, end))
+                    .last()
+                    .map(|(_, chunk)| {
+                        (
+                            chunk.summary.start_timestamp.0,
+                            chunk.summary.end_timestamp.0,
+                        )
+                    })
+            })
+        });
         let doomed: Vec<(i64, i64)> = self
             .tree
             .iter()
             .filter(|(_, chunk)| {
                 chunk.summary.end_timestamp < keep.start || chunk.summary.start_timestamp > keep.end
             })
-            .map(|(_, chunk)| {
-                (
+            .filter_map(|(_, chunk)| {
+                let key = (
                     chunk.summary.start_timestamp.0,
                     chunk.summary.end_timestamp.0,
-                )
+                );
+                (Some(key) != predecessor).then_some((
+                    chunk.summary.start_timestamp.0,
+                    chunk.summary.end_timestamp.0,
+                ))
             })
             .collect();
         if doomed.is_empty() {
@@ -2765,9 +2789,16 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         index_buffer: &Buffer,
         render_queue: &RenderQueue,
         line_visible_range: Range<Timestamp>,
+        terminal_hold: bool,
     ) -> Option<u32> {
-        let step = self.fitted_index_step(line_visible_range.clone());
-        self.write_to_index_buffer_with_step(index_buffer, render_queue, line_visible_range, step)
+        let step = self.fitted_index_step(line_visible_range.clone(), terminal_hold);
+        self.write_to_index_buffer_with_step_mode(
+            index_buffer,
+            render_queue,
+            line_visible_range,
+            step,
+            terminal_hold,
+        )
     }
 
     /// Stride for `range` that [`Self::write_to_index_buffer_with_step`] is
@@ -2777,8 +2808,9 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     /// dense range can still overshoot; the write loop would then stop mid-strip
     /// and drop the *newest* samples, since chunks are visited oldest first.
     /// Double until the exact count fits, as `plot_3d` does.
-    fn fitted_index_step(&self, range: Range<Timestamp>) -> usize {
+    fn fitted_index_step(&self, range: Range<Timestamp>, terminal_hold: bool) -> usize {
         let (chunk_count, index_count) = self.range_index_stats(range.clone());
+        let index_count = index_count.saturating_add(usize::from(terminal_hold) * 2);
         let mut step = index_sampling_step(chunk_count, index_count);
         // `index_count` bounds the strip from above, so only an over-budget range
         // has to pay for the exact count.
@@ -2786,7 +2818,9 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             return step;
         }
         for _ in 0..MAX_INDEX_STEP_DOUBLINGS {
-            if self.count_strip_index_u32s(range.clone(), step) <= INDEX_BUFFER_LEN as u32 {
+            if self.count_strip_index_u32s_mode(range.clone(), step, terminal_hold)
+                <= INDEX_BUFFER_LEN as u32
+            {
                 break;
             }
             step = step.saturating_mul(2).max(2);
@@ -2800,8 +2834,18 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     /// Uses the same visibility clipping as [`Self::draw_index_chunk_iter`] but does **not**
     /// require GPU-resident chunks (counts from CPU timestamps + visible length only).
     pub fn count_strip_index_u32s(&self, line_visible_range: Range<Timestamp>, step: usize) -> u32 {
+        self.count_strip_index_u32s_mode(line_visible_range, step, false)
+    }
+
+    fn count_strip_index_u32s_mode(
+        &self,
+        line_visible_range: Range<Timestamp>,
+        step: usize,
+        terminal_hold: bool,
+    ) -> u32 {
         let step = step.max(1);
         let mut n: u32 = 0;
+        let mut has_sample = false;
         for c in self.range_iter(line_visible_range.clone()) {
             let Some((start_offset, end_offset)) =
                 chunk_visible_offsets(&c.timestamps, &line_visible_range)
@@ -2825,6 +2869,7 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             if let Some(index) = index_iter.next() {
                 n = n.saturating_add(1);
                 last_written = Some(index);
+                has_sample = true;
             }
             for index in index_iter.step_by(step) {
                 n = n.saturating_add(1);
@@ -2837,6 +2882,9 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             }
             n = n.saturating_add(1);
         }
+        if terminal_hold && has_sample {
+            n = n.saturating_add(2);
+        }
         n
     }
 
@@ -2847,6 +2895,23 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         line_visible_range: Range<Timestamp>,
         step: usize,
     ) -> Option<u32> {
+        self.write_to_index_buffer_with_step_mode(
+            index_buffer,
+            render_queue,
+            line_visible_range,
+            step,
+            false,
+        )
+    }
+
+    fn write_to_index_buffer_with_step_mode(
+        &self,
+        index_buffer: &Buffer,
+        render_queue: &RenderQueue,
+        line_visible_range: Range<Timestamp>,
+        step: usize,
+        terminal_hold: bool,
+    ) -> Option<u32> {
         let mut view = render_queue.write_buffer_with(
             index_buffer,
             0,
@@ -2854,9 +2919,10 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         )?;
         let mut view = view.slice(..);
         let mut written_u32s: u32 = 0;
-        'chunks: for chunk in self.draw_index_chunk_iter(line_visible_range) {
+        let mut final_index = None;
+        for chunk in self.draw_index_chunk_iter(line_visible_range) {
             let Some(v) = try_append_u32(view, 0) else {
-                break 'chunks;
+                return Some(written_u32s);
             };
             view = v;
             written_u32s += 1;
@@ -2865,34 +2931,46 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             let mut last_written: Option<u32> = None;
             if let Some(index) = index_iter.next() {
                 let Some(v) = try_append_u32(view, index) else {
-                    break 'chunks;
+                    return Some(written_u32s);
                 };
                 view = v;
                 written_u32s += 1;
                 last_written = Some(index);
+                final_index = Some(index);
             }
             for index in index_iter.step_by(step) {
                 let Some(v) = try_append_u32(view, index) else {
-                    break 'chunks;
+                    return Some(written_u32s);
                 };
                 view = v;
                 written_u32s += 1;
                 last_written = Some(index);
+                final_index = Some(index);
             }
             if let Some(end) = end
                 && last_written != Some(end)
             {
                 let Some(v) = try_append_u32(view, end) else {
-                    break 'chunks;
+                    return Some(written_u32s);
+                };
+                view = v;
+                written_u32s += 1;
+                final_index = Some(end);
+            }
+            let Some(v) = try_append_u32(view, 0) else {
+                return Some(written_u32s);
+            };
+            view = v;
+            written_u32s += 1;
+        }
+        if terminal_hold && let Some(index) = final_index {
+            for _ in 0..2 {
+                let Some(v) = try_append_u32(view, index) else {
+                    return Some(written_u32s);
                 };
                 view = v;
                 written_u32s += 1;
             }
-            let Some(v) = try_append_u32(view, 0) else {
-                break 'chunks;
-            };
-            view = v;
-            written_u32s += 1;
         }
         Some(written_u32s)
     }
@@ -3007,6 +3085,7 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     /// Drop all CPU/GPU chunks (full rebuild from SeriesStore).
     pub fn clear(&mut self) {
         self.content_gen = self.content_gen.wrapping_add(1);
+        self.projected_range = None;
         let full = nodit::interval::ii(i64::MIN, i64::MAX);
         for (_range, chunk) in self.tree.remove_overlapping(full) {
             if let Some(alloc) = &mut self.data_buffer_shard_alloc
@@ -3754,7 +3833,7 @@ mod tests {
     }
 
     #[test]
-    fn held_element_samples_span_constant_window() {
+    fn projected_samples_keep_the_authoritative_predecessor() {
         let mut cache = TelemetryCache::default();
         let id = ComponentId::new("test.constant");
         insert_f64(&mut cache, id, 0, 4.0);
@@ -3766,17 +3845,17 @@ mod tests {
         );
 
         assert_eq!(
-            held_element_samples(&cache, id, 0, &range),
-            vec![(Timestamp(10), 4.0), (Timestamp(19), 4.0)]
+            element_samples_with_predecessor(&cache, id, 0, &range),
+            vec![(Timestamp(0), 4.0)]
         );
 
         let mut line = LineTree::<f32>::default();
         assert_eq!(
             project_series_element_to_line(&cache, id, 0, &range, Timestamp(0), &mut line, None,),
-            2
+            1
         );
-        assert_eq!(line.first_timestamp(), Some(Timestamp(10)));
-        assert_eq!(line.latest_sample_timestamp(), Some(Timestamp(19)));
+        assert_eq!(line.first_timestamp(), Some(Timestamp(0)));
+        assert_eq!(line.latest_sample_timestamp(), Some(Timestamp(0)));
     }
 
     #[test]
@@ -4191,7 +4270,7 @@ mod tests {
     }
 
     #[test]
-    fn held_element_samples_make_sparse_changes_stepwise() {
+    fn projected_samples_are_not_expanded_for_zero_order_hold() {
         let mut cache = TelemetryCache::default();
         let id = ComponentId::new("test.steps");
         insert_f64(&mut cache, id, 0, 1.0);
@@ -4199,13 +4278,8 @@ mod tests {
         insert_f64(&mut cache, id, 20, 3.0);
 
         assert_eq!(
-            held_element_samples(&cache, id, 0, &(Timestamp(5)..Timestamp(16))),
-            vec![
-                (Timestamp(5), 1.0),
-                (Timestamp(9), 1.0),
-                (Timestamp(10), 2.0),
-                (Timestamp(15), 2.0),
-            ]
+            element_samples_with_predecessor(&cache, id, 0, &(Timestamp(5)..Timestamp(16))),
+            vec![(Timestamp(0), 1.0), (Timestamp(10), 2.0)]
         );
     }
 
@@ -4220,9 +4294,9 @@ mod tests {
         let need = Timestamp(0)..Timestamp(15_000_001);
         let mut tree = LineTree::<f32>::default();
         apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
-        assert_eq!(tree.total_points(), 3);
+        assert_eq!(tree.total_points(), 2);
         assert_eq!(
-            plot_sync_plan(tree.stored_exclusive_span(), &need, false),
+            plot_sync_plan(tree.projected_span(), &need, false),
             PlotSyncPlan::Keep
         );
         assert!(plot_line_matches_store_interior(
@@ -4234,7 +4308,7 @@ mod tests {
             &cache, id, 0, &need, &tree
         ));
         apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
-        assert_eq!(tree.total_points(), 5);
+        assert_eq!(tree.total_points(), 3);
         assert_eq!(
             tree.get_nearest(Timestamp(7_500_000)).map(|(ts, _)| ts),
             Some(Timestamp(7_500_000))
@@ -4254,11 +4328,11 @@ mod tests {
         let need = Timestamp(0)..Timestamp(15_000_000);
         let mut tree = LineTree::<f32>::default();
         apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
-        assert_eq!(tree.total_points(), 40);
+        assert_eq!(tree.total_points(), 20);
 
         insert_f64(&mut cache, id, 7_000_000, 50.0);
         apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
-        assert_eq!(tree.total_points(), 42);
+        assert_eq!(tree.total_points(), 21);
         assert!(tree.get_nearest(Timestamp(7_000_000)).is_some());
     }
 
@@ -4272,13 +4346,13 @@ mod tests {
         let first = Timestamp(0)..Timestamp(15_000_001);
         let mut tree = LineTree::<f32>::default();
         apply_plot_sync_plan(&cache, id, 0, &first, Timestamp(0), None, false, &mut tree);
-        assert_eq!(tree.total_points(), 31);
+        assert_eq!(tree.total_points(), 16);
         assert_eq!(tree.first_timestamp(), Some(Timestamp(0)));
 
         insert_f64(&mut cache, id, 15_100_000, 15.1);
         let slid = Timestamp(100_000)..Timestamp(15_100_001);
         assert_eq!(
-            plot_sync_plan(tree.stored_exclusive_span(), &slid, false),
+            plot_sync_plan(tree.projected_span(), &slid, false),
             PlotSyncPlan::Extend {
                 prefix: None,
                 suffix: Some(Timestamp(15_000_001)..Timestamp(15_100_001)),
@@ -4290,7 +4364,23 @@ mod tests {
         apply_plot_sync_plan(&cache, id, 0, &slid, Timestamp(0), None, false, &mut tree);
         assert_eq!(tree.first_timestamp(), Some(Timestamp(0)));
         assert_eq!(tree.latest_sample_timestamp(), Some(Timestamp(15_100_000)));
-        assert_eq!(tree.total_points(), 34);
+        assert_eq!(tree.total_points(), 17);
+    }
+
+    #[test]
+    fn constant_trailing_extensions_do_not_materialize_hold_anchors() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.constant.trailing");
+        insert_f64(&mut cache, id, 0, 4.0);
+        let mut tree = LineTree::<f32>::default();
+
+        for step in 0..=100 {
+            let offset = step * REQUEST_KEY_QUANTUM_MICROS;
+            let range = Timestamp(offset)..Timestamp(10_000_000 + offset);
+            apply_plot_sync_plan(&cache, id, 0, &range, Timestamp(0), None, false, &mut tree);
+            assert_eq!(tree.total_points(), 1);
+            assert_eq!(tree.first_timestamp(), Some(Timestamp(0)));
+        }
     }
 
     #[test]
@@ -4620,8 +4710,8 @@ mod tests {
             "full_count={full_count} INDEX_BUFFER_LEN={INDEX_BUFFER_LEN}"
         );
         assert!(zoom_count < full_count);
-        assert_eq!(tree.fitted_index_step(full), 1);
-        assert_eq!(tree.fitted_index_step(zoomed), 1);
+        assert_eq!(tree.fitted_index_step(full, false), 1);
+        assert_eq!(tree.fitted_index_step(zoomed, false), 1);
     }
 
     #[test]
@@ -4651,7 +4741,7 @@ mod tests {
             tree.count_strip_index_u32s(range.clone(), 1) > INDEX_BUFFER_LEN as u32,
             "fixture must be over budget at step 1"
         );
-        let step = tree.fitted_index_step(range.clone());
+        let step = tree.fitted_index_step(range.clone(), false);
         assert!(
             step > 1,
             "over-budget range must raise the step, got {step}"
@@ -4722,15 +4812,15 @@ mod tests {
         // Tip window: last 5s
         let tip = Timestamp(5_000_000)..Timestamp(10_000_000);
         let n = project_series_element_to_line(&cache, id, 0, &tip, earliest, &mut line, None);
-        assert_eq!(n, 1000);
-        assert_eq!(line.total_points(), 1000);
+        assert_eq!(n, 501);
+        assert_eq!(line.total_points(), 501);
 
         // Jump to start: first 5s — clear and rebuild
         line.clear();
         let start = Timestamp(0)..Timestamp(5_000_000);
         let n2 = project_series_element_to_line(&cache, id, 0, &start, earliest, &mut line, None);
-        assert_eq!(n2, 1000);
-        assert_eq!(line.total_points(), 1000);
+        assert_eq!(n2, 500);
+        assert_eq!(line.total_points(), 500);
         // Store still holds full history
         assert_eq!(cache.total_sample_count(), 1000);
     }
@@ -4829,6 +4919,20 @@ mod tests {
             c, 12,
             "leading 0 + 10 indices + trailing 0 (no duplicate last)"
         );
+    }
+
+    #[test]
+    fn zero_order_hold_adds_only_a_transient_terminal_pair() {
+        let mut tree = LineTree::<f32>::default();
+        let ts: Vec<Timestamp> = (0i64..10).map(Timestamp).collect();
+        let vals: Vec<f32> = (0..10).map(|i| i as f32).collect();
+        tree.insert(Chunk::from_iter(&ts, Timestamp(0), vals.into_iter()).expect("chunk"));
+
+        assert_eq!(
+            tree.count_strip_index_u32s_mode(Timestamp(0)..Timestamp(10), 1, true),
+            14
+        );
+        assert_eq!(tree.total_points(), 10);
     }
 
     // === Archive + view (non-destructive HC) tests ===
