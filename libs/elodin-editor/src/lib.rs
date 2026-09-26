@@ -2767,8 +2767,12 @@ mod tests {
             pkt.0.insert(packet_id, pkt_sys);
             app.world_mut()
                 .resource_mut::<crate::ui::plot::data::VisiblePrefetchState>()
-                .in_flight
-                .insert((ComponentId(1), 0, 1));
+                .begin(crate::ui::plot::data::PrefetchKey::Window {
+                    component_id: ComponentId(1),
+                    start: 0,
+                    end: 1,
+                })
+                .unwrap();
         }
 
         app.world_mut()
@@ -2792,11 +2796,11 @@ mod tests {
         assert!(app.world().resource::<MsgRequestIdHandlers>().0.is_empty());
         assert!(app.world().resource::<RequestIdHandlers>().0.is_empty());
         assert!(app.world().resource::<PacketIdHandlers>().0.is_empty());
-        assert!(
+        assert_eq!(
             app.world()
                 .resource::<crate::ui::plot::data::VisiblePrefetchState>()
-                .in_flight
-                .is_empty()
+                .request_count(),
+            0
         );
         // Systems were unregistered — a second unregister must fail.
         assert!(app.world_mut().unregister_system(msg_sys).is_err());
@@ -2840,7 +2844,13 @@ mod tests {
         let mut series_load = impeller2_bevy::SeriesStoreLoadState::default();
         let mut plot_sync = crate::ui::plot::data::PlotSyncState::default();
         let mut prefetch = crate::ui::plot::data::VisiblePrefetchState::default();
-        prefetch.in_flight.insert((ComponentId(1), 0, 1));
+        prefetch
+            .begin(crate::ui::plot::data::PrefetchKey::Window {
+                component_id: ComponentId(1),
+                start: 0,
+                end: 1,
+            })
+            .unwrap();
         prefetch.clear_in_flight();
 
         let soft = series_store_soft_reconnect(&session, Some(addr));
@@ -2860,7 +2870,7 @@ mod tests {
         }
 
         assert!(cache.has_series(&ComponentId(42)));
-        assert!(prefetch.in_flight.is_empty());
+        assert_eq!(prefetch.request_count(), 0);
     }
 
     #[test]
@@ -2980,8 +2990,12 @@ mod tests {
                 .insert(3u16.to_le_bytes(), pkt_sys);
             app.world_mut()
                 .resource_mut::<crate::ui::plot::data::VisiblePrefetchState>()
-                .in_flight
-                .insert((ComponentId(1), 0, 1));
+                .begin(crate::ui::plot::data::PrefetchKey::Window {
+                    component_id: ComponentId(1),
+                    start: 0,
+                    end: 1,
+                })
+                .unwrap();
             app.world_mut()
                 .resource_mut::<plugins::kdl_document::LastSyncedActiveKey>()
                 .0 = Some("schematics/main.kdl".into());
@@ -3011,11 +3025,11 @@ mod tests {
         assert!(app.world().resource::<MsgRequestIdHandlers>().0.is_empty());
         assert!(app.world().resource::<RequestIdHandlers>().0.is_empty());
         assert!(app.world().resource::<PacketIdHandlers>().0.is_empty());
-        assert!(
+        assert_eq!(
             app.world()
                 .resource::<crate::ui::plot::data::VisiblePrefetchState>()
-                .in_flight
-                .is_empty()
+                .request_count(),
+            0
         );
         assert!(
             app.world()

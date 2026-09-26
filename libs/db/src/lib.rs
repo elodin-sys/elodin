@@ -2236,11 +2236,8 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                 Ok(component.clone())
             })?;
             let Some((timestamps, data)) = component.get_range(&range) else {
-                return Err(Error::TimeRangeOutOfBounds {
-                    range,
-                    component_id: component.component_id,
-                    latest: component.time_series.latest().map(|x| *x.0),
-                });
+                tx.send_time_series(id, &[], &[]).await?;
+                return Ok(PacketAction::Continue);
             };
             let size = component.schema.size();
             let (timestamps, data) = if let Some(limit) = limit {

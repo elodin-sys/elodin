@@ -592,34 +592,120 @@ fn visible_sync_range(
     Some((range_key, Timestamp(range_key.0)..Timestamp(range_key.1)))
 }
 
-/// Dedupes in-flight visible-window GetTimeSeries requests.
+/// Identifies logical sparse-prefetch requests.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum PrefetchKey {
+    Window {
+        component_id: ComponentId,
+        start: i64,
+        end: i64,
+    },
+    Anchor {
+        component_id: ComponentId,
+        start: i64,
+    },
+}
+
+impl PrefetchKey {
+    fn component_id(self) -> ComponentId {
+        match self {
+            Self::Window { component_id, .. } | Self::Anchor { component_id, .. } => component_id,
+        }
+    }
+
+    fn same_slot(self, other: Self) -> bool {
+        self.component_id() == other.component_id()
+            && matches!(
+                (self, other),
+                (Self::Window { .. }, Self::Window { .. })
+                    | (Self::Anchor { .. }, Self::Anchor { .. })
+            )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PrefetchRequestState {
+    InFlight(u64),
+    RetryAt(Instant),
+}
+
 #[derive(Resource, Default)]
 pub struct VisiblePrefetchState {
-    pub(crate) in_flight: HashSet<(ComponentId, i64, i64)>,
-    anchor_in_flight: HashMap<ComponentId, i64>,
-    anchor_probed: HashMap<ComponentId, i64>,
-    anchor_retry_after: HashMap<ComponentId, (i64, Instant)>,
+    requests: HashMap<PrefetchKey, PrefetchRequestState>,
+    next_attempt: u64,
 }
 
 impl VisiblePrefetchState {
-    /// Cancels requests while retaining probes that match the soft-preserved cache.
     pub fn clear_in_flight(&mut self) {
-        self.in_flight.clear();
-        self.anchor_in_flight.clear();
-        self.anchor_retry_after.clear();
+        self.requests.clear();
     }
 
-    fn request_count(&self) -> usize {
-        self.in_flight.len() + self.anchor_in_flight.len()
+    pub(crate) fn request_count(&self) -> usize {
+        self.requests
+            .values()
+            .filter(|state| matches!(state, PrefetchRequestState::InFlight(_)))
+            .count()
+    }
+
+    fn has_capacity(&self) -> bool {
+        self.request_count() < MAX_VISIBLE_PREFETCH_IN_FLIGHT
+    }
+
+    fn drop_superseded_retries(&mut self, key: PrefetchKey) {
+        self.requests.retain(|existing, state| {
+            *existing == key
+                || !existing.same_slot(key)
+                || matches!(state, PrefetchRequestState::InFlight(_))
+        });
+    }
+
+    pub(crate) fn begin(&mut self, key: PrefetchKey) -> Option<u64> {
+        self.drop_superseded_retries(key);
+        let now = Instant::now();
+        if self.requests.iter().any(|(existing, state)| {
+            existing.same_slot(key) && matches!(state, PrefetchRequestState::InFlight(_))
+        }) {
+            return None;
+        }
+        if self.requests.get(&key).is_some_and(
+            |state| matches!(state, PrefetchRequestState::RetryAt(retry_at) if now < *retry_at),
+        ) {
+            return None;
+        }
+        self.next_attempt = self.next_attempt.wrapping_add(1);
+        let attempt = self.next_attempt;
+        self.requests
+            .insert(key, PrefetchRequestState::InFlight(attempt));
+        Some(attempt)
+    }
+
+    fn is_current(&self, key: PrefetchKey, attempt: u64) -> bool {
+        self.requests.get(&key) == Some(&PrefetchRequestState::InFlight(attempt))
+    }
+
+    fn finish(&mut self, key: PrefetchKey, attempt: u64, success: bool) {
+        if !self.is_current(key, attempt) {
+            return;
+        }
+        if success {
+            self.requests.remove(&key);
+        } else {
+            self.requests.insert(
+                key,
+                PrefetchRequestState::RetryAt(Instant::now() + PREFETCH_RETRY_DELAY),
+            );
+        }
+    }
+
+    fn cancel_component(&mut self, component_id: ComponentId) {
+        self.requests
+            .retain(|key, _| key.component_id() != component_id);
     }
 }
 
 const VISIBLE_PREFETCH_LIMIT: usize = 8192;
-const HOLD_ANCHOR_RETRY_DELAY: Duration = Duration::from_millis(100);
-
-fn visible_prefetch_packet_id() -> PacketId {
-    fastrand::u16(1..=u16::MAX).to_le_bytes()
-}
+const MAX_VISIBLE_PREFETCH_IN_FLIGHT: usize = 32;
+const PREFETCH_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 #[derive(Debug, PartialEq, Eq)]
 enum HoldAnchorDecision {
@@ -637,55 +723,28 @@ fn hold_anchor_decision(
     if series_store
         .get_at_or_before(&component_id, start)
         .is_some()
+        || series_store.is_covered(
+            &component_id,
+            &(Timestamp(i64::MIN)..Timestamp(start.0.saturating_add(1))),
+        )
     {
         return HoldAnchorDecision::Satisfied;
     }
-    if prefetch.anchor_in_flight.get(&component_id) == Some(&start.0)
-        || prefetch.anchor_probed.get(&component_id) == Some(&start.0)
-    {
-        return HoldAnchorDecision::Pending;
-    }
+    let key = PrefetchKey::Anchor {
+        component_id,
+        start: start.0,
+    };
     if prefetch
-        .anchor_retry_after
-        .get(&component_id)
-        .is_some_and(|(retry_start, retry_at)| {
-            *retry_start == start.0 && Instant::now() < *retry_at
+        .requests
+        .get(&key)
+        .is_some_and(|state| match state {
+            PrefetchRequestState::InFlight(_) => true,
+            PrefetchRequestState::RetryAt(retry_at) => Instant::now() < *retry_at,
         })
     {
         return HoldAnchorDecision::Pending;
     }
-    if let Some(&probed) = prefetch.anchor_probed.get(&component_id)
-        && probed < start.0
-        && series_store.is_covered(
-            &component_id,
-            &(Timestamp(probed)..Timestamp(start.0.saturating_add(1))),
-        )
-    {
-        return HoldAnchorDecision::Pending;
-    }
     HoldAnchorDecision::Request
-}
-
-fn finish_hold_anchor_probe(
-    prefetch: &mut VisiblePrefetchState,
-    component_id: ComponentId,
-    start: Timestamp,
-    confirmed: bool,
-) {
-    if prefetch.anchor_in_flight.get(&component_id) != Some(&start.0) {
-        return;
-    }
-    prefetch.anchor_in_flight.remove(&component_id);
-    if confirmed {
-        prefetch.anchor_probed.insert(component_id, start.0);
-        prefetch.anchor_retry_after.remove(&component_id);
-    } else {
-        prefetch.anchor_probed.remove(&component_id);
-        prefetch.anchor_retry_after.insert(
-            component_id,
-            (start.0, Instant::now() + HOLD_ANCHOR_RETRY_DELAY),
-        );
-    }
 }
 
 fn apply_hold_anchor_payload(
@@ -748,20 +807,22 @@ fn prefetch_hold_anchor(
     prefetch: &mut VisiblePrefetchState,
     commands: &mut Commands,
 ) -> bool {
+    let key = PrefetchKey::Anchor {
+        component_id,
+        start: start.0,
+    };
     match hold_anchor_decision(component_id, start, series_store, prefetch) {
         HoldAnchorDecision::Satisfied => {
-            prefetch.anchor_in_flight.remove(&component_id);
-            prefetch.anchor_probed.remove(&component_id);
-            prefetch.anchor_retry_after.remove(&component_id);
+            prefetch.requests.remove(&key);
             return false;
         }
         HoldAnchorDecision::Pending => return false,
         HoldAnchorDecision::Request => {}
     }
 
-    prefetch.anchor_in_flight.insert(component_id, start.0);
-    prefetch.anchor_probed.remove(&component_id);
-    prefetch.anchor_retry_after.remove(&component_id);
+    let Some(attempt) = prefetch.begin(key) else {
+        return false;
+    };
     commands.send_req_reply_raw(
         GetTimeSeriesPredecessor {
             id: PacketId::default(),
@@ -775,14 +836,26 @@ fn prefetch_hold_anchor(
               mut prefetch: ResMut<VisiblePrefetchState>|
               -> bool {
             if !priority.high.contains(&component_id) {
-                prefetch.anchor_in_flight.remove(&component_id);
-                prefetch.anchor_probed.remove(&component_id);
-                prefetch.anchor_retry_after.remove(&component_id);
+                prefetch.cancel_component(component_id);
+                return true;
+            }
+            if !prefetch.is_current(key, attempt) {
                 return true;
             }
             let confirmed =
                 apply_hold_anchor_reply(&pkt, component_id, start, &mut series_store, &schema_reg);
-            finish_hold_anchor_probe(&mut prefetch, component_id, start, confirmed);
+            if confirmed
+                && series_store
+                    .get_at_or_before(&component_id, start)
+                    .is_none()
+            {
+                series_store.mark_covered(
+                    component_id,
+                    Timestamp(i64::MIN),
+                    Timestamp(start.0.saturating_add(1)),
+                );
+            }
+            prefetch.finish(key, attempt, confirmed);
             true
         },
     );
@@ -807,12 +880,25 @@ fn prefetch_visible_window(
     // in `update_series_fetch_priority` and filled by live + begin→end backfill.
     let fetch_ids =
         plot_fetch_component_ids(graph_states, line_3ds, point_trails, object_3ds, eql_ctx);
+    prefetch
+        .requests
+        .retain(|key, _| fetch_ids.contains(&key.component_id()));
     if fetch_ids.is_empty() {
         return;
     }
-    const MAX_VISIBLE_PREFETCH_IN_FLIGHT: usize = 32;
+    for component_id in fetch_ids.iter().copied() {
+        prefetch.drop_superseded_retries(PrefetchKey::Anchor {
+            component_id,
+            start: sync_range.start.0,
+        });
+        prefetch.drop_superseded_retries(PrefetchKey::Window {
+            component_id,
+            start: range_key.0,
+            end: range_key.1,
+        });
+    }
     for component_id in fetch_ids {
-        if prefetch.request_count() >= MAX_VISIBLE_PREFETCH_IN_FLIGHT {
+        if !prefetch.has_capacity() {
             break;
         }
         if !schema_reg.0.contains_key(&component_id) {
@@ -825,159 +911,159 @@ fn prefetch_visible_window(
             prefetch,
             commands,
         );
-        if prefetch.request_count() >= MAX_VISIBLE_PREFETCH_IN_FLIGHT {
+        if !prefetch.has_capacity() {
             continue;
         }
-        if series_store.is_covered(&component_id, sync_range) {
-            prefetch
-                .in_flight
-                .remove(&(component_id, range_key.0, range_key.1));
-            continue;
-        }
-        let key = (component_id, range_key.0, range_key.1);
-        if prefetch.in_flight.contains(&key) {
-            continue;
-        }
-        prefetch.in_flight.insert(key);
-        let start = sync_range.start;
-        let end = sync_range.end;
-        let packet_id = visible_prefetch_packet_id();
-        let msg = GetTimeSeries {
-            id: packet_id,
-            range: start..end,
+        let key = PrefetchKey::Window {
             component_id,
-            limit: Some(VISIBLE_PREFETCH_LIMIT),
+            start: range_key.0,
+            end: range_key.1,
         };
-        commands.send_req_with_handler(
-            msg,
-            packet_id,
-            move |pkt: InRef<OwnedPacket<PacketGrantR>>,
-                  mut series_store: ResMut<TelemetryCache>,
-                  schema_reg: Res<ComponentSchemaRegistry>,
-                  priority: Res<SeriesFetchPriority>,
-                  mut prefetch: ResMut<VisiblePrefetchState>,
-                  mut commands: Commands| {
-                apply_visible_prefetch_page(
-                    &pkt,
-                    component_id,
-                    start,
-                    end,
-                    range_key,
-                    &mut series_store,
-                    &schema_reg,
-                    &priority,
-                    &mut prefetch,
-                    &mut commands,
-                );
-            },
+        if series_store.is_covered(&component_id, sync_range) {
+            prefetch.requests.remove(&key);
+            continue;
+        }
+        let Some(attempt) = prefetch.begin(key) else {
+            continue;
+        };
+        send_visible_prefetch_page(
+            key,
+            attempt,
+            component_id,
+            sync_range.start,
+            sync_range.end,
+            commands,
         );
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[derive(Debug, PartialEq, Eq)]
+enum VisiblePageOutcome {
+    Complete,
+    Next(Timestamp),
+    Invalid,
+}
+
 fn apply_visible_prefetch_page(
     pkt: &OwnedPacket<PacketGrantR>,
     component_id: ComponentId,
     req_start: Timestamp,
     req_end: Timestamp,
-    range_key: (i64, i64),
     series_store: &mut TelemetryCache,
     schema_reg: &ComponentSchemaRegistry,
-    priority: &SeriesFetchPriority,
-    prefetch: &mut VisiblePrefetchState,
-    commands: &mut Commands,
-) {
-    let drop_in_flight = |prefetch: &mut VisiblePrefetchState| {
-        prefetch
-            .in_flight
-            .remove(&(component_id, range_key.0, range_key.1));
-    };
-    // Component may have left the allowlist while this page was in flight.
-    if !priority.high.contains(&component_id) {
-        drop_in_flight(prefetch);
-        return;
-    }
+) -> VisiblePageOutcome {
     let OwnedPacket::TimeSeries(time_series) = pkt else {
-        drop_in_flight(prefetch);
-        return;
+        return VisiblePageOutcome::Invalid;
     };
     let (Ok(timestamps), Ok(buf)) = (time_series.timestamps(), time_series.data()) else {
-        drop_in_flight(prefetch);
-        return;
+        return VisiblePageOutcome::Invalid;
     };
+    apply_visible_prefetch_payload(
+        timestamps,
+        buf,
+        component_id,
+        req_start,
+        req_end,
+        series_store,
+        schema_reg,
+    )
+}
+
+fn apply_visible_prefetch_payload(
+    timestamps: &[Timestamp],
+    buf: &[u8],
+    component_id: ComponentId,
+    req_start: Timestamp,
+    req_end: Timestamp,
+    series_store: &mut TelemetryCache,
+    schema_reg: &ComponentSchemaRegistry,
+) -> VisiblePageOutcome {
     let Some(schema) = schema_reg.0.get(&component_id) else {
-        drop_in_flight(prefetch);
-        return;
+        return VisiblePageOutcome::Invalid;
     };
     let elem_size = schema.size();
-    let mut last_ts = req_start;
+    if buf.len() != timestamps.len().saturating_mul(elem_size) {
+        return VisiblePageOutcome::Invalid;
+    }
     for (i, &timestamp) in timestamps.iter().enumerate() {
         let offset = i * elem_size;
-        if offset + elem_size > buf.len() {
-            break;
-        }
-        if let Ok(view) = impeller2::types::ComponentView::try_from_bytes_shape(
+        let Ok(view) = impeller2::types::ComponentView::try_from_bytes_shape(
             &buf[offset..offset + elem_size],
             schema.shape(),
             schema.prim_type(),
-        ) {
-            series_store.insert(component_id, timestamp, ComponentValue::from_view(view));
-            last_ts = timestamp;
-        }
+        ) else {
+            return VisiblePageOutcome::Invalid;
+        };
+        series_store.insert(component_id, timestamp, ComponentValue::from_view(view));
     }
     if timestamps.len() < VISIBLE_PREFETCH_LIMIT {
         series_store.mark_covered(component_id, req_start, req_end);
-    } else if !timestamps.is_empty() {
-        series_store.mark_covered(
-            component_id,
-            req_start,
-            Timestamp(last_ts.0.saturating_add(1)),
-        );
+        return VisiblePageOutcome::Complete;
     }
-    if !priority.high.contains(&component_id) {
-        series_store.remove_series(&component_id);
-        drop_in_flight(prefetch);
-        return;
+    let Some(last_ts) = timestamps.last().copied() else {
+        series_store.mark_covered(component_id, req_start, req_end);
+        return VisiblePageOutcome::Complete;
+    };
+    let next_start = Timestamp(last_ts.0.saturating_add(1));
+    series_store.mark_covered(component_id, req_start, next_start);
+    if next_start < req_end {
+        VisiblePageOutcome::Next(next_start)
+    } else {
+        VisiblePageOutcome::Complete
     }
-    // Continue paging until the visible window is filled or the DB has no more.
-    if !timestamps.is_empty()
-        && timestamps.len() >= VISIBLE_PREFETCH_LIMIT
-        && last_ts.0.saturating_add(1) < req_end.0
-    {
-        let next_start = Timestamp(last_ts.0.saturating_add(1));
-        let packet_id = visible_prefetch_packet_id();
-        let msg = GetTimeSeries {
-            id: packet_id,
-            range: next_start..req_end,
+}
+
+fn send_visible_prefetch_page(
+    key: PrefetchKey,
+    attempt: u64,
+    component_id: ComponentId,
+    req_start: Timestamp,
+    req_end: Timestamp,
+    commands: &mut Commands,
+) {
+    commands.send_req_reply_raw(
+        GetTimeSeries {
+            id: PacketId::default(),
+            range: req_start..req_end,
             component_id,
             limit: Some(VISIBLE_PREFETCH_LIMIT),
-        };
-        commands.send_req_with_handler(
-            msg,
-            packet_id,
-            move |pkt: InRef<OwnedPacket<PacketGrantR>>,
-                  mut series_store: ResMut<TelemetryCache>,
-                  schema_reg: Res<ComponentSchemaRegistry>,
-                  priority: Res<SeriesFetchPriority>,
-                  mut prefetch: ResMut<VisiblePrefetchState>,
-                  mut commands: Commands| {
-                apply_visible_prefetch_page(
-                    &pkt,
+        },
+        move |pkt: InRef<OwnedPacket<PacketGrantR>>,
+              mut series_store: ResMut<TelemetryCache>,
+              schema_reg: Res<ComponentSchemaRegistry>,
+              priority: Res<SeriesFetchPriority>,
+              mut prefetch: ResMut<VisiblePrefetchState>,
+              mut commands: Commands|
+              -> bool {
+            if !priority.high.contains(&component_id) {
+                prefetch.cancel_component(component_id);
+                return true;
+            }
+            if !prefetch.is_current(key, attempt) {
+                return true;
+            }
+            match apply_visible_prefetch_page(
+                &pkt,
+                component_id,
+                req_start,
+                req_end,
+                &mut series_store,
+                &schema_reg,
+            ) {
+                VisiblePageOutcome::Complete => prefetch.finish(key, attempt, true),
+                VisiblePageOutcome::Next(next_start) => send_visible_prefetch_page(
+                    key,
+                    attempt,
                     component_id,
                     next_start,
                     req_end,
-                    range_key,
-                    &mut series_store,
-                    &schema_reg,
-                    &priority,
-                    &mut prefetch,
                     &mut commands,
-                );
-            },
-        );
-    } else {
-        drop_in_flight(prefetch);
-    }
+                ),
+                VisiblePageOutcome::Invalid => prefetch.finish(key, attempt, false),
+            }
+            true
+        },
+    );
 }
 
 /// Rebuild enabled plot LineTrees from the full SeriesStore for the visible window.
@@ -1490,10 +1576,7 @@ pub fn update_series_fetch_priority(
         cache.remove_series(&id);
         backfill.clear_component(id);
         if let Some(ref mut prefetch) = prefetch {
-            prefetch.in_flight.retain(|(cid, _, _)| *cid != id);
-            prefetch.anchor_in_flight.remove(&id);
-            prefetch.anchor_probed.remove(&id);
-            prefetch.anchor_retry_after.remove(&id);
+            prefetch.cancel_component(id);
         }
     }
     priority.high = next;
@@ -3697,30 +3780,151 @@ mod tests {
     }
 
     #[test]
-    fn visible_prefetch_reserves_zero_packet_id() {
-        for _ in 0..1024 {
-            assert_ne!(u16::from_le_bytes(visible_prefetch_packet_id()), 0);
-        }
+    fn reconnect_clears_unified_prefetch_requests() {
+        let id = ComponentId::new("test.reconnect");
+        let mut prefetch = VisiblePrefetchState::default();
+        prefetch
+            .begin(PrefetchKey::Window {
+                component_id: id,
+                start: 10,
+                end: 20,
+            })
+            .unwrap();
+        prefetch
+            .begin(PrefetchKey::Anchor {
+                component_id: id,
+                start: 10,
+            })
+            .unwrap();
+        assert_eq!(prefetch.request_count(), 2);
+        prefetch.clear_in_flight();
+        assert!(prefetch.requests.is_empty());
     }
 
     #[test]
-    fn reconnect_probe_state_matches_cache_policy() {
-        let id = ComponentId::new("test.reconnect");
-        let mut soft = VisiblePrefetchState::default();
-        soft.in_flight.insert((id, 10, 20));
-        soft.anchor_in_flight.insert(id, 10);
-        soft.anchor_probed.insert(id, 10);
-        soft.anchor_retry_after
-            .insert(id, (10, Instant::now() + HOLD_ANCHOR_RETRY_DELAY));
-        soft.clear_in_flight();
+    fn unified_prefetch_counts_only_active_requests() {
+        let mut prefetch = VisiblePrefetchState::default();
+        for index in 0..32 {
+            let key = PrefetchKey::Window {
+                component_id: ComponentId(index),
+                start: 10,
+                end: 20,
+            };
+            assert!(prefetch.begin(key).is_some());
+            assert!(prefetch.begin(key).is_none());
+        }
+        prefetch.requests.insert(
+            PrefetchKey::Anchor {
+                component_id: ComponentId(100),
+                start: 10,
+            },
+            PrefetchRequestState::RetryAt(Instant::now() + Duration::from_secs(1)),
+        );
+        assert_eq!(prefetch.request_count(), 32);
+        assert_eq!(prefetch.requests.len(), 33);
+        assert!(!prefetch.has_capacity());
+        let key = PrefetchKey::Window {
+            component_id: ComponentId(31),
+            start: 10,
+            end: 20,
+        };
+        let PrefetchRequestState::InFlight(attempt) = prefetch.requests[&key] else {
+            panic!("expected active request");
+        };
+        prefetch.finish(key, attempt, true);
+        assert!(prefetch.has_capacity());
+    }
 
-        assert!(soft.in_flight.is_empty());
-        assert!(soft.anchor_in_flight.is_empty());
-        assert!(soft.anchor_retry_after.is_empty());
-        assert_eq!(soft.anchor_probed.get(&id), Some(&10));
+    #[test]
+    fn unified_prefetch_retries_and_ignores_stale_completion() {
+        let mut prefetch = VisiblePrefetchState::default();
+        let key = PrefetchKey::Window {
+            component_id: ComponentId(1),
+            start: 10,
+            end: 20,
+        };
+        let first_attempt = prefetch.begin(key).unwrap();
+        prefetch.finish(key, first_attempt, false);
+        assert!(matches!(
+            prefetch.requests.get(&key),
+            Some(PrefetchRequestState::RetryAt(_))
+        ));
+        assert!(prefetch.begin(key).is_none());
 
-        let hard = VisiblePrefetchState::default();
-        assert!(hard.anchor_probed.is_empty());
+        prefetch.requests.insert(
+            key,
+            PrefetchRequestState::RetryAt(Instant::now() - Duration::from_millis(1)),
+        );
+        let second_attempt = prefetch.begin(key).unwrap();
+        prefetch.finish(key, first_attempt, true);
+        assert!(prefetch.is_current(key, second_attempt));
+        prefetch.finish(key, second_attempt, true);
+        assert!(prefetch.requests.is_empty());
+    }
+
+    #[test]
+    fn changing_range_does_not_orphan_in_flight_request() {
+        let mut prefetch = VisiblePrefetchState::default();
+        let component_id = ComponentId(1);
+        let old = PrefetchKey::Window {
+            component_id,
+            start: 0,
+            end: 10,
+        };
+        let old_attempt = prefetch.begin(old).unwrap();
+        for start in 1..=512 {
+            let current = PrefetchKey::Window {
+                component_id,
+                start: start * 10,
+                end: start * 10 + 10,
+            };
+            assert!(prefetch.begin(current).is_none());
+            assert!(prefetch.is_current(old, old_attempt));
+            assert_eq!(prefetch.request_count(), 1);
+            assert_eq!(prefetch.requests.len(), 1);
+        }
+
+        prefetch.finish(old, old_attempt, true);
+        let current = PrefetchKey::Window {
+            component_id,
+            start: 5_120,
+            end: 5_130,
+        };
+        assert!(prefetch.begin(current).is_some());
+    }
+
+    #[test]
+    fn cancelling_component_removes_visible_and_anchor_requests() {
+        let mut prefetch = VisiblePrefetchState::default();
+        let removed = ComponentId(1);
+        let kept = ComponentId(2);
+        for key in [
+            PrefetchKey::Window {
+                component_id: removed,
+                start: 10,
+                end: 20,
+            },
+            PrefetchKey::Anchor {
+                component_id: removed,
+                start: 10,
+            },
+            PrefetchKey::Window {
+                component_id: kept,
+                start: 10,
+                end: 20,
+            },
+        ] {
+            prefetch.begin(key).unwrap();
+        }
+
+        prefetch.cancel_component(removed);
+        assert_eq!(prefetch.request_count(), 1);
+        assert!(
+            prefetch
+                .requests
+                .keys()
+                .all(|key| key.component_id() == kept)
+        );
     }
 
     #[test]
@@ -3734,41 +3938,202 @@ mod tests {
             HoldAnchorDecision::Request
         );
 
-        prefetch.anchor_in_flight.insert(id, start.0);
+        let key = PrefetchKey::Anchor {
+            component_id: id,
+            start: start.0,
+        };
+        let attempt = prefetch.begin(key).unwrap();
         assert_eq!(
             hold_anchor_decision(id, start, &cache, &prefetch),
             HoldAnchorDecision::Pending
         );
-        finish_hold_anchor_probe(&mut prefetch, id, start, false);
-        assert!(!prefetch.anchor_probed.contains_key(&id));
-        assert!(!prefetch.anchor_in_flight.contains_key(&id));
+        prefetch.finish(key, attempt, false);
         assert_eq!(
             hold_anchor_decision(id, start, &cache, &prefetch),
             HoldAnchorDecision::Pending
         );
-        prefetch
-            .anchor_retry_after
-            .insert(id, (start.0, Instant::now() - Duration::from_millis(1)));
+        prefetch.requests.insert(
+            key,
+            PrefetchRequestState::RetryAt(Instant::now() - Duration::from_millis(1)),
+        );
         assert_eq!(
             hold_anchor_decision(id, start, &cache, &prefetch),
             HoldAnchorDecision::Request
         );
-        prefetch.anchor_in_flight.insert(id, start.0);
-        finish_hold_anchor_probe(&mut prefetch, id, start, true);
-        assert_eq!(prefetch.anchor_probed.get(&id), Some(&start.0));
-        assert!(!prefetch.anchor_retry_after.contains_key(&id));
+        let attempt = prefetch.begin(key).unwrap();
+        prefetch.finish(key, attempt, true);
+        assert!(!prefetch.requests.contains_key(&key));
+        cache.mark_covered(
+            id,
+            Timestamp(i64::MIN),
+            Timestamp(start.0.saturating_add(1)),
+        );
+        assert_eq!(
+            hold_anchor_decision(id, start, &cache, &prefetch),
+            HoldAnchorDecision::Satisfied
+        );
+    }
 
-        cache.mark_covered(id, start, Timestamp(201));
-        assert_eq!(
-            hold_anchor_decision(id, Timestamp(200), &cache, &prefetch),
-            HoldAnchorDecision::Pending
+    #[test]
+    fn empty_visible_page_marks_coverage_and_completes_request() {
+        use impeller2::schema::Schema;
+        use impeller2::types::PrimType;
+
+        let id = ComponentId::new("test.visible.empty");
+        let mut schemas = ComponentSchemaRegistry::default();
+        schemas.0.insert(
+            id,
+            Schema::new(PrimType::F64, Vec::<u64>::new()).expect("valid schema"),
         );
-        prefetch.anchor_probed.insert(id, 200);
-        assert_eq!(prefetch.anchor_probed.len(), 1);
+        let mut cache = TelemetryCache::default();
+        let range = Timestamp(10)..Timestamp(20);
         assert_eq!(
-            hold_anchor_decision(id, start, &cache, &prefetch),
-            HoldAnchorDecision::Request
+            apply_visible_prefetch_payload(
+                &[],
+                &[],
+                id,
+                range.start,
+                range.end,
+                &mut cache,
+                &schemas,
+            ),
+            VisiblePageOutcome::Complete
         );
+        assert!(cache.is_covered(&id, &range));
+    }
+
+    #[test]
+    fn empty_sparse_windows_do_not_leak_request_slots() {
+        use impeller2::schema::Schema;
+        use impeller2::types::PrimType;
+
+        let id = ComponentId::new("test.visible.sparse");
+        let mut schemas = ComponentSchemaRegistry::default();
+        schemas.0.insert(
+            id,
+            Schema::new(PrimType::F64, Vec::<u64>::new()).expect("valid schema"),
+        );
+        let mut cache = TelemetryCache::default();
+        let mut prefetch = VisiblePrefetchState::default();
+        for index in 0..40 {
+            let start = index * 10;
+            let end = start + 10;
+            let key = PrefetchKey::Window {
+                component_id: id,
+                start,
+                end,
+            };
+            let attempt = prefetch.begin(key).unwrap();
+            assert_eq!(
+                apply_visible_prefetch_payload(
+                    &[],
+                    &[],
+                    id,
+                    Timestamp(start),
+                    Timestamp(end),
+                    &mut cache,
+                    &schemas,
+                ),
+                VisiblePageOutcome::Complete
+            );
+            prefetch.finish(key, attempt, true);
+            assert_eq!(prefetch.request_count(), 0);
+            assert!(prefetch.requests.is_empty());
+        }
+        assert!(cache.is_covered(&id, &(Timestamp(0)..Timestamp(400))));
+    }
+
+    #[test]
+    fn visible_pages_share_one_logical_request_until_complete() {
+        use impeller2::schema::Schema;
+        use impeller2::types::PrimType;
+
+        let id = ComponentId::new("test.visible.pages");
+        let mut schemas = ComponentSchemaRegistry::default();
+        schemas.0.insert(
+            id,
+            Schema::new(PrimType::U8, Vec::<u64>::new()).expect("valid schema"),
+        );
+        let mut cache = TelemetryCache::default();
+        let mut prefetch = VisiblePrefetchState::default();
+        let key = PrefetchKey::Window {
+            component_id: id,
+            start: 0,
+            end: 10_000,
+        };
+        let attempt = prefetch.begin(key).unwrap();
+        let timestamps = (0..VISIBLE_PREFETCH_LIMIT)
+            .map(|timestamp| Timestamp(timestamp as i64))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            apply_visible_prefetch_payload(
+                &timestamps,
+                &vec![0; VISIBLE_PREFETCH_LIMIT],
+                id,
+                Timestamp(0),
+                Timestamp(10_000),
+                &mut cache,
+                &schemas,
+            ),
+            VisiblePageOutcome::Next(Timestamp(VISIBLE_PREFETCH_LIMIT as i64))
+        );
+        assert!(prefetch.is_current(key, attempt));
+
+        let next = VISIBLE_PREFETCH_LIMIT as i64;
+        assert_eq!(
+            apply_visible_prefetch_payload(
+                &[Timestamp(next)],
+                &[0],
+                id,
+                Timestamp(next),
+                Timestamp(10_000),
+                &mut cache,
+                &schemas,
+            ),
+            VisiblePageOutcome::Complete
+        );
+        prefetch.finish(key, attempt, true);
+        assert!(prefetch.requests.is_empty());
+        assert!(cache.is_covered(&id, &(Timestamp(0)..Timestamp(10_000))));
+    }
+
+    #[test]
+    fn malformed_visible_page_schedules_retry_without_coverage() {
+        use impeller2::schema::Schema;
+        use impeller2::types::PrimType;
+
+        let id = ComponentId::new("test.visible.malformed");
+        let mut schemas = ComponentSchemaRegistry::default();
+        schemas.0.insert(
+            id,
+            Schema::new(PrimType::F64, Vec::<u64>::new()).expect("valid schema"),
+        );
+        let mut cache = TelemetryCache::default();
+        let mut prefetch = VisiblePrefetchState::default();
+        let key = PrefetchKey::Window {
+            component_id: id,
+            start: 10,
+            end: 20,
+        };
+        let attempt = prefetch.begin(key).unwrap();
+        assert_eq!(
+            apply_visible_prefetch_payload(
+                &[Timestamp(10)],
+                &[],
+                id,
+                Timestamp(10),
+                Timestamp(20),
+                &mut cache,
+                &schemas,
+            ),
+            VisiblePageOutcome::Invalid
+        );
+        prefetch.finish(key, attempt, false);
+        assert!(matches!(
+            prefetch.requests.get(&key),
+            Some(PrefetchRequestState::RetryAt(_))
+        ));
+        assert!(!cache.is_covered(&id, &(Timestamp(10)..Timestamp(20))));
     }
 
     #[test]

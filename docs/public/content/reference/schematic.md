@@ -299,11 +299,15 @@ object_3d lander.world_pos {
 - `line_width`: screen-space trail width (default 1.0).
 - `max_length`: optional positive cumulative trail length in meters. The oldest segment is interpolated so sparse samples still end at the requested length.
 - `status`: optional `(N,)` integer component. Nonzero points use `hit_color`.
-- `start`: optional scalar component. The first nonzero sample starts the trails; earlier position samples are ignored.
+- `start`: optional scalar component path used as a one-shot lifecycle gate. Trails stay hidden until its first nonzero sample, and earlier position history is ignored. Later zeroes do not stop or reset the trails. Use it for positions initialized before motion—especially with change-only recording; `max_length` only limits distance.
 - `color`: trail and head color. When omitted, falls back to the timeline `played_color`.
 - `hit_color`: status-highlighted trail and head color (default red).
 - `head_size`, `line_width`, and `max_length` accept integer or decimal KDL numbers.
 - Long windows are downsampled so all trails fit one GPU index buffer (187 samples per trail at `N = 695`).
+
+```kdl
+point_trails "payload.positions" start="payload.released" max_length=3
+```
 
 ### vector_arrow
 - `vector`: EQL expression yielding a 3-component vector (required).

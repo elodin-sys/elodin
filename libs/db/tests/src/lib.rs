@@ -101,6 +101,17 @@ mod tests {
         let empty = client.request(&request(10)).await.unwrap();
         assert!(empty.timestamps().unwrap().is_empty());
         assert!(empty.data().unwrap().is_empty());
+        let empty_range = client
+            .request(&GetTimeSeries {
+                id: vtable_id,
+                range: Timestamp(0)..Timestamp(10),
+                component_id,
+                limit: None,
+            })
+            .await
+            .unwrap();
+        assert!(empty_range.timestamps().unwrap().is_empty());
+        assert!(empty_range.data().unwrap().is_empty());
 
         for (timestamp, value) in [(20, 2u64), (40, 4u64)] {
             let mut packet = LenPacket::table(vtable_id, 16);
@@ -132,6 +143,24 @@ mod tests {
                 .get(..8)
                 .map(|data| u64::from_le_bytes(data.try_into().unwrap()));
             assert_eq!(value, expected_value);
+        }
+
+        for range in [
+            Timestamp(0)..Timestamp(19),
+            Timestamp(21)..Timestamp(39),
+            Timestamp(41)..Timestamp(50),
+        ] {
+            let response = client
+                .request(&GetTimeSeries {
+                    id: vtable_id,
+                    range,
+                    component_id,
+                    limit: None,
+                })
+                .await
+                .unwrap();
+            assert!(response.timestamps().unwrap().is_empty());
+            assert!(response.data().unwrap().is_empty());
         }
     }
 
@@ -1168,7 +1197,7 @@ mod tests {
     }
 
     #[test]
-    async fn test_get_time_series_not_found() {
+    async fn test_get_time_series_empty_and_not_found() {
         let (addr, _db) = setup_test_db().await.unwrap();
         let mut client = Client::connect(addr).await.unwrap();
 
@@ -1194,9 +1223,9 @@ mod tests {
             limit: None,
         };
 
-        let result = client.request(&query).await;
-
-        result.unwrap_err();
+        let result = client.request(&query).await.unwrap();
+        assert!(result.timestamps().unwrap().is_empty());
+        assert!(result.data().unwrap().is_empty());
 
         // Now try with non-existent component
         let non_existent_component_id = ComponentId::new("non_existent_component");
