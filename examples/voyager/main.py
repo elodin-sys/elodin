@@ -1,19 +1,17 @@
 import os
 import typing as ty
+from pathlib import Path
 
 import elodin as el
 import jax
+import numpy as np
+import spiceypy as spice
 from jax import numpy as jnp
 from jax.numpy import linalg as la
-import spiceypy as spice
-import numpy as np
-from pathlib import Path
 
-from dynamics import heliocentric_relative_acceleration
+from dynamics import heliocentric_relative_acceleration, state_error
 
-# SIM_TIME_STEP = 1.0 / 120.0
 SIM_TIME_STEP = 3600.0
-# SIM_TIME_STEP = 86400.0
 SIMULATION_RATE_HZ = 1 / SIM_TIME_STEP
 DEFAULT_DB_PATH = "dbs/voyager"
 DB_PATH_ENV = "DB_PATH"
@@ -38,6 +36,12 @@ start_time_epoch_us = 252_452_400_000_000
 
 def gravitational_parameter_m3_s2(spice_name: str) -> float:
     return float(spice.bodvrd(spice_name, "GM", 1)[1][0]) * 1.0e9
+
+
+def spice_state_si(spice_name: str, time_et: float) -> tuple[np.ndarray, np.ndarray]:
+    state, _ = spice.spkezr(spice_name, time_et, "ECLIPJ2000", "NONE", "SUN")
+    state = np.asarray(state, dtype=np.float64)
+    return state[:3] * 1000.0, state[3:] * 1000.0
 
 
 PLANETS = [
@@ -170,9 +174,8 @@ VelocityErrorMps = ty.Annotated[
     ),
 ]
 
-EPHEMERIS_BODIES = PLANETS
 DISPLAY_BODIES = PLANETS + PROBES + TRUTH_PROBES
-SUN_MASS = 1.9885e30
+SUN_MASS_KG = 1.9885e30
 SUN_GM = gravitational_parameter_m3_s2("SUN")
 
 
@@ -183,7 +186,7 @@ sun = w.spawn(
         el.Body(
             world_pos=el.WorldPos(linear=jnp.array([0.0, 0.0, 0.0])),
             world_vel=el.WorldVel(linear=jnp.array([0.0, 0.0, 0.0])),
-            inertia=el.Inertia(SUN_MASS),
+            inertia=el.Inertia(SUN_MASS_KG),
         ),
         el.C(GravitationalParameter, jnp.array([SUN_GM], dtype=jnp.float64)),
     ],
@@ -192,24 +195,17 @@ sun = w.spawn(
 
 body_entity_ids = {"Sun": sun}
 
-for body in EPHEMERIS_BODIES + PROBES + TRUTH_PROBES:
-    init_state, _ = spice.spkezr(body["spice_name"], start_time_et, "ECLIPJ2000", "NONE", "SUN")
-
-    init_pos = jnp.array(init_state[:3]) * 1000.0
-    init_vel = jnp.array(init_state[3:]) * 1000.0
-
-    print(body["spice_name"])
-    print(init_pos)
-    print(init_vel)
+for body in PLANETS + PROBES + TRUTH_PROBES:
+    init_pos_m, init_vel_mps = spice_state_si(body["spice_name"], start_time_et)
 
     components = [
         el.Body(
-            world_pos=el.WorldPos(linear=init_pos),
-            world_vel=el.WorldVel(linear=init_vel),
+            world_pos=el.WorldPos(linear=jnp.asarray(init_pos_m)),
+            world_vel=el.WorldVel(linear=jnp.asarray(init_vel_mps)),
             inertia=el.Inertia(body["mass"]),
         ),
     ]
-    if body in EPHEMERIS_BODIES:
+    if body in PLANETS:
         components.append(
             el.C(
                 GravitationalParameter,
@@ -233,10 +229,8 @@ for body in EPHEMERIS_BODIES + PROBES + TRUTH_PROBES:
 def pre_step(tick: int, ctx: el.StepContext):
     current_time_et = start_time_et + tick * SIM_TIME_STEP
 
-    for body in EPHEMERIS_BODIES + TRUTH_PROBES:
-        state, _ = spice.spkezr(body["spice_name"], current_time_et, "ECLIPJ2000", "NONE", "SUN")
-        pos_m = np.asarray(state[:3], dtype=np.float64) * 1000.0
-        vel_ms = np.asarray(state[3:], dtype=np.float64) * 1000.0
+    for body in PLANETS + TRUTH_PROBES:
+        pos_m, vel_mps = spice_state_si(body["spice_name"], current_time_et)
 
         ctx.write_component(
             f"{body['entity_name']}.world_pos",
@@ -244,7 +238,7 @@ def pre_step(tick: int, ctx: el.StepContext):
         )
         ctx.write_component(
             f"{body['entity_name']}.world_vel",
-            np.array([0.0, 0.0, 0.0, vel_ms[0], vel_ms[1], vel_ms[2]], dtype=np.float64),
+            np.array([0.0, 0.0, 0.0, vel_mps[0], vel_mps[1], vel_mps[2]], dtype=np.float64),
         )
 
 
@@ -262,14 +256,14 @@ def post_step(tick: int, ctx: el.StepContext) -> None:
             dtype=np.float64,
         )[3:6]
 
-        truth_state, _ = spice.spkezr(
-            probe["spice_name"], current_time_et, "ECLIPJ2000", "NONE", "SUN"
-        )
-        truth_pos = np.asarray(truth_state[:3], dtype=np.float64) * 1000.0
-        truth_vel = np.asarray(truth_state[3:], dtype=np.float64) * 1000.0
+        truth_pos, truth_vel = spice_state_si(probe["spice_name"], current_time_et)
 
-        position_error_km = np.linalg.norm(simulated_pos - truth_pos) / 1000.0
-        velocity_error_mps = np.linalg.norm(simulated_vel - truth_vel)
+        position_error_km, velocity_error_mps = state_error(
+            simulated_pos,
+            simulated_vel,
+            truth_pos,
+            truth_vel,
+        )
 
         ctx.write_component(
             f"{probe['entity_name']}.position_error_km",
@@ -364,7 +358,6 @@ w.schematic(
             hierarchy
         }}
         tabs share=0.6 {{
-            //viewport name=Viewport pos="(0,0,0,0,0,0,100)" look_at="(0,0,0,0,0,0,0)" hdr=#true
             viewport name=Viewport pos="(0,0,0,0, 0,0,2000000000000.0)" look_at="(0,0,0,0, 0,0,0)" fov=45.0 near=1000000.0
 
             graph "voyager1.position_error_km" name="Voyager 1 position error (km)"
@@ -395,8 +388,7 @@ db_path = Path(os.environ.get(DB_PATH_ENV, DEFAULT_DB_PATH))
 max_ticks_env = os.environ.get(MAX_TICKS_ENV)
 max_ticks = int(max_ticks_env) if max_ticks_env is not None else None
 
-# sim = w.run(sys, SIM_TIME_STEP, run_time_step=1 / 120.0, pre_step=pre_step)
-sim = w.run(
+w.run(
     sys,
     simulation_rate=SIMULATION_RATE_HZ,
     pre_step=pre_step,
