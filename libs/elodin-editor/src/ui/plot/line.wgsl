@@ -19,6 +19,7 @@ struct LineUniform {
 @group(2) @binding(1) var<storage> y_values: array<f32>;
 @group(2) @binding(2) var<storage> index_buffer: array<u32>;
 
+const STRIP_SEPARATOR_INDEX: u32 = 0xffffffffu;
 
 struct VertexInput {
   @builtin(vertex_index) vertex_index : u32,
@@ -46,7 +47,7 @@ struct VertexOutput {
   let pair_index = select(vertex.instance_index, vertex.instance_index / 2u, zoh);
   let index_a = index_buffer[pair_index];
   let index_b = index_buffer[pair_index + 1];
-  if index_a == 0u || index_b == 0u {
+  if index_a == STRIP_SEPARATOR_INDEX || index_b == STRIP_SEPARATOR_INDEX {
     return VertexOutput(vec4(2.0, 2.0, 0.0, 1.0), vec4(0.0));
   }
   let time_a = x_values[index_a];

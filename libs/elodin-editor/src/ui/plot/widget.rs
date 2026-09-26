@@ -1525,6 +1525,7 @@ pub fn auto_y_bounds(
             selected_range.0.start.0,
             selected_range.0.end.0,
             content_sig,
+            graph_state.graph_type,
         );
         if graph_state.auto_y_cache == Some(cache_key) {
             continue;
@@ -1542,11 +1543,12 @@ pub fn auto_y_bounds(
             let gpu::LineMut::Timeseries(line) = line else {
                 continue;
             };
-            let zoh_range = line.data.range_with_predecessor(selected_range.0.clone());
-            let summary = line.data.range_summary(zoh_range.clone());
+            let data_range =
+                gpu::timeseries_data_range(line, selected_range.0.clone(), graph_state.graph_type);
+            let summary = line.data.range_summary(data_range.clone());
             let (line_min, line_max) = if summary.len > OVERVIEW_MAX_POINTS {
                 line.data
-                    .percentile_bounds(zoh_range, 1.0, 99.0)
+                    .percentile_bounds(data_range, 1.0, 99.0)
                     .unwrap_or((summary.min.unwrap_or(0.0), summary.max.unwrap_or(1.0)))
             } else {
                 (summary.min.unwrap_or(0.0), summary.max.unwrap_or(1.0))

@@ -71,6 +71,22 @@ const LINE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("e44f3b60-cb86-42a2-b7d8
 const POINT_SHADER_HANDLE: Handle<Shader> = uuid_handle!("4f1aa57d-aacd-4d17-859f-0dad0ee3890f");
 const BAR_SHADER_HANDLE: Handle<Shader> = uuid_handle!("091989F7-D5B1-4C6C-B9C1-EDD5EE51F1B1");
 
+pub(crate) fn timeseries_uses_zoh(graph_type: GraphType) -> bool {
+    matches!(graph_type, GraphType::Line)
+}
+
+pub(crate) fn timeseries_data_range(
+    line: &Line,
+    range: Range<Timestamp>,
+    graph_type: GraphType,
+) -> Range<Timestamp> {
+    if timeseries_uses_zoh(graph_type) {
+        line.data.range_with_predecessor(range)
+    } else {
+        range
+    }
+}
+
 pub const VALUE_BUFFER_SIZE: NonZeroU64 = NonZeroU64::new(value_buffer_bytes(CHUNK_COUNT)).unwrap();
 pub const MIN_VALUE_BUFFER_SIZE: NonZeroU64 =
     NonZeroU64::new(value_buffer_bytes(PLOT_VALUE_SHARD_CLASSES[0])).unwrap();
@@ -285,13 +301,13 @@ pub enum LineMut<'a> {
 }
 
 impl LineMut<'_> {
-    fn is_timeseries(&self) -> bool {
-        matches!(self, Self::Timeseries(_))
+    fn uses_zoh(&self, graph_type: GraphType) -> bool {
+        matches!(self, Self::Timeseries(_)) && timeseries_uses_zoh(graph_type)
     }
 
-    fn data_range(&self, range: Range<Timestamp>, zoh: bool) -> Range<Timestamp> {
+    fn data_range(&self, range: Range<Timestamp>, graph_type: GraphType) -> Range<Timestamp> {
         match self {
-            Self::Timeseries(line) if zoh => line.data.range_with_predecessor(range),
+            Self::Timeseries(line) => timeseries_data_range(line, range, graph_type),
             _ => range,
         }
     }
@@ -996,7 +1012,7 @@ fn extract_lines(
                     }
                     continue;
                 }
-                let zoh = line.is_timeseries() && matches!(*graph_type, GraphType::Line);
+                let zoh = line.uses_zoh(*graph_type);
                 let draw_uniform = uniform.with_zoh(zoh);
                 let has_index_cache = cache.as_ref().is_some_and(|c| c.0.is_some());
                 // Camera / clip: continuous visible range for short windows (silky scrub);
@@ -1010,7 +1026,7 @@ fn extract_lines(
                         crate::TRAILING_RANGE_QUANTUM_MICROS,
                     )
                 };
-                let data_range = line.data_range(clip_range.clone(), zoh);
+                let data_range = line.data_range(clip_range.clone(), *graph_type);
                 let required_value_shards = line.required_value_shards(data_range.clone());
                 let value_buffers_needed =
                     line.value_buffers_needing_allocation(data_range.clone());
@@ -1276,8 +1292,10 @@ fn queue_line(
 mod tests {
     use super::{
         LineHandle, PendingUnusedPlotLines, apply_pending_unused_plot_lines,
-        plot_draw_replay_allowed, release_unused_plot_line,
+        plot_draw_replay_allowed, release_unused_plot_line, timeseries_data_range,
+        timeseries_uses_zoh,
     };
+    use crate::ui::plot::data::Chunk;
     use crate::ui::plot::{
         CollectedGraphData, Line, PlotDataComponent, PlotGpuBufferPool, PlotLineKey, PlotLineUsers,
         XYLine,
@@ -1285,7 +1303,8 @@ mod tests {
     use bevy::asset::Assets;
     use bevy::ecs::system::SystemState;
     use bevy::prelude::{Commands, World};
-    use impeller2::types::ComponentId;
+    use impeller2::types::{ComponentId, Timestamp};
+    use impeller2_wkt::GraphType;
 
     fn plot_world() -> World {
         let mut world = World::new();
@@ -1395,6 +1414,32 @@ mod tests {
             "nothing drawn yet"
         );
         assert!(!plot_draw_replay_allowed::<(u32, u32)>(None, None));
+    }
+
+    #[test]
+    fn graph_type_controls_predecessor_rendering_and_bounds() {
+        let mut line = Line::default();
+        line.data.insert(
+            Chunk::from_iter(
+                &[Timestamp(0), Timestamp(10)],
+                Timestamp(0),
+                [100.0f32, 2.0].into_iter(),
+            )
+            .expect("chunk"),
+        );
+        let visible = Timestamp(10)..Timestamp(20);
+
+        assert!(timeseries_uses_zoh(GraphType::Line));
+        assert!(!timeseries_uses_zoh(GraphType::Point));
+        assert!(!timeseries_uses_zoh(GraphType::Bar));
+        let line_range = timeseries_data_range(&line, visible.clone(), GraphType::Line);
+        assert_eq!(line_range, Timestamp(0)..Timestamp(20));
+        assert_eq!(line.data.range_summary(line_range).max, Some(100.0));
+        for graph_type in [GraphType::Point, GraphType::Bar] {
+            let range = timeseries_data_range(&line, visible.clone(), graph_type);
+            assert_eq!(range, visible);
+            assert_eq!(line.data.range_summary(range).max, Some(2.0));
+        }
     }
 
     /// Bevy runs `on_discard`/`on_insert` — not `on_add`/`on_remove` — when a

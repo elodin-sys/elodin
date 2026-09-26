@@ -27,7 +27,7 @@ use zerocopy::{Immutable, IntoBytes};
 use std::any::type_name;
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU64;
-use std::ops::RangeInclusive;
+use std::ops::{ControlFlow, RangeInclusive};
 use std::sync::Arc;
 use std::sync::atomic::{self, AtomicBool};
 use std::time::{Duration, Instant};
@@ -44,6 +44,8 @@ use crate::{EqlContext, SelectedTimeRange};
 use hamann_chen_line::{select_polyline3_indices, select_time_value_indices};
 
 use super::PlotBounds;
+
+const PLOT_STRIP_SEPARATOR_INDEX: u32 = u32::MAX;
 
 /// Maximum points to request for overview data (LTTB downsampled)
 /// Must be <= CHUNK_LEN to fit within a single GPU buffer shard
@@ -2447,10 +2449,34 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     }
 
     pub fn range_summary(&self, range: Range<Timestamp>) -> ChunkSummary<D> {
-        self.range_iter(range)
-            .fold(ChunkSummary::default(), |mut xs, x| {
-                xs.add_summary(&x.summary);
-                xs
+        self.range_iter(range.clone())
+            .fold(ChunkSummary::default(), |mut summary, chunk| {
+                let Some((start, end)) = chunk_visible_offsets(&chunk.timestamps, &range) else {
+                    return summary;
+                };
+                if start == 0 && end == chunk.summary.len {
+                    summary.add_summary(&chunk.summary);
+                    return summary;
+                }
+                let mut clipped: ChunkSummary<D> = ChunkSummary::default();
+                for (timestamp, value) in chunk.timestamps[start..end]
+                    .iter()
+                    .zip(&chunk.data.cpu()[start..end])
+                {
+                    clipped.len += 1;
+                    clipped.start_timestamp = clipped.start_timestamp.min(*timestamp);
+                    clipped.end_timestamp = clipped.end_timestamp.max(*timestamp);
+                    clipped.min = Some(match clipped.min {
+                        Some(min) => min.min(value.clone()),
+                        None => value.clone(),
+                    });
+                    clipped.max = Some(match clipped.max {
+                        Some(max) => max.max(value.clone()),
+                        None => value.clone(),
+                    });
+                }
+                summary.add_summary(&clipped);
+                summary
             })
     }
 
@@ -2843,48 +2869,21 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         step: usize,
         terminal_hold: bool,
     ) -> u32 {
-        let step = step.max(1);
         let mut n: u32 = 0;
-        let mut has_sample = false;
-        for c in self.range_iter(line_visible_range.clone()) {
-            let Some((start_offset, end_offset)) =
-                chunk_visible_offsets(&c.timestamps, &line_visible_range)
-            else {
-                continue;
-            };
-            let vis_len = end_offset.saturating_sub(start_offset);
-            if vis_len == 0 {
-                continue;
-            }
-            // `into_index_iter` length depends only on `len`; absolute indices match GPU path
-            // after clip, but counts are identical for any `range.start` with sufficient span.
-            let chunk = IndexChunk {
-                range: 0..u32::MAX,
-                len: vis_len,
-            };
+        let chunks = self
+            .range_iter(line_visible_range.clone())
+            .filter_map(|chunk| {
+                let (start, end) = chunk_visible_offsets(&chunk.timestamps, &line_visible_range)?;
+                let len = end.saturating_sub(start);
+                (len > 0).then_some(IndexChunk {
+                    range: 0..u32::MAX,
+                    len,
+                })
+            });
+        let _ = for_each_strip_index(chunks, step, terminal_hold, |_| {
             n = n.saturating_add(1);
-            let end = chunk.clone().into_index_iter().last();
-            let mut index_iter = chunk.into_index_iter();
-            let mut last_written: Option<u32> = None;
-            if let Some(index) = index_iter.next() {
-                n = n.saturating_add(1);
-                last_written = Some(index);
-                has_sample = true;
-            }
-            for index in index_iter.step_by(step) {
-                n = n.saturating_add(1);
-                last_written = Some(index);
-            }
-            if let Some(end) = end
-                && last_written != Some(end)
-            {
-                n = n.saturating_add(1);
-            }
-            n = n.saturating_add(1);
-        }
-        if terminal_hold && has_sample {
-            n = n.saturating_add(2);
-        }
+            ControlFlow::Continue(())
+        });
         n
     }
 
@@ -2917,61 +2916,24 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             0,
             NonZeroU64::new((INDEX_BUFFER_LEN * 4) as u64).unwrap(),
         )?;
-        let mut view = view.slice(..);
+        let mut view = Some(view.slice(..));
         let mut written_u32s: u32 = 0;
-        let mut final_index = None;
-        for chunk in self.draw_index_chunk_iter(line_visible_range) {
-            let Some(v) = try_append_u32(view, 0) else {
-                return Some(written_u32s);
-            };
-            view = v;
-            written_u32s += 1;
-            let end = chunk.clone().into_index_iter().last();
-            let mut index_iter = chunk.into_index_iter();
-            let mut last_written: Option<u32> = None;
-            if let Some(index) = index_iter.next() {
-                let Some(v) = try_append_u32(view, index) else {
-                    return Some(written_u32s);
+        let _ = for_each_strip_index(
+            self.draw_index_chunk_iter(line_visible_range),
+            step,
+            terminal_hold,
+            |index| {
+                let Some(current) = view.take() else {
+                    return ControlFlow::Break(());
                 };
-                view = v;
-                written_u32s += 1;
-                last_written = Some(index);
-                final_index = Some(index);
-            }
-            for index in index_iter.step_by(step) {
-                let Some(v) = try_append_u32(view, index) else {
-                    return Some(written_u32s);
+                let Some(rest) = try_append_u32(current, index) else {
+                    return ControlFlow::Break(());
                 };
-                view = v;
+                view = Some(rest);
                 written_u32s += 1;
-                last_written = Some(index);
-                final_index = Some(index);
-            }
-            if let Some(end) = end
-                && last_written != Some(end)
-            {
-                let Some(v) = try_append_u32(view, end) else {
-                    return Some(written_u32s);
-                };
-                view = v;
-                written_u32s += 1;
-                final_index = Some(end);
-            }
-            let Some(v) = try_append_u32(view, 0) else {
-                return Some(written_u32s);
-            };
-            view = v;
-            written_u32s += 1;
-        }
-        if terminal_hold && let Some(index) = final_index {
-            for _ in 0..2 {
-                let Some(v) = try_append_u32(view, index) else {
-                    return Some(written_u32s);
-                };
-                view = v;
-                written_u32s += 1;
-            }
-        }
+                ControlFlow::Continue(())
+            },
+        );
         Some(written_u32s)
     }
 
@@ -4915,9 +4877,37 @@ mod tests {
         let chunk = Chunk::from_iter(&ts, Timestamp(0), vals.into_iter()).expect("chunk");
         tree.insert(chunk);
         let c = tree.count_strip_index_u32s(Timestamp(0)..Timestamp(10), 1);
+        assert_eq!(c, 12, "leading separator + 10 indices + trailing separator");
+    }
+
+    #[test]
+    fn strip_separator_never_aliases_data_index_zero() {
+        let mut indices = Vec::new();
+        let result = for_each_strip_index(
+            [IndexChunk {
+                range: 0..3,
+                len: 3,
+            }],
+            1,
+            true,
+            |index| {
+                indices.push(index);
+                ControlFlow::Continue(())
+            },
+        );
+
+        assert!(result.is_continue());
         assert_eq!(
-            c, 12,
-            "leading 0 + 10 indices + trailing 0 (no duplicate last)"
+            indices,
+            [
+                PLOT_STRIP_SEPARATOR_INDEX,
+                0,
+                1,
+                2,
+                PLOT_STRIP_SEPARATOR_INDEX,
+                2,
+                2,
+            ]
         );
     }
 
@@ -5462,6 +5452,13 @@ mod tests {
     }
 
     #[test]
+    fn value_shard_zero_is_reserved_for_nan() {
+        let free = value_data_free_map(4);
+        assert!(!free.contains(0));
+        assert_eq!(free.iter().collect::<Vec<_>>(), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
     fn plot_gpu_snapshot_accounts_for_resident_and_pooled_buffers() {
         let snapshot = PlotGpuPoolSnapshot {
             value_live: 2,
@@ -5558,6 +5555,44 @@ impl IndexChunk {
     pub fn into_index_iter(self) -> impl Iterator<Item = u32> {
         self.range.take(self.len)
     }
+}
+
+fn for_each_strip_index(
+    chunks: impl IntoIterator<Item = IndexChunk>,
+    step: usize,
+    terminal_hold: bool,
+    mut emit: impl FnMut(u32) -> ControlFlow<()>,
+) -> ControlFlow<()> {
+    let step = step.max(1);
+    let mut final_index = None;
+    for chunk in chunks {
+        emit(PLOT_STRIP_SEPARATOR_INDEX)?;
+        let end = chunk.clone().into_index_iter().last();
+        let mut indices = chunk.into_index_iter();
+        let mut last_written = None;
+        if let Some(index) = indices.next() {
+            emit(index)?;
+            last_written = Some(index);
+            final_index = Some(index);
+        }
+        for index in indices.step_by(step) {
+            emit(index)?;
+            last_written = Some(index);
+            final_index = Some(index);
+        }
+        if let Some(end) = end
+            && last_written != Some(end)
+        {
+            emit(end)?;
+            final_index = Some(end);
+        }
+        emit(PLOT_STRIP_SEPARATOR_INDEX)?;
+    }
+    if terminal_hold && let Some(index) = final_index {
+        emit(index)?;
+        emit(index)?;
+    }
+    ControlFlow::Continue(())
 }
 
 pub trait BoundOrd {
@@ -5990,6 +6025,10 @@ pub struct BufferShardAlloc {
     free_map: RoaringBitmap,
 }
 
+fn value_data_free_map(chunks: usize) -> RoaringBitmap {
+    (1..=chunks as u32).collect()
+}
+
 impl BufferShardAlloc {
     pub fn with_nan_chunk(
         chunks: usize,
@@ -5999,7 +6038,8 @@ impl BufferShardAlloc {
     ) -> Self {
         let mut this = Self::new::<f32>(chunks + 1, chunk_len, render_device);
         this.data_capacity = chunks;
-        let shard = this.alloc().expect("couldn't alloc nan");
+        this.free_map = value_data_free_map(chunks);
+        let shard = this.nan_shard();
         render_queue.write_buffer_shard(&shard, &f32::NAN.to_le_bytes());
         this
     }
@@ -6011,17 +6051,13 @@ impl BufferShardAlloc {
         render_queue: &RenderQueue,
     ) -> Self {
         let chunk_size = size_of::<f32>() * chunk_len;
-        let mut free_map = RoaringBitmap::new();
-        for i in 0..=chunks as u32 {
-            free_map.insert(i);
-        }
-        let mut this = Self {
+        let this = Self {
             buffer,
-            free_map,
+            free_map: value_data_free_map(chunks),
             chunk_size,
             data_capacity: chunks,
         };
-        let shard = this.alloc().expect("couldn't alloc nan");
+        let shard = this.nan_shard();
         render_queue.write_buffer_shard(&shard, &f32::NAN.to_le_bytes());
         this
     }
@@ -6065,6 +6101,13 @@ impl BufferShardAlloc {
         })
     }
 
+    fn nan_shard(&self) -> BufferShard {
+        BufferShard {
+            buffer: self.buffer.clone(),
+            range: 0..self.chunk_size as u64,
+        }
+    }
+
     pub fn buffer(&self) -> &Buffer {
         &self.buffer
     }
@@ -6089,11 +6132,8 @@ impl BufferShardAlloc {
     /// Free every shard at once. Callers must have released the GPU copies that
     /// referenced them, since `release_gpu` drops a shard without deallocating it.
     pub fn reset_shards(&mut self, render_queue: &RenderQueue) {
-        self.free_map = RoaringBitmap::new();
-        for i in 0..=self.data_capacity as u32 {
-            self.free_map.insert(i);
-        }
-        let shard = self.alloc().expect("couldn't alloc nan");
+        self.free_map = value_data_free_map(self.data_capacity);
+        let shard = self.nan_shard();
         render_queue.write_buffer_shard(&shard, &f32::NAN.to_le_bytes());
     }
 
@@ -6104,7 +6144,10 @@ impl BufferShardAlloc {
             "trying to dealloc shard from wrong buffer",
         );
         let i = shard.range.start as usize / self.chunk_size;
-        self.free_map.insert(i as u32);
+        debug_assert_ne!(i, 0, "NaN shard must remain reserved");
+        if i != 0 {
+            self.free_map.insert(i as u32);
+        }
     }
 }
 

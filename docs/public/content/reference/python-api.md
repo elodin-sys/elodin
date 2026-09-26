@@ -636,9 +636,9 @@ A container of component metadata.
     only when its bytes differ from the latest recorded value. This preserves
     state semantics while avoiding duplicate rows. Set
     `record_every_tick="true"` only for consumers that require dense samples.
-    Editor plots and `Exec.history()` carry values forward while aligning
-    sparse components; raw database exports remain change streams with
-    per-component row counts.
+    Editor line plots and `Exec.history()` carry sparse values forward. Point
+    and bar plots show recorded samples only; raw database exports remain
+    change streams with per-component row counts.
 
     Example combining a label hint with the export-skip flag:
 
