@@ -14,7 +14,7 @@ order = 6
 
 ## Glossary
 
-- Top-level nodes: `coordinate`, `theme`, `timeline`, `telemetry_mode`, `skybox`, `environment`, `panel` variants, `object_3d`, `line_3d`, `vector_arrow`, `world_mesh`, `window`.
+- Top-level nodes: `coordinate`, `theme`, `timeline`, `telemetry_mode`, `skybox`, `environment`, `panel` variants, `object_3d`, `line_3d`, `point_trails`, `vector_arrow`, `world_mesh`, `window`.
 - EQL: expressions are evaluated in the runtime EQL context. Vector-like fields expect 3 components; `world_pos` is a 7-component array (quat + position).
 - Colors: `color r g b [a]` or named (`black`, `white`, `blue`, `red`, `orange`, `yellow`, `yalk`, `pink`, `cyan`, `gray`, `green`, `mint`, `turquoise`, `slate`, `pumpkin`, `yolk`, `peach`, `reddish`, `hyperblue`); alpha optional. Colors can be inline or in `color`/`colour` child nodes. Defaults to white when omitted unless noted.
 - Booleans: KDL booleans are `#true`/`#false`. A bare `True` is a *string*, not a boolean — most flags silently fall back to their default if given one. Viewport flags (`hdr`, `show_grid`, `active`, ...) leniently accept `True`/`"true"` (case-insensitive), but prefer the `#` forms everywhere.
@@ -23,7 +23,7 @@ order = 6
 ### coordinate
 - Optional top-level node that sets the global coordinate frame for the schematic.
 - `frame`: `"ENU"` (default), `"NED"`, or `"ECEF"`.
-- Elements (`viewport`, `object_3d`, `line_3d`, `vector_arrow`, `world_mesh`) that don't specify their own `frame` attribute inherit this global frame.
+- Elements (`viewport`, `object_3d`, `line_3d`, `point_trails`, `vector_arrow`, `world_mesh`) that don't specify their own `frame` attribute inherit this global frame.
 - Example: `coordinate frame="NED"` sets the entire schematic to use North-East-Down coordinates.
 
 ### theme
@@ -290,6 +290,25 @@ object_3d lander.world_pos {
 - `future_color`: color of the future segment, independent of `color`. Its alpha sets the future opacity and is used as-is (no extra fade). When omitted, falls back to the timeline `future_color` (default `white`, faded).
 - `perspective`: default true (set false for screen-space lines).
 
+### point_trails
+- Positional `component`: required; a flat `3 × N` f64 component laid out axis-major, `[x0..xN-1, y0..yN-1, z0..zN-1]`. `N` comes from the component length.
+- Draws every point's trail up to the playback time in one batched draw, plus a marker at each point's latest position.
+- `frame`: optional; `ENU`, `NED`, or `ECEF`. Inherits from global `coordinate` if omitted.
+- `head_size`: cube edge or sphere diameter in meters (default 1.0).
+- `head_shape`: `cube` (default) or `sphere`.
+- `line_width`: screen-space trail width (default 1.0).
+- `max_length`: optional positive cumulative trail length in meters. The oldest segment is interpolated so sparse samples still end at the requested length.
+- `status`: optional `(N,)` integer component. Nonzero points use `hit_color`.
+- `start`: optional scalar component path used as a one-shot lifecycle gate. Trails stay hidden until its first nonzero sample, and earlier position history is ignored. Later zeroes do not stop or reset the trails. Use it for positions initialized before motion—especially with change-only recording; `max_length` only limits distance.
+- `color`: trail and head color. When omitted, falls back to the timeline `played_color`.
+- `hit_color`: status-highlighted trail and head color (default red).
+- `head_size`, `line_width`, and `max_length` accept integer or decimal KDL numbers.
+- Long windows are downsampled so all trails fit one GPU index buffer (187 samples per trail at `N = 695`).
+
+```kdl
+point_trails "payload.positions" start="payload.released" max_length=3
+```
+
 ### vector_arrow
 - `vector`: EQL expression yielding a 3-component vector (required).
 - `origin`: EQL for arrow base; `world_pos` or 3-tuple (optional).
@@ -327,6 +346,7 @@ schematic =
   | panel
   | object_3d
   | line_3d
+  | point_trails
   | vector_arrow
   | world_mesh
   )*
@@ -531,6 +551,18 @@ line_3d = "line_3d"
         [color]
         [future_color]
         [perspective=bool]
+
+point_trails = "point_trails"
+             <component>
+             [frame=ENU|NED|ECEF]
+             [status=component]
+             [start=component]
+             [head_size=float]
+             [head_shape=cube|sphere]
+             [line_width=float]
+             [max_length=float]
+             [color]
+             [hit_color]
 
 vector_arrow = "vector_arrow"
              <vector-eql>

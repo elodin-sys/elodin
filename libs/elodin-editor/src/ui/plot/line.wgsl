@@ -6,7 +6,7 @@
 struct LineUniform {
   line_width : f32,
                color : vec4<f32>,
-                       chunk_size : f32,
+                       zoh : f32,
 #ifdef SIXTEEN_BYTE_ALIGNMENT
                                     // WebGL2 structs must be 16 byte aligned.
                                     _padding : vec2<f32>,
@@ -19,6 +19,7 @@ struct LineUniform {
 @group(2) @binding(1) var<storage> y_values: array<f32>;
 @group(2) @binding(2) var<storage> index_buffer: array<u32>;
 
+const STRIP_SEPARATOR_INDEX: u32 = 0xffffffffu;
 
 struct VertexInput {
   @builtin(vertex_index) vertex_index : u32,
@@ -42,17 +43,41 @@ struct VertexOutput {
   let position = positions[vertex.vertex_index];
   let resolution = view.viewport.zw;
   let width = line_uniform.line_width / resolution;
-  let index_a = index_buffer[vertex.instance_index];
-  let index_b = index_buffer[vertex.instance_index + 1];
+  let zoh = line_uniform.zoh > 0.5;
+  let pair_index = select(vertex.instance_index, vertex.instance_index / 2u, zoh);
+  let index_a = index_buffer[pair_index];
+  let index_b = index_buffer[pair_index + 1];
+  if index_a == STRIP_SEPARATOR_INDEX || index_b == STRIP_SEPARATOR_INDEX {
+    return VertexOutput(vec4(2.0, 2.0, 0.0, 1.0), vec4(0.0));
+  }
   let time_a = x_values[index_a];
   let time_b = x_values[index_b];
   let data_a = y_values[index_a];
   let data_b = y_values[index_b];
 
-  let pos_a = vec2(time_a, data_a);
-  let pos_b = vec2(time_b, data_b);
-  let clip_a = (view.clip_from_view * vec4(pos_a, 0.0, 1.0)).xy;
-  let clip_b = (view.clip_from_view * vec4(pos_b, 0.0, 1.0)).xy;
+  var pos_a = vec2(time_a, data_a);
+  var pos_b = vec2(time_b, data_b);
+  let vertical = vertex.instance_index % 2u == 1u;
+  if zoh {
+    if index_a == index_b {
+      if vertical {
+        return VertexOutput(vec4(2.0, 2.0, 0.0, 1.0), vec4(0.0));
+      }
+    } else if vertical {
+      pos_a = vec2(time_b, data_a);
+    } else {
+      pos_b = vec2(time_b, data_a);
+    }
+  }
+  var clip_a = (view.clip_from_view * vec4(pos_a, 0.0, 1.0)).xy;
+  var clip_b = (view.clip_from_view * vec4(pos_b, 0.0, 1.0)).xy;
+  if zoh && index_a == index_b {
+    clip_a.x = max(clip_a.x, -1.0);
+    clip_b = vec2(1.0, clip_a.y);
+  }
+  if all(clip_a == clip_b) {
+    return VertexOutput(vec4(2.0, 2.0, 0.0, 1.0), vec4(0.0));
+  }
   let x_basis = normalize(clip_b - clip_a);
   let y_basis = vec2(-x_basis.y, x_basis.x);
   let stride = width * position.x * y_basis;

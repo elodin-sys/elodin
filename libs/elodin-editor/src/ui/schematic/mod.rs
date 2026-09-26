@@ -25,7 +25,7 @@ use egui_tiles::{Tile, TileId};
 use impeller2_bevy::ComponentMetadataRegistry;
 use impeller2_wkt::{
     ActionPane, ComponentMonitor, ComponentPath, GeoPositionGauge, HorizonGauge, Line3d,
-    OrientationGauge, Panel, Schematic, SchematicElem, Split, VectorArrow3d,
+    OrientationGauge, Panel, PointTrails, Schematic, SchematicElem, Split, VectorArrow3d,
     VideoStream as WktVideoStream, Viewport, WindowSchematic, WorldMesh,
 };
 
@@ -74,6 +74,7 @@ pub struct SchematicParam<'w, 's> {
     pub camera_layers: Query<'w, 's, &'static RenderLayers>,
     pub objects_3d: Query<'w, 's, (Entity, &'static Object3DState)>,
     pub lines_3d: Query<'w, 's, (Entity, &'static Line3d)>,
+    pub point_trails: Query<'w, 's, (Entity, &'static PointTrails)>,
     pub world_meshes: Query<'w, 's, (Entity, &'static WorldMesh)>,
     pub vector_arrows: Query<
         'w,
@@ -569,6 +570,15 @@ pub fn tiles_to_schematic(
             bindings.bind_ephemeral(node_id, entity);
             l.node_id = node_id;
             SchematicElem::Line3d(l)
+        }));
+    schematic
+        .elems
+        .extend(param.point_trails.iter().map(|(entity, trails)| {
+            let mut t = trails.clone();
+            let node_id = impeller2_wkt::NodeId::next();
+            bindings.bind_ephemeral(node_id, entity);
+            t.node_id = node_id;
+            SchematicElem::PointTrails(t)
         }));
     schematic.elems.extend(
         param

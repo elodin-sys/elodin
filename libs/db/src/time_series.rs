@@ -106,6 +106,16 @@ impl TimeSeries {
         Some((*timestamp, buf))
     }
 
+    pub fn get_at_or_before(&self, timestamp: Timestamp) -> Option<(Timestamp, &[u8])> {
+        let timestamps = self.timestamps();
+        let index = timestamps.partition_point(|&candidate| candidate <= timestamp);
+        let index = index.checked_sub(1)?;
+        let element_size = self.element_size();
+        let timestamp = *timestamps.get(index)?;
+        let offset = index * element_size;
+        Some((timestamp, self.data.get(offset..offset + element_size)?))
+    }
+
     pub fn get_range(&self, range: &Range<Timestamp>) -> Option<(&[Timestamp], &[u8])> {
         let indices = self.range_indices(range)?;
         self.get_indices(indices)
@@ -234,5 +244,32 @@ impl TimeSeries {
     /// Returns the number of samples currently stored.
     pub fn sample_count(&self) -> usize {
         self.index.len() as usize / size_of::<i64>()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_at_or_before_respects_boundaries() {
+        let dir = tempfile::tempdir().unwrap();
+        let series = TimeSeries::create(dir.path(), "test".into(), Timestamp(0), 8).unwrap();
+        assert!(series.get_at_or_before(Timestamp(10)).is_none());
+
+        series.push_buf(Timestamp(20), &2u64.to_le_bytes()).unwrap();
+        series.push_buf(Timestamp(40), &4u64.to_le_bytes()).unwrap();
+
+        assert!(series.get_at_or_before(Timestamp(19)).is_none());
+        for (query, expected_timestamp, expected_value) in [
+            (20, 20, 2u64),
+            (30, 20, 2u64),
+            (40, 40, 4u64),
+            (50, 40, 4u64),
+        ] {
+            let (timestamp, data) = series.get_at_or_before(Timestamp(query)).unwrap();
+            assert_eq!(timestamp, Timestamp(expected_timestamp));
+            assert_eq!(data, expected_value.to_le_bytes());
+        }
     }
 }

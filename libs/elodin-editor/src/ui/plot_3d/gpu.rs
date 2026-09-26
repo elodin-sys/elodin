@@ -2,10 +2,7 @@ use crate::ui::schematic::ElementAffine;
 use crate::ui::widgets::SystemStateExt;
 use crate::{
     SelectedTimeRange,
-    ui::plot::{
-        Line,
-        gpu::{INDEX_BUFFER_LEN, INDEX_BUFFER_SIZE},
-    },
+    ui::plot::{Line, gpu::INDEX_BUFFER_LEN},
     ui::timeline::TimelineSettings,
 };
 use bevy::camera::visibility::RenderLayers;
@@ -18,6 +15,7 @@ use bevy::{
     ecs::{
         component::Component,
         entity::Entity,
+        query::With,
         schedule::{IntoScheduleConfigs, SystemSet},
         system::{
             Commands, Query, Res, ResMut, SystemState,
@@ -37,7 +35,7 @@ use bevy::{
             RenderCommandResult, SetItemPipeline, ViewSortedRenderPhases,
         },
         render_resource::{binding_types::uniform_buffer, *},
-        renderer::{RenderDevice, RenderQueue},
+        renderer::RenderDevice,
         view::ExtractedView,
     },
     transform::{
@@ -62,8 +60,6 @@ const LINE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("bfffa3c4-9401-4b6e-b3ab
 /// Dense line-local XYZ buffers: one `f32` per strip sample plus a leading NaN sentinel.
 /// Sized to the index budget so a full-fidelity short window still fits.
 const LOCAL_VALUE_BUFFER_LEN: usize = INDEX_BUFFER_LEN;
-const LOCAL_VALUE_BUFFER_SIZE: NonZeroU64 =
-    NonZeroU64::new((LOCAL_VALUE_BUFFER_LEN * size_of::<f32>()) as u64).unwrap();
 
 #[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum PlotSystem {
@@ -122,9 +118,9 @@ impl Plugin for Plot3dGpuPlugin {
         let layout_entries = BindGroupLayoutEntries::sequential(
             ShaderStages::VERTEX,
             (
-                storage_buffer_read_only_sized(false, Some(LOCAL_VALUE_BUFFER_SIZE)),
-                storage_buffer_read_only_sized(false, Some(LOCAL_VALUE_BUFFER_SIZE)),
-                storage_buffer_read_only_sized(false, Some(LOCAL_VALUE_BUFFER_SIZE)),
+                storage_buffer_read_only_sized(false, None),
+                storage_buffer_read_only_sized(false, None),
+                storage_buffer_read_only_sized(false, None),
             ),
         );
         let values_descriptor =
@@ -135,9 +131,9 @@ impl Plugin for Plot3dGpuPlugin {
         let index_layout_entries = BindGroupLayoutEntries::sequential(
             ShaderStages::VERTEX,
             (
-                storage_buffer_read_only_sized(false, Some(INDEX_BUFFER_SIZE)),
-                storage_buffer_read_only_sized(false, Some(INDEX_BUFFER_SIZE)),
-                storage_buffer_read_only_sized(false, Some(INDEX_BUFFER_SIZE)),
+                storage_buffer_read_only_sized(false, None),
+                storage_buffer_read_only_sized(false, None),
+                storage_buffer_read_only_sized(false, None),
             ),
         );
         let index_descriptor =
@@ -306,13 +302,13 @@ impl LineUniform {
 }
 
 #[derive(Resource)]
-struct LineValuesLayout {
+pub(super) struct LineValuesLayout {
     layout: BindGroupLayout,
     descriptor: BindGroupLayoutDescriptor,
 }
 
 #[derive(Resource)]
-struct LineIndexLayout {
+pub(super) struct LineIndexLayout {
     layout: BindGroupLayout,
     descriptor: BindGroupLayoutDescriptor,
 }
@@ -648,88 +644,133 @@ fn f32_residual_too_large(residual: DVec3) -> bool {
     residual.length_squared() > F32_ANCHOR_RESIDUAL_WARN_M_SQ
 }
 
-/// Build dense first-point-relative XYZ value buffers + remapped strip indices.
+/// Dense first-point-relative XYZ values + strip indices.
 ///
 /// `anchor` is the line's first sample in frame coordinates (entity
-/// `GeoPosition`). Vertices are `p_frame - anchor`. The entity's
-/// `GeoRotation::absolute` carries the frame→Bevy basis via GlobalTransform.
-/// Index layout matches the historical NaN-sentinel strip: leading/trailing
-/// `0` (NaN slot), samples at `1..n`.
-fn write_anchor_local_line_buffers(
+/// `GeoPosition`). Vertices are `p_frame - anchor`. Slot 0 holds NaN and
+/// samples occupy `1..=n`; the indices return to slot 0 before, between, and
+/// after strips, so segments touching it produce NaN positions and are culled.
+/// `strip_ends` are exclusive end offsets into `xs`/`ys`/`zs`.
+fn anchor_local_strips(
     xs: &[f64],
     ys: &[f64],
     zs: &[f64],
+    strip_ends: &[usize],
     anchor: DVec3,
-    render_device: &RenderDevice,
-    render_queue: &RenderQueue,
-) -> Option<([Buffer; 3], [Buffer; 3], u32, bool)> {
-    let n = xs.len().min(ys.len()).min(zs.len());
-    if n < 2 {
-        return None;
-    }
-    // Slot 0 = NaN sentinel; samples occupy 1..=n (capped to buffer length).
-    let max_samples = LOCAL_VALUE_BUFFER_LEN.saturating_sub(1);
-    let n = n.min(max_samples);
-    let mut x_local = vec![f32::NAN; n + 1];
-    let mut y_local = vec![f32::NAN; n + 1];
-    let mut z_local = vec![f32::NAN; n + 1];
+) -> ([Vec<f32>; 3], Vec<u32>, bool) {
+    let n = xs
+        .len()
+        .min(ys.len())
+        .min(zs.len())
+        .min(LOCAL_VALUE_BUFFER_LEN.saturating_sub(1));
+    let mut values = [0, 1, 2].map(|_| vec![f32::NAN; n + 1]);
     let mut residual_too_large = false;
     for i in 0..n {
         let residual = DVec3::new(xs[i], ys[i], zs[i]) - anchor;
         residual_too_large |= f32_residual_too_large(residual);
         let local = residual.as_vec3();
-        x_local[i + 1] = local.x;
-        y_local[i + 1] = local.y;
-        z_local[i + 1] = local.z;
+        values[0][i + 1] = local.x;
+        values[1][i + 1] = local.y;
+        values[2][i + 1] = local.z;
     }
 
-    // Single contiguous strip with NaN sentinels (one logical chunk).
-    let mut indices: Vec<u32> = Vec::with_capacity(n + 2);
+    let mut indices: Vec<u32> = Vec::with_capacity(n + strip_ends.len() + 1);
     indices.push(0);
-    for i in 0..n {
-        indices.push((i + 1) as u32);
+    let mut start = 0;
+    for &end in strip_ends {
+        let end = end.min(n);
+        indices.extend((start..end).map(|i| (i + 1) as u32));
+        indices.push(0);
+        start = end;
     }
-    indices.push(0);
-    if indices.len() > INDEX_BUFFER_LEN {
-        indices.truncate(INDEX_BUFFER_LEN);
+    indices.truncate(INDEX_BUFFER_LEN);
+    (values, indices, residual_too_large)
+}
+
+/// Upload [`anchor_local_strips`] and bind it for [`DrawLine`]. The flag
+/// reports an anchor residual large enough for visible f32 ULP.
+pub(super) fn build_gpu_line(
+    values: [&[f64]; 3],
+    strip_ends: &[usize],
+    anchor: DVec3,
+    render_device: &RenderDevice,
+    values_layout: &LineValuesLayout,
+    index_layout: &LineIndexLayout,
+) -> Option<(GpuLine, bool)> {
+    let [xs, ys, zs] = values;
+    if xs.len().min(ys.len()).min(zs.len()) < 2 {
+        return None;
     }
+    let ([x_local, y_local, z_local], indices, residual_too_large) =
+        anchor_local_strips(xs, ys, zs, strip_ends, anchor);
     let count = indices.len() as u32;
     if count < 2 {
         return None;
     }
 
-    let value_bufs = [x_local, y_local, z_local].map(|data| {
-        let mut bytes = vec![0u8; LOCAL_VALUE_BUFFER_SIZE.get() as usize];
-        let src = data.as_bytes();
-        bytes[..src.len()].copy_from_slice(src);
+    let value_size = NonZeroU64::new((x_local.len() * size_of::<f32>()) as u64)?;
+    let value_buffers = [x_local, y_local, z_local].map(|data| {
         render_device.create_buffer_with_data(&BufferInitDescriptor {
             label: Some("line_3d anchor-local values"),
-            contents: &bytes,
+            contents: data.as_bytes(),
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
         })
     });
 
-    let index_bufs = ['x', 'y', 'z'].map(|_| {
-        let mut bytes = vec![0u8; INDEX_BUFFER_LEN * size_of::<u32>()];
-        let src = indices.as_bytes();
-        bytes[..src.len()].copy_from_slice(src);
+    let index_size = NonZeroU64::new((indices.len() * size_of::<u32>()) as u64)?;
+    let index_buffers = ['x', 'y', 'z'].map(|_| {
         render_device.create_buffer_with_data(&BufferInitDescriptor {
             label: Some("line_3d anchor-local indices"),
-            contents: &bytes,
+            contents: indices.as_bytes(),
             usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
         })
     });
 
-    let _ = render_queue;
+    let value_entries = [0, 1, 2].map(|i| BindGroupEntry {
+        binding: i as u32,
+        resource: BindingResource::Buffer(BufferBinding {
+            buffer: &value_buffers[i],
+            offset: 0,
+            size: Some(value_size),
+        }),
+    });
+    let values_bind_group = render_device.create_bind_group(
+        "line_3d anchor-local values",
+        &values_layout.layout,
+        &value_entries,
+    );
 
-    Some((value_bufs, index_bufs, count, residual_too_large))
+    let index_entries = [0, 1, 2].map(|i| BindGroupEntry {
+        binding: i as u32,
+        resource: BindingResource::Buffer(BufferBinding {
+            buffer: &index_buffers[i],
+            offset: 0,
+            size: Some(index_size),
+        }),
+    });
+    let index_bind_group = render_device.create_bind_group(
+        "line_3d anchor-local indexes",
+        &index_layout.layout,
+        &index_entries,
+    );
+
+    Some((
+        GpuLine {
+            values_bind_group,
+            index_bind_group,
+            value_buffers,
+            index_buffers,
+            count,
+            last_index_key: None,
+        },
+        residual_too_large,
+    ))
 }
 
 fn extract_lines(
     mut main_world: ResMut<MainWorld>,
     mut commands: Commands,
     render_device: Res<RenderDevice>,
-    render_queue: Res<RenderQueue>,
     values_layout: Res<LineValuesLayout>,
     index_layout: Res<LineIndexLayout>,
 ) {
@@ -895,58 +936,22 @@ fn extract_lines(
                 let ys = axis_values(1);
                 let zs = axis_values(2);
 
-                let (value_buffers, index_buffers, count, residual_too_large) =
-                    write_anchor_local_line_buffers(
-                        &xs,
-                        &ys,
-                        &zs,
-                        line_anchor,
-                        &render_device,
-                        &render_queue,
-                    )?;
+                let (mut gpu_line, residual_too_large) = build_gpu_line(
+                    [&xs, &ys, &zs],
+                    &[xs.len()],
+                    line_anchor,
+                    &render_device,
+                    &values_layout,
+                    &index_layout,
+                )?;
                 if residual_too_large {
                     let eql = line_3d.map(|l| l.eql.as_str()).unwrap_or("<unknown>");
                     warn_once!(
                         "line_3d first-point subtract left a residual large enough that f32 ULP is visible (usually a zero/near-zero first sample): {eql}"
                     );
                 }
-
-                let value_entries = [0, 1, 2].map(|i| BindGroupEntry {
-                    binding: i as u32,
-                    resource: BindingResource::Buffer(BufferBinding {
-                        buffer: &value_buffers[i],
-                        offset: 0,
-                        size: Some(LOCAL_VALUE_BUFFER_SIZE),
-                    }),
-                });
-                let values_bind_group = render_device.create_bind_group(
-                    "line_3d anchor-local values",
-                    &values_layout.layout,
-                    &value_entries,
-                );
-
-                let index_entries = [0, 1, 2].map(|i| BindGroupEntry {
-                    binding: i as u32,
-                    resource: BindingResource::Buffer(BufferBinding {
-                        buffer: &index_buffers[i],
-                        offset: 0,
-                        size: Some(INDEX_BUFFER_SIZE),
-                    }),
-                });
-                let index_bind_group = render_device.create_bind_group(
-                    "line_3d anchor-local indexes",
-                    &index_layout.layout,
-                    &index_entries,
-                );
-
-                Some(GpuLine {
-                    values_bind_group,
-                    index_bind_group,
-                    value_buffers,
-                    index_buffers,
-                    count,
-                    last_index_key: Some(index_key),
-                })
+                gpu_line.last_index_key = Some(index_key);
+                Some(gpu_line)
             };
 
             let mut next_cache = GpuLineIndexCache::default();
@@ -1017,7 +1022,7 @@ fn queue_line(
     mut pipelines: ResMut<SpecializedRenderPipelines<LinePipeline>>,
     pipeline_cache: Res<PipelineCache>,
     view_key_cache: Res<ViewKeyCache>,
-    lines: Query<(Entity, &MainEntity, &LineHandles, &LineConfig)>,
+    lines: Query<(Entity, &MainEntity, &LineConfig), With<GpuLine>>,
     mut views: Query<(&ExtractedView, Option<&RenderLayers>)>,
     mut transparent_render_phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
 ) {
@@ -1035,7 +1040,7 @@ fn queue_line(
         };
         let render_layers = render_layers.cloned().unwrap_or_default();
 
-        for (entity, main_entity, _handle, config) in &lines {
+        for (entity, main_entity, config) in &lines {
             if !config.render_layers.intersects(&render_layers) {
                 continue;
             }
@@ -1296,6 +1301,15 @@ mod tests {
             .count();
         assert!(stalled > 0, "expected repeated samples, stalled={stalled}");
         assert!(overshoot > 0, "expected ULP jumps, overshoot={overshoot}");
+    }
+
+    #[test]
+    fn strips_break_at_the_nan_slot() {
+        let xs = [1.0, 2.0, 10.0, 11.0, 12.0];
+        let (values, indices, _) = anchor_local_strips(&xs, &xs, &xs, &[2, 5], DVec3::splat(1.0));
+        assert!(values.iter().all(|axis| axis[0].is_nan()));
+        assert_eq!(values[0][1..], [0.0, 1.0, 9.0, 10.0, 11.0]);
+        assert_eq!(indices, [0, 1, 2, 0, 3, 4, 5, 0]);
     }
 
     #[test]

@@ -1525,6 +1525,7 @@ pub fn auto_y_bounds(
             selected_range.0.start.0,
             selected_range.0.end.0,
             content_sig,
+            graph_state.graph_type,
         );
         if graph_state.auto_y_cache == Some(cache_key) {
             continue;
@@ -1542,10 +1543,12 @@ pub fn auto_y_bounds(
             let gpu::LineMut::Timeseries(line) = line else {
                 continue;
             };
-            let summary = line.data.range_summary(selected_range.0.clone());
+            let data_range =
+                gpu::timeseries_data_range(line, selected_range.0.clone(), graph_state.graph_type);
+            let summary = line.data.range_summary(data_range.clone());
             let (line_min, line_max) = if summary.len > OVERVIEW_MAX_POINTS {
                 line.data
-                    .percentile_bounds(selected_range.0.clone(), 1.0, 99.0)
+                    .percentile_bounds(data_range, 1.0, 99.0)
                     .unwrap_or((summary.min.unwrap_or(0.0), summary.max.unwrap_or(1.0)))
             } else {
                 (summary.min.unwrap_or(0.0), summary.max.unwrap_or(1.0))
@@ -1594,7 +1597,7 @@ pub fn sync_graphs(
             let Some(component_metadata) = metadata_store.get_metadata(component_id) else {
                 continue;
             };
-            let component = collected_graph_data
+            collected_graph_data
                 .components
                 .entry(*component_id)
                 .or_insert_with(|| {
@@ -1617,19 +1620,9 @@ pub fn sync_graphs(
             for (value_index, (enabled, color)) in component_values.iter().enumerate() {
                 // Ensure a Line asset exists so we can spawn GPU entities before
                 // SeriesStore has projected samples into the tree.
-                let line_handle = component.lines.entry(value_index).or_insert_with(|| {
-                    let label = component
-                        .element_names
-                        .get(value_index)
-                        .filter(|s| !s.is_empty())
-                        .cloned()
-                        .unwrap_or_else(|| format!("[{value_index}]"));
-                    lines.add(Line {
-                        label,
-                        ..Default::default()
-                    })
-                });
-                let line = line_handle.clone();
+                let line = collected_graph_data
+                    .ensure_line_handle(*component_id, value_index, &mut lines)
+                    .expect("component was inserted above");
 
                 let entity = graph_state
                     .enabled_lines

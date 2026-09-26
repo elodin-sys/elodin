@@ -9,13 +9,14 @@ use bevy::{
 };
 use bevy_render::render_resource::{Buffer, BufferDescriptor, BufferSlice, BufferUsages};
 use bevy_render::renderer::{RenderDevice, RenderQueue};
-use impeller2::types::{ComponentId, ComponentView, OwnedPacket, Timestamp};
+use impeller2::types::{ComponentId, ComponentView, OwnedPacket, PacketId, Timestamp};
 use impeller2_bevy::{
     BackfillState, CommandsExt, ComponentAdapters, ComponentPathRegistry, ComponentSchemaRegistry,
     PacketGrantR, PacketHandlerInput, PacketHandlers, SeriesFetchPriority, TelemetryCache,
 };
 use impeller2_wkt::{
-    ComponentValue, CurrentTimestamp, EarliestTimestamp, GetTimeSeries, Line3d, VectorArrow3d,
+    ComponentValue, CurrentTimestamp, EarliestTimestamp, GetTimeSeries, GetTimeSeriesPredecessor,
+    Line3d, PointTrails, VectorArrow3d,
 };
 use itertools::{Itertools, MinMaxResult};
 use nodit::NoditMap;
@@ -26,7 +27,7 @@ use zerocopy::{Immutable, IntoBytes};
 use std::any::type_name;
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU64;
-use std::ops::RangeInclusive;
+use std::ops::{ControlFlow, RangeInclusive};
 use std::sync::Arc;
 use std::sync::atomic::{self, AtomicBool};
 use std::time::{Duration, Instant};
@@ -43,6 +44,8 @@ use crate::{EqlContext, SelectedTimeRange};
 use hamann_chen_line::{select_polyline3_indices, select_time_value_indices};
 
 use super::PlotBounds;
+
+const PLOT_STRIP_SEPARATOR_INDEX: u32 = u32::MAX;
 
 /// Maximum points to request for overview data (LTTB downsampled)
 /// Must be <= CHUNK_LEN to fit within a single GPU buffer shard
@@ -136,21 +139,11 @@ impl PlotDataComponent {
         earliest_timestamp: Timestamp,
         archive_enabled: bool,
     ) {
-        let element_names = self
-            .element_names
-            .iter()
-            .filter(|s| !s.is_empty())
-            .map(|s| Some(s.as_str()))
-            .chain(std::iter::repeat(None));
-        for (i, (new_value, name)) in component_view.iter().zip(element_names).enumerate() {
+        for (i, new_value) in component_view.iter().enumerate() {
+            let Some(line) = self.lines.get(&i) else {
+                continue;
+            };
             let new_value = new_value.as_f32();
-            let line = self.lines.entry(i).or_insert_with(|| {
-                let label = name.map(str::to_string).unwrap_or_else(|| format!("[{i}]"));
-                assets.add(Line {
-                    label,
-                    ..Default::default()
-                })
-            });
             let mut line = assets.get_mut(line.id()).expect("missing line asset");
             // Only accept data at timestamps beyond all existing data for this
             // line. Live FixedRate snapshots can repeat the playhead timestamp;
@@ -182,6 +175,7 @@ impl PlotDataComponent {
 #[derive(Resource, Clone, Default)]
 pub struct CollectedGraphData {
     pub components: BTreeMap<ComponentId, PlotDataComponent>,
+    line_layout_generation: u64,
 }
 
 impl CollectedGraphData {
@@ -201,9 +195,46 @@ impl CollectedGraphData {
             .and_then(|component| component.lines.get(&index))
     }
 
+    pub fn ensure_line_handle(
+        &mut self,
+        component_id: ComponentId,
+        index: usize,
+        assets: &mut Assets<Line>,
+    ) -> Option<Handle<Line>> {
+        let component = self.components.get_mut(&component_id)?;
+        if let Some(handle) = component.lines.get(&index) {
+            return Some(handle.clone());
+        }
+        let label = component
+            .element_names
+            .get(index)
+            .filter(|name| !name.is_empty())
+            .cloned()
+            .unwrap_or_else(|| format!("[{index}]"));
+        let handle = assets.add(Line {
+            label,
+            ..Default::default()
+        });
+        component.lines.insert(index, handle.clone());
+        self.line_layout_generation = self.line_layout_generation.wrapping_add(1);
+        Some(handle)
+    }
+
+    pub fn line_layout_generation(&self) -> u64 {
+        self.line_layout_generation
+    }
+
     pub fn remove_line_handle(&mut self, id: AssetId<Line>) {
+        let mut removed = false;
         for component in self.components.values_mut() {
-            component.lines.retain(|_, handle| handle.id() != id);
+            component.lines.retain(|_, handle| {
+                let keep = handle.id() != id;
+                removed |= !keep;
+                keep
+            });
+        }
+        if removed {
+            self.line_layout_generation = self.line_layout_generation.wrapping_add(1);
         }
     }
 }
@@ -491,6 +522,7 @@ pub fn queue_timestamp_read(
     earliest_timestamp: Res<EarliestTimestamp>,
     graph_states: Query<&GraphState>,
     line_3ds: Query<&Line3d>,
+    point_trails: Query<&PointTrails>,
     object_3ds: Query<&Object3DState>,
     eql_ctx: Res<EqlContext>,
     series_store: Res<TelemetryCache>,
@@ -511,6 +543,7 @@ pub fn queue_timestamp_read(
         range_key,
         &graph_states,
         &line_3ds,
+        &point_trails,
         &object_3ds,
         &eql_ctx,
         &series_store,
@@ -527,6 +560,7 @@ pub fn queue_timestamp_read(
         earliest_timestamp.0,
         &graph_states,
         &line_3ds,
+        &point_trails,
         &object_3ds,
         &eql_ctx,
         &series_store,
@@ -560,19 +594,275 @@ fn visible_sync_range(
     Some((range_key, Timestamp(range_key.0)..Timestamp(range_key.1)))
 }
 
-/// Dedupes in-flight visible-window GetTimeSeries requests.
+/// Identifies logical sparse-prefetch requests.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum PrefetchKey {
+    Window {
+        component_id: ComponentId,
+        start: i64,
+        end: i64,
+    },
+    Anchor {
+        component_id: ComponentId,
+        start: i64,
+    },
+}
+
+impl PrefetchKey {
+    fn component_id(self) -> ComponentId {
+        match self {
+            Self::Window { component_id, .. } | Self::Anchor { component_id, .. } => component_id,
+        }
+    }
+
+    fn same_slot(self, other: Self) -> bool {
+        self.component_id() == other.component_id()
+            && matches!(
+                (self, other),
+                (Self::Window { .. }, Self::Window { .. })
+                    | (Self::Anchor { .. }, Self::Anchor { .. })
+            )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PrefetchRequestState {
+    InFlight(u64),
+    RetryAt(Instant),
+}
+
 #[derive(Resource, Default)]
 pub struct VisiblePrefetchState {
-    pub(crate) in_flight: HashSet<(ComponentId, i64, i64)>,
+    requests: HashMap<PrefetchKey, PrefetchRequestState>,
+    next_attempt: u64,
 }
 
 impl VisiblePrefetchState {
     pub fn clear_in_flight(&mut self) {
-        self.in_flight.clear();
+        self.requests.clear();
+    }
+
+    pub(crate) fn request_count(&self) -> usize {
+        self.requests
+            .values()
+            .filter(|state| matches!(state, PrefetchRequestState::InFlight(_)))
+            .count()
+    }
+
+    fn has_capacity(&self) -> bool {
+        self.request_count() < MAX_VISIBLE_PREFETCH_IN_FLIGHT
+    }
+
+    fn drop_superseded_retries(&mut self, key: PrefetchKey) {
+        self.requests.retain(|existing, state| {
+            *existing == key
+                || !existing.same_slot(key)
+                || matches!(state, PrefetchRequestState::InFlight(_))
+        });
+    }
+
+    pub(crate) fn begin(&mut self, key: PrefetchKey) -> Option<u64> {
+        self.drop_superseded_retries(key);
+        let now = Instant::now();
+        if self.requests.iter().any(|(existing, state)| {
+            existing.same_slot(key) && matches!(state, PrefetchRequestState::InFlight(_))
+        }) {
+            return None;
+        }
+        if self.requests.get(&key).is_some_and(
+            |state| matches!(state, PrefetchRequestState::RetryAt(retry_at) if now < *retry_at),
+        ) {
+            return None;
+        }
+        self.next_attempt = self.next_attempt.wrapping_add(1);
+        let attempt = self.next_attempt;
+        self.requests
+            .insert(key, PrefetchRequestState::InFlight(attempt));
+        Some(attempt)
+    }
+
+    fn is_current(&self, key: PrefetchKey, attempt: u64) -> bool {
+        self.requests.get(&key) == Some(&PrefetchRequestState::InFlight(attempt))
+    }
+
+    fn finish(&mut self, key: PrefetchKey, attempt: u64, success: bool) {
+        if !self.is_current(key, attempt) {
+            return;
+        }
+        if success {
+            self.requests.remove(&key);
+        } else {
+            self.requests.insert(
+                key,
+                PrefetchRequestState::RetryAt(Instant::now() + PREFETCH_RETRY_DELAY),
+            );
+        }
+    }
+
+    fn cancel_component(&mut self, component_id: ComponentId) {
+        self.requests
+            .retain(|key, _| key.component_id() != component_id);
     }
 }
 
 const VISIBLE_PREFETCH_LIMIT: usize = 8192;
+const MAX_VISIBLE_PREFETCH_IN_FLIGHT: usize = 32;
+const PREFETCH_RETRY_DELAY: Duration = Duration::from_millis(100);
+
+#[derive(Debug, PartialEq, Eq)]
+enum HoldAnchorDecision {
+    Satisfied,
+    Pending,
+    Request,
+}
+
+fn hold_anchor_decision(
+    component_id: ComponentId,
+    start: Timestamp,
+    series_store: &TelemetryCache,
+    prefetch: &VisiblePrefetchState,
+) -> HoldAnchorDecision {
+    if series_store
+        .get_at_or_before(&component_id, start)
+        .is_some()
+        || series_store.is_covered(
+            &component_id,
+            &(Timestamp(i64::MIN)..Timestamp(start.0.saturating_add(1))),
+        )
+    {
+        return HoldAnchorDecision::Satisfied;
+    }
+    let key = PrefetchKey::Anchor {
+        component_id,
+        start: start.0,
+    };
+    if prefetch
+        .requests
+        .get(&key)
+        .is_some_and(|state| match state {
+            PrefetchRequestState::InFlight(_) => true,
+            PrefetchRequestState::RetryAt(retry_at) => Instant::now() < *retry_at,
+        })
+    {
+        return HoldAnchorDecision::Pending;
+    }
+    HoldAnchorDecision::Request
+}
+
+fn apply_hold_anchor_payload(
+    timestamps: &[Timestamp],
+    buf: &[u8],
+    component_id: ComponentId,
+    start: Timestamp,
+    series_store: &mut TelemetryCache,
+    schema_reg: &ComponentSchemaRegistry,
+) -> bool {
+    if timestamps.is_empty() {
+        return buf.is_empty();
+    }
+    let (Some(&timestamp), Some(schema)) = (timestamps.first(), schema_reg.0.get(&component_id))
+    else {
+        return false;
+    };
+    let size = schema.size();
+    if timestamps.len() != 1 || timestamp > start || buf.len() != size {
+        return false;
+    }
+    let Ok(view) = impeller2::types::ComponentView::try_from_bytes_shape(
+        buf,
+        schema.shape(),
+        schema.prim_type(),
+    ) else {
+        return false;
+    };
+    series_store.insert(component_id, timestamp, ComponentValue::from_view(view));
+    true
+}
+
+fn apply_hold_anchor_reply(
+    packet: &OwnedPacket<PacketGrantR>,
+    component_id: ComponentId,
+    start: Timestamp,
+    series_store: &mut TelemetryCache,
+    schema_reg: &ComponentSchemaRegistry,
+) -> bool {
+    let OwnedPacket::TimeSeries(time_series) = packet else {
+        return false;
+    };
+    let (Ok(timestamps), Ok(buf)) = (time_series.timestamps(), time_series.data()) else {
+        return false;
+    };
+    apply_hold_anchor_payload(
+        timestamps,
+        buf,
+        component_id,
+        start,
+        series_store,
+        schema_reg,
+    )
+}
+
+fn prefetch_hold_anchor(
+    component_id: ComponentId,
+    start: Timestamp,
+    series_store: &TelemetryCache,
+    prefetch: &mut VisiblePrefetchState,
+    commands: &mut Commands,
+) -> bool {
+    let key = PrefetchKey::Anchor {
+        component_id,
+        start: start.0,
+    };
+    match hold_anchor_decision(component_id, start, series_store, prefetch) {
+        HoldAnchorDecision::Satisfied => {
+            prefetch.requests.remove(&key);
+            return false;
+        }
+        HoldAnchorDecision::Pending => return false,
+        HoldAnchorDecision::Request => {}
+    }
+
+    let Some(attempt) = prefetch.begin(key) else {
+        return false;
+    };
+    commands.send_req_reply_raw(
+        GetTimeSeriesPredecessor {
+            id: PacketId::default(),
+            timestamp: start,
+            component_id,
+        },
+        move |pkt: InRef<OwnedPacket<PacketGrantR>>,
+              mut series_store: ResMut<TelemetryCache>,
+              schema_reg: Res<ComponentSchemaRegistry>,
+              priority: Res<SeriesFetchPriority>,
+              mut prefetch: ResMut<VisiblePrefetchState>|
+              -> bool {
+            if !priority.high.contains(&component_id) {
+                prefetch.cancel_component(component_id);
+                return true;
+            }
+            if !prefetch.is_current(key, attempt) {
+                return true;
+            }
+            let confirmed =
+                apply_hold_anchor_reply(&pkt, component_id, start, &mut series_store, &schema_reg);
+            if confirmed
+                && series_store
+                    .get_at_or_before(&component_id, start)
+                    .is_none()
+            {
+                series_store.mark_covered(
+                    component_id,
+                    Timestamp(i64::MIN),
+                    Timestamp(start.0.saturating_add(1)),
+                );
+            }
+            prefetch.finish(key, attempt, confirmed);
+            true
+        },
+    );
+    true
+}
 
 #[allow(clippy::too_many_arguments)]
 fn prefetch_visible_window(
@@ -580,6 +870,7 @@ fn prefetch_visible_window(
     range_key: (i64, i64),
     graph_states: &Query<&GraphState>,
     line_3ds: &Query<&Line3d>,
+    point_trails: &Query<&PointTrails>,
     object_3ds: &Query<&Object3DState>,
     eql_ctx: &EqlContext,
     series_store: &TelemetryCache,
@@ -589,162 +880,192 @@ fn prefetch_visible_window(
 ) {
     // Prefetch only plot/3D consumers; monitors/viewport/arrows are allowlisted
     // in `update_series_fetch_priority` and filled by live + begin→end backfill.
-    let fetch_ids = plot_fetch_component_ids(graph_states, line_3ds, object_3ds, eql_ctx);
+    let fetch_ids =
+        plot_fetch_component_ids(graph_states, line_3ds, point_trails, object_3ds, eql_ctx);
+    prefetch
+        .requests
+        .retain(|key, _| fetch_ids.contains(&key.component_id()));
     if fetch_ids.is_empty() {
         return;
     }
-    const MAX_VISIBLE_PREFETCH_IN_FLIGHT: usize = 32;
+    for component_id in fetch_ids.iter().copied() {
+        prefetch.drop_superseded_retries(PrefetchKey::Anchor {
+            component_id,
+            start: sync_range.start.0,
+        });
+        prefetch.drop_superseded_retries(PrefetchKey::Window {
+            component_id,
+            start: range_key.0,
+            end: range_key.1,
+        });
+    }
     for component_id in fetch_ids {
-        if prefetch.in_flight.len() >= MAX_VISIBLE_PREFETCH_IN_FLIGHT {
+        if !prefetch.has_capacity() {
             break;
         }
         if !schema_reg.0.contains_key(&component_id) {
             continue;
         }
-        if series_store.has_samples_in_range(&component_id, sync_range) {
-            prefetch
-                .in_flight
-                .remove(&(component_id, range_key.0, range_key.1));
-            continue;
-        }
-        let key = (component_id, range_key.0, range_key.1);
-        if prefetch.in_flight.contains(&key) {
-            continue;
-        }
-        prefetch.in_flight.insert(key);
-        let start = sync_range.start;
-        let end = sync_range.end;
-        let packet_id = fastrand::u16(..).to_le_bytes();
-        let msg = GetTimeSeries {
-            id: packet_id,
-            range: start..end,
+        prefetch_hold_anchor(
             component_id,
-            limit: Some(VISIBLE_PREFETCH_LIMIT),
+            sync_range.start,
+            series_store,
+            prefetch,
+            commands,
+        );
+        if !prefetch.has_capacity() {
+            continue;
+        }
+        let key = PrefetchKey::Window {
+            component_id,
+            start: range_key.0,
+            end: range_key.1,
         };
-        commands.send_req_with_handler(
-            msg,
-            packet_id,
-            move |pkt: InRef<OwnedPacket<PacketGrantR>>,
-                  mut series_store: ResMut<TelemetryCache>,
-                  schema_reg: Res<ComponentSchemaRegistry>,
-                  priority: Res<SeriesFetchPriority>,
-                  mut prefetch: ResMut<VisiblePrefetchState>,
-                  mut commands: Commands| {
-                apply_visible_prefetch_page(
-                    &pkt,
-                    component_id,
-                    start,
-                    end,
-                    range_key,
-                    &mut series_store,
-                    &schema_reg,
-                    &priority,
-                    &mut prefetch,
-                    &mut commands,
-                );
-            },
+        if series_store.is_covered(&component_id, sync_range) {
+            prefetch.requests.remove(&key);
+            continue;
+        }
+        let Some(attempt) = prefetch.begin(key) else {
+            continue;
+        };
+        send_visible_prefetch_page(
+            key,
+            attempt,
+            component_id,
+            sync_range.start,
+            sync_range.end,
+            commands,
         );
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[derive(Debug, PartialEq, Eq)]
+enum VisiblePageOutcome {
+    Complete,
+    Next(Timestamp),
+    Invalid,
+}
+
 fn apply_visible_prefetch_page(
     pkt: &OwnedPacket<PacketGrantR>,
     component_id: ComponentId,
     req_start: Timestamp,
     req_end: Timestamp,
-    range_key: (i64, i64),
     series_store: &mut TelemetryCache,
     schema_reg: &ComponentSchemaRegistry,
-    priority: &SeriesFetchPriority,
-    prefetch: &mut VisiblePrefetchState,
-    commands: &mut Commands,
-) {
-    let drop_in_flight = |prefetch: &mut VisiblePrefetchState| {
-        prefetch
-            .in_flight
-            .remove(&(component_id, range_key.0, range_key.1));
-    };
-    // Component may have left the allowlist while this page was in flight.
-    if !priority.high.contains(&component_id) {
-        drop_in_flight(prefetch);
-        return;
-    }
+) -> VisiblePageOutcome {
     let OwnedPacket::TimeSeries(time_series) = pkt else {
-        drop_in_flight(prefetch);
-        return;
+        return VisiblePageOutcome::Invalid;
     };
     let (Ok(timestamps), Ok(buf)) = (time_series.timestamps(), time_series.data()) else {
-        drop_in_flight(prefetch);
-        return;
+        return VisiblePageOutcome::Invalid;
     };
+    apply_visible_prefetch_payload(
+        timestamps,
+        buf,
+        component_id,
+        req_start,
+        req_end,
+        series_store,
+        schema_reg,
+    )
+}
+
+fn apply_visible_prefetch_payload(
+    timestamps: &[Timestamp],
+    buf: &[u8],
+    component_id: ComponentId,
+    req_start: Timestamp,
+    req_end: Timestamp,
+    series_store: &mut TelemetryCache,
+    schema_reg: &ComponentSchemaRegistry,
+) -> VisiblePageOutcome {
     let Some(schema) = schema_reg.0.get(&component_id) else {
-        drop_in_flight(prefetch);
-        return;
+        return VisiblePageOutcome::Invalid;
     };
     let elem_size = schema.size();
-    let mut last_ts = req_start;
+    if buf.len() != timestamps.len().saturating_mul(elem_size) {
+        return VisiblePageOutcome::Invalid;
+    }
     for (i, &timestamp) in timestamps.iter().enumerate() {
         let offset = i * elem_size;
-        if offset + elem_size > buf.len() {
-            break;
-        }
-        if let Ok(view) = impeller2::types::ComponentView::try_from_bytes_shape(
+        let Ok(view) = impeller2::types::ComponentView::try_from_bytes_shape(
             &buf[offset..offset + elem_size],
             schema.shape(),
             schema.prim_type(),
-        ) {
-            series_store.insert(component_id, timestamp, ComponentValue::from_view(view));
-            last_ts = timestamp;
-        }
+        ) else {
+            return VisiblePageOutcome::Invalid;
+        };
+        series_store.insert(component_id, timestamp, ComponentValue::from_view(view));
     }
-    if let Some(&first) = timestamps.first() {
-        series_store.mark_covered(component_id, first, Timestamp(last_ts.0.saturating_add(1)));
+    if timestamps.len() < VISIBLE_PREFETCH_LIMIT {
+        series_store.mark_covered(component_id, req_start, req_end);
+        return VisiblePageOutcome::Complete;
     }
-    if !priority.high.contains(&component_id) {
-        series_store.remove_series(&component_id);
-        drop_in_flight(prefetch);
-        return;
+    let Some(last_ts) = timestamps.last().copied() else {
+        series_store.mark_covered(component_id, req_start, req_end);
+        return VisiblePageOutcome::Complete;
+    };
+    let next_start = Timestamp(last_ts.0.saturating_add(1));
+    series_store.mark_covered(component_id, req_start, next_start);
+    if next_start < req_end {
+        VisiblePageOutcome::Next(next_start)
+    } else {
+        VisiblePageOutcome::Complete
     }
-    // Continue paging until the visible window is filled or the DB has no more.
-    if !timestamps.is_empty()
-        && timestamps.len() >= VISIBLE_PREFETCH_LIMIT
-        && last_ts.0.saturating_add(1) < req_end.0
-    {
-        let next_start = Timestamp(last_ts.0.saturating_add(1));
-        let packet_id = fastrand::u16(..).to_le_bytes();
-        let msg = GetTimeSeries {
-            id: packet_id,
-            range: next_start..req_end,
+}
+
+fn send_visible_prefetch_page(
+    key: PrefetchKey,
+    attempt: u64,
+    component_id: ComponentId,
+    req_start: Timestamp,
+    req_end: Timestamp,
+    commands: &mut Commands,
+) {
+    commands.send_req_reply_raw(
+        GetTimeSeries {
+            id: PacketId::default(),
+            range: req_start..req_end,
             component_id,
             limit: Some(VISIBLE_PREFETCH_LIMIT),
-        };
-        commands.send_req_with_handler(
-            msg,
-            packet_id,
-            move |pkt: InRef<OwnedPacket<PacketGrantR>>,
-                  mut series_store: ResMut<TelemetryCache>,
-                  schema_reg: Res<ComponentSchemaRegistry>,
-                  priority: Res<SeriesFetchPriority>,
-                  mut prefetch: ResMut<VisiblePrefetchState>,
-                  mut commands: Commands| {
-                apply_visible_prefetch_page(
-                    &pkt,
+        },
+        move |pkt: InRef<OwnedPacket<PacketGrantR>>,
+              mut series_store: ResMut<TelemetryCache>,
+              schema_reg: Res<ComponentSchemaRegistry>,
+              priority: Res<SeriesFetchPriority>,
+              mut prefetch: ResMut<VisiblePrefetchState>,
+              mut commands: Commands|
+              -> bool {
+            if !priority.high.contains(&component_id) {
+                prefetch.cancel_component(component_id);
+                return true;
+            }
+            if !prefetch.is_current(key, attempt) {
+                return true;
+            }
+            match apply_visible_prefetch_page(
+                &pkt,
+                component_id,
+                req_start,
+                req_end,
+                &mut series_store,
+                &schema_reg,
+            ) {
+                VisiblePageOutcome::Complete => prefetch.finish(key, attempt, true),
+                VisiblePageOutcome::Next(next_start) => send_visible_prefetch_page(
+                    key,
+                    attempt,
                     component_id,
                     next_start,
                     req_end,
-                    range_key,
-                    &mut series_store,
-                    &schema_reg,
-                    &priority,
-                    &mut prefetch,
                     &mut commands,
-                );
-            },
-        );
-    } else {
-        drop_in_flight(prefetch);
-    }
+                ),
+                VisiblePageOutcome::Invalid => prefetch.finish(key, attempt, false),
+            }
+            true
+        },
+    );
 }
 
 /// Rebuild enabled plot LineTrees from the full SeriesStore for the visible window.
@@ -752,6 +1073,43 @@ fn apply_visible_prefetch_page(
 /// as backfill / visible prefetch streams in, subsequent syncs fill gaps (a
 /// covered first/last span is not treated as complete if the store later has
 /// more samples inside it).
+fn active_line_layout(
+    graph_data: &CollectedGraphData,
+    fetch_ids: &HashSet<ComponentId>,
+) -> HashSet<(ComponentId, usize)> {
+    graph_data
+        .components
+        .iter()
+        .filter(|(component_id, _)| fetch_ids.contains(component_id))
+        .flat_map(|(&component_id, component)| {
+            component
+                .lines
+                .keys()
+                .map(move |&index| (component_id, index))
+        })
+        .collect()
+}
+
+fn refresh_line_layout(
+    sync_state: &mut PlotSyncState,
+    graph_data: &CollectedGraphData,
+    fetch_ids: &HashSet<ComponentId>,
+    enabled_changed: bool,
+) -> HashSet<(ComponentId, usize)> {
+    let generation = graph_data.line_layout_generation();
+    if !enabled_changed && sync_state.last_layout_generation == generation {
+        return HashSet::new();
+    }
+    let layout = active_line_layout(graph_data, fetch_ids);
+    let added = layout
+        .difference(&sync_state.last_layout)
+        .copied()
+        .collect();
+    sync_state.last_layout = layout;
+    sync_state.last_layout_generation = generation;
+    added
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn sync_plot_lines_from_series_store(
     range_key: (i64, i64),
@@ -761,23 +1119,28 @@ pub fn sync_plot_lines_from_series_store(
     earliest: Timestamp,
     graph_states: &Query<&GraphState>,
     line_3ds: &Query<&Line3d>,
+    point_trails: &Query<&PointTrails>,
     object_3ds: &Query<&Object3DState>,
     eql_ctx: &EqlContext,
     series_store: &TelemetryCache,
     sync_state: &mut PlotSyncState,
 ) {
-    let fetch_ids = plot_fetch_component_ids(graph_states, line_3ds, object_3ds, eql_ctx);
+    let fetch_ids =
+        plot_fetch_component_ids(graph_states, line_3ds, point_trails, object_3ds, eql_ctx);
     let range_changed = sync_state.last_range != Some(range_key);
     let enabled_changed = sync_state.last_enabled != fetch_ids;
+    let layout_generation = graph_data.line_layout_generation();
+    let layout_changed = sync_state.last_layout_generation != layout_generation;
     let gen_changed = series_store.generation() != sync_state.last_generation;
     let due = sync_state
         .last_rebuild
         .map(|t| t.elapsed() >= Duration::from_millis(100))
         .unwrap_or(true);
 
-    if !(range_changed || enabled_changed || (gen_changed && due)) {
+    if !(range_changed || enabled_changed || layout_changed || (gen_changed && due)) {
         return;
     }
+    let new_layout = refresh_line_layout(sync_state, graph_data, &fetch_ids, enabled_changed);
     sync_state.last_range = Some(range_key);
     sync_state.last_generation = series_store.generation();
     sync_state.last_enabled = fetch_ids.clone();
@@ -790,34 +1153,23 @@ pub fn sync_plot_lines_from_series_store(
     } else {
         None
     };
-    // Overview stride depends on the full window count — always rebuild.
-    let force_full = enabled_changed || max_points.is_some();
-
     for (&component_id, component) in graph_data.components.iter_mut() {
         if !fetch_ids.contains(&component_id) {
             continue;
         }
-        let has_samples_in_window = series_store.has_samples_in_range(&component_id, sync_range);
-        let num_elements = component.element_names.len().max(1);
-        for element_index in 0..num_elements {
-            let handle = component.lines.entry(element_index).or_insert_with(|| {
-                let label = component
-                    .element_names
-                    .get(element_index)
-                    .filter(|s| !s.is_empty())
-                    .cloned()
-                    .unwrap_or_else(|| format!("[{element_index}]"));
-                lines.add(Line {
-                    label,
-                    ..Default::default()
-                })
-            });
+        let has_state_in_window = series_store
+            .series(&component_id)
+            .is_some_and(|series| series.range(..sync_range.end).next_back().is_some());
+        for (&element_index, handle) in &component.lines {
             let Some(mut line) = lines.get_mut(handle) else {
                 continue;
             };
-            if !has_samples_in_window {
+            // Overview stride changes with total count; new handles have no projected history.
+            let force_full =
+                max_points.is_some() || new_layout.contains(&(component_id, element_index));
+            if !has_state_in_window {
                 if should_clear_line_on_empty_store(
-                    line.data.stored_exclusive_span(),
+                    line.data.projected_span(),
                     sync_range,
                     range_changed,
                     series_store.is_covered(&component_id, sync_range),
@@ -939,7 +1291,7 @@ fn apply_plot_sync_plan(
             sync_range,
             tree,
         );
-    match plot_sync_plan(tree.stored_exclusive_span(), sync_range, rebuild) {
+    match plot_sync_plan(tree.projected_span(), sync_range, rebuild) {
         PlotSyncPlan::FullRebuild => {
             tree.clear();
             project_series_element_to_line(
@@ -969,6 +1321,7 @@ fn apply_plot_sync_plan(
             tree.evict_chunks_outside(padded_sync_keep_range(sync_range));
         }
     }
+    tree.set_projected_range(sync_range.clone());
 }
 
 /// True when every in-store sample inside the tree's already-covered span is
@@ -985,7 +1338,7 @@ fn plot_line_matches_store_interior(
     need: &Range<Timestamp>,
     tree: &LineTree<f32>,
 ) -> bool {
-    let Some(stored) = tree.stored_exclusive_span() else {
+    let Some(stored) = tree.projected_span() else {
         return true;
     };
     let start = stored.start.max(need.start);
@@ -994,30 +1347,16 @@ fn plot_line_matches_store_interior(
         return true;
     }
     let inspect = start..end;
-    let store_count =
-        store_element_count_in_range(series_store, component_id, element_index, &inspect);
-    let tree_count = tree.sample_count_in_range(&inspect);
-    // `0 <= tree_count` would treat leftover tree samples as a match and leave
-    // a phantom trace after a seek into a gap or a sparse element hole.
-    if store_count == 0 {
-        return tree_count == 0;
-    }
-    store_count <= tree_count
-}
-
-fn store_element_count_in_range(
-    series_store: &TelemetryCache,
-    component_id: ComponentId,
-    element_index: usize,
-    range: &Range<Timestamp>,
-) -> usize {
     let Some(series) = series_store.series(&component_id) else {
-        return 0;
+        return !tree.has_samples();
     };
     series
-        .range(range.start..range.end)
-        .filter(|(_, val)| val.get(element_index).is_some())
-        .count()
+        .range(inspect)
+        .filter(|(_, value)| value.get(element_index).is_some())
+        .all(|(timestamp, _)| {
+            tree.get_nearest(*timestamp)
+                .is_some_and(|(actual, _)| actual == *timestamp)
+        })
 }
 
 fn padded_sync_keep_range(sync_range: &Range<Timestamp>) -> Range<Timestamp> {
@@ -1032,6 +1371,8 @@ pub struct PlotSyncState {
     last_range: Option<(i64, i64)>,
     last_generation: u64,
     last_enabled: HashSet<ComponentId>,
+    last_layout_generation: u64,
+    last_layout: HashSet<(ComponentId, usize)>,
     last_rebuild: Option<Instant>,
 }
 
@@ -1090,11 +1431,19 @@ fn collect_object_3d_mesh_component_ids(
     }
 }
 
+fn point_trails_component_ids(trails: &PointTrails) -> impl Iterator<Item = ComponentId> {
+    std::iter::once(trails.component.as_str())
+        .chain(trails.status.as_deref())
+        .chain(trails.start.as_deref())
+        .map(|name| ComponentId::new(name.trim()))
+}
+
 /// Component IDs for plot LineTree sync / visible-window prefetch
-/// (graphs + Line3d + object_3d only).
+/// (graphs + Line3d + point_trails + object_3d only).
 fn plot_fetch_component_ids(
     graph_states: &Query<&GraphState>,
     line_3ds: &Query<&Line3d>,
+    point_trails: &Query<&PointTrails>,
     object_3ds: &Query<&Object3DState>,
     eql_ctx: &EqlContext,
 ) -> HashSet<ComponentId> {
@@ -1107,6 +1456,7 @@ fn plot_fetch_component_ids(
     for line in line_3ds.iter() {
         collect_eql_component_ids(&line.eql, eql_ctx, &mut ids);
     }
+    ids.extend(point_trails.iter().flat_map(point_trails_component_ids));
     for obj in object_3ds.iter() {
         collect_eql_component_ids(&obj.data.eql, eql_ctx, &mut ids);
         collect_object_3d_mesh_component_ids(&obj.data.mesh, eql_ctx, &mut ids);
@@ -1120,16 +1470,19 @@ fn plot_fetch_component_ids(
 
 /// Full SeriesStore consumer set: plots/3D plus monitors, viewport cameras,
 /// and vector arrows.
+#[allow(clippy::too_many_arguments)]
 fn enabled_fetch_component_ids(
     graph_states: &Query<&GraphState>,
     line_3ds: &Query<&Line3d>,
+    point_trails: &Query<&PointTrails>,
     object_3ds: &Query<&Object3DState>,
     monitors: &Query<&MonitorData>,
     viewports: &Query<&Viewport>,
     vector_arrows: &Query<&VectorArrow3d>,
     eql_ctx: &EqlContext,
 ) -> HashSet<ComponentId> {
-    let mut ids = plot_fetch_component_ids(graph_states, line_3ds, object_3ds, eql_ctx);
+    let mut ids =
+        plot_fetch_component_ids(graph_states, line_3ds, point_trails, object_3ds, eql_ctx);
     for monitor in monitors.iter() {
         if !monitor.component_name.trim().is_empty() {
             ids.insert(ComponentId::new(&monitor.component_name));
@@ -1191,6 +1544,7 @@ pub(crate) fn sensor_camera_world_pos_ids(configs: &SensorCameraConfigs) -> Hash
 pub fn update_series_fetch_priority(
     graph_states: Query<&GraphState>,
     line_3ds: Query<&Line3d>,
+    point_trails: Query<&PointTrails>,
     object_3ds: Query<&Object3DState>,
     monitors: Query<&MonitorData>,
     viewports: Query<&Viewport>,
@@ -1212,6 +1566,7 @@ pub fn update_series_fetch_priority(
         enabled_fetch_component_ids(
             &graph_states,
             &line_3ds,
+            &point_trails,
             &object_3ds,
             &monitors,
             &viewports,
@@ -1224,10 +1579,45 @@ pub fn update_series_fetch_priority(
         cache.remove_series(&id);
         backfill.clear_component(id);
         if let Some(ref mut prefetch) = prefetch {
-            prefetch.in_flight.retain(|(cid, _, _)| *cid != id);
+            prefetch.cancel_component(id);
         }
     }
     priority.high = next;
+}
+
+/// Stored samples in the window plus the latest preceding value.
+fn element_samples_with_predecessor(
+    cache: &TelemetryCache,
+    component_id: ComponentId,
+    element_index: usize,
+    range: &Range<Timestamp>,
+) -> Vec<(Timestamp, f32)> {
+    if range.start >= range.end {
+        return Vec::new();
+    }
+    let Some(series) = cache.series(&component_id) else {
+        return Vec::new();
+    };
+
+    series
+        .range(..range.start)
+        .rev()
+        .find_map(|(&timestamp, value)| {
+            value
+                .get(element_index)
+                .map(|element| (timestamp, element.as_f32()))
+        })
+        .into_iter()
+        .chain(
+            series
+                .range(range.clone())
+                .filter_map(|(&timestamp, value)| {
+                    value
+                        .get(element_index)
+                        .map(|element| (timestamp, element.as_f32()))
+                }),
+        )
+        .collect()
 }
 
 /// Project SeriesStore samples into a plot `LineTree` for one element.
@@ -1241,10 +1631,8 @@ pub(crate) fn project_series_element_to_line(
     line: &mut LineTree<f32>,
     max_points: Option<usize>,
 ) -> usize {
-    let Some(series) = cache.series(&component_id) else {
-        return 0;
-    };
-    let count = series.range(range.start..range.end).count();
+    let samples = element_samples_with_predecessor(cache, component_id, element_index, range);
+    let count = samples.len();
     if count == 0 {
         return 0;
     }
@@ -1255,15 +1643,12 @@ pub(crate) fn project_series_element_to_line(
     let mut timestamps = Vec::new();
     let mut values = Vec::new();
     let mut total = 0usize;
-    for (i, (ts, val)) in series.range(range.start..range.end).enumerate() {
+    for (i, (timestamp, value)) in samples.into_iter().enumerate() {
         if i % stride != 0 && i + 1 != count {
             continue;
         }
-        let Some(elem) = val.get(element_index) else {
-            continue;
-        };
-        timestamps.push(*ts);
-        values.push(elem.as_f32());
+        timestamps.push(timestamp);
+        values.push(value);
         if timestamps.len() >= CHUNK_LEN {
             let n = timestamps.len();
             if let Some(chunk) = Chunk::from_iter(&timestamps, earliest, values.iter().copied()) {
@@ -1298,29 +1683,24 @@ fn append_series_element_to_line(
     earliest: Timestamp,
     line: &mut LineTree<f32>,
 ) -> usize {
-    let Some(series) = cache.series(&component_id) else {
-        return 0;
-    };
     let mut total = 0usize;
-    for (ts, val) in series.range(range.start..range.end) {
-        let Some(elem) = val.get(element_index) else {
-            continue;
-        };
-        let new_value = elem.as_f32();
+    for (timestamp, new_value) in
+        element_samples_with_predecessor(cache, component_id, element_index, range)
+    {
         let mut accepted = false;
         if let Some(last) = line.last() {
-            if *ts <= last.summary.end_timestamp {
+            if timestamp <= last.summary.end_timestamp {
                 continue;
             }
             if last.timestamps.len() < CHUNK_LEN {
                 line.update_last(|c| {
-                    c.push(*ts, earliest, new_value);
+                    c.push(timestamp, earliest, new_value);
                 });
                 accepted = true;
             }
         }
         if !accepted {
-            line.insert(Chunk::from_initial_value(*ts, earliest, new_value));
+            line.insert(Chunk::from_initial_value(timestamp, earliest, new_value));
         }
         total += 1;
     }
@@ -1882,6 +2262,7 @@ impl<D: Clone + BoundOrd> ChunkSummary<D> {
 
 pub struct LineTree<D: Clone + BoundOrd> {
     tree: NoditMap<i64, nodit::Interval<i64>, Chunk<D>>,
+    projected_range: Option<Range<Timestamp>>,
     data_buffer_shard_alloc: Option<BufferShardAlloc>,
     timestamp_buffer_shard_alloc: Option<BufferShardAlloc>,
     /// Append-only archive of raw `(timestamp, value)` samples ingested live.
@@ -1912,6 +2293,7 @@ impl<D: Clone + BoundOrd> Default for LineTree<D> {
     fn default() -> Self {
         Self {
             tree: Default::default(),
+            projected_range: None,
             data_buffer_shard_alloc: None,
             timestamp_buffer_shard_alloc: None,
             raw_timestamps: Vec::new(),
@@ -2067,10 +2449,34 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     }
 
     pub fn range_summary(&self, range: Range<Timestamp>) -> ChunkSummary<D> {
-        self.range_iter(range)
-            .fold(ChunkSummary::default(), |mut xs, x| {
-                xs.add_summary(&x.summary);
-                xs
+        self.range_iter(range.clone())
+            .fold(ChunkSummary::default(), |mut summary, chunk| {
+                let Some((start, end)) = chunk_visible_offsets(&chunk.timestamps, &range) else {
+                    return summary;
+                };
+                if start == 0 && end == chunk.summary.len {
+                    summary.add_summary(&chunk.summary);
+                    return summary;
+                }
+                let mut clipped: ChunkSummary<D> = ChunkSummary::default();
+                for (timestamp, value) in chunk.timestamps[start..end]
+                    .iter()
+                    .zip(&chunk.data.cpu()[start..end])
+                {
+                    clipped.len += 1;
+                    clipped.start_timestamp = clipped.start_timestamp.min(*timestamp);
+                    clipped.end_timestamp = clipped.end_timestamp.max(*timestamp);
+                    clipped.min = Some(match clipped.min {
+                        Some(min) => min.min(value.clone()),
+                        None => value.clone(),
+                    });
+                    clipped.max = Some(match clipped.max {
+                        Some(max) => max.max(value.clone()),
+                        None => value.clone(),
+                    });
+                }
+                summary.add_summary(&clipped);
+                summary
             })
     }
 
@@ -2185,20 +2591,52 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         Some(start..Timestamp(end.0.saturating_add(1)))
     }
 
+    fn projected_span(&self) -> Option<Range<Timestamp>> {
+        self.projected_range
+            .clone()
+            .or_else(|| self.stored_exclusive_span())
+    }
+
+    fn set_projected_range(&mut self, range: Range<Timestamp>) {
+        self.projected_range = Some(range);
+    }
+
+    pub fn range_with_predecessor(&self, range: Range<Timestamp>) -> Range<Timestamp> {
+        self.last_timestamp_strictly_before(range.start)
+            .unwrap_or(range.start)..range.end
+    }
+
     /// Drop chunks that lie entirely outside `keep`. Overlapping chunks stay so
     /// a slide cannot punch a hole in the still-visible strip.
     pub fn evict_chunks_outside(&mut self, keep: Range<Timestamp>) {
+        let predecessor = self.projected_range.as_ref().and_then(|_| {
+            keep.start.0.checked_sub(1).and_then(|end| {
+                self.tree
+                    .overlapping(ii(i64::MIN, end))
+                    .last()
+                    .map(|(_, chunk)| {
+                        (
+                            chunk.summary.start_timestamp.0,
+                            chunk.summary.end_timestamp.0,
+                        )
+                    })
+            })
+        });
         let doomed: Vec<(i64, i64)> = self
             .tree
             .iter()
             .filter(|(_, chunk)| {
                 chunk.summary.end_timestamp < keep.start || chunk.summary.start_timestamp > keep.end
             })
-            .map(|(_, chunk)| {
-                (
+            .filter_map(|(_, chunk)| {
+                let key = (
                     chunk.summary.start_timestamp.0,
                     chunk.summary.end_timestamp.0,
-                )
+                );
+                (Some(key) != predecessor).then_some((
+                    chunk.summary.start_timestamp.0,
+                    chunk.summary.end_timestamp.0,
+                ))
             })
             .collect();
         if doomed.is_empty() {
@@ -2377,9 +2815,16 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         index_buffer: &Buffer,
         render_queue: &RenderQueue,
         line_visible_range: Range<Timestamp>,
+        terminal_hold: bool,
     ) -> Option<u32> {
-        let step = self.fitted_index_step(line_visible_range.clone());
-        self.write_to_index_buffer_with_step(index_buffer, render_queue, line_visible_range, step)
+        let step = self.fitted_index_step(line_visible_range.clone(), terminal_hold);
+        self.write_to_index_buffer_with_step_mode(
+            index_buffer,
+            render_queue,
+            line_visible_range,
+            step,
+            terminal_hold,
+        )
     }
 
     /// Stride for `range` that [`Self::write_to_index_buffer_with_step`] is
@@ -2389,8 +2834,9 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     /// dense range can still overshoot; the write loop would then stop mid-strip
     /// and drop the *newest* samples, since chunks are visited oldest first.
     /// Double until the exact count fits, as `plot_3d` does.
-    fn fitted_index_step(&self, range: Range<Timestamp>) -> usize {
+    fn fitted_index_step(&self, range: Range<Timestamp>, terminal_hold: bool) -> usize {
         let (chunk_count, index_count) = self.range_index_stats(range.clone());
+        let index_count = index_count.saturating_add(usize::from(terminal_hold) * 2);
         let mut step = index_sampling_step(chunk_count, index_count);
         // `index_count` bounds the strip from above, so only an over-budget range
         // has to pay for the exact count.
@@ -2398,7 +2844,9 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             return step;
         }
         for _ in 0..MAX_INDEX_STEP_DOUBLINGS {
-            if self.count_strip_index_u32s(range.clone(), step) <= INDEX_BUFFER_LEN as u32 {
+            if self.count_strip_index_u32s_mode(range.clone(), step, terminal_hold)
+                <= INDEX_BUFFER_LEN as u32
+            {
                 break;
             }
             step = step.saturating_mul(2).max(2);
@@ -2412,43 +2860,30 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     /// Uses the same visibility clipping as [`Self::draw_index_chunk_iter`] but does **not**
     /// require GPU-resident chunks (counts from CPU timestamps + visible length only).
     pub fn count_strip_index_u32s(&self, line_visible_range: Range<Timestamp>, step: usize) -> u32 {
-        let step = step.max(1);
+        self.count_strip_index_u32s_mode(line_visible_range, step, false)
+    }
+
+    fn count_strip_index_u32s_mode(
+        &self,
+        line_visible_range: Range<Timestamp>,
+        step: usize,
+        terminal_hold: bool,
+    ) -> u32 {
         let mut n: u32 = 0;
-        for c in self.range_iter(line_visible_range.clone()) {
-            let Some((start_offset, end_offset)) =
-                chunk_visible_offsets(&c.timestamps, &line_visible_range)
-            else {
-                continue;
-            };
-            let vis_len = end_offset.saturating_sub(start_offset);
-            if vis_len == 0 {
-                continue;
-            }
-            // `into_index_iter` length depends only on `len`; absolute indices match GPU path
-            // after clip, but counts are identical for any `range.start` with sufficient span.
-            let chunk = IndexChunk {
-                range: 0..u32::MAX,
-                len: vis_len,
-            };
+        let chunks = self
+            .range_iter(line_visible_range.clone())
+            .filter_map(|chunk| {
+                let (start, end) = chunk_visible_offsets(&chunk.timestamps, &line_visible_range)?;
+                let len = end.saturating_sub(start);
+                (len > 0).then_some(IndexChunk {
+                    range: 0..u32::MAX,
+                    len,
+                })
+            });
+        let _ = for_each_strip_index(chunks, step, terminal_hold, |_| {
             n = n.saturating_add(1);
-            let end = chunk.clone().into_index_iter().last();
-            let mut index_iter = chunk.into_index_iter();
-            let mut last_written: Option<u32> = None;
-            if let Some(index) = index_iter.next() {
-                n = n.saturating_add(1);
-                last_written = Some(index);
-            }
-            for index in index_iter.step_by(step) {
-                n = n.saturating_add(1);
-                last_written = Some(index);
-            }
-            if let Some(end) = end
-                && last_written != Some(end)
-            {
-                n = n.saturating_add(1);
-            }
-            n = n.saturating_add(1);
-        }
+            ControlFlow::Continue(())
+        });
         n
     }
 
@@ -2459,53 +2894,46 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         line_visible_range: Range<Timestamp>,
         step: usize,
     ) -> Option<u32> {
+        self.write_to_index_buffer_with_step_mode(
+            index_buffer,
+            render_queue,
+            line_visible_range,
+            step,
+            false,
+        )
+    }
+
+    fn write_to_index_buffer_with_step_mode(
+        &self,
+        index_buffer: &Buffer,
+        render_queue: &RenderQueue,
+        line_visible_range: Range<Timestamp>,
+        step: usize,
+        terminal_hold: bool,
+    ) -> Option<u32> {
         let mut view = render_queue.write_buffer_with(
             index_buffer,
             0,
             NonZeroU64::new((INDEX_BUFFER_LEN * 4) as u64).unwrap(),
         )?;
-        let mut view = view.slice(..);
+        let mut view = Some(view.slice(..));
         let mut written_u32s: u32 = 0;
-        'chunks: for chunk in self.draw_index_chunk_iter(line_visible_range) {
-            let Some(v) = try_append_u32(view, 0) else {
-                break 'chunks;
-            };
-            view = v;
-            written_u32s += 1;
-            let end = chunk.clone().into_index_iter().last();
-            let mut index_iter = chunk.into_index_iter();
-            let mut last_written: Option<u32> = None;
-            if let Some(index) = index_iter.next() {
-                let Some(v) = try_append_u32(view, index) else {
-                    break 'chunks;
+        let _ = for_each_strip_index(
+            self.draw_index_chunk_iter(line_visible_range),
+            step,
+            terminal_hold,
+            |index| {
+                let Some(current) = view.take() else {
+                    return ControlFlow::Break(());
                 };
-                view = v;
-                written_u32s += 1;
-                last_written = Some(index);
-            }
-            for index in index_iter.step_by(step) {
-                let Some(v) = try_append_u32(view, index) else {
-                    break 'chunks;
+                let Some(rest) = try_append_u32(current, index) else {
+                    return ControlFlow::Break(());
                 };
-                view = v;
+                view = Some(rest);
                 written_u32s += 1;
-                last_written = Some(index);
-            }
-            if let Some(end) = end
-                && last_written != Some(end)
-            {
-                let Some(v) = try_append_u32(view, end) else {
-                    break 'chunks;
-                };
-                view = v;
-                written_u32s += 1;
-            }
-            let Some(v) = try_append_u32(view, 0) else {
-                break 'chunks;
-            };
-            view = v;
-            written_u32s += 1;
-        }
+                ControlFlow::Continue(())
+            },
+        );
         Some(written_u32s)
     }
 
@@ -2619,6 +3047,7 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     /// Drop all CPU/GPU chunks (full rebuild from SeriesStore).
     pub fn clear(&mut self) {
         self.content_gen = self.content_gen.wrapping_add(1);
+        self.projected_range = None;
         let full = nodit::interval::ii(i64::MIN, i64::MAX);
         for (_range, chunk) in self.tree.remove_overlapping(full) {
             if let Some(alloc) = &mut self.data_buffer_shard_alloc
@@ -3046,6 +3475,59 @@ mod tests {
     }
 
     #[test]
+    fn tuple_array_access_eql_component_is_allowlisted() {
+        use impeller2::schema::Schema;
+        use impeller2::types::PrimType;
+
+        let name = "effector.cube_pos_ecef";
+        let component = Arc::new(eql::Component::new(
+            name.to_string(),
+            ComponentId::new(name),
+            Schema::new(PrimType::F64, vec![1950_u64]).expect("valid schema"),
+        ));
+        let eql_ctx = EqlContext(eql::Context::from_leaves(
+            [component],
+            Timestamp(0),
+            Timestamp(1),
+        ));
+        let mut ids = HashSet::new();
+        collect_eql_component_ids(
+            "(effector.cube_pos_ecef[0],effector.cube_pos_ecef[650],effector.cube_pos_ecef[1300])",
+            &eql_ctx,
+            &mut ids,
+        );
+        assert_eq!(ids, [ComponentId::new(name)].into_iter().collect());
+    }
+
+    #[test]
+    fn point_trails_components_are_allowlisted() {
+        let trails = PointTrails {
+            component: "effector.cube_pos_ecef".to_string(),
+            status: Some("effector.cube_hit_tick".to_string()),
+            start: Some("effector.cube_cloud_fired".to_string()),
+            head_size: 0.15,
+            head_shape: Default::default(),
+            line_width: 4.0,
+            max_length: Some(3.0),
+            color: None,
+            hit_color: None,
+            frame: None,
+            node_id: Default::default(),
+        };
+        let ids: HashSet<_> = point_trails_component_ids(&trails).collect();
+        assert_eq!(
+            ids,
+            [
+                ComponentId::new("effector.cube_pos_ecef"),
+                ComponentId::new("effector.cube_hit_tick"),
+                ComponentId::new("effector.cube_cloud_fired"),
+            ]
+            .into_iter()
+            .collect()
+        );
+    }
+
+    #[test]
     fn ellipsoid_covariance_eql_components_are_allowlisted() {
         use impeller2::schema::Schema;
         use impeller2::types::PrimType;
@@ -3262,6 +3744,508 @@ mod tests {
     }
 
     #[test]
+    fn line_layout_generation_targets_only_new_handles() {
+        let id = ComponentId::new("test.layout");
+        let mut graph_data = CollectedGraphData::default();
+        graph_data
+            .components
+            .insert(id, PlotDataComponent::new("layout", vec![]));
+        let mut lines = Assets::<Line>::default();
+        let first = graph_data.ensure_line_handle(id, 0, &mut lines).unwrap();
+        let fetch_ids = HashSet::from([id]);
+        let mut state = PlotSyncState::default();
+
+        assert_eq!(
+            refresh_line_layout(&mut state, &graph_data, &fetch_ids, true),
+            HashSet::from([(id, 0)])
+        );
+        assert!(refresh_line_layout(&mut state, &graph_data, &fetch_ids, false).is_empty());
+
+        graph_data.ensure_line_handle(id, 1, &mut lines).unwrap();
+        let added = refresh_line_layout(&mut state, &graph_data, &fetch_ids, false);
+        assert_eq!(added, HashSet::from([(id, 1)]));
+        let mut cache = TelemetryCache::default();
+        insert_f64(&mut cache, id, 0, 1.0);
+        for (component_id, index) in added {
+            let handle = graph_data.get_line(&component_id, index).unwrap();
+            apply_plot_sync_plan(
+                &cache,
+                component_id,
+                index,
+                &(Timestamp(0)..Timestamp(10)),
+                Timestamp(0),
+                None,
+                true,
+                &mut lines.get_mut(handle).unwrap().data,
+            );
+        }
+        assert_eq!(lines.get(&first).unwrap().data.content_gen(), 0);
+        assert!(
+            lines
+                .get(graph_data.get_line(&id, 1).unwrap())
+                .unwrap()
+                .data
+                .content_gen()
+                > 0
+        );
+
+        graph_data.remove_line_handle(first.id());
+        assert!(refresh_line_layout(&mut state, &graph_data, &fetch_ids, false).is_empty());
+        assert_eq!(state.last_layout, HashSet::from([(id, 1)]));
+    }
+
+    #[test]
+    fn projected_samples_keep_the_authoritative_predecessor() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.constant");
+        insert_f64(&mut cache, id, 0, 4.0);
+        let range = Timestamp(10)..Timestamp(20);
+        cache.mark_covered(id, range.start, range.end);
+        assert_eq!(
+            hold_anchor_decision(id, range.start, &cache, &VisiblePrefetchState::default()),
+            HoldAnchorDecision::Satisfied
+        );
+
+        assert_eq!(
+            element_samples_with_predecessor(&cache, id, 0, &range),
+            vec![(Timestamp(0), 4.0)]
+        );
+
+        let mut line = LineTree::<f32>::default();
+        assert_eq!(
+            project_series_element_to_line(&cache, id, 0, &range, Timestamp(0), &mut line, None,),
+            1
+        );
+        assert_eq!(line.first_timestamp(), Some(Timestamp(0)));
+        assert_eq!(line.latest_sample_timestamp(), Some(Timestamp(0)));
+    }
+
+    #[test]
+    fn reconnect_clears_unified_prefetch_requests() {
+        let id = ComponentId::new("test.reconnect");
+        let mut prefetch = VisiblePrefetchState::default();
+        prefetch
+            .begin(PrefetchKey::Window {
+                component_id: id,
+                start: 10,
+                end: 20,
+            })
+            .unwrap();
+        prefetch
+            .begin(PrefetchKey::Anchor {
+                component_id: id,
+                start: 10,
+            })
+            .unwrap();
+        assert_eq!(prefetch.request_count(), 2);
+        prefetch.clear_in_flight();
+        assert!(prefetch.requests.is_empty());
+    }
+
+    #[test]
+    fn unified_prefetch_counts_only_active_requests() {
+        let mut prefetch = VisiblePrefetchState::default();
+        for index in 0..32 {
+            let key = PrefetchKey::Window {
+                component_id: ComponentId(index),
+                start: 10,
+                end: 20,
+            };
+            assert!(prefetch.begin(key).is_some());
+            assert!(prefetch.begin(key).is_none());
+        }
+        prefetch.requests.insert(
+            PrefetchKey::Anchor {
+                component_id: ComponentId(100),
+                start: 10,
+            },
+            PrefetchRequestState::RetryAt(Instant::now() + Duration::from_secs(1)),
+        );
+        assert_eq!(prefetch.request_count(), 32);
+        assert_eq!(prefetch.requests.len(), 33);
+        assert!(!prefetch.has_capacity());
+        let key = PrefetchKey::Window {
+            component_id: ComponentId(31),
+            start: 10,
+            end: 20,
+        };
+        let PrefetchRequestState::InFlight(attempt) = prefetch.requests[&key] else {
+            panic!("expected active request");
+        };
+        prefetch.finish(key, attempt, true);
+        assert!(prefetch.has_capacity());
+    }
+
+    #[test]
+    fn unified_prefetch_retries_and_ignores_stale_completion() {
+        let mut prefetch = VisiblePrefetchState::default();
+        let key = PrefetchKey::Window {
+            component_id: ComponentId(1),
+            start: 10,
+            end: 20,
+        };
+        let first_attempt = prefetch.begin(key).unwrap();
+        prefetch.finish(key, first_attempt, false);
+        assert!(matches!(
+            prefetch.requests.get(&key),
+            Some(PrefetchRequestState::RetryAt(_))
+        ));
+        assert!(prefetch.begin(key).is_none());
+
+        prefetch.requests.insert(
+            key,
+            PrefetchRequestState::RetryAt(Instant::now() - Duration::from_millis(1)),
+        );
+        let second_attempt = prefetch.begin(key).unwrap();
+        prefetch.finish(key, first_attempt, true);
+        assert!(prefetch.is_current(key, second_attempt));
+        prefetch.finish(key, second_attempt, true);
+        assert!(prefetch.requests.is_empty());
+    }
+
+    #[test]
+    fn changing_range_does_not_orphan_in_flight_request() {
+        let mut prefetch = VisiblePrefetchState::default();
+        let component_id = ComponentId(1);
+        let old = PrefetchKey::Window {
+            component_id,
+            start: 0,
+            end: 10,
+        };
+        let old_attempt = prefetch.begin(old).unwrap();
+        for start in 1..=512 {
+            let current = PrefetchKey::Window {
+                component_id,
+                start: start * 10,
+                end: start * 10 + 10,
+            };
+            assert!(prefetch.begin(current).is_none());
+            assert!(prefetch.is_current(old, old_attempt));
+            assert_eq!(prefetch.request_count(), 1);
+            assert_eq!(prefetch.requests.len(), 1);
+        }
+
+        prefetch.finish(old, old_attempt, true);
+        let current = PrefetchKey::Window {
+            component_id,
+            start: 5_120,
+            end: 5_130,
+        };
+        assert!(prefetch.begin(current).is_some());
+    }
+
+    #[test]
+    fn cancelling_component_removes_visible_and_anchor_requests() {
+        let mut prefetch = VisiblePrefetchState::default();
+        let removed = ComponentId(1);
+        let kept = ComponentId(2);
+        for key in [
+            PrefetchKey::Window {
+                component_id: removed,
+                start: 10,
+                end: 20,
+            },
+            PrefetchKey::Anchor {
+                component_id: removed,
+                start: 10,
+            },
+            PrefetchKey::Window {
+                component_id: kept,
+                start: 10,
+                end: 20,
+            },
+        ] {
+            prefetch.begin(key).unwrap();
+        }
+
+        prefetch.cancel_component(removed);
+        assert_eq!(prefetch.request_count(), 1);
+        assert!(
+            prefetch
+                .requests
+                .keys()
+                .all(|key| key.component_id() == kept)
+        );
+    }
+
+    #[test]
+    fn hold_anchor_requests_are_bounded_and_deduplicated() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.anchor");
+        let mut prefetch = VisiblePrefetchState::default();
+        let start = Timestamp(100);
+        assert_eq!(
+            hold_anchor_decision(id, start, &cache, &prefetch),
+            HoldAnchorDecision::Request
+        );
+
+        let key = PrefetchKey::Anchor {
+            component_id: id,
+            start: start.0,
+        };
+        let attempt = prefetch.begin(key).unwrap();
+        assert_eq!(
+            hold_anchor_decision(id, start, &cache, &prefetch),
+            HoldAnchorDecision::Pending
+        );
+        prefetch.finish(key, attempt, false);
+        assert_eq!(
+            hold_anchor_decision(id, start, &cache, &prefetch),
+            HoldAnchorDecision::Pending
+        );
+        prefetch.requests.insert(
+            key,
+            PrefetchRequestState::RetryAt(Instant::now() - Duration::from_millis(1)),
+        );
+        assert_eq!(
+            hold_anchor_decision(id, start, &cache, &prefetch),
+            HoldAnchorDecision::Request
+        );
+        let attempt = prefetch.begin(key).unwrap();
+        prefetch.finish(key, attempt, true);
+        assert!(!prefetch.requests.contains_key(&key));
+        cache.mark_covered(
+            id,
+            Timestamp(i64::MIN),
+            Timestamp(start.0.saturating_add(1)),
+        );
+        assert_eq!(
+            hold_anchor_decision(id, start, &cache, &prefetch),
+            HoldAnchorDecision::Satisfied
+        );
+    }
+
+    #[test]
+    fn empty_visible_page_marks_coverage_and_completes_request() {
+        use impeller2::schema::Schema;
+        use impeller2::types::PrimType;
+
+        let id = ComponentId::new("test.visible.empty");
+        let mut schemas = ComponentSchemaRegistry::default();
+        schemas.0.insert(
+            id,
+            Schema::new(PrimType::F64, Vec::<u64>::new()).expect("valid schema"),
+        );
+        let mut cache = TelemetryCache::default();
+        let range = Timestamp(10)..Timestamp(20);
+        assert_eq!(
+            apply_visible_prefetch_payload(
+                &[],
+                &[],
+                id,
+                range.start,
+                range.end,
+                &mut cache,
+                &schemas,
+            ),
+            VisiblePageOutcome::Complete
+        );
+        assert!(cache.is_covered(&id, &range));
+    }
+
+    #[test]
+    fn empty_sparse_windows_do_not_leak_request_slots() {
+        use impeller2::schema::Schema;
+        use impeller2::types::PrimType;
+
+        let id = ComponentId::new("test.visible.sparse");
+        let mut schemas = ComponentSchemaRegistry::default();
+        schemas.0.insert(
+            id,
+            Schema::new(PrimType::F64, Vec::<u64>::new()).expect("valid schema"),
+        );
+        let mut cache = TelemetryCache::default();
+        let mut prefetch = VisiblePrefetchState::default();
+        for index in 0..40 {
+            let start = index * 10;
+            let end = start + 10;
+            let key = PrefetchKey::Window {
+                component_id: id,
+                start,
+                end,
+            };
+            let attempt = prefetch.begin(key).unwrap();
+            assert_eq!(
+                apply_visible_prefetch_payload(
+                    &[],
+                    &[],
+                    id,
+                    Timestamp(start),
+                    Timestamp(end),
+                    &mut cache,
+                    &schemas,
+                ),
+                VisiblePageOutcome::Complete
+            );
+            prefetch.finish(key, attempt, true);
+            assert_eq!(prefetch.request_count(), 0);
+            assert!(prefetch.requests.is_empty());
+        }
+        assert!(cache.is_covered(&id, &(Timestamp(0)..Timestamp(400))));
+    }
+
+    #[test]
+    fn visible_pages_share_one_logical_request_until_complete() {
+        use impeller2::schema::Schema;
+        use impeller2::types::PrimType;
+
+        let id = ComponentId::new("test.visible.pages");
+        let mut schemas = ComponentSchemaRegistry::default();
+        schemas.0.insert(
+            id,
+            Schema::new(PrimType::U8, Vec::<u64>::new()).expect("valid schema"),
+        );
+        let mut cache = TelemetryCache::default();
+        let mut prefetch = VisiblePrefetchState::default();
+        let key = PrefetchKey::Window {
+            component_id: id,
+            start: 0,
+            end: 10_000,
+        };
+        let attempt = prefetch.begin(key).unwrap();
+        let timestamps = (0..VISIBLE_PREFETCH_LIMIT)
+            .map(|timestamp| Timestamp(timestamp as i64))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            apply_visible_prefetch_payload(
+                &timestamps,
+                &vec![0; VISIBLE_PREFETCH_LIMIT],
+                id,
+                Timestamp(0),
+                Timestamp(10_000),
+                &mut cache,
+                &schemas,
+            ),
+            VisiblePageOutcome::Next(Timestamp(VISIBLE_PREFETCH_LIMIT as i64))
+        );
+        assert!(prefetch.is_current(key, attempt));
+
+        let next = VISIBLE_PREFETCH_LIMIT as i64;
+        assert_eq!(
+            apply_visible_prefetch_payload(
+                &[Timestamp(next)],
+                &[0],
+                id,
+                Timestamp(next),
+                Timestamp(10_000),
+                &mut cache,
+                &schemas,
+            ),
+            VisiblePageOutcome::Complete
+        );
+        prefetch.finish(key, attempt, true);
+        assert!(prefetch.requests.is_empty());
+        assert!(cache.is_covered(&id, &(Timestamp(0)..Timestamp(10_000))));
+    }
+
+    #[test]
+    fn malformed_visible_page_schedules_retry_without_coverage() {
+        use impeller2::schema::Schema;
+        use impeller2::types::PrimType;
+
+        let id = ComponentId::new("test.visible.malformed");
+        let mut schemas = ComponentSchemaRegistry::default();
+        schemas.0.insert(
+            id,
+            Schema::new(PrimType::F64, Vec::<u64>::new()).expect("valid schema"),
+        );
+        let mut cache = TelemetryCache::default();
+        let mut prefetch = VisiblePrefetchState::default();
+        let key = PrefetchKey::Window {
+            component_id: id,
+            start: 10,
+            end: 20,
+        };
+        let attempt = prefetch.begin(key).unwrap();
+        assert_eq!(
+            apply_visible_prefetch_payload(
+                &[Timestamp(10)],
+                &[],
+                id,
+                Timestamp(10),
+                Timestamp(20),
+                &mut cache,
+                &schemas,
+            ),
+            VisiblePageOutcome::Invalid
+        );
+        prefetch.finish(key, attempt, false);
+        assert!(matches!(
+            prefetch.requests.get(&key),
+            Some(PrefetchRequestState::RetryAt(_))
+        ));
+        assert!(!cache.is_covered(&id, &(Timestamp(10)..Timestamp(20))));
+    }
+
+    #[test]
+    fn hold_anchor_payload_confirms_only_empty_or_valid_replies() {
+        use impeller2::schema::Schema;
+        use impeller2::types::PrimType;
+
+        let id = ComponentId::new("test.anchor.payload");
+        let mut schemas = ComponentSchemaRegistry::default();
+        schemas.0.insert(
+            id,
+            Schema::new(PrimType::F64, Vec::<u64>::new()).expect("valid schema"),
+        );
+        let mut cache = TelemetryCache::default();
+
+        assert!(apply_hold_anchor_payload(
+            &[],
+            &[],
+            id,
+            Timestamp(10),
+            &mut cache,
+            &schemas,
+        ));
+        assert!(!apply_hold_anchor_payload(
+            &[Timestamp(5)],
+            &[],
+            id,
+            Timestamp(10),
+            &mut cache,
+            &schemas,
+        ));
+        assert!(!apply_hold_anchor_payload(
+            &[Timestamp(11)],
+            &1.0f64.to_le_bytes(),
+            id,
+            Timestamp(10),
+            &mut cache,
+            &schemas,
+        ));
+        assert!(apply_hold_anchor_payload(
+            &[Timestamp(5)],
+            &1.0f64.to_le_bytes(),
+            id,
+            Timestamp(10),
+            &mut cache,
+            &schemas,
+        ));
+        assert_eq!(
+            cache
+                .get_at_or_before(&id, Timestamp(10))
+                .and_then(|value| value.get(0))
+                .map(|value| value.as_f64()),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn projected_samples_are_not_expanded_for_zero_order_hold() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.steps");
+        insert_f64(&mut cache, id, 0, 1.0);
+        insert_f64(&mut cache, id, 10, 2.0);
+        insert_f64(&mut cache, id, 20, 3.0);
+
+        assert_eq!(
+            element_samples_with_predecessor(&cache, id, 0, &(Timestamp(5)..Timestamp(16))),
+            vec![(Timestamp(0), 1.0), (Timestamp(10), 2.0)]
+        );
+    }
+
+    #[test]
     fn apply_plot_sync_plan_rebuilds_holes_inside_a_covered_span() {
         // Partial first project: only the endpoints. The exclusive span already
         // covers the window, so endpoint-only planning would Keep forever.
@@ -3274,7 +4258,7 @@ mod tests {
         apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
         assert_eq!(tree.total_points(), 2);
         assert_eq!(
-            plot_sync_plan(tree.stored_exclusive_span(), &need, false),
+            plot_sync_plan(tree.projected_span(), &need, false),
             PlotSyncPlan::Keep
         );
         assert!(plot_line_matches_store_interior(
@@ -3288,8 +4272,8 @@ mod tests {
         apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
         assert_eq!(tree.total_points(), 3);
         assert_eq!(
-            tree.sample_count_in_range(&need),
-            cache.sample_count_in_range(&id, &need)
+            tree.get_nearest(Timestamp(7_500_000)).map(|(ts, _)| ts),
+            Some(Timestamp(7_500_000))
         );
     }
 
@@ -3330,7 +4314,7 @@ mod tests {
         insert_f64(&mut cache, id, 15_100_000, 15.1);
         let slid = Timestamp(100_000)..Timestamp(15_100_001);
         assert_eq!(
-            plot_sync_plan(tree.stored_exclusive_span(), &slid, false),
+            plot_sync_plan(tree.projected_span(), &slid, false),
             PlotSyncPlan::Extend {
                 prefix: None,
                 suffix: Some(Timestamp(15_000_001)..Timestamp(15_100_001)),
@@ -3343,6 +4327,22 @@ mod tests {
         assert_eq!(tree.first_timestamp(), Some(Timestamp(0)));
         assert_eq!(tree.latest_sample_timestamp(), Some(Timestamp(15_100_000)));
         assert_eq!(tree.total_points(), 17);
+    }
+
+    #[test]
+    fn constant_trailing_extensions_do_not_materialize_hold_anchors() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.constant.trailing");
+        insert_f64(&mut cache, id, 0, 4.0);
+        let mut tree = LineTree::<f32>::default();
+
+        for step in 0..=100 {
+            let offset = step * REQUEST_KEY_QUANTUM_MICROS;
+            let range = Timestamp(offset)..Timestamp(10_000_000 + offset);
+            apply_plot_sync_plan(&cache, id, 0, &range, Timestamp(0), None, false, &mut tree);
+            assert_eq!(tree.total_points(), 1);
+            assert_eq!(tree.first_timestamp(), Some(Timestamp(0)));
+        }
     }
 
     #[test]
@@ -3672,8 +4672,8 @@ mod tests {
             "full_count={full_count} INDEX_BUFFER_LEN={INDEX_BUFFER_LEN}"
         );
         assert!(zoom_count < full_count);
-        assert_eq!(tree.fitted_index_step(full), 1);
-        assert_eq!(tree.fitted_index_step(zoomed), 1);
+        assert_eq!(tree.fitted_index_step(full, false), 1);
+        assert_eq!(tree.fitted_index_step(zoomed, false), 1);
     }
 
     #[test]
@@ -3703,7 +4703,7 @@ mod tests {
             tree.count_strip_index_u32s(range.clone(), 1) > INDEX_BUFFER_LEN as u32,
             "fixture must be over budget at step 1"
         );
-        let step = tree.fitted_index_step(range.clone());
+        let step = tree.fitted_index_step(range.clone(), false);
         assert!(
             step > 1,
             "over-budget range must raise the step, got {step}"
@@ -3774,8 +4774,8 @@ mod tests {
         // Tip window: last 5s
         let tip = Timestamp(5_000_000)..Timestamp(10_000_000);
         let n = project_series_element_to_line(&cache, id, 0, &tip, earliest, &mut line, None);
-        assert_eq!(n, 500);
-        assert_eq!(line.total_points(), 500);
+        assert_eq!(n, 501);
+        assert_eq!(line.total_points(), 501);
 
         // Jump to start: first 5s — clear and rebuild
         line.clear();
@@ -3877,10 +4877,52 @@ mod tests {
         let chunk = Chunk::from_iter(&ts, Timestamp(0), vals.into_iter()).expect("chunk");
         tree.insert(chunk);
         let c = tree.count_strip_index_u32s(Timestamp(0)..Timestamp(10), 1);
-        assert_eq!(
-            c, 12,
-            "leading 0 + 10 indices + trailing 0 (no duplicate last)"
+        assert_eq!(c, 12, "leading separator + 10 indices + trailing separator");
+    }
+
+    #[test]
+    fn strip_separator_never_aliases_data_index_zero() {
+        let mut indices = Vec::new();
+        let result = for_each_strip_index(
+            [IndexChunk {
+                range: 0..3,
+                len: 3,
+            }],
+            1,
+            true,
+            |index| {
+                indices.push(index);
+                ControlFlow::Continue(())
+            },
         );
+
+        assert!(result.is_continue());
+        assert_eq!(
+            indices,
+            [
+                PLOT_STRIP_SEPARATOR_INDEX,
+                0,
+                1,
+                2,
+                PLOT_STRIP_SEPARATOR_INDEX,
+                2,
+                2,
+            ]
+        );
+    }
+
+    #[test]
+    fn zero_order_hold_adds_only_a_transient_terminal_pair() {
+        let mut tree = LineTree::<f32>::default();
+        let ts: Vec<Timestamp> = (0i64..10).map(Timestamp).collect();
+        let vals: Vec<f32> = (0..10).map(|i| i as f32).collect();
+        tree.insert(Chunk::from_iter(&ts, Timestamp(0), vals.into_iter()).expect("chunk"));
+
+        assert_eq!(
+            tree.count_strip_index_u32s_mode(Timestamp(0)..Timestamp(10), 1, true),
+            14
+        );
+        assert_eq!(tree.total_points(), 10);
     }
 
     // === Archive + view (non-destructive HC) tests ===
@@ -4410,6 +5452,13 @@ mod tests {
     }
 
     #[test]
+    fn value_shard_zero_is_reserved_for_nan() {
+        let free = value_data_free_map(4);
+        assert!(!free.contains(0));
+        assert_eq!(free.iter().collect::<Vec<_>>(), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
     fn plot_gpu_snapshot_accounts_for_resident_and_pooled_buffers() {
         let snapshot = PlotGpuPoolSnapshot {
             value_live: 2,
@@ -4506,6 +5555,44 @@ impl IndexChunk {
     pub fn into_index_iter(self) -> impl Iterator<Item = u32> {
         self.range.take(self.len)
     }
+}
+
+fn for_each_strip_index(
+    chunks: impl IntoIterator<Item = IndexChunk>,
+    step: usize,
+    terminal_hold: bool,
+    mut emit: impl FnMut(u32) -> ControlFlow<()>,
+) -> ControlFlow<()> {
+    let step = step.max(1);
+    let mut final_index = None;
+    for chunk in chunks {
+        emit(PLOT_STRIP_SEPARATOR_INDEX)?;
+        let end = chunk.clone().into_index_iter().last();
+        let mut indices = chunk.into_index_iter();
+        let mut last_written = None;
+        if let Some(index) = indices.next() {
+            emit(index)?;
+            last_written = Some(index);
+            final_index = Some(index);
+        }
+        for index in indices.step_by(step) {
+            emit(index)?;
+            last_written = Some(index);
+            final_index = Some(index);
+        }
+        if let Some(end) = end
+            && last_written != Some(end)
+        {
+            emit(end)?;
+            final_index = Some(end);
+        }
+        emit(PLOT_STRIP_SEPARATOR_INDEX)?;
+    }
+    if terminal_hold && let Some(index) = final_index {
+        emit(index)?;
+        emit(index)?;
+    }
+    ControlFlow::Continue(())
 }
 
 pub trait BoundOrd {
@@ -4938,6 +6025,10 @@ pub struct BufferShardAlloc {
     free_map: RoaringBitmap,
 }
 
+fn value_data_free_map(chunks: usize) -> RoaringBitmap {
+    (1..=chunks as u32).collect()
+}
+
 impl BufferShardAlloc {
     pub fn with_nan_chunk(
         chunks: usize,
@@ -4947,7 +6038,8 @@ impl BufferShardAlloc {
     ) -> Self {
         let mut this = Self::new::<f32>(chunks + 1, chunk_len, render_device);
         this.data_capacity = chunks;
-        let shard = this.alloc().expect("couldn't alloc nan");
+        this.free_map = value_data_free_map(chunks);
+        let shard = this.nan_shard();
         render_queue.write_buffer_shard(&shard, &f32::NAN.to_le_bytes());
         this
     }
@@ -4959,17 +6051,13 @@ impl BufferShardAlloc {
         render_queue: &RenderQueue,
     ) -> Self {
         let chunk_size = size_of::<f32>() * chunk_len;
-        let mut free_map = RoaringBitmap::new();
-        for i in 0..=chunks as u32 {
-            free_map.insert(i);
-        }
-        let mut this = Self {
+        let this = Self {
             buffer,
-            free_map,
+            free_map: value_data_free_map(chunks),
             chunk_size,
             data_capacity: chunks,
         };
-        let shard = this.alloc().expect("couldn't alloc nan");
+        let shard = this.nan_shard();
         render_queue.write_buffer_shard(&shard, &f32::NAN.to_le_bytes());
         this
     }
@@ -5013,6 +6101,13 @@ impl BufferShardAlloc {
         })
     }
 
+    fn nan_shard(&self) -> BufferShard {
+        BufferShard {
+            buffer: self.buffer.clone(),
+            range: 0..self.chunk_size as u64,
+        }
+    }
+
     pub fn buffer(&self) -> &Buffer {
         &self.buffer
     }
@@ -5037,11 +6132,8 @@ impl BufferShardAlloc {
     /// Free every shard at once. Callers must have released the GPU copies that
     /// referenced them, since `release_gpu` drops a shard without deallocating it.
     pub fn reset_shards(&mut self, render_queue: &RenderQueue) {
-        self.free_map = RoaringBitmap::new();
-        for i in 0..=self.data_capacity as u32 {
-            self.free_map.insert(i);
-        }
-        let shard = self.alloc().expect("couldn't alloc nan");
+        self.free_map = value_data_free_map(self.data_capacity);
+        let shard = self.nan_shard();
         render_queue.write_buffer_shard(&shard, &f32::NAN.to_le_bytes());
     }
 
@@ -5052,7 +6144,10 @@ impl BufferShardAlloc {
             "trying to dealloc shard from wrong buffer",
         );
         let i = shard.range.start as usize / self.chunk_size;
-        self.free_map.insert(i as u32);
+        debug_assert_ne!(i, 0, "NaN shard must remain reserved");
+        if i != 0 {
+            self.free_map.insert(i as u32);
+        }
     }
 }
 
