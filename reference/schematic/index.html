@@ -473,6 +473,11 @@
                         </li>
                         
                         <li>
+                            <a href="/reference/schematic/#point-trails">point_trails</a>
+                            
+                        </li>
+                        
+                        <li>
                             <a href="/reference/schematic/#vector-arrow">vector_arrow</a>
                             
                         </li>
@@ -529,7 +534,7 @@
                   <h1>Schematic KDL</h1>
                    <h2 id="glossary">Glossary</h2>
 <ul>
-<li>Top-level nodes: <code>coordinate</code>, <code>theme</code>, <code>timeline</code>, <code>telemetry_mode</code>, <code>skybox</code>, <code>environment</code>, <code>panel</code> variants, <code>object_3d</code>, <code>line_3d</code>, <code>vector_arrow</code>, <code>world_mesh</code>, <code>window</code>.</li>
+<li>Top-level nodes: <code>coordinate</code>, <code>theme</code>, <code>timeline</code>, <code>telemetry_mode</code>, <code>skybox</code>, <code>environment</code>, <code>panel</code> variants, <code>object_3d</code>, <code>line_3d</code>, <code>point_trails</code>, <code>vector_arrow</code>, <code>world_mesh</code>, <code>window</code>.</li>
 <li>EQL: expressions are evaluated in the runtime EQL context. Vector-like fields expect 3 components; <code>world_pos</code> is a 7-component array (quat + position).</li>
 <li>Colors: <code>color r g b [a]</code> or named (<code>black</code>, <code>white</code>, <code>blue</code>, <code>red</code>, <code>orange</code>, <code>yellow</code>, <code>yalk</code>, <code>pink</code>, <code>cyan</code>, <code>gray</code>, <code>green</code>, <code>mint</code>, <code>turquoise</code>, <code>slate</code>, <code>pumpkin</code>, <code>yolk</code>, <code>peach</code>, <code>reddish</code>, <code>hyperblue</code>); alpha optional. Colors can be inline or in <code>color</code>/<code>colour</code> child nodes. Defaults to white when omitted unless noted.</li>
 <li>Booleans: KDL booleans are <code>#true</code>/<code>#false</code>. A bare <code>True</code> is a <em>string</em>, not a boolean — most flags silently fall back to their default if given one. Viewport flags (<code>hdr</code>, <code>show_grid</code>, <code>active</code>, ...) leniently accept <code>True</code>/<code>"true"</code> (case-insensitive), but prefer the <code>#</code> forms everywhere.</li>
@@ -539,7 +544,7 @@
 <ul>
 <li>Optional top-level node that sets the global coordinate frame for the schematic.</li>
 <li><code>frame</code>: <code>"ENU"</code> (default), <code>"NED"</code>, or <code>"ECEF"</code>.</li>
-<li>Elements (<code>viewport</code>, <code>object_3d</code>, <code>line_3d</code>, <code>vector_arrow</code>, <code>world_mesh</code>) that don't specify their own <code>frame</code> attribute inherit this global frame.</li>
+<li>Elements (<code>viewport</code>, <code>object_3d</code>, <code>line_3d</code>, <code>point_trails</code>, <code>vector_arrow</code>, <code>world_mesh</code>) that don't specify their own <code>frame</code> attribute inherit this global frame.</li>
 <li>Example: <code>coordinate frame="NED"</code> sets the entire schematic to use North-East-Down coordinates.</li>
 </ul>
 <h3 id="theme">theme</h3>
@@ -861,7 +866,23 @@ larger the error confidence interval, the larger the ellipsoid.</li>
 <li><code>future_color</code>: color of the future segment, independent of <code>color</code>. Its alpha sets the future opacity and is used as-is (no extra fade). When omitted, falls back to the timeline <code>future_color</code> (default <code>white</code>, faded).</li>
 <li><code>perspective</code>: default true (set false for screen-space lines).</li>
 </ul>
-<h3 id="vector-arrow">vector_arrow</h3>
+<h3 id="point-trails">point_trails</h3>
+<ul>
+<li>Positional <code>component</code>: required; a flat <code>3 × N</code> f64 component laid out axis-major, <code>[x0..xN-1, y0..yN-1, z0..zN-1]</code>. <code>N</code> comes from the component length.</li>
+<li>Draws every point's trail up to the playback time in one batched draw, plus a marker at each point's latest position.</li>
+<li><code>frame</code>: optional; <code>ENU</code>, <code>NED</code>, or <code>ECEF</code>. Inherits from global <code>coordinate</code> if omitted.</li>
+<li><code>head_size</code>: cube edge or sphere diameter in meters (default 1.0).</li>
+<li><code>head_shape</code>: <code>cube</code> (default) or <code>sphere</code>.</li>
+<li><code>line_width</code>: screen-space trail width (default 1.0).</li>
+<li><code>max_length</code>: optional positive cumulative trail length in meters. The oldest segment is interpolated so sparse samples still end at the requested length.</li>
+<li><code>status</code>: optional <code>(N,)</code> integer component. Nonzero points use <code>hit_color</code>.</li>
+<li><code>start</code>: optional scalar component path used as a one-shot lifecycle gate. Trails stay hidden until its first nonzero sample, and earlier position history is ignored. Later zeroes do not stop or reset the trails. Use it for positions initialized before motion—especially with change-only recording; <code>max_length</code> only limits distance.</li>
+<li><code>color</code>: trail and head color. When omitted, falls back to the timeline <code>played_color</code>.</li>
+<li><code>hit_color</code>: status-highlighted trail and head color (default red).</li>
+<li><code>head_size</code>, <code>line_width</code>, and <code>max_length</code> accept integer or decimal KDL numbers.</li>
+<li>Long windows are downsampled so all trails fit one GPU index buffer (187 samples per trail at <code>N = 695</code>).</li>
+</ul>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="kdl"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">point_trails</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">payload.positions</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#93A1A1, #93A1A1);"> start</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">payload.released</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#93A1A1, #93A1A1);"> max_length</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#D33682, #D33682);">3</span></span></code></pre><h3 id="vector-arrow">vector_arrow</h3>
 <ul>
 <li><code>vector</code>: EQL expression yielding a 3-component vector (required).</li>
 <li><code>origin</code>: EQL for arrow base; <code>world_pos</code> or 3-tuple (optional).</li>
@@ -897,6 +918,7 @@ suffix, .e.g., "0.3m" for 0.3 meters from origin (default "0.1m").</li>
 <span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">  |</span><span style="color: light-dark(#2AA198, #2AA198);"> panel</span></span>
 <span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">  |</span><span style="color: light-dark(#2AA198, #2AA198);"> object_3d</span></span>
 <span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">  |</span><span style="color: light-dark(#2AA198, #2AA198);"> line_3d</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">  |</span><span style="color: light-dark(#2AA198, #2AA198);"> point_trails</span></span>
 <span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">  |</span><span style="color: light-dark(#2AA198, #2AA198);"> vector_arrow</span></span>
 <span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">  |</span><span style="color: light-dark(#2AA198, #2AA198);"> world_mesh</span></span>
 <span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">  )*</span></span>
@@ -1101,6 +1123,18 @@ suffix, .e.g., "0.3m" for 0.3 meters from origin (default "0.1m").</li>
 <span class="giallo-l"><span>        [</span><span style="color: light-dark(#2AA198, #2AA198);">color</span><span>]</span></span>
 <span class="giallo-l"><span>        [</span><span style="color: light-dark(#2AA198, #2AA198);">future_color</span><span>]</span></span>
 <span class="giallo-l"><span>        [</span><span style="color: light-dark(#93A1A1, #93A1A1);">perspective</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">bool</span><span>]</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">point_trails</span><span> = </span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">point_trails</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">             &lt;component&gt;</span></span>
+<span class="giallo-l"><span>             [</span><span style="color: light-dark(#93A1A1, #93A1A1);">frame</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">ENU|NED|ECEF</span><span>]</span></span>
+<span class="giallo-l"><span>             [</span><span style="color: light-dark(#93A1A1, #93A1A1);">status</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">component</span><span>]</span></span>
+<span class="giallo-l"><span>             [</span><span style="color: light-dark(#93A1A1, #93A1A1);">start</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">component</span><span>]</span></span>
+<span class="giallo-l"><span>             [</span><span style="color: light-dark(#93A1A1, #93A1A1);">head_size</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">float</span><span>]</span></span>
+<span class="giallo-l"><span>             [</span><span style="color: light-dark(#93A1A1, #93A1A1);">head_shape</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">cube|sphere</span><span>]</span></span>
+<span class="giallo-l"><span>             [</span><span style="color: light-dark(#93A1A1, #93A1A1);">line_width</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">float</span><span>]</span></span>
+<span class="giallo-l"><span>             [</span><span style="color: light-dark(#93A1A1, #93A1A1);">max_length</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">float</span><span>]</span></span>
+<span class="giallo-l"><span>             [</span><span style="color: light-dark(#2AA198, #2AA198);">color</span><span>]</span></span>
+<span class="giallo-l"><span>             [</span><span style="color: light-dark(#2AA198, #2AA198);">hit_color</span><span>]</span></span>
 <span class="giallo-l"></span>
 <span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">vector_arrow</span><span> = </span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">vector_arrow</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span>
 <span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">             &lt;vector-eql&gt;</span></span>

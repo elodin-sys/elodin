@@ -1424,7 +1424,15 @@ The semi-implicit integrator is a numerical method used to solve ordinary differ
 <tr><td><code>element_names</code></td><td>comma-separated string (e.g. <code>"x,y,z"</code>, <code>"q0,q1,q2,q3"</code>)</td><td>Labels for each element of a vector or matrix component. Used by the component inspector and as column suffixes when exporting with <code>elodin-db export --flatten</code>.</td></tr>
 <tr><td><code>private</code></td><td><code>"true"</code></td><td>Component is omitted from <code>elodin-db export</code> by default (pass <code>--include-private</code> to include it). Useful for marking internal scratch state (e.g. large covariance matrices) that downstream consumers shouldn't see.</td></tr>
 <tr><td><code>external_control</code></td><td><code>"true"</code></td><td>Component is writable from external clients (e.g. Betaflight or a HITL bridge) over the Impeller2 protocol. The simulation will not overwrite values written externally.</td></tr>
+<tr><td><code>record_every_tick</code></td><td><code>"true"</code></td><td>Opt out of sparse recording and write a sample at every telemetry commit even when its bytes are unchanged.</td></tr>
 </tbody></table>
+<p>Component recording is sparse by default: the simulation writes a sample
+only when its bytes differ from the latest recorded value. This preserves
+state semantics while avoiding duplicate rows. Set
+<code>record_every_tick="true"</code> only for consumers that require dense samples.
+Editor line plots and <code>Exec.history()</code> carry sparse values forward. Point
+and bar plots show recorded samples only; raw database exports remain
+change streams with per-component row counts.</p>
 <p>Example combining a label hint with the export-skip flag:</p>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> elodin</span><span style="color: light-dark(#859900, #859900);"> as</span><span> el</span></span>
 <span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> jax</span></span>
