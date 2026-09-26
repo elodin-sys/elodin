@@ -1,8 +1,8 @@
 # Vision-Guided Gate Racing Plan
 
 **Document status:** Authoritative living specification  
-**Last verified against repository:** 2026-09-08
-**Current resume point:** Package D — manual hardware qualification
+**Last verified against repository:** 2026-09-23  
+**Current resume point:** Package D — manual hardware qualification (Package B complete)
 
 ## 1. Purpose and authority
 
@@ -123,11 +123,10 @@ The default 8 kHz build busy-waits in Betaflight and consumes approximately one
 CPU core to avoid scheduler wakeup latency. The build-time
 `VIRTUAL_GYRO_SAMPLE_RATE_HZ` and Python `simulation_rate` must remain equal.
 
-The example does **not** currently contain a camera, gates, course selection,
-referee, guidance interface, ANGLE-mode guidance, racing controller, perception,
-race tests, or race CI. The README refers to `test_comms.py`, but that file is
-not present; Package A must repair this documentation or supply its supported
-replacement.
+The example does **not** currently contain gates, course selection, referee,
+ANGLE-mode racing guidance, perception, race tests, or race CI. An opt-in FPV
+camera (`RACE_CAMERA=1`) is available after Package B; the default scripted run
+still does not require a GPU render server.
 
 ### 3.1 Current conventions
 
@@ -424,12 +423,12 @@ degrees and horizontal FoV 90 degrees. Package G must derive and test this
 rather than duplicating unexplained constants.
 
 A frame sample is offered to guidance at most once per nominal 30 Hz camera
-period. The current `read_msg` API returns only the payload, not the DB message's
-actual capture timestamp, so the adapter records the requested sample time
-(`ctx.timestamp - latency`) and must not invent a capture time. A repeated
-payload is valid sample-and-hold behavior when the renderer lags. Until the
-renderer produces a frame, guidance receives `None`. A future timestamp-aware
-API would be a material contract change and must follow Section 2.
+period. `GuidanceUpdate.frame_sample_time` is the requested sample time
+(`ctx.timestamp - latency`), not a renderer capture time. Frame identity for
+counts and observed FPS comes from the timestamp selected by `read_msg_at`:
+the same sample-and-hold lookup as `read_msg`, plus the selected message's
+timestamp. A repeated selected timestamp is sample-and-hold, not a new frame.
+Until the renderer produces a frame, guidance receives `None`.
 
 ### 7.5 Courses and gates
 
@@ -616,7 +615,7 @@ stable machine-readable C0 result in addition to human diagnostics.
 **Handoff:** Mark A complete, record exact commands and measured runtime, and set
 the resume point to B, C, or D.
 
-### [ ] B — FPV camera vertical slice
+### [x] B — FPV camera vertical slice
 
 **Objective:** Prove independent camera production, consumption, display, and
 recording without introducing racing behavior.
@@ -645,6 +644,31 @@ The default camera-disabled run does not start or require the render server.
 
 **Handoff:** Record the DB path, export command, observed FPS, and any GPU-specific
 limitations.
+
+**Verified 2026-09-23 (review follow-up on `pkg-b-fpv-camera`; WSL2, NVIDIA
+GeForce RTX 3050 6GB Laptop GPU):**
+
+- Default: `RACE_CAMERA=0 elodin run examples/betaflight-sitl/main.py` →
+  `FPV camera: disabled`, no render-server, C0 `status=PASS`,
+  lockstep_steps `119995`, exit 0 (DB `betaflight_db017`).
+- Camera: `RACE_CAMERA=1 elodin run examples/betaflight-sitl/main.py` →
+  `drone.fpv` `(360, 640, 4)` uint8, first frame at `t≈0.693s`,
+  `sample_count=430`, `offered_sample_fps≈30.06`,
+  `unique_selected_timestamps=388` after warmup,
+  `observed_sim_fps≈30.08` (≥15), `shape_ok=True`, C0 `PASS`,
+  lockstep_steps `119995`, exit 0 (DB `betaflight_db018`).
+- Frame count and FPS use distinct `read_msg_at` selected timestamps.
+  `GuidanceUpdate.frame_sample_time` remains the requested time
+  (`ctx.timestamp - 33000`).
+- A deliberate 1000 FPS floor exited 1 with
+  `FAIL: observed FPS below Package B acceptance floor (1000 FPS)`.
+  The shipped floor is 15. Missing or wrongly shaped frames also exit 1.
+- Export:
+  `elodin-db export-videos betaflight_db018 --output /tmp/bf_fpv_videos_b018 --fps 30`
+  → nonempty `drone.fpv.mp4` (432 frames, 640×360 H.264).
+- Limitations: wall-clock realtime factor is still below 1× with the camera
+  on this host. The local venv must import the WSL `nox-py` build that
+  contains `read_msg_at`.
 
 ### [ ] C — Course and referee vertical slice
 
@@ -1018,12 +1042,12 @@ branch for later resumption.
 | Package | Status | Evidence / notes |
 |---|---|---|
 | A | Complete | 24 pure tests pass; C0 returned 0 with 119,995 simulation-loop lockstep responses, max motor 0.574, and 56.837 m takeoff rise in 29 wall-clock seconds after rebuilding latest main. Deliberate 100 m criterion returned 1. Shared headless propagation fixes: `301ae367` (`#837`) and lifecycle follow-up `36ee3431` (`#838`). |
-| B | Not started | Platform camera API exists; no Betaflight integration |
+| B | Complete | `RACE_CAMERA=1` FPV slice in `main.py` on post-A/D tree; verified 2026-09-11 (see Package B handoff) |
 | C | Not started | No course or referee code |
 | D | In progress | Command seam, one-tick ordering, AUX2 ANGLE configuration, s10 manual controller, 250 ms heartbeat failsafe, DB telemetry, and simulation-time physical sign audit implemented. The audit bypasses the external controller but retains the common semantic-to-RC/Betaflight path. 50 pure tests and 5 controller tests pass; live audit passes with roll 0.446, pitch 0.444, yaw 1.480 rad/s and max motor 0.391. Manual hardware qualification remains. |
 | E | Blocked by C, D | No truth guidance |
 | F | Blocked by E | No course controller |
-| G | Blocked by B | No racing camera geometry contract in code |
+| G | Ready (needs B) | Camera contract available; racing geometry helpers not yet in code |
 | H | Blocked by B, C, G | No detector |
 | I | Blocked by G | No tracker |
 | J | Blocked by E, H, I | No vision guidance |
@@ -1033,13 +1057,15 @@ branch for later resumption.
 ### Resume point
 
 Complete Package D's **manual hardware qualification** using the documented
-gamepad or keyboard controls. The implementation and deterministic physical
-audit are complete, but Package D must remain open until an operator has armed,
-taken off, exercised roll/pitch/yaw/throttle, landed, and disarmed.
+gamepad or keyboard controls. Package B is complete. Package C remains a valid
+independent alternative; Package G can begin on the perception path.
+
+The Package D implementation and deterministic physical audit are complete, but
+Package D must remain open until an operator has armed, taken off, exercised
+roll/pitch/yaw/throttle, landed, and disarmed.
 
 After recording that result in the Package D handoff, Package E is the
-recommended implementation continuation. Packages B and C remain valid
-independent alternatives if camera or course work is prioritized first.
+recommended implementation continuation.
 
 Package A verification from the repository root, with the Elodin Python
 environment active and the current release CLI on `PATH`:
@@ -1064,6 +1090,7 @@ then restored.
 
 | Date | Decision | Reason and affected packages |
 |---|---|---|
+| 2026-09-23 | Count FPV frames by the `read_msg_at` selected timestamp, and exit nonzero when `RACE_CAMERA=1` gets no valid frames or FPS below 15. | Pixel hashes undercounted near-uniform frames. `#851` already returns the selected message timestamp. Guidance still stores the requested sample time. Affects B and later G, H, and J. |
 | 2026-09-03 | Run headless recipes once while retaining watched recipes in the editor. | Package A exposed that a failed simulation child was logged and then waited for source reload, so `elodin run` could not return nonzero. The approved shared fixes (`301ae367`, `#837`; lifecycle follow-up `36ee3431`, `#838`) make headless execution one-shot without changing interactive editor recovery, centralize recipe execution dispatch in s10, and add an end-to-end lifecycle CI check. This enables failure contracts in A, F, K, and L. |
 | 2026-09-01 | Keep the current ENU/FLU world, Gazebo-bridge conventions, native motor order, and 8 kHz lockstep. | These are the implemented baseline; changing them is not required for racing. A–L rely on them. |
 | 2026-09-01 | Preserve scripted takeoff as the default and make other control modes opt-in. | Allows every package to merge independently without replacing the reference SITL example prematurely. |
