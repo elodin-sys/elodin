@@ -11,7 +11,12 @@ def heliocentric_relative_acceleration(probe_position, source_position, mu):
     return direct - sun
 
 
-def state_error(simulated_position_m, simulated_velocity_mps, truth_position_m, truth_velocity_mps):
+def state_error(
+    simulated_position_m,
+    simulated_velocity_mps,
+    truth_position_m,
+    truth_velocity_mps,
+):
     """Return position error in km and velocity error in m/s."""
     position_delta_m = np.asarray(simulated_position_m, dtype=np.float64) - np.asarray(
         truth_position_m, dtype=np.float64
