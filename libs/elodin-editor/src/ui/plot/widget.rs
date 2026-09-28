@@ -234,6 +234,36 @@ fn retain_enabled_line(
         .is_some()
 }
 
+fn despawn_stale_enabled_lines(graph_state: &mut GraphState, commands: &mut Commands) {
+    let kernel = graph_state
+        .kernel
+        .as_ref()
+        .map(|kernel| (&kernel.path, kernel.lines.len()));
+    let derived = graph_state
+        .derived
+        .as_ref()
+        .map(|derived| (&derived.path, derived.lines.len()));
+    let stale = graph_state
+        .enabled_lines
+        .keys()
+        .filter(|(component_path, index)| {
+            !retain_enabled_line(
+                kernel,
+                derived,
+                &graph_state.components,
+                component_path,
+                *index,
+            )
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    for key in stale {
+        if let Some((entity, _)) = graph_state.enabled_lines.remove(&key) {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
 fn has_timeseries_selection(graph_state: &GraphState) -> bool {
     !graph_state.components.is_empty()
         || graph_state.derived.is_some()
@@ -1716,25 +1746,7 @@ pub fn sync_graphs(
             }
         }
 
-        let kernel_keep = graph_state
-            .kernel
-            .as_ref()
-            .map(|kernel| (&kernel.path, kernel.lines.len()));
-        let derived_keep = graph_state
-            .derived
-            .as_ref()
-            .map(|derived| (&derived.path, derived.lines.len()));
-        graph_state
-            .enabled_lines
-            .retain(|(component_path, index), _| {
-                retain_enabled_line(
-                    kernel_keep,
-                    derived_keep,
-                    &graph_state.components,
-                    component_path,
-                    *index,
-                )
-            });
+        despawn_stale_enabled_lines(graph_state, &mut commands);
     }
 }
 
@@ -2631,12 +2643,14 @@ pub fn graph_touch(
 
 #[cfg(test)]
 mod short_window_y_tests {
-    use super::{has_timeseries_selection, retain_enabled_line, should_update_short_window_y};
+    use super::{
+        despawn_stale_enabled_lines, has_timeseries_selection, should_update_short_window_y,
+    };
     use crate::{
         plugins::render_layer_alloc::RenderLayerAllocator,
         ui::plot::{DerivedGraph, GraphBundle, KernelGraph},
     };
-    use bevy::prelude::Entity;
+    use bevy::{ecs::system::SystemState, prelude::*};
     use impeller2_bevy::ComponentPath;
     use impeller2_wkt::DisplayKernelBinding;
     use std::collections::BTreeMap;
@@ -2684,39 +2698,33 @@ mod short_window_y_tests {
             last_generation: 0,
             last_range: None,
         });
-        graph_state.enabled_lines.insert(
-            (path.clone(), 0),
-            (Entity::from_bits(1), bevy_egui::egui::Color32::WHITE),
-        );
-        graph_state.enabled_lines.insert(
-            (path.clone(), 1),
-            (Entity::from_bits(2), bevy_egui::egui::Color32::WHITE),
-        );
-        graph_state.enabled_lines.insert(
-            (path.clone(), 2),
-            (Entity::from_bits(3), bevy_egui::egui::Color32::WHITE),
-        );
-
-        let kernel_keep = graph_state
-            .kernel
-            .as_ref()
-            .map(|kernel| (&kernel.path, kernel.lines.len()));
+        let mut world = World::new();
+        let line_0 = world.spawn_empty().id();
+        let line_1 = world.spawn_empty().id();
+        let stale_line = world.spawn_empty().id();
         graph_state
             .enabled_lines
-            .retain(|(component_path, index), _| {
-                retain_enabled_line(
-                    kernel_keep,
-                    None,
-                    &graph_state.components,
-                    component_path,
-                    *index,
-                )
-            });
+            .insert((path.clone(), 0), (line_0, bevy_egui::egui::Color32::WHITE));
+        graph_state
+            .enabled_lines
+            .insert((path.clone(), 1), (line_1, bevy_egui::egui::Color32::WHITE));
+        graph_state.enabled_lines.insert(
+            (path.clone(), 2),
+            (stale_line, bevy_egui::egui::Color32::WHITE),
+        );
+
+        let mut system_state: SystemState<Commands> = SystemState::new(&mut world);
+        let mut commands = system_state.get_mut(&mut world).expect("commands");
+        despawn_stale_enabled_lines(&mut graph_state, &mut commands);
+        system_state.apply(&mut world);
 
         assert_eq!(graph_state.enabled_lines.len(), 2);
         assert!(graph_state.enabled_lines.contains_key(&(path.clone(), 0)));
         assert!(graph_state.enabled_lines.contains_key(&(path.clone(), 1)));
         assert!(!graph_state.enabled_lines.contains_key(&(path, 2)));
+        assert!(world.get_entity(line_0).is_ok());
+        assert!(world.get_entity(line_1).is_ok());
+        assert!(world.get_entity(stale_line).is_err());
     }
 
     #[test]
