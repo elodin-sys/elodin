@@ -2105,6 +2105,7 @@ fn silent_connection_ignores_msg(id: PacketId) -> bool {
         Stream::ID,
         GetSchema::ID,
         GetTimeSeries::ID,
+        GetTimeSeriesPredecessor::ID,
         GetComponentMetadata::ID,
         DumpMetadata::ID,
         DumpSchema::ID,
@@ -2235,11 +2236,8 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                 Ok(component.clone())
             })?;
             let Some((timestamps, data)) = component.get_range(&range) else {
-                return Err(Error::TimeRangeOutOfBounds {
-                    range,
-                    component_id: component.component_id,
-                    latest: component.time_series.latest().map(|x| *x.0),
-                });
+                tx.send_time_series(id, &[], &[]).await?;
+                return Ok(PacketAction::Continue);
             };
             let size = component.schema.size();
             let (timestamps, data) = if let Some(limit) = limit {
@@ -2249,6 +2247,23 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                 (timestamps, data)
             };
             tx.send_time_series(id, timestamps, data).await?;
+        }
+        Packet::Msg(m) if m.id == GetTimeSeriesPredecessor::ID => {
+            let request = m.parse::<GetTimeSeriesPredecessor>()?;
+            let component = db.with_state(|state| {
+                state
+                    .components
+                    .get(&request.component_id)
+                    .cloned()
+                    .ok_or(Error::ComponentNotFound(request.component_id))
+            })?;
+            if let Some((timestamp, data)) =
+                component.time_series.get_at_or_before(request.timestamp)
+            {
+                tx.send_time_series(request.id, &[timestamp], data).await?;
+            } else {
+                tx.send_time_series(request.id, &[], &[]).await?;
+            }
         }
         Packet::Msg(m) if m.id == SetComponentMetadata::ID => {
             let SetComponentMetadata(metadata) = m.parse::<SetComponentMetadata>()?;

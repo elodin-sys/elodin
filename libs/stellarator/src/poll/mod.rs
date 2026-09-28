@@ -25,7 +25,9 @@ use crate::{Error, Executor, Reactor};
 pub struct PollingReactor {
     poller: Arc<Poller>,
     states: Slab<OpState>,
-    fds: HashMap<RawFd, SmallVec<[CompletionId; 4]>>,
+    /// The ops waiting on each descriptor since its registration last fired,
+    /// with the readiness each waits for.
+    fds: HashMap<RawFd, SmallVec<[(CompletionId, polling::Event); 4]>>,
     events: polling::Events,
 }
 
@@ -45,10 +47,12 @@ impl Reactor for PollingReactor {
             self.poller.wait(&mut self.events, Some(Duration::ZERO))?;
         }
         for event in self.events.iter() {
-            let Some(ids) = self.fds.get(&(event.key as RawFd)) else {
+            let Some(waiters) = self.fds.get_mut(&(event.key as RawFd)) else {
                 continue;
             };
-            for id in ids.iter() {
+            // The registration fired, so wake every waiter; any that still
+            // cannot proceed register again when they are next polled.
+            for (id, _) in waiters.drain(..) {
                 let Some(state) = self.states.get_mut(id.0) else {
                     continue;
                 };
@@ -58,6 +62,9 @@ impl Reactor for PollingReactor {
                 *state = OpState::Ready;
             }
         }
+        // `Poller::wait` appends to `events`. Left full, it hands kevent zero
+        // slots, which returns at once even with a timeout: the reactor spins.
+        self.events.clear();
         Ok(())
     }
 
@@ -110,12 +117,18 @@ impl PollingReactor {
             let source = unsafe { std::os::fd::BorrowedFd::borrow_raw(fd) };
             #[cfg(target_os = "windows")]
             let source = unsafe { std::os::windows::io::BorrowedSocket::borrow_raw(fd as _) };
-            if let Some(states) = self.fds.get_mut(&fd) {
-                self.poller.modify(source, event)?;
-                states.push(id);
+            if let Some(waiters) = self.fds.get_mut(&fd) {
+                match waiters.iter_mut().find(|(waiter, _)| waiter.0 == id.0) {
+                    Some((_, interest)) => *interest = event,
+                    None => waiters.push((id, event)),
+                }
+                // A descriptor has one registration, and each change replaces
+                // it; it must cover every waiter, or registering a reader would
+                // drop a waiting writer's interest.
+                self.poller.modify(source, combined(event.key, waiters))?;
             } else {
                 unsafe { self.poller.add(&source, event)? };
-                self.fds.insert(fd, smallvec::smallvec![id]);
+                self.fds.insert(fd, smallvec::smallvec![(id, event)]);
             }
         }
         Ok(())
@@ -152,10 +165,27 @@ impl PollingReactor {
             }
             Poll::Ready(res) => {
                 let _ = self.states.try_remove(completion.id.0);
+                if let Some(event) = completion.op_code.as_ref().get_ref().event()
+                    && let Some(waiters) = self.fds.get_mut(&(event.key as RawFd))
+                {
+                    waiters.retain(|(waiter, _)| waiter.0 != completion.id.0);
+                }
                 Poll::Ready(res)
             }
         }
     }
+}
+
+/// One registration covering the readiness any of `waiters` waits for.
+fn combined(key: usize, waiters: &[(CompletionId, polling::Event)]) -> polling::Event {
+    let mut interest = polling::Event::none(key);
+    for (_, event) in waiters {
+        interest.readable |= event.readable;
+        interest.writable |= event.writable;
+        interest.set_interrupt(interest.is_interrupt() || event.is_interrupt());
+        interest.set_priority(interest.is_priority() || event.is_priority());
+    }
+    interest
 }
 
 pub trait OpCode {
@@ -230,5 +260,171 @@ impl Executor<PollingReactor> {
             scheduler,
             timer: Timer::new(crate::os::os_clock()),
         })
+    }
+}
+
+#[cfg(all(test, not(target_os = "windows")))]
+mod tests {
+    use std::{future::Future, net::SocketAddr, pin::pin, rc::Rc, task::Poll, time::Duration};
+
+    use rustix::time::{ClockId, clock_gettime};
+
+    use crate::{
+        Executor,
+        net::{TcpListener, TcpStream, UdpSocket},
+        test,
+    };
+
+    /// More than the poller's event buffer holds (1024 on macOS).
+    const ROUND_TRIPS: usize = 2048;
+
+    fn thread_cpu_time() -> Duration {
+        let t = clock_gettime(ClockId::ThreadCPUTime);
+        Duration::new(t.tv_sec as u64, t.tv_nsec as u32)
+    }
+
+    /// Awaits `fut`, counting the polls that returned `Pending`: each one
+    /// waited for the reactor to deliver a readiness event.
+    async fn counting_pending<F: Future>(fut: F, pending: &mut usize) -> F::Output {
+        let mut fut = pin!(fut);
+        std::future::poll_fn(|cx| {
+            let poll = fut.as_mut().poll(cx);
+            if poll.is_pending() {
+                *pending += 1;
+            }
+            poll
+        })
+        .await
+    }
+
+    #[test]
+    async fn idle_reactor_blocks_after_more_events_than_its_buffer_holds() {
+        let a = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let b = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let a_addr = a.local_addr().unwrap();
+        let b_addr = b.local_addr().unwrap();
+        // The echo task replies only after `a` has started waiting, so every
+        // receive on `a` is pending until the reactor delivers its event.
+        let echo = crate::spawn(async move {
+            let mut buf = vec![0u8; 16];
+            for _ in 0..ROUND_TRIPS {
+                let (n, out) = b.recv(buf).await;
+                n.unwrap();
+                b.send_to(b"y", a_addr).await.0.unwrap();
+                buf = out;
+            }
+        });
+        let mut pending = 0;
+        let mut buf = vec![0u8; 16];
+        for _ in 0..ROUND_TRIPS {
+            a.send_to(b"x", b_addr).await.0.unwrap();
+            let (n, out) = counting_pending(a.recv(buf), &mut pending).await;
+            assert_eq!(n.unwrap(), 1);
+            buf = out;
+        }
+        echo.await.unwrap();
+        assert!(
+            pending >= ROUND_TRIPS,
+            "only {pending} receives waited on the reactor"
+        );
+        let before = thread_cpu_time();
+        crate::sleep(Duration::from_millis(100)).await;
+        let spent = thread_cpu_time() - before;
+        assert!(
+            spent < Duration::from_millis(20),
+            "the reactor ran for {spent:?} of an idle 100 ms sleep"
+        );
+    }
+
+    /// `fut`'s output, or `None` if `limit` passes first.
+    async fn within<F: Future>(limit: Duration, fut: F) -> Option<F::Output> {
+        let mut fut = pin!(fut);
+        let mut timer = pin!(crate::sleep(limit));
+        std::future::poll_fn(|cx| {
+            if let Poll::Ready(out) = fut.as_mut().poll(cx) {
+                return Poll::Ready(Some(out));
+            }
+            timer.as_mut().poll(cx).map(|()| None)
+        })
+        .await
+    }
+
+    #[test]
+    async fn completed_ops_leave_no_waiters_registered() {
+        let a = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let b = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let a_addr = a.local_addr().unwrap();
+        let b_addr = b.local_addr().unwrap();
+        let echo = crate::spawn(async move {
+            let mut buf = vec![0u8; 16];
+            for _ in 0..ROUND_TRIPS {
+                let (n, out) = b.recv(buf).await;
+                n.unwrap();
+                b.send_to(b"y", a_addr).await.0.unwrap();
+                buf = out;
+            }
+        });
+        let mut buf = vec![0u8; 16];
+        for _ in 0..ROUND_TRIPS {
+            a.send_to(b"x", b_addr).await.0.unwrap();
+            let (n, out) = a.recv(buf).await;
+            n.unwrap();
+            buf = out;
+        }
+        echo.await.unwrap();
+        // Each event walks its descriptor's waiters, so any left behind make
+        // every later event slower.
+        let registered: usize =
+            Executor::with_reactor(|r| r.fds.values().map(|waiters| waiters.len()).sum());
+        assert_eq!(
+            registered, 0,
+            "waiters left after {ROUND_TRIPS} round trips"
+        );
+    }
+
+    #[test]
+    async fn a_waiting_reader_does_not_cancel_a_waiting_writer() {
+        const TOTAL: usize = 32 << 20;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let client = Rc::new(
+            TcpStream::connect(listener.local_addr().unwrap())
+                .await
+                .unwrap(),
+        );
+        let server = listener.accept().await.unwrap();
+        // Waits on `client` for the byte the server sends at the end.
+        let reader = crate::spawn({
+            let client = client.clone();
+            async move { client.read(vec![0u8; 16]).await.0.unwrap() }
+        });
+        let drain = crate::spawn(async move {
+            let (mut got, mut buf) = (0, vec![0u8; 64 << 10]);
+            while got < TOTAL {
+                let (n, out) = server.read(buf).await;
+                got += n.unwrap();
+                buf = out;
+            }
+            server.write(b"x").await.0.unwrap();
+        });
+        // More than the socket buffers hold: the writer waits for writability
+        // while the reader waits for readability on the same descriptor.
+        let write_all = async {
+            let (mut sent, mut chunk) = (0, vec![0u8; 1 << 20]);
+            while sent < TOTAL {
+                let (n, out) = client.write(chunk).await;
+                sent += n.unwrap();
+                chunk = out;
+            }
+        };
+        let limit = Duration::from_secs(10);
+        assert!(
+            within(limit, write_all).await.is_some(),
+            "the writer stalled"
+        );
+        assert!(
+            within(limit, drain).await.map(Result::unwrap).is_some(),
+            "the drain stalled"
+        );
+        assert_eq!(within(limit, reader).await.map(Result::unwrap), Some(1));
     }
 }

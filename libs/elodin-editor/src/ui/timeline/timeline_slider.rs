@@ -22,7 +22,8 @@ use crate::ui::{
 
 use super::{
     AutoFollowLatestState, DurationExt, LatestFollow, StreamTickOrigin, TimelineArgs,
-    TimelineIcons, TimelineSettings, get_position_range, position_from_value, value_from_position,
+    TimelineIcons, TimelineSettings, get_position_range, playback::PlaybackDiscontinuities,
+    playback::PlaybackRegion, position_from_value, value_from_position,
 };
 use crate::ui::widgets::SystemStateExt;
 
@@ -47,6 +48,8 @@ pub struct Timeline<'a> {
     active_range: RangeInclusive<f64>,
     full_range: RangeInclusive<f64>,
     focus_range: Option<RangeInclusive<f64>>,
+    selection: Option<&'a mut Option<(i64, i64)>>,
+    gaps: &'a [(i64, i64)],
     handle_image_id: Option<egui::TextureId>,
     handle_image_tint: egui::Color32,
     max_handle_image_tint: egui::Color32,
@@ -96,6 +99,8 @@ impl<'a> Timeline<'a> {
             full_range: active_range.clone(),
             active_range,
             focus_range: None,
+            selection: None,
+            gaps: &[],
             handle_image_id: None,
             handle_image_tint: get_scheme().success,
             max_handle_image_tint: get_scheme().success,
@@ -147,6 +152,18 @@ impl<'a> Timeline<'a> {
         self
     }
 
+    /// Playback region from shift-drag. Not the graph window: that one is
+    /// [`Self::focus_range`].
+    pub fn selection(mut self, selection: &'a mut Option<(i64, i64)>) -> Self {
+        self.selection = Some(selection);
+        self
+    }
+
+    pub fn gaps(mut self, gaps: &'a [(i64, i64)]) -> Self {
+        self.gaps = gaps;
+        self
+    }
+
     fn get_value(&mut self) -> f64 {
         get(&mut self.get_set_value)
     }
@@ -157,6 +174,17 @@ impl<'a> Timeline<'a> {
 
     fn range(&self) -> RangeInclusive<f64> {
         self.active_range.clone()
+    }
+}
+
+/// The playback region after a plain seek to `pos`. Seeking outside the band
+/// clears it (so it can be dismissed and the loop falls back to the whole
+/// recording); seeking inside keeps it, so the playhead can be repositioned
+/// within an active loop.
+fn region_after_seek(region: Option<(i64, i64)>, pos: i64) -> Option<(i64, i64)> {
+    match region {
+        Some((start, end)) if pos < start || pos > end => None,
+        other => other,
     }
 }
 
@@ -199,9 +227,38 @@ impl Timeline<'_> {
                 value_from_position(position - aim_radius, self.range(), position_range),
                 value_from_position(position + aim_radius, self.range(), position_range),
             );
-
-            self.set_value(new_value);
-            response.changed();
+            let shift = ui.input(|input| input.modifiers.shift);
+            if shift {
+                let id = response.id;
+                let aimed = new_value.round() as i64;
+                let start = if response.drag_started() {
+                    ui.ctx().data_mut(|data| data.insert_temp(id, aimed));
+                    aimed
+                } else {
+                    ui.ctx()
+                        .data(|data| data.get_temp::<i64>(id))
+                        .unwrap_or(aimed)
+                };
+                if let Some(selection) = self.selection.as_deref_mut() {
+                    let (start, end) = if start <= aimed {
+                        (start, aimed)
+                    } else {
+                        (aimed, start)
+                    };
+                    if end > start {
+                        *selection = Some((start, end));
+                    }
+                }
+            } else {
+                self.set_value(new_value);
+                // A plain seek away from the band dismisses it. Without a path
+                // to clear the region, loop_bounds would keep preferring that
+                // stale range over the full recording forever, even though the
+                // loop button still advertises "Loop recording".
+                if let Some(selection) = self.selection.as_deref_mut() {
+                    *selection = region_after_seek(*selection, new_value.round() as i64);
+                }
+            }
         }
         self.full_range =
             *self.active_range.start()..=self.active_range.start() + full_duration_float;
@@ -261,6 +318,37 @@ impl Timeline<'_> {
                     [overlay_rect.right_top(), overlay_rect.right_bottom()],
                     edge_stroke,
                 );
+            }
+
+            // Playback region. Blue, so it stays distinct from the green graph
+            // window above.
+            let drawn = self.selection.as_ref().and_then(|slot| **slot);
+            if let Some((start, end)) = drawn {
+                let start_x =
+                    position_from_value(start as f64, self.active_range.clone(), position_range);
+                let end_x =
+                    position_from_value(end as f64, self.active_range.clone(), position_range);
+                let overlay_rect = egui::Rect::from_x_y_ranges(start_x..=end_x, rect.y_range());
+                ui.painter().rect_filled(
+                    overlay_rect,
+                    CornerRadius::ZERO,
+                    get_scheme().blue.opacity(0.18),
+                );
+                let edge = egui::Stroke::new(1.0_f32, get_scheme().blue);
+                ui.painter()
+                    .line_segment([overlay_rect.left_top(), overlay_rect.left_bottom()], edge);
+                ui.painter().line_segment(
+                    [overlay_rect.right_top(), overlay_rect.right_bottom()],
+                    edge,
+                );
+            }
+
+            for &(start, end) in self.gaps {
+                let start_x =
+                    position_from_value(start as f64, self.active_range.clone(), position_range);
+                let end_x =
+                    position_from_value(end as f64, self.active_range.clone(), position_range);
+                paint_discontinuity(ui, start_x, end_x, rect);
             }
 
             // Fixed Max Handle
@@ -354,7 +442,36 @@ impl Timeline<'_> {
             .response
         }
     }
+}
 
+fn paint_discontinuity(ui: &egui::Ui, start_x: f32, end_x: f32, rect: egui::Rect) {
+    if end_x - start_x < 2.0 {
+        return;
+    }
+    let mid_y = rect.center().y;
+    let amplitude = (rect.height() * 0.22).max(2.0);
+    let step = ((end_x - start_x) / 24.0).max(6.0);
+    let mut points = Vec::new();
+    let mut up = true;
+    let mut x = start_x;
+    while x < end_x {
+        let y = if up {
+            mid_y - amplitude
+        } else {
+            mid_y + amplitude
+        };
+        points.push(egui::pos2(x, y));
+        up = !up;
+        x += step;
+    }
+    points.push(egui::pos2(end_x, mid_y));
+    ui.painter().add(egui::Shape::line(
+        points,
+        egui::Stroke::new(1.0_f32, get_scheme().text_secondary),
+    ));
+}
+
+impl Timeline<'_> {
     fn get_handle_size(rect: &egui::Rect, aspect_ratio: f32) -> egui::Vec2 {
         let rect_height = rect.height();
         egui::vec2(rect_height * aspect_ratio, rect_height)
@@ -398,6 +515,8 @@ pub struct TimelineSlider<'w> {
     latest_follow: ResMut<'w, LatestFollow>,
     auto_follow_latest_state: ResMut<'w, AutoFollowLatestState>,
     timeline_settings: Res<'w, TimelineSettings>,
+    playback_region: ResMut<'w, PlaybackRegion>,
+    discontinuities: Res<'w, PlaybackDiscontinuities>,
 }
 
 impl WidgetSystem for TimelineSlider<'_> {
@@ -419,6 +538,8 @@ impl WidgetSystem for TimelineSlider<'_> {
             mut latest_follow,
             mut auto_follow_latest_state,
             timeline_settings,
+            mut playback_region,
+            discontinuities,
         } = state.params_mut(world);
 
         tick_origin.observe_stream(**current_stream_id);
@@ -428,37 +549,63 @@ impl WidgetSystem for TimelineSlider<'_> {
         let playhead_color = timeline_settings.played_color.into_color32();
         let latest_color = timeline_settings.future_color.into_color32();
 
-        ui.horizontal(|ui| {
-            let response = ui
-                .add(
-                    Timeline::new(
-                        &mut tick.bypass_change_detection().0,
-                        timeline_args.active_range,
-                    )
-                    .width(timeline_args.available_width)
-                    .height(timeline_args.line_height)
-                    .handle_image_id(handle_icon)
-                    .handle_image_tint(playhead_color)
-                    .max_handle_image_tint(latest_color)
-                    .handle_aspect_ratio(12.0 / 30.0)
-                    .segments(timeline_args.segment_count)
-                    .focus_range(timeline_args.focus_range),
+        let mut selection = playback_region.0.map(|(start, end)| (start.0, end.0));
+        let response = ui
+            .add(
+                Timeline::new(
+                    &mut tick.bypass_change_detection().0,
+                    timeline_args.active_range,
                 )
-                .on_hover_cursor(egui::CursorIcon::PointingHand);
+                .width(timeline_args.available_width)
+                .height(timeline_args.line_height)
+                .handle_image_id(handle_icon)
+                .handle_image_tint(playhead_color)
+                .max_handle_image_tint(latest_color)
+                .handle_aspect_ratio(12.0 / 30.0)
+                .segments(timeline_args.segment_count)
+                .focus_range(timeline_args.focus_range)
+                .selection(&mut selection)
+                .gaps(&discontinuities.gaps),
+            )
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
 
-            if response.changed() {
-                let target_timestamp = Timestamp(tick.0);
-                auto_follow_latest_state.cancel();
-                latest_follow.0 = false;
-                current_timestamp.0 = target_timestamp;
-                if target_timestamp <= earliest_timestamp.0 {
-                    tick_origin.request_rebase();
-                }
+        let region_now = selection.map(|(start, end)| (Timestamp(start), Timestamp(end)));
+        if region_now.map(|(start, end)| (start.0, end.0))
+            != playback_region.0.map(|(s, e)| (s.0, e.0))
+        {
+            playback_region.0 = region_now;
+            auto_follow_latest_state.cancel();
+            latest_follow.0 = false;
+        }
+
+        if response.changed() {
+            let target_timestamp = Timestamp(tick.0);
+            auto_follow_latest_state.cancel();
+            latest_follow.0 = false;
+            current_timestamp.0 = target_timestamp;
+            if target_timestamp <= earliest_timestamp.0 {
+                tick_origin.request_rebase();
             }
-        });
+        }
     }
 }
 
 pub fn sync_ui_tick(tick: Res<CurrentTimestamp>, mut ui_tick: ResMut<UITick>) {
     ui_tick.0 = tick.0.0;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::region_after_seek;
+
+    #[test]
+    fn seeking_outside_the_band_clears_it_and_inside_keeps_it() {
+        let region = Some((100, 200));
+        assert_eq!(region_after_seek(region, 150), region, "inside: keep");
+        assert_eq!(region_after_seek(region, 100), region, "on the edge: keep");
+        assert_eq!(region_after_seek(region, 200), region, "on the edge: keep");
+        assert_eq!(region_after_seek(region, 50), None, "before: dismiss");
+        assert_eq!(region_after_seek(region, 250), None, "after: dismiss");
+        assert_eq!(region_after_seek(None, 150), None, "nothing to clear");
+    }
 }

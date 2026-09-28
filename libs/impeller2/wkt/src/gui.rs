@@ -549,6 +549,7 @@ pub enum SchematicElem {
     Panel(Panel),
     Object3d(Object3D),
     Line3d(Line3d),
+    PointTrails(PointTrails),
     VectorArrow(VectorArrow3d),
     WorldMesh(WorldMesh),
     Window(WindowSchematic),
@@ -988,6 +989,45 @@ pub struct Line3d {
 
 impl Asset for Line3d {
     const NAME: &'static str = "line_3d";
+}
+
+/// Trails and cube heads for N points stored in one flat `3 × N` f64
+/// component, axis-major: `[x0..xN-1, y0..yN-1, z0..zN-1]`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PointTrailsHeadShape {
+    #[default]
+    Cube,
+    Sphere,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct PointTrails {
+    pub component: String,
+    /// Optional `(N,)` integer component; a nonzero element draws that point's
+    /// trail and head in `hit_color`.
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Optional scalar component whose first nonzero sample starts the trails.
+    #[serde(default)]
+    pub start: Option<String>,
+    pub head_size: f32,
+    #[serde(default)]
+    pub head_shape: PointTrailsHeadShape,
+    pub line_width: f32,
+    /// Maximum cumulative trail length in meters. `None` keeps the full window.
+    #[serde(default)]
+    pub max_length: Option<f32>,
+    /// `None` falls back to the timeline played color.
+    #[serde(default)]
+    pub color: Option<Color>,
+    /// `None` falls back to red.
+    #[serde(default)]
+    pub hit_color: Option<Color>,
+    #[serde(default)]
+    pub frame: Option<bevy_geo_frames::GeoFrame>,
+    pub node_id: NodeId,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

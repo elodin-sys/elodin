@@ -2319,12 +2319,14 @@ mod series_store_allowlist_tests {
         );
     }
 
-    // Anders' scenario (PR #861): under partial backfill a fast series can hold
-    // a nearer sample whose adjacent gap is not yet covered, while a slower
-    // series is covered out to a farther boundary. The uncovered nearer sample
-    // is deliberately not trusted as adjacent — the DB may hold something
-    // between it and the playhead — so the covered farther boundary wins. The
-    // caller's nominal step stays the floor whenever nothing is vouched.
+    // Anders' scenario (PR #861): under partial backfill, mixed coverage can make
+    // a frame step jump farther than a nearer known sample. With the playhead at
+    // 0, a 1 kHz series holds a sample at 999 µs but only [0, 1) is covered, and
+    // a slow series is covered out to its sample at 5000 µs. The uncovered 999
+    // is not trusted as adjacent — the DB may hold something before it — so the
+    // step lands on 5000. The nominal step is only the fallback when no series
+    // can answer; it does not cap the jump. Once the fast gap is covered, 999
+    // wins again.
     #[test]
     fn mixed_coverage_prefers_the_vouched_boundary_over_a_nearer_uncovered_sample() {
         let fast = ComponentId(1);

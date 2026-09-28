@@ -1191,6 +1191,7 @@ impl WorldPosExt for WorldPos {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn advance_playback(
     time: Res<Time>,
     mut current_ts: ResMut<CurrentTimestamp>,
@@ -1198,6 +1199,8 @@ pub fn advance_playback(
     speed: Res<ui::timeline::PlaybackSpeed>,
     last_updated: Res<LastUpdated>,
     earliest: Res<EarliestTimestamp>,
+    playback_loop: Res<ui::timeline::playback::PlaybackLoop>,
+    region: Res<ui::timeline::playback::PlaybackRegion>,
 ) {
     if paused.0 {
         return;
@@ -1206,8 +1209,22 @@ pub fn advance_playback(
         return;
     }
     let delta_micros = (time.delta_secs_f64() * speed.0 * 1_000_000.0) as i64;
-    let new_ts = Timestamp(current_ts.0.0.saturating_add(delta_micros));
-    current_ts.0 = Timestamp(new_ts.0.clamp(earliest.0.0, last_updated.0.0));
+    let next = match ui::timeline::playback::loop_bounds(
+        playback_loop.0,
+        region.0,
+        earliest.0,
+        last_updated.0,
+    ) {
+        Some((start, end)) => {
+            ui::timeline::playback::step_loop(current_ts.0.0, delta_micros, start, end)
+        }
+        None => current_ts
+            .0
+            .0
+            .saturating_add(delta_micros)
+            .clamp(earliest.0.0, last_updated.0.0),
+    };
+    current_ts.0 = Timestamp(next);
 }
 
 pub fn follow_latest(
@@ -1215,6 +1232,7 @@ pub fn follow_latest(
     latest: Res<LastUpdated>,
     earliest: Res<EarliestTimestamp>,
     latest_follow: Res<ui::timeline::LatestFollow>,
+    mut paused: ResMut<ui::Paused>,
     replay: Option<Res<ReplayMode>>,
 ) {
     if replay.is_some() || !latest_follow.0 {
@@ -1223,6 +1241,10 @@ pub fn follow_latest(
     if earliest.0 >= latest.0 {
         return;
     }
+    // Sole writer of the playhead while live follow is on. The timeline
+    // widget used to pin it a second time, a frame later, which discarded
+    // whatever advance_playback had just done.
+    paused.0 = false;
     current_ts.0 = latest.0;
 }
 
@@ -2745,8 +2767,12 @@ mod tests {
             pkt.0.insert(packet_id, pkt_sys);
             app.world_mut()
                 .resource_mut::<crate::ui::plot::data::VisiblePrefetchState>()
-                .in_flight
-                .insert((ComponentId(1), 0, 1));
+                .begin(crate::ui::plot::data::PrefetchKey::Window {
+                    component_id: ComponentId(1),
+                    start: 0,
+                    end: 1,
+                })
+                .unwrap();
         }
 
         app.world_mut()
@@ -2770,11 +2796,11 @@ mod tests {
         assert!(app.world().resource::<MsgRequestIdHandlers>().0.is_empty());
         assert!(app.world().resource::<RequestIdHandlers>().0.is_empty());
         assert!(app.world().resource::<PacketIdHandlers>().0.is_empty());
-        assert!(
+        assert_eq!(
             app.world()
                 .resource::<crate::ui::plot::data::VisiblePrefetchState>()
-                .in_flight
-                .is_empty()
+                .request_count(),
+            0
         );
         // Systems were unregistered — a second unregister must fail.
         assert!(app.world_mut().unregister_system(msg_sys).is_err());
@@ -2818,7 +2844,13 @@ mod tests {
         let mut series_load = impeller2_bevy::SeriesStoreLoadState::default();
         let mut plot_sync = crate::ui::plot::data::PlotSyncState::default();
         let mut prefetch = crate::ui::plot::data::VisiblePrefetchState::default();
-        prefetch.in_flight.insert((ComponentId(1), 0, 1));
+        prefetch
+            .begin(crate::ui::plot::data::PrefetchKey::Window {
+                component_id: ComponentId(1),
+                start: 0,
+                end: 1,
+            })
+            .unwrap();
         prefetch.clear_in_flight();
 
         let soft = series_store_soft_reconnect(&session, Some(addr));
@@ -2838,7 +2870,7 @@ mod tests {
         }
 
         assert!(cache.has_series(&ComponentId(42)));
-        assert!(prefetch.in_flight.is_empty());
+        assert_eq!(prefetch.request_count(), 0);
     }
 
     #[test]
@@ -2958,8 +2990,12 @@ mod tests {
                 .insert(3u16.to_le_bytes(), pkt_sys);
             app.world_mut()
                 .resource_mut::<crate::ui::plot::data::VisiblePrefetchState>()
-                .in_flight
-                .insert((ComponentId(1), 0, 1));
+                .begin(crate::ui::plot::data::PrefetchKey::Window {
+                    component_id: ComponentId(1),
+                    start: 0,
+                    end: 1,
+                })
+                .unwrap();
             app.world_mut()
                 .resource_mut::<plugins::kdl_document::LastSyncedActiveKey>()
                 .0 = Some("schematics/main.kdl".into());
@@ -2989,11 +3025,11 @@ mod tests {
         assert!(app.world().resource::<MsgRequestIdHandlers>().0.is_empty());
         assert!(app.world().resource::<RequestIdHandlers>().0.is_empty());
         assert!(app.world().resource::<PacketIdHandlers>().0.is_empty());
-        assert!(
+        assert_eq!(
             app.world()
                 .resource::<crate::ui::plot::data::VisiblePrefetchState>()
-                .in_flight
-                .is_empty()
+                .request_count(),
+            0
         );
         assert!(
             app.world()

@@ -19,7 +19,6 @@ Prerequisites:
     2. (Optional) Configure Betaflight via CLI: socat + screen
 """
 
-import math
 import os
 import re
 import subprocess
@@ -46,6 +45,18 @@ from controls import (
     guidance_mode_from_env,
     semantic_to_rc,
 )
+from course import course_from_env
+from schematic import build_schematic
+from referee import Referee, world_position_from_transform
+from referee_audit import (
+    RefereeAuditCollector,
+    RefereeAuditResult,
+    audit_initial_condition,
+    evaluate_referee_audit,
+    referee_audit_from_env,
+)
+from race_runtime import RaceTelemetry, spawn_course
+from fpv_camera import FAR, FOV_DEG, FPS, HEIGHT, LATENCY_US, MOUNT, MSG, NEAR, WIDTH, FpvCamera
 from sim import Drone, create_physics_system
 from sensors import IMU, create_sensor_system, SensorDataBuffer
 from comms import (
@@ -60,6 +71,7 @@ config = DEFAULT_CONFIG
 
 try:
     guidance_mode = guidance_mode_from_env()
+    race_course = course_from_env()
 except ValueError as exc:
     print(f"ERROR: {exc}", file=sys.stderr)
     sys.exit(2)
@@ -72,9 +84,36 @@ audit_requested = audit_value == "1"
 if audit_requested and guidance_mode is not GuidanceMode.MANUAL:
     print("ERROR: RACE_MANUAL_AUDIT=1 requires RACE_GUIDANCE=manual", file=sys.stderr)
     sys.exit(2)
+try:
+    referee_audit_config = referee_audit_from_env(
+        os.environ,
+        course_name=race_course.name,
+        guidance_mode=guidance_mode.value,
+        manual_audit_requested=audit_requested,
+    )
+except ValueError as exc:
+    print(f"ERROR: {exc}", file=sys.stderr)
+    sys.exit(2)
+referee_audit_requested = referee_audit_config.enabled
 if audit_requested:
     config.simulation_time = 24.0
+if referee_audit_requested:
+    initial_position, initial_velocity, simulation_time = audit_initial_condition(
+        True,
+        config.initial_position,
+        config.initial_velocity,
+        config.simulation_time,
+    )
+    config.initial_position = np.array(initial_position)
+    config.initial_velocity = np.array(initial_velocity)
+    config.simulation_time = simulation_time
 config.set_as_global()
+
+_race_camera = os.environ.get("RACE_CAMERA", "0")
+if _race_camera not in ("0", "1"):
+    print(f"ERROR: RACE_CAMERA must be '0' or '1', got {_race_camera!r}", file=sys.stderr)
+    sys.exit(2)
+CAMERA_ENABLED = _race_camera == "1"
 
 if guidance_mode is GuidanceMode.SCRIPTED:
     command_source = ScriptedGuidance()
@@ -85,28 +124,6 @@ elif audit_requested:
 else:
     command_source = ManualGuidance()
     initial_control = SemanticControl.safe()
-
-# Package B: opt-in FPV camera (Section 7.4). Default off preserves scripted SITL.
-_race_camera = os.environ.get("RACE_CAMERA", "0")
-if _race_camera not in ("0", "1"):
-    print(f"ERROR: RACE_CAMERA must be '0' or '1', got {_race_camera!r}", file=sys.stderr)
-    sys.exit(2)
-CAMERA_ENABLED = _race_camera == "1"
-
-FPV_MSG = "drone.fpv"
-FPV_WIDTH = 640
-FPV_HEIGHT = 360
-FPV_FPS = 30.0
-FPV_LATENCY_US = 33_000
-FPV_MOUNT = [0.08, 0.0, 0.02]
-FPV_NEAR = 0.1
-FPV_FAR = 100.0
-# Vertical FoV for fx = fy = 320 at 640×360 (≈58.72°, hFOV 90°).
-FPV_FOV_DEG = 2.0 * math.degrees(math.atan((FPV_HEIGHT / 2.0) / 320.0))
-FPV_PERIOD_US = int(round(1_000_000.0 / FPV_FPS))
-FPV_FRAME_BYTES = FPV_WIDTH * FPV_HEIGHT * 4
-FPV_MIN_FPS = 15.0
-FPV_WARMUP_US = 2_000_000
 
 
 # --- Betaflight Binary Path ---
@@ -157,78 +174,45 @@ drone = world.spawn(
         ),
         Drone(),
         IMU(),
+        RaceTelemetry(),
     ],
     name="drone",
 )
 
-# Opt-in FPV camera (Package B). Registering a sensor_camera causes s10 to
-# start the headless render-server; keep this behind RACE_CAMERA=1.
+# Gate bars are kinematic scene entities with WorldPos only. They deliberately
+# have no Body/Inertia/Force components and never enter rigid-body integration.
+gate_entities = spawn_course(world, race_course)
+
+# Opt-in FPV camera. Registering a sensor_camera starts the render server.
 if CAMERA_ENABLED:
     world.sensor_camera(
         entity=drone,
         name="fpv",
-        width=FPV_WIDTH,
-        height=FPV_HEIGHT,
-        fov=FPV_FOV_DEG,
-        near=FPV_NEAR,
-        far=FPV_FAR,
-        pos_offset=FPV_MOUNT,
-        rot_offset=[0.0, 0.0, 0.0],  # body +X look, body +Z up
+        width=WIDTH,
+        height=HEIGHT,
+        fov=FOV_DEG,
+        near=NEAR,
+        far=FAR,
+        pos_offset=MOUNT,
+        rot_offset=[0.0, 0.0, 0.0],
         format="rgba",
-        fps=FPV_FPS,
+        fps=FPS,
         create_frustum=True,
         frustums_color=[1.0, 0.6, 0.0, 1.0],
         projection_color=[1.0, 0.6, 0.0, 0.35],
     )
 
-# Editor schematic for visualization
-if CAMERA_ENABLED:
-    _schematic = f"""
-    tabs {{
-        hsplit name = "Viewport" {{
-            viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 10,10,5)" look_at="drone.world_pos" show_grid=#true show_frustums=#true active=#true
-            vsplit share=0.3 {{
-                sensor_view "{FPV_MSG}" name="FPV Camera"
-                graph "drone.motor_command" name="Motor Commands (from Betaflight)"
-                graph "drone.motor_thrust" name="Motor Thrust"
-            }}
-            vsplit share=0.3 {{
-                graph "drone.world_pos.linear()" name="Position (ENU)"
-                graph "drone.world_vel.linear()" name="Velocity"
-                graph "drone.gyro" name="Gyroscope"
-            }}
-        }}
-    }}
-    object_3d drone.world_pos {{
-        glb path="edu-450-v2-drone.glb" scale=10.0
-    }}
-    object_3d "(0,0,0,1, 0,0,0)" {{
-        plane width=40 depth=40 {{ color 70 90 70 }}
-    }}
-    """
-else:
-    _schematic = """
-    tabs {
-        hsplit name = "Viewport" {
-            viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 10,10,5)" look_at="drone.world_pos" show_grid=#true active=#true
-            vsplit share=0.3 {
-                graph "drone.motor_command" name="Motor Commands (from Betaflight)"
-                graph "drone.motor_thrust" name="Motor Thrust"
-                graph "drone.accel" name="Accelerometer"
-            }
-            vsplit share=0.3 {
-                graph "drone.world_pos.linear()" name="Position (ENU)"
-                graph "drone.world_vel.linear()" name="Velocity"
-                graph "drone.gyro" name="Gyroscope"
-            }
-        }
-    }
-    object_3d drone.world_pos {
-        glb path="edu-450-v2-drone.glb" scale=10.0
-    }
-    """
-
-world.schematic(_schematic, "betaflight-sitl.kdl")
+# Editor schematic for visualization. Procedural gate boxes use the editor's
+# standard non-emissive material; their entity poses supply the gate yaw.
+# The FPV pane, frustum flag, and ground plane are injected only when enabled.
+world.schematic(
+    build_schematic(
+        race_course,
+        audit_enabled=referee_audit_requested,
+        camera_enabled=CAMERA_ENABLED,
+    ),
+    "betaflight-sitl.kdl",
+)
 
 
 # --- System ---
@@ -284,14 +268,24 @@ if guidance_mode is GuidanceMode.MANUAL and not audit_requested:
 
 print(f"Betaflight SITL: {BETAFLIGHT_PATH.name}")
 print(f"Guidance: {'audit (simulation time)' if audit_requested else guidance_mode.value}")
+if referee_audit_requested:
+    print(
+        "Referee audit: controlled ballistic fixture "
+        f"position={tuple(config.initial_position)} velocity={tuple(config.initial_velocity)}"
+    )
+if race_course.gates:
+    print(
+        f"Race course: {race_course.name} "
+        f"({len(race_course.gates)} gate, inner opening {race_course.inner_size:.1f}m)"
+    )
 print(f"Simulation: {config.simulation_time}s at {config.pid_rate:.0f}Hz PID loop")
 print(
     f"Requested sensor rates: gyro={config.gyro_rate:.0f}Hz, accel={config.accel_rate:.0f}Hz, baro={config.baro_rate:.0f}Hz, mag={config.mag_rate:.0f}Hz"
 )
 if CAMERA_ENABLED:
     print(
-        f"FPV camera: {FPV_MSG} {FPV_WIDTH}x{FPV_HEIGHT} @ {FPV_FPS:.0f}Hz "
-        f"fov={FPV_FOV_DEG:.2f}° latency={FPV_LATENCY_US}us (RACE_CAMERA=1)"
+        f"FPV camera: {MSG} {WIDTH}x{HEIGHT} @ {FPS:.0f}Hz "
+        f"fov={FOV_DEG:.2f}° latency={LATENCY_US}us (RACE_CAMERA=1)"
     )
 else:
     print("FPV camera: disabled (RACE_CAMERA=0)")
@@ -336,26 +330,51 @@ start_time = [None]
 last_print = [0.0]
 c0_result: list[C0Result | None] = [None]
 axis_audit = AxisAudit() if audit_requested else None
+referee = Referee(race_course)
+# Establish the pre-integration truth sample so even a first-tick segment has
+# a well-defined previous endpoint.
+referee.observe_truth(config.initial_position, 0.0)
+race_result_emitted = [False]
+race_result_line_count = [0]
+referee_audit_result: list[RefereeAuditResult | None] = [None]
+referee_audit_result_emitted = [False]
+referee_audit_collector = (
+    RefereeAuditCollector(tuple(float(value) for value in config.initial_position))
+    if referee_audit_requested
+    else None
+)
+fpv = FpvCamera() if CAMERA_ENABLED else None
+fpv_report = [None]
 
 
-@dataclass
-class FpvCameraStats:
-    last_period_idx: int = -1
-    sample_count: int = 0
-    first_frame_sim_s: float | None = None
-    last_requested_sample_us: int | None = None
-    last_selected_ts: int | None = None
-    shape_ok: bool = True
-    unique_samples: int = 0
-    observed_fps: float = 0.0
-    accepted: bool = False
-    # Latest sample offered to guidance this tick (or None).
-    latest_frame: np.ndarray | None = None
-    latest_sample_us: int | None = None
-    latest_fresh: bool = False
+def emit_race_result() -> None:
+    """Emit the enabled course's final result exactly once."""
+
+    if race_course.gates and not race_result_emitted[0]:
+        print(referee.result().format())
+        race_result_emitted[0] = True
+        race_result_line_count[0] += 1
 
 
-fpv_stats = FpvCameraStats() if CAMERA_ENABLED else None
+def emit_final_results() -> None:
+    """Emit the race and qualification contracts once, in that order."""
+
+    emit_race_result()
+    if referee_audit_requested and not referee_audit_result_emitted[0]:
+        assert referee_audit_collector is not None
+        evidence = referee_audit_collector.evidence(
+            race_result=referee.result(),
+            race_line_count=race_result_line_count[0],
+            # This is the single line emitted immediately below.
+            audit_line_count=1,
+        )
+        result = evaluate_referee_audit(evidence)
+        referee_audit_result[0] = result
+        print(result.format())
+        if not result.passed:
+            print(f"Referee audit failed checks: {','.join(result.failed_checks)}")
+        referee_audit_result_emitted[0] = True
+
 
 # Pre-allocated buffers to avoid allocation in hot loop
 _rc_channels_buffer = np.full(MAX_RC_CHANNELS, 1500, dtype=np.uint16)
@@ -374,106 +393,6 @@ _component_reads = [
 _manual_input_tick_interval = max(1, round(config.pid_rate / 1_000.0))
 _barometer_tick_interval = config.baro_tick_interval
 _magnetometer_tick_interval = config.mag_tick_interval
-
-
-def _read_fpv_frame(ctx: el.StepContext, stats: FpvCameraStats) -> None:
-    """Non-blocking latency-adjusted FPV read, at most once per camera period."""
-    stats.latest_frame = None
-    stats.latest_sample_us = None
-    stats.latest_fresh = False
-
-    period_idx = int(ctx.timestamp // FPV_PERIOD_US)
-    if period_idx == stats.last_period_idx:
-        return
-    stats.last_period_idx = period_idx
-
-    requested = ctx.timestamp - FPV_LATENCY_US
-    stats.last_requested_sample_us = requested
-    # Guidance records the requested sample time, not the renderer timestamp.
-    stats.latest_sample_us = requested
-    selected = ctx.read_msg_at(FPV_MSG, requested)
-    if selected is None:
-        return
-    selected_ts, payload = selected
-
-    arr = np.asarray(payload)
-    if arr.size != FPV_FRAME_BYTES:
-        stats.shape_ok = False
-        return
-
-    rgba = arr.reshape(FPV_HEIGHT, FPV_WIDTH, 4)
-    if rgba.dtype != np.uint8:
-        stats.shape_ok = False
-        return
-
-    stats.sample_count += 1
-    stats.latest_frame = rgba
-    stats.latest_fresh = True
-    if stats.first_frame_sim_s is None:
-        stats.first_frame_sim_s = ctx.tick * config.dt
-        print(
-            f"[fpv] first frame at t={stats.first_frame_sim_s:.3f}s "
-            f"(requested_sample_us={requested}, selected_ts={selected_ts}, "
-            f"shape={rgba.shape}, dtype={rgba.dtype})"
-        )
-
-    if selected_ts != stats.last_selected_ts:
-        stats.last_selected_ts = int(selected_ts)
-        stats.unique_samples += 1
-
-
-def _report_fpv_stats(ctx: el.StepContext, stats: FpvCameraStats, sim_time: float) -> None:
-    """Shutdown report: first-frame time, counts, observed simulated FPS."""
-    print()
-    print("--- FPV camera (Package B) ---")
-    stats.accepted = False
-    if stats.first_frame_sim_s is None:
-        print(f"  sample_count: {stats.sample_count}")
-        print("  FAIL: render-server produced no valid FPV frames")
-        return
-    if not stats.shape_ok:
-        print(f"  sample_count: {stats.sample_count}")
-        print(f"  FAIL: FPV frame was not ({FPV_HEIGHT}, {FPV_WIDTH}, 4) uint8")
-        return
-
-    # Count distinct renderer messages after warmup. read_msg_at returns the
-    # selected DB timestamp; a repeated timestamp is sample-and-hold, not a new frame.
-    sim_start_us = ctx.timestamp - int(sim_time * 1_000_000)
-    sweep_end = ctx.timestamp - 100_000
-    sweep_start = sim_start_us + FPV_WARMUP_US
-    sweep_window_us = max(sweep_end - sweep_start, 1)
-    sweep_seconds = sweep_window_us / 1_000_000.0
-    step_us = max(int(FPV_PERIOD_US / 2), 100)
-    selected_times: set[int] = set()
-    cursor = sweep_start
-    while cursor <= sweep_end:
-        selected = ctx.read_msg_at(FPV_MSG, cursor)
-        if selected is not None:
-            selected_times.add(int(selected[0]))
-        cursor += step_us
-
-    unique_frames = len(selected_times)
-    observed_fps = unique_frames / sweep_seconds if sweep_seconds > 0 else 0.0
-    stats.observed_fps = observed_fps
-    offered_fps = 0.0
-    if sim_time > stats.first_frame_sim_s:
-        offered_fps = stats.sample_count / (sim_time - stats.first_frame_sim_s)
-
-    print(f"  first_frame_sim_s: {stats.first_frame_sim_s:.3f}")
-    print(f"  sample_count: {stats.sample_count}")
-    print(f"  unique_selected_timestamps: {unique_frames}")
-    print(f"  offered_sample_fps≈{offered_fps:.2f} (non-None latency reads / sim-s)")
-    print(f"  shape_ok: {stats.shape_ok} (expect ({FPV_HEIGHT}, {FPV_WIDTH}, 4) uint8)")
-    print(f"  last_requested_sample_us: {stats.last_requested_sample_us}")
-    print(
-        f"  observed_sim_fps≈{observed_fps:.2f} "
-        f"(unique_selected_timestamps={unique_frames} in {sweep_seconds:.2f}s after warmup)"
-    )
-    stats.accepted = observed_fps >= FPV_MIN_FPS
-    if stats.accepted:
-        print(f"  OK: observed FPS meets Package B acceptance (>= {FPV_MIN_FPS:.0f} FPS)")
-    else:
-        print(f"  FAIL: observed FPS below Package B acceptance floor ({FPV_MIN_FPS:.0f} FPS)")
 
 
 def sitl_post_step(tick: int, ctx: el.StepContext):
@@ -539,6 +458,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
     barometer = s.barometer
     magnetometer = s.magnetometer
     manual_values = s.manual_values
+    current_truth_position = None
     barometer_fresh = tick % _barometer_tick_interval == 0
     magnetometer_fresh = tick % _magnetometer_tick_interval == 0
     manual_input_poll = isinstance(command_source, ManualGuidance) and (
@@ -551,6 +471,11 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         reads.append("drone.mag")
     if manual_input_poll:
         reads.append("drone.manual_control")
+    audit_telemetry_poll = (
+        referee_audit_collector is not None and referee_audit_collector.telemetry_due(tick)
+    )
+    if audit_telemetry_poll:
+        reads.extend(["drone.last_gate_passed", "drone.gate_pass_times"])
     sensor_read_succeeded = False
     try:
         sensor_data = ctx.component_batch_operation(reads=reads)
@@ -558,6 +483,15 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         gyro = sensor_data["drone.gyro"]
         world_pos = sensor_data["drone.world_pos"]
         world_vel = sensor_data["drone.world_vel"]
+        current_truth_position = world_position_from_transform(world_pos)
+        if referee_audit_collector is not None:
+            referee_audit_collector.record_truth_read(current_truth_position)
+        if audit_telemetry_poll:
+            assert referee_audit_collector is not None
+            referee_audit_collector.record_telemetry(
+                int(sensor_data["drone.last_gate_passed"][0]),
+                tuple(float(value) for value in sensor_data["drone.gate_pass_times"]),
+            )
         if barometer_fresh:
             s.barometer = float(sensor_data["drone.baro"][0])
             barometer = s.barometer
@@ -610,17 +544,17 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
     except TimeoutError:
         pass  # Timeouts expected during bootgrace
 
-    # Camera read is after lockstep and never blocks physics (Section 6.2 / Package B).
     frame = None
     frame_sample_time = None
     frame_fresh = False
-    if fpv_stats is not None:
-        _read_fpv_frame(ctx, fpv_stats)
-        frame = fpv_stats.latest_frame
-        if fpv_stats.latest_sample_us is not None:
-            frame_sample_time = float(fpv_stats.latest_sample_us)
-        frame_fresh = fpv_stats.latest_fresh
+    if fpv is not None:
+        sample = fpv.poll(ctx.read_msg_at, ctx.timestamp, t)
+        frame = sample.frame
+        if sample.requested_us is not None:
+            frame_sample_time = float(sample.requested_us)
+        frame_fresh = sample.fresh
 
+    progress = referee.progress()
     update = GuidanceUpdate(
         sim_time=t,
         tick=tick,
@@ -633,6 +567,10 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         frame=frame,
         frame_sample_time=frame_sample_time,
         frame_fresh=frame_fresh,
+        last_gate_passed=progress.last_gate_passed,
+        next_gate_index=progress.next_gate_index,
+        gate_count=progress.gate_count,
+        gate_inner_size=progress.gate_inner_size,
     )
     if isinstance(command_source, (ScriptedGuidance, AuditGuidance)):
         next_control = command_source.update(update)
@@ -652,6 +590,23 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
     if next_command != s.rc_telemetry:
         ctx.write_component("drone.rc_command", next_command.as_array())
         s.rc_telemetry = next_command
+
+    # Referee scoring is the final post-step stage. It always consumes truth,
+    # independent of guidance mode, while guidance sees only the public progress
+    # snapshot constructed above (therefore a pass becomes visible next tick).
+    if race_course.gates and current_truth_position is not None:
+        gate_event = referee.observe_truth(current_truth_position, t)
+        if referee_audit_collector is not None:
+            referee_audit_collector.record_scoring_tick(current_truth_position, tick, gate_event)
+        if gate_event is not None:
+            ctx.component_batch_operation(
+                writes={
+                    "drone.last_gate_passed": np.array([gate_event.gate_index], dtype=np.int64),
+                    "drone.gate_pass_times": np.array(
+                        referee.telemetry_pass_times(), dtype=np.float64
+                    ),
+                }
+            )
 
     # Print status every second
     if t - last_print[0] >= 1.0:
@@ -725,11 +680,12 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         print(f"  Final position: z={final_z:.2f}m, vz={final_vz:.2f}m/s")
         print()
 
-        if fpv_stats is not None:
-            _report_fpv_stats(ctx, fpv_stats, s.sim_time)
+        if fpv is not None:
+            fpv_report[0] = fpv.finish(ctx.read_msg_at, ctx.timestamp)
+            print(fpv_report[0].format())
             print()
 
-        if guidance_mode is GuidanceMode.SCRIPTED:
+        if guidance_mode is GuidanceMode.SCRIPTED and not referee_audit_requested:
             result = evaluate_c0(
                 lockstep_steps=s.lockstep_steps,
                 max_motor=s.max_motor,
@@ -761,6 +717,8 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         if axis_audit is not None:
             print(axis_audit.format())
 
+        emit_final_results()
+
 
 # Return the next non-existent filename with auto-incremented
 # number if the pattern ends in Xs.
@@ -790,26 +748,34 @@ def next_filename(pattern: str) -> str:
 #   elodin editor examples/betaflight-sitl/main.py
 
 db_filename = next_filename("betaflight_dbXXX")
-world.run(
-    system,
-    simulation_rate=config.pid_rate,
-    generate_real_time=True,
-    max_ticks=config.total_sim_ticks,
-    post_step=sitl_post_step,
-    db_path=db_filename,
-    interactive=False,
-)
+try:
+    world.run(
+        system,
+        simulation_rate=config.pid_rate,
+        generate_real_time=True,
+        max_ticks=config.total_sim_ticks,
+        post_step=sitl_post_step,
+        db_path=db_filename,
+        interactive=False,
+    )
+finally:
+    # The CLI imports this file once to generate a recipe before starting the
+    # simulation child. Emit only from a process that actually initialized the
+    # bridge; this covers interrupted/exceptional simulation shutdown without
+    # duplicating the child's normal callback result in the recipe generator.
+    if bridge[0] is not None:
+        emit_final_results()
 # `world.run()` won't reach here unless `interactive` is false.
 print(f"Wrote database to: {db_filename}")
 
 if not bridge[0]:
-    # `elodin run` also evaluates this file in the s10 parent, which never
-    # executes ticks. Only the simulation process can judge the camera.
     print("\nNo simulation ticks executed.")
     print("Usage: python3 examples/betaflight-sitl/main.py run")
 elif c0_result[0] is not None and not c0_result[0].passed:
     sys.exit(1)
+elif referee_audit_result[0] is not None and not referee_audit_result[0].passed:
+    sys.exit(referee_audit_result[0].exit_code)
 elif axis_audit is not None and not axis_audit.passed:
     sys.exit(1)
-elif fpv_stats is not None and not fpv_stats.accepted:
+elif fpv_report[0] is not None and not fpv_report[0].accepted:
     sys.exit(1)

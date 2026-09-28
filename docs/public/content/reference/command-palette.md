@@ -72,7 +72,7 @@ tier. Generated assets are written next to the manifest used by the editor.
 
 ## Time
 
-- `Set Playback Speed`: pick a preset playback speed.
+- `Set Playback Speed`: pick a preset playback speed. The timeline `SPEED` label does the same thing; this entry is an alias.
 - `Goto Tick...`: jump to a specific tick (pauses playback).
 - `Fix Current Time Range`: lock the current selected range as fixed start/end.
 - `Set Time Range`: set start/end offsets using `+`, `-`, or `=` formats (e.g. `+5m`, `-10s`,

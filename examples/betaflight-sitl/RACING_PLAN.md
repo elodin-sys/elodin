@@ -1,8 +1,8 @@
 # Vision-Guided Gate Racing Plan
 
 **Document status:** Authoritative living specification  
-**Last verified against repository:** 2026-09-23  
-**Current resume point:** Package D — manual hardware qualification (Package B complete)
+**Last verified against repository:** 2026-09-26  
+**Current resume point:** Package D — manual hardware qualification (Packages B and C complete)
 
 ## 1. Purpose and authority
 
@@ -123,10 +123,20 @@ The default 8 kHz build busy-waits in Betaflight and consumes approximately one
 CPU core to avoid scheduler wakeup latency. The build-time
 `VIRTUAL_GYRO_SAMPLE_RATE_HZ` and Python `simulation_rate` must remain equal.
 
-The example does **not** currently contain gates, course selection, referee,
-ANGLE-mode racing guidance, perception, race tests, or race CI. An opt-in FPV
-camera (`RACE_CAMERA=1`) is available after Package B; the default scripted run
-still does not require a GPU render server.
+The example now additionally contains:
+
+- Package A's pure protocol/convention tests and machine-readable C0 result;
+- Package B's opt-in FPV camera (`RACE_CAMERA=1`); the default scripted run
+  still does not require a GPU render server;
+- Package C's opt-in `none`/`single` course geometry, four-bar gate rendering,
+  ordered truth referee, fixed-width race telemetry, final race result, and
+  deterministic live positive-crossing qualification; and
+- Package D's command seam, manual-controller integration, ANGLE configuration,
+  one-tick RC latch, and automated physical sign audit. Package D remains open
+  only for operator hardware qualification.
+
+The example does **not** currently contain autonomous truth/vision guidance, the
+three-gate course, perception/tracking, race completion tests, or race CI.
 
 ### 3.1 Current conventions
 
@@ -424,11 +434,13 @@ rather than duplicating unexplained constants.
 
 A frame sample is offered to guidance at most once per nominal 30 Hz camera
 period. `GuidanceUpdate.frame_sample_time` is the requested sample time
-(`ctx.timestamp - latency`), not a renderer capture time. Frame identity for
-counts and observed FPS comes from the timestamp selected by `read_msg_at`:
-the same sample-and-hold lookup as `read_msg`, plus the selected message's
-timestamp. A repeated selected timestamp is sample-and-hold, not a new frame.
-Until the renderer produces a frame, guidance receives `None`.
+(`ctx.timestamp - latency`), not a renderer capture time. `frame_fresh` is
+true only when `read_msg_at` selects a timestamp different from the previous
+sample. A repeated timestamp is sample-and-hold: the held frame may still be
+supplied, with `frame_fresh=False`. Shutdown accounting reports every renderer
+frame (`total_frames`) separately from the frames inside the post-warmup
+window used for observed FPS. Until the renderer produces a frame, guidance
+receives `None`.
 
 ### 7.5 Courses and gates
 
@@ -465,6 +477,12 @@ Only the next gate in sequence can count. For each physics tick:
 3. Interpolate the crossing fraction at local `x = 0`.
 4. Test interpolated local y/z against `±inner_size/2`.
 5. On success, record gate index and simulation time exactly once.
+
+The pass timestamp is linearly interpolated between the previous and current
+simulation sample times using the same plane-crossing fraction; it never uses
+wall-clock time. Lap time runs from simulation time zero through the final
+ordered crossing. An enabled course emits exactly one final result on complete,
+incomplete, or interrupted simulation shutdown after execution starts.
 
 Tests must cover centered, edge-inside, edge-outside, backward, yawed, and fast
 diagonal crossings. The end-of-run output contract is:
@@ -645,32 +663,45 @@ The default camera-disabled run does not start or require the render server.
 **Handoff:** Record the DB path, export command, observed FPS, and any GPU-specific
 limitations.
 
-**Verified 2026-09-23 (review follow-up on `pkg-b-fpv-camera`; WSL2, NVIDIA
-GeForce RTX 3050 6GB Laptop GPU):**
+**Verified 2026-09-26 after merging `main` (`84b7692f`) and the PR 853 review fixes
+(WSL2, NVIDIA GeForce RTX 3050 6GB Laptop GPU):**
 
+- `python3 -m pytest examples/betaflight-sitl/tests -q` → 109 passed.
 - Default: `RACE_CAMERA=0 elodin run examples/betaflight-sitl/main.py` →
   `FPV camera: disabled`, no render-server, C0 `status=PASS`,
-  lockstep_steps `119995`, exit 0 (DB `betaflight_db017`).
+  lockstep_steps `119995`, exit 0 (DB `betaflight_db022`).
 - Camera: `RACE_CAMERA=1 elodin run examples/betaflight-sitl/main.py` →
-  `drone.fpv` `(360, 640, 4)` uint8, first frame at `t≈0.693s`,
-  `sample_count=430`, `offered_sample_fps≈30.06`,
-  `unique_selected_timestamps=388` after warmup,
-  `observed_sim_fps≈30.08` (≥15), `shape_ok=True`, C0 `PASS`,
-  lockstep_steps `119995`, exit 0 (DB `betaflight_db018`).
-- Frame count and FPS use distinct `read_msg_at` selected timestamps.
-  `GuidanceUpdate.frame_sample_time` remains the requested time
-  (`ctx.timestamp - 33000`).
-- A deliberate 1000 FPS floor exited 1 with
-  `FAIL: observed FPS below Package B acceptance floor (1000 FPS)`.
-  The shipped floor is 15. Missing or wrongly shaped frames also exit 1.
+  `drone.fpv` 640×360, `total_frames=437`, `window_frames=389`,
+  `observed_sim_fps≈29.92`, `held_samples=0` on this run, `status=PASS`,
+  C0 `PASS`, exit 0 (DB `betaflight_db024`).
+- Camera plus course: `RACE_CAMERA=1 RACE_COURSE=single elodin run examples/betaflight-sitl/main.py` →
+  `[FPV] total_frames=428 window_frames=389 observed_fps=29.92 status=PASS`
+  and `[RACE] course=single gates_passed=0/1 status=INCOMPLETE`, exit 0
+  (DB `betaflight_db026`). Export:
+  `elodin-db export-videos betaflight_db026 --output /tmp/bf_fpv_b026 --fps 30`
+  → nonempty 429-frame 640×360 video. The scripted climb does not steer at
+  the gate, so the gate is small in the forward view; the schematic test
+  proves the FPV pane and the four gate bars are both present.
+- Camera plus referee audit:
+  `RACE_CAMERA=1 RACE_COURSE=single RACE_REFEREE_AUDIT=1 elodin run examples/betaflight-sitl/main.py`
+  → `[FPV] total_frames=55 window_frames=15 observed_fps=30.01 status=PASS`
+  and `[C-REFEREE-AUDIT] ... status=PASS`, exit 0 (DB `betaflight_db027`).
+  The 2.5 s audit still has 15 post-warmup frames, so no short-window exception
+  was added.
+- `frame_fresh` is true only for a new selected timestamp. Held frames are
+  still offered with `frame_fresh=False` (covered by
+  `tests/test_fpv_camera.py`).
 - Export:
-  `elodin-db export-videos betaflight_db018 --output /tmp/bf_fpv_videos_b018 --fps 30`
-  → nonempty `drone.fpv.mp4` (432 frames, 640×360 H.264).
-- Limitations: wall-clock realtime factor is still below 1× with the camera
-  on this host. The local venv must import the WSL `nox-py` build that
-  contains `read_msg_at`.
+  `elodin-db export-videos betaflight_db024 --output /tmp/bf_fpv_b024 --fps 30`
+  → nonempty `drone.fpv.mp4` (438 frames, 640×360 H.264). The export can be
+  one frame ahead of `total_frames` because the render-server may write one
+  more frame while it shuts down after the final tick.
+- Raising the acceptance floor to 1000 FPS made the same camera run exit 1
+  with `reason=fps-below-15`. The shipped floor is 15.
+- FPV sampling lives in `fpv_camera.py`. The schematic in `schematic.py`
+  injects only the FPV pane, frustum flag, and ground plane.
 
-### [ ] C — Course and referee vertical slice
+### [x] C — Course and referee vertical slice
 
 **Objective:** Provide independently tested course geometry, rendering, pass
 scoring, and race results without autonomous guidance.
@@ -696,6 +727,24 @@ prove valid, missed, backward, yawed, and diagonal behavior.
 
 **Handoff:** Record final gate coordinate/yaw conventions and the race result
 example.
+
+Additional positive-path qualification (2026-09-16):
+
+```bash
+RACE_COURSE=single RACE_REFEREE_AUDIT=1 \
+  elodin run examples/betaflight-sitl/main.py
+```
+
+This separate integration fixture leaves the contract course unchanged, starts
+the disarmed drone at `(5, 0, 4.9)` m with `+10 m/s` world-X velocity, and ends
+at 2.5 simulated seconds before scripted guidance leaves its safe boot phase.
+Six-DOF gravity and drag produced one gate-0 pass at interpolated simulation
+time `1.085149 s` near `(10.0, 0.0, 1.7958)` m and finished at X=`11.7776 m`;
+telemetry read back on the following callback tick matched the event and
+retained both unused `-1.0` slots. The process emitted exactly one complete
+`[RACE]` line and one passing `[C-REFEREE-AUDIT]` line and returned zero. This
+qualifies the live truth/referee/telemetry/result path, not steering or powered
+autonomous flight.
 
 ### [ ] D — Manual piloting, control seam, and ANGLE mode
 
@@ -1041,10 +1090,10 @@ branch for later resumption.
 
 | Package | Status | Evidence / notes |
 |---|---|---|
-| A | Complete | 24 pure tests pass; C0 returned 0 with 119,995 simulation-loop lockstep responses, max motor 0.574, and 56.837 m takeoff rise in 29 wall-clock seconds after rebuilding latest main. Deliberate 100 m criterion returned 1. Shared headless propagation fixes: `301ae367` (`#837`) and lifecycle follow-up `36ee3431` (`#838`). |
-| B | Complete | `RACE_CAMERA=1` FPV slice in `main.py` on post-A/D tree; verified 2026-09-11 (see Package B handoff) |
-| C | Not started | No course or referee code |
-| D | In progress | Command seam, one-tick ordering, AUX2 ANGLE configuration, s10 manual controller, 250 ms heartbeat failsafe, DB telemetry, and simulation-time physical sign audit implemented. The audit bypasses the external controller but retains the common semantic-to-RC/Betaflight path. 50 pure tests and 5 controller tests pass; live audit passes with roll 0.446, pitch 0.444, yaw 1.480 rad/s and max motor 0.391. Manual hardware qualification remains. |
+| A | Complete | 24 pure tests pass; the recorded C0 acceptance run returned 0 with 119,995 simulation-loop lockstep responses, max motor 0.574, and 56.837 m takeoff rise in 29 wall-clock seconds. A deliberate 100 m criterion returned 1. Shared headless propagation fixes: `301ae367` (`#837`) and lifecycle follow-up `36ee3431` (`#838`). |
+| B | Complete | `fpv_camera.py` owns sampling, freshness, exact frame accounting, and acceptance. Verified 2026-09-26: `total_frames=437`, `window_frames=389`, `observed_fps=29.92`, exit 0 (DB `betaflight_db024`). Held-frame freshness and window bounds are pure tests. |
+| C | Complete | `none`/`single` startup selection, static four-bar orange rendering, ordered truth referee, Package D progress integration, fixed-width referee telemetry, exactly one final enabled-course result, and an opt-in positive live audit are implemented. The qualification suite passed 96 tests. The live audit used the unchanged vertical 2.5 m gate, reported one complete pass at 1.085149 s, and verified later-tick telemetry readback. Default C0 and ordinary incomplete `single` behavior were preserved. A 1280×720 H.264 recording and crossing frame were reviewed as qualification evidence; a PR should attach or upload those artifacts separately rather than rely on a host-local path. |
+| D | In progress | Command seam, one-tick ordering, AUX2 ANGLE configuration, s10 manual controller, 250 ms heartbeat failsafe, DB telemetry, and simulation-time physical sign audit implemented. The audit bypasses the external controller but retains the common semantic-to-RC/Betaflight path. The combined qualification passed with roll 1.006, pitch 1.011, yaw 1.479 rad/s and accepted max motor 0.391; 5 controller tests also pass. Manual hardware qualification remains. |
 | E | Blocked by C, D | No truth guidance |
 | F | Blocked by E | No course controller |
 | G | Ready (needs B) | Camera contract available; racing geometry helpers not yet in code |
@@ -1064,33 +1113,20 @@ The Package D implementation and deterministic physical audit are complete, but
 Package D must remain open until an operator has armed, taken off, exercised
 roll/pitch/yaw/throttle, landed, and disarmed.
 
-After recording that result in the Package D handoff, Package E is the
-recommended implementation continuation.
+Record that result in this plan. Package E is then the recommended implementation
+continuation because its C and D code prerequisites are present. Package G can
+begin on the perception path because Package B's camera contract is present.
 
-Package A verification from the repository root, with the Elodin Python
-environment active and the current release CLI on `PATH`:
-
-```bash
-python3 -m pytest examples/betaflight-sitl/tests -q
-elodin run examples/betaflight-sitl/main.py
-```
-
-The verified C0 result was:
-
-```text
-[C0] lockstep_steps=119995 motor_response=true max_motor=0.574 takeoff_delta_m=56.837 status=PASS
-```
-
-The pure suite passed 24 tests in 0.15 seconds and C0 completed in 29 wall-clock
-seconds. Raising the takeoff criterion temporarily to 100 m emitted
-`status=FAIL` and returned process status 1; the required 0.1 m criterion was
-then restored.
+Package C's durable qualification command, output contract, measured result, and
+scope are recorded with its work-package acceptance evidence above. User-facing
+headless/editor audit and reproducible video-capture instructions, including the
+recoverable MPEG-TS fallback, are maintained in `README.md`.
 
 ## 13. Decision log
 
 | Date | Decision | Reason and affected packages |
 |---|---|---|
-| 2026-09-23 | Count FPV frames by the `read_msg_at` selected timestamp, and exit nonzero when `RACE_CAMERA=1` gets no valid frames or FPS below 15. | Pixel hashes undercounted near-uniform frames. `#851` already returns the selected message timestamp. Guidance still stores the requested sample time. Affects B and later G, H, and J. |
+| 2026-09-26 | Keep FPV sampling in `fpv_camera.py`. `frame_fresh` means a new `read_msg_at` timestamp, and shutdown FPS uses only timestamps inside the post-warmup window. | Held frames were marked fresh, and the cursor sweep was not an exact frame count. The schematic injects only the FPV fragments. Affects B and later G, H, and J. |
 | 2026-09-03 | Run headless recipes once while retaining watched recipes in the editor. | Package A exposed that a failed simulation child was logged and then waited for source reload, so `elodin run` could not return nonzero. The approved shared fixes (`301ae367`, `#837`; lifecycle follow-up `36ee3431`, `#838`) make headless execution one-shot without changing interactive editor recovery, centralize recipe execution dispatch in s10, and add an end-to-end lifecycle CI check. This enables failure contracts in A, F, K, and L. |
 | 2026-09-01 | Keep the current ENU/FLU world, Gazebo-bridge conventions, native motor order, and 8 kHz lockstep. | These are the implemented baseline; changing them is not required for racing. A–L rely on them. |
 | 2026-09-01 | Preserve scripted takeoff as the default and make other control modes opt-in. | Allows every package to merge independently without replacing the reference SITL example prematurely. |

@@ -56,6 +56,10 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let index_x_b = index_x_buffer[vertex.instance_index + 1];
     let index_y_b = index_y_buffer[vertex.instance_index + 1];
     let index_z_b = index_z_buffer[vertex.instance_index + 1];
+    // Index zero separates strips; collapse those instances instead of relying on NaN clipping.
+    if index_x_a == 0u || index_x_b == 0u {
+        return VertexOutput(vec4(0.0, 0.0, 0.0, 1.0), vec4(0.0));
+    }
     // Let's not assume ENU here.
     let point_a = vec3(x_values[index_x_a], y_values[index_y_a], z_values[index_z_a]);
     let point_b = vec3(x_values[index_x_b], y_values[index_y_b], z_values[index_z_b]);

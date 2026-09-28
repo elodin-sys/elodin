@@ -973,9 +973,7 @@ pub fn create_log_stream(tile_id: Option<TileId>) -> PaletteItem {
 
 fn set_playback_speed() -> PaletteItem {
     PaletteItem::new("Set Playback Speed", TIME_LABEL, |_: In<String>| {
-        let speeds = [
-            0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0, 20.0, 30.0, 40.0, 50.0, 100.0,
-        ];
+        let speeds = crate::ui::timeline::playback::PLAYBACK_SPEED_PRESETS;
         let next_page = PalettePage::new(
             speeds
                 .into_iter()
@@ -983,8 +981,16 @@ fn set_playback_speed() -> PaletteItem {
                     PaletteItem::new(
                         speed.to_string(),
                         "SPEED".to_string(),
-                        move |_: In<String>, mut playback_speed: ResMut<PlaybackSpeed>| {
-                            playback_speed.0 = speed;
+                        move |_: In<String>,
+                              mut playback_speed: ResMut<PlaybackSpeed>,
+                              mut latest_follow: ResMut<LatestFollow>,
+                              mut auto_follow: ResMut<AutoFollowLatestState>| {
+                            crate::ui::timeline::playback::set_playback_speed(
+                                speed,
+                                &mut playback_speed,
+                                &mut latest_follow,
+                                &mut auto_follow,
+                            );
                             PaletteEvent::Exit
                         },
                     )

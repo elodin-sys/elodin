@@ -24,20 +24,37 @@ use crate::{
 
 use super::widgets::{SystemStateExt, WidgetSystem, WidgetSystemExt};
 
+pub mod playback;
 pub mod timeline_controls;
 pub mod timeline_slider;
 
 pub(crate) fn plugin(app: &mut App) {
     app.add_plugins(timeline_controls::plugin)
         .init_resource::<PlaybackSpeed>()
+        .init_resource::<playback::PlaybackLoop>()
+        .init_resource::<playback::PlaybackRegion>()
+        .init_resource::<playback::PlaybackDiscontinuities>()
         .init_resource::<TimelineSettings>()
         .init_resource::<TelemetryMode>()
         .init_resource::<LatestFollow>()
         .init_resource::<AutoFollowLatestState>()
         .add_systems(
+            PreUpdate,
+            playback::skip_discontinuities
+                .after(crate::advance_playback)
+                .before(crate::follow_latest),
+        )
+        .add_systems(
             Update,
             (
                 reset_playback_speed_on_stream_change,
+                playback::apply_recorded_playback_speed,
+            )
+                .chain(),
+        )
+        .add_systems(
+            Update,
+            (
                 reset_latest_follow_on_stream_change,
                 reset_auto_follow_latest_state,
                 auto_start_follow_latest,
@@ -45,6 +62,12 @@ pub(crate) fn plugin(app: &mut App) {
         );
 }
 
+/// Multiplier on wall-clock time while the playhead advances.
+///
+/// Session state, like [`playback::PlaybackLoop`] and [`playback::PlaybackRegion`].
+/// None of them are written into the KDL schematic: a schematic is shared
+/// layout, and opening it must not resume the previous session's speed, loop,
+/// or selection.
 #[derive(bevy::prelude::Resource, Clone, Copy, Debug)]
 pub struct PlaybackSpeed(pub f64);
 
@@ -118,6 +141,7 @@ struct AutoFollowLatestParams<'w> {
     current_timestamp: ResMut<'w, CurrentTimestamp>,
     paused: ResMut<'w, crate::ui::Paused>,
     latest_follow: ResMut<'w, LatestFollow>,
+    playback_loop: ResMut<'w, playback::PlaybackLoop>,
     state: ResMut<'w, AutoFollowLatestState>,
 }
 
@@ -133,9 +157,18 @@ fn reset_playback_speed_on_stream_change(
 fn reset_latest_follow_on_stream_change(
     current_stream_id: Res<CurrentStreamId>,
     mut latest_follow: ResMut<LatestFollow>,
+    mut playback_loop: ResMut<playback::PlaybackLoop>,
+    mut playback_region: ResMut<playback::PlaybackRegion>,
+    mut discontinuities: ResMut<playback::PlaybackDiscontinuities>,
 ) {
     if current_stream_id.is_changed() {
         latest_follow.0 = false;
+        *discontinuities = playback::PlaybackDiscontinuities::default();
+        // Loop and region belong to one recording. Kept across a connect they
+        // name timestamps the new stream does not have, so step_loop pulls the
+        // playhead outside the new range on every frame.
+        playback_loop.0 = false;
+        playback_region.0 = None;
     }
 }
 
@@ -168,6 +201,7 @@ fn auto_start_follow_latest(params: AutoFollowLatestParams) {
         mut current_timestamp,
         mut paused,
         mut latest_follow,
+        mut playback_loop,
         mut state,
     } = params;
 
@@ -190,6 +224,10 @@ fn auto_start_follow_latest(params: AutoFollowLatestParams) {
         }
         Some(baseline_latest) if latest.0 > baseline_latest => {
             latest_follow.0 = true;
+            // Follow and loop are exclusive: the button paths turn the loop off
+            // when they enable follow, and this automatic path must too, or a
+            // schematic with `follow_latest` leaves both on.
+            playback_loop.0 = false;
             paused.0 = false;
             current_timestamp.0 = latest.0;
             state.armed = false;
@@ -496,5 +534,76 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
                     PointerOwnerPriority::Panel,
                 );
             });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use impeller2::types::Timestamp;
+
+    #[test]
+    fn a_new_stream_drops_the_loop_and_its_region() {
+        let mut app = App::new();
+        app.insert_resource(CurrentStreamId(1))
+            .init_resource::<LatestFollow>()
+            .init_resource::<playback::PlaybackLoop>()
+            .init_resource::<playback::PlaybackRegion>()
+            .init_resource::<playback::PlaybackDiscontinuities>()
+            .add_systems(Update, reset_latest_follow_on_stream_change);
+
+        // The first run consumes the change from inserting the stream id.
+        app.update();
+        app.world_mut().resource_mut::<playback::PlaybackLoop>().0 = true;
+        app.world_mut().resource_mut::<playback::PlaybackRegion>().0 =
+            Some((Timestamp(10), Timestamp(20)));
+
+        app.update();
+        assert!(
+            app.world().resource::<playback::PlaybackLoop>().0,
+            "the same stream keeps the loop"
+        );
+
+        app.world_mut().resource_mut::<CurrentStreamId>().0 = 2;
+        app.update();
+        assert!(!app.world().resource::<playback::PlaybackLoop>().0);
+        assert!(
+            app.world()
+                .resource::<playback::PlaybackRegion>()
+                .0
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn auto_follow_turns_the_loop_off() {
+        let mut app = App::new();
+        app.insert_resource(CurrentStreamId(1))
+            .init_resource::<TimelineSettings>()
+            .insert_resource(EarliestTimestamp(Timestamp(0)))
+            .insert_resource(LastUpdated(Timestamp(1_000)))
+            .init_resource::<CurrentTimestamp>()
+            .init_resource::<crate::ui::Paused>()
+            .init_resource::<LatestFollow>()
+            .init_resource::<playback::PlaybackLoop>()
+            .init_resource::<AutoFollowLatestState>()
+            .add_systems(Update, auto_start_follow_latest);
+
+        app.world_mut()
+            .resource_mut::<TimelineSettings>()
+            .follow_latest = true;
+        app.world_mut().resource_mut::<playback::PlaybackLoop>().0 = true;
+
+        // First tick records the baseline; the data has not moved yet.
+        app.update();
+        assert!(!app.world().resource::<LatestFollow>().0);
+
+        app.world_mut().resource_mut::<LastUpdated>().0 = Timestamp(2_000);
+        app.update();
+        assert!(app.world().resource::<LatestFollow>().0);
+        assert!(
+            !app.world().resource::<playback::PlaybackLoop>().0,
+            "following the live edge and looping are exclusive"
+        );
     }
 }

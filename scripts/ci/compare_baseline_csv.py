@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Compare exported CSV telemetry against a known-good baseline.
+"""Compare exported CSV telemetry changes against a known-good baseline.
 
 The comparison is numeric and tolerance-based for all numeric cells. Columns
 named ``time`` are ignored so that runs with different wall-clock timestamps do
-not fail CI.
+not fail CI. Consecutive duplicate states are collapsed so dense and sparse
+recordings compare with the same semantics.
 """
 
 from __future__ import annotations
@@ -140,6 +141,17 @@ def _selected_columns(header: list[str]) -> list[int]:
     return [idx for idx, name in enumerate(header) if name.strip().lower() not in IGNORED_COLUMNS]
 
 
+def _change_rows(rows: list[list[str]], columns: list[int]) -> list[tuple[int, list[str]]]:
+    changes: list[tuple[int, list[str]]] = []
+    previous: tuple[str, ...] | None = None
+    for row_number, row in enumerate(rows, start=2):
+        state = tuple(row[column] for column in columns)
+        if state != previous:
+            changes.append((row_number, row))
+            previous = state
+    return changes
+
+
 def _compare_file(
     rel_path: str,
     baseline_path: Path,
@@ -158,27 +170,34 @@ def _compare_file(
     if baseline_names != candidate_names:
         return None, f"{rel_path}: header mismatch after ignoring time columns"
 
-    if len(baseline_rows) != len(candidate_rows):
+    for label, header, rows in (
+        ("baseline", baseline_header, baseline_rows),
+        ("candidate", candidate_header, candidate_rows),
+    ):
+        for row_index, row in enumerate(rows, start=2):
+            if len(row) != len(header):
+                return None, (
+                    f"{rel_path}: malformed {label} row {row_index} "
+                    f"(expected {len(header)} columns, got {len(row)})"
+                )
+
+    baseline_changes = _change_rows(baseline_rows, baseline_cols)
+    candidate_changes = _change_rows(candidate_rows, candidate_cols)
+    if len(baseline_changes) != len(candidate_changes):
         return None, (
-            f"{rel_path}: row count mismatch "
-            f"(baseline={len(baseline_rows)}, candidate={len(candidate_rows)})"
+            f"{rel_path}: change-row count mismatch "
+            f"(baseline={len(baseline_changes)} from {len(baseline_rows)} rows, "
+            f"candidate={len(candidate_changes)} from {len(candidate_rows)} rows)"
         )
 
     max_abs = 0.0
     max_rel = 0.0
 
-    for row_index, (base_row, cand_row) in enumerate(zip(baseline_rows, candidate_rows), start=2):
-        if len(base_row) != len(baseline_header):
-            return None, (
-                f"{rel_path}: malformed baseline row {row_index} "
-                f"(expected {len(baseline_header)} columns, got {len(base_row)})"
-            )
-        if len(cand_row) != len(candidate_header):
-            return None, (
-                f"{rel_path}: malformed candidate row {row_index} "
-                f"(expected {len(candidate_header)} columns, got {len(cand_row)})"
-            )
-
+    for change_index, (baseline_change, candidate_change) in enumerate(
+        zip(baseline_changes, candidate_changes, strict=True), start=1
+    ):
+        baseline_row_number, base_row = baseline_change
+        candidate_row_number, cand_row = candidate_change
         for name, base_col, cand_col in zip(baseline_names, baseline_cols, candidate_cols):
             baseline_raw = base_row[base_col].strip()
             candidate_raw = cand_row[cand_col].strip()
@@ -190,14 +209,14 @@ def _compare_file(
                 if math.isnan(baseline_num) or math.isnan(candidate_num):
                     if not (math.isnan(baseline_num) and math.isnan(candidate_num)):
                         return None, (
-                            f"{rel_path}:{name}: row {row_index} "
+                            f"{rel_path}:{name}: change {change_index} "
                             f"NaN mismatch (baseline={baseline_raw}, candidate={candidate_raw})"
                         )
                     continue
                 if math.isinf(baseline_num) or math.isinf(candidate_num):
                     if baseline_num != candidate_num:
                         return None, (
-                            f"{rel_path}:{name}: row {row_index} "
+                            f"{rel_path}:{name}: change {change_index} "
                             f"Inf mismatch (baseline={baseline_raw}, candidate={candidate_raw})"
                         )
                     continue
@@ -214,19 +233,21 @@ def _compare_file(
                     abs_tol=tolerance.abs_tol,
                 ):
                     return None, (
-                        f"{rel_path}:{name}: row {row_index} exceeds tolerance "
-                        f"(baseline={baseline_num:.16g}, candidate={candidate_num:.16g}, "
+                        f"{rel_path}:{name}: change {change_index} exceeds tolerance "
+                        f"(baseline row {baseline_row_number}, "
+                        f"candidate row {candidate_row_number}; "
+                        f"baseline={baseline_num:.16g}, candidate={candidate_num:.16g}, "
                         f"abs_diff={abs_diff:.3e}, rel_diff={rel_diff:.3e}, "
                         f"abs_tol={tolerance.abs_tol:.3e}, rel_tol={tolerance.rel_tol:.3e})"
                     )
             elif baseline_raw != candidate_raw:
                 return None, (
-                    f"{rel_path}:{name}: row {row_index} string mismatch "
+                    f"{rel_path}:{name}: change {change_index} string mismatch "
                     f"(baseline={baseline_raw!r}, candidate={candidate_raw!r})"
                 )
 
     return FileStats(
-        rel_path=rel_path, rows=len(baseline_rows), max_abs=max_abs, max_rel=max_rel
+        rel_path=rel_path, rows=len(baseline_changes), max_abs=max_abs, max_rel=max_rel
     ), None
 
 
