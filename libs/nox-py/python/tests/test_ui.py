@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import sys
 import time
 from pathlib import Path
 
@@ -193,6 +194,21 @@ def test_point_trails_to_python_roundtrip():
     namespace = {}
     exec(compile(generated, "<point-trails>", "exec"), namespace)
     assert _canonical(namespace["build"]()) == _canonical(ui.from_kdl(source))
+
+
+def test_watch_load_module_supports_sibling_imports(tmp_path):
+    from elodin.ui.watch import _load_module
+
+    dependency_name = "watch_sibling_dependency"
+    (tmp_path / f"{dependency_name}.py").write_text("VALUE = 42\n")
+    script = tmp_path / "schematic.py"
+    script.write_text(f"from {dependency_name} import VALUE\n")
+    original_path = sys.path.copy()
+    try:
+        assert _load_module(script).VALUE == 42
+        assert sys.path == original_path
+    finally:
+        sys.modules.pop(dependency_name, None)
 
 
 def test_write_roundtrip(tmp_path):

@@ -23,7 +23,12 @@ def _load_module(path: Path):
     if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot load {path}")
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    original_path = sys.path.copy()
+    sys.path.insert(0, str(path.resolve().parent))
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.path[:] = original_path
     return mod
 
 
