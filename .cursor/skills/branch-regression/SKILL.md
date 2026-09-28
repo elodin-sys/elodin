@@ -42,8 +42,9 @@ For each branch (base first, then head):
 
 ```bash
 git switch "$BASE_BRANCH"            # then later: git switch "$HEAD_BRANCH"
-nix develop --command just install   # rebuild py + editor + db for THIS branch
-nix develop --command bash .cursor/skills/branch-regression/capture_branch.sh "$OUT/base"
+nix develop --command bash -lc \
+  'just install && bash .cursor/skills/branch-regression/capture_branch.sh "$1"' \
+  _ "$OUT/base"
 # head pass writes to "$OUT/head"
 ```
 
@@ -53,6 +54,10 @@ gallery (ball, three-body, drone, rc-jet, apollo-lander, video-stream,
 sensor-camera, cube-sat, voyager, geo-frames); pass example names to override.
 Headless-only examples (frames, linalg, stablehlo, cube-sat-pysim) are run with
 `elodin run` for logs/exit only — add them explicitly if wanted.
+
+Build and capture must run in the same `nix develop` invocation. Each Nix shell
+has its own virtual environment, so a separate capture shell cannot import the
+Python package installed by `just install`.
 
 Rules baked into the script (do not work around them):
 
