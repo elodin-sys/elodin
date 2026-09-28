@@ -224,6 +224,19 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
                     ));
 
                     super::skybox_status::draw_skybox_status_bar(ui, skybox_ui, skybox_cache);
+
+                    let shortcut = if cfg!(target_os = "macos") {
+                        "\u{2318}P"
+                    } else {
+                        "Ctrl+P"
+                    };
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(
+                            egui::RichText::new(format!("Command Palette  {shortcut}"))
+                                .text_style(egui::TextStyle::Small)
+                                .color(get_scheme().text_secondary),
+                        );
+                    });
                 });
             },
         );
