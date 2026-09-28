@@ -23,8 +23,16 @@ import sys
 from pathlib import Path
 from urllib.parse import quote
 
-TIMESTAMP = re.compile(r"^\S*\d{2}:\d{2}:\d{2}\S*\s+")
+ANSI = re.compile(r"\x1b\[[0-9;]*m")
+TIMESTAMP = re.compile(r"\b\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d+)?\s+")
+ISOLATED_WORKTREE = re.compile(r"/tmp/elodin-regression-(?:main|head)")
 LEVEL = re.compile(r"\b(WARN|ERROR)\b")
+
+
+def normalize_log_line(line: str) -> str:
+    line = ANSI.sub("", line)
+    line = TIMESTAMP.sub("", line, count=1)
+    return ISOLATED_WORKTREE.sub("<repo>", line).strip()
 
 
 def log_issues(path: Path) -> set[str]:
@@ -33,7 +41,7 @@ def log_issues(path: Path) -> set[str]:
     issues = set()
     for line in path.read_text(errors="replace").splitlines():
         if LEVEL.search(line):
-            issues.add(TIMESTAMP.sub("", line).strip())
+            issues.add(normalize_log_line(line))
     return issues
 
 
