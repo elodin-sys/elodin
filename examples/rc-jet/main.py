@@ -133,6 +133,19 @@ def setup_world(
     return world, jet, target
 
 
+def _run_max_ticks() -> int | None:
+    """Interactive flights run until stopped.
+
+    Headless runs (`ELODIN_NON_INTERACTIVE=1`) still stop after the scenario
+    window. `ELODIN_MAX_TICKS` overrides either mode.
+    """
+    if override := os.environ.get("ELODIN_MAX_TICKS"):
+        return int(override)
+    if os.environ.get("ELODIN_NON_INTERACTIVE") == "1":
+        return NUMERICS.total_ticks
+    return None
+
+
 MODEL = bdx_model.load()
 NUMERICS = Numerics()
 SCENARIO = load_scenario(MODEL, FALLBACKS)
@@ -165,6 +178,11 @@ print(
     f"({SCENARIO.initial.fuel_kg:.2f} kg fuel)"
 )
 print(f"Time step: {NUMERICS.dt:.6f} s ({1 / NUMERICS.dt:.0f} Hz)")
+_max_ticks = _run_max_ticks()
+if _max_ticks is None:
+    print("Duration: until stopped")
+else:
+    print(f"Duration: {_max_ticks * NUMERICS.dt:.0f} s ({_max_ticks} ticks)")
 print()
 
 # RC controller runs alongside the simulation (gamepad or keyboard).
@@ -197,7 +215,7 @@ world.run(
     sim_system,
     simulation_rate=1.0 / NUMERICS.dt,
     generate_real_time=True,
-    max_ticks=int(os.environ.get("ELODIN_MAX_TICKS", NUMERICS.total_ticks)),
+    max_ticks=_max_ticks,
     db_path=os.environ.get("ELODIN_DB_PATH"),
     interactive=os.environ.get("ELODIN_NON_INTERACTIVE") != "1",
 )
