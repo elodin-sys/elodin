@@ -10,7 +10,7 @@
 # listed in HEADLESS_EXAMPLES below.
 set -uo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
+REPO_ROOT="${BRANCH_REGRESSION_REPO_ROOT:-$(cd "$(dirname "$0")/../../.." && pwd)}"
 OUT_DIR="${1:?usage: capture_branch.sh <out-dir> [example ...]}"
 shift
 EXAMPLES=("$@")
