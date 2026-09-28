@@ -21,6 +21,16 @@ cd docs/public
 zola serve
 ```
 
+### CLI reference
+
+Regenerate the command reference from the repo root:
+
+```sh
+cargo run --release --package elodin -- --markdown-help
+```
+
+Put that output into `content/reference/elodin-cli.md`, replacing everything below the front matter. Keep the `+++` block at the top of the file.
+
 ### Video Encoding
 
 ```sh
