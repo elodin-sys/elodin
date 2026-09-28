@@ -183,6 +183,18 @@ def test_viewport_rejects_invalid_frustums_up_marker():
         ui.viewport(frustums_up_marker="triangle")
 
 
+def test_point_trails_to_python_roundtrip():
+    source = (
+        'point_trails "effector.positions" status="effector.hit" start="effector.fired" '
+        'head_size=0.15 head_shape="sphere" line_width=4.0 max_length=3.0 '
+        'frame="ECEF" { color 255 193 7; hit_color 255 255 255 }'
+    )
+    generated = ui.to_python(source)
+    namespace = {}
+    exec(compile(generated, "<point-trails>", "exec"), namespace)
+    assert _canonical(namespace["build"]()) == _canonical(ui.from_kdl(source))
+
+
 def test_write_roundtrip(tmp_path):
     built = ui.schematic(ui.graph("x"))
     path = tmp_path / "out.kdl"

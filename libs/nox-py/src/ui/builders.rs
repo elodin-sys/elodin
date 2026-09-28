@@ -31,6 +31,12 @@ pub struct PyLine3d {
     pub(crate) inner: Line3d,
 }
 
+#[pyclass(name = "PointTrails", module = "elodin.ui")]
+#[derive(Clone, Debug)]
+pub struct PyPointTrails {
+    pub(crate) inner: PointTrails,
+}
+
 #[pyclass(name = "VectorArrow", module = "elodin.ui")]
 #[derive(Clone, Debug)]
 pub struct PyVectorArrow {
@@ -1453,6 +1459,63 @@ fn line_3d(
 
 #[pyfunction]
 #[pyo3(signature = (
+    component,
+    status=None,
+    start=None,
+    head_size=1.0,
+    head_shape="cube",
+    line_width=1.0,
+    max_length=None,
+    color=None,
+    hit_color=None,
+    frame=None,
+))]
+#[allow(clippy::too_many_arguments)]
+fn point_trails(
+    component: &Bound<'_, PyAny>,
+    status: Option<&Bound<'_, PyAny>>,
+    start: Option<&Bound<'_, PyAny>>,
+    head_size: f32,
+    head_shape: &str,
+    line_width: f32,
+    max_length: Option<f32>,
+    color: Option<&Bound<'_, PyAny>>,
+    hit_color: Option<&Bound<'_, PyAny>>,
+    frame: Option<&str>,
+) -> PyResult<PyPointTrails> {
+    let head_shape = match head_shape {
+        "cube" => PointTrailsHeadShape::Cube,
+        "sphere" => PointTrailsHeadShape::Sphere,
+        other => {
+            return Err(PyValueError::new_err(format!(
+                "unknown point trail head shape {other:?}"
+            )));
+        }
+    };
+    if max_length.is_some_and(|value| !value.is_finite() || value <= 0.0) {
+        return Err(PyValueError::new_err(
+            "max_length must be a positive distance in meters",
+        ));
+    }
+    Ok(PyPointTrails {
+        inner: PointTrails {
+            component: extract_eql(component)?,
+            status: extract_optional_eql(status)?,
+            start: extract_optional_eql(start)?,
+            head_size,
+            head_shape,
+            line_width,
+            max_length,
+            color: extract_optional_color(color)?,
+            hit_color: extract_optional_color(hit_color)?,
+            frame: frame.map(parse_frame).transpose()?,
+            node_id: NodeId::default(),
+        },
+    })
+}
+
+#[pyfunction]
+#[pyo3(signature = (
     vector,
     origin=None,
     name=None,
@@ -1595,6 +1658,7 @@ pub(super) fn register_builders(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(thruster, module)?)?;
     module.add_function(wrap_pyfunction!(object_3d, module)?)?;
     module.add_function(wrap_pyfunction!(line_3d, module)?)?;
+    module.add_function(wrap_pyfunction!(point_trails, module)?)?;
     module.add_function(wrap_pyfunction!(vector_arrow, module)?)?;
     module.add_function(wrap_pyfunction!(world_mesh, module)?)?;
     module.add_function(wrap_pyfunction!(window, module)?)?;

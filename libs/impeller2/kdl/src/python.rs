@@ -173,6 +173,7 @@ fn schematic_elem_expr(elem: &SchematicElem) -> PyExpr {
         SchematicElem::Panel(panel) => panel_expr(panel, None),
         SchematicElem::Object3d(object) => object_expr(object),
         SchematicElem::Line3d(line) => line_expr(line),
+        SchematicElem::PointTrails(trails) => point_trails_expr(trails),
         SchematicElem::VectorArrow(arrow) => vector_arrow_expr(arrow),
         SchematicElem::WorldMesh(mesh) => world_mesh_expr(mesh),
         SchematicElem::Window(window) => window_expr(window),
@@ -676,6 +677,29 @@ fn line_expr(line: &Line3d) -> PyExpr {
         .kw_opt("future_color", line.future_color.map(py_color))
         .kw("perspective", py_bool(line.perspective))
         .kw_opt("frame", line.frame.map(|frame| py_str(<&str>::from(frame))))
+}
+
+fn point_trails_expr(trails: &PointTrails) -> PyExpr {
+    PyExpr::call("point_trails")
+        .arg(py_str(&trails.component))
+        .kw_opt("status", trails.status.as_deref().map(py_str))
+        .kw_opt("start", trails.start.as_deref().map(py_str))
+        .kw("head_size", py_f32(trails.head_size))
+        .kw(
+            "head_shape",
+            py_str(match trails.head_shape {
+                PointTrailsHeadShape::Cube => "cube",
+                PointTrailsHeadShape::Sphere => "sphere",
+            }),
+        )
+        .kw("line_width", py_f32(trails.line_width))
+        .kw_opt("max_length", trails.max_length.map(py_f32))
+        .kw_opt("color", trails.color.map(py_color))
+        .kw_opt("hit_color", trails.hit_color.map(py_color))
+        .kw_opt(
+            "frame",
+            trails.frame.map(|frame| py_str(<&str>::from(frame))),
+        )
 }
 
 fn vector_arrow_expr(arrow: &VectorArrow3d) -> PyExpr {

@@ -23,6 +23,7 @@ Schematic = _native.Schematic
 Panel = _native.Panel
 Object3D = _native.Object3D
 Line3d = _native.Line3d
+PointTrails = _native.PointTrails
 VectorArrow = _native.VectorArrow
 WorldMesh = _native.WorldMesh
 Window = _native.Window
@@ -94,6 +95,7 @@ thruster_light = _native.thruster_light
 thruster = _native.thruster
 object_3d = _native.object_3d
 line_3d = _native.line_3d
+point_trails = _native.point_trails
 vector_arrow = _native.vector_arrow
 world_mesh = _native.world_mesh
 window = _native.window
@@ -103,6 +105,7 @@ __all__ = [
     "Panel",
     "Object3D",
     "Line3d",
+    "PointTrails",
     "VectorArrow",
     "WorldMesh",
     "Window",
@@ -183,6 +186,7 @@ __all__ = [
     "thruster",
     "object_3d",
     "line_3d",
+    "point_trails",
     "vector_arrow",
     "world_mesh",
     "window",

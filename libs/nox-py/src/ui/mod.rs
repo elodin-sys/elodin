@@ -175,6 +175,14 @@ fn push_elem(schematic: &mut Schematic, obj: &Bound<'_, PyAny>) -> PyResult<()> 
             .push(impeller2_wkt::SchematicElem::Line3d(line.inner.clone()));
         return Ok(());
     }
+    if let Ok(trails) = obj.extract::<PyRef<'_, PyPointTrails>>() {
+        schematic
+            .elems
+            .push(impeller2_wkt::SchematicElem::PointTrails(
+                trails.inner.clone(),
+            ));
+        return Ok(());
+    }
     if let Ok(arrow) = obj.extract::<PyRef<'_, PyVectorArrow>>() {
         schematic
             .elems
@@ -196,7 +204,7 @@ fn push_elem(schematic: &mut Schematic, obj: &Bound<'_, PyAny>) -> PyResult<()> 
         return Ok(());
     }
     Err(PyTypeError::new_err(
-        "schematic elements must be Panel, Object3D, Line3d, VectorArrow, WorldMesh, or Window",
+        "schematic elements must be Panel, Object3D, Line3d, PointTrails, VectorArrow, WorldMesh, or Window",
     ))
 }
 
@@ -363,6 +371,7 @@ pub fn register(parent_module: &Bound<'_, PyModule>) -> PyResult<()> {
     child.add_class::<PyPanel>()?;
     child.add_class::<PyObject3D>()?;
     child.add_class::<PyLine3d>()?;
+    child.add_class::<PyPointTrails>()?;
     child.add_class::<PyVectorArrow>()?;
     child.add_class::<PyWorldMesh>()?;
     child.add_class::<PyWindow>()?;
