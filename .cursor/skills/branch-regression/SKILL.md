@@ -69,11 +69,14 @@ Rules baked into the script (do not work around them):
 
 ```bash
 nix develop --command uv run python .cursor/skills/branch-regression/compare_runs.py \
-  "$OUT/base" "$OUT/head" --rmse-threshold 0.05
+  "$OUT/base" "$OUT/head" --rmse-threshold 0.05 --html "$OUT/report.html" \
+  > "$OUT/report.md"
 ```
 
 Prints a markdown table (exit codes, new WARN/ERROR count, screenshot RMSE,
-verdict) and exits 1 if anything is flagged. Save it: `... > "$OUT/report.md"`.
+verdict), writes `report.html`, and exits 1 if anything is flagged. The HTML
+report must include base/head screenshot thumbnails for every example; each
+thumbnail links to the full-size image. Always generate both report formats.
 
 Then, for every flagged example, **Read both PNGs** and judge visually:
 - Same scene composition (objects, trails, view cube, graph panels populated)?
