@@ -324,6 +324,28 @@ fn parse_backend_config(
     }
 }
 
+fn validate_component_metadata(component: &crate::PyComponent) -> Result<(), Error> {
+    if component
+        .metadata
+        .get("transient")
+        .is_some_and(|value| value == "true")
+    {
+        for conflicting_key in ["external_control", "wait_for_write", "record_every_tick"] {
+            if component
+                .metadata
+                .get(conflicting_key)
+                .is_some_and(|value| value == "true")
+            {
+                return Err(Error::PyO3(PyValueError::new_err(format!(
+                    "component '{}' cannot be both transient and {conflicting_key}",
+                    component.name
+                ))));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[pymethods]
 impl WorldBuilder {
     #[new]
@@ -377,6 +399,12 @@ impl WorldBuilder {
     pub fn insert(&mut self, entity_id: EntityId, spawnable: Spawnable) -> Result<(), Error> {
         match spawnable {
             Spawnable::Archetypes(archetypes) => {
+                for archetype in &archetypes {
+                    for component in &archetype.component_data {
+                        validate_component_metadata(component)?;
+                    }
+                }
+
                 for archetype in archetypes {
                     for (arr, component) in archetype.arrays.iter().zip(archetype.component_data) {
                         let component_id = ComponentId::new(&component.name);
@@ -385,23 +413,6 @@ impl WorldBuilder {
                             name: component.name.clone(),
                             metadata: component.metadata.clone(),
                         };
-                        if metadata.is_transient() {
-                            for conflicting_key in
-                                ["external_control", "wait_for_write", "record_every_tick"]
-                            {
-                                if metadata
-                                    .metadata
-                                    .get(conflicting_key)
-                                    .map(|value| value == "true")
-                                    .unwrap_or(false)
-                                {
-                                    return Err(Error::PyO3(PyValueError::new_err(format!(
-                                        "component '{}' cannot be both transient and {conflicting_key}",
-                                        metadata.name
-                                    ))));
-                                }
-                            }
-                        }
 
                         self.world.metadata.component_map.insert(
                             component_id,

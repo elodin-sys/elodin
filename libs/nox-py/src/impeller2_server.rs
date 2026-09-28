@@ -338,8 +338,14 @@ fn resolve_source_assets_root(entry: Option<&Path>) -> Option<PathBuf> {
 }
 
 pub fn copy_db_to_world(state: &State, world: &mut WorldExec) {
-    let world = world.world_mut();
-    for (component_id, (schema, _)) in world.metadata.component_map.iter() {
+    copy_db_to_world_for_world(state, world.world_mut());
+}
+
+fn copy_db_to_world_for_world(state: &State, world: &mut World) {
+    for (component_id, (schema, component_metadata)) in world.metadata.component_map.iter() {
+        if component_metadata.is_transient() {
+            continue;
+        }
         let Some(column) = world.host.get_mut(component_id) else {
             continue;
         };
@@ -352,10 +358,6 @@ pub fn copy_db_to_world(state: &State, world: &mut WorldExec) {
             let offset = i * size;
             let entity_id = impeller2::types::EntityId(*entity_id);
             let Some(entity_metadata) = world.metadata.entity_metadata.get(&entity_id) else {
-                continue;
-            };
-            let Some((_, component_metadata)) = world.metadata.component_map.get(component_id)
-            else {
                 continue;
             };
 
@@ -907,6 +909,7 @@ pub fn timestamps_changed(db: &DB, components: &mut [(PairId, Timestamp)]) -> Op
 mod commit_tests {
     use super::*;
     use std::collections::HashMap;
+    use tempfile::tempdir;
 
     fn metadata(record_every_tick: bool) -> ComponentMetadata {
         let mut values = HashMap::new();
@@ -940,6 +943,72 @@ mod commit_tests {
             Some(&value),
             &value,
         ));
+    }
+
+    #[test]
+    fn transient_component_is_not_copied_from_db() {
+        let temp = tempdir().unwrap();
+        let db = DB::create(temp.path().join("db")).unwrap();
+        let component_id = ComponentId::new("scratch");
+        let pair_id = ComponentId::from_pair("e1", "scratch");
+        let schema = elodin_db::ComponentSchema {
+            prim_type: impeller2::types::PrimType::F64,
+            dim: [1].into_iter().collect(),
+        };
+
+        db.with_state_mut(|state| {
+            state.set_component_metadata(
+                ComponentMetadata {
+                    component_id: pair_id,
+                    name: "e1.scratch".into(),
+                    metadata: HashMap::new(),
+                },
+                &db.path,
+            )?;
+            state.insert_component(pair_id, schema.clone(), &db.path)?;
+            state
+                .get_component(pair_id)
+                .unwrap()
+                .time_series
+                .push_buf(Timestamp(0), &99.0f64.to_le_bytes())
+        })
+        .unwrap();
+
+        let entity_id = impeller2::types::EntityId(0);
+        let mut world = World::default();
+        world.metadata.entity_metadata.insert(
+            entity_id,
+            EntityMetadata {
+                entity_id,
+                name: "e1".into(),
+                metadata: HashMap::new(),
+            },
+        );
+        world.metadata.component_map.insert(
+            component_id,
+            (
+                schema,
+                ComponentMetadata {
+                    component_id,
+                    name: "scratch".into(),
+                    metadata: HashMap::from([("transient".into(), "true".into())]),
+                },
+            ),
+        );
+        world.host.insert(
+            component_id,
+            crate::world::Column {
+                buffer: 1.0f64.to_le_bytes().to_vec(),
+                entity_ids: entity_id.0.to_le_bytes().to_vec(),
+            },
+        );
+
+        db.with_state(|state| copy_db_to_world_for_world(state, &mut world));
+
+        assert_eq!(
+            world.host.get(&component_id).unwrap().buffer,
+            1.0f64.to_le_bytes()
+        );
     }
 }
 

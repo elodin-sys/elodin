@@ -472,6 +472,42 @@ def test_transient_rejects_incompatible_metadata(conflicting_key):
         world.spawn(InvalidState(np.array(0.0)), "e1")
 
 
+def test_rejected_transient_metadata_does_not_mutate_world():
+    Invalid = ty.Annotated[
+        jax.Array,
+        el.Component(
+            "invalid",
+            el.ComponentType.F64,
+            metadata={"transient": "true", "external_control": "true"},
+        ),
+    ]
+
+    @dataclass
+    class InvalidState(el.Archetype):
+        x: X
+        invalid: Invalid
+
+    @dataclass
+    class ValidState(el.Archetype):
+        x: X
+
+    @el.map
+    def increment(x: X) -> X:
+        return x + 1
+
+    world = el.World()
+    with pytest.raises(ValueError):
+        world.spawn(InvalidState(np.array(1.0), np.array(0.0)), "invalid")
+
+    world.spawn(ValidState(np.array(2.0)), "e1")
+    exec = world.build(increment)
+    exec.run()
+
+    history = exec.history("e1.x")
+    expected = pl.DataFrame({"e1.x": [2.0, 3.0]})
+    assert_frame_equal(history.drop("time"), expected)
+
+
 def test_map_seq_single_entity():
     """Test map_seq with a single entity (batch_size == 1)."""
 
