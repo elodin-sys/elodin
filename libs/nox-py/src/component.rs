@@ -94,6 +94,10 @@ impl PyComponent {
             })
             .collect();
 
+        if name.chars().any(char::is_whitespace) {
+            return Err(Error::InvalidComponentName(name));
+        }
+
         Ok(Self { name, ty, metadata })
     }
 
@@ -425,5 +429,26 @@ mod tests {
     fn component_names() {
         assert_eq!(WorldPos::<Op>::NAME, "world_pos");
         assert_eq!(Seed::<Op>::NAME, "seed");
+    }
+
+    #[test]
+    fn component_name_rejects_whitespace() {
+        use std::collections::HashMap;
+
+        use pyo3::Python;
+
+        use super::PyComponent;
+
+        pyo3::prepare_freethreaded_python();
+        Python::with_gil(|py| {
+            let err = PyComponent::new(py, "fuel mass".into(), None, HashMap::new())
+                .expect_err("whitespace is rejected");
+            assert!(
+                err.to_string().contains("whitespace"),
+                "unexpected error: {err}"
+            );
+            PyComponent::new(py, "fuel_mass".into(), None, HashMap::new())
+                .expect("snake_case names are accepted");
+        });
     }
 }

@@ -38,6 +38,8 @@ pub enum Error {
     InvalidTimeStep(std::time::Duration),
     #[error("invalid log level: {0}")]
     InvalidLogLevel(String),
+    #[error("component name must not contain whitespace: {0}")]
+    InvalidComponentName(String),
     #[error("unsupported element type for JAX backend: {0}")]
     UnsupportedDtype(String),
     #[error("cranelift backend: {0}")]
@@ -52,6 +54,9 @@ impl From<Error> for PyErr {
             Error::InvalidLogLevel(level) => {
                 PyValueError::new_err(format!("invalid log level: {level}"))
             }
+            Error::InvalidComponentName(name) => PyValueError::new_err(format!(
+                "component name must not contain whitespace: {name}"
+            )),
             Error::PyO3(err) => err,
             err => PyRuntimeError::new_err(err.to_string()),
         }
