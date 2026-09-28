@@ -208,6 +208,19 @@ mod tests {
                 [1, 2]
             );
             assert!(ctx.read_msg_at(py, "camera.gray", 31).unwrap().is_none());
+            let (exact_early, _) = ctx.read_msg_at(py, "camera.gray", 32).unwrap().unwrap();
+            assert_eq!(exact_early, 32);
+            let (exact_late, late_payload) =
+                ctx.read_msg_at(py, "camera.gray", 48).unwrap().unwrap();
+            assert_eq!(exact_late, 48);
+            assert_eq!(
+                late_payload
+                    .call_method0("tolist")
+                    .unwrap()
+                    .extract::<Vec<u8>>()
+                    .unwrap(),
+                [3, 4]
+            );
         });
     }
 }

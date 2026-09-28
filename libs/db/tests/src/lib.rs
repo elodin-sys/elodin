@@ -63,6 +63,108 @@ mod tests {
     }
 
     #[test]
+    async fn test_time_series_predecessor_request() {
+        let (addr, _db) = setup_test_db().await.unwrap();
+        let mut client = Client::connect(addr).await.unwrap();
+        let component_id = ComponentId::new("predecessor.value");
+        client
+            .send(&SetComponentMetadata::new(
+                component_id,
+                "predecessor.value",
+            ))
+            .await
+            .0
+            .unwrap();
+
+        let vtable_id = 1u16.to_le_bytes();
+        client
+            .send(&VTableMsg {
+                id: vtable_id,
+                vtable: vtable([raw_field(
+                    0,
+                    8,
+                    timestamp(
+                        raw_table(8, 8),
+                        schema(PrimType::U64, &[], component(component_id)),
+                    ),
+                )]),
+            })
+            .await
+            .0
+            .unwrap();
+
+        let request = |timestamp| GetTimeSeriesPredecessor {
+            id: vtable_id,
+            timestamp: Timestamp(timestamp),
+            component_id,
+        };
+        let empty = client.request(&request(10)).await.unwrap();
+        assert!(empty.timestamps().unwrap().is_empty());
+        assert!(empty.data().unwrap().is_empty());
+        let empty_range = client
+            .request(&GetTimeSeries {
+                id: vtable_id,
+                range: Timestamp(0)..Timestamp(10),
+                component_id,
+                limit: None,
+            })
+            .await
+            .unwrap();
+        assert!(empty_range.timestamps().unwrap().is_empty());
+        assert!(empty_range.data().unwrap().is_empty());
+
+        for (timestamp, value) in [(20, 2u64), (40, 4u64)] {
+            let mut packet = LenPacket::table(vtable_id, 16);
+            packet.extend_from_slice(&value.to_le_bytes());
+            packet.extend_aligned(&[i64::from(timestamp)]);
+            client.send(packet).await.0.unwrap();
+        }
+        sleep(Duration::from_millis(100)).await;
+
+        for (query, expected_timestamp, expected_value) in [
+            (19, None, None),
+            (20, Some(20), Some(2u64)),
+            (30, Some(20), Some(2u64)),
+            (40, Some(40), Some(4u64)),
+            (50, Some(40), Some(4u64)),
+        ] {
+            let response = client.request(&request(query)).await.unwrap();
+            assert_eq!(
+                response
+                    .timestamps()
+                    .unwrap()
+                    .first()
+                    .map(|timestamp| timestamp.0),
+                expected_timestamp
+            );
+            let value = response
+                .data()
+                .unwrap()
+                .get(..8)
+                .map(|data| u64::from_le_bytes(data.try_into().unwrap()));
+            assert_eq!(value, expected_value);
+        }
+
+        for range in [
+            Timestamp(0)..Timestamp(19),
+            Timestamp(21)..Timestamp(39),
+            Timestamp(41)..Timestamp(50),
+        ] {
+            let response = client
+                .request(&GetTimeSeries {
+                    id: vtable_id,
+                    range,
+                    component_id,
+                    limit: None,
+                })
+                .await
+                .unwrap();
+            assert!(response.timestamps().unwrap().is_empty());
+            assert!(response.data().unwrap().is_empty());
+        }
+    }
+
+    #[test]
     async fn test_silent_connection_does_not_emit_replies_or_errors() {
         let (addr, _db) = setup_test_db().await.unwrap();
         let mut client = Client::connect(addr).await.unwrap();
@@ -1095,7 +1197,7 @@ mod tests {
     }
 
     #[test]
-    async fn test_get_time_series_not_found() {
+    async fn test_get_time_series_empty_and_not_found() {
         let (addr, _db) = setup_test_db().await.unwrap();
         let mut client = Client::connect(addr).await.unwrap();
 
@@ -1121,9 +1223,9 @@ mod tests {
             limit: None,
         };
 
-        let result = client.request(&query).await;
-
-        result.unwrap_err();
+        let result = client.request(&query).await.unwrap();
+        assert!(result.timestamps().unwrap().is_empty());
+        assert!(result.data().unwrap().is_empty());
 
         // Now try with non-existent component
         let non_existent_component_id = ComponentId::new("non_existent_component");

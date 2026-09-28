@@ -57,6 +57,7 @@ fn serialize_schematic_elem(elem: &SchematicElem) -> KdlNode {
         SchematicElem::Panel(panel) => serialize_panel(panel),
         SchematicElem::Object3d(obj) => serialize_object_3d(obj),
         SchematicElem::Line3d(line) => serialize_line_3d(line),
+        SchematicElem::PointTrails(trails) => serialize_point_trails(trails),
         SchematicElem::VectorArrow(arrow) => serialize_vector_arrow(arrow),
         SchematicElem::WorldMesh(world_mesh) => serialize_world_mesh(world_mesh),
         SchematicElem::Window(window) => serialize_window(window),
@@ -1291,6 +1292,40 @@ fn serialize_line_3d(line: &Line3d) -> KdlNode {
             .push(KdlEntry::new_prop("perspective", false));
     }
 
+    node
+}
+
+fn serialize_point_trails(trails: &PointTrails) -> KdlNode {
+    let mut node = KdlNode::new("point_trails");
+    node.entries_mut()
+        .push(KdlEntry::new(trails.component.clone()));
+    if let Some(status) = &trails.status {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("status", status.clone()));
+    }
+    if let Some(start) = &trails.start {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("start", start.clone()));
+    }
+    push_float_prop_if_ne(&mut node, "head_size", trails.head_size, 1.0);
+    if trails.head_shape == PointTrailsHeadShape::Sphere {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("head_shape", "sphere"));
+    }
+    push_float_prop_if_ne(&mut node, "line_width", trails.line_width, 1.0);
+    if let Some(max_length) = trails.max_length {
+        push_rounded_float_prop(&mut node, "max_length", f64::from(max_length));
+    }
+    if let Some(frame) = trails.frame {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
+    }
+    if let Some(color) = trails.color {
+        serialize_color_to_node(&mut node, &color);
+    }
+    if let Some(hit_color) = trails.hit_color {
+        serialize_color_to_node_named(&mut node, &hit_color, Some("hit_color"));
+    }
     node
 }
 
@@ -2875,6 +2910,43 @@ object_3d lander.world_pos {
         } else {
             panic!("Expected line_3d");
         }
+    }
+
+    #[test]
+    fn test_serialize_point_trails() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::PointTrails(PointTrails {
+                component: "effector.cube_pos_ecef".to_string(),
+                status: Some("effector.cube_hit_tick".to_string()),
+                start: Some("effector.cube_cloud_fired".to_string()),
+                head_size: 0.15,
+                head_shape: PointTrailsHeadShape::Sphere,
+                line_width: 4.0,
+                max_length: Some(3.0),
+                color: Some(Color::YOLK),
+                hit_color: Some(Color::WHITE),
+                frame: Some(GeoFrame::ECEF),
+                node_id: NodeId::default(),
+            }));
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        let SchematicElem::PointTrails(trails) = &parsed.elems[0] else {
+            panic!("Expected point_trails");
+        };
+        assert_eq!(trails.component, "effector.cube_pos_ecef");
+        assert_eq!(trails.status.as_deref(), Some("effector.cube_hit_tick"));
+        assert_eq!(trails.start.as_deref(), Some("effector.cube_cloud_fired"));
+        assert!((trails.head_size - 0.15).abs() < 1e-6);
+        assert_eq!(trails.head_shape, PointTrailsHeadShape::Sphere);
+        assert_eq!(trails.line_width, 4.0);
+        assert_eq!(trails.max_length, Some(3.0));
+        assert_color_close(trails.color.expect("color"), Color::YOLK);
+        assert_color_close(trails.hit_color.expect("hit_color"), Color::WHITE);
+        assert_eq!(trails.frame, Some(GeoFrame::ECEF));
     }
 
     #[test]

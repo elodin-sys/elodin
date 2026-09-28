@@ -97,7 +97,7 @@ impl WorldExec {
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use pyo3::types::IntoPyDict;
+use pyo3::types::PyDict;
 
 #[pyclass(name = "Exec")]
 pub struct PyExec {
@@ -206,9 +206,16 @@ impl PyExec {
 
         let mut result_df = dataframes[0].clone();
         for df in dataframes.into_iter().skip(1) {
-            result_df =
-                result_df.call_method("join", (df,), Some(&[("on", "time")].into_py_dict(py)?))?;
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("on", "time")?;
+            kwargs.set_item("how", "full")?;
+            kwargs.set_item("coalesce", true)?;
+            result_df = result_df.call_method("join", (df,), Some(&kwargs))?;
         }
+        result_df = result_df.call_method1("sort", ("time",))?;
+        let kwargs = PyDict::new(py);
+        kwargs.set_item("strategy", "forward")?;
+        result_df = result_df.call_method("fill_null", (), Some(&kwargs))?;
         Ok(result_df)
     }
 }
