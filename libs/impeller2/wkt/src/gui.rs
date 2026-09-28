@@ -1155,7 +1155,7 @@ pub enum PointTrailsHeadShape {
     Sphere,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct PointTrails {
     pub component: String,
