@@ -57,6 +57,14 @@ impl ComponentMetadata {
             .get("record_every_tick")
             .is_some_and(|value| value == "true")
     }
+
+    /// Returns true if this component's metadata contains `"transient": "true"`.
+    /// Transient simulation components remain in world memory but are not recorded.
+    pub fn is_transient(&self) -> bool {
+        self.metadata
+            .get("transient")
+            .is_some_and(|value| value == "true")
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Schema)]
@@ -127,6 +135,13 @@ mod tests {
         assert!(!metadata(&[]).record_every_tick());
         assert!(!metadata(&[("record_every_tick", "false")]).record_every_tick());
         assert!(metadata(&[("record_every_tick", "true")]).record_every_tick());
+    }
+
+    #[test]
+    fn transient_is_opt_in() {
+        assert!(!metadata(&[]).is_transient());
+        assert!(!metadata(&[("transient", "false")]).is_transient());
+        assert!(metadata(&[("transient", "true")]).is_transient());
     }
 }
 

@@ -385,6 +385,23 @@ impl WorldBuilder {
                             name: component.name.clone(),
                             metadata: component.metadata.clone(),
                         };
+                        if metadata.is_transient() {
+                            for conflicting_key in
+                                ["external_control", "wait_for_write", "record_every_tick"]
+                            {
+                                if metadata
+                                    .metadata
+                                    .get(conflicting_key)
+                                    .map(|value| value == "true")
+                                    .unwrap_or(false)
+                                {
+                                    return Err(Error::PyO3(PyValueError::new_err(format!(
+                                        "component '{}' cannot be both transient and {conflicting_key}",
+                                        metadata.name
+                                    ))));
+                                }
+                            }
+                        }
 
                         self.world.metadata.component_map.insert(
                             component_id,

@@ -236,6 +236,9 @@ pub fn init_db(
 
     db.with_state_mut(|state| {
         for (component_id, (schema, component_metadata)) in world.metadata.component_map.iter() {
+            if component_metadata.is_transient() {
+                continue;
+            }
             let Some(column) = world.host.get(component_id) else {
                 continue;
             };
@@ -427,7 +430,10 @@ fn commit_world_head_for_world(
     timestamp: Timestamp,
     exclusions: Option<&HashSet<ComponentId>>,
 ) -> Result<(), Error> {
-    for (component_id, (schema, _)) in world.metadata.component_map.iter() {
+    for (component_id, (schema, component_metadata)) in world.metadata.component_map.iter() {
+        if component_metadata.is_transient() {
+            continue;
+        }
         let Some(column) = world.host.get_mut(component_id) else {
             continue;
         };
@@ -437,11 +443,6 @@ fn commit_world_head_for_world(
             let offset = i * size;
             let entity_id = impeller2::types::EntityId(*entity_id);
             let Some(entity_metadata) = world.metadata.entity_metadata.get(&entity_id) else {
-                continue;
-            };
-            let Some((_schema, component_metadata)) =
-                world.metadata.component_map.get(component_id)
-            else {
                 continue;
             };
 

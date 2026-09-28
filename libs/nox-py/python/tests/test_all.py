@@ -5,6 +5,7 @@ import elodin as el
 import jax
 import jax.numpy as np
 import polars as pl
+import pytest
 from polars.testing import assert_frame_equal
 from jax import random
 
@@ -416,6 +417,59 @@ def test_external_control_waiting():
     assert np.isclose(df["e1.x"][-1], 1.0)  # Should be 1.0 + 0.0
 
     print("External control waiting test passed!")
+
+
+def test_transient_component_not_recorded(tmp_path):
+    S = ty.Annotated[
+        jax.Array,
+        el.Component("s", el.ComponentType.F64, metadata={"transient": "true"}),
+    ]
+
+    @el.map
+    def step(x: X, s: S) -> tuple[X, S]:
+        return x + s, s + 1
+
+    @dataclass
+    class State(el.Archetype):
+        x: X
+        s: S
+
+    world = el.World()
+    world.spawn(State(np.array(0.0), np.array(0.0)), "e1")
+    exec = world.build(step)
+    exec.run(4)
+
+    history = exec.history("e1.x")
+    assert np.isclose(history["e1.x"][-1], 6.0)
+
+    exec.save_archive(str(tmp_path), "csv")
+    assert (tmp_path / "e1.x.csv").is_file()
+    assert not (tmp_path / "e1.s.csv").exists()
+
+
+@pytest.mark.parametrize(
+    "conflicting_key", ["external_control", "wait_for_write", "record_every_tick"]
+)
+def test_transient_rejects_incompatible_metadata(conflicting_key):
+    Invalid = ty.Annotated[
+        jax.Array,
+        el.Component(
+            "invalid",
+            el.ComponentType.F64,
+            metadata={"transient": "true", conflicting_key: "true"},
+        ),
+    ]
+
+    @dataclass
+    class InvalidState(el.Archetype):
+        invalid: Invalid
+
+    world = el.World()
+    with pytest.raises(
+        ValueError,
+        match=f"component 'invalid' cannot be both transient and {conflicting_key}",
+    ):
+        world.spawn(InvalidState(np.array(0.0)), "e1")
 
 
 def test_map_seq_single_entity():
