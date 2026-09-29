@@ -72,8 +72,11 @@ def test_display_kernels_expr_schematic_still_builds():
 
     rebuilt = mod.build()
     kdl = rebuilt.emit_kdl()
+    assert kdl.startswith("// Auto-generated from ")
+    assert "examples/display-kernels/schematic.py" in kdl.splitlines()[0]
     assert "kernel=" in kdl
-    assert ui.from_kdl(kdl).emit_kdl() == kdl
+    body = kdl.split("\n", 1)[1]
+    assert ui.from_kdl(kdl).emit_kdl() == body
 
 
 def test_apply_overlay_changes_share_without_source():

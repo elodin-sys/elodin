@@ -172,6 +172,15 @@ def test_viewport_frustums_up_marker_roundtrip():
     assert _canonical(namespace["build"]()) == _canonical(built)
 
 
+def test_emit_kdl_notes_generating_python_file():
+    kdl = ui.schematic(ui.viewport()).emit_kdl()
+    banner, body = kdl.split("\n", 1)
+    assert banner.startswith("// Auto-generated from ")
+    assert "test_ui.py" in banner
+    assert "Auto-generated" in banner
+    assert ui.from_kdl(kdl).emit_kdl() == body
+
+
 def test_viewport_frustums_up_marker_defaults_omitted():
     kdl = ui.schematic(ui.viewport()).emit_kdl()
     assert "frustums_up_marker" not in kdl

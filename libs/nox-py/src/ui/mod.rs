@@ -7,7 +7,7 @@ mod builders;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use impeller::types::IntoLenPacket;
@@ -31,6 +31,8 @@ const ACTIVE_SCHEMATIC_KEY: &str = "schematics/main.kdl";
 pub struct PySchematic {
     pub(crate) inner: Schematic,
     pub(crate) kernel_assets: HashMap<String, Vec<u8>>,
+    /// Python file that called `ui.schematic`, when this object was built in Python.
+    source_path: Option<String>,
 }
 
 impl PySchematic {
@@ -38,6 +40,7 @@ impl PySchematic {
         Self {
             inner,
             kernel_assets: HashMap::new(),
+            source_path: None,
         }
     }
 
@@ -45,11 +48,21 @@ impl PySchematic {
         Self {
             inner,
             kernel_assets,
+            source_path: None,
         }
     }
 
     pub fn emit_kdl_string(&self) -> String {
-        serialize_schematic(&self.inner)
+        let body = serialize_schematic(&self.inner);
+        let Some(path) = &self.source_path else {
+            return body;
+        };
+        let path = path.replace(['\n', '\r'], " ");
+        if body.is_empty() {
+            format!("// Auto-generated from {path}")
+        } else {
+            format!("// Auto-generated from {path}\n{body}")
+        }
     }
 }
 
@@ -62,6 +75,7 @@ impl PySchematic {
         Ok(Self {
             inner,
             kernel_assets: HashMap::new(),
+            source_path: None,
         })
     }
 
@@ -104,6 +118,7 @@ impl PySchematic {
 
 /// Build a schematic from panels/objects plus optional globals.
 #[pyfunction]
+#[allow(clippy::too_many_arguments)]
 #[pyo3(signature = (
     *elems,
     coordinate=None,
@@ -114,6 +129,7 @@ impl PySchematic {
     telemetry_mode=false,
 ))]
 fn schematic(
+    py: Python<'_>,
     elems: Vec<Bound<'_, PyAny>>,
     coordinate: Option<Bound<'_, PyAny>>,
     theme: Option<Bound<'_, PyAny>>,
@@ -153,7 +169,77 @@ fn schematic(
     Ok(PySchematic {
         inner,
         kernel_assets: builders::take_kernel_assets(),
+        source_path: python_schematic_source(py),
     })
+}
+
+/// Python file that built this schematic, skipping the `elodin` package itself.
+fn python_schematic_source(py: Python<'_>) -> Option<String> {
+    let package_root = elodin_package_root(py);
+    let stdlib = python_stdlib(py);
+    let inspect = py.import("inspect").ok()?;
+    let mut frame = inspect.call_method0("currentframe").ok()?;
+    for _ in 0..16 {
+        if frame.is_none() {
+            return None;
+        }
+        let filename: Option<String> = frame
+            .getattr("f_code")
+            .ok()
+            .and_then(|code| code.getattr("co_filename").ok())
+            .and_then(|value| value.extract().ok());
+        if let Some(filename) = filename
+            && let Some(path) =
+                user_source_label(&filename, package_root.as_deref(), stdlib.as_deref())
+        {
+            return Some(path);
+        }
+        frame = frame.getattr("f_back").ok()?;
+    }
+    None
+}
+
+fn elodin_package_root(py: Python<'_>) -> Option<PathBuf> {
+    let module = py.import("elodin").ok()?;
+    let file: String = module.getattr("__file__").ok()?.extract().ok()?;
+    Some(Path::new(&file).parent()?.to_path_buf())
+}
+
+fn python_stdlib(py: Python<'_>) -> Option<PathBuf> {
+    let sysconfig = py.import("sysconfig").ok()?;
+    let paths = sysconfig.call_method0("get_paths").ok()?;
+    let stdlib: String = paths.get_item("stdlib").ok()?.extract().ok()?;
+    Some(PathBuf::from(stdlib))
+}
+
+fn user_source_label(
+    filename: &str,
+    package_root: Option<&Path>,
+    stdlib: Option<&Path>,
+) -> Option<String> {
+    if filename.is_empty() || filename.starts_with('<') {
+        return None;
+    }
+    let path = Path::new(filename);
+    if path.extension().and_then(|ext| ext.to_str()) != Some("py") {
+        return None;
+    }
+    if let Some(root) = package_root
+        && path.starts_with(root)
+    {
+        return None;
+    }
+    if let Some(stdlib) = stdlib
+        && path.starts_with(stdlib)
+    {
+        return None;
+    }
+    let label = std::env::current_dir()
+        .ok()
+        .and_then(|cwd| path.strip_prefix(&cwd).ok().map(|rel| rel.to_path_buf()))
+        .filter(|rel| !rel.as_os_str().is_empty())
+        .unwrap_or_else(|| path.to_path_buf());
+    Some(label.display().to_string())
 }
 
 fn push_elem(schematic: &mut Schematic, obj: &Bound<'_, PyAny>) -> PyResult<()> {
