@@ -1,7 +1,7 @@
 use anyhow::Context;
-use impeller2::types::{LenPacket, Msg, PacketId, msg_id};
-use impeller2_stellar::SinkExt;
-use impeller2_wkt::{
+use impeller::types::{LenPacket, Msg, PacketId, msg_id};
+use impeller_stellar::SinkExt;
+use impeller_wkt::{
     MsgMetadata, MsgStream, SetComponentMetadata, SetMsgMetadata, log_entry_msg_schema,
 };
 use serde::{Deserialize, Serialize};
@@ -18,7 +18,7 @@ use stellarator::{io::SplitExt, struc_con::Joinable};
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 use blackbox::{CompassRecord, GpsRecord, ImuRecord, Record};
-use impeller2::types::Timestamp;
+use impeller::types::Timestamp;
 
 #[derive(db_macros::AsVTable, db_macros::Metadatatize)]
 #[db(parent = "aleph")]
@@ -304,8 +304,8 @@ pub async fn connect() -> anyhow::Result<()> {
         .await
         .map_err(anyhow::Error::from)?;
     let (rx, tx) = stream.split();
-    let tx = impeller2_stellar::PacketSink::new(tx);
-    let mut rx = impeller2_stellar::PacketStream::new(rx);
+    let tx = impeller_stellar::PacketSink::new(tx);
+    let mut rx = impeller_stellar::PacketStream::new(rx);
 
     let gps_clock_mode = gps_clock_enabled();
     if gps_clock_mode {
@@ -368,7 +368,7 @@ pub async fn connect() -> anyhow::Result<()> {
         loop {
             let pkt = rx.next(buf).await?;
             match &pkt {
-                impeller2::types::OwnedPacket::Msg(m) if m.id == Command::ID => {
+                impeller::types::OwnedPacket::Msg(m) if m.id == Command::ID => {
                     let cmd = m.parse::<Command>()?;
                     println!("cmd {cmd:?}");
                     let buf = cobs::encode_vec(cmd.as_bytes());
@@ -382,7 +382,7 @@ pub async fn connect() -> anyhow::Result<()> {
     });
     let read = stellarator::struc_con::stellar(move || async move {
         let mut buf = vec![0u8; 4096];
-        let mut frame = impeller2_frame::FrameDecoder::<Vec<u8>>::default();
+        let mut frame = impeller_frame::FrameDecoder::<Vec<u8>>::default();
         let mut clock_state = ClockState::new(gps_clock_mode);
         let mut imu_rx: u64 = 0;
         let mut imu_sent: u64 = 0;
@@ -490,7 +490,7 @@ pub async fn connect() -> anyhow::Result<()> {
                     }
                     Err(_err) => {
                         cobs_errors += 1;
-                        frame = impeller2_frame::FrameDecoder::<Vec<u8>>::default();
+                        frame = impeller_frame::FrameDecoder::<Vec<u8>>::default();
                         break;
                     }
                 }

@@ -145,10 +145,10 @@ dependencies = [
  "db-macros",
  "fastrand 2.4.1",
  "futures-lite",
- "impeller2",
- "impeller2-frame",
- "impeller2-stellar",
- "impeller2-wkt",
+ "impeller",
+ "impeller-frame",
+ "impeller-stellar",
+ "impeller-wkt",
  "postcard-schema",
  "serde",
  "stellarator",
@@ -176,9 +176,9 @@ dependencies = [
  "anyhow",
  "db-macros",
  "image",
- "impeller2",
- "impeller2-stellar",
- "impeller2-wkt",
+ "impeller",
+ "impeller-stellar",
+ "impeller-wkt",
  "nu-ansi-term 0.49.0",
  "roci-adcs",
  "stellarator",
@@ -1223,9 +1223,9 @@ dependencies = [
  "clap 4.6.1",
  "device_query",
  "gilrs",
- "impeller2",
- "impeller2-stellar",
- "impeller2-wkt",
+ "impeller",
+ "impeller-stellar",
+ "impeller-wkt",
  "stellarator",
  "tracing",
  "tracing-subscriber",
@@ -5541,8 +5541,7 @@ dependencies = [
  "directories",
  "elodin-db",
  "elodin-editor",
- "impeller2-bevy",
- "impeller2-kdl",
+ "impeller-bevy",
  "machine-uid",
  "miette 7.6.0",
  "monte-carlo",
@@ -5584,11 +5583,11 @@ dependencies = [
  "goldie",
  "hifitime",
  "hostname",
- "impeller2",
- "impeller2-cli",
- "impeller2-kdl",
- "impeller2-stellar",
- "impeller2-wkt",
+ "impeller",
+ "impeller-cli",
+ "impeller-kdl",
+ "impeller-stellar",
+ "impeller-wkt",
  "libc",
  "mcap",
  "memmap2",
@@ -5644,9 +5643,9 @@ dependencies = [
  "clap 4.6.1",
  "colored",
  "futures-lite",
- "impeller2",
- "impeller2-stellar",
- "impeller2-wkt",
+ "impeller",
+ "impeller-stellar",
+ "impeller-wkt",
  "iocraft",
  "postcard",
  "serde",
@@ -5665,9 +5664,9 @@ dependencies = [
  "elodin-db",
  "fastrand 2.4.1",
  "futures-lite",
- "impeller2",
- "impeller2-stellar",
- "impeller2-wkt",
+ "impeller",
+ "impeller-stellar",
+ "impeller-wkt",
  "miette 7.6.0",
  "nox",
  "postcard",
@@ -5723,11 +5722,11 @@ dependencies = [
  "hex",
  "hifitime",
  "image",
- "impeller2",
- "impeller2-bevy",
- "impeller2-cli",
- "impeller2-kdl",
- "impeller2-wkt",
+ "impeller",
+ "impeller-bevy",
+ "impeller-cli",
+ "impeller-kdl",
+ "impeller-wkt",
  "itertools 0.12.1",
  "jiff",
  "miette 7.6.0",
@@ -5997,8 +5996,8 @@ dependencies = [
  "bevy_math",
  "convert_case 0.8.0",
  "hifitime",
- "impeller2",
- "impeller2-wkt",
+ "impeller",
+ "impeller-wkt",
  "jiff",
  "peg",
  "smallvec",
@@ -7118,8 +7117,8 @@ dependencies = [
  "gstreamer",
  "gstreamer-base",
  "gstreamer-video",
- "impeller2",
- "impeller2-wkt",
+ "impeller",
+ "impeller-wkt",
  "pkg-config",
  "postcard",
 ]
@@ -7973,7 +7972,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40fac9d56ed6437b198fddba683305e8e2d651aa42647f00f5ae542e7f5c94a2"
 
 [[package]]
-name = "impeller2"
+name = "impeller"
 version = "0.19.3-alpha.0"
 dependencies = [
  "bevy",
@@ -7996,16 +7995,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "impeller2-bbq"
+name = "impeller-bbq"
 version = "0.19.3-alpha.0"
 dependencies = [
  "bbqueue",
- "impeller2",
+ "impeller",
  "stellarator-buf",
 ]
 
 [[package]]
-name = "impeller2-bevy"
+name = "impeller-bevy"
 version = "0.19.3-alpha.0"
 dependencies = [
  "bbqueue",
@@ -8013,10 +8012,10 @@ dependencies = [
  "compact_str",
  "fastrand 2.4.1",
  "futures-lite",
- "impeller2",
- "impeller2-bbq",
- "impeller2-stellar",
- "impeller2-wkt",
+ "impeller",
+ "impeller-bbq",
+ "impeller-stellar",
+ "impeller-wkt",
  "miette 7.6.0",
  "nox",
  "postcard",
@@ -8029,7 +8028,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "impeller2-cli"
+name = "impeller-cli"
 version = "0.19.3-alpha.0"
 dependencies = [
  "anyhow",
@@ -8039,9 +8038,9 @@ dependencies = [
  "fastrand 2.4.1",
  "futures-lite",
  "hifitime",
- "impeller2",
- "impeller2-stellar",
- "impeller2-wkt",
+ "impeller",
+ "impeller-stellar",
+ "impeller-wkt",
  "mlua",
  "nox",
  "nu-ansi-term 0.49.0",
@@ -8058,20 +8057,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "impeller2-frame"
+name = "impeller-frame"
 version = "0.19.3-alpha.0"
 dependencies = [
  "cobs 0.2.3",
- "impeller2",
+ "impeller",
 ]
 
 [[package]]
-name = "impeller2-kdl"
+name = "impeller-kdl"
 version = "0.19.3-alpha.0"
 dependencies = [
  "bevy_geo_frames",
- "impeller2",
- "impeller2-wkt",
+ "impeller",
+ "impeller-wkt",
  "kdl",
  "miette 7.6.0",
  "ron 0.10.1",
@@ -8082,16 +8081,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "impeller2-stellar"
+name = "impeller-stellar"
 version = "0.19.3-alpha.0"
 dependencies = [
  "bbqueue",
  "fastrand 2.4.1",
  "futures-concurrency",
  "futures-lite",
- "impeller2",
- "impeller2-bbq",
- "impeller2-wkt",
+ "impeller",
+ "impeller-bbq",
+ "impeller-wkt",
  "miette 7.6.0",
  "postcard",
  "postcard-schema",
@@ -8103,13 +8102,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "impeller2-wkt"
+name = "impeller-wkt"
 version = "0.19.3-alpha.0"
 dependencies = [
  "bevy",
  "bevy_geo_frames",
  "compact_str",
- "impeller2",
+ "impeller",
  "mlua",
  "nox",
  "postcard",
@@ -8943,9 +8942,9 @@ dependencies = [
  "clap 4.6.1",
  "db-macros",
  "fastrand 2.4.1",
- "impeller2",
- "impeller2-stellar",
- "impeller2-wkt",
+ "impeller",
+ "impeller-stellar",
+ "impeller-wkt",
  "mlua",
  "nox",
  "roci-adcs",
@@ -9254,9 +9253,9 @@ dependencies = [
  "clap 4.6.1",
  "db-macros",
  "fastrand 2.4.1",
- "impeller2",
- "impeller2-stellar",
- "impeller2-wkt",
+ "impeller",
+ "impeller-stellar",
+ "impeller-wkt",
  "mlua",
  "nox",
  "roci-adcs",
@@ -9503,9 +9502,9 @@ dependencies = [
  "clap 4.6.1",
  "crossterm 0.27.0",
  "futures-lite",
- "impeller2",
- "impeller2-stellar",
- "impeller2-wkt",
+ "impeller",
+ "impeller-stellar",
+ "impeller-wkt",
  "nalgebra",
  "postcard",
  "serde",
@@ -10057,10 +10056,10 @@ dependencies = [
  "elodin-macros",
  "env_logger 0.11.10",
  "futures-lite",
- "impeller2",
- "impeller2-kdl",
- "impeller2-stellar",
- "impeller2-wkt",
+ "impeller",
+ "impeller-kdl",
+ "impeller-stellar",
+ "impeller-wkt",
  "indicatif 0.17.11",
  "miette 7.6.0",
  "ndarray 0.16.1",
@@ -12286,9 +12285,9 @@ dependencies = [
  "colored",
  "device_query",
  "gilrs",
- "impeller2",
- "impeller2-stellar",
- "impeller2-wkt",
+ "impeller",
+ "impeller-stellar",
+ "impeller-wkt",
  "stellarator",
  "tracing",
  "tracing-subscriber",
@@ -12657,10 +12656,10 @@ dependencies = [
  "db-macros",
  "fastrand 2.4.1",
  "heapless 0.8.0",
- "impeller2",
- "impeller2-bbq",
- "impeller2-stellar",
- "impeller2-wkt",
+ "impeller",
+ "impeller-bbq",
+ "impeller-stellar",
+ "impeller-wkt",
  "nix 0.29.0",
  "nox",
  "postcard",
@@ -12760,8 +12759,8 @@ dependencies = [
  "anyhow",
  "clap 4.6.1",
  "futures-lite",
- "impeller2",
- "impeller2-wkt",
+ "impeller",
+ "impeller-wkt",
  "postcard",
  "retina",
  "rtsp-ingest",
@@ -14160,9 +14159,9 @@ dependencies = [
  "db-macros",
  "fastrand 2.4.1",
  "futures-concurrency",
- "impeller2",
- "impeller2-stellar",
- "impeller2-wkt",
+ "impeller",
+ "impeller-stellar",
+ "impeller-wkt",
  "stellarator",
  "sysinfo 0.34.2",
  "zerocopy",
@@ -15382,9 +15381,9 @@ dependencies = [
  "bytes",
  "clap 4.6.1",
  "ffmpeg-next",
- "impeller2",
- "impeller2-stellar",
- "impeller2-wkt",
+ "impeller",
+ "impeller-stellar",
+ "impeller-wkt",
  "kdam",
  "miette 5.10.0",
  "postcard",

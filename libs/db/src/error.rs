@@ -1,6 +1,6 @@
 use crate::Timestamp;
-use impeller2::types::{ComponentId, PacketId, PrimType};
-use impeller2_wkt::{ErrorResponse, StreamId};
+use impeller::types::{ComponentId, PacketId, PrimType};
+use impeller_wkt::{ErrorResponse, StreamId};
 use std::{io, ops::Range, path::PathBuf};
 use thiserror::Error;
 
@@ -20,9 +20,9 @@ pub enum Error {
     #[error("{0}")]
     Io(#[from] std::io::Error),
     #[error("impeller_stella {0}")]
-    ImpellerStella(impeller2_stellar::Error),
+    ImpellerStella(impeller_stellar::Error),
     #[error("impeller {0}")]
-    Impeller(#[from] impeller2::error::Error),
+    Impeller(#[from] impeller::error::Error),
     #[error("component not found {0}")]
     ComponentNotFound(ComponentId),
     #[error(
@@ -83,10 +83,10 @@ pub enum Error {
     WriteTimeout,
 }
 
-impl From<impeller2_stellar::Error> for Error {
-    fn from(value: impeller2_stellar::Error) -> Self {
+impl From<impeller_stellar::Error> for Error {
+    fn from(value: impeller_stellar::Error) -> Self {
         match value {
-            impeller2_stellar::Error::Stellar(error) => Error::from(error),
+            impeller_stellar::Error::Stellar(error) => Error::from(error),
             err => Error::ImpellerStella(err),
         }
     }

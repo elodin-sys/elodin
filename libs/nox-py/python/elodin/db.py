@@ -25,7 +25,7 @@ Quick start::
 
 Design notes:
 
-* Every ``TableWriter.write`` emits exactly one Impeller2 ``Table`` packet:
+* Every ``TableWriter.write`` emits exactly one Impeller ``Table`` packet:
   a shared little-endian ``i64`` timestamp (microseconds by default,
   nanoseconds with ``timestamp="ns"``) followed by each field's values at a
   fixed, naturally-aligned offset.

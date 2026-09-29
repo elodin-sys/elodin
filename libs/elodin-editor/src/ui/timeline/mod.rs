@@ -5,8 +5,8 @@ use bevy::ecs::{
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::{EguiContexts, EguiTextureHandle, egui};
-use impeller2_bevy::CurrentStreamId;
-use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated, StreamId};
+use impeller_bevy::CurrentStreamId;
+use impeller_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated, StreamId};
 use timeline_controls::TimelineControls;
 
 use std::ops::RangeInclusive;
@@ -82,8 +82,8 @@ pub struct LatestFollow(pub bool);
 
 #[derive(bevy::prelude::Resource, Clone, Copy, Debug, PartialEq)]
 pub struct TimelineSettings {
-    pub played_color: impeller2_wkt::Color,
-    pub future_color: impeller2_wkt::Color,
+    pub played_color: impeller_wkt::Color,
+    pub future_color: impeller_wkt::Color,
     pub follow_latest: bool,
 }
 
@@ -93,12 +93,12 @@ pub struct TelemetryMode(pub bool);
 
 impl Default for TimelineSettings {
     fn default() -> Self {
-        Self::from(impeller2_wkt::TimelineConfig::default())
+        Self::from(impeller_wkt::TimelineConfig::default())
     }
 }
 
-impl From<impeller2_wkt::TimelineConfig> for TimelineSettings {
-    fn from(value: impeller2_wkt::TimelineConfig) -> Self {
+impl From<impeller_wkt::TimelineConfig> for TimelineSettings {
+    fn from(value: impeller_wkt::TimelineConfig) -> Self {
         Self {
             played_color: value.played_color,
             future_color: value.future_color,
@@ -107,7 +107,7 @@ impl From<impeller2_wkt::TimelineConfig> for TimelineSettings {
     }
 }
 
-impl From<TimelineSettings> for impeller2_wkt::TimelineConfig {
+impl From<TimelineSettings> for impeller_wkt::TimelineConfig {
     fn from(value: TimelineSettings) -> Self {
         Self {
             played_color: value.played_color,
@@ -121,7 +121,7 @@ impl From<TimelineSettings> for impeller2_wkt::TimelineConfig {
 #[derive(bevy::prelude::Resource, Default, Clone, Copy, Debug)]
 pub(crate) struct AutoFollowLatestState {
     stream_id: Option<StreamId>,
-    baseline_latest: Option<impeller2::types::Timestamp>,
+    baseline_latest: Option<impeller::types::Timestamp>,
     armed: bool,
 }
 
@@ -239,7 +239,7 @@ fn auto_start_follow_latest(params: AutoFollowLatestParams) {
 #[derive(bevy::prelude::Resource, Default, Clone, Copy, Debug)]
 pub struct StreamTickOrigin {
     stream_id: Option<StreamId>,
-    timestamp: Option<impeller2::types::Timestamp>,
+    timestamp: Option<impeller::types::Timestamp>,
     pending_rebase: bool,
 }
 
@@ -258,8 +258,8 @@ impl StreamTickOrigin {
 
     pub fn observe_tick(
         &mut self,
-        tick: impeller2::types::Timestamp,
-        earliest: impeller2::types::Timestamp,
+        tick: impeller::types::Timestamp,
+        earliest: impeller::types::Timestamp,
     ) {
         if tick < earliest {
             return;
@@ -278,7 +278,7 @@ impl StreamTickOrigin {
         }
     }
 
-    pub fn origin(&self, fallback: impeller2::types::Timestamp) -> impeller2::types::Timestamp {
+    pub fn origin(&self, fallback: impeller::types::Timestamp) -> impeller::types::Timestamp {
         self.timestamp.unwrap_or(fallback)
     }
 }
@@ -540,7 +540,7 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use impeller2::types::Timestamp;
+    use impeller::types::Timestamp;
 
     #[test]
     fn a_new_stream_drops_the_loop_and_its_region() {

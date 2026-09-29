@@ -6,7 +6,7 @@
 
 use std::collections::VecDeque;
 
-use impeller2::types::Timestamp;
+use impeller::types::Timestamp;
 use openh264::OpenH264API;
 use openh264::encoder::{
     BitRate, Encoder, EncoderConfig, FrameRate, IntraFramePeriod, RateControlMode, SpsPpsStrategy,
@@ -541,7 +541,7 @@ mod tests {
         ParameterSetCache, SensorH264Encoder, annex_b_nals, apply_parameter_sets,
         take_ready_frames, to_annex_b,
     };
-    use impeller2::types::Timestamp;
+    use impeller::types::Timestamp;
     use std::collections::VecDeque;
 
     #[test]

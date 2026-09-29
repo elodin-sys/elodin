@@ -1,10 +1,10 @@
 //! Elodin DB transport for semantic pilot input.
 
 use anyhow::Result;
-use impeller2::types::{ComponentId, LenPacket, PrimType};
-use impeller2::vtable::builder::{component, raw_field, schema, vtable};
-use impeller2_stellar::Client;
-use impeller2_wkt::VTableMsg;
+use impeller::types::{ComponentId, LenPacket, PrimType};
+use impeller::vtable::builder::{component, raw_field, schema, vtable};
+use impeller_stellar::Client;
+use impeller_wkt::VTableMsg;
 
 use crate::input::ControlInput;
 

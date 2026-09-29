@@ -1,5 +1,5 @@
 use bevy::{math::DVec3, prelude::*};
-use impeller2_wkt::ComponentValue;
+use impeller_wkt::ComponentValue;
 use nox::ArrayBuf;
 use std::collections::HashMap;
 

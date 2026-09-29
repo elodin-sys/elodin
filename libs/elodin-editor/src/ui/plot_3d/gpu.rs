@@ -49,9 +49,9 @@ use bevy_render::{
     sync_world::{MainEntity, SyncToRenderWorld, TemporaryRenderEntity},
 };
 use binding_types::storage_buffer_read_only_sized;
-use impeller2::types::{ComponentId, Timestamp};
-use impeller2_bevy::TelemetryCache;
-use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated, Line3d};
+use impeller::types::{ComponentId, Timestamp};
+use impeller_bevy::TelemetryCache;
+use impeller_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated, Line3d};
 use std::num::NonZeroU64;
 use zerocopy::IntoBytes;
 
@@ -268,7 +268,7 @@ impl LineTrailColors {
 }
 
 /// Linearize a schematic (sRGB) color for the line shader, preserving alpha.
-fn wkt_color_linear(color: impeller2_wkt::Color) -> Vec4 {
+fn wkt_color_linear(color: impeller_wkt::Color) -> Vec4 {
     Vec4::from_array(
         Color::srgba(color.r, color.g, color.b, color.a)
             .to_linear()
@@ -865,7 +865,7 @@ fn extract_lines(
             };
             let anchor_key = anchor_cache_key(frame, line_anchor);
 
-            let build_gpu_line = |range: std::ops::Range<impeller2::types::Timestamp>,
+            let build_gpu_line = |range: std::ops::Range<impeller::types::Timestamp>,
                                   cached: Option<&GpuLine>| {
                 if range.start >= range.end {
                     return None;
@@ -1182,7 +1182,7 @@ mod tests {
             cache.insert(
                 component_id,
                 ts,
-                impeller2_wkt::ComponentValue::F64(
+                impeller_wkt::ComponentValue::F64(
                     nox::array![sample.x, sample.y, sample.z].to_dyn(),
                 ),
             );

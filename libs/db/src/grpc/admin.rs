@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use impeller2::types::ComponentId;
-use impeller2_wkt::{ComponentMetadata as DbComponentMetadata, SetDbConfig as DbSetDbConfig};
+use impeller::types::ComponentId;
+use impeller_wkt::{ComponentMetadata as DbComponentMetadata, SetDbConfig as DbSetDbConfig};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};

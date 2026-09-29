@@ -125,9 +125,9 @@ let bytes = receive_from_flight_software();
 let imu: ImuData = from_bytes(&bytes)?;
 ```
 
-## Integration with Impeller2
+## Integration with Impeller
 
-Postcard-C is designed to work seamlessly with Impeller2 for telemetry streaming:
+Postcard-C is designed to work seamlessly with Impeller for telemetry streaming:
 
 ```cpp
 // Flight software sending component data
@@ -137,11 +137,11 @@ struct DroneState {
     Vec3 velocity;
 };
 
-// Serialize and send via Impeller2 message
+// Serialize and send via Impeller message
 DroneState state = get_current_state();
 auto packet = state.encode_vec();
 
-// Wrap in Impeller2 message format
+// Wrap in Impeller message format
 send_impeller_msg(ComponentId("drone.state"), packet);
 ```
 
@@ -320,7 +320,7 @@ When contributing to Postcard-C:
 ## Related Projects
 
 - [Postcard](https://github.com/jamesmunns/postcard) - The original Rust implementation
-- [Impeller2](../impeller2/README.md) - Protocol using Postcard for messages
+- [Impeller](../impeller/README.md) - Protocol using Postcard for messages
 - [Elodin Database](../db/README.md) - Stores Postcard-encoded telemetry
 
 ## License

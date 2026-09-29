@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
 use elodin_db::DB;
-use impeller2::types::{ComponentId, PrimType, Timestamp};
+use impeller::types::{ComponentId, PrimType, Timestamp};
 use numpy::{PyArray1, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -146,7 +146,7 @@ impl StepContext {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use impeller2::types::msg_id;
+    use impeller::types::msg_id;
 
     #[test]
     fn read_msg_latest_returns_timestamp_and_payload() {
@@ -386,7 +386,7 @@ impl StepContext {
         msg_name: &str,
         timestamp: Option<i64>,
     ) -> Result<Option<Bound<'py, PyAny>>, Error> {
-        let msg_id = impeller2::types::msg_id(msg_name);
+        let msg_id = impeller::types::msg_id(msg_name);
 
         self.db.with_state(|state| {
             let Some(msg_log) = state.get_msg_log(msg_id) else {
@@ -423,7 +423,7 @@ impl StepContext {
         msg_name: &str,
         timestamp: i64,
     ) -> Result<Option<(i64, Bound<'py, PyAny>)>, Error> {
-        let msg_id = impeller2::types::msg_id(msg_name);
+        let msg_id = impeller::types::msg_id(msg_name);
         self.db.with_state(|state| {
             let Some(msg_log) = state.get_msg_log(msg_id) else {
                 return Ok(None);
@@ -450,7 +450,7 @@ impl StepContext {
         py: Python<'py>,
         msg_name: &str,
     ) -> Result<Option<(i64, Bound<'py, PyAny>)>, Error> {
-        let msg_id = impeller2::types::msg_id(msg_name);
+        let msg_id = impeller::types::msg_id(msg_name);
         self.db.with_state(|state| {
             let Some(msg_log) = state.get_msg_log(msg_id) else {
                 return Ok(None);

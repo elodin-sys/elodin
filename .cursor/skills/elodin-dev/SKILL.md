@@ -9,7 +9,7 @@ Elodin is a monorepo for aerospace simulation and flight software. The stack:
 
 - **nox-py** — Python SDK (JAX + PyO3 bindings; includes ECS in `src/`)
 - **nox** — Tensor compiler (→ Cranelift-MLIR / JAX)
-- **Impeller2** — High-performance pub-sub telemetry protocol
+- **Impeller** — High-performance pub-sub telemetry protocol
 - **Elodin-DB** — Time-series telemetry database
 - **Elodin Editor** — 3D viewer and graphing tool (Bevy + Egui)
 - **Roci** — Reactive flight software framework
@@ -22,7 +22,7 @@ Python Simulations (nox-py)
         │
    ┌────┴────┬──────────────┐
    │         │              │
- NOX      Impeller2     Elodin-DB
+ NOX      Impeller     Elodin-DB
 Compiler  (Telemetry)   (Storage)
    │         │              │
 Cranelift/ Stellarator    Elodin
@@ -35,9 +35,9 @@ Cranelift/ Stellarator    Elodin
 
 Key integration points:
 1. nox-py → nox → Cranelift-MLIR (default) or JAX (simulation compilation)
-2. nox-py → impeller2 → elodin-db (telemetry)
-3. elodin-editor → impeller2 → elodin-db (visualization)
-4. roci → impeller2 → elodin-db (flight software telemetry)
+2. nox-py → impeller → elodin-db (telemetry)
+3. elodin-editor → impeller → elodin-db (visualization)
+4. roci → impeller → elodin-db (flight software telemetry)
 
 ## Prerequisites
 
@@ -84,7 +84,7 @@ The Cargo workspace has 57 members. Key crates by area:
 |------|--------|
 | Simulation | `nox`, `elodin-macros`, `nox-py`, `nox-frames`, `cranelift-mlir` |
 | Database | `db`, `db/cli`, `db/eql`, `db/tests` |
-| Telemetry | `impeller2`, `impeller2/{bevy,stellar,bbq,frame,kdl,wkt}` |
+| Telemetry | `impeller`, `impeller/{bevy,stellar,bbq,frame,kdl,wkt}` |
 | Editor | `elodin-editor`, `apps/elodin` |
 | Runtime | `stellarator`, `stellarator/{buf,macros,maitake}` |
 | Flight SW | `roci`, `roci/{macros,adcs}` |

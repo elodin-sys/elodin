@@ -12,8 +12,8 @@ use std::collections::HashMap;
 use std::io::Cursor;
 
 use elodin_db::DB;
-use impeller2::types::{Timestamp, msg_id};
-use impeller2_wkt::{MsgMetadata, opaque_bytes_msg_schema};
+use impeller::types::{Timestamp, msg_id};
+use impeller_wkt::{MsgMetadata, opaque_bytes_msg_schema};
 use openh264::OpenH264API;
 use openh264::encoder::{
     BitRate, Encoder, EncoderConfig, FrameRate, IntraFramePeriod, RateControlMode, SpsPpsStrategy,

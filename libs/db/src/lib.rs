@@ -1,12 +1,12 @@
 use datafusion::common::HashSet;
 use futures_lite::StreamExt;
-use impeller2::registry::VTableRegistry;
-use impeller2::types::{PacketHeader, PacketTy};
-use impeller2::vtable::builder::{
+use impeller::registry::VTableRegistry;
+use impeller::types::{PacketHeader, PacketTy};
+use impeller::vtable::builder::{
     OpBuilder, component, raw_field, raw_table, schema, timestamp, vtable,
 };
-use impeller2::vtable::{Op, RealizedField, TIMESTAMP_NS_EXT_ID, builder};
-use impeller2::{
+use impeller::vtable::{Op, RealizedField, TIMESTAMP_NS_EXT_ID, builder};
+use impeller::{
     com_de::Decomponentize,
     registry,
     schema::Schema,
@@ -16,8 +16,8 @@ use impeller2::{
     },
     vtable::VTable,
 };
-use impeller2_stellar::{PacketSink, PacketStream};
-use impeller2_wkt::*;
+use impeller_stellar::{PacketSink, PacketStream};
+use impeller_wkt::*;
 use msg_log::MsgLog;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use smallvec::SmallVec;
@@ -95,12 +95,12 @@ mod vtable_stream;
 /// Analyzes a VTable to find byte ranges that are used as timestamp sources.
 /// Returns a vector of (offset, end) tuples representing the byte ranges.
 fn find_timestamp_source_ranges<Ops, Data, Fields>(
-    vtable: &impeller2::vtable::VTable<Ops, Data, Fields>,
+    vtable: &impeller::vtable::VTable<Ops, Data, Fields>,
 ) -> Vec<(usize, usize)>
 where
-    Ops: impeller2::buf::Buf<Op>,
-    Data: impeller2::buf::Buf<u8>,
-    Fields: impeller2::buf::Buf<impeller2::vtable::Field>,
+    Ops: impeller::buf::Buf<Op>,
+    Data: impeller::buf::Buf<u8>,
+    Fields: impeller::buf::Buf<impeller::vtable::Field>,
 {
     let mut ranges = Vec::new();
     for (op_idx, op) in vtable.ops.as_slice().iter().enumerate() {
@@ -865,7 +865,7 @@ impl DB {
         self.with_state_mut(|state| {
             if let Err(err) = vtable.vtable.validate_field_alignment(vtable.id) {
                 return Err(match err {
-                    impeller2::error::Error::VtableFieldMisaligned {
+                    impeller::error::Error::VtableFieldMisaligned {
                         packet_id,
                         component_id,
                         offset,
@@ -1528,52 +1528,52 @@ impl ComponentSchema {
         let size = self.size();
         let buf = buf
             .get(..size)
-            .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?;
+            .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?;
         let dim = &self.dim;
         let view = match self.prim_type {
             PrimType::U8 => ComponentView::U8(
                 nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
-                    .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
+                    .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?,
             ),
             PrimType::U16 => ComponentView::U16(
                 nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
-                    .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
+                    .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?,
             ),
             PrimType::U32 => ComponentView::U32(
                 nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
-                    .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
+                    .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?,
             ),
             PrimType::U64 => ComponentView::U64(
                 nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
-                    .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
+                    .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?,
             ),
             PrimType::I8 => ComponentView::I8(
                 nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
-                    .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
+                    .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?,
             ),
             PrimType::I16 => ComponentView::I16(
                 nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
-                    .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
+                    .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?,
             ),
             PrimType::I32 => ComponentView::I32(
                 nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
-                    .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
+                    .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?,
             ),
             PrimType::I64 => ComponentView::I64(
                 nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
-                    .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
+                    .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?,
             ),
             PrimType::Bool => ComponentView::Bool(
                 nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
-                    .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
+                    .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?,
             ),
             PrimType::F32 => ComponentView::F32(
                 nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
-                    .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
+                    .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?,
             ),
             PrimType::F64 => ComponentView::F64(
                 nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
-                    .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
+                    .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?,
             ),
         };
         Ok((size, view))
@@ -1824,7 +1824,7 @@ impl Decomponentize for DBSink<'_> {
     fn apply_value(
         &mut self,
         component_id: ComponentId,
-        value: impeller2::types::ComponentView<'_>,
+        value: impeller::types::ComponentView<'_>,
         timestamp: Option<Timestamp>,
     ) -> Result<(), Error> {
         self.apply_buf(component_id, value.as_bytes(), timestamp)
@@ -2034,7 +2034,7 @@ impl<A: AsyncWrite + 'static> PacketTx<A> {
         let req_id = self.req_id;
         self.send_with_builder(|pkt| {
             let header = PacketHeader {
-                packet_ty: impeller2::types::PacketTy::Msg,
+                packet_ty: impeller::types::PacketTy::Msg,
                 id: M::ID,
                 req_id,
             };
@@ -2084,7 +2084,7 @@ impl<A: AsyncWrite + 'static> PacketTx<A> {
         let req_id = self.req_id;
         self.send_with_builder(|pkt| {
             let header = PacketHeader {
-                packet_ty: impeller2::types::PacketTy::TimeSeries,
+                packet_ty: impeller::types::PacketTy::TimeSeries,
                 id,
                 req_id,
             };
@@ -2274,7 +2274,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
 
             tx.send_with_builder(|pkt| {
                 let header = PacketHeader {
-                    packet_ty: impeller2::types::PacketTy::Msg,
+                    packet_ty: impeller::types::PacketTy::Msg,
                     id: ComponentMetadata::ID,
                     req_id: m.req_id,
                 };

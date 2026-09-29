@@ -408,13 +408,13 @@ impl Cli {
         let mut app = self.editor_app()?;
         match &args.sim {
             Simulator::None => {
-                app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(None));
+                app.add_plugins(impeller_bevy::TcpImpellerPlugin::new(None));
             }
             Simulator::Addr(addr) => {
-                app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(Some(*addr)));
+                app.add_plugins(impeller_bevy::TcpImpellerPlugin::new(Some(addr)));
             }
             Simulator::File(_) | Simulator::Db(_) => {
-                app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(Some(args.addr)));
+                app.add_plugins(impeller_bevy::TcpImpellerPlugin::new(Some(args.addr)));
             }
         };
         app.insert_resource(BevyCancelToken(cancel_token.clone()))
@@ -490,7 +490,7 @@ impl Cli {
     pub fn render_server(self, args: RenderServerArgs) -> miette::Result<()> {
         let mut app = App::new();
         app.add_plugins(elodin_editor::headless::HeadlessEditorPlugin);
-        app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(Some(args.addr)));
+        app.add_plugins(impeller_bevy::TcpImpellerPlugin::new(Some(args.addr)));
         app.run();
         Ok(())
     }

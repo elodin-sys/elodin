@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use impeller2_stellar::Client;
-use impeller2_wkt::{Stream, StreamBehavior};
+use impeller_stellar::Client;
+use impeller_wkt::{Stream, StreamBehavior};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Duration;

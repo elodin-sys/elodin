@@ -4,17 +4,17 @@ use std::time::Duration;
 use crate::utils::SchemaExt;
 use bytemuck::Pod;
 use elodin_db::{ComponentSchema, MetadataExt};
-use impeller2::com_de::FromComponentView;
-use impeller2::{
+use impeller::com_de::FromComponentView;
+use impeller::{
     component::Component,
     types::{ComponentView, EntityId},
 };
-use impeller2_wkt::{ComponentMetadata, EntityMetadata};
+use impeller_wkt::{ComponentMetadata, EntityMetadata};
 
 use crate::error::Error;
 use crate::globals::SimulationTimeStep;
 use crate::globals::SystemGlobals;
-use impeller2::types::ComponentId;
+use impeller::types::ComponentId;
 use nox::ArrayTy;
 use serde::{Deserialize, Serialize};
 
@@ -44,8 +44,8 @@ pub struct World {
     pub metadata: WorldMetadata,
 }
 
-pub use impeller2_wkt::SensorCameraConfig;
-pub use impeller2_wkt::ThermalTagConfig;
+pub use impeller_wkt::SensorCameraConfig;
+pub use impeller_wkt::ThermalTagConfig;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub struct WorldMetadata {
@@ -118,7 +118,7 @@ pub struct Entity<'a> {
 }
 
 impl Entity<'_> {
-    pub fn metadata(self, metadata: impeller2_wkt::EntityMetadata) -> Self {
+    pub fn metadata(self, metadata: impeller_wkt::EntityMetadata) -> Self {
         self.world
             .metadata
             .entity_metadata

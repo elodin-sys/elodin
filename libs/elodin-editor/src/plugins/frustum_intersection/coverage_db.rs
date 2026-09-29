@@ -1,13 +1,13 @@
-//! Persist frustum coverage ratios to impeller2/Elodin DB.
+//! Persist frustum coverage ratios to impeller/Elodin DB.
 //!
 //! Creates or updates `{ellipsoid_name}.frustum_coverage` components with the volume ratio.
 //! Stale coverage entities (ellipsoids no longer in view) are reset to 0.0.
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use impeller2::types::ComponentId;
-use impeller2_bevy::{ComponentMetadataRegistry, ComponentValue, EntityMap};
-use impeller2_wkt::ComponentMetadata;
+use impeller::types::ComponentId;
+use impeller_bevy::{ComponentMetadataRegistry, ComponentValue, EntityMap};
+use impeller_wkt::ComponentMetadata;
 use std::collections::{HashMap, HashSet};
 
 use super::IntersectionRatios;
@@ -17,8 +17,8 @@ pub(super) struct CoverageDbParams<'w, 's> {
     pub ratios: Res<'w, IntersectionRatios>,
     pub entity_map: ResMut<'w, EntityMap>,
     pub metadata_reg: ResMut<'w, ComponentMetadataRegistry>,
-    pub schema_reg: ResMut<'w, impeller2_bevy::ComponentSchemaRegistry>,
-    pub path_reg: ResMut<'w, impeller2_bevy::ComponentPathRegistry>,
+    pub schema_reg: ResMut<'w, impeller_bevy::ComponentSchemaRegistry>,
+    pub path_reg: ResMut<'w, impeller_bevy::ComponentPathRegistry>,
     pub values: Query<'w, 's, &'static mut ComponentValue>,
     pub names: Query<'w, 's, &'static Name>,
 }
@@ -45,7 +45,7 @@ fn set_coverage_value(
     commands.entity(entity).insert(ComponentValue::F32(arr));
 }
 
-/// Persist coverage ratios to impeller2 components. Spawns new entities for unseen ellipsoids,
+/// Persist coverage ratios to impeller components. Spawns new entities for unseen ellipsoids,
 /// updates existing ones, and resets coverage to 0.0 for ellipsoids no longer in any frustum.
 pub(super) fn write_coverage_to_db(mut params: CoverageDbParams<'_, '_>, mut commands: Commands) {
     let mut ratios_by_ellipsoid: HashMap<Entity, f32> = HashMap::new();
@@ -79,18 +79,18 @@ pub(super) fn write_coverage_to_db(mut params: CoverageDbParams<'_, '_>, mut com
                 .clone();
 
             params.schema_reg.0.entry(cid).or_insert_with(|| {
-                use impeller2::component::Component;
-                impeller2_wkt::FrustumCoverage::schema()
+                use impeller::component::Component;
+                impeller_wkt::FrustumCoverage::schema()
             });
 
             params
                 .path_reg
                 .0
                 .entry(cid)
-                .or_insert_with(|| impeller2_bevy::ComponentPath::from_name(&full_name));
+                .or_insert_with(|| impeller_bevy::ComponentPath::from_name(&full_name));
 
             let e = commands
-                .spawn((cid, impeller2_bevy::ComponentValueMap::default(), metadata))
+                .spawn((cid, impeller_bevy::ComponentValueMap::default(), metadata))
                 .id();
             params.entity_map.insert(cid, e);
             e

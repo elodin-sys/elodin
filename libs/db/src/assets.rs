@@ -202,12 +202,12 @@ pub fn ingest_asset_dir(db_path: &Path, source_root: &Path) -> io::Result<Ingest
 /// regardless of how it got there. Idempotent: a path already in `db:` form maps
 /// to `None` via `local_asset_name` and is left as-is.
 pub fn rewrite_schematic_kdl_to_db(assets_dir: &Path, content: &str) -> Option<String> {
-    let mut schematic = impeller2_kdl::parse_schematic(content).ok()?;
-    impeller2_kdl::rewrite_asset_paths(&mut schematic, |path| {
-        let name = impeller2_kdl::local_asset_name(path)?;
+    let mut schematic = impeller_kdl::parse_schematic(content).ok()?;
+    impeller_kdl::rewrite_asset_paths(&mut schematic, |path| {
+        let name = impeller_kdl::local_asset_name(path)?;
         resolve_stored_asset_key(assets_dir, &name).map(|key| format!("db:{key}"))
     });
-    let serialized = impeller2_kdl::serialize_schematic(&schematic);
+    let serialized = impeller_kdl::serialize_schematic(&schematic);
     (serialized != content).then_some(serialized)
 }
 
@@ -388,17 +388,17 @@ impl WindowIngest<'_> {
         content: &str,
         base_dir: Option<&Path>,
     ) -> io::Result<Option<String>> {
-        let Ok(mut root) = impeller2_kdl::parse_schematic(content) else {
+        let Ok(mut root) = impeller_kdl::parse_schematic(content) else {
             return Ok(None);
         };
         let map = self.ingest_referenced_windows(&root, base_dir)?;
         if map.is_empty() {
             return Ok(None);
         }
-        impeller2_kdl::rewrite_asset_paths(&mut root, |path| {
+        impeller_kdl::rewrite_asset_paths(&mut root, |path| {
             map.get(path).map(|key| format!("db:{key}"))
         });
-        let serialized = impeller2_kdl::serialize_schematic(&root);
+        let serialized = impeller_kdl::serialize_schematic(&root);
         Ok((serialized != content).then_some(serialized))
     }
 
@@ -410,24 +410,24 @@ impl WindowIngest<'_> {
     /// resolve to different files from different referencing directories.
     fn ingest_referenced_windows(
         &mut self,
-        schematic: &impeller2_wkt::Schematic,
+        schematic: &impeller_wkt::Schematic,
         base_dir: Option<&Path>,
     ) -> io::Result<HashMap<String, String>> {
         let mut map = HashMap::new();
         for elem in &schematic.elems {
-            let impeller2_wkt::SchematicElem::Window(window) = elem else {
+            let impeller_wkt::SchematicElem::Window(window) = elem else {
                 continue;
             };
             let Some(reference) = window.path.as_deref() else {
                 continue;
             };
-            if !impeller2_kdl::is_local_asset_path(reference) || map.contains_key(reference) {
+            if !impeller_kdl::is_local_asset_path(reference) || map.contains_key(reference) {
                 continue;
             }
             // Already stored in the tree (ingested alongside the assets):
             // the normal `store_asset`/`rewrite_stored_schematics` rewrite
             // covers it; only files outside the tree need pulling in.
-            if let Some(name) = impeller2_kdl::local_asset_name(reference)
+            if let Some(name) = impeller_kdl::local_asset_name(reference)
                 && resolve_stored_asset_key(self.assets_dir, &name).is_some()
             {
                 continue;
@@ -463,14 +463,14 @@ impl WindowIngest<'_> {
         // save fallback): it still becomes fetchable over HTTP, it just cannot
         // be scanned for further references.
         if let Ok(content) = std::str::from_utf8(&bytes)
-            && let Ok(mut schematic) = impeller2_kdl::parse_schematic(content)
+            && let Ok(mut schematic) = impeller_kdl::parse_schematic(content)
         {
             let map = self.ingest_referenced_windows(&schematic, canonical.parent())?;
             if !map.is_empty() {
-                impeller2_kdl::rewrite_asset_paths(&mut schematic, |path| {
+                impeller_kdl::rewrite_asset_paths(&mut schematic, |path| {
                     map.get(path).map(|key| format!("db:{key}"))
                 });
-                bytes = impeller2_kdl::serialize_schematic(&schematic).into_bytes();
+                bytes = impeller_kdl::serialize_schematic(&schematic).into_bytes();
             }
         }
 

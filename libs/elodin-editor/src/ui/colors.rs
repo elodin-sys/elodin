@@ -9,7 +9,7 @@ use std::{
 };
 
 use egui::Color32;
-use impeller2_wkt::Color;
+use impeller_wkt::Color;
 use serde::{Deserialize, Serialize};
 
 use crate::dirs;

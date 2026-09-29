@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
-use impeller2::types::ComponentId;
+use impeller::types::ComponentId;
 
 use crate::error::Error;
 use crate::exec::ExecMetadata;

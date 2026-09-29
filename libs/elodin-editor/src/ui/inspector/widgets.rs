@@ -1,6 +1,6 @@
 use bevy_egui::egui;
 use egui::color_picker::{Alpha, color_picker_color32};
-use impeller2_wkt::QueryType;
+use impeller_wkt::QueryType;
 
 use crate::ui::{
     button::{ECheckboxButton, EColorButton},
@@ -251,7 +251,7 @@ pub fn search(
     .response
 }
 
-pub fn node_color_picker(ui: &mut egui::Ui, label: &str, color: &mut impeller2_wkt::Color) -> bool {
+pub fn node_color_picker(ui: &mut egui::Ui, label: &str, color: &mut impeller_wkt::Color) -> bool {
     let mut egui_color = color.into_color32();
     let res = ui.add(
         ECheckboxButton::new(label, true)
@@ -269,7 +269,7 @@ pub fn node_color_picker(ui: &mut egui::Ui, label: &str, color: &mut impeller2_w
 
     color_popup(ui, &mut egui_color, color_id, &res);
 
-    let new_color = impeller2_wkt::Color::from_color32(egui_color);
+    let new_color = impeller_wkt::Color::from_color32(egui_color);
     let changed = new_color != *color;
     *color = new_color;
     ui.separator();
@@ -284,7 +284,7 @@ pub fn eql_textfield(
 ) -> egui::Response {
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
-        let eql_res = ui.add_enabled(enabled, query(eql, impeller2_wkt::QueryType::EQL));
+        let eql_res = ui.add_enabled(enabled, query(eql, impeller_wkt::QueryType::EQL));
         eql_autocomplete(ui, eql_ctx, &eql_res, eql);
         eql_res
     })

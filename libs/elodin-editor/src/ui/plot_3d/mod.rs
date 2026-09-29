@@ -12,8 +12,8 @@ use bevy::{
     transform::TransformSystems,
 };
 use bevy_geo_frames::GeoPosition;
-use impeller2_bevy::{ComponentMetadataRegistry, TelemetryCache};
-use impeller2_wkt::Line3d;
+use impeller_bevy::{ComponentMetadataRegistry, TelemetryCache};
+use impeller_wkt::Line3d;
 
 use gpu::{LineConfig, LineUniform};
 
@@ -28,7 +28,7 @@ mod point_trails;
 /// KDL `color`/`future_color` can set per-line opacity. An explicit
 /// `future_color` alpha is used as-is; only fallback futures get the default
 /// fade (see `LineTrailColors::resolve`).
-fn line_color_linear(color: &impeller2_wkt::Color) -> Vec4 {
+fn line_color_linear(color: &impeller_wkt::Color) -> Vec4 {
     let linear = Color::srgba(color.r, color.g, color.b, color.a).to_linear();
     Vec4::new(linear.red, linear.green, linear.blue, linear.alpha)
 }
@@ -238,13 +238,13 @@ mod tests {
         // A KDL color/future_color alpha must survive into the line uniform
         // (sRGB->linear leaves alpha untouched). An explicit future_color keeps
         // this alpha as-is; fallback futures get the default fade in `resolve`.
-        let color = impeller2_wkt::Color::rgba(1.0, 1.0, 1.0, 0.25);
+        let color = impeller_wkt::Color::rgba(1.0, 1.0, 1.0, 0.25);
         assert_eq!(line_color_linear(&color).w, 0.25);
     }
 
     #[test]
     fn line_handle_supports_unnamed_sparse_array_indices() {
-        let id = impeller2::types::ComponentId::new("cube_pos_ecef");
+        let id = impeller::types::ComponentId::new("cube_pos_ecef");
         let mut data = CollectedGraphData::default();
         data.components
             .insert(id, PlotDataComponent::new("cube_pos_ecef", Vec::new()));

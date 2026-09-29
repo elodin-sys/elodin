@@ -31,15 +31,15 @@ use bevy_egui::{EguiContextSettings, EguiGlobalSettings, EguiPlugin};
 use bevy_geo_frames::GeoFramePlugin;
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use bevy_picking::{PickingSettings, PickingSystems, mesh_picking::update_hits};
-use impeller2::types::{ComponentId, OwnedPacket};
-use impeller2::types::{Msg, Timestamp};
-use impeller2_bevy::{
+use impeller::types::{ComponentId, OwnedPacket};
+use impeller::types::{Msg, Timestamp};
+use impeller_bevy::{
     ComponentMetadataRegistry, ComponentPathRegistry, ComponentSchemaRegistry, ComponentValueMap,
     ConnectionAddr, EntityMap, MsgRequestIdHandlers, PacketHandlerInput, PacketHandlers,
     PacketIdHandlers, RequestIdHandlers,
 };
-use impeller2_wkt::{CurrentTimestamp, NewConnection, Object3D, WorldPos};
-use impeller2_wkt::{EarliestTimestamp, LastUpdated};
+use impeller_wkt::{CurrentTimestamp, NewConnection, Object3D, WorldPos};
+use impeller_wkt::{EarliestTimestamp, LastUpdated};
 use nox::Tensor;
 use object_3d::create_object_3d_entity;
 use plugins::frustum::FrustumPlugin;
@@ -344,7 +344,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(ViewCubePlugin {
                 config: ViewCubeConfig::editor_mode(),
             })
-            .add_plugins(impeller2_bevy::Impeller2Plugin)
+            .add_plugins(impeller_bevy::ImpellerPlugin)
             .add_plugins(FrustumPlugin)
             .add_plugins(FrustumIntersectionPlugin)
             .add_plugins(GizmoPlugin);
@@ -394,7 +394,7 @@ impl Plugin for EditorPlugin {
                     follow_latest,
                     // Update selection after playback advances to keep line_3d and object_3d in sync.
                     set_selected_range,
-                    impeller2_bevy::apply_cached_data,
+                    impeller_bevy::apply_cached_data,
                     // Keep Object3D WorldPos in lock-step with cached component values
                     // before transforms are synchronized for rendering.
                     object_3d::update_object_3d_system,
@@ -412,12 +412,12 @@ impl Plugin for EditorPlugin {
                     set_floating_origin,
                 )
                     .chain()
-                    .after(impeller2_bevy::sink)
+                    .after(impeller_bevy::sink)
                     .in_set(PositionSync),
             )
             .add_systems(
                 Update,
-                impeller2_bevy::backfill_cache.after(crate::ui::plot::update_series_fetch_priority),
+                impeller_bevy::backfill_cache.after(crate::ui::plot::update_series_fetch_priority),
             )
             .add_systems(
                 Update,
@@ -578,7 +578,7 @@ fn has_sensor_view_pane(windows: &Query<&crate::ui::tiles::WindowState>) -> bool
 #[cfg(target_os = "macos")]
 fn throttle_for_sensor_cameras(
     configs: Res<sensor_camera::SensorCameraConfigs>,
-    db_config: Res<impeller2_wkt::DbConfig>,
+    db_config: Res<impeller_wkt::DbConfig>,
     mut settings: ResMut<bevy_framepace::FramepaceSettings>,
     mut shadow_map: ResMut<DirectionalLightShadowMap>,
     mut dir_lights: Query<&mut DirectionalLight>,
@@ -608,7 +608,7 @@ fn throttle_for_sensor_cameras(
 #[cfg(not(target_os = "macos"))]
 fn throttle_for_sensor_cameras(
     configs: Res<sensor_camera::SensorCameraConfigs>,
-    db_config: Res<impeller2_wkt::DbConfig>,
+    db_config: Res<impeller_wkt::DbConfig>,
     mut settings: ResMut<bevy_framepace::FramepaceSettings>,
     mut shadow_map: ResMut<DirectionalLightShadowMap>,
     windows: Query<&crate::ui::tiles::WindowState>,
@@ -1289,21 +1289,21 @@ pub trait BevyExt {
     type Bevy;
     fn into_bevy(self) -> Self::Bevy;
 }
-impl BevyExt for impeller2_wkt::Mesh {
+impl BevyExt for impeller_wkt::Mesh {
     type Bevy = Mesh;
 
     fn into_bevy(self) -> Self::Bevy {
         match self {
-            impeller2_wkt::Mesh::Sphere { radius } => {
+            impeller_wkt::Mesh::Sphere { radius } => {
                 bevy::math::primitives::Sphere { radius }.into()
             }
-            impeller2_wkt::Mesh::Box { x, y, z } => {
+            impeller_wkt::Mesh::Box { x, y, z } => {
                 bevy::math::primitives::Cuboid::new(x, y, z).into()
             }
-            impeller2_wkt::Mesh::Cylinder { radius, height } => {
+            impeller_wkt::Mesh::Cylinder { radius, height } => {
                 bevy::math::primitives::Cylinder::new(radius, height).into()
             }
-            impeller2_wkt::Mesh::Plane { width, depth } => {
+            impeller_wkt::Mesh::Plane { width, depth } => {
                 bevy::math::primitives::Plane3d::default()
                     .mesh()
                     .size(width, depth)
@@ -1313,7 +1313,7 @@ impl BevyExt for impeller2_wkt::Mesh {
     }
 }
 
-impl BevyExt for impeller2_wkt::Material {
+impl BevyExt for impeller_wkt::Material {
     type Bevy = StandardMaterial;
 
     fn into_bevy(self) -> Self::Bevy {
@@ -1356,10 +1356,10 @@ pub struct SyncedObject3d(HashMap<Entity, Entity>);
 
 #[allow(clippy::too_many_arguments)]
 pub fn sync_object_3d(
-    query: Query<(Entity, &ComponentId), With<impeller2_wkt::WorldPos>>,
-    meshes: Query<&impeller2_wkt::Mesh>,
-    materials: Query<&impeller2_wkt::Material>,
-    glbs: Query<&impeller2_wkt::Glb>,
+    query: Query<(Entity, &ComponentId), With<impeller_wkt::WorldPos>>,
+    meshes: Query<&impeller_wkt::Mesh>,
+    materials: Query<&impeller_wkt::Material>,
+    glbs: Query<&impeller_wkt::Glb>,
     mut synced_object_3d: ResMut<SyncedObject3d>,
     entity_map: ResMut<EntityMap>,
     path_reg: Res<ComponentPathRegistry>,
@@ -1370,7 +1370,7 @@ pub fn sync_object_3d(
     mut commands: Commands,
     assets: Res<AssetServer>,
     geo_context: Res<GeoContext>,
-    connection_addr: Option<Res<impeller2_bevy::ConnectionAddr>>,
+    connection_addr: Option<Res<impeller_bevy::ConnectionAddr>>,
     initial_kdl: Option<Res<plugins::kdl_document::InitialKdlPath>>,
 ) {
     let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
@@ -1398,8 +1398,8 @@ pub fn sync_object_3d(
             .and_then(|e| materials.get(*e).ok());
 
         let mesh_source = match (glb, mesh, material) {
-            (Some(glb), _, _) => impeller2_wkt::Object3DMesh::glb(glb.0.clone()),
-            (_, Some(mesh), Some(mat)) => impeller2_wkt::Object3DMesh::Mesh {
+            (Some(glb), _, _) => impeller_wkt::Object3DMesh::glb(glb.0.clone()),
+            (_, Some(mesh), Some(mat)) => impeller_wkt::Object3DMesh::Mesh {
                 mesh: mesh.clone(),
                 material: mat.clone(),
             },
@@ -1497,25 +1497,25 @@ fn despawn_synced_object_3d(commands: &mut Commands, synced_glbs: &mut SyncedObj
 }
 
 fn hard_clear_series_store(
-    telemetry_cache: &mut impeller2_bevy::TelemetryCache,
-    backfill_state: &mut impeller2_bevy::BackfillState,
-    series_load: &mut impeller2_bevy::SeriesStoreLoadState,
+    telemetry_cache: &mut impeller_bevy::TelemetryCache,
+    backfill_state: &mut impeller_bevy::BackfillState,
+    series_load: &mut impeller_bevy::SeriesStoreLoadState,
     plot_sync: &mut crate::ui::plot::data::PlotSyncState,
     visible_prefetch: &mut crate::ui::plot::data::VisiblePrefetchState,
 ) {
-    *telemetry_cache = impeller2_bevy::TelemetryCache::default();
-    *backfill_state = impeller2_bevy::BackfillState::default();
-    *series_load = impeller2_bevy::SeriesStoreLoadState::default();
+    *telemetry_cache = impeller_bevy::TelemetryCache::default();
+    *backfill_state = impeller_bevy::BackfillState::default();
+    *series_load = impeller_bevy::SeriesStoreLoadState::default();
     *plot_sync = crate::ui::plot::data::PlotSyncState::default();
     *visible_prefetch = crate::ui::plot::data::VisiblePrefetchState::default();
 }
 
 /// Soft reconnect: keep SeriesStore samples; re-arm begin→end backfill for catch-up.
 fn soft_rearm_series_store_catchup(
-    backfill_state: &mut impeller2_bevy::BackfillState,
-    series_load: &mut impeller2_bevy::SeriesStoreLoadState,
+    backfill_state: &mut impeller_bevy::BackfillState,
+    series_load: &mut impeller_bevy::SeriesStoreLoadState,
 ) {
-    *backfill_state = impeller2_bevy::BackfillState::default();
+    *backfill_state = impeller_bevy::BackfillState::default();
     series_load.components_started = 0;
     series_load.components_complete = 0;
     series_load.complete = false;
@@ -1543,9 +1543,9 @@ fn apply_series_store_on_reconnect(
     soft: bool,
     addr: Option<std::net::SocketAddr>,
     session: &mut SeriesStoreSession,
-    telemetry_cache: &mut impeller2_bevy::TelemetryCache,
-    backfill_state: &mut impeller2_bevy::BackfillState,
-    series_load: &mut impeller2_bevy::SeriesStoreLoadState,
+    telemetry_cache: &mut impeller_bevy::TelemetryCache,
+    backfill_state: &mut impeller_bevy::BackfillState,
+    series_load: &mut impeller_bevy::SeriesStoreLoadState,
     plot_sync: &mut crate::ui::plot::data::PlotSyncState,
     visible_prefetch: &mut crate::ui::plot::data::VisiblePrefetchState,
 ) {
@@ -1653,21 +1653,21 @@ struct SeriesStoreReconnect<'w> {
     msg_handlers: ResMut<'w, MsgRequestIdHandlers>,
     req_handlers: ResMut<'w, RequestIdHandlers>,
     packet_id_handlers: ResMut<'w, PacketIdHandlers>,
-    telemetry_cache: ResMut<'w, impeller2_bevy::TelemetryCache>,
-    backfill_state: ResMut<'w, impeller2_bevy::BackfillState>,
-    series_load: ResMut<'w, impeller2_bevy::SeriesStoreLoadState>,
+    telemetry_cache: ResMut<'w, impeller_bevy::TelemetryCache>,
+    backfill_state: ResMut<'w, impeller_bevy::BackfillState>,
+    series_load: ResMut<'w, impeller_bevy::SeriesStoreLoadState>,
     plot_sync: ResMut<'w, crate::ui::plot::data::PlotSyncState>,
     visible_prefetch: ResMut<'w, crate::ui::plot::data::VisiblePrefetchState>,
 }
 
 /// When DbConfig identity differs from the preserved session, wipe SeriesStore + UI.
 pub(crate) fn sync_series_store_session_from_db_config(
-    config: Res<impeller2_wkt::DbConfig>,
+    config: Res<impeller_wkt::DbConfig>,
     mut series: SeriesStoreReconnect,
     mut editor_ui: EditorUiHardClear,
     mut current: ResMut<CurrentTimestamp>,
-    mut sim_time_step_fetch: ResMut<impeller2_bevy::SimTimeStepFetch>,
-    mut sim_time_step: ResMut<impeller2_wkt::SimulationTimeStep>,
+    mut sim_time_step_fetch: ResMut<impeller_bevy::SimTimeStepFetch>,
+    mut sim_time_step: ResMut<impeller_wkt::SimulationTimeStep>,
     mut component_time_ranges: ResMut<ui::data_overview::ComponentTimeRanges>,
 ) {
     if !config.is_changed() {
@@ -1685,7 +1685,7 @@ pub(crate) fn sync_series_store_session_from_db_config(
     }
     // A different recording may run at a different rate, measured from ranges
     // that must be re-queried rather than carried over.
-    impeller2_bevy::rearm_sim_time_step(&mut sim_time_step_fetch, &mut sim_time_step);
+    impeller_bevy::rearm_sim_time_step(&mut sim_time_step_fetch, &mut sim_time_step);
     component_time_ranges.reset();
     cancel_in_flight_series_requests(
         &mut editor_ui.commands,
@@ -1716,15 +1716,15 @@ fn clear_state_new_connection(
     mut component_time_ranges: ResMut<ui::data_overview::ComponentTimeRanges>,
     mut series: SeriesStoreReconnect,
     mut editor_ui: EditorUiHardClear,
-    mut sim_time_step_fetch: ResMut<impeller2_bevy::SimTimeStepFetch>,
-    mut sim_time_step: ResMut<impeller2_wkt::SimulationTimeStep>,
+    mut sim_time_step_fetch: ResMut<impeller_bevy::SimTimeStepFetch>,
+    mut sim_time_step: ResMut<impeller_wkt::SimulationTimeStep>,
 ) {
     match packet {
         OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
         _ => return,
     }
 
-    impeller2_bevy::rearm_sim_time_step(&mut sim_time_step_fetch, &mut sim_time_step);
+    impeller_bevy::rearm_sim_time_step(&mut sim_time_step_fetch, &mut sim_time_step);
 
     // SeriesStore ops run before any UI early-return so a missing primary
     // window cannot leave handlers/cache in a half-torn-down state.
@@ -2593,8 +2593,8 @@ mod tests {
     use bevy::math::{DQuat, EulerRot};
     use bevy::mesh::VertexAttributeValues;
     use bevy_geo_frames::RotationKind;
-    use impeller2::types::{ComponentId, Timestamp};
-    use impeller2_wkt::ComponentValue;
+    use impeller::types::{ComponentId, Timestamp};
+    use impeller_wkt::ComponentValue;
 
     #[cfg(feature = "big_space")]
     #[test]
@@ -2665,7 +2665,7 @@ mod tests {
 
     #[test]
     fn plane_mesh_is_horizontal_in_bevy() {
-        let mesh = impeller2_wkt::Mesh::plane(10.0, 20.0).into_bevy();
+        let mesh = impeller_wkt::Mesh::plane(10.0, 20.0).into_bevy();
         let Some(VertexAttributeValues::Float32x3(normals)) =
             mesh.attribute(Mesh::ATTRIBUTE_NORMAL)
         else {
@@ -2695,8 +2695,8 @@ mod tests {
         std::net::SocketAddr::from(([127, 0, 0, 1], port))
     }
 
-    fn populated_cache() -> impeller2_bevy::TelemetryCache {
-        let mut cache = impeller2_bevy::TelemetryCache::default();
+    fn populated_cache() -> impeller_bevy::TelemetryCache {
+        let mut cache = impeller_bevy::TelemetryCache::default();
         cache.insert(
             ComponentId(42),
             Timestamp(1_000),
@@ -2711,8 +2711,8 @@ mod tests {
         let mut session = SeriesStoreSession::identity(Some(addr), Some(100));
         let mut cache = populated_cache();
         let gen_before = cache.generation();
-        let mut backfill = impeller2_bevy::BackfillState::default();
-        let mut series_load = impeller2_bevy::SeriesStoreLoadState {
+        let mut backfill = impeller_bevy::BackfillState::default();
+        let mut series_load = impeller_bevy::SeriesStoreLoadState {
             components_started: 3,
             components_complete: 3,
             samples_loaded: 10,
@@ -2744,8 +2744,8 @@ mod tests {
     #[test]
     fn soft_reconnect_cancels_handlers_and_prefetch() {
         use bevy::ecs::system::{InRef, RunSystemOnce};
-        use impeller2::types::PacketId;
-        use impeller2_bevy::PacketGrantR;
+        use impeller::types::PacketId;
+        use impeller_bevy::PacketGrantR;
 
         let mut app = App::new();
         app.init_resource::<MsgRequestIdHandlers>()
@@ -2845,8 +2845,8 @@ mod tests {
         let addr = sample_addr(2240);
         let mut session = SeriesStoreSession::identity(Some(addr), Some(50));
         let mut cache = populated_cache();
-        let mut backfill = impeller2_bevy::BackfillState::default();
-        let mut series_load = impeller2_bevy::SeriesStoreLoadState::default();
+        let mut backfill = impeller_bevy::BackfillState::default();
+        let mut series_load = impeller_bevy::SeriesStoreLoadState::default();
         let mut plot_sync = crate::ui::plot::data::PlotSyncState::default();
         let mut prefetch = crate::ui::plot::data::VisiblePrefetchState::default();
         prefetch
@@ -2884,8 +2884,8 @@ mod tests {
         let new = sample_addr(2241);
         let mut session = SeriesStoreSession::identity(Some(old), Some(100));
         let mut cache = populated_cache();
-        let mut backfill = impeller2_bevy::BackfillState::default();
-        let mut series_load = impeller2_bevy::SeriesStoreLoadState {
+        let mut backfill = impeller_bevy::BackfillState::default();
+        let mut series_load = impeller_bevy::SeriesStoreLoadState {
             samples_loaded: 99,
             complete: true,
             ..Default::default()
@@ -2912,16 +2912,16 @@ mod tests {
 
     fn sync_app(addr: std::net::SocketAddr) -> App {
         let mut app = App::new();
-        app.init_resource::<impeller2_wkt::DbConfig>()
+        app.init_resource::<impeller_wkt::DbConfig>()
             .init_resource::<SeriesStoreSession>()
             .init_resource::<MsgRequestIdHandlers>()
             .init_resource::<RequestIdHandlers>()
             .init_resource::<PacketIdHandlers>()
-            .init_resource::<impeller2_bevy::TelemetryCache>()
-            .init_resource::<impeller2_bevy::BackfillState>()
-            .init_resource::<impeller2_bevy::SeriesStoreLoadState>()
-            .init_resource::<impeller2_bevy::SimTimeStepFetch>()
-            .insert_resource(impeller2_wkt::SimulationTimeStep(0.008333))
+            .init_resource::<impeller_bevy::TelemetryCache>()
+            .init_resource::<impeller_bevy::BackfillState>()
+            .init_resource::<impeller_bevy::SeriesStoreLoadState>()
+            .init_resource::<impeller_bevy::SimTimeStepFetch>()
+            .insert_resource(impeller_wkt::SimulationTimeStep(0.008333))
             .init_resource::<ui::data_overview::ComponentTimeRanges>()
             .init_resource::<crate::ui::plot::data::PlotSyncState>()
             .init_resource::<crate::ui::plot::data::VisiblePrefetchState>()
@@ -2960,7 +2960,7 @@ mod tests {
     #[test]
     fn hard_clear_when_db_config_identity_changes() {
         use bevy::ecs::system::InRef;
-        use impeller2_bevy::PacketGrantR;
+        use impeller_bevy::PacketGrantR;
 
         let addr = sample_addr(2240);
         let mut app = sync_app(addr);
@@ -2979,7 +2979,7 @@ mod tests {
             *session = SeriesStoreSession::identity(Some(addr), Some(100));
             let mut cache = app
                 .world_mut()
-                .resource_mut::<impeller2_bevy::TelemetryCache>();
+                .resource_mut::<impeller_bevy::TelemetryCache>();
             *cache = populated_cache();
             app.world_mut()
                 .resource_mut::<MsgRequestIdHandlers>()
@@ -3018,12 +3018,12 @@ mod tests {
         }
 
         {
-            let mut config = app.world_mut().resource_mut::<impeller2_wkt::DbConfig>();
+            let mut config = app.world_mut().resource_mut::<impeller_wkt::DbConfig>();
             config.set_time_start_timestamp_micros(200);
         }
         app.update();
 
-        let cache = app.world().resource::<impeller2_bevy::TelemetryCache>();
+        let cache = app.world().resource::<impeller_bevy::TelemetryCache>();
         assert!(!cache.has_series(&ComponentId(42)));
         let session = app.world().resource::<SeriesStoreSession>();
         assert_eq!(session.start_ts, Some(200));
@@ -3067,9 +3067,7 @@ mod tests {
         // The published rate must go with it, or TPS, tick labels and
         // jump-to-tick keep quoting the previous recording.
         assert_eq!(
-            app.world()
-                .resource::<impeller2_wkt::SimulationTimeStep>()
-                .0,
+            app.world().resource::<impeller_wkt::SimulationTimeStep>().0,
             0.0
         );
         assert!(app.world_mut().unregister_system(msg_sys).is_err());
@@ -3088,21 +3086,21 @@ mod tests {
             *session = SeriesStoreSession::identity(Some(addr), None);
             let mut cache = app
                 .world_mut()
-                .resource_mut::<impeller2_bevy::TelemetryCache>();
+                .resource_mut::<impeller_bevy::TelemetryCache>();
             *cache = populated_cache();
             app.world_mut()
                 .resource_mut::<plugins::kdl_document::LastSyncedActiveKey>()
                 .0 = Some("schematics/main.kdl".into());
         }
         {
-            let mut config = app.world_mut().resource_mut::<impeller2_wkt::DbConfig>();
+            let mut config = app.world_mut().resource_mut::<impeller_wkt::DbConfig>();
             config.set_time_start_timestamp_micros(100);
         }
         app.update();
 
         assert!(
             app.world()
-                .resource::<impeller2_bevy::TelemetryCache>()
+                .resource::<impeller_bevy::TelemetryCache>()
                 .has_series(&ComponentId(42))
         );
         assert_eq!(

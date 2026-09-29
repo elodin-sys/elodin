@@ -2,9 +2,9 @@
 //! `elodin_db::DB` (no sockets): registration must pass alignment validation
 //! and a row must sink into per-component time series.
 
-use impeller2::types::{ComponentId, PrimType};
-use impeller2::vtable::builder::{component, raw_field, raw_table, schema, timestamp, vtable};
-use impeller2_wkt::VTableMsg;
+use impeller::types::{ComponentId, PrimType};
+use impeller::vtable::builder::{component, raw_field, raw_table, schema, timestamp, vtable};
+use impeller_wkt::VTableMsg;
 
 #[test]
 fn two_field_vtable_round_trip() {

@@ -12,9 +12,9 @@ use bevy_egui::egui::{Color32, Id};
 use bevy_geo_frames::prelude::*;
 use bevy_mat3_material::Mat3Material;
 use egui_tiles::{Container, Tile, TileId};
-use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry, ConnectionAddr};
-use impeller2_kdl::FromKdl;
-use impeller2_wkt::{
+use impeller_bevy::{ComponentPath, ComponentSchemaRegistry, ConnectionAddr};
+use impeller_kdl::FromKdl;
+use impeller_wkt::{
     Graph, Line3d, Object3D, Panel, PointTrails, Schematic, VectorArrow3d, Viewport,
     WindowSchematic,
 };
@@ -139,12 +139,12 @@ pub(crate) fn schematic_geo_origin(schematic: &Schematic) -> bevy_geo_frames::Ge
 /// Reference ellipsoid for the schematic's `coordinate body=…`; absent means
 /// Earth, so existing schematics keep WGS84.
 pub(crate) fn body_ellipsoid(
-    body: Option<impeller2_wkt::CelestialBody>,
+    body: Option<impeller_wkt::CelestialBody>,
 ) -> bevy_geo_frames::Ellipsoid {
     match body.unwrap_or_default() {
-        impeller2_wkt::CelestialBody::Earth => bevy_geo_frames::Ellipsoid::WGS84,
-        impeller2_wkt::CelestialBody::Moon => bevy_geo_frames::Ellipsoid::Sphere {
-            radius: impeller2_wkt::CelestialBody::MOON_RADIUS_M,
+        impeller_wkt::CelestialBody::Earth => bevy_geo_frames::Ellipsoid::WGS84,
+        impeller_wkt::CelestialBody::Moon => bevy_geo_frames::Ellipsoid::Sphere {
+            radius: impeller_wkt::CelestialBody::MOON_RADIUS_M,
         },
     }
 }
@@ -154,8 +154,8 @@ pub(crate) fn body_ellipsoid(
 /// (and for any ellipsoid no body maps to), so plain schematics stay unchanged.
 pub(crate) fn ellipsoid_body(
     ellipsoid: bevy_geo_frames::Ellipsoid,
-) -> Option<impeller2_wkt::CelestialBody> {
-    [impeller2_wkt::CelestialBody::Moon]
+) -> Option<impeller_wkt::CelestialBody> {
+    [impeller_wkt::CelestialBody::Moon]
         .into_iter()
         .find(|&body| body_ellipsoid(Some(body)).parameters() == ellipsoid.parameters())
 }
@@ -249,7 +249,7 @@ pub struct MonitorsRoot;
 /// still incomplete. Retried in place so `--kdl` does not need a full reopen.
 #[derive(Resource, Default)]
 pub struct PendingObject3dSpawns {
-    objects: Vec<impeller2_wkt::Object3D>,
+    objects: Vec<impeller_wkt::Object3D>,
 }
 
 pub(crate) fn plugin(app: &mut App) {
@@ -304,7 +304,7 @@ pub struct LoadSchematicParams<'w, 's> {
     monitor_root: Option<Single<'w, 's, Entity, With<MonitorsRoot>>>,
 }
 
-fn apply_theme(theme: Option<&impeller2_wkt::ThemeConfig>) -> colors::SchemeSelection {
+fn apply_theme(theme: Option<&impeller_wkt::ThemeConfig>) -> colors::SchemeSelection {
     let current = colors::current_selection();
     let scheme = theme
         .and_then(|t| t.scheme.as_deref())
@@ -396,7 +396,7 @@ fn collect_window_descriptors(
     let mut windows = Vec::new();
 
     for elem in &schematic.elems {
-        let impeller2_wkt::SchematicElem::Window(window) = elem else {
+        let impeller_wkt::SchematicElem::Window(window) = elem else {
             continue;
         };
 
@@ -446,7 +446,7 @@ impl LoadSchematicParams<'_, '_> {
         base_dir: Option<&Path>,
         window_assets: Option<&[SchematicWindow]>,
     ) {
-        if let Err(err) = impeller2_wkt::validate_single_cinematic_environment(
+        if let Err(err) = impeller_wkt::validate_single_cinematic_environment(
             Some(schematic),
             &self.sensor_camera_configs.0,
         ) {
@@ -513,7 +513,7 @@ impl LoadSchematicParams<'_, '_> {
         let panel_count = schematic
             .elems
             .iter()
-            .filter(|elem| matches!(elem, impeller2_wkt::SchematicElem::Panel(_)))
+            .filter(|elem| matches!(elem, impeller_wkt::SchematicElem::Panel(_)))
             .count();
         let tabs_parent = tabs_parent_for_panels(&main_state, panel_count);
         let mut main_ui_state = crate::ui::WindowUiState::default();
@@ -522,7 +522,7 @@ impl LoadSchematicParams<'_, '_> {
         let force_graph_lock = schematic.telemetry_mode;
         for elem in &schematic.elems {
             match elem {
-                impeller2_wkt::SchematicElem::Panel(p) => {
+                impeller_wkt::SchematicElem::Panel(p) => {
                     let p = apply_fallback_frame_to_panel(p, fallback_frame);
                     self.spawn_panel(
                         &mut main_state,
@@ -533,45 +533,45 @@ impl LoadSchematicParams<'_, '_> {
                         force_graph_lock,
                     );
                 }
-                impeller2_wkt::SchematicElem::Object3d(object_3d) => {
+                impeller_wkt::SchematicElem::Object3d(object_3d) => {
                     let mut obj = object_3d.clone();
                     if obj.frame.is_none() {
                         obj.frame = fallback_frame;
                     }
                     self.spawn_object_3d(obj);
                 }
-                impeller2_wkt::SchematicElem::Line3d(line_3d) => {
+                impeller_wkt::SchematicElem::Line3d(line_3d) => {
                     let mut line = line_3d.clone();
                     if line.frame.is_none() {
                         line.frame = fallback_frame;
                     }
                     self.spawn_line_3d(line);
                 }
-                impeller2_wkt::SchematicElem::PointTrails(point_trails) => {
+                impeller_wkt::SchematicElem::PointTrails(point_trails) => {
                     let mut trails = point_trails.clone();
                     if trails.frame.is_none() {
                         trails.frame = fallback_frame;
                     }
                     self.spawn_point_trails(trails);
                 }
-                impeller2_wkt::SchematicElem::VectorArrow(vector_arrow) => {
+                impeller_wkt::SchematicElem::VectorArrow(vector_arrow) => {
                     let mut arrow = vector_arrow.clone();
                     if arrow.frame.is_none() {
                         arrow.frame = fallback_frame;
                     }
                     self.spawn_vector_arrow(arrow, None);
                 }
-                impeller2_wkt::SchematicElem::WorldMesh(world_mesh) => {
+                impeller_wkt::SchematicElem::WorldMesh(world_mesh) => {
                     let mut wm = world_mesh.clone();
                     if wm.frame.is_none() {
                         wm.frame = fallback_frame;
                     }
                     self.spawn_world_mesh(wm);
                 }
-                impeller2_wkt::SchematicElem::Window(_) => {}
-                impeller2_wkt::SchematicElem::Theme(_) => {}
-                impeller2_wkt::SchematicElem::Timeline(_) => {}
-                impeller2_wkt::SchematicElem::Coordinate(_) => {}
+                impeller_wkt::SchematicElem::Window(_) => {}
+                impeller_wkt::SchematicElem::Theme(_) => {}
+                impeller_wkt::SchematicElem::Timeline(_) => {}
+                impeller_wkt::SchematicElem::Coordinate(_) => {}
             }
         }
 
@@ -684,7 +684,7 @@ impl LoadSchematicParams<'_, '_> {
                     continue;
                 }
                 match read_window_schematic_kdl(&path, connection_addr) {
-                    Ok(kdl) => match impeller2_wkt::Schematic::from_kdl(&kdl) {
+                    Ok(kdl) => match impeller_wkt::Schematic::from_kdl(&kdl) {
                         Ok(window_schematic) => {
                             self.spawn_window(
                                 &window_schematic,
@@ -756,7 +756,7 @@ impl LoadSchematicParams<'_, '_> {
             load.task = None;
             // Parse here so torn bytes share the retry path with fetch errors.
             let parsed = result.and_then(|kdl| {
-                impeller2_wkt::Schematic::from_kdl(&kdl)
+                impeller_wkt::Schematic::from_kdl(&kdl)
                     .map(|schematic| (kdl, schematic))
                     .map_err(|err| render_diag(&err))
             });
@@ -857,13 +857,13 @@ impl LoadSchematicParams<'_, '_> {
         let panel_count = sec_schematic
             .elems
             .iter()
-            .filter(|elem| matches!(elem, impeller2_wkt::SchematicElem::Panel(_)))
+            .filter(|elem| matches!(elem, impeller_wkt::SchematicElem::Panel(_)))
             .count();
         let tabs_parent = tabs_parent_for_panels(&tile_state, panel_count);
         let mut ui_state = crate::ui::WindowUiState::default();
 
         for elem in &sec_schematic.elems {
-            if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
+            if let impeller_wkt::SchematicElem::Panel(panel) = elem {
                 self.spawn_panel(
                     &mut tile_state,
                     &mut ui_state,
@@ -1122,7 +1122,7 @@ impl LoadSchematicParams<'_, '_> {
         }
     }
 
-    pub fn spawn_world_mesh(&mut self, world_mesh: impeller2_wkt::WorldMesh) {
+    pub fn spawn_world_mesh(&mut self, world_mesh: impeller_wkt::WorldMesh) {
         let entity = crate::plugins::world_mesh::spawn_world_mesh_terrain(
             &mut self.commands,
             &mut self.meshes,
@@ -1424,14 +1424,14 @@ impl LoadSchematicParams<'_, '_> {
                         .copied()
                         .unwrap_or_else(|| colors::get_scheme().highlight);
                     entity_cmds.insert(QueryPlotData {
-                        data: impeller2_wkt::QueryPlot {
+                        data: impeller_wkt::QueryPlot {
                             name: graph_label.clone(),
                             query: graph.eql.clone(),
                             refresh_interval: std::time::Duration::from_millis(500),
                             auto_refresh: true,
-                            color: impeller2_wkt::Color::from_color32(default_color),
-                            query_type: impeller2_wkt::QueryType::EQL,
-                            plot_mode: impeller2_wkt::PlotMode::TimeSeries,
+                            color: impeller_wkt::Color::from_color32(default_color),
+                            query_type: impeller_wkt::QueryType::EQL,
+                            plot_mode: impeller_wkt::PlotMode::TimeSeries,
                             x_label: None,
                             y_label: None,
                             node_id: Default::default(),
@@ -1553,7 +1553,7 @@ impl LoadSchematicParams<'_, '_> {
                 tile_state.insert_tile(Tile::Pane(Pane::ActionTile(pane)), parent_id, false)
             }
             Panel::VideoStream(video_stream) => {
-                let msg_id = impeller2::types::msg_id(&video_stream.msg_name);
+                let msg_id = impeller::types::msg_id(&video_stream.msg_name);
                 let label = video_stream
                     .name
                     .clone()
@@ -1587,7 +1587,7 @@ impl LoadSchematicParams<'_, '_> {
                 tile_state.insert_tile(Tile::Pane(Pane::VideoStream(pane)), parent_id, false)
             }
             Panel::SensorView(sensor_view) => {
-                let msg_id = impeller2::types::msg_id(&sensor_view.msg_name);
+                let msg_id = impeller::types::msg_id(&sensor_view.msg_name);
                 let label = sensor_view
                     .name
                     .clone()
@@ -1646,7 +1646,7 @@ impl LoadSchematicParams<'_, '_> {
                 tile_state.insert_tile(Tile::Pane(Pane::SensorView(pane)), parent_id, false)
             }
             Panel::LogStream(log_stream) => {
-                let msg_id = impeller2::types::msg_id(&log_stream.msg_name);
+                let msg_id = impeller::types::msg_id(&log_stream.msg_name);
                 let label = log_stream
                     .name
                     .clone()
@@ -1872,7 +1872,7 @@ pub fn reject_mixed_cinematic_environment(
         return;
     }
     if let Err(err) =
-        impeller2_wkt::validate_single_cinematic_environment(Some(&schematic.0), &configs.0)
+        impeller_wkt::validate_single_cinematic_environment(Some(&schematic.0), &configs.0)
     {
         bevy::log::error!("{err}");
         *logged = true;
@@ -1984,9 +1984,9 @@ mod tests {
     };
     use bevy_geo_frames::{GeoFrame, GeoFramePlugin, GeoPosition, GeoRotation, RotationKind};
     use bevy_mat3_material::Mat3Material;
-    use impeller2_bevy::ComponentSchemaRegistry;
-    use impeller2_kdl::FromKdl;
-    use impeller2_wkt::Schematic;
+    use impeller_bevy::ComponentSchemaRegistry;
+    use impeller_kdl::FromKdl;
+    use impeller_wkt::Schematic;
     use test_case::test_case;
 
     fn test_app() -> App {
@@ -2064,7 +2064,7 @@ mod tests {
 
     /// Rebuilds `CurrentSchematic` from live editor state, as saving does.
     fn save_schematic(app: &mut App) -> Schematic {
-        app.init_resource::<impeller2_bevy::ComponentMetadataRegistry>()
+        app.init_resource::<impeller_bevy::ComponentMetadataRegistry>()
             .init_resource::<crate::ui::schematic::CurrentWindowSchematics>();
         app.world_mut()
             .run_system_cached(crate::ui::schematic::tiles_to_schematic)
@@ -2261,7 +2261,7 @@ mod tests {
         load_schematic(&mut app, &schematic);
 
         let mut query = app.world_mut().query::<(
-            &impeller2_wkt::Line3d,
+            &impeller_wkt::Line3d,
             &GeoPosition,
             &GeoRotation,
             &Transform,
@@ -2288,7 +2288,7 @@ mod tests {
 
         let mut query = app
             .world_mut()
-            .query::<(&impeller2_wkt::PointTrails, &GeoPosition, &GeoRotation)>();
+            .query::<(&impeller_wkt::PointTrails, &GeoPosition, &GeoRotation)>();
         let (trails, geo_pos, geo_rot) = query
             .iter(app.world())
             .next()
@@ -2400,7 +2400,7 @@ mod tests {
             .ellipsoid;
         assert_eq!(
             ellipsoid.parameters().0,
-            impeller2_wkt::CelestialBody::MOON_RADIUS_M
+            impeller_wkt::CelestialBody::MOON_RADIUS_M
         );
         // A lunar sphere has no flattening, unlike WGS84.
         assert_eq!(ellipsoid.parameters().0, ellipsoid.parameters().1);
@@ -2427,8 +2427,8 @@ mod tests {
 
         let saved = save_schematic(&mut app);
         assert_eq!(saved.frame, Some(GeoFrame::ECEF));
-        assert_eq!(saved.body, Some(impeller2_wkt::CelestialBody::Moon));
-        assert!(impeller2_kdl::serialize_schematic(&saved).contains(r#"body=moon"#));
+        assert_eq!(saved.body, Some(impeller_wkt::CelestialBody::Moon));
+        assert!(impeller_kdl::serialize_schematic(&saved).contains(r#"body=moon"#));
 
         // Reloading the saved schematic keeps the lunar ellipsoid.
         load_schematic(&mut app, &saved);
@@ -2439,7 +2439,7 @@ mod tests {
             .ellipsoid;
         assert_eq!(
             ellipsoid.parameters().0,
-            impeller2_wkt::CelestialBody::MOON_RADIUS_M
+            impeller_wkt::CelestialBody::MOON_RADIUS_M
         );
 
         // Earth stays implicit, and a stale lunar body does not linger.
@@ -2452,7 +2452,7 @@ mod tests {
     /// lat/lon.
     #[test]
     fn schematic_geo_origin_carries_the_body_ellipsoid() {
-        let moon_radius = impeller2_wkt::CelestialBody::MOON_RADIUS_M;
+        let moon_radius = impeller_wkt::CelestialBody::MOON_RADIUS_M;
         let earth_radius = bevy_geo_frames::GeoOrigin::default()
             .ellipsoid
             .parameters()
@@ -2486,7 +2486,7 @@ mod tests {
 
     #[test]
     fn celestial_bodies_round_trip_through_their_ellipsoids() {
-        use impeller2_wkt::CelestialBody;
+        use impeller_wkt::CelestialBody;
         assert_eq!(super::ellipsoid_body(super::body_ellipsoid(None)), None);
         assert_eq!(
             super::ellipsoid_body(super::body_ellipsoid(Some(CelestialBody::Earth))),
@@ -2956,10 +2956,10 @@ mod tests {
         use crate::vector_arrow::VectorArrowState;
         use bevy::ecs::system::SystemState;
         use bevy_geo_frames::{GeoContext, GeoFrame, GeoOrigin};
-        use impeller2::schema::Schema;
-        use impeller2::types::{ComponentId, PrimType, Timestamp};
-        use impeller2_bevy::EntityMap;
-        use impeller2_wkt::ComponentValue;
+        use impeller::schema::Schema;
+        use impeller::types::{ComponentId, PrimType, Timestamp};
+        use impeller_bevy::EntityMap;
+        use impeller_wkt::ComponentValue;
         use nox::Array;
         use std::collections::HashMap;
         use std::sync::Arc;

@@ -14,8 +14,8 @@ use bevy::{
 use bevy_editor_cam::prelude::EditorCam;
 use bevy_egui::egui::{self, Align};
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation, OrDefault, RotationKind};
-use impeller2_bevy::EntityMap;
-use impeller2_wkt::{
+use impeller_bevy::EntityMap;
+use impeller_wkt::{
     BloomPreset, ComponentValue, EarthAirglowConfig, EarthCityLightsConfig, EarthNightMapConfig,
     EarthStarsConfig, FrustumUpMarker, QueryType, WorldPos,
 };
@@ -724,7 +724,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         let has_detected_ellipsoid = object_3d_states.iter().any(|object_state| {
             matches!(
                 &object_state.data.mesh,
-                impeller2_wkt::Object3DMesh::Ellipsoid { .. }
+                impeller_wkt::Object3DMesh::Ellipsoid { .. }
             )
         });
 
@@ -975,7 +975,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         });
                     });
                     viewport_config.frustums_color =
-                        impeller2_wkt::Color::from_color32(frustums_color);
+                        impeller_wkt::Color::from_color32(frustums_color);
 
                     ui.add_space(8.0);
                     let mut projection_color = viewport_config.projection_color.into_color32();
@@ -999,7 +999,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         });
                     });
                     viewport_config.projection_color =
-                        impeller2_wkt::Color::from_color32(projection_color);
+                        impeller_wkt::Color::from_color32(projection_color);
 
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
@@ -1886,9 +1886,9 @@ mod tests {
         use bevy::math::{DQuat, DVec3};
         use bevy::prelude::{IntoScheduleConfigs, Transform};
         use bevy_geo_frames::{GeoContext, GeoFrame, GeoOrigin, GeoPosition, GeoRotation, Present};
-        use impeller2::schema::Schema;
-        use impeller2::types::{ComponentId, PrimType, Timestamp};
-        use impeller2_wkt::ComponentValue;
+        use impeller::schema::Schema;
+        use impeller::types::{ComponentId, PrimType, Timestamp};
+        use impeller_wkt::ComponentValue;
         use nox::Array;
         use std::collections::HashMap;
         use std::sync::Arc;
@@ -2013,8 +2013,8 @@ mod tests {
         use bevy::ecs::system::SystemState;
         use bevy::math::DVec3;
         use bevy_geo_frames::{GeoContext, GeoFrame, GeoOrigin};
-        use impeller2::schema::Schema;
-        use impeller2::types::{ComponentId, PrimType, Timestamp};
+        use impeller::schema::Schema;
+        use impeller::types::{ComponentId, PrimType, Timestamp};
         use nox::Array;
         use std::collections::HashMap;
         use std::sync::Arc;
@@ -2552,7 +2552,7 @@ mod tests {
     }
 
     fn focus_object_state(eql: &str) -> Object3DState {
-        use impeller2_wkt::{Object3D, Object3DMesh};
+        use impeller_wkt::{Object3D, Object3DMesh};
         Object3DState {
             compiled_expr: None,
             scale_expr: None,

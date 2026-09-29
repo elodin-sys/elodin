@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock};
 
 use bevy::asset::io::*;
 use bevy::prelude::*;
-use impeller2_bevy::ConnectionAddr;
+use impeller_bevy::ConnectionAddr;
 use reqwest::StatusCode;
 
 use super::asset_cache::{self, CachedAsset};

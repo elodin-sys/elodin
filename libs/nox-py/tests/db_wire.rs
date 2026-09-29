@@ -1,10 +1,10 @@
 //! Reproduces the TableWriter wire sequence (metadata, vtable, table) over a
 //! real TCP connection to an embedded server, mirroring writer.rs exactly.
 
-use impeller2::types::{ComponentId, LenPacket, PrimType};
-use impeller2::vtable::builder::{component, raw_field, raw_table, schema, timestamp, vtable};
-use impeller2_stellar::Client;
-use impeller2_wkt::{SetComponentMetadata, VTableMsg};
+use impeller::types::{ComponentId, LenPacket, PrimType};
+use impeller::vtable::builder::{component, raw_field, raw_table, schema, timestamp, vtable};
+use impeller_stellar::Client;
+use impeller_wkt::{SetComponentMetadata, VTableMsg};
 
 /// Reserve a free localhost port. The listener is dropped before the server
 /// binds; the tiny race is acceptable for tests.

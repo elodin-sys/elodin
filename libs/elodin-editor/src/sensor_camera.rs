@@ -39,9 +39,9 @@ use bevy::{
 };
 use bevy_ai_skybox::prelude::PrimarySkybox;
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
-use impeller2::types::{ComponentId, Timestamp};
-pub use impeller2_wkt::SensorCameraConfig;
-use impeller2_wkt::{CurrentTimestamp, DbConfig, ThermalTagConfig};
+use impeller::types::{ComponentId, Timestamp};
+pub use impeller_wkt::SensorCameraConfig;
+use impeller_wkt::{CurrentTimestamp, DbConfig, ThermalTagConfig};
 
 use crate::object_3d::{ComponentArrayExt, ELLIPSOID_RENDER_LAYER, Object3DState};
 use crate::plugins::render_layer_alloc::{CINEMATIC_EARTH_RENDER_LAYER, THERMAL_MASK_RENDER_LAYER};
@@ -1012,8 +1012,8 @@ fn update_sensor_camera_transforms(
     )>,
     #[cfg(feature = "big_space")] mut cells: Query<&mut crate::spatial::GridCell>,
     #[cfg(feature = "big_space")] settings: Res<crate::spatial::FloatingOriginSettings>,
-    cache: Res<impeller2_bevy::TelemetryCache>,
-    current_ts: Res<impeller2_wkt::CurrentTimestamp>,
+    cache: Res<impeller_bevy::TelemetryCache>,
+    current_ts: Res<impeller_wkt::CurrentTimestamp>,
     coordinate: Res<crate::Coordinate>,
     geo_context: Res<GeoContext>,
 ) {
@@ -1052,8 +1052,8 @@ pub fn update_sensor_camera_frustum_source_transforms(
     )>,
     #[cfg(feature = "big_space")] mut cells: Query<&mut crate::spatial::GridCell>,
     #[cfg(feature = "big_space")] settings: Res<crate::spatial::FloatingOriginSettings>,
-    cache: Res<impeller2_bevy::TelemetryCache>,
-    current_ts: Res<impeller2_wkt::CurrentTimestamp>,
+    cache: Res<impeller_bevy::TelemetryCache>,
+    current_ts: Res<impeller_wkt::CurrentTimestamp>,
     coordinate: Res<crate::Coordinate>,
     geo_context: Res<GeoContext>,
 ) {
@@ -1095,8 +1095,8 @@ struct SensorCameraPose {
 
 fn sensor_camera_transform(
     config: &SensorCameraConfig,
-    cache: &impeller2_bevy::TelemetryCache,
-    ts: impeller2::types::Timestamp,
+    cache: &impeller_bevy::TelemetryCache,
+    ts: impeller::types::Timestamp,
     frame: GeoFrame,
     geo_context: &GeoContext,
 ) -> Option<SensorCameraPose> {
@@ -1108,7 +1108,7 @@ fn sensor_camera_transform(
 
 fn sensor_camera_pose(
     config: &SensorCameraConfig,
-    world_pos: impeller2_wkt::WorldPos,
+    world_pos: impeller_wkt::WorldPos,
     frame: GeoFrame,
     geo_context: &GeoContext,
 ) -> Option<SensorCameraPose> {
@@ -1774,8 +1774,8 @@ mod tests {
         assert_eq!(claim_readback_slot(&slots, 0), Some(0));
     }
 
-    fn world_pos(pos: DVec3, att: bevy::math::DQuat) -> impeller2_wkt::WorldPos {
-        impeller2_wkt::WorldPos {
+    fn world_pos(pos: DVec3, att: bevy::math::DQuat) -> impeller_wkt::WorldPos {
+        impeller_wkt::WorldPos {
             att: nox::Quaternion::new(att.w, att.x, att.y, att.z),
             pos: nox::Vector3::new(pos.x, pos.y, pos.z),
         }

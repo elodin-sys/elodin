@@ -13,9 +13,9 @@ use bevy::{
     prelude::*,
 };
 use bevy_egui::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
-use impeller2::types::{ComponentId, Timestamp};
-use impeller2_bevy::{CommandsExt, SimTimeStepFetch, SimTimeStepSource};
-use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery, SimulationTimeStep, SparklineQuery};
+use impeller::types::{ComponentId, Timestamp};
+use impeller_bevy::{CommandsExt, SimTimeStepFetch, SimTimeStepSource};
+use impeller_wkt::{ArrowIPC, ErrorResponse, SQLQuery, SimulationTimeStep, SparklineQuery};
 
 use crate::{
     EqlContext, SelectedTimeRange,
@@ -1297,7 +1297,7 @@ fn finest_sample_spacing_micros(time_ranges: &ComponentTimeRanges) -> Option<i64
 #[cfg(test)]
 mod sample_spacing_tests {
     use super::*;
-    use impeller2_bevy::{ComponentPathRegistry, ComponentSchemaRegistry};
+    use impeller_bevy::{ComponentPathRegistry, ComponentSchemaRegistry};
 
     fn ranges(entries: &[(&str, i64, i64, usize)]) -> ComponentTimeRanges {
         let mut time_ranges = ComponentTimeRanges::default();
@@ -1420,9 +1420,9 @@ mod sample_spacing_tests {
     }
 
     fn declare_a_rate(app: &mut App) {
-        use impeller2::component::Component;
+        use impeller::component::Component;
         let id = <SimulationTimeStep as Component>::COMPONENT_ID;
-        let schema = impeller2::schema::Schema::new(impeller2::types::PrimType::F64, [0usize; 0])
+        let schema = impeller::schema::Schema::new(impeller::types::PrimType::F64, [0usize; 0])
             .expect("schema");
         app.world_mut()
             .resource_mut::<ComponentSchemaRegistry>()

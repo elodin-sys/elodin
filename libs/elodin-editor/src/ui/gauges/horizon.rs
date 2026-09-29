@@ -15,8 +15,8 @@ use bevy::{
 };
 use bevy_egui::egui::{self, Align2, Color32, FontId, Pos2, Sense, Shape, Stroke, Vec2};
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoOrigin, approx_radius, ecef_to_lla_deg};
-use impeller2_bevy::{EntityMap, TelemetryCache};
-use impeller2_wkt::{ComponentValue, CurrentTimestamp};
+use impeller_bevy::{EntityMap, TelemetryCache};
+use impeller_wkt::{ComponentValue, CurrentTimestamp};
 
 use super::{BARE_QUAT_UNIT_TOLERANCE, EqlBinding, GaugePane, gauge_title, text_with_halo};
 use crate::ui::{
@@ -122,7 +122,7 @@ struct Pose {
 }
 
 /// Extract a pose from a component value, accepting (in `F32` or `F64`) a
-/// `SpatialTransform`/[`WorldPos`](impeller2_wkt::WorldPos) 7-vector (quaternion
+/// `SpatialTransform`/[`WorldPos`](impeller_wkt::WorldPos) 7-vector (quaternion
 /// head + position tail) or a bare, near-unit-length 4-vector quaternion.
 ///
 /// The unit-length gate on bare 4-vectors mirrors the orientation gauge: an

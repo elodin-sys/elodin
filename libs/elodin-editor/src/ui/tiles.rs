@@ -23,7 +23,7 @@ use egui::UiBuilder;
 use egui::response::Flags;
 use egui_material_icons::{icon_button, icons::*};
 use egui_tiles::{Container, Tile, TileId, Tiles};
-use impeller2_wkt::{BloomConfig, BloomPreset, FrustumUpMarker, Graph, Viewport, WindowRect};
+use impeller_wkt::{BloomConfig, BloomPreset, FrustumUpMarker, Graph, Viewport, WindowRect};
 use smallvec::{SmallVec, smallvec};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::{
@@ -294,9 +294,9 @@ pub struct ViewportConfig {
     pub show_coverage_in_viewport: bool,
     /// Display 2D projection of frustum∩ellipsoid on far plane.
     pub show_projection_2d: bool,
-    pub frustums_color: impeller2_wkt::Color,
+    pub frustums_color: impeller_wkt::Color,
     /// Color for this viewport's source frustum 2D projection in target viewports.
-    pub projection_color: impeller2_wkt::Color,
+    pub projection_color: impeller_wkt::Color,
     pub frustums_thickness: f32,
     /// Marks the image-up direction on this viewport's frustum.
     pub frustums_up_marker: FrustumUpMarker,
@@ -1263,8 +1263,8 @@ impl Pane {
                     let mut state = SystemState::<(
                         Query<&ViewportConfig>,
                         Query<(
-                            &impeller2_wkt::ComponentMetadata,
-                            &impeller2_bevy::ComponentValue,
+                            &impeller_wkt::ComponentMetadata,
+                            &impeller_bevy::ComponentValue,
                         )>,
                     )>::new(world);
                     let (configs, component_values) = state.params(world);
@@ -1281,10 +1281,10 @@ impl Pane {
                                     return None;
                                 }
                                 let ratio = match value {
-                                    impeller2_bevy::ComponentValue::F32(array) => {
+                                    impeller_bevy::ComponentValue::F32(array) => {
                                         nox::ArrayBuf::as_buf(&array.buf).first().copied()
                                     }
-                                    impeller2_bevy::ComponentValue::F64(array) => {
+                                    impeller_bevy::ComponentValue::F64(array) => {
                                         nox::ArrayBuf::as_buf(&array.buf).first().map(|v| *v as f32)
                                     }
                                     _ => None,
@@ -1759,7 +1759,7 @@ impl ViewportPane {
             transform,
             #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
-            impeller2_wkt::WorldPos::default(),
+            impeller_wkt::WorldPos::default(),
             Name::new("viewport"),
         ));
 
@@ -3370,7 +3370,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             .spawn((
                                 super::gauges::GeoPositionGaugeData::new(
                                     None,
-                                    impeller2_wkt::DisplayFrame::default(),
+                                    impeller_wkt::DisplayFrame::default(),
                                 ),
                                 super::gauges::EqlBinding::new(eql.clone()),
                             ))
@@ -3428,7 +3428,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if read_only {
                             continue;
                         }
-                        let msg_id = impeller2::types::msg_id(&msg_name);
+                        let msg_id = impeller::types::msg_id(&msg_name);
                         let entity = state_mut
                             .commands
                             .spawn((
@@ -3463,7 +3463,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if read_only {
                             continue;
                         }
-                        let msg_id = impeller2::types::msg_id(&msg_name);
+                        let msg_id = impeller::types::msg_id(&msg_name);
                         let entity = state_mut
                             .commands
                             .spawn((
@@ -4000,8 +4000,8 @@ mod close_tests {
     use bevy::ecs::system::SystemState;
     use bevy::prelude::{Commands, Entity, World};
     use bevy_egui::egui::Color32;
-    use impeller2::types::ComponentId;
-    use impeller2_bevy::ComponentPath;
+    use impeller::types::ComponentId;
+    use impeller_bevy::ComponentPath;
     use std::collections::BTreeMap;
 
     fn plot_world() -> World {

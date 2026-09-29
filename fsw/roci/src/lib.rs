@@ -6,12 +6,12 @@ use drivers::DriverMode;
 mod system_fn;
 
 pub use db_macros::{AsVTable, Componentize, Decomponentize, Metadatatize};
-pub use impeller2;
-pub use impeller2::com_de::{Componentize, Decomponentize};
-pub use impeller2::vtable::AsVTable;
-pub use impeller2_stellar::{SinkExt, StreamExt, Subscription};
-pub use impeller2_wkt;
-pub use impeller2_wkt::Metadatatize;
+pub use impeller;
+pub use impeller::com_de::{Componentize, Decomponentize};
+pub use impeller::vtable::AsVTable;
+pub use impeller_stellar::{SinkExt, StreamExt, Subscription};
+pub use impeller_wkt;
+pub use impeller_wkt::Metadatatize;
 pub use system_fn::*;
 pub use zerocopy;
 

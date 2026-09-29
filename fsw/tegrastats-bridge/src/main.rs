@@ -1,8 +1,8 @@
 use db_macros::{AsVTable, Metadatatize};
 use futures_concurrency::future::{Join, Race};
-use impeller2::types::{LenPacket, PacketId, Timestamp};
-use impeller2_stellar::SinkExt;
-use impeller2_stellar::{PacketSink, PacketStream};
+use impeller::types::{LenPacket, PacketId, Timestamp};
+use impeller_stellar::SinkExt;
+use impeller_stellar::{PacketSink, PacketStream};
 use std::{
     mem,
     net::SocketAddr,
@@ -95,7 +95,7 @@ async fn connect() -> anyhow::Result<Duration> {
                     "send failed after connected session {:?}: {err:?}",
                     connected_at.elapsed()
                 );
-                return Ok::<Duration, impeller2_stellar::Error>(connected_at.elapsed());
+                return Ok::<Duration, impeller_stellar::Error>(connected_at.elapsed());
             }
             stellarator::sleep(Duration::from_millis(1000)).await;
         }

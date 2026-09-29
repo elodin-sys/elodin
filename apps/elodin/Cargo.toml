@@ -43,8 +43,7 @@ tracing-tracy = { version = "0.11", optional = true }
 elodin-editor.path = "../../libs/elodin-editor"
 elodin-editor.default-features = false
 elodin-db = { path = "../../libs/db", default-features = false, features = ["grpc"] }
-impeller2-bevy.path = "../../libs/impeller2/bevy"
-impeller2-kdl.path = "../../libs/impeller2/kdl"
+impeller-bevy.path = "../../libs/impeller/bevy"
 
 # crypto
 ring = "0.17"

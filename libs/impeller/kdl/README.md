@@ -1,0 +1,114 @@
+# Impeller KDL Serdes
+
+Serializer/deserializer for `impeller_wkt::Schematic` to and from KDL.
+
+## Scope
+
+- Canonical user-facing schema docs: `docs/public/content/reference/schematic.md`
+- This README is a code-facing quick reference of what the current parser/serializer supports.
+
+## Top-Level Nodes
+
+The parser accepts these root nodes:
+
+- `coordinate`: sets the global coordinate frame (`frame=ENU|NED|ECEF`) and optional geographic origin (`lat`/`lon`/`alt`)
+- `theme`
+- `timeline`
+- `window`
+- Panel roots: `tabs`, `hsplit`, `vsplit`, `viewport`, `graph`, `component_monitor`, `geo_position_gauge`, `orientation_gauge`, `action_pane`, `query_table`, `query_plot`, `inspector`, `hierarchy`, `schematic_tree`, `data_overview`, `dashboard`
+- Scene roots: `object_3d`, `line_3d`, `vector_arrow`
+
+## Coordinate Frame
+
+The optional `coordinate` node sets a global coordinate frame for the schematic. Elements that don't specify their own `frame` attribute inherit this global frame.
+
+```kdl
+coordinate frame="NED"
+```
+
+Supported frames:
+- `ENU`: East-North-Up (default Bevy convention)
+- `NED`: North-East-Down (common in aerospace)
+- `ECEF`: Earth-Centered Earth-Fixed
+
+Individual elements (`viewport`, `object_3d`, `line_3d`, `vector_arrow`) can override the global frame with their own `frame` attribute.
+
+The `coordinate` node also accepts an optional geographic origin that sets the viewer's `GeoContext` origin:
+
+```kdl
+coordinate frame="NED" lat=34.72 lon=-86.64 alt=180.0
+```
+
+- `lat`/`lon` are geodetic latitude/longitude in degrees; `alt` is altitude in meters.
+- `lat` and `lon` must be given together; `alt` is optional and defaults to `0.0`.
+
+## Panel Nodes
+
+- `tabs { ... }`: container of panels.
+- `hsplit` / `vsplit`: container of panels. Child `share=<f32>` controls split weight.
+- `viewport`: camera panel (`fov`, `active`, `show_grid`, `show_arrows`, `show_view_cube`, `view_cube_frame`, `hdr`, `name`, `pos`, `look_at`, `frame`) and optional local child `vector_arrow` nodes.
+- `graph`: positional EQL string + optional `name`, `type` (`line|point|bar`), `lock`, `auto_y_range`, `y_min`, `y_max`, child `color` nodes.
+- `component_monitor`: requires `component_name`; optional `name`.
+- `geo_position_gauge`: positional `eql` (required; a 3-vector position or a 7-vector pose; named `eql=` also accepted); optional `name`, `source` (`ECEF`/`NED`/`ENU`; inherits from global `coordinate` if omitted, else `ENU`), `display` (`ECEF`/`NED`/`ENU`/`LLA`, default `NED`).
+- `orientation_gauge`: positional `eql` (required; a 4-vector `[x,y,z,w]` quaternion or a 7-vector pose; named `eql=` also accepted); optional `name`, `source` (`ECEF`/`NED`/`ENU`; inherits from global `coordinate` if omitted, else `ENU`), `display` (`ECEF`/`NED`/`ENU`, default `NED`), optional `reference x y z w` child (body→`source` quaternion the gimbal shows as neutral; identity when omitted).
+- `action_pane`: requires `name` and `lua`.
+- `query_table`: optional `name`, optional positional query string, optional `type` (`eql|sql`).
+- `query_plot`: requires `name` and `query`; optional `refresh_interval` (ms), `auto_refresh`, `color`, `type` (`eql|sql`), `mode` (`timeseries|xy`), `x_label`, `y_label`.
+- `inspector`, `hierarchy`: no properties.
+- `schematic_tree`, `data_overview`: optional `name`.
+- `dashboard`: Bevy UI-style panel tree (`dashboard { node ... }`).
+- `video_stream`: panel form `video_stream <msg_name> [name=...]` is supported when nested inside panel containers.
+  Top-level `video_stream` is currently not accepted by the root node parser.
+
+## Viewport Flags
+
+`viewport` supports these display toggles:
+
+- `show_grid` (default `#false`)
+- `show_arrows` (default `#true`)
+- `show_view_cube` (default `#true`)
+
+Example:
+
+```kdl
+viewport name="Fin Orientation"
+         show_grid=#true
+         show_view_cube=#false
+         pos="drone.world_pos"
+         look_at="drone.world_pos + (0,0,0,0, 1,0,0)"
+```
+
+## Scene Nodes
+
+All scene nodes support an optional `frame` attribute (`ENU`, `NED`, or `ECEF`) that specifies the coordinate frame for interpreting position and orientation. If omitted, the global `coordinate` frame is used.
+
+- `object_3d <eql> [frame=ENU|NED|ECEF] { ... }`: one mesh child is required.
+  - `glb path=... [scale=1.0] [translate="(x,y,z)"] [rotate="(deg_x,deg_y,deg_z)"]`
+  - `sphere radius=...`
+  - `box x=... y=... z=...`
+  - `cylinder radius=... height=...`
+  - `plane [size=10.0] [width=size] [depth=size]`
+  - `ellipsoid [scale="(1, 1, 1)"]`
+  - mesh nodes support optional `color` and optional `emissivity` (clamped to `[0.0, 1.0]` on serialization).
+- `line_3d <eql> [frame=ENU|NED|ECEF] [line_width=1.0] [color] [future_color] [perspective=#true]` — `color` is the played segment (falls back to timeline `played_color`); `future_color` is the future segment (falls back to `color`, then timeline `future_color`).
+- `vector_arrow <vector-eql> [frame=ENU|NED|ECEF] [origin] [scale=1.0] [name] [body_frame|in_body_frame=#false] [normalize=#false] [show_name|display_name=#true] [arrow_thickness=0.1] [label_position] [color]`
+
+## Defaults And Aliases
+
+- `window` parse aliases:
+  - path: `path`, `file`, or `name`
+  - title: `title` or `display`
+- `vector_arrow` parse aliases:
+  - `in_body_frame` -> `body_frame`
+  - `display_name` -> `show_name`
+- color child spelling accepts both `color` and `colour`
+- `label_position` supports:
+  - proportion in `[0, 1]` (number or string)
+  - absolute string with meters suffix, for example `"0.30m"`
+
+## Serialization Notes
+
+- `serialize_schematic` omits the top-level `timeline` node when all its properties serialize to defaults, including an explicit full range (`full`, `full_range`, or `fullrange`). The parser still accepts a bare `timeline`; an absent node loads with the same defaults. Custom `played_color`, `future_color`, `follow_latest=#true`, and non-full `range` values are retained independently.
+
+- Many default scalar properties are omitted (for example `viewport fov=45.0`, `show_arrows=#true`).
+- Several nodes always serialize explicit color children, including `line_3d`, `vector_arrow`, `query_plot`, and mesh materials.

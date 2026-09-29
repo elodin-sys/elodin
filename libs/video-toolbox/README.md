@@ -36,7 +36,7 @@ The library provides a unified API that uses:
                       │  (Stores video   │
                       │   as messages)   │
                       └─────────┬────────┘
-                                │ Impeller2 Protocol
+                                │ Impeller Protocol
                                 ▼
                   ┌─────────────────────────┐
                   │    Elodin Editor        │

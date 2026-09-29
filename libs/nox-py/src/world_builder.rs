@@ -13,9 +13,9 @@ use crate::{
 use ::s10::{GroupRecipe, SimRecipe, cli::run_recipe_with_token};
 use clap::Parser;
 use convert_case::Casing;
-use impeller2::types::{ComponentId, PrimType, Timestamp};
-use impeller2_kdl::FromKdl;
-use impeller2_wkt::{BloomConfig, ComponentMetadata, EntityMetadata, EnvironmentConfig, Schematic};
+use impeller::types::{ComponentId, PrimType, Timestamp};
+use impeller_kdl::FromKdl;
+use impeller_wkt::{BloomConfig, ComponentMetadata, EntityMetadata, EnvironmentConfig, Schematic};
 use miette::miette;
 use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
 use pyo3::exceptions::PyValueError;
@@ -167,7 +167,7 @@ impl WorldBuilder {
     }
 
     fn validate_cinematic_owners(&self) -> Result<(), Error> {
-        impeller2_wkt::validate_single_cinematic_environment(
+        impeller_wkt::validate_single_cinematic_environment(
             self.parsed_schematic().as_ref(),
             &self.world.metadata.sensor_cameras,
         )
@@ -360,7 +360,7 @@ impl WorldBuilder {
         id: Option<String>,
     ) -> Result<EntityId, Error> {
         let entity_id = EntityId {
-            inner: impeller2::types::EntityId(self.world.entity_len()),
+            inner: impeller::types::EntityId(self.world.entity_len()),
         };
         self.insert(entity_id, spawnable)?;
         self.world.metadata.entity_len += 1;
@@ -575,7 +575,7 @@ impl WorldBuilder {
             })?;
         let pair_name = format!("{}.{}", entity_meta.name, name);
         let preset = match camera_model {
-            Some(name) => Some(impeller2_wkt::sensor_camera_model_preset(name).ok_or_else(
+            Some(name) => Some(impeller_wkt::sensor_camera_model_preset(name).ok_or_else(
                 || {
                     Error::PyO3(PyValueError::new_err(format!(
                         "unsupported sensor camera model '{name}'; expected 'boson640p'"
@@ -621,7 +621,7 @@ impl WorldBuilder {
         let fov = fov
             .or_else(|| {
                 resolved_lens_hfov
-                    .map(|hfov| impeller2_wkt::vertical_fov_from_hfov(hfov, width, height))
+                    .map(|hfov| impeller_wkt::vertical_fov_from_hfov(hfov, width, height))
             })
             .unwrap_or(90.0);
         if !(fov > 0.0 && fov < 180.0 && fov.is_finite()) {
@@ -663,7 +663,7 @@ impl WorldBuilder {
         }
 
         let mut parsed_effect_params = camera_model
-            .and_then(impeller2_wkt::sensor_camera_model_effect_params)
+            .and_then(impeller_wkt::sensor_camera_model_effect_params)
             .unwrap_or_else(|| serde_json::json!({}));
         if let Some(params) = effect_params {
             let overrides = py_json_value(params)?;
@@ -672,7 +672,7 @@ impl WorldBuilder {
                     "sensor_camera effect_params must be a dictionary",
                 )));
             }
-            impeller2_wkt::merge_json(&mut parsed_effect_params, overrides);
+            impeller_wkt::merge_json(&mut parsed_effect_params, overrides);
         }
 
         let pos_off = [
@@ -709,7 +709,7 @@ impl WorldBuilder {
                 )),
             ));
         }
-        let frustums_up_marker = impeller2_wkt::FrustumUpMarker::from_str(frustums_up_marker)
+        let frustums_up_marker = impeller_wkt::FrustumUpMarker::from_str(frustums_up_marker)
             .map_err(|_| {
                 Error::PyO3(PyValueError::new_err(format!(
                     "sensor_camera frustums_up_marker must be 'none' or 'highlight', got '{frustums_up_marker}'"
@@ -731,9 +731,9 @@ impl WorldBuilder {
             .transpose()?;
 
         let color_from_vec = |value: Option<Vec<f32>>,
-                              default_color: impeller2_wkt::Color,
+                              default_color: impeller_wkt::Color,
                               field: &str|
-         -> Result<impeller2_wkt::Color, crate::error::Error> {
+         -> Result<impeller_wkt::Color, crate::error::Error> {
             let Some(value) = value else {
                 return Ok(default_color);
             };
@@ -744,7 +744,7 @@ impl WorldBuilder {
                     )),
                 ));
             }
-            Ok(impeller2_wkt::Color::rgba(
+            Ok(impeller_wkt::Color::rgba(
                 value[0].clamp(0.0, 1.0),
                 value[1].clamp(0.0, 1.0),
                 value[2].clamp(0.0, 1.0),
@@ -774,12 +774,12 @@ impl WorldBuilder {
                 show_ellipsoids,
                 frustums_color: color_from_vec(
                     frustums_color,
-                    impeller2_wkt::default_viewport_frustums_color(),
+                    impeller_wkt::default_viewport_frustums_color(),
                     "frustums_color",
                 )?,
                 projection_color: color_from_vec(
                     projection_color,
-                    impeller2_wkt::default_viewport_projection_color(),
+                    impeller_wkt::default_viewport_projection_color(),
                     "projection_color",
                 )?,
                 frustums_thickness,
@@ -958,7 +958,7 @@ impl WorldBuilder {
                         tracing::error!(?error, "gRPC server exited");
                     }
                 });
-                crate::impeller2_server::prime_schematic_assets(
+                crate::impeller_server::prime_schematic_assets(
                     &db_server.db,
                     exec.world_mut(),
                     simulation_source_entrypoint.as_deref().map(Path::new),
@@ -983,7 +983,7 @@ impl WorldBuilder {
                         .stack_size(256 * 1024 * 1024)
                         .spawn(move || {
                             stellarator::run(|| {
-                                crate::impeller2_server::Server::new(db_server, exec)
+                                crate::impeller_server::Server::new(db_server, exec)
                                     .run_with_cancellation(
                                         move || {
                                             let cancelled = if let Some(ref func) = is_canceled {
@@ -1501,18 +1501,18 @@ impl WorldBuilder {
                     op_complexity_vec.sort_by(|a, b| b.1.cmp(a.1));
 
                     // Analyze components memory
-                    let element_size = |prim_type: impeller2::types::PrimType| -> usize {
+                    let element_size = |prim_type: impeller::types::PrimType| -> usize {
                         match prim_type {
-                            impeller2::types::PrimType::Bool
-                            | impeller2::types::PrimType::U8
-                            | impeller2::types::PrimType::I8 => 1,
-                            impeller2::types::PrimType::U16 | impeller2::types::PrimType::I16 => 2,
-                            impeller2::types::PrimType::U32
-                            | impeller2::types::PrimType::I32
-                            | impeller2::types::PrimType::F32 => 4,
-                            impeller2::types::PrimType::U64
-                            | impeller2::types::PrimType::I64
-                            | impeller2::types::PrimType::F64 => 8,
+                            impeller::types::PrimType::Bool
+                            | impeller::types::PrimType::U8
+                            | impeller::types::PrimType::I8 => 1,
+                            impeller::types::PrimType::U16 | impeller::types::PrimType::I16 => 2,
+                            impeller::types::PrimType::U32
+                            | impeller::types::PrimType::I32
+                            | impeller::types::PrimType::F32 => 4,
+                            impeller::types::PrimType::U64
+                            | impeller::types::PrimType::I64
+                            | impeller::types::PrimType::F64 => 8,
                         }
                     };
 
@@ -1667,16 +1667,16 @@ impl WorldBuilder {
                         None => tempfile::tempdir()?.keep().join("db"),
                     };
                     let db = elodin_db::DB::create(db_path)?;
-                    crate::impeller2_server::prime_schematic_assets(
+                    crate::impeller_server::prime_schematic_assets(
                         &db,
                         compiled_exec.world_mut(),
                         simulation_source_entrypoint.as_deref().map(Path::new),
                     )
                     .map_err(Error::DB)?;
-                    crate::impeller2_server::init_db(
+                    crate::impeller_server::init_db(
                         &db,
                         compiled_exec.world_mut(),
-                        impeller2::types::Timestamp::now(),
+                        impeller::types::Timestamp::now(),
                     )?;
 
                     let mut exec_with_db = PyExec {
@@ -1764,9 +1764,9 @@ impl WorldBuilder {
         let db = elodin_db::DB::create(db_path)?;
         // No sim entrypoint is threaded into `build`; ingest falls back to
         // `$ELODIN_ASSETS` / cwd like before.
-        crate::impeller2_server::prime_schematic_assets(&db, exec.world_mut(), None)
+        crate::impeller_server::prime_schematic_assets(&db, exec.world_mut(), None)
             .map_err(Error::DB)?;
-        crate::impeller2_server::init_db(&db, exec.world_mut(), Timestamp::now())?;
+        crate::impeller_server::init_db(&db, exec.world_mut(), Timestamp::now())?;
         Ok(PyExec {
             exec,
             db: Box::new(db),
@@ -1857,7 +1857,7 @@ impl WorldBuilder {
         let requested_path = path.map(PathBuf::from);
         let file_contents = requested_path
             .as_ref()
-            .map(|p| impeller2_kdl::env::schematic_file(p))
+            .map(|p| impeller_kdl::env::schematic_file(p))
             .and_then(|path| {
                 if path.exists() {
                     std::fs::read_to_string(&path)
@@ -1902,7 +1902,7 @@ impl WorldBuilder {
         let entities = PyList::empty(py);
 
         // Build a map of entity_id -> set of component names (using HashSet to avoid duplicates)
-        let mut entity_components: HashMap<impeller2::types::EntityId, HashSet<String>> =
+        let mut entity_components: HashMap<impeller::types::EntityId, HashSet<String>> =
             HashMap::new();
 
         // Iterate through all components in the world
@@ -1922,7 +1922,7 @@ impl WorldBuilder {
                 let (chunks, remainder) = buffer.entity_ids.as_chunks::<8>();
                 for chunk in chunks {
                     let entity_id = u64::from_le_bytes(*chunk);
-                    let entity_id = impeller2::types::EntityId(entity_id);
+                    let entity_id = impeller::types::EntityId(entity_id);
                     entity_components
                         .entry(entity_id)
                         .or_default()
@@ -2339,15 +2339,15 @@ mod test {
 
     #[test]
     fn two_cinematic_sensor_cameras_are_rejected() {
-        let err = impeller2_wkt::validate_single_cinematic_environment(
+        let err = impeller_wkt::validate_single_cinematic_environment(
             None,
             &[
-                impeller2_wkt::SensorCameraConfig {
+                impeller_wkt::SensorCameraConfig {
                     camera_name: "a.cam".into(),
                     cinematic: true,
                     ..Default::default()
                 },
-                impeller2_wkt::SensorCameraConfig {
+                impeller_wkt::SensorCameraConfig {
                     camera_name: "b.cam".into(),
                     cinematic: true,
                     ..Default::default()
@@ -2362,16 +2362,16 @@ mod test {
 
     #[test]
     fn cinematic_viewport_and_sensor_camera_are_rejected() {
-        let schematic = impeller2_wkt::Schematic::from_kdl(
+        let schematic = impeller_wkt::Schematic::from_kdl(
             r#"
 environment { earth }
 viewport name="Chase" cinematic=#true
 "#,
         )
         .unwrap();
-        let err = impeller2_wkt::validate_single_cinematic_environment(
+        let err = impeller_wkt::validate_single_cinematic_environment(
             Some(&schematic),
-            &[impeller2_wkt::SensorCameraConfig {
+            &[impeller_wkt::SensorCameraConfig {
                 camera_name: "bdx.fpv_cam".into(),
                 cinematic: true,
                 ..Default::default()

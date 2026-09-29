@@ -18,9 +18,9 @@ use bevy::{
     transform::components::Transform,
 };
 use bevy_geo_frames::prelude::*;
-use impeller2::types::ComponentId;
-use impeller2_bevy::EntityMap;
-use impeller2_wkt::{
+use impeller::types::ComponentId;
+use impeller_bevy::EntityMap;
+use impeller_wkt::{
     BodyAxes, Color as WktColor, ComponentValue as WktComponentValue, LabelPosition, VectorArrow3d,
     WorldPos,
 };
@@ -90,7 +90,7 @@ impl Plugin for GizmoPlugin {
         app.add_systems(
             bevy::app::PreUpdate,
             evaluate_vector_arrows
-                .after(impeller2_bevy::apply_cached_data)
+                .after(impeller_bevy::apply_cached_data)
                 .before(crate::sync_pos),
         );
         app.add_systems(

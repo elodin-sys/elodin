@@ -1,7 +1,7 @@
 //! Always-on, customer-facing per-phase simulation-cycle timing summary.
 //!
 //! The `run` / `serve` simulation loop in
-//! [`crate::impeller2_server::tick`] walks through seven distinct
+//! [`crate::impeller_server::tick`] walks through seven distinct
 //! phases on every iteration (pre_step → db read → kernel →
 //! commit → write-barrier → post_step → real-time pacing). One
 //! iteration is one **simulation cycle** — one pass from pre_step

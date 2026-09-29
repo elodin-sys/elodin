@@ -10,8 +10,8 @@ use std::path::PathBuf;
 
 use elodin_db::export_mcap::{McapExportOptions, run};
 use elodin_db::{ComponentSchema, DB};
-use impeller2::types::{ComponentId, PrimType, Timestamp, msg_id};
-use impeller2_wkt::{ComponentMetadata, MsgMetadata, log_entry_msg_schema};
+use impeller::types::{ComponentId, PrimType, Timestamp, msg_id};
+use impeller_wkt::{ComponentMetadata, MsgMetadata, log_entry_msg_schema};
 
 const TS_BASE: i64 = 1_700_000_000_000_000; // µs epoch
 const TS_STEP: i64 = 10_000; // 100 Hz
@@ -113,7 +113,7 @@ fn build_fixture(path: PathBuf) -> DB {
         .expect("set_msg_metadata");
     });
     for step in 0..3usize {
-        let entry = impeller2_wkt::LogEntry {
+        let entry = impeller_wkt::LogEntry {
             level: 2,
             message: format!("log line {step}"),
         };

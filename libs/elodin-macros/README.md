@@ -10,7 +10,7 @@
 ## The problem without this crate
 In **nox-py**, doing things “by hand” means:
 
-- implementing `impeller2::component::Component` (name, schema, etc.),
+- implementing `impeller::component::Component` (name, schema, etc.),
 - implementing `elodin_macros::Component`, `Archetype`, `ComponentGroup`,
 - handling `IntoOp` / `FromOp` conversions (to/from `Noxpr`),
 - writing boilerplate to insert into the `World`, initialize systems, etc.

@@ -72,11 +72,11 @@ reqwest = { version = "0.12", features = [
   "gzip",
   "blocking",
 ], default-features = false }
-impeller2.path = "../../libs/impeller2"
-impeller2.features = ["hifitime"]
-impeller2-wkt.path = "../../libs/impeller2/wkt"
-impeller2-wkt.features = ["bevy", "nox", "gui", "std"]
-impeller2-kdl.path = "../../libs/impeller2/kdl"
+impeller.path = "../../libs/impeller"
+impeller.features = ["hifitime"]
+impeller-wkt.path = "../../libs/impeller/wkt"
+impeller-wkt.features = ["bevy", "nox", "gui", "std"]
+impeller-kdl.path = "../../libs/impeller/kdl"
 bevy_mat3_material.path = "../bevy_mat3_material"
 bevy_world_mesh = { path = "../bevy_world_mesh", default-features = false, features = ["terrain", "regions"] }
 toml.version = "0.8"
@@ -113,7 +113,7 @@ arrow.version = "55"
 arrow.features = ["canonical_extension_types"]
 
 # lua
-impeller2-cli.path = "../db/cli"
+impeller-cli.path = "../db/cli"
 
 # channels
 flume = "0.11.1"
@@ -131,8 +131,8 @@ bevy_defer = "0.18"
 bitvec = "1.0.1"
 
 [target.'cfg(target_family = "wasm")'.dependencies]
-impeller2-bevy.path = "../../libs/impeller2/bevy"
-impeller2-bevy.default-features = false
+impeller-bevy.path = "../../libs/impeller/bevy"
+impeller-bevy.default-features = false
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 bevy_hanabi = { version = "0.20.0-dev", default-features = false, features = ["3d"] }
@@ -151,9 +151,9 @@ miette.version = "7.2"
 miette.features = ["fancy"]
 
 # impeller
-impeller2-bevy.path = "../../libs/impeller2/bevy"
-impeller2-bevy.features = ["tcp"]
-impeller2-bevy.default-features = false
+impeller-bevy.path = "../../libs/impeller/bevy"
+impeller-bevy.features = ["tcp"]
+impeller-bevy.default-features = false
 cranelift-mlir.path = "../cranelift-mlir"
 sha2 = "0.10"
 

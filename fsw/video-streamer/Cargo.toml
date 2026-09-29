@@ -7,9 +7,9 @@ publish = false
 
 [dependencies]
 ffmpeg-next.version = "8.0.0"
-impeller2 = { path = "../../libs/impeller2" }
-impeller2-stellar = { path = "../../libs/impeller2/stellar" }
-impeller2-wkt = { path = "../../libs/impeller2/wkt" }
+impeller = { path = "../../libs/impeller" }
+impeller-stellar = { path = "../../libs/impeller/stellar" }
+impeller-wkt = { path = "../../libs/impeller/wkt" }
 clap = { version = "4.4", features = ["derive"] }
 thiserror = "1.0"
 miette = { version = "5.10", features = ["fancy"] }

@@ -49,8 +49,8 @@ mod tests {
     use super::*;
     use crate::formulas::Formula;
     use crate::{Component, ComponentPart, Context, Expr};
-    use impeller2::schema::Schema;
-    use impeller2::types::{ComponentId, PrimType, Timestamp};
+    use impeller::schema::Schema;
+    use impeller::types::{ComponentId, PrimType, Timestamp};
     use std::collections::BTreeMap;
     use std::sync::Arc;
 

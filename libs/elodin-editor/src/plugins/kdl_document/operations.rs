@@ -1,10 +1,10 @@
 use crate::ui::schematic::CurrentSchematic;
 use bevy::asset::{AssetPath, AssetServer};
 use bevy::prelude::*;
-use impeller2_kdl::KdlSchematicError;
-use impeller2_kdl::env::schematic_file;
-use impeller2_kdl::{FromKdl, ToKdl};
-use impeller2_wkt::{DbConfig, Schematic, SkyboxConfig};
+use impeller_kdl::KdlSchematicError;
+use impeller_kdl::env::schematic_file;
+use impeller_kdl::{FromKdl, ToKdl};
+use impeller_wkt::{DbConfig, Schematic, SkyboxConfig};
 use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -39,7 +39,7 @@ pub fn sync_document_skybox(
 pub(crate) fn filesystem_to_asset_path(path: &Path) -> AssetPath<'static> {
     let resolved = canonicalize_or_original(path);
     let source = super::super::kdl_asset_source::KDL_ASSET_SOURCE;
-    if let Ok(root) = impeller2_kdl::env::schematic_dir_or_cwd() {
+    if let Ok(root) = impeller_kdl::env::schematic_dir_or_cwd() {
         let canonical_root = canonicalize_or_original(&root);
         if let Ok(relative) = resolved.strip_prefix(&canonical_root) {
             return AssetPath::from_path_buf(relative.to_path_buf()).with_source(source);
@@ -90,7 +90,7 @@ fn read_document_from_disk(
         .elems
         .iter()
         .filter_map(|elem| match elem {
-            impeller2_wkt::SchematicElem::Window(window) => window.path.as_deref(),
+            impeller_wkt::SchematicElem::Window(window) => window.path.as_deref(),
             _ => None,
         })
         .map(|path| {
@@ -265,8 +265,8 @@ fn rewrite_schematic_for_db(
     local_assets: &mut Vec<(String, String)>,
     referenced_windows: &mut Vec<String>,
 ) {
-    impeller2_kdl::rewrite_asset_paths(schematic, |path| {
-        if !impeller2_kdl::is_local_asset_path(path) {
+    impeller_kdl::rewrite_asset_paths(schematic, |path| {
+        if !impeller_kdl::is_local_asset_path(path) {
             return None;
         }
         // A detached-window sub-schematic: store it under its window key and
@@ -277,7 +277,7 @@ fn rewrite_schematic_for_db(
         }
         // A local mesh/icon: key by its component path and upload its bytes from
         // disk at PUT time.
-        let name = impeller2_kdl::local_asset_name(path)?;
+        let name = impeller_kdl::local_asset_name(path)?;
         local_assets.push((name.clone(), path.to_string()));
         Some(format!("db:{name}"))
     });
@@ -709,7 +709,7 @@ pub fn sync_document_from_config(
 mod db_save_tests {
     use super::*;
     use crate::ui::tiles::WindowId;
-    use impeller2_wkt::{Object3D, Object3DMesh, SchematicElem, WindowSchematic};
+    use impeller_wkt::{Object3D, Object3DMesh, SchematicElem, WindowSchematic};
 
     fn glb_object(eql: &str, mesh: &str) -> SchematicElem {
         SchematicElem::Object3d(Object3D {

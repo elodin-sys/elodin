@@ -12,7 +12,7 @@ use fuzzy_matcher::skim::SkimMatcherV2;
 
 use crate::utils::component_label;
 use crate::{Error, MetadataExt};
-use impeller2_wkt::ComponentMetadata;
+use impeller_wkt::ComponentMetadata;
 
 const HEADER_SIZE: usize = 24; // committed_len (8) + head_len (8) + start_timestamp (8)
 
@@ -482,8 +482,8 @@ mod tests {
         dir: &Path,
         components: &[(&str, usize)], // (name, entry_count)
     ) -> Result<(), Error> {
-        use impeller2::types::ComponentId;
-        use impeller2_wkt::DbConfig;
+        use impeller::types::ComponentId;
+        use impeller_wkt::DbConfig;
 
         fs::create_dir_all(dir)?;
 

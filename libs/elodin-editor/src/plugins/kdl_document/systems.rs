@@ -2,7 +2,7 @@ use bevy::asset::{AssetEvent, AssetLoadFailedEvent};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_ai_skybox::prelude::{SetActiveSkybox, SkyboxCache};
-use impeller2_wkt::{DbConfig, SkyboxConfig};
+use impeller_wkt::{DbConfig, SkyboxConfig};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -128,15 +128,15 @@ fn gated_windows_changed(
     snapshot: &StoredSchematicSnapshot,
     addr: Option<SocketAddr>,
 ) -> bool {
-    use impeller2_kdl::FromKdl;
+    use impeller_kdl::FromKdl;
     if !snapshot.root_matches(key, root_kdl) {
         return false;
     }
-    let Ok(root) = impeller2_wkt::Schematic::from_kdl(root_kdl) else {
+    let Ok(root) = impeller_wkt::Schematic::from_kdl(root_kdl) else {
         return false;
     };
     for elem in &root.elems {
-        let impeller2_wkt::SchematicElem::Window(window) = elem else {
+        let impeller_wkt::SchematicElem::Window(window) = elem else {
             continue;
         };
         let Some(window_key) = window.path.as_deref().and_then(|p| p.strip_prefix("db:")) else {
@@ -222,7 +222,7 @@ pub(super) fn handle_open_document_requests(
 #[allow(clippy::too_many_arguments)]
 pub(super) fn handle_open_document_from_active_requests(
     mut requests: MessageReader<OpenDocumentFromActiveRequest>,
-    connection_addr: Option<Res<impeller2_bevy::ConnectionAddr>>,
+    connection_addr: Option<Res<impeller_bevy::ConnectionAddr>>,
     pending_active: Res<PendingActiveSchematic>,
     mut fetch: ResMut<ActiveSchematicFetch>,
     mut current_document: ResMut<CurrentDocument>,

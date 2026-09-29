@@ -5,8 +5,8 @@
 use bevy::{ecs::system::SystemParam, math::DVec3, prelude::*};
 use bevy_egui::egui;
 use bevy_geo_frames::{GeoContext, GeoFrame, ecef_to_lla_deg};
-use impeller2_bevy::{EntityMap, TelemetryCache};
-use impeller2_wkt::{ComponentValue, CurrentTimestamp, DisplayFrame};
+use impeller_bevy::{EntityMap, TelemetryCache};
+use impeller_wkt::{ComponentValue, CurrentTimestamp, DisplayFrame};
 
 use super::{EqlBinding, GaugePane, component_value_to_position};
 use crate::ui::{

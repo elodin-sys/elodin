@@ -2,7 +2,7 @@
 //!
 //! Pulls an H.264 RTSP stream with [`retina`], reframes each access unit to
 //! Annex-B with in-band SPS/PPS, maps timestamps onto the DB timeline, and
-//! streams the frames **into** elodin-db over the impeller2 wire protocol —
+//! streams the frames **into** elodin-db over the impeller wire protocol —
 //! exactly like the `elodinsink` GStreamer plugin and `fsw/video-streamer`.
 //!
 //! This is a standalone producer: elodin-db stays passive (it never reaches out
@@ -16,8 +16,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use clap::Parser;
 use futures_lite::StreamExt;
-use impeller2::types::{IntoLenPacket, LenPacket, Timestamp, msg_id};
-use impeller2_wkt::{
+use impeller::types::{IntoLenPacket, LenPacket, Timestamp, msg_id};
+use impeller_wkt::{
     LastUpdated, MsgMetadata, SetMsgMetadata, SubscribeLastUpdated, opaque_bytes_msg_schema,
 };
 use retina::client::{Credentials, PlayOptions, Session, SessionOptions, SetupOptions, Transport};
@@ -30,7 +30,7 @@ use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 use tracing::{info, warn};
 use url::Url;
 
-/// impeller2 packet header: ty (1) + id (2) + req_id (1).
+/// impeller packet header: ty (1) + id (2) + req_id (1).
 const PACKET_HEADER_LEN: usize = 4;
 const RECONNECT_DELAY: Duration = Duration::from_secs(2);
 
@@ -254,13 +254,13 @@ async fn connect_db(
 }
 
 /// Builds a timestamped opaque-bytes message packet for the video log.
-fn build_pkt(id: impeller2::types::PacketId, ts: i64, annexb: &[u8]) -> LenPacket {
+fn build_pkt(id: impeller::types::PacketId, ts: i64, annexb: &[u8]) -> LenPacket {
     let mut pkt = LenPacket::msg_with_timestamp(id, Timestamp(ts), annexb.len());
     pkt.extend_from_slice(annexb);
     pkt
 }
 
-/// Reads one length-prefixed (u32 LE) impeller2 packet body from `read`.
+/// Reads one length-prefixed (u32 LE) impeller packet body from `read`.
 async fn read_len_packet(read: &mut OwnedReadHalf) -> std::io::Result<Vec<u8>> {
     let mut len_buf = [0u8; 4];
     read.read_exact(&mut len_buf).await?;

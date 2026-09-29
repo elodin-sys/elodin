@@ -12,12 +12,12 @@ repository = "https://github.com/elodin-sys/elodin"
 default = ["csv", "std", "stellar"]
 std = []
 csv = ["dep:csv", "serde"]
-stellar = ["dep:stellarator", "impeller2-stellar", "impeller2/thingbuf", "fastrand", "bbqueue", "impeller2-bbq"]
+stellar = ["dep:stellarator", "impeller-stellar", "impeller/thingbuf", "fastrand", "bbqueue", "impeller-bbq"]
 
 [dependencies]
-impeller2.path = "../../libs/impeller2"
-impeller2.features = ["std"]
-impeller2-wkt.path = "../../libs/impeller2/wkt"
+impeller.path = "../../libs/impeller"
+impeller.features = ["std"]
+impeller-wkt.path = "../../libs/impeller/wkt"
 
 # data structures
 heapless = "0.8"
@@ -28,11 +28,11 @@ zerocopy.features = ["derive"]
 # async
 stellarator.path = "../../libs/stellarator"
 stellarator.optional = true
-impeller2-stellar.path = "../../libs/impeller2/stellar"
-impeller2-stellar.features = ["queue"]
-impeller2-stellar.optional = true
-impeller2-bbq.path = "../../libs/impeller2/bbq"
-impeller2-bbq.optional = true
+impeller-stellar.path = "../../libs/impeller/stellar"
+impeller-stellar.features = ["queue"]
+impeller-stellar.optional = true
+impeller-bbq.path = "../../libs/impeller/bbq"
+impeller-bbq.optional = true
 fastrand.version = "2.2.0"
 fastrand.optional = true
 bbqueue.path = "../../libs/bbqueue"

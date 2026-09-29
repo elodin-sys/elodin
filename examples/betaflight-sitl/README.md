@@ -649,7 +649,7 @@ class BetaflightSyncBridge:
 Update [main.py](examples/betaflight-sitl/main.py) to use the `post_step` pattern from the SITL example:
 
 ```python
-def create_sitl_step_callback(bridge: BetaflightSyncBridge, client: Impeller2):
+def create_sitl_step_callback(bridge: BetaflightSyncBridge, client: Impeller):
     """Create the post_step callback for SITL synchronization."""
     
     def sitl_step(tick: int):

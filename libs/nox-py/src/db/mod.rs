@@ -3,7 +3,7 @@
 //! Exposes (under the `elodin.db` native submodule; ergonomic wrappers live in
 //! `python/elodin/db.py`):
 //!   * `Server` — embedded `elodin-db` instance (same server the CLI runs)
-//!   * `Client` — TCP Impeller2 client: discovery, latest-value subscription,
+//!   * `Client` — TCP Impeller client: discovery, latest-value subscription,
 //!     historical time-series reads, SQL (Arrow IPC) queries
 //!   * `TableWriter` — batched telemetry writer: one vtable with a shared
 //!     timestamp, one `Table` packet per row, bounded-queue non-blocking mode
@@ -13,7 +13,7 @@
 //! Python-facing calls communicate over bounded std channels and release the
 //! GIL while blocking.
 
-use impeller2::types::PrimType;
+use impeller::types::PrimType;
 use pyo3::prelude::*;
 
 mod client;

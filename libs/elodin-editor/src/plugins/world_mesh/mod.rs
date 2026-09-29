@@ -83,7 +83,7 @@ pub(crate) fn spawn_world_mesh_terrain(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     world_mesh_materials: &mut Assets<bevy_world_mesh::prelude::WorldMeshMaterial>,
-    world_mesh: &impeller2_wkt::WorldMesh,
+    world_mesh: &impeller_wkt::WorldMesh,
 ) -> Entity {
     let region = world_mesh.region.clone();
     let config = if region == "globe" {
@@ -123,7 +123,7 @@ fn spawn_world_mesh_terrain_bundle(
     commands: &mut Commands,
     terrain_bundle: TerrainBundle,
     material: Handle<bevy_world_mesh::prelude::WorldMeshMaterial>,
-    world_mesh: &impeller2_wkt::WorldMesh,
+    world_mesh: &impeller_wkt::WorldMesh,
     region: &str,
 ) -> Entity {
     let anchor = commands
@@ -148,7 +148,7 @@ fn spawn_world_mesh_terrain_bundle(
     anchor
 }
 
-fn world_mesh_transform(world_mesh: &impeller2_wkt::WorldMesh) -> Transform {
+fn world_mesh_transform(world_mesh: &impeller_wkt::WorldMesh) -> Transform {
     let mut transform = Transform::default();
     if world_mesh.frame.or_default().is_some() {
         return transform;
@@ -162,7 +162,7 @@ fn world_mesh_transform(world_mesh: &impeller2_wkt::WorldMesh) -> Transform {
 fn insert_geo_components(
     commands: &mut Commands,
     entity: Entity,
-    world_mesh: &impeller2_wkt::WorldMesh,
+    world_mesh: &impeller_wkt::WorldMesh,
 ) {
     let Some(frame) = world_mesh.frame.or_default() else {
         return;
@@ -174,7 +174,7 @@ fn insert_geo_components(
     ));
 }
 
-fn world_mesh_visibility(world_mesh: &impeller2_wkt::WorldMesh) -> Visibility {
+fn world_mesh_visibility(world_mesh: &impeller_wkt::WorldMesh) -> Visibility {
     if world_mesh.visible {
         Visibility::Visible
     } else {
@@ -380,7 +380,7 @@ fn spawn_world_mesh_fallback(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
-    world_mesh: &impeller2_wkt::WorldMesh,
+    world_mesh: &impeller_wkt::WorldMesh,
     region: &str,
     fallback: WorldMeshFallback,
 ) -> Entity {
@@ -398,7 +398,7 @@ fn spawn_world_mesh_fallback(
 
 fn spawn_planar_fallback_grid(
     commands: &mut Commands,
-    world_mesh: &impeller2_wkt::WorldMesh,
+    world_mesh: &impeller_wkt::WorldMesh,
     region: &str,
 ) -> Entity {
     commands
@@ -437,7 +437,7 @@ fn spawn_globe_fallback(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
-    world_mesh: &impeller2_wkt::WorldMesh,
+    world_mesh: &impeller_wkt::WorldMesh,
     region: &str,
 ) -> Entity {
     let mut transform = world_mesh_transform(world_mesh);
@@ -591,7 +591,7 @@ mod tests {
     use super::*;
     use bevy::ecs::system::RunSystemOnce;
     use bevy_geo_frames::{GeoContext, GeoFrame};
-    use impeller2_wkt::{NodeId, WorldMesh};
+    use impeller_wkt::{NodeId, WorldMesh};
 
     #[test]
     fn terrain_model_view_position_is_identity_at_origin() {
