@@ -31,10 +31,30 @@ HEAD_BRANCH=$(git branch --show-current)
 BASE_BRANCH=main         # or the branch the user named
 OUT=ai-context/branch-regression/$(date +%Y-%m-%d)-$BASE_BRANCH-vs-$HEAD_BRANCH
 mkdir -p "$OUT"
+if [ -f "$OUT/shell-id.txt" ]; then
+  ELODIN_SHELL_ID=$(cat "$OUT/shell-id.txt")
+else
+  ELODIN_SHELL_ID="${ELODIN_SHELL_ID:-branch-regression-$(date +%Y%m%d-%H%M%S)}"
+  printf '%s\n' "$ELODIN_SHELL_ID" > "$OUT/shell-id.txt"
+fi
+export ELODIN_SHELL_ID
 ```
 
 If there is **any** staged or uncommitted work, STOP and ask the user to commit
 or stash it themselves. Never stash, commit, or discard on their behalf.
+
+Use the same `OUT` and `ELODIN_SHELL_ID` when resuming an interrupted run. Never
+create a fresh shell ID for each branch or example. A caller may choose any
+path-safe name by exporting `ELODIN_SHELL_ID` before starting, for example:
+
+```bash
+export ELODIN_SHELL_ID="branch-regression-$(date +%Y%m%d-%H%M%S)"
+```
+
+Named shell directories persist for later passes and resumed sessions. Shells
+that start without an explicit ID use a numeric process/session ID and contain
+`target/shells/$ELODIN_SHELL_ID/garbage-collectable`; the Nix shell may remove
+those after the process dies.
 
 ### 1 & 2. Capture each branch
 
@@ -57,7 +77,10 @@ Headless-only examples (frames, linalg, stablehlo, cube-sat-pysim) are run with
 
 Build and capture must run in the same `nix develop` invocation. Each Nix shell
 has its own virtual environment, so a separate capture shell cannot import the
-Python package installed by `just install`.
+Python package installed by `just install`. Both branch passes must also inherit
+the same named `ELODIN_SHELL_ID`, which reuses the virtual environment and bin
+directory instead of creating a new session. Still run `just install` after
+switching branches so each pass tests binaries built from its own commit.
 
 Rules baked into the script (do not work around them):
 
@@ -118,3 +141,5 @@ through; use judgment.
 - Screenshot delay: script default 20 s (`ELODIN_SCREENSHOT_DELAY`); heavy
   examples may need 25 s. Same delay on both branches, or RMSE is meaningless.
 - Output lives under gitignored `ai-context/`; never commit captures.
+- When resuming after a crash, locate the existing output directory and restore
+  `ELODIN_SHELL_ID` from `shell-id.txt` before entering `nix develop`.

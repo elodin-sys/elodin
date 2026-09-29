@@ -71,7 +71,11 @@ Open the Elodin editor in a new nix develop shell and connect to the local serve
 elodin editor
 ```
 
-`just install` writes `elodin` / `elodin-db` and a Python venv into this shell's `target/shells/$ELODIN_SHELL_ID/` so parallel worktrees and agent shells cannot overwrite each other.
+`just install` writes `elodin` / `elodin-db` and a Python venv into this shell's
+`target/shells/$ELODIN_SHELL_ID/` so parallel worktrees and agent shells cannot
+overwrite each other. The `ELODIN_SHELL_ID` defaults to the shell's processs id
+(PID) but can be set to another name to manage the session manually (no
+automatic clean up).
 
 ---
 
