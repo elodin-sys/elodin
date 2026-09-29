@@ -1424,7 +1424,7 @@ The semi-implicit integrator is a numerical method used to solve ordinary differ
 <tr><td><code>element_names</code></td><td>comma-separated string (e.g. <code>"x,y,z"</code>, <code>"q0,q1,q2,q3"</code>)</td><td>Labels for each element of a vector or matrix component. Used by the component inspector and as column suffixes when exporting with <code>elodin-db export --flatten</code>.</td></tr>
 <tr><td><code>private</code></td><td><code>"true"</code></td><td>Component is omitted from <code>elodin-db export</code> by default (pass <code>--include-private</code> to include it). Useful for marking internal scratch state (e.g. large covariance matrices) that downstream consumers shouldn't see.</td></tr>
 <tr><td><code>transient</code></td><td><code>"true"</code></td><td>Simulation component remains available to systems in memory but is never registered with or recorded to Elodin DB. It is absent from DB schemas, the editor, replication, and exports.</td></tr>
-<tr><td><code>external_control</code></td><td><code>"true"</code></td><td>Component is writable from external clients (e.g. Betaflight or a HITL bridge) over the Impeller2 protocol. The simulation will not overwrite values written externally.</td></tr>
+<tr><td><code>external_control</code></td><td><code>"true"</code></td><td>Component is writable from external clients (e.g. Betaflight or a HITL bridge) over the Impeller protocol. The simulation will not overwrite values written externally.</td></tr>
 <tr><td><code>record_every_tick</code></td><td><code>"true"</code></td><td>Opt out of sparse recording and write a sample at every telemetry commit even when its bytes are unchanged.</td></tr>
 </tbody></table>
 <p>Component recording is sparse by default: the simulation writes a sample
@@ -1880,7 +1880,7 @@ change streams with per-component row counts.</p>
 </li>
 </ul>
 <h3 id="class-elodin-db-tablewriter"><em>class</em> <code>elodin.db.TableWriter</code></h3>
-<p>Batched telemetry writer: every <code>write</code> emits exactly one Impeller2 <code>Table</code> packet — a shared <code>i64</code> timestamp followed by each field's values — one packet per tick, not one per component. All declared fields are required on every write; use one writer per rate group. Reconnects automatically, replaying the metadata + vtable handshake. Usable as a context manager.</p>
+<p>Batched telemetry writer: every <code>write</code> emits exactly one Impeller <code>Table</code> packet — a shared <code>i64</code> timestamp followed by each field's values — one packet per tick, not one per component. All declared fields are required on every write; use one writer per rate group. Reconnects automatically, replaying the metadata + vtable handshake. Usable as a context manager.</p>
 <ul>
 <li>
 <p><code>write(timestamp_us=None, values=None, *, timestamp_ns=None)</code> -&gt; None</p>

@@ -587,7 +587,7 @@ optional element labels:</p>
 <span class="giallo-l"><span>    }</span><span>,</span></span>
 <span class="giallo-l"><span>)</span></span></code></pre>
 <p>All primitive types are supported: <code>f32/f64</code>, <code>i8..i64</code>, <code>u8..u64</code>, <code>bool_</code>.
-Every write emits exactly <strong>one</strong> Impeller2 <code>Table</code> packet: a shared <code>i64</code>
+Every write emits exactly <strong>one</strong> Impeller <code>Table</code> packet: a shared <code>i64</code>
 timestamp followed by each field's values — one packet per tick, not one per
 component. All declared fields are required on every write; use one writer
 per rate group (e.g. one 110 Hz IMU writer, one 50 Hz control writer).</p>
