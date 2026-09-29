@@ -395,6 +395,14 @@
                 >
             </li>
             
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-846/reference/migration/kdl-to-python/"
+                    >Migrate KDL schematics to Python</a
+                >
+            </li>
+            
         </ul>
           
     </nav>
@@ -1423,6 +1431,7 @@ The semi-implicit integrator is a numerical method used to solve ordinary differ
 <table><thead><tr><th>Key</th><th>Value</th><th>Effect</th></tr></thead><tbody>
 <tr><td><code>element_names</code></td><td>comma-separated string (e.g. <code>"x,y,z"</code>, <code>"q0,q1,q2,q3"</code>)</td><td>Labels for each element of a vector or matrix component. Used by the component inspector and as column suffixes when exporting with <code>elodin-db export --flatten</code>.</td></tr>
 <tr><td><code>private</code></td><td><code>"true"</code></td><td>Component is omitted from <code>elodin-db export</code> by default (pass <code>--include-private</code> to include it). Useful for marking internal scratch state (e.g. large covariance matrices) that downstream consumers shouldn't see.</td></tr>
+<tr><td><code>transient</code></td><td><code>"true"</code></td><td>Simulation component remains available to systems in memory but is never registered with or recorded to Elodin DB. It is absent from DB schemas, the editor, replication, and exports.</td></tr>
 <tr><td><code>external_control</code></td><td><code>"true"</code></td><td>Component is writable from external clients (e.g. Betaflight or a HITL bridge) over the Impeller2 protocol. The simulation will not overwrite values written externally.</td></tr>
 <tr><td><code>record_every_tick</code></td><td><code>"true"</code></td><td>Opt out of sparse recording and write a sample at every telemetry commit even when its bytes are unchanged.</td></tr>
 </tbody></table>
@@ -1433,6 +1442,7 @@ state semantics while avoiding duplicate rows. Set
 Editor line plots and <code>Exec.history()</code> carry sparse values forward. Point
 and bar plots show recorded samples only; raw database exports remain
 change streams with per-component row counts.</p>
+<p><code>transient</code> is a simulation-runtime storage contract, not an export filter. A transient component cannot also set <code>external_control</code>, <code>wait_for_write</code>, or <code>record_every_tick</code>, and DB-backed APIs such as <code>StepContext.read_component</code>, <code>StepContext.write_component</code>, and <code>Exec.history</code> cannot access it. Direct database writers are unaffected by this key.</p>
 <p>Example combining a label hint with the export-skip flag:</p>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> elodin</span><span style="color: light-dark(#859900, #859900);"> as</span><span> el</span></span>
 <span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> jax</span></span>
@@ -2161,7 +2171,7 @@ It must evaluate to at least 3 values in meters. The expression can be a literal
 <div class="footer-line-padding"></div>
 <div class="footer-line"></div>
 <div class="docs-navigation d-flex justify-content-between">
-                
+                   
 </div>
 
               </main>
