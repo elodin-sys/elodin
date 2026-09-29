@@ -120,7 +120,11 @@ EngineSpool = ty.Annotated[
 ]
 EngineArmed = ty.Annotated[
     jax.Array,
-    el.Component("engine_armed", el.ComponentType(el.PrimitiveType.F64, (N_ENGINES,))),
+    el.Component(
+        "engine_armed",
+        el.ComponentType(el.PrimitiveType.F64, (N_ENGINES,)),
+        metadata={"transient": "true"},
+    ),
 ]
 TeaTebCharges = ty.Annotated[
     jax.Array,
@@ -187,7 +191,11 @@ WindEcef = ty.Annotated[
 ]
 WindGustNed = ty.Annotated[
     jax.Array,
-    el.Component("wind_gust_ned", el.ComponentType(el.PrimitiveType.F64, (3,))),
+    el.Component(
+        "wind_gust_ned",
+        el.ComponentType(el.PrimitiveType.F64, (3,)),
+        metadata={"transient": "true"},
+    ),
 ]
 Qbar = ty.Annotated[
     jax.Array,

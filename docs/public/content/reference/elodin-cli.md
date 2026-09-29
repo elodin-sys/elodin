@@ -1010,6 +1010,10 @@ When the flag is honored, the export prints a one-line skip message per componen
 
 Pass `--include-private` to override the filter and export every component regardless of metadata (useful for forensic or full-fidelity exports).
 
+###### **Transient Components**
+
+Simulation components whose metadata contains `"transient": "true"` are kept in the simulation's in-memory world but never registered with or written to Elodin DB. They therefore do not appear in the database schema, editor, replication, or any export, including exports using `--include-private`. Use transient components only for tick-to-tick state that does not need replay, visualization, or forensic analysis. See the Python API reference for restrictions and examples.
+
 ###### **Example**
 
 ```bash
