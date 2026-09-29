@@ -1,10 +1,10 @@
 use bevy::{ecs::system::SystemParam, prelude::*};
 use bevy_egui::egui::{self, Frame, RichText, Stroke};
-use impeller2::types::ComponentId;
-use impeller2_bevy::ComponentValue;
-use impeller2_bevy::ComponentValueExt;
-use impeller2_bevy::{ComponentMetadataRegistry, EntityMap, TelemetryCache};
-use impeller2_wkt::{ComponentMetadata, CurrentTimestamp};
+use impeller::types::ComponentId;
+use impeller_bevy::ComponentValue;
+use impeller_bevy::ComponentValueExt;
+use impeller_bevy::{ComponentMetadataRegistry, EntityMap, TelemetryCache};
+use impeller_wkt::{ComponentMetadata, CurrentTimestamp};
 
 use super::{PaneName, colors::get_scheme, widgets::WidgetSystem};
 use crate::ui::widgets::SystemStateExt;
@@ -161,25 +161,25 @@ fn render_component_value_cards(
                 .unwrap_or_else(|| format!("{dim_i:?}"));
 
             let value = match value {
-                impeller2_bevy::ElementValueMut::U8(v) => v.to_string(),
-                impeller2_bevy::ElementValueMut::U16(v) => v.to_string(),
-                impeller2_bevy::ElementValueMut::U32(v) => v.to_string(),
-                impeller2_bevy::ElementValueMut::U64(v) => v.to_string(),
-                impeller2_bevy::ElementValueMut::I8(v) => v.to_string(),
-                impeller2_bevy::ElementValueMut::I16(v) => v.to_string(),
-                impeller2_bevy::ElementValueMut::I32(v) => v.to_string(),
-                impeller2_bevy::ElementValueMut::I64(v) => v.to_string(),
-                impeller2_bevy::ElementValueMut::F64(v) => {
+                impeller_bevy::ElementValueMut::U8(v) => v.to_string(),
+                impeller_bevy::ElementValueMut::U16(v) => v.to_string(),
+                impeller_bevy::ElementValueMut::U32(v) => v.to_string(),
+                impeller_bevy::ElementValueMut::U64(v) => v.to_string(),
+                impeller_bevy::ElementValueMut::I8(v) => v.to_string(),
+                impeller_bevy::ElementValueMut::I16(v) => v.to_string(),
+                impeller_bevy::ElementValueMut::I32(v) => v.to_string(),
+                impeller_bevy::ElementValueMut::I64(v) => v.to_string(),
+                impeller_bevy::ElementValueMut::F64(v) => {
                     let mut str = format!("{v:.8}");
                     str.truncate(10);
                     str
                 }
-                impeller2_bevy::ElementValueMut::F32(v) => {
+                impeller_bevy::ElementValueMut::F32(v) => {
                     let mut str = format!("{v:.8}");
                     str.truncate(10);
                     str
                 }
-                impeller2_bevy::ElementValueMut::Bool(v) => v.to_string(),
+                impeller_bevy::ElementValueMut::Bool(v) => v.to_string(),
             };
             (label, value)
         })

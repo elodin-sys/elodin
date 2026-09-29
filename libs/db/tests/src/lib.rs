@@ -7,11 +7,11 @@ mod tests {
     };
     use elodin_db::{AtomicTimestampExt, DB, Error, Server};
 
-    use impeller2::{
+    use impeller::{
         types::{ComponentId, IntoLenPacket, LenPacket, Msg, PrimType, Timestamp},
         vtable::builder::{component, raw_field, raw_table, schema, timestamp, vtable},
     };
-    use impeller2_stellar::Client;
+    use impeller_stellar::Client;
     use postcard_schema::{Schema, schema::owned::OwnedNamedType};
     use std::{
         collections::{BTreeMap, BTreeSet},
@@ -24,7 +24,7 @@ mod tests {
     use zerocopy::FromBytes;
     use zerocopy::IntoBytes;
 
-    use impeller2_wkt::*;
+    use impeller_wkt::*;
 
     async fn setup_test_db() -> Result<(SocketAddr, Arc<DB>), Error> {
         let subscriber = tracing_subscriber::FmtSubscriber::new();
@@ -1257,7 +1257,7 @@ mod tests {
         };
 
         let result = client.request(&get_schema).await;
-        let Err(impeller2_stellar::Error::Response(resp)) = result else {
+        let Err(impeller_stellar::Error::Response(resp)) = result else {
             panic!("invalid error");
         };
         assert_eq!(
@@ -1279,7 +1279,7 @@ mod tests {
         };
 
         let result = client.request(&get_metadata).await.unwrap_err();
-        let impeller2_stellar::Error::Response(resp) = result else {
+        let impeller_stellar::Error::Response(resp) = result else {
             panic!("invalid error");
         };
         assert_eq!(
@@ -1298,7 +1298,7 @@ mod tests {
         let get_metadata = GetMsgMetadata { msg_id };
 
         let result = client.request(&get_metadata).await.unwrap_err();
-        let impeller2_stellar::Error::Response(resp) = result else {
+        let impeller_stellar::Error::Response(resp) = result else {
             panic!("invalid error");
         };
         assert_eq!(
@@ -1322,7 +1322,7 @@ mod tests {
         };
 
         let result = client.request(&get_msgs).await.unwrap_err();
-        let impeller2_stellar::Error::Response(resp) = result else {
+        let impeller_stellar::Error::Response(resp) = result else {
             panic!("invalid error");
         };
         assert_eq!(resp.description, format!("msg not found {:?}", msg_id));
@@ -1803,7 +1803,7 @@ mod tests {
             .0
             .unwrap();
 
-        let Err(impeller2_stellar::Error::Response(err)) = client.recv::<()>(42).await else {
+        let Err(impeller_stellar::Error::Response(err)) = client.recv::<()>(42).await else {
             panic!("invalid response");
         };
         assert_eq!(
@@ -1847,7 +1847,7 @@ mod tests {
         client.send(pkt.with_request_id(42)).await.0.unwrap();
         sleep(Duration::from_millis(10)).await;
 
-        let Err(impeller2_stellar::Error::Response(err)) = client.recv::<()>(42).await else {
+        let Err(impeller_stellar::Error::Response(err)) = client.recv::<()>(42).await else {
             panic!("invalid response");
         };
         assert_eq!(elodin_db::Error::TimeTravel.to_string(), err.description);
@@ -2018,7 +2018,7 @@ mod tests {
     /// Helper: poll until a message log has at least `min_count` messages.
     async fn wait_for_msg_count(
         db: &Arc<DB>,
-        msg_id: impeller2::types::PacketId,
+        msg_id: impeller::types::PacketId,
         min_count: usize,
         timeout: Duration,
     ) -> bool {
@@ -2324,7 +2324,7 @@ mod tests {
         let component_id = ComponentId::new("follow_sensor");
         let vtable_id = 10u16.to_le_bytes();
         let msg_name = "follow_telemetry";
-        let msg_id = impeller2::types::msg_id(msg_name);
+        let msg_id = impeller::types::msg_id(msg_name);
 
         // Pre-connect: write 3 component samples with realistic timestamps.
         {
@@ -2348,7 +2348,7 @@ mod tests {
                     id: msg_id,
                     metadata: MsgMetadata {
                         name: msg_name.to_string(),
-                        schema: <impeller2_wkt::OpaqueBytes as postcard_schema::Schema>::SCHEMA
+                        schema: <impeller_wkt::OpaqueBytes as postcard_schema::Schema>::SCHEMA
                             .into(),
                         metadata: Default::default(),
                     },
@@ -2734,7 +2734,7 @@ mod tests {
         let component_id = ComponentId::new("dedup_test");
         let vtable_id = 20u16.to_le_bytes();
         let msg_name = "dedup_msg";
-        let msg_id = impeller2::types::msg_id(msg_name);
+        let msg_id = impeller::types::msg_id(msg_name);
 
         // ── Era 1: write 3 component samples + 1 message ────────────────
         let src_listener_1 = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -2763,7 +2763,7 @@ mod tests {
                     id: msg_id,
                     metadata: MsgMetadata {
                         name: msg_name.to_string(),
-                        schema: <impeller2_wkt::OpaqueBytes as postcard_schema::Schema>::SCHEMA
+                        schema: <impeller_wkt::OpaqueBytes as postcard_schema::Schema>::SCHEMA
                             .into(),
                         metadata: Default::default(),
                     },
@@ -3056,7 +3056,7 @@ mod tests {
 
         // 5 messages.
         let msg_name = "multi_log";
-        let msg_id = impeller2::types::msg_id(msg_name);
+        let msg_id = impeller::types::msg_id(msg_name);
         {
             let mut client = Client::connect(src_addr).await.unwrap();
             client
@@ -3064,7 +3064,7 @@ mod tests {
                     id: msg_id,
                     metadata: MsgMetadata {
                         name: msg_name.to_string(),
-                        schema: <impeller2_wkt::OpaqueBytes as postcard_schema::Schema>::SCHEMA
+                        schema: <impeller_wkt::OpaqueBytes as postcard_schema::Schema>::SCHEMA
                             .into(),
                         metadata: Default::default(),
                     },

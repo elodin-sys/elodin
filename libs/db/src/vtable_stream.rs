@@ -7,15 +7,15 @@ use std::{
     },
 };
 
-use impeller2::{
+use impeller::{
     types::{
         ComponentView, IntoLenPacket, LenPacket, Msg, PACKET_HEADER_LEN, PacketId, PrimType,
         RequestId, Timestamp,
     },
     vtable::{Op, RealizedComponent, RealizedOp, TIMESTAMP_NS_EXT_ID, VTable},
 };
-use impeller2_stellar::PacketSink;
-use impeller2_wkt::{ComponentValue, FixedRateBehavior, FixedRateOp, MeanOp, VTableMsg};
+use impeller_stellar::PacketSink;
+use impeller_wkt::{ComponentValue, FixedRateBehavior, FixedRateOp, MeanOp, VTableMsg};
 use stellarator::{
     io::AsyncWrite,
     sync::{Mutex, WaitCell, WaitQueue},
@@ -72,7 +72,7 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
                                 expected = size_of::<Timestamp>(),
                                 "timestamp source range has wrong byte length"
                             );
-                            return Err(Error::Impeller(impeller2::error::Error::InvalidOp));
+                            return Err(Error::Impeller(impeller::error::Error::InvalidOp));
                         }
                         timestamp = Some(range);
                     }
@@ -92,7 +92,7 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
                     let RealizedOp::Component(RealizedComponent { component_id }) =
                         vtable.realize(ext.arg, None)?
                     else {
-                        return Err(Error::Impeller(impeller2::error::Error::InvalidOp));
+                        return Err(Error::Impeller(impeller::error::Error::InvalidOp));
                     };
                     let component = db
                         .with_state(|s| s.get_component(component_id).cloned())
@@ -119,13 +119,13 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
                                 expected = size_of::<Timestamp>(),
                                 "timestamp_ns source range has wrong byte length"
                             );
-                            return Err(Error::Impeller(impeller2::error::Error::InvalidOp));
+                            return Err(Error::Impeller(impeller::error::Error::InvalidOp));
                         }
                         timestamp = Some(range);
                     }
                     realized_op = vtable.realize(ext.arg, None)?;
                 }
-                _ => return Err(Error::Impeller(impeller2::error::Error::InvalidOp)),
+                _ => return Err(Error::Impeller(impeller::error::Error::InvalidOp)),
             }
         }
         let field_range = field.offset.to_index()..field.offset.to_index() + field.len as usize;
@@ -134,7 +134,7 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
         let component = plan
             .first()
             .and_then(|s| s.as_component())
-            .ok_or(Error::Impeller(impeller2::error::Error::InvalidOp))
+            .ok_or(Error::Impeller(impeller::error::Error::InvalidOp))
             .inspect_err(|_| warn!("component not found"))?;
         if let Some((shape, ty)) = schema {
             let component_shape = component.schema.shape();
@@ -143,7 +143,7 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
                     "invalid schema: expected {:?}, got {:?}",
                     shape, component_shape
                 );
-                return Err(Error::Impeller(impeller2::error::Error::InvalidOp));
+                return Err(Error::Impeller(impeller::error::Error::InvalidOp));
             }
         }
         if component.schema.size() != field.len as usize {
@@ -152,7 +152,7 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
                 component.schema.size(),
                 field.len
             );
-            return Err(Error::Impeller(impeller2::error::Error::InvalidOp));
+            return Err(Error::Impeller(impeller::error::Error::InvalidOp));
         }
         let prim_type = component.schema.prim_type;
         field_plans.push((plan, shard, timestamp, prim_type));

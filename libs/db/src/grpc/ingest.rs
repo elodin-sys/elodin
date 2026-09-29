@@ -4,8 +4,8 @@ use std::{
     time::Duration,
 };
 
-use impeller2::types::{ComponentId, PrimType as DbPrimType, Timestamp};
-use impeller2_wkt::{ComponentMetadata, SetDbConfig};
+use impeller::types::{ComponentId, PrimType as DbPrimType, Timestamp};
+use impeller_wkt::{ComponentMetadata, SetDbConfig};
 use prost::Message;
 use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;

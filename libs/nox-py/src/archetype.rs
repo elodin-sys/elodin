@@ -1,8 +1,8 @@
-use impeller2::component::Component;
-use impeller2_wkt::ComponentMetadata;
+use impeller::component::Component;
+use impeller_wkt::ComponentMetadata;
 use nox::NoxprNode;
 
-use impeller2::schema::Schema;
+use impeller::schema::Schema;
 
 use crate::PyComponent;
 use crate::World;

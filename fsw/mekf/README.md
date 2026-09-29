@@ -371,5 +371,5 @@ https://github.com/elodin-sys/elodin
 | `fsw/serial-bridge/src/main.rs` | Orin-side UART receiver and Elodin-DB writer |
 | `fsw/mekf/src/main.rs` | MEKF attitude estimator |
 | `fsw/blackbox/src/lib.rs` | Shared record definitions (ImuRecord, GpsRecord, etc.) |
-| `libs/impeller2/frame/src/lib.rs` | COBS FrameDecoder |
+| `libs/impeller/frame/src/lib.rs` | COBS FrameDecoder |
 | `aleph/modules/sensor-fw.nix` | NixOS module (GPS config, flash service) |

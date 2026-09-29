@@ -370,8 +370,8 @@ mod tests {
     use super::*;
     use crate::{Component, Context};
     use bevy_math::DVec3;
-    use impeller2::schema::Schema;
-    use impeller2::types::{ComponentId, PrimType, Timestamp};
+    use impeller::schema::Schema;
+    use impeller::types::{ComponentId, PrimType, Timestamp};
     use std::sync::Arc;
 
     fn ctx_with_pos(dim: u64) -> Context {

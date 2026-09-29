@@ -7,9 +7,9 @@ publish = false
 
 [dependencies]
 # impeller wire protocol
-impeller2.path = "../../libs/impeller2"
-impeller2.features = ["std"]
-impeller2-wkt = { path = "../../libs/impeller2/wkt" }
+impeller.path = "../../libs/impeller"
+impeller.features = ["std"]
+impeller-wkt = { path = "../../libs/impeller/wkt" }
 rtsp-ingest.path = "../../libs/rtsp-ingest"
 
 # RTSP client (control + RTP H.264 depacketization)

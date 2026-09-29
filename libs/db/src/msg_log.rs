@@ -5,8 +5,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use impeller2::{buf::UmbraBuf, types::Timestamp};
-use impeller2_wkt::MsgMetadata;
+use impeller::{buf::UmbraBuf, types::Timestamp};
+use impeller_wkt::MsgMetadata;
 use stellarator::sync::WaitQueue;
 use zerocopy::{FromBytes, IntoBytes};
 

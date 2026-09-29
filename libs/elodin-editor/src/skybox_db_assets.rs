@@ -4,8 +4,8 @@ use bevy_ai_skybox::{
     ManifestEntry, SkyboxManifest,
     prelude::{SetActiveSkybox, SkyboxAssetSettings, SkyboxCache},
 };
-use impeller2_bevy::{ConnectionAddr, PacketTx};
-use impeller2_wkt::{DbConfig, StoreAsset};
+use impeller_bevy::{ConnectionAddr, PacketTx};
+use impeller_wkt::{DbConfig, StoreAsset};
 use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
@@ -567,7 +567,7 @@ async fn prepare_skybox_upload(
     Ok(PrepareOutput::NeedsUpload {
         uploads: vec![
             (
-                impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME.to_string(),
+                impeller_kdl::SKYBOX_MANIFEST_ASSET_NAME.to_string(),
                 manifest_bytes,
             ),
             (cubemap_name, cubemap_bytes),
@@ -582,7 +582,7 @@ fn read_local_cubemap(
     cubemap_file: &str,
     cubemap_path: &Path,
 ) -> Result<(String, Vec<u8>, CubemapDigest), String> {
-    let cubemap_name = impeller2_kdl::skybox_cubemap_asset_name(cubemap_file)
+    let cubemap_name = impeller_kdl::skybox_cubemap_asset_name(cubemap_file)
         .ok_or_else(|| format!("invalid skybox cubemap file path `{cubemap_file}`"))?;
     let cubemap_bytes =
         std::fs::read(cubemap_path).map_err(|err| format!("{}: {err}", cubemap_path.display()))?;
@@ -597,7 +597,7 @@ async fn fetch_db_skybox_manifest(connection_addr: SocketAddr) -> Result<SkyboxM
         .build()
         .map_err(|err| err.to_string())?;
     let base = assets_http_base(connection_addr);
-    let url = format!("{base}/{}", impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME);
+    let url = format!("{base}/{}", impeller_kdl::SKYBOX_MANIFEST_ASSET_NAME);
     let response = client
         .get(&url)
         .send()
@@ -640,7 +640,7 @@ async fn download_db_skybox_assets(
         .build()
         .map_err(|err| err.to_string())?;
     let base = assets_http_base(connection_addr);
-    let manifest_url = format!("{base}/{}", impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME);
+    let manifest_url = format!("{base}/{}", impeller_kdl::SKYBOX_MANIFEST_ASSET_NAME);
     let manifest_bytes = fetch_asset(&client, &manifest_url).await?;
     let manifest = std::str::from_utf8(&manifest_bytes).map_err(|err| err.to_string())?;
     let manifest = SkyboxManifest::from_ron_str(manifest).map_err(|err| err.to_string())?;
@@ -649,7 +649,7 @@ async fn download_db_skybox_assets(
         .cloned()
         .ok_or_else(|| format!("skybox `{skybox}` is not present in database manifest"))?;
 
-    let cubemap_name = impeller2_kdl::skybox_cubemap_asset_name(&entry.cubemap_file)
+    let cubemap_name = impeller_kdl::skybox_cubemap_asset_name(&entry.cubemap_file)
         .ok_or_else(|| format!("invalid skybox cubemap file path `{}`", entry.cubemap_file))?;
     let cubemap_url = format!("{base}/{cubemap_name}");
     let cubemap_bytes = fetch_asset(&client, &cubemap_url).await?;
@@ -675,7 +675,7 @@ async fn verify_db_skybox_assets(
         .map_err(|err| err.to_string())?;
     let base = assets_http_base(connection_addr);
 
-    let manifest_url = format!("{base}/{}", impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME);
+    let manifest_url = format!("{base}/{}", impeller_kdl::SKYBOX_MANIFEST_ASSET_NAME);
     let manifest_resp = client
         .get(&manifest_url)
         .send()
@@ -696,7 +696,7 @@ async fn verify_db_skybox_assets(
         return Ok(false);
     };
 
-    let cubemap_name = impeller2_kdl::skybox_cubemap_asset_name(&entry.cubemap_file)
+    let cubemap_name = impeller_kdl::skybox_cubemap_asset_name(&entry.cubemap_file)
         .ok_or_else(|| format!("invalid skybox cubemap file path `{}`", entry.cubemap_file))?;
     let cubemap_url = format!("{base}/{cubemap_name}");
 
@@ -719,7 +719,7 @@ async fn verify_db_skybox_assets(
 }
 
 fn cubemap_cache_path(cache_dir: &Path, cubemap_file: &str) -> Result<PathBuf, String> {
-    let asset_name = impeller2_kdl::skybox_cubemap_asset_name(cubemap_file)
+    let asset_name = impeller_kdl::skybox_cubemap_asset_name(cubemap_file)
         .ok_or_else(|| format!("invalid skybox cubemap file path `{cubemap_file}`"))?;
     let rel = asset_name
         .strip_prefix("skyboxes/")

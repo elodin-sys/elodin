@@ -33,13 +33,13 @@ use bevy_editor_cam::controller::{component::EditorCam, motion::CurrentMotion};
 use bevy_geo_frames::GeoContext;
 use egui_tiles::{Tile, TileId};
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
-use impeller2::types::Timestamp;
-use impeller2_bevy::{
+use impeller::types::Timestamp;
+use impeller_bevy::{
     ComponentMetadataRegistry, ComponentPathRegistry, ConnectionAddr, EntityMap, PacketTx,
 };
-use impeller2_kdl::ToKdl;
-use impeller2_wkt::SkyboxConfig;
-use impeller2_wkt::{
+use impeller_kdl::ToKdl;
+use impeller_wkt::SkyboxConfig;
+use impeller_wkt::{
     ComponentPath, ComponentValue, CurrentTimestamp, DbConfig, EarliestTimestamp, IsRecording,
     LastUpdated, Material, Mesh, Object3D, SetDbConfig, SimulationTimeStep,
 };
@@ -570,7 +570,7 @@ fn graph_parts(
                       mut render_layer_alloc: ResMut<RenderLayerAllocator>,
                       mut tile_param: TileParam,
                       path_reg: Res<ComponentPathRegistry>,
-                      schema_reg: Res<impeller2_bevy::ComponentSchemaRegistry>,
+                      schema_reg: Res<impeller_bevy::ComponentSchemaRegistry>,
                       metadata_reg: Res<ComponentMetadataRegistry>,
                       palette_state: Res<CommandPaletteState>| {
                     let Some(mut tile_state) = tile_param.target(palette_state.target_window)
@@ -1484,7 +1484,7 @@ pub fn clear_schematic() -> PaletteItem {
             // Leave the CLI `--kdl` pin so Clear isn't undone by sticky sync.
             params.clear_initial_kdl_pin();
             params.current_document.clear();
-            params.load_schematic(&impeller2_wkt::Schematic::default(), None, None);
+            params.load_schematic(&impeller_wkt::Schematic::default(), None, None);
             // `load_schematic` despawns every schematic entity and zeroes
             // `CurrentSchematic.skybox`, but the skybox is a global render
             // resource, not an entity, so it survives unless we clear it too.
@@ -1595,7 +1595,7 @@ fn open_schematic_item(key: String) -> PaletteItem {
 fn root_schematic_for_save(
     schematic: &CurrentSchematic,
     skybox_cache: Option<&SkyboxCache>,
-) -> impeller2_wkt::Schematic {
+) -> impeller_wkt::Schematic {
     let mut root = schematic.0.clone();
     // Prefer the cache's active skybox when it asserts one: it's the live truth
     // if the user switched skyboxes through a path that didn't touch
@@ -1941,7 +1941,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                         .unwrap_or((0.8, 0.8, 0.8));
                 let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
 
-                let mesh_source = impeller2_wkt::Object3DMesh::Mesh {
+                let mesh_source = impeller_wkt::Object3DMesh::Mesh {
                     mesh: mesh.clone(),
                     material: Material::color(r, g, b),
                 };
@@ -2039,7 +2039,7 @@ pub fn create_3d_object() -> PaletteItem {
                                                   connection_addr: Option<Res<ConnectionAddr>>,
                                                   initial_kdl: Option<Res<crate::plugins::kdl_document::InitialKdlPath>>
                                                 | {
-                                                let obj = impeller2_wkt::Object3DMesh::glb(gltf_path.trim());
+                                                let obj = impeller_wkt::Object3DMesh::glb(gltf_path.trim());
                                                 let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
                                                 let local_root = crate::object_3d::local_assets_root(initial_kdl.as_deref());
 
@@ -2337,8 +2337,8 @@ impl Default for PalettePage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use impeller2_kdl::FromKdl;
-    use impeller2_wkt::Schematic;
+    use impeller_kdl::FromKdl;
+    use impeller_wkt::Schematic;
     use std::path::PathBuf;
 
     fn parse_saved_schematic(kdl: &str) -> Schematic {

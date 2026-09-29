@@ -1,9 +1,9 @@
 use anyhow::Result;
-use impeller2::com_de::Decomponentize;
-use impeller2::registry::HashMapRegistry;
-use impeller2::types::{ComponentId, ComponentView, Timestamp};
-use impeller2_stellar::SubStream;
-use impeller2_wkt::{StreamReply, VTableMsg};
+use impeller::com_de::Decomponentize;
+use impeller::registry::HashMapRegistry;
+use impeller::types::{ComponentId, ComponentView, Timestamp};
+use impeller_stellar::SubStream;
+use impeller_wkt::{StreamReply, VTableMsg};
 use std::collections::HashMap;
 use std::time::Instant;
 use stellarator::buf::Slice;
@@ -98,7 +98,7 @@ impl TelemetryProcessor {
     /// Handle a table packet  
     async fn handle_table(
         &mut self,
-        table: impeller2::types::OwnedTable<Slice<Vec<u8>>>,
+        table: impeller::types::OwnedTable<Slice<Vec<u8>>>,
     ) -> Result<()> {
         self.packet_count += 1;
 

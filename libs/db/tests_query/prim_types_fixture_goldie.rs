@@ -11,8 +11,8 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use elodin_db::{ComponentSchema, DB};
-use impeller2::types::{ComponentId, PrimType, Timestamp};
-use impeller2_wkt::ComponentMetadata;
+use impeller::types::{ComponentId, PrimType, Timestamp};
+use impeller_wkt::ComponentMetadata;
 use std::collections::HashMap;
 use zerocopy::IntoBytes;
 

@@ -17,7 +17,7 @@ mod stream;
 
 const DESCRIPTOR_SET: &[u8] = tonic::include_file_descriptor_set!("elodin_db_descriptor");
 
-pub use impeller2::GRPC_PORT_OFFSET;
+pub use impeller::GRPC_PORT_OFFSET;
 
 pub fn grpc_addr(tcp: SocketAddr) -> SocketAddr {
     SocketAddr::new(tcp.ip(), tcp.port().saturating_add(GRPC_PORT_OFFSET))

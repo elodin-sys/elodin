@@ -7,12 +7,12 @@ use bevy::ecs::{
 use bevy::prelude::{Children, Resource};
 use bevy_egui::egui::{self, Align, Color32, Layout, RichText, emath};
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
-use impeller2::types::ComponentId;
-use impeller2_bevy::{
+use impeller::types::ComponentId;
+use impeller_bevy::{
     ComponentMetadataRegistry, ComponentPath, ComponentPathRegistry, ComponentSchemaRegistry,
     ComponentValue, ComponentValueExt, ElementValueMut,
 };
-use impeller2_wkt::{ComponentMetadata, MetadataExt};
+use impeller_wkt::{ComponentMetadata, MetadataExt};
 use smallvec::SmallVec;
 
 use crate::{

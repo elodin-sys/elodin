@@ -5,12 +5,12 @@ use bevy::ecs::{
 use bevy::prelude::*;
 use bevy_egui::egui;
 use egui::{Ui, load::SizedTexture};
-use impeller2::types::Timestamp;
-use impeller2_bevy::{
+use impeller::types::Timestamp;
+use impeller_bevy::{
     CurrentStreamId, SeriesFetchPriority, TelemetryCache, next_subscribed_sample,
     prev_subscribed_sample,
 };
-use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated, SimulationTimeStep};
+use impeller_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated, SimulationTimeStep};
 use std::convert::TryFrom;
 use std::time::Duration;
 use std::time::Instant;

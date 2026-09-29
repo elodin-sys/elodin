@@ -1,5 +1,5 @@
 [package]
-name = "impeller2-cli"
+name = "impeller-cli"
 license = "MIT OR Apache-2.0"
 version.workspace = true
 edition = "2024"
@@ -31,14 +31,14 @@ tabled = "0.17.0"
 # async
 stellarator.path = "../../stellarator"
 stellarator.features = ["miette"]
-impeller2-stellar.path = "../../impeller2/stellar"
+impeller-stellar.path = "../../impeller/stellar"
 futures-lite = "2.5.0"
 
 # ser-de
-impeller2.path = "../../impeller2"
-impeller2.features = ["std", "mlua", "hifitime"]
-impeller2-wkt.path = "../../impeller2/wkt"
-impeller2-wkt.features = ["std", "mlua"]
+impeller.path = "../../impeller"
+impeller.features = ["std", "mlua", "hifitime"]
+impeller-wkt.path = "../../impeller/wkt"
+impeller-wkt.features = ["std", "mlua"]
 serde.version = "1.0"
 serde.features = ["derive"]
 postcard = "1.1"

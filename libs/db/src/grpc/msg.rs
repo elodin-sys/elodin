@@ -1,7 +1,7 @@
 use std::{sync::Arc, time::Duration};
 
-use impeller2::types::{PacketId, msg_id};
-use impeller2_wkt::{LogEntry, MsgMetadata, log_entry_msg_schema, opaque_bytes_msg_schema};
+use impeller::types::{PacketId, msg_id};
+use impeller_wkt::{LogEntry, MsgMetadata, log_entry_msg_schema, opaque_bytes_msg_schema};
 use postcard_schema::schema::owned::OwnedNamedType;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -129,7 +129,7 @@ impl MessageServiceImpl {
     fn validate(
         &self,
         message: v1::OutgoingMessage,
-    ) -> Result<(PacketId, impeller2::types::Timestamp, Vec<u8>), (String, String)> {
+    ) -> Result<(PacketId, impeller::types::Timestamp, Vec<u8>), (String, String)> {
         let describe = |handle| {
             self.metadata(handle)
                 .map_or_else(|_| String::new(), |(_, metadata)| metadata.name)
@@ -438,7 +438,7 @@ impl MessageService for MessageServiceImpl {
 
 #[cfg(test)]
 mod tests {
-    use impeller2::types::Timestamp;
+    use impeller::types::Timestamp;
     use tempfile::TempDir;
     use v1::message_service_server::MessageServiceServer;
 

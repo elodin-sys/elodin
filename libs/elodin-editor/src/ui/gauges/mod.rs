@@ -11,9 +11,9 @@ pub mod orientation;
 use bevy::{math::DVec3, prelude::*};
 use bevy_egui::egui::{self, Align2, Color32, FontId, Pos2, Vec2};
 use bevy_geo_frames::GeoContext;
-use impeller2::types::{ComponentId, Timestamp};
-use impeller2_bevy::{EntityMap, TelemetryCache};
-use impeller2_wkt::ComponentValue;
+use impeller::types::{ComponentId, Timestamp};
+use impeller_bevy::{EntityMap, TelemetryCache};
+use impeller_wkt::ComponentValue;
 
 use crate::EqlContext;
 use crate::object_3d::{CompiledExpr, compile_eql_expr_with_geo};
@@ -45,7 +45,7 @@ pub(crate) fn component_buf_f64(value: &ComponentValue) -> Option<Vec<f64>> {
 ///
 /// Accepts only (in `F32` or `F64`):
 /// - a bare 3-vector (exactly three elements), or
-/// - a SpatialTransform / [`WorldPos`](impeller2_wkt::WorldPos) (≥7 elements:
+/// - a SpatialTransform / [`WorldPos`](impeller_wkt::WorldPos) (≥7 elements:
 ///   quat `[x, y, z, w]` + position `[x, y, z]`).
 ///
 /// Rejects other lengths (e.g. 4-element fin deflections) so a consumer does not
@@ -286,9 +286,9 @@ mod tests {
     use crate::ui::widgets::SystemStateExt;
     use bevy::ecs::system::SystemState;
     use bevy_geo_frames::{GeoFrame, GeoOrigin};
-    use impeller2::schema::Schema;
-    use impeller2::types::PrimType;
-    use impeller2_bevy::EntityMap;
+    use impeller::schema::Schema;
+    use impeller::types::PrimType;
+    use impeller_bevy::EntityMap;
     use nox::Array;
     use std::collections::HashMap;
     use std::sync::Arc;

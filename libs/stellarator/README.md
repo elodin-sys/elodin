@@ -194,7 +194,7 @@ async fn cancellable_operation() {
 Stellarator is designed to integrate seamlessly with:
 
 1. **Roci** - Reactive flight software framework
-2. **Impeller2** - High-performance telemetry protocol
+2. **Impeller** - High-performance telemetry protocol
 3. **Elodin Simulation** - Hardware-in-the-loop testing
 4. **Aleph** - Flight computer platform
 

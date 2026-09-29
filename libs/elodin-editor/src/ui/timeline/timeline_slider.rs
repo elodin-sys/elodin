@@ -8,9 +8,9 @@ use bevy::{
 };
 use bevy_egui::egui;
 use egui::{CornerRadius, Margin};
-use impeller2::types::Timestamp;
-use impeller2_bevy::CurrentStreamId;
-use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp};
+use impeller::types::Timestamp;
+use impeller_bevy::CurrentStreamId;
+use impeller_wkt::{CurrentTimestamp, EarliestTimestamp};
 use std::ops::RangeInclusive;
 
 use crate::ui::{

@@ -16,11 +16,11 @@ use std::net::SocketAddr;
 use std::sync::mpsc::{SyncSender, sync_channel};
 use std::sync::{Arc, Mutex};
 
-use impeller2::com_de::Decomponentize;
-use impeller2::registry::HashMapRegistry;
-use impeller2::types::{ComponentId, ComponentView, LenPacket, PrimType, Timestamp, msg_id};
-use impeller2_stellar::Client as StellarClient;
-use impeller2_wkt::{
+use impeller::com_de::Decomponentize;
+use impeller::registry::HashMapRegistry;
+use impeller::types::{ComponentId, ComponentView, LenPacket, PrimType, Timestamp, msg_id};
+use impeller_stellar::Client as StellarClient;
+use impeller_wkt::{
     ArrowIPC, DumpMetadata, DumpMetadataResp, DumpSchema, DumpSchemaResp, EarliestTimestamp,
     GetEarliestTimestamp, GetMsgs, GetSchema, GetTimeSeries, MsgBatch, MsgMetadata, SQLQuery,
     SetMsgMetadata, Stream, StreamBehavior, StreamReply,
@@ -95,7 +95,7 @@ type TimeSeriesParts<'py> = (Bound<'py, PyBytes>, Bound<'py, PyBytes>, String, V
 /// wrapper by [`Client::latest`].
 type LatestParts<'py> = (i64, Bound<'py, PyBytes>, String, Vec<usize>);
 
-fn is_time_range_out_of_bounds_response(err: &impeller2_wkt::ErrorResponse) -> bool {
+fn is_time_range_out_of_bounds_response(err: &impeller_wkt::ErrorResponse) -> bool {
     err.description.starts_with("time range out of bounds ")
 }
 
@@ -105,12 +105,12 @@ mod tests {
 
     #[test]
     fn only_time_range_out_of_bounds_finishes_pagination() {
-        let empty_tail = impeller2_wkt::ErrorResponse {
+        let empty_tail = impeller_wkt::ErrorResponse {
             description:
                 "time range out of bounds 10..20 for component c with latest timestamp Some(9)"
                     .to_string(),
         };
-        let component_missing = impeller2_wkt::ErrorResponse {
+        let component_missing = impeller_wkt::ErrorResponse {
             description: "component not found c".to_string(),
         };
 
@@ -269,7 +269,7 @@ async fn request_worker_loop(addr: SocketAddr, queue: Arc<RequestQueue>) {
 async fn execute_request(
     c: &mut StellarClient,
     req: DbRequest,
-) -> Result<DbResponse, impeller2_stellar::Error> {
+) -> Result<DbResponse, impeller_stellar::Error> {
     match req {
         DbRequest::Components => {
             let metadata_resp: DumpMetadataResp = c.request(&DumpMetadata).await?;
@@ -408,7 +408,7 @@ async fn paginated_time_series(
     limit: Option<usize>,
     chunk: usize,
     sample_bytes: usize,
-) -> Result<(Vec<u8>, Vec<u8>), impeller2_stellar::Error> {
+) -> Result<(Vec<u8>, Vec<u8>), impeller_stellar::Error> {
     let mut ts_out: Vec<u8> = Vec::new();
     let mut data_out: Vec<u8> = Vec::new();
     if start >= stop {
@@ -440,7 +440,7 @@ async fn paginated_time_series(
             // GetSchema above already proved the component exists. A
             // server-side "out of bounds" means this page is empty, including
             // the first page for a valid component with no samples in range.
-            Err(impeller2_stellar::Error::Response(err))
+            Err(impeller_stellar::Error::Response(err))
                 if is_time_range_out_of_bounds_response(&err) =>
             {
                 tracing::trace!("time series pagination finished: {err}");
@@ -448,10 +448,8 @@ async fn paginated_time_series(
             }
             Err(e) => return Err(e),
         };
-        let timestamps = series
-            .timestamps()
-            .map_err(impeller2_stellar::Error::from)?;
-        let data = series.data().map_err(impeller2_stellar::Error::from)?;
+        let timestamps = series.timestamps().map_err(impeller_stellar::Error::from)?;
+        let data = series.data().map_err(impeller_stellar::Error::from)?;
         let n = timestamps.len();
         if n <= skip {
             break;
@@ -779,7 +777,7 @@ enum SubscribeOutcome {
     /// The shutdown queue was closed; exit the reconnect loop.
     Shutdown,
     /// The connection failed; reconnect after backoff.
-    ConnectionError(impeller2_stellar::Error),
+    ConnectionError(impeller_stellar::Error),
 }
 
 async fn subscribe_with_reconnect(
@@ -855,7 +853,7 @@ async fn subscribe_once(
     latest_values: Arc<Mutex<HashMap<String, ComponentValue>>>,
     components: Arc<Mutex<HashMap<ComponentId, String>>>,
     connection_state: Arc<Mutex<ConnectionState>>,
-) -> impeller2_stellar::Error {
+) -> impeller_stellar::Error {
     let mut client = match StellarClient::connect(addr).await {
         Ok(c) => c,
         Err(e) => return e,

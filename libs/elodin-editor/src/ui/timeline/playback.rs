@@ -9,9 +9,9 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
-use impeller2::types::{ComponentId, Timestamp};
-use impeller2_bevy::{CurrentStreamId, SeriesFetchPriority, TelemetryCache};
-use impeller2_wkt::{CurrentTimestamp, DbConfig, EarliestTimestamp, LastUpdated};
+use impeller::types::{ComponentId, Timestamp};
+use impeller_bevy::{CurrentStreamId, SeriesFetchPriority, TelemetryCache};
+use impeller_wkt::{CurrentTimestamp, DbConfig, EarliestTimestamp, LastUpdated};
 
 use super::{AutoFollowLatestState, LatestFollow, PlaybackSpeed};
 
@@ -591,7 +591,7 @@ mod tests {
 
     #[test]
     fn the_playhead_gap_is_the_union_of_subscribed_series() {
-        use impeller2_bevy::ComponentValue;
+        use impeller_bevy::ComponentValue;
 
         let sample = || ComponentValue::F64(nox::array![0.0f64].to_dyn());
         let mut cache = TelemetryCache::default();
@@ -657,7 +657,7 @@ mod tests {
 
     #[test]
     fn the_scan_resumes_when_later_samples_arrive() {
-        use impeller2_bevy::ComponentValue;
+        use impeller_bevy::ComponentValue;
         let sample = || ComponentValue::F64(nox::array![0.0f64].to_dyn());
         let mut cache = TelemetryCache::default();
         let id = ComponentId::new("imu");
@@ -682,7 +682,7 @@ mod tests {
 
     #[test]
     fn a_stale_scan_for_an_unfilled_id_does_not_hide_gaps() {
-        use impeller2_bevy::ComponentValue;
+        use impeller_bevy::ComponentValue;
         let sample = || ComponentValue::F64(nox::array![0.0f64].to_dyn());
         let a = ComponentId::new("a");
         let b = ComponentId::new("b");
@@ -705,7 +705,7 @@ mod tests {
 
     #[test]
     fn the_scan_drops_holes_from_a_rewound_series() {
-        use impeller2_bevy::ComponentValue;
+        use impeller_bevy::ComponentValue;
         let sample = || ComponentValue::F64(nox::array![0.0f64].to_dyn());
         let mut cache = TelemetryCache::default();
         let id = ComponentId::new("imu");
@@ -731,7 +731,7 @@ mod tests {
 
     #[test]
     fn backfill_into_a_scanned_span_drops_the_stale_hole() {
-        use impeller2_bevy::ComponentValue;
+        use impeller_bevy::ComponentValue;
         let sample = || ComponentValue::F64(nox::array![0.0f64].to_dyn());
         let mut cache = TelemetryCache::default();
         let id = ComponentId::new("imu");

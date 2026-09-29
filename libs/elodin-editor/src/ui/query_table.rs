@@ -9,9 +9,9 @@ use bevy::{
     prelude::{Commands, Component, Entity, In, Query, Res, ResMut},
 };
 use egui::RichText;
-use impeller2::types::Timestamp;
-use impeller2_bevy::CommandsExt;
-use impeller2_wkt::{
+use impeller::types::Timestamp;
+use impeller_bevy::CommandsExt;
+use impeller_wkt::{
     ArrowIPC, EarliestTimestamp, ErrorResponse, LastUpdated, QueryTable, QueryType, SQLQuery,
 };
 

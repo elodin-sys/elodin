@@ -11,7 +11,7 @@ use arrow::{
 };
 use bevy::asset::{Assets, Handle};
 use bevy_egui::egui::Color32;
-use impeller2_wkt::PlotMode;
+use impeller_wkt::PlotMode;
 
 use super::plot::XYLine;
 
@@ -46,7 +46,7 @@ pub struct SqlPlotSeries {
 pub struct SqlBatchPlot {
     pub x_offset: f64,
     pub y_offset: f64,
-    pub earliest_timestamp: Option<impeller2::types::Timestamp>,
+    pub earliest_timestamp: Option<impeller::types::Timestamp>,
     pub series: Vec<SqlPlotSeries>,
 }
 
@@ -156,7 +156,7 @@ pub fn process_sql_record_batch(
     let x_col = batch.column(0);
     let (x_values, earliest_abs_timestamp_micros) = extract_x_column(x_col);
 
-    let earliest_timestamp = earliest_abs_timestamp_micros.map(impeller2::types::Timestamp);
+    let earliest_timestamp = earliest_abs_timestamp_micros.map(impeller::types::Timestamp);
 
     let finite_x_values: Vec<f64> = x_values
         .iter()

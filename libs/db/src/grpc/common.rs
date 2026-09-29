@@ -1,7 +1,7 @@
 use std::{collections::HashMap, path::PathBuf, sync::Mutex};
 
-use impeller2::types::{PrimType as DbPrimType, Timestamp};
-use impeller2_wkt::{
+use impeller::types::{PrimType as DbPrimType, Timestamp};
+use impeller_wkt::{
     ComponentMetadata as DbComponentMetadata, DbConfig as DbDbConfig,
     MsgMetadata as DbMessageMetadata,
 };

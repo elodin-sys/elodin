@@ -1,6 +1,6 @@
 use bevy::{asset::AssetPath, prelude::*, reflect::TypePath};
-use impeller2_kdl::KdlSchematicError;
-use impeller2_wkt::Schematic;
+use impeller_kdl::KdlSchematicError;
+use impeller_wkt::Schematic;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use thiserror::Error;
@@ -89,7 +89,7 @@ impl StoredSchematicSnapshot {
 /// ingested files vs. `to_kdl` output differ only in layout). `None` when the
 /// content does not parse.
 pub(crate) fn normalized_schematic_kdl(content: &str) -> Option<String> {
-    use impeller2_kdl::{FromKdl, ToKdl};
+    use impeller_kdl::{FromKdl, ToKdl};
     Schematic::from_kdl(content).ok().map(|s| s.to_kdl())
 }
 

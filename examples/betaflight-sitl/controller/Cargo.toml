@@ -15,9 +15,9 @@ name = "betaflight-sitl-controller"
 path = "src/main.rs"
 
 [dependencies]
-impeller2 = { path = "../../../libs/impeller2", features = ["std"] }
-impeller2-stellar = { path = "../../../libs/impeller2/stellar" }
-impeller2-wkt = { path = "../../../libs/impeller2/wkt" }
+impeller = { path = "../../../libs/impeller", features = ["std"] }
+impeller-stellar = { path = "../../../libs/impeller/stellar" }
+impeller-wkt = { path = "../../../libs/impeller/wkt" }
 stellarator = { path = "../../../libs/stellarator", features = ["tokio"] }
 gilrs = "0.11"
 device_query = "2"

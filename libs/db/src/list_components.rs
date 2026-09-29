@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use impeller2::types::Timestamp;
+use impeller::types::Timestamp;
 use tabular::{Row, Table};
 
 use crate::{DB, Error};

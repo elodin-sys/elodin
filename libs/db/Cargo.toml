@@ -25,7 +25,7 @@ axum = [
     "dep:axum-streams",
     "dep:serde_json",
     "dep:tokio",
-    "dep:impeller2-kdl",
+    "dep:impeller-kdl",
     "dep:reqwest",
 ]
 grpc = [
@@ -45,16 +45,16 @@ grpc = [
 ]
 parquet = ["dep:parquet"]
 video-export = ["dep:muxide", "dep:scuffle-h264", "dep:openh264", "dep:serde_json"]
-mcap-export = ["dep:mcap", "dep:base64", "dep:serde_json", "dep:impeller2-kdl"]
+mcap-export = ["dep:mcap", "dep:base64", "dep:serde_json", "dep:impeller-kdl"]
 tracy = ["dep:tracing-tracy"]
 
 [dependencies]
 # ser-de
-impeller2.path = "../impeller2"
-impeller2.features = ["std"]
-impeller2-wkt.path = "../impeller2/wkt"
-impeller2-wkt.features = ["gui"]
-impeller2-cli.path = "cli"
+impeller.path = "../impeller"
+impeller.features = ["std"]
+impeller-wkt.path = "../impeller/wkt"
+impeller-wkt.features = ["gui"]
+impeller-cli.path = "cli"
 serde.version = "1.0"
 serde.features = ["derive"]
 postcard = "1.1"
@@ -66,7 +66,7 @@ nox.default-features = false
 # async
 stellarator.path = "../stellarator"
 stellarator.features = ["miette", "tokio"]
-impeller2-stellar.path = "../impeller2/stellar"
+impeller-stellar.path = "../impeller/stellar"
 futures-lite = "2.5.0"
 
 # data structures
@@ -134,8 +134,8 @@ tokio.version = "1"
 tokio.features = ["rt-multi-thread", "time"]
 tokio.optional = true
 
-impeller2-kdl.path = "../impeller2/kdl"
-impeller2-kdl.optional = true
+impeller-kdl.path = "../impeller/kdl"
+impeller-kdl.optional = true
 reqwest = { version = "0.12", default-features = false, features = [
     "rustls-tls",
 ], optional = true }

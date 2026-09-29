@@ -2,7 +2,7 @@ use std::{borrow::Cow, ops::Range, sync::Arc};
 
 use arrow::ipc::writer::StreamWriter;
 use futures_lite::StreamExt;
-use impeller2::types::{ComponentId, PrimType as DbPrimType, Timestamp};
+use impeller::types::{ComponentId, PrimType as DbPrimType, Timestamp};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Code, Request, Response, Status};
@@ -366,8 +366,8 @@ fn time_series_data(timestamps: &[Timestamp], data: &[u8]) -> GetTimeSeriesRespo
 
 #[cfg(test)]
 mod tests {
-    use impeller2::types::PrimType;
-    use impeller2_wkt::ComponentMetadata;
+    use impeller::types::PrimType;
+    use impeller_wkt::ComponentMetadata;
     use tempfile::TempDir;
 
     use super::*;

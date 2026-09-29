@@ -401,9 +401,9 @@ dependencies = [
  "chrono",
  "clap",
  "colored",
- "impeller2",
- "impeller2-stellar",
- "impeller2-wkt",
+ "impeller",
+ "impeller-stellar",
+ "impeller-wkt",
  "postcard",
  "serde",
  "stellarator",
@@ -845,7 +845,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "impeller2"
+name = "impeller"
 version = "0.15.0-alpha.1"
 dependencies = [
  "const-fnv1a-hash",
@@ -862,13 +862,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "impeller2-stellar"
+name = "impeller-stellar"
 version = "0.15.0-alpha.1"
 dependencies = [
  "futures-concurrency",
  "futures-lite",
- "impeller2",
- "impeller2-wkt",
+ "impeller",
+ "impeller-wkt",
  "miette",
  "postcard",
  "serde",
@@ -878,11 +878,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "impeller2-wkt"
+name = "impeller-wkt"
 version = "0.15.0-alpha.1"
 dependencies = [
  "compact_str",
- "impeller2",
+ "impeller",
  "postcard",
  "postcard-schema",
  "serde",

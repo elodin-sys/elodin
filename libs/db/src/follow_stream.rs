@@ -16,11 +16,11 @@ use std::{
     time::Duration,
 };
 
-use impeller2::{
+use impeller::{
     types::{ComponentId, IntoLenPacket, LenPacket, PacketId, Timestamp},
     vtable::builder::{component, raw_field, raw_table, schema, timestamp, vtable},
 };
-use impeller2_wkt::*;
+use impeller_wkt::*;
 use stellarator::io::AsyncWrite;
 use tracing::info;
 
@@ -72,7 +72,7 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
             let new_components: Vec<(
                 Component,
                 Option<ComponentMetadata>,
-                impeller2::schema::Schema<Vec<u64>>,
+                impeller::schema::Schema<Vec<u64>>,
             )> = db.with_state(|state| {
                 let mut new_comps = Vec::new();
                 for comp in state.components.values() {

@@ -3,7 +3,7 @@ use bevy::math::DQuat;
 use bevy::prelude::{Entity, Query, Res};
 use bevy_egui::egui;
 use bevy_geo_frames::GeoFrame;
-use impeller2_wkt::DisplayFrame;
+use impeller_wkt::DisplayFrame;
 
 use crate::{
     EqlContext,

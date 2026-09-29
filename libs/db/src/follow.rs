@@ -18,9 +18,9 @@
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use impeller2::types::{IntoLenPacket, Msg, OwnedPacket as Packet, PacketId, Timestamp};
-use impeller2_stellar::{PacketSink, PacketStream};
-use impeller2_wkt::*;
+use impeller::types::{IntoLenPacket, Msg, OwnedPacket as Packet, PacketId, Timestamp};
+use impeller_stellar::{PacketSink, PacketStream};
+use impeller_wkt::*;
 #[cfg(feature = "axum")]
 use stellarator::struc_con::Joinable;
 use stellarator::{io::SplitExt, net::TcpStream};
@@ -239,7 +239,7 @@ async fn apply_source_snapshot(
     }
 
     for msg_meta in &metadata_resp.msg_metadata {
-        let msg_id = impeller2::types::msg_id(&msg_meta.name);
+        let msg_id = impeller::types::msg_id(&msg_meta.name);
         db.with_state_mut(|s| s.set_msg_metadata(msg_id, msg_meta.clone(), &db.path))?;
     }
 
@@ -319,7 +319,7 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
     let msg_ids: Vec<PacketId> = metadata_resp
         .msg_metadata
         .iter()
-        .map(|m| impeller2::types::msg_id(&m.name))
+        .map(|m| impeller::types::msg_id(&m.name))
         .collect();
     let mut msg_last_ts: std::collections::HashMap<PacketId, Timestamp> =
         std::collections::HashMap::new();
@@ -349,13 +349,13 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
     // Connection-local VTable-to-ComponentId mapping for follow-stream data.
     // Stored locally (not in the global vtable_registry) to prevent ID collisions
     // with VTables registered by local clients connecting to this follower DB.
-    let mut follow_vtables: std::collections::HashMap<PacketId, impeller2::types::ComponentId> =
+    let mut follow_vtables: std::collections::HashMap<PacketId, impeller::types::ComponentId> =
         std::collections::HashMap::new();
 
     // Track how many samples each component had at connection start.
     // On reconnection, the source resends ALL data; we skip samples we
     // already have using these counters (decremented as chunks arrive).
-    let mut skip_remaining: std::collections::HashMap<impeller2::types::ComponentId, usize> = db
+    let mut skip_remaining: std::collections::HashMap<impeller::types::ComponentId, usize> = db
         .with_state(|state| {
             state
                 .components

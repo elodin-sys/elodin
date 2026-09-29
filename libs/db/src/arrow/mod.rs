@@ -13,8 +13,8 @@ use datafusion::{
     physical_plan::streaming::PartitionStream, prelude::SessionContext,
 };
 use futures_lite::{Stream, StreamExt};
-use impeller2::types::{PrimType, Timestamp};
-use impeller2_wkt::ArchiveFormat;
+use impeller::types::{PrimType, Timestamp};
+use impeller_wkt::ArchiveFormat;
 use std::{
     collections::HashMap,
     fs::File,

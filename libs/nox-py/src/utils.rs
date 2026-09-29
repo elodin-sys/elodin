@@ -1,4 +1,4 @@
-use impeller2::{schema::Schema, types::PrimType};
+use impeller::{schema::Schema, types::PrimType};
 use nox::{ArrayTy, ElementType};
 
 pub trait SchemaExt {
@@ -13,17 +13,17 @@ pub trait PrimTypeExt {
 impl PrimTypeExt for PrimType {
     fn to_element_type(&self) -> ElementType {
         match self {
-            impeller2::types::PrimType::U8 => ElementType::U8,
-            impeller2::types::PrimType::U16 => ElementType::U16,
-            impeller2::types::PrimType::U32 => ElementType::U32,
-            impeller2::types::PrimType::U64 => ElementType::U64,
-            impeller2::types::PrimType::I8 => ElementType::S8,
-            impeller2::types::PrimType::I16 => ElementType::S16,
-            impeller2::types::PrimType::I32 => ElementType::S32,
-            impeller2::types::PrimType::I64 => ElementType::S64,
-            impeller2::types::PrimType::Bool => ElementType::Pred,
-            impeller2::types::PrimType::F32 => ElementType::F32,
-            impeller2::types::PrimType::F64 => ElementType::F64,
+            impeller::types::PrimType::U8 => ElementType::U8,
+            impeller::types::PrimType::U16 => ElementType::U16,
+            impeller::types::PrimType::U32 => ElementType::U32,
+            impeller::types::PrimType::U64 => ElementType::U64,
+            impeller::types::PrimType::I8 => ElementType::S8,
+            impeller::types::PrimType::I16 => ElementType::S16,
+            impeller::types::PrimType::I32 => ElementType::S32,
+            impeller::types::PrimType::I64 => ElementType::S64,
+            impeller::types::PrimType::Bool => ElementType::Pred,
+            impeller::types::PrimType::F32 => ElementType::F32,
+            impeller::types::PrimType::F64 => ElementType::F64,
         }
     }
 }

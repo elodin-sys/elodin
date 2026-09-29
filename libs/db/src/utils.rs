@@ -5,8 +5,8 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use crate::MetadataExt;
-use impeller2::types::PrimType;
-use impeller2_wkt::{ComponentMetadata, DbConfig};
+use impeller::types::PrimType;
+use impeller_wkt::{ComponentMetadata, DbConfig};
 
 /// Read a primitive value from a byte slice at the given offset and convert it to f64.
 ///
@@ -335,7 +335,7 @@ pub(crate) fn read_msg_timestamp_range(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use impeller2::types::ComponentId;
+    use impeller::types::ComponentId;
     use std::collections::HashMap;
     use std::io::Write;
     use tempfile::TempDir;

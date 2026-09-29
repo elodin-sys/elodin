@@ -1,0 +1,3290 @@
+use crate::color_names::{color_to_ints, name_from_color};
+use bevy_geo_frames::RotationKind;
+use impeller_wkt::*;
+use kdl::{KdlDocument, KdlEntry, KdlNode};
+
+// Default precision for float properties emitted to KDL.
+const KDL_FLOAT_PRECISION: u32 = 6;
+
+pub fn serialize_schematic(schematic: &Schematic) -> String {
+    let mut doc = KdlDocument::new();
+
+    if let Some(frame) = schematic.frame {
+        doc.nodes_mut()
+            .push(serialize_coordinate(&CoordinateConfig {
+                frame,
+                origin: schematic.origin,
+                body: schematic.body,
+            }));
+    }
+    if let Some(theme) = schematic.theme.as_ref() {
+        doc.nodes_mut().push(serialize_theme(theme));
+    }
+    if let Some(timeline) = schematic.timeline.as_ref() {
+        let node = serialize_timeline(timeline);
+        // Check the serialized properties rather than TimelineConfig equality:
+        // an explicit full range also normalizes to the default behavior.
+        // The loader restores defaults when the timeline node is absent.
+        if !node.entries().is_empty() {
+            doc.nodes_mut().push(node);
+        }
+    }
+    if schematic.telemetry_mode {
+        let mut node = KdlNode::new("telemetry_mode");
+        node.entries_mut().push(KdlEntry::new(true));
+        doc.nodes_mut().push(node);
+    }
+    if let Some(skybox) = schematic.skybox.as_ref() {
+        doc.nodes_mut().push(serialize_skybox(skybox));
+    }
+    if let Some(environment) = schematic.environment.as_ref() {
+        doc.nodes_mut().push(serialize_environment(environment));
+    }
+
+    for elem in &schematic.elems {
+        let node = serialize_schematic_elem(elem);
+        doc.nodes_mut().push(node);
+    }
+
+    doc.autoformat();
+    let mut s = doc.to_string();
+    s.truncate(s.trim_end().len());
+    s
+}
+
+fn serialize_schematic_elem(elem: &SchematicElem) -> KdlNode {
+    match elem {
+        SchematicElem::Panel(panel) => serialize_panel(panel),
+        SchematicElem::Object3d(obj) => serialize_object_3d(obj),
+        SchematicElem::Line3d(line) => serialize_line_3d(line),
+        SchematicElem::PointTrails(trails) => serialize_point_trails(trails),
+        SchematicElem::VectorArrow(arrow) => serialize_vector_arrow(arrow),
+        SchematicElem::WorldMesh(world_mesh) => serialize_world_mesh(world_mesh),
+        SchematicElem::Window(window) => serialize_window(window),
+        SchematicElem::Theme(theme) => serialize_theme(theme),
+        SchematicElem::Timeline(timeline) => serialize_timeline(timeline),
+        SchematicElem::Coordinate(coordinate) => serialize_coordinate(coordinate),
+    }
+}
+
+fn serialize_coordinate(coordinate: &CoordinateConfig) -> KdlNode {
+    let mut node = KdlNode::new("coordinate");
+    node.entries_mut()
+        .push(KdlEntry::new_prop("frame", <&str>::from(coordinate.frame)));
+    if let Some(origin) = coordinate.origin {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("lat", origin.latitude));
+        node.entries_mut()
+            .push(KdlEntry::new_prop("lon", origin.longitude));
+        if origin.altitude != 0.0 {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("alt", origin.altitude));
+        }
+    }
+    if let Some(body) = coordinate.body {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("body", body.as_str()));
+    }
+    node
+}
+
+fn serialize_world_mesh(world_mesh: &WorldMesh) -> KdlNode {
+    let mut node = KdlNode::new("world_mesh");
+
+    node.entries_mut()
+        .push(KdlEntry::new(world_mesh.region.clone()));
+
+    if let Some(lod_count) = world_mesh.lod_count {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("lod_count", i128::from(lod_count)));
+    }
+
+    if let Some((x, y, z)) = world_mesh.translate {
+        let tuple_str = format!("({x}, {y}, {z})");
+        node.entries_mut()
+            .push(KdlEntry::new_prop("translate", tuple_str));
+    }
+
+    if let Some(frame) = world_mesh.frame {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
+    }
+
+    if !world_mesh.visible {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("visible", false));
+    }
+
+    node
+}
+
+fn serialize_environment(environment: &EnvironmentConfig) -> KdlNode {
+    let mut node = KdlNode::new("environment");
+    let mut children = KdlDocument::new();
+    if let Some(sun) = &environment.sun {
+        let mut sun_node = KdlNode::new("sun");
+        if let Some(azimuth) = sun.azimuth_deg {
+            push_rounded_float_prop(&mut sun_node, "azimuth", f64::from(azimuth));
+        }
+        if let Some(elevation) = sun.elevation_deg {
+            push_rounded_float_prop(&mut sun_node, "elevation", f64::from(elevation));
+        }
+        push_rounded_float_prop(&mut sun_node, "illuminance", f64::from(sun.illuminance));
+        if sun.shadows != SunConfig::default_shadows() {
+            sun_node
+                .entries_mut()
+                .push(KdlEntry::new_prop("shadows", sun.shadows));
+        }
+        if let Some((x, y, z)) = sun.direction {
+            sun_node
+                .entries_mut()
+                .push(KdlEntry::new_prop("direction", format!("({x}, {y}, {z})")));
+        }
+        children.nodes_mut().push(sun_node);
+    }
+    if (environment.ambient_scale - EnvironmentConfig::default_ambient_scale()).abs() > f32::EPSILON
+    {
+        let mut ambient_node = KdlNode::new("ambient");
+        push_rounded_float_prop(
+            &mut ambient_node,
+            "scale",
+            f64::from(environment.ambient_scale),
+        );
+        children.nodes_mut().push(ambient_node);
+    }
+    if let Some(sky_color) = &environment.sky_color {
+        let mut sky_node = KdlNode::new("sky");
+        sky_node
+            .entries_mut()
+            .push(KdlEntry::new_prop("color", color_to_kdl_string(sky_color)));
+        children.nodes_mut().push(sky_node);
+    }
+    if let Some(atmosphere) = &environment.atmosphere {
+        let mut atmosphere_node = KdlNode::new("atmosphere");
+        if atmosphere.origin != (0.0, 0.0, 0.0) {
+            let (x, y, z) = atmosphere.origin;
+            atmosphere_node
+                .entries_mut()
+                .push(KdlEntry::new_prop("origin", format!("({x}, {y}, {z})")));
+        }
+        if atmosphere.inner_radius != AtmosphereConfig::default_inner_radius() {
+            push_rounded_float_prop(
+                &mut atmosphere_node,
+                "inner_radius",
+                f64::from(atmosphere.inner_radius),
+            );
+        }
+        if atmosphere.outer_radius != AtmosphereConfig::default_outer_radius() {
+            push_rounded_float_prop(
+                &mut atmosphere_node,
+                "outer_radius",
+                f64::from(atmosphere.outer_radius),
+            );
+        }
+        if atmosphere.ground_albedo != AtmosphereConfig::default_ground_albedo() {
+            let (r, g, b) = atmosphere.ground_albedo;
+            atmosphere_node.entries_mut().push(KdlEntry::new_prop(
+                "ground_albedo",
+                format!("({r}, {g}, {b})"),
+            ));
+        }
+        if atmosphere.raymarched {
+            atmosphere_node
+                .entries_mut()
+                .push(KdlEntry::new_prop("raymarched", true));
+        }
+        children.nodes_mut().push(atmosphere_node);
+    }
+    if let Some(earth) = &environment.earth {
+        children.nodes_mut().push(serialize_earth(earth));
+    }
+    node.set_children(children);
+    node
+}
+
+fn serialize_earth(earth: &EarthConfig) -> KdlNode {
+    let mut earth_node = KdlNode::new("earth");
+    let mut kids = KdlDocument::new();
+    if earth.stars != EarthStarsConfig::default() {
+        let mut node = KdlNode::new("stars");
+        for (name, value, default) in [
+            (
+                "density",
+                earth.stars.density,
+                EarthStarsConfig::default_density(),
+            ),
+            ("size", earth.stars.size, EarthStarsConfig::default_size()),
+            (
+                "brightness",
+                earth.stars.brightness,
+                EarthStarsConfig::default_brightness(),
+            ),
+        ] {
+            push_float_prop_if_ne(&mut node, name, value, default);
+        }
+        kids.nodes_mut().push(node);
+    }
+    if earth.city_lights != EarthCityLightsConfig::default() {
+        let mut node = KdlNode::new("city_lights");
+        for (name, value, default) in [
+            (
+                "density",
+                earth.city_lights.density,
+                EarthCityLightsConfig::default_density(),
+            ),
+            (
+                "size",
+                earth.city_lights.size,
+                EarthCityLightsConfig::default_size(),
+            ),
+            (
+                "height",
+                earth.city_lights.height,
+                EarthCityLightsConfig::default_height(),
+            ),
+            (
+                "brightness",
+                earth.city_lights.brightness,
+                EarthCityLightsConfig::default_brightness(),
+            ),
+        ] {
+            push_float_prop_if_ne(&mut node, name, value, default);
+        }
+        kids.nodes_mut().push(node);
+    }
+    if earth.airglow != EarthAirglowConfig::default() {
+        let mut node = KdlNode::new("airglow");
+        for (name, value, default) in [
+            (
+                "density",
+                earth.airglow.density,
+                EarthAirglowConfig::default_density(),
+            ),
+            (
+                "size",
+                earth.airglow.size,
+                EarthAirglowConfig::default_size(),
+            ),
+            (
+                "brightness",
+                earth.airglow.brightness,
+                EarthAirglowConfig::default_brightness(),
+            ),
+        ] {
+            push_float_prop_if_ne(&mut node, name, value, default);
+        }
+        kids.nodes_mut().push(node);
+    }
+    if earth.night_map != EarthNightMapConfig::default() {
+        let mut node = KdlNode::new("night_map");
+        push_float_prop_if_ne(
+            &mut node,
+            "brightness",
+            earth.night_map.brightness,
+            EarthNightMapConfig::default_brightness(),
+        );
+        kids.nodes_mut().push(node);
+    }
+    if !kids.nodes().is_empty() {
+        earth_node.set_children(kids);
+    }
+    earth_node
+}
+
+fn serialize_skybox(skybox: &SkyboxConfig) -> KdlNode {
+    let mut node = KdlNode::new("skybox");
+    push_name_prop(&mut node, &skybox.name);
+    node
+}
+
+fn serialize_panel(panel: &Panel) -> KdlNode {
+    match panel {
+        Panel::Tabs(panels) => {
+            let mut node = KdlNode::new("tabs");
+            let mut children = KdlDocument::new();
+
+            for panel in panels {
+                children.nodes_mut().push(serialize_panel(panel));
+            }
+
+            node.set_children(children);
+            node
+        }
+        Panel::HSplit(split) => serialize_split(split, true),
+        Panel::VSplit(split) => serialize_split(split, false),
+        Panel::Viewport(viewport) => serialize_viewport(viewport),
+        Panel::Graph(graph) => serialize_graph(graph),
+        Panel::ComponentMonitor(monitor) => serialize_component_monitor(monitor),
+        Panel::GeoPositionGauge(gauge) => serialize_geo_position_gauge(gauge),
+        Panel::OrientationGauge(gauge) => serialize_orientation_gauge(gauge),
+        Panel::HorizonGauge(gauge) => serialize_horizon_gauge(gauge),
+        Panel::ActionPane(action_pane) => serialize_action_pane(action_pane),
+        Panel::QueryTable(query_table) => serialize_query_table(query_table),
+        Panel::QueryPlot(query_plot) => serialize_query_plot(query_plot),
+        Panel::Inspector => KdlNode::new("inspector"),
+        Panel::Hierarchy => KdlNode::new("hierarchy"),
+        Panel::SchematicTree(name) => {
+            let mut node = KdlNode::new("schematic_tree");
+            push_optional_name_prop(&mut node, name.as_deref());
+            node
+        }
+        Panel::DataOverview(name) => {
+            let mut node = KdlNode::new("data_overview");
+            push_optional_name_prop(&mut node, name.as_deref());
+            node
+        }
+        Panel::VideoStream(video_stream) => serialize_video_stream(video_stream),
+        Panel::SensorView(sensor_view) => serialize_sensor_view(sensor_view),
+        Panel::LogStream(log_stream) => serialize_log_stream(log_stream),
+    }
+}
+
+fn push_name_prop(node: &mut KdlNode, name: &str) {
+    node.entries_mut().push(KdlEntry::new_prop("name", name));
+}
+
+fn round_float(value: f64, precision: u32) -> f64 {
+    if !value.is_finite() {
+        return value;
+    }
+
+    let factor = 10_f64.powi(precision as i32);
+    let rounded = (value * factor).round() / factor;
+
+    if rounded == 0.0 && rounded.is_sign_negative() {
+        0.0
+    } else {
+        rounded
+    }
+}
+
+fn round_float_default(value: f64) -> f64 {
+    round_float(value, KDL_FLOAT_PRECISION)
+}
+
+fn push_rounded_float_prop(node: &mut KdlNode, name: &str, value: f64) {
+    node.entries_mut()
+        .push(KdlEntry::new_prop(name, round_float_default(value)));
+}
+
+fn push_float_prop_if_ne(node: &mut KdlNode, name: &str, value: f32, default: f32) {
+    if (value - default).abs() > f32::EPSILON {
+        push_rounded_float_prop(node, name, f64::from(value));
+    }
+}
+
+fn push_optional_name_prop(node: &mut KdlNode, name: Option<&str>) {
+    if let Some(name) = name {
+        push_name_prop(node, name);
+    }
+}
+
+fn color_to_kdl_string(color: &Color) -> String {
+    if let Some(name) = name_from_color(color) {
+        name.to_string()
+    } else {
+        let (r, g, b, a) = color_to_ints(color);
+        if a == 255 {
+            format!("({r},{g},{b})")
+        } else {
+            format!("({r},{g},{b},{a})")
+        }
+    }
+}
+
+fn serialize_video_stream(video_stream: &VideoStream) -> KdlNode {
+    let mut node = KdlNode::new("video_stream");
+    node.entries_mut()
+        .push(KdlEntry::new(video_stream.msg_name.as_str()));
+    push_optional_name_prop(&mut node, video_stream.name.as_deref());
+    node
+}
+
+fn serialize_sensor_view(sensor_view: &SensorView) -> KdlNode {
+    let mut node = KdlNode::new("sensor_view");
+    node.entries_mut()
+        .push(KdlEntry::new(sensor_view.msg_name.as_str()));
+    push_optional_name_prop(&mut node, sensor_view.name.as_deref());
+    node
+}
+
+fn serialize_log_stream(log_stream: &LogStream) -> KdlNode {
+    let mut node = KdlNode::new("log_stream");
+    node.entries_mut()
+        .push(KdlEntry::new(log_stream.msg_name.as_str()));
+    push_optional_name_prop(&mut node, log_stream.name.as_deref());
+    node
+}
+
+fn serialize_split(split: &Split, is_horizontal: bool) -> KdlNode {
+    let node_name = if is_horizontal { "hsplit" } else { "vsplit" };
+    let mut node = KdlNode::new(node_name);
+
+    if split.active {
+        node.entries_mut().push(KdlEntry::new_prop("active", true));
+    }
+
+    push_optional_name_prop(&mut node, split.name.as_deref());
+
+    let mut children = KdlDocument::new();
+
+    for (i, panel) in split.panels.iter().enumerate() {
+        let mut child_node = serialize_panel(panel);
+
+        if let Some(&share) = split.shares.get(&i) {
+            push_rounded_float_prop(&mut child_node, "share", share as f64);
+        }
+
+        children.nodes_mut().push(child_node);
+    }
+
+    node.set_children(children);
+    node
+}
+
+fn serialize_viewport(viewport: &Viewport) -> KdlNode {
+    let mut node = KdlNode::new("viewport");
+
+    push_optional_name_prop(&mut node, viewport.name.as_deref());
+
+    if (viewport.fov - 45.0).abs() > f32::EPSILON {
+        push_rounded_float_prop(&mut node, "fov", viewport.fov as f64);
+    }
+
+    if let Some(near) = viewport.near {
+        push_rounded_float_prop(&mut node, "near", near as f64);
+    }
+
+    if let Some(far) = viewport.far {
+        push_rounded_float_prop(&mut node, "far", far as f64);
+    }
+
+    if let Some(aspect) = viewport.aspect {
+        push_rounded_float_prop(&mut node, "aspect", aspect as f64);
+    }
+
+    if let Some(ref pos) = viewport.pos {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("pos", pos.clone()));
+    }
+
+    if let Some(ref look_at) = viewport.look_at {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("look_at", look_at.clone()));
+    }
+
+    if let Some(frame) = viewport.frame {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
+    }
+    if let Some(ref up) = viewport.up {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("up", up.clone()));
+    }
+
+    if viewport.smoothing != 0.0 {
+        push_rounded_float_prop(&mut node, "smoothing", viewport.smoothing as f64);
+    }
+
+    if viewport.hdr {
+        node.entries_mut().push(KdlEntry::new_prop("hdr", true));
+    }
+
+    if viewport.cinematic {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("cinematic", true));
+    }
+
+    if let Some(ev100) = viewport.ev100 {
+        push_rounded_float_prop(&mut node, "ev100", f64::from(ev100));
+    }
+
+    if let Some(bloom) = &viewport.bloom {
+        let mut bloom_node = KdlNode::new("bloom");
+        if bloom.preset != BloomPreset::Natural {
+            let preset = match bloom.preset {
+                BloomPreset::Natural => "natural",
+                BloomPreset::OldSchool => "old_school",
+            };
+            bloom_node
+                .entries_mut()
+                .push(KdlEntry::new_prop("preset", preset));
+        }
+        if let Some(intensity) = bloom.intensity {
+            push_rounded_float_prop(&mut bloom_node, "intensity", intensity as f64);
+        }
+        if let Some(threshold) = bloom.threshold {
+            push_rounded_float_prop(&mut bloom_node, "threshold", threshold as f64);
+        }
+        if let Some(threshold_softness) = bloom.threshold_softness {
+            push_rounded_float_prop(
+                &mut bloom_node,
+                "threshold_softness",
+                threshold_softness as f64,
+            );
+        }
+        let mut children = node.children().cloned().unwrap_or_else(KdlDocument::new);
+        children.nodes_mut().push(bloom_node);
+        node.set_children(children);
+    }
+
+    if viewport.show_grid {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("show_grid", true));
+    }
+
+    if !viewport.show_arrows {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("show_arrows", false));
+    }
+
+    if viewport.create_frustum {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("create_frustum", true));
+    }
+
+    if viewport.show_frustums {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("show_frustums", true));
+    }
+
+    if viewport.frustums_color != default_viewport_frustums_color() {
+        if let Some(name) = name_from_color(&viewport.frustums_color) {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("frustums_color", name));
+        } else {
+            let (r, g, b, a) = color_to_ints(&viewport.frustums_color);
+            if a == 255 {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "frustums_color",
+                    format!("({r},{g},{b})"),
+                ));
+            } else {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "frustums_color",
+                    format!("({r},{g},{b},{a})"),
+                ));
+            }
+        }
+    }
+
+    if viewport.projection_color != default_viewport_projection_color() {
+        if let Some(name) = name_from_color(&viewport.projection_color) {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("projection_color", name));
+        } else {
+            let (r, g, b, a) = color_to_ints(&viewport.projection_color);
+            if a == 255 {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "projection_color",
+                    format!("({r},{g},{b})"),
+                ));
+            } else {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "projection_color",
+                    format!("({r},{g},{b},{a})"),
+                ));
+            }
+        }
+    }
+
+    if (viewport.frustums_thickness - default_viewport_frustums_thickness()).abs() > f32::EPSILON {
+        push_rounded_float_prop(
+            &mut node,
+            "frustums_thickness",
+            viewport.frustums_thickness as f64,
+        );
+    }
+
+    if viewport.frustums_up_marker != FrustumUpMarker::None {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "frustums_up_marker",
+            viewport.frustums_up_marker.as_str(),
+        ));
+    }
+
+    if viewport.frustums_up_marker_overlay {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("frustums_up_marker_overlay", true));
+    }
+
+    if !viewport.show_view_cube {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("show_view_cube", false));
+    }
+
+    if let Some(view_cube_frame) = viewport.view_cube_frame {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "view_cube_frame",
+            <&str>::from(view_cube_frame),
+        ));
+    }
+
+    if !viewport.effects {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("effects", false));
+    }
+
+    if viewport.active {
+        node.entries_mut().push(KdlEntry::new_prop("active", true));
+    }
+
+    if !viewport.local_arrows.is_empty() {
+        let mut children = node.children().cloned().unwrap_or_else(KdlDocument::new);
+        for arrow in &viewport.local_arrows {
+            children.nodes_mut().push(serialize_vector_arrow(arrow));
+        }
+        node.set_children(children);
+    }
+
+    node
+}
+
+fn serialize_window(window: &WindowSchematic) -> KdlNode {
+    let mut node = KdlNode::new("window");
+    if let Some(path) = &window.path {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("path", path.clone()));
+    }
+
+    if let Some(title) = &window.title {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("title", title.clone()));
+    }
+
+    if let Some(idx) = window.screen {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("screen", i128::from(idx)));
+    }
+
+    if let Some(rect) = window.screen_rect {
+        let mut rect_node = KdlNode::new("rect");
+        rect_node
+            .entries_mut()
+            .push(KdlEntry::new(i128::from(rect.x)));
+        rect_node
+            .entries_mut()
+            .push(KdlEntry::new(i128::from(rect.y)));
+        rect_node
+            .entries_mut()
+            .push(KdlEntry::new(i128::from(rect.width)));
+        rect_node
+            .entries_mut()
+            .push(KdlEntry::new(i128::from(rect.height)));
+
+        let mut children = node.children().cloned().unwrap_or_else(KdlDocument::new);
+        children.nodes_mut().push(rect_node);
+        node.set_children(children);
+    }
+
+    node
+}
+
+fn serialize_theme(theme: &ThemeConfig) -> KdlNode {
+    let mut node = KdlNode::new("theme");
+    if let Some(mode) = &theme.mode {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("mode", mode.clone()));
+    }
+    if let Some(scheme) = &theme.scheme {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("scheme", scheme.clone()));
+    }
+    node
+}
+
+fn serialize_timeline(timeline: &TimelineConfig) -> KdlNode {
+    let mut node = KdlNode::new("timeline");
+
+    if timeline.played_color != default_timeline_played_color() {
+        if let Some(name) = name_from_color(&timeline.played_color) {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("played_color", name));
+        } else {
+            let (r, g, b, a) = color_to_ints(&timeline.played_color);
+            if a == 255 {
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("played_color", format!("({r},{g},{b})")));
+            } else {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "played_color",
+                    format!("({r},{g},{b},{a})"),
+                ));
+            }
+        }
+    }
+
+    if timeline.future_color != default_timeline_future_color() {
+        if let Some(name) = name_from_color(&timeline.future_color) {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("future_color", name));
+        } else {
+            let (r, g, b, a) = color_to_ints(&timeline.future_color);
+            if a == 255 {
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("future_color", format!("({r},{g},{b})")));
+            } else {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "future_color",
+                    format!("({r},{g},{b},{a})"),
+                ));
+            }
+        }
+    }
+
+    if timeline.follow_latest {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("follow_latest", true));
+    }
+
+    if let Some(range) = timeline.range.as_deref() {
+        let normalized = range.trim().to_ascii_lowercase();
+        if normalized != "full" && normalized != "full_range" && normalized != "fullrange" {
+            node.entries_mut().push(KdlEntry::new_prop("range", range));
+        }
+    }
+
+    node
+}
+
+fn serialize_graph(graph: &Graph) -> KdlNode {
+    let mut node = KdlNode::new("graph");
+
+    // Add the EQL query as the first unnamed entry
+    node.entries_mut().push(KdlEntry::new(graph.eql.clone()));
+
+    push_optional_name_prop(&mut node, graph.name.as_deref());
+
+    match graph.graph_type {
+        GraphType::Line => {} // Default, don't serialize
+        GraphType::Point => {
+            node.entries_mut().push(KdlEntry::new_prop("type", "point"));
+        }
+        GraphType::Bar => {
+            node.entries_mut().push(KdlEntry::new_prop("type", "bar"));
+        }
+    }
+
+    if !graph.auto_y_range {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("auto_y_range", false));
+    }
+
+    if graph.locked {
+        node.entries_mut().push(KdlEntry::new_prop("lock", true));
+    }
+
+    // Only serialize y_range if auto_y_range is false and range is not default
+    if !graph.auto_y_range && (graph.y_range.start != 0.0 || graph.y_range.end != 1.0) {
+        push_rounded_float_prop(&mut node, "y_min", graph.y_range.start);
+        push_rounded_float_prop(&mut node, "y_max", graph.y_range.end);
+    }
+
+    for color in &graph.colors {
+        serialize_color_to_node(&mut node, color);
+    }
+
+    node
+}
+
+fn serialize_component_monitor(monitor: &ComponentMonitor) -> KdlNode {
+    let mut node = KdlNode::new("component_monitor");
+    push_optional_name_prop(&mut node, monitor.name.as_deref());
+    node.entries_mut().push(KdlEntry::new_prop(
+        "component_name",
+        monitor.component_name.clone(),
+    ));
+    node
+}
+
+fn serialize_geo_position_gauge(gauge: &GeoPositionGauge) -> KdlNode {
+    let mut node = KdlNode::new("geo_position_gauge");
+    node.entries_mut().push(KdlEntry::new(gauge.eql.clone()));
+    push_optional_name_prop(&mut node, gauge.name.as_deref());
+    if let Some(source) = gauge.source {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("source", <&str>::from(source)));
+    }
+    node.entries_mut()
+        .push(KdlEntry::new_prop("display", gauge.display.as_str()));
+    node
+}
+
+fn serialize_orientation_gauge(gauge: &OrientationGauge) -> KdlNode {
+    let mut node = KdlNode::new("orientation_gauge");
+    node.entries_mut().push(KdlEntry::new(gauge.eql.clone()));
+    push_optional_name_prop(&mut node, gauge.name.as_deref());
+    if let Some(source) = gauge.source {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("source", <&str>::from(source)));
+    }
+    if let Some(display) = gauge.display {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("display", <&str>::from(display)));
+    }
+    push_optional_reference(&mut node, gauge.reference);
+    node
+}
+
+fn serialize_horizon_gauge(gauge: &HorizonGauge) -> KdlNode {
+    let mut node = KdlNode::new("horizon_gauge");
+    node.entries_mut().push(KdlEntry::new(gauge.eql.clone()));
+    push_optional_name_prop(&mut node, gauge.name.as_deref());
+    if let Some(source) = gauge.source {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("source", <&str>::from(source)));
+    }
+    push_optional_reference(&mut node, gauge.reference);
+    node
+}
+
+/// Emit the `reference x y z w` child, if the gauge has one (an identity
+/// reference is stored as `None`, so the common case stays implicit).
+fn push_optional_reference(node: &mut KdlNode, reference: Option<[f64; 4]>) {
+    let Some(q) = reference else {
+        return;
+    };
+    let mut child = KdlNode::new("reference");
+    for v in q {
+        child
+            .entries_mut()
+            .push(KdlEntry::new(round_float_default(v)));
+    }
+    let mut children = KdlDocument::new();
+    children.nodes_mut().push(child);
+    node.set_children(children);
+}
+
+fn serialize_action_pane(action_pane: &ActionPane) -> KdlNode {
+    let mut node = KdlNode::new("action_pane");
+
+    push_name_prop(&mut node, &action_pane.name);
+
+    node.entries_mut()
+        .push(KdlEntry::new_prop("lua", action_pane.lua.clone()));
+
+    node
+}
+
+fn serialize_query_table(query_table: &QueryTable) -> KdlNode {
+    let mut node = KdlNode::new("query_table");
+
+    push_optional_name_prop(&mut node, query_table.name.as_deref());
+
+    // Add the query as the first unnamed entry
+    if !query_table.query.is_empty() {
+        node.entries_mut()
+            .push(KdlEntry::new(query_table.query.clone()));
+    }
+
+    match query_table.query_type {
+        QueryType::EQL => {} // Default, don't serialize
+        QueryType::SQL => {
+            node.entries_mut().push(KdlEntry::new_prop("type", "sql"));
+        }
+    }
+
+    node
+}
+
+fn serialize_query_plot(query_plot: &QueryPlot) -> KdlNode {
+    let mut node = KdlNode::new("query_plot");
+
+    push_name_prop(&mut node, &query_plot.name);
+
+    node.entries_mut()
+        .push(KdlEntry::new_prop("query", query_plot.query.clone()));
+
+    // Only serialize refresh_interval if it's not the default (1 second)
+    if query_plot.refresh_interval.as_millis() != 1000 {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "refresh_interval",
+            query_plot.refresh_interval.as_millis() as i128,
+        ));
+    }
+
+    if query_plot.auto_refresh {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("auto_refresh", true));
+    }
+
+    serialize_color_to_node(&mut node, &query_plot.color);
+
+    match query_plot.query_type {
+        QueryType::EQL => {} // Default, don't serialize
+        QueryType::SQL => {
+            node.entries_mut().push(KdlEntry::new_prop("type", "sql"));
+        }
+    }
+
+    // Serialize plot mode (only if not default TimeSeries)
+    match query_plot.plot_mode {
+        PlotMode::TimeSeries => {} // Default, don't serialize
+        PlotMode::XY => {
+            node.entries_mut().push(KdlEntry::new_prop("mode", "xy"));
+        }
+    }
+
+    // Serialize optional axis labels
+    if let Some(ref x_label) = query_plot.x_label {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("x_label", x_label.clone()));
+    }
+
+    if let Some(ref y_label) = query_plot.y_label {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("y_label", y_label.clone()));
+    }
+
+    node
+}
+
+fn serialize_object_3d(obj: &Object3D) -> KdlNode {
+    let mut node = KdlNode::new("object_3d");
+
+    node.entries_mut().push(KdlEntry::new(obj.eql.clone()));
+
+    // Add frame attribute if not default (Bevy)
+    if let Some(frame) = obj.frame {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
+    }
+    if let Some(frame_orientation) = obj.frame_orientation
+        && obj.frame != Some(frame_orientation)
+    {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "frame_orientation",
+            <&str>::from(frame_orientation),
+        ));
+    }
+    if obj.orientation == RotationKind::Absolute {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("orientation", "absolute"));
+    }
+    if !obj.sensor_visible {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("sensor_visible", false));
+    }
+
+    let mut children = KdlDocument::new();
+    let (mut mesh_node, sibling_nodes) = serialize_object_3d_mesh(&obj.mesh);
+
+    if let Some(vr) = &obj.mesh_visibility_range {
+        serialize_visibility_range_to_node(&mut mesh_node, vr);
+    }
+
+    children.nodes_mut().push(mesh_node);
+    for sibling in sibling_nodes {
+        children.nodes_mut().push(sibling);
+    }
+
+    if let Some(icon) = &obj.icon {
+        children.nodes_mut().push(serialize_object_3d_icon(icon));
+    }
+    for thruster in &obj.thrusters {
+        children.nodes_mut().push(serialize_thruster(thruster));
+    }
+
+    node.set_children(children);
+
+    node
+}
+
+fn serialize_thruster(thruster: &Thruster) -> KdlNode {
+    let mut node = KdlNode::new("thruster");
+    push_optional_name_prop(&mut node, thruster.name.as_deref());
+    if thruster.body_frame {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("body_frame", true));
+    }
+    node.entries_mut().push(KdlEntry::new_prop(
+        "position",
+        tuple3_to_kdl_string(thruster.position),
+    ));
+    if let Some(direction) = thruster.direction {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "direction",
+            tuple3_to_kdl_string(direction),
+        ));
+    }
+    node.entries_mut()
+        .push(KdlEntry::new_prop("intensity", thruster.intensity.clone()));
+    if thruster.effect != Thruster::default_effect() {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("effect", thruster.effect.clone()));
+    }
+    if (thruster.scale - Thruster::default_scale()).abs() > f32::EPSILON {
+        push_rounded_float_prop(&mut node, "scale", f64::from(thruster.scale));
+    }
+    if let Some(emission_rate) = thruster.emission_rate {
+        push_rounded_float_prop(&mut node, "emission_rate", f64::from(emission_rate));
+    }
+    if (thruster.cutoff - Thruster::default_cutoff()).abs() > f32::EPSILON {
+        push_rounded_float_prop(&mut node, "cutoff", f64::from(thruster.cutoff));
+    }
+    if !thruster.extra_effects.is_empty() || thruster.light.is_some() {
+        let mut children = KdlDocument::new();
+        for effect in &thruster.extra_effects {
+            let mut effect_node = KdlNode::new("effect");
+            effect_node
+                .entries_mut()
+                .push(KdlEntry::new(effect.clone()));
+            children.nodes_mut().push(effect_node);
+        }
+        if let Some(light) = &thruster.light {
+            children.nodes_mut().push(serialize_thruster_light(light));
+        }
+        node.set_children(children);
+    }
+    node
+}
+
+fn serialize_thruster_light(light: &ThrusterLight) -> KdlNode {
+    let mut node = KdlNode::new("light");
+    node.entries_mut().push(KdlEntry::new_prop(
+        "color",
+        tuple3_to_kdl_string(light.color),
+    ));
+    push_rounded_float_prop(&mut node, "intensity", f64::from(light.intensity));
+    if (light.range - ThrusterLight::default_range()).abs() > f32::EPSILON {
+        push_rounded_float_prop(&mut node, "range", f64::from(light.range));
+    }
+    if light.offset.abs() > f32::EPSILON {
+        push_rounded_float_prop(&mut node, "offset", f64::from(light.offset));
+    }
+    if let Some(spot_angle) = light.spot_angle {
+        push_rounded_float_prop(&mut node, "spot_angle", f64::from(spot_angle));
+    }
+    if light.shadows {
+        node.entries_mut().push(KdlEntry::new_prop("shadows", true));
+    }
+    node
+}
+
+fn tuple3_to_kdl_string(value: (f32, f32, f32)) -> String {
+    format!(
+        "({}, {}, {})",
+        round_float_default(f64::from(value.0)),
+        round_float_default(f64::from(value.1)),
+        round_float_default(f64::from(value.2))
+    )
+}
+
+fn serialize_object_3d_icon(icon: &Object3DIcon) -> KdlNode {
+    use impeller_wkt::{Object3DIconSource, default_icon_size};
+
+    let mut node = KdlNode::new("icon");
+
+    match &icon.source {
+        Object3DIconSource::Path(path) => {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("path", path.clone()));
+        }
+        Object3DIconSource::Builtin(name) => {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("builtin", name.clone()));
+        }
+    }
+
+    let is_default_color =
+        icon.color.r == 1.0 && icon.color.g == 1.0 && icon.color.b == 1.0 && icon.color.a == 1.0;
+    if !is_default_color {
+        serialize_color_to_node(&mut node, &icon.color);
+    }
+
+    if (icon.size - default_icon_size()).abs() > f32::EPSILON {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("size", icon.size as f64));
+    }
+
+    if let Some(vr) = &icon.visibility_range {
+        serialize_visibility_range_to_node(&mut node, vr);
+    }
+
+    node
+}
+
+fn serialize_visibility_range_to_node(node: &mut KdlNode, vr: &impeller_wkt::VisRange) {
+    let mut vr_node = KdlNode::new("visibility_range");
+
+    if vr.min > 0.0 {
+        push_rounded_float_prop(&mut vr_node, "min", vr.min as f64);
+    }
+    if vr.max < f32::MAX {
+        push_rounded_float_prop(&mut vr_node, "max", vr.max as f64);
+    }
+    if vr.fade_distance > 0.0 {
+        push_rounded_float_prop(&mut vr_node, "fade_distance", vr.fade_distance as f64);
+    }
+
+    if let Some(existing_children) = node.children_mut().as_mut() {
+        existing_children.nodes_mut().push(vr_node);
+    } else {
+        let mut doc = KdlDocument::new();
+        doc.nodes_mut().push(vr_node);
+        node.set_children(doc);
+    }
+}
+
+/// Returns (mesh_node, sibling_nodes) where sibling_nodes are nodes that should be
+/// siblings of the mesh node in the object_3d children (e.g., animate nodes)
+fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> (KdlNode, Vec<KdlNode>) {
+    match mesh {
+        Object3DMesh::Glb {
+            path,
+            scale,
+            translate,
+            rotate,
+            animations,
+            emissivity,
+            glow,
+            glow_color,
+        } => {
+            let mut node = KdlNode::new("glb");
+            node.entries_mut()
+                .push(KdlEntry::new_prop("path", path.clone()));
+            if *scale != 1.0 {
+                push_rounded_float_prop(&mut node, "scale", *scale as f64);
+            }
+            if *emissivity != 0.0 {
+                push_rounded_float_prop(&mut node, "emissivity", *emissivity as f64);
+            }
+            if *glow != 0.0 {
+                push_rounded_float_prop(&mut node, "glow", *glow as f64);
+            }
+            if let Some(glow_color) = glow_color {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "glow_color",
+                    color_to_kdl_string(glow_color),
+                ));
+            }
+            if *translate != (0.0, 0.0, 0.0) {
+                let tuple_str = format!("({}, {}, {})", translate.0, translate.1, translate.2);
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("translate", tuple_str));
+            }
+            if *rotate != (0.0, 0.0, 0.0) {
+                let tuple_str = format!("({}, {}, {})", rotate.0, rotate.1, rotate.2);
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("rotate", tuple_str));
+            }
+            // Build animate nodes as siblings (not children of glb)
+            let mut animate_nodes = Vec::new();
+            for anim in animations {
+                let mut anim_node = kdl::KdlNode::new("animate");
+                anim_node
+                    .entries_mut()
+                    .push(kdl::KdlEntry::new_prop("joint", anim.joint_name.clone()));
+                anim_node.entries_mut().push(kdl::KdlEntry::new_prop(
+                    "rotation_vector",
+                    anim.eql_expr.clone(),
+                ));
+                animate_nodes.push(anim_node);
+            }
+            (node, animate_nodes)
+        }
+        Object3DMesh::Mesh { mesh, material } => {
+            let node = match mesh {
+                Mesh::Sphere { radius } => {
+                    let mut node = KdlNode::new("sphere");
+                    push_rounded_float_prop(&mut node, "radius", *radius as f64);
+                    serialize_material_to_node(&mut node, material);
+                    node
+                }
+                Mesh::Box { x, y, z } => {
+                    let mut node = KdlNode::new("box");
+                    push_rounded_float_prop(&mut node, "x", *x as f64);
+                    push_rounded_float_prop(&mut node, "y", *y as f64);
+                    push_rounded_float_prop(&mut node, "z", *z as f64);
+                    serialize_material_to_node(&mut node, material);
+                    node
+                }
+                Mesh::Cylinder { radius, height } => {
+                    let mut node = KdlNode::new("cylinder");
+                    push_rounded_float_prop(&mut node, "radius", *radius as f64);
+                    push_rounded_float_prop(&mut node, "height", *height as f64);
+                    serialize_material_to_node(&mut node, material);
+                    node
+                }
+                Mesh::Plane { width, depth } => {
+                    let mut node = KdlNode::new("plane");
+                    push_rounded_float_prop(&mut node, "width", *width as f64);
+                    push_rounded_float_prop(&mut node, "depth", *depth as f64);
+                    serialize_material_to_node(&mut node, material);
+                    node
+                }
+            };
+            (node, Vec::new())
+        }
+        Object3DMesh::Ellipsoid {
+            scale,
+            color,
+            error_covariance_cholesky,
+            error_covariance,
+            error_confidence_interval,
+            show_grid,
+            grid_color,
+        } => {
+            let mut node = KdlNode::new("ellipsoid");
+            let uses_covariance = error_covariance_cholesky.is_some() || error_covariance.is_some();
+            if let Some(cholesky) = error_covariance_cholesky {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "error_covariance_cholesky",
+                    cholesky.clone(),
+                ));
+            } else if let Some(covariance) = error_covariance {
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("error_covariance", covariance.clone()));
+            } else {
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("scale", scale.clone()));
+            }
+            if uses_covariance
+                && *error_confidence_interval
+                    != impeller_wkt::default_ellipsoid_confidence_interval()
+            {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "error_confidence_interval",
+                    *error_confidence_interval as f64,
+                ));
+            }
+            if *show_grid {
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("show_grid", true));
+            }
+            if color != &default_ellipsoid_color() {
+                serialize_color_to_node(&mut node, color);
+            }
+            if *show_grid && *grid_color != impeller_wkt::default_ellipsoid_grid_color() {
+                serialize_color_to_node_named(&mut node, grid_color, Some("grid_color"));
+            }
+
+            (node, Vec::new())
+        }
+    }
+}
+
+fn serialize_line_3d(line: &Line3d) -> KdlNode {
+    let mut node = KdlNode::new("line_3d");
+
+    // Add the EQL query as the first unnamed entry
+    node.entries_mut().push(KdlEntry::new(line.eql.clone()));
+
+    if line.line_width != 1.0 {
+        push_rounded_float_prop(&mut node, "line_width", line.line_width as f64);
+    }
+
+    if let Some(frame) = line.frame {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
+    }
+
+    if let Some(color) = line.color {
+        serialize_color_to_node(&mut node, &color);
+    }
+
+    if let Some(future_color) = line.future_color {
+        serialize_color_to_node_named(&mut node, &future_color, Some("future_color"));
+    }
+
+    if !line.perspective {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("perspective", false));
+    }
+
+    node
+}
+
+fn serialize_point_trails(trails: &PointTrails) -> KdlNode {
+    let mut node = KdlNode::new("point_trails");
+    node.entries_mut()
+        .push(KdlEntry::new(trails.component.clone()));
+    if let Some(status) = &trails.status {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("status", status.clone()));
+    }
+    if let Some(start) = &trails.start {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("start", start.clone()));
+    }
+    push_float_prop_if_ne(&mut node, "head_size", trails.head_size, 1.0);
+    if trails.head_shape == PointTrailsHeadShape::Sphere {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("head_shape", "sphere"));
+    }
+    push_float_prop_if_ne(&mut node, "line_width", trails.line_width, 1.0);
+    if let Some(max_length) = trails.max_length {
+        push_rounded_float_prop(&mut node, "max_length", f64::from(max_length));
+    }
+    if let Some(frame) = trails.frame {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
+    }
+    if let Some(color) = trails.color {
+        serialize_color_to_node(&mut node, &color);
+    }
+    if let Some(hit_color) = trails.hit_color {
+        serialize_color_to_node_named(&mut node, &hit_color, Some("hit_color"));
+    }
+    node
+}
+
+fn serialize_vector_arrow(arrow: &VectorArrow3d) -> KdlNode {
+    let mut node = KdlNode::new("vector_arrow");
+    node.entries_mut().push(KdlEntry::new(arrow.vector.clone()));
+
+    if let Some(origin) = &arrow.origin {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("origin", origin.clone()));
+    }
+
+    if (arrow.scale - 1.0).abs() > f64::EPSILON {
+        push_rounded_float_prop(&mut node, "scale", arrow.scale);
+    }
+
+    push_optional_name_prop(&mut node, arrow.name.as_deref());
+
+    if arrow.body_frame {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("body_frame", true));
+    }
+
+    if arrow.normalize {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("normalize", true));
+    }
+
+    if !arrow.show_name {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("show_name", false));
+    }
+
+    let thickness = arrow.thickness.value();
+    if (thickness - ArrowThickness::default().value()).abs() > f32::EPSILON {
+        push_rounded_float_prop(
+            &mut node,
+            "arrow_thickness",
+            ArrowThickness::round_to_precision(thickness) as f64,
+        );
+    }
+
+    match arrow.label_position {
+        LabelPosition::None => {}
+        LabelPosition::Proportionate(label_position) => {
+            node.entries_mut().push(KdlEntry::new_prop(
+                "label_position",
+                format!("{:.2}", label_position),
+            ));
+        }
+        LabelPosition::Absolute(length) => {
+            node.entries_mut().push(KdlEntry::new_prop(
+                "label_position",
+                format!("{:.2}m", length),
+            ));
+        }
+    }
+
+    if let Some(frame) = arrow.frame {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
+    }
+
+    serialize_color_to_node(&mut node, &arrow.color);
+
+    node
+}
+
+fn serialize_color_to_node(node: &mut KdlNode, color: &Color) {
+    serialize_color_to_node_named(node, color, None)
+}
+
+fn serialize_color_to_node_named(node: &mut KdlNode, color: &Color, name: Option<&str>) {
+    let mut color_node = KdlNode::new(name.unwrap_or("color"));
+
+    let (r, g, b, a) = color_to_ints(color);
+    if let Some(named) = name_from_color(color) {
+        color_node.entries_mut().push(KdlEntry::new(named));
+        if a != 255 {
+            color_node.entries_mut().push(KdlEntry::new(a));
+        }
+    } else {
+        color_node.entries_mut().push(KdlEntry::new(r));
+        color_node.entries_mut().push(KdlEntry::new(g));
+        color_node.entries_mut().push(KdlEntry::new(b));
+        if a != 255 {
+            color_node.entries_mut().push(KdlEntry::new(a));
+        }
+    }
+
+    if let Some(existing_children) = node.children_mut().as_mut() {
+        existing_children.nodes_mut().push(color_node);
+    } else {
+        let mut doc = KdlDocument::new();
+        doc.nodes_mut().push(color_node);
+        node.set_children(doc);
+    }
+}
+
+fn serialize_material_to_node(node: &mut KdlNode, material: &Material) {
+    let emissivity = material.emissivity.clamp(0.0, 1.0);
+    if emissivity > 0.0 {
+        push_rounded_float_prop(node, "emissivity", emissivity as f64);
+    }
+    serialize_color_to_node(node, &material.base_color);
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    use crate::parse_schematic;
+    use bevy_geo_frames::{GeoFrame, RotationKind};
+
+    const COLOR_EPSILON: f32 = 1.0 / 255.0 + 1e-6;
+
+    fn assert_color_close(actual: Color, expected: Color) {
+        assert!(
+            (actual.r - expected.r).abs() <= COLOR_EPSILON,
+            "expected r ~= {} got {}",
+            expected.r,
+            actual.r
+        );
+        assert!(
+            (actual.g - expected.g).abs() <= COLOR_EPSILON,
+            "expected g ~= {} got {}",
+            expected.g,
+            actual.g
+        );
+        assert!(
+            (actual.b - expected.b).abs() <= COLOR_EPSILON,
+            "expected b ~= {} got {}",
+            expected.b,
+            actual.b
+        );
+        assert!(
+            (actual.a - expected.a).abs() <= COLOR_EPSILON,
+            "expected a ~= {} got {}",
+            expected.a,
+            actual.a
+        );
+    }
+
+    #[test]
+    fn test_serialize_timeline_config() {
+        let schematic = Schematic {
+            timeline: Some(TimelineConfig {
+                played_color: Color::MINT,
+                future_color: Color::HYPERBLUE,
+                follow_latest: true,
+                range: None,
+            }),
+            ..Default::default()
+        };
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert!(serialized.contains("timeline"));
+        assert!(serialized.contains("played_color="));
+        assert!(serialized.contains("future_color="));
+        assert!(serialized.contains("follow_latest=#true"));
+
+        let timeline = parsed.timeline.expect("timeline config should roundtrip");
+        assert_eq!(timeline.played_color, Color::MINT);
+        assert_eq!(timeline.future_color, Color::HYPERBLUE);
+        assert!(timeline.follow_latest);
+    }
+
+    #[test]
+    fn test_serialize_skips_bare_timeline_node() {
+        let schematic = Schematic {
+            timeline: Some(TimelineConfig::default()),
+            ..Default::default()
+        };
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            !serialized.contains("timeline"),
+            "default timeline settings should not emit a node: {serialized}"
+        );
+
+        // Omitting the node must load back to the same settings.
+        let parsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(
+            parsed.timeline.unwrap_or_default(),
+            TimelineConfig::default()
+        );
+    }
+
+    #[test]
+    fn test_serialize_timeline_preserves_each_non_default_setting() {
+        for timeline in [
+            TimelineConfig {
+                played_color: Color::MINT,
+                ..Default::default()
+            },
+            TimelineConfig {
+                future_color: Color::HYPERBLUE,
+                ..Default::default()
+            },
+            TimelineConfig {
+                follow_latest: true,
+                ..Default::default()
+            },
+            TimelineConfig {
+                range: Some("last_5s".to_string()),
+                ..Default::default()
+            },
+        ] {
+            let schematic = Schematic {
+                timeline: Some(timeline.clone()),
+                ..Default::default()
+            };
+            let serialized = serialize_schematic(&schematic);
+            let parsed = parse_schematic(&serialized).unwrap();
+            assert_eq!(parsed.timeline, Some(timeline), "{serialized}");
+        }
+    }
+
+    #[test]
+    fn test_serialize_timeline_normalizes_default_inputs() {
+        for source in [
+            "",
+            "timeline",
+            "timeline follow_latest=#false",
+            "timeline played_color=yalk future_color=white",
+            "timeline range=full",
+            "timeline range=full_range",
+            "timeline range=fullrange",
+        ] {
+            let schematic = parse_schematic(source).unwrap();
+            let serialized = serialize_schematic(&schematic);
+            let parsed = parse_schematic(&serialized).unwrap();
+            assert!(parsed.timeline.is_none(), "{source:?}: {serialized}");
+            assert_eq!(serialize_schematic(&parsed), serialized);
+            assert_eq!(
+                parsed.timeline.unwrap_or_default(),
+                TimelineConfig::default()
+            );
+        }
+    }
+
+    #[test]
+    fn test_serialize_timeline_range_and_telemetry_mode() {
+        let schematic = Schematic {
+            timeline: Some(TimelineConfig {
+                played_color: default_timeline_played_color(),
+                future_color: default_timeline_future_color(),
+                follow_latest: true,
+                range: Some("last_5s".to_string()),
+            }),
+            telemetry_mode: true,
+            ..Default::default()
+        };
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert!(
+            serialized.contains("range=") && serialized.contains("last_5s"),
+            "serialized missing range: {serialized}"
+        );
+        assert!(
+            serialized.contains("telemetry_mode") && serialized.contains("#true"),
+            "serialized missing telemetry_mode: {serialized}"
+        );
+        assert_eq!(
+            parsed.timeline.expect("timeline").range.as_deref(),
+            Some("last_5s")
+        );
+        assert!(parsed.telemetry_mode);
+    }
+
+    #[test]
+    fn test_serialize_skybox_config() {
+        let schematic = Schematic {
+            skybox: Some(SkyboxConfig {
+                name: "desert_night".to_string(),
+            }),
+            ..Default::default()
+        };
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert!(serialized.contains("skybox"));
+        assert!(serialized.contains("desert_night"));
+        assert_eq!(
+            parsed.skybox.expect("skybox config should roundtrip").name,
+            "desert_night"
+        );
+    }
+
+    #[test]
+    fn test_serialize_environment_roundtrip() {
+        let schematic = Schematic {
+            environment: Some(EnvironmentConfig {
+                sun: Some(SunConfig {
+                    azimuth_deg: Some(320.0),
+                    elevation_deg: Some(32.0),
+                    illuminance: 130_000.0,
+                    shadows: true,
+                    direction: None,
+                }),
+                ambient_scale: 0.02,
+                sky_color: Some(Color::BLACK),
+                atmosphere: Some(AtmosphereConfig {
+                    origin: (10.0, -20.0, 30.0),
+                    inner_radius: 6_373_200.0,
+                    outer_radius: 6_473_200.0,
+                    ground_albedo: (0.2, 0.25, 0.3),
+                    raymarched: false,
+                }),
+                earth: None,
+            }),
+            ..Default::default()
+        };
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        let environment = parsed.environment.expect("environment should roundtrip");
+        let sun = environment.sun.expect("sun should roundtrip");
+        assert_eq!(sun.azimuth_deg, Some(320.0));
+        assert_eq!(sun.elevation_deg, Some(32.0));
+        assert_eq!(sun.illuminance, 130_000.0);
+        assert!(sun.shadows);
+        assert!((environment.ambient_scale - 0.02).abs() < 1e-6);
+        assert_eq!(environment.sky_color, Some(Color::BLACK));
+        let atmosphere = environment.atmosphere.expect("atmosphere should roundtrip");
+        assert_eq!(atmosphere.origin, (10.0, -20.0, 30.0));
+        assert_eq!(atmosphere.inner_radius, 6_373_200.0);
+        assert_eq!(atmosphere.outer_radius, 6_473_200.0);
+        assert_eq!(atmosphere.ground_albedo, (0.2, 0.25, 0.3));
+        assert!(!atmosphere.raymarched);
+    }
+
+    #[test]
+    fn test_environment_atmosphere_raymarched_roundtrip() {
+        let parsed = parse_schematic(
+            r#"environment {
+    atmosphere origin="(1, 2, 3)" raymarched=#true
+}"#,
+        )
+        .unwrap();
+        let environment = parsed.environment.expect("environment");
+        let atmosphere = environment.atmosphere.expect("atmosphere");
+        assert!(atmosphere.raymarched);
+        assert_eq!(atmosphere.origin, (1.0, 2.0, 3.0));
+
+        let serialized = serialize_schematic(&Schematic {
+            environment: Some(EnvironmentConfig {
+                atmosphere: Some(atmosphere),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        assert!(serialized.contains("raymarched=#true") || serialized.contains("raymarched=true"));
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert!(reparsed.environment.unwrap().atmosphere.unwrap().raymarched);
+    }
+
+    #[test]
+    fn test_environment_atmosphere_defaults_roundtrip() {
+        // A bare `atmosphere` node keeps Bevy's earth defaults and serializes
+        // without redundant properties.
+        let parsed = parse_schematic("environment {\n    atmosphere\n}").unwrap();
+        let environment = parsed.environment.expect("environment parsed");
+        let atmosphere = environment.atmosphere.expect("atmosphere parsed");
+        assert_eq!(atmosphere, AtmosphereConfig::default());
+
+        let serialized = serialize_schematic(&Schematic {
+            environment: Some(environment),
+            ..Default::default()
+        });
+        assert!(serialized.contains("atmosphere"));
+        assert!(!serialized.contains("inner_radius"));
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(
+            reparsed.environment.unwrap().atmosphere,
+            Some(AtmosphereConfig::default())
+        );
+    }
+
+    #[test]
+    fn test_environment_atmosphere_rejects_inverted_radii() {
+        let kdl = "environment {\n    atmosphere inner_radius=100.0 outer_radius=50.0\n}";
+        assert!(parse_schematic(kdl).is_err());
+    }
+
+    #[test]
+    fn test_environment_earth_roundtrip() {
+        // Earth requires a cinematic viewport.
+        let parsed =
+            parse_schematic("environment {\n    earth\n}\nviewport cinematic=#true").unwrap();
+        let environment = parsed.environment.expect("environment parsed");
+        assert_eq!(environment.earth, Some(EarthConfig::default()));
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] else {
+            panic!("expected cinematic viewport");
+        };
+        assert!(viewport.cinematic);
+
+        let serialized = serialize_schematic(&Schematic {
+            environment: Some(environment.clone()),
+            elems: parsed.elems.clone(),
+            ..Default::default()
+        });
+        assert!(serialized.contains("earth"));
+        assert!(serialized.contains("cinematic"));
+        assert!(!serialized.contains("night_ev100"));
+        assert!(!serialized.contains("stars"));
+        assert!(!serialized.contains("city_lights"));
+        assert!(!serialized.contains("airglow"));
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(
+            reparsed.environment.unwrap().earth,
+            Some(EarthConfig::default())
+        );
+    }
+
+    #[test]
+    fn test_environment_earth_particles_roundtrip() {
+        let parsed = parse_schematic(
+            r#"environment {
+    earth {
+        stars density=0.5 size=1.25 brightness=0.8
+        city_lights density=0.75 size=4.0 height=6000 brightness=1.2
+        airglow density=1.5 size=0.9
+        night_map brightness=0.35
+    }
+}
+viewport cinematic=#true"#,
+        )
+        .unwrap();
+        let earth = parsed.environment.unwrap().earth.unwrap();
+        assert_eq!(earth.stars.density, 0.5);
+        assert_eq!(earth.stars.size, 1.25);
+        assert_eq!(earth.stars.brightness, 0.8);
+        assert_eq!(earth.city_lights.density, 0.75);
+        assert_eq!(earth.city_lights.size, 4.0);
+        assert_eq!(earth.city_lights.height, 6000.0);
+        assert_eq!(earth.city_lights.brightness, 1.2);
+        assert_eq!(earth.airglow.density, 1.5);
+        assert_eq!(earth.airglow.size, 0.9);
+        assert_eq!(
+            earth.airglow.brightness,
+            EarthAirglowConfig::default_brightness()
+        );
+        assert_eq!(earth.night_map.brightness, 0.35);
+
+        let serialized = serialize_schematic(&Schematic {
+            environment: Some(EnvironmentConfig {
+                earth: Some(earth),
+                ..Default::default()
+            }),
+            elems: parsed.elems.clone(),
+            ..Default::default()
+        });
+        assert!(serialized.contains("stars"));
+        assert!(serialized.contains("city_lights"));
+        assert!(serialized.contains("airglow"));
+        assert!(serialized.contains("night_map"));
+        assert!(serialized.contains("density=0.5"));
+        assert!(serialized.contains("height=6000"));
+        assert!(!serialized.contains("brightness=1.0"));
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(reparsed.environment.unwrap().earth.unwrap(), earth);
+    }
+
+    #[test]
+    fn test_environment_earth_rejects_unknown_child() {
+        let err = parse_schematic(
+            "environment {\n    earth {\n        clouds density=1.0\n    }\n}\nviewport cinematic=#true",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("earth.clouds") || format!("{err:?}").contains("clouds"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn test_environment_sun_direction_roundtrip() {
+        let parsed = parse_schematic(
+            r#"environment {
+    sun direction="(0.5, -0.7, 0.4)" illuminance=100000.0
+}"#,
+        )
+        .unwrap();
+        let sun = parsed.environment.unwrap().sun.unwrap();
+        assert_eq!(sun.direction, Some((0.5, -0.7, 0.4)));
+
+        let serialized = serialize_schematic(&Schematic {
+            environment: Some(EnvironmentConfig {
+                sun: Some(sun),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(
+            reparsed.environment.unwrap().sun.unwrap().direction,
+            Some((0.5, -0.7, 0.4))
+        );
+    }
+
+    #[test]
+    fn test_environment_auto_sun_roundtrip() {
+        // Placement omitted: az/el stay None (ephemeris) and do not serialize.
+        let parsed = parse_schematic(
+            r#"environment {
+    sun illuminance=100000.0
+}"#,
+        )
+        .unwrap();
+        let sun = parsed.environment.unwrap().sun.unwrap();
+        assert!(sun.tracks_ephemeris());
+        assert_eq!(sun.azimuth_deg, None);
+        assert_eq!(sun.elevation_deg, None);
+        assert_eq!(sun.direction, None);
+        assert_eq!(sun.illuminance, 100_000.0);
+
+        let serialized = serialize_schematic(&Schematic {
+            environment: Some(EnvironmentConfig {
+                sun: Some(sun),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        assert!(serialized.contains("sun"));
+        assert!(!serialized.contains("azimuth"));
+        assert!(!serialized.contains("elevation"));
+        assert!(!serialized.contains("direction"));
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert!(
+            reparsed
+                .environment
+                .unwrap()
+                .sun
+                .unwrap()
+                .tracks_ephemeris()
+        );
+    }
+
+    #[test]
+    fn test_parse_environment_defaults_and_shadows_off() {
+        let kdl = r#"
+environment {
+    sun azimuth=10.0 shadows=#false
+}
+"#;
+        let parsed = parse_schematic(kdl).unwrap();
+        let environment = parsed.environment.expect("environment parsed");
+        let sun = environment.sun.expect("sun parsed");
+        assert_eq!(sun.azimuth_deg, Some(10.0));
+        assert_eq!(sun.elevation_deg, None);
+        assert_eq!(sun.illuminance, SunConfig::default_illuminance());
+        assert!(!sun.shadows);
+        assert!(!sun.tracks_ephemeris());
+        assert_eq!(
+            environment.ambient_scale,
+            EnvironmentConfig::default_ambient_scale()
+        );
+        assert_eq!(environment.sky_color, None);
+    }
+
+    #[test]
+    fn test_viewport_ev100_roundtrip() {
+        let kdl = r#"viewport name="main" hdr=#true ev100=13.2"#;
+        let parsed = parse_schematic(kdl).unwrap();
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] else {
+            panic!("expected viewport");
+        };
+        assert_eq!(viewport.ev100, Some(13.2));
+
+        let serialized = serialize_schematic(&parsed);
+        assert!(serialized.contains("ev100=13.2"));
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &reparsed.elems[0] else {
+            panic!("expected viewport");
+        };
+        assert_eq!(viewport.ev100, Some(13.2));
+    }
+
+    #[test]
+    fn test_viewport_cinematic_roundtrip() {
+        let kdl = r#"
+environment { earth }
+viewport name="main" cinematic=#true ev100=13.5
+"#;
+        let parsed = parse_schematic(kdl).unwrap();
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] else {
+            panic!("expected viewport");
+        };
+        assert!(viewport.cinematic);
+        assert!(!viewport.hdr);
+        assert_eq!(viewport.fov, 45.0);
+
+        let serialized = serialize_schematic(&parsed);
+        assert!(serialized.contains("cinematic"));
+        assert!(!serialized.contains("hdr="));
+        assert!(
+            !serialized.contains("fov="),
+            "default FOV should be omitted: {serialized}"
+        );
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &reparsed.elems[0] else {
+            panic!("expected viewport");
+        };
+        assert!(viewport.cinematic);
+    }
+
+    #[test]
+    fn test_viewport_smoothing_roundtrip() {
+        let kdl = r#"viewport name="main" smoothing=0.3"#;
+        let parsed = parse_schematic(kdl).unwrap();
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] else {
+            panic!("expected viewport");
+        };
+        assert!((viewport.smoothing - 0.3).abs() < f32::EPSILON);
+
+        let serialized = serialize_schematic(&parsed);
+        assert!(serialized.contains("smoothing=0.3"));
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &reparsed.elems[0] else {
+            panic!("expected viewport");
+        };
+        assert!((viewport.smoothing - 0.3).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_viewport_zero_smoothing_not_serialized() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::Panel(Panel::Viewport(Viewport::default())));
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            !serialized.contains("smoothing"),
+            "default smoothing should be omitted, got:\n{serialized}"
+        );
+    }
+
+    #[test]
+    fn test_serialize_simple_viewport() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::Panel(Panel::Viewport(Viewport {
+                name: Some("main".to_string()),
+                fov: 60.0,
+                near: None,
+                far: None,
+                aspect: None,
+                active: true,
+                show_grid: true,
+                show_arrows: true,
+                create_frustum: false,
+                show_frustums: false,
+                frustums_color: default_viewport_frustums_color(),
+                projection_color: default_viewport_projection_color(),
+                frustums_thickness: default_viewport_frustums_thickness(),
+                frustums_up_marker: FrustumUpMarker::None,
+                frustums_up_marker_overlay: false,
+                show_view_cube: true,
+                view_cube_frame: None,
+                effects: true,
+                hdr: false,
+                cinematic: false,
+                bloom: None,
+                ev100: None,
+                pos: None,
+                look_at: None,
+                frame: None,
+                up: None,
+                smoothing: 0.0,
+                local_arrows: Vec::new(),
+                node_id: NodeId::default(),
+            })));
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert_eq!(parsed.elems.len(), 1);
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] {
+            assert_eq!(viewport.name, Some("main".to_string()));
+            assert_eq!(viewport.fov, 60.0);
+            assert!(viewport.active);
+            assert!(viewport.show_grid);
+            assert!(viewport.show_view_cube);
+            assert!(viewport.effects);
+        } else {
+            panic!("Expected viewport panel");
+        }
+    }
+
+    #[test]
+    fn test_serialize_viewport_frustums_up_marker() {
+        let viewport_line = |marker| {
+            let mut schematic = Schematic::default();
+            schematic
+                .elems
+                .push(SchematicElem::Panel(Panel::Viewport(Viewport {
+                    create_frustum: true,
+                    frustums_up_marker: marker,
+                    ..Default::default()
+                })));
+            serialize_schematic(&schematic)
+        };
+
+        assert!(!viewport_line(FrustumUpMarker::None).contains("frustums_up_marker"));
+        for (marker, expected) in [(FrustumUpMarker::Highlight, "highlight")] {
+            let serialized = viewport_line(marker);
+            assert!(
+                serialized.contains(&format!("frustums_up_marker={expected}"))
+                    || serialized.contains(&format!(r#"frustums_up_marker="{expected}""#)),
+                "expected frustums_up_marker={expected}, got:\n{serialized}"
+            );
+            let reparsed = parse_schematic(&serialized).unwrap();
+            let SchematicElem::Panel(Panel::Viewport(viewport)) = &reparsed.elems[0] else {
+                panic!("Expected viewport panel");
+            };
+            assert_eq!(viewport.frustums_up_marker, marker);
+        }
+    }
+
+    #[test]
+    fn test_viewport_property_order() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::Panel(Panel::Viewport(Viewport {
+                name: Some("main".to_string()),
+                fov: 60.0,
+                near: Some(0.05),
+                far: Some(500.0),
+                aspect: Some(1.7778),
+                active: true,
+                show_grid: true,
+                show_arrows: false,
+                create_frustum: true,
+                show_frustums: true,
+                frustums_color: Color::YALK,
+                projection_color: Color::MINT,
+                frustums_thickness: 0.012,
+                frustums_up_marker: FrustumUpMarker::Highlight,
+                frustums_up_marker_overlay: true,
+                show_view_cube: false,
+                view_cube_frame: None,
+                effects: true,
+                hdr: true,
+                cinematic: false,
+                bloom: None,
+                ev100: None,
+                pos: Some("(0,0,0,0, 1,2,3)".to_string()),
+                look_at: Some("(0,0,0,0, 0,0,0)".to_string()),
+                frame: None,
+                up: None,
+                smoothing: 0.0,
+                local_arrows: Vec::new(),
+                node_id: NodeId::default(),
+            })));
+
+        let serialized = serialize_schematic(&schematic);
+        let viewport_line = serialized
+            .lines()
+            .find(|line| line.trim_start().starts_with("viewport"))
+            .expect("viewport line missing");
+
+        let properties = [
+            "name=",
+            "fov=",
+            "near=",
+            "far=",
+            "aspect=",
+            "pos=",
+            "look_at=",
+            "hdr=",
+            "show_grid=",
+            "show_arrows=",
+            "create_frustum=",
+            "show_frustums=",
+            "frustums_color=",
+            "projection_color=",
+            "frustums_thickness=",
+            "frustums_up_marker=",
+            "frustums_up_marker_overlay=",
+            "show_view_cube=",
+            "active=",
+        ];
+        let mut indices = Vec::with_capacity(properties.len());
+        for property in properties {
+            let idx = viewport_line
+                .find(property)
+                .unwrap_or_else(|| panic!("{property} missing in `{viewport_line}`"));
+            indices.push(idx);
+        }
+
+        for window in indices.windows(2) {
+            assert!(
+                window[0] < window[1],
+                "expected viewport properties in order name → fov → near → far → aspect → pos → look_at → hdr → show_grid → show_arrows → create_frustum → show_frustums → frustums_color → projection_color → frustums_thickness → frustums_up_marker → frustums_up_marker_overlay → show_view_cube → active: `{viewport_line}`"
+            );
+        }
+    }
+
+    #[test]
+    fn test_serialize_graph() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::Panel(Panel::Graph(Graph {
+                eql: "a.world_pos".to_string(),
+                name: Some("Position Graph".to_string()),
+                graph_type: GraphType::Line,
+                locked: false,
+                auto_y_range: true,
+                y_range: 0.0..1.0,
+                node_id: NodeId::default(),
+                colors: vec![],
+            })));
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert_eq!(parsed.elems.len(), 1);
+        if let SchematicElem::Panel(Panel::Graph(graph)) = &parsed.elems[0] {
+            assert_eq!(graph.eql, "a.world_pos");
+            assert_eq!(graph.name, Some("Position Graph".to_string()));
+            assert_eq!(graph.graph_type, GraphType::Line);
+        } else {
+            panic!("Expected graph panel");
+        }
+    }
+
+    #[test]
+    fn test_serialize_graph_with_colors() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::Panel(Panel::Graph(Graph {
+                eql: "rocket.fins[2], rocket.fins[3]".to_string(),
+                name: None,
+                graph_type: GraphType::Line,
+                locked: false,
+                auto_y_range: true,
+                y_range: 0.0..1.0,
+                node_id: NodeId::default(),
+                colors: vec![Color::rgb(1.0, 0.0, 0.0), Color::rgb(0.0, 1.0, 0.0)],
+            })));
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert_eq!(parsed.elems.len(), 1);
+        let SchematicElem::Panel(Panel::Graph(graph)) = &parsed.elems[0] else {
+            panic!("Expected graph panel");
+        };
+        assert_eq!(graph.colors.len(), 2);
+        assert_eq!(graph.colors[0], Color::rgb(1.0, 0.0, 0.0));
+        assert_eq!(graph.colors[1], Color::rgb(0.0, 1.0, 0.0));
+    }
+
+    #[test]
+    fn test_roundtrip_named_color_red_is_serialized() {
+        let original = r#"
+graph "value" {
+    color red
+}
+"#;
+
+        let parsed = parse_schematic(original).unwrap();
+        let serialized = serialize_schematic(&parsed);
+
+        assert!(
+            serialized.contains("color red"),
+            "serialized output should emit named red, got:\n{serialized}"
+        );
+
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Panel(Panel::Graph(graph)) = &reparsed.elems[0] else {
+            panic!("Expected graph panel");
+        };
+        assert_eq!(graph.colors.len(), 1);
+        assert_eq!(graph.colors[0], Color::RED);
+    }
+
+    #[test]
+    fn test_serialize_object_3d_sphere() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Object3d(Object3D {
+            eql: "a.world_pos".to_string(),
+            mesh: Object3DMesh::Mesh {
+                mesh: Mesh::Sphere { radius: 0.2 },
+                material: Material::with_color(Color::rgb(1.0, 0.0, 0.0)),
+            },
+            icon: None,
+            thrusters: Vec::new(),
+            mesh_visibility_range: None,
+            frame: None,
+            frame_orientation: None,
+            orientation: Default::default(),
+            sensor_visible: true,
+            node_id: NodeId::default(),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert_eq!(parsed.elems.len(), 1);
+        if let SchematicElem::Object3d(obj) = &parsed.elems[0] {
+            assert_eq!(obj.eql, "a.world_pos");
+            if let Object3DMesh::Mesh { mesh, material } = &obj.mesh {
+                if let Mesh::Sphere { radius } = mesh {
+                    assert_eq!(*radius, 0.2);
+                } else {
+                    panic!("Expected sphere mesh");
+                }
+                assert_eq!(material.base_color.r, 1.0);
+                assert_eq!(material.base_color.g, 0.0);
+                assert_eq!(material.base_color.b, 0.0);
+            } else {
+                panic!("Expected mesh object");
+            }
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_serialize_object_3d_plane() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Object3d(Object3D {
+            eql: "a.world_pos".to_string(),
+            mesh: Object3DMesh::Mesh {
+                mesh: Mesh::Plane {
+                    width: 15.0,
+                    depth: 20.0,
+                },
+                material: Material::with_color(Color::rgb(0.0, 0.5, 1.0)),
+            },
+            icon: None,
+            thrusters: Vec::new(),
+            mesh_visibility_range: None,
+            frame: None,
+            frame_orientation: None,
+            orientation: Default::default(),
+            sensor_visible: true,
+            node_id: NodeId::default(),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert_eq!(parsed.elems.len(), 1);
+        let SchematicElem::Object3d(obj) = &parsed.elems[0] else {
+            panic!("Expected object_3d");
+        };
+
+        let Object3DMesh::Mesh { mesh, material } = &obj.mesh else {
+            panic!("Expected mesh object");
+        };
+
+        let Mesh::Plane { width, depth } = mesh else {
+            panic!("Expected plane mesh");
+        };
+
+        assert!((*width - 15.0).abs() < f32::EPSILON);
+        assert!((*depth - 20.0).abs() < f32::EPSILON);
+        assert_eq!(material.base_color.r, 0.0);
+        assert!((material.base_color.g - 128.0 / 255.0).abs() < f32::EPSILON);
+        assert_eq!(material.base_color.b, 1.0);
+    }
+
+    #[test]
+    fn test_serialize_object_3d_thruster() {
+        let original = r#"
+object_3d "vehicle.world_pos" {
+    sphere radius=0.25 {
+        color 80 170 255
+    }
+    thruster name="main" body_frame=#true position="(-0.35, 0, 0)" direction="(-1, 0, 0)" intensity="vehicle.specific_force[0] / 20.0" emission_rate=420.0
+}
+"#;
+
+        let parsed = parse_schematic(original).unwrap();
+        let serialized = serialize_schematic(&parsed);
+        let reparsed = parse_schematic(&serialized).unwrap();
+
+        let SchematicElem::Object3d(obj) = &reparsed.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        assert_eq!(obj.thrusters.len(), 1);
+        let thruster = &obj.thrusters[0];
+        assert_eq!(thruster.name.as_deref(), Some("main"));
+        assert!(thruster.body_frame);
+        assert_eq!(thruster.position, (-0.35, 0.0, 0.0));
+        assert_eq!(thruster.direction, Some((-1.0, 0.0, 0.0)));
+        assert_eq!(thruster.intensity, "vehicle.specific_force[0] / 20.0");
+        assert_eq!(thruster.emission_rate, Some(420.0));
+    }
+
+    #[test]
+    fn test_serialize_thruster_light_round_trip() {
+        let original = r#"
+object_3d lander.world_pos {
+    sphere radius=0.1
+    thruster name="DPS" body_frame=#true position="(0, -1.9, 0)" direction="(0, -1, 0)" intensity="lander.main_thrust_viz[2]" {
+        light color="(1.0, 0.95, 0.88)" intensity=3000000.0 range=40.0 offset=0.8 shadows=#true
+    }
+}
+"#;
+
+        let parsed = parse_schematic(original).unwrap();
+        let serialized = serialize_schematic(&parsed);
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Object3d(obj) = &reparsed.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        let thruster = &obj.thrusters[0];
+        let light = thruster.light.as_ref().expect("light survives round trip");
+        assert_eq!(light.color, (1.0, 0.95, 0.88));
+        assert_eq!(light.intensity, 3000000.0);
+        assert_eq!(light.range, 40.0);
+        assert_eq!(light.offset, 0.8);
+        assert_eq!(light.spot_angle, None);
+        assert!(light.shadows);
+    }
+
+    #[test]
+    fn test_serialize_thruster_effect_layers_round_trip() {
+        let original = r#"
+object_3d lander.world_pos {
+    sphere radius=0.1
+    thruster name="DPS" body_frame=#true position="(0, -1.9, 0)" direction="(0, -1, 0)" intensity="lander.main_thrust_viz[2]" effect="effects/apollo-lander/descent_plume.effect" {
+        effect "effects/apollo-lander/descent_glow.effect"
+        light color="(1.0, 0.95, 0.88)" intensity=3000000.0 range=40.0 offset=0.8 shadows=#true
+    }
+}
+"#;
+
+        let parsed = parse_schematic(original).unwrap();
+        let serialized = serialize_schematic(&parsed);
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Object3d(obj) = &reparsed.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        let thruster = &obj.thrusters[0];
+        assert_eq!(
+            thruster.effect,
+            "effects/apollo-lander/descent_plume.effect"
+        );
+        assert_eq!(
+            thruster.extra_effects,
+            vec!["effects/apollo-lander/descent_glow.effect".to_string()]
+        );
+        assert_eq!(
+            thruster.effect_layers().collect::<Vec<_>>(),
+            vec![
+                "effects/apollo-lander/descent_plume.effect",
+                "effects/apollo-lander/descent_glow.effect",
+            ]
+        );
+        assert!(thruster.light.is_some(), "light coexists with layers");
+    }
+
+    #[test]
+    fn test_serialize_thruster_spot_light_round_trip() {
+        let original = r#"
+object_3d lander.world_pos {
+    sphere radius=0.1
+    thruster name="DPS" body_frame=#true position="(0, -1.9, 0)" direction="(0, -1, 0)" intensity="lander.main_thrust_viz[2]" {
+        light color="(1.0, 0.9, 0.8)" intensity=5000000.0 spot_angle=120.0
+    }
+}
+"#;
+
+        let parsed = parse_schematic(original).unwrap();
+        let serialized = serialize_schematic(&parsed);
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Object3d(obj) = &reparsed.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        let light = obj.thrusters[0]
+            .light
+            .as_ref()
+            .expect("spot light survives round trip");
+        assert_eq!(light.spot_angle, Some(120.0));
+        assert_eq!(light.range, ThrusterLight::default_range());
+        assert_eq!(light.offset, 0.0);
+        assert!(!light.shadows);
+    }
+
+    #[test]
+    fn test_serialize_object_3d_vector_thruster() {
+        let original = r#"
+object_3d lander.world_pos {
+    sphere radius=0.1
+    thruster name="DPS" body_frame=#true position="(0, -0.55, 0)" intensity=lander.main_thrust_viz scale=2.0
+}
+"#;
+
+        let parsed = parse_schematic(original).unwrap();
+        let serialized = serialize_schematic(&parsed);
+        let reparsed = parse_schematic(&serialized).unwrap();
+
+        let SchematicElem::Object3d(obj) = &reparsed.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        let thruster = &obj.thrusters[0];
+        assert!(thruster.vector_intensity());
+        assert_eq!(thruster.direction, None);
+        assert_eq!(thruster.intensity, "lander.main_thrust_viz");
+        assert!((thruster.scale - 2.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_serialize_object_3d_material_emissivity() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Object3d(Object3D {
+            eql: "a.world_pos".to_string(),
+            mesh: Object3DMesh::Mesh {
+                mesh: Mesh::Sphere { radius: 0.2 },
+                material: Material::color_with_emissivity(1.0, 1.0, 0.0, 0.25),
+            },
+            icon: None,
+            thrusters: Vec::new(),
+            mesh_visibility_range: None,
+            frame: None,
+            frame_orientation: None,
+            orientation: Default::default(),
+            sensor_visible: true,
+            node_id: NodeId::default(),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("emissivity=0.25"),
+            "serialized output should expose emissivity on the mesh node, got:\n{serialized}"
+        );
+
+        let parsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Object3d(obj) = &parsed.elems[0] else {
+            panic!("Expected object_3d");
+        };
+        let Object3DMesh::Mesh { material, .. } = &obj.mesh else {
+            panic!("Expected mesh object");
+        };
+        assert!((material.emissivity - 0.25).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_serialize_object_3d_ellipsoid() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Object3d(Object3D {
+            eql: "rocket.world_pos".to_string(),
+            mesh: Object3DMesh::Ellipsoid {
+                scale: "rocket.scale".to_string(),
+                color: Color::rgba(64.0 / 255.0, 128.0 / 255.0, 1.0, 96.0 / 255.0),
+                error_covariance_cholesky: None,
+                error_covariance: None,
+                error_confidence_interval: impeller_wkt::default_ellipsoid_confidence_interval(),
+                show_grid: impeller_wkt::default_ellipsoid_show_grid(),
+                grid_color: impeller_wkt::default_ellipsoid_grid_color(),
+            },
+            icon: None,
+            thrusters: Vec::new(),
+            mesh_visibility_range: None,
+            frame: None,
+            frame_orientation: None,
+            orientation: Default::default(),
+            sensor_visible: true,
+            node_id: NodeId::default(),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert_eq!(parsed.elems.len(), 1);
+        if let SchematicElem::Object3d(obj) = &parsed.elems[0] {
+            assert_eq!(obj.eql, "rocket.world_pos");
+            match &obj.mesh {
+                Object3DMesh::Ellipsoid {
+                    scale,
+                    color,
+                    error_covariance_cholesky,
+                    error_covariance: _,
+                    error_confidence_interval: _,
+                    show_grid: _,
+                    grid_color: _,
+                } => {
+                    assert_eq!(scale, "rocket.scale");
+                    assert!((color.r - 64.0 / 255.0).abs() < f32::EPSILON);
+                    assert!((color.g - 128.0 / 255.0).abs() < f32::EPSILON);
+                    assert!((color.b - 1.0).abs() < f32::EPSILON);
+                    assert!((color.a - 96.0 / 255.0).abs() < f32::EPSILON);
+                    assert!(error_covariance_cholesky.is_none());
+                }
+                _ => panic!("Expected ellipsoid mesh"),
+            }
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_serialize_object_3d_with_frame() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Object3d(Object3D {
+            eql: "ball.world_pos".to_string(),
+            mesh: Object3DMesh::Mesh {
+                mesh: Mesh::Sphere { radius: 0.2 },
+                material: Material::with_color(Color::ORANGE),
+            },
+            frame: Some(GeoFrame::NED),
+            frame_orientation: None,
+            orientation: Default::default(),
+            sensor_visible: true,
+            mesh_visibility_range: None,
+            icon: None,
+            thrusters: Vec::new(),
+            node_id: NodeId::next(),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("frame=NED") || serialized.contains(r#"frame="NED""#),
+            "serialized output should contain frame=NED, got:\n{serialized}"
+        );
+
+        let parsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(parsed.elems.len(), 1);
+        if let SchematicElem::Object3d(obj) = &parsed.elems[0] {
+            assert_eq!(obj.eql, "ball.world_pos");
+            assert!(matches!(obj.frame, Some(GeoFrame::NED)));
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_serialize_object_3d_with_absolute_orientation() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Object3d(Object3D {
+            eql: "ball.world_pos".to_string(),
+            mesh: Object3DMesh::Mesh {
+                mesh: Mesh::Sphere { radius: 0.2 },
+                material: Material::with_color(Color::ORANGE),
+            },
+            frame: Some(GeoFrame::NED),
+            frame_orientation: None,
+            orientation: RotationKind::Absolute,
+            sensor_visible: false,
+            mesh_visibility_range: None,
+            icon: None,
+            thrusters: Vec::new(),
+            node_id: NodeId::next(),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("orientation=absolute"),
+            "serialized output should contain orientation=absolute, got:\n{serialized}"
+        );
+        assert!(serialized.contains("sensor_visible=#false"));
+
+        let parsed = parse_schematic(&serialized).unwrap();
+        if let SchematicElem::Object3d(obj) = &parsed.elems[0] {
+            assert_eq!(obj.orientation, RotationKind::Absolute);
+            assert!(!obj.sensor_visible);
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_serialize_object_3d_default_orientation_not_serialized() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Object3d(Object3D {
+            eql: "ball.world_pos".to_string(),
+            mesh: Object3DMesh::Mesh {
+                mesh: Mesh::Sphere { radius: 0.2 },
+                material: Material::with_color(Color::ORANGE),
+            },
+            frame: Some(GeoFrame::NED),
+            frame_orientation: None,
+            orientation: RotationKind::Relative,
+            sensor_visible: true,
+            mesh_visibility_range: None,
+            icon: None,
+            thrusters: Vec::new(),
+            node_id: NodeId::next(),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            !serialized.contains("orientation="),
+            "default relative orientation should not be serialized, got:\n{serialized}"
+        );
+    }
+
+    #[test]
+    fn test_serialize_object_3d_with_frame_orientation() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Object3d(Object3D {
+            eql: "ball.world_pos".to_string(),
+            mesh: Object3DMesh::Mesh {
+                mesh: Mesh::Sphere { radius: 0.2 },
+                material: Material::with_color(Color::ORANGE),
+            },
+            frame: Some(GeoFrame::ECEF),
+            frame_orientation: Some(GeoFrame::NED),
+            orientation: RotationKind::Absolute,
+            sensor_visible: true,
+            mesh_visibility_range: None,
+            icon: None,
+            thrusters: Vec::new(),
+            node_id: NodeId::next(),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("frame_orientation=NED")
+                || serialized.contains(r#"frame_orientation="NED""#),
+            "serialized output should contain frame_orientation=NED, got:\n{serialized}"
+        );
+
+        let parsed = parse_schematic(&serialized).unwrap();
+        if let SchematicElem::Object3d(obj) = &parsed.elems[0] {
+            assert_eq!(obj.frame, Some(GeoFrame::ECEF));
+            assert_eq!(obj.frame_orientation, Some(GeoFrame::NED));
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_serialize_object_3d_default_frame_not_serialized() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Object3d(Object3D {
+            eql: "entity.world_pos".to_string(),
+            mesh: Object3DMesh::Mesh {
+                mesh: Mesh::Sphere { radius: 0.5 },
+                material: Material::with_color(Color::WHITE),
+            },
+            frame: None,             // Default (no frame)
+            frame_orientation: None, // Default (no frame)
+            orientation: Default::default(),
+            sensor_visible: true,
+            icon: None,
+            thrusters: Vec::new(),
+            mesh_visibility_range: None,
+            node_id: NodeId::next(),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            !serialized.contains("frame="),
+            "default None frame should not be serialized, got:\n{serialized}"
+        );
+    }
+
+    #[test]
+    fn test_serialize_viewport_effects_false() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::Panel(Panel::Viewport(Viewport {
+                name: Some("main".to_string()),
+                effects: false,
+                ..Default::default()
+            })));
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("effects=#false") || serialized.contains("effects=false"),
+            "expected effects=#false in:\n{serialized}"
+        );
+        let parsed = parse_schematic(&serialized).unwrap();
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] {
+            assert!(!viewport.effects);
+        } else {
+            panic!("Expected viewport");
+        }
+    }
+
+    #[test]
+    fn test_serialize_viewport_with_frame() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::Panel(Panel::Viewport(Viewport {
+                name: Some("main".to_string()),
+                fov: 45.0,
+                active: false,
+                show_grid: false,
+                show_arrows: true,
+                hdr: false,
+                pos: Some("(0,0,0,0, 8,2,4)".to_string()),
+                look_at: None,
+                frame: Some(GeoFrame::NED),
+                local_arrows: Vec::new(),
+                aspect: None,
+                ..Default::default()
+            })));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("frame=NED") || serialized.contains(r#"frame="NED""#),
+            "serialized output should contain frame=NED, got:\n{serialized}"
+        );
+    }
+
+    #[test]
+    fn test_serialize_viewport_with_view_cube_frame() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::Panel(Panel::Viewport(Viewport {
+                name: Some("main".to_string()),
+                frame: Some(GeoFrame::ECEF),
+                view_cube_frame: Some(GeoFrame::ENU),
+                ..Default::default()
+            })));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("view_cube_frame=ENU")
+                || serialized.contains(r#"view_cube_frame="ENU""#),
+            "serialized output should contain view_cube_frame=ENU, got:\n{serialized}"
+        );
+        let parsed = parse_schematic(&serialized).unwrap();
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] {
+            assert_eq!(viewport.frame, Some(GeoFrame::ECEF));
+            assert_eq!(viewport.view_cube_frame, Some(GeoFrame::ENU));
+        } else {
+            panic!("Expected viewport");
+        }
+    }
+
+    #[test]
+    fn test_serialize_line_3d_with_frame() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Line3d(Line3d {
+            eql: "ball.world_pos".to_string(),
+            line_width: 2.0,
+            color: Some(Color::WHITE),
+            future_color: None,
+            perspective: true,
+            frame: Some(GeoFrame::ENU),
+            node_id: NodeId::next(),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("frame=ENU") || serialized.contains(r#"frame="ENU""#),
+            "serialized output should contain frame=ENU, got:\n{serialized}"
+        );
+    }
+
+    #[test]
+    fn test_serialize_vector_arrow_with_frame() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::VectorArrow(VectorArrow3d {
+                vector: "ball.velocity".to_string(),
+                origin: Some("ball.world_pos".to_string()),
+                scale: 1.0,
+                name: None,
+                color: Color::WHITE,
+                body_frame: false,
+                normalize: false,
+                show_name: true,
+                thickness: ArrowThickness::default(),
+                label_position: LabelPosition::None,
+                frame: Some(GeoFrame::ECEF),
+                node_id: NodeId::next(),
+            }));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("frame=ECEF") || serialized.contains(r#"frame="ECEF""#),
+            "serialized output should contain frame=ECEF, got:\n{serialized}"
+        );
+    }
+
+    #[test]
+    fn test_serialize_tabs_with_children() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Panel(Panel::Tabs(vec![
+            Panel::Viewport(Viewport {
+                name: Some("camera1".to_string()),
+                fov: 45.0,
+                near: None,
+                far: None,
+                aspect: None,
+                active: false,
+                show_grid: false,
+                show_arrows: true,
+                create_frustum: false,
+                show_frustums: false,
+                frustums_color: default_viewport_frustums_color(),
+                projection_color: default_viewport_projection_color(),
+                frustums_thickness: default_viewport_frustums_thickness(),
+                frustums_up_marker: FrustumUpMarker::None,
+                frustums_up_marker_overlay: false,
+                show_view_cube: true,
+                view_cube_frame: None,
+                effects: true,
+                hdr: false,
+                cinematic: false,
+                bloom: None,
+                ev100: None,
+                pos: None,
+                look_at: None,
+                frame: None,
+                up: None,
+                smoothing: 0.0,
+                local_arrows: Vec::new(),
+                node_id: NodeId::default(),
+            }),
+            Panel::Graph(Graph {
+                eql: "data.position".to_string(),
+                name: Some("Position".to_string()),
+                graph_type: GraphType::Line,
+                locked: false,
+                auto_y_range: true,
+                y_range: 0.0..1.0,
+                node_id: NodeId::default(),
+                colors: vec![],
+            }),
+        ])));
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert_eq!(parsed.elems.len(), 1);
+        if let SchematicElem::Panel(Panel::Tabs(tabs)) = &parsed.elems[0] {
+            assert_eq!(tabs.len(), 2);
+
+            if let Panel::Viewport(viewport) = &tabs[0] {
+                assert_eq!(viewport.name, Some("camera1".to_string()));
+            } else {
+                panic!("Expected viewport in first tab");
+            }
+
+            if let Panel::Graph(graph) = &tabs[1] {
+                assert_eq!(graph.eql, "data.position");
+                assert_eq!(graph.name, Some("Position".to_string()));
+            } else {
+                panic!("Expected graph in second tab");
+            }
+        } else {
+            panic!("Expected tabs panel");
+        }
+    }
+
+    #[test]
+    fn test_serialize_line_3d() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Line3d(Line3d {
+            eql: "trajectory".to_string(),
+            line_width: 2.0,
+            color: Some(Color::MINT),
+            future_color: Some(Color::WHITE),
+            perspective: false,
+            frame: None,
+            node_id: NodeId::default(),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert_eq!(parsed.elems.len(), 1);
+        if let SchematicElem::Line3d(line) = &parsed.elems[0] {
+            assert_eq!(line.eql, "trajectory");
+            assert_eq!(line.line_width, 2.0);
+            assert_color_close(line.color.expect("color"), Color::MINT);
+            assert_color_close(line.future_color.expect("future_color"), Color::WHITE);
+            assert!(!line.perspective);
+        } else {
+            panic!("Expected line_3d");
+        }
+    }
+
+    #[test]
+    fn test_serialize_point_trails() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::PointTrails(PointTrails {
+                component: "effector.cube_pos_ecef".to_string(),
+                status: Some("effector.cube_hit_tick".to_string()),
+                start: Some("effector.cube_cloud_fired".to_string()),
+                head_size: 0.15,
+                head_shape: PointTrailsHeadShape::Sphere,
+                line_width: 4.0,
+                max_length: Some(3.0),
+                color: Some(Color::YOLK),
+                hit_color: Some(Color::WHITE),
+                frame: Some(GeoFrame::ECEF),
+                node_id: NodeId::default(),
+            }));
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        let SchematicElem::PointTrails(trails) = &parsed.elems[0] else {
+            panic!("Expected point_trails");
+        };
+        assert_eq!(trails.component, "effector.cube_pos_ecef");
+        assert_eq!(trails.status.as_deref(), Some("effector.cube_hit_tick"));
+        assert_eq!(trails.start.as_deref(), Some("effector.cube_cloud_fired"));
+        assert!((trails.head_size - 0.15).abs() < 1e-6);
+        assert_eq!(trails.head_shape, PointTrailsHeadShape::Sphere);
+        assert_eq!(trails.line_width, 4.0);
+        assert_eq!(trails.max_length, Some(3.0));
+        assert_color_close(trails.color.expect("color"), Color::YOLK);
+        assert_color_close(trails.hit_color.expect("hit_color"), Color::WHITE);
+        assert_eq!(trails.frame, Some(GeoFrame::ECEF));
+    }
+
+    #[test]
+    fn test_serialize_vector_arrow() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::VectorArrow(VectorArrow3d {
+                vector: "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]".to_string(),
+                origin: Some("ball.world_pos".to_string()),
+                scale: 2.5,
+                name: Some("Velocity".to_string()),
+                color: Color::BLUE,
+                body_frame: true,
+                normalize: true,
+                show_name: false,
+                thickness: ArrowThickness::new(1.23456),
+                label_position: LabelPosition::None,
+                frame: None,
+                node_id: NodeId::default(),
+            }));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("arrow_thickness=1.235"),
+            "arrow_thickness should serialize as a numeric value rounded to 3 decimals: {serialized}"
+        );
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert_eq!(parsed.elems.len(), 1);
+        if let SchematicElem::VectorArrow(arrow) = &parsed.elems[0] {
+            assert_eq!(
+                arrow.vector,
+                "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]"
+            );
+            assert_eq!(arrow.origin.as_deref(), Some("ball.world_pos"));
+            assert_eq!(arrow.scale, 2.5);
+            assert_eq!(arrow.name.as_deref(), Some("Velocity"));
+            assert!(arrow.body_frame);
+            assert!(arrow.normalize);
+            assert!(!arrow.show_name);
+            assert!(
+                (arrow.thickness.value() - 1.235).abs() < 1e-6,
+                "unexpected thickness after roundtrip {}",
+                arrow.thickness.value()
+            );
+            assert_color_close(arrow.color, Color::BLUE);
+        } else {
+            panic!("Expected vector_arrow");
+        }
+    }
+
+    #[test]
+    fn test_roundtrip_complex_example() {
+        let original_kdl = r#"
+tabs {
+    viewport fov=45.0 active=#true show_grid=#false hdr=#true
+    graph "a.world_pos" name="a world_pos"
+}
+
+object_3d "a.world_pos" {
+    sphere radius=0.2 {
+        color mint
+    }
+}
+"#;
+
+        let parsed = parse_schematic(original_kdl).unwrap();
+        let serialized = serialize_schematic(&parsed);
+        assert!(
+            serialized.contains("color mint") || serialized.contains("color 135 222 158"),
+            "serialized output should mention either the mint name or its RGBA components, got:\n{serialized}"
+        );
+        let reparsed = parse_schematic(&serialized).unwrap();
+
+        // Check that the structure is preserved
+        assert_eq!(parsed.elems.len(), reparsed.elems.len());
+    }
+
+    #[test]
+    fn test_roundtrip_complex_example_color_tuple() {
+        let original_kdl = r#"
+tabs {
+    viewport fov=45.0 active=#true show_grid=#false hdr=#true
+    graph "a.world_pos" name="a world_pos"
+}
+
+object_3d "a.world_pos" {
+    sphere radius=0.2 {
+        color 255 0 255
+    }
+}
+"#;
+        let parsed = parse_schematic(original_kdl).unwrap();
+        let serialized = serialize_schematic(&parsed);
+        // NOTE: fov and grid are dropped because they are the default value.
+        //
+        //viewport hdr=#true show_grid=#false active=#true
+        assert_eq!(
+            r#"
+tabs {
+    viewport hdr=#true active=#true
+    graph a.world_pos name="a world_pos"
+}
+object_3d a.world_pos {
+    sphere radius=0.2 {
+        color 255 0 255
+    }
+}"#
+            .trim(),
+            serialized
+        );
+        let reparsed = parse_schematic(&serialized).unwrap();
+
+        // Check that the structure is preserved
+        assert_eq!(parsed.elems.len(), reparsed.elems.len());
+    }
+
+    #[test]
+    fn test_roundtrip_rocket_example() {
+        let original_kdl = r#"graph "rocket.fin_deflect[0]" name=Fin "#;
+        let parsed = parse_schematic(original_kdl).unwrap();
+        let serialized = serialize_schematic(&parsed);
+        assert_eq!(r#"graph "rocket.fin_deflect[0]" name=Fin"#, serialized);
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(parsed.elems.len(), reparsed.elems.len());
+    }
+
+    #[test]
+    fn test_roundtrip_glb_animations() {
+        use impeller_wkt::{Object3DMesh, SchematicElem};
+        let original = r#"
+object_3d "rocket.world_pos" {
+    glb path="rocket.glb"
+    animate joint="Root.Fin_0" rotation_vector="(0, 1.0, 0)"
+}
+"#;
+        let parsed = parse_schematic(original).unwrap();
+        let SchematicElem::Object3d(parsed_obj) = &parsed.elems[0] else {
+            panic!("Expected Object3d in parsed")
+        };
+        let Object3DMesh::Glb {
+            animations: parsed_anims,
+            ..
+        } = &parsed_obj.mesh
+        else {
+            panic!("Expected Glb mesh in parsed")
+        };
+        assert_eq!(parsed_anims.len(), 1);
+        let serialized = serialize_schematic(&parsed);
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Object3d(obj) = &reparsed.elems[0] else {
+            panic!()
+        };
+        let Object3DMesh::Glb { animations, .. } = &obj.mesh else {
+            panic!()
+        };
+        assert_eq!(animations.len(), 1, "serialized:\n{serialized}");
+    }
+
+    #[test]
+    fn test_roundtrip_coordinate_frame_ned() {
+        let original = r#"coordinate frame="NED"
+
+viewport name="main"
+"#;
+        let parsed = parse_schematic(original).unwrap();
+        assert_eq!(
+            parsed.frame,
+            Some(bevy_geo_frames::GeoFrame::NED),
+            "Parsed schematic should have NED frame"
+        );
+
+        // Check viewport has its own ENU frame
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] {
+            assert_eq!(viewport.frame, None, "Viewport should have no frame");
+        } else {
+            panic!("Expected viewport panel");
+        }
+        let serialized = serialize_schematic(&parsed);
+
+        let expected = r#"coordinate frame=NED
+viewport name=main"#;
+        assert_eq!(serialized, expected, "Full serialized output");
+
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(
+            reparsed.frame,
+            Some(bevy_geo_frames::GeoFrame::NED),
+            "Re-parsed schematic should preserve NED frame"
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_coordinate_origin() {
+        let original = r#"coordinate frame="NED" lat=34.72 lon=-86.64 alt=180.5
+
+viewport name="main"
+"#;
+        let parsed = parse_schematic(original).unwrap();
+        let origin = GeoOriginConfig {
+            latitude: 34.72,
+            longitude: -86.64,
+            altitude: 180.5,
+        };
+        assert_eq!(parsed.origin, Some(origin));
+
+        let serialized = serialize_schematic(&parsed);
+        let expected = r#"coordinate frame=NED lat=34.72 lon=-86.64 alt=180.5
+viewport name=main"#;
+        assert_eq!(serialized, expected, "Full serialized output");
+
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(reparsed.frame, Some(bevy_geo_frames::GeoFrame::NED));
+        assert_eq!(reparsed.origin, Some(origin));
+    }
+
+    #[test]
+    fn test_roundtrip_coordinate_origin_zero_alt_omitted() {
+        let parsed = parse_schematic(r#"coordinate frame="ENU" lat=1.5 lon=-2.5"#).unwrap();
+        let serialized = serialize_schematic(&parsed);
+        assert_eq!(serialized, "coordinate frame=ENU lat=1.5 lon=-2.5");
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(reparsed.origin, parsed.origin);
+    }
+
+    #[test]
+    fn test_roundtrip_coordinate_frame_enu() {
+        let original = r#"coordinate frame="ENU"
+
+viewport name="main"
+"#;
+        let parsed = parse_schematic(original).unwrap();
+        assert_eq!(parsed.frame, Some(bevy_geo_frames::GeoFrame::ENU));
+
+        let serialized = serialize_schematic(&parsed);
+
+        let expected = r#"coordinate frame=ENU
+viewport name=main"#;
+        assert_eq!(serialized, expected, "Full serialized output");
+
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(reparsed.frame, Some(bevy_geo_frames::GeoFrame::ENU));
+    }
+
+    #[test]
+    fn test_schematic_without_coordinate_frame() {
+        let original = r#"viewport name="main""#;
+        let parsed = parse_schematic(original).unwrap();
+        assert_eq!(
+            parsed.frame, None,
+            "Schematic without coordinate node should have None frame"
+        );
+
+        let serialized = serialize_schematic(&parsed);
+        assert!(
+            !serialized.contains("coordinate"),
+            "Serialized output should not contain coordinate when frame is None"
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_global_and_local_frames() {
+        let original = r#"coordinate frame="NED"
+
+viewport name="main" frame="ENU"
+"#;
+        let parsed = parse_schematic(original).unwrap();
+        assert_eq!(
+            parsed.frame,
+            Some(bevy_geo_frames::GeoFrame::NED),
+            "Global frame should be NED"
+        );
+
+        // Check viewport has its own ENU frame
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] {
+            assert_eq!(
+                viewport.frame,
+                Some(GeoFrame::ENU),
+                "Viewport should have ENU frame"
+            );
+        } else {
+            panic!("Expected viewport panel");
+        }
+
+        let serialized = serialize_schematic(&parsed);
+
+        let expected = r#"coordinate frame=NED
+viewport name=main frame=ENU"#;
+        assert_eq!(serialized, expected, "Full serialized output");
+
+        // Verify round-trip preserves both frames
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(reparsed.frame, Some(bevy_geo_frames::GeoFrame::NED));
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &reparsed.elems[0] {
+            assert_eq!(viewport.frame, Some(GeoFrame::ENU));
+        } else {
+            panic!("Expected viewport panel after reparse");
+        }
+    }
+
+    #[test]
+    fn test_roundtrip_same_global_and_local_frames() {
+        let original = r#"coordinate frame="NED"
+
+viewport name="main" frame="NED"
+"#;
+        let parsed = parse_schematic(original).unwrap();
+        assert_eq!(
+            parsed.frame,
+            Some(bevy_geo_frames::GeoFrame::NED),
+            "Global frame should be NED"
+        );
+
+        // Check viewport has its own ENU frame
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] {
+            assert_eq!(
+                viewport.frame,
+                Some(GeoFrame::NED),
+                "Viewport should have ENU frame"
+            );
+        } else {
+            panic!("Expected viewport panel");
+        }
+
+        let serialized = serialize_schematic(&parsed);
+
+        let expected = r#"coordinate frame=NED
+viewport name=main frame=NED"#;
+        assert_eq!(serialized, expected, "Full serialized output");
+
+        // Verify round-trip preserves both frames
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(reparsed.frame, Some(bevy_geo_frames::GeoFrame::NED));
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &reparsed.elems[0] {
+            assert_eq!(viewport.frame, Some(GeoFrame::NED));
+        } else {
+            panic!("Expected viewport panel after reparse");
+        }
+    }
+}

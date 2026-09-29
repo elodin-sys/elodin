@@ -305,7 +305,7 @@ nix develop --command elodin-db query --eql "lander.thrust" --offset -2 --limit 
 #### - [ ] DB-105 — Generate: rc-jet SITL DB (full duration)
 
 - **Priority:** P2 | **Mode:** agent | **Requires:** SDK-001
-- **Description:** Runs the **entire 3-minute** rc-jet flight in real time (300 Hz fixed-wing 6DOF) with the external Rust RC controller (s10 cargo recipe) writing the `external_control` component `bdx.control_commands` over Impeller2. Proves a long, dense, dual-writer recording: the sim writes physics, the external controller writes commands, both land in one DB.
+- **Description:** Runs the **entire 3-minute** rc-jet flight in real time (300 Hz fixed-wing 6DOF) with the external Rust RC controller (s10 cargo recipe) writing the `external_control` component `bdx.control_commands` over Impeller. Proves a long, dense, dual-writer recording: the sim writes physics, the external controller writes commands, both land in one DB.
 - **Expected duration:** ~4 min (compile + 180 s real-time flight)
 
 **Steps**

@@ -8,7 +8,7 @@ use bevy::{
     world_serialization::WorldAssetRoot,
 };
 use bevy_egui::egui::{self, Align, RichText};
-use impeller2_wkt::{
+use impeller_wkt::{
     ComponentMetadata, Material, Mesh, Object3DMesh, default_ellipsoid_confidence_interval,
     default_ellipsoid_grid_color, default_ellipsoid_scale_expr, default_ellipsoid_show_grid,
 };
@@ -61,7 +61,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
     ) -> Self::Output {
         let tree_actions = SmallVec::new();
         let connection_addr = world
-            .get_resource::<impeller2_bevy::ConnectionAddr>()
+            .get_resource::<impeller_bevy::ConnectionAddr>()
             .map(|addr| addr.0);
         let local_root = crate::object_3d::local_assets_root(
             world.get_resource::<crate::plugins::kdl_document::InitialKdlPath>(),
@@ -184,7 +184,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                     "Sphere" => {
                         object_3d_state.data.mesh = Object3DMesh::Mesh {
                             mesh: Mesh::Sphere { radius: 1.0 },
-                            material: Material::with_color(impeller2_wkt::Color::HYPERBLUE),
+                            material: Material::with_color(impeller_wkt::Color::HYPERBLUE),
                         };
                         object_3d_state.scale_expr = None;
                         object_3d_state.scale_error = None;
@@ -196,7 +196,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                                 y: 1.0,
                                 z: 1.0,
                             },
-                            material: Material::with_color(impeller2_wkt::Color::HYPERBLUE),
+                            material: Material::with_color(impeller_wkt::Color::HYPERBLUE),
                         };
                         object_3d_state.scale_expr = None;
                         object_3d_state.scale_error = None;
@@ -207,7 +207,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                                 radius: 0.5,
                                 height: 2.0,
                             },
-                            material: Material::with_color(impeller2_wkt::Color::HYPERBLUE),
+                            material: Material::with_color(impeller_wkt::Color::HYPERBLUE),
                         };
                         object_3d_state.scale_expr = None;
                         object_3d_state.scale_error = None;
@@ -218,7 +218,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                                 width: 10.0,
                                 depth: 10.0,
                             },
-                            material: Material::with_color(impeller2_wkt::Color::HYPERBLUE),
+                            material: Material::with_color(impeller_wkt::Color::HYPERBLUE),
                         };
                         object_3d_state.scale_expr = None;
                         object_3d_state.scale_error = None;
@@ -227,7 +227,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                         let default_scale = default_ellipsoid_scale_expr();
                         object_3d_state.data.mesh = Object3DMesh::Ellipsoid {
                             scale: default_scale.clone(),
-                            color: impeller2_wkt::Color::WHITE,
+                            color: impeller_wkt::Color::WHITE,
                             error_covariance_cholesky: None,
                             error_covariance: None,
                             error_confidence_interval: default_ellipsoid_confidence_interval(),

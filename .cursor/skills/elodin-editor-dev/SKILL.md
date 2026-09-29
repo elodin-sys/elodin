@@ -5,7 +5,7 @@ description: Contribute to the Elodin Editor, the 3D viewer and graphing tool. U
 
 # Elodin Editor Development
 
-The Elodin Editor is a 3D visualization and telemetry graphing tool built with Bevy (ECS game engine) and Egui (immediate-mode UI). It connects to Elodin-DB via Impeller2 for real-time data.
+The Elodin Editor is a 3D visualization and telemetry graphing tool built with Bevy (ECS game engine) and Egui (immediate-mode UI). It connects to Elodin-DB via Impeller for real-time data.
 
 ## Running
 
@@ -105,7 +105,7 @@ src/
 
 ### `apps/elodin/` — CLI binary
 
-The main entry point that ties together the editor with nox-py, s10, and Impeller2. Handles CLI argument parsing (`elodin editor`, `elodin run`, etc.).
+The main entry point that ties together the editor with nox-py, s10, and Impeller. Handles CLI argument parsing (`elodin editor`, `elodin run`, etc.).
 
 ## Key Subsystems
 
@@ -131,7 +131,7 @@ Metadata ──► EqlContext ──► ADD COMPONENT / palettes (full list)
 | Piece | Where |
 |-------|--------|
 | Allowlist + reclaim | `ui/plot/data.rs` → `update_series_fetch_priority` |
-| Backfill / live filter | `impeller2_bevy` → `backfill_cache`, `SeriesFetchPriority` |
+| Backfill / live filter | `impeller_bevy` → `backfill_cache`, `SeriesFetchPriority` |
 | Schedule | editor + headless: priority then `backfill_cache` (`lib.rs`, `headless.rs`) |
 
 **Allowlist** (`SeriesFetchPriority.high`): enabled graph lines; `Line3d` / `object_3d` EQL (including `thruster` intensity EQL for particle plumes); monitors; viewport `pos`/`look_at`/`up` EQL; `vector_arrow` EQL; path-registry adapter pairs (`*.world_pos`, …); sensor-camera `{entity}.world_pos`. Empty ⇒ no SeriesStore I/O. Leaving an ID drops it from RAM. **Any new live consumer must extend this allowlist** or it will be blank/stale. Adapter leaf match is case-sensitive (`WORLD_POS` ≠ `world_pos`).
@@ -162,7 +162,7 @@ Key crates used in the editor:
 | `bevy` | ECS game engine, 3D rendering, windowing |
 | `bevy_egui` | Egui integration for Bevy |
 | `egui` | Immediate-mode UI framework |
-| `impeller2-bevy` | Bevy plugin for Impeller2 telemetry |
+| `impeller-bevy` | Bevy plugin for Impeller telemetry |
 | `arrow` | Arrow data format for time-series |
 | `eql` | Elodin Query Language parser |
 | `nox` | Spatial math types |

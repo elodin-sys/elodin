@@ -47,8 +47,8 @@ use bevy::{
 use bevy_render::extract_component::ExtractComponent;
 use bevy_render::sync_world::{MainEntity, SyncToRenderWorld, TemporaryRenderEntity};
 use binding_types::storage_buffer_read_only_sized;
-use impeller2::types::Timestamp;
-use impeller2_wkt::GraphType;
+use impeller::types::Timestamp;
+use impeller_wkt::GraphType;
 use std::collections::HashSet;
 use std::num::NonZeroU64;
 use std::ops::Range;
@@ -1303,8 +1303,8 @@ mod tests {
     use bevy::asset::Assets;
     use bevy::ecs::system::SystemState;
     use bevy::prelude::{Commands, World};
-    use impeller2::types::{ComponentId, Timestamp};
-    use impeller2_wkt::GraphType;
+    use impeller::types::{ComponentId, Timestamp};
+    use impeller_wkt::GraphType;
 
     fn plot_world() -> World {
         let mut world = World::new();

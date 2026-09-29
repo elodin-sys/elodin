@@ -26,7 +26,7 @@
 - `.cursor/skills/bevy/SKILL.md` — Bevy ECS performance patterns for editor code: `Local<T>`, query filters, `run_if`, Events vs Messages, `bevy_defer`.
 - `.cursor/skills/elodin-aleph/SKILL.md` — Aleph Jetson Orin workflows: `deploy.sh`, SD image, FSW service modules, STM32 flash/reset, on-vehicle elodin-db, SITL/HITL.
 - `.cursor/skills/elodin-cranelift/SKILL.md` — Cranelift-MLIR JIT backend development: `ELODIN_BACKEND`, adding ops, checkpoint tests, regression baselines, debug env vars.
-- `.cursor/skills/elodin-db/SKILL.md` — Elodin-DB usage: run/lua/merge/trim/follow, Impeller2 clients (C/C++/Rust/Python), replication, editor connection.
+- `.cursor/skills/elodin-db/SKILL.md` — Elodin-DB usage: run/lua/merge/trim/follow, Impeller clients (C/C++/Rust/Python), replication, editor connection.
 - `.cursor/skills/elodin-dev/SKILL.md` — Monorepo architecture and contributor setup: `nix develop`, `just install`, CI checks, workspace crate map.
 - `.cursor/skills/elodin-dev/ci-checks.md` — Local CI mirror commands: cargo fmt/test/clippy, ruff, alejandra, plus the Apollo Monte Carlo Buildkite step.
 - `.cursor/skills/elodin-editor-dev/SKILL.md` — Editor development: cargo run/watch, env vars, Bevy/Egui layout, KDL schematics, plots, video, command palette.
@@ -130,7 +130,7 @@
 - `fsw/gstreamer/README.md` — `elodinsink` GStreamer plugin streaming Annex-B H.264 NAL units to Elodin-DB from test/file/webcam/GenICam sources.
 - `fsw/mekf/README.md` — Aleph sensor pipeline spec: dual BMI270 + mag/baro/GPS over COBS/EL UART, serial-bridge DB components, MEKF attitude service.
 - `fsw/msp-osd/README.md` — MSP DisplayPort OSD service mapping Elodin-DB telemetry to FPV goggles; terminal debug and serial VTX backends, Walksnail support.
-- `fsw/roci/README.md` — Roci reactive flight-software framework: composable `System` trait, drivers, Impeller2 TCP, CSV logging, roci-adcs algorithms.
+- `fsw/roci/README.md` — Roci reactive flight-software framework: composable `System` trait, drivers, Impeller TCP, CSV logging, roci-adcs algorithms.
 - `fsw/sensor-fw/README.md` — STM32H747 Aleph expansion firmware: high-rate IMU/mag/baro sampling, SD blackbox, UART streaming; probe-rs/openocd flashing.
 - `fsw/udp_component_broadcast/README.md` — Python UDP bridge broadcasting Elodin-DB components between machines with protobuf, rename/filter, timestamp modes.
 - `fsw/video-streamer/README.md` — FFmpeg-based utility re-encoding video files to AV1 OBUs and streaming them into Elodin-DB.
@@ -143,7 +143,7 @@
 
 ## Libraries (`libs/`)
 
-- `libs/bbqueue/README.md` — Vendored bbqueue 0.7 SPSC ring buffer bridging Impeller2 TCP I/O to the editor, patched for `usize` frame headers (8 MiB frames).
+- `libs/bbqueue/README.md` — Vendored bbqueue 0.7 SPSC ring buffer bridging Impeller TCP I/O to the editor, patched for `usize` frame headers (8 MiB frames).
 - `libs/bevy_geo_frames/README.md` — Bevy crate providing geographical coordinate frame types via `bevy_geo_frames::prelude`.
 - `libs/bevy_mat3_material/README.md` — Bevy `MaterialExtension` applying 3×3 shear/scale vertex transforms with correct normal handling.
 - `libs/bevy_world_mesh/README.md` — Large-scale terrain renderer: planar regions and spherical Earth from public DEM/imagery, fly camera, debug overlays.
@@ -174,15 +174,15 @@
 - `libs/elodin-editor/src/plugins/web_asset/README.md` — Registers `http`/`https` Bevy asset sources with ETag-aware download caching.
 - `libs/elodin-macros/README.md` — Derive macros wiring Rust structs into nox/nox-py: `Component`, `Archetype`, `ComponentGroup`, `IntoOp`/`FromOp`, `FromBuilder`, `ReprMonad`.
 - `libs/hamann-chen-line/README.md` — Hamann–Chen curvature-based polyline simplification for 2D/3D/time-series; editor `CurveCompressSettings` integration.
-- `libs/impeller2/README.md` — Impeller2 pub-sub telemetry protocol: hierarchical components, Table/Message/TimeSeries packets, VTables, sub-crates, transports.
-- `libs/impeller2/kdl/README.md` — KDL serdes for `Schematic`: coordinate frames, panel nodes, viewport/graph/query UI, 3D scene nodes, serialization defaults.
+- `libs/impeller/README.md` — Impeller pub-sub telemetry protocol: hierarchical components, Table/Message/TimeSeries packets, VTables, sub-crates, transports.
+- `libs/impeller/kdl/README.md` — KDL serdes for `Schematic`: coordinate frames, panel nodes, viewport/graph/query UI, 3D scene nodes, serialization defaults.
 - `libs/nox/README.md` — Core Nox tensor engine: tensor types, symbolic IR, differentiable primitives, Cranelift/JAX backends, ecosystem map.
 - `libs/nox/array/README.md` — Zero-copy `ArrayView` for n-dimensional tensors in `no_std`, plus NumPy/JAX-style dynamic broadcasting rules.
 - `libs/nox/src/noxpr/README.md` — noxpr subsystem for building typed tensor compute graphs in Rust and lowering them to JAX/StableHLO.
 - `libs/nox-frames/README.md` — Compile-time-safe coordinate frames, poses, and Earth transforms (ECI/ECEF/NED) with time-aware composition.
 - `libs/nox-py/README.md` — Python SDK reference: ECS simulation API, execution modes, profiling, DB/HITL integration, gravity models, examples.
 - `libs/nox-py/python/elodin/FSW Workshop 2025 abstract.md` — Workshop abstract on vectorizing the EGM2008 gravity model via JAX for real-time execution.
-- `libs/postcard-c/README.md` — Postcard wire-format C/C++ codegen and header-only runtime for Rust↔C telemetry, HITL, Impeller2 integration.
+- `libs/postcard-c/README.md` — Postcard wire-format C/C++ codegen and header-only runtime for Rust↔C telemetry, HITL, Impeller integration.
 - `libs/postcard-c/codegen/examples/README.md` — Example codegen workflow: generate C++ bindings from RON, build with C++23, encode/decode round-trip.
 - `libs/s10/README.md` — S10 TOML recipe orchestrator: sim/cargo/process/group recipes, watch mode, readiness probes, editor/Python integration.
 - `libs/stellarator/README.md` — Deterministic single-threaded async runtime for flight software: io_uring/polling I/O, serial, structured concurrency.
