@@ -15,7 +15,7 @@ import elodin.ui as ui
 
 REPO = Path(__file__).resolve().parents[4]
 EXAMPLES = REPO / "examples"
-KDL_CORPUS = REPO / "libs" / "impeller2" / "kdl" / "tests" / "corpus" / "sources"
+KDL_CORPUS = REPO / "libs" / "impeller" / "kdl" / "tests" / "corpus" / "sources"
 
 
 def _load_example(path: Path, name: str):

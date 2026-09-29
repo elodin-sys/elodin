@@ -2,14 +2,14 @@
 //! deterministically, and round-trip to an equal model. Canonical models are
 //! snapshotted as sorted JSON under `tests/corpus/goldens/`.
 //!
-//! Refresh goldens with `BLESS_GOLDENS=1 cargo test -p impeller2-kdl --test golden_corpus`.
+//! Refresh goldens with `BLESS_GOLDENS=1 cargo test -p impeller-kdl --test golden_corpus`.
 
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use impeller2_kdl::{parse_schematic, serialize_schematic};
-use impeller2_wkt::Schematic;
+use impeller_kdl::{parse_schematic, serialize_schematic};
+use impeller_wkt::Schematic;
 use serde_json::Value;
 
 fn corpus_root() -> PathBuf {

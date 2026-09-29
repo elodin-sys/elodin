@@ -1267,7 +1267,7 @@ impl LoadSchematicParams<'_, '_> {
                     let mut dependencies: Vec<_> = binding
                         .inputs
                         .iter()
-                        .map(|input| impeller2::types::ComponentId::new(&input.component))
+                        .map(|input| impeller::types::ComponentId::new(&input.component))
                         .collect();
                     dependencies.sort();
                     dependencies.dedup();
@@ -2758,14 +2758,14 @@ mod tests {
     fn install_scalar_eql_component(app: &mut App) {
         let component = std::sync::Arc::new(eql::Component::new(
             "sample.value".to_string(),
-            impeller2::types::ComponentId::new("sample.value"),
-            impeller2::schema::Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new())
+            impeller::types::ComponentId::new("sample.value"),
+            impeller::schema::Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new())
                 .expect("schema"),
         ));
         app.insert_resource(EqlContext(eql::Context::from_leaves(
             [component],
-            impeller2::types::Timestamp(0),
-            impeller2::types::Timestamp(1),
+            impeller::types::Timestamp(0),
+            impeller::types::Timestamp(1),
         )));
     }
 
@@ -2785,7 +2785,7 @@ mod tests {
         let derived = graphs[0].derived.as_ref().expect("derived graph");
         assert_eq!(
             derived.dependencies,
-            vec![impeller2::types::ComponentId::new("sample.value")]
+            vec![impeller::types::ComponentId::new("sample.value")]
         );
 
         let mut query_plot = app
@@ -2795,7 +2795,7 @@ mod tests {
 
         let saved = save_schematic(&mut app);
         assert!(
-            impeller2_kdl::serialize_schematic(&saved)
+            impeller_kdl::serialize_schematic(&saved)
                 .contains(r#"graph "sample.value.sqrt()" name="Square root""#)
         );
     }

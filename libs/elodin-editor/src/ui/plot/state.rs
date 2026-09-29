@@ -11,7 +11,7 @@ use bevy_egui::egui::{self, Color32};
 use impeller::schema::Schema;
 use impeller::types::{ComponentId, Timestamp};
 use impeller_bevy::ComponentPath;
-use impeller_wkt::{ComponentMetadata, GraphType};
+use impeller_wkt::{ComponentMetadata, DisplayKernelBinding, GraphType};
 
 use super::Line;
 use super::gpu::LineVisibleRange;

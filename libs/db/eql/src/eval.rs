@@ -199,7 +199,7 @@ fn clip_sample(value: f64, min: f64, max: f64) -> f64 {
 mod tests {
     use super::*;
     use crate::{Component, Context};
-    use impeller2::{
+    use impeller::{
         schema::Schema,
         types::{ComponentId, PrimType, Timestamp},
     };

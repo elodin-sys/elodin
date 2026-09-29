@@ -8,9 +8,9 @@ use std::time::{Duration, Instant};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use cranelift_mlir::display_kernel::DisplayKernelExec;
-use impeller2::types::{ComponentId, Timestamp};
-use impeller2_bevy::{ConnectionAddr, EntityMap, TelemetryCache};
-use impeller2_wkt::{
+use impeller::types::{ComponentId, Timestamp};
+use impeller_bevy::{ConnectionAddr, EntityMap, TelemetryCache};
+use impeller_wkt::{
     ComponentValue, DISPLAY_KERNEL_ASSET_PREFIX, DisplayKernelArtifact, DisplayKernelBinding,
 };
 use sha2::{Digest, Sha256};
@@ -517,7 +517,7 @@ fn write_floats(values: &[f64], dtype: &str) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-fn flatten_value_count(outputs: &[impeller2_wkt::DisplayKernelTensor]) -> usize {
+fn flatten_value_count(outputs: &[impeller_wkt::DisplayKernelTensor]) -> usize {
     outputs
         .iter()
         .map(|tensor| {
@@ -538,7 +538,7 @@ fn unpack_batched_outputs(
 ) -> Result<(), String> {
     let mut series = 0;
     for (index, tensor) in artifact.outputs.iter().enumerate() {
-        let width = impeller2_wkt::dtype_width(&tensor.dtype)?;
+        let width = impeller_wkt::dtype_width(&tensor.dtype)?;
         let elems = tensor
             .shape
             .iter()
@@ -569,7 +569,7 @@ fn unpack_batched_outputs(
 mod tests {
     use super::*;
     use bevy::app::TaskPoolPlugin;
-    use impeller2_wkt::{DisplayKernelInput, DisplayKernelTensor};
+    use impeller_wkt::{DisplayKernelInput, DisplayKernelTensor};
     use sha2::{Digest, Sha256};
 
     fn sample_artifact(hash: &str, batch_size: u32) -> DisplayKernelArtifact {

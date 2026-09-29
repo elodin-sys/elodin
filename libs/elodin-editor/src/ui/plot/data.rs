@@ -1491,7 +1491,7 @@ fn floor_ts_quantum(ts: Timestamp, quantum_micros: i64) -> Timestamp {
 
 /// Parse an EQL string and insert every referenced component ID into `out`.
 fn collect_kernel_component_ids(
-    binding: &impeller2_wkt::DisplayKernelBinding,
+    binding: &impeller_wkt::DisplayKernelBinding,
     out: &mut HashSet<ComponentId>,
 ) {
     for input in &binding.inputs {
@@ -4379,7 +4379,7 @@ mod tests {
         let component = Arc::new(eql::Component::new(
             "sample.value".to_string(),
             id,
-            impeller2::schema::Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new())
+            impeller::schema::Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new())
                 .unwrap(),
         ));
         let context = eql::Context::from_leaves([component], Timestamp(0), Timestamp(3));
@@ -4405,7 +4405,7 @@ mod tests {
         let component = Arc::new(eql::Component::new(
             "sample.vector".to_string(),
             id,
-            impeller2::schema::Schema::new(impeller2::types::PrimType::F64, vec![2_u64]).unwrap(),
+            impeller::schema::Schema::new(impeller::types::PrimType::F64, vec![2_u64]).unwrap(),
         ));
         let context = eql::Context::from_leaves([component], Timestamp(0), Timestamp(2));
         let expr = context.parse_str("sample.vector.norm()").unwrap();
@@ -4433,7 +4433,7 @@ mod tests {
         let fast = ComponentId::new("fast.value");
         let slow = ComponentId::new("slow.value");
         let schema =
-            impeller2::schema::Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new())
+            impeller::schema::Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new())
                 .unwrap();
         let context = eql::Context::from_leaves(
             [

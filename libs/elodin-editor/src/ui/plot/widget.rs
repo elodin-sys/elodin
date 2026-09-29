@@ -27,7 +27,9 @@ use bevy::{
 };
 use bevy_egui::egui::{self, Align, CornerRadius, Frame, Layout, Margin, RichText, Stroke};
 use impeller::types::Timestamp;
-use impeller_bevy::{ComponentMetadataRegistry, ComponentPath, ComponentSchemaRegistry};
+use impeller_bevy::{
+    ComponentMetadataRegistry, ComponentPath, ComponentSchemaRegistry, TelemetryCache,
+};
 use impeller_wkt::{CurrentTimestamp, EarliestTimestamp};
 use std::time::{Duration, Instant};
 use std::{
@@ -210,10 +212,10 @@ pub enum PlotDataSource<'a> {
 }
 
 fn retain_enabled_line(
-    kernel: Option<(&impeller2_bevy::ComponentPath, usize)>,
-    derived: Option<(&impeller2_bevy::ComponentPath, usize)>,
-    components: &std::collections::BTreeMap<impeller2_bevy::ComponentPath, GraphStateComponent>,
-    component_path: &impeller2_bevy::ComponentPath,
+    kernel: Option<(&impeller_bevy::ComponentPath, usize)>,
+    derived: Option<(&impeller_bevy::ComponentPath, usize)>,
+    components: &std::collections::BTreeMap<impeller_bevy::ComponentPath, GraphStateComponent>,
+    component_path: &impeller_bevy::ComponentPath,
     index: usize,
 ) -> bool {
     if let Some((path, len)) = kernel
@@ -1884,7 +1886,7 @@ pub fn sync_kernel_graphs(
     mut lines: ResMut<Assets<Line>>,
     mut commands: Commands,
     mut kernels: ResMut<crate::plugins::display_kernel::DisplayKernelCache>,
-    connection_addr: Option<Res<impeller2_bevy::ConnectionAddr>>,
+    connection_addr: Option<Res<impeller_bevy::ConnectionAddr>>,
     initial_kdl: Option<Res<crate::plugins::kdl_document::InitialKdlPath>>,
 ) {
     use crate::plugins::display_kernel::{KernelStatus, evaluate_kernel_series, kernel_fetch_ctx};
@@ -2649,8 +2651,8 @@ mod short_window_y_tests {
         ui::plot::{DerivedGraph, GraphBundle, KernelGraph},
     };
     use bevy::{ecs::system::SystemState, prelude::*};
-    use impeller2_bevy::ComponentPath;
-    use impeller2_wkt::DisplayKernelBinding;
+    use impeller_bevy::ComponentPath;
+    use impeller_wkt::DisplayKernelBinding;
     use std::collections::BTreeMap;
 
     #[test]

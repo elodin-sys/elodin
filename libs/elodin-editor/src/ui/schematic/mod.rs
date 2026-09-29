@@ -308,7 +308,7 @@ impl SchematicParam<'_, '_> {
                                     .map(|(_, color)| *color)
                                     .or_else(|| kernel_state.colors.get(index).copied());
                                 if let Some(color) = color {
-                                    colors.push(impeller2_wkt::Color::from_color32(color));
+                                    colors.push(impeller_wkt::Color::from_color32(color));
                                 }
                             }
                         } else if let Some(derived) = &graph_state.derived {
@@ -320,7 +320,7 @@ impl SchematicParam<'_, '_> {
                                     .map(|(_, color)| *color)
                                     .or_else(|| derived.colors.get(index).copied());
                                 if let Some(color) = color {
-                                    colors.push(impeller2_wkt::Color::from_color32(color));
+                                    colors.push(impeller_wkt::Color::from_color32(color));
                                 }
                             }
                         } else {
@@ -335,10 +335,8 @@ impl SchematicParam<'_, '_> {
                                         index,
                                         &self.metadata,
                                     ));
-                                    colors.push(impeller2_wkt::Color::from_color32(*color));
+                                    colors.push(impeller_wkt::Color::from_color32(*color));
                                 }
-                                parts.push(component_expr(component_path, index, &self.metadata));
-                                colors.push(impeller_wkt::Color::from_color32(*color));
                             }
 
                             if !parts.is_empty() {

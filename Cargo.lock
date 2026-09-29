@@ -5542,6 +5542,7 @@ dependencies = [
  "elodin-db",
  "elodin-editor",
  "impeller-bevy",
+ "impeller-kdl",
  "machine-uid",
  "miette 7.6.0",
  "monte-carlo",

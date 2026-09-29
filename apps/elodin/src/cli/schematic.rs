@@ -31,7 +31,7 @@ impl Cli {
                     .into_diagnostic()
                     .wrap_err_with(|| format!("failed to read {}", input.display()))?;
                 let source_name = input.file_name().and_then(|name| name.to_str());
-                let python = impeller2_kdl::schematic_to_python(&source, source_name)
+                let python = impeller_kdl::schematic_to_python(&source, source_name)
                     .into_diagnostic()
                     .wrap_err_with(|| format!("failed to parse {}", input.display()))?;
                 if let Some(output) = output {

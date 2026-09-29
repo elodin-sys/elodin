@@ -758,7 +758,7 @@ mod tests {
     use bevy::prelude::World;
     use impeller::schema::Schema;
     use impeller::types::{ComponentId, PrimType, Timestamp};
-    use impeller2_wkt::DisplayKernelBinding;
+    use impeller_wkt::DisplayKernelBinding;
     use std::sync::Arc;
 
     /// Converting a graph to a SQL query plot must despawn the timeseries lines

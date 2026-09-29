@@ -1116,7 +1116,7 @@ fn ellipsoid_shape_mode(mesh: &impeller_wkt::Object3DMesh) -> Option<EllipsoidSh
             error_covariance_cholesky: Some(_),
             ..
         }
-        | impeller2_wkt::Object3DMesh::Ellipsoid {
+        | impeller_wkt::Object3DMesh::Ellipsoid {
             error_covariance_cholesky_kernel: Some(_),
             ..
         } => Some(EllipsoidShapeMode::Cholesky),
@@ -1124,7 +1124,7 @@ fn ellipsoid_shape_mode(mesh: &impeller_wkt::Object3DMesh) -> Option<EllipsoidSh
             error_covariance: Some(_),
             ..
         }
-        | impeller2_wkt::Object3DMesh::Ellipsoid {
+        | impeller_wkt::Object3DMesh::Ellipsoid {
             error_covariance_kernel: Some(_),
             ..
         } => Some(EllipsoidShapeMode::Covariance),
@@ -2639,7 +2639,7 @@ pub fn update_object_3d_kernels(
     mut objects_query: Query<(
         Entity,
         &mut Object3DState,
-        &mut impeller2_wkt::WorldPos,
+        &mut impeller_wkt::WorldPos,
         Option<&mut EllipsoidVisual>,
         Has<WorldPosReceived>,
         Option<&Children>,
@@ -2651,7 +2651,7 @@ pub fn update_object_3d_kernels(
     geo_context: Res<GeoContext>,
     coordinate: Res<Coordinate>,
     mut kernels: ResMut<crate::plugins::display_kernel::DisplayKernelCache>,
-    connection_addr: Option<Res<impeller2_bevy::ConnectionAddr>>,
+    connection_addr: Option<Res<impeller_bevy::ConnectionAddr>>,
     initial_kdl: Option<Res<crate::plugins::kdl_document::InitialKdlPath>>,
 ) {
     use crate::plugins::display_kernel::{
@@ -2698,7 +2698,7 @@ pub fn update_object_3d_kernels(
         let Some(shape_mode) = ellipsoid_shape_mode(&object_3d.data.mesh) else {
             continue;
         };
-        let impeller2_wkt::Object3DMesh::Ellipsoid {
+        let impeller_wkt::Object3DMesh::Ellipsoid {
             error_confidence_interval,
             error_covariance_cholesky_kernel,
             error_covariance_kernel,
@@ -2794,15 +2794,15 @@ pub fn update_object_3d_kernels(
     }
 }
 
-fn kernel_outputs_to_world_pos(outputs: &[Vec<u8>]) -> Option<impeller2_wkt::WorldPos> {
+fn kernel_outputs_to_world_pos(outputs: &[Vec<u8>]) -> Option<impeller_wkt::WorldPos> {
     let bytes = outputs.first()?;
     let values = output_f64s(bytes)?;
     match values.as_slice() {
-        [x, y, z] => Some(impeller2_wkt::WorldPos {
+        [x, y, z] => Some(impeller_wkt::WorldPos {
             att: nox::Quaternion::identity(),
             pos: nox::Vector3::new(*x, *y, *z),
         }),
-        [qx, qy, qz, qw, x, y, z] => Some(impeller2_wkt::WorldPos {
+        [qx, qy, qz, qw, x, y, z] => Some(impeller_wkt::WorldPos {
             att: nox::Quaternion::new(*qw, *qx, *qy, *qz),
             pos: nox::Vector3::new(*x, *y, *z),
         }),

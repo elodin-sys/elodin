@@ -7,8 +7,8 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use bevy_geo_frames::{GeoFrame, RotationKind};
-use impeller2_kdl::color_from_name;
-use impeller2_wkt::*;
+use impeller_kdl::color_from_name;
+use impeller_wkt::*;
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 
@@ -1090,7 +1090,7 @@ fn material(color: Option<&Bound<'_, PyAny>>, emissivity: f32) -> PyResult<Mater
 fn sphere(radius: f32, color: Option<&Bound<'_, PyAny>>, emissivity: f32) -> PyResult<PyMesh> {
     Ok(PyMesh {
         inner: Object3DMesh::Mesh {
-            mesh: impeller2_wkt::Mesh::Sphere { radius },
+            mesh: impeller_wkt::Mesh::Sphere { radius },
             material: material(color, emissivity)?,
         },
     })
@@ -1107,7 +1107,7 @@ fn box_mesh(
 ) -> PyResult<PyMesh> {
     Ok(PyMesh {
         inner: Object3DMesh::Mesh {
-            mesh: impeller2_wkt::Mesh::Box { x, y, z },
+            mesh: impeller_wkt::Mesh::Box { x, y, z },
             material: material(color, emissivity)?,
         },
     })
@@ -1123,7 +1123,7 @@ fn cylinder(
 ) -> PyResult<PyMesh> {
     Ok(PyMesh {
         inner: Object3DMesh::Mesh {
-            mesh: impeller2_wkt::Mesh::Cylinder { radius, height },
+            mesh: impeller_wkt::Mesh::Cylinder { radius, height },
             material: material(color, emissivity)?,
         },
     })
@@ -1139,7 +1139,7 @@ fn plane(
 ) -> PyResult<PyMesh> {
     Ok(PyMesh {
         inner: Object3DMesh::Mesh {
-            mesh: impeller2_wkt::Mesh::Plane { width, depth },
+            mesh: impeller_wkt::Mesh::Plane { width, depth },
             material: material(color, emissivity)?,
         },
     })

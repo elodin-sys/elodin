@@ -3403,7 +3403,7 @@ object_3d "drone.world_pos" {
         let SchematicElem::Object3d(ellip) = &schematic.elems[2] else {
             panic!("expected ellipsoid object");
         };
-        let impeller2_wkt::Object3DMesh::Ellipsoid {
+        let impeller_wkt::Object3DMesh::Ellipsoid {
             error_covariance_cholesky_kernel: Some(chol),
             ..
         } = &ellip.mesh
@@ -3441,7 +3441,7 @@ object_3d "drone.world_pos" {
         let SchematicElem::Object3d(ellip) = &schematic.elems[1] else {
             panic!("expected ellipsoid object");
         };
-        let impeller2_wkt::Object3DMesh::Ellipsoid {
+        let impeller_wkt::Object3DMesh::Ellipsoid {
             error_covariance_cholesky_kernel: Some(chol),
             ..
         } = &ellip.mesh
@@ -3469,7 +3469,7 @@ object_3d "drone.world_pos" {
         let SchematicElem::Object3d(ellip) = &schematic.elems[0] else {
             panic!("expected ellipsoid object");
         };
-        let impeller2_wkt::Object3DMesh::Ellipsoid {
+        let impeller_wkt::Object3DMesh::Ellipsoid {
             color,
             error_covariance_cholesky_kernel: Some(_),
             ..
@@ -3487,7 +3487,7 @@ object_3d "drone.world_pos" {
         let SchematicElem::Object3d(ellip) = &parsed.elems[0] else {
             panic!("expected ellipsoid object");
         };
-        let impeller2_wkt::Object3DMesh::Ellipsoid { color, .. } = &ellip.mesh else {
+        let impeller_wkt::Object3DMesh::Ellipsoid { color, .. } = &ellip.mesh else {
             panic!("expected ellipsoid");
         };
         assert!((color.r - 64.0 / 255.0).abs() < f32::EPSILON);

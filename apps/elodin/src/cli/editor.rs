@@ -160,6 +160,7 @@ fn executable_suffixes() -> Vec<OsString> {
     }
 }
 
+#[cfg(any(windows, test))]
 fn pathext_suffixes(pathext: &str) -> Vec<OsString> {
     pathext
         .split(';')
@@ -453,7 +454,7 @@ impl Cli {
                 app.add_plugins(impeller_bevy::TcpImpellerPlugin::new(None));
             }
             Simulator::Addr(addr) => {
-                app.add_plugins(impeller_bevy::TcpImpellerPlugin::new(Some(addr)));
+                app.add_plugins(impeller_bevy::TcpImpellerPlugin::new(Some(*addr)));
             }
             Simulator::File(_) | Simulator::Db(_) => {
                 app.add_plugins(impeller_bevy::TcpImpellerPlugin::new(Some(args.addr)));

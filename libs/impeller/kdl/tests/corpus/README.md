@@ -1,6 +1,6 @@
 # Schematic golden corpus (Phase 0)
 
-Checked-in KDL sources used by `golden_corpus` tests (`cargo test -p impeller2-kdl --test golden_corpus`):
+Checked-in KDL sources used by `golden_corpus` tests (`cargo test -p impeller-kdl --test golden_corpus`):
 
 - `sources/examples/` — snapshot of this monorepo's `examples/*/*.kdl`
 - `sources/fsw/` — vendored from `../fsw/assets/schematics` (sibling flight-software repo)
@@ -16,5 +16,5 @@ JSON goldens under `goldens/` are the **canonical** model after `parse → emit 
 Refresh goldens after intentional serializer/parser changes:
 
 ```bash
-BLESS_GOLDENS=1 cargo test -p impeller2-kdl --test golden_corpus
+BLESS_GOLDENS=1 cargo test -p impeller-kdl --test golden_corpus
 ```

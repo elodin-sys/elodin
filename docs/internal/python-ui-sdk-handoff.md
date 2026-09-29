@@ -21,13 +21,13 @@ Companion review (not in this repo): `elodin-kdl-ergonomics-review-2026-07-28.md
 | Decision | Locked choice |
 |---|---|
 | Package | `elodin.ui` (inside the existing `elodin` wheel) |
-| Bindings | PyO3 over `impeller2_wkt` |
+| Bindings | PyO3 over `impeller_wkt` |
 | Artifact | KDL text, unchanged DB channel |
 | Expressions | Typed Python frontend → EQL strings today; `eql::Expr` / Tier B–C later |
 | KDL authoring | Demote, do not delete (replay of historical DBs is forever) |
 | Editor save | Layout overlay in Phase 4 — editor must not rewrite source |
 
-FSW KDLs live at `../fsw/assets/schematics` (sibling of this repo). Corpus copies them under `libs/impeller2/kdl/tests/corpus/sources/fsw/` (21 files, not ~20).
+FSW KDLs live at `../fsw/assets/schematics` (sibling of this repo). Corpus copies them under `libs/impeller/kdl/tests/corpus/sources/fsw/` (21 files, not ~20).
 
 ---
 
@@ -35,7 +35,7 @@ FSW KDLs live at `../fsw/assets/schematics` (sibling of this repo). Corpus copie
 
 | Phase | Intent | Status |
 |---|---|---|
-| **0** | Golden corpus, `PartialEq`, emit determinism | **Done.** G0: `cargo test -p impeller2-kdl --test golden_corpus` |
+| **0** | Golden corpus, `PartialEq`, emit determinism | **Done.** G0: `cargo test -p impeller-kdl --test golden_corpus` |
 | **1** | Builders + emit/parse/write/push; examples match handwritten KDL | **Done.** G1: pytest `test_ui.py` |
 | **2** | Typed expr + schema | **Mostly done.** Python `Expr`/`Schema`/`pose()`/`sym_mat3()` emit **EQL strings**. **Not done:** PyO3 over `eql::Expr`; property test random AST → parse → equal AST; reproducing every expression in FSW `main.kdl`. That is leftover G2 work, not a reason to restart Phase 2. |
 | **3** | `elodin ui watch`, last-good, editor error banner | **Done enough to demo.** No headless-editor integration test (G3 still wants save→re-render &lt; 1s recorded). |
@@ -56,7 +56,7 @@ just install py          # maturin 1.12.6 pin in justfile — do not bump casual
 just install editor      # elodin → ~/.cargo/bin
 
 # Rust goldens (Phase 0)
-cargo test -p impeller2-kdl --test golden_corpus
+cargo test -p impeller-kdl --test golden_corpus
 
 # Python UI (Phases 1–2)
 python -m pytest libs/nox-py/python/tests/test_ui.py libs/nox-py/python/tests/test_ui_expr.py -v
@@ -65,7 +65,7 @@ python -m pytest libs/nox-py/python/tests/test_ui.py libs/nox-py/python/tests/te
 Bless goldens only after intentional parser/serializer changes:
 
 ```bash
-BLESS_GOLDENS=1 cargo test -p impeller2-kdl --test golden_corpus
+BLESS_GOLDENS=1 cargo test -p impeller-kdl --test golden_corpus
 ```
 
 CI: `cargo fmt`, `cargo test`, `cargo clippy -- -Dwarnings`, `ruff format --check && ruff check --fix`, `alejandra`. For `elodin-db` tests: `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 RAYON_NUM_THREADS=1`.
@@ -108,8 +108,8 @@ elodin ui watch examples/display-kernels/schematic.py --db 127.0.0.1:2240
 | `world.schematic` accepts `str \| Schematic` | `libs/nox-py/src/world_builder.rs` |
 | Watch CLI | `apps/elodin/src/cli/ui.rs` (`elodin ui watch`) — enum is `UiCommand` to avoid clashing with `std::process::Command` |
 | Editor banner | `libs/elodin-editor/src/ui/status_bar.rs` |
-| Golden corpus | `libs/impeller2/kdl/tests/corpus/` + `golden_corpus.rs` |
-| `PartialEq` on GUI types | `libs/impeller2/wkt/src/gui.rs` |
+| Golden corpus | `libs/impeller/kdl/tests/corpus/` + `golden_corpus.rs` |
+| `PartialEq` on GUI types | `libs/impeller/wkt/src/gui.rs` |
 | Demo | `examples/display-kernels/{schematic.py,main.py,README.md}` |
 | Other Python rebuilds | `examples/drone/{motor_panel.py,rate_control_panel.py}` |
 | Tests | `libs/nox-py/python/tests/test_ui.py`, `test_ui_expr.py` |

@@ -1239,12 +1239,12 @@ fn queue_save_layout_now(
         .schematic_active()
         .map(str::to_string)
         .unwrap_or_else(|| ACTIVE_SCHEMATIC_KEY.to_string());
-    let overlay_key = impeller2_kdl::overlay_asset_key(&active_key);
-    let mut overlay = impeller2_kdl::extract_overlay(&schematic.0);
+    let overlay_key = impeller_kdl::overlay_asset_key(&active_key);
+    let mut overlay = impeller_kdl::extract_overlay(&schematic.0);
     overlay.schematic = Some(active_key.clone());
     let split_count = overlay.splits.len();
     let window_count = overlay.windows.len();
-    let bytes = impeller2_kdl::serialize_overlay(&overlay).into_bytes();
+    let bytes = impeller_kdl::serialize_overlay(&overlay).into_bytes();
     let url = crate::object_3d::resolve_db_asset_url(&format!("db:{overlay_key}"), Some(addr));
     // Local copy is for inspection only and may be removed later. The DB
     // asset (`PUT` to `{url}`) is what watch/replay consume.

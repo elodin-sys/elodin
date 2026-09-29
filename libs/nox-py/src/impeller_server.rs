@@ -1124,7 +1124,7 @@ mod asset_tests {
         world.metadata.schematic = Some("viewport {\n}\n".to_string());
         let key = format!(
             "{}{}",
-            impeller2_wkt::DISPLAY_KERNEL_ASSET_PREFIX,
+            impeller_wkt::DISPLAY_KERNEL_ASSET_PREFIX,
             "deadbeef"
         );
         let sidecar = b"{\"version\":1,\"hash\":\"deadbeef\"}".to_vec();
@@ -1147,7 +1147,7 @@ mod asset_tests {
         let reopened = elodin_db::DB::open(db_path).unwrap();
         let new_key = format!(
             "{}{}",
-            impeller2_wkt::DISPLAY_KERNEL_ASSET_PREFIX,
+            impeller_wkt::DISPLAY_KERNEL_ASSET_PREFIX,
             "cafebabe"
         );
         let new_sidecar = b"{\"version\":1,\"hash\":\"cafebabe\"}".to_vec();

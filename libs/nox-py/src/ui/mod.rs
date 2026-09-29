@@ -1,6 +1,6 @@
 //! `elodin.ui` — typed schematic builders that emit canonical KDL.
 //!
-//! Phase 1–2: builders over [`impeller2_wkt`]; EQL via strings or Python
+//! Phase 1–2: builders over [`impeller_wkt`]; EQL via strings or Python
 //! `Expr` objects. Phase 3 adds watch/push + build-error metadata.
 
 mod builders;
@@ -10,12 +10,12 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::str::FromStr;
 
-use impeller2::types::IntoLenPacket;
-use impeller2_kdl::{
+use impeller::types::IntoLenPacket;
+use impeller_kdl::{
     apply_overlay as apply_overlay_model, extract_overlay as extract_overlay_model,
     overlay_asset_key, parse_overlay, parse_schematic, serialize_overlay, serialize_schematic,
 };
-use impeller2_wkt::{
+use impeller_wkt::{
     DISPLAY_KERNEL_ASSET_PREFIX, DumpMetadata, DumpMetadataResp, Schematic, SetDbConfig, StoreAsset,
 };
 use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
@@ -140,7 +140,7 @@ fn schematic(
         inner.timeline = Some(builders::extract_timeline(&t)?);
     }
     if let Some(name) = skybox {
-        inner.skybox = Some(impeller2_wkt::SkyboxConfig { name });
+        inner.skybox = Some(impeller_wkt::SkyboxConfig { name });
     }
     if let Some(environment) = environment {
         inner.environment = Some(builders::extract_environment(&environment)?);
@@ -160,25 +160,25 @@ fn push_elem(schematic: &mut Schematic, obj: &Bound<'_, PyAny>) -> PyResult<()> 
     if let Ok(panel) = obj.extract::<PyRef<'_, PyPanel>>() {
         schematic
             .elems
-            .push(impeller2_wkt::SchematicElem::Panel(panel.inner.clone()));
+            .push(impeller_wkt::SchematicElem::Panel(panel.inner.clone()));
         return Ok(());
     }
     if let Ok(obj3d) = obj.extract::<PyRef<'_, PyObject3D>>() {
         schematic
             .elems
-            .push(impeller2_wkt::SchematicElem::Object3d(obj3d.inner.clone()));
+            .push(impeller_wkt::SchematicElem::Object3d(obj3d.inner.clone()));
         return Ok(());
     }
     if let Ok(line) = obj.extract::<PyRef<'_, PyLine3d>>() {
         schematic
             .elems
-            .push(impeller2_wkt::SchematicElem::Line3d(line.inner.clone()));
+            .push(impeller_wkt::SchematicElem::Line3d(line.inner.clone()));
         return Ok(());
     }
     if let Ok(trails) = obj.extract::<PyRef<'_, PyPointTrails>>() {
         schematic
             .elems
-            .push(impeller2_wkt::SchematicElem::PointTrails(
+            .push(impeller_wkt::SchematicElem::PointTrails(
                 trails.inner.clone(),
             ));
         return Ok(());
@@ -186,7 +186,7 @@ fn push_elem(schematic: &mut Schematic, obj: &Bound<'_, PyAny>) -> PyResult<()> 
     if let Ok(arrow) = obj.extract::<PyRef<'_, PyVectorArrow>>() {
         schematic
             .elems
-            .push(impeller2_wkt::SchematicElem::VectorArrow(
+            .push(impeller_wkt::SchematicElem::VectorArrow(
                 arrow.inner.clone(),
             ));
         return Ok(());
@@ -194,13 +194,13 @@ fn push_elem(schematic: &mut Schematic, obj: &Bound<'_, PyAny>) -> PyResult<()> 
     if let Ok(mesh) = obj.extract::<PyRef<'_, PyWorldMesh>>() {
         schematic
             .elems
-            .push(impeller2_wkt::SchematicElem::WorldMesh(mesh.inner.clone()));
+            .push(impeller_wkt::SchematicElem::WorldMesh(mesh.inner.clone()));
         return Ok(());
     }
     if let Ok(window) = obj.extract::<PyRef<'_, PyWindow>>() {
         schematic
             .elems
-            .push(impeller2_wkt::SchematicElem::Window(window.inner.clone()));
+            .push(impeller_wkt::SchematicElem::Window(window.inner.clone()));
         return Ok(());
     }
     Err(PyTypeError::new_err(
@@ -249,7 +249,7 @@ fn schematic_active(db: &str) -> PyResult<Option<String>> {
     let addr = SocketAddr::from_str(db)
         .map_err(|e| PyValueError::new_err(format!("invalid db address {db:?}: {e}")))?;
     crate::db::block_on(move || async move {
-        let mut client = impeller2_stellar::Client::connect(addr)
+        let mut client = impeller_stellar::Client::connect(addr)
             .await
             .map_err(|e| PyRuntimeError::new_err(format!("connect to {addr}: {e}")))?;
         let resp: DumpMetadataResp = client
@@ -283,7 +283,7 @@ fn push(schematic: &PySchematic, db: &str, key: Option<String>) -> PyResult<()> 
 
     let kernel_assets = schematic.kernel_assets.clone();
     crate::db::block_on(move || async move {
-        let mut client = impeller2_stellar::Client::connect(addr)
+        let mut client = impeller_stellar::Client::connect(addr)
             .await
             .map_err(|e| PyRuntimeError::new_err(format!("connect to {addr}: {e}")))?;
         for (asset_key, bytes) in kernel_assets {
@@ -334,7 +334,7 @@ fn set_build_error(db: &str, message: Option<String>) -> PyResult<()> {
         metadata,
     };
     crate::db::block_on(move || async move {
-        let mut client = impeller2_stellar::Client::connect(addr)
+        let mut client = impeller_stellar::Client::connect(addr)
             .await
             .map_err(|e| PyRuntimeError::new_err(format!("connect to {addr}: {e}")))?;
         client
@@ -417,7 +417,7 @@ fn from_kdl(text: &str) -> PyResult<PySchematic> {
 #[pyfunction]
 #[pyo3(signature = (text, source_name=None))]
 fn to_python(text: &str, source_name: Option<&str>) -> PyResult<String> {
-    impeller2_kdl::schematic_to_python(text, source_name)
+    impeller_kdl::schematic_to_python(text, source_name)
         .map_err(|err| PyValueError::new_err(err.to_string()))
 }
 

@@ -32,7 +32,7 @@ use crate::{
 
 use super::RootWidgetSystem;
 use crate::ui::widgets::SystemStateExt;
-use impeller2_wkt::DbConfig;
+use impeller_wkt::DbConfig;
 
 #[derive(SystemParam)]
 pub struct StatusBar<'w, 's> {
