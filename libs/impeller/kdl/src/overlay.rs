@@ -3,7 +3,7 @@
 //! The Python source owns structure and EQL; the editor writes this artifact
 //! after the user drags splits. `apply_overlay` merges it at build/watch time.
 
-use impeller2_wkt::{Panel, Schematic, SchematicElem, Split, WindowRect, WindowSchematic};
+use impeller_wkt::{Panel, Schematic, SchematicElem, Split, WindowRect, WindowSchematic};
 use kdl::{KdlDocument, KdlEntry, KdlNode};
 
 use crate::KdlSchematicError;

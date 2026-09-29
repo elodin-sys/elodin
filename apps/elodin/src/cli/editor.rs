@@ -3,6 +3,7 @@ use bevy::window::{PrimaryWindow, WindowResized};
 use core::fmt;
 use elodin_editor::EditorPlugin;
 use miette::{IntoDiagnostic, miette};
+use std::ffi::{OsStr, OsString};
 use std::io::{Read, Seek, Write};
 use std::net::{Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
@@ -141,13 +142,54 @@ fn python_bin() -> miette::Result<String> {
 
 fn which_bin(bin: &str) -> Option<String> {
     let path = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path) {
-        let candidate = dir.join(bin);
-        if candidate.is_file() {
-            return Some(candidate.display().to_string());
+    find_on_path(bin, &path, &executable_suffixes())
+}
+
+/// `PATHEXT` suffixes on Windows (`python` -> `python.exe`). Empty on Unix.
+fn executable_suffixes() -> Vec<OsString> {
+    #[cfg(windows)]
+    {
+        let pathext =
+            std::env::var_os("PATHEXT").unwrap_or_else(|| OsString::from(".COM;.EXE;.BAT;.CMD"));
+        std::env::split_paths(&pathext)
+            .filter_map(|ext| {
+                let raw = ext.as_os_str();
+                if raw.is_empty() {
+                    return None;
+                }
+                let mut suffix = OsString::new();
+                if !raw.to_string_lossy().starts_with('.') {
+                    suffix.push(".");
+                }
+                suffix.push(raw);
+                Some(suffix)
+            })
+            .collect()
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
+}
+
+fn find_on_path(bin: &str, path: &OsStr, suffixes: &[OsString]) -> Option<String> {
+    std::env::split_paths(path).find_map(|dir| find_in_dir(&dir, bin, suffixes))
+}
+
+fn find_in_dir(dir: &Path, bin: &str, suffixes: &[OsString]) -> Option<String> {
+    let mut names = Vec::with_capacity(1 + suffixes.len());
+    names.push(OsString::from(bin));
+    if Path::new(bin).extension().is_none() {
+        for suffix in suffixes {
+            let mut name = OsString::from(bin);
+            name.push(suffix);
+            names.push(name);
         }
     }
-    None
+    names.into_iter().find_map(|name| {
+        let candidate = dir.join(name);
+        candidate.is_file().then(|| candidate.display().to_string())
+    })
 }
 
 const COMPILE_PYTHON_SCHEMATIC: &str = r#"
@@ -592,6 +634,7 @@ fn on_window_resize(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
     use std::str::FromStr;
 
     #[test]
@@ -729,6 +772,36 @@ mod tests {
         assert!(is_python_schematic(Path::new("schematics/main.py")));
         assert!(is_python_schematic(Path::new("Main.PY")));
         assert!(!is_python_schematic(Path::new("schematics/main.kdl")));
+    }
+
+    #[test]
+    fn which_bin_finds_pathext_candidate() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("python.exe"), []).unwrap();
+        let suffixes = [OsString::from(".COM"), OsString::from(".exe")];
+        let found = find_on_path("python", dir.path().as_os_str(), &suffixes).unwrap();
+        assert_eq!(PathBuf::from(found), dir.path().join("python.exe"));
+        assert!(find_on_path("python3", dir.path().as_os_str(), &suffixes).is_none());
+    }
+
+    #[test]
+    fn which_bin_prefers_exact_name() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("python"), []).unwrap();
+        std::fs::write(dir.path().join("python.exe"), []).unwrap();
+        let suffixes = [OsString::from(".exe")];
+        let found = find_on_path("python", dir.path().as_os_str(), &suffixes).unwrap();
+        assert_eq!(PathBuf::from(found), dir.path().join("python"));
+        assert!(find_on_path("python", dir.path().as_os_str(), &[]).is_some());
+        assert!(find_on_path("python3", dir.path().as_os_str(), &[]).is_none());
+    }
+
+    #[test]
+    fn which_bin_does_not_append_suffix_to_an_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("python.exe.EXE"), []).unwrap();
+        let suffixes = [OsString::from(".EXE")];
+        assert!(find_on_path("python.exe", dir.path().as_os_str(), &suffixes).is_none());
     }
 
     #[test]
