@@ -322,7 +322,7 @@ def test_watch_follows_active_schematic_and_overlay(tmp_path):
         assert run_once(script, addr, quiet=True)
         assert _wait_for(lambda: ui.schematic_active(addr) == foo_key)
         foo_asset = assets / "foo.kdl"
-        assert _wait_for(foo_asset.exists)
+        assert _wait_for(lambda: foo_asset.exists() and "share=0.25" in foo_asset.read_text())
         foo_body = foo_asset.read_text()
         assert "share=0.25" in foo_body
         assert "share=0.75" not in foo_body
