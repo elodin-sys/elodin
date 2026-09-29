@@ -106,7 +106,9 @@ elodin editor examples/rc-jet/main.py
 ```
 
 The RC controller starts automatically (FrSky-style gamepad or keyboard) and
-sends `bdx.control_commands` at 60 Hz.
+sends `bdx.control_commands` at 60 Hz. The flight keeps going until you stop
+it. Headless runs (`ELODIN_NON_INTERACTIVE=1`) stop after 180 s unless
+`ELODIN_MAX_TICKS` is set.
 
 ### LWIR reference validation
 

@@ -31,9 +31,7 @@ def test_state_error_is_zero_for_matching_states():
     position = np.array([1.0e9, -2.0e9, 3.0e9])
     velocity = np.array([12000.0, -4000.0, 250.0])
 
-    position_error_km, velocity_error_mps = state_error(
-        position, velocity, position, velocity
-    )
+    position_error_km, velocity_error_mps = state_error(position, velocity, position, velocity)
 
     assert position_error_km == 0.0
     assert velocity_error_mps == 0.0
