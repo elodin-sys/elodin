@@ -497,6 +497,21 @@ fn write_floats(values: &[f64], dtype: &str) -> Result<Vec<u8>, String> {
                 out.extend_from_slice(&(*value as i32).to_le_bytes());
             }
         }
+        "u64" => {
+            for value in values {
+                out.extend_from_slice(&(*value as u64).to_le_bytes());
+            }
+        }
+        "u32" => {
+            for value in values {
+                out.extend_from_slice(&(*value as u32).to_le_bytes());
+            }
+        }
+        "bool" => {
+            for value in values {
+                out.push(u8::from(*value != 0.0));
+            }
+        }
         other => return Err(format!("unsupported display kernel input dtype {other}")),
     }
     Ok(out)
@@ -602,6 +617,28 @@ mod tests {
     fn writes_and_reads_f64_payloads() {
         let bytes = write_floats(&[1.5, -2.0], "f64").unwrap();
         assert_eq!(output_floats(&bytes, "f64").unwrap(), vec![1.5, -2.0]);
+    }
+
+    #[test]
+    fn writes_unsigned_and_bool_payloads() {
+        assert_eq!(
+            write_floats(&[1.0, 42.0], "u64").unwrap(),
+            [1u64, 42]
+                .into_iter()
+                .flat_map(u64::to_le_bytes)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            write_floats(&[7.0, 255.0], "u32").unwrap(),
+            [7u32, 255]
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            write_floats(&[0.0, 1.0, 2.0], "bool").unwrap(),
+            vec![0, 1, 1]
+        );
     }
 
     #[test]
