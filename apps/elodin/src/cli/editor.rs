@@ -149,27 +149,27 @@ fn which_bin(bin: &str) -> Option<String> {
 fn executable_suffixes() -> Vec<OsString> {
     #[cfg(windows)]
     {
-        let pathext =
-            std::env::var_os("PATHEXT").unwrap_or_else(|| OsString::from(".COM;.EXE;.BAT;.CMD"));
-        std::env::split_paths(&pathext)
-            .filter_map(|ext| {
-                let raw = ext.as_os_str();
-                if raw.is_empty() {
-                    return None;
-                }
-                let mut suffix = OsString::new();
-                if !raw.to_string_lossy().starts_with('.') {
-                    suffix.push(".");
-                }
-                suffix.push(raw);
-                Some(suffix)
-            })
-            .collect()
+        let pathext = std::env::var_os("PATHEXT")
+            .map(|value| value.to_string_lossy().into_owned())
+            .unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_string());
+        pathext_suffixes(&pathext)
     }
     #[cfg(not(windows))]
     {
         Vec::new()
     }
+}
+
+fn pathext_suffixes(pathext: &str) -> Vec<OsString> {
+    pathext
+        .split(';')
+        .filter(|ext| !ext.is_empty())
+        .map(|ext| {
+            let mut suffix = OsString::from(".");
+            suffix.push(ext.strip_prefix('.').unwrap_or(ext));
+            suffix
+        })
+        .collect()
 }
 
 fn find_on_path(bin: &str, path: &OsStr, suffixes: &[OsString]) -> Option<String> {
@@ -775,6 +775,18 @@ mod tests {
     }
 
     #[test]
+    fn pathext_lists_exe_and_skips_empty_entries() {
+        assert_eq!(
+            pathext_suffixes(".COM;.EXE;;BAT"),
+            vec![
+                OsString::from(".COM"),
+                OsString::from(".EXE"),
+                OsString::from(".BAT"),
+            ]
+        );
+    }
+
+    #[test]
     fn which_bin_finds_pathext_candidate() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("python.exe"), []).unwrap();
@@ -782,6 +794,9 @@ mod tests {
         let found = find_on_path("python", dir.path().as_os_str(), &suffixes).unwrap();
         assert_eq!(PathBuf::from(found), dir.path().join("python.exe"));
         assert!(find_on_path("python3", dir.path().as_os_str(), &suffixes).is_none());
+        std::fs::write(dir.path().join("python3.exe"), []).unwrap();
+        let found = find_on_path("python3", dir.path().as_os_str(), &suffixes).unwrap();
+        assert_eq!(PathBuf::from(found), dir.path().join("python3.exe"));
     }
 
     #[test]
