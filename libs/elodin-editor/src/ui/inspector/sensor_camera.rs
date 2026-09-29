@@ -4,7 +4,7 @@ use bevy::ecs::{
 };
 use bevy::prelude::Entity;
 use bevy_egui::egui::{self, Align};
-use impeller2_wkt::FrustumUpMarker;
+use impeller_wkt::FrustumUpMarker;
 
 use crate::{
     sensor_camera::SensorCameraConfigs,
@@ -152,7 +152,7 @@ impl WidgetSystem for InspectorSensorCamera<'_, '_> {
                             color_popup(ui, &mut frustums_color, color_id, &swatch);
                         });
                     });
-                    config.frustums_color = impeller2_wkt::Color::from_color32(frustums_color);
+                    config.frustums_color = impeller_wkt::Color::from_color32(frustums_color);
 
                     ui.add_space(8.0);
                     let mut projection_color = config.projection_color.into_color32();
@@ -175,7 +175,7 @@ impl WidgetSystem for InspectorSensorCamera<'_, '_> {
                             color_popup(ui, &mut projection_color, color_id, &swatch);
                         });
                     });
-                    config.projection_color = impeller2_wkt::Color::from_color32(projection_color);
+                    config.projection_color = impeller_wkt::Color::from_color32(projection_color);
 
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {

@@ -13,8 +13,8 @@ use bevy::render::sync_world::RenderEntity;
 use bevy::render::{Extract, ExtractSchedule, RenderApp};
 use bevy_geo_frames::solar::sun_direction_ecef;
 use bevy_geo_frames::{GeoContext, GeoFrame};
-use impeller2::types::Timestamp;
-use impeller2_wkt::{AtmosphereConfig, CurrentTimestamp, EnvironmentConfig, SunConfig};
+use impeller::types::Timestamp;
+use impeller_wkt::{AtmosphereConfig, CurrentTimestamp, EnvironmentConfig, SunConfig};
 
 use crate::MainCamera;
 use crate::plugins::cinematic_earth::CinematicEarthRoot;
@@ -44,7 +44,7 @@ pub(crate) struct SchematicAtmosphere(AtmosphereConfig);
 
 /// Earth-mode `sky color` dome for regular viewports.
 #[derive(Component)]
-pub(crate) struct SchematicSkyDome(impeller2_wkt::Color);
+pub(crate) struct SchematicSkyDome(impeller_wkt::Color);
 
 /// Just inside the cinematic atmosphere shell (outer radius 6,471 km).
 const SKY_DOME_RADIUS_M: f32 = 6.46e6;
@@ -429,7 +429,7 @@ fn clear_color_matches(current: &ClearColorConfig, desired: &ClearColorConfig) -
 /// cinematic sky (atmosphere + Milky Way over black space) and renders `sky
 /// color` as the regular-viewport dome, so both cameras keep fixed clears.
 fn clear_colors(
-    sky_color: Option<impeller2_wkt::Color>,
+    sky_color: Option<impeller_wkt::Color>,
     earth: bool,
 ) -> (ClearColorConfig, ClearColorConfig) {
     if earth {
@@ -600,7 +600,7 @@ mod tests {
     #[test]
     fn earth_implies_default_ephemeris_sun() {
         let env = EnvironmentConfig {
-            earth: Some(impeller2_wkt::EarthConfig::default()),
+            earth: Some(impeller_wkt::EarthConfig::default()),
             ..Default::default()
         };
         let sun = effective_sun(&env).expect("earth implies a sun");
@@ -616,7 +616,7 @@ mod tests {
                 illuminance: 12_000.0,
                 ..Default::default()
             }),
-            earth: Some(impeller2_wkt::EarthConfig::default()),
+            earth: Some(impeller_wkt::EarthConfig::default()),
             ..Default::default()
         };
         assert_eq!(effective_sun(&env).unwrap().illuminance, 12_000.0);
@@ -642,7 +642,7 @@ mod tests {
     fn atmosphere_spawns_at_cinematic_earth_transform() {
         let mut app = App::new();
         app.insert_resource(SceneEnvironment(Some(EnvironmentConfig {
-            earth: Some(impeller2_wkt::EarthConfig::default()),
+            earth: Some(impeller_wkt::EarthConfig::default()),
             ..default()
         })))
         .init_resource::<Assets<ScatteringMedium>>()
@@ -681,7 +681,7 @@ mod tests {
     fn earth_mode_sun_lights_only_the_cinematic_layer() {
         let mut app = App::new();
         app.insert_resource(SceneEnvironment(Some(EnvironmentConfig {
-            earth: Some(impeller2_wkt::EarthConfig::default()),
+            earth: Some(impeller_wkt::EarthConfig::default()),
             ..default()
         })))
         .insert_resource(crate::Coordinate::default())
@@ -703,7 +703,7 @@ mod tests {
     fn earth_mode_tags_object_3d_casters_with_cinematic_layer() {
         let mut app = App::new();
         app.insert_resource(SceneEnvironment(Some(EnvironmentConfig {
-            earth: Some(impeller2_wkt::EarthConfig::default()),
+            earth: Some(impeller_wkt::EarthConfig::default()),
             ..default()
         })))
         .add_systems(Update, sync_cinematic_shadow_casters);
@@ -765,7 +765,7 @@ mod tests {
 
     #[test]
     fn earth_mode_keeps_fixed_clears_and_flat_mode_honors_sky_color() {
-        let blue = impeller2_wkt::Color {
+        let blue = impeller_wkt::Color {
             r: 0.3,
             g: 0.6,
             b: 0.9,
@@ -790,8 +790,8 @@ mod tests {
     fn earth_mode_sky_color_spawns_regular_sky_dome() {
         let mut app = App::new();
         app.insert_resource(SceneEnvironment(Some(EnvironmentConfig {
-            earth: Some(impeller2_wkt::EarthConfig::default()),
-            sky_color: Some(impeller2_wkt::Color::rgb(0.5, 0.7, 0.9)),
+            earth: Some(impeller_wkt::EarthConfig::default()),
+            sky_color: Some(impeller_wkt::Color::rgb(0.5, 0.7, 0.9)),
             ..default()
         })))
         .init_resource::<Assets<Mesh>>()

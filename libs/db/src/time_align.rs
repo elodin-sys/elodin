@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use crate::utils::component_label;
 use crate::{Error, MetadataExt};
-use impeller2_wkt::ComponentMetadata;
+use impeller_wkt::ComponentMetadata;
 
 const HEADER_SIZE: usize = 24; // committed_len (8) + head_len (8) + start_timestamp (8)
 
@@ -509,8 +509,8 @@ mod tests {
         dir: &Path,
         components: &[(&str, i64, &[i64])], // (name, start_ts, timestamps)
     ) -> Result<(), Error> {
-        use impeller2::types::ComponentId;
-        use impeller2_wkt::DbConfig;
+        use impeller::types::ComponentId;
+        use impeller_wkt::DbConfig;
 
         fs::create_dir_all(dir)?;
 
@@ -583,14 +583,14 @@ mod tests {
         run(db_path.clone(), 0.0, true, None, false, true).unwrap();
 
         // Verify comp1 shifted by -10s
-        let comp1_id = impeller2::types::ComponentId::new("comp1");
+        let comp1_id = impeller::types::ComponentId::new("comp1");
         let (start_ts1, timestamps1) =
             read_index_file(&db_path.join(comp1_id.to_string()).join("index"));
         assert_eq!(start_ts1, 0);
         assert_eq!(timestamps1, vec![0, 10_000_000, 20_000_000]);
 
         // Verify comp2 shifted by -15s
-        let comp2_id = impeller2::types::ComponentId::new("comp2");
+        let comp2_id = impeller::types::ComponentId::new("comp2");
         let (start_ts2, timestamps2) =
             read_index_file(&db_path.join(comp2_id.to_string()).join("index"));
         assert_eq!(start_ts2, 0);
@@ -632,14 +632,14 @@ mod tests {
         .unwrap();
 
         // Verify comp1 was shifted
-        let comp1_id = impeller2::types::ComponentId::new("comp1");
+        let comp1_id = impeller::types::ComponentId::new("comp1");
         let (start_ts1, timestamps1) =
             read_index_file(&db_path.join(comp1_id.to_string()).join("index"));
         assert_eq!(start_ts1, 0);
         assert_eq!(timestamps1, vec![0, 10_000_000, 20_000_000]);
 
         // Verify comp2 was NOT shifted
-        let comp2_id = impeller2::types::ComponentId::new("comp2");
+        let comp2_id = impeller::types::ComponentId::new("comp2");
         let (start_ts2, timestamps2) =
             read_index_file(&db_path.join(comp2_id.to_string()).join("index"));
         assert_eq!(start_ts2, 15_000_000);
@@ -716,7 +716,7 @@ mod tests {
         run(db_path.clone(), 0.0, true, None, true, true).unwrap();
 
         // Verify not modified
-        let comp1_id = impeller2::types::ComponentId::new("comp1");
+        let comp1_id = impeller::types::ComponentId::new("comp1");
         let (start_ts, timestamps) =
             read_index_file(&db_path.join(comp1_id.to_string()).join("index"));
         assert_eq!(start_ts, 10_000_000);

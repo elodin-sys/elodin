@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package elodin.broadcast;
 
-// Primitive data types matching impeller2 PrimType
+// Primitive data types matching impeller PrimType
 enum PrimType {
     PRIM_TYPE_UNSPECIFIED = 0;
     PRIM_TYPE_U8 = 1;

@@ -16,11 +16,11 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::warn;
 
-use impeller2_wkt::{DbConfig, Schematic};
+use impeller_wkt::{DbConfig, Schematic};
 
 use crate::DB;
 
-pub use impeller2::ASSETS_HTTP_PORT_OFFSET;
+pub use impeller::ASSETS_HTTP_PORT_OFFSET;
 
 /// Active skybox for asset sync: `skybox.active` metadata overrides schematic KDL.
 pub fn skybox_name_for_schematic_sync(
@@ -41,13 +41,13 @@ fn schematic_sync_asset_names(
     db_config: Option<&DbConfig>,
 ) -> (Vec<String>, Option<String>) {
     let skybox_name = skybox_name_for_schematic_sync(db_config, schematic);
-    let mut names = impeller2_kdl::collect_db_asset_names(schematic);
+    let mut names = impeller_kdl::collect_db_asset_names(schematic);
     if skybox_name.is_some()
         && !names
             .iter()
-            .any(|name| name == impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME)
+            .any(|name| name == impeller_kdl::SKYBOX_MANIFEST_ASSET_NAME)
     {
-        names.push(impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME.to_string());
+        names.push(impeller_kdl::SKYBOX_MANIFEST_ASSET_NAME.to_string());
     }
     (names, skybox_name)
 }
@@ -98,7 +98,7 @@ pub fn assets_http_base_url(tcp: SocketAddr) -> String {
 #[derive(Error, Debug)]
 pub enum SyncAssetsError {
     #[error("failed to parse schematic KDL")]
-    Parse(#[source] impeller2_kdl::KdlSchematicError),
+    Parse(#[source] impeller_kdl::KdlSchematicError),
     #[error("asset index returned HTTP {0}")]
     IndexStatus(reqwest::StatusCode),
     #[error("failed to fetch asset index from source")]
@@ -471,8 +471,7 @@ pub async fn sync_schematic_assets_from_source(
     schematic_kdl: &str,
     db_config: Option<&DbConfig>,
 ) -> Result<(), SyncAssetsError> {
-    let schematic =
-        impeller2_kdl::parse_schematic(schematic_kdl).map_err(SyncAssetsError::Parse)?;
+    let schematic = impeller_kdl::parse_schematic(schematic_kdl).map_err(SyncAssetsError::Parse)?;
     let (names, skybox_name) = schematic_sync_asset_names(&schematic, db_config);
     if names.is_empty() {
         return Ok(());
@@ -487,7 +486,7 @@ pub async fn sync_schematic_assets_from_source(
 
     for name in names {
         if let Some(bytes) = sync_one_schematic_asset(&client, &base, &assets_dir, &name).await {
-            if name == impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME {
+            if name == impeller_kdl::SKYBOX_MANIFEST_ASSET_NAME {
                 skybox_manifest = Some(bytes);
             }
             synced.insert(name);
@@ -497,7 +496,7 @@ pub async fn sync_schematic_assets_from_source(
     if let (Some(skybox_name), Some(manifest)) = (skybox_name, skybox_manifest)
         && let Ok(manifest) = std::str::from_utf8(&manifest)
     {
-        match impeller2_kdl::skybox_manifest_cubemap_asset_name(manifest, &skybox_name) {
+        match impeller_kdl::skybox_manifest_cubemap_asset_name(manifest, &skybox_name) {
             Ok(Some(cubemap_name)) if !synced.contains(&cubemap_name) => {
                 let _ = sync_one_schematic_asset(&client, &base, &assets_dir, &cubemap_name).await;
             }
@@ -1382,7 +1381,7 @@ object_3d "rocket.world_pos" {
     #[test]
     fn skybox_name_for_schematic_sync_prefers_metadata() {
         let schematic = Schematic {
-            skybox: Some(impeller2_wkt::SkyboxConfig {
+            skybox: Some(impeller_wkt::SkyboxConfig {
                 name: "desert_night".to_string(),
             }),
             ..Default::default()
@@ -1404,7 +1403,7 @@ object_3d "rocket.world_pos" {
         assert_eq!(skybox.as_deref(), Some("alpine"));
         assert_eq!(
             names,
-            vec![impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME.to_string()]
+            vec![impeller_kdl::SKYBOX_MANIFEST_ASSET_NAME.to_string()]
         );
     }
 

@@ -10,8 +10,8 @@ use bevy::{
 };
 use bevy_egui::egui::{self, Align2, Color32, FontId, Pos2, Sense, Shape, Stroke, Vec2};
 use bevy_geo_frames::{GeoContext, GeoFrame};
-use impeller2_bevy::{EntityMap, TelemetryCache};
-use impeller2_wkt::{ComponentValue, CurrentTimestamp};
+use impeller_bevy::{EntityMap, TelemetryCache};
+use impeller_wkt::{ComponentValue, CurrentTimestamp};
 use std::f32::consts::TAU;
 
 use super::{BARE_QUAT_UNIT_TOLERANCE, EqlBinding, GaugePane, gauge_title, text_with_halo};
@@ -216,7 +216,7 @@ fn canonical_hemisphere(q: DQuat) -> DQuat {
 /// Extract an attitude quaternion from a component value.
 ///
 /// Accepts only (in `F32` or `F64`):
-/// - a SpatialTransform / [`WorldPos`](impeller2_wkt::WorldPos) (≥7 elements
+/// - a SpatialTransform / [`WorldPos`](impeller_wkt::WorldPos) (≥7 elements
 ///   whose head 4 are the quaternion `[x, y, z, w]`), or
 /// - a bare, (approximately) unit-length 4-vector `[x, y, z, w]`.
 ///

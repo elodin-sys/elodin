@@ -234,7 +234,7 @@ runs:
   process.
 - **A managed external process** via `world.recipe(...)` — Elodin launches and
   tears down the real flight-software binary alongside the sim (covered next).
-- **A networked client** over the Impeller2 protocol talking to `elodin-db`: any
+- **A networked client** over the Impeller protocol talking to `elodin-db`: any
   external program — or **hardware-in-the-loop** rig — reads sensor components and
   writes `external_control` commands without an in-process bridge.
 

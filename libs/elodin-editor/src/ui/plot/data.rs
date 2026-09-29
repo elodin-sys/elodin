@@ -9,12 +9,12 @@ use bevy::{
 };
 use bevy_render::render_resource::{Buffer, BufferDescriptor, BufferSlice, BufferUsages};
 use bevy_render::renderer::{RenderDevice, RenderQueue};
-use impeller2::types::{ComponentId, ComponentView, OwnedPacket, PacketId, Timestamp};
-use impeller2_bevy::{
+use impeller::types::{ComponentId, ComponentView, OwnedPacket, PacketId, Timestamp};
+use impeller_bevy::{
     BackfillState, CommandsExt, ComponentAdapters, ComponentPathRegistry, ComponentSchemaRegistry,
     PacketGrantR, PacketHandlerInput, PacketHandlers, SeriesFetchPriority, TelemetryCache,
 };
-use impeller2_wkt::{
+use impeller_wkt::{
     ComponentValue, CurrentTimestamp, EarliestTimestamp, GetTimeSeries, GetTimeSeriesPredecessor,
     Line3d, PointTrails, VectorArrow3d,
 };
@@ -768,7 +768,7 @@ fn apply_hold_anchor_payload(
     if timestamps.len() != 1 || timestamp > start || buf.len() != size {
         return false;
     }
-    let Ok(view) = impeller2::types::ComponentView::try_from_bytes_shape(
+    let Ok(view) = impeller::types::ComponentView::try_from_bytes_shape(
         buf,
         schema.shape(),
         schema.prim_type(),
@@ -989,7 +989,7 @@ fn apply_visible_prefetch_payload(
     }
     for (i, &timestamp) in timestamps.iter().enumerate() {
         let offset = i * elem_size;
-        let Ok(view) = impeller2::types::ComponentView::try_from_bytes_shape(
+        let Ok(view) = impeller::types::ComponentView::try_from_bytes_shape(
             &buf[offset..offset + elem_size],
             schema.shape(),
             schema.prim_type(),
@@ -1403,17 +1403,17 @@ fn collect_eql_component_ids(eql: &str, eql_ctx: &EqlContext, out: &mut HashSet<
 }
 
 fn collect_object_3d_mesh_component_ids(
-    mesh: &impeller2_wkt::Object3DMesh,
+    mesh: &impeller_wkt::Object3DMesh,
     eql_ctx: &EqlContext,
     out: &mut HashSet<ComponentId>,
 ) {
     match mesh {
-        impeller2_wkt::Object3DMesh::Glb { animations, .. } => {
+        impeller_wkt::Object3DMesh::Glb { animations, .. } => {
             for anim in animations {
                 collect_eql_component_ids(&anim.eql_expr, eql_ctx, out);
             }
         }
-        impeller2_wkt::Object3DMesh::Ellipsoid {
+        impeller_wkt::Object3DMesh::Ellipsoid {
             scale,
             error_covariance_cholesky,
             error_covariance,
@@ -1427,7 +1427,7 @@ fn collect_object_3d_mesh_component_ids(
                 collect_eql_component_ids(scale, eql_ctx, out);
             }
         }
-        impeller2_wkt::Object3DMesh::Mesh { .. } => {}
+        impeller_wkt::Object3DMesh::Mesh { .. } => {}
     }
 }
 
@@ -3327,7 +3327,7 @@ pub const MAX_INDEX_STEP_DOUBLINGS: usize = 26;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use impeller2_wkt::ComponentValue;
+    use impeller_wkt::ComponentValue;
 
     #[test]
     fn next_timestamp_advances_by_one_microsecond() {
@@ -3476,8 +3476,8 @@ mod tests {
 
     #[test]
     fn tuple_array_access_eql_component_is_allowlisted() {
-        use impeller2::schema::Schema;
-        use impeller2::types::PrimType;
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
 
         let name = "effector.cube_pos_ecef";
         let component = Arc::new(eql::Component::new(
@@ -3529,9 +3529,9 @@ mod tests {
 
     #[test]
     fn ellipsoid_covariance_eql_components_are_allowlisted() {
-        use impeller2::schema::Schema;
-        use impeller2::types::PrimType;
-        use impeller2_wkt::{
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
+        use impeller_wkt::{
             Object3DMesh, default_ellipsoid_color, default_ellipsoid_confidence_interval,
             default_ellipsoid_grid_color,
         };
@@ -3593,9 +3593,9 @@ mod tests {
 
     #[test]
     fn glb_joint_animation_eql_components_are_allowlisted() {
-        use impeller2::schema::Schema;
-        use impeller2::types::PrimType;
-        use impeller2_wkt::{JointAnimation, Object3DMesh};
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
+        use impeller_wkt::{JointAnimation, Object3DMesh};
 
         let components = [
             "CANOPENMOTORMESSAGE3.ACTUAL_POSITION",
@@ -3649,7 +3649,7 @@ mod tests {
 
     #[test]
     fn viewport_adapter_ids_expand_pair_paths_by_leaf() {
-        use impeller2_wkt::ComponentPath;
+        use impeller_wkt::ComponentPath;
         let leaf = ComponentId::new("world_pos");
         let pair = ComponentId::new("ball_1.world_pos");
         let mut path_reg = ComponentPathRegistry::default();
@@ -4017,8 +4017,8 @@ mod tests {
 
     #[test]
     fn empty_visible_page_marks_coverage_and_completes_request() {
-        use impeller2::schema::Schema;
-        use impeller2::types::PrimType;
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
 
         let id = ComponentId::new("test.visible.empty");
         let mut schemas = ComponentSchemaRegistry::default();
@@ -4045,8 +4045,8 @@ mod tests {
 
     #[test]
     fn empty_sparse_windows_do_not_leak_request_slots() {
-        use impeller2::schema::Schema;
-        use impeller2::types::PrimType;
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
 
         let id = ComponentId::new("test.visible.sparse");
         let mut schemas = ComponentSchemaRegistry::default();
@@ -4086,8 +4086,8 @@ mod tests {
 
     #[test]
     fn visible_pages_share_one_logical_request_until_complete() {
-        use impeller2::schema::Schema;
-        use impeller2::types::PrimType;
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
 
         let id = ComponentId::new("test.visible.pages");
         let mut schemas = ComponentSchemaRegistry::default();
@@ -4140,8 +4140,8 @@ mod tests {
 
     #[test]
     fn malformed_visible_page_schedules_retry_without_coverage() {
-        use impeller2::schema::Schema;
-        use impeller2::types::PrimType;
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
 
         let id = ComponentId::new("test.visible.malformed");
         let mut schemas = ComponentSchemaRegistry::default();
@@ -4179,8 +4179,8 @@ mod tests {
 
     #[test]
     fn hold_anchor_payload_confirms_only_empty_or_valid_replies() {
-        use impeller2::schema::Schema;
-        use impeller2::types::PrimType;
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
 
         let id = ComponentId::new("test.anchor.payload");
         let mut schemas = ComponentSchemaRegistry::default();
@@ -4530,7 +4530,7 @@ mod tests {
     #[test]
     fn sensor_camera_world_pos_ids_from_configs() {
         use crate::sensor_camera::SensorCameraConfigs;
-        use impeller2_wkt::SensorCameraConfig;
+        use impeller_wkt::SensorCameraConfig;
         let configs = SensorCameraConfigs(vec![SensorCameraConfig {
             entity_name: "cam_ball_a".into(),
             camera_name: "scene_cam".into(),

@@ -13,7 +13,7 @@ pub enum Error {
     #[error("component value had wrong size")]
     ValueSizeMismatch,
     #[error("impeller error: {0}")]
-    Impeller(#[from] impeller2::error::Error),
+    Impeller(#[from] impeller::error::Error),
     #[error("channel closed")]
     ChannelClosed,
     #[error("io {0}")]

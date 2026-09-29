@@ -12,7 +12,7 @@ use bevy::{
     winit::WINIT_WINDOWS,
 };
 use bevy_defer::{AccessError, AsyncCommandsExtension, AsyncWorld};
-use impeller2_wkt::WindowRect;
+use impeller_wkt::WindowRect;
 #[cfg(target_os = "macos")]
 use winit::dpi::LogicalPosition;
 use winit::{

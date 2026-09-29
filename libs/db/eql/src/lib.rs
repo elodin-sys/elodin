@@ -8,11 +8,11 @@ use std::{
 use unicode_ident::*;
 
 use convert_case::Casing;
-use impeller2::{
+use impeller::{
     schema::Schema,
     types::{ComponentId, Timestamp},
 };
-use impeller2_wkt::ComponentPath;
+use impeller_wkt::ComponentPath;
 use peg::error::ParseError;
 
 /// DataFusion table/column ident for a component name.
@@ -878,7 +878,7 @@ mod tests {
     }
 
     fn create_test_entity_component() -> Arc<Component> {
-        use impeller2::types::{ComponentId, PrimType};
+        use impeller::types::{ComponentId, PrimType};
 
         Arc::new(Component::new(
             "a.world_pos".to_string(),
@@ -922,7 +922,7 @@ mod tests {
         let component = Arc::new(Component::new(
             "CANOPENMOTORMESSAGE3.ACTUAL_POSITION".to_string(),
             ComponentId::new("CANOPENMOTORMESSAGE3.ACTUAL_POSITION"),
-            Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+            Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
         ));
         let context = Context::from_leaves([component.clone()], Timestamp(0), Timestamp(1000));
         let expr = context
@@ -1056,7 +1056,7 @@ mod tests {
 
     #[test]
     fn test_two_table_join_sql() {
-        use impeller2::types::{ComponentId, PrimType};
+        use impeller::types::{ComponentId, PrimType};
 
         let part1 = create_test_component_part();
         let context = create_test_context();
@@ -1110,7 +1110,7 @@ mod tests {
 
     #[test]
     fn test_three_table_join_sql() {
-        use impeller2::types::{ComponentId, PrimType};
+        use impeller::types::{ComponentId, PrimType};
 
         let part1 = create_test_component_part();
         let context = create_test_context();
@@ -1347,7 +1347,7 @@ mod tests {
             let v_body_comp = Arc::new(Component::new(
                 "rocket.v_body".to_string(),
                 ComponentId::new("rocket.v_body"),
-                Schema::new(impeller2::types::PrimType::F64, vec![3u64]).unwrap(),
+                Schema::new(impeller::types::PrimType::F64, vec![3u64]).unwrap(),
             ));
             Context::from_leaves([v_body_comp], Timestamp(0), Timestamp(1000))
         }
@@ -1394,7 +1394,7 @@ mod tests {
             let component = Arc::new(Component::new(
                 "a.value".to_string(),
                 ComponentId::new("a.value"),
-                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+                Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
             ));
             let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
 
@@ -1438,12 +1438,12 @@ mod tests {
             let y_comp = Arc::new(Component::new(
                 "a.y".to_string(),
                 ComponentId::new("a.y"),
-                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+                Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
             ));
             let x_comp = Arc::new(Component::new(
                 "a.x".to_string(),
                 ComponentId::new("a.x"),
-                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+                Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
             ));
             let context = Context::from_leaves([y_comp, x_comp], Timestamp(0), Timestamp(1000));
 
@@ -1466,7 +1466,7 @@ mod tests {
             let component = Arc::new(Component::new(
                 "a.value".to_string(),
                 ComponentId::new("a.value"),
-                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+                Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
             ));
             let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
 
@@ -1484,7 +1484,7 @@ mod tests {
             let component = Arc::new(Component::new(
                 "a.value".to_string(),
                 ComponentId::new("a.value"),
-                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+                Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
             ));
             let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
 
@@ -1566,7 +1566,7 @@ mod tests {
             let component = Arc::new(Component::new(
                 "a.value".to_string(),
                 ComponentId::new("a.value"),
-                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+                Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
             ));
             let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
 
@@ -1587,7 +1587,7 @@ mod tests {
             let component = Arc::new(Component::new(
                 "a.value".to_string(),
                 ComponentId::new("a.value"),
-                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+                Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
             ));
             let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
 
@@ -1605,7 +1605,7 @@ mod tests {
             let component = Arc::new(Component::new(
                 "a.temperature".to_string(),
                 ComponentId::new("a.temperature"),
-                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+                Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
             ));
             let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
 
@@ -1656,7 +1656,7 @@ mod tests {
             let component = Arc::new(Component::new(
                 "a.value".to_string(),
                 ComponentId::new("a.value"),
-                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+                Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
             ));
             let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
 

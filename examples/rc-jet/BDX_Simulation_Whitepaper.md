@@ -565,7 +565,7 @@ def system():
 - Failure modes (engine-out, surface jam)
 
 ### 10.4 Hardware-in-the-Loop
-- External control via Impeller2 protocol
+- External control via Impeller protocol
 - Real RC transmitter input
 - Connection to actual flight controller firmware
 

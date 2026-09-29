@@ -2,7 +2,7 @@ use std::{io::Write, net::SocketAddr, path::PathBuf};
 
 use clap::{Parser, Subcommand, ValueEnum};
 use elodin_db::Server;
-use impeller2::vtable;
+use impeller::vtable;
 use miette::IntoDiagnostic;
 use postcard_c_codegen::SchemaExt;
 use tracing::info;
@@ -26,7 +26,7 @@ enum Commands {
     #[command(about = "Run the Elodin database server")]
     Run(RunArgs),
     #[command(about = "Run a Lua script or launch a REPL")]
-    Lua(impeller2_cli::Args),
+    Lua(impeller_cli::Args),
     #[command(about = "Generate C++ header files")]
     GenCpp,
     #[command(
@@ -543,7 +543,7 @@ async fn main() -> miette::Result<()> {
             if let Some(start_timestamp) = start_timestamp {
                 server
                     .db
-                    .set_earliest_timestamp(impeller2::types::Timestamp(start_timestamp))
+                    .set_earliest_timestamp(impeller::types::Timestamp(start_timestamp))
                     .into_diagnostic()?;
             }
             #[cfg(feature = "axum")]
@@ -576,18 +576,18 @@ async fn main() -> miette::Result<()> {
                 }
             });
             if let Some(lua_config) = config {
-                let args = impeller2_cli::Args {
+                let args = impeller_cli::Args {
                     config: Some(lua_config),
                     db: Some(path.clone()),
                     lua_args: vec![],
                 };
-                impeller2_cli::run(args)
+                impeller_cli::run(args)
                     .await
                     .map_err(|e| miette::miette!(e))?;
             }
             db.await.unwrap().into_diagnostic()
         }
-        Commands::Lua(args) => impeller2_cli::run(args)
+        Commands::Lua(args) => impeller_cli::run(args)
             .await
             .map_err(|e| miette::miette!(e)),
         Commands::GenCpp => {
@@ -595,21 +595,21 @@ async fn main() -> miette::Result<()> {
                 "ELODIN_DB",
                 [
                     include_str!("../../postcard-c/postcard.h").to_string(),
-                    impeller2_wkt::InitialTimestamp::to_cpp()?,
-                    impeller2_wkt::FixedRateBehavior::to_cpp()?,
-                    impeller2_wkt::StreamBehavior::to_cpp()?,
-                    impeller2_wkt::Stream::to_cpp()?,
-                    impeller2_wkt::MsgStream::to_cpp()?,
+                    impeller_wkt::InitialTimestamp::to_cpp()?,
+                    impeller_wkt::FixedRateBehavior::to_cpp()?,
+                    impeller_wkt::StreamBehavior::to_cpp()?,
+                    impeller_wkt::Stream::to_cpp()?,
+                    impeller_wkt::MsgStream::to_cpp()?,
                     vtable::Field::to_cpp()?,
                     vtable::Op::to_cpp()?,
                     vtable::OpRef::to_cpp()?,
-                    impeller2::types::PrimType::to_cpp()?,
+                    impeller::types::PrimType::to_cpp()?,
                     vtable::VTable::<Vec<vtable::Op>, Vec<u8>, Vec<vtable::Field>>::to_cpp()?,
-                    impeller2_wkt::VTableMsg::to_cpp()?,
-                    impeller2_wkt::VTableStream::to_cpp()?,
-                    impeller2_wkt::ComponentMetadata::to_cpp()?,
-                    impeller2_wkt::SetComponentMetadata::to_cpp()?,
-                    impeller2_wkt::LogEntry::to_cpp()?,
+                    impeller_wkt::VTableMsg::to_cpp()?,
+                    impeller_wkt::VTableStream::to_cpp()?,
+                    impeller_wkt::ComponentMetadata::to_cpp()?,
+                    impeller_wkt::SetComponentMetadata::to_cpp()?,
+                    impeller_wkt::LogEntry::to_cpp()?,
                     include_str!("../cpp/helpers.hpp").to_string(),
                     gen_log_helpers()?,
                     include_str!("../cpp/vtable.hpp").to_string(),
@@ -826,7 +826,7 @@ async fn main() -> miette::Result<()> {
 }
 
 fn run_info(args: InfoArgs) -> miette::Result<()> {
-    use impeller2_wkt::DbConfig;
+    use impeller_wkt::DbConfig;
 
     let db_state_path = match args.path {
         Some(path) => {
@@ -894,7 +894,7 @@ fn format_duration(duration: std::time::Duration) -> String {
     }
 }
 
-fn print_metadata(config: &impeller2_wkt::DbConfig) {
+fn print_metadata(config: &impeller_wkt::DbConfig) {
     let meta = &config.metadata;
 
     // Filter out version keys (displayed separately) and collect remaining metadata
@@ -916,8 +916,8 @@ fn print_metadata(config: &impeller2_wkt::DbConfig) {
 
 /// Generate C++ logging helpers with precomputed LogEntry schema bytes.
 fn gen_log_helpers() -> miette::Result<String> {
-    use impeller2::types::Msg;
-    use impeller2_wkt::{MsgMetadata, SetMsgMetadata, log_entry_msg_schema};
+    use impeller::types::Msg;
+    use impeller_wkt::{MsgMetadata, SetMsgMetadata, log_entry_msg_schema};
 
     let schema = log_entry_msg_schema();
     let set_msg_meta_id = SetMsgMetadata::ID;

@@ -11,7 +11,7 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use colored::*;
-use impeller2_stellar::Client;
+use impeller_stellar::Client;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tracing::info;

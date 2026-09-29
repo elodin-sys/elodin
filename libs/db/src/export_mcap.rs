@@ -27,8 +27,8 @@ use std::sync::Arc;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use glob::Pattern;
-use impeller2::types::{PacketId, PrimType, Timestamp, msg_id};
-use impeller2_wkt::{
+use impeller::types::{PacketId, PrimType, Timestamp, msg_id};
+use impeller_wkt::{
     Color, Line3d, LogEntry, Object3D, Object3DMesh, Panel, Schematic, SchematicElem,
     SensorCameraConfig, VectorArrow3d, log_entry_msg_schema,
 };
@@ -145,7 +145,7 @@ fn element_paths(
         // EQL default names for this shape (single source of truth for naming).
         eql::Component::new(
             name.to_string(),
-            impeller2::types::ComponentId::new(name),
+            impeller::types::ComponentId::new(name),
             schema.to_schema(),
         )
         .element_names
@@ -330,7 +330,7 @@ fn quat_from_mat3_cols(c0: [f64; 3], c1: [f64; 3], c2: [f64; 3]) -> [f64; 4] {
     }
 }
 
-fn geo_frame_anchors(origin: &impeller2_wkt::GeoOriginConfig) -> GeoFrameAnchors {
+fn geo_frame_anchors(origin: &impeller_wkt::GeoOriginConfig) -> GeoFrameAnchors {
     const WGS84_A: f64 = 6_378_137.0;
     const WGS84_E2: f64 = 6.694_379_990_141_316_5e-3;
     let lat = origin.latitude.to_radians();
@@ -545,7 +545,7 @@ fn load_schematics(db_path: &Path, active_key: Option<&str>) -> LoadedSchematics
     loaded
         .raw
         .push((key.to_string(), primary_kdl.clone().into_bytes()));
-    let primary = match impeller2_kdl::parse_schematic(&primary_kdl) {
+    let primary = match impeller_kdl::parse_schematic(&primary_kdl) {
         Ok(s) => s,
         Err(err) => {
             eprintln!("Warning: failed to parse schematic {key}: {err}");
@@ -561,7 +561,7 @@ fn load_schematics(db_path: &Path, active_key: Option<&str>) -> LoadedSchematics
         };
         let sub_key = asset_key(path).to_string();
         match std::fs::read_to_string(assets_dir.join(&sub_key)) {
-            Ok(kdl) => match impeller2_kdl::parse_schematic(&kdl) {
+            Ok(kdl) => match impeller_kdl::parse_schematic(&kdl) {
                 Ok(sub) => {
                     loaded.raw.push((sub_key.clone(), kdl.into_bytes()));
                     loaded.windows.push((sub_key, sub));
@@ -1343,20 +1343,20 @@ fn build_object_entity(
             let color = color_json(&material.base_color);
             let pose = model_pose.clone();
             match mesh {
-                impeller2_wkt::Mesh::Sphere { radius } => {
+                impeller_wkt::Mesh::Sphere { radius } => {
                     let d = (radius * 2.0) as f64;
                     entity.insert(
                         "spheres".into(),
                         json!([{"pose": pose, "size": {"x": d, "y": d, "z": d}, "color": color}]),
                     );
                 }
-                impeller2_wkt::Mesh::Box { x, y, z } => {
+                impeller_wkt::Mesh::Box { x, y, z } => {
                     entity.insert(
                         "cubes".into(),
                         json!([{"pose": pose, "size": {"x": x, "y": y, "z": z}, "color": color}]),
                     );
                 }
-                impeller2_wkt::Mesh::Cylinder { radius, height } => {
+                impeller_wkt::Mesh::Cylinder { radius, height } => {
                     let d = (radius * 2.0) as f64;
                     entity.insert(
                         "cylinders".into(),
@@ -1367,7 +1367,7 @@ fn build_object_entity(
                         }]),
                     );
                 }
-                impeller2_wkt::Mesh::Plane { width, depth } => {
+                impeller_wkt::Mesh::Plane { width, depth } => {
                     entity.insert(
                         "cubes".into(),
                         json!([{
@@ -1822,7 +1822,7 @@ impl<'a> LayoutBuilder<'a> {
     }
 
     /// Fold an n-way split into nested binary mosaic nodes with split percentages.
-    fn split_node(&mut self, split: &impeller2_wkt::Split, direction: &str) -> Option<Value> {
+    fn split_node(&mut self, split: &impeller_wkt::Split, direction: &str) -> Option<Value> {
         let children: Vec<(Value, f32)> = split
             .panels
             .iter()
@@ -3162,7 +3162,7 @@ mod tests {
         let _ = std::fs::create_dir_all(&db_path);
         let component = crate::Component::create(
             &db_path,
-            impeller2::types::ComponentId::new(name),
+            impeller::types::ComponentId::new(name),
             name.to_string(),
             crate::ComponentSchema::new(prim, dim),
             Timestamp(0),
@@ -3368,8 +3368,8 @@ mod tests {
     fn vector_element_indices_explicit_tuple() {
         let component = Arc::new(eql::Component::new(
             "ball.world_vel".into(),
-            impeller2::types::ComponentId::new("ball.world_vel"),
-            impeller2::schema::Schema::new(PrimType::F64, [6usize]).unwrap(),
+            impeller::types::ComponentId::new("ball.world_vel"),
+            impeller::schema::Schema::new(PrimType::F64, [6usize]).unwrap(),
         ));
         let ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1_000_000));
         let expr = ctx
@@ -3388,13 +3388,13 @@ mod tests {
         // linear part; plain 3-vector -> all of it).
         let vel = Arc::new(eql::Component::new(
             "ball.world_vel".into(),
-            impeller2::types::ComponentId::new("ball.world_vel"),
-            impeller2::schema::Schema::new(PrimType::F64, [6usize]).unwrap(),
+            impeller::types::ComponentId::new("ball.world_vel"),
+            impeller::schema::Schema::new(PrimType::F64, [6usize]).unwrap(),
         ));
         let wind = Arc::new(eql::Component::new(
             "ball.wind".into(),
-            impeller2::types::ComponentId::new("ball.wind"),
-            impeller2::schema::Schema::new(PrimType::F64, [3usize]).unwrap(),
+            impeller::types::ComponentId::new("ball.wind"),
+            impeller::schema::Schema::new(PrimType::F64, [3usize]).unwrap(),
         ));
         let ctx = eql::Context::from_leaves([vel, wind], Timestamp(0), Timestamp(1_000_000));
         let expr = ctx.parse_str("ball.world_vel").unwrap();
@@ -3450,8 +3450,8 @@ mod tests {
         // Entity-backed object needs a component leaf named like `lander.world_pos`.
         let component = Arc::new(eql::Component::new(
             "lander.world_pos".into(),
-            impeller2::types::ComponentId::new("lander.world_pos"),
-            impeller2::schema::Schema::new(PrimType::F64, [7usize]).unwrap(),
+            impeller::types::ComponentId::new("lander.world_pos"),
+            impeller::schema::Schema::new(PrimType::F64, [7usize]).unwrap(),
         ));
         let ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1_000_000));
         let object = test_glb_object(
@@ -3535,8 +3535,8 @@ mod tests {
     fn ctx_with_pose(name: &str) -> eql::Context {
         let component = Arc::new(eql::Component::new(
             name.into(),
-            impeller2::types::ComponentId::new(name),
-            impeller2::schema::Schema::new(PrimType::F64, [7usize]).unwrap(),
+            impeller::types::ComponentId::new(name),
+            impeller::schema::Schema::new(PrimType::F64, [7usize]).unwrap(),
         ));
         eql::Context::from_leaves([component], Timestamp(0), Timestamp(1_000_000))
     }
@@ -3683,7 +3683,7 @@ mod tests {
 
     #[test]
     fn geo_anchors_equator_prime_meridian() {
-        let anchors = geo_frame_anchors(&impeller2_wkt::GeoOriginConfig {
+        let anchors = geo_frame_anchors(&impeller_wkt::GeoOriginConfig {
             latitude: 0.0,
             longitude: 0.0,
             altitude: 0.0,

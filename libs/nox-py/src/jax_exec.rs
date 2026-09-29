@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
-use impeller2::types::ComponentId;
+use impeller::types::ComponentId;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyTuple};
 

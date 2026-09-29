@@ -7,10 +7,10 @@ use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
 use bevy_egui::egui::{self, Color32};
 
-use impeller2::schema::Schema;
-use impeller2::types::{ComponentId, Timestamp};
-use impeller2_bevy::ComponentPath;
-use impeller2_wkt::{ComponentMetadata, GraphType};
+use impeller::schema::Schema;
+use impeller::types::{ComponentId, Timestamp};
+use impeller_bevy::ComponentPath;
+use impeller_wkt::{ComponentMetadata, GraphType};
 
 use super::gpu::LineVisibleRange;
 use crate::MainCamera;
@@ -194,7 +194,7 @@ pub fn graph_lines_from_component(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use impeller2::types::PrimType;
+    use impeller::types::PrimType;
     use std::collections::HashMap;
 
     fn test_schema(shape: &[u64]) -> Schema<Vec<u64>> {

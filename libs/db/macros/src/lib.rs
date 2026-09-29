@@ -75,7 +75,7 @@ pub fn as_vtable(input: TokenStream) -> TokenStream {
 
 pub(crate) fn impeller_crate_name() -> proc_macro2::TokenStream {
     let name =
-        crate_name("impeller2").expect("impeller2 must be a dependency to use db-macros derives");
+        crate_name("impeller").expect("impeller must be a dependency to use db-macros derives");
 
     match name {
         FoundCrate::Itself => quote!(crate),
@@ -87,8 +87,8 @@ pub(crate) fn impeller_crate_name() -> proc_macro2::TokenStream {
 }
 
 pub(crate) fn wkt_crate_name() -> proc_macro2::TokenStream {
-    let name = crate_name("impeller2-wkt")
-        .expect("impeller2-wkt must be a dependency to use db-macros derives");
+    let name = crate_name("impeller-wkt")
+        .expect("impeller-wkt must be a dependency to use db-macros derives");
 
     match name {
         FoundCrate::Itself => quote!(crate),

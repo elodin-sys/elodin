@@ -86,7 +86,7 @@ mod tests {
         ManifestEntry, SkyboxStyle,
         prelude::{PrimarySkybox, SetActiveSkybox, SkyboxAssetPlugin, SkyboxCache},
     };
-    use impeller2_wkt::{DbConfig, Schematic, SchematicElem, SkyboxConfig};
+    use impeller_wkt::{DbConfig, Schematic, SchematicElem, SkyboxConfig};
     use std::{
         fs,
         path::{Path, PathBuf},
@@ -203,7 +203,7 @@ mod tests {
         let window = doc.windows.first()?;
         let window_doc = assets.get(&window.handle)?;
         window_doc.root.elems.iter().find_map(|elem| match elem {
-            SchematicElem::Panel(impeller2_wkt::Panel::Graph(graph)) => graph.name.as_deref(),
+            SchematicElem::Panel(impeller_wkt::Panel::Graph(graph)) => graph.name.as_deref(),
             _ => None,
         })
     }
@@ -322,7 +322,7 @@ mod tests {
         app.world_mut().write_message(DocumentLoaded {
             save_path: None,
             document: SchematicDocumentAsset {
-                root: impeller2_wkt::Schematic {
+                root: impeller_wkt::Schematic {
                     skybox: skybox.map(|name| SkyboxConfig {
                         name: name.to_string(),
                     }),
@@ -342,7 +342,7 @@ mod tests {
         app.world_mut().write_message(DocumentLoaded {
             save_path: None,
             document: SchematicDocumentAsset {
-                root: impeller2_wkt::Schematic {
+                root: impeller_wkt::Schematic {
                     skybox: Some(SkyboxConfig {
                         name: "grand_canyon".to_string(),
                     }),
@@ -369,7 +369,7 @@ mod tests {
         app.world_mut().write_message(DocumentLoaded {
             save_path: None,
             document: SchematicDocumentAsset {
-                root: impeller2_wkt::Schematic::default(),
+                root: impeller_wkt::Schematic::default(),
                 windows: Vec::new(),
             },
             explicit: false,
@@ -390,7 +390,7 @@ mod tests {
             .insert("skybox.active".to_string(), String::new());
 
         let document = SchematicDocumentAsset {
-            root: impeller2_wkt::Schematic {
+            root: impeller_wkt::Schematic {
                 skybox: Some(SkyboxConfig {
                     name: "grand_canyon".to_string(),
                 }),
@@ -833,7 +833,7 @@ mod tests {
 
         // ...matches the normalized serialization of the same schematic.
         let normalized = {
-            use impeller2_kdl::{FromKdl, ToKdl};
+            use impeller_kdl::{FromKdl, ToKdl};
             Schematic::from_kdl("viewport {\n}\n").unwrap().to_kdl()
         };
         assert!(content.matches("schematics/main.kdl", &normalized));
@@ -1155,7 +1155,7 @@ mod tests {
         let temp = TempTestDir::new("config-sync-skip-current");
         let path = temp.path().join("drone.kdl");
         fs::write(&path, "timeline\n").expect("write kdl");
-        let resolved_path = impeller2_kdl::env::schematic_file(&path);
+        let resolved_path = impeller_kdl::env::schematic_file(&path);
 
         let given = path.clone();
         let mut app = App::new();
@@ -1193,8 +1193,8 @@ mod tests {
     }
 
     fn eql_component(name: &str) -> std::sync::Arc<eql::Component> {
-        use impeller2::schema::Schema;
-        use impeller2::types::{ComponentId, PrimType};
+        use impeller::schema::Schema;
+        use impeller::types::{ComponentId, PrimType};
 
         std::sync::Arc::new(eql::Component::new(
             name.to_string(),
@@ -1238,7 +1238,7 @@ mod tests {
     /// fingerprint changes so large FSW dumps cannot respawn the 3D scene.
     #[test]
     fn reload_sticky_kdl_when_eql_ready_opens_once() {
-        use impeller2::types::Timestamp;
+        use impeller::types::Timestamp;
 
         let temp = TempTestDir::new("sticky-kdl-eql-ready");
         let path = temp.path().join("local.kdl");
@@ -1310,12 +1310,12 @@ mod tests {
 
     #[test]
     fn reload_sticky_kdl_skips_when_document_already_loaded() {
-        use impeller2::types::Timestamp;
+        use impeller::types::Timestamp;
 
         let temp = TempTestDir::new("sticky-kdl-already-loaded");
         let path = temp.path().join("local.kdl");
         fs::write(&path, "timeline\n").expect("write kdl");
-        let resolved_path = impeller2_kdl::env::schematic_file(&path);
+        let resolved_path = impeller_kdl::env::schematic_file(&path);
 
         let mut app = sticky_kdl_test_app(path);
         {
@@ -1345,7 +1345,7 @@ mod tests {
         let temp = TempTestDir::new("sticky-kdl-blocks-active");
         let path = temp.path().join("local.kdl");
         fs::write(&path, "timeline\n").expect("write kdl");
-        let resolved_path = impeller2_kdl::env::schematic_file(&path);
+        let resolved_path = impeller_kdl::env::schematic_file(&path);
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -1400,7 +1400,7 @@ mod tests {
         let temp = TempTestDir::new("sticky-kdl-blocks-revision");
         let path = temp.path().join("local.kdl");
         fs::write(&path, "timeline\n").expect("write kdl");
-        let resolved_path = impeller2_kdl::env::schematic_file(&path);
+        let resolved_path = impeller_kdl::env::schematic_file(&path);
 
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)

@@ -3,7 +3,7 @@ use crate::error::Error;
 use crate::system::{SystemBuilder, SystemParam};
 use crate::utils::SchemaExt;
 use elodin_db::ComponentSchema;
-use impeller2::types::{ComponentId, EntityId};
+use impeller::types::{ComponentId, EntityId};
 use nox::{
     ArrayTy, Builder, CompFn, ElementType, Literal, Noxpr, NoxprFn, NoxprScalarExt, ReprMonad,
 };

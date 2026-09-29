@@ -25,9 +25,9 @@ use bevy::{
     window::{PrimaryWindow, Window},
 };
 use bevy_egui::egui::{self, Align, CornerRadius, Frame, Layout, Margin, RichText, Stroke};
-use impeller2::types::Timestamp;
-use impeller2_bevy::{ComponentMetadataRegistry, ComponentPath, ComponentSchemaRegistry};
-use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp};
+use impeller::types::Timestamp;
+use impeller_bevy::{ComponentMetadataRegistry, ComponentPath, ComponentSchemaRegistry};
+use impeller_wkt::{CurrentTimestamp, EarliestTimestamp};
 use std::time::{Duration, Instant};
 use std::{
     fmt::Debug,

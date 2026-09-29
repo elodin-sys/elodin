@@ -3,9 +3,9 @@ use bevy::prelude::*;
 use bevy_ai_skybox::prelude::{
     SetActiveSkybox, SkyboxCache, SkyboxGenerated, SkyboxGenerationPhase, SkyboxGenerationUi,
 };
-use impeller2_bevy::PacketTx;
-use impeller2_kdl::ToKdl;
-use impeller2_wkt::{DbConfig, SetDbConfig, SkyboxConfig, StoreAsset};
+use impeller_bevy::PacketTx;
+use impeller_kdl::ToKdl;
+use impeller_wkt::{DbConfig, SetDbConfig, SkyboxConfig, StoreAsset};
 use std::collections::VecDeque;
 
 use crate::plugins::kdl_document::{
@@ -463,7 +463,7 @@ fn should_push_loaded_skybox_to_db(loaded: Option<&str>, db: Option<&str>) -> bo
 mod tests {
     use super::*;
     use crate::plugins::kdl_document::{LastSyncedActiveKey, SchematicDocumentAsset};
-    use impeller2_wkt::Schematic;
+    use impeller_wkt::Schematic;
     use std::path::PathBuf;
 
     #[test]

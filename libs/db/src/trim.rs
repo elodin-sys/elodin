@@ -13,7 +13,7 @@ use std::fs::{self, File};
 use std::io::{self, Read, Seek, SeekFrom, Write as IoWrite};
 use std::path::{Path, PathBuf};
 
-use impeller2_wkt::DbConfig;
+use impeller_wkt::DbConfig;
 
 use crate::msg_log::MsgLog;
 use crate::utils::{
@@ -743,9 +743,9 @@ fn write_empty_appendlog(path: &Path) -> Result<(), Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use impeller2::buf::UmbraBuf;
-    use impeller2::types::{ComponentId, Timestamp};
-    use impeller2_wkt::ComponentMetadata;
+    use impeller::buf::UmbraBuf;
+    use impeller::types::{ComponentId, Timestamp};
+    use impeller_wkt::ComponentMetadata;
     use std::collections::HashMap;
     use tempfile::TempDir;
 

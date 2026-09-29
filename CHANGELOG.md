@@ -57,7 +57,7 @@
 - **(fix)** Make `elodin_capture.sh` work on Ubuntu. (#767)
 - **(fix)** Restore minimal terrain rendering. (#761)
 - **(fix:examples)** Put Apollo thruster particles in schematic Z-up. (#797)
-- **(fix:impeller2)** Skip and log malformed fields instead of dropping the table. (#762)
+- **(fix:impeller)** Skip and log malformed fields instead of dropping the table. (#762)
 - **(perf)** Bump to Rust 1.98 and use algebraic float methods on hot paths. (#798)
 - **(perf)** Improve editor FPS on DB playback. (#771)
 - **(chore)** Bump Bevy Hanabi. (#773)

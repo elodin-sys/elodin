@@ -15,9 +15,9 @@ use bevy::{
     ui::Val,
 };
 use egui::{self, Color32, Vec2};
-use impeller2::types::{OwnedPacket, Timestamp};
-use impeller2_bevy::{CommandsExt, CurrentStreamId, PacketGrantR};
-use impeller2_wkt::{CurrentTimestamp, ErrorResponse, GetMsgs, MsgBatch, TimestampedMsgStream};
+use impeller::types::{OwnedPacket, Timestamp};
+use impeller_bevy::{CommandsExt, CurrentStreamId, PacketGrantR};
+use impeller_wkt::{CurrentTimestamp, ErrorResponse, GetMsgs, MsgBatch, TimestampedMsgStream};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -33,7 +33,7 @@ use crate::plugins::frustum_common::frustum_up_marker_color;
 use crate::sensor_camera::SensorCameraConfigs;
 use crate::ui::up_marker::paint_up_marker;
 use crate::ui::widgets::SystemStateExt;
-use impeller2_wkt::FrustumUpMarker;
+use impeller_wkt::FrustumUpMarker;
 
 // ---------------------------------------------------------------------------
 // Public pane types (unchanged API)
@@ -1195,7 +1195,7 @@ pub fn connect_streams(
     )>,
     mut commands: Commands,
     stream_id: Res<CurrentStreamId>,
-    last_updated: Res<impeller2_wkt::LastUpdated>,
+    last_updated: Res<impeller_wkt::LastUpdated>,
 ) {
     for (entity, mut stream, decoder, mut cache) in &mut query {
         match &mut stream.state {
@@ -1302,7 +1302,7 @@ pub fn set_visibility(mut query: Query<(&mut Node, &IsTileVisible)>) {
 
 pub(crate) fn invalidate_sensor_frames_if_loaded_skybox_differs(
     loaded_skybox: Option<&str>,
-    config: &impeller2_wkt::DbConfig,
+    config: &impeller_wkt::DbConfig,
     caches: &mut Query<&mut VideoFrameCache>,
 ) {
     if loaded_skybox == config.skybox_active() {
@@ -1312,7 +1312,7 @@ pub(crate) fn invalidate_sensor_frames_if_loaded_skybox_differs(
 }
 
 pub(crate) fn invalidate_sensor_frames_on_db_skybox_change(
-    config: Res<impeller2_wkt::DbConfig>,
+    config: Res<impeller_wkt::DbConfig>,
     skybox_ui: Option<Res<bevy_ai_skybox::prelude::SkyboxGenerationUi>>,
     mut locally_pushed: ResMut<crate::skybox_generation::LocallyPushedSkyboxActive>,
     mut last_active: Local<Option<String>>,

@@ -60,9 +60,9 @@ use schematic::SchematicPlugin;
 
 use self::colors::get_scheme;
 use self::{command_palette::CommandPaletteState, plot::GraphState, timeline::timeline_slider};
-use impeller2::types::ComponentId;
-use impeller2_bevy::ComponentValueMap;
-use impeller2_wkt::{ComponentMetadata, ComponentValue, WindowRect};
+use impeller::types::ComponentId;
+use impeller_bevy::ComponentValueMap;
+use impeller_wkt::{ComponentMetadata, ComponentValue, WindowRect};
 
 use crate::ui::window::window_entity_from_target;
 use crate::{
@@ -180,7 +180,7 @@ pub enum SelectedObject {
 }
 
 impl SelectedObject {
-    pub fn is_entity_selected(&self, id: impeller2::types::ComponentId) -> bool {
+    pub fn is_entity_selected(&self, id: impeller::types::ComponentId) -> bool {
         matches!(self, SelectedObject::Entity(pair) if pair.impeller == id)
     }
 
@@ -372,7 +372,7 @@ impl Plugin for UiPlugin {
             .add_systems(
                 PreUpdate,
                 sync_windows
-                    .after(impeller2_bevy::sink)
+                    .after(impeller_bevy::sink)
                     .before(EguiPreUpdateSet::BeginPass),
             )
             .add_systems(

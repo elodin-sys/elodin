@@ -1,7 +1,7 @@
 use bevy::ecs::system::{SystemParam, SystemState};
 use bevy::prelude::*;
 use bevy_egui::egui;
-use impeller2_wkt::Line3d;
+use impeller_wkt::Line3d;
 
 use crate::ui::colors::get_scheme;
 use crate::ui::timeline::TimelineSettings;

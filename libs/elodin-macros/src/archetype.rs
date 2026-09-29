@@ -35,8 +35,8 @@ pub fn archetype(input: TokenStream) -> TokenStream {
     let where_clause = &generics.where_clause;
     quote! {
         impl #crate_name::Archetype for #ident #generics #where_clause {
-            fn components() -> Vec<(#crate_name::impeller2::schema::Schema<Vec<u64>>, #crate_name::impeller2_wkt::ComponentMetadata)> {
-                use #crate_name::impeller2::component::Component;
+            fn components() -> Vec<(#crate_name::impeller::schema::Schema<Vec<u64>>, #crate_name::impeller_wkt::ComponentMetadata)> {
+                use #crate_name::impeller::component::Component;
                 use #crate_name::archetype::ComponentExt;
                 vec![#( (<#tys>::schema(), <#tys>::metadata()), )*]
             }

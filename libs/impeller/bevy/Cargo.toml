@@ -1,0 +1,54 @@
+[package]
+name = "impeller-bevy"
+license = "MIT OR Apache-2.0"
+version.workspace = true
+edition = "2024"
+
+[features]
+default = ["tcp"]
+tcp = ["stellarator", "impeller-stellar"]
+
+[dependencies]
+impeller.path = ".."
+impeller.features = ["bevy", "std", "thingbuf"]
+impeller-wkt.path = "../wkt"
+impeller-wkt.features = ["gui", "bevy"]
+nox.path = "../../nox"
+
+# bevy
+bevy.workspace = true
+#bevy.features = ["bevy-asset"]
+
+# channels
+thingbuf = "0.1.6"
+impeller-bbq.path = "../bbq"
+bbqueue.path = "../../bbqueue"
+bbqueue.features = ["std", "maitake-sync-0_3"]
+bbqueue.default-features = false
+stellarator-buf.path = "../../stellarator/buf"
+
+# async
+stellarator.path = "../../stellarator"
+stellarator.optional = true
+stellarator.features = ["miette"]
+impeller-stellar.path = "../stellar"
+impeller-stellar.features = ["queue"]
+impeller-stellar.optional = true
+futures-lite = "2.5.0"
+
+# helpers
+smallvec.version = "1.11.2"
+compact_str = "0.9"
+tracing = "0.1"
+
+# error
+miette.version = "7.2"
+miette.features = ["fancy-no-syscall"]
+
+# rand
+fastrand = "2.2"
+
+# serde
+serde.version = "1.0"
+postcard.version = "1.0.8"
+postcard.features = ["alloc"]

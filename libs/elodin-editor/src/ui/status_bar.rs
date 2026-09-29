@@ -11,10 +11,10 @@ use bevy::{
     window::PrimaryWindow,
 };
 use bevy_ai_skybox::prelude::{SkyboxCacheHealth, SkyboxGenerationUi};
-use impeller2_bevy::{
+use impeller_bevy::{
     ConnectionStatus, SimTimeStepFetch, SimTimeStepSource, ThreadConnectionStatus,
 };
-use impeller2_wkt::SimulationTimeStep;
+use impeller_wkt::SimulationTimeStep;
 use std::time::{Duration, Instant};
 
 use crate::ui::{

@@ -9,8 +9,8 @@ use bevy::{
     prelude::{Commands, Component, Entity, In, Query, Res, ResMut},
 };
 use egui::{Color32, RichText};
-use impeller2_bevy::CommandsExt;
-use impeller2_wkt::{ArrowIPC, ErrorResponse, PlotMode, QueryPlot, QueryType, SQLQuery};
+use impeller_bevy::CommandsExt;
+use impeller_wkt::{ArrowIPC, ErrorResponse, PlotMode, QueryPlot, QueryType, SQLQuery};
 use itertools::Itertools;
 
 use crate::{
@@ -27,7 +27,7 @@ use crate::{
         widgets::WidgetSystem,
     },
 };
-use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp};
+use impeller_wkt::{CurrentTimestamp, EarliestTimestamp};
 
 use super::plot::{Line, gpu};
 use crate::ui::widgets::SystemStateExt;
@@ -60,7 +60,7 @@ pub struct QueryPlotData {
     pub x_offset: f64,
     pub y_offset: f64,
     pub last_refresh: Option<Instant>,
-    pub earliest_timestamp: Option<impeller2::types::Timestamp>,
+    pub earliest_timestamp: Option<impeller::types::Timestamp>,
 }
 
 impl Default for QueryPlotData {
@@ -71,7 +71,7 @@ impl Default for QueryPlotData {
                 query: Default::default(),
                 refresh_interval: Duration::from_millis(500),
                 auto_refresh: Default::default(),
-                color: impeller2_wkt::Color::from_color32(get_scheme().highlight),
+                color: impeller_wkt::Color::from_color32(get_scheme().highlight),
                 query_type: QueryType::EQL,
                 plot_mode: PlotMode::TimeSeries,
                 x_label: None,
@@ -217,7 +217,7 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
         if plot.auto_color {
             let scheme_color = get_scheme().highlight;
             if plot.data.color.into_color32() != scheme_color {
-                plot.data.color = impeller2_wkt::Color::from_color32(scheme_color);
+                plot.data.color = impeller_wkt::Color::from_color32(scheme_color);
             }
         }
 

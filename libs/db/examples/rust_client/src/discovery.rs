@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
 use colored::*;
-use impeller2::schema::Schema;
-use impeller2::types::{ComponentId, PrimType};
-use impeller2_stellar::Client;
-use impeller2_wkt::{DumpMetadata, DumpMetadataResp, DumpSchema, DumpSchemaResp};
+use impeller::schema::Schema;
+use impeller::types::{ComponentId, PrimType};
+use impeller_stellar::Client;
+use impeller_wkt::{DumpMetadata, DumpMetadataResp, DumpSchema, DumpSchemaResp};
 use std::collections::HashMap;
 use tracing::{debug, info};
 

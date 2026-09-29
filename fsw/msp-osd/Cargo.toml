@@ -11,9 +11,9 @@ path = "src/main.rs"
 
 [dependencies]
 # Core protocol for Elodin-DB
-impeller2 = { path = "../../libs/impeller2", features = ["std"] }
-impeller2-stellar = { path = "../../libs/impeller2/stellar" }
-impeller2-wkt = { path = "../../libs/impeller2/wkt" }
+impeller = { path = "../../libs/impeller", features = ["std"] }
+impeller-stellar = { path = "../../libs/impeller/stellar" }
+impeller-wkt = { path = "../../libs/impeller/wkt" }
 
 # Async runtime
 stellarator = { path = "../../libs/stellarator", features = ["tokio"] }

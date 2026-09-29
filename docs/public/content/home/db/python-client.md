@@ -75,7 +75,7 @@ writer = client.table_writer(
 ```
 
 All primitive types are supported: `f32/f64`, `i8..i64`, `u8..u64`, `bool_`.
-Every write emits exactly **one** Impeller2 `Table` packet: a shared `i64`
+Every write emits exactly **one** Impeller `Table` packet: a shared `i64`
 timestamp followed by each field's values — one packet per tick, not one per
 component. All declared fields are required on every write; use one writer
 per rate group (e.g. one 110 Hz IMU writer, one 50 Hz control writer).

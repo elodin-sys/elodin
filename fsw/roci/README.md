@@ -6,7 +6,7 @@ A reactive flight software framework for building composable control systems wit
 
 Roci (named after the ship from The Expanse) is a framework designed to simplify the development of flight software by providing:
 - **Composable Systems** - Build complex control systems from simple, reusable components
-- **Zero-Copy Communication** - Efficient data exchange with the Impeller2 protocol
+- **Zero-Copy Communication** - Efficient data exchange with the Impeller protocol
 - **Real-Time Drivers** - Support for different execution modes (fixed frequency, interrupt-driven)
 - **Telemetry Integration** - Seamless connection to Elodin's simulation and visualization tools
 
@@ -132,7 +132,7 @@ let gyro_bias = state.b_hat; // Get estimated gyro bias
 
 ### TCP/Network Integration
 
-Roci integrates with Impeller2 for network communication:
+Roci integrates with Impeller for network communication:
 
 ```rust
 use roci::tcp::{tcp_connect, tcp_listen};
@@ -219,7 +219,7 @@ Roci has evolved significantly since its initial implementation. Here are some m
 
 1. **Initial Implementation** ([#469](https://github.com/elodin-sys/paracosm/pull/469)) - May 2024
    - Core framework with World/Handler pattern
-   - Basic Conduit (now Impeller2) integration
+   - Basic Conduit (now Impeller) integration
    - Entity-Component mapping with derive macros
 
 2. **Combinator Refactor** ([#508](https://github.com/elodin-sys/paracosm/pull/508))
@@ -238,8 +238,8 @@ Roci has evolved significantly since its initial implementation. Here are some m
    - Cross-language support for filter algorithms
    - Enabled prototyping in Python
 
-7. **Impeller2 Protocol** ([#763](https://github.com/elodin-sys/paracosm/pull/763))
-   - Migration from Conduit to Impeller2
+7. **Impeller Protocol** ([#763](https://github.com/elodin-sys/paracosm/pull/763))
+   - Migration from Conduit to Impeller
    - Improved performance and flexibility
 
 ## Design Philosophy
@@ -282,7 +282,7 @@ See the `examples/` directory for complete examples:
 
 ## Related Projects
 
-- **Impeller2** - High-performance telemetry protocol
+- **Impeller** - High-performance telemetry protocol
 - **Nox** - Tensor and linear algebra library
 
 ## Contributing

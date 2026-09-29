@@ -11,11 +11,11 @@ use bevy::ecs::{
 };
 use bevy_egui::egui;
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
-use impeller2_wkt::{ComponentPath, GraphType, QueryType};
+use impeller_wkt::{ComponentPath, GraphType, QueryType};
 use smallvec::SmallVec;
 
 use egui::{Align, Color32};
-use impeller2_bevy::{ComponentMetadataRegistry, ComponentSchemaRegistry};
+use impeller_bevy::{ComponentMetadataRegistry, ComponentSchemaRegistry};
 
 use crate::{
     EqlContext,
@@ -237,8 +237,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     if ui.checkbox(&mut auto_color, "Use scheme color").changed() {
                         query_plot.auto_color = auto_color;
                         if auto_color {
-                            query_plot.data.color =
-                                impeller2_wkt::Color::from_color32(scheme_color);
+                            query_plot.data.color = impeller_wkt::Color::from_color32(scheme_color);
                         }
                     }
                     let color_id = ui.auto_id_with("color");
@@ -253,7 +252,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     if color_popup(ui, &mut color, color_id, &btn_resp).is_some()
                         && color != prev_color
                     {
-                        query_plot.data.color = impeller2_wkt::Color::from_color32(color);
+                        query_plot.data.color = impeller_wkt::Color::from_color32(color);
                         query_plot.auto_color = false;
                     }
                 });
@@ -584,14 +583,14 @@ fn add_components_from_eql(
         graph_state.enabled_lines.clear();
         let color = get_scheme().highlight;
         commands.entity(graph_id).insert(QueryPlotData {
-            data: impeller2_wkt::QueryPlot {
+            data: impeller_wkt::QueryPlot {
                 name: graph_state.label.clone(),
                 query: query.to_string(),
                 refresh_interval: Duration::from_millis(500),
                 auto_refresh: true,
-                color: impeller2_wkt::Color::from_color32(color),
+                color: impeller_wkt::Color::from_color32(color),
                 query_type: QueryType::EQL,
-                plot_mode: impeller2_wkt::PlotMode::TimeSeries,
+                plot_mode: impeller_wkt::PlotMode::TimeSeries,
                 x_label: None,
                 y_label: None,
                 node_id: Default::default(),
@@ -708,8 +707,8 @@ mod tests {
     use crate::ui::plot::GraphBundle;
     use bevy::ecs::system::SystemState;
     use bevy::prelude::World;
-    use impeller2::schema::Schema;
-    use impeller2::types::{ComponentId, PrimType, Timestamp};
+    use impeller::schema::Schema;
+    use impeller::types::{ComponentId, PrimType, Timestamp};
     use std::sync::Arc;
 
     /// Converting a graph to a SQL query plot must despawn the timeseries lines

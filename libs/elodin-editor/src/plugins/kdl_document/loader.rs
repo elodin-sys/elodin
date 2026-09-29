@@ -1,6 +1,6 @@
 use bevy::asset::{AssetLoader, AssetPath, io::Reader};
-use impeller2_kdl::FromKdl;
-use impeller2_wkt::Schematic;
+use impeller_kdl::FromKdl;
+use impeller_wkt::Schematic;
 use std::path::Path;
 
 use super::types::{
@@ -31,7 +31,7 @@ impl AssetLoader for SchematicDocumentLoader {
         let source = load_context.path().source().clone_owned();
 
         for window in root.elems.iter().filter_map(|elem| match elem {
-            impeller2_wkt::SchematicElem::Window(window) => Some(window),
+            impeller_wkt::SchematicElem::Window(window) => Some(window),
             _ => None,
         }) {
             let Some(path) = window.path.as_deref() else {

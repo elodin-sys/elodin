@@ -17,12 +17,12 @@ use std::sync::atomic::{AtomicU8, AtomicU16, AtomicU64, Ordering};
 use std::sync::mpsc::{SyncSender, sync_channel};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use impeller2::types::{ComponentId, LenPacket, Msg, OwnedPacket, PrimType};
-use impeller2::vtable::builder::{
+use impeller::types::{ComponentId, LenPacket, Msg, OwnedPacket, PrimType};
+use impeller::vtable::builder::{
     component, raw_field, raw_table, schema, timestamp, timestamp_ns, vtable,
 };
-use impeller2_stellar::{PacketSink, PacketStream};
-use impeller2_wkt::{ErrorResponse, SetComponentMetadata, VTableMsg};
+use impeller_stellar::{PacketSink, PacketStream};
+use impeller_wkt::{ErrorResponse, SetComponentMetadata, VTableMsg};
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use stellarator::io::{OwnedWriter, SplitExt};
@@ -464,7 +464,7 @@ fn record_error(last_error: &Mutex<Option<String>>, msg: &str) {
     }
 }
 
-async fn connect(addr: SocketAddr, ctx: &WriterCtx) -> Result<Conn, impeller2_stellar::Error> {
+async fn connect(addr: SocketAddr, ctx: &WriterCtx) -> Result<Conn, impeller_stellar::Error> {
     let stream = TcpStream::connect(addr).await?;
     let (reader, writer) = stream.split();
     let last_error = ctx.last_error.clone();
@@ -497,7 +497,7 @@ async fn send_row(
     reg: &Registration,
     data: &[u8],
     ctx: &WriterCtx,
-) -> Result<(), impeller2_stellar::Error> {
+) -> Result<(), impeller_stellar::Error> {
     if conn.is_none() {
         *conn = Some(connect(addr, ctx).await?);
         ctx.state.store(writer_state::CONNECTED, Ordering::Relaxed);

@@ -12,15 +12,15 @@ anyhow = "1"
 # async
 stellarator.path = "../../libs/stellarator"
 stellarator.features = ["miette"]
-impeller2-stellar.path = "../../libs/impeller2/stellar"
+impeller-stellar.path = "../../libs/impeller/stellar"
 futures-lite = "2.5.0"
 
 # ser-de
-impeller2.path = "../../libs/impeller2"
-impeller2.features = ["std"]
-impeller2-wkt.path = "../../libs/impeller2/wkt"
-impeller2-wkt.features = ["std"]
-impeller2-frame.path = "../../libs/impeller2/frame"
+impeller.path = "../../libs/impeller"
+impeller.features = ["std"]
+impeller-wkt.path = "../../libs/impeller/wkt"
+impeller-wkt.features = ["std"]
+impeller-frame.path = "../../libs/impeller/frame"
 cobs = "0.2"
 zerocopy.version = "0.8.2"
 db-macros.workspace = true
