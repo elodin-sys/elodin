@@ -843,6 +843,10 @@
                                 </li>
                                 
                                 <li>
+                                    <a href="/reference/elodin-cli/#transient-components">Transient Components</a>
+                                </li>
+                                
+                                <li>
                                     <a href="/reference/elodin-cli/#example-9">Example</a>
                                 </li>
                                 
@@ -1773,6 +1777,8 @@ on the gRPC endpoint; omitted means unauthenticated.</p>
 <p>When the flag is honored, the export prints a one-line skip message per component:</p>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>  Skipping drone.estimate_covariance (private)</span></span></code></pre>
 <p>Pass <code>--include-private</code> to override the filter and export every component regardless of metadata (useful for forensic or full-fidelity exports).</p>
+<h6 id="transient-components"><strong>Transient Components</strong></h6>
+<p>Simulation components whose metadata contains <code>"transient": "true"</code> are kept in the simulation's in-memory world but never registered with or written to Elodin DB. They therefore do not appear in the database schema, editor, replication, or any export, including exports using <code>--include-private</code>. Use transient components only for tick-to-tick state that does not need replay, visualization, or forensic analysis. See the Python API reference for restrictions and examples.</p>
 <h6 id="example-9"><strong>Example</strong></h6>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Export all components to parquet (default format)</span></span>
 <span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin-db</span><span style="color: light-dark(#2AA198, #2AA198);"> export</span><span style="color: light-dark(#2AA198, #2AA198);"> ./my-database</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">o</span><span style="color: light-dark(#2AA198, #2AA198);"> ./export</span></span>
