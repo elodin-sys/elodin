@@ -54,6 +54,9 @@ def _assets_http_url(db: str, key: str) -> str:
     host = host.strip("[]")
     if host in ("", "0.0.0.0", "::"):
         host = "127.0.0.1"
+    elif ":" in host:
+        # HTTP URLs require brackets around IPv6 literals.
+        host = f"[{host}]"
     return f"http://{host}:{int(port) + 1}/{key}"
 
 

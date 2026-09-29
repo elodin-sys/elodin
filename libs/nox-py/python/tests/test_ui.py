@@ -267,6 +267,30 @@ def _wait_for(predicate, timeout: float = 5.0) -> bool:
     return False
 
 
+def test_assets_http_url_brackets_ipv6():
+    from urllib.parse import urlsplit
+
+    from elodin.ui.watch import _assets_http_url
+
+    url = _assets_http_url("[fde1:2240:a1ef::1]:2240", "schematics/main.overlay.kdl")
+    parts = urlsplit(url)
+    assert url == "http://[fde1:2240:a1ef::1]:2241/schematics/main.overlay.kdl"
+    assert parts.hostname == "fde1:2240:a1ef::1"
+    assert parts.port == 2241
+
+    assert (
+        _assets_http_url("[::1]:2240", "schematics/main.overlay.kdl")
+        == "http://[::1]:2241/schematics/main.overlay.kdl"
+    )
+    assert (
+        _assets_http_url("127.0.0.1:2240", "schematics/main.overlay.kdl")
+        == "http://127.0.0.1:2241/schematics/main.overlay.kdl"
+    )
+    assert _assets_http_url("localhost:2240", "k") == "http://localhost:2241/k"
+    assert _assets_http_url("0.0.0.0:2240", "k") == "http://127.0.0.1:2241/k"
+    assert _assets_http_url("[::]:2240", "k") == "http://127.0.0.1:2241/k"
+
+
 def test_watch_follows_active_schematic_and_overlay(tmp_path):
     """Save As + Save Layout must survive the next watch rebuild.
 
