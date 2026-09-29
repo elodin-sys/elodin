@@ -719,24 +719,24 @@ and the editor loads schematic and meshes from the DB itself.</p>
 <h3 id="a-simple-file-referenced-by-path-in-kdl">A — Simple file referenced by <code>path=</code> in KDL</h3>
 <p>Use this when the schematic stores a <strong>direct relative path</strong> (like a <code>.glb</code> mesh or <code>.png</code> icon).</p>
 <ol>
-<li><strong>KDL</strong> (<code>libs/impeller2/kdl</code>) — parse and serialize the path field on the relevant node.</li>
-<li><strong>Collect &amp; rewrite</strong> (<code>libs/impeller2/kdl/src/rewrite.rs</code>):
+<li><strong>KDL</strong> (<code>libs/impeller/kdl</code>) — parse and serialize the path field on the relevant node.</li>
+<li><strong>Collect &amp; rewrite</strong> (<code>libs/impeller/kdl/src/rewrite.rs</code>):
 <ul>
 <li><code>collect_local_asset_paths</code> — include new local paths</li>
 <li><code>collect_db_asset_names</code> — include <code>db:</code> keys (for <a href="/reference/elodin-cli">follow</a> sync)</li>
 <li><code>rewrite_asset_paths</code> — rewrite local → <code>db:…</code> on record</li>
 </ul>
 </li>
-<li><strong>Persist</strong> — no change if the path appears in collect; <code>persist_schematic_assets</code> in <code>libs/nox-py/src/impeller2_server.rs</code> is generic.</li>
+<li><strong>Persist</strong> — no change if the path appears in collect; <code>persist_schematic_assets</code> in <code>libs/nox-py/src/impeller_server.rs</code> is generic.</li>
 <li><strong>Follow</strong> — no change if the path appears in <code>collect_db_asset_names</code>; full-tree mirror via <code>GET /__index__</code> copies all assets.</li>
 <li><strong>Editor</strong> — if Bevy can load the format: resolve with <code>resolve_db_asset_url</code> and <code>AssetServer.load(url)</code>. No blocking HTTP in Bevy systems.</li>
-<li><strong>Tests</strong> — unit tests in <code>impeller2-kdl</code> (collect/rewrite) and <code>nox-py</code> (persist).</li>
+<li><strong>Tests</strong> — unit tests in <code>impeller-kdl</code> (collect/rewrite) and <code>nox-py</code> (persist).</li>
 </ol>
 <h3 id="b-indirect-reference-name-manifest-file">B — Indirect reference (name → manifest → file)</h3>
 <p>Use this when the KDL stores a <strong>logical name</strong> (like <code>skybox name=…</code>).</p>
 <ol>
-<li>Add a <strong>single resolver</strong> in <code>impeller2/kdl</code> (manifest parse → extra storage keys).</li>
-<li><strong>Persist</strong> — extend collect after resolving (see <code>add_local_skybox_cubemap_path</code> in <code>impeller2_server.rs</code>).</li>
+<li>Add a <strong>single resolver</strong> in <code>impeller/kdl</code> (manifest parse → extra storage keys).</li>
+<li><strong>Persist</strong> — extend collect after resolving (see <code>add_local_skybox_cubemap_path</code> in <code>impeller_server.rs</code>).</li>
 <li><strong>Follow</strong> — after syncing the manifest bytes, resolve and fetch dependent files (<code>assets_http.rs</code>).</li>
 <li><strong>Editor</strong> — either teach the consumer to load via HTTP, or mirror into a local cache (skybox pattern, async via <code>IoTaskPool</code>).</li>
 <li><strong>Avoid</strong> copying manifest-resolution logic into three places; share one resolver.</li>
