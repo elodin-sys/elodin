@@ -392,6 +392,14 @@
                 >
             </li>
             
+            <li>
+                <a
+                    class=" docs-link"
+                    href="/reference/migration/kdl-to-python/"
+                    >Migrate KDL schematics to Python</a
+                >
+            </li>
+            
         </ul>
           
     </nav>
@@ -460,8 +468,9 @@ advances, simulating a live session:</p>
 <p>Without <code>--replay</code>, the full recorded time range is available immediately.</p>
 <h2 id="choose-a-schematic">Choose a schematic</h2>
 <p>By default, the editor opens the active schematic stored in the database.
-Override it with a local KDL file:</p>
-<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#2AA198, #2AA198);"> dbs/apollo</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-replay</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-kdl</span><span style="color: light-dark(#2AA198, #2AA198);"> schematics/review.kdl</span></span></code></pre>
+Override it with a local KDL or Python schematic:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#2AA198, #2AA198);"> dbs/apollo</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-replay</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-schematic</span><span style="color: light-dark(#2AA198, #2AA198);"> schematics/review.kdl</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#2AA198, #2AA198);"> dbs/apollo</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-schematic</span><span style="color: light-dark(#2AA198, #2AA198);"> assets/schematics/main.py</span></span></code></pre>
 <p>For details about bundled GLB files, images, skyboxes, and schematics, see
 <a href="/reference/db-asset-server">DB Asset Server</a>.</p>
 
@@ -469,7 +478,7 @@ Override it with a local KDL file:</p>
 <div class="footer-line-padding"></div>
 <div class="footer-line"></div>
 <div class="docs-navigation d-flex justify-content-between">
-                
+                   
 </div>
 
               </main>

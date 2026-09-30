@@ -392,6 +392,14 @@
                 >
             </li>
             
+            <li>
+                <a
+                    class=" docs-link"
+                    href="/reference/migration/kdl-to-python/"
+                    >Migrate KDL schematics to Python</a
+                >
+            </li>
+            
         </ul>
           
     </nav>
@@ -532,7 +540,10 @@
  
               <main class="docs-content col-lg-11 col-xxl-10">
                   <h1>Schematic KDL</h1>
-                   <h2 id="glossary">Glossary</h2>
+                   <p>KDL is the editor's schematic artifact format. To author the same model with
+typed Python builders, see <a href="/reference/migration/kdl-to-python/">Migrate KDL schematics to
+Python</a>.</p>
+<h2 id="glossary">Glossary</h2>
 <ul>
 <li>Top-level nodes: <code>coordinate</code>, <code>theme</code>, <code>timeline</code>, <code>telemetry_mode</code>, <code>skybox</code>, <code>environment</code>, <code>panel</code> variants, <code>object_3d</code>, <code>line_3d</code>, <code>point_trails</code>, <code>vector_arrow</code>, <code>world_mesh</code>, <code>window</code>.</li>
 <li>EQL: expressions are evaluated in the runtime EQL context. Vector-like fields expect 3 components; <code>world_pos</code> is a 7-component array (quat + position).</li>
@@ -1301,7 +1312,7 @@ magnitude encodes the angle in degrees.</p>
             <div class="footer-card">v0.14 to v0.15 &rarr;</div>
         </div>
     </a>
-        
+           
 </div>
 
               </main>

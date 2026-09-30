@@ -94,6 +94,9 @@
         <loc>/reference/migration/</loc>
     </url>
     <url>
+        <loc>/reference/migration/kdl-to-python/</loc>
+    </url>
+    <url>
         <loc>/reference/migration/to-0-15/</loc>
     </url>
     <url>
