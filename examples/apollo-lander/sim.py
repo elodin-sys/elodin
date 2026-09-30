@@ -11,12 +11,12 @@ from reference import build_reference
 from rcs_geometry import RCS_THRUSTER_AXIS as RCS_THRUSTER_AXIS_TABLE
 from rcs_geometry import RCS_THRUSTER_SIGN as RCS_THRUSTER_SIGN_TABLE
 from rcs_geometry import RCS_THRUSTER_VIZ_MIN_RAW_LEVEL
+from schematic import build as build_schematic
 
 SIMULATION_RATE_HZ = 120.0
 SIM_TIME_STEP = 1.0 / SIMULATION_RATE_HZ
 TELEMETRY_RATE_HZ = 40.0
 GUIDANCE_RATE_HZ = 24.0
-SCHEMATIC_PATH = Path(__file__).with_name("apollo-lander.kdl")
 PDI_START = datetime(1969, 7, 20, 20, 9, 53, 164000, tzinfo=timezone.utc)
 START_TIMESTAMP_US = int(PDI_START.timestamp() * 1_000_000)
 
@@ -512,7 +512,7 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
             ),
         )
 
-    world.schematic(SCHEMATIC_PATH.read_text(), SCHEMATIC_PATH.name)
+    world.schematic(build_schematic(), "apollo-lander.kdl")
 
     non_effectors = engine_response | attitude_control | mass_props | thrust_visualization
     effectors = lunar_gravity | apply_main_thrust | apply_rcs_torque
