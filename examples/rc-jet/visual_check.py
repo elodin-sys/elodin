@@ -13,6 +13,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from visual_check_schematic import build as build_schematic
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "scripts" / "boson_ref"))
 
@@ -190,8 +192,7 @@ camera_args = {
 world.sensor_camera(name="ir_rgba", format="rgba", **camera_args)
 world.sensor_camera(name="ir_gray8", format="gray8", **camera_args)
 
-kdl_path = Path(__file__).with_name("visual_check.kdl")
-world.schematic(kdl_path.read_text(), kdl_path.name)
+world.schematic(build_schematic(), "visual_check.kdl")
 
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 pending = list(CAPTURES)
