@@ -1,0 +1,81 @@
+theme mode="dark" scheme="default"
+
+tabs {
+    hsplit name="Simulation" {
+        viewport name="3D View" pos="crazyflie.world_pos + (0,0,0,0, 0.2, 0.2, 0.2)" look_at="crazyflie.world_pos" show_grid=#true active=#true
+        vsplit share=0.35 {
+            graph "crazyflie.gyro" name="Gyroscope (rad/s)"
+            graph "crazyflie.accel" name="Accelerometer (g)"
+            graph "crazyflie.motor_pwm" name="Motor PWM"
+        }
+    }
+    vsplit name="Motors" {
+        graph "crazyflie.motor_rpm" name="Motor RPM"
+        graph "crazyflie.thrust" name="Motor Thrust (N)"
+        graph "crazyflie.motor_command" name="Motor Command (from SITL)"
+    }
+    vsplit name="Controls" {
+        graph "crazyflie.is_armed_control" name="Armed State (Q to toggle)"
+        graph "crazyflie.button_blue" name="Blue Button (Shift)"
+        graph "crazyflie.button_yellow" name="Yellow Button (E)"
+        graph "crazyflie.button_green" name="Green Button (R)"
+        graph "crazyflie.button_red" name="Red Button (T)"
+    }
+}
+object_3d crazyflie.world_pos {
+    glb path="crazyflie.glb" rotate="(0.0, 0.0, 0.0)" translate="(0.0, 0.0, 0.0)" scale=0.7
+    animate joint="Root.Propeller_0" rotation_vector="(0, crazyflie.propeller_angle[0], 0)"
+    animate joint="Root.Propeller_1" rotation_vector="(0, crazyflie.propeller_angle[1], 0)"
+    animate joint="Root.Propeller_2" rotation_vector="(0, crazyflie.propeller_angle[2], 0)"
+    animate joint="Root.Propeller_3" rotation_vector="(0, crazyflie.propeller_angle[3], 0)"
+}
+
+// Motor position indicators
+vector_arrow "(0.707, -0.707, 0)" origin="crazyflie.world_pos" scale=0.046 name="M1: FR" show_name=#true body_frame=#true {
+    color yellow 10
+}
+vector_arrow "(0.707, 0.707, 0)" origin="crazyflie.world_pos" scale=0.046 name="M2: FL" show_name=#true body_frame=#true {
+    color yellow 10
+}
+vector_arrow "(-0.707, 0.707, 0)" origin="crazyflie.world_pos" scale=0.046 name="M3: BL" show_name=#true body_frame=#true {
+    color yellow 10
+}
+vector_arrow "(-0.707, -0.707, 0)" origin="crazyflie.world_pos" scale=0.046 name="M4: BR" show_name=#true body_frame=#true {
+    color yellow 10
+}
+
+// Rotor disc visualization
+object_3d "crazyflie.world_pos + (0,0,0,0, 0.0325, -0.0325, 0.013)" body_frame=#true {
+    cylinder radius=0.0225 height=0.002 {
+        color cyan 30
+    }
+}
+object_3d "crazyflie.world_pos + (0,0,0,0, 0.0325, 0.0325, 0.013)" body_frame=#true {
+    cylinder radius=0.0225 height=0.002 {
+        color red 30
+    }
+}
+object_3d "crazyflie.world_pos + (0,0,0,0, -0.0325, 0.0325, 0.013)" body_frame=#true {
+    cylinder radius=0.0225 height=0.002 {
+        color cyan 30
+    }
+}
+object_3d "crazyflie.world_pos + (0,0,0,0, -0.0325, -0.0325, 0.013)" body_frame=#true {
+    cylinder radius=0.0225 height=0.002 {
+        color red 30
+    }
+}
+
+// Thrust visualization arrows
+vector_arrow "crazyflie.thrust_viz_m1" origin="crazyflie.world_pos + (0,0,0,0, 0.0325, -0.0325, 0.013)" body_frame=#true {
+    color cyan 20
+}
+vector_arrow "crazyflie.thrust_viz_m2" origin="crazyflie.world_pos + (0,0,0,0, 0.0325, 0.0325, 0.013)" body_frame=#true {
+    color red 20
+}
+vector_arrow "crazyflie.thrust_viz_m3" origin="crazyflie.world_pos + (0,0,0,0, -0.0325, 0.0325, 0.013)" body_frame=#true {
+    color cyan 20
+}
+vector_arrow "crazyflie.thrust_viz_m4" origin="crazyflie.world_pos + (0,0,0,0, -0.0325, -0.0325, 0.013)" body_frame=#true {
+    color red 20
+}

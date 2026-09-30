@@ -7,6 +7,7 @@ the frustum, while the two 3D viewports keep the ellipsoid/debug view.
 import elodin as el
 import jax.numpy as jnp
 import numpy as np
+from pathlib import Path
 
 SIM_RATE = 120.0
 SENSOR_CAMERA_FPS = SIM_RATE / 4.0
@@ -70,19 +71,9 @@ def world() -> tuple[el.World, el.EntityId]:
     }}
     """
 
+    schematic_template = Path(__file__).with_name("ellipsoid.kdl").read_text()
     world.schematic(
-        """
-        theme mode="dark" scheme="default"
-
-        tabs {
-            hsplit name="Frustums" {
-                viewport name="Viewport Source" pos="(0,0,0,1, -3,-0.5,2)" look_at="(0,0,0,0, 0,0,0)" create_frustum=#true frustums_color="yalk" projection_color="mint" frustums_thickness=0.006 frustums_up_marker="highlight" show_grid=#true active=#true near=0.05 far=6.0
-                viewport name="Target View" pos="(0,0,0,1, 2,2,1.5)" look_at="(0,0,0,0, 0,0,0)" show_frustums=#true show_grid=#true active=#true
-                sensor_view "drone.scene_cam" name="Sensor Camera"
-            }
-        }
-    """
-        + object_mesh,
+        schematic_template.replace("__OBJECT_MESH__", object_mesh.strip()),
         "ellipsoid.kdl",
     )
     return world, body

@@ -12,6 +12,7 @@ remains a separate follow-up.
 
 import elodin as el
 import jax.numpy as jnp
+from pathlib import Path
 
 SIM_RATE = 30.0
 
@@ -25,15 +26,8 @@ def world() -> el.World:
         ),
         name="reference",
     )
-    world.schematic(
-        """
-        coordinate frame=ENU
-        world_mesh "brienz"
-
-        viewport frame=ENU name="Brienz Terrain" hdr=#true active=#true pos="(0,0,0,1, 4560,-4560,2640)" look_at="(0,0,0,1, 0,0,-120)" up="(0,0,1)" near=1.0 fov=60.0 show_grid=#false show_view_cube=#true
-        """,
-        "terrain.kdl",
-    )
+    schematic_path = Path(__file__).with_name("terrain.kdl")
+    world.schematic(schematic_path.read_text(), "terrain.kdl")
     return world
 
 

@@ -23,6 +23,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import os
+from pathlib import Path
 import sys
 import time
 
@@ -177,20 +178,8 @@ for name, color in BALL_COLORS.items():
         f"    object_3d {name}.world_pos {{ sphere radius={BALL_RADIUS} {{ color {color} }} }}"
     )
 
-schematic = """
-    timeline follow_latest=#true
-    hsplit {{
-        viewport name=Main pos="(0,0,0,0, 14,14,10)" look_at="(0,0,0,0, 0,0,1)" show_grid=#true show_frustums=#true
-        vsplit {{
-            sensor_view "cam_ball_a.scene_cam" name="RGB Camera (Cyan Ball)"
-            sensor_view "cam_ball_b.thermal_cam" name="Thermal (Magenta Ball)"
-        }}
-    }}
-{objects}
-    object_3d "(0,0,0,1, 0,0,0)" {{
-        plane width=12 depth=12 {{ color 60 120 60 }}
-    }}
-""".format(objects="\n".join(object_3d_lines))
+schematic_template = Path(__file__).with_name("sensor-camera.kdl").read_text()
+schematic = schematic_template.replace("__OBJECTS__", "\n".join(object_3d_lines))
 
 world.schematic(schematic, "sensor-camera.kdl")
 

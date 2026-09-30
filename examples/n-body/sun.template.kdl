@@ -1,0 +1,15 @@
+object_3d sun.world_pos {
+    sphere radius={sun_radius:.8f} {
+        color {sun_color}
+    }
+    icon builtin="wb_sunny" {
+        visibility_range min=1.0 fade_distance=5.0
+        color {sun_color}
+    }
+}
+line_3d sun.world_pos line_width=1.5 perspective=#false {
+    color {sun_color}
+}
+vector_arrow "(0,0,0.03)" origin="sun.world_pos" scale=1.0 name="sun" show_name=#true arrow_thickness=0.02 label_position=1.0 {
+    color {sun_color}
+}

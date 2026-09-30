@@ -206,78 +206,32 @@ def _kdl_color(rgb: tuple[int, int, int]) -> str:
 
 
 def _build_schematic() -> str:
-    lines: list[str] = [
-        """
-coordinate frame=ENU
-timeline follow_latest=#true
-
-tabs {
-    hsplit {
-        tabs share=0.75 {
-            viewport name=SolarSystem pos="(0,0,0,1, -6,6,6)" look_at="(0,0,0,1, 0,0,0)" hdr=#true show_grid=#true active=#true
-            viewport name=TopDown pos="(0,0,0,1, 0,0,25)" look_at="(0,0,0,1, 0,0,0)" hdr=#true show_grid=#true 
-        }
-        tabs share=0.25 {
-            graph "earth.world_pos[4],earth.world_pos[5],earth.world_pos[6],truth_earth.truth_world_pos[4],truth_earth.truth_world_pos[5],truth_earth.truth_world_pos[6]" name="Earth vs Truth (AU)"
-            hierarchy
-            inspector
-        }
-    }
-}
-"""
-    ]
+    lines: list[str] = [Path(__file__).with_name("solar-system-template.kdl").read_text()]
     sun_color = _kdl_color(SUN_COLOR)
     sun_radius = _radius_au(SUN_RADIUS_KM)
+    sun_template = Path(__file__).with_name("sun.template.kdl").read_text()
     lines.append(
-        f"""
-object_3d sun.world_pos {{
-    sphere radius={sun_radius:.8f} {{
-        color {sun_color}
-    }}
-    icon builtin="wb_sunny" {{
-        visibility_range min=1.0 fade_distance=5.0
-        color {sun_color}
-    }}
-}}
-line_3d sun.world_pos line_width=1.5 perspective=#false {{
-    color {sun_color}
-}}
-vector_arrow "(0,0,0.03)" origin="sun.world_pos" scale=1.0 name="sun" show_name=#true arrow_thickness=0.02 label_position=1.0 {{
-    color {sun_color}
-}}
-"""
+        sun_template.format(
+            sun_radius=sun_radius,
+            sun_color=sun_color,
+        )
     )
+    body_template = Path(__file__).with_name("body.template.kdl").read_text()
     for body in BODIES:
         label = body.name.replace("_", " ")
         color = _kdl_color(body.meta.color_rgb)
         radius = _radius_au(body.meta.radius_km)
         truth_radius = radius * 0.6
         lines.append(
-            f"""
-object_3d {body.name}.world_pos {{
-    sphere radius={radius:.8f} {{
-        color {color}
-    }}
-    icon builtin="{body.meta.icon}" {{
-        visibility_range min=1.0 fade_distance=5.0
-        color {color}
-    }}
-}}
-line_3d {body.name}.world_pos line_width=1.5 perspective=#false {{
-    color {color}
-}}
-vector_arrow "(0,0,0.03)" origin="{body.name}.world_pos" scale=1.0 name="{label}" show_name=#true arrow_thickness=0.02 label_position=1.0 {{
-    color {color}
-}}
-object_3d truth_{body.name}.truth_world_pos {{
-    sphere radius={truth_radius:.8f} {{
-        color {TRUTH_COLOR} 120
-    }}
-}}
-line_3d truth_{body.name}.truth_world_pos line_width=1.0 perspective=#false {{
-    color {TRUTH_COLOR} 80
-}}
-"""
+            body_template.format(
+                body_name=body.name,
+                radius=radius,
+                color=color,
+                icon=body.meta.icon,
+                label=label,
+                truth_radius=truth_radius,
+                truth_color=TRUTH_COLOR,
+            )
         )
     return "".join(lines)
 

@@ -1,0 +1,12 @@
+timeline follow_latest=#true
+hsplit {
+    viewport name=Main pos="(0,0,0,0, 14,14,10)" look_at="(0,0,0,0, 0,0,1)" show_grid=#true show_frustums=#true
+    vsplit {
+        sensor_view "cam_ball_a.scene_cam" name="RGB Camera (Cyan Ball)"
+        sensor_view "cam_ball_b.thermal_cam" name="Thermal (Magenta Ball)"
+    }
+}
+__OBJECTS__
+object_3d "(0,0,0,1, 0,0,0)" {
+    plane width=12 depth=12 { color 60 120 60 }
+}
