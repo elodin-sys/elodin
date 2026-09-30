@@ -24,7 +24,7 @@ use crate::{
         colors::{EColor, get_color_by_index_all, get_scheme},
         inspector::{color_popup, eql_autocomplete, inspector_text_field, query, search},
         label::{self, label_with_buttons},
-        plot::GraphState,
+        plot::{DerivedGraph, GraphState},
         query_plot::QueryPlotData,
         schematic::EqlExt,
         theme::{self, configure_input_with_border},
@@ -558,6 +558,16 @@ fn collect_component_names(
     }
 }
 
+fn clear_kernel_graph(graph_state: &mut GraphState, commands: &mut Commands) {
+    if graph_state.kernel.take().is_none() {
+        return;
+    }
+    for (entity, _) in graph_state.enabled_lines.values() {
+        commands.entity(*entity).despawn();
+    }
+    graph_state.enabled_lines.clear();
+}
+
 fn add_components_from_eql(
     graph_id: Entity,
     graph_state: &mut GraphState,
@@ -572,6 +582,7 @@ fn add_components_from_eql(
         .map_err(|err| format!("Invalid EQL expression: {err}"))?;
 
     if expr.frame_conversion_name().is_some() {
+        clear_kernel_graph(graph_state, commands);
         // Frame converters need SQL evaluation — attach QueryPlotData and clear SeriesStore lines.
         // `sync_graphs` skips QueryPlotData graphs, so it can never reclaim these
         // entities: dropping them from `enabled_lines` alone leaves them rendering
@@ -581,6 +592,7 @@ fn add_components_from_eql(
         }
         graph_state.components.clear();
         graph_state.enabled_lines.clear();
+        graph_state.derived = None;
         let color = get_scheme().highlight;
         commands.entity(graph_id).insert(QueryPlotData {
             data: impeller_wkt::QueryPlot {
@@ -603,6 +615,42 @@ fn add_components_from_eql(
         return Ok(true);
     }
 
+    if expr.requires_plot_evaluation() && eql::eval::supports(&expr) {
+        clear_kernel_graph(graph_state, commands);
+        for (entity, _) in graph_state.enabled_lines.values() {
+            commands.entity(*entity).despawn();
+        }
+        graph_state.components.clear();
+        graph_state.enabled_lines.clear();
+        commands.entity(graph_id).remove::<QueryPlotData>();
+        let mut dependencies: Vec<_> = expr
+            .to_graph_components()
+            .into_iter()
+            .map(|(path, _)| path.id)
+            .collect();
+        dependencies.sort();
+        dependencies.dedup();
+        graph_state.derived = Some(DerivedGraph {
+            source: query.to_string(),
+            expr,
+            dependencies,
+            lines: Vec::new(),
+            colors: Vec::new(),
+            path: ComponentPath::from_name(&format!("derived.{}", graph_state.label)),
+            last_generation: u64::MAX,
+            last_range: None,
+        });
+        return Ok(true);
+    }
+
+    if graph_state.derived.take().is_some() {
+        for (entity, _) in graph_state.enabled_lines.values() {
+            commands.entity(*entity).despawn();
+        }
+        graph_state.enabled_lines.clear();
+    }
+    commands.entity(graph_id).remove::<QueryPlotData>();
+
     let mut requested_components = expr.to_graph_components();
     requested_components.sort();
     requested_components.dedup();
@@ -610,6 +658,7 @@ fn add_components_from_eql(
     if requested_components.is_empty() {
         return Err("The expression does not reference any plottable component.".to_string());
     }
+    clear_kernel_graph(graph_state, commands);
 
     let mut requested_by_path: BTreeMap<ComponentPath, BTreeSet<usize>> = BTreeMap::new();
     for (path, index) in requested_components {
@@ -704,11 +753,12 @@ fn default_component_values(path: &ComponentPath, len: usize) -> Vec<(bool, Colo
 mod tests {
     use super::*;
     use crate::plugins::render_layer_alloc::RenderLayerAllocator;
-    use crate::ui::plot::GraphBundle;
+    use crate::ui::plot::{GraphBundle, KernelGraph};
     use bevy::ecs::system::SystemState;
     use bevy::prelude::World;
     use impeller::schema::Schema;
     use impeller::types::{ComponentId, PrimType, Timestamp};
+    use impeller_wkt::DisplayKernelBinding;
     use std::sync::Arc;
 
     /// Converting a graph to a SQL query plot must despawn the timeseries lines
@@ -760,5 +810,103 @@ mod tests {
             "the stale timeseries line must be despawned"
         );
         assert!(world.entity(graph_id).contains::<QueryPlotData>());
+    }
+
+    #[test]
+    fn scalar_formula_uses_derived_graph() {
+        let component = Arc::new(eql::Component::new(
+            "sample.value".to_string(),
+            ComponentId::new("sample.value"),
+            Schema::new(PrimType::F64, Vec::<u64>::new()).unwrap(),
+        ));
+        let eql_context = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+        let mut world = World::new();
+        let mut render_layer_alloc = RenderLayerAllocator::default();
+        let mut graph_state = GraphBundle::try_new(
+            &mut render_layer_alloc,
+            BTreeMap::new(),
+            "graph".to_string(),
+        )
+        .expect("a free render layer")
+        .graph_state;
+        let graph_id = world.spawn_empty().id();
+
+        let mut system_state: SystemState<Commands> = SystemState::new(&mut world);
+        let mut commands = system_state.get_mut(&mut world).expect("commands");
+        let converted = add_components_from_eql(
+            graph_id,
+            &mut graph_state,
+            &ComponentMetadataRegistry::default(),
+            &ComponentSchemaRegistry::default(),
+            &eql_context,
+            &mut commands,
+            "sample.value.sqrt()",
+        )
+        .expect("formula must be accepted");
+        system_state.apply(&mut world);
+
+        assert!(converted);
+        let derived = graph_state.derived.expect("derived graph");
+        assert_eq!(derived.source, "sample.value.sqrt()");
+        assert_eq!(derived.dependencies, vec![ComponentId::new("sample.value")]);
+        assert!(!world.entity(graph_id).contains::<QueryPlotData>());
+    }
+
+    #[test]
+    fn eql_edit_clears_kernel_graph() {
+        let component = Arc::new(eql::Component::new(
+            "sample.value".to_string(),
+            ComponentId::new("sample.value"),
+            Schema::new(PrimType::F64, Vec::<u64>::new()).unwrap(),
+        ));
+        let eql_context = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+        let mut world = World::new();
+        let mut render_layer_alloc = RenderLayerAllocator::default();
+        let mut graph_state = GraphBundle::try_new(
+            &mut render_layer_alloc,
+            BTreeMap::new(),
+            "graph".to_string(),
+        )
+        .expect("a free render layer")
+        .graph_state;
+        let kernel_path = ComponentPath::from_name("kernel.graph");
+        graph_state.kernel = Some(KernelGraph {
+            binding: DisplayKernelBinding::default(),
+            dependencies: vec![ComponentId::new("sample.value")],
+            lines: vec![Default::default()],
+            colors: Vec::new(),
+            path: kernel_path.clone(),
+            last_generation: 0,
+            last_range: None,
+        });
+        let kernel_line = world.spawn_empty().id();
+        graph_state
+            .enabled_lines
+            .insert((kernel_path, 0), (kernel_line, Color32::RED));
+        let graph_id = world.spawn_empty().id();
+
+        let mut system_state: SystemState<Commands> = SystemState::new(&mut world);
+        let mut commands = system_state.get_mut(&mut world).expect("commands");
+        let converted = add_components_from_eql(
+            graph_id,
+            &mut graph_state,
+            &ComponentMetadataRegistry::default(),
+            &ComponentSchemaRegistry::default(),
+            &eql_context,
+            &mut commands,
+            "sample.value",
+        )
+        .expect("component expression must be accepted");
+        system_state.apply(&mut world);
+
+        assert!(converted);
+        assert!(graph_state.kernel.is_none());
+        assert!(graph_state.enabled_lines.is_empty());
+        assert!(world.get_entity(kernel_line).is_err());
+        assert!(
+            graph_state
+                .components
+                .contains_key(&ComponentPath::from_name("sample.value"))
+        );
     }
 }

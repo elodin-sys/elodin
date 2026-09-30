@@ -24,7 +24,9 @@ import pytest
 
 import elodin.db as edb
 
-_port = itertools.count(23310)
+# Impeller listens on N, the asset server on N+1, and gRPC on N+2.
+# Hand each test a free N so it does not bind another test's companion port.
+_port = itertools.count(23310, 3)
 
 
 @pytest.fixture()

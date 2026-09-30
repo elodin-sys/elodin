@@ -1,0 +1,65 @@
+hsplit {
+    vsplit share=0.5 {
+        tabs share=0.125 {
+            component_monitor component_name=CONTROLMESSAGE.TIME_MONOTONIC
+        }
+        tabs share=0.125 {
+            component_monitor component_name=CONTROLMESSAGE.ACC_MEAS_BODY
+        }
+        tabs share=0.25 {
+            component_monitor component_name=CONTROLMESSAGE.ACC_CMD_BODY
+        }
+        tabs share=0.25 {
+            component_monitor component_name=CONTROLMESSAGE.PITCH_PID
+        }
+    }
+    vsplit share=0.5 {
+        tabs share=0.5 {
+            graph "CONTROLMESSAGE.ACC_MEAS_BODY[0],CONTROLMESSAGE.ACC_MEAS_BODY[1]" name=Graph {
+                color 132 93 40
+                color 82 31 20
+            }
+        }
+        tabs share=0.5 {
+            graph "CONTROLMESSAGE.ACC_CMD_BODY[0],CONTROLMESSAGE.ACC_CMD_BODY[1]" name=Graph {
+                color 108 60 40
+                color 132 93 40
+            }
+        }
+        tabs share=0.5 {
+            component_monitor component_name=CONTROLMESSAGE.ROLL_PID
+        }
+    }
+    vsplit share=0.5 {
+        tabs share=0.25 {
+            component_monitor component_name=CONTROLMESSAGE.MOTOR_OUTPUT
+        }
+        tabs share=0.25 {
+            component_monitor component_name=CONTROLMESSAGE.FIN_DEFLECTION_DEG
+        }
+        tabs share=0.25 {
+            component_monitor component_name=STATEMACHINE.MISSILE_MODE
+        }
+    }
+    vsplit share=0.5 {
+        tabs share=0.5 {
+            graph "CONTROLMESSAGE.MOTOR_OUTPUT[0],CONTROLMESSAGE.MOTOR_OUTPUT[1],CONTROLMESSAGE.MOTOR_OUTPUT[2],CONTROLMESSAGE.MOTOR_OUTPUT[3]" name=Graph {
+                color 157 75 42
+                color 52 92 145
+                color 106 156 106
+                color 80 106 122
+            }
+        }
+        tabs share=0.5 {
+            graph "CONTROLMESSAGE.FIN_DEFLECTION_DEG[0],CONTROLMESSAGE.FIN_DEFLECTION_DEG[1],CONTROLMESSAGE.FIN_DEFLECTION_DEG[2],CONTROLMESSAGE.FIN_DEFLECTION_DEG[3]" name=Graph {
+                color 100 72 168
+                color 176 98 62
+                color 201 147 54
+                color 157 75 42
+            }
+        }
+        tabs share=0.5 {
+            component_monitor component_name=CONTROLMESSAGE.YAW_PID
+        }
+    }
+}

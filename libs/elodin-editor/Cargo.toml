@@ -154,6 +154,8 @@ miette.features = ["fancy"]
 impeller-bevy.path = "../../libs/impeller/bevy"
 impeller-bevy.features = ["tcp"]
 impeller-bevy.default-features = false
+cranelift-mlir.path = "../cranelift-mlir"
+sha2 = "0.10"
 
 # 3D text for ViewCube labels
 bevy_fontmesh = "0.6"

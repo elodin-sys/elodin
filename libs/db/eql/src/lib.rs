@@ -35,6 +35,7 @@ pub fn sql_table_name(component_name: &str) -> String {
         .collect()
 }
 
+pub mod eval;
 pub mod formulas;
 
 use formulas::{FormulaRegistry, create_default_registry};

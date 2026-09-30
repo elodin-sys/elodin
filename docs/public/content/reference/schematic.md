@@ -12,6 +12,10 @@ icon = ""
 order = 6
 +++
 
+KDL is the editor's schematic artifact format. To author the same model with
+typed Python builders, see [Migrate KDL schematics to
+Python](@/reference/migration/kdl-to-python.md).
+
 ## Glossary
 
 - Top-level nodes: `coordinate`, `theme`, `timeline`, `telemetry_mode`, `skybox`, `environment`, `panel` variants, `object_3d`, `line_3d`, `point_trails`, `vector_arrow`, `world_mesh`, `window`.

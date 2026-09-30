@@ -32,6 +32,7 @@ use crate::{
 
 use super::RootWidgetSystem;
 use crate::ui::widgets::SystemStateExt;
+use impeller_wkt::DbConfig;
 
 #[derive(SystemParam)]
 pub struct StatusBar<'w, 's> {
@@ -45,6 +46,7 @@ pub struct StatusBar<'w, 's> {
     hardware_stats: Res<'w, HardwareStats>,
     plot_gpu_pool: Res<'w, PlotGpuBufferPool>,
     command_palette_state: ResMut<'w, CommandPaletteState>,
+    db_config: Res<'w, DbConfig>,
 }
 
 impl RootWidgetSystem for StatusBar<'_, '_> {
@@ -70,6 +72,12 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
         let hardware_stats = &state_mut.hardware_stats;
         let plot_gpu_pool = &state_mut.plot_gpu_pool;
         let mut command_palette_state = state_mut.command_palette_state;
+        let build_error = state_mut
+            .db_config
+            .metadata
+            .get("ui.build_error")
+            .filter(|s| !s.is_empty())
+            .cloned();
 
         let panel = super::utils::show_panel(
             egui::Panel::bottom("status_bar").frame(egui::Frame {
@@ -86,6 +94,14 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
                     // Status
 
                     ui.add(editor_status_label(state_mut.connection_status.status()));
+
+                    if let Some(err) = &build_error {
+                        ui.add(egui::Label::new(
+                            egui::RichText::new(format!("Schematic build error: {err}"))
+                                .text_style(egui::TextStyle::Small)
+                                .color(get_scheme().error),
+                        ));
+                    }
 
                     // Editor FPS
 

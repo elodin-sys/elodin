@@ -1,0 +1,281 @@
+theme mode=dark scheme=default
+
+skybox name=desert_night
+// This is the LLA according to the vehicle at the Mojave launch site.
+coordinate frame=ENU lat=35.3506640 lon=-117.80902 alt=589.2740
+coordinate frame=ENU lat=0.0 lon=0.0 alt=0.0
+tabs {
+    hsplit name="Dynamics and Fin Cams" {
+        vsplit name="World Info" share=1.991293 {
+            hsplit share=1.428405 {
+                vsplit share=0.8 {
+                    viewport frame=NED name="Full View" near=0.1 pos="(0,0,0,0,2,0,-2) + (0,0,0,1,NAVNED.POS_NED[0], NAVNED.POS_NED[1], NAVNED.POS_NED[2])" look_at="(0,0,0,1,NAVNED.POS_NED[0], NAVNED.POS_NED[1], NAVNED.POS_NED[2])" show_grid=#true show_view_cube=#false show_frustum=#true far=15000000.0
+                    viewport frame=ECEF name="Fixed Fin Cam" near=0.1 pos="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).translate(-2.2,0,0)" look_at="NAVEKFSTATE.POS_ECEF" up="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).WORLD_POS.direction(1,1,1)" show_grid=#true show_view_cube=#true show_frustum=#false
+                }
+                vsplit share=0.8 {
+                    tabs {
+                    viewport name="Strake Fin 1 Cam" near=0.1 pos="MFNAVELODINENUMESSAGE.WORLD_POS.translate(-0.2,-0.07,-0.07)" look_at="MFNAVELODINENUMESSAGE.WORLD_POS.translate(-4,0,0)" up="MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,-1,-1)" show_grid=#true show_view_cube=#false
+                    viewport name="Strake Fin 3 Cam" near=0.1 pos="MFNAVELODINENUMESSAGE.WORLD_POS.translate(-0.2,0.07,0.07)" look_at="MFNAVELODINENUMESSAGE.WORLD_POS.translate(-4,0,0)" up="MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,-1,-1)" show_grid=#true show_view_cube=#false
+                    }
+                    // This ~2000m estimate for the vehicle camera far plane came from Anna.
+                    viewport name="Vehicle Camera" aspect=1.0 far=2000 near=0.1 pos="MFNAVELODINENUMESSAGE.WORLD_POS.translate(1.1,0,0)" look_at="MFNAVELODINENUMESSAGE.WORLD_POS.translate(10,0,0)" up="MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,1,0)" show_grid=#true show_view_cube=#false create_frustum=#false frustums_thickness=0.01 far=15000000.0
+                }
+            }
+            component_monitor name=MFNAVELODINENUMESSAGE.WORLD_POS component_name=MFNAVELODINENUMESSAGE.WORLD_POS share=0.376114
+            component_monitor name=MFNAVELODINENUMESSAGE.VEL_ENU component_name=MFNAVELODINENUMESSAGE.VEL_ENU share=0.287617
+            component_monitor name=MFNAVELODINENUMESSAGE.WORLD_ACCEL component_name=MFNAVELODINENUMESSAGE.WORLD_ACCEL share=0.30528
+            component_monitor name=MFNAVELODINENUMESSAGE.GYRO_BODY_DEG component_name=MFNAVELODINENUMESSAGE.GYRO_BODY_DEG share=0.4132
+            hsplit share=0.550215 {
+                component_monitor name=EKFTARGETMESSAGE.POS_ECEF component_name=EKFTARGETMESSAGE.POS_ECEF
+                component_monitor name=MFNAVELODINENUMESSAGE.TARG_VEL_ENU component_name=MFNAVELODINENUMESSAGE.TARG_VEL_ENU
+            }
+        }
+        vsplit name="Debug Info" share=1.941397 {
+            hsplit name="State Info" share=1.0 {
+                component_monitor name=STATEMACHINEOUTPUT.MISSILE_MODE component_name=STATEMACHINEOUTPUT.MISSILE_MODE share=0.667112
+                component_monitor name=MFNAVELODINENUMESSAGE.TIME_MONOTONIC component_name=MFNAVELODINENUMESSAGE.TIME_MONOTONIC share=0.765838
+                component_monitor name=GUIDANCEMESSAGE.GUIDANCE_MODE component_name=GUIDANCEMESSAGE.GUIDANCE_MODE share=0.683231
+                component_monitor name=TARGETMESSAGE.TARGET_MODE component_name=TARGETMESSAGE.TARGET_MODE share=1.024313
+            }
+            hsplit name=Angles share=1.0 {
+                component_monitor name=MFNAVELODINENUMESSAGE.YPR_ENU2BODY_DEG component_name=MFNAVELODINENUMESSAGE.YPR_ENU2BODY_DEG share=1.0
+                component_monitor name=MFPIMUMESSAGE.GYRO component_name=MFPIMUMESSAGE.GYRO share=1.0
+                tabs share=1.0 {
+                    component_monitor name=MFPIMUMESSAGE.ACCEL component_name=MFPIMUMESSAGE.ACCEL
+                    component_monitor name=GUIDANCEMESSAGE.BODY_ROLL_ANGLE component_name=GUIDANCEMESSAGE.BODY_ROLL_ANGLE
+                }
+            }
+            hsplit share=1.0 {
+                component_monitor name=TRACKERMESSAGE.LOS_NED component_name=TRACKERMESSAGE.LOS_NED share=0.33181
+                component_monitor name=GUIDANCEMESSAGE.ACC_CMD_NED component_name=GUIDANCEMESSAGE.ACC_CMD_NED share=0.344716
+                component_monitor name=CONTROLMESSAGE.ACC_CMD_BODY component_name=CONTROLMESSAGE.ACC_CMD_BODY share=0.323474
+            }
+            hsplit share=1.0 {
+                component_monitor name=TRACKERMESSAGE.LOS_RATE_NED component_name=TRACKERMESSAGE.LOS_RATE_NED share=0.167787
+                component_monitor name=CONTROLMESSAGE.ACC_MEAS_BODY component_name=CONTROLMESSAGE.ACC_MEAS_BODY share=0.321861
+            }
+            hsplit share=1.0 {
+                component_monitor name=TRACKERMESSAGE.RANGE_TO_GO component_name=TRACKERMESSAGE.RANGE_TO_GO share=0.639584
+                component_monitor name=CONTROLMESSAGE.DYNAMIC_COMMANDED component_name=CONTROLMESSAGE.DYNAMIC_COMMANDED share=0.668049
+            }
+            hsplit share=1.0 {
+                component_monitor name=CONTROLMESSAGE.PITCH_PID component_name=CONTROLMESSAGE.PITCH_PID
+                component_monitor name=CONTROLMESSAGE.YAW_PID component_name=CONTROLMESSAGE.YAW_PID share=0.985218
+            }
+            hsplit share=1.0 {
+                component_monitor name=CONTROLMESSAGE.ROLL_PID component_name=CONTROLMESSAGE.ROLL_PID
+                component_monitor name=CONTROLMESSAGE.FIN_DEFLECTION_DEG component_name=CONTROLMESSAGE.FIN_DEFLECTION_DEG
+            }
+            hsplit share=1.0 {
+                    component_monitor name=GPSPOSMESSAGE1.HACC component_name=GPSPOSMESSAGE1.HACC
+                    component_monitor name=GPSPOSMESSAGE1.VACC component_name=GPSPOSMESSAGE1.VACC
+            }
+        }
+        // TODO: Get off NED.
+        // viewport frame=NED name=Blank near=0.1 pos="(0,0,0,1,-8,0,-1.5)" look_at="(0,0,0,1,NAVNED.POS_NED[0], NAVNED.POS_NED[1], NAVNED.POS_NED[2])" up show_view_cube=#true share=1.86731 show_frustum=#false show_grid=#true far=15000000.0
+        viewport frame=NED name=Blank near=0.1 pos="(0,0,0,1,-8,0,-1.5)" look_at="(0,0,0,1,0.0, 0.0, 0.0)" show_view_cube=#true share=1.86731 show_frustum=#false show_grid=#true far=15000000.0
+        // I want matrix expressions NOW!
+        //viewport name="Target and Missile" near=0.1 pos="(0,0,0,1,0,-8,1.5)" look_at="(0,0,0,1, (MFNAVELODINENUMESSAGE.WORLD_POS[0] + EKFTARGETMESSAGE.POS_ECEF[0])/2, (MFNAVELODINENUMESSAGE.WORLD_POS[1] + EKFTARGETMESSAGE.POS_ECEF[1])/2, (MFNAVELODINENUMESSAGE.WORLD_POS[2] + EKFTARGETMESSAGE.POS_ECEF[2])/2)" show_view_cube=#false share=1.86731 show_frustum=#true
+        }
+    hsplit name="Fins and Strake Cams" {
+        vsplit share=0.8 {
+            viewport frame=ECEF name="Full View" near=0.1 pos="(0,0,0,0,0,1,1) + (0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" look_at="(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" show_grid=#true show_view_cube=#false show_frustum=#true far=15000000.0
+            tabs {
+                viewport frame=ECEF name="Fixed Fin Cam" near=0.1 pos="NAVEKFSTATE.POS_ECEF.translate(-1.2,0,0)" look_at="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" up="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2]).direction(0,0,1)" show_grid=#true show_view_cube=#false show_frustum=#false
+                viewport frame=ECEF name="Fin Cam" near=0.1 pos="NAVEKFSTATE.POS_ECEF.translate(-1.2,0,0)" look_at="(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" show_grid=#true show_view_cube=#false show_frustum=#false
+            }
+        }
+        vsplit share=0.8 {
+            tabs {
+            viewport name="Strake Fin 1 Cam" near=0.1 pos="MFNAVELODINENUMESSAGE.WORLD_POS.translate(-0.2,-0.07,-0.07)" look_at="MFNAVELODINENUMESSAGE.WORLD_POS.translate(-4,0,0)" up="MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,-1,-1)" show_grid=#true show_view_cube=#false
+            viewport name="Strake Fin 3 Cam" near=0.1 pos="MFNAVELODINENUMESSAGE.WORLD_POS.translate(-0.2,0.07,0.07)" look_at="MFNAVELODINENUMESSAGE.WORLD_POS.translate(-4,0,0)" up="MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,-1,-1)" show_grid=#true show_view_cube=#false
+            }
+            // This ~2000m estimate for the vehicle camera far plane came from Anna.
+            viewport name="Vehicle Camera" aspect=1.0 far=2000 near=0.1 pos="MFNAVELODINENUMESSAGE.WORLD_POS.translate(1.1,0,0)" look_at="MFNAVELODINENUMESSAGE.WORLD_POS.translate(10,0,0)" up="MFNAVELODINENUMESSAGE.WORLD_POS.direction(0,1,0)" show_grid=#true show_view_cube=#false create_frustum=#true frustums_thickness=0.01
+        }
+        viewport name=Blank near=0.1 pos="(0,0,0,1,0,-8,1.5)" look_at=MFNAVELODINENUMESSAGE.WORLD_POS show_view_cube=#false share=1.86731 show_frustum=#true show_grid=#true
+    }
+    hsplit name=Dynamics {
+        vsplit name="World Info" share=1.661305 {
+            viewport name=Missile frame=ECEF near=0.1 pos="(0,0,0,0, 0.5,-5,1) + (0,0,0,1,NAVNED.POS_NED[0], NAVNED.POS_NED[1], NAVNED.POS_NED[2])" look_at="(0,0,0,1,NAVNED.POS_NED[0], NAVNED.POS_NED[1], NAVNED.POS_NED[2])"  show_grid=#true share=1.5 show_frustum=#true show_view_cube=#false
+            viewport frame=ECEF name=Target near=0.1 pos="(0,0,0,0, 1,-10,4) + (0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])" look_at="(0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])" show_grid=#true share=0.639168 show_frustum=#true show_view_cube=#false
+            component_monitor name=.WORLD_POS component_name=MFNAVELODINENUMESSAGE.WORLD_POS share=0.476327
+            component_monitor name=MFNAVELODINENUMESSAGE.VEL_ENU component_name=MFNAVELODINENUMESSAGE.VEL_ENU share=0.482066
+            component_monitor name=MFNAVELODINENUMESSAGE.WORLD_ACCEL component_name=MFNAVELODINENUMESSAGE.WORLD_ACCEL share=0.439024
+            component_monitor name=MFNAVELODINENUMESSAGE.GYRO_BODY_DEG component_name=MFNAVELODINENUMESSAGE.GYRO_BODY_DEG share=0.4132
+            hsplit share=0.550215 {
+                component_monitor name=EKFTARGETMESSAGE.POS_ECEF component_name=EKFTARGETMESSAGE.POS_ECEF
+                component_monitor name=MFNAVELODINENUMESSAGE.TARG_VEL_ENU component_name=MFNAVELODINENUMESSAGE.TARG_VEL_ENU
+            }
+        }
+        vsplit name="Debug Info" share=2.838696 {
+            hsplit name="State Info" share=1.0 {
+                component_monitor name=STATEMACHINEOUTPUT.MISSILE_MODE component_name=STATEMACHINEOUTPUT.MISSILE_MODE share=0.667112
+                component_monitor name=MFNAVELODINENUMESSAGE.TIME_MONOTONIC component_name=MFNAVELODINENUMESSAGE.TIME_MONOTONIC share=0.765838
+                component_monitor name=GUIDANCEMESSAGE.GUIDANCE_MODE component_name=GUIDANCEMESSAGE.GUIDANCE_MODE share=0.683231
+                component_monitor name=TARGETMESSAGE.TARGET_MODE component_name=TARGETMESSAGE.TARGET_MODE share=1.024313
+            }
+            hsplit name=Angles share=1.0 {
+                component_monitor name=MFNAVELODINENUMESSAGE.YPR_ENU2BODY_DEG component_name=MFNAVELODINENUMESSAGE.YPR_ENU2BODY_DEG share=1.0
+                component_monitor name=MFPIMUMESSAGE.GYRO component_name=MFPIMUMESSAGE.GYRO share=1.0
+                tabs share=1.0 {
+                    component_monitor name=MFPIMUMESSAGE.ACCEL component_name=MFPIMUMESSAGE.ACCEL
+                    component_monitor name=GUIDANCEMESSAGE.BODY_ROLL_ANGLE component_name=GUIDANCEMESSAGE.BODY_ROLL_ANGLE
+                }
+            }
+            hsplit share=1.0 {
+                component_monitor name=TRACKERMESSAGE.LOS_NED component_name=TRACKERMESSAGE.LOS_NED share=0.33181
+                component_monitor name=GUIDANCEMESSAGE.ACC_CMD_NED component_name=GUIDANCEMESSAGE.ACC_CMD_NED share=0.344716
+                component_monitor name=CONTROLMESSAGE.ACC_CMD_BODY component_name=CONTROLMESSAGE.ACC_CMD_BODY share=0.323474
+            }
+            hsplit share=1.0 {
+                component_monitor name=TRACKERMESSAGE.LOS_RATE_NED component_name=TRACKERMESSAGE.LOS_RATE_NED share=0.167787
+                component_monitor name=CONTROLMESSAGE.ACC_MEAS_BODY component_name=CONTROLMESSAGE.ACC_MEAS_BODY share=0.321861
+            }
+            hsplit share=1.0 {
+                component_monitor name=TRACKERMESSAGE.RANGE_TO_GO component_name=TRACKERMESSAGE.RANGE_TO_GO share=0.639584
+                component_monitor name=CONTROLMESSAGE.DYNAMIC_COMMANDED component_name=CONTROLMESSAGE.DYNAMIC_COMMANDED share=0.668049
+            }
+            hsplit share=1.0 {
+                component_monitor name=CONTROLMESSAGE.PITCH_PID component_name=CONTROLMESSAGE.PITCH_PID share=1.01478
+                component_monitor name=CONTROLMESSAGE.YAW_PID component_name=CONTROLMESSAGE.YAW_PID share=0.985218
+            }
+            hsplit share=1.0 {
+                component_monitor name=CONTROLMESSAGE.ROLL_PID component_name=CONTROLMESSAGE.ROLL_PID
+                component_monitor name=CONTROLMESSAGE.FIN_DEFLECTION_DEG component_name=CONTROLMESSAGE.FIN_DEFLECTION_DEG
+            }
+        }
+    }
+
+    viewport frame=ECEF name="Full View" near=0.1 pos="(0,0,0,0, 0.5,-5,1) + (0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" look_at="(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" show_grid=#true show_view_cube=#true show_frustum=#true
+}
+
+object_3d frame=ECEF "(0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])" {
+    glb path=fixed_wing.glb
+    icon builtin=star {
+        visibility_range min=50.0 fade_distance=50.0
+        color 212 10 10
+    }
+}
+// This blue star shows the target's ECEF position. It's near the target ENU above but they're not exactly aligned.
+object_3d frame="ECEF" "(0,0,0,1, EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])" {
+    glb path=fixed_wing.glb
+    icon builtin=star {
+        visibility_range min=50.0 fade_distance=50.0
+        color 10 10 212
+    }
+}
+
+// object_3d frame=ECEF "(0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])" {
+//     // TODO: This scale isn't accounting for this being in the ECEF frame currently.
+//     ellipsoid scale="TARGETMESSAGE.STD_POS_ECEF" show_grid=#true {
+//     //ellipsoid scale="(12.0,12.0,12.0)" show_grid=#true {
+//         color 0 188 212 40
+//         grid_color 255 255 255 120
+//     }
+// }
+
+object_3d frame=ECEF orientation=absolute "(0.0, 0.0, 0.0, 1.0, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])"  {
+    // k ~= 1.91 for 70% confidence interval
+    // TODO: NED is not correct here. It ought to be ENU. We _should_ be able to express it like this:
+    // scale="k*(x[1], x[0], x[2])" but there is an Elodin bug that prevents that.
+    // NOTE: No minus for x[2] since these are standard variations.
+
+    ellipsoid error_covariance="NAKEKFCOV.PPOS_ECEF" show_grid=#true error_confidence_interval=95 {
+    //ellipsoid scale="1.91*(NAVNED.STD_POS_NED[1], NAVNED.STD_POS_NED[0], NAVNED.STD_POS_NED[2])" show_grid=#true {
+        color 0 212 188 20
+        grid_color 255 255 255 120
+    }
+}
+
+// object_3d MFNAVELODINENUMESSAGE.WORLD_POS {
+//     glb path=articulated-missile-ghost-fins.glb
+//     animate joint=FinGhost_0 rotation_vector="(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[0], 0)"
+//     animate joint=FinGhost_1 rotation_vector="(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[1], 0)"
+//     animate joint=FinGhost_2 rotation_vector="(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[2], 0)"
+//     animate joint=FinGhost_3 rotation_vector="(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[3], 0)"
+//     animate joint=Root.Fin_0 rotation_vector="(0, CANOPENMOTORMESSAGE0.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)"
+//     animate joint=Root.Fin_1 rotation_vector="(0, CANOPENMOTORMESSAGE1.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)"
+//     animate joint=Root.Fin_2 rotation_vector="(0, CANOPENMOTORMESSAGE2.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)"
+//     animate joint=Root.Fin_3 rotation_vector="(0, CANOPENMOTORMESSAGE3.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)"
+//     icon builtin=rocket_launch {
+//         color 76 175 80
+//         visibility_range min=50.0 fade_distance=50.0
+//     }
+//     // TODO: This should be accel.norm() but that wasn't working for some reason.
+//     thruster name="motor" effect="plume" intensity="MFIMUMESSAGE.ACCEL.Z/9.8 - 1.0" direction="(-1, 0, 0)" emission_rate=1300.0 cutoff=0.10 body_frame=#true position="(-0.6,0,0)"
+
+// }
+
+// TODO: We don't have an ECEF quaternion yet. But this is the ECEF position of the missile and it's exactly right.
+object_3d frame=ECEF "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" {
+    glb path=articulated-missile-ghost-fins.glb
+    animate joint=FinGhost_0 rotation_vector="(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[0], 0)"
+    animate joint=FinGhost_1 rotation_vector="(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[1], 0)"
+    animate joint=FinGhost_2 rotation_vector="(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[2], 0)"
+    animate joint=FinGhost_3 rotation_vector="(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[3], 0)"
+    animate joint=Root.Fin_0 rotation_vector="(0, CANOPENMOTORMESSAGE0.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)"
+    animate joint=Root.Fin_1 rotation_vector="(0, CANOPENMOTORMESSAGE1.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)"
+    animate joint=Root.Fin_2 rotation_vector="(0, CANOPENMOTORMESSAGE2.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)"
+    animate joint=Root.Fin_3 rotation_vector="(0, CANOPENMOTORMESSAGE3.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)"
+    icon builtin=rocket_launch {
+        color 76 80 175
+        visibility_range min=50.0 fade_distance=50.0
+    }
+}
+
+object_3d frame=ECEF frame_orientation=ENU "(0,0,0,1, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" {
+    glb path=compass.glb
+}
+line_3d frame=ECEF "(0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])" perspective=#false {
+    color 255 0 0
+}
+
+line_3d frame=ECEF "(0,0,0,1, EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])" perspective=#false {
+    color 0 0 255
+}
+
+// TODO: I don't see this in the scene.
+// line_3d frame=ECEF "(0, 0, 0, 1, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" perspective=#false {
+//     color 255 255 0
+// }
+
+line_3d frame=ECEF "(NAVEKFSTATE.QUAT_ECEF2BODY.X, NAVEKFSTATE.QUAT_ECEF2BODY.Y, NAVEKFSTATE.QUAT_ECEF2BODY.Z, NAVEKFSTATE.QUAT_ECEF2BODY.W, NAVEKFSTATE.POS_ECEF[0],NAVEKFSTATE.POS_ECEF[1],NAVEKFSTATE.POS_ECEF[2])" perspective=#false {
+    color 0 255 0
+}
+
+// Requires running some scripts. Will avoid for now.
+//world_mesh "globe" frame=ECEF
+
+object_3d frame=ECEF "(0,0,0,1,0,0,0)" {
+    glb path="earth.glb" emissivity=0.4 glow=0.5
+}
+
+// vector_arrow "(1, 0, 0)" origin=MFNAVELODINENUMESSAGE.WORLD_POS name="Rocket Orientation X" body_frame=#true {
+//     color 255 0 0
+// }
+// vector_arrow "(0, 1, 0)" origin=MFNAVELODINENUMESSAGE.WORLD_POS name="Rocket Orientation Y" body_frame=#true {
+//     color 0 255 0
+// }
+// vector_arrow "(0, 0, 1)" origin=MFNAVELODINENUMESSAGE.WORLD_POS name="Rocket Orientation Z" body_frame=#true {
+//     color 0 0 255
+// }
+// vector_arrow "(MFNAVELODINENUMESSAGE.VEL_ENU[0], MFNAVELODINENUMESSAGE.VEL_ENU[1], MFNAVELODINENUMESSAGE.VEL_ENU[2])" origin="MFNAVELODINENUMESSAGE.WORLD_POS + (0,0,0,0,  0,0,0)" scale=0.1 name="Rocket Linear Velocity" {
+//     color 255 255 0
+// }
+// vector_arrow "(0, CONTROLMESSAGE.ACC_CMD_BODY[0], CONTROLMESSAGE.ACC_CMD_BODY[1])" origin=MFNAVELODINENUMESSAGE.WORLD_POS name="Rocket Commanded Acceleration" body_frame=#true {
+//     color 0 255 255
+// }
+// vector_arrow "(0, CONTROLMESSAGE.ACC_MEAS_BODY[0], CONTROLMESSAGE.ACC_MEAS_BODY[1])" origin=MFNAVELODINENUMESSAGE.WORLD_POS name="Rocket Measured Acceleration" body_frame=#true {
+//     color 255 0 255
+// }
+// vector_arrow "(TRACKERMESSAGE.LOS_NED[1], TRACKERMESSAGE.LOS_NED[0], 0) - (0, 0, TRACKERMESSAGE.LOS_NED[2])" origin=MFNAVELODINENUMESSAGE.WORLD_POS name="Target Controls LOS" {
+//     color 255 255 255
+// }
+// vector_arrow "(0,0,1)" origin="(0,0,0,1,EKFTARGETMESSAGE.POS_ECEF[0], EKFTARGETMESSAGE.POS_ECEF[1], EKFTARGETMESSAGE.POS_ECEF[2])" scale=50.0 name="Target Visibility" {
+//     color 255 0 0
+// }
+// window screen=1 {
+//     rect 0 0 100 100
+// }
+window

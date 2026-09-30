@@ -50,6 +50,10 @@ elodin-db.path = "../db"
 elodin-db.features = ["grpc"]
 futures-lite = "2.5.0"
 
+bevy_geo_frames.path = "../bevy_geo_frames"
+bevy_geo_frames.default-features = false
+bevy_geo_frames.features = ["strum", "serde"]
+
 impeller-kdl.path = "../impeller/kdl"
 # async
 stellarator.path = "../stellarator"

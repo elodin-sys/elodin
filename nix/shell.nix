@@ -170,17 +170,24 @@ with pkgs; let
 
       export ELODIN_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
+      shell_is_collectable=
       if [ -z "''${ELODIN_SHELL_ID:-}" ]; then
         if [ "$(uname -s)" = Linux ]; then
           ELODIN_SHELL_ID="$(ps -o sid= -p $$ | tr -d '[:space:]')"
         else
           ELODIN_SHELL_ID="$$"
         fi
+        shell_is_collectable=1
       fi
       export ELODIN_SHELL_ID
       shell_dir="$ELODIN_ROOT/target/shells/$ELODIN_SHELL_ID"
       export ELODIN_SHELL_BIN="$shell_dir/bin"
       mkdir -p "$ELODIN_SHELL_BIN"
+      if [ -n "$shell_is_collectable" ]; then
+        touch "$shell_dir/garbage-collectable"
+      else
+        rm -f "$shell_dir/garbage-collectable"
+      fi
       export VIRTUAL_ENV="$shell_dir/venv"
       export UV_PROJECT_ENVIRONMENT="$VIRTUAL_ENV"
       if [ ! -x "$VIRTUAL_ENV/bin/python" ]; then
@@ -193,6 +200,7 @@ with pkgs; let
       if [ -d "$ELODIN_ROOT/target/shells" ]; then
         for dir in "$ELODIN_ROOT/target/shells"/[0-9]*; do
           [ -d "$dir" ] || continue
+          [ -f "$dir/garbage-collectable" ] || continue
           dead_id="''${dir##*/}"
           case "$dead_id" in
             *[!0-9]*) continue ;;
@@ -201,7 +209,7 @@ with pkgs; let
             rm -rf "$dir"
           fi
         done
-        unset dir dead_id
+        unset dir dead_id shell_is_collectable
       fi
 
       alias zar='gtar --zstd --sparse'
