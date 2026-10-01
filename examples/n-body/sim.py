@@ -9,8 +9,6 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-from schematic import BodyVisual, build as build_schematic
-
 # Truth data is in AU/day; Elodin tick rates are in Hz (seconds), so convert
 # the Gaussian gravitational constant to AU^3 / (solar_mass * s^2).
 K_SQUARED_DAY = 2.9591220828e-4
@@ -33,6 +31,7 @@ CSV_PATHS: tuple[Path, ...] = (
 SUN_MASS_SOLAR = 1.0
 SUN_RADIUS_KM = 696_340.0
 SUN_COLOR = (255, 220, 120)
+TRUTH_COLOR = "180 180 180"
 
 PLANET_ICON = "public"
 MOON_ICON = "circle"
@@ -202,22 +201,85 @@ def load_truth(csv_paths: tuple[Path, ...] = CSV_PATHS) -> tuple[jax.Array, np.n
     return jnp.array(pos), vel, dates
 
 
-def _build_schematic():
-    return build_schematic(
-        [
-            BodyVisual(
-                name=body.name,
-                radius=_radius_au(body.meta.radius_km),
-                color=body.meta.color_rgb,
-                icon=body.meta.icon,
-                label=body.name.replace("_", " "),
-                truth_radius=_radius_au(body.meta.radius_km) * 0.6,
-            )
-            for body in BODIES
-        ],
-        sun_radius=_radius_au(SUN_RADIUS_KM),
-        sun_color=SUN_COLOR,
+def _kdl_color(rgb: tuple[int, int, int]) -> str:
+    return f"{rgb[0]} {rgb[1]} {rgb[2]}"
+
+
+def _build_schematic() -> str:
+    lines: list[str] = [
+        """
+coordinate frame=ENU
+timeline follow_latest=#true
+
+tabs {
+    hsplit {
+        tabs share=0.75 {
+            viewport name=SolarSystem pos="(0,0,0,1, -6,6,6)" look_at="(0,0,0,1, 0,0,0)" hdr=#true show_grid=#true active=#true
+            viewport name=TopDown pos="(0,0,0,1, 0,0,25)" look_at="(0,0,0,1, 0,0,0)" hdr=#true show_grid=#true 
+        }
+        tabs share=0.25 {
+            graph "earth.world_pos[4],earth.world_pos[5],earth.world_pos[6],truth_earth.truth_world_pos[4],truth_earth.truth_world_pos[5],truth_earth.truth_world_pos[6]" name="Earth vs Truth (AU)"
+            hierarchy
+            inspector
+        }
+    }
+}
+"""
+    ]
+    sun_color = _kdl_color(SUN_COLOR)
+    sun_radius = _radius_au(SUN_RADIUS_KM)
+    lines.append(
+        f"""
+object_3d sun.world_pos {{
+    sphere radius={sun_radius:.8f} {{
+        color {sun_color}
+    }}
+    icon builtin="wb_sunny" {{
+        visibility_range min=1.0 fade_distance=5.0
+        color {sun_color}
+    }}
+}}
+line_3d sun.world_pos line_width=1.5 perspective=#false {{
+    color {sun_color}
+}}
+vector_arrow "(0,0,0.03)" origin="sun.world_pos" scale=1.0 name="sun" show_name=#true arrow_thickness=0.02 label_position=1.0 {{
+    color {sun_color}
+}}
+"""
     )
+    for body in BODIES:
+        label = body.name.replace("_", " ")
+        color = _kdl_color(body.meta.color_rgb)
+        radius = _radius_au(body.meta.radius_km)
+        truth_radius = radius * 0.6
+        lines.append(
+            f"""
+object_3d {body.name}.world_pos {{
+    sphere radius={radius:.8f} {{
+        color {color}
+    }}
+    icon builtin="{body.meta.icon}" {{
+        visibility_range min=1.0 fade_distance=5.0
+        color {color}
+    }}
+}}
+line_3d {body.name}.world_pos line_width=1.5 perspective=#false {{
+    color {color}
+}}
+vector_arrow "(0,0,0.03)" origin="{body.name}.world_pos" scale=1.0 name="{label}" show_name=#true arrow_thickness=0.02 label_position=1.0 {{
+    color {color}
+}}
+object_3d truth_{body.name}.truth_world_pos {{
+    sphere radius={truth_radius:.8f} {{
+        color {TRUTH_COLOR} 120
+    }}
+}}
+line_3d truth_{body.name}.truth_world_pos line_width=1.0 perspective=#false {{
+    color {TRUTH_COLOR} 80
+}}
+"""
+        )
+    return "".join(lines)
 
 
 def build_world() -> el.World:
