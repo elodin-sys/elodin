@@ -5,6 +5,7 @@ from math import cos, sin, radians
 from typing import Annotated
 
 import elodin as el
+import elodin.ui as ui
 import jax
 import jax.numpy as np
 from elodin import egm08
@@ -655,32 +656,87 @@ w.spawn(CSSRel(el.Edge(css_4, sat)), name="CSS 4 -> Sat")
 w.spawn(CSSRel(el.Edge(css_5, sat)), name="CSS 5 -> Sat")
 
 w.schematic(
-    f"""
-    coordinate frame=ECEF
-    // Globe is ECEF-fixed; the sim Earth body still spins, so continents lag.
-    environment {{
-        sun illuminance=100000.0 shadows=#true
-        ambient scale=0.05
-        earth
-    }}
-    vsplit {{
-        hsplit share=0.6 {{
-            tabs {{
-                viewport name=Viewport pos="ore_sat.world_pos.translate_world({float(cam[0]):.4f}, {float(cam[1]):.4f}, {float(cam[2]):.4f})" look_at="ore_sat.world_pos.translate_world({float(look[0]):.4f}, {float(look[1]):.4f}, {float(look[2]):.4f})" up="({float(up[0]):.5f}, {float(up[1]):.5f}, {float(up[2]):.5f})" near=0.5 cinematic=#true
-            }}
-            graph "css_0.css_value, css_1.css_value, css_2.css_value, css_3.css_value, css_4.css_value, css_5.css_value" Name=Sensor
-        }}
-        graph "ore_sat.att_est" Name=Att
-    }}
-
-    object_3d ore_sat.world_pos {{
-        glb path="oresat-low.glb"
-        icon builtin="satellite_alt" {{
-            visibility_range min=50.0 fade_distance=50.0
-            color 76 175 80
-        }}
-    }}
-""",
+    ui.schematic(
+        ui.vsplit(
+            ui.hsplit(
+                ui.tabs(
+                    ui.viewport(
+                        name="Viewport",
+                        fov=45.0,
+                        near=0.5,
+                        active=False,
+                        show_grid=False,
+                        show_arrows=True,
+                        create_frustum=False,
+                        show_frustums=False,
+                        frustums_color="yellow",
+                        projection_color="white",
+                        frustums_thickness=0.006,
+                        show_view_cube=True,
+                        effects=True,
+                        hdr=False,
+                        cinematic=True,
+                        pos=(
+                            f"ore_sat.world_pos.translate_world({float(cam[0]):.4f}, "
+                            f"{float(cam[1]):.4f}, {float(cam[2]):.4f})"
+                        ),
+                        look_at=(
+                            f"ore_sat.world_pos.translate_world({float(look[0]):.4f}, "
+                            f"{float(look[1]):.4f}, {float(look[2]):.4f})"
+                        ),
+                        up=f"({float(up[0]):.5f}, {float(up[1]):.5f}, {float(up[2]):.5f})",
+                        smoothing=0.0,
+                    ),
+                ),
+                ui.graph(
+                    "css_0.css_value, css_1.css_value, css_2.css_value, css_3.css_value, "
+                    "css_4.css_value, css_5.css_value",
+                ),
+                share=0.6,
+            ),
+            ui.graph("ore_sat.att_est"),
+        ),
+        ui.object_3d(
+            "ore_sat.world_pos",
+            mesh=ui.glb(
+                "oresat-low.glb",
+                scale=1.0,
+                translate=(0.0, 0.0, 0.0),
+                rotate=(0.0, 0.0, 0.0),
+                emissivity=0.0,
+                glow=0.0,
+            ),
+            orientation="relative",
+            icon=ui.icon(
+                builtin="satellite_alt",
+                color=ui.color(76, 175, 80, 255),
+                size=32.0,
+                visibility=ui.visibility_range(
+                    min=50.0,
+                    max=3.4028235e38,
+                    fade_distance=50.0,
+                ),
+            ),
+        ),
+        coordinate=ui.coordinate(frame="ECEF"),
+        environment=ui.environment(
+            sun=ui.sun(illuminance=100000.0, shadows=True),
+            ambient=0.05,
+            earth=ui.earth(
+                stars_density=0.05,
+                stars_size=0.4,
+                stars_brightness=1.88,
+                city_lights_density=0.05,
+                city_lights_size=1.0,
+                city_lights_height=0.0,
+                city_lights_brightness=0.05,
+                airglow_density=0.55,
+                airglow_size=1.05,
+                airglow_brightness=1.45,
+                night_map_brightness=0.05,
+            ),
+        ),
+    ),
     "cube-sat.kdl",
 )
 
