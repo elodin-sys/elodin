@@ -7,4 +7,12 @@ tabs {
         sensor_view "drone.scene_cam" name="Sensor Camera"
     }
 }
-__OBJECT_MESH__
+object_3d ellipsoid.world_pos {
+    ellipsoid scale="(0.9, 0.9, 0.38)" show_grid=#true {
+        color 0 188 212 28
+        grid_color 255 255 255 120
+    }
+}
+object_3d drone.world_pos {
+    glb path="talon-quad-v2.glb" rotate="(0.0, 0.0, 0.0)" translate="(0.0, 0.0, 0.0)" scale=0.65
+}

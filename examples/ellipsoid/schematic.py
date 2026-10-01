@@ -1,7 +1,6 @@
 """Typed schematic for the ellipsoid frustum-intersection example.
 
-Layout matches `ellipsoid.kdl`. Object meshes match the `__OBJECT_MESH__`
-substitution in `sim.py`.
+Layout and object meshes match `ellipsoid.kdl`.
 """
 
 from __future__ import annotations
