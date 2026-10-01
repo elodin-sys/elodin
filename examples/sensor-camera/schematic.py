@@ -5,6 +5,7 @@ Typed elodin.ui translation of .sensor-camera.rendered.kdl.
 
 import elodin.ui as ui
 
+
 def build() -> ui.Schematic:
     return ui.schematic(
         ui.hsplit(

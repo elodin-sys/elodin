@@ -27,6 +27,7 @@ Typed elodin.ui translation of apollo-lander.kdl.
 
 import elodin.ui as ui
 
+
 def build() -> ui.Schematic:
     return ui.schematic(
         ui.hsplit(

@@ -5,6 +5,7 @@ Typed elodin.ui translation of covariance-ellipsoids.kdl.
 
 import elodin.ui as ui
 
+
 def build() -> ui.Schematic:
     return ui.schematic(
         ui.hsplit(

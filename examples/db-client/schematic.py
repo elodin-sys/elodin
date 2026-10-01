@@ -9,6 +9,7 @@ Typed elodin.ui translation of schematic.kdl.
 
 import elodin.ui as ui
 
+
 def build() -> ui.Schematic:
     return ui.schematic(
         ui.tabs(
