@@ -23,4 +23,10 @@ window path="examples/drone/rate-control-panel.kdl"
 vector_arrow "(1, 0, 0)" origin="drone.world_pos" scale=1.0 name="Drone X" body_frame=#true
 vector_arrow "(0, 1, 0)" origin="drone.world_pos" scale=1.0 name="Drone Y" body_frame=#true
 vector_arrow "(0, 0, 1)" origin="drone.world_pos" scale=1.0 name="Drone Z" body_frame=#true
-__OBJECT_MESH__
+object_3d drone.world_pos {
+    glb path="talon-quad-v2.glb"
+    icon builtin="flight" {
+        visibility_range min=500.0
+        color 0 188 212
+    }
+}

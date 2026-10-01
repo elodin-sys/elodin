@@ -1,6 +1,5 @@
 import typing as ty
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import control
 import elodin as el
@@ -13,6 +12,7 @@ import params
 import sensors
 import telemetry
 from config import Config
+from schematic import build as build_schematic
 
 BodyThrust = ty.Annotated[
     el.SpatialForce,
@@ -127,19 +127,8 @@ def world() -> tuple[el.World, el.EntityId]:
         name="drone",
     )
 
-    object_mesh = f"""
-    object_3d drone.world_pos {{
-        glb path="{Config.GLOBAL.drone_glb}"
-        icon builtin="flight" {{
-            visibility_range min=500.0
-            color 0 188 212
-        }}
-    }}
-    """
-
-    schematic_template = Path(__file__).with_name("drone.kdl").read_text()
     world.schematic(
-        schematic_template.replace("__OBJECT_MESH__", object_mesh.strip()),
+        build_schematic(drone_glb=Config.GLOBAL.drone_glb),
         "drone.kdl",
     )
     return world, drone

@@ -23,9 +23,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import os
-from pathlib import Path
 import sys
 import time
+from schematic import build as build_schematic
 
 SIM_TIME_STEP = 1.0 / 120.0
 MAX_TICKS = int(os.getenv("ELODIN_SENSOR_CAMERA_MAX_TICKS", "18000"))
@@ -164,24 +164,7 @@ world.sensor_camera(
 
 # ── Schematic ────────────────────────────────────────────────────────────────
 
-BALL_COLORS = {
-    "cam_ball_a": "0 220 220",  # cyan
-    "cam_ball_b": "220 0 220",  # magenta
-    "ball_1": "255 140 0",  # orange
-    "ball_2": "255 255 100",  # yellow
-    "ball_3": "100 255 100",  # green
-}
-
-object_3d_lines = []
-for name, color in BALL_COLORS.items():
-    object_3d_lines.append(
-        f"    object_3d {name}.world_pos {{ sphere radius={BALL_RADIUS} {{ color {color} }} }}"
-    )
-
-schematic_template = Path(__file__).with_name("sensor-camera.kdl").read_text()
-schematic = schematic_template.replace("__OBJECTS__", "\n".join(object_3d_lines))
-
-world.schematic(schematic, "sensor-camera.kdl")
+world.schematic(build_schematic(ball_radius=BALL_RADIUS), "sensor-camera.kdl")
 
 # ── System composition ───────────────────────────────────────────────────────
 
