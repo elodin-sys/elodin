@@ -83,8 +83,8 @@ impl super::Formula for TimeSlice {
 #[cfg(test)]
 mod tests {
     use crate::{Component, ComponentPart, Context, Expr, formulas::TimeSlice, parse_duration};
-    use impeller2::schema::Schema;
-    use impeller2::types::{ComponentId, PrimType, Timestamp};
+    use impeller::schema::Schema;
+    use impeller::types::{ComponentId, PrimType, Timestamp};
     use std::collections::BTreeMap;
     use std::sync::Arc;
 

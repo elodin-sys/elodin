@@ -1,7 +1,7 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
-use impeller2::types::ComponentId;
+use impeller::types::ComponentId;
 use numpy::PyUntypedArray;
 use pyo3::exceptions::PyOSError;
 use pyo3::exceptions::PyValueError;
@@ -18,7 +18,7 @@ pub mod error;
 pub mod exec;
 pub mod globals;
 pub mod graph;
-pub mod impeller2_server;
+pub mod impeller_server;
 pub mod integrator;
 pub mod jax_exec;
 pub mod linalg;
@@ -31,6 +31,7 @@ pub mod spatial;
 pub mod step_context;
 pub mod system;
 pub mod tick_metrics;
+pub mod ui;
 pub mod utils;
 pub mod world;
 pub mod world_builder;
@@ -53,8 +54,8 @@ pub use world_builder::*;
 
 pub use elodin_db::ComponentSchema;
 pub use elodin_macros::{Archetype, Component};
-pub use impeller2;
-pub use impeller2_wkt;
+pub use impeller;
+pub use impeller_wkt;
 pub use nox;
 
 trait PyUntypedArrayExt {
@@ -173,6 +174,7 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     s10::register(m)?;
     monte_carlo::register(m)?;
     db::register(m)?;
+    ui::register(m)?;
     // try_init: the db module may have installed a tracing subscriber (which
     // claims the global `log` logger) when ELODIN_DB_LOG is set.
     let _ = env_logger::try_init();

@@ -17,6 +17,26 @@ This example is a work in progress. Right now the simulated probes do
 not make it to Saturn. Future work is needed to isolate the error
 sources and improve the simulation.
 
+## Current model limits
+
+The simulation is still gravity-only. That gets us pretty far, but it
+leaves out a few things that matter once the propagation gets longer.
+
+Solar radiation pressure is one of them. It is just the small force from
+sunlight hitting the spacecraft, but over time it can add up. I tested it
+separately during the Voyager validation work and it did reduce some of
+the remaining error, but I am leaving it out of the main model for now.
+
+We also are not replaying the full history of Voyager thrust events and
+attitude-control activity. Because of that, a difference from the SPICE
+trajectory does not automatically mean the gravity model or integrator
+is wrong.
+
+For validation, shorter maneuver-free windows are more useful than trying
+to score the entire mission at once. They let us change one part of the
+model, start from the same SPICE state, and see what actually improved
+without mixing a bunch of effects together.
+
 The editor exposes that divergence numerically as two telemetry signals
 for each simulated probe:
 

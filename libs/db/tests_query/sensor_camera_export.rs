@@ -1,8 +1,8 @@
 use std::io::Cursor;
 
 use elodin_db::DB;
-use impeller2::types::{Timestamp, msg_id};
-use impeller2_wkt::{Color, SensorCameraConfig};
+use impeller::types::{Timestamp, msg_id};
+use impeller_wkt::{Color, SensorCameraConfig};
 use openh264::OpenH264API;
 use openh264::encoder::{Encoder, EncoderConfig, FrameRate, IntraFramePeriod, SpsPpsStrategy};
 use openh264::formats::{RgbaSliceU8, YUVBuffer};

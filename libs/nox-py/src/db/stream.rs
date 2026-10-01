@@ -12,11 +12,11 @@ use std::hash::{BuildHasher, Hasher};
 use std::net::SocketAddr;
 use std::sync::{Arc, Condvar, Mutex};
 
-use impeller2::com_de::Decomponentize;
-use impeller2::registry::HashMapRegistry;
-use impeller2::types::{ComponentId, ComponentView, MsgBuf, PacketId, PrimType, Timestamp};
-use impeller2_stellar::Client as StellarClient;
-use impeller2_wkt::{
+use impeller::com_de::Decomponentize;
+use impeller::registry::HashMapRegistry;
+use impeller::types::{ComponentId, ComponentView, MsgBuf, PacketId, PrimType, Timestamp};
+use impeller_stellar::Client as StellarClient;
+use impeller_wkt::{
     FixedRateBehavior, InitialTimestamp, Stream, StreamBehavior, StreamReply, TimestampedMsgStream,
 };
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
@@ -312,7 +312,7 @@ async fn run_stream(
     behavior: StreamBehavior,
     wanted: &HashMap<ComponentId, String>,
     queue: &Arc<BoundedQueue<RowData>>,
-) -> Result<(), impeller2_stellar::Error> {
+) -> Result<(), impeller_stellar::Error> {
     let mut client = StellarClient::connect(addr).await?;
     let stream = Stream {
         behavior,
@@ -371,7 +371,7 @@ impl MsgStreamSub {
         let addr: SocketAddr = addr
             .parse()
             .map_err(|e| PyRuntimeError::new_err(format!("invalid address {addr:?}: {e}")))?;
-        let msg_id = impeller2::types::msg_id(name);
+        let msg_id = impeller::types::msg_id(name);
         let queue = Arc::new(BoundedQueue::new(maxlen));
         let shutdown = Arc::new(WaitQueue::new());
         let thread_queue = queue.clone();
@@ -446,7 +446,7 @@ async fn run_msg_stream(
     addr: SocketAddr,
     msg_id: PacketId,
     queue: &Arc<BoundedQueue<MsgItem>>,
-) -> Result<(), impeller2_stellar::Error> {
+) -> Result<(), impeller_stellar::Error> {
     let mut client = StellarClient::connect(addr).await?;
     let mut sub = client.stream(&TimestampedMsgStream { msg_id }).await?;
     loop {

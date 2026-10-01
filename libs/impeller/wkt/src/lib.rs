@@ -1,0 +1,274 @@
+#[cfg(feature = "nox")]
+use impeller::component::Component;
+use impeller::types::Timestamp;
+use serde::{Deserialize, Serialize};
+
+mod metadata;
+mod msgs;
+mod path;
+#[cfg(feature = "nox")]
+mod value;
+
+pub use metadata::*;
+pub use msgs::*;
+pub use path::*;
+#[cfg(feature = "nox")]
+pub use value::*;
+
+#[cfg(feature = "gui")]
+mod gui;
+#[cfg(feature = "gui")]
+pub use gui::*;
+
+// TODO: Consider making this an enum so we can round-trip color names.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Reflect))]
+pub struct Color {
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
+}
+
+impl Color {
+    pub const BLACK: Self = Self::rgb(0., 0., 0.);
+    pub const WHITE: Self = Self::rgb(1., 1., 1.);
+
+    pub const BLUE: Self = Self::rgb(0., 0., 1.);
+    pub const RED: Self = Self::rgb(1., 0., 0.);
+    pub const ORANGE: Self = Self::rgb(1., 0.5, 0.);
+    pub const YELLOW: Self = Self::rgb(1., 1., 0.);
+    pub const CYAN: Self = Self::rgb(0., 1., 1.);
+    pub const GRAY: Self = Self::rgb(0.5, 0.5, 0.5);
+    pub const GREEN: Self = Self::rgb(0., 1., 0.);
+    pub const PINK: Self = Self::rgb(1., 0.752_941_2, 0.796_078_44);
+    pub const YALK: Self = Self::rgb(1., 0.9, 0.2);
+
+    pub const TURQUOISE: Self = Self::rgb(0.41, 0.7, 0.75);
+    pub const SLATE: Self = Self::rgb(0.5, 0.44, 1.);
+    pub const PUMPKIN: Self = Self::rgb(1.0, 0.44, 0.12);
+    pub const YOLK: Self = Self::rgb(1., 0.77, 0.02);
+    pub const PEACH: Self = Self::rgb(1., 0.84, 0.7);
+    pub const REDDISH: Self = Self::rgb(0.913, 0.125, 0.0335);
+    pub const HYPERBLUE: Self = Self::rgb(0.08, 0.38, 0.82);
+    pub const MINT: Self = Self::rgb(0.53, 0.87, 0.62);
+    pub const TRANSPARENT: Self = Self::rgba(0., 0., 0., 0.);
+
+    pub const fn rgb(r: f32, g: f32, b: f32) -> Self {
+        Self { r, g, b, a: 1. }
+    }
+
+    pub const fn rgba(r: f32, g: f32, b: f32, a: f32) -> Self {
+        Self { r, g, b, a }
+    }
+}
+
+impl Default for Color {
+    fn default() -> Self {
+        Self::TRANSPARENT
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, Default, Copy)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Resource))]
+pub struct Tick(pub u64);
+
+#[cfg(feature = "nox")]
+impl impeller::com_de::Decomponentize for Tick {
+    type Error = core::convert::Infallible;
+
+    fn apply_value(
+        &mut self,
+        component_id: impeller::types::ComponentId,
+        value: impeller::types::ComponentView<'_>,
+        _timestamp: Option<Timestamp>,
+    ) -> Result<(), Self::Error> {
+        if component_id != Tick::COMPONENT_ID {
+            return Ok(());
+        }
+        let impeller::types::ComponentView::U64(view) = value else {
+            return Ok(());
+        };
+        let buf = view.buf();
+        self.0 = buf[0];
+        Ok(())
+    }
+}
+
+impl impeller::component::Component for Tick {
+    const NAME: &'static str = "tick";
+
+    fn schema() -> impeller::schema::Schema<Vec<u64>> {
+        impeller::schema::Schema::new(impeller::types::PrimType::U64, [0u64; 0])
+            .expect("failed to create schema")
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Resource))]
+pub struct SimulationTimeStep(pub f64);
+
+impl SimulationTimeStep {
+    pub fn as_duration(&self) -> std::time::Duration {
+        std::time::Duration::from_secs_f64(self.0)
+    }
+}
+
+impl impeller::component::Component for SimulationTimeStep {
+    const NAME: &'static str = "simulation_time_step";
+    const ASSET: bool = false;
+
+    fn schema() -> impeller::schema::Schema<Vec<u64>> {
+        impeller::schema::Schema::new(impeller::types::PrimType::F64, [0usize; 0])
+            .expect("failed to create schema")
+    }
+}
+
+#[cfg(feature = "nox")]
+impl impeller::com_de::Decomponentize for SimulationTimeStep {
+    type Error = core::convert::Infallible;
+    fn apply_value(
+        &mut self,
+        component_id: impeller::types::ComponentId,
+        value: impeller::types::ComponentView<'_>,
+        _timestamp: Option<Timestamp>,
+    ) -> Result<(), Self::Error> {
+        if component_id != SimulationTimeStep::COMPONENT_ID {
+            return Ok(());
+        }
+        let impeller::types::ComponentView::F64(view) = value else {
+            return Ok(());
+        };
+        let buf = view.buf();
+        self.0 = buf[0];
+        Ok(())
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct FrustumCoverage(pub f32);
+
+impl impeller::component::Component for FrustumCoverage {
+    const NAME: &'static str = "frustum_coverage";
+
+    fn schema() -> impeller::schema::Schema<Vec<u64>> {
+        impeller::schema::Schema::new(impeller::types::PrimType::F32, [0usize; 0])
+            .expect("failed to create schema")
+    }
+}
+
+#[cfg(feature = "nox")]
+impl impeller::com_de::Decomponentize for FrustumCoverage {
+    type Error = core::convert::Infallible;
+    fn apply_value(
+        &mut self,
+        component_id: impeller::types::ComponentId,
+        value: impeller::types::ComponentView<'_>,
+        _timestamp: Option<Timestamp>,
+    ) -> Result<(), Self::Error> {
+        if component_id != FrustumCoverage::COMPONENT_ID {
+            return Ok(());
+        }
+        let impeller::types::ComponentView::F32(view) = value else {
+            return Ok(());
+        };
+        let buf = view.buf();
+        self.0 = buf[0];
+        Ok(())
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, Copy)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Resource))]
+pub struct LastUpdated(pub Timestamp);
+
+#[derive(Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Resource))]
+pub struct IsRecording(pub bool);
+
+#[cfg(feature = "nox")]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct WorldPos {
+    pub att: nox::Quaternion<f64, nox::ArrayRepr>,
+    pub pos: nox::Vector3<f64, nox::ArrayRepr>,
+}
+
+#[cfg(feature = "nox")]
+impl Component for WorldPos {
+    const NAME: &'static str = "world_pos";
+    const ASSET: bool = false;
+
+    #[cfg(feature = "std")]
+    fn schema() -> impeller::schema::Schema<Vec<u64>> {
+        impeller::schema::Schema::new(impeller::types::PrimType::F64, [7usize])
+            .expect("failed to create schema")
+    }
+}
+
+#[cfg(feature = "nox")]
+impl impeller::com_de::Decomponentize for WorldPos {
+    type Error = core::convert::Infallible;
+
+    fn apply_value(
+        &mut self,
+        component_id: impeller::types::ComponentId,
+        value: impeller::types::ComponentView<'_>,
+        _timestamp: Option<Timestamp>,
+    ) -> Result<(), Self::Error> {
+        if component_id != WorldPos::COMPONENT_ID {
+            return Ok(());
+        }
+        let impeller::types::ComponentView::F64(view) = value else {
+            return Ok(());
+        };
+        let buf = view.buf();
+        let att: [f64; 4] = buf[..4].try_into().expect("slice size wrong");
+        self.att = nox::Quaternion(nox::Tensor::from_buf(att));
+        let pos: [f64; 3] = buf[4..].try_into().expect("slice size wrong");
+        self.pos = nox::Tensor::from_buf(pos);
+        Ok(())
+    }
+}
+
+#[derive(Clone, Serialize, Deserialize, Copy)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Resource))]
+pub struct CurrentTimestamp(pub Timestamp);
+
+impl Default for CurrentTimestamp {
+    fn default() -> Self {
+        Self(Timestamp::EPOCH)
+    }
+}
+
+impl impeller::component::Component for CurrentTimestamp {
+    const NAME: &'static str = "current_timestamp";
+
+    fn schema() -> impeller::schema::Schema<Vec<u64>> {
+        impeller::schema::Schema::new(impeller::types::PrimType::I64, [1usize])
+            .expect("failed to create schema")
+    }
+}
+
+#[cfg(feature = "nox")]
+impl impeller::com_de::Decomponentize for CurrentTimestamp {
+    type Error = core::convert::Infallible;
+
+    fn apply_value(
+        &mut self,
+        component_id: impeller::types::ComponentId,
+        value: impeller::types::ComponentView<'_>,
+        _timestamp: Option<Timestamp>,
+    ) -> Result<(), Self::Error> {
+        if component_id != CurrentTimestamp::COMPONENT_ID {
+            return Ok(());
+        }
+        let impeller::types::ComponentView::I64(view) = value else {
+            return Ok(());
+        };
+        let buf = view.buf();
+        self.0 = Timestamp(buf[0]);
+        Ok(())
+    }
+}

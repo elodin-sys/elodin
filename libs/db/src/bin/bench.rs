@@ -13,12 +13,12 @@ use std::collections::VecDeque;
 
 use clap::{Parser, ValueEnum};
 use elodin_db::Server;
-use impeller2::{
+use impeller::{
     types::{ComponentId, LenPacket, PrimType},
     vtable::builder::{component, raw_field, schema, vtable},
 };
-use impeller2_stellar::Client;
-use impeller2_wkt::{SubscribeLastUpdated, VTableMsg};
+use impeller_stellar::Client;
+use impeller_wkt::{SubscribeLastUpdated, VTableMsg};
 use stellarator::{net::TcpListener, sleep, spawn, struc_con::stellar};
 
 #[cfg(feature = "grpc")]
@@ -1009,8 +1009,8 @@ async fn count_total_samples(
     let mut client = Client::connect(addr).await.unwrap();
     let mut total: u64 = 0;
 
-    use impeller2::types::Timestamp;
-    use impeller2_wkt::GetTimeSeries;
+    use impeller::types::Timestamp;
+    use impeller_wkt::GetTimeSeries;
 
     // Build the (vtable_id, comp_name) pairs matching writer registration.
     let pairs: Vec<([u8; 2], String)> = match mode {

@@ -35,7 +35,12 @@ fn to_column_name(expr: &Expr) -> Option<String> {
 }
 
 fn parse(recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
-    if args.is_empty() && matches!(recv, Expr::ComponentPart(_)) {
+    if args.is_empty()
+        && matches!(
+            recv,
+            Expr::ComponentPart(_) | Expr::Tuple(_) | Expr::BinaryOp(_, _, _) | Expr::Formula(_, _)
+        )
+    {
         return Ok(Expr::Formula(Arc::new(Norm), Box::new(recv)));
     }
     Err(Error::InvalidMethodCall("norm".to_string()))

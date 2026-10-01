@@ -42,15 +42,19 @@ serde_json = "1.0"
 toml = "0.8"
 
 # impeller
-impeller2.path = "../impeller2"
-impeller2-wkt.path = "../impeller2/wkt"
-impeller2-wkt.features = ["gui", "std"]
-impeller2-stellar.path = "../impeller2/stellar"
+impeller.path = "../impeller"
+impeller-wkt.path = "../impeller/wkt"
+impeller-wkt.features = ["gui", "std"]
+impeller-stellar.path = "../impeller/stellar"
 elodin-db.path = "../db"
 elodin-db.features = ["grpc"]
 futures-lite = "2.5.0"
 
-impeller2-kdl.path = "../impeller2/kdl"
+bevy_geo_frames.path = "../bevy_geo_frames"
+bevy_geo_frames.default-features = false
+bevy_geo_frames.features = ["strum", "serde"]
+
+impeller-kdl.path = "../impeller/kdl"
 # async
 stellarator.path = "../stellarator"
 tokio.version = "1.34"

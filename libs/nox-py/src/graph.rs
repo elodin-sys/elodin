@@ -1,4 +1,4 @@
-use impeller2::{
+use impeller::{
     component::Component,
     types::{ComponentId, ComponentView, EntityId},
 };
@@ -78,8 +78,8 @@ impl crate::component::Component for Edge {}
 impl Component for Edge {
     const NAME: &'static str = "edge";
 
-    fn schema() -> impeller2::schema::Schema<Vec<u64>> {
-        impeller2::schema::Schema::new(impeller2::types::PrimType::U64, [2usize]).unwrap()
+    fn schema() -> impeller::schema::Schema<Vec<u64>> {
+        impeller::schema::Schema::new(impeller::types::PrimType::U64, [2usize]).unwrap()
     }
 }
 

@@ -19,9 +19,9 @@ use bevy::{
     },
 };
 use bevy_geo_frames::GeoPosition;
-use impeller2::types::{ComponentId, Timestamp};
-use impeller2_bevy::TelemetryCache;
-use impeller2_wkt::{ComponentValue, CurrentTimestamp, PointTrails, PointTrailsHeadShape};
+use impeller::types::{ComponentId, Timestamp};
+use impeller_bevy::TelemetryCache;
+use impeller_wkt::{ComponentValue, CurrentTimestamp, PointTrails, PointTrailsHeadShape};
 use nox::ArrayBuf;
 
 use super::gpu::{
@@ -51,8 +51,8 @@ struct PointTrailsStyle {
     head_size: f32,
     head_shape: PointTrailsHeadShape,
     line_width: f32,
-    color: impeller2_wkt::Color,
-    hit_color: impeller2_wkt::Color,
+    color: impeller_wkt::Color,
+    hit_color: impeller_wkt::Color,
 }
 
 fn point_trails_style(trails: &PointTrails, timeline: &TimelineSettings) -> PointTrailsStyle {
@@ -61,7 +61,7 @@ fn point_trails_style(trails: &PointTrails, timeline: &TimelineSettings) -> Poin
         head_shape: trails.head_shape,
         line_width: trails.line_width,
         color: trails.color.unwrap_or(timeline.played_color),
-        hit_color: trails.hit_color.unwrap_or(impeller2_wkt::Color::RED),
+        hit_color: trails.hit_color.unwrap_or(impeller_wkt::Color::RED),
     }
 }
 
@@ -219,7 +219,7 @@ fn init_point_trails(
     for (entity, trails) in &trails {
         let style = point_trails_style(trails, &timeline);
         let mut material =
-            |color| materials.add(impeller2_wkt::Material::with_color(color).into_bevy());
+            |color| materials.add(impeller_wkt::Material::with_color(color).into_bevy());
         commands.entity(entity).insert((
             PointTrailsState {
                 component_id: ComponentId::new(trails.component.trim()),
@@ -304,7 +304,7 @@ fn sync_point_trails(
             state.style = style;
             for (handle, color) in state.materials.iter().zip([style.color, style.hit_color]) {
                 if let Some(mut material) = materials.get_mut(handle) {
-                    *material = impeller2_wkt::Material::with_color(color).into_bevy();
+                    *material = impeller_wkt::Material::with_color(color).into_bevy();
                 }
             }
             uniform.line_width = style.line_width;
@@ -540,23 +540,23 @@ mod tests {
             node_id: default(),
         };
         let mut timeline = TimelineSettings {
-            played_color: impeller2_wkt::Color::GREEN,
+            played_color: impeller_wkt::Color::GREEN,
             ..default()
         };
         assert_eq!(
             point_trails_style(&trails, &timeline).color,
-            impeller2_wkt::Color::GREEN
+            impeller_wkt::Color::GREEN
         );
 
-        trails.color = Some(impeller2_wkt::Color::BLUE);
-        trails.hit_color = Some(impeller2_wkt::Color::YELLOW);
+        trails.color = Some(impeller_wkt::Color::BLUE);
+        trails.hit_color = Some(impeller_wkt::Color::YELLOW);
         trails.head_size = 0.2;
         trails.head_shape = PointTrailsHeadShape::Cube;
         trails.line_width = 3.0;
-        timeline.played_color = impeller2_wkt::Color::RED;
+        timeline.played_color = impeller_wkt::Color::RED;
         let style = point_trails_style(&trails, &timeline);
-        assert_eq!(style.color, impeller2_wkt::Color::BLUE);
-        assert_eq!(style.hit_color, impeller2_wkt::Color::YELLOW);
+        assert_eq!(style.color, impeller_wkt::Color::BLUE);
+        assert_eq!(style.hit_color, impeller_wkt::Color::YELLOW);
         assert_eq!(style.head_size, 0.2);
         assert_eq!(style.head_shape, PointTrailsHeadShape::Cube);
         assert_eq!(style.line_width, 3.0);

@@ -13,8 +13,8 @@ use bevy::world_serialization::{WorldInstance, WorldInstanceSpawner};
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::controller::motion::CurrentMotion;
 use bevy_editor_cam::extensions::look_to::LookToTrigger;
-use impeller2_bevy::EntityMap;
-use impeller2_wkt::ComponentValue;
+use impeller_bevy::EntityMap;
+use impeller_wkt::ComponentValue;
 use std::collections::HashMap;
 use std::f32::consts::PI;
 

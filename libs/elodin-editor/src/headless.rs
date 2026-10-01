@@ -42,13 +42,13 @@ use bevy_ai_skybox::prelude::{
 use bevy_geo_frames::GeoContext;
 use bevy_geo_frames::GeoFramePlugin;
 use bevy_mat3_material::Mat3Material;
-use impeller2::types::{ComponentId, LenPacket, Timestamp, msg_id};
-use impeller2_bevy::{
+use impeller::types::{ComponentId, LenPacket, Timestamp, msg_id};
+use impeller_bevy::{
     ConnectionAddr, ConnectionStatus, CurrentStreamId, MsgPacketTx, PacketTx, SeriesFetchPriority,
     ThreadConnectionStatus,
 };
-use impeller2_kdl::FromKdl;
-use impeller2_wkt::{
+use impeller_kdl::FromKdl;
+use impeller_wkt::{
     CurrentTimestamp, DbConfig, DumpMetadata, LastUpdated, MsgMetadata, SchematicElem,
     SetMsgMetadata, SetStreamFilter, opaque_bytes_msg_schema,
 };
@@ -120,12 +120,14 @@ impl Plugin for HeadlessEditorPlugin {
                     }),
             )
             .add_plugins(crate::skybox_asset_plugin_headless())
-            .add_plugins(impeller2_bevy::Impeller2Plugin)
+            .add_plugins(impeller_bevy::ImpellerPlugin)
             .add_plugins(bevy::dev_tools::infinite_grid::InfiniteGridPlugin)
             .add_plugins(bevy::pbr::wireframe::WireframePlugin::default())
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(crate::plugins::world_mesh::EditorWorldMeshPlugin)
             .add_plugins(crate::rim_glow_material::RimGlowMaterialPlugin);
+        #[cfg(not(target_family = "wasm"))]
+        app.add_plugins(crate::plugins::display_kernel::DisplayKernelPlugin);
         app.add_plugins(crate::plugins::scene_environment::SceneEnvironmentPlugin);
         #[cfg(not(target_family = "wasm"))]
         {
@@ -147,8 +149,10 @@ impl Plugin for HeadlessEditorPlugin {
         .add_systems(
             PreUpdate,
             (
-                impeller2_bevy::apply_cached_data,
+                impeller_bevy::apply_cached_data,
                 crate::object_3d::update_object_3d_system,
+                #[cfg(not(target_family = "wasm"))]
+                crate::object_3d::update_object_3d_kernels,
                 crate::sync_object_3d,
                 // `sync_pos` writes `WorldPos` into `GeoPosition`/`GeoRotation`;
                 // the geo systems below propagate those into `Transform`. Running
@@ -163,7 +167,7 @@ impl Plugin for HeadlessEditorPlugin {
                 crate::spatial::apply_big_translation,
             )
                 .chain()
-                .after(impeller2_bevy::sink)
+                .after(impeller_bevy::sink)
                 .in_set(PositionSync),
         )
         .add_systems(Startup, setup_headless_lighting)
@@ -193,7 +197,7 @@ impl Plugin for HeadlessEditorPlugin {
         )
         .add_systems(
             Update,
-            impeller2_bevy::backfill_cache.after(crate::ui::plot::update_series_fetch_priority),
+            impeller_bevy::backfill_cache.after(crate::ui::plot::update_series_fetch_priority),
         )
         .add_systems(Update, crate::update_eql_context)
         .add_systems(Update, poll_headless_db_config)
@@ -417,7 +421,7 @@ fn load_headless_scene(
         loaded.revision = revision;
         return;
     }
-    let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(&content).inspect_err(|e| {
+    let Ok(schematic) = impeller_wkt::Schematic::from_kdl(&content).inspect_err(|e| {
         tracing::warn!("Failed to parse schematic KDL: {e}");
     }) else {
         // Bytes fetched but unparsable: back off before retrying so permanently
@@ -428,7 +432,7 @@ fn load_headless_scene(
         return;
     };
     if let Err(err) =
-        impeller2_wkt::validate_single_cinematic_environment(Some(&schematic), &configs.0)
+        impeller_wkt::validate_single_cinematic_environment(Some(&schematic), &configs.0)
     {
         tracing::error!("{err}");
         pending.next_attempt = Some(Instant::now() + Duration::from_millis(400));
@@ -463,9 +467,14 @@ fn load_headless_scene(
                 if obj.frame.is_none() {
                     obj.frame = fallback_frame;
                 }
-                let Ok(expr) = eql.0.parse_str(&obj.eql) else {
-                    tracing::warn!("Failed to parse EQL for object_3d: {}", obj.eql);
-                    continue;
+                let expr = if obj.kernel.is_some() {
+                    eql.0.parse_str("0").unwrap_or(eql::Expr::FloatLiteral(0.0))
+                } else {
+                    let Ok(expr) = eql.0.parse_str(&obj.eql) else {
+                        tracing::warn!("Failed to parse EQL for object_3d: {}", obj.eql);
+                        continue;
+                    };
+                    expr
                 };
                 if let Ok(entity) = create_object_3d_entity(
                     &mut commands,
@@ -1312,7 +1321,7 @@ fn collect_frames(app: &App) -> Vec<(String, Timestamp, Vec<u8>)> {
 #[cfg(test)]
 mod tests {
     use super::{is_ai_skybox_target, next_due_ts, rgba_to_gray8};
-    use impeller2::types::Timestamp;
+    use impeller::types::Timestamp;
 
     #[test]
     fn cinematic_earth_skybox_is_not_an_ai_skybox_target() {

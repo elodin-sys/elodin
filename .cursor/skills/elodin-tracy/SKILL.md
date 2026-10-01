@@ -85,6 +85,8 @@ When the `tracy` feature is enabled, the editor binary (`apps/elodin`) sets up a
 - All Bevy systems, schedules, and stages (via `bevy/trace_tracy`)
 - Any function annotated with `#[tracing::instrument]`
 
+Bevy's own profiling guide: <https://github.com/bevyengine/bevy/blob/main/docs/profiling.md>
+
 **Tracy-specific runtime behavior:**
 - Present mode switches to `AutoNoVsync` (eliminates vsync idle from profiles)
 - Winit uses `continuous()` mode instead of reactive/game mode

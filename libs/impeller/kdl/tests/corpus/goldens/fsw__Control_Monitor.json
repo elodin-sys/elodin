@@ -1,0 +1,323 @@
+{
+  "body": null,
+  "elems": [
+    {
+      "Panel": {
+        "HSplit": {
+          "active": false,
+          "name": null,
+          "panels": [
+            {
+              "VSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "CONTROLMESSAGE.TIME_MONOTONIC",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "CONTROLMESSAGE.ACC_MEAS_BODY",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "CONTROLMESSAGE.ACC_CMD_BODY",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "CONTROLMESSAGE.PITCH_PID",
+                          "name": null
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {
+                  "0": 0.125,
+                  "1": 0.125,
+                  "2": 0.25,
+                  "3": 0.25
+                }
+              }
+            },
+            {
+              "VSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.1568627506494522,
+                              "g": 0.364705890417099,
+                              "r": 0.5176470875740051
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.0784313753247261,
+                              "g": 0.12156862765550613,
+                              "r": 0.32156863808631897
+                            }
+                          ],
+                          "eql": "CONTROLMESSAGE.ACC_MEAS_BODY[0],CONTROLMESSAGE.ACC_MEAS_BODY[1]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.1568627506494522,
+                              "g": 0.23529411852359772,
+                              "r": 0.42352941632270813
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.1568627506494522,
+                              "g": 0.364705890417099,
+                              "r": 0.5176470875740051
+                            }
+                          ],
+                          "eql": "CONTROLMESSAGE.ACC_CMD_BODY[0],CONTROLMESSAGE.ACC_CMD_BODY[1]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "CONTROLMESSAGE.ROLL_PID",
+                          "name": null
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {
+                  "0": 0.5,
+                  "1": 0.5,
+                  "2": 0.5
+                }
+              }
+            },
+            {
+              "VSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "CONTROLMESSAGE.MOTOR_OUTPUT",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "CONTROLMESSAGE.FIN_DEFLECTION_DEG",
+                          "name": null
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "STATEMACHINE.MISSILE_MODE",
+                          "name": null
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {
+                  "0": 0.25,
+                  "1": 0.25,
+                  "2": 0.25
+                }
+              }
+            },
+            {
+              "VSplit": {
+                "active": false,
+                "name": null,
+                "panels": [
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.16470588743686676,
+                              "g": 0.29411765933036804,
+                              "r": 0.615686297416687
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.5686274766921997,
+                              "g": 0.3607843220233917,
+                              "r": 0.20392157137393951
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.4156862795352936,
+                              "g": 0.6117647290229797,
+                              "r": 0.4156862795352936
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.47843137383461,
+                              "g": 0.4156862795352936,
+                              "r": 0.3137255012989044
+                            }
+                          ],
+                          "eql": "CONTROLMESSAGE.MOTOR_OUTPUT[0],CONTROLMESSAGE.MOTOR_OUTPUT[1],CONTROLMESSAGE.MOTOR_OUTPUT[2],CONTROLMESSAGE.MOTOR_OUTPUT[3]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [
+                            {
+                              "a": 1.0,
+                              "b": 0.658823549747467,
+                              "g": 0.2823529541492462,
+                              "r": 0.3921568691730499
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.24313725531101227,
+                              "g": 0.3843137323856354,
+                              "r": 0.6901960968971252
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.21176470816135406,
+                              "g": 0.5764706134796143,
+                              "r": 0.7882353067398071
+                            },
+                            {
+                              "a": 1.0,
+                              "b": 0.16470588743686676,
+                              "g": 0.29411765933036804,
+                              "r": 0.615686297416687
+                            }
+                          ],
+                          "eql": "CONTROLMESSAGE.FIN_DEFLECTION_DEG[0],CONTROLMESSAGE.FIN_DEFLECTION_DEG[1],CONTROLMESSAGE.FIN_DEFLECTION_DEG[2],CONTROLMESSAGE.FIN_DEFLECTION_DEG[3]",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Graph",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "Tabs": [
+                      {
+                        "ComponentMonitor": {
+                          "component_name": "CONTROLMESSAGE.YAW_PID",
+                          "name": null
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "shares": {
+                  "0": 0.5,
+                  "1": 0.5,
+                  "2": 0.5
+                }
+              }
+            }
+          ],
+          "shares": {
+            "0": 0.5,
+            "1": 0.5,
+            "2": 0.5,
+            "3": 0.5
+          }
+        }
+      }
+    }
+  ],
+  "environment": null,
+  "frame": null,
+  "origin": null,
+  "skybox": null,
+  "telemetry_mode": false,
+  "theme": null,
+  "timeline": null
+}

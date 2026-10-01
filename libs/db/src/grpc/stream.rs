@@ -4,7 +4,7 @@ use std::{
     time::Duration,
 };
 
-use impeller2::types::{ComponentId, Timestamp, msg_id};
+use impeller::types::{ComponentId, Timestamp, msg_id};
 use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
@@ -828,8 +828,8 @@ async fn send_db_config(
 
 #[cfg(test)]
 mod tests {
-    use impeller2::types::PrimType;
-    use impeller2_wkt::{ComponentMetadata, SetDbConfig};
+    use impeller::types::PrimType;
+    use impeller_wkt::{ComponentMetadata, SetDbConfig};
     use tempfile::TempDir;
     use v1::stream_service_server::StreamServiceServer;
 

@@ -238,22 +238,22 @@ Expect HTTP `200` and non-empty files under `assets/` after a sim that reference
 
 Use this when the schematic stores a **direct relative path** (like a `.glb` mesh or `.png` icon).
 
-1. **KDL** (`libs/impeller2/kdl`) — parse and serialize the path field on the relevant node.
-2. **Collect & rewrite** (`libs/impeller2/kdl/src/rewrite.rs`):
+1. **KDL** (`libs/impeller/kdl`) — parse and serialize the path field on the relevant node.
+2. **Collect & rewrite** (`libs/impeller/kdl/src/rewrite.rs`):
    - `collect_local_asset_paths` — include new local paths
    - `collect_db_asset_names` — include `db:` keys (for [follow](/reference/elodin-cli) sync)
    - `rewrite_asset_paths` — rewrite local → `db:…` on record
-3. **Persist** — no change if the path appears in collect; `persist_schematic_assets` in `libs/nox-py/src/impeller2_server.rs` is generic.
+3. **Persist** — no change if the path appears in collect; `persist_schematic_assets` in `libs/nox-py/src/impeller_server.rs` is generic.
 4. **Follow** — no change if the path appears in `collect_db_asset_names`; full-tree mirror via `GET /__index__` copies all assets.
 5. **Editor** — if Bevy can load the format: resolve with `resolve_db_asset_url` and `AssetServer.load(url)`. No blocking HTTP in Bevy systems.
-6. **Tests** — unit tests in `impeller2-kdl` (collect/rewrite) and `nox-py` (persist).
+6. **Tests** — unit tests in `impeller-kdl` (collect/rewrite) and `nox-py` (persist).
 
 ### B — Indirect reference (name → manifest → file)
 
 Use this when the KDL stores a **logical name** (like `skybox name=…`).
 
-1. Add a **single resolver** in `impeller2/kdl` (manifest parse → extra storage keys).
-2. **Persist** — extend collect after resolving (see `add_local_skybox_cubemap_path` in `impeller2_server.rs`).
+1. Add a **single resolver** in `impeller/kdl` (manifest parse → extra storage keys).
+2. **Persist** — extend collect after resolving (see `add_local_skybox_cubemap_path` in `impeller_server.rs`).
 3. **Follow** — after syncing the manifest bytes, resolve and fetch dependent files (`assets_http.rs`).
 4. **Editor** — either teach the consumer to load via HTTP, or mirror into a local cache (skybox pattern, async via `IoTaskPool`).
 5. **Avoid** copying manifest-resolution logic into three places; share one resolver.

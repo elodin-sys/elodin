@@ -5,6 +5,7 @@ use crate::plugins::kdl_document::{
     LastActiveSchematicContent, LastSyncedActiveKey, LastSyncedAssetsRevision,
     PendingActiveSchematic, SchematicDocumentAsset, fetch_schematic_index, plan_db_save,
     schematic_name_from_key, schematic_save_key_from_name, upload_db_save_plan,
+    upload_overlay_bytes,
 };
 use crate::skybox_generation::{
     LocallyPushedSkyboxActive, SkyboxDocumentSyncMut, active_write_key,
@@ -19,7 +20,7 @@ use bevy::{
         system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
         world::World,
     },
-    log::error,
+    log::{error, info},
     pbr::{StandardMaterial, wireframe::WireframeConfig},
     prelude::{Entity, In, MessageWriter, Mut, Resource, Transform},
     tasks::{IoTaskPool, Task, futures_lite::future},
@@ -33,13 +34,13 @@ use bevy_editor_cam::controller::{component::EditorCam, motion::CurrentMotion};
 use bevy_geo_frames::GeoContext;
 use egui_tiles::{Tile, TileId};
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
-use impeller2::types::Timestamp;
-use impeller2_bevy::{
+use impeller::types::Timestamp;
+use impeller_bevy::{
     ComponentMetadataRegistry, ComponentPathRegistry, ConnectionAddr, EntityMap, PacketTx,
 };
-use impeller2_kdl::ToKdl;
-use impeller2_wkt::SkyboxConfig;
-use impeller2_wkt::{
+use impeller_kdl::ToKdl;
+use impeller_wkt::SkyboxConfig;
+use impeller_wkt::{
     ComponentPath, ComponentValue, CurrentTimestamp, DbConfig, EarliestTimestamp, IsRecording,
     LastUpdated, Material, Mesh, Object3D, SetDbConfig, SimulationTimeStep,
 };
@@ -75,7 +76,15 @@ pub(crate) fn plugin(app: &mut bevy::app::App) {
     app.init_resource::<PendingSchematicSaveKey>()
         .init_resource::<SchematicSaveInFlight>()
         .init_resource::<SchematicIndexCache>()
-        .add_systems(Update, (poll_schematic_save, refresh_schematic_index));
+        .init_resource::<LayoutSaveInFlight>()
+        .add_systems(
+            Update,
+            (
+                poll_schematic_save,
+                poll_layout_save,
+                refresh_schematic_index,
+            ),
+        );
 }
 
 /// Carries the target asset key chosen in the "Save Schematic" name prompt into
@@ -570,7 +579,7 @@ fn graph_parts(
                       mut render_layer_alloc: ResMut<RenderLayerAllocator>,
                       mut tile_param: TileParam,
                       path_reg: Res<ComponentPathRegistry>,
-                      schema_reg: Res<impeller2_bevy::ComponentSchemaRegistry>,
+                      schema_reg: Res<impeller_bevy::ComponentSchemaRegistry>,
                       metadata_reg: Res<ComponentMetadataRegistry>,
                       palette_state: Res<CommandPaletteState>| {
                     let Some(mut tile_state) = tile_param.target(palette_state.target_window)
@@ -1186,6 +1195,137 @@ pub fn save_schematic() -> PaletteItem {
     )
 }
 
+/// Write only split shares and window rects (`*.overlay.kdl`). Python `watch`
+/// reapplies this on rebuild so `schematic.py` stays free of drag noise (FR-9).
+pub fn save_layout() -> PaletteItem {
+    PaletteItem::new(
+        "Save Layout",
+        SCHEMATIC_LABEL,
+        |_: In<String>, mut commands: Commands| {
+            commands.run_system_cached(crate::ui::schematic::tiles_to_schematic);
+            commands.run_system_cached(queue_save_layout_now);
+            PaletteEvent::Exit
+        },
+    )
+}
+
+#[derive(Resource, Default)]
+struct LayoutSaveInFlight {
+    task: Option<Task<Result<(), String>>>,
+}
+
+fn queue_save_layout_now(
+    schematic: Res<CurrentSchematic>,
+    config: Res<DbConfig>,
+    connection_addr: Option<Res<ConnectionAddr>>,
+    mut in_flight: ResMut<LayoutSaveInFlight>,
+    mut failed: MessageWriter<DocumentCommandFailed>,
+) {
+    if in_flight.task.is_some() {
+        failed.write(DocumentCommandFailed {
+            title: "Failed to Save Layout".to_string(),
+            message: "A layout save is already in progress.".to_string(),
+        });
+        return;
+    }
+    let Some(addr) = connection_addr.as_ref().map(|c| c.0) else {
+        failed.write(DocumentCommandFailed {
+            title: "Failed to Save Layout".to_string(),
+            message: "Not connected to a database.".to_string(),
+        });
+        return;
+    };
+    let active_key = config
+        .schematic_active()
+        .map(str::to_string)
+        .unwrap_or_else(|| ACTIVE_SCHEMATIC_KEY.to_string());
+    let overlay_key = impeller_kdl::overlay_asset_key(&active_key);
+    let mut overlay = impeller_kdl::extract_overlay(&schematic.0);
+    overlay.schematic = Some(active_key.clone());
+    let split_count = overlay.splits.len();
+    let window_count = overlay.windows.len();
+    let bytes = impeller_kdl::serialize_overlay(&overlay).into_bytes();
+    let url = crate::object_3d::resolve_db_asset_url(&format!("db:{overlay_key}"), Some(addr));
+    // Local copy is for inspection only and may be removed later. The DB
+    // asset (`PUT` to `{url}`) is what watch/replay consume.
+    match write_overlay_to_cwd(&overlay_key, &bytes) {
+        Ok(path) => {
+            info!(path = %path.display(), "wrote temporary layout overlay file");
+            eprintln!(
+                "[elodin] Save Layout: wrote temporary filesystem copy {}\n\
+                 [elodin] (may be temporary — canonical overlay is the DB asset {url})",
+                path.display()
+            );
+        }
+        Err(err) => {
+            error!(error = %err, "failed to write temporary layout overlay file");
+            eprintln!("[elodin] Save Layout: failed to write local overlay file: {err}");
+        }
+    }
+    info!(
+        key = %overlay_key,
+        url = %url,
+        splits = split_count,
+        windows = window_count,
+        bytes = bytes.len(),
+        "saving layout overlay to DB"
+    );
+    eprintln!(
+        "[elodin] Save Layout: writing DB asset {overlay_key} → {url} \
+         ({split_count} split shares, {window_count} windows, {} bytes). \
+         schematic.py is unchanged.",
+        bytes.len()
+    );
+    in_flight.task = Some(
+        IoTaskPool::get().spawn(async move { upload_overlay_bytes(&overlay_key, bytes, addr) }),
+    );
+}
+
+/// Temporary local copy so a Save Layout is inspectable without knowing the
+/// DB data dir. Not the source of truth; watch still reads the DB asset.
+fn write_overlay_to_cwd(overlay_key: &str, bytes: &[u8]) -> Result<std::path::PathBuf, String> {
+    let path = std::env::current_dir()
+        .map_err(|e| e.to_string())?
+        .join(overlay_key);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
+    }
+    // Comment is local-only; the DB PUT uses the raw overlay bytes.
+    let mut disk = String::from(
+        "// Temporary filesystem copy for inspection. Canonical overlay is the DB asset.\n",
+    );
+    disk.push_str(&String::from_utf8_lossy(bytes));
+    std::fs::write(&path, disk).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(path)
+}
+
+fn poll_layout_save(
+    mut in_flight: ResMut<LayoutSaveInFlight>,
+    mut failed: MessageWriter<DocumentCommandFailed>,
+) {
+    let Some(task) = in_flight.task.as_mut() else {
+        return;
+    };
+    let Some(result) = future::block_on(future::poll_once(task)) else {
+        return;
+    };
+    in_flight.task = None;
+    match result {
+        Ok(()) => {
+            info!("layout overlay write succeeded");
+            eprintln!("[elodin] Save Layout: overlay written");
+        }
+        Err(err) => {
+            error!(error = %err, "layout overlay write failed");
+            eprintln!("[elodin] Save Layout failed: {err}");
+            failed.write(DocumentCommandFailed {
+                title: "Failed to Save Layout".to_string(),
+                message: err,
+            });
+        }
+    }
+}
+
 /// Save the current schematic under a chosen name (`schematics/<name>.kdl`),
 /// which also repoints `schematic.active` and populates the
 /// "Open Schematic..." picker. Pre-fills the active schematic's name so
@@ -1484,7 +1624,7 @@ pub fn clear_schematic() -> PaletteItem {
             // Leave the CLI `--kdl` pin so Clear isn't undone by sticky sync.
             params.clear_initial_kdl_pin();
             params.current_document.clear();
-            params.load_schematic(&impeller2_wkt::Schematic::default(), None, None);
+            params.load_schematic(&impeller_wkt::Schematic::default(), None, None);
             // `load_schematic` despawns every schematic entity and zeroes
             // `CurrentSchematic.skybox`, but the skybox is a global render
             // resource, not an entity, so it survives unless we clear it too.
@@ -1595,7 +1735,7 @@ fn open_schematic_item(key: String) -> PaletteItem {
 fn root_schematic_for_save(
     schematic: &CurrentSchematic,
     skybox_cache: Option<&SkyboxCache>,
-) -> impeller2_wkt::Schematic {
+) -> impeller_wkt::Schematic {
     let mut root = schematic.0.clone();
     // Prefer the cache's active skybox when it asserts one: it's the live truth
     // if the user switched skyboxes through a path that didn't touch
@@ -1941,7 +2081,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                         .unwrap_or((0.8, 0.8, 0.8));
                 let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
 
-                let mesh_source = impeller2_wkt::Object3DMesh::Mesh {
+                let mesh_source = impeller_wkt::Object3DMesh::Mesh {
                     mesh: mesh.clone(),
                     material: Material::color(r, g, b),
                 };
@@ -1959,6 +2099,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                         orientation: Default::default(),
                         sensor_visible: true,
                         node_id: Default::default(),
+                        kernel: None,
                     },
                     expr.clone(),
                     &eql_ctx.0,
@@ -2039,13 +2180,25 @@ pub fn create_3d_object() -> PaletteItem {
                                                   connection_addr: Option<Res<ConnectionAddr>>,
                                                   initial_kdl: Option<Res<crate::plugins::kdl_document::InitialKdlPath>>
                                                 | {
-                                                let obj = impeller2_wkt::Object3DMesh::glb(gltf_path.trim());
+                                                let obj = impeller_wkt::Object3DMesh::glb(gltf_path.trim());
                                                 let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
                                                 let local_root = crate::object_3d::local_assets_root(initial_kdl.as_deref());
 
                                                 let _ = crate::object_3d::create_object_3d_entity(
                                                     &mut commands,
-                                                    Object3D { eql: eql.clone(), mesh: obj, icon: None, thrusters: Vec::new(), mesh_visibility_range: None, frame: None, frame_orientation: None, orientation: Default::default(), sensor_visible: true, node_id: Default::default() },
+                                                    Object3D {
+                                                        eql: eql.clone(),
+                                                        mesh: obj,
+                                                        icon: None,
+                                                        kernel: None,
+                                                        thrusters: Vec::new(),
+                                                        mesh_visibility_range: None,
+                                                        frame: None,
+                                                        frame_orientation: None,
+                                                        orientation: Default::default(),
+                                                        sensor_visible: true,
+                                                        node_id: Default::default(),
+                                                    },
                                                     expr.clone(),
                                                     &eql_ctx.0,
                                                     &mut material_assets,
@@ -2315,6 +2468,7 @@ impl Default for PalettePage {
             create_3d_object(),
             save_schematic(),
             save_schematic_as(),
+            save_layout(),
             open_schematic(),
             clear_schematic(),
             skybox_menu(),
@@ -2337,8 +2491,8 @@ impl Default for PalettePage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use impeller2_kdl::FromKdl;
-    use impeller2_wkt::Schematic;
+    use impeller_kdl::FromKdl;
+    use impeller_wkt::Schematic;
     use std::path::PathBuf;
 
     fn parse_saved_schematic(kdl: &str) -> Schematic {

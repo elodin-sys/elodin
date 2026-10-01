@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use crate::utils::component_label;
 use crate::{Error, MetadataExt};
-use impeller2_wkt::DbConfig;
+use impeller_wkt::DbConfig;
 
 const HEADER_SIZE: usize = 24; // committed_len (8) + head_len (8) + extra (8)
 

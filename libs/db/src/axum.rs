@@ -2,8 +2,8 @@ use axum::extract::{Json, Path, State};
 use axum::routing::{get, post};
 use axum::{Router, response::IntoResponse};
 use futures_lite::StreamExt;
-use impeller2::types::Timestamp;
-use impeller2_wkt::{ComponentValue, ErrorResponse, MsgMetadata};
+use impeller::types::Timestamp;
+use impeller_wkt::{ComponentValue, ErrorResponse, MsgMetadata};
 use miette::IntoDiagnostic;
 use serde::Serialize;
 use serde_json::Value;
@@ -33,7 +33,7 @@ pub async fn push_msg(
     db: State<Arc<DB>>,
     body: Json<serde_json::Value>,
 ) -> Result<impl IntoResponse, Json<ErrorResponse>> {
-    let msg_id = impeller2::types::msg_id(&msg_id);
+    let msg_id = impeller::types::msg_id(&msg_id);
     let msg_log = db
         .with_state(|s| s.msg_logs.get(&msg_id).cloned())
         .ok_or(Error::MsgNotFound(msg_id))
@@ -62,7 +62,7 @@ pub async fn push_entity_table(
     db: State<Arc<DB>>,
     body: Json<ComponentValue>,
 ) -> Result<impl IntoResponse, Json<ErrorResponse>> {
-    let component_id = impeller2::types::ComponentId::new(&component_id);
+    let component_id = impeller::types::ComponentId::new(&component_id);
     let component = db
         .with_state(|s| s.get_component(component_id).cloned())
         .ok_or(Error::ComponentNotFound(component_id))
@@ -90,7 +90,7 @@ pub async fn stream_msgs(
     Path(msg_id): Path<String>,
     db: State<Arc<DB>>,
 ) -> Result<impl IntoResponse, Json<ErrorResponse>> {
-    let msg_id = impeller2::types::msg_id(&msg_id);
+    let msg_id = impeller::types::msg_id(&msg_id);
     let msg_log = db
         .with_state(|s| s.msg_logs.get(&msg_id).cloned())
         .ok_or(Error::MsgNotFound(msg_id))
@@ -132,7 +132,7 @@ pub async fn stream(
     Path(component_id): Path<String>,
     db: State<Arc<DB>>,
 ) -> Result<impl IntoResponse, Json<ErrorResponse>> {
-    let component_id = impeller2::types::ComponentId::new(&component_id);
+    let component_id = impeller::types::ComponentId::new(&component_id);
     let component = db
         .with_state(|s| s.get_component(component_id).cloned())
         .ok_or(Error::ComponentNotFound(component_id))
@@ -155,7 +155,7 @@ pub fn component_stream(component: Component) -> impl futures_lite::Stream<Item 
             timestamp: Timestamp,
         ) -> Value {
             let data = match <[T]>::try_ref_from_bytes(buf)
-                .map_err(impeller2::error::Error::from)
+                .map_err(impeller::error::Error::from)
                 .map_err(Error::from)
             {
                 Ok(d) => d,
@@ -173,17 +173,17 @@ pub fn component_stream(component: Component) -> impl futures_lite::Stream<Item 
         }
         let shape = &component.schema.dim[..];
         let json = match component.schema.prim_type {
-            impeller2::types::PrimType::U8 => buf_to_json::<u8>(buf, shape, timestamp),
-            impeller2::types::PrimType::U16 => buf_to_json::<u16>(buf, shape, timestamp),
-            impeller2::types::PrimType::U32 => buf_to_json::<u32>(buf, shape, timestamp),
-            impeller2::types::PrimType::U64 => buf_to_json::<u64>(buf, shape, timestamp),
-            impeller2::types::PrimType::I8 => buf_to_json::<i8>(buf, shape, timestamp),
-            impeller2::types::PrimType::I16 => buf_to_json::<i16>(buf, shape, timestamp),
-            impeller2::types::PrimType::I32 => buf_to_json::<i32>(buf, shape, timestamp),
-            impeller2::types::PrimType::I64 => buf_to_json::<i64>(buf, shape, timestamp),
-            impeller2::types::PrimType::Bool => buf_to_json::<bool>(buf, shape, timestamp),
-            impeller2::types::PrimType::F32 => buf_to_json::<f32>(buf, shape, timestamp),
-            impeller2::types::PrimType::F64 => buf_to_json::<f64>(buf, shape, timestamp),
+            impeller::types::PrimType::U8 => buf_to_json::<u8>(buf, shape, timestamp),
+            impeller::types::PrimType::U16 => buf_to_json::<u16>(buf, shape, timestamp),
+            impeller::types::PrimType::U32 => buf_to_json::<u32>(buf, shape, timestamp),
+            impeller::types::PrimType::U64 => buf_to_json::<u64>(buf, shape, timestamp),
+            impeller::types::PrimType::I8 => buf_to_json::<i8>(buf, shape, timestamp),
+            impeller::types::PrimType::I16 => buf_to_json::<i16>(buf, shape, timestamp),
+            impeller::types::PrimType::I32 => buf_to_json::<i32>(buf, shape, timestamp),
+            impeller::types::PrimType::I64 => buf_to_json::<i64>(buf, shape, timestamp),
+            impeller::types::PrimType::Bool => buf_to_json::<bool>(buf, shape, timestamp),
+            impeller::types::PrimType::F32 => buf_to_json::<f32>(buf, shape, timestamp),
+            impeller::types::PrimType::F64 => buf_to_json::<f64>(buf, shape, timestamp),
         };
         Ok::<_, Error>(Some((json, component)))
     })

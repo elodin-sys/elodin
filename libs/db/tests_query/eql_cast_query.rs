@@ -3,8 +3,8 @@ use std::path::Path;
 use std::process::Command;
 
 use elodin_db::{ComponentSchema, DB};
-use impeller2::types::{ComponentId, PrimType, Timestamp};
-use impeller2_wkt::ComponentMetadata;
+use impeller::types::{ComponentId, PrimType, Timestamp};
+use impeller_wkt::ComponentMetadata;
 
 fn create_fixture(name: &str, prim_type: PrimType, rows: &[Vec<u8>]) -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("tempdir");

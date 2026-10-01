@@ -21,7 +21,7 @@ impl IconTextureCache {
             return handle.clone();
         }
 
-        let Some(codepoint) = impeller2_wkt::builtin_icon_char(icon_name) else {
+        let Some(codepoint) = impeller_wkt::builtin_icon_char(icon_name) else {
             warn!(
                 "Unknown built-in icon '{}', using fallback circle",
                 icon_name

@@ -1,6 +1,6 @@
 use std::{ops::Range, path::Path, sync::Arc, sync::RwLock};
 
-use impeller2::types::Timestamp;
+use impeller::types::Timestamp;
 use stellarator::sync::WaitQueue;
 use tracing::warn;
 use zerocopy::FromBytes;

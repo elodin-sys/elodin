@@ -2,7 +2,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::{Res, ResMut};
 use bevy_egui::egui;
 
-use impeller2::types::ComponentId;
+use impeller::types::ComponentId;
 
 use crate::ui::widgets::SystemStateExt;
 use crate::{

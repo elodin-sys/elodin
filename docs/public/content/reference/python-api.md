@@ -629,7 +629,8 @@ A container of component metadata.
     |---|---|---|
     | `element_names` | comma-separated string (e.g. `"x,y,z"`, `"q0,q1,q2,q3"`) | Labels for each element of a vector or matrix component. Used by the component inspector and as column suffixes when exporting with `elodin-db export --flatten`. |
     | `private` | `"true"` | Component is omitted from `elodin-db export` by default (pass `--include-private` to include it). Useful for marking internal scratch state (e.g. large covariance matrices) that downstream consumers shouldn't see. |
-    | `external_control` | `"true"` | Component is writable from external clients (e.g. Betaflight or a HITL bridge) over the Impeller2 protocol. The simulation will not overwrite values written externally. |
+    | `transient` | `"true"` | Simulation component remains available to systems in memory but is never registered with or recorded to Elodin DB. It is absent from DB schemas, the editor, replication, and exports. |
+    | `external_control` | `"true"` | Component is writable from external clients (e.g. Betaflight or a HITL bridge) over the Impeller protocol. The simulation will not overwrite values written externally. |
     | `record_every_tick` | `"true"` | Opt out of sparse recording and write a sample at every telemetry commit even when its bytes are unchanged. |
 
     Component recording is sparse by default: the simulation writes a sample
@@ -639,6 +640,8 @@ A container of component metadata.
     Editor line plots and `Exec.history()` carry sparse values forward. Point
     and bar plots show recorded samples only; raw database exports remain
     change streams with per-component row counts.
+
+    `transient` is a simulation-runtime storage contract, not an export filter. A transient component cannot also set `external_control`, `wait_for_write`, or `record_every_tick`, and DB-backed APIs such as `StepContext.read_component`, `StepContext.write_component`, and `Exec.history` cannot access it. Direct database writers are unaffected by this key.
 
     Example combining a label hint with the export-skip flag:
 
@@ -1116,7 +1119,7 @@ Embedded Elodin DB server — the same engine as `elodin-db run` — for tests, 
 
 ### _class_ `elodin.db.TableWriter`
 
-Batched telemetry writer: every `write` emits exactly one Impeller2 `Table` packet — a shared `i64` timestamp followed by each field's values — one packet per tick, not one per component. All declared fields are required on every write; use one writer per rate group. Reconnects automatically, replaying the metadata + vtable handshake. Usable as a context manager.
+Batched telemetry writer: every `write` emits exactly one Impeller `Table` packet — a shared `i64` timestamp followed by each field's values — one packet per tick, not one per component. All declared fields are required on every write; use one writer per rate group. Reconnects automatically, replaying the metadata + vtable handshake. Usable as a context manager.
 
 - `write(timestamp_us=None, values=None, *, timestamp_ns=None)` -> None
 

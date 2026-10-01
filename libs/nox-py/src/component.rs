@@ -2,7 +2,7 @@ use elodin_macros::{Component, ReprMonad};
 use nox::{Op, OwnedRepr, ReprMonad, Scalar};
 
 pub trait Component:
-    impeller2::component::Component + for<'a> nox::FromBuilder<Item<'a> = Self> + ReprMonad<Op>
+    impeller::component::Component + for<'a> nox::FromBuilder<Item<'a> = Self> + ReprMonad<Op>
 {
 }
 
@@ -38,7 +38,7 @@ use pyo3::types::PyList;
 use pyo3::{intern, types::PySequence};
 
 use crate::Error;
-use impeller2::types::ComponentId;
+use impeller::types::ComponentId;
 
 #[derive(Clone, Debug)]
 #[pyclass(name = "Component")]
@@ -55,7 +55,7 @@ impl PyComponent {
         ComponentId::new(&self.name)
     }
 
-    pub fn from_component<C: impeller2::component::Component>() -> Self {
+    pub fn from_component<C: impeller::component::Component>() -> Self {
         let schema = C::schema();
         PyComponent {
             name: C::NAME.to_string(),
@@ -93,6 +93,10 @@ impl PyComponent {
                 (k, value)
             })
             .collect();
+
+        if name.chars().any(char::is_whitespace) {
+            return Err(Error::InvalidComponentName(name));
+        }
 
         Ok(Self { name, ty, metadata })
     }
@@ -283,38 +287,38 @@ pub enum PrimitiveType {
     Bool,
 }
 
-impl From<impeller2::types::PrimType> for PrimitiveType {
-    fn from(val: impeller2::types::PrimType) -> Self {
+impl From<impeller::types::PrimType> for PrimitiveType {
+    fn from(val: impeller::types::PrimType) -> Self {
         match val {
-            impeller2::types::PrimType::F64 => PrimitiveType::F64,
-            impeller2::types::PrimType::F32 => PrimitiveType::F32,
-            impeller2::types::PrimType::U64 => PrimitiveType::U64,
-            impeller2::types::PrimType::U32 => PrimitiveType::U32,
-            impeller2::types::PrimType::U16 => PrimitiveType::U16,
-            impeller2::types::PrimType::U8 => PrimitiveType::U8,
-            impeller2::types::PrimType::I64 => PrimitiveType::I64,
-            impeller2::types::PrimType::I32 => PrimitiveType::I32,
-            impeller2::types::PrimType::I16 => PrimitiveType::I16,
-            impeller2::types::PrimType::I8 => PrimitiveType::I8,
-            impeller2::types::PrimType::Bool => PrimitiveType::Bool,
+            impeller::types::PrimType::F64 => PrimitiveType::F64,
+            impeller::types::PrimType::F32 => PrimitiveType::F32,
+            impeller::types::PrimType::U64 => PrimitiveType::U64,
+            impeller::types::PrimType::U32 => PrimitiveType::U32,
+            impeller::types::PrimType::U16 => PrimitiveType::U16,
+            impeller::types::PrimType::U8 => PrimitiveType::U8,
+            impeller::types::PrimType::I64 => PrimitiveType::I64,
+            impeller::types::PrimType::I32 => PrimitiveType::I32,
+            impeller::types::PrimType::I16 => PrimitiveType::I16,
+            impeller::types::PrimType::I8 => PrimitiveType::I8,
+            impeller::types::PrimType::Bool => PrimitiveType::Bool,
         }
     }
 }
 
-impl From<PrimitiveType> for impeller2::types::PrimType {
+impl From<PrimitiveType> for impeller::types::PrimType {
     fn from(val: PrimitiveType) -> Self {
         match val {
-            PrimitiveType::F64 => impeller2::types::PrimType::F64,
-            PrimitiveType::F32 => impeller2::types::PrimType::F32,
-            PrimitiveType::U64 => impeller2::types::PrimType::U64,
-            PrimitiveType::U32 => impeller2::types::PrimType::U32,
-            PrimitiveType::U16 => impeller2::types::PrimType::U16,
-            PrimitiveType::U8 => impeller2::types::PrimType::U8,
-            PrimitiveType::I64 => impeller2::types::PrimType::I64,
-            PrimitiveType::I32 => impeller2::types::PrimType::I32,
-            PrimitiveType::I16 => impeller2::types::PrimType::I16,
-            PrimitiveType::I8 => impeller2::types::PrimType::I8,
-            PrimitiveType::Bool => impeller2::types::PrimType::Bool,
+            PrimitiveType::F64 => impeller::types::PrimType::F64,
+            PrimitiveType::F32 => impeller::types::PrimType::F32,
+            PrimitiveType::U64 => impeller::types::PrimType::U64,
+            PrimitiveType::U32 => impeller::types::PrimType::U32,
+            PrimitiveType::U16 => impeller::types::PrimType::U16,
+            PrimitiveType::U8 => impeller::types::PrimType::U8,
+            PrimitiveType::I64 => impeller::types::PrimType::I64,
+            PrimitiveType::I32 => impeller::types::PrimType::I32,
+            PrimitiveType::I16 => impeller::types::PrimType::I16,
+            PrimitiveType::I8 => impeller::types::PrimType::I8,
+            PrimitiveType::Bool => impeller::types::PrimType::Bool,
         }
     }
 }
@@ -418,12 +422,33 @@ impl ShapeIndexer {
 #[cfg(test)]
 mod tests {
     use crate::{Seed, WorldPos};
-    use impeller2::component::Component;
+    use impeller::component::Component;
     use nox::Op;
 
     #[test]
     fn component_names() {
         assert_eq!(WorldPos::<Op>::NAME, "world_pos");
         assert_eq!(Seed::<Op>::NAME, "seed");
+    }
+
+    #[test]
+    fn component_name_rejects_whitespace() {
+        use std::collections::HashMap;
+
+        use pyo3::Python;
+
+        use super::PyComponent;
+
+        pyo3::prepare_freethreaded_python();
+        Python::with_gil(|py| {
+            let err = PyComponent::new(py, "fuel mass".into(), None, HashMap::new())
+                .expect_err("whitespace is rejected");
+            assert!(
+                err.to_string().contains("whitespace"),
+                "unexpected error: {err}"
+            );
+            PyComponent::new(py, "fuel_mass".into(), None, HashMap::new())
+                .expect("snake_case names are accepted");
+        });
     }
 }

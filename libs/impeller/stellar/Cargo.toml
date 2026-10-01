@@ -1,0 +1,52 @@
+[package]
+name = "impeller-stellar"
+license = "MIT OR Apache-2.0"
+version.workspace = true
+edition = "2024"
+
+[features]
+queue = [
+    "dep:thingbuf",
+    "bbqueue",
+    "impeller-bbq",
+    "impeller/thingbuf",
+    "stellarator/miette"
+    ]
+
+[dependencies]
+# async
+stellarator.path = "../../stellarator"
+futures-lite = "2.5.0"
+futures-concurrency = "7.6.2"
+
+# ser-des
+impeller.path = ".."
+impeller.features = ["std"]
+impeller-wkt.path = "../wkt"
+zerocopy.version = "0.8.2"
+zerocopy.features = ["derive"]
+serde.version = "1.0"
+serde.features = ["derive"]
+postcard.version = "1.0.10"
+postcard.features = ["alloc", "experimental-derive"]
+
+# schema
+postcard-schema.version = "0.2"
+postcard-schema.features = ["use-std"]
+
+# rand
+fastrand = "2.2.0"
+
+# errors
+thiserror = "2.0"
+miette.version = "7.2"
+
+# thingbuf
+thingbuf.version = "0.1.6"
+thingbuf.optional = true
+bbqueue.path = "../../bbqueue"
+bbqueue.features = ["std", "maitake-sync-0_3"]
+bbqueue.default-features = false
+bbqueue.optional = true
+impeller-bbq.path = "../bbq"
+impeller-bbq.optional = true

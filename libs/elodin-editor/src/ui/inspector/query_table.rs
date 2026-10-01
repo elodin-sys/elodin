@@ -3,9 +3,9 @@ use std::time::Instant;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::{Commands, Entity, In, Query, Res, ResMut};
 use bevy_egui::egui;
-use impeller2::types::Timestamp;
-use impeller2_bevy::CommandsExt;
-use impeller2_wkt::{ArrowIPC, EarliestTimestamp, ErrorResponse, LastUpdated, QueryType, SQLQuery};
+use impeller::types::Timestamp;
+use impeller_bevy::CommandsExt;
+use impeller_wkt::{ArrowIPC, EarliestTimestamp, ErrorResponse, LastUpdated, QueryType, SQLQuery};
 
 use crate::ui::widgets::SystemStateExt;
 use crate::{

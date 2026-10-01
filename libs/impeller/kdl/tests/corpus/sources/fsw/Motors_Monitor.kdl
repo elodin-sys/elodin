@@ -1,0 +1,85 @@
+vsplit {
+    hsplit share=0.6080149412155151 {
+        tabs share=0.5 {
+            component_monitor component_name=MOTORMESSAGE0.TIME_MONOTONIC
+        }
+        tabs share=0.5 {
+            component_monitor component_name=STATEMACHINE.MISSILE_MODE
+        }
+        tabs {
+            graph "MOTORMESSAGE0.MOTOR_CURRENT[0]" name=Graph {
+                color 214 164 54
+            }
+        }
+        tabs {
+            graph "MOTORMESSAGE0.COMMANDED_SETPOINT[0]" name=Graph {
+                color 16 22 46
+            }
+        }
+        tabs {
+            graph "MOTORMESSAGE0.MOTOR_POSITION[0]" name=Graph {
+                color 87 53 30
+            }
+        }
+    }
+    hsplit share=0.6624921560287476 {
+        tabs {
+            component_monitor component_name=MOTORMESSAGE1.TIME_MONOTONIC
+        }
+        tabs {
+            graph "MOTORMESSAGE1.MOTOR_CURRENT[0]" name=Graph {
+                color 30 41 54
+            }
+        }
+        tabs {
+            graph "MOTORMESSAGE1.COMMANDED_SETPOINT[0]" name=Graph {
+                color 69 36 26
+            }
+        }
+        tabs {
+            graph "MOTORMESSAGE1.MOTOR_POSITION[0]" name=Graph {
+                color 69 36 26
+            }
+        }
+    }
+    hsplit share=0.6147463917732239 {
+        tabs {
+            component_monitor component_name=MOTORMESSAGE2.TIME_MONOTONIC
+        }
+        tabs {
+            graph "MOTORMESSAGE2.MOTOR_CURRENT[0]" name=Graph {
+                color 157 75 42
+            }
+        }
+        tabs {
+            graph "MOTORMESSAGE2.COMMANDED_SETPOINT[0]" name=Graph {
+                color 57 25 14
+            }
+        }
+        tabs {
+            graph "MOTORMESSAGE2.MOTOR_POSITION[0]" name=Graph {
+                color 22 32 44
+            }
+        }
+    }
+    hsplit share=0.6147463917732239 {
+        tabs {
+            component_monitor component_name=MOTORMESSAGE3.TIME_MONOTONIC
+        }
+        tabs {
+            graph "MOTORMESSAGE3.MOTOR_CURRENT[0]" name=Graph {
+                color 182 82 45
+            }
+        }
+        tabs {
+            graph "MOTORMESSAGE3.COMMANDED_SETPOINT[0]" name=Graph {
+                color 95 138 95
+            }
+        }
+        tabs {
+            graph "MOTORMESSAGE3.MOTOR_POSITION[0]" name=Graph {
+                color 99 70 34
+            }
+        }
+    }
+}

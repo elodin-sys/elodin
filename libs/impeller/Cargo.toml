@@ -1,0 +1,67 @@
+[package]
+name = "impeller"
+license = "MIT OR Apache-2.0"
+edition = "2024"
+version.workspace = true
+repository.workspace = true
+
+[features]
+default = ["alloc", "std"]
+std = ["miette", "alloc", "serde/std", "nox", "nox-array/std", "stellarator-buf/std"]
+alloc = []
+bevy = ["dep:bevy"]
+mlua = ["dep:mlua"]
+thingbuf = ["dep:thingbuf", "replace_with"]
+hifitime = ["dep:hifitime"]
+nox = ["dep:nox"]
+
+[dependencies]
+# ser-des
+zerocopy.version = "0.8.2"
+zerocopy.features = ["derive"]
+serde.version = "1.0"
+serde.default-features = false
+serde.features = ["derive"]
+postcard.version = "1.1"
+postcard.features = ["alloc", "experimental-derive"]
+postcard-schema.version = "0.2"
+postcard-schema.features = ["derive"]
+
+
+# types
+heapless.version = "0.8"
+heapless.features = ["serde"]
+nox-array.path = "../nox/array"
+nox.path = "../nox"
+nox.default-features = false
+nox.optional = true
+stellarator-buf.path = "../stellarator/buf"
+
+# errors
+thiserror = { version = "2.0", default-features = false }
+# no_std-compatible: lets the core report skipped fields without a std logger
+tracing = { version = "0.1", default-features = false }
+miette.version = "7.2"
+miette.optional = true
+
+# hash
+const-fnv1a-hash = "1.1.0"
+
+# bevy
+bevy.workspace = true
+bevy.optional = true
+
+# lua
+mlua.version = "0.10.5"
+mlua.features = ["serialize"]
+mlua.optional = true
+
+# thingbuf
+thingbuf.version = "0.1.6"
+thingbuf.optional = true
+replace_with.version = "0.1.7"
+replace_with.optional = true
+
+# integrations
+hifitime.version = "4.0"
+hifitime.optional = true

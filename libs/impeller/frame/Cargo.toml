@@ -1,0 +1,10 @@
+[package]
+name = "impeller-frame"
+license = "MIT OR Apache-2.0"
+version.workspace = true
+edition = "2024"
+
+[dependencies]
+impeller.path = ".."
+impeller.features = ["std"]
+cobs.version = "0.2.3"

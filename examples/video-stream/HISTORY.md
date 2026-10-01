@@ -88,7 +88,7 @@ The video streaming feature enables real-time video transmission from cameras an
 | **elodinsink** | `fsw/gstreamer/` | GStreamer plugin that sends H.264 NAL units to Elodin DB |
 | **video-streamer** | `fsw/video-streamer/` | FFMPEG-based utility for streaming video files |
 | **video-toolbox** | `libs/video-toolbox/` | H.264 decoder abstraction (VideoToolbox on macOS) |
-| **impeller2** | `libs/impeller2/` | Protocol with `MsgWithTimestamp` packet type |
+| **impeller** | `libs/impeller/` | Protocol with `MsgWithTimestamp` packet type |
 | **Elodin DB** | `libs/db/` | Message storage and fixed-rate streaming |
 | **Elodin Editor** | `libs/elodin-editor/` | Video tile with decoder and display |
 
@@ -213,7 +213,7 @@ A cross-platform H.264 decoder abstraction that provides:
                       │  (Stores video   │
                       │   as messages)   │
                       └─────────┬────────┘
-                                │ Impeller2 Protocol
+                                │ Impeller Protocol
                                 ▼
                   ┌─────────────────────────┐
                   │    Elodin Editor        │
@@ -262,9 +262,9 @@ pub enum NalType {
 
 ---
 
-### D. Impeller2 Protocol Extensions
+### D. Impeller Protocol Extensions
 
-**Location:** `libs/impeller2/src/types.rs`
+**Location:** `libs/impeller/src/types.rs`
 
 PR #67 added the `MsgWithTimestamp` packet type to support timestamped messages.
 
@@ -329,7 +329,7 @@ db_path/
 The `FixedRateMsgStream` request enables synchronized video playback:
 
 ```rust
-// From libs/impeller2/wkt/src/msgs.rs
+// From libs/impeller/wkt/src/msgs.rs
 pub struct FixedRateMsgStream {
     pub msg_id: PacketId,
     pub fixed_rate: FixedRateOp,
@@ -762,8 +762,8 @@ h264parse ! elodinsink ...
 
 | File | Description |
 |------|-------------|
-| [`libs/impeller2/src/types.rs`](../libs/impeller2/src/types.rs) | `PacketTy::MsgWithTimestamp` and `LenPacket` |
-| [`libs/impeller2/wkt/src/msgs.rs`](../libs/impeller2/wkt/src/msgs.rs) | `FixedRateMsgStream`, `SetStreamState` messages |
+| [`libs/impeller/src/types.rs`](../libs/impeller/src/types.rs) | `PacketTy::MsgWithTimestamp` and `LenPacket` |
+| [`libs/impeller/wkt/src/msgs.rs`](../libs/impeller/wkt/src/msgs.rs) | `FixedRateMsgStream`, `SetStreamState` messages |
 | [`libs/db/src/lib.rs`](../libs/db/src/lib.rs) | `handle_fixed_rate_msg_stream` implementation |
 | [`libs/db/src/msg_log.rs`](../libs/db/src/msg_log.rs) | Message log storage |
 

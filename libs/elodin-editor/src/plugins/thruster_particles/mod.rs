@@ -50,8 +50,8 @@ use bevy_hanabi::{
         velocity::SetVelocitySphereModifier,
     },
 };
-use impeller2_bevy::{ConnectionAddr, EntityMap};
-use impeller2_wkt::{ComponentValue as WktComponentValue, CurrentTimestamp, Thruster, WorldPos};
+use impeller_bevy::{ConnectionAddr, EntityMap};
+use impeller_wkt::{ComponentValue as WktComponentValue, CurrentTimestamp, Thruster, WorldPos};
 
 use crate::EqlContext;
 use crate::WorldPosExt;
@@ -693,11 +693,7 @@ fn ensure_kdl_thrusters(
 /// light, or a spot aimed down the exhaust when `spot_angle` is set (Bevy
 /// spots shine along local -Z; the jet's exhaust is local -Y). Starts at zero
 /// intensity; `sync_kdl_thruster_particles` drives it with the live signal.
-fn spawn_thruster_light(
-    commands: &mut Commands,
-    jet: Entity,
-    light: &impeller2_wkt::ThrusterLight,
-) {
+fn spawn_thruster_light(commands: &mut Commands, jet: Entity, light: &impeller_wkt::ThrusterLight) {
     let color = Color::srgb(light.color.0, light.color.1, light.color.2);
     let transform = Transform {
         translation: Vec3::new(0.0, -light.offset, 0.0),
@@ -1477,10 +1473,12 @@ mod tests {
             scale_error: None,
             error_covariance_cholesky_expr: None,
             error_covariance_expr: None,
+            last_pose_kernel_input: None,
+            last_cov_kernel_input: None,
             joint_animations: Vec::new(),
-            data: impeller2_wkt::Object3D {
+            data: impeller_wkt::Object3D {
                 eql: "lander.world_pos".to_string(),
-                mesh: impeller2_wkt::Object3DMesh::glb("lander.glb"),
+                mesh: impeller_wkt::Object3DMesh::glb("lander.glb"),
                 frame: None,
                 frame_orientation: None,
                 orientation: Default::default(),
@@ -1489,6 +1487,7 @@ mod tests {
                 thrusters,
                 mesh_visibility_range: None,
                 node_id: Default::default(),
+                kernel: None,
             },
         }
     }
@@ -1771,11 +1770,11 @@ mod tests {
             .init_resource::<SeekParticleReset>()
             .insert_resource(Paused(false))
             .insert_resource(LatestFollow(false))
-            .insert_resource(CurrentTimestamp(impeller2::types::Timestamp(6_000_000)))
+            .insert_resource(CurrentTimestamp(impeller::types::Timestamp(6_000_000)))
             .add_systems(Update, sync_effect_simulation_clock);
 
         app.update();
-        app.world_mut().resource_mut::<CurrentTimestamp>().0 = impeller2::types::Timestamp(0);
+        app.world_mut().resource_mut::<CurrentTimestamp>().0 = impeller::types::Timestamp(0);
         app.update();
 
         assert!(
@@ -1792,12 +1791,12 @@ mod tests {
             .init_resource::<SeekParticleReset>()
             .insert_resource(Paused(false))
             .insert_resource(LatestFollow(false))
-            .insert_resource(CurrentTimestamp(impeller2::types::Timestamp(0)))
+            .insert_resource(CurrentTimestamp(impeller::types::Timestamp(0)))
             .add_systems(Update, sync_effect_simulation_clock);
 
         app.update();
         app.world_mut().resource_mut::<CurrentTimestamp>().0 =
-            impeller2::types::Timestamp(6_000_000);
+            impeller::types::Timestamp(6_000_000);
         app.update();
 
         assert!(
@@ -1814,12 +1813,12 @@ mod tests {
             .init_resource::<SeekParticleReset>()
             .insert_resource(Paused(false))
             .insert_resource(LatestFollow(true))
-            .insert_resource(CurrentTimestamp(impeller2::types::Timestamp(0)))
+            .insert_resource(CurrentTimestamp(impeller::types::Timestamp(0)))
             .add_systems(Update, sync_effect_simulation_clock);
 
         app.update();
         app.world_mut().resource_mut::<CurrentTimestamp>().0 =
-            impeller2::types::Timestamp(6_000_000);
+            impeller::types::Timestamp(6_000_000);
         app.update();
 
         assert!(

@@ -1,7 +1,7 @@
 use std::{fmt::Display, net::SocketAddr, sync::OnceLock};
 
 use db_macros::AsVTable;
-use impeller2_stellar::StreamExt;
+use impeller_stellar::StreamExt;
 use nu_ansi_term::{Color, Style};
 use zerocopy::{Immutable, KnownLayout, TryFromBytes};
 
@@ -165,11 +165,11 @@ async fn print_sensor_info() -> anyhow::Result<()> {
     const COLOR: Color = Color::Purple;
 
     let addr = SocketAddr::new([127, 0, 0, 1].into(), 2240);
-    let mut imu_client = impeller2_stellar::Client::connect(addr).await?;
+    let mut imu_client = impeller_stellar::Client::connect(addr).await?;
     let mut imu_sub = imu_client.subscribe::<ImuInfo>().await?;
     let imu = imu_sub.next().await?;
 
-    let mut aleph_client = impeller2_stellar::Client::connect(addr).await?;
+    let mut aleph_client = impeller_stellar::Client::connect(addr).await?;
     let mut aleph_sub = aleph_client.subscribe::<AlephInfo>().await?;
     let aleph = aleph_sub.next().await?;
 
@@ -225,7 +225,7 @@ async fn print_soc_telem() -> anyhow::Result<()> {
     const COLOR: Color = Color::Blue;
 
     let mut client =
-        impeller2_stellar::Client::connect(SocketAddr::new([127, 0, 0, 1].into(), 2240)).await?;
+        impeller_stellar::Client::connect(SocketAddr::new([127, 0, 0, 1].into(), 2240)).await?;
     let mut sub = client.subscribe::<HWTelem>().await?;
     let info = sub.next().await?;
 

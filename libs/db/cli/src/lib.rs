@@ -4,7 +4,7 @@ use arrow::{
     error::ArrowError,
     util::display::{ArrayFormatter, FormatOptions},
 };
-use impeller2::{
+use impeller::{
     com_de::Decomponentize,
     schema::Schema,
     types::{ComponentId, Msg, OwnedTimeSeries, PacketId, PrimType, Request, Timestamp, msg_id},
@@ -14,8 +14,8 @@ use impeller2::{
     },
 };
 
-use impeller2::types::{IntoLenPacket, LenPacket, OwnedPacket};
-use impeller2_wkt::*;
+use impeller::types::{IntoLenPacket, LenPacket, OwnedPacket};
+use impeller_wkt::*;
 use mlua::{
     AnyUserData, Error, Lua, LuaSerdeExt, MultiValue, ObjectLike, UserData, UserDataRef, Value,
 };
@@ -48,7 +48,7 @@ use zerocopy::{Immutable, IntoBytes, TryFromBytes};
 pub use mlua;
 
 pub struct Client {
-    client: impeller2_stellar::Client,
+    client: impeller_stellar::Client,
 }
 
 impl Client {
@@ -58,7 +58,7 @@ impl Client {
             .map_err(anyhow::Error::from)?
             .next()
             .ok_or_else(|| anyhow!("missing socket ip"))?;
-        let client = impeller2_stellar::Client::connect(addr).await?;
+        let client = impeller_stellar::Client::connect(addr).await?;
         Ok(Client { client })
     }
 
@@ -828,10 +828,10 @@ pub async fn run(args: Args) -> anyhow::Result<()> {
             validator: MatchingBracketValidator::new(),
         };
         let mut history = rustyline::history::FileHistory::with_config(config);
-        let dirs = directories::ProjectDirs::from("systems", "elodin", "impeller2-cli")
+        let dirs = directories::ProjectDirs::from("systems", "elodin", "impeller-cli")
             .ok_or_else(|| anyhow!("dir not found"))?;
         std::fs::create_dir_all(dirs.data_dir())?;
-        let history_path = dirs.data_dir().join("impeller2-history");
+        let history_path = dirs.data_dir().join("impeller-history");
         if history_path.exists() {
             history.load(&history_path)?;
         }
@@ -1008,7 +1008,7 @@ impl Decomponentize for DebugSink {
     fn apply_value(
         &mut self,
         component_id: ComponentId,
-        value: impeller2::types::ComponentView<'_>,
+        value: impeller::types::ComponentView<'_>,
         timestamp: Option<Timestamp>,
     ) -> Result<(), Self::Error> {
         let epoch = timestamp.map(hifitime::Epoch::from);

@@ -1,0 +1,10 @@
+vsplit {
+    hsplit share=0.5 {
+        component_monitor name=FINHEALTHMESSAGE.MOTOR_1_HEALTH component_name=FINHEALTHMESSAGE.MOTOR_1_HEALTH share=0.436141
+        component_monitor name=FINHEALTHMESSAGE.TIME_MONOTONIC component_name=FINHEALTHMESSAGE.TIME_MONOTONIC share=1.563858
+    }
+    component_monitor name=FINHEALTHMESSAGE.MOTOR_0_HEALTH component_name=FINHEALTHMESSAGE.MOTOR_0_HEALTH share=0.298856
+    component_monitor name=FINHEALTHMESSAGE.MOTOR_2_HEALTH component_name=FINHEALTHMESSAGE.MOTOR_2_HEALTH share=0.451144
+    component_monitor name=FINHEALTHMESSAGE.MOTOR_3_HEALTH component_name=FINHEALTHMESSAGE.MOTOR_3_HEALTH share=0.25
+}
+window

@@ -1,5 +1,5 @@
 use bevy_egui::egui::{self, RichText};
-use impeller2_wkt::{Color, Line3d};
+use impeller_wkt::{Color, Line3d};
 
 use crate::ui::colors::{EColor, get_scheme};
 use crate::ui::inspector::color_popup;

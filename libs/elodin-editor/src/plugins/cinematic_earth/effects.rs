@@ -6,7 +6,7 @@ use bevy::prelude::Image;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy_hanabi::graph::expr::{ExprHandle, PropertyHandle, WriterExpr};
 use bevy_hanabi::prelude::*;
-use impeller2_wkt::{EarthCityLightsConfig, EarthConfig};
+use impeller_wkt::{EarthCityLightsConfig, EarthConfig};
 
 use super::curves::{CITY_NIGHT_FULL, CITY_NIGHT_START};
 use super::modifiers::{CityTileCdfModifier, SphereMapColorModifier};

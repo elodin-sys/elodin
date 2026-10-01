@@ -14,8 +14,8 @@ use std::time::Instant;
 use clap::{Parser, Subcommand};
 use elodin_db::export::{self, ExportFormat, ExportOptions};
 use elodin_db::{ComponentSchema, DB};
-use impeller2::types::{ComponentId, PrimType, Timestamp};
-use impeller2_wkt::ComponentMetadata;
+use impeller::types::{ComponentId, PrimType, Timestamp};
+use impeller_wkt::ComponentMetadata;
 use zerocopy::IntoBytes;
 
 #[derive(Parser)]
@@ -270,7 +270,7 @@ fn run_decode_schema(db_path: PathBuf) {
             (Ok(s), Ok(m)) => (s, m),
             _ => continue,
         };
-        let schema: impeller2::schema::Schema<Vec<u64>> =
+        let schema: impeller::schema::Schema<Vec<u64>> =
             postcard::from_bytes(&schema_bytes).expect("decode schema");
         let metadata: ComponentMetadata =
             postcard::from_bytes(&metadata_bytes).expect("decode metadata");

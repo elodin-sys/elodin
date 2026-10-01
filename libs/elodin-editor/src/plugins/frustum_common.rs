@@ -2,7 +2,7 @@ use crate::plugins::render_layer_alloc::RenderLayerLease;
 use crate::sensor_camera::SensorCameraFrustumSource;
 use crate::ui::tiles::{DEFAULT_VIEWPORT_FAR, ViewportConfig};
 use bevy::prelude::*;
-use impeller2_wkt::FrustumUpMarker;
+use impeller_wkt::FrustumUpMarker;
 
 pub type MainViewportQueryItem = (
     Entity,
@@ -131,21 +131,21 @@ const FRUSTUM_NEAR_WHITE: f32 = 0.7;
 /// stays legible against that color, falling back to its complement when the
 /// frustum is itself near-white. Always opaque, so the ball still reads on a
 /// translucent or fully clear frustum.
-pub fn frustum_up_marker_color(frustum_color: impeller2_wkt::Color) -> impeller2_wkt::Color {
+pub fn frustum_up_marker_color(frustum_color: impeller_wkt::Color) -> impeller_wkt::Color {
     let darkest_channel = frustum_color
         .r
         .min(frustum_color.g)
         .min(frustum_color.b)
         .clamp(0.0, 1.0);
     if darkest_channel > FRUSTUM_NEAR_WHITE {
-        impeller2_wkt::Color::rgba(
+        impeller_wkt::Color::rgba(
             1.0 - frustum_color.r.clamp(0.0, 1.0),
             1.0 - frustum_color.g.clamp(0.0, 1.0),
             1.0 - frustum_color.b.clamp(0.0, 1.0),
             1.0,
         )
     } else {
-        impeller2_wkt::Color::rgba(1.0, 1.0, 1.0, 1.0)
+        impeller_wkt::Color::rgba(1.0, 1.0, 1.0, 1.0)
     }
 }
 
@@ -307,7 +307,7 @@ mod tests {
 
     #[test]
     fn up_marker_color_is_white_against_ordinary_frustums() {
-        use impeller2_wkt::Color as FrustumColor;
+        use impeller_wkt::Color as FrustumColor;
 
         let white = FrustumColor::rgba(1.0, 1.0, 1.0, 1.0);
         for color in [
@@ -323,7 +323,7 @@ mod tests {
 
     #[test]
     fn up_marker_color_complements_near_white_frustums() {
-        use impeller2_wkt::Color as FrustumColor;
+        use impeller_wkt::Color as FrustumColor;
 
         assert_eq!(
             frustum_up_marker_color(FrustumColor::WHITE),
@@ -339,7 +339,7 @@ mod tests {
 
     #[test]
     fn up_marker_color_is_opaque_on_a_clear_frustum() {
-        use impeller2_wkt::Color as FrustumColor;
+        use impeller_wkt::Color as FrustumColor;
 
         assert_eq!(
             frustum_up_marker_color(FrustumColor::rgba(0.2, 0.3, 0.4, 0.0)),

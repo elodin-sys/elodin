@@ -9,12 +9,12 @@ use bevy::{
 };
 use bevy_render::render_resource::{Buffer, BufferDescriptor, BufferSlice, BufferUsages};
 use bevy_render::renderer::{RenderDevice, RenderQueue};
-use impeller2::types::{ComponentId, ComponentView, OwnedPacket, PacketId, Timestamp};
-use impeller2_bevy::{
+use impeller::types::{ComponentId, ComponentView, OwnedPacket, PacketId, Timestamp};
+use impeller_bevy::{
     BackfillState, CommandsExt, ComponentAdapters, ComponentPathRegistry, ComponentSchemaRegistry,
     PacketGrantR, PacketHandlerInput, PacketHandlers, SeriesFetchPriority, TelemetryCache,
 };
-use impeller2_wkt::{
+use impeller_wkt::{
     ComponentValue, CurrentTimestamp, EarliestTimestamp, GetTimeSeries, GetTimeSeriesPredecessor,
     Line3d, PointTrails, VectorArrow3d,
 };
@@ -176,6 +176,106 @@ impl PlotDataComponent {
 pub struct CollectedGraphData {
     pub components: BTreeMap<ComponentId, PlotDataComponent>,
     line_layout_generation: u64,
+}
+
+pub(crate) struct EvaluatedSeries {
+    pub timestamps: Vec<Timestamp>,
+    pub values: Vec<Vec<f32>>,
+}
+
+fn component_eval_value(value: &ComponentValue) -> eql::eval::EvalValue {
+    use nox::ArrayBuf;
+
+    macro_rules! numeric {
+        ($array:expr) => {
+            $array
+                .buf
+                .as_buf()
+                .iter()
+                .map(|&value| value as f64)
+                .collect::<Vec<_>>()
+        };
+    }
+
+    let values = match value {
+        ComponentValue::U8(array) => numeric!(array),
+        ComponentValue::U16(array) => numeric!(array),
+        ComponentValue::U32(array) => numeric!(array),
+        ComponentValue::U64(array) => numeric!(array),
+        ComponentValue::I8(array) => numeric!(array),
+        ComponentValue::I16(array) => numeric!(array),
+        ComponentValue::I32(array) => numeric!(array),
+        ComponentValue::I64(array) => numeric!(array),
+        ComponentValue::Bool(array) => array
+            .buf
+            .as_buf()
+            .iter()
+            .map(|&value| if value { 1.0 } else { 0.0 })
+            .collect(),
+        ComponentValue::F32(array) => numeric!(array),
+        ComponentValue::F64(array) => array.buf.as_buf().to_vec(),
+    };
+    if value.shape().is_empty() || values.len() == 1 {
+        eql::eval::EvalValue::Scalar(values.first().copied().unwrap_or_default())
+    } else {
+        eql::eval::EvalValue::Vector(values)
+    }
+}
+
+pub(crate) fn evaluate_series(
+    cache: &TelemetryCache,
+    expr: &eql::Expr,
+    dependencies: &[ComponentId],
+    range: Range<Timestamp>,
+    max_points: Option<usize>,
+) -> Result<EvaluatedSeries, eql::eval::EvalError> {
+    let sample_times = cache.union_timestamps(dependencies, range);
+    if sample_times.is_empty() {
+        return Ok(EvaluatedSeries {
+            timestamps: Vec::new(),
+            values: Vec::new(),
+        });
+    }
+    let stride = max_points
+        .filter(|&limit| limit > 0)
+        .map(|limit| sample_times.len().div_ceil(limit))
+        .unwrap_or(1)
+        .max(1);
+    let mut timestamps = Vec::new();
+    let mut output: Vec<Vec<f32>> = Vec::new();
+    for (sample_index, timestamp) in sample_times.into_iter().enumerate() {
+        if sample_index % stride != 0 {
+            continue;
+        }
+        let value = match eql::eval::evaluate(expr, &|part| {
+            cache
+                .get_at_or_before(&part.id, timestamp)
+                .map(component_eval_value)
+                .ok_or_else(|| eql::eval::EvalError::MissingComponent(part.name.clone()))
+        }) {
+            Ok(value) => value,
+            Err(eql::eval::EvalError::MissingComponent(_)) => continue,
+            Err(err) => return Err(err),
+        };
+        let values = value.into_values();
+        if output.is_empty() {
+            output.resize_with(values.len(), Vec::new);
+        }
+        if values.len() != output.len() {
+            return Err(eql::eval::EvalError::Broadcast {
+                left: output.len(),
+                right: values.len(),
+            });
+        }
+        timestamps.push(timestamp);
+        for (series, value) in output.iter_mut().zip(values) {
+            series.push(value as f32);
+        }
+    }
+    Ok(EvaluatedSeries {
+        timestamps,
+        values: output,
+    })
 }
 
 impl CollectedGraphData {
@@ -768,7 +868,7 @@ fn apply_hold_anchor_payload(
     if timestamps.len() != 1 || timestamp > start || buf.len() != size {
         return false;
     }
-    let Ok(view) = impeller2::types::ComponentView::try_from_bytes_shape(
+    let Ok(view) = impeller::types::ComponentView::try_from_bytes_shape(
         buf,
         schema.shape(),
         schema.prim_type(),
@@ -989,7 +1089,7 @@ fn apply_visible_prefetch_payload(
     }
     for (i, &timestamp) in timestamps.iter().enumerate() {
         let offset = i * elem_size;
-        let Ok(view) = impeller2::types::ComponentView::try_from_bytes_shape(
+        let Ok(view) = impeller::types::ComponentView::try_from_bytes_shape(
             &buf[offset..offset + elem_size],
             schema.shape(),
             schema.prim_type(),
@@ -1390,6 +1490,15 @@ fn floor_ts_quantum(ts: Timestamp, quantum_micros: i64) -> Timestamp {
 }
 
 /// Parse an EQL string and insert every referenced component ID into `out`.
+fn collect_kernel_component_ids(
+    binding: &impeller_wkt::DisplayKernelBinding,
+    out: &mut HashSet<ComponentId>,
+) {
+    for input in &binding.inputs {
+        out.insert(ComponentId::new(&input.component));
+    }
+}
+
 fn collect_eql_component_ids(eql: &str, eql_ctx: &EqlContext, out: &mut HashSet<ComponentId>) {
     if eql.trim().is_empty() {
         return;
@@ -1403,23 +1512,30 @@ fn collect_eql_component_ids(eql: &str, eql_ctx: &EqlContext, out: &mut HashSet<
 }
 
 fn collect_object_3d_mesh_component_ids(
-    mesh: &impeller2_wkt::Object3DMesh,
+    mesh: &impeller_wkt::Object3DMesh,
     eql_ctx: &EqlContext,
     out: &mut HashSet<ComponentId>,
 ) {
     match mesh {
-        impeller2_wkt::Object3DMesh::Glb { animations, .. } => {
+        impeller_wkt::Object3DMesh::Glb { animations, .. } => {
             for anim in animations {
                 collect_eql_component_ids(&anim.eql_expr, eql_ctx, out);
             }
         }
-        impeller2_wkt::Object3DMesh::Ellipsoid {
+        impeller_wkt::Object3DMesh::Ellipsoid {
             scale,
             error_covariance_cholesky,
             error_covariance,
+            error_covariance_cholesky_kernel,
+            error_covariance_kernel,
             ..
         } => {
-            if let Some(cholesky) = error_covariance_cholesky {
+            if let Some(kernel) = error_covariance_cholesky_kernel
+                .as_ref()
+                .or(error_covariance_kernel.as_ref())
+            {
+                collect_kernel_component_ids(kernel, out);
+            } else if let Some(cholesky) = error_covariance_cholesky {
                 collect_eql_component_ids(cholesky, eql_ctx, out);
             } else if let Some(covariance) = error_covariance {
                 collect_eql_component_ids(covariance, eql_ctx, out);
@@ -1427,7 +1543,7 @@ fn collect_object_3d_mesh_component_ids(
                 collect_eql_component_ids(scale, eql_ctx, out);
             }
         }
-        impeller2_wkt::Object3DMesh::Mesh { .. } => {}
+        impeller_wkt::Object3DMesh::Mesh { .. } => {}
     }
 }
 
@@ -1449,8 +1565,14 @@ fn plot_fetch_component_ids(
 ) -> HashSet<ComponentId> {
     let mut ids = HashSet::new();
     for gs in graph_states.iter() {
-        for (path, _) in gs.enabled_lines.keys() {
-            ids.insert(path.id);
+        if let Some(kernel) = &gs.kernel {
+            ids.extend(kernel.dependencies.iter().copied());
+        } else if let Some(derived) = &gs.derived {
+            ids.extend(derived.dependencies.iter().copied());
+        } else {
+            for (path, _) in gs.enabled_lines.keys() {
+                ids.insert(path.id);
+            }
         }
     }
     for line in line_3ds.iter() {
@@ -1458,7 +1580,11 @@ fn plot_fetch_component_ids(
     }
     ids.extend(point_trails.iter().flat_map(point_trails_component_ids));
     for obj in object_3ds.iter() {
-        collect_eql_component_ids(&obj.data.eql, eql_ctx, &mut ids);
+        if let Some(kernel) = &obj.data.kernel {
+            collect_kernel_component_ids(kernel, &mut ids);
+        } else {
+            collect_eql_component_ids(&obj.data.eql, eql_ctx, &mut ids);
+        }
         collect_object_3d_mesh_component_ids(&obj.data.mesh, eql_ctx, &mut ids);
         // Thruster particle intensity EQL (plume / cold_gas / motor smoke).
         for thruster in &obj.data.thrusters {
@@ -3327,7 +3453,7 @@ pub const MAX_INDEX_STEP_DOUBLINGS: usize = 26;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use impeller2_wkt::ComponentValue;
+    use impeller_wkt::ComponentValue;
 
     #[test]
     fn next_timestamp_advances_by_one_microsecond() {
@@ -3476,8 +3602,8 @@ mod tests {
 
     #[test]
     fn tuple_array_access_eql_component_is_allowlisted() {
-        use impeller2::schema::Schema;
-        use impeller2::types::PrimType;
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
 
         let name = "effector.cube_pos_ecef";
         let component = Arc::new(eql::Component::new(
@@ -3529,9 +3655,9 @@ mod tests {
 
     #[test]
     fn ellipsoid_covariance_eql_components_are_allowlisted() {
-        use impeller2::schema::Schema;
-        use impeller2::types::PrimType;
-        use impeller2_wkt::{
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
+        use impeller_wkt::{
             Object3DMesh, default_ellipsoid_color, default_ellipsoid_confidence_interval,
             default_ellipsoid_grid_color,
         };
@@ -3553,6 +3679,8 @@ mod tests {
             color: default_ellipsoid_color(),
             error_covariance_cholesky: Some("shape.cholesky".into()),
             error_covariance: Some("shape.covariance".into()),
+            error_covariance_cholesky_kernel: None,
+            error_covariance_kernel: None,
             error_confidence_interval: default_ellipsoid_confidence_interval(),
             show_grid: false,
             grid_color: default_ellipsoid_grid_color(),
@@ -3593,9 +3721,9 @@ mod tests {
 
     #[test]
     fn glb_joint_animation_eql_components_are_allowlisted() {
-        use impeller2::schema::Schema;
-        use impeller2::types::PrimType;
-        use impeller2_wkt::{JointAnimation, Object3DMesh};
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
+        use impeller_wkt::{JointAnimation, Object3DMesh};
 
         let components = [
             "CANOPENMOTORMESSAGE3.ACTUAL_POSITION",
@@ -3649,7 +3777,7 @@ mod tests {
 
     #[test]
     fn viewport_adapter_ids_expand_pair_paths_by_leaf() {
-        use impeller2_wkt::ComponentPath;
+        use impeller_wkt::ComponentPath;
         let leaf = ComponentId::new("world_pos");
         let pair = ComponentId::new("ball_1.world_pos");
         let mut path_reg = ComponentPathRegistry::default();
@@ -4017,8 +4145,8 @@ mod tests {
 
     #[test]
     fn empty_visible_page_marks_coverage_and_completes_request() {
-        use impeller2::schema::Schema;
-        use impeller2::types::PrimType;
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
 
         let id = ComponentId::new("test.visible.empty");
         let mut schemas = ComponentSchemaRegistry::default();
@@ -4045,8 +4173,8 @@ mod tests {
 
     #[test]
     fn empty_sparse_windows_do_not_leak_request_slots() {
-        use impeller2::schema::Schema;
-        use impeller2::types::PrimType;
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
 
         let id = ComponentId::new("test.visible.sparse");
         let mut schemas = ComponentSchemaRegistry::default();
@@ -4086,8 +4214,8 @@ mod tests {
 
     #[test]
     fn visible_pages_share_one_logical_request_until_complete() {
-        use impeller2::schema::Schema;
-        use impeller2::types::PrimType;
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
 
         let id = ComponentId::new("test.visible.pages");
         let mut schemas = ComponentSchemaRegistry::default();
@@ -4140,8 +4268,8 @@ mod tests {
 
     #[test]
     fn malformed_visible_page_schedules_retry_without_coverage() {
-        use impeller2::schema::Schema;
-        use impeller2::types::PrimType;
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
 
         let id = ComponentId::new("test.visible.malformed");
         let mut schemas = ComponentSchemaRegistry::default();
@@ -4179,8 +4307,8 @@ mod tests {
 
     #[test]
     fn hold_anchor_payload_confirms_only_empty_or_valid_replies() {
-        use impeller2::schema::Schema;
-        use impeller2::types::PrimType;
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
 
         let id = ComponentId::new("test.anchor.payload");
         let mut schemas = ComponentSchemaRegistry::default();
@@ -4243,6 +4371,111 @@ mod tests {
             element_samples_with_predecessor(&cache, id, 0, &(Timestamp(5)..Timestamp(16))),
             vec![(Timestamp(0), 1.0), (Timestamp(10), 2.0)]
         );
+    }
+
+    #[test]
+    fn evaluate_series_projects_sqrt_per_sample() {
+        let id = ComponentId::new("sample.value");
+        let component = Arc::new(eql::Component::new(
+            "sample.value".to_string(),
+            id,
+            impeller::schema::Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new())
+                .unwrap(),
+        ));
+        let context = eql::Context::from_leaves([component], Timestamp(0), Timestamp(3));
+        let expr = context.parse_str("sample.value.sqrt()").unwrap();
+        let mut cache = TelemetryCache::default();
+        insert_f64(&mut cache, id, 0, 4.0);
+        insert_f64(&mut cache, id, 1, 9.0);
+        insert_f64(&mut cache, id, 2, 16.0);
+
+        let evaluated =
+            evaluate_series(&cache, &expr, &[id], Timestamp(0)..Timestamp(3), None).unwrap();
+
+        assert_eq!(
+            evaluated.timestamps,
+            vec![Timestamp(0), Timestamp(1), Timestamp(2)]
+        );
+        assert_eq!(evaluated.values, vec![vec![2.0, 3.0, 4.0]]);
+    }
+
+    #[test]
+    fn evaluate_series_projects_vector_norm() {
+        let id = ComponentId::new("sample.vector");
+        let component = Arc::new(eql::Component::new(
+            "sample.vector".to_string(),
+            id,
+            impeller::schema::Schema::new(impeller::types::PrimType::F64, vec![2_u64]).unwrap(),
+        ));
+        let context = eql::Context::from_leaves([component], Timestamp(0), Timestamp(2));
+        let expr = context.parse_str("sample.vector.norm()").unwrap();
+        let mut cache = TelemetryCache::default();
+        cache.insert(
+            id,
+            Timestamp(0),
+            ComponentValue::F64(nox::array![3.0, 4.0].to_dyn()),
+        );
+        cache.insert(
+            id,
+            Timestamp(1),
+            ComponentValue::F64(nox::array![5.0, 12.0].to_dyn()),
+        );
+
+        let evaluated =
+            evaluate_series(&cache, &expr, &[id], Timestamp(0)..Timestamp(2), None).unwrap();
+
+        assert_eq!(evaluated.values, vec![vec![5.0, 13.0]]);
+    }
+
+    #[test]
+    fn evaluate_series_unions_mixed_rate_timestamps() {
+        // Sparse series listed first so a hashed/first clock would drop the dense samples.
+        let fast = ComponentId::new("fast.value");
+        let slow = ComponentId::new("slow.value");
+        let schema =
+            impeller::schema::Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new())
+                .unwrap();
+        let context = eql::Context::from_leaves(
+            [
+                Arc::new(eql::Component::new(
+                    "fast.value".to_string(),
+                    fast,
+                    schema.clone(),
+                )),
+                Arc::new(eql::Component::new("slow.value".to_string(), slow, schema)),
+            ],
+            Timestamp(0),
+            Timestamp(5),
+        );
+        let expr = context.parse_str("fast.value + slow.value").unwrap();
+        let mut cache = TelemetryCache::default();
+        insert_f64(&mut cache, slow, 0, 10.0);
+        insert_f64(&mut cache, slow, 4, 20.0);
+        for t in 0..=4 {
+            insert_f64(&mut cache, fast, t, t as f64);
+        }
+
+        let evaluated = evaluate_series(
+            &cache,
+            &expr,
+            &[slow, fast],
+            Timestamp(0)..Timestamp(5),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            evaluated.timestamps,
+            vec![
+                Timestamp(0),
+                Timestamp(1),
+                Timestamp(2),
+                Timestamp(3),
+                Timestamp(4)
+            ]
+        );
+        // Zero-order hold on slow: 10 until t=4, then 20.
+        assert_eq!(evaluated.values, vec![vec![10.0, 11.0, 12.0, 13.0, 24.0]]);
     }
 
     #[test]
@@ -4530,7 +4763,7 @@ mod tests {
     #[test]
     fn sensor_camera_world_pos_ids_from_configs() {
         use crate::sensor_camera::SensorCameraConfigs;
-        use impeller2_wkt::SensorCameraConfig;
+        use impeller_wkt::SensorCameraConfig;
         let configs = SensorCameraConfigs(vec![SensorCameraConfig {
             entity_name: "cam_ball_a".into(),
             camera_name: "scene_cam".into(),

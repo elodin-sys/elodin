@@ -6,7 +6,7 @@ Video Streamer is a utility that loads video files from disk, re-encodes them to
 
 - Loads video files using FFmpeg
 - Re-encodes video to AV1 format
-- Streams OBUs to elodin-db using the impeller2_stellar client
+- Streams OBUs to elodin-db using the impeller_stellar client
 - Configurable message IDs, bitrate, keyframe intervals, and encoding speed
 
 ## Requirements

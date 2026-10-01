@@ -4,7 +4,7 @@ use crate::World;
 use crate::exec::ExecSlotMetadata;
 use crate::query::normalize_expr;
 use crate::utils::SchemaExt;
-use impeller2::types::ComponentId;
+use impeller::types::ComponentId;
 use nox::{ArrayTy, Noxpr, NoxprComp, NoxprFn, NoxprId, NoxprTy};
 
 use crate::{ComponentArray, ComponentSchema, Error};
@@ -971,7 +971,7 @@ pub struct PySystemBuilder {
 
 #[derive(Clone)]
 pub struct ArgMetadata {
-    pub entity_map: BTreeMap<impeller2::types::EntityId, usize>,
+    pub entity_map: BTreeMap<impeller::types::EntityId, usize>,
     pub len: usize,
     pub schema: ComponentSchema,
     pub component: PyComponent,
@@ -1045,7 +1045,7 @@ pub fn noxpr_to_callable(func: Arc<NoxprFn>) -> Py<PyAny> {
 mod tests {
     use std::{collections::BTreeMap, marker::PhantomData};
 
-    use impeller2::types::{ComponentId, EntityId};
+    use impeller::types::{ComponentId, EntityId};
 
     use super::{ComponentArray, ExecSlotMetadata, normalize_arg_for_slot};
     use nox::NoxprScalarExt;

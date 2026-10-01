@@ -4,10 +4,10 @@
 //! following the pattern from libs/db/examples/rust_client/src/control.rs
 
 use anyhow::Result;
-use impeller2::types::{ComponentId, LenPacket, PrimType};
-use impeller2::vtable::builder::{component, raw_field, schema, vtable};
-use impeller2_stellar::Client;
-use impeller2_wkt::VTableMsg;
+use impeller::types::{ComponentId, LenPacket, PrimType};
+use impeller::vtable::builder::{component, raw_field, schema, vtable};
+use impeller_stellar::Client;
+use impeller_wkt::VTableMsg;
 use std::time::{Duration, Instant};
 use tracing::info;
 

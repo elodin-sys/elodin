@@ -261,7 +261,7 @@ struct EarthLookFingerprint {
 }
 
 impl EarthLookFingerprint {
-    fn from_earth(earth: &impeller2_wkt::EarthConfig) -> Self {
+    fn from_earth(earth: &impeller_wkt::EarthConfig) -> Self {
         let earth = earth.clamp();
         Self {
             star_density: earth.stars.density,
@@ -314,7 +314,7 @@ fn ensure_assets(
     asset_server: &AssetServer,
     effects: &mut Assets<EffectAsset>,
     images: &mut Assets<Image>,
-    earth: &impeller2_wkt::EarthConfig,
+    earth: &impeller_wkt::EarthConfig,
 ) -> CinematicEarthAssets {
     if let Some(assets) = assets {
         write_effects(assets, effects, earth);
@@ -345,7 +345,7 @@ fn ensure_assets(
 fn write_effects(
     assets: &CinematicEarthAssets,
     effects: &mut Assets<EffectAsset>,
-    earth: &impeller2_wkt::EarthConfig,
+    earth: &impeller_wkt::EarthConfig,
 ) {
     if let Some(mut slot) = effects.get_mut(&assets.stars_dim) {
         *slot = effects::stars_dim(earth);

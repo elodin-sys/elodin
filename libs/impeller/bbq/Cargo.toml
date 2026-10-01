@@ -1,0 +1,13 @@
+[package]
+name = "impeller-bbq"
+license = "MIT OR Apache-2.0"
+version.workspace = true
+edition = "2024"
+
+[dependencies]
+stellarator-buf.path = "../../stellarator/buf"
+impeller.path = ".."
+impeller.features = ["std"]
+bbqueue.path = "../../bbqueue"
+bbqueue.default-features = false
+bbqueue.features = ["std", "maitake-sync-0_3"]

@@ -80,7 +80,7 @@ const FRUSTUM_FACE_ALPHA: u8 = 45;
 const FRUSTUM_FACE_EMISSIVE_STRENGTH: f32 = 0.15;
 
 fn frustum_face_material_for_color(
-    color: impeller2_wkt::Color,
+    color: impeller_wkt::Color,
     materials: &mut Assets<StandardMaterial>,
     cache: &mut FrustumMaterialCache,
 ) -> Handle<StandardMaterial> {
@@ -184,7 +184,7 @@ fn frustum_mesh_setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) 
 }
 
 fn frustum_material_for_color(
-    color: impeller2_wkt::Color,
+    color: impeller_wkt::Color,
     materials: &mut Assets<StandardMaterial>,
     cache: &mut FrustumMaterialCache,
 ) -> Handle<StandardMaterial> {

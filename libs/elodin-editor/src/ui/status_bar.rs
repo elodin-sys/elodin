@@ -4,20 +4,21 @@ use bevy::{
     },
     ecs::{
         query::With,
-        system::{Query, Res, SystemParam, SystemState},
+        system::{Query, Res, ResMut, SystemParam, SystemState},
         world::World,
     },
     prelude::Entity,
     window::PrimaryWindow,
 };
 use bevy_ai_skybox::prelude::{SkyboxCacheHealth, SkyboxGenerationUi};
-use impeller2_bevy::{
+use impeller_bevy::{
     ConnectionStatus, SimTimeStepFetch, SimTimeStepSource, ThreadConnectionStatus,
 };
-use impeller2_wkt::SimulationTimeStep;
+use impeller_wkt::SimulationTimeStep;
 use std::time::{Duration, Instant};
 
 use crate::ui::{
+    command_palette::CommandPaletteState,
     input_owner::{PointerOwnerPriority, UiBlocker},
     register_window_input_blocker,
 };
@@ -31,6 +32,7 @@ use crate::{
 
 use super::RootWidgetSystem;
 use crate::ui::widgets::SystemStateExt;
+use impeller_wkt::DbConfig;
 
 #[derive(SystemParam)]
 pub struct StatusBar<'w, 's> {
@@ -43,6 +45,8 @@ pub struct StatusBar<'w, 's> {
     skybox_cache: Res<'w, SkyboxCacheHealth>,
     hardware_stats: Res<'w, HardwareStats>,
     plot_gpu_pool: Res<'w, PlotGpuBufferPool>,
+    command_palette_state: ResMut<'w, CommandPaletteState>,
+    db_config: Res<'w, DbConfig>,
 }
 
 impl RootWidgetSystem for StatusBar<'_, '_> {
@@ -67,6 +71,13 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
         let skybox_cache = &state_mut.skybox_cache;
         let hardware_stats = &state_mut.hardware_stats;
         let plot_gpu_pool = &state_mut.plot_gpu_pool;
+        let mut command_palette_state = state_mut.command_palette_state;
+        let build_error = state_mut
+            .db_config
+            .metadata
+            .get("ui.build_error")
+            .filter(|s| !s.is_empty())
+            .cloned();
 
         let panel = super::utils::show_panel(
             egui::Panel::bottom("status_bar").frame(egui::Frame {
@@ -83,6 +94,14 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
                     // Status
 
                     ui.add(editor_status_label(state_mut.connection_status.status()));
+
+                    if let Some(err) = &build_error {
+                        ui.add(egui::Label::new(
+                            egui::RichText::new(format!("Schematic build error: {err}"))
+                                .text_style(egui::TextStyle::Small)
+                                .color(get_scheme().error),
+                        ));
+                    }
 
                     // Editor FPS
 
@@ -224,6 +243,31 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
                     ));
 
                     super::skybox_status::draw_skybox_status_bar(ui, skybox_ui, skybox_cache);
+
+                    let shortcut = if cfg!(target_os = "macos") {
+                        "\u{2318}P"
+                    } else {
+                        "Ctrl+P"
+                    };
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let response = ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(format!("Command Palette  {shortcut}"))
+                                    .text_style(egui::TextStyle::Small)
+                                    .color(get_scheme().text_secondary),
+                            )
+                            .sense(egui::Sense::click()),
+                        );
+                        if response.clicked() {
+                            if command_palette_state.show {
+                                command_palette_state.close();
+                            } else {
+                                command_palette_state
+                                    .open_palette_top_level(Some(target_window));
+                            }
+                        }
+                        response.on_hover_cursor(egui::CursorIcon::PointingHand);
+                    });
                 });
             },
         );

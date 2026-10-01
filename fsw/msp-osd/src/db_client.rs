@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
-use impeller2::com_de::Decomponentize;
-use impeller2::registry::HashMapRegistry;
-use impeller2::types::{ComponentId, ComponentView, Timestamp};
-use impeller2_stellar::Client;
-use impeller2_wkt::{DumpMetadata, DumpMetadataResp, Stream, StreamBehavior, StreamReply};
+use impeller::com_de::Decomponentize;
+use impeller::registry::HashMapRegistry;
+use impeller::types::{ComponentId, ComponentView, Timestamp};
+use impeller_stellar::Client;
+use impeller_wkt::{DumpMetadata, DumpMetadataResp, Stream, StreamBehavior, StreamReply};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;

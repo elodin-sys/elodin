@@ -14,9 +14,9 @@ path = "src/main.rs"
 
 [dependencies]
 # Core protocol
-impeller2 = { path = "../../../impeller2", features = ["std"] }
-impeller2-stellar = { path = "../../../impeller2/stellar" }
-impeller2-wkt = { path = "../../../impeller2/wkt" }
+impeller = { path = "../../../impeller", features = ["std"] }
+impeller-stellar = { path = "../../../impeller/stellar" }
+impeller-wkt = { path = "../../../impeller/wkt" }
 
 # Async runtime
 stellarator = { path = "../../../stellarator", features = ["tokio"] }

@@ -406,7 +406,7 @@ fn group_components_by_prefix(tasks: Vec<ComponentTask>, db_path: &Path) -> Vec<
         .collect()
 }
 
-fn component_created_at(db_path: &Path, component_id: impeller2::types::ComponentId) -> SystemTime {
+fn component_created_at(db_path: &Path, component_id: impeller::types::ComponentId) -> SystemTime {
     std::fs::metadata(db_path.join(component_id.to_string()))
         .and_then(|metadata| metadata.created().or_else(|_| metadata.modified()))
         .unwrap_or(SystemTime::UNIX_EPOCH)

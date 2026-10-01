@@ -2,7 +2,7 @@
 //! the image orientation reads the same there as on the frustum drawn in 3D.
 
 use egui::Color32;
-use impeller2_wkt::FrustumUpMarker;
+use impeller_wkt::FrustumUpMarker;
 
 /// Bar thickness, as a fraction of half the image height, so the painted marker
 /// keeps the weight it has on the 3D frustum.

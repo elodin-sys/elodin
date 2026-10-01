@@ -81,14 +81,20 @@ Launch the Elodin editor (default)
 
   Default value: `[::]:2240`
 
-* `--kdl <KDL>` — Open this KDL schematic after connecting to the database.
+* `--schematic <PATH>` — Open this schematic after connecting. Accepts a
+  `.kdl` file or a Python script that defines `build() -> elodin.ui.Schematic`.
+  Relative paths are resolved from the current directory, then from a
+  database directory when one is given.
+
+* `--kdl <KDL>` — Deprecated alias for `--schematic`.
 
 * `--replay` — Reveal recorded data progressively as the playback marker
   advances, simulating a live session.
 
 ```bash
 elodin editor dbs/apollo --replay
-elodin editor dbs/apollo --kdl schematics/review.kdl
+elodin editor dbs/apollo --schematic schematics/review.kdl
+elodin editor dbs/apollo --schematic assets/schematics/main.py
 ```
 
 ###### **Environment**
@@ -1009,6 +1015,10 @@ When the flag is honored, the export prints a one-line skip message per componen
 ```
 
 Pass `--include-private` to override the filter and export every component regardless of metadata (useful for forensic or full-fidelity exports).
+
+###### **Transient Components**
+
+Simulation components whose metadata contains `"transient": "true"` are kept in the simulation's in-memory world but never registered with or written to Elodin DB. They therefore do not appear in the database schema, editor, replication, or any export, including exports using `--include-private`. Use transient components only for tick-to-tick state that does not need replay, visualization, or forensic analysis. See the Python API reference for restrictions and examples.
 
 ###### **Example**
 

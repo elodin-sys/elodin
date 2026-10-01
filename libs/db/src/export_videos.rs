@@ -9,8 +9,8 @@ use std::io::{self, Cursor};
 use std::path::PathBuf;
 
 use glob::Pattern;
-use impeller2::types::{PacketId, msg_id};
-use impeller2_wkt::SensorCameraConfig;
+use impeller::types::{PacketId, msg_id};
+use impeller_wkt::SensorCameraConfig;
 use muxide::api::{MuxerBuilder, VideoCodec};
 use muxide::codec::h264::is_h264_keyframe;
 use openh264::OpenH264API;
@@ -541,8 +541,8 @@ mod tests {
     use super::*;
     use openh264::formats::YUVSource;
 
-    fn color(r: f32, g: f32, b: f32, a: f32) -> impeller2_wkt::Color {
-        impeller2_wkt::Color { r, g, b, a }
+    fn color(r: f32, g: f32, b: f32, a: f32) -> impeller_wkt::Color {
+        impeller_wkt::Color { r, g, b, a }
     }
 
     fn sensor_camera_config(fps: f32) -> SensorCameraConfig {

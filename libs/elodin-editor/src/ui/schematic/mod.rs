@@ -22,8 +22,8 @@ use bevy::{
 };
 use bevy_geo_frames::{GeoFrame, GeoPosition};
 use egui_tiles::{Tile, TileId};
-use impeller2_bevy::ComponentMetadataRegistry;
-use impeller2_wkt::{
+use impeller_bevy::ComponentMetadataRegistry;
+use impeller_wkt::{
     ActionPane, ComponentMonitor, ComponentPath, GeoPositionGauge, HorizonGauge, Line3d,
     OrientationGauge, Panel, PointTrails, Schematic, SchematicElem, Split, VectorArrow3d,
     VideoStream as WktVideoStream, Viewport, WindowSchematic, WorldMesh,
@@ -211,13 +211,13 @@ impl SchematicParam<'_, '_> {
                         let show_frustums = vp_config.map(|c| c.show_frustums).unwrap_or(false);
                         let frustums_color = vp_config
                             .map(|c| c.frustums_color)
-                            .unwrap_or_else(impeller2_wkt::default_viewport_frustums_color);
+                            .unwrap_or_else(impeller_wkt::default_viewport_frustums_color);
                         let projection_color = vp_config
                             .map(|c| c.projection_color)
-                            .unwrap_or_else(impeller2_wkt::default_viewport_projection_color);
+                            .unwrap_or_else(impeller_wkt::default_viewport_projection_color);
                         let frustums_thickness = vp_config
                             .map(|c| c.frustums_thickness)
-                            .unwrap_or_else(impeller2_wkt::default_viewport_frustums_thickness);
+                            .unwrap_or_else(impeller_wkt::default_viewport_frustums_thickness);
                         let frustums_up_marker =
                             vp_config.map(|c| c.frustums_up_marker).unwrap_or_default();
                         let frustums_up_marker_overlay = vp_config
@@ -250,7 +250,7 @@ impl SchematicParam<'_, '_> {
                             .map(|geo_pos| geo_pos.0)
                             .ok();
 
-                        let node_id = impeller2_wkt::NodeId::next();
+                        let node_id = impeller_wkt::NodeId::next();
                         bindings.bind_ephemeral(node_id, cam_entity);
                         Some(Panel::Viewport(Viewport {
                             fov,
@@ -295,28 +295,60 @@ impl SchematicParam<'_, '_> {
                     Pane::Graph(graph) => {
                         let graph_state = self.graph_states.get(graph.id).ok()?;
                         let mut eql = String::new();
-                        let mut colors: Vec<impeller2_wkt::Color> = vec![];
+                        let mut colors: Vec<impeller_wkt::Color> = vec![];
                         let mut parts: Vec<String> = Vec::new();
+                        let kernel = graph_state.kernel.as_ref().map(|k| k.binding.clone());
 
-                        for (component_path, component_values) in &graph_state.components {
-                            for (index, (enabled, color)) in component_values.iter().enumerate() {
-                                if !*enabled {
-                                    continue;
+                        if let Some(kernel_state) = &graph_state.kernel {
+                            for index in 0..kernel_state.lines.len().max(kernel_state.colors.len())
+                            {
+                                let color = graph_state
+                                    .enabled_lines
+                                    .get(&(kernel_state.path.clone(), index))
+                                    .map(|(_, color)| *color)
+                                    .or_else(|| kernel_state.colors.get(index).copied());
+                                if let Some(color) = color {
+                                    colors.push(impeller_wkt::Color::from_color32(color));
                                 }
-                                parts.push(component_expr(component_path, index, &self.metadata));
-                                colors.push(impeller2_wkt::Color::from_color32(*color));
+                            }
+                        } else if let Some(derived) = &graph_state.derived {
+                            eql = derived.source.clone();
+                            for index in 0..derived.lines.len().max(derived.colors.len()) {
+                                let color = graph_state
+                                    .enabled_lines
+                                    .get(&(derived.path.clone(), index))
+                                    .map(|(_, color)| *color)
+                                    .or_else(|| derived.colors.get(index).copied());
+                                if let Some(color) = color {
+                                    colors.push(impeller_wkt::Color::from_color32(color));
+                                }
+                            }
+                        } else {
+                            for (component_path, component_values) in &graph_state.components {
+                                for (index, (enabled, color)) in component_values.iter().enumerate()
+                                {
+                                    if !*enabled {
+                                        continue;
+                                    }
+                                    parts.push(component_expr(
+                                        component_path,
+                                        index,
+                                        &self.metadata,
+                                    ));
+                                    colors.push(impeller_wkt::Color::from_color32(*color));
+                                }
+                            }
+
+                            if !parts.is_empty() {
+                                eql = parts.join(", ");
+                            } else if !graph_state.label.is_empty() {
+                                eql = graph_state.label.clone();
                             }
                         }
 
-                        if !parts.is_empty() {
-                            eql = parts.join(", ");
-                        } else if !graph_state.label.is_empty() {
-                            eql = graph_state.label.clone();
-                        }
-
-                        let node_id = impeller2_wkt::NodeId::next();
+                        let node_id = impeller_wkt::NodeId::next();
                         bindings.bind_ephemeral(node_id, graph.id);
-                        Some(Panel::Graph(impeller2_wkt::Graph {
+                        Some(Panel::Graph(impeller_wkt::Graph {
                             eql,
                             name: pane_name,
                             graph_type: graph_state.graph_type,
@@ -325,6 +357,7 @@ impl SchematicParam<'_, '_> {
                             y_range: graph_state.y_range.clone(),
                             node_id,
                             colors,
+                            kernel,
                         }))
                     }
 
@@ -339,7 +372,7 @@ impl SchematicParam<'_, '_> {
                     Pane::GeoPositionGauge(gauge) => {
                         let data = self.geo_position_gauges.get(gauge.entity).ok()?;
                         let binding = self.eql_bindings.get(gauge.entity).ok()?;
-                        let node_id = impeller2_wkt::NodeId::next();
+                        let node_id = impeller_wkt::NodeId::next();
                         bindings.bind_ephemeral(node_id, gauge.entity);
                         Some(Panel::GeoPositionGauge(GeoPositionGauge {
                             eql: binding.eql.clone(),
@@ -355,7 +388,7 @@ impl SchematicParam<'_, '_> {
                     Pane::OrientationGauge(gauge) => {
                         let data = self.orientation_gauges.get(gauge.entity).ok()?;
                         let binding = self.eql_bindings.get(gauge.entity).ok()?;
-                        let node_id = impeller2_wkt::NodeId::next();
+                        let node_id = impeller_wkt::NodeId::next();
                         bindings.bind_ephemeral(node_id, gauge.entity);
                         Some(Panel::OrientationGauge(OrientationGauge {
                             eql: binding.eql.clone(),
@@ -371,7 +404,7 @@ impl SchematicParam<'_, '_> {
                     Pane::HorizonGauge(gauge) => {
                         let data = self.horizon_gauges.get(gauge.entity).ok()?;
                         let binding = self.eql_bindings.get(gauge.entity).ok()?;
-                        let node_id = impeller2_wkt::NodeId::next();
+                        let node_id = impeller_wkt::NodeId::next();
                         bindings.bind_ephemeral(node_id, gauge.entity);
                         Some(Panel::HorizonGauge(HorizonGauge {
                             eql: binding.eql.clone(),
@@ -392,7 +425,7 @@ impl SchematicParam<'_, '_> {
 
                     Pane::QueryPlot(plot) => {
                         let query_plot_data = self.query_plots.get(plot.entity).ok()?;
-                        let node_id = impeller2_wkt::NodeId::next();
+                        let node_id = impeller_wkt::NodeId::next();
                         bindings.bind_ephemeral(node_id, plot.entity);
                         let mut qp = query_plot_data.data.clone();
                         qp.node_id = node_id;
@@ -419,14 +452,14 @@ impl SchematicParam<'_, '_> {
                     }
                     Pane::SensorView(sv_pane) => {
                         let video_stream = self.video_streams.get(sv_pane.entity).ok()?;
-                        Some(Panel::SensorView(impeller2_wkt::SensorView {
+                        Some(Panel::SensorView(impeller_wkt::SensorView {
                             msg_name: video_stream.msg_name.clone(),
                             name: pane_name,
                         }))
                     }
                     Pane::LogStream(ls_pane) => {
                         let log_state = self.log_streams.get(ls_pane.entity).ok()?;
-                        Some(Panel::LogStream(impeller2_wkt::LogStream {
+                        Some(Panel::LogStream(impeller_wkt::LogStream {
                             msg_name: log_state.msg_name.clone(),
                             name: pane_name,
                         }))
@@ -530,7 +563,7 @@ pub fn tiles_to_schematic(
             default_origin.longitude,
             default_origin.altitude,
         ))
-        .then(|| impeller2_wkt::GeoOriginConfig {
+        .then(|| impeller_wkt::GeoOriginConfig {
             latitude: origin.latitude.to_degrees(),
             longitude: origin.longitude.to_degrees(),
             altitude: origin.altitude,
@@ -557,7 +590,7 @@ pub fn tiles_to_schematic(
         .elems
         .extend(param.objects_3d.iter().map(|(entity, o)| {
             let mut obj = o.data.clone();
-            let node_id = impeller2_wkt::NodeId::next();
+            let node_id = impeller_wkt::NodeId::next();
             bindings.bind_ephemeral(node_id, entity);
             obj.node_id = node_id;
             SchematicElem::Object3d(obj)
@@ -566,7 +599,7 @@ pub fn tiles_to_schematic(
         .elems
         .extend(param.lines_3d.iter().map(|(entity, line)| {
             let mut l = line.clone();
-            let node_id = impeller2_wkt::NodeId::next();
+            let node_id = impeller_wkt::NodeId::next();
             bindings.bind_ephemeral(node_id, entity);
             l.node_id = node_id;
             SchematicElem::Line3d(l)
@@ -575,7 +608,7 @@ pub fn tiles_to_schematic(
         .elems
         .extend(param.point_trails.iter().map(|(entity, trails)| {
             let mut t = trails.clone();
-            let node_id = impeller2_wkt::NodeId::next();
+            let node_id = impeller_wkt::NodeId::next();
             bindings.bind_ephemeral(node_id, entity);
             t.node_id = node_id;
             SchematicElem::PointTrails(t)
@@ -587,7 +620,7 @@ pub fn tiles_to_schematic(
             .filter(|(_, _, viewport_arrow)| viewport_arrow.is_none())
             .map(|(entity, arrow, _)| {
                 let mut a = arrow.clone();
-                let node_id = impeller2_wkt::NodeId::next();
+                let node_id = impeller_wkt::NodeId::next();
                 bindings.bind_ephemeral(node_id, entity);
                 a.node_id = node_id;
                 SchematicElem::VectorArrow(a)
@@ -598,7 +631,7 @@ pub fn tiles_to_schematic(
         .elems
         .extend(param.world_meshes.iter().map(|(entity, world_mesh)| {
             let mut wm = world_mesh.clone();
-            let node_id = impeller2_wkt::NodeId::next();
+            let node_id = impeller_wkt::NodeId::next();
             bindings.bind_ephemeral(node_id, entity);
             wm.node_id = node_id;
             SchematicElem::WorldMesh(wm)
@@ -667,7 +700,7 @@ pub fn tiles_to_schematic(
     }
 
     schematic.elems.extend(window_elems);
-    let mut timeline: impeller2_wkt::TimelineConfig = (*param.timeline_settings).into();
+    let mut timeline: impeller_wkt::TimelineConfig = (*param.timeline_settings).into();
     timeline.range = param.time_range_behavior.to_schematic_range();
     schematic.timeline = Some(timeline);
     schematic.telemetry_mode = param.telemetry_mode.0;
@@ -675,7 +708,7 @@ pub fn tiles_to_schematic(
         && let Some(mode) = state.descriptor.mode.clone()
     {
         let selection = colors::current_selection();
-        schematic.theme = Some(impeller2_wkt::ThemeConfig {
+        schematic.theme = Some(impeller_wkt::ThemeConfig {
             mode: Some(mode),
             scheme: Some(selection.scheme),
         });
@@ -725,7 +758,7 @@ impl Plugin for SchematicPlugin {
 /// of forking to a newly generated `schematics/<stem>.kdl` key.
 fn preserved_window_key(state: &tiles::WindowState) -> Option<String> {
     let path = state.descriptor.path.as_ref()?.to_str()?;
-    impeller2_kdl::db_asset_name(path)
+    impeller_kdl::db_asset_name(path)
 }
 
 /// The stem of a single-level `schematics/<stem>.kdl` key, i.e. the namespace
@@ -881,12 +914,29 @@ fn const_value(expr: &eql::Expr) -> Option<f64> {
 pub trait EqlExt {
     fn to_graph_components(&self) -> Vec<(ComponentPath, usize)>;
     fn to_graph_component_affines(&self) -> Vec<(ComponentPath, usize, ElementAffine)>;
+    /// Whether plotting this expression requires evaluating its AST instead of
+    /// displaying its source components directly.
+    fn requires_plot_evaluation(&self) -> bool;
     /// First geo-frame converter in the expression, if any (`ecef_to_ned`, …).
     /// Schematic load attaches SQL-backed `QueryPlotData` when this is `Some`.
     fn frame_conversion_name(&self) -> Option<&'static str>;
 }
 
 impl EqlExt for eql::Expr {
+    fn requires_plot_evaluation(&self) -> bool {
+        match self {
+            eql::Expr::Formula(_, _) | eql::Expr::BinaryOp(_, _, _) => true,
+            eql::Expr::ArrayAccess(expr, _)
+            | eql::Expr::Last(expr, _)
+            | eql::Expr::First(expr, _) => expr.requires_plot_evaluation(),
+            eql::Expr::Tuple(exprs) => exprs.iter().any(|e| e.requires_plot_evaluation()),
+            eql::Expr::ComponentPart(_)
+            | eql::Expr::Time(_)
+            | eql::Expr::FloatLiteral(_)
+            | eql::Expr::StringLiteral(_) => false,
+        }
+    }
+
     /// Name of the first geo-frame converter in the expression, if any.
     fn frame_conversion_name(&self) -> Option<&'static str> {
         match self {
@@ -1031,7 +1081,7 @@ mod element_affine_tests {
         eql::Expr::ArrayAccess(
             Box::new(eql::Expr::ComponentPart(Arc::new(eql::ComponentPart {
                 name: name.to_string(),
-                id: impeller2::types::ComponentId::new(name),
+                id: impeller::types::ComponentId::new(name),
                 component: None,
                 children: Default::default(),
             }))),
@@ -1148,6 +1198,29 @@ mod element_affine_tests {
     }
 
     #[test]
+    fn plot_evaluation_detects_math_without_routing_plain_components() {
+        let plain = element("ball.pos", 0);
+        assert!(!plain.requires_plot_evaluation());
+
+        let arithmetic = binary(
+            element("ball.pos", 0),
+            eql::Expr::FloatLiteral(2.0),
+            eql::BinaryOp::Mul,
+        );
+        assert!(arithmetic.requires_plot_evaluation());
+
+        let sqrt = eql::Expr::Formula(Arc::new(eql::formulas::Sqrt), Box::new(plain.clone()));
+        assert!(sqrt.requires_plot_evaluation());
+
+        // Comma graphs are tuples of components and must stay independent series.
+        let comma = eql::Expr::Tuple(vec![plain.clone(), element("ball.vel", 0)]);
+        assert!(!comma.requires_plot_evaluation());
+
+        let tuple = eql::Expr::Tuple(vec![plain, sqrt]);
+        assert!(tuple.requires_plot_evaluation());
+    }
+
+    #[test]
     fn to_graph_components_matches_the_affine_traversal() {
         // The plain accessor must stay a projection of the affine one; graphs and
         // monitors rely on its exact ordering.
@@ -1176,8 +1249,8 @@ mod element_affine_tests {
 #[cfg(test)]
 mod frame_conversion_tests {
     use super::*;
-    use impeller2::schema::Schema;
-    use impeller2::types::{ComponentId, PrimType, Timestamp};
+    use impeller::schema::Schema;
+    use impeller::types::{ComponentId, PrimType, Timestamp};
     use std::sync::Arc;
 
     fn ctx() -> eql::Context {

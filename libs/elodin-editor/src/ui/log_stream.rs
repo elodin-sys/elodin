@@ -2,9 +2,9 @@ use bevy::ecs::query::QueryData;
 use bevy::ecs::system::{In, InRef, SystemParam};
 use bevy::prelude::{Commands, Component, Entity, Query, Res, World};
 use egui::{self, Color32, RichText, ScrollArea};
-use impeller2::types::{OwnedPacket, Timestamp};
-use impeller2_bevy::{CommandsExt, CurrentStreamId, PacketGrantR};
-use impeller2_wkt::{
+use impeller::types::{OwnedPacket, Timestamp};
+use impeller_bevy::{CommandsExt, CurrentStreamId, PacketGrantR};
+use impeller_wkt::{
     CurrentTimestamp, ErrorResponse, FixedRateMsgStream, FixedRateOp, GetMsgs, LogEntry, MsgBatch,
 };
 use std::collections::BTreeMap;

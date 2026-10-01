@@ -4,7 +4,7 @@ use core::fmt;
 #[derive(Clone, Copy)]
 #[pyclass]
 pub struct EntityId {
-    pub inner: impeller2::types::EntityId,
+    pub inner: impeller::types::EntityId,
 }
 
 #[pymethods]

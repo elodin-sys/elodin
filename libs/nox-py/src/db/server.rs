@@ -3,6 +3,7 @@
 //! loggers don't need a separate `elodin-db run` process.
 
 use std::net::SocketAddr;
+use std::path::Path;
 
 use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
@@ -10,9 +11,9 @@ use stellarator::struc_con::{Joinable, Thread, stellar};
 
 /// An embedded Elodin-DB server.
 ///
-/// `Server(path, addr)` binds `addr` immediately (errors surface here, e.g.
-/// port already in use) and serves the database at `path` on a background
-/// thread until `stop()` is called or the process exits.
+/// `Server(path, addr)` binds Impeller TCP on `addr` immediately (errors
+/// surface here, e.g. port already in use) and the DB Asset Server on
+/// `addr.port + 1`. The editor loads `schematic.active` over that HTTP port.
 #[pyclass]
 pub struct Server {
     thread: Option<Thread<Option<()>>>,
@@ -31,6 +32,20 @@ impl Server {
             .map_err(|e| PyRuntimeError::new_err(format!("invalid address {addr:?}: {e}")))?;
         let server = elodin_db::Server::new(path, sock_addr).map_err(|e| {
             PyRuntimeError::new_err(format!("failed to start elodin-db at {addr}: {e}"))
+        })?;
+        // Same as `elodin-db run` / `world.run`: editor fetches
+        // `schematics/main.kdl` from HTTP on N+1, not over Impeller.
+        let http_addr = elodin_db::assets_http::assets_http_addr(sock_addr);
+        elodin_db::assets_http::spawn_assets_http(
+            Path::new(path),
+            sock_addr,
+            true,
+            Some(server.db.clone()),
+        )
+        .map_err(|e| {
+            PyRuntimeError::new_err(format!(
+                "failed to start elodin-db asset HTTP at {http_addr}: {e}"
+            ))
         })?;
         let thread = stellar(move || async move {
             if let Err(err) = server.run().await {

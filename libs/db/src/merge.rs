@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 
 use crate::utils::{is_timestamp_source_component, read_timestamp_range};
 use crate::{Error, MetadataExt, copy_dir_native, copy_file_native, sync_dir};
-use impeller2::types::ComponentId;
-use impeller2_wkt::{ComponentMetadata, DbConfig};
+use impeller::types::ComponentId;
+use impeller_wkt::{ComponentMetadata, DbConfig};
 
 /// Statistics about a merge operation
 #[derive(Default, Debug)]

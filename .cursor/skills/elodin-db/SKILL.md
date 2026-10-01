@@ -5,7 +5,7 @@ description: Work with Elodin-DB, the time-series telemetry database. Use when r
 
 # Elodin-DB
 
-Elodin-DB is a high-performance time-series database for telemetry data. It stores components, messages, and metadata using the Impeller2 protocol, and serves as the central data bus between simulations, flight software, and the Elodin Editor.
+Elodin-DB is a high-performance time-series database for telemetry data. It stores components, messages, and metadata using the Impeller protocol, and serves as the central data bus between simulations, flight software, and the Elodin Editor.
 
 ## Quick Start
 
@@ -134,7 +134,7 @@ The C++ library is C++20 compatible. See `libs/db/examples/client.cpp` for subsc
 
 ### Rust Client
 
-See `libs/db/examples/rust_client/` for a complete Rust client using Impeller2.
+See `libs/db/examples/rust_client/` for a complete Rust client using Impeller.
 
 ### C++ Header Generation
 
@@ -282,7 +282,7 @@ From a simulation, the editor connects automatically when launched via `elodin e
 
 ## Architecture
 
-Elodin-DB uses the Impeller2 protocol internally:
+Elodin-DB uses the Impeller protocol internally:
 - **Components**: Time-series data indexed by entity + component name + timestamp
 - **Messages**: Ordered log entries (commands, events)
 - **Metadata**: Schema information, entity names, component types
