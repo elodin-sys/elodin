@@ -35,3 +35,33 @@ def test_audit_schematic_uses_oblique_camera_and_referee_graphs() -> None:
     assert 'graph "drone.accel" name="Accelerometer"' not in schematic
     assert 'graph "drone.gyro" name="Gyroscope"' not in schematic
     assert schematic.count("object_3d gate_0_") == 4
+
+
+def test_camera_schematic_injects_only_the_fpv_fragments() -> None:
+    course = course_from_name("none")
+    disabled = build_schematic(course, audit_enabled=False)
+    enabled = build_schematic(course, audit_enabled=False, camera_enabled=True)
+
+    assert 'sensor_view "drone.fpv"' not in disabled
+    assert "show_frustums" not in disabled
+    assert "sensor_visible=#false" not in disabled
+    assert "plane width=40" not in disabled
+    assert 'sensor_view "drone.fpv" name="FPV Camera"' in enabled
+    assert "show_frustums" not in enabled
+    assert "object_3d drone.world_pos sensor_visible=#false" in enabled
+    assert enabled.count("sensor_visible=#false") == 1
+    assert "plane width=40 depth=40" in enabled
+    assert enabled.count('graph "drone.motor_command"') == 1
+    assert enabled.count('graph "drone.accel"') == 1
+    assert 'pos="drone.world_pos + (0,0,0,0, 10,10,5)"' in enabled
+
+
+def test_camera_and_course_schematic_combine() -> None:
+    course = course_from_name("single")
+    schematic = build_schematic(course, audit_enabled=False, camera_enabled=True)
+
+    assert 'sensor_view "drone.fpv"' in schematic
+    assert schematic.count("object_3d gate_0_") == 4
+    assert "object_3d drone.world_pos sensor_visible=#false" in schematic
+    assert schematic.count("sensor_visible=#false") == 1
+    assert 'pos="(0,0,0,1, 4,-2,3)"' in schematic
