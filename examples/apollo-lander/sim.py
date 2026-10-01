@@ -1,7 +1,6 @@
 import math
 import typing as ty
 from datetime import datetime, timezone
-from pathlib import Path
 
 import elodin as el
 import jax

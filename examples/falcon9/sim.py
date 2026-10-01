@@ -10,7 +10,6 @@ real annotation objects, not the stringized ForwardRefs that import creates.
 
 import math
 import typing as ty
-from pathlib import Path
 
 import aero
 import atmosphere
