@@ -23,7 +23,7 @@ use crate::{
         colors::{ColorExt, EColor, get_scheme},
         theme::configure_combo_box,
         tiles::WindowState,
-        time_label::time_label,
+        time_label::{format_time_input, parse_time_input},
         widgets::WidgetSystem,
     },
 };
@@ -309,10 +309,16 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                         }
                                     }
 
-                                    // TIME
+                                    // TIME. The row is right-to-left, so the copy button is
+                                    // added first and lands to the right of the value.
 
-                                    let time: hifitime::Epoch = tick.0.into();
-                                    ui.add(time_label(time));
+                                    time_value_field(
+                                        ui,
+                                        &mut tick,
+                                        &mut paused,
+                                        &mut latest_follow,
+                                        &mut auto_follow_latest_state,
+                                    );
 
                                     let time_label = egui::RichText::new("TIME")
                                         .color(get_scheme().text_secondary);
@@ -385,6 +391,106 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                 });
             });
     }
+}
+
+/// Editable playhead time. Click selects the value. Enter or clicking away
+/// seeks. The `µs` button copies the raw microsecond timestamp used by
+/// `elodin-db merge --align`.
+fn time_value_field(
+    ui: &mut egui::Ui,
+    tick: &mut CurrentTimestamp,
+    paused: &mut Paused,
+    latest_follow: &mut LatestFollow,
+    auto_follow: &mut AutoFollowLatestState,
+) {
+    let scheme = get_scheme();
+    let edit_id = ui.make_persistent_id("timeline_time_edit");
+    let buffer_id = edit_id.with("buffer");
+    let origin_id = edit_id.with("origin");
+    let copied_id = edit_id.with("copied");
+    let micros = tick.0.0;
+    let current = format_time_input(micros);
+    let mut text = ui
+        .data(|data| data.get_temp::<String>(buffer_id))
+        .unwrap_or_else(|| current.clone());
+
+    let font_id = egui::TextStyle::Body.resolve(ui.style());
+    let text_color = scheme.text_primary;
+    let painter = ui.painter().clone();
+    let width = painter
+        .layout_no_wrap(text.clone(), font_id.clone(), text_color)
+        .size()
+        .x
+        .max(24.0)
+        + 4.0;
+
+    let copied_recently = ui
+        .data(|data| data.get_temp::<Instant>(copied_id))
+        .is_some_and(|at| at.elapsed() < Duration::from_secs(1));
+    let copy_label = if copied_recently { "copied" } else { "µs" };
+    let copy = ui
+        .add(
+            egui::Button::new(egui::RichText::new(copy_label).size(11.0).color(
+                if copied_recently {
+                    scheme.highlight
+                } else {
+                    scheme.text_secondary
+                },
+            ))
+            .frame(false),
+        )
+        .on_hover_text("Copy this time as microseconds");
+    let response = ui.add(
+        egui::TextEdit::singleline(&mut text)
+            .id(edit_id)
+            .frame(egui::Frame::NONE)
+            .font(font_id)
+            .text_color(text_color)
+            .desired_width(width)
+            .margin(egui::Margin::ZERO),
+    );
+
+    if response.gained_focus() {
+        ui.data_mut(|data| data.insert_temp(origin_id, current));
+        select_all(ui.ctx(), edit_id, text.chars().count());
+    }
+    let (escape, enter) = ui.input(|input| {
+        (
+            input.key_pressed(egui::Key::Escape),
+            input.key_pressed(egui::Key::Enter),
+        )
+    });
+    let finish = response.lost_focus() || (response.has_focus() && (escape || enter));
+    if response.has_focus() && !finish {
+        ui.data_mut(|data| data.insert_temp(buffer_id, text.clone()));
+    }
+    if finish {
+        let origin = ui.data(|data| data.get_temp::<String>(origin_id));
+        if !escape
+            && origin.as_deref() != Some(text.as_str())
+            && let Some(micros) = parse_time_input(&text)
+            && micros != tick.0.0
+        {
+            paused.0 = true;
+            auto_follow.cancel();
+            latest_follow.0 = false;
+            tick.0 = Timestamp(micros);
+        }
+        ui.data_mut(|data| {
+            data.remove::<String>(buffer_id);
+            data.remove::<String>(origin_id);
+        });
+        ui.memory_mut(|memory| memory.surrender_focus(edit_id));
+    }
+    if copy.clicked() {
+        // Clicking the button also commits an active edit. Copy that value,
+        // not the playhead captured at the start of this frame.
+        ui.ctx().copy_text(tick.0.0.to_string());
+        ui.data_mut(|data| data.insert_temp(copied_id, Instant::now()));
+    }
+
+    response
+        .on_hover_text("Enter to seek · Esc to cancel\nMicroseconds, seconds with s, or UTC date");
 }
 
 /// Speed field drawn as the same pill as [`live_follow_button`]. Whichever of
