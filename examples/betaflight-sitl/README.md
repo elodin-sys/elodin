@@ -177,6 +177,35 @@ Betaflight path before `AxisAudit` observes the physical response. A successful
 run emits a `[D-AUDIT] ... status=PASS` line and exits nonzero if an axis responds
 with the wrong sign, throttle has no motor response, or ANGLE was not requested.
 
+### FPV Camera
+
+`RACE_CAMERA=0` (the default) registers no camera and does not start the render
+server. `RACE_CAMERA=1` registers `drone.fpv`: 640×360 RGBA, 30 frames per
+simulation second, read with 33 ms of latency. Any other value fails at startup.
+The camera is independent of `RACE_GUIDANCE` and `RACE_COURSE`. The frustum is off
+by default; turn it on with CREATE in the FPV camera inspector, then SHOW
+FRUSTUMS in the viewport inspector. The drone model is drawn at 10× physical
+size so it stays easy to see from the chase camera, and it is hidden from the
+FPV image so the camera shows the world ahead instead of the model interior.
+
+```bash
+RACE_CAMERA=1 elodin run examples/betaflight-sitl/main.py
+RACE_CAMERA=1 elodin editor examples/betaflight-sitl/main.py
+elodin-db export-videos <db> --output /tmp/bf_fpv --fps 30
+```
+
+`<db>` is the database path printed at the end of the run. A camera-enabled run
+prints one shutdown line:
+
+```text
+[FPV] total_frames=... window_frames=... observed_fps=... status=PASS|FAIL reason=...
+```
+
+`status=FAIL` exits 1. `frame_fresh` is true only for a newly rendered frame. A
+held frame is still supplied, with `frame_fresh=False`. The exported video can
+be one frame ahead of `total_frames`, because the render server may write one
+more frame while it shuts down after the final tick.
+
 ### Race Course and Referee
 
 Course selection is independent of the command source:
@@ -353,6 +382,7 @@ examples/betaflight-sitl/
 ├── baseline.py        # Default C0 scenario pass/fail assessment
 ├── controls.py        # Guidance, semantic input, RC conversion, and failsafe
 ├── course.py          # Pure gate/course geometry and KDL bar generation
+├── fpv_camera.py      # FPV sampling, freshness, frame accounting, and acceptance
 ├── referee.py         # Pure ordered crossing scorer and race result
 ├── referee_audit.py   # Pure opt-in live-audit config and acceptance evaluator
 ├── race_runtime.py    # Static scene entities and referee telemetry adapters

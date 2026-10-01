@@ -56,6 +56,7 @@ from referee_audit import (
     referee_audit_from_env,
 )
 from race_runtime import RaceTelemetry, spawn_course
+from fpv_camera import FAR, FOV_DEG, FPS, HEIGHT, LATENCY_US, MOUNT, MSG, NEAR, WIDTH, FpvCamera
 from sim import Drone, create_physics_system
 from sensors import IMU, create_sensor_system, SensorDataBuffer
 from comms import (
@@ -107,6 +108,12 @@ if referee_audit_requested:
     config.initial_velocity = np.array(initial_velocity)
     config.simulation_time = simulation_time
 config.set_as_global()
+
+_race_camera = os.environ.get("RACE_CAMERA", "0")
+if _race_camera not in ("0", "1"):
+    print(f"ERROR: RACE_CAMERA must be '0' or '1', got {_race_camera!r}", file=sys.stderr)
+    sys.exit(2)
+CAMERA_ENABLED = _race_camera == "1"
 
 if guidance_mode is GuidanceMode.SCRIPTED:
     command_source = ScriptedGuidance()
@@ -176,10 +183,31 @@ drone = world.spawn(
 # have no Body/Inertia/Force components and never enter rigid-body integration.
 gate_entities = spawn_course(world, race_course)
 
+# Opt-in FPV camera. Registering a sensor_camera starts the render server.
+if CAMERA_ENABLED:
+    world.sensor_camera(
+        entity=drone,
+        name="fpv",
+        width=WIDTH,
+        height=HEIGHT,
+        fov=FOV_DEG,
+        near=NEAR,
+        far=FAR,
+        pos_offset=MOUNT,
+        rot_offset=[0.0, 0.0, 0.0],
+        format="rgba",
+        fps=FPS,
+    )
+
 # Editor schematic for visualization. Procedural gate boxes use the editor's
 # standard non-emissive material; their entity poses supply the gate yaw.
+# The FPV pane, hidden drone mesh, and ground plane are injected only when enabled.
 world.schematic(
-    build_schematic(race_course, audit_enabled=referee_audit_requested),
+    build_schematic(
+        race_course,
+        audit_enabled=referee_audit_requested,
+        camera_enabled=CAMERA_ENABLED,
+    ),
     "betaflight-sitl.kdl",
 )
 
@@ -251,6 +279,13 @@ print(f"Simulation: {config.simulation_time}s at {config.pid_rate:.0f}Hz PID loo
 print(
     f"Requested sensor rates: gyro={config.gyro_rate:.0f}Hz, accel={config.accel_rate:.0f}Hz, baro={config.baro_rate:.0f}Hz, mag={config.mag_rate:.0f}Hz"
 )
+if CAMERA_ENABLED:
+    print(
+        f"FPV camera: {MSG} {WIDTH}x{HEIGHT} @ {FPS:.0f}Hz "
+        f"fov={FOV_DEG:.2f}° latency={LATENCY_US}us (RACE_CAMERA=1)"
+    )
+else:
+    print("FPV camera: disabled (RACE_CAMERA=0)")
 
 
 # --- SITL State ---
@@ -305,6 +340,8 @@ referee_audit_collector = (
     if referee_audit_requested
     else None
 )
+fpv = FpvCamera() if CAMERA_ENABLED else None
+fpv_report = [None]
 
 
 def emit_race_result() -> None:
@@ -504,6 +541,16 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
     except TimeoutError:
         pass  # Timeouts expected during bootgrace
 
+    frame = None
+    frame_sample_time = None
+    frame_fresh = False
+    if fpv is not None:
+        sample = fpv.poll(ctx.read_msg_at, ctx.timestamp, t)
+        frame = sample.frame
+        if sample.requested_us is not None:
+            frame_sample_time = float(sample.requested_us)
+        frame_fresh = sample.fresh
+
     progress = referee.progress()
     update = GuidanceUpdate(
         sim_time=t,
@@ -514,6 +561,9 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         barometer_fresh=barometer_fresh and sensor_read_succeeded,
         magnetometer=magnetometer,
         magnetometer_fresh=magnetometer_fresh and sensor_read_succeeded,
+        frame=frame,
+        frame_sample_time=frame_sample_time,
+        frame_fresh=frame_fresh,
         last_gate_passed=progress.last_gate_passed,
         next_gate_index=progress.next_gate_index,
         gate_count=progress.gate_count,
@@ -627,6 +677,11 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         print(f"  Final position: z={final_z:.2f}m, vz={final_vz:.2f}m/s")
         print()
 
+        if fpv is not None:
+            fpv_report[0] = fpv.finish(ctx.read_msg_at, ctx.timestamp)
+            print(fpv_report[0].format())
+            print()
+
         if guidance_mode is GuidanceMode.SCRIPTED and not referee_audit_requested:
             result = evaluate_c0(
                 lockstep_steps=s.lockstep_steps,
@@ -718,4 +773,6 @@ elif c0_result[0] is not None and not c0_result[0].passed:
 elif referee_audit_result[0] is not None and not referee_audit_result[0].passed:
     sys.exit(referee_audit_result[0].exit_code)
 elif axis_audit is not None and not axis_audit.passed:
+    sys.exit(1)
+elif fpv_report[0] is not None and not fpv_report[0].accepted:
     sys.exit(1)
