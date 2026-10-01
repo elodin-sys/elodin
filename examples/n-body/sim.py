@@ -9,6 +9,8 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from schematic import BodyVisual, build as build_schematic
+
 # Truth data is in AU/day; Elodin tick rates are in Hz (seconds), so convert
 # the Gaussian gravitational constant to AU^3 / (solar_mass * s^2).
 K_SQUARED_DAY = 2.9591220828e-4
@@ -31,7 +33,6 @@ CSV_PATHS: tuple[Path, ...] = (
 SUN_MASS_SOLAR = 1.0
 SUN_RADIUS_KM = 696_340.0
 SUN_COLOR = (255, 220, 120)
-TRUTH_COLOR = "180 180 180"
 
 PLANET_ICON = "public"
 MOON_ICON = "circle"
@@ -201,39 +202,22 @@ def load_truth(csv_paths: tuple[Path, ...] = CSV_PATHS) -> tuple[jax.Array, np.n
     return jnp.array(pos), vel, dates
 
 
-def _kdl_color(rgb: tuple[int, int, int]) -> str:
-    return f"{rgb[0]} {rgb[1]} {rgb[2]}"
-
-
-def _build_schematic() -> str:
-    lines: list[str] = [Path(__file__).with_name("solar-system-template.kdl").read_text()]
-    sun_color = _kdl_color(SUN_COLOR)
-    sun_radius = _radius_au(SUN_RADIUS_KM)
-    sun_template = Path(__file__).with_name("sun.template.kdl").read_text()
-    lines.append(
-        sun_template.format(
-            sun_radius=sun_radius,
-            sun_color=sun_color,
-        )
-    )
-    body_template = Path(__file__).with_name("body.template.kdl").read_text()
-    for body in BODIES:
-        label = body.name.replace("_", " ")
-        color = _kdl_color(body.meta.color_rgb)
-        radius = _radius_au(body.meta.radius_km)
-        truth_radius = radius * 0.6
-        lines.append(
-            body_template.format(
-                body_name=body.name,
-                radius=radius,
-                color=color,
+def _build_schematic():
+    return build_schematic(
+        [
+            BodyVisual(
+                name=body.name,
+                radius=_radius_au(body.meta.radius_km),
+                color=body.meta.color_rgb,
                 icon=body.meta.icon,
-                label=label,
-                truth_radius=truth_radius,
-                truth_color=TRUTH_COLOR,
+                label=body.name.replace("_", " "),
+                truth_radius=_radius_au(body.meta.radius_km) * 0.6,
             )
-        )
-    return "".join(lines)
+            for body in BODIES
+        ],
+        sun_radius=_radius_au(SUN_RADIUS_KM),
+        sun_color=SUN_COLOR,
+    )
 
 
 def build_world() -> el.World:
