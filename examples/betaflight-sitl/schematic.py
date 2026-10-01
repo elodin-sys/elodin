@@ -15,8 +15,8 @@ def build_schematic(course: Course, *, audit_enabled: bool, camera_enabled: bool
             # The oblique view shows the full opening and world-X departure.
             camera = 'pos="(0,0,0,1, 3,-4,3.5)" look_at="(9,0,2)"'
 
-    frustum = " show_frustums=#true" if camera_enabled else ""
     fpv_pane = f'\n                sensor_view "{MSG}" name="FPV Camera"' if camera_enabled else ""
+    drone_visibility = " sensor_visible=#false" if camera_enabled else ""
     accel_graph = 'graph "drone.accel" name="Accelerometer"'
     gyro_graph = 'graph "drone.gyro" name="Gyroscope"'
     if audit_enabled:
@@ -26,7 +26,7 @@ def build_schematic(course: Course, *, audit_enabled: bool, camera_enabled: bool
     schematic = f"""
     tabs {{
         hsplit name = "Viewport" {{
-            viewport name=Viewport {camera} show_grid=#true{frustum} active=#true
+            viewport name=Viewport {camera} show_grid=#true active=#true
             vsplit share=0.3 {{{fpv_pane}
                 graph "drone.motor_command" name="Motor Commands (from Betaflight)"
                 graph "drone.motor_thrust" name="Motor Thrust"
@@ -39,7 +39,7 @@ def build_schematic(course: Course, *, audit_enabled: bool, camera_enabled: bool
             }}
         }}
     }}
-    object_3d drone.world_pos {{
+    object_3d drone.world_pos{drone_visibility} {{
         glb path="edu-450-v2-drone.glb" scale=10.0
     }}
     """

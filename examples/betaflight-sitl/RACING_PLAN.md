@@ -644,7 +644,8 @@ required.
 **Required work:**
 
 - Implement the camera contract in Section 7.4 behind `RACE_CAMERA=1`.
-- Add `sensor_view "drone.fpv"` and a frustum-enabled viewport.
+- Add `sensor_view "drone.fpv"`. The camera frustum stays available in the
+  inspectors and is hidden by default.
 - Add a neutral ground plane or other fixed visual reference so frames are not
   uniformly empty.
 - Read frames non-blockingly with the specified latency at most once per nominal
@@ -699,7 +700,25 @@ limitations.
 - Raising the acceptance floor to 1000 FPS made the same camera run exit 1
   with `reason=fps-below-15`. The shipped floor is 15.
 - FPV sampling lives in `fpv_camera.py`. The schematic in `schematic.py`
-  injects only the FPV pane, frustum flag, and ground plane.
+  injects only the FPV pane, the ground plane, and `sensor_visible=#false` on
+  the 10× drone mesh. The frustum is off by default.
+
+**Verified 2026-10-01 after merging `main` (`d8fbf209`) (WSL2, NVIDIA GeForce RTX 3050 6GB Laptop GPU):**
+
+- `python3 -m pytest examples/betaflight-sitl/tests -q` → 109 passed.
+  `ruff format --check`, `ruff check`, and `typos -c typos.toml` passed.
+- Default: `RACE_CAMERA=0 elodin run examples/betaflight-sitl/main.py` →
+  `FPV camera: disabled`, no render-server, C0 `status=PASS`,
+  lockstep_steps `119995`, exit 0 (DB `betaflight_db029`).
+- Camera plus course: `RACE_CAMERA=1 RACE_COURSE=single elodin run examples/betaflight-sitl/main.py` →
+  `[FPV] total_frames=450 window_frames=389 observed_fps=29.92 status=PASS`
+  and `[RACE] course=single gates_passed=0/1 status=INCOMPLETE`, C0 `PASS`,
+  exit 0 (DB `betaflight_db030`). Export:
+  `elodin-db export-videos betaflight_db030 --output /tmp/bf_fpv_fix --fps 30`
+  → nonempty 451-frame 640×360 video. Frames at 0.5 s and 3 s show a level
+  horizon, the ground plane, and the gate centered ahead. At 8 s the gate is
+  larger and still centered. No frame shows the drone model. The mount is
+  unchanged.
 
 ### [x] C — Course and referee vertical slice
 
@@ -1126,6 +1145,7 @@ recoverable MPEG-TS fallback, are maintained in `README.md`.
 
 | Date | Decision | Reason and affected packages |
 |---|---|---|
+| 2026-10-01 | Hide the frustum by default and set the 10× drone mesh to `sensor_visible=#false` when the FPV camera is on. The mount contract stays `[0.08, 0.0, 0.02]` m, body +X, tilt 0. | The frustum filled the chase view, and the camera sat inside the display mesh. Hiding the mesh from the sensor camera shows the world ahead without changing the camera-to-body geometry Package G tests. Affects B and later G, H, and J. |
 | 2026-09-26 | Keep FPV sampling in `fpv_camera.py`. `frame_fresh` means a new `read_msg_at` timestamp, and shutdown FPS uses only timestamps inside the post-warmup window. | Held frames were marked fresh, and the cursor sweep was not an exact frame count. The schematic injects only the FPV fragments. Affects B and later G, H, and J. |
 | 2026-09-03 | Run headless recipes once while retaining watched recipes in the editor. | Package A exposed that a failed simulation child was logged and then waited for source reload, so `elodin run` could not return nonzero. The approved shared fixes (`301ae367`, `#837`; lifecycle follow-up `36ee3431`, `#838`) make headless execution one-shot without changing interactive editor recovery, centralize recipe execution dispatch in s10, and add an end-to-end lifecycle CI check. This enables failure contracts in A, F, K, and L. |
 | 2026-09-01 | Keep the current ENU/FLU world, Gazebo-bridge conventions, native motor order, and 8 kHz lockstep. | These are the implemented baseline; changing them is not required for racing. A–L rely on them. |

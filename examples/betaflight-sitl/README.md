@@ -182,7 +182,11 @@ with the wrong sign, throttle has no motor response, or ANGLE was not requested.
 `RACE_CAMERA=0` (the default) registers no camera and does not start the render
 server. `RACE_CAMERA=1` registers `drone.fpv`: 640×360 RGBA, 30 frames per
 simulation second, read with 33 ms of latency. Any other value fails at startup.
-The camera is independent of `RACE_GUIDANCE` and `RACE_COURSE`.
+The camera is independent of `RACE_GUIDANCE` and `RACE_COURSE`. The frustum is off
+by default; turn it on with CREATE in the FPV camera inspector, then SHOW
+FRUSTUMS in the viewport inspector. The drone model is drawn at 10× physical
+size so it stays easy to see from the chase camera, and it is hidden from the
+FPV image so the camera shows the world ahead instead of the model interior.
 
 ```bash
 RACE_CAMERA=1 elodin run examples/betaflight-sitl/main.py

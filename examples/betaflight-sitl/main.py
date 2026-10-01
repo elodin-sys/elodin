@@ -197,14 +197,11 @@ if CAMERA_ENABLED:
         rot_offset=[0.0, 0.0, 0.0],
         format="rgba",
         fps=FPS,
-        create_frustum=True,
-        frustums_color=[1.0, 0.6, 0.0, 1.0],
-        projection_color=[1.0, 0.6, 0.0, 0.35],
     )
 
 # Editor schematic for visualization. Procedural gate boxes use the editor's
 # standard non-emissive material; their entity poses supply the gate yaw.
-# The FPV pane, frustum flag, and ground plane are injected only when enabled.
+# The FPV pane, hidden drone mesh, and ground plane are injected only when enabled.
 world.schematic(
     build_schematic(
         race_course,
