@@ -8,6 +8,8 @@ import elodin as el
 import jax.numpy as jnp
 import numpy as np
 
+from schematic import build as build_schematic
+
 SIM_RATE = 120.0
 SENSOR_CAMERA_FPS = SIM_RATE / 4.0
 SENSOR_CAMERA_NAME = "drone.scene_cam"
@@ -58,31 +60,8 @@ def world() -> tuple[el.World, el.EntityId]:
         frustums_up_marker="highlight",
     )
 
-    object_mesh = f"""
-    object_3d ellipsoid.world_pos {{
-        ellipsoid scale="({ELLIPSOID_SCALE[0]}, {ELLIPSOID_SCALE[1]}, {ELLIPSOID_SCALE[2]})" show_grid=#true {{
-            color 0 188 212 28
-            grid_color 255 255 255 120
-        }}
-    }}
-    object_3d drone.world_pos {{
-        glb path="talon-quad-v2.glb" rotate="(0.0, 0.0, 0.0)" translate="(0.0, 0.0, 0.0)" scale=0.65
-    }}
-    """
-
     world.schematic(
-        """
-        theme mode="dark" scheme="default"
-
-        tabs {
-            hsplit name="Frustums" {
-                viewport name="Viewport Source" pos="(0,0,0,1, -3,-0.5,2)" look_at="(0,0,0,0, 0,0,0)" create_frustum=#true frustums_color="yalk" projection_color="mint" frustums_thickness=0.006 frustums_up_marker="highlight" show_grid=#true active=#true near=0.05 far=6.0
-                viewport name="Target View" pos="(0,0,0,1, 2,2,1.5)" look_at="(0,0,0,0, 0,0,0)" show_frustums=#true show_grid=#true active=#true
-                sensor_view "drone.scene_cam" name="Sensor Camera"
-            }
-        }
-    """
-        + object_mesh,
+        build_schematic(ellipsoid_scale=tuple(ELLIPSOID_SCALE)),
         "ellipsoid.kdl",
     )
     return world, body

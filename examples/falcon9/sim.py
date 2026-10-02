@@ -10,7 +10,6 @@ real annotation objects, not the stringized ForwardRefs that import creates.
 
 import math
 import typing as ty
-from pathlib import Path
 
 import aero
 import atmosphere
@@ -19,6 +18,7 @@ import jax.numpy as jnp
 import propulsion
 import rcs
 import sensors as sn
+from schematic import build as build_schematic
 from constants import (
     DECK_HALF_ALONG_M,
     DECK_HALF_CROSS_M,
@@ -1621,8 +1621,7 @@ def build_mission(
         StaticSceneObject(el.WorldPos(angular=lz1_att, linear=lz1_ecef())),
         name="lz1",
     )
-    schematic_path = Path(__file__).with_name("falcon9.kdl")
-    world.schematic(schematic_path.read_text(), schematic_path.name)
+    world.schematic(build_schematic(), "falcon9.kdl")
     return world, system | make_truth_playback(ref, display_lag_s) | make_display_scoring(
         ref, display_lag_s
     )

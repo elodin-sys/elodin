@@ -15,7 +15,11 @@ fn all_example_schematics_parse() {
         }
         for file in std::fs::read_dir(&dir).expect("example dir") {
             let path = file.expect("file entry").path();
-            if path.extension().is_some_and(|e| e == "kdl") {
+            let is_template = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.ends_with(".template.kdl"));
+            if path.extension().is_some_and(|e| e == "kdl") && !is_template {
                 let text = std::fs::read_to_string(&path).expect("read kdl");
                 // Validate each generated visual-check viewport separately.
                 if path.file_name().is_some_and(|n| n == "visual_check.kdl") {

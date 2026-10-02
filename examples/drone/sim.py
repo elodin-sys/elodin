@@ -12,6 +12,7 @@ import params
 import sensors
 import telemetry
 from config import Config
+from schematic import build as build_schematic
 
 BodyThrust = ty.Annotated[
     el.SpatialForce,
@@ -126,45 +127,8 @@ def world() -> tuple[el.World, el.EntityId]:
         name="drone",
     )
 
-    object_mesh = f"""
-    object_3d drone.world_pos {{
-        glb path="{Config.GLOBAL.drone_glb}"
-        icon builtin="flight" {{
-            visibility_range min=500.0
-            color 0 188 212
-        }}
-    }}
-    """
-
     world.schematic(
-        """
-        theme mode="dark" scheme="default"
-
-        tabs {
-            hsplit name = "Viewport" {
-                viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 2,2,2)" look_at="drone.world_pos" show_grid=#true active=#true
-                vsplit share=0.4 {
-                    graph "drone.angle_desired" name="angle_desired"
-                    graph "drone.world_pos.q0, drone.world_pos.q1, drone.world_pos.q2, drone.world_pos.q3, drone.attitude_target" name="World Pos"
-                    graph "drone.ang_vel_setpoint"
-                }
-            }
-            vsplit name="Sensor Panel" {
-                graph "drone.gyro"
-                graph "drone.accel"
-                graph "drone.magnetometer"
-            }
-        }
-        
-        // important to keep these active as our only regression tests for the multiple window panels
-        window path="examples/drone/motor-panel.kdl"
-        window path="examples/drone/rate-control-panel.kdl"
-
-        vector_arrow "(1, 0, 0)" origin="drone.world_pos" scale=1.0 name="Drone X" body_frame=#true
-        vector_arrow "(0, 1, 0)" origin="drone.world_pos" scale=1.0 name="Drone Y" body_frame=#true
-        vector_arrow "(0, 0, 1)" origin="drone.world_pos" scale=1.0 name="Drone Z" body_frame=#true
-    """
-        + object_mesh,
+        build_schematic(drone_glb=Config.GLOBAL.drone_glb),
         "drone.kdl",
     )
     return world, drone

@@ -38,7 +38,7 @@ import elodin.db as edb
 
 EXAMPLE_DIR = Path(__file__).resolve().parent
 REPO_ROOT = EXAMPLE_DIR.parents[1]
-SCHEMATIC = EXAMPLE_DIR / "schematic.kdl"
+SCHEMATIC = EXAMPLE_DIR / "schematic.py"
 
 STATE_RATE_HZ = 100.0  # world_pos + IMU
 STATUS_DIV = 10  # status writer runs every N state ticks (10 Hz)
