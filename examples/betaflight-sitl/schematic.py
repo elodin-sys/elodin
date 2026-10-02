@@ -31,6 +31,8 @@ def build_schematic(course: Course, *, audit_enabled: bool, camera_enabled: bool
                 graph "drone.motor_command" name="Motor Commands (from Betaflight)"
                 graph "drone.motor_thrust" name="Motor Thrust"
                 {accel_graph}
+                graph "drone.guidance_mode" name="Guidance Phase (numeric code)"
+                graph "drone.rc_command" name="RC Command (AETR/AUX PWM)"
             }}
             vsplit share=0.3 {{
                 graph "drone.world_pos.linear()" name="Position (ENU)"

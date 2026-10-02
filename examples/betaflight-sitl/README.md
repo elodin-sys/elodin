@@ -14,6 +14,8 @@ The simulation provides:
 - **UDP Communication**: Bidirectional sensor/motor data exchange
 - **8kHz Lockstep Loop**: Real-time physics and Betaflight PID updates by default
 - **Multi-Rate Sensors**: Requested sensor rates are capped by the simulation rate
+- **Opt-in FPV**: `RACE_CAMERA=1` records a 640×360 forward camera independently of guidance
+- **Opt-in Truth Hold**: `RACE_GUIDANCE=truth RACE_COURSE=single` holds 4 m before one gate
 
 ```
 ┌─────────────────────┐        UDP        ┌─────────────────────┐
@@ -190,6 +192,8 @@ FPV image so the camera shows the world ahead instead of the model interior.
 
 ```bash
 RACE_CAMERA=1 elodin run examples/betaflight-sitl/main.py
+RACE_CAMERA=1 RACE_GUIDANCE=truth RACE_COURSE=single \
+  elodin run examples/betaflight-sitl/main.py
 RACE_CAMERA=1 elodin editor examples/betaflight-sitl/main.py
 elodin-db export-videos <db> --output /tmp/bf_fpv --fps 30
 ```
@@ -240,7 +244,9 @@ bounds, and records each gate once. The pass timestamp is interpolated between
 the segment endpoints in simulation time (never wall-clock time); lap time runs
 from simulation time zero through the final gate crossing. Guidance receives
 the resulting ordered progress on the next physics tick and only public course
-rules—never gate poses, the crossing point, or drone truth through this seam.
+rules through the base update; truth mode separately receives copied truth
+state and gate poses through its truth-only update. Referee crossing coordinates
+are never exposed to guidance.
 
 An enabled course emits exactly one final machine-readable line, including on
 an incomplete or interrupted run. The default vertical script does not steer
@@ -257,6 +263,50 @@ telemetry is recorded as:
 - `drone.last_gate_passed`: ordered gate index, initially `-1`;
 - `drone.gate_pass_times`: fixed three-entry simulation-seconds array, with
   unpassed slots set to `-1.0` (reserved for the three-gate core course).
+
+#### Truth-guided single-gate hold (Package E)
+
+From the repository root, after building SITL and initializing EEPROM as above:
+
+```bash
+RACE_GUIDANCE=truth RACE_COURSE=single \
+  elodin run examples/betaflight-sitl/main.py
+```
+
+This opt-in mode uses copied vehicle/gate truth to command Betaflight through
+the same one-tick-latched RC boundary in ANGLE mode. It takes off, acquires and
+holds the ENU target `(6, 0, 1.8)` m, four metres before the gate at
+`(10, 0, 1.8)` m. The phases are ARM → TAKEOFF → HOVER → ACQUIRE → HOLD; a
+failure transitions to FAULT. `drone.guidance_mode` records numeric phase codes:
+`0` disabled (other modes), `1` ARM, `2` TAKEOFF, `3` HOVER, `4` ACQUIRE,
+`5` HOLD, `6` FAULT. `drone.rc_command` records the next tick's six AETR/AUX
+PWM values. The run caps at **45 simulated seconds**; fixed controller gains,
+including `takeoff_climb_rate_mps=0.20` and `hover_rc_trim=0.13`, live in
+`guidance.py`'s `TruthGuidanceConfig`, not environment-variable overrides.
+No camera or GPU is required. Set `RACE_CAMERA=1` to additionally record FPV
+frames in truth mode: the same timestamp/freshness fields are offered in its
+immutable update, but pixels are never used as a truth-control shortcut. The
+camera result remains an independent pass/fail check; both `[FPV]` and
+`[E-HOLD]` must pass for the combined command to exit zero. This mode does
+**not** attempt gate passage, vision guidance, or a multi-gate race.
+
+A separate truth-based host grader emits exactly one `[E-HOLD]` line: `PASS`
+means an eligible continuous 10-simulated-second window at ≤0.30 m
+*time-weighted 3D RMS* error while armed in ANGLE with lockstep and motor
+response, no forward crossing and no guidance fault. `FAIL` (for example no
+qualified window, fault, or crossing) exits nonzero in headless mode. An E hold
+PASS still accompanies one **expected** incomplete `[RACE]` result with
+`course=single`, `gates_passed=0/1`, and `status=INCOMPLETE`; incomplete race
+status does not fail Package E. Three consecutive qualified headless runs
+measured online RMS `0.075521`, `0.074801`, and `0.074188` m (independent DB
+RMS `0.075520758`, `0.074803460`, and `0.074187954` m), each over exactly
+10 s.
+The qualification command, windows, regression checks, and operating envelope
+are recorded in [RACING_PLAN.md](RACING_PLAN.md). In the 2026-10-02
+latest-main reconciliation, three additional consecutive camera-off truth
+runs passed at 0.074574/0.073668/0.073832 m RMS; a separate camera-enabled
+truth run passed at 0.071955 m RMS with 1350 renderer frames at 29.98 simulated
+FPS. Scripted C0 and both C/D audits also passed with `RACE_CAMERA=1`.
 
 #### Package C referee qualification
 
@@ -383,7 +433,11 @@ examples/betaflight-sitl/
 ├── controls.py        # Guidance, semantic input, RC conversion, and failsafe
 ├── course.py          # Pure gate/course geometry and KDL bar generation
 ├── fpv_camera.py      # FPV sampling, freshness, frame accounting, and acceptance
+├── race_options.py    # Pure guidance/course/camera startup selection
+├── exit_status.py     # Independent scenario failure exit-code aggregation
 ├── referee.py         # Pure ordered crossing scorer and race result
+├── hold_referee.py    # Independent truth-based single-gate hold grader
+├── guidance.py        # Pure truth-guided single-gate standoff controller
 ├── referee_audit.py   # Pure opt-in live-audit config and acceptance evaluator
 ├── race_runtime.py    # Static scene entities and referee telemetry adapters
 ├── controller/        # s10-managed Rust gamepad/keyboard input provider

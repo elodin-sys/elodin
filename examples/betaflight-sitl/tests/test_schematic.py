@@ -1,5 +1,7 @@
 """Pure tests for the Betaflight SITL editor schematic variants."""
 
+import pytest
+
 from course import course_from_name, gate_schematic
 from schematic import build_schematic
 
@@ -10,6 +12,8 @@ def test_default_schematic_keeps_chase_camera_and_sensor_graphs() -> None:
     assert 'pos="drone.world_pos + (0,0,0,0, 10,10,5)" look_at="drone.world_pos"' in schematic
     assert 'graph "drone.accel" name="Accelerometer"' in schematic
     assert 'graph "drone.gyro" name="Gyroscope"' in schematic
+    assert 'graph "drone.guidance_mode" name="Guidance Phase (numeric code)"' in schematic
+    assert 'graph "drone.rc_command" name="RC Command (AETR/AUX PWM)"' in schematic
     assert "object_3d gate_" not in schematic
     assert 'graph "drone.last_gate_passed"' not in schematic
 
@@ -22,6 +26,8 @@ def test_course_schematic_frames_gate_without_changing_sensor_graphs() -> None:
     assert 'graph "drone.accel" name="Accelerometer"' in schematic
     assert 'graph "drone.gyro" name="Gyroscope"' in schematic
     assert schematic.count("object_3d gate_0_") == 4
+    assert 'graph "drone.guidance_mode" name="Guidance Phase (numeric code)"' in schematic
+    assert 'graph "drone.rc_command" name="RC Command (AETR/AUX PWM)"' in schematic
     assert gate_schematic(course) in schematic
 
 
@@ -32,6 +38,8 @@ def test_audit_schematic_uses_oblique_camera_and_referee_graphs() -> None:
     assert 'pos="(0,0,0,1, 3,-4,3.5)" look_at="(9,0,2)"' in schematic
     assert 'graph "drone.last_gate_passed" name="Referee: Last Gate Passed"' in schematic
     assert 'graph "drone.gate_pass_times" name="Referee: Gate Pass Times"' in schematic
+    assert 'graph "drone.guidance_mode" name="Guidance Phase (numeric code)"' in schematic
+    assert 'graph "drone.rc_command" name="RC Command (AETR/AUX PWM)"' in schematic
     assert 'graph "drone.accel" name="Accelerometer"' not in schematic
     assert 'graph "drone.gyro" name="Gyroscope"' not in schematic
     assert schematic.count("object_3d gate_0_") == 4
@@ -65,3 +73,32 @@ def test_camera_and_course_schematic_combine() -> None:
     assert "object_3d drone.world_pos sensor_visible=#false" in schematic
     assert schematic.count("sensor_visible=#false") == 1
     assert 'pos="(0,0,0,1, 4,-2,3)"' in schematic
+
+
+@pytest.mark.parametrize(
+    ("camera_enabled", "audit_enabled", "course_name"),
+    [
+        (False, False, "none"),
+        (True, False, "none"),
+        (False, False, "single"),
+        (True, False, "single"),
+        (False, True, "single"),
+        (True, True, "single"),
+    ],
+)
+def test_b_fpv_and_e_guidance_graphs_coexist_without_duplicates(
+    camera_enabled: bool, audit_enabled: bool, course_name: str
+) -> None:
+    schematic = build_schematic(
+        course_from_name(course_name), audit_enabled=audit_enabled, camera_enabled=camera_enabled
+    )
+    for graph in ("drone.guidance_mode", "drone.rc_command", "drone.motor_command"):
+        assert schematic.count(f'graph "{graph}"') == 1
+    assert schematic.count('sensor_view "drone.fpv"') == int(camera_enabled)
+    assert schematic.count("sensor_visible=#false") == int(camera_enabled)
+    assert schematic.count("plane width=40 depth=40") == int(camera_enabled)
+    assert schematic.count("object_3d gate_0_") == (4 if course_name == "single" else 0)
+    assert schematic.count('graph "drone.last_gate_passed"') == int(audit_enabled)
+    assert schematic.count('graph "drone.gate_pass_times"') == int(audit_enabled)
+    assert schematic.count('graph "drone.accel"') == int(not audit_enabled)
+    assert schematic.count('graph "drone.gyro"') == int(not audit_enabled)

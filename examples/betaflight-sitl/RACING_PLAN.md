@@ -1,8 +1,8 @@
 # Vision-Guided Gate Racing Plan
 
 **Document status:** Authoritative living specification  
-**Last verified against repository:** 2026-10-01
-**Current resume point:** Package E — truth-guided single-gate hold (Package G independently ready)
+**Last verified against repository:** 2026-10-02
+**Current resume point:** Package F — truth-guided straight course (Package G independently ready)
 
 ## 1. Purpose and authority
 
@@ -130,13 +130,19 @@ The example now additionally contains:
   still does not require a GPU render server;
 - Package C's opt-in `none`/`single` course geometry, four-bar gate rendering,
   ordered truth referee, fixed-width race telemetry, final race result, and
-  deterministic live positive-crossing qualification; and
+  deterministic live positive-crossing qualification;
 - Package D's command seam, manual-controller integration, ANGLE configuration,
   one-tick RC latch, automated physical sign audit, and operator-qualified
-  keyboard and gamepad control paths.
+  keyboard and gamepad control paths; and
+- Package E's opt-in truth-guided single-gate ARM/TAKEOFF/HOVER/ACQUIRE/HOLD
+  controller, independent 10-second standoff hold grader, and phase/RC telemetry.
 
-The example does **not** currently contain autonomous truth/vision guidance, the
-three-gate course, perception/tracking, race completion tests, or race CI.
+The camera is independently opt-in for scripted, manual, and truth guidance; it
+is observational in truth mode and never replaces copied truth state.
+
+The example does **not** currently contain vision guidance or
+perception/tracking, the three-gate course, autonomous gate-passing/COMMIT
+behavior, race completion tests, or race CI.
 
 ### 3.1 Current conventions
 
@@ -845,7 +851,11 @@ The operator tested and signed off on both documented input paths. Each path was
 used to arm, take off, command throttle, roll, pitch, and yaw, land, and disarm.
 Together with the deterministic physical audit above, this closes Package D.
 
-### [ ] E — Truth-guided single-gate hold
+### [x] E — Truth-guided single-gate hold
+
+**Implementation status:** Complete. The truth-only controller and independent
+host hold grader passed three consecutive headless qualifications on 2026-09-29.
+This is a hold before one gate, not a gate-pass or race-completion capability.
 
 **Objective:** Prove mission phases and control laws independently of perception.
 
@@ -871,6 +881,76 @@ not cross the gate. The referee measures the metric; guidance does not self-grad
 
 **Handoff:** Record gains, run command, measured RMS values, and any operating
 envelope discovered.
+
+Qualification (2026-09-29, three consecutive clean-start runs from the
+repository root, each exit 0):
+
+```bash
+RACE_GUIDANCE=truth RACE_COURSE=single \
+  ./target/release/elodin run examples/betaflight-sitl/main.py
+```
+
+The accepted fixed gains in `TruthGuidanceConfig` (`guidance.py`) are
+`takeoff_climb_rate_mps=0.20`, `hover_rc_trim=0.13`, horizontal
+`kp_xy=0.7`/`kv_xy=1.5`, altitude `kp_altitude=0.075`/`kd_altitude=0.12`,
+and yaw `yaw_kp=0.5`/`yaw_rate_damping=0.10`; the remaining limits and timing
+are defined in that config object, not environment variables.
+The gate is at `(10,0,1.8)` m ENU (yaw 0, 2.5 m inner opening), and the target
+is `(6,0,1.8)` m. The independent referee requires a continuous, eligible
+10-simulated-second window of time-weighted 3D RMS ≤0.30 m, with armed/ANGLE,
+lockstep and motor response, no forward gate crossing, and no guidance fault.
+
+| Run | Online window (sim s) / RMS (m) | Independent DB window (sim s) / RMS (m) |
+|---|---|---|
+| 1 | `[27.612500,37.612500]` / 0.075521 | `[27.612500,37.612500]` / 0.075520758 |
+| 2 | `[27.629125,37.629125]` / 0.074801 | `[27.629000,37.629000]` / 0.074803460 |
+| 3 | `[27.627750,37.627750]` / 0.074188 | `[27.627750,37.627750]` / 0.074187954 |
+
+Each independently reconstructed window is exactly 10 s and contains 80,001
+samples; online/offline RMS differences are at most 0.000002460 m. All three
+runs reached HOLD, retained armed/ANGLE/lockstep/motor evidence, and had no
+fault or crossing (maximum world X 6.315425189, 6.312380604, and 6.314916699
+m, respectively; gate plane X=10 m). Each emitted one `[E-HOLD] status=PASS`
+and one **expected** incomplete `[RACE]` with `course=single`,
+`gates_passed=0/1`, `status=INCOMPLETE`; a failed hold emits
+`[E-HOLD] status=FAIL` and exits nonzero. The race result remains incomplete
+because Package E deliberately never passes a gate.
+
+Final regressions: `python3 -m pytest examples/betaflight-sitl/tests -q`
+(**138 passed**); `cargo test -p betaflight-sitl-controller` (**5 passed**);
+`./target/release/elodin run examples/betaflight-sitl/main.py` and
+`RACE_COURSE=single ./target/release/elodin run examples/betaflight-sitl/main.py`
+(both exit 0 with one `[C0] status=PASS`; the scripted single-course run also
+emits one expected incomplete `[RACE]`). Qualified envelope: headless truth +
+`single`, 8 kHz Betaflight/physics lockstep, 45 simulated seconds. Camera,
+vision, multi-gate flight, and gate passing are not qualified by these runs.
+
+**Merged B + E verification (2026-10-02, rebuilt latest-main binaries/wheel):**
+`python -m pytest examples/betaflight-sitl/tests -q` passed **180** pure
+tests (including both B and E suites and camera/truth/startup/exit combinations);
+`cargo test -p betaflight-sitl-controller` passed **5** tests. Default
+camera-off C0 exited 0 with one `[C0] status=PASS` (119,995 lockstep steps).
+Three further consecutive unchanged-code, camera-off truth+`single` runs exited
+0, with one expected incomplete `[RACE]` and one passing `[E-HOLD]` each:
+
+| Run / DB | Continuous 10 s hold window (sim s) | Online RMS (m) |
+|---|---|---:|
+| 1 / `betaflight_db007` | `[27.653375,37.653375]` | 0.074574 |
+| 2 / `betaflight_db008` | `[27.649250,37.649250]` | 0.073668 |
+| 3 / `betaflight_db009` | `[27.657375,37.657375]` | 0.073832 |
+
+All reported armed/ANGLE/lockstep/motor evidence, no fault or crossing, and
+exactly 10 s. With `RACE_CAMERA=1`, truth+`single` (`betaflight_db010`) also
+exited 0: `[E-HOLD]` RMS 0.071955 m, `[FPV] total_frames=1350
+window_frames=1289 observed_fps=29.98 status=PASS`, and one expected incomplete
+`[RACE]`. The independent camera still supplies its frame/sample-time/freshness
+fields to the immutable truth update; guidance does not use the pixels for
+control. `elodin-db export-videos betaflight_db010 --output <out> --fps 30`
+produced a nonempty 640×360, 1351-frame `drone.fpv.mp4` (the extra frame can
+arrive during renderer shutdown). Camera-enabled scripted C0, Package C
+referee audit, and Package D physical audit separately exited 0 with their own
+one result line plus one passing `[FPV]` line. These merged runs do not qualify
+vision guidance or gate passage.
 
 ### [ ] F — Truth-guided straight course
 
@@ -1115,27 +1195,27 @@ branch for later resumption.
 | Package | Status | Evidence / notes |
 |---|---|---|
 | A | Complete | 24 pure tests pass; the recorded C0 acceptance run returned 0 with 119,995 simulation-loop lockstep responses, max motor 0.574, and 56.837 m takeoff rise in 29 wall-clock seconds. A deliberate 100 m criterion returned 1. Shared headless propagation fixes: `301ae367` (`#837`) and lifecycle follow-up `36ee3431` (`#838`). |
-| B | Complete | `fpv_camera.py` owns sampling, freshness, exact frame accounting, and acceptance. Verified 2026-09-26: `total_frames=437`, `window_frames=389`, `observed_fps=29.92`, exit 0 (DB `betaflight_db024`). Held-frame freshness and window bounds are pure tests. |
+| B | Complete | `fpv_camera.py` owns sampling, freshness, exact frame accounting, and acceptance. Verified 2026-09-26: `total_frames=437`, `window_frames=389`, `observed_fps=29.92`, exit 0 (DB `betaflight_db024`). Held-frame freshness and window bounds are pure tests. The merged 2026-10-02 B+E truth/camera run also passed with 1350 frames and 29.98 simulated FPS (details under E); scripted and C/D audit camera combinations passed. |
 | C | Complete | `none`/`single` startup selection, static four-bar orange rendering, ordered truth referee, Package D progress integration, fixed-width referee telemetry, exactly one final enabled-course result, and an opt-in positive live audit are implemented. The qualification suite passed 96 tests. The live audit used the unchanged vertical 2.5 m gate, reported one complete pass at 1.085149 s, and verified later-tick telemetry readback. Default C0 and ordinary incomplete `single` behavior were preserved. A 1280×720 H.264 recording and crossing frame were reviewed as qualification evidence; a PR should attach or upload those artifacts separately rather than rely on a host-local path. |
 | D | Complete | Command seam, one-tick ordering, AUX2 ANGLE configuration, s10 manual controller, 250 ms heartbeat failsafe, DB telemetry, and simulation-time physical sign audit are implemented. The combined automated qualification passed with roll 1.006, pitch 1.011, yaw 1.479 rad/s and accepted max motor 0.391; 5 controller tests also pass. On 2026-09-28, the operator tested and signed off on both keyboard and gamepad paths, including arm, takeoff, throttle/roll/pitch/yaw response, landing, and disarm. |
-| E | Ready | C and D are complete; no truth guidance is implemented yet. |
-| F | Blocked by E | No course controller |
-| G | Ready (needs B) | Camera contract available; racing geometry helpers not yet in code |
-| H | Blocked by B, C, G | No detector |
+| E | Complete | Opt-in truth-only single-gate standoff controller and independent 10 s hold grader. Three consecutive original 2026-09-29 runs exited 0 with RMS 0.075521/0.074801/0.074188 m (offline 0.075520758/0.074803460/0.074187954 m), no crossing or fault, and expected incomplete 0/1 race results; 138 pure tests on the original E branch, 5 controller tests, and default/scripted-single C0 regressions passed. The merged 2026-10-02 verification passed 180 pure tests, 5 controller tests, three further truth runs and opt-in B+E camera coexistence (details above). |
+| F | Ready | E is qualified; three-gate course, COMMIT/pass sequencing, and safe finish remain to be implemented. |
+| G | Ready (B complete) | Independent perception-path option: camera contract available; synthetic geometry/PnP helpers not yet in code. |
+| H | Blocked by G | B and C complete; no offline detector yet. |
 | I | Blocked by G | No tracker |
-| J | Blocked by E, H, I | No vision guidance |
+| J | Blocked by H, I | B, C, E complete; no detector, tracker, or vision guidance yet. |
 | K | Blocked by F, J | No vision race |
 | L | Blocked by F/K | No race CI or final docs |
 
 ### Resume point
 
-Begin Package E, **truth-guided single-gate hold**. Its Package C course/referee
-and Package D control prerequisites are complete. Package E should implement the
-ARM, TAKEOFF, HOVER, ACQUIRE, and HOLD phases and qualify a continuous
-10-simulated-second hold at the four-metre standoff target.
+Begin Package F, **truth-guided straight course**. Package E has qualified the
+single-gate standoff hold; F must add the specified three-gate course,
+COMMIT/repeated acquisition and hold, ordered passes, and safe finish without
+camera or vision input. Passing a gate is not yet implemented.
 
 Package G is an independent perception-path option: Package B's camera contract
-is complete, so G's synthetic vision geometry can begin in parallel with E.
+is complete, so G's synthetic vision geometry can begin in parallel with F.
 
 Package C's durable qualification command, output contract, measured result, and
 scope are recorded with its work-package acceptance evidence above. User-facing
