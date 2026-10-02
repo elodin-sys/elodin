@@ -1,4 +1,5 @@
 import elodin as el
+import elodin.ui as ui
 from jax import numpy as jnp
 from jax.numpy import linalg as la
 
@@ -88,40 +89,47 @@ w.spawn(GravityConstraint(b, c), name="B -> C")
 w.spawn(GravityConstraint(c, a), name="C -> A")
 w.spawn(GravityConstraint(c, b), name="C -> B")
 
-w.schematic("""
-    coordinate frame=ECEF // This is not exactly correct. HCI would be the right system for this perhaps.
-    hsplit {
-        tabs share=0.2 {
-            hierarchy
-            schematic_tree
-        }
-        tabs share=0.6 {
-            viewport name=Viewport pos="(0,0,0,0,0,0,3)" look_at="(0,0,0,0,0,0,0)" hdr=#true
-            graph "a.world_pos" name=Graph
-        }
-        tabs share=0.2 {
-            inspector
-        }
-    }
-    object_3d a.world_pos {
-        sphere radius=0.2 emissivity=1.0 {
-            color yellow
-        }
-    }
-    object_3d b.world_pos {
-        sphere radius=0.2 emissivity=1.0 {
-            color pink
-        }
-    }
-    object_3d c.world_pos {
-        sphere radius=0.2 emissivity=1.0 {
-            color cyan
-        }
-    }
-    line_3d b.world_pos line_width=10.0 perspective=#false {
-        color yolk
-    }
-""")
+w.schematic(
+    ui.schematic(
+        ui.hsplit(
+            ui.tabs(
+                ui.hierarchy(),
+                ui.schematic_tree(),
+                share=0.2,
+            ),
+            ui.tabs(
+                ui.viewport(
+                    name="Viewport",
+                    pos="(0,0,0,0,0,0,3)",
+                    look_at="(0,0,0,0,0,0,0)",
+                    hdr=True,
+                ),
+                ui.graph("a.world_pos", name="Graph"),
+                share=0.6,
+            ),
+            ui.tabs(
+                ui.inspector(),
+                share=0.2,
+            ),
+        ),
+        ui.object_3d(
+            "a.world_pos",
+            mesh=ui.sphere(radius=0.2, emissivity=1.0, color="yellow"),
+        ),
+        ui.object_3d(
+            "b.world_pos",
+            mesh=ui.sphere(radius=0.2, emissivity=1.0, color="pink"),
+        ),
+        ui.object_3d(
+            "c.world_pos",
+            mesh=ui.sphere(radius=0.2, emissivity=1.0, color="cyan"),
+        ),
+        ui.line_3d("b.world_pos", line_width=10.0, perspective=False, color="yolk"),
+        # This is not exactly correct. HCI might be more appropriate.
+        coordinate=ui.coordinate(frame="ECEF"),
+    ),
+)
+
 
 sys = el.six_dof(sys=gravity)
 sim = w.run(

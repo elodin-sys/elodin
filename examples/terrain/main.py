@@ -11,6 +11,7 @@ remains a separate follow-up.
 """
 
 import elodin as el
+import elodin.ui as ui
 import jax.numpy as jnp
 
 SIM_RATE = 30.0
@@ -26,14 +27,26 @@ def world() -> el.World:
         name="reference",
     )
     world.schematic(
-        """
-        coordinate frame=ENU
-        world_mesh "brienz"
-
-        viewport frame=ENU name="Brienz Terrain" hdr=#true active=#true pos="(0,0,0,1, 4560,-4560,2640)" look_at="(0,0,0,1, 0,0,-120)" up="(0,0,1)" near=1.0 fov=60.0 show_grid=#false show_view_cube=#true
-        """,
+        ui.schematic(
+            ui.world_mesh("brienz"),
+            ui.viewport(
+                frame="ENU",
+                name="Brienz Terrain",
+                hdr=True,
+                active=True,
+                pos="(0,0,0,1, 4560,-4560,2640)",
+                look_at="(0,0,0,1, 0,0,-120)",
+                up="(0,0,1)",
+                near=1.0,
+                fov=60.0,
+                show_grid=False,
+                show_view_cube=True,
+            ),
+            coordinate=ui.coordinate(frame="ENU"),
+        ),
         "terrain.kdl",
     )
+
     return world
 
 

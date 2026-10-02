@@ -8,6 +8,7 @@ from math import cos, radians, sin
 from typing import Annotated
 
 import elodin as el
+import elodin.ui as ui
 import jax
 import jax.numpy as np
 
@@ -91,20 +92,67 @@ w.spawn(
 )
 
 w.schematic(
-    f"""
-    coordinate frame=ECEF
-    environment {{
-        sun illuminance=100000.0 shadows=#true
-        ambient scale=0.05
-        earth
-    }}
-    tabs {{
-        viewport name=Viewport pos="ore_sat.world_pos.translate_world({float(cam[0]):.4f}, {float(cam[1]):.4f}, {float(cam[2]):.4f})" look_at="ore_sat.world_pos.translate_world({float(look[0]):.4f}, {float(look[1]):.4f}, {float(look[2]):.4f})" up="({float(up[0]):.5f}, {float(up[1]):.5f}, {float(up[2]):.5f})" near=0.5 cinematic=#true show_grid=#false active=#true
-    }}
-    object_3d ore_sat.world_pos {{
-        glb path="oresat-low.glb"
-    }}
-""",
+    ui.schematic(
+        ui.tabs(
+            ui.viewport(
+                name="Viewport",
+                fov=45.0,
+                near=0.5,
+                active=True,
+                show_grid=False,
+                show_arrows=True,
+                create_frustum=False,
+                show_frustums=False,
+                frustums_color="yellow",
+                projection_color="white",
+                frustums_thickness=0.006,
+                show_view_cube=True,
+                effects=True,
+                hdr=False,
+                cinematic=True,
+                pos=(
+                    f"ore_sat.world_pos.translate_world({float(cam[0]):.4f}, "
+                    f"{float(cam[1]):.4f}, {float(cam[2]):.4f})"
+                ),
+                look_at=(
+                    f"ore_sat.world_pos.translate_world({float(look[0]):.4f}, "
+                    f"{float(look[1]):.4f}, {float(look[2]):.4f})"
+                ),
+                up=f"({float(up[0]):.5f}, {float(up[1]):.5f}, {float(up[2]):.5f})",
+                smoothing=0.0,
+            ),
+        ),
+        ui.object_3d(
+            "ore_sat.world_pos",
+            mesh=ui.glb(
+                "oresat-low.glb",
+                scale=1.0,
+                translate=(0.0, 0.0, 0.0),
+                rotate=(0.0, 0.0, 0.0),
+                emissivity=0.0,
+                glow=0.0,
+            ),
+            orientation="relative",
+        ),
+        coordinate=ui.coordinate(frame="ECEF"),
+        environment=ui.environment(
+            sun=ui.sun(illuminance=100000.0, shadows=True),
+            ambient=0.05,
+            earth=ui.earth(
+                stars_density=0.05,
+                stars_size=0.4,
+                stars_brightness=1.88,
+                city_lights_density=0.05,
+                city_lights_size=1.0,
+                city_lights_height=0.0,
+                city_lights_brightness=0.05,
+                airglow_density=0.55,
+                airglow_size=1.05,
+                airglow_brightness=1.45,
+                night_map_brightness=0.05,
+            ),
+        ),
+    ),
     "cube-sat-visual-check.kdl",
 )
 
