@@ -61,7 +61,7 @@ and ground contact key off geodetic altitude, and the aircraft spawns at a
 real location — the Mojave RC field (35.350664 N, 117.809027 W, field
 elevation 589.274 m), the center of the `mojave_rc_field` terrain region.
 
-The schematic (`bdx.kdl`) keeps editor 3D panes as normal viewports
+The Python schematic (`bdx_schematic.py`) keeps editor 3D panes as normal viewports
 (aircraft + Mojave mesh, drone-like lighting). Cinematic Earth — globe,
 atmosphere, and the 100 klx sun — is owned by `world.sensor_camera(...,
 cinematic=True)` and rendered only in the sibling render-server. The
@@ -80,7 +80,7 @@ Close-up terrain is the geo-anchored `mojave_rc_field` planar
 `world_mesh` (`frame="ENU"`).
 
 The package GLB is already Elodin body (X forward, Y left, Z up), so
-`bdx.kdl` declares it `orientation=absolute` with no `rotate` — an absolute
+`bdx_schematic.py` declares it `orientation="absolute"` with no rotation — an absolute
 identity maps those axes straight onto ECEF. The Y-up drone GLB next to it
 does carry `rotate="(90, 0, 0)"`. The hashed package GLB is not rewritten.
 
@@ -104,6 +104,21 @@ Git LFS — run `git lfs pull` if the loader reports manifest hash mismatches.
 ```bash
 elodin editor examples/rc-jet/main.py
 ```
+
+Run from the repository root. The simulation builds its default layout from
+`bdx_schematic.py`; `visual_check.py` uses `visual_check_schematic.py`.
+To explicitly select the Python layout and update it while the editor runs:
+
+```bash
+elodin editor examples/rc-jet/main.py --schematic examples/rc-jet/bdx_schematic.py
+# In another terminal, using the database address printed at startup:
+elodin ui watch examples/rc-jet/bdx_schematic.py --db 127.0.0.1:2240
+```
+
+Save Layout writes a KDL overlay, not the Python source. The saved-layout names
+remain `bdx.kdl` and `visual_check.kdl`. The original KDL files beside the Python
+modules are retained as migration references (and, for `bdx.kdl`, a Rust parser
+fixture); tests compare their parsed models with the Python-generated layouts.
 
 The RC controller starts automatically (FrSky-style gamepad or keyboard) and
 sends `bdx.control_commands` at 60 Hz. The flight keeps going until you stop
@@ -177,8 +192,11 @@ mass updates as it burns, and an empty tank is a flameout. Thrust acts
 
 ```
 examples/rc-jet/
-├── main.py              # scenario select, ECEF world, loads bdx.kdl
-├── bdx.kdl              # editor layout (mojave_rc_field + GLB + sensor views)
+├── main.py              # scenario select, ECEF world, builds the Python schematic
+├── bdx_schematic.py     # editor layout (mojave_rc_field + GLB + sensor views)
+├── visual_check_schematic.py # layout for the RGBA/gray8 LWIR parity check
+├── bdx.kdl              # retained migration reference and Rust parser fixture
+├── visual_check.kdl     # retained migration reference for the LWIR check
 ├── bdx_model.py         # package loader: schema/identity/frames/SHA-256 validation
 ├── class_d_fallbacks.py # labeled class-D placeholder set (opt-in, logged)
 ├── scenario.py          # site + scenario + numerics (no aircraft data)
@@ -211,14 +229,15 @@ every direction so the conversion can never silently rot.
 ## Tests
 
 ```bash
-pytest examples/rc-jet/tests -o 'pythonpath='   # inside `nix develop .#run`
+uv run python -m pytest examples/rc-jet/tests -o 'pythonpath='   # inside `nix develop`
 ```
 
 Covers: loader rejection rules (schema/identity/frames/hash/path/symlink),
 GLB contract, the sign battery, no-clamp/no-floor guards, wind invariance,
 trim and dash reproduction against package anchors, propulsion monotonicity,
 fuel-flow integration, thrust-line moment sign, validity flagging, ECEF
-altitude hold, and ground rest.
+altitude hold, ground rest, and KDL/Python schematic parity (including the
+standalone Python entry points).
 
 ## Fidelity roadmap
 

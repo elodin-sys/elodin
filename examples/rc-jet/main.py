@@ -24,6 +24,7 @@ import jax.numpy as jnp
 import numpy as np
 
 import bdx_model
+from bdx_schematic import build as build_schematic
 from class_d_fallbacks import FALLBACKS
 from frames import enu_basis, level_attitude_ecef, quaternion_xyzw_from_matrix
 from scenario import Numerics, Scenario, load_scenario
@@ -128,8 +129,7 @@ def setup_world(
         create_frustum=False,
     )
 
-    schematic_path = Path(__file__).with_name("bdx.kdl")
-    world.schematic(schematic_path.read_text(), schematic_path.name)
+    world.schematic(build_schematic(), "bdx.kdl")
     return world, jet, target
 
 
