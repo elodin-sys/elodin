@@ -218,35 +218,8 @@ rtsp_receiver = el.s10.PyRecipe.process(
 world.recipe(rtsp_receiver)
 
 # Define schematic with top-down camera view and video stream tiles
-world.schematic("""
-    hsplit {
-        tabs share=0.5 {
-            viewport name=Viewport pos="(0,0,0,0, 0,0,12)" look_at="(0,0,0,0, 0,0,0)" show_grid=#true
-        }
-        vsplit share=0.5 {
-            tabs {
-                video_stream "test-video" name="Test Pattern"
-                video_stream "obs-camera" name="OBS Camera"
-                video_stream "rtsp-camera" name="RTSP Camera"
-            }
-            graph "ball.wind" name="Wind (m/s)"
-        }
-    }
-    object_3d ball.world_pos {
-        sphere radius=0.3 {
-            color orange
-        }
-    }
-    object_3d "(0,0,0,1, 0,0,0)" {
-        plane width=10 depth=10 {
-            color 32 128 32 200
-        }
-    }
-    // Wind force visualization arrow at origin, slightly above ground
-    vector_arrow "ball.wind" origin="(0,0,0,1, 0,0,0.5)" scale=0.3 name="Wind" show_name=#true {
-        color cyan 200
-    }
-""")
+SCHEMATIC_PATH = Path(__file__).with_name("schematic.kdl")
+world.schematic(SCHEMATIC_PATH.read_text())
 
 print("Video Streaming Example - Rolling Ball")
 print("======================================")

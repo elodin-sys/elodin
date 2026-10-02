@@ -1,0 +1,23 @@
+object_3d {body_name}.world_pos {
+    sphere radius={radius:.8f} {
+        color {color}
+    }
+    icon builtin="{icon}" {
+        visibility_range min=1.0 fade_distance=5.0
+        color {color}
+    }
+}
+line_3d {body_name}.world_pos line_width=1.5 perspective=#false {
+    color {color}
+}
+vector_arrow "(0,0,0.03)" origin="{body_name}.world_pos" scale=1.0 name="{label}" show_name=#true arrow_thickness=0.02 label_position=1.0 {
+    color {color}
+}
+object_3d truth_{body_name}.truth_world_pos {
+    sphere radius={truth_radius:.8f} {
+        color {truth_color} 120
+    }
+}
+line_3d truth_{body_name}.truth_world_pos line_width=1.0 perspective=#false {
+    color {truth_color} 80
+}

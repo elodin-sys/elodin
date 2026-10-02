@@ -25,6 +25,7 @@ import numpy as np
 import os
 import sys
 import time
+from schematic import build as build_schematic
 
 SIM_TIME_STEP = 1.0 / 120.0
 MAX_TICKS = int(os.getenv("ELODIN_SENSOR_CAMERA_MAX_TICKS", "18000"))
@@ -163,36 +164,7 @@ world.sensor_camera(
 
 # ── Schematic ────────────────────────────────────────────────────────────────
 
-BALL_COLORS = {
-    "cam_ball_a": "0 220 220",  # cyan
-    "cam_ball_b": "220 0 220",  # magenta
-    "ball_1": "255 140 0",  # orange
-    "ball_2": "255 255 100",  # yellow
-    "ball_3": "100 255 100",  # green
-}
-
-object_3d_lines = []
-for name, color in BALL_COLORS.items():
-    object_3d_lines.append(
-        f"    object_3d {name}.world_pos {{ sphere radius={BALL_RADIUS} {{ color {color} }} }}"
-    )
-
-schematic = """
-    timeline follow_latest=#true
-    hsplit {{
-        viewport name=Main pos="(0,0,0,0, 14,14,10)" look_at="(0,0,0,0, 0,0,1)" show_grid=#true show_frustums=#true
-        vsplit {{
-            sensor_view "cam_ball_a.scene_cam" name="RGB Camera (Cyan Ball)"
-            sensor_view "cam_ball_b.thermal_cam" name="Thermal (Magenta Ball)"
-        }}
-    }}
-{objects}
-    object_3d "(0,0,0,1, 0,0,0)" {{
-        plane width=12 depth=12 {{ color 60 120 60 }}
-    }}
-""".format(objects="\n".join(object_3d_lines))
-
-world.schematic(schematic, "sensor-camera.kdl")
+world.schematic(build_schematic(ball_radius=BALL_RADIUS), "sensor-camera.kdl")
 
 # ── System composition ───────────────────────────────────────────────────────
 

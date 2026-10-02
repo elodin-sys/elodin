@@ -3,6 +3,7 @@
 
 import math
 import typing as ty
+from pathlib import Path
 
 import elodin as el
 import jax
@@ -91,29 +92,8 @@ def world() -> el.World:
         name="covariance",
     )
 
-    world.schematic(
-        """
-        coordinate frame=ENU
-        hsplit {
-            viewport name="Cholesky: P = LL^T" pos="(0,0,0,1, 0,-6,4)" look_at="cholesky.world_pos" show_grid=#true active=#true
-            viewport frame=ENU name="Direct covariance: P" pos="(0,0,0,1, 8,-6,4)" look_at="covariance.world_pos" show_grid=#true active=#true
-        }
-
-        object_3d cholesky.world_pos {
-            ellipsoid error_covariance_cholesky="cholesky.cholesky_factor" error_confidence_interval=70.0 show_grid=#true {
-                color 255 152 0 72
-                grid_color 255 193 7 220
-            }
-        }
-        object_3d frame=ENU covariance.world_pos {
-            ellipsoid error_covariance="covariance.error_covariance" error_confidence_interval=70.0 show_grid=#true {
-                color 3 169 244 72
-                grid_color 0 188 212 220
-            }
-        }
-        """,
-        "covariance-ellipsoids.kdl",
-    )
+    schematic_path = Path(__file__).with_name("covariance-ellipsoids.kdl")
+    world.schematic(schematic_path.read_text(), "covariance-ellipsoids.kdl")
     return world
 
 
