@@ -1,8 +1,8 @@
 # Vision-Guided Gate Racing Plan
 
 **Document status:** Authoritative living specification  
-**Last verified against repository:** 2026-09-26  
-**Current resume point:** Package D — manual hardware qualification (Packages B and C complete)
+**Last verified against repository:** 2026-10-01
+**Current resume point:** Package E — truth-guided single-gate hold (Package G independently ready)
 
 ## 1. Purpose and authority
 
@@ -132,8 +132,8 @@ The example now additionally contains:
   ordered truth referee, fixed-width race telemetry, final race result, and
   deterministic live positive-crossing qualification; and
 - Package D's command seam, manual-controller integration, ANGLE configuration,
-  one-tick RC latch, and automated physical sign audit. Package D remains open
-  only for operator hardware qualification.
+  one-tick RC latch, automated physical sign audit, and operator-qualified
+  keyboard and gamepad control paths.
 
 The example does **not** currently contain autonomous truth/vision guidance, the
 three-gate course, perception/tracking, race completion tests, or race CI.
@@ -765,10 +765,10 @@ retained both unused `-1.0` slots. The process emitted exactly one complete
 qualifies the live truth/referee/telemetry/result path, not steering or powered
 autonomous flight.
 
-### [ ] D — Manual piloting, control seam, and ANGLE mode
+### [x] D — Manual piloting, control seam, and ANGLE mode
 
-**Implementation status:** Code and automated acceptance are complete; a manual
-qualification session with physical input hardware remains to close the package.
+**Implementation status:** Complete. Code and automated acceptance are complete,
+and an operator has qualified both keyboard and gamepad control paths.
 
 **Objective:** Replace hardcoded RC construction with a minimal, testable command
 boundary; add a safe manual piloting option; preserve default behavior; and prove
@@ -835,10 +835,15 @@ passed 5 tests, and the live injected-input audit reported:
 [D-AUDIT] angle=true roll_right_rad_s=0.446 pitch_forward_rad_s=0.444 yaw_right_rad_s=1.480 max_motor=0.391 status=PASS
 ```
 
-Manual gamepad/keyboard qualification is still pending. Follow the controls in
-`README.md`, demonstrate arm, takeoff, all four command axes, landing, and
-disarm, then record the hardware/layout and result here before marking D
-complete.
+Manual keyboard and gamepad qualification (2026-09-28):
+
+```bash
+RACE_GUIDANCE=manual elodin editor examples/betaflight-sitl/main.py
+```
+
+The operator tested and signed off on both documented input paths. Each path was
+used to arm, take off, command throttle, roll, pitch, and yaw, land, and disarm.
+Together with the deterministic physical audit above, this closes Package D.
 
 ### [ ] E — Truth-guided single-gate hold
 
@@ -1112,8 +1117,8 @@ branch for later resumption.
 | A | Complete | 24 pure tests pass; the recorded C0 acceptance run returned 0 with 119,995 simulation-loop lockstep responses, max motor 0.574, and 56.837 m takeoff rise in 29 wall-clock seconds. A deliberate 100 m criterion returned 1. Shared headless propagation fixes: `301ae367` (`#837`) and lifecycle follow-up `36ee3431` (`#838`). |
 | B | Complete | `fpv_camera.py` owns sampling, freshness, exact frame accounting, and acceptance. Verified 2026-09-26: `total_frames=437`, `window_frames=389`, `observed_fps=29.92`, exit 0 (DB `betaflight_db024`). Held-frame freshness and window bounds are pure tests. |
 | C | Complete | `none`/`single` startup selection, static four-bar orange rendering, ordered truth referee, Package D progress integration, fixed-width referee telemetry, exactly one final enabled-course result, and an opt-in positive live audit are implemented. The qualification suite passed 96 tests. The live audit used the unchanged vertical 2.5 m gate, reported one complete pass at 1.085149 s, and verified later-tick telemetry readback. Default C0 and ordinary incomplete `single` behavior were preserved. A 1280×720 H.264 recording and crossing frame were reviewed as qualification evidence; a PR should attach or upload those artifacts separately rather than rely on a host-local path. |
-| D | In progress | Command seam, one-tick ordering, AUX2 ANGLE configuration, s10 manual controller, 250 ms heartbeat failsafe, DB telemetry, and simulation-time physical sign audit implemented. The audit bypasses the external controller but retains the common semantic-to-RC/Betaflight path. The combined qualification passed with roll 1.006, pitch 1.011, yaw 1.479 rad/s and accepted max motor 0.391; 5 controller tests also pass. Manual hardware qualification remains. |
-| E | Blocked by C, D | No truth guidance |
+| D | Complete | Command seam, one-tick ordering, AUX2 ANGLE configuration, s10 manual controller, 250 ms heartbeat failsafe, DB telemetry, and simulation-time physical sign audit are implemented. The combined automated qualification passed with roll 1.006, pitch 1.011, yaw 1.479 rad/s and accepted max motor 0.391; 5 controller tests also pass. On 2026-09-28, the operator tested and signed off on both keyboard and gamepad paths, including arm, takeoff, throttle/roll/pitch/yaw response, landing, and disarm. |
+| E | Ready | C and D are complete; no truth guidance is implemented yet. |
 | F | Blocked by E | No course controller |
 | G | Ready (needs B) | Camera contract available; racing geometry helpers not yet in code |
 | H | Blocked by B, C, G | No detector |
@@ -1124,17 +1129,13 @@ branch for later resumption.
 
 ### Resume point
 
-Complete Package D's **manual hardware qualification** using the documented
-gamepad or keyboard controls. Package B is complete. Package C remains a valid
-independent alternative; Package G can begin on the perception path.
+Begin Package E, **truth-guided single-gate hold**. Its Package C course/referee
+and Package D control prerequisites are complete. Package E should implement the
+ARM, TAKEOFF, HOVER, ACQUIRE, and HOLD phases and qualify a continuous
+10-simulated-second hold at the four-metre standoff target.
 
-The Package D implementation and deterministic physical audit are complete, but
-Package D must remain open until an operator has armed, taken off, exercised
-roll/pitch/yaw/throttle, landed, and disarmed.
-
-Record that result in this plan. Package E is then the recommended implementation
-continuation because its C and D code prerequisites are present. Package G can
-begin on the perception path because Package B's camera contract is present.
+Package G is an independent perception-path option: Package B's camera contract
+is complete, so G's synthetic vision geometry can begin in parallel with E.
 
 Package C's durable qualification command, output contract, measured result, and
 scope are recorded with its work-package acceptance evidence above. User-facing
