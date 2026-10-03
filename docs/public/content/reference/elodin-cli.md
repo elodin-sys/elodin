@@ -68,7 +68,7 @@ Launch the Elodin editor (default)
 * `<addr/path>` — Optional connection target, simulation, or recording. Can be:
   - A socket address (e.g., `127.0.0.1:2240`) to connect to a running Elodin DB
   - A Python file (e.g., `main.py`) to run a simulation
-  - A TOML file (e.g., `s10.toml`) to run from a plan
+  - A TOML file (e.g., `s10.toml`) to run from a [plan](/reference/s10#debugging)
   - A simulation directory containing `main.py` or `s10.toml`
   - An Elodin DB directory containing `db_state`; the editor serves it and
     connects automatically

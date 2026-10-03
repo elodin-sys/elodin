@@ -254,7 +254,8 @@ world.recipe(controller)
 ```
 
 The `ready` probe gates startup until the process is up; richer probes (`tcp`,
-`unix`, `file`, `log`) and `depends_on` let you orchestrate multi-process stacks.
+`unix`, `file`, `log`) and `depends_on` let you orchestrate multi-process stacks
+(see [Process Orchestration (s10)](/reference/s10)).
 
 For the sim and controller to find each other — without colliding when 8 workers run
 at once — the example uses **named ports** instead of hardcoded numbers (`main.py`):
