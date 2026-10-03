@@ -178,6 +178,24 @@ db_path = p.db_path
 - `params(spec=None)` reads `ELODIN_MONTE_CARLO_CONTEXT` and returns defaults plus row overrides. It exposes `run_id`, `seed`, `db_path`, `db_addr`, `cache_dir`, `run_dir`, `slots()`, and `as_overrides_dict()`.
 - `result(**values)` writes scalar run outputs to `result.json` in the current run directory; the campaign runner merges these into `results.csv`.
 
+### s10 Recipe API
+
+`world.recipe(recipe)` registers an external process that Elodin launches next to the simulation, gates on readiness, and tears down when the simulation exits. See [Process Orchestration (s10)](/reference/s10) for ordering, lifecycle, and SITL/HITL patterns.
+
+```python
+world.recipe(el.s10.PyRecipe.process(
+    name="controller",
+    cmd="./controller",
+    ready=el.s10.Ready.tcp("127.0.0.1:9000"),
+))
+```
+
+- `el.s10.PyRecipe.process(name, cmd, args=None, cwd=None, env=None, restart_policy=None, depends_on=None, ready=None, ready_timeout=None, silence=False)` runs a command.
+- `el.s10.PyRecipe.cargo(name, path, package=None, bin=None, args=None, cwd=None, env=None, restart_policy=None, depends_on=None, ready=None, ready_timeout=None, silence=False)` builds a Rust crate, then runs its binary.
+- `el.s10.Ready.tcp(addr)`, `.unix(path)`, `.file(path)`, `.delay(ms)`, and `.log(pattern)` are readiness probes. `log` only works in `elodin monte-carlo` campaigns. `ready_timeout` accepts strings such as `"500ms"` or `"30s"` (default `"30s"`).
+- `el.s10.RestartPolicy.Never` (default) or `.Instant`.
+- `args`, `cwd`, and probe addresses and paths expand `${NAME}` / `${NAME:-default}` from the environment when the process is spawned.
+
 ### _class_ `elodin.EntityId`
 Integer reference identifier for entities in Elodin.
 
@@ -272,7 +290,7 @@ Context object passed to `pre_step` and `post_step` callbacks, providing direct 
 
     Use this to ensure clean shutdown of external processes (like Betaflight SITL) before the simulation exits, preventing memory corruption or resource leaks.
 
-    This is a no-op if no recipes were registered or if running with `--no-s10`.
+    This only has an effect when the simulation is run directly with `python main.py run`. Under `elodin editor`, `elodin run`, and `elodin monte-carlo`, the simulation runs with `--no-s10` and this is a no-op; the simulation exiting already stops every recipe. It is also a no-op if no recipes were registered. See [Process Orchestration (s10)](/reference/s10#lifecycle-and-shutdown).
 
     {% alert(kind="notice") %}
     Call `stop_recipes()` before the simulation exits to allow external processes time to clean up. You may want to add a brief delay (e.g., `time.sleep(0.5)`) after calling this method to ensure the processes have finished shutting down.
