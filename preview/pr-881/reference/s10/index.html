@@ -597,7 +597,7 @@
 <tr><td><code>el.s10.Ready.tcp("127.0.0.1:9000")</code></td><td>A TCP connection to the address succeeds. Use an IP literal, not a hostname.</td></tr>
 <tr><td><code>el.s10.Ready.unix("/tmp/app.sock")</code></td><td>A Unix socket connection succeeds</td></tr>
 <tr><td><code>el.s10.Ready.file("/tmp/app.ready")</code></td><td>The path exists</td></tr>
-<tr><td><code>el.s10.Ready.delay(100)</code></td><td>The given number of milliseconds have passed since spawn</td></tr>
+<tr><td><code>el.s10.Ready.delay(100)</code></td><td>The given number of milliseconds have passed since spawn (not bounded by <code>ready_timeout</code>)</td></tr>
 <tr><td><code>el.s10.Ready.log("listening")</code></td><td>A line containing the pattern appears in the recipe's log. <strong>Only works in <code>elodin monte-carlo</code> campaigns</strong>, where s10 writes per-recipe log files.</td></tr>
 </tbody></table>
 <p>For <code>cargo</code> recipes, the build finishes before the readiness clock starts, so a slow compile doesn't use up <code>delay</code> or <code>ready_timeout</code>.</p>
@@ -654,7 +654,7 @@
 <h2 id="lifecycle-and-shutdown">Lifecycle and shutdown</h2>
 <table><thead><tr><th>Event</th><th>Effect</th></tr></thead><tbody>
 <tr><td>The simulation exits, successfully or not</td><td>Every recipe is stopped</td></tr>
-<tr><td>A recipe fails: spawn error, build error, readiness timeout, or a dependency that died before becoming ready</td><td>Every recipe and the simulation are stopped</td></tr>
+<tr><td>A recipe fails: spawn error, build error, readiness timeout, or a dependency that died before becoming ready</td><td>Every recipe and the simulation are stopped (under <code>python main.py run</code>, the simulation keeps running)</td></tr>
 <tr><td>A recipe exits on its own after becoming ready</td><td>Nothing else stops (with <code>restart_policy=Instant</code>, it respawns)</td></tr>
 <tr><td>The editor closes, you press Ctrl-C, or a campaign run times out</td><td>Everything is stopped</td></tr>
 </tbody></table>
@@ -827,31 +827,6 @@
 </p>
     </div>
 </a>
-<script type="module">
-  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: document.body.classList.contains("dark") ? "dark" : "default",
-    securityLevel: "loose",
-  });
-
-  const nodes = [];
-  document.querySelectorAll("pre > code.language-mermaid").forEach((code) => {
-    const div = document.createElement("div");
-    div.className = "mermaid";
-    div.style.margin = "2rem 0";
-    div.style.overflowX = "auto";
-    div.style.textAlign = "center";
-    div.textContent = code.textContent;
-    code.parentElement.replaceWith(div);
-    nodes.push(div);
-  });
-
-  if (nodes.length) {
-    await mermaid.run({ nodes });
-  }
-</script>
 
                   
 <div class="footer-line-padding"></div>
@@ -887,6 +862,29 @@
     };
 </script>
 <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-881/js/tex-mml-chtml.js"></script>
+<script type="module">
+    // Zola < 0.22 emits class="language-mermaid"; 0.22+ (giallo) emits data-lang="mermaid".
+    const blocks = document.querySelectorAll('pre > code.language-mermaid, pre > code[data-lang="mermaid"]');
+    if (blocks.length) {
+        const { default: mermaid } = await import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs");
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: document.body.classList.contains("dark") ? "dark" : "default",
+            securityLevel: "loose",
+        });
+        const nodes = [...blocks].map((code) => {
+            const div = document.createElement("div");
+            div.className = "mermaid";
+            div.style.margin = "2rem 0";
+            div.style.overflowX = "auto";
+            div.style.textAlign = "center";
+            div.textContent = code.textContent;
+            code.parentElement.replaceWith(div);
+            return div;
+        });
+        await mermaid.run({ nodes });
+    }
+</script>
 
   <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-881/js/elasticlunr.min.js"></script>
   <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-881/search_index.en.js"></script>

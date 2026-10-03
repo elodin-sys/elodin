@@ -578,6 +578,29 @@ startup.</p>
     };
 </script>
 <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-881/js/tex-mml-chtml.js"></script>
+<script type="module">
+    // Zola < 0.22 emits class="language-mermaid"; 0.22+ (giallo) emits data-lang="mermaid".
+    const blocks = document.querySelectorAll('pre > code.language-mermaid, pre > code[data-lang="mermaid"]');
+    if (blocks.length) {
+        const { default: mermaid } = await import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs");
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: document.body.classList.contains("dark") ? "dark" : "default",
+            securityLevel: "loose",
+        });
+        const nodes = [...blocks].map((code) => {
+            const div = document.createElement("div");
+            div.className = "mermaid";
+            div.style.margin = "2rem 0";
+            div.style.overflowX = "auto";
+            div.style.textAlign = "center";
+            div.textContent = code.textContent;
+            code.parentElement.replaceWith(div);
+            return div;
+        });
+        await mermaid.run({ nodes });
+    }
+</script>
 
   <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-881/js/elasticlunr.min.js"></script>
   <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-881/search_index.en.js"></script>
