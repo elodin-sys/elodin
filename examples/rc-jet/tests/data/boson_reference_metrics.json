@@ -1,0 +1,16 @@
+{
+  "source": "ft27-seq06 frame 840, post-AGC NV12 Y plane",
+  "width": 640,
+  "height": 512,
+  "metrics": {
+    "min_dn": 1,
+    "p01_dn": 1,
+    "p50_dn": 86,
+    "p99_dn": 232,
+    "max_dn": 254,
+    "mean_dn": 98.38,
+    "mean_gradient_dn": 17.413,
+    "edge_fraction": 0.153003,
+    "laplacian_rms_dn": 24.05
+  }
+}

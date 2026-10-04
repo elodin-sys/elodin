@@ -17,6 +17,16 @@ Each entry should be a clickable thumbnail followed by a short description. For 
 **[Elodin Dev Intro](https://www.youtube.com/watch?v=p8tyteJksas)** — Quick introduction to local development with Elodin. By Dan Driscoll. See also [`README.md`](README.md).
 
 
+## Headless Capture
+
+[![Elodin Editor - Headless Video Capture with Agent and Manual Capture](https://img.youtube.com/vi/z7V1lSHIVqA/hqdefault.jpg)](https://www.youtube.com/watch?v=z7V1lSHIVqA)
+
+**[Elodin Editor - Headless Video Capture with Agent and Manual Capture](https://www.youtube.com/watch?v=z7V1lSHIVqA)** — Demonstrates a headless video capture of an Elodin example while an agent also captures. By Anders Pitman. See also [`.cursor/skills/elodin-headless-capture/SKILL.md`](.cursor/skills/elodin-headless-capture/SKILL.md).
+
+[![Elodin Editor - Headless Video Capture with Agent and Live Editor](https://img.youtube.com/vi/vyoQbBBw-m8/hqdefault.jpg)](https://www.youtube.com/watch?v=vyoQbBBw-m8)
+
+**[Elodin Editor - Headless Video Capture with Agent and Live Editor](https://www.youtube.com/watch?v=vyoQbBBw-m8)** — Demonstrates a headless video capture of an Elodin example while the live editor is running. By Anders Pitman. See also [`.cursor/skills/elodin-headless-capture/SKILL.md`](.cursor/skills/elodin-headless-capture/SKILL.md).
+
 ## Profiling & Performance
 
 [![Tracy - Elodin Editor](https://img.youtube.com/vi/-jW672rMV2s/hqdefault.jpg)](https://www.youtube.com/watch?v=-jW672rMV2s)

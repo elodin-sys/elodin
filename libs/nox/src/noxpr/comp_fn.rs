@@ -160,7 +160,7 @@ impl_comp_fn!(T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13);
 impl<F, T, R> CompFn<T, R> for F
 where
     F: Sync + Send,
-    F: for<'a> fn_traits::Fn<T, Output = R>,
+    F: fn_traits::Fn<T, Output = R>,
     T: for<'a> FromBuilder<Item<'a> = T>,
 {
     fn compute(&self, builder: &mut Builder) -> R {

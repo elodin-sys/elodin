@@ -1,0 +1,16 @@
+{
+  "source": "SpaceX CRS-12 press kit, August 2017 (planned mission timeline)",
+  "mirror": "https://spacex.com.pl/files/2017-10/crs12presskit.pdf",
+  "corroboration": "https://www.nasaspaceflight.com/2017/08/spacex-falcon-9-launch-crs-12-dragon-mission-iss/",
+  "note": "Planned (pre-flight) event times in seconds after liftoff. Compare against events.json, which holds times observed in the webcast telemetry.",
+  "events_s": {
+    "max_q": 68,
+    "meco": 145,
+    "stage_separation": 148,
+    "second_stage_ignition": 156,
+    "boostback_start": 161,
+    "entry_start": 369,
+    "landing": 463,
+    "seco1": 554
+  }
+}

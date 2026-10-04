@@ -6,6 +6,21 @@
 }: let
   elodin-db = pkgs.elodin-db;
   cfg = config.services.elodin-db;
+  assetsFlag = lib.optionalString (cfg.assetsDir != null) " --assets ${cfg.assetsDir}";
+
+  # The shared asset root is normally created (tmpfiles) and populated
+  # (elodin-assets-seed.service) by the `elodin` module. Those only exist when
+  # that module is enabled, so elodin-db must not silently rely on them: when it
+  # runs standalone (e.g. services.elodin.enable = false) it has to create its
+  # own ingest source, and it must only order after a seed unit that exists.
+  # `or false` keeps this valid even if the `elodin` module is not imported.
+  elodinEnabled = config.services.elodin.enable or false;
+  elodinSeeds = elodinEnabled && (config.services.elodin.examples or false);
+  # The `elodin` module hardcodes this path; when our assetsDir matches it and
+  # that module is enabled, defer to it for directory creation to avoid a
+  # duplicate tmpfiles entry. Otherwise we own the directory.
+  elodinOwnsAssetsDir = elodinEnabled && cfg.assetsDir == "/var/lib/elodin/assets";
+  assetsAfter = lib.optional elodinSeeds "elodin-assets-seed.service";
 in {
   options.services.elodin-db = {
     enable = lib.mkOption {
@@ -43,31 +58,46 @@ in {
         The parent path for the elodin-db output directory.
       '';
     };
+    assetsDir = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = ''
+        Source assets/ tree ingested into each fresh database on creation
+        (passed to `elodin-db run --assets`). Defaults to null for DB-only
+        deployments; when services.elodin.examples is enabled, this defaults to
+        the shared asset root seeded by the elodin module. Set an explicit path
+        to ingest your own assets.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
+    services.elodin-db.assetsDir = lib.mkIf elodinSeeds (lib.mkDefault "/var/lib/elodin/assets");
+
     systemd.services."elodin-db@" = {
-      after = ["network.target"];
+      # Order after the asset seed (from the elodin module, when present) so a
+      # fresh boot ingests a fully populated tree, not a partial one.
+      after = ["network.target"] ++ assetsAfter;
       stopIfChanged = false;
       restartIfChanged = false;
       description = "Start elodin-db under the folder '%i'";
       serviceConfig = {
         Type = "exec";
         User = "root";
-        ExecStart = "${elodin-db}/bin/elodin-db run [::]:2240 --http-addr [::]:2248 ${cfg.dbFolderName}/%i";
+        ExecStart = "${elodin-db}/bin/elodin-db run [::]:2240 --http-addr [::]:2248${assetsFlag} ${cfg.dbFolderName}/%i";
         KillSignal = "SIGINT";
         Environment = "RUST_LOG=info";
       };
     };
 
     systemd.services.elodin-db = lib.mkIf (cfg.autostart && !cfg.dbUniqueOnBoot) {
-      after = ["network.target"];
+      after = ["network.target"] ++ assetsAfter;
       wantedBy = ["multi-user.target"];
       description = "Elodin-DB telemetry database";
       serviceConfig = {
         Type = "exec";
         User = "root";
-        ExecStart = "${elodin-db}/bin/elodin-db run [::]:2240 --http-addr [::]:2248 ${cfg.dbFolderName}/default";
+        ExecStart = "${elodin-db}/bin/elodin-db run [::]:2240 --http-addr [::]:2248${assetsFlag} ${cfg.dbFolderName}/default";
         KillSignal = "SIGINT";
         Restart = "on-failure";
         RestartSec = "5s";
@@ -76,7 +106,7 @@ in {
     };
 
     systemd.services."elodin-db-default" = lib.mkIf (cfg.autostart && cfg.dbUniqueOnBoot) {
-      after = ["network.target"];
+      after = ["network.target"] ++ assetsAfter;
       wantedBy = ["multi-user.target"];
       stopIfChanged = false;
       restartIfChanged = false;
@@ -110,15 +140,40 @@ in {
 
     system.activationScripts.restartElodinDb = lib.mkIf (cfg.autostart && cfg.dbUniqueOnBoot) {
       text = ''
-        if [ -d /run/systemd/system ] && \
-           /run/current-system/sw/bin/systemctl is-active --quiet elodin-db-default.service 2>/dev/null; then
-          echo "restarting elodin-db-default for fresh database..."
-          /run/current-system/sw/bin/systemctl restart elodin-db-default.service || true
+        if [ -d /run/systemd/system ]; then
+          # Kill leftover SITL/manual elodin-db on :2240, then start flight DB.
+          echo "ensuring flight elodin-db owns :2240..."
+          /run/current-system/sw/bin/systemctl stop 'elodin-db@*' elodin-db-default.service elodin-db.service 2>/dev/null || true
+          /run/current-system/sw/bin/pkill -9 -f 'elodin-db run' 2>/dev/null || true
+          sleep 1
+          if [ "$(/run/current-system/sw/bin/systemctl show -p LoadState --value elodin-db-default.service 2>/dev/null)" = loaded ]; then
+            /run/current-system/sw/bin/systemctl start elodin-db-default.service || true
+          fi
         fi
       '';
     };
 
+    # Ensure the ingest source exists so `--assets` never points at a missing
+    # directory (ingest would otherwise warn and the DB would start without its
+    # asset tree). When the `elodin` module owns this same path we defer to it.
+    # A group-writable setgid dir mirrors the shared ELODIN_ASSETS convention so
+    # wheel users can drop in their own assets.
+    systemd.tmpfiles.rules = lib.optionals (cfg.assetsDir != null && !elodinOwnsAssetsDir) [
+      "d ${cfg.assetsDir} 2775 root wheel - -"
+    ];
+
     environment.systemPackages = [elodin-db];
-    networking.firewall.allowedTCPPorts = lib.optionals cfg.openFirewall [2240 2248];
+    networking.firewall.allowedTCPPortRanges = lib.optionals cfg.openFirewall [
+      {
+        from = 1;
+        to = 65535;
+      }
+    ];
+    networking.firewall.allowedUDPPortRanges = lib.optionals cfg.openFirewall [
+      {
+        from = 1;
+        to = 65535;
+      }
+    ];
   };
 }

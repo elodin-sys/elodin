@@ -129,7 +129,7 @@ where
 mod tests {
     use super::*;
     use elodin_macros::{Archetype, Component, ReprMonad};
-    use impeller2::component::Component as ComponentTrait;
+    use impeller::component::Component as ComponentTrait;
     use nox::{Op, OwnedRepr};
 
     #[derive(Clone, Component, ReprMonad)]

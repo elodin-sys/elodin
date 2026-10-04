@@ -55,6 +55,52 @@ impl TerrainConfig {
     }
 }
 
+/// Smallest planar clipmap that stayed in-index on RC-jet (32 was too small).
+pub const PLANAR_ATLAS_MIN: u32 = 64;
+/// Working-set cap. LOD5 planar datasets are 341 tiles; 1024 layers is ~2 GiB.
+pub const PLANAR_ATLAS_MAX: u32 = 256;
+
+/// GPU atlas layers for a planar region: at least [`PLANAR_ATLAS_MIN`], at
+/// most [`PLANAR_ATLAS_MAX`], and never larger than the on-disk tile count
+/// when that count already exceeds the minimum.
+pub fn planar_atlas_size(dataset_tiles: u32) -> u32 {
+    if dataset_tiles == 0 {
+        return PLANAR_ATLAS_MIN;
+    }
+    dataset_tiles.clamp(PLANAR_ATLAS_MIN, PLANAR_ATLAS_MAX)
+}
+
+/// Atlas layers for the preprocess binary: the whole planar tile pyramid,
+/// `(4^lod_count - 1) / 3` tiles (341 at LOD 5), lives in the atlas at once.
+pub fn planar_preprocess_atlas_size(dataset_tiles: u32, lod_count: u32) -> u32 {
+    dataset_tiles.max((4u32.pow(lod_count) - 1) / 3)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn planar_atlas_size_uses_min_when_dataset_is_unknown() {
+        assert_eq!(planar_atlas_size(0), PLANAR_ATLAS_MIN);
+    }
+
+    #[test]
+    fn planar_atlas_size_clamps_to_working_set() {
+        assert_eq!(planar_atlas_size(32), PLANAR_ATLAS_MIN);
+        assert_eq!(planar_atlas_size(80), 80);
+        assert_eq!(planar_atlas_size(341), PLANAR_ATLAS_MAX);
+        assert_eq!(planar_atlas_size(1024), PLANAR_ATLAS_MAX);
+    }
+
+    #[test]
+    fn planar_preprocess_atlas_holds_the_full_dataset() {
+        assert_eq!(planar_preprocess_atlas_size(0, 5), 341);
+        assert_eq!(planar_preprocess_atlas_size(341, 5), 341);
+        assert_eq!(planar_preprocess_atlas_size(2048, 5), 2048);
+    }
+}
+
 /// The components of a terrain.
 ///
 /// Does not include loader(s) and a material.

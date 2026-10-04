@@ -25,7 +25,10 @@
 
     nativeBuildInputs = [
       (rustToolchain pkgs)
+      pkgs.protobuf
     ];
+
+    buildFeatures = ["grpc"];
 
     HOST_CC = "${pkgs.stdenv.cc.nativePrefix}cc";
     TARGET_CC = "${pkgs.stdenv.cc.targetPrefix}cc";
@@ -33,6 +36,11 @@
     GIT_HASH = gitRev;
 
     doCheck = false;
+
+    meta = {
+      description = "Elodin time-series database";
+      mainProgram = "elodin-db";
+    };
   };
 in
   bin

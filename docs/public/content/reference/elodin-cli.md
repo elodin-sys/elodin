@@ -28,6 +28,7 @@ This document contains the help content for the Elodin command-line programs.
 * [`elodin-db fix-timestamps`↴](#elodin-db-fix-timestamps)
 * [`elodin-db merge`↴](#elodin-db-merge)
 * [`elodin-db prune`↴](#elodin-db-prune)
+* [`elodin-db compact`↴](#elodin-db-compact)
 * [`elodin-db truncate`↴](#elodin-db-truncate)
 * [`elodin-db time-align`↴](#elodin-db-time-align)
 * [`elodin-db drop`↴](#elodin-db-drop)
@@ -60,40 +61,70 @@ This document contains the help content for the Elodin command-line programs.
 
 Launch the Elodin editor (default)
 
-**Usage:** `elodin editor [--kdl KDL-PATH] [addr/path]`
+**Usage:** `elodin editor [OPTIONS] [addr/path]`
 
 ###### **Arguments**
 
-* `<addr/path>` — Optional connection target or simulation to run. Can be:
+* `<addr/path>` — Optional connection target, simulation, or recording. Can be:
   - A socket address (e.g., `127.0.0.1:2240`) to connect to a running Elodin DB
   - A Python file (e.g., `main.py`) to run a simulation
-  - A TOML file (e.g., `s10.toml`) to run from a plan
-  - A directory containing `main.py` or `s10.toml`
-* `--kdl <PATH>` — Optional parameter that will load a specific schematic KDL
-  after connecting to a database.
+  - A TOML file (e.g., `s10.toml`) to run from a [plan](/reference/s10#debugging)
+  - A simulation directory containing `main.py` or `s10.toml`
+  - An Elodin DB directory containing `db_state`; the editor serves it and
+    connects automatically
+
+###### **Options**
+
+* `--addr <ADDR>` — Address to use when launching a Python simulation or
+  serving a database directory. Assets use its port + 1. Existing `s10.toml`
+  plans control their own addresses.
+
+  Default value: `[::]:2240`
+
+* `--schematic <PATH>` — Open this schematic after connecting. Accepts a
+  `.kdl` file or a Python script that defines `build() -> elodin.ui.Schematic`.
+  Relative paths are resolved from the current directory, then from a
+  database directory when one is given.
+
+* `--kdl <KDL>` — Deprecated alias for `--schematic`.
+
+* `--replay` — Reveal recorded data progressively as the playback marker
+  advances, simulating a live session.
+
+```bash
+elodin editor dbs/apollo --replay
+elodin editor dbs/apollo --schematic schematics/review.kdl
+elodin editor dbs/apollo --schematic assets/schematics/main.py
+```
 
 ###### **Environment**
 
 * `BLOCKADE_API_KEY` — Optional. Enables Skybox AI generation from the command palette
   (`Skybox...` → `Generate Skybox...`). Existing cached skyboxes and KDL `skybox name="..."`
   activation do not require this key.
-* `ELODIN_ASSETS_DIR` — Optional. Overrides the asset root. Skybox assets are read from and
-  generated into `$ELODIN_ASSETS_DIR/skyboxes`; otherwise `./assets/skyboxes` is used.
+* `ELODIN_ASSETS` — Optional. Overrides the asset root. Skybox assets are read from and
+  generated into `$ELODIN_ASSETS/skyboxes`; otherwise `./assets/skyboxes` is used.
 
 ## `elodin run`
 
 Run an Elodin simulation in headless mode (not available on Windows)
 
-**Usage:** `elodin run [--monte-carlo PLAN.csv] [addr/path]`
+**Usage:** `elodin run [OPTIONS] [addr/path]`
 
 ###### **Arguments**
 
-* `<addr/path>` — Simulation to run. Can be:
+* `<addr/path>` — Simulation or database to run. Can be:
   - A Python file (e.g., `main.py`)
   - A TOML file (e.g., `s10.toml`)
   - A directory containing `main.py` or `s10.toml`
+  - An Elodin DB directory containing `db_state`, served until interrupted
 
-* `--monte-carlo <PLAN.csv>` — Sugar for `elodin monte-carlo run <addr/path> --plan PLAN.csv`.
+###### **Options**
+
+* `--addr <ADDR>` — Address to use when launching a Python simulation or
+  serving a database directory. Default: `[::]:2240`.
+
+For campaigns, use `elodin monte-carlo run` (below).
 
 ## `elodin monte-carlo`
 
@@ -101,11 +132,35 @@ Run a simulation campaign with a bounded worker pool. Each worker owns a
 deterministic resource slot (DB port and user-defined SITL ports), and the
 runner recycles those slots across arbitrarily many runs. The campaign pins a
 shared `ELODIN_CACHE_DIR` so large Cranelift constants are mapped once across
-workers. Concurrency is governed by the s10 admission budget `S10_MAX_INFLIGHT`
-(default: logical cores): the runner executes `floor(S10_MAX_INFLIGHT /
-recipe_weight)` runs at once and sizes its orchestrator I/O thread pool from the
-same budget. Campaign startup reaps prior campaign-scoped cgroups by default so
-stale sidecars from an interrupted run cannot collide with worker ports.
+workers. Concurrency comes from `--workers N` (or `workers = N` in
+`campaign.toml`): exactly N runs execute at once regardless of how many
+processes each run spawns. When neither is set, the runner sizes itself from
+logical cores; `S10_MAX_INFLIGHT` remains a low-level escape hatch for
+budgeting by process count instead of run count. Only a numeric
+`S10_MAX_INFLIGHT` overrides `campaign.toml`'s `workers`; `off` (or an
+unparsable value) disables admission limiting without overriding the
+configured worker count.
+
+Before anything launches, the runner takes an exclusive lock on the out dir
+(`campaign.lock`) so two campaigns cannot interleave in the same output,
+validates the entire static port plan for every worker (u16 overflow,
+cross-name collisions), warns when planned ports fall inside the kernel
+ephemeral range, raises its own file-descriptor limit, and reaps prior
+campaign-scoped cgroups plus campaign-marked processes still bound to a
+campaign port. Foreign port owners block startup with pid/name details instead
+of being killed. Each run preflight-probes its static ports and reports
+squatters by pid/name (`port 20034 already bound by pid 320389 (weaverd)`). On timeout the
+runner tears the run down via its cgroup when one is available and via
+per-recipe process groups otherwise; on Linux hosts without a delegated cgroup
+(e.g. a plain ssh session) the campaign transparently re-executes itself under
+`systemd-run --user --scope` — for both `run` and `resume` (opt out with
+`--no-self-scope`).
+
+Every worker slot also reserves `db_port + 1` for elodin-db's always-on asset
+server (the headless sensor-camera renderer fetches scene assets from it):
+the assets port is validated, preflight-probed, and exported as
+`ELODIN_MC_PORT_DB_ASSETS`, and a `db_port = "auto"` allocation always yields
+a consecutive db/assets port pair.
 
 **Usage:** `elodin monte-carlo <COMMAND>`
 
@@ -173,21 +228,39 @@ elodin monte-carlo run examples/monte-carlo/main.py \
 
 Key options:
 
-- `--plan <PLAN.csv>`: materialized one-row-per-run plan.
+- `--workers <N>`: run exactly N runs at once. Wins over `S10_MAX_INFLIGHT`
+  and `campaign.toml`'s `workers`. Default: sized from logical cores.
+- `--plan <PLAN.csv>`: materialized one-row-per-run plan. If a sibling
+  `spec.toml` is newer than the plan, the runner warns that the plan is stale.
 - `--spec <SPEC.toml>`: sampling spec; sampled into a plan before execution.
-- `--campaign <CAMPAIGN.toml>`: resource slots, hooks, retries, timeouts.
-- `S10_MAX_INFLIGHT` (environment variable, not a flag): the single concurrency
-  knob. The runner plans the per-run recipe, counts its processes
-  (`recipe_weight`), and executes `floor(S10_MAX_INFLIGHT / recipe_weight)` runs
-  at once (clamped to the plan size). Defaults to the host's logical core count;
-  set it higher to oversubscribe I/O-bound SITL stacks, or `off` to disable
-  admission limiting entirely.
+- `--campaign <CAMPAIGN.toml>`: workers, resource slots, hooks, retries,
+  timeouts, retention, quality gates, scratch dir, `[[build]]` steps, and a
+  campaign-wide `[env]` table.
+- `--scratch-dir <DIR|auto>`: run per-run IO (including the embedded DB) on a
+  fast scratch filesystem; each run's surviving artifacts move to `--out`
+  (sparse-aware) as it finishes. `auto` picks `/dev/shm` when present. Use
+  this when the artifact volume cannot sustain `workers x` DB write IOPS
+  (network/EBS-class disks). When `auto` finds no `/dev/shm`, the campaign
+  logs that per-run IO is staying on the artifact volume. If a run's final
+  move fails (e.g. the artifact volume fills up), the run is marked failed
+  with the destination error and its scratch copy is preserved — the campaign
+  never deletes a scratch tree that still holds run artifacts, and logs the
+  path to recover them from. The scratch location is deterministic per out
+  dir, so `resume` finds preserved passed runs and finishes the move instead
+  of re-running them (a fresh `run` clears the campaign's scratch tree first).
+- `--cache-dir <DIR>`: override the compile cache. The default lives in
+  `~/.cache/elodin/monte-carlo/const-cache` (content-addressed, shared across
+  campaigns) so `--clean` and fresh out dirs never cause a compile storm.
+- `--strict-ports`: error (instead of warn) when planned ports fall inside the
+  kernel ephemeral range (`/proc/sys/net/ipv4/ip_local_port_range`).
+- `--no-self-scope`: do not re-exec under `systemd-run --user --scope` when no
+  delegated cgroup is available.
 - `--runtime-threads <N>`: override the orchestrator I/O thread pool. When unset
-  (or `0`) it is auto-sized from `S10_MAX_INFLIGHT`, capped at logical cores.
+  (or `0`) it is auto-sized from the worker budget, capped at logical cores.
 - `--memory-probe`: enable expensive shared-constant PSS sampling and
   `memory.json`/`processes.csv` output. Leave this off for scaling benchmarks.
-- `--keep-existing`: do not reap existing `elodin` / `elodin-db` processes at
-  campaign startup.
+- `--keep-existing`: do not reap prior campaign cgroups or campaign-marked
+  processes bound to campaign ports at startup.
 - `--fail-on-errors`: exit non-zero when any run failed or missed scoring.
   Off by default so exploratory campaigns can finish with partial failures.
   Also configurable as `fail_on_run_errors = true` in `campaign.toml`. For CI
@@ -197,6 +270,32 @@ Key options:
 - `--clean`: prune `runs/` directories that are not part of the active plan.
 - Campaigns always display a live progress TUI with aggregate counts and active
   worker progress while they run.
+
+`campaign.toml` additions beyond the flags above:
+
+- `[resources.ports]` values may be a numeric base (shifted by
+  `worker_id * port_stride`, validated up front for every worker) or `"auto"`
+  (allocated dynamically per run, collision-free by construction). Sims read
+  them via `el.monte_carlo.port("name")` / `ELODIN_MC_PORT_<NAME>` either way.
+  `db_port` also accepts `"auto"` (allocated together with its `db_port + 1`
+  assets port). Placing a named port on `db_port + 1` is rejected — that port
+  always belongs to the asset server.
+- `[env]`: extra environment variables for every run's processes.
+- `[[build]]`: any number of one-time build steps run before workers start.
+- `[retention]`: `keep_run_db = "always" | "never" | "on-fail"`, plus
+  `prune_on_pass` / `prune_on_fail` glob lists (relative to the run dir)
+  removed after scoring, and `compact_run_db` (default `true`) which truncates
+  kept DBs' preallocated files to their real size.
+- `[quality]`: `max_behind_deadline_frac` / `max_real_time_factor` mark runs
+  whose real-time pacing degraded as `degraded` (they are excluded from
+  passes; `fail_on_degraded = true` also counts them toward
+  `fail_on_run_errors`). Use this to keep oversubscribed campaigns from
+  silently ingesting load-skewed samples.
+
+The runner also injects machine-sympathy defaults into every run when the user
+has not set them: `OMP_NUM_THREADS` / `OPENBLAS_NUM_THREADS` /
+`MKL_NUM_THREADS` and XLA CPU thread flags sized to `max(1, cores / workers)`,
+so N concurrent sims do not each size their thread pools to every core.
 
 Simulations that ingest parameters from a file (rather than via
 `el.monte_carlo.params(...)`) can configure `[params_delivery]` in
@@ -209,7 +308,14 @@ Outputs include per-run databases under `runs/`, `results.csv`, `perf.csv`,
 `--memory-probe`, the runner also writes `memory.json` and `processes.csv`.
 Each run's child process output is captured in `runs/<run_id>/logs/`, and the
 per-run simulation timing snapshot is written to `runs/<run_id>/sim_summary.json`
-for the final campaign rollup.
+for the final campaign rollup. Every failed, invalid, or degraded run carries a
+one-line machine-readable `failure_reason` in `results.csv` / `metrics.json`
+(timeouts, which leaf recipe failed and how, readiness-gate timeouts, port
+conflicts with the owning pid), echoed on the live `[failed]` reporter line.
+Setup-only failures (a run whose port preflight failed, so no process ever
+spawned) skip the `post_run` hook entirely — there is no run database to score.
+Real-time-paced runs also record `behind_deadline_frac`, `real_time_factor`,
+and `drift_resets`, with worst-run callouts in the campaign summary.
 
 ## Python Simulation Subcommands
 
@@ -252,6 +358,7 @@ python examples/drone/main.py bench --ticks 1000 --profile
 * `fix-timestamps` — Fix monotonic timestamps in a database
 * `merge` — Merge two databases into one with optional prefixes
 * `prune` — Remove empty components from a database
+* `compact` — Truncate preallocated (sparse) database files to their real size
 * `truncate` — Clear all data from a database, preserving schemas
 * `time-align` — Align component timestamps to a target timestamp
 * `drop` — Drop (delete) components from a database
@@ -287,7 +394,14 @@ Run the Elodin database server
 
 * `--http-addr <ADDR>` — Address to bind the HTTP server to (enables HTTP API)
 
-* `--replay` — Replay recorded data as live telemetry. The database advances `last_updated` with playback so connected editors see data "arriving" over time. Requires an existing database with recorded data.
+The protobuf/gRPC API starts automatically at `<ADDR> + 2` (`2242` for the
+default native listener), alongside asset HTTP at `<ADDR> + 1`. It covers
+ingest, query, live playback, message logs, metadata/config, and assets. Health
+and reflection share the endpoint. See `libs/db/proto/elodin/db/v1` and
+`elodin-db-protos` (16 MiB max message).
+
+* `--grpc-auth-token <TOKEN>` — Require `authorization: Bearer TOKEN` metadata
+  on the gRPC endpoint; omitted means unauthenticated.
 
 * `--follows <ADDR>` — Follow another elodin-db instance, replicating all components, messages, and metadata over a single TCP connection. The local instance still accepts its own connections and data writers.
 
@@ -471,6 +585,33 @@ elodin-db prune --dry-run ./my-database
 
 # Prune empty components
 elodin-db prune -y ./my-database
+```
+
+
+## `elodin-db compact`
+
+Truncate a database's preallocated (sparse) storage files to their committed length. Elodin DB preallocates each component's `data`/`index` files as 8 GB sparse files, so a recorded database's *apparent* size can be hundreds of gigabytes while its real size is under one — and anything that walks it naively (rsync, tar, S3 upload, CI artifact collection) processes the apparent size. After compaction, apparent size matches real size.
+
+Compacted databases stay fully readable (open, export, query, replay, editor playback). Further *writes* need the headroom that compaction removed, so only compact databases that are done recording, and never one that a live server has open. Monte Carlo campaigns compact retained run databases automatically (`[retention] compact_run_db`, on by default).
+
+**Usage:** `elodin-db compact [OPTIONS] <PATH>`
+
+###### **Arguments**
+
+* `<PATH>` — Path to the database directory
+
+###### **Options**
+
+* `--dry-run` — Show how much apparent size would be reclaimed without modifying
+
+###### **Example**
+
+```bash
+# Preview reclaimable space
+elodin-db compact --dry-run ./my-database
+
+# Truncate preallocated files to their real size
+elodin-db compact ./my-database
 ```
 
 
@@ -742,7 +883,7 @@ elodin-db query --eql "rocket.world_pos" --limit 1000 -f parquet ./my-database >
 
 ## `elodin-db export`
 
-Export database contents to parquet, arrow-ipc, or csv files without requiring a running server. This is useful for analyzing telemetry data with external tools like pandas, DuckDB, or other data analysis frameworks.
+Export database contents to parquet, arrow-ipc, csv, or a Foxglove-compatible mcap file without requiring a running server. This is useful for analyzing telemetry data with external tools like pandas, DuckDB, or other data analysis frameworks, or for reviewing and sharing recordings in [Foxglove](https://foxglove.dev).
 
 The export runs in parallel across components and is dramatically faster than the historical single-threaded path; on a 20-core machine the customer's ~3 GB CSV export went from ~32 s (default formatting) to ~2.2 s (`--csv-fast-floats`), a 14× speedup.
 
@@ -760,7 +901,7 @@ The export runs in parallel across components and is dramatically faster than th
 
   Default value: `parquet`
 
-  Possible values: `parquet`, `arrow-ipc`, `csv`
+  Possible values: `parquet`, `arrow-ipc`, `csv`, `mcap` (alias: `foxglove`)
 
 * `--flatten` — Flatten vector columns to separate columns (e.g., `vel_ned` becomes `vel_ned.x`, `vel_ned.y`, `vel_ned.z`)
 
@@ -776,6 +917,12 @@ The export runs in parallel across components and is dramatically faster than th
 
 * `--include-private` — Include components whose metadata has `private: true`. Off by default — those components are skipped (see [Private Components](#private-components) below).
 
+* `--all-assets` — MCAP-only: attach every file under `{db}/assets/` instead of only schematic-referenced assets.
+
+* `--epoch-offset-us <i64>` — MCAP-only: add this offset (µs) to every sample timestamp before writing MCAP `log_time`/`publish_time`. When omitted and the earliest sample is pre-1970 (negative Unix µs), the exporter auto-rebases so earliest becomes `t=0` and records the shift in metadata key `elodin.time_offset_us`. The same auto-rebase runs if a requested offset would leave any sample pre-epoch (MCAP `log_time` is unsigned and cannot store absolute 1969-era times) — so `--epoch-offset-us 0` on Apollo-style data still preserves playback ordering rather than collapsing every sample to `t=0`.
+
+* `--max-embed-mb <u64>` — MCAP-only: maximum GLB size (MiB) to base64-embed inside `/scene` `SceneUpdate` messages (default `32`). Larger GLBs are still attached to the MCAP but their model primitive is omitted entirely (no empty-`data` model). The viewport follow-entity's mesh is always embedded regardless of this limit.
+
 ###### **Export Formats**
 
 | Format | Extension | Description |
@@ -783,6 +930,33 @@ The export runs in parallel across components and is dramatically faster than th
 | `parquet` | `.parquet` | Columnar format with compression. Best for large datasets and analytics tools. |
 | `arrow-ipc` | `.arrow` | Arrow IPC format. Fast to read/write, good for streaming data between processes. |
 | `csv` | `.csv` | Plain text format. Universal compatibility but larger file sizes. |
+| `mcap` | `.mcap` | Foxglove-compatible MCAP recording (single file, zstd-compressed JSON channels). See [Foxglove MCAP Export](#foxglove-mcap-export) below. |
+
+###### **Foxglove MCAP Export**
+
+`--format mcap` (alias `--format foxglove`) writes a single `{db_name}.mcap` plus a generated `{db_name}.foxglove-layout.json`, ready to open in [Foxglove](https://app.foxglove.dev) or upload to the Foxglove Data Platform:
+
+- Every component becomes a JSON channel (`drone.world_pos` → `/drone/world_pos`) with fields named after the component's `element_names`; dotted names nest (`e.r` → `.e.r`).
+- Pose components (`*.world_pos`, 7 elements) additionally publish `foxglove.FrameTransforms` on `/tf` (`world` → entity), driving the Foxglove 3D panel.
+- Schematic `object_3d` meshes/GLBs (including literal-pose entities), `line_3d` trajectories (decimated, pixel-width scale-invariant lines), constant `vector_arrow`s, and `world_mesh "globe"` (swapped to `earth.glb` on the Earth frame) become `foxglove.SceneUpdate` entities — **one topic per entity** (`/scene/<entity-id>`), because Foxglove backfills only the latest message per topic when a 3D panel (re)mounts. Data-driven `vector_arrow`s (≤30 Hz) publish one topic each (`/scene_dynamic/<name>`). Multiple `object_3d` on the same entity get unique ids (`{frame}-model`, `{frame}-model-2`, …). Literal poses compose with GLB `translate`/`rotate`.
+- Viewport `near`/`far` are honored in the 3D panel `cameraState`; `far` is clamped to ≥4× the camera distance (derived from the viewport `pos` offset, including `translate_world(x,y,z)`-style method chains). Each 3D panel follows its own `look_at`/`pos` subject and subscribes to every scene topic.
+- A schematic `coordinate lat=… lon=… alt=…` node emits static world→`NED`/`ENU` anchor transforms and re-parents entities whose `object_3d` declares `frame="NED"`/`"ENU"` under them.
+- Message logs export as `foxglove.CompressedVideo` (native H.264 and sensor-camera RGBA re-encoded via openh264 when the `video-export` feature is on), `foxglove.RawImage` (sensor cameras without video-export), `foxglove.Log` (LogEntry streams → Log/`RosOut` panel), or base64 JSON (other).
+- Schematic KDL files and referenced GLB assets travel along as MCAP attachments; DB and component metadata as MCAP metadata records (including `elodin.time_offset_us` when timestamps are rebased).
+- The generated layout mirrors the Elodin schematic: tabs/splits map to Foxglove tabs/splits, `graph` EQL expressions expand to Plot panel series, `viewport` becomes a 3D panel following the vehicle, `component_monitor` becomes Raw Messages, `log_stream` becomes a Log panel. SQL `query_plot`, icons, thrusters, bloom/hdr, and non-globe `world_mesh` regions are skipped with a console note.
+
+```bash
+# Export and open locally (drag into app.foxglove.dev or the desktop app)
+elodin-db export --format mcap --output ./fg ./my-database
+
+# One-shot upload + layout + view URL
+scripts/foxglove-upload.sh \
+  --mcap ./fg/my-database.mcap \
+  --layout ./fg/my-database.foxglove-layout.json \
+  --device elodin-my-example \
+  --key elodin-my-example-v1 \
+  --layout-name "Elodin My Example"
+```
 
 ###### **Vector Column Handling**
 
@@ -841,6 +1015,10 @@ When the flag is honored, the export prints a one-line skip message per componen
 ```
 
 Pass `--include-private` to override the filter and export every component regardless of metadata (useful for forensic or full-fidelity exports).
+
+###### **Transient Components**
+
+Simulation components whose metadata contains `"transient": "true"` are kept in the simulation's in-memory world but never registered with or written to Elodin DB. They therefore do not appear in the database schema, editor, replication, or any export, including exports using `--include-private`. Use transient components only for tick-to-tick state that does not need replay, visualization, or forensic analysis. See the Python API reference for restrictions and examples.
 
 ###### **Example**
 

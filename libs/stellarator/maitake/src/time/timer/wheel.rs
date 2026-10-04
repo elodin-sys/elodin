@@ -379,8 +379,11 @@ impl Wheel {
         let distance = self.next_slot_distance(now)?;
 
         let slot = distance % Self::SLOTS;
-        // does the next slot wrap this wheel around from the now slot?
-        let skipped = distance.saturating_sub(Self::SLOTS);
+        // `next_set_bit` represents a wrapped slot as SLOTS + slot. Convert
+        // that to a rotation count (0 or 1), not the slot number after the
+        // wrap. Treating the latter as a rotation count can put the deadline
+        // in the past (slot 0) or several rotations into the future.
+        let skipped = distance / Self::SLOTS;
 
         debug_assert!(distance < Self::SLOTS * 2);
         debug_assert!(

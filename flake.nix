@@ -9,12 +9,17 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
     systems.url = "github:nix-systems/default";
     rust-overlay = {
-      url = "github:oxalica/rust-overlay";
+      url = "github:oxalica/rust-overlay/c84e121aaede7ef8c7bd9fb5154ccc1599e07816";
       inputs.nixpkgs.follows = "nixpkgs";
     };
     flake-utils = {
       url = "github:numtide/flake-utils";
       inputs.systems.follows = "systems";
+    };
+    aleph = {
+      url = "path:./aleph";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.rust-overlay.follows = "rust-overlay";
     };
   };
 
@@ -55,7 +60,9 @@
         elodin-db = final.callPackage ./aleph/pkgs/elodin-db.nix {
           inherit rustToolchain gitRev;
         };
+        elodin-db-protos = final.callPackage ./nix/pkgs/elodin-db-protos.nix {};
         elodinsink = final.callPackage ./nix/pkgs/elodinsink.nix {inherit rustToolchain;};
+        rtsp-streamer = final.callPackage ./nix/pkgs/rtsp-streamer.nix {inherit rustToolchain;};
       };
     };
   in
@@ -82,15 +89,34 @@
         shells = pkgs.callPackage ./nix/shell.nix {inherit config rustToolchain;};
       in {
         packages = with pkgs.elodin; {
-          inherit elodin-cli elodin-db elodinsink;
+          inherit elodin-cli elodin-db elodin-db-protos elodinsink rtsp-streamer;
           elodin-py = elodin-py.py;
+          elodin = elodin-cli;
+          default = elodin-cli;
+        };
+
+        apps = let
+          elodinApp = {
+            type = "app";
+            program = "${pkgs.elodin.elodin-cli}/bin/elodin";
+            meta.description = "Elodin CLI and editor";
+          };
+          elodinDbApp = {
+            type = "app";
+            program = "${pkgs.elodin.elodin-db}/bin/elodin-db";
+            meta.description = "Elodin time-series database";
+          };
+        in {
+          elodin = elodinApp;
+          elodin-db = elodinDbApp;
+          default = elodinApp;
         };
 
         devShells =
           (with shells; {
             inherit elodin;
             default = shells.elodin;
-            run = pkgs.callPackage ./nix/run.nix {};
+            run = pkgs.callPackage ./nix/run.nix {inherit rustToolchain;};
           })
           // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
             tracy = pkgs.callPackage ./nix/tracy.nix {};

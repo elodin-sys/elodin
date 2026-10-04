@@ -1,8 +1,8 @@
 use clap::Parser;
 use db_macros::{AsVTable, Metadatatize};
-use impeller2::types::{LenPacket, PacketId};
-use impeller2_stellar::Client;
-use impeller2_stellar::{SinkExt, StreamExt};
+use impeller::types::{LenPacket, PacketId};
+use impeller_stellar::Client;
+use impeller_stellar::{SinkExt, StreamExt};
 use mlua::LuaSerdeExt;
 use nox::{
     array::{Quat, Vec3},

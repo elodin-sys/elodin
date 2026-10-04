@@ -13,8 +13,9 @@ use crate::{
 use ::s10::{GroupRecipe, SimRecipe, cli::run_recipe_with_token};
 use clap::Parser;
 use convert_case::Casing;
-use impeller2::types::{ComponentId, PrimType, Timestamp};
-use impeller2_wkt::{ComponentMetadata, EntityMetadata};
+use impeller::types::{ComponentId, PrimType, Timestamp};
+use impeller_kdl::FromKdl;
+use impeller_wkt::{BloomConfig, ComponentMetadata, EntityMetadata, EnvironmentConfig, Schematic};
 use miette::miette;
 use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
 use pyo3::exceptions::PyValueError;
@@ -28,6 +29,7 @@ use std::{
     iter,
     net::SocketAddr,
     path::{Path, PathBuf},
+    str::FromStr,
     sync::Arc,
     time,
 };
@@ -125,17 +127,71 @@ pub struct WorldBuilder {
     pub recipes: HashMap<String, ::s10::Recipe>,
 }
 
+fn py_json_value(obj: &Bound<'_, PyAny>) -> Result<serde_json::Value, Error> {
+    let json = obj.py().import("json")?;
+    let dumped: String = json.call_method1("dumps", (obj,))?.extract()?;
+    Ok(serde_json::from_str(&dumped)?)
+}
+
+fn parse_sensor_camera_environment(obj: &Bound<'_, PyAny>) -> Result<EnvironmentConfig, Error> {
+    let value = py_json_value(obj)?;
+    serde_json::from_value(value).map_err(|err| {
+        Error::PyO3(PyValueError::new_err(format!(
+            "sensor_camera environment is invalid: {err}"
+        )))
+    })
+}
+
+fn parse_sensor_camera_bloom(obj: &Bound<'_, PyAny>) -> Result<BloomConfig, Error> {
+    let value = py_json_value(obj)?;
+    serde_json::from_value(value).map_err(|err| {
+        Error::PyO3(PyValueError::new_err(format!(
+            "sensor_camera bloom is invalid: {err}"
+        )))
+    })
+}
+
+fn cinematic_look_requires_cinematic(
+    cinematic: bool,
+    has_environment: bool,
+    has_ev100: bool,
+    has_bloom: bool,
+) -> bool {
+    cinematic || !(has_environment || has_ev100 || has_bloom)
+}
+
 impl WorldBuilder {
+    fn parsed_schematic(&self) -> Option<Schematic> {
+        let content = self.world.metadata.schematic.as_deref()?;
+        Schematic::from_kdl(content).ok()
+    }
+
+    fn validate_cinematic_owners(&self) -> Result<(), Error> {
+        impeller_wkt::validate_single_cinematic_environment(
+            self.parsed_schematic().as_ref(),
+            &self.world.metadata.sensor_cameras,
+        )
+        .map_err(|err| Error::PyO3(PyValueError::new_err(err.to_string())))
+    }
+
     fn sim_recipe(&mut self, path: PathBuf, addr: SocketAddr, optimize: bool) -> ::s10::Recipe {
+        let mut depends_on = self
+            .recipes
+            .iter()
+            .filter(|(_, recipe)| recipe.has_ready_probe())
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        depends_on.sort();
         let sim = SimRecipe {
             path,
             addr,
             optimize,
             env: HashMap::new(),
             log_path: None,
-            depends_on: Vec::new(),
+            depends_on,
             ready: None,
             ready_timeout: None,
+            own_process_group: false,
         };
         let mut recipes: HashMap<String, ::s10::Recipe> = self
             .recipes
@@ -145,16 +201,33 @@ impl WorldBuilder {
             .collect();
 
         if !self.world.metadata.sensor_cameras.is_empty() {
+            #[cfg(target_family = "unix")]
+            let (cmd, args) = (
+                "nice",
+                vec![
+                    "-n".to_string(),
+                    "19".to_string(),
+                    "elodin".to_string(),
+                    "render-server".to_string(),
+                    "--addr".to_string(),
+                    addr.to_string(),
+                ],
+            );
+            #[cfg(not(target_family = "unix"))]
+            let (cmd, args) = (
+                "elodin",
+                vec![
+                    "render-server".to_string(),
+                    "--addr".to_string(),
+                    addr.to_string(),
+                ],
+            );
             recipes.insert(
                 "render-server".to_string(),
                 ::s10::Recipe::Process(::s10::ProcessRecipe {
-                    cmd: "elodin".to_string(),
+                    cmd: cmd.to_string(),
                     process_args: ::s10::ProcessArgs {
-                        args: vec![
-                            "render-server".to_string(),
-                            "--addr".to_string(),
-                            addr.to_string(),
-                        ],
+                        args,
                         cwd: None,
                         env: std::collections::HashMap::from([(
                             "TRACY_PORT".to_string(),
@@ -167,6 +240,7 @@ impl WorldBuilder {
                         depends_on: Vec::new(),
                         ready: None,
                         ready_timeout: None,
+                        own_process_group: false,
                     },
                     no_watch: true,
                 }),
@@ -250,6 +324,28 @@ fn parse_backend_config(
     }
 }
 
+fn validate_component_metadata(component: &crate::PyComponent) -> Result<(), Error> {
+    if component
+        .metadata
+        .get("transient")
+        .is_some_and(|value| value == "true")
+    {
+        for conflicting_key in ["external_control", "wait_for_write", "record_every_tick"] {
+            if component
+                .metadata
+                .get(conflicting_key)
+                .is_some_and(|value| value == "true")
+            {
+                return Err(Error::PyO3(PyValueError::new_err(format!(
+                    "component '{}' cannot be both transient and {conflicting_key}",
+                    component.name
+                ))));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[pymethods]
 impl WorldBuilder {
     #[new]
@@ -264,7 +360,7 @@ impl WorldBuilder {
         id: Option<String>,
     ) -> Result<EntityId, Error> {
         let entity_id = EntityId {
-            inner: impeller2::types::EntityId(self.world.entity_len()),
+            inner: impeller::types::EntityId(self.world.entity_len()),
         };
         self.insert(entity_id, spawnable)?;
         self.world.metadata.entity_len += 1;
@@ -273,7 +369,7 @@ impl WorldBuilder {
                 let new_id = name
                     .without_boundaries(&convert_case::Boundary::digits())
                     .to_case(convert_case::Case::Snake);
-                eprintln!("convert name {:?} to ID {:?}", &name, &new_id);
+                eprintln!("convert name {:?} to ID {:?}", name, new_id);
                 info!("convert name {:?} to ID {:?}", &name, &new_id);
                 Some(new_id)
             }
@@ -303,6 +399,12 @@ impl WorldBuilder {
     pub fn insert(&mut self, entity_id: EntityId, spawnable: Spawnable) -> Result<(), Error> {
         match spawnable {
             Spawnable::Archetypes(archetypes) => {
+                for archetype in &archetypes {
+                    for component in &archetype.component_data {
+                        validate_component_metadata(component)?;
+                    }
+                }
+
                 for archetype in archetypes {
                     for (arr, component) in archetype.arrays.iter().zip(archetype.component_data) {
                         let component_id = ComponentId::new(&component.name);
@@ -345,13 +447,62 @@ impl WorldBuilder {
         Ok(())
     }
 
+    #[pyo3(signature = (entity, temperature_c, emissivity = 1.0))]
+    fn thermal_tag(
+        &mut self,
+        entity: crate::entity::EntityId,
+        temperature_c: f32,
+        emissivity: f32,
+    ) -> Result<(), crate::error::Error> {
+        if !temperature_c.is_finite() {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "thermal_tag temperature_c must be finite",
+            )));
+        }
+        if !(emissivity.is_finite() && (0.0..=1.0).contains(&emissivity)) {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "thermal_tag emissivity must be finite and between 0 and 1",
+            )));
+        }
+        let entity_name = self
+            .world
+            .metadata
+            .entity_metadata
+            .get(&entity.inner)
+            .ok_or_else(|| {
+                Error::PyO3(PyValueError::new_err(format!(
+                    "entity {:?} not found in metadata; spawn it before calling thermal_tag()",
+                    entity.inner
+                )))
+            })?
+            .name
+            .clone();
+        let tag = crate::world::ThermalTagConfig {
+            entity_name: entity_name.clone(),
+            temperature_c,
+            emissivity,
+        };
+        if let Some(existing) = self
+            .world
+            .metadata
+            .thermal_tags
+            .iter_mut()
+            .find(|existing| existing.entity_name == entity_name)
+        {
+            *existing = tag;
+        } else {
+            self.world.metadata.thermal_tags.push(tag);
+        }
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (
         entity,
         name,
-        width,
-        height,
-        fov = 90.0,
+        width = None,
+        height = None,
+        fov = None,
         near = 0.01,
         far = 1000.0,
         pos_offset = vec![0.0, 0.0, 0.0],
@@ -359,33 +510,50 @@ impl WorldBuilder {
         format = "rgba",
         effect = "normal",
         effect_params = None,
+        camera_model = None,
+        lens_hfov = None,
         create_frustum = false,
         show_ellipsoids = false,
         frustums_color = None,
         projection_color = None,
         frustums_thickness = 0.006,
-        fps = 30.0,
+        frustums_up_marker = "none",
+        frustums_up_marker_overlay = true,
+        fps = None,
+        cinematic = false,
+        ev100 = None,
+        bloom = None,
+        environment = None,
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn sensor_camera(
         &mut self,
         entity: crate::entity::EntityId,
         name: String,
-        width: u32,
-        height: u32,
-        fov: f32,
+        width: Option<u32>,
+        height: Option<u32>,
+        fov: Option<f32>,
         near: f32,
         far: f32,
         pos_offset: Vec<f64>,
         rot_offset: Vec<f64>,
         format: &str,
         effect: &str,
-        effect_params: Option<&Bound<'_, PyDict>>,
+        effect_params: Option<&Bound<'_, PyAny>>,
+        camera_model: Option<&str>,
+        lens_hfov: Option<f32>,
         create_frustum: bool,
         show_ellipsoids: bool,
         frustums_color: Option<Vec<f32>>,
         projection_color: Option<Vec<f32>>,
         frustums_thickness: f32,
-        fps: f32,
+        frustums_up_marker: &str,
+        frustums_up_marker_overlay: bool,
+        fps: Option<f32>,
+        cinematic: bool,
+        ev100: Option<f32>,
+        bloom: Option<&Bound<'_, PyAny>>,
+        environment: Option<&Bound<'_, PyAny>>,
     ) -> Result<(), crate::error::Error> {
         if name.chars().any(|c| c.is_whitespace()) {
             return Err(crate::error::Error::PyO3(
@@ -406,25 +574,105 @@ impl WorldBuilder {
                 )))
             })?;
         let pair_name = format!("{}.{}", entity_meta.name, name);
+        let preset = match camera_model {
+            Some(name) => Some(impeller_wkt::sensor_camera_model_preset(name).ok_or_else(
+                || {
+                    Error::PyO3(PyValueError::new_err(format!(
+                        "unsupported sensor camera model '{name}'; expected 'boson640p'"
+                    )))
+                },
+            )?),
+            None => None,
+        };
+        let width = width
+            .or_else(|| preset.map(|preset| preset.width))
+            .ok_or_else(|| {
+                Error::PyO3(PyValueError::new_err(
+                    "sensor_camera width is required unless camera_model supplies it",
+                ))
+            })?;
+        let height = height
+            .or_else(|| preset.map(|preset| preset.height))
+            .ok_or_else(|| {
+                Error::PyO3(PyValueError::new_err(
+                    "sensor_camera height is required unless camera_model supplies it",
+                ))
+            })?;
+        if width == 0 || height == 0 {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "sensor_camera width and height must be greater than zero",
+            )));
+        }
+        if fov.is_some() && lens_hfov.is_some() {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "sensor_camera fov and lens_hfov are mutually exclusive",
+            )));
+        }
+        let resolved_lens_hfov = if fov.is_none() {
+            lens_hfov.or_else(|| preset.map(|preset| preset.lens_hfov_degrees))
+        } else {
+            None
+        };
+        if resolved_lens_hfov.is_some_and(|fov| !(fov > 0.0 && fov < 180.0 && fov.is_finite())) {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "sensor_camera lens_hfov must be finite and between 0 and 180 degrees",
+            )));
+        }
+        let fov = fov
+            .or_else(|| {
+                resolved_lens_hfov
+                    .map(|hfov| impeller_wkt::vertical_fov_from_hfov(hfov, width, height))
+            })
+            .unwrap_or(90.0);
+        if !(fov > 0.0 && fov < 180.0 && fov.is_finite()) {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "sensor_camera fov must be finite and between 0 and 180 degrees",
+            )));
+        }
+        let fps = fps
+            .or_else(|| preset.map(|preset| preset.fps))
+            .unwrap_or(30.0);
+        if !(near > 0.0 && far > near && near.is_finite() && far.is_finite()) {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "sensor_camera requires finite clipping planes with 0 < near < far",
+            )));
+        }
         match format {
-            "rgba" | "gray" => {}
+            "rgba" | "gray8" | "h264" => {}
             _ => {
                 return Err(crate::error::Error::PyO3(
                     pyo3::exceptions::PyValueError::new_err(format!(
-                        "unsupported format '{}': expected 'rgba' or 'gray'",
+                        "unsupported format '{}': expected 'rgba', 'gray8', or 'h264'",
                         format
                     )),
                 ));
             }
         }
+        if matches!(format, "gray8" | "h264") && (width % 2 != 0 || height % 2 != 0) {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "sensor_camera gray8 and h264 width and height must be even",
+            )));
+        }
+        if !matches!(
+            effect,
+            "normal" | "thermal" | "night_vision" | "depth" | "lwir"
+        ) {
+            return Err(Error::PyO3(PyValueError::new_err(format!(
+                "unsupported sensor camera effect '{effect}'"
+            ))));
+        }
 
-        let mut parsed_effect_params = std::collections::HashMap::new();
+        let mut parsed_effect_params = camera_model
+            .and_then(impeller_wkt::sensor_camera_model_effect_params)
+            .unwrap_or_else(|| serde_json::json!({}));
         if let Some(params) = effect_params {
-            for (key, value) in params.iter() {
-                if let (Ok(k), Ok(v)) = (key.extract::<String>(), value.extract::<f64>()) {
-                    parsed_effect_params.insert(k, v);
-                }
+            let overrides = py_json_value(params)?;
+            if !overrides.is_object() {
+                return Err(Error::PyO3(PyValueError::new_err(
+                    "sensor_camera effect_params must be a dictionary",
+                )));
             }
+            impeller_wkt::merge_json(&mut parsed_effect_params, overrides);
         }
 
         let pos_off = [
@@ -461,11 +709,31 @@ impl WorldBuilder {
                 )),
             ));
         }
+        let frustums_up_marker = impeller_wkt::FrustumUpMarker::from_str(frustums_up_marker)
+            .map_err(|_| {
+                Error::PyO3(PyValueError::new_err(format!(
+                    "sensor_camera frustums_up_marker must be 'none' or 'highlight', got '{frustums_up_marker}'"
+                )))
+            })?;
+        if !cinematic_look_requires_cinematic(
+            cinematic,
+            environment.is_some(),
+            ev100.is_some(),
+            bloom.is_some(),
+        ) {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "ev100, bloom, and environment require cinematic=True",
+            )));
+        }
+        let bloom = bloom.map(parse_sensor_camera_bloom).transpose()?;
+        let environment = environment
+            .map(parse_sensor_camera_environment)
+            .transpose()?;
 
         let color_from_vec = |value: Option<Vec<f32>>,
-                              default_color: impeller2_wkt::Color,
+                              default_color: impeller_wkt::Color,
                               field: &str|
-         -> Result<impeller2_wkt::Color, crate::error::Error> {
+         -> Result<impeller_wkt::Color, crate::error::Error> {
             let Some(value) = value else {
                 return Ok(default_color);
             };
@@ -476,7 +744,7 @@ impl WorldBuilder {
                     )),
                 ));
             }
-            Ok(impeller2_wkt::Color::rgba(
+            Ok(impeller_wkt::Color::rgba(
                 value[0].clamp(0.0, 1.0),
                 value[1].clamp(0.0, 1.0),
                 value[2].clamp(0.0, 1.0),
@@ -500,21 +768,33 @@ impl WorldBuilder {
                 format: format.to_string(),
                 effect: effect.to_string(),
                 effect_params: parsed_effect_params,
+                camera_model: camera_model.map(str::to_owned),
+                lens_hfov_degrees: resolved_lens_hfov,
                 create_frustum,
                 show_ellipsoids,
                 frustums_color: color_from_vec(
                     frustums_color,
-                    impeller2_wkt::default_viewport_frustums_color(),
+                    impeller_wkt::default_viewport_frustums_color(),
                     "frustums_color",
                 )?,
                 projection_color: color_from_vec(
                     projection_color,
-                    impeller2_wkt::default_viewport_projection_color(),
+                    impeller_wkt::default_viewport_projection_color(),
                     "projection_color",
                 )?,
                 frustums_thickness,
+                frustums_up_marker,
+                frustums_up_marker_overlay,
                 fps,
+                cinematic,
+                ev100,
+                bloom,
+                environment,
             });
+        if let Err(err) = self.validate_cinematic_owners() {
+            self.world.metadata.sensor_cameras.pop();
+            return Err(err);
+        }
 
         Ok(())
     }
@@ -583,6 +863,7 @@ impl WorldBuilder {
         let path = args.first().ok_or(Error::MissingArg("path".to_string()))?;
         let path = PathBuf::from(path);
         let args = Args::parse_from(args);
+        self.validate_cinematic_owners()?;
         match args {
             Args::Run {
                 addr,
@@ -664,9 +945,31 @@ impl WorldBuilder {
                             crate::Error::DB(e)
                         }
                     })?;
-                crate::impeller2_server::prime_schematic_assets(&db_server.db, exec.world_mut())
-                    .map_err(crate::Error::DB)?;
-                elodin_db::assets_http::spawn_assets_http(&db_path, addr)?;
+                let grpc_addr = elodin_db::grpc::grpc_addr(addr);
+                let grpc_db = db_server.db.clone();
+                let listener = std::net::TcpListener::bind(grpc_addr).map_err(|e| {
+                    crate::Error::Io(std::io::Error::new(
+                        e.kind(),
+                        format!("failed to bind gRPC server at {grpc_addr}: {e}"),
+                    ))
+                })?;
+                stellarator::struc_con::tokio(move |_| async move {
+                    if let Err(error) = elodin_db::grpc::serve_listener(listener, grpc_db).await {
+                        tracing::error!(?error, "gRPC server exited");
+                    }
+                });
+                crate::impeller_server::prime_schematic_assets(
+                    &db_server.db,
+                    exec.world_mut(),
+                    simulation_source_entrypoint.as_deref().map(Path::new),
+                )
+                .map_err(crate::Error::DB)?;
+                elodin_db::assets_http::spawn_assets_http(
+                    &db_path,
+                    addr,
+                    true,
+                    Some(db_server.db.clone()),
+                )?;
                 capture_simulation_source(py, &db_path, simulation_source_entrypoint.as_deref())?;
                 let run_result = py.allow_threads(|| {
                     // Run the async executor (and therefore the JIT tick_fn) on a
@@ -680,7 +983,7 @@ impl WorldBuilder {
                         .stack_size(256 * 1024 * 1024)
                         .spawn(move || {
                             stellarator::run(|| {
-                                crate::impeller2_server::Server::new(db_server, exec)
+                                crate::impeller_server::Server::new(db_server, exec)
                                     .run_with_cancellation(
                                         move || {
                                             let cancelled = if let Some(ref func) = is_canceled {
@@ -1198,18 +1501,18 @@ impl WorldBuilder {
                     op_complexity_vec.sort_by(|a, b| b.1.cmp(a.1));
 
                     // Analyze components memory
-                    let element_size = |prim_type: impeller2::types::PrimType| -> usize {
+                    let element_size = |prim_type: impeller::types::PrimType| -> usize {
                         match prim_type {
-                            impeller2::types::PrimType::Bool
-                            | impeller2::types::PrimType::U8
-                            | impeller2::types::PrimType::I8 => 1,
-                            impeller2::types::PrimType::U16 | impeller2::types::PrimType::I16 => 2,
-                            impeller2::types::PrimType::U32
-                            | impeller2::types::PrimType::I32
-                            | impeller2::types::PrimType::F32 => 4,
-                            impeller2::types::PrimType::U64
-                            | impeller2::types::PrimType::I64
-                            | impeller2::types::PrimType::F64 => 8,
+                            impeller::types::PrimType::Bool
+                            | impeller::types::PrimType::U8
+                            | impeller::types::PrimType::I8 => 1,
+                            impeller::types::PrimType::U16 | impeller::types::PrimType::I16 => 2,
+                            impeller::types::PrimType::U32
+                            | impeller::types::PrimType::I32
+                            | impeller::types::PrimType::F32 => 4,
+                            impeller::types::PrimType::U64
+                            | impeller::types::PrimType::I64
+                            | impeller::types::PrimType::F64 => 8,
                         }
                     };
 
@@ -1364,12 +1667,16 @@ impl WorldBuilder {
                         None => tempfile::tempdir()?.keep().join("db"),
                     };
                     let db = elodin_db::DB::create(db_path)?;
-                    crate::impeller2_server::prime_schematic_assets(&db, compiled_exec.world_mut())
-                        .map_err(Error::DB)?;
-                    crate::impeller2_server::init_db(
+                    crate::impeller_server::prime_schematic_assets(
                         &db,
                         compiled_exec.world_mut(),
-                        impeller2::types::Timestamp::now(),
+                        simulation_source_entrypoint.as_deref().map(Path::new),
+                    )
+                    .map_err(Error::DB)?;
+                    crate::impeller_server::init_db(
+                        &db,
+                        compiled_exec.world_mut(),
+                        impeller::types::Timestamp::now(),
                     )?;
 
                     let mut exec_with_db = PyExec {
@@ -1455,9 +1762,11 @@ impl WorldBuilder {
             None => tempfile::tempdir()?.keep().join("db"),
         };
         let db = elodin_db::DB::create(db_path)?;
-        crate::impeller2_server::prime_schematic_assets(&db, exec.world_mut())
+        // No sim entrypoint is threaded into `build`; ingest falls back to
+        // `$ELODIN_ASSETS` / cwd like before.
+        crate::impeller_server::prime_schematic_assets(&db, exec.world_mut(), None)
             .map_err(Error::DB)?;
-        crate::impeller2_server::init_db(&db, exec.world_mut(), Timestamp::now())?;
+        crate::impeller_server::init_db(&db, exec.world_mut(), Timestamp::now())?;
         Ok(PyExec {
             exec,
             db: Box::new(db),
@@ -1525,18 +1834,30 @@ impl WorldBuilder {
     /// If a `path` is given and the file exists, the file's contents will be
     /// used as the schematic.
     ///
-    /// In all other cases, `default_content` is used as the schematic.
+    /// In all other cases, `default_content` is used as the schematic. Accepts a
+    /// KDL `str` or an `elodin.ui.Schematic` object (serialized to KDL).
     ///
     /// Primarily this affords the code a means of specifying a default
     /// schematic and location for saving custom schematics. It is expected that
     /// the user may make changes and save the schematic to the given path, but
     /// this function itself does not write to the `path`.
     #[pyo3(signature = (default_content = None, path = None,))]
-    pub fn schematic(&mut self, default_content: Option<String>, path: Option<String>) {
+    pub fn schematic(
+        &mut self,
+        default_content: Option<&Bound<'_, PyAny>>,
+        path: Option<String>,
+    ) -> Result<(), Error> {
+        let (default_content, kernel_assets) = match default_content {
+            None => (None, HashMap::new()),
+            Some(obj) => {
+                let (kdl, kernels) = crate::ui::extract_schematic_content(obj)?;
+                (Some(kdl), kernels)
+            }
+        };
         let requested_path = path.map(PathBuf::from);
         let file_contents = requested_path
             .as_ref()
-            .map(|p| impeller2_kdl::env::schematic_file(p))
+            .map(|p| impeller_kdl::env::schematic_file(p))
             .and_then(|path| {
                 if path.exists() {
                     std::fs::read_to_string(&path)
@@ -1563,7 +1884,16 @@ impl WorldBuilder {
                     None
                 }
             });
+        let previous = self.world.metadata.schematic.clone();
+        let previous_kernels = self.world.metadata.schematic_kernels.clone();
         self.world.metadata.schematic = file_contents.or(default_content);
+        self.world.metadata.schematic_kernels = kernel_assets;
+        if let Err(err) = self.validate_cinematic_owners() {
+            self.world.metadata.schematic = previous;
+            self.world.metadata.schematic_kernels = previous_kernels;
+            return Err(err);
+        }
+        Ok(())
     }
 
     pub fn discover_components(&self, py: Python<'_>) -> Result<Py<PyAny>, Error> {
@@ -1572,7 +1902,7 @@ impl WorldBuilder {
         let entities = PyList::empty(py);
 
         // Build a map of entity_id -> set of component names (using HashSet to avoid duplicates)
-        let mut entity_components: HashMap<impeller2::types::EntityId, HashSet<String>> =
+        let mut entity_components: HashMap<impeller::types::EntityId, HashSet<String>> =
             HashMap::new();
 
         // Iterate through all components in the world
@@ -1589,18 +1919,15 @@ impl WorldBuilder {
                     );
                 }
 
-                // Process entity IDs - using chunks_exact to ensure we only process complete IDs
-                for chunk in buffer.entity_ids.chunks_exact(8) {
-                    let entity_id = u64::from_le_bytes(chunk.try_into().unwrap());
-                    let entity_id = impeller2::types::EntityId(entity_id);
+                let (chunks, remainder) = buffer.entity_ids.as_chunks::<8>();
+                for chunk in chunks {
+                    let entity_id = u64::from_le_bytes(*chunk);
+                    let entity_id = impeller::types::EntityId(entity_id);
                     entity_components
                         .entry(entity_id)
                         .or_default()
                         .insert(metadata.name.clone());
                 }
-
-                // Check if there's a remainder (incomplete ID) that was skipped
-                let remainder = buffer.entity_ids.chunks_exact(8).remainder();
                 if !remainder.is_empty() {
                     tracing::warn!(
                         "Component '{}' has {} bytes of incomplete entity ID data",
@@ -1933,6 +2260,43 @@ mod test {
     use super::*;
     use convert_case::Casing;
 
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn sim_recipe_waits_for_ready_sidecars() {
+        let mut builder = WorldBuilder::default();
+        builder.recipes.insert(
+            "controller".into(),
+            ::s10::Recipe::Process(::s10::ProcessRecipe {
+                cmd: "true".into(),
+                process_args: ::s10::ProcessArgs {
+                    args: Vec::new(),
+                    cwd: None,
+                    env: HashMap::new(),
+                    restart_policy: ::s10::RestartPolicy::Never,
+                    fail_on_error: false,
+                    log_path: None,
+                    silence: true,
+                    depends_on: Vec::new(),
+                    ready: Some(::s10::ReadyProbe::Delay { ms: 100 }),
+                    ready_timeout: Some("1s".into()),
+                    own_process_group: false,
+                },
+                no_watch: true,
+            }),
+        );
+        let ::s10::Recipe::Group(group) = builder.sim_recipe(
+            PathBuf::from("main.py"),
+            "127.0.0.1:2240".parse().unwrap(),
+            false,
+        ) else {
+            panic!("expected recipe group");
+        };
+        let ::s10::Recipe::Sim(sim) = &group.recipes["sim"] else {
+            panic!("expected simulation recipe");
+        };
+        assert_eq!(sim.depends_on, ["controller"]);
+    }
+
     #[test]
     fn test_snake_case() {
         assert!(!"e1".is_case(convert_case::Case::Snake));
@@ -1954,5 +2318,68 @@ mod test {
         assert!(is_snake_case("e1"));
         assert!(is_snake_case("e_1"));
         assert!(!is_snake_case("E1"));
+    }
+
+    #[test]
+    fn cinematic_false_rejects_look_kwargs() {
+        assert!(!cinematic_look_requires_cinematic(
+            false, true, false, false
+        ));
+        assert!(!cinematic_look_requires_cinematic(
+            false, false, true, false
+        ));
+        assert!(!cinematic_look_requires_cinematic(
+            false, false, false, true
+        ));
+        assert!(cinematic_look_requires_cinematic(true, true, true, true));
+        assert!(cinematic_look_requires_cinematic(
+            false, false, false, false
+        ));
+    }
+
+    #[test]
+    fn two_cinematic_sensor_cameras_are_rejected() {
+        let err = impeller_wkt::validate_single_cinematic_environment(
+            None,
+            &[
+                impeller_wkt::SensorCameraConfig {
+                    camera_name: "a.cam".into(),
+                    cinematic: true,
+                    ..Default::default()
+                },
+                impeller_wkt::SensorCameraConfig {
+                    camera_name: "b.cam".into(),
+                    cinematic: true,
+                    ..Default::default()
+                },
+            ],
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("a.cam"), "{msg}");
+        assert!(msg.contains("b.cam"), "{msg}");
+    }
+
+    #[test]
+    fn cinematic_viewport_and_sensor_camera_are_rejected() {
+        let schematic = impeller_wkt::Schematic::from_kdl(
+            r#"
+environment { earth }
+viewport name="Chase" cinematic=#true
+"#,
+        )
+        .unwrap();
+        let err = impeller_wkt::validate_single_cinematic_environment(
+            Some(&schematic),
+            &[impeller_wkt::SensorCameraConfig {
+                camera_name: "bdx.fpv_cam".into(),
+                cinematic: true,
+                ..Default::default()
+            }],
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Chase"), "{msg}");
+        assert!(msg.contains("bdx.fpv_cam"), "{msg}");
     }
 }

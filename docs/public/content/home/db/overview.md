@@ -17,7 +17,10 @@ Elodin DB is a time-series database for physical systems. It serves as a central
 
 Elodin DB is based on the same ECS system as Elodin Sim (and the rest of the Elodin ecosystem). Elodin DB sorts data into "entities" and "components". Entities are best thought of as objects that emit telemetry. For instance an individual sensor would be an entity. A component is a piece of telemetry data that is associated with an entity. For example an accelerometer's acceleration reading would be a component. Entities can have multiple components, and each component can be associated with multiple entities.
 
-Elodin DB chiefly communicates over `impeller` -- Elodin's lightweight message protocol designed for flight software. In addition to `impeller`, Elodin DB can be queried via SQL and results are returned in the Arrow IPC format.
+Elodin DB chiefly communicates over `impeller` -- Elodin's lightweight native
+protocol used by the editor, simulation, and followers. It also offers an
+optional protobuf/gRPC API for foreign clients: ingest, historical and SQL
+queries, live playback, message logs, metadata, config, and assets.
 
 ## Quick Start
 
@@ -28,6 +31,18 @@ To start a new instance of Elodin DB, use the following command:
 ```sh
 elodin-db run
 ```
+
+The gRPC API starts automatically two ports above the native endpoint:
+
+```sh
+elodin-db run [::]:2240 ./db
+# Native: 2240, asset HTTP: 2241, gRPC: 2242
+```
+
+See `libs/db/proto/elodin/db/v1`, the `elodin-db-protos` CMake package, and
+`libs/db/examples/grpc-client-batched.cpp` (16 MiB max message). Health and
+reflection are enabled. Use `--grpc-auth-token TOKEN` to require bearer-token
+metadata; without it the API is unauthenticated.
 
 ### Lua REPL
 

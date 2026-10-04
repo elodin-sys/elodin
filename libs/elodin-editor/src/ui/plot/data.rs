@@ -1,46 +1,59 @@
 use bevy::asset::Asset;
 use bevy::log::warn_once;
-use bevy::prelude::{DetectChanges, InRef, Res, ResMut};
+use bevy::prelude::{InRef, Res, ResMut};
 use bevy::reflect::TypePath;
 use bevy::{
-    asset::{Assets, Handle},
+    asset::{AssetId, Assets, Handle},
     ecs::system::{Commands, Query},
     prelude::Resource,
 };
 use bevy_render::render_resource::{Buffer, BufferDescriptor, BufferSlice, BufferUsages};
 use bevy_render::renderer::{RenderDevice, RenderQueue};
-use impeller2::types::{ComponentId, ComponentView, OwnedPacket, PrimType, Timestamp};
-use impeller2_bevy::{
-    CommandsExt, ComponentSchemaRegistry, ComponentValueMap, EntityMap, PacketGrantR,
-    PacketHandlerInput, PacketHandlers,
+use impeller::types::{ComponentId, ComponentView, OwnedPacket, PacketId, Timestamp};
+use impeller_bevy::{
+    BackfillState, CommandsExt, ComponentAdapters, ComponentPathRegistry, ComponentSchemaRegistry,
+    PacketGrantR, PacketHandlerInput, PacketHandlers, SeriesFetchPriority, TelemetryCache,
 };
-use impeller2_wkt::{
-    CurrentTimestamp, EarliestTimestamp, GetTimeSeries, LastUpdated, PlotOverviewQuery,
+use impeller_wkt::{
+    ComponentValue, CurrentTimestamp, EarliestTimestamp, GetTimeSeries, GetTimeSeriesPredecessor,
+    Line3d, PointTrails, VectorArrow3d,
 };
 use itertools::{Itertools, MinMaxResult};
 use nodit::NoditMap;
 use nodit::interval::ii;
 use roaring::bitmap::RoaringBitmap;
-use zerocopy::{Immutable, IntoBytes, TryFromBytes};
+use zerocopy::{Immutable, IntoBytes};
 
 use std::any::type_name;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU64;
-use std::ops::RangeInclusive;
+use std::ops::{ControlFlow, RangeInclusive};
 use std::sync::Arc;
 use std::sync::atomic::{self, AtomicBool};
 use std::time::{Duration, Instant};
 use std::{collections::BTreeMap, fmt::Debug, ops::Range};
 
+use crate::object_3d::Object3DState;
+use crate::sensor_camera::SensorCameraConfigs;
+use crate::ui::inspector::viewport::Viewport;
+use crate::ui::monitor::MonitorData;
 use crate::ui::plot::gpu::INDEX_BUFFER_LEN;
-use crate::{SelectedTimeRange, TimeRangeBehavior};
+use crate::ui::plot::state::GraphState;
+use crate::ui::schematic::EqlExt;
+use crate::{EqlContext, SelectedTimeRange};
 use hamann_chen_line::{select_polyline3_indices, select_time_value_indices};
 
 use super::PlotBounds;
 
+const PLOT_STRIP_SEPARATOR_INDEX: u32 = u32::MAX;
+
 /// Maximum points to request for overview data (LTTB downsampled)
 /// Must be <= CHUNK_LEN to fit within a single GPU buffer shard
 pub const OVERVIEW_MAX_POINTS: usize = CHUNK_LEN;
+
+/// Cap for [`LineTree::percentile_bounds`]. Uniform stride keeps P1/P99
+/// stable while avoiding a full-window `Vec` (the remaining FULL RANGE cost).
+pub const MAX_PERCENTILE_SAMPLES: usize = 8192;
 
 /// Tuning for **Hamann–Chen** downsampling of live [`LineTree`] telemetry.
 ///
@@ -104,18 +117,8 @@ pub struct PlotDataComponent {
     pub label: String,
     pub element_names: Vec<String>,
     pub lines: BTreeMap<usize, Handle<Line>>,
-    request_states: HashMap<Timestamp, RequestState>,
-    /// Whether the overview data has been requested for each line element
-    overview_requested: HashMap<usize, bool>,
-}
-
-#[derive(Clone, Debug)]
-enum RequestState {
-    Requested(Instant),
-    Returned {
-        len: usize,
-        last_timestamp: Option<Timestamp>,
-    },
+    /// Last time this component's LineTrees were synced from SeriesStore.
+    last_query_attempt: Option<Instant>,
 }
 
 impl PlotDataComponent {
@@ -124,8 +127,7 @@ impl PlotDataComponent {
             label: component_label.to_string(),
             element_names,
             lines: BTreeMap::new(),
-            request_states: HashMap::new(),
-            overview_requested: HashMap::new(),
+            last_query_attempt: None,
         }
     }
 
@@ -137,26 +139,15 @@ impl PlotDataComponent {
         earliest_timestamp: Timestamp,
         archive_enabled: bool,
     ) {
-        let element_names = self
-            .element_names
-            .iter()
-            .filter(|s| !s.is_empty())
-            .map(|s| Some(s.as_str()))
-            .chain(std::iter::repeat(None));
-        for (i, (new_value, name)) in component_view.iter().zip(element_names).enumerate() {
+        for (i, new_value) in component_view.iter().enumerate() {
+            let Some(line) = self.lines.get(&i) else {
+                continue;
+            };
             let new_value = new_value.as_f32();
-            let line = self.lines.entry(i).or_insert_with(|| {
-                let label = name.map(str::to_string).unwrap_or_else(|| format!("[{i}]"));
-                assets.add(Line {
-                    label,
-                    ..Default::default()
-                })
-            });
-            let line = assets.get_mut(line.id()).expect("missing line asset");
+            let mut line = assets.get_mut(line.id()).expect("missing line asset");
             // Only accept data at timestamps beyond all existing data for this
-            // line.  The FixedRate stream sends a snapshot at the current
-            // playback position each frame; skipping timestamps already covered
-            // prevents corrupting historical data loaded by GetTimeSeries.
+            // line. Live FixedRate snapshots can repeat the playhead timestamp;
+            // skipping already-covered times keeps the tip monotonic.
             let mut accepted = false;
             if let Some(last) = line.data.last() {
                 if timestamp <= last.summary.end_timestamp {
@@ -184,6 +175,107 @@ impl PlotDataComponent {
 #[derive(Resource, Clone, Default)]
 pub struct CollectedGraphData {
     pub components: BTreeMap<ComponentId, PlotDataComponent>,
+    line_layout_generation: u64,
+}
+
+pub(crate) struct EvaluatedSeries {
+    pub timestamps: Vec<Timestamp>,
+    pub values: Vec<Vec<f32>>,
+}
+
+fn component_eval_value(value: &ComponentValue) -> eql::eval::EvalValue {
+    use nox::ArrayBuf;
+
+    macro_rules! numeric {
+        ($array:expr) => {
+            $array
+                .buf
+                .as_buf()
+                .iter()
+                .map(|&value| value as f64)
+                .collect::<Vec<_>>()
+        };
+    }
+
+    let values = match value {
+        ComponentValue::U8(array) => numeric!(array),
+        ComponentValue::U16(array) => numeric!(array),
+        ComponentValue::U32(array) => numeric!(array),
+        ComponentValue::U64(array) => numeric!(array),
+        ComponentValue::I8(array) => numeric!(array),
+        ComponentValue::I16(array) => numeric!(array),
+        ComponentValue::I32(array) => numeric!(array),
+        ComponentValue::I64(array) => numeric!(array),
+        ComponentValue::Bool(array) => array
+            .buf
+            .as_buf()
+            .iter()
+            .map(|&value| if value { 1.0 } else { 0.0 })
+            .collect(),
+        ComponentValue::F32(array) => numeric!(array),
+        ComponentValue::F64(array) => array.buf.as_buf().to_vec(),
+    };
+    if value.shape().is_empty() || values.len() == 1 {
+        eql::eval::EvalValue::Scalar(values.first().copied().unwrap_or_default())
+    } else {
+        eql::eval::EvalValue::Vector(values)
+    }
+}
+
+pub(crate) fn evaluate_series(
+    cache: &TelemetryCache,
+    expr: &eql::Expr,
+    dependencies: &[ComponentId],
+    range: Range<Timestamp>,
+    max_points: Option<usize>,
+) -> Result<EvaluatedSeries, eql::eval::EvalError> {
+    let sample_times = cache.union_timestamps(dependencies, range);
+    if sample_times.is_empty() {
+        return Ok(EvaluatedSeries {
+            timestamps: Vec::new(),
+            values: Vec::new(),
+        });
+    }
+    let stride = max_points
+        .filter(|&limit| limit > 0)
+        .map(|limit| sample_times.len().div_ceil(limit))
+        .unwrap_or(1)
+        .max(1);
+    let mut timestamps = Vec::new();
+    let mut output: Vec<Vec<f32>> = Vec::new();
+    for (sample_index, timestamp) in sample_times.into_iter().enumerate() {
+        if sample_index % stride != 0 {
+            continue;
+        }
+        let value = match eql::eval::evaluate(expr, &|part| {
+            cache
+                .get_at_or_before(&part.id, timestamp)
+                .map(component_eval_value)
+                .ok_or_else(|| eql::eval::EvalError::MissingComponent(part.name.clone()))
+        }) {
+            Ok(value) => value,
+            Err(eql::eval::EvalError::MissingComponent(_)) => continue,
+            Err(err) => return Err(err),
+        };
+        let values = value.into_values();
+        if output.is_empty() {
+            output.resize_with(values.len(), Vec::new);
+        }
+        if values.len() != output.len() {
+            return Err(eql::eval::EvalError::Broadcast {
+                left: output.len(),
+                right: values.len(),
+            });
+        }
+        timestamps.push(timestamp);
+        for (series, value) in output.iter_mut().zip(values) {
+            series.push(value as f32);
+        }
+    }
+    Ok(EvaluatedSeries {
+        timestamps,
+        values: output,
+    })
 }
 
 impl CollectedGraphData {
@@ -202,6 +294,89 @@ impl CollectedGraphData {
             .get(component_id)
             .and_then(|component| component.lines.get(&index))
     }
+
+    pub fn ensure_line_handle(
+        &mut self,
+        component_id: ComponentId,
+        index: usize,
+        assets: &mut Assets<Line>,
+    ) -> Option<Handle<Line>> {
+        let component = self.components.get_mut(&component_id)?;
+        if let Some(handle) = component.lines.get(&index) {
+            return Some(handle.clone());
+        }
+        let label = component
+            .element_names
+            .get(index)
+            .filter(|name| !name.is_empty())
+            .cloned()
+            .unwrap_or_else(|| format!("[{index}]"));
+        let handle = assets.add(Line {
+            label,
+            ..Default::default()
+        });
+        component.lines.insert(index, handle.clone());
+        self.line_layout_generation = self.line_layout_generation.wrapping_add(1);
+        Some(handle)
+    }
+
+    pub fn line_layout_generation(&self) -> u64 {
+        self.line_layout_generation
+    }
+
+    pub fn remove_line_handle(&mut self, id: AssetId<Line>) {
+        let mut removed = false;
+        for component in self.components.values_mut() {
+            component.lines.retain(|_, handle| {
+                let keep = handle.id() != id;
+                removed |= !keep;
+                keep
+            });
+        }
+        if removed {
+            self.line_layout_generation = self.line_layout_generation.wrapping_add(1);
+        }
+    }
+}
+
+/// Live `LineHandle` entities per plot asset. Last user unloads GPU and
+/// drops the `CollectedGraphData` handle so unused `Assets<Line>` can go.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum PlotLineKey {
+    Timeseries(AssetId<Line>),
+    XY(AssetId<XYLine>),
+}
+
+#[derive(Resource, Default)]
+pub struct PlotLineUsers {
+    counts: HashMap<PlotLineKey, usize>,
+}
+
+impl PlotLineUsers {
+    pub fn retain(&mut self, key: PlotLineKey) {
+        *self.counts.entry(key).or_insert(0) += 1;
+    }
+
+    pub fn release(&mut self, key: PlotLineKey) -> usize {
+        let Some(count) = self.counts.get_mut(&key) else {
+            return 0;
+        };
+        *count = count.saturating_sub(1);
+        let remaining = *count;
+        if remaining == 0 {
+            self.counts.remove(&key);
+        }
+        remaining
+    }
+
+    pub fn is_used(&self, key: PlotLineKey) -> bool {
+        self.counts.contains_key(&key)
+    }
+
+    #[cfg(test)]
+    pub fn count(&self, key: PlotLineKey) -> usize {
+        self.counts.get(&key).copied().unwrap_or(0)
+    }
 }
 
 pub fn pkt_handler(
@@ -211,6 +386,7 @@ pub fn pkt_handler(
     tick: Res<CurrentTimestamp>,
     earliest_timestamp: Res<EarliestTimestamp>,
     curve_compress: Res<CurveCompressSettings>,
+    selected_range: Res<SelectedTimeRange>,
 ) {
     let mut tick = *tick;
     if let OwnedPacket::Table(table) = packet {
@@ -236,12 +412,15 @@ pub fn pkt_handler(
         ) {
             warn_once!(?err, "graph sink failed");
         }
-        maybe_compress_all_graph_lines(
-            &mut collected_graph_data,
-            &mut lines,
-            earliest_timestamp.0,
-            &curve_compress,
-        );
+        // Short windows draw every sample — do not rewrite the CPU LineTree via HC.
+        if !crate::is_short_accuracy_window(&selected_range.0) {
+            maybe_compress_all_graph_lines(
+                &mut collected_graph_data,
+                &mut lines,
+                earliest_timestamp.0,
+                &curve_compress,
+            );
+        }
     }
 }
 
@@ -249,8 +428,9 @@ pub fn pkt_handler(
 /// (`hamann-chen-line`, algorithm structure from Shane Celis’s C# gist linked on
 /// [`CurveCompressSettings`]).
 ///
-/// Does nothing when [`CurveCompressSettings::enabled`] is false. Otherwise, for each plot
-/// component: if there are **three** lines and timestamps match across them, tries joint 3D
+/// Does nothing when [`CurveCompressSettings::enabled`] is false. Callers should also skip this
+/// for short accuracy windows (≤30 s) so live ingest cannot rewrite truth. Otherwise, for each
+/// plot component: if there are **three** lines and timestamps match across them, tries joint 3D
 /// compression; else compresses each line independently. GPU index-buffer sizing is handled
 /// separately in the plot render path.
 pub fn maybe_compress_all_graph_lines(
@@ -268,7 +448,7 @@ pub fn maybe_compress_all_graph_lines(
             continue;
         }
         for line_handle in &handles {
-            let Some(line) = lines.get_mut(line_handle) else {
+            let Some(mut line) = lines.get_mut(line_handle) else {
                 continue;
             };
             line.maybe_compress_live(earliest, settings);
@@ -399,24 +579,32 @@ fn try_joint_triline_compress(
         let new_z: Vec<f32> = idx.iter().map(|&i| vz[i]).collect();
         (new_ts, new_x, new_y, new_z)
     };
-    let Some(xl) = lines.get_mut(hx) else {
-        return false;
-    };
-    xl.data
-        .rebuild_from_time_value_pairs(earliest, &new_ts, &new_x);
-    xl.data.mark_compressed();
-    let Some(yl) = lines.get_mut(hy) else {
-        return false;
-    };
-    yl.data
-        .rebuild_from_time_value_pairs(earliest, &new_ts, &new_y);
-    yl.data.mark_compressed();
-    let Some(zl) = lines.get_mut(hz) else {
-        return false;
-    };
-    zl.data
-        .rebuild_from_time_value_pairs(earliest, &new_ts, &new_z);
-    zl.data.mark_compressed();
+    // Scope each `AssetMut` guard so consecutive `get_mut` calls don't
+    // overlap mutable borrows of the `Assets` collection.
+    {
+        let Some(mut xl) = lines.get_mut(hx) else {
+            return false;
+        };
+        xl.data
+            .rebuild_from_time_value_pairs(earliest, &new_ts, &new_x);
+        xl.data.mark_compressed();
+    }
+    {
+        let Some(mut yl) = lines.get_mut(hy) else {
+            return false;
+        };
+        yl.data
+            .rebuild_from_time_value_pairs(earliest, &new_ts, &new_y);
+        yl.data.mark_compressed();
+    }
+    {
+        let Some(mut zl) = lines.get_mut(hz) else {
+            return false;
+        };
+        zl.data
+            .rebuild_from_time_value_pairs(earliest, &new_ts, &new_z);
+        zl.data.mark_compressed();
+    }
     true
 }
 
@@ -425,504 +613,1283 @@ pub fn setup_pkt_handler(mut packet_handlers: ResMut<PacketHandlers>, mut comman
     packet_handlers.0.push(sys);
 }
 
-fn process_time_series<T>(
-    time_series_buf: &[u8],
-    timestamps: &[Timestamp],
-    len: usize,
-    plot_data: &mut PlotDataComponent,
-    lines: &mut Assets<Line>,
-    earliest_timestamp: Timestamp,
-) where
-    T: AsF32 + TryFromBytes + Immutable,
-{
-    let Ok(data) = <[T]>::try_ref_from_bytes(time_series_buf) else {
-        return;
-    };
-    for i in 0..len {
-        let line = plot_data.lines.entry(i).or_insert_with(|| {
-            let label = plot_data
-                .element_names
-                .get(i)
-                .filter(|s| !s.is_empty())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| format!("[{i}]"));
-            lines.add(Line {
-                label,
-                ..Default::default()
-            })
-        });
-        let values = data.iter().skip(i).step_by(len).map(|v| v.as_f32());
-        let Some(line) = lines.get_mut(line) else {
-            continue;
-        };
-        let Some(chunk) = Chunk::from_iter(timestamps, earliest_timestamp, values) else {
-            continue;
-        };
-        line.data.insert(chunk);
-    }
-}
-
 #[allow(clippy::too_many_arguments)]
-pub fn handle_time_series(
-    InRef(pkt): InRef<OwnedPacket<PacketGrantR>>,
-    mut collected_graph_data: ResMut<CollectedGraphData>,
-    entity_map: Res<EntityMap>,
-    component_values: Query<&ComponentValueMap>,
-    mut lines: ResMut<Assets<Line>>,
-    mut commands: Commands,
-    mut range: Range<Timestamp>,
-    entity_id: ComponentId,
-    component_id: ComponentId,
-    earliest_timestamp: Res<EarliestTimestamp>,
-    schema_reg: Res<ComponentSchemaRegistry>,
-) {
-    match pkt {
-        OwnedPacket::Msg(_) => {}
-        OwnedPacket::Table(_) => {}
-        OwnedPacket::TimeSeries(time_series) => {
-            let Some((len, prim_type)) = entity_map
-                .get(&entity_id)
-                .and_then(|entity| component_values.get(*entity).ok())
-                .and_then(|component_value_map| component_value_map.get(&component_id))
-                .map(|current_value| {
-                    (
-                        current_value.shape().iter().copied().product::<usize>(),
-                        current_value.prim_type(),
-                    )
-                })
-                .or_else(|| {
-                    let schema = schema_reg.0.get(&component_id)?;
-                    Some((
-                        schema.shape().iter().copied().product::<usize>(),
-                        schema.prim_type(),
-                    ))
-                })
-            else {
-                return;
-            };
-            let Ok(timestamps) = time_series.timestamps() else {
-                return;
-            };
-            let Ok(buf) = time_series.data() else {
-                return;
-            };
-            let Some(plot_data) = collected_graph_data.get_component_mut(&component_id) else {
-                return;
-            };
-            match prim_type {
-                PrimType::U8 => process_time_series::<u8>(
-                    buf,
-                    timestamps,
-                    len,
-                    plot_data,
-                    &mut lines,
-                    earliest_timestamp.0,
-                ),
-                PrimType::U16 => process_time_series::<u16>(
-                    buf,
-                    timestamps,
-                    len,
-                    plot_data,
-                    &mut lines,
-                    earliest_timestamp.0,
-                ),
-                PrimType::U32 => process_time_series::<u32>(
-                    buf,
-                    timestamps,
-                    len,
-                    plot_data,
-                    &mut lines,
-                    earliest_timestamp.0,
-                ),
-                PrimType::U64 => process_time_series::<u64>(
-                    buf,
-                    timestamps,
-                    len,
-                    plot_data,
-                    &mut lines,
-                    earliest_timestamp.0,
-                ),
-                PrimType::I8 => process_time_series::<i8>(
-                    buf,
-                    timestamps,
-                    len,
-                    plot_data,
-                    &mut lines,
-                    earliest_timestamp.0,
-                ),
-                PrimType::I16 => process_time_series::<i16>(
-                    buf,
-                    timestamps,
-                    len,
-                    plot_data,
-                    &mut lines,
-                    earliest_timestamp.0,
-                ),
-                PrimType::I32 => process_time_series::<i32>(
-                    buf,
-                    timestamps,
-                    len,
-                    plot_data,
-                    &mut lines,
-                    earliest_timestamp.0,
-                ),
-                PrimType::I64 => process_time_series::<i64>(
-                    buf,
-                    timestamps,
-                    len,
-                    plot_data,
-                    &mut lines,
-                    earliest_timestamp.0,
-                ),
-                PrimType::Bool => process_time_series::<bool>(
-                    buf,
-                    timestamps,
-                    len,
-                    plot_data,
-                    &mut lines,
-                    earliest_timestamp.0,
-                ),
-                PrimType::F32 => process_time_series::<f32>(
-                    buf,
-                    timestamps,
-                    len,
-                    plot_data,
-                    &mut lines,
-                    earliest_timestamp.0,
-                ),
-                PrimType::F64 => process_time_series::<f64>(
-                    buf,
-                    timestamps,
-                    len,
-                    plot_data,
-                    &mut lines,
-                    earliest_timestamp.0,
-                ),
-            }
-            plot_data.request_states.insert(
-                range.start,
-                RequestState::Returned {
-                    len: timestamps.len(),
-                    last_timestamp: timestamps.last().copied(),
-                },
-            );
-            let Some(last_timestamp) = timestamps.last() else {
-                return;
-            };
-            if last_timestamp >= &range.end {
-                return;
-            }
-            // GetTimeSeries returns the end bound inclusively, so reusing the
-            // terminal timestamp overlaps the next page with the current chunk.
-            range.start = next_timestamp(*last_timestamp);
-
-            if range.start >= range.end {
-                return;
-            }
-
-            if timestamps.len() < CHUNK_LEN {
-                return;
-            }
-            let range = next_range(range, plot_data, &lines);
-
-            let packet_id = fastrand::u16(..).to_le_bytes();
-            let start = range.start;
-            let end = range.end;
-            let msg = GetTimeSeries {
-                id: packet_id,
-                range,
-                component_id,
-                limit: Some(CHUNK_LEN),
-            };
-            commands.send_req_with_handler(
-                msg,
-                packet_id,
-                move |pkt: InRef<OwnedPacket<PacketGrantR>>,
-                      collected_graph_data: ResMut<CollectedGraphData>,
-                      entity_map: Res<EntityMap>,
-                      component_values: Query<&ComponentValueMap>,
-                      lines: ResMut<Assets<Line>>,
-                      earliest_timestamp: Res<EarliestTimestamp>,
-                      schema_reg: Res<ComponentSchemaRegistry>,
-                      commands: Commands| {
-                    handle_time_series(
-                        pkt,
-                        collected_graph_data,
-                        entity_map,
-                        component_values,
-                        lines,
-                        commands,
-                        start..end,
-                        entity_id,
-                        component_id,
-                        earliest_timestamp,
-                        schema_reg,
-                    );
-                },
-            );
-        }
-    }
-}
-
 pub fn queue_timestamp_read(
     selected_range: Res<SelectedTimeRange>,
-    mut commands: Commands,
+    behavior: Res<crate::TimeRangeBehavior>,
     mut graph_data: ResMut<CollectedGraphData>,
     mut lines: ResMut<Assets<Line>>,
     earliest_timestamp: Res<EarliestTimestamp>,
-    latest_timestamp: Res<LastUpdated>,
-    replay_mode: Option<Res<crate::ReplayMode>>,
+    graph_states: Query<&GraphState>,
+    line_3ds: Query<&Line3d>,
+    point_trails: Query<&PointTrails>,
+    object_3ds: Query<&Object3DState>,
+    eql_ctx: Res<EqlContext>,
+    series_store: Res<TelemetryCache>,
+    mut sync_state: ResMut<PlotSyncState>,
+    mut prefetch: ResMut<VisiblePrefetchState>,
+    schema_reg: Res<ComponentSchemaRegistry>,
+    mut commands: Commands,
 ) {
-    if selected_range.0.end.0 == i64::MIN
-        || selected_range.0.start.0 == i64::MAX
-        || selected_range.0.start.0 == i64::MIN
-        || selected_range.0.end.0 == i64::MAX
-    {
+    let sync_range = visible_sync_range(&selected_range, &behavior);
+    let Some((range_key, sync_range)) = sync_range else {
         return;
-    }
+    };
 
-    let query_range = data_query_range(
-        selected_range.0.clone(),
-        earliest_timestamp.0,
-        latest_timestamp.0,
-        replay_mode.is_some(),
+    // Fill the visible window ASAP for enabled plots while full begin→end
+    // backfill continues in the background.
+    prefetch_visible_window(
+        &sync_range,
+        range_key,
+        &graph_states,
+        &line_3ds,
+        &point_trails,
+        &object_3ds,
+        &eql_ctx,
+        &series_store,
+        &schema_reg,
+        &mut prefetch,
+        &mut commands,
     );
-    if query_range.start >= query_range.end {
-        return;
+
+    sync_plot_lines_from_series_store(
+        range_key,
+        &sync_range,
+        &mut graph_data,
+        &mut lines,
+        earliest_timestamp.0,
+        &graph_states,
+        &line_3ds,
+        &point_trails,
+        &object_3ds,
+        &eql_ctx,
+        &series_store,
+        &mut sync_state,
+    );
+}
+
+fn visible_sync_range(
+    selected_range: &SelectedTimeRange,
+    behavior: &crate::TimeRangeBehavior,
+) -> Option<((i64, i64), Range<Timestamp>)> {
+    let selected = selected_range.0.clone();
+    if selected.start.0 == i64::MIN || selected.end.0 == i64::MAX || selected.start >= selected.end
+    {
+        return None;
+    }
+    let range_key = if behavior.is_trailing_window() {
+        let start = floor_ts_quantum(selected.start, REQUEST_KEY_QUANTUM_MICROS);
+        let end = Timestamp(
+            selected
+                .end
+                .0
+                .div_euclid(REQUEST_KEY_QUANTUM_MICROS)
+                .saturating_add(1)
+                .saturating_mul(REQUEST_KEY_QUANTUM_MICROS),
+        );
+        (start.0, end.0.max(start.0.saturating_add(1)))
+    } else {
+        (selected.start.0, selected.end.0)
+    };
+    Some((range_key, Timestamp(range_key.0)..Timestamp(range_key.1)))
+}
+
+/// Identifies logical sparse-prefetch requests.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub(crate) enum PrefetchKey {
+    Window {
+        component_id: ComponentId,
+        start: i64,
+        end: i64,
+    },
+    Anchor {
+        component_id: ComponentId,
+        start: i64,
+    },
+}
+
+impl PrefetchKey {
+    fn component_id(self) -> ComponentId {
+        match self {
+            Self::Window { component_id, .. } | Self::Anchor { component_id, .. } => component_id,
+        }
     }
 
-    // Simple volume-based decision: use overview for large time ranges (> 10 minutes)
-    // This covers two use cases:
-    // 1. Live telemetry: data span is small (< 10 minutes) -> direct chunked loading
-    // 2. Historical datasets: data span is large (> 10 minutes) -> use LTTB overview first
-    const TEN_MINUTES_MICROS: i64 = 600_000_000; // 10 minutes in microseconds
-    let range_duration = query_range.end.0.saturating_sub(query_range.start.0);
-    let use_overview = range_duration > TEN_MINUTES_MICROS;
+    fn same_slot(self, other: Self) -> bool {
+        self.component_id() == other.component_id()
+            && matches!(
+                (self, other),
+                (Self::Window { .. }, Self::Window { .. })
+                    | (Self::Anchor { .. }, Self::Anchor { .. })
+            )
+    }
+}
 
-    for (&component_id, component) in graph_data.components.iter_mut() {
-        let mut line = component
-            .lines
-            .first_key_value()
-            .and_then(|(_k, v)| lines.get_mut(v));
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PrefetchRequestState {
+    InFlight(u64),
+    RetryAt(Instant),
+}
 
-        if let Some(last_queried) = line.as_ref().and_then(|l| l.last_queried.as_ref())
-            && last_queried.elapsed() <= Duration::from_millis(250)
-        {
-            continue;
+#[derive(Resource, Default)]
+pub struct VisiblePrefetchState {
+    requests: HashMap<PrefetchKey, PrefetchRequestState>,
+    next_attempt: u64,
+}
+
+impl VisiblePrefetchState {
+    pub fn clear_in_flight(&mut self) {
+        self.requests.clear();
+    }
+
+    pub(crate) fn request_count(&self) -> usize {
+        self.requests
+            .values()
+            .filter(|state| matches!(state, PrefetchRequestState::InFlight(_)))
+            .count()
+    }
+
+    fn has_capacity(&self) -> bool {
+        self.request_count() < MAX_VISIBLE_PREFETCH_IN_FLIGHT
+    }
+
+    fn drop_superseded_retries(&mut self, key: PrefetchKey) {
+        self.requests.retain(|existing, state| {
+            *existing == key
+                || !existing.same_slot(key)
+                || matches!(state, PrefetchRequestState::InFlight(_))
+        });
+    }
+
+    pub(crate) fn begin(&mut self, key: PrefetchKey) -> Option<u64> {
+        self.drop_superseded_retries(key);
+        let now = Instant::now();
+        if self.requests.iter().any(|(existing, state)| {
+            existing.same_slot(key) && matches!(state, PrefetchRequestState::InFlight(_))
+        }) {
+            return None;
         }
+        if self.requests.get(&key).is_some_and(
+            |state| matches!(state, PrefetchRequestState::RetryAt(retry_at) if now < *retry_at),
+        ) {
+            return None;
+        }
+        self.next_attempt = self.next_attempt.wrapping_add(1);
+        let attempt = self.next_attempt;
+        self.requests
+            .insert(key, PrefetchRequestState::InFlight(attempt));
+        Some(attempt)
+    }
 
-        if use_overview {
-            // Request overview for each element that hasn't been requested yet
-            let num_elements = component.element_names.len().max(1);
+    fn is_current(&self, key: PrefetchKey, attempt: u64) -> bool {
+        self.requests.get(&key) == Some(&PrefetchRequestState::InFlight(attempt))
+    }
 
-            for element_index in 0..num_elements {
-                if component
-                    .overview_requested
-                    .get(&element_index)
-                    .copied()
-                    .unwrap_or(false)
-                {
-                    continue;
-                }
+    fn finish(&mut self, key: PrefetchKey, attempt: u64, success: bool) {
+        if !self.is_current(key, attempt) {
+            return;
+        }
+        if success {
+            self.requests.remove(&key);
+        } else {
+            self.requests.insert(
+                key,
+                PrefetchRequestState::RetryAt(Instant::now() + PREFETCH_RETRY_DELAY),
+            );
+        }
+    }
 
-                // Mark as requested
-                component.overview_requested.insert(element_index, true);
+    fn cancel_component(&mut self, component_id: ComponentId) {
+        self.requests
+            .retain(|key, _| key.component_id() != component_id);
+    }
+}
 
-                let packet_id = fastrand::u16(..).to_le_bytes();
+const VISIBLE_PREFETCH_LIMIT: usize = 8192;
+const MAX_VISIBLE_PREFETCH_IN_FLIGHT: usize = 32;
+const PREFETCH_RETRY_DELAY: Duration = Duration::from_millis(100);
 
-                let query = PlotOverviewQuery {
-                    id: packet_id,
+#[derive(Debug, PartialEq, Eq)]
+enum HoldAnchorDecision {
+    Satisfied,
+    Pending,
+    Request,
+}
+
+fn hold_anchor_decision(
+    component_id: ComponentId,
+    start: Timestamp,
+    series_store: &TelemetryCache,
+    prefetch: &VisiblePrefetchState,
+) -> HoldAnchorDecision {
+    if series_store
+        .get_at_or_before(&component_id, start)
+        .is_some()
+        || series_store.is_covered(
+            &component_id,
+            &(Timestamp(i64::MIN)..Timestamp(start.0.saturating_add(1))),
+        )
+    {
+        return HoldAnchorDecision::Satisfied;
+    }
+    let key = PrefetchKey::Anchor {
+        component_id,
+        start: start.0,
+    };
+    if prefetch
+        .requests
+        .get(&key)
+        .is_some_and(|state| match state {
+            PrefetchRequestState::InFlight(_) => true,
+            PrefetchRequestState::RetryAt(retry_at) => Instant::now() < *retry_at,
+        })
+    {
+        return HoldAnchorDecision::Pending;
+    }
+    HoldAnchorDecision::Request
+}
+
+fn apply_hold_anchor_payload(
+    timestamps: &[Timestamp],
+    buf: &[u8],
+    component_id: ComponentId,
+    start: Timestamp,
+    series_store: &mut TelemetryCache,
+    schema_reg: &ComponentSchemaRegistry,
+) -> bool {
+    if timestamps.is_empty() {
+        return buf.is_empty();
+    }
+    let (Some(&timestamp), Some(schema)) = (timestamps.first(), schema_reg.0.get(&component_id))
+    else {
+        return false;
+    };
+    let size = schema.size();
+    if timestamps.len() != 1 || timestamp > start || buf.len() != size {
+        return false;
+    }
+    let Ok(view) = impeller::types::ComponentView::try_from_bytes_shape(
+        buf,
+        schema.shape(),
+        schema.prim_type(),
+    ) else {
+        return false;
+    };
+    series_store.insert(component_id, timestamp, ComponentValue::from_view(view));
+    true
+}
+
+fn apply_hold_anchor_reply(
+    packet: &OwnedPacket<PacketGrantR>,
+    component_id: ComponentId,
+    start: Timestamp,
+    series_store: &mut TelemetryCache,
+    schema_reg: &ComponentSchemaRegistry,
+) -> bool {
+    let OwnedPacket::TimeSeries(time_series) = packet else {
+        return false;
+    };
+    let (Ok(timestamps), Ok(buf)) = (time_series.timestamps(), time_series.data()) else {
+        return false;
+    };
+    apply_hold_anchor_payload(
+        timestamps,
+        buf,
+        component_id,
+        start,
+        series_store,
+        schema_reg,
+    )
+}
+
+fn prefetch_hold_anchor(
+    component_id: ComponentId,
+    start: Timestamp,
+    series_store: &TelemetryCache,
+    prefetch: &mut VisiblePrefetchState,
+    commands: &mut Commands,
+) -> bool {
+    let key = PrefetchKey::Anchor {
+        component_id,
+        start: start.0,
+    };
+    match hold_anchor_decision(component_id, start, series_store, prefetch) {
+        HoldAnchorDecision::Satisfied => {
+            prefetch.requests.remove(&key);
+            return false;
+        }
+        HoldAnchorDecision::Pending => return false,
+        HoldAnchorDecision::Request => {}
+    }
+
+    let Some(attempt) = prefetch.begin(key) else {
+        return false;
+    };
+    commands.send_req_reply_raw(
+        GetTimeSeriesPredecessor {
+            id: PacketId::default(),
+            timestamp: start,
+            component_id,
+        },
+        move |pkt: InRef<OwnedPacket<PacketGrantR>>,
+              mut series_store: ResMut<TelemetryCache>,
+              schema_reg: Res<ComponentSchemaRegistry>,
+              priority: Res<SeriesFetchPriority>,
+              mut prefetch: ResMut<VisiblePrefetchState>|
+              -> bool {
+            if !priority.high.contains(&component_id) {
+                prefetch.cancel_component(component_id);
+                return true;
+            }
+            if !prefetch.is_current(key, attempt) {
+                return true;
+            }
+            let confirmed =
+                apply_hold_anchor_reply(&pkt, component_id, start, &mut series_store, &schema_reg);
+            if confirmed
+                && series_store
+                    .get_at_or_before(&component_id, start)
+                    .is_none()
+            {
+                series_store.mark_covered(
                     component_id,
-                    range: query_range.clone(),
-                    max_points: OVERVIEW_MAX_POINTS as u32,
-                    element_index,
-                };
-                let earliest = earliest_timestamp.0;
-
-                commands.send_req_with_handler(
-                    query,
-                    packet_id,
-                    move |pkt: InRef<OwnedPacket<PacketGrantR>>,
-                          mut collected_graph_data: ResMut<CollectedGraphData>,
-                          mut lines: ResMut<Assets<Line>>| {
-                        handle_overview_response(
-                            pkt,
-                            &mut collected_graph_data,
-                            &mut lines,
-                            component_id,
-                            element_index,
-                            earliest,
-                        );
-                    },
+                    Timestamp(i64::MIN),
+                    Timestamp(start.0.saturating_add(1)),
                 );
             }
-            // When using overview mode, skip the regular gap-filling logic
-            // Overview provides downsampled data for the full range at once
+            prefetch.finish(key, attempt, confirmed);
+            true
+        },
+    );
+    true
+}
+
+#[allow(clippy::too_many_arguments)]
+fn prefetch_visible_window(
+    sync_range: &Range<Timestamp>,
+    range_key: (i64, i64),
+    graph_states: &Query<&GraphState>,
+    line_3ds: &Query<&Line3d>,
+    point_trails: &Query<&PointTrails>,
+    object_3ds: &Query<&Object3DState>,
+    eql_ctx: &EqlContext,
+    series_store: &TelemetryCache,
+    schema_reg: &ComponentSchemaRegistry,
+    prefetch: &mut VisiblePrefetchState,
+    commands: &mut Commands,
+) {
+    // Prefetch only plot/3D consumers; monitors/viewport/arrows are allowlisted
+    // in `update_series_fetch_priority` and filled by live + begin→end backfill.
+    let fetch_ids =
+        plot_fetch_component_ids(graph_states, line_3ds, point_trails, object_3ds, eql_ctx);
+    prefetch
+        .requests
+        .retain(|key, _| fetch_ids.contains(&key.component_id()));
+    if fetch_ids.is_empty() {
+        return;
+    }
+    for component_id in fetch_ids.iter().copied() {
+        prefetch.drop_superseded_retries(PrefetchKey::Anchor {
+            component_id,
+            start: sync_range.start.0,
+        });
+        prefetch.drop_superseded_retries(PrefetchKey::Window {
+            component_id,
+            start: range_key.0,
+            end: range_key.1,
+        });
+    }
+    for component_id in fetch_ids {
+        if !prefetch.has_capacity() {
+            break;
+        }
+        if !schema_reg.0.contains_key(&component_id) {
             continue;
         }
-
-        let mut process_range = |mut range: Range<Timestamp>| {
-            let packet_id = fastrand::u16(..).to_le_bytes();
-
-            loop {
-                match component.request_states.get(&range.start) {
-                    // Rerequest chunks if we have not received a response for 10 seconds
-                    Some(RequestState::Requested(time))
-                        if time.elapsed() > Duration::from_secs(10) =>
-                    {
-                        break;
-                    }
-
-                    // When the visible range grows (replay mode), extend the tail
-                    // from the last returned timestamp instead of replacing the
-                    // whole partial chunk from its original start.
-                    Some(RequestState::Returned {
-                        len,
-                        last_timestamp,
-                    }) if *len < CHUNK_LEN
-                        && last_timestamp
-                            .map(|t| t < query_range.end)
-                            .unwrap_or_default() =>
-                    {
-                        let Some(last_timestamp) = *last_timestamp else {
-                            return;
-                        };
-                        range.start = next_timestamp(last_timestamp);
-                        if range.start >= range.end {
-                            return;
-                        }
-                    }
-                    // Skip the chunk if it was already requested
-                    Some(RequestState::Returned { .. }) | Some(RequestState::Requested(_)) => {
-                        return;
-                    }
-                    None => break,
-                }
-            }
-
-            component
-                .request_states
-                .insert(range.start, RequestState::Requested(Instant::now()));
-
-            let start = range.start;
-            let end = range.end;
-            let msg = GetTimeSeries {
-                id: packet_id,
-                range: range.clone(),
-                component_id,
-                limit: Some(CHUNK_LEN),
-            };
-            commands.send_req_with_handler(
-                msg,
-                packet_id,
-                move |pkt: InRef<OwnedPacket<PacketGrantR>>,
-                      collected_graph_data: ResMut<CollectedGraphData>,
-                      entity_map: Res<EntityMap>,
-                      component_values: Query<&ComponentValueMap>,
-                      lines: ResMut<Assets<Line>>,
-                      earliest_timestamp: Res<EarliestTimestamp>,
-                      schema_reg: Res<ComponentSchemaRegistry>,
-                      commands: Commands| {
-                    handle_time_series(
-                        pkt,
-                        collected_graph_data,
-                        entity_map,
-                        component_values,
-                        lines,
-                        commands,
-                        start..end,
-                        component_id,
-                        component_id,
-                        earliest_timestamp,
-                        schema_reg,
-                    );
-                },
-            );
+        prefetch_hold_anchor(
+            component_id,
+            sync_range.start,
+            series_store,
+            prefetch,
+            commands,
+        );
+        if !prefetch.has_capacity() {
+            continue;
+        }
+        let key = PrefetchKey::Window {
+            component_id,
+            start: range_key.0,
+            end: range_key.1,
         };
-        if let Some(line) = line.as_mut() {
+        if series_store.is_covered(&component_id, sync_range) {
+            prefetch.requests.remove(&key);
+            continue;
+        }
+        let Some(attempt) = prefetch.begin(key) else {
+            continue;
+        };
+        send_visible_prefetch_page(
+            key,
+            attempt,
+            component_id,
+            sync_range.start,
+            sync_range.end,
+            commands,
+        );
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum VisiblePageOutcome {
+    Complete,
+    Next(Timestamp),
+    Invalid,
+}
+
+fn apply_visible_prefetch_page(
+    pkt: &OwnedPacket<PacketGrantR>,
+    component_id: ComponentId,
+    req_start: Timestamp,
+    req_end: Timestamp,
+    series_store: &mut TelemetryCache,
+    schema_reg: &ComponentSchemaRegistry,
+) -> VisiblePageOutcome {
+    let OwnedPacket::TimeSeries(time_series) = pkt else {
+        return VisiblePageOutcome::Invalid;
+    };
+    let (Ok(timestamps), Ok(buf)) = (time_series.timestamps(), time_series.data()) else {
+        return VisiblePageOutcome::Invalid;
+    };
+    apply_visible_prefetch_payload(
+        timestamps,
+        buf,
+        component_id,
+        req_start,
+        req_end,
+        series_store,
+        schema_reg,
+    )
+}
+
+fn apply_visible_prefetch_payload(
+    timestamps: &[Timestamp],
+    buf: &[u8],
+    component_id: ComponentId,
+    req_start: Timestamp,
+    req_end: Timestamp,
+    series_store: &mut TelemetryCache,
+    schema_reg: &ComponentSchemaRegistry,
+) -> VisiblePageOutcome {
+    let Some(schema) = schema_reg.0.get(&component_id) else {
+        return VisiblePageOutcome::Invalid;
+    };
+    let elem_size = schema.size();
+    if buf.len() != timestamps.len().saturating_mul(elem_size) {
+        return VisiblePageOutcome::Invalid;
+    }
+    for (i, &timestamp) in timestamps.iter().enumerate() {
+        let offset = i * elem_size;
+        let Ok(view) = impeller::types::ComponentView::try_from_bytes_shape(
+            &buf[offset..offset + elem_size],
+            schema.shape(),
+            schema.prim_type(),
+        ) else {
+            return VisiblePageOutcome::Invalid;
+        };
+        series_store.insert(component_id, timestamp, ComponentValue::from_view(view));
+    }
+    if timestamps.len() < VISIBLE_PREFETCH_LIMIT {
+        series_store.mark_covered(component_id, req_start, req_end);
+        return VisiblePageOutcome::Complete;
+    }
+    let Some(last_ts) = timestamps.last().copied() else {
+        series_store.mark_covered(component_id, req_start, req_end);
+        return VisiblePageOutcome::Complete;
+    };
+    let next_start = Timestamp(last_ts.0.saturating_add(1));
+    series_store.mark_covered(component_id, req_start, next_start);
+    if next_start < req_end {
+        VisiblePageOutcome::Next(next_start)
+    } else {
+        VisiblePageOutcome::Complete
+    }
+}
+
+fn send_visible_prefetch_page(
+    key: PrefetchKey,
+    attempt: u64,
+    component_id: ComponentId,
+    req_start: Timestamp,
+    req_end: Timestamp,
+    commands: &mut Commands,
+) {
+    commands.send_req_reply_raw(
+        GetTimeSeries {
+            id: PacketId::default(),
+            range: req_start..req_end,
+            component_id,
+            limit: Some(VISIBLE_PREFETCH_LIMIT),
+        },
+        move |pkt: InRef<OwnedPacket<PacketGrantR>>,
+              mut series_store: ResMut<TelemetryCache>,
+              schema_reg: Res<ComponentSchemaRegistry>,
+              priority: Res<SeriesFetchPriority>,
+              mut prefetch: ResMut<VisiblePrefetchState>,
+              mut commands: Commands|
+              -> bool {
+            if !priority.high.contains(&component_id) {
+                prefetch.cancel_component(component_id);
+                return true;
+            }
+            if !prefetch.is_current(key, attempt) {
+                return true;
+            }
+            match apply_visible_prefetch_page(
+                &pkt,
+                component_id,
+                req_start,
+                req_end,
+                &mut series_store,
+                &schema_reg,
+            ) {
+                VisiblePageOutcome::Complete => prefetch.finish(key, attempt, true),
+                VisiblePageOutcome::Next(next_start) => send_visible_prefetch_page(
+                    key,
+                    attempt,
+                    component_id,
+                    next_start,
+                    req_end,
+                    &mut commands,
+                ),
+                VisiblePageOutcome::Invalid => prefetch.finish(key, attempt, false),
+            }
+            true
+        },
+    );
+}
+
+/// Rebuild enabled plot LineTrees from the full SeriesStore for the visible window.
+/// Playback is never blocked: whatever samples are already in the store are shown;
+/// as backfill / visible prefetch streams in, subsequent syncs fill gaps (a
+/// covered first/last span is not treated as complete if the store later has
+/// more samples inside it).
+fn active_line_layout(
+    graph_data: &CollectedGraphData,
+    fetch_ids: &HashSet<ComponentId>,
+) -> HashSet<(ComponentId, usize)> {
+    graph_data
+        .components
+        .iter()
+        .filter(|(component_id, _)| fetch_ids.contains(component_id))
+        .flat_map(|(&component_id, component)| {
+            component
+                .lines
+                .keys()
+                .map(move |&index| (component_id, index))
+        })
+        .collect()
+}
+
+fn refresh_line_layout(
+    sync_state: &mut PlotSyncState,
+    graph_data: &CollectedGraphData,
+    fetch_ids: &HashSet<ComponentId>,
+    enabled_changed: bool,
+) -> HashSet<(ComponentId, usize)> {
+    let generation = graph_data.line_layout_generation();
+    if !enabled_changed && sync_state.last_layout_generation == generation {
+        return HashSet::new();
+    }
+    let layout = active_line_layout(graph_data, fetch_ids);
+    let added = layout
+        .difference(&sync_state.last_layout)
+        .copied()
+        .collect();
+    sync_state.last_layout = layout;
+    sync_state.last_layout_generation = generation;
+    added
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn sync_plot_lines_from_series_store(
+    range_key: (i64, i64),
+    sync_range: &Range<Timestamp>,
+    graph_data: &mut CollectedGraphData,
+    lines: &mut Assets<Line>,
+    earliest: Timestamp,
+    graph_states: &Query<&GraphState>,
+    line_3ds: &Query<&Line3d>,
+    point_trails: &Query<&PointTrails>,
+    object_3ds: &Query<&Object3DState>,
+    eql_ctx: &EqlContext,
+    series_store: &TelemetryCache,
+    sync_state: &mut PlotSyncState,
+) {
+    let fetch_ids =
+        plot_fetch_component_ids(graph_states, line_3ds, point_trails, object_3ds, eql_ctx);
+    let range_changed = sync_state.last_range != Some(range_key);
+    let enabled_changed = sync_state.last_enabled != fetch_ids;
+    let layout_generation = graph_data.line_layout_generation();
+    let layout_changed = sync_state.last_layout_generation != layout_generation;
+    let gen_changed = series_store.generation() != sync_state.last_generation;
+    let due = sync_state
+        .last_rebuild
+        .map(|t| t.elapsed() >= Duration::from_millis(100))
+        .unwrap_or(true);
+
+    if !(range_changed || enabled_changed || layout_changed || (gen_changed && due)) {
+        return;
+    }
+    let new_layout = refresh_line_layout(sync_state, graph_data, &fetch_ids, enabled_changed);
+    sync_state.last_range = Some(range_key);
+    sync_state.last_generation = series_store.generation();
+    sync_state.last_enabled = fetch_ids.clone();
+    sync_state.last_rebuild = Some(Instant::now());
+
+    const TEN_MINUTES_MICROS: i64 = 600_000_000;
+    let range_duration = sync_range.end.0.saturating_sub(sync_range.start.0);
+    let max_points = if range_duration > TEN_MINUTES_MICROS {
+        Some(OVERVIEW_MAX_POINTS)
+    } else {
+        None
+    };
+    for (&component_id, component) in graph_data.components.iter_mut() {
+        if !fetch_ids.contains(&component_id) {
+            continue;
+        }
+        let has_state_in_window = series_store
+            .series(&component_id)
+            .is_some_and(|series| series.range(..sync_range.end).next_back().is_some());
+        for (&element_index, handle) in &component.lines {
+            let Some(mut line) = lines.get_mut(handle) else {
+                continue;
+            };
+            // Overview stride changes with total count; new handles have no projected history.
+            let force_full =
+                max_points.is_some() || new_layout.contains(&(component_id, element_index));
+            if !has_state_in_window {
+                if should_clear_line_on_empty_store(
+                    line.data.projected_span(),
+                    sync_range,
+                    range_changed,
+                    series_store.is_covered(&component_id, sync_range),
+                    force_full,
+                ) {
+                    line.data.clear();
+                }
+                continue;
+            }
+            apply_plot_sync_plan(
+                series_store,
+                component_id,
+                element_index,
+                sync_range,
+                earliest,
+                max_points,
+                force_full,
+                &mut line.data,
+            );
             line.last_queried = Some(Instant::now());
-            line.data
-                .tree
-                .gaps_trimmed(nodit::interval::ie(query_range.start.0, query_range.end.0))
-                .map(|i| Timestamp(i.start())..Timestamp(i.end()))
-                .for_each(process_range)
-        } else {
-            process_range(query_range.clone());
+        }
+        component.last_query_attempt = Some(Instant::now());
+    }
+}
+
+/// How to update a LineTree when the trailing window moves or new samples arrive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PlotSyncPlan {
+    FullRebuild,
+    Keep,
+    Extend {
+        prefix: Option<Range<Timestamp>>,
+        suffix: Option<Range<Timestamp>>,
+    },
+}
+
+/// Decide whether a slide can reuse the existing tree.
+///
+/// A trailing `last_*` window only needs the newly exposed edges. Clearing and
+/// re-inserting every 100 ms drops GPU shards and rewrites every vertex, which
+/// reads as a horizontal hitch once per quantum (about every two frames at
+/// ~20 FPS on a dense schematic).
+///
+/// Endpoint span alone is not enough: a partial first project (visible prefetch
+/// plus the live tip, or two sparse endpoints) can already cover `need` while
+/// leaving holes. Callers must pass `force_full` when the store has samples
+/// inside that span that the tree does not — otherwise `Keep` / `Extend` never
+/// refresh those interiors.
+pub(crate) fn plot_sync_plan(
+    stored: Option<Range<Timestamp>>,
+    need: &Range<Timestamp>,
+    force_full: bool,
+) -> PlotSyncPlan {
+    if force_full {
+        return PlotSyncPlan::FullRebuild;
+    }
+    let Some(stored) = stored else {
+        return PlotSyncPlan::FullRebuild;
+    };
+    if range_overlap_ratio(&stored, need) < 0.25 {
+        return PlotSyncPlan::FullRebuild;
+    }
+    // A missing left edge is a seek or a punched hole — rebuild rather than
+    // insert a prefix that `insert_overwrite` can eat the next chunk with.
+    if stored.start > need.start {
+        return PlotSyncPlan::FullRebuild;
+    }
+    let suffix = (stored.end < need.end).then_some(stored.end..need.end);
+    if suffix.is_none() {
+        PlotSyncPlan::Keep
+    } else {
+        PlotSyncPlan::Extend {
+            prefix: None,
+            suffix,
         }
     }
 }
 
+/// Whether to drop a LineTree when the store has no samples in `need`.
+///
+/// A covered empty window is an authoritative gap — keep/extend would leave
+/// leftover samples in the clip. An uncovered window with only a small camera
+/// move keeps the last draw; the store may still be catching up.
+fn should_clear_line_on_empty_store(
+    stored: Option<Range<Timestamp>>,
+    need: &Range<Timestamp>,
+    range_changed: bool,
+    covered: bool,
+    force_full: bool,
+) -> bool {
+    if covered {
+        return true;
+    }
+    if !range_changed {
+        return false;
+    }
+    matches!(
+        plot_sync_plan(stored, need, force_full),
+        PlotSyncPlan::FullRebuild
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn apply_plot_sync_plan(
+    series_store: &TelemetryCache,
+    component_id: ComponentId,
+    element_index: usize,
+    sync_range: &Range<Timestamp>,
+    earliest: Timestamp,
+    max_points: Option<usize>,
+    force_full: bool,
+    tree: &mut LineTree<f32>,
+) {
+    let rebuild = force_full
+        || !plot_line_matches_store_interior(
+            series_store,
+            component_id,
+            element_index,
+            sync_range,
+            tree,
+        );
+    match plot_sync_plan(tree.projected_span(), sync_range, rebuild) {
+        PlotSyncPlan::FullRebuild => {
+            tree.clear();
+            project_series_element_to_line(
+                series_store,
+                component_id,
+                element_index,
+                sync_range,
+                earliest,
+                tree,
+                max_points,
+            );
+        }
+        PlotSyncPlan::Keep => {
+            tree.evict_chunks_outside(padded_sync_keep_range(sync_range));
+        }
+        PlotSyncPlan::Extend { suffix, .. } => {
+            if let Some(range) = suffix {
+                append_series_element_to_line(
+                    series_store,
+                    component_id,
+                    element_index,
+                    &range,
+                    earliest,
+                    tree,
+                );
+            }
+            tree.evict_chunks_outside(padded_sync_keep_range(sync_range));
+        }
+    }
+    tree.set_projected_range(sync_range.clone());
+}
+
+/// True when every in-store sample inside the tree's already-covered span is
+/// also in the tree.
+///
+/// Compared only on `stored ∩ need`, so a newly exposed suffix still goes
+/// through `Extend` instead of a full rebuild. Samples the store later
+/// backfills *inside* that span fail this check and force a rebuild — the
+/// append path cannot insert earlier than the tip.
+fn plot_line_matches_store_interior(
+    series_store: &TelemetryCache,
+    component_id: ComponentId,
+    element_index: usize,
+    need: &Range<Timestamp>,
+    tree: &LineTree<f32>,
+) -> bool {
+    let Some(stored) = tree.projected_span() else {
+        return true;
+    };
+    let start = stored.start.max(need.start);
+    let end = stored.end.min(need.end);
+    if end.0 <= start.0 {
+        return true;
+    }
+    let inspect = start..end;
+    let Some(series) = series_store.series(&component_id) else {
+        return !tree.has_samples();
+    };
+    series
+        .range(inspect)
+        .filter(|(_, value)| value.get(element_index).is_some())
+        .all(|(timestamp, _)| {
+            tree.get_nearest(*timestamp)
+                .is_some_and(|(actual, _)| actual == *timestamp)
+        })
+}
+
+fn padded_sync_keep_range(sync_range: &Range<Timestamp>) -> Range<Timestamp> {
+    let pad = REQUEST_KEY_QUANTUM_MICROS.saturating_mul(4);
+    Timestamp(sync_range.start.0.saturating_sub(pad))
+        ..Timestamp(sync_range.end.0.saturating_add(pad))
+}
+
+/// Tracks when plot LineTrees were last rebuilt from SeriesStore.
+#[derive(Resource, Default)]
+pub struct PlotSyncState {
+    last_range: Option<(i64, i64)>,
+    last_generation: u64,
+    last_enabled: HashSet<ComponentId>,
+    last_layout_generation: u64,
+    last_layout: HashSet<(ComponentId, usize)>,
+    last_rebuild: Option<Instant>,
+}
+
+/// Request-key quantum (100 ms) — used when quantizing trailing sync windows.
+pub(crate) const REQUEST_KEY_QUANTUM_MICROS: i64 = 100_000;
+
+fn floor_ts_quantum(ts: Timestamp, quantum_micros: i64) -> Timestamp {
+    if quantum_micros <= 0 {
+        return ts;
+    }
+    Timestamp(
+        ts.0.div_euclid(quantum_micros)
+            .saturating_mul(quantum_micros),
+    )
+}
+
+/// Parse an EQL string and insert every referenced component ID into `out`.
+fn collect_kernel_component_ids(
+    binding: &impeller_wkt::DisplayKernelBinding,
+    out: &mut HashSet<ComponentId>,
+) {
+    for input in &binding.inputs {
+        out.insert(ComponentId::new(&input.component));
+    }
+}
+
+fn collect_eql_component_ids(eql: &str, eql_ctx: &EqlContext, out: &mut HashSet<ComponentId>) {
+    if eql.trim().is_empty() {
+        return;
+    }
+    let Ok(parsed) = eql_ctx.0.parse_str(eql) else {
+        return;
+    };
+    for (c, _) in parsed.to_graph_components() {
+        out.insert(c.id);
+    }
+}
+
+fn collect_object_3d_mesh_component_ids(
+    mesh: &impeller_wkt::Object3DMesh,
+    eql_ctx: &EqlContext,
+    out: &mut HashSet<ComponentId>,
+) {
+    match mesh {
+        impeller_wkt::Object3DMesh::Glb { animations, .. } => {
+            for anim in animations {
+                collect_eql_component_ids(&anim.eql_expr, eql_ctx, out);
+            }
+        }
+        impeller_wkt::Object3DMesh::Ellipsoid {
+            scale,
+            error_covariance_cholesky,
+            error_covariance,
+            error_covariance_cholesky_kernel,
+            error_covariance_kernel,
+            ..
+        } => {
+            if let Some(kernel) = error_covariance_cholesky_kernel
+                .as_ref()
+                .or(error_covariance_kernel.as_ref())
+            {
+                collect_kernel_component_ids(kernel, out);
+            } else if let Some(cholesky) = error_covariance_cholesky {
+                collect_eql_component_ids(cholesky, eql_ctx, out);
+            } else if let Some(covariance) = error_covariance {
+                collect_eql_component_ids(covariance, eql_ctx, out);
+            } else {
+                collect_eql_component_ids(scale, eql_ctx, out);
+            }
+        }
+        impeller_wkt::Object3DMesh::Mesh { .. } => {}
+    }
+}
+
+fn point_trails_component_ids(trails: &PointTrails) -> impl Iterator<Item = ComponentId> {
+    std::iter::once(trails.component.as_str())
+        .chain(trails.status.as_deref())
+        .chain(trails.start.as_deref())
+        .map(|name| ComponentId::new(name.trim()))
+}
+
+/// Component IDs for plot LineTree sync / visible-window prefetch
+/// (graphs + Line3d + point_trails + object_3d only).
+fn plot_fetch_component_ids(
+    graph_states: &Query<&GraphState>,
+    line_3ds: &Query<&Line3d>,
+    point_trails: &Query<&PointTrails>,
+    object_3ds: &Query<&Object3DState>,
+    eql_ctx: &EqlContext,
+) -> HashSet<ComponentId> {
+    let mut ids = HashSet::new();
+    for gs in graph_states.iter() {
+        if let Some(kernel) = &gs.kernel {
+            ids.extend(kernel.dependencies.iter().copied());
+        } else if let Some(derived) = &gs.derived {
+            ids.extend(derived.dependencies.iter().copied());
+        } else {
+            for (path, _) in gs.enabled_lines.keys() {
+                ids.insert(path.id);
+            }
+        }
+    }
+    for line in line_3ds.iter() {
+        collect_eql_component_ids(&line.eql, eql_ctx, &mut ids);
+    }
+    ids.extend(point_trails.iter().flat_map(point_trails_component_ids));
+    for obj in object_3ds.iter() {
+        if let Some(kernel) = &obj.data.kernel {
+            collect_kernel_component_ids(kernel, &mut ids);
+        } else {
+            collect_eql_component_ids(&obj.data.eql, eql_ctx, &mut ids);
+        }
+        collect_object_3d_mesh_component_ids(&obj.data.mesh, eql_ctx, &mut ids);
+        // Thruster particle intensity EQL (plume / cold_gas / motor smoke).
+        for thruster in &obj.data.thrusters {
+            collect_eql_component_ids(&thruster.intensity, eql_ctx, &mut ids);
+        }
+    }
+    ids
+}
+
+/// Full SeriesStore consumer set: plots/3D plus monitors, viewport cameras,
+/// and vector arrows.
+#[allow(clippy::too_many_arguments)]
+fn enabled_fetch_component_ids(
+    graph_states: &Query<&GraphState>,
+    line_3ds: &Query<&Line3d>,
+    point_trails: &Query<&PointTrails>,
+    object_3ds: &Query<&Object3DState>,
+    monitors: &Query<&MonitorData>,
+    viewports: &Query<&Viewport>,
+    vector_arrows: &Query<&VectorArrow3d>,
+    eql_ctx: &EqlContext,
+) -> HashSet<ComponentId> {
+    let mut ids =
+        plot_fetch_component_ids(graph_states, line_3ds, point_trails, object_3ds, eql_ctx);
+    for monitor in monitors.iter() {
+        if !monitor.component_name.trim().is_empty() {
+            ids.insert(ComponentId::new(&monitor.component_name));
+        }
+    }
+    for viewport in viewports.iter() {
+        collect_eql_component_ids(&viewport.pos.eql, eql_ctx, &mut ids);
+        collect_eql_component_ids(&viewport.look_at.eql, eql_ctx, &mut ids);
+        collect_eql_component_ids(&viewport.up.eql, eql_ctx, &mut ids);
+    }
+    for arrow in vector_arrows.iter() {
+        collect_eql_component_ids(&arrow.vector, eql_ctx, &mut ids);
+        if let Some(origin) = &arrow.origin {
+            collect_eql_component_ids(origin, eql_ctx, &mut ids);
+        }
+    }
+    ids
+}
+
+/// SeriesStore allowlist: UI consumers plus viewport adapter pair IDs
+/// (e.g. `ball_1.world_pos`, not only the static `world_pos` type id).
+pub(crate) fn build_series_store_allowlist(
+    consumer_ids: HashSet<ComponentId>,
+    extra_ids: impl IntoIterator<Item = ComponentId>,
+) -> HashSet<ComponentId> {
+    let mut ids = consumer_ids;
+    ids.extend(extra_ids);
+    ids
+}
+
+/// All `ComponentPathRegistry` IDs whose leaf name matches a registered adapter
+/// type (`WorldPos::COMPONENT_ID` = hash("world_pos"), etc.), plus the static
+/// adapter keys themselves.
+pub(crate) fn viewport_adapter_component_ids(
+    path_reg: &ComponentPathRegistry,
+    adapter_leaf_ids: &HashSet<ComponentId>,
+) -> HashSet<ComponentId> {
+    let mut ids = adapter_leaf_ids.clone();
+    for (&id, path) in path_reg.0.iter() {
+        if adapter_leaf_ids.contains(&path.tail().id) {
+            ids.insert(id);
+        }
+    }
+    ids
+}
+
+/// `{entity}.world_pos` for each configured sensor camera parent entity.
+pub(crate) fn sensor_camera_world_pos_ids(configs: &SensorCameraConfigs) -> HashSet<ComponentId> {
+    configs
+        .0
+        .iter()
+        .map(|c| ComponentId::new(&format!("{}.world_pos", c.entity_name)))
+        .collect()
+}
+
+/// Keep SeriesStore allowlist in sync with enabled plot / 3D / UI consumers.
+/// Reclaims RAM when IDs leave the allowlist so re-subscribe re-fetches cleanly.
+#[allow(clippy::too_many_arguments)]
+pub fn update_series_fetch_priority(
+    graph_states: Query<&GraphState>,
+    line_3ds: Query<&Line3d>,
+    point_trails: Query<&PointTrails>,
+    object_3ds: Query<&Object3DState>,
+    monitors: Query<&MonitorData>,
+    viewports: Query<&Viewport>,
+    vector_arrows: Query<&VectorArrow3d>,
+    eql_ctx: Res<EqlContext>,
+    path_reg: Res<ComponentPathRegistry>,
+    adapters: Res<ComponentAdapters>,
+    sensor_cameras: Res<SensorCameraConfigs>,
+    mut priority: ResMut<SeriesFetchPriority>,
+    mut cache: ResMut<TelemetryCache>,
+    mut backfill: ResMut<BackfillState>,
+    // Present in the interactive editor; absent in headless render-server.
+    mut prefetch: Option<ResMut<VisiblePrefetchState>>,
+) {
+    let adapter_leaves: HashSet<ComponentId> = adapters.keys().copied().collect();
+    let mut extras = viewport_adapter_component_ids(&path_reg, &adapter_leaves);
+    extras.extend(sensor_camera_world_pos_ids(&sensor_cameras));
+    let next = build_series_store_allowlist(
+        enabled_fetch_component_ids(
+            &graph_states,
+            &line_3ds,
+            &point_trails,
+            &object_3ds,
+            &monitors,
+            &viewports,
+            &vector_arrows,
+            &eql_ctx,
+        ),
+        extras,
+    );
+    for id in priority.high.difference(&next).copied().collect::<Vec<_>>() {
+        cache.remove_series(&id);
+        backfill.clear_component(id);
+        if let Some(ref mut prefetch) = prefetch {
+            prefetch.cancel_component(id);
+        }
+    }
+    priority.high = next;
+}
+
+/// Stored samples in the window plus the latest preceding value.
+fn element_samples_with_predecessor(
+    cache: &TelemetryCache,
+    component_id: ComponentId,
+    element_index: usize,
+    range: &Range<Timestamp>,
+) -> Vec<(Timestamp, f32)> {
+    if range.start >= range.end {
+        return Vec::new();
+    }
+    let Some(series) = cache.series(&component_id) else {
+        return Vec::new();
+    };
+
+    series
+        .range(..range.start)
+        .rev()
+        .find_map(|(&timestamp, value)| {
+            value
+                .get(element_index)
+                .map(|element| (timestamp, element.as_f32()))
+        })
+        .into_iter()
+        .chain(
+            series
+                .range(range.clone())
+                .filter_map(|(&timestamp, value)| {
+                    value
+                        .get(element_index)
+                        .map(|element| (timestamp, element.as_f32()))
+                }),
+        )
+        .collect()
+}
+
+/// Project SeriesStore samples into a plot `LineTree` for one element.
+/// When `max_points` is set, stride-downsample so long windows stay GPU-friendly.
+pub(crate) fn project_series_element_to_line(
+    cache: &TelemetryCache,
+    component_id: ComponentId,
+    element_index: usize,
+    range: &Range<Timestamp>,
+    earliest: Timestamp,
+    line: &mut LineTree<f32>,
+    max_points: Option<usize>,
+) -> usize {
+    let samples = element_samples_with_predecessor(cache, component_id, element_index, range);
+    let count = samples.len();
+    if count == 0 {
+        return 0;
+    }
+    let stride = max_points
+        .map(|max| count.div_ceil(max).max(1))
+        .unwrap_or(1);
+
+    let mut timestamps = Vec::new();
+    let mut values = Vec::new();
+    let mut total = 0usize;
+    for (i, (timestamp, value)) in samples.into_iter().enumerate() {
+        if i % stride != 0 && i + 1 != count {
+            continue;
+        }
+        timestamps.push(timestamp);
+        values.push(value);
+        if timestamps.len() >= CHUNK_LEN {
+            let n = timestamps.len();
+            if let Some(chunk) = Chunk::from_iter(&timestamps, earliest, values.iter().copied()) {
+                line.insert(chunk);
+                total += n;
+            }
+            timestamps.clear();
+            values.clear();
+        }
+    }
+    if !timestamps.is_empty() {
+        let n = timestamps.len();
+        if let Some(chunk) = Chunk::from_iter(&timestamps, earliest, values.into_iter()) {
+            line.insert(chunk);
+            total += n;
+        }
+    }
+    total
+}
+
+/// Append samples onto the last chunk, same path as live `push_value`.
+///
+/// Inserting a fresh `Chunk` every 100 ms (the trailing quantum) grows the
+/// shard count until `value_buffer_plan` resizes. That releases every GPU
+/// shard (#817); `draw_index_chunk_iter` then skips anything not resident
+/// and the strip shows holes, then goes blank.
+fn append_series_element_to_line(
+    cache: &TelemetryCache,
+    component_id: ComponentId,
+    element_index: usize,
+    range: &Range<Timestamp>,
+    earliest: Timestamp,
+    line: &mut LineTree<f32>,
+) -> usize {
+    let mut total = 0usize;
+    for (timestamp, new_value) in
+        element_samples_with_predecessor(cache, component_id, element_index, range)
+    {
+        let mut accepted = false;
+        if let Some(last) = line.last() {
+            if timestamp <= last.summary.end_timestamp {
+                continue;
+            }
+            if last.timestamps.len() < CHUNK_LEN {
+                line.update_last(|c| {
+                    c.push(timestamp, earliest, new_value);
+                });
+                accepted = true;
+            }
+        }
+        if !accepted {
+            line.insert(Chunk::from_initial_value(timestamp, earliest, new_value));
+        }
+        total += 1;
+    }
+    total
+}
+
+/// Fraction of `a`'s duration that overlaps `b` (0.0–1.0).
+pub(crate) fn range_overlap_ratio(a: &Range<Timestamp>, b: &Range<Timestamp>) -> f64 {
+    let overlap_start = a.start.0.max(b.start.0);
+    let overlap_end = a.end.0.min(b.end.0);
+    let overlap = overlap_end.saturating_sub(overlap_start).max(0);
+    let a_len = a.end.0.saturating_sub(a.start.0).max(1);
+    overlap as f64 / a_len as f64
+}
+
+/// Expand a selected window with prefetch margin for trailing / non-replay fetches.
+#[cfg(test)]
+pub(crate) fn expand_query_range_with_margin(
+    selected_range: Range<Timestamp>,
+    earliest: Timestamp,
+    latest: Timestamp,
+    trailing: bool,
+) -> Range<Timestamp> {
+    const MIN_PREFETCH_MARGIN: Duration = Duration::from_secs(2);
+    if !trailing {
+        return selected_range.start.max(earliest)..selected_range.end.min(latest);
+    }
+    let span = selected_range
+        .end
+        .0
+        .saturating_sub(selected_range.start.0)
+        .max(0);
+    let margin = span.max(MIN_PREFETCH_MARGIN.as_micros() as i64);
+    let start = Timestamp(
+        selected_range
+            .start
+            .0
+            .saturating_sub(margin)
+            .max(earliest.0),
+    );
+    let end = Timestamp(selected_range.end.0.saturating_add(margin).min(latest.0));
+    if start < end {
+        start..end
+    } else {
+        selected_range.start.max(earliest)..selected_range.end.min(latest)
+    }
+}
+
+#[cfg(test)]
 fn data_query_range(
     selected_range: Range<Timestamp>,
     earliest: Timestamp,
     latest: Timestamp,
     replay_mode: bool,
+    trailing: bool,
 ) -> Range<Timestamp> {
-    if replay_mode && earliest < latest {
-        earliest..latest
-    } else {
-        selected_range
-    }
+    // Trailing and replay: fetch selected ± margin (not the entire DB).
+    // Non-trailing recorded: clamp selected to DB bounds only.
+    let use_margin = trailing || replay_mode;
+    expand_query_range_with_margin(selected_range, earliest, latest, use_margin)
 }
 
-/// Handle the response from a PlotOverviewQuery.
-/// This inserts downsampled data into the LineTree for quick rendering.
-fn handle_overview_response(
-    pkt: InRef<OwnedPacket<PacketGrantR>>,
-    collected_graph_data: &mut CollectedGraphData,
-    lines: &mut Assets<Line>,
-    component_id: ComponentId,
-    element_index: usize,
-    earliest_timestamp: Timestamp,
-) {
-    let OwnedPacket::TimeSeries(time_series) = &*pkt else {
-        return;
-    };
-
-    let Ok(timestamps) = time_series.timestamps() else {
-        return;
-    };
-    let Ok(buf) = time_series.data() else {
-        return;
-    };
-
-    if timestamps.is_empty() {
-        return;
-    }
-
-    let Some(plot_data) = collected_graph_data.get_component_mut(&component_id) else {
-        return;
-    };
-
-    // Get or create the line for this element
-    let line = plot_data.lines.entry(element_index).or_insert_with(|| {
-        let label = plot_data
-            .element_names
-            .get(element_index)
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| format!("[{element_index}]"));
-        lines.add(Line {
-            label,
-            ..Default::default()
-        })
-    });
-
-    let Some(line) = lines.get_mut(line) else {
-        return;
-    };
-
-    // The response contains f32 values
-    let Ok(values) = <[f32]>::try_ref_from_bytes(buf) else {
-        return;
-    };
-
-    // Create a chunk with the overview data
-    if let Some(chunk) = Chunk::from_iter(timestamps, earliest_timestamp, values.iter().copied()) {
-        line.data.insert(chunk);
-    }
-}
-
+#[cfg(test)]
 fn next_range(
     mut current_range: Range<Timestamp>,
     component: &PlotDataComponent,
@@ -938,6 +1905,7 @@ fn next_range(
     current_range
 }
 
+#[cfg(test)]
 fn next_timestamp(timestamp: Timestamp) -> Timestamp {
     Timestamp(timestamp.0.saturating_add(1))
 }
@@ -969,6 +1937,8 @@ pub struct XYLine {
     pub y_shard_alloc: Option<BufferShardAlloc>,
     pub x_values: Vec<SharedBuffer<f32, CHUNK_LEN>>,
     pub y_values: Vec<SharedBuffer<f32, CHUNK_LEN>>,
+    /// Set by [`XYLine::replace_points`]; consumed by [`XYLine::queue_load`].
+    content_replaced: bool,
 }
 
 impl XYLine {
@@ -976,13 +1946,76 @@ impl XYLine {
         self.x_values.iter().map(|c| c.cpu().len()).sum()
     }
 
-    pub fn queue_load(&mut self, render_queue: &RenderQueue, render_device: &RenderDevice) {
-        let x_shard_alloc = self.x_shard_alloc.get_or_insert_with(|| {
-            BufferShardAlloc::with_nan_chunk(CHUNK_COUNT, CHUNK_LEN, render_device, render_queue)
-        });
-        let y_shard_alloc = self.y_shard_alloc.get_or_insert_with(|| {
-            BufferShardAlloc::with_nan_chunk(CHUNK_COUNT, CHUNK_LEN, render_device, render_queue)
-        });
+    /// Swap in a whole new point set, keeping the shard allocations so a
+    /// re-queried line does not have to take pool buffers on every refresh.
+    ///
+    /// Dropping the old chunks does not deallocate their shards, so the
+    /// allocations are reclaimed by the next `queue_load`, which holds the
+    /// render queue that a reset needs.
+    pub fn replace_points(&mut self, label: String, points: impl IntoIterator<Item = (f32, f32)>) {
+        self.label = label;
+        self.x_values.clear();
+        self.y_values.clear();
+        self.content_replaced = true;
+        for (x, y) in points {
+            self.push_x_value(x);
+            self.push_y_value(y);
+        }
+    }
+
+    pub fn has_samples(&self) -> bool {
+        self.x_values.iter().any(|c| !c.cpu().is_empty())
+    }
+
+    pub fn queue_load(
+        &mut self,
+        render_queue: &RenderQueue,
+        render_device: &RenderDevice,
+        pool: &mut PlotGpuBufferPool,
+    ) {
+        if !self.has_samples() {
+            return;
+        }
+        let x_class = value_shard_class(self.x_values.len());
+        let y_class = value_shard_class(self.y_values.len());
+        if std::mem::take(&mut self.content_replaced) {
+            // The replaced chunks dropped their shards without deallocating
+            // them, so hand the whole allocation back rather than leaking a
+            // shard per refresh. An unchanged class is reset in place, which
+            // keeps this off the pool entirely.
+            reclaim_or_release(&mut self.x_shard_alloc, x_class, pool, render_queue);
+            reclaim_or_release(&mut self.y_shard_alloc, y_class, pool, render_queue);
+        }
+        if self
+            .x_shard_alloc
+            .as_ref()
+            .is_some_and(|alloc| alloc.capacity_shards() < x_class)
+        {
+            for buffer in &self.x_values {
+                buffer.release_gpu();
+            }
+            if let Some(alloc) = self.x_shard_alloc.take() {
+                pool.release_value(alloc);
+            }
+        }
+        if self
+            .y_shard_alloc
+            .as_ref()
+            .is_some_and(|alloc| alloc.capacity_shards() < y_class)
+        {
+            for buffer in &self.y_values {
+                buffer.release_gpu();
+            }
+            if let Some(alloc) = self.y_shard_alloc.take() {
+                pool.release_value(alloc);
+            }
+        }
+        let x_shard_alloc = self
+            .x_shard_alloc
+            .get_or_insert_with(|| pool.take_value(x_class, render_device, render_queue));
+        let y_shard_alloc = self
+            .y_shard_alloc
+            .get_or_insert_with(|| pool.take_value(y_class, render_device, render_queue));
         for buf in &mut self.x_values {
             buf.queue_load(render_queue, x_shard_alloc);
         }
@@ -991,41 +2024,92 @@ impl XYLine {
         }
     }
 
+    pub fn gpu_resident(&self) -> bool {
+        self.x_shard_alloc.is_some() || self.y_shard_alloc.is_some()
+    }
+
+    pub fn required_value_shards(&self) -> usize {
+        self.x_values.len().max(self.y_values.len()).max(1)
+    }
+
+    pub fn value_buffers_needing_allocation(&self) -> usize {
+        let needed = |slot: &Option<BufferShardAlloc>, class: usize| {
+            usize::from(xy_takes_from_pool(
+                slot.as_ref().map(BufferShardAlloc::capacity_shards),
+                class,
+                self.content_replaced,
+            ))
+        };
+        needed(&self.x_shard_alloc, value_shard_class(self.x_values.len()))
+            + needed(&self.y_shard_alloc, value_shard_class(self.y_values.len()))
+    }
+
+    pub fn unload_gpu(&mut self, pool: &mut PlotGpuBufferPool) {
+        if !self.gpu_resident() {
+            return;
+        }
+        for buf in &self.x_values {
+            buf.release_gpu();
+        }
+        for buf in &self.y_values {
+            buf.release_gpu();
+        }
+        if let Some(alloc) = self.x_shard_alloc.take() {
+            pool.release_value(alloc);
+        }
+        if let Some(alloc) = self.y_shard_alloc.take() {
+            pool.release_value(alloc);
+        }
+    }
+
+    #[cfg(test)]
+    fn mark_gpu_clean(&self) {
+        for buf in self.x_values.iter().chain(self.y_values.iter()) {
+            buf.mark_gpu_clean();
+        }
+    }
+
+    #[cfg(test)]
+    fn all_gpu_dirty(&self) -> bool {
+        self.x_values
+            .iter()
+            .chain(self.y_values.iter())
+            .all(|buf| buf.gpu_is_dirty())
+    }
+
     pub fn write_to_index_buffer(
         &mut self,
         index_buffer: &Buffer,
         render_queue: &RenderQueue,
         pixel_width: usize,
-    ) -> u32 {
+    ) -> Option<u32> {
         // Decimate to respect the fixed index buffer size (same pattern as timeseries)
         let desired_index_len = INDEX_BUFFER_LEN.min(pixel_width.max(1) * 4);
         let total_points: usize = self.x_values.iter().map(|c| c.cpu().len()).sum();
         if total_points == 0 {
-            return 0;
+            return Some(0);
         }
         let step = total_points.div_ceil(desired_index_len.max(1)).max(1);
 
-        let mut view = render_queue
-            .write_buffer_with(
-                index_buffer,
-                0,
-                NonZeroU64::new((INDEX_BUFFER_LEN * 4) as u64).unwrap(),
-            )
-            .expect("no write buf");
-        let mut view = &mut view[..];
+        let mut view = render_queue.write_buffer_with(
+            index_buffer,
+            0,
+            NonZeroU64::new((INDEX_BUFFER_LEN * 4) as u64).unwrap(),
+        )?;
+        let mut view = view.slice(..);
         let mut written_u32s: u32 = 0;
         let mut global_index = 0usize;
         for buf in &mut self.x_values {
             let gpu = buf.gpu.lock();
             let Some(gpu) = gpu.as_ref() else {
-                return 0;
+                return Some(0);
             };
             let chunk = gpu.as_index_chunk::<f32>(buf.cpu().len());
             for (i, index) in chunk.into_index_iter().enumerate() {
                 let absolute = global_index + i;
                 if absolute.is_multiple_of(step) || absolute + 1 == total_points {
                     let Some(v) = try_append_u32(view, index) else {
-                        return written_u32s;
+                        return Some(written_u32s);
                     };
                     view = v;
                     written_u32s += 1;
@@ -1034,7 +2118,7 @@ impl XYLine {
             global_index += buf.cpu().len();
         }
 
-        written_u32s
+        Some(written_u32s)
     }
 
     pub fn plot_bounds(&self) -> PlotBounds {
@@ -1073,33 +2157,6 @@ impl XYLine {
         let mut buf = SharedBuffer::default();
         buf.push(value);
         self.y_values.push(buf);
-    }
-}
-
-pub trait AsF32 {
-    fn as_f32(&self) -> f32;
-}
-macro_rules! impl_as_f32 {
-    ($($t:ty),*) => {
-        $(
-            impl AsF32 for $t {
-                fn as_f32(&self) -> f32 { *self as f32 }
-            }
-        )*
-    }
-}
-
-impl_as_f32!(u8, u16, u32, u64, i8, i16, i32, i64, f64);
-
-impl AsF32 for f32 {
-    fn as_f32(&self) -> f32 {
-        *self
-    }
-}
-
-impl AsF32 for bool {
-    fn as_f32(&self) -> f32 {
-        if *self { 1.0 } else { 0.0 }
     }
 }
 
@@ -1148,6 +2205,25 @@ impl<T: IntoBytes + Immutable + Debug + Clone, const N: usize> SharedBuffer<T, N
 impl<T, const N: usize> SharedBuffer<T, N> {
     pub fn cpu(&self) -> &[T] {
         &self.cpu
+    }
+
+    fn release_gpu(&self) {
+        let _ = self.gpu.lock().take();
+        self.gpu_dirty.store(true, atomic::Ordering::SeqCst);
+    }
+
+    fn gpu_resident(&self) -> bool {
+        self.gpu.lock().is_some()
+    }
+
+    #[cfg(test)]
+    fn gpu_is_dirty(&self) -> bool {
+        self.gpu_dirty.load(atomic::Ordering::SeqCst)
+    }
+
+    #[cfg(test)]
+    fn mark_gpu_clean(&self) {
+        self.gpu_dirty.store(false, atomic::Ordering::SeqCst);
     }
 }
 
@@ -1312,6 +2388,7 @@ impl<D: Clone + BoundOrd> ChunkSummary<D> {
 
 pub struct LineTree<D: Clone + BoundOrd> {
     tree: NoditMap<i64, nodit::Interval<i64>, Chunk<D>>,
+    projected_range: Option<Range<Timestamp>>,
     data_buffer_shard_alloc: Option<BufferShardAlloc>,
     timestamp_buffer_shard_alloc: Option<BufferShardAlloc>,
     /// Append-only archive of raw `(timestamp, value)` samples ingested live.
@@ -1322,27 +2399,34 @@ pub struct LineTree<D: Clone + BoundOrd> {
     /// the archive is never decimated, running HC multiple times produces identical output
     /// (monotone quality) and parameter changes can be re-applied without loss.
     ///
-    /// Populated only for live streaming. Samples arriving via `GetTimeSeries` (historical DB
-    /// scroll) go through `handle_time_series`, which bypasses `push_value` and fills the view
-    /// directly — the archive stays empty for those ranges (elodin-db itself is the archive).
+    /// Populated only for live streaming via [`PlotDataComponent::push_value`].
+    /// Historical samples projected from SeriesStore fill the view (`tree`) directly
+    /// without updating this archive.
     raw_timestamps: Vec<Timestamp>,
     raw_values: Vec<D>,
     /// Archive length at the end of the last HC pass, for throttling decisions.
     last_hc_archive_len: usize,
     /// Wall-clock instant of the last HC pass, for time-based throttling.
     last_hc_instant: Option<std::time::Instant>,
+    /// Bumped on any view-content mutation ([`Self::insert`] — including live
+    /// appends via [`Self::update_last`] — [`Self::clear`], and view rebuild)
+    /// so GPU index caches invalidate when LineTree contents change without a
+    /// visible-range change.
+    content_gen: u64,
 }
 
 impl<D: Clone + BoundOrd> Default for LineTree<D> {
     fn default() -> Self {
         Self {
             tree: Default::default(),
+            projected_range: None,
             data_buffer_shard_alloc: None,
             timestamp_buffer_shard_alloc: None,
             raw_timestamps: Vec::new(),
             raw_values: Vec::new(),
             last_hc_archive_len: 0,
             last_hc_instant: None,
+            content_gen: 0,
         }
     }
 }
@@ -1366,6 +2450,10 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     }
 
     pub fn insert(&mut self, chunk: Chunk<D>) {
+        // Covers live appends too (`update_last` re-inserts the tail chunk):
+        // the GPU index strip must be rewritten for the live tip to advance
+        // even when the visible-range cache key is unchanged.
+        self.content_gen = self.content_gen.wrapping_add(1);
         let _ = self.tree.insert_overwrite(
             ii(
                 chunk.summary.start_timestamp.0,
@@ -1377,6 +2465,47 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
 
     pub fn total_points(&self) -> usize {
         self.tree.iter().map(|(_, c)| c.summary.len).sum()
+    }
+
+    /// Samples with timestamps in `[range.start, range.end)`.
+    pub fn sample_count_in_range(&self, range: &Range<Timestamp>) -> usize {
+        if range.end.0 <= range.start.0 {
+            return 0;
+        }
+        self.range_iter(range.clone())
+            .map(|chunk| {
+                let start = chunk.timestamps.partition_point(|&t| t < range.start);
+                let end = chunk.timestamps.partition_point(|&t| t < range.end);
+                end.saturating_sub(start)
+            })
+            .sum()
+    }
+
+    pub fn has_samples(&self) -> bool {
+        self.tree.iter().any(|(_, c)| c.summary.len > 0)
+    }
+
+    /// Identity for GPU index-cache invalidation when the view is rebuilt in place.
+    pub fn content_gen(&self) -> u64 {
+        self.content_gen
+    }
+
+    /// Earliest sample value in the tree (first point of the first chunk by time).
+    pub fn first_sample(&self) -> Option<D>
+    where
+        D: Copy,
+    {
+        let (_, chunk) = self.tree.first_key_value()?;
+        chunk.data.cpu().first().copied()
+    }
+
+    /// Timestamp of the sample returned by [`Self::first_sample`].
+    pub fn first_timestamp(&self) -> Option<Timestamp> {
+        let (_, chunk) = self.tree.first_key_value()?;
+        if chunk.data.cpu().is_empty() {
+            return None;
+        }
+        chunk.timestamps.first().copied()
     }
 
     pub fn chunk_count(&self) -> usize {
@@ -1446,15 +2575,43 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     }
 
     pub fn range_summary(&self, range: Range<Timestamp>) -> ChunkSummary<D> {
-        self.range_iter(range)
-            .fold(ChunkSummary::default(), |mut xs, x| {
-                xs.add_summary(&x.summary);
-                xs
+        self.range_iter(range.clone())
+            .fold(ChunkSummary::default(), |mut summary, chunk| {
+                let Some((start, end)) = chunk_visible_offsets(&chunk.timestamps, &range) else {
+                    return summary;
+                };
+                if start == 0 && end == chunk.summary.len {
+                    summary.add_summary(&chunk.summary);
+                    return summary;
+                }
+                let mut clipped: ChunkSummary<D> = ChunkSummary::default();
+                for (timestamp, value) in chunk.timestamps[start..end]
+                    .iter()
+                    .zip(&chunk.data.cpu()[start..end])
+                {
+                    clipped.len += 1;
+                    clipped.start_timestamp = clipped.start_timestamp.min(*timestamp);
+                    clipped.end_timestamp = clipped.end_timestamp.max(*timestamp);
+                    clipped.min = Some(match clipped.min {
+                        Some(min) => min.min(value.clone()),
+                        None => value.clone(),
+                    });
+                    clipped.max = Some(match clipped.max {
+                        Some(max) => max.max(value.clone()),
+                        None => value.clone(),
+                    });
+                }
+                summary.add_summary(&clipped);
+                summary
             })
     }
 
     /// Compute robust percentile-based bounds that filter out extreme outliers.
     /// Returns (p1, p99) percentile values from the data, which excludes the most extreme 1% on each end.
+    ///
+    /// Values are taken at a uniform stride so the working set stays at
+    /// [`MAX_PERCENTILE_SAMPLES`]. Full-window collect + quickselect was the
+    /// remaining ~12 FPS cost on graph-heavy FULL RANGE views.
     pub fn percentile_bounds(
         &self,
         range: Range<Timestamp>,
@@ -1464,37 +2621,51 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     where
         D: PartialOrd + Copy,
     {
-        // Collect all values from chunks in range
-        let mut values: Vec<D> = self
-            .range_iter(range)
-            .flat_map(|chunk| chunk.data.cpu().iter().copied())
-            .filter(|v| {
-                // Filter out non-finite f32 values if D is f32
-                // This is a bit of a hack but works for our use case
-                let bytes = std::mem::size_of::<D>();
-                if bytes == 4 {
-                    // Likely f32
-                    let v_f32: f32 = unsafe { std::mem::transmute_copy(v) };
-                    v_f32.is_finite()
-                } else {
-                    true
+        let mut slices: Vec<&[D]> = Vec::new();
+        let mut total = 0usize;
+        for chunk in self.range_iter(range.clone()) {
+            let Some((start, end)) = chunk_visible_offsets(&chunk.timestamps, &range) else {
+                continue;
+            };
+            let data = chunk.data.cpu();
+            let end = end.min(data.len());
+            if start >= end {
+                continue;
+            }
+            let slice = &data[start..end];
+            total += slice.len();
+            slices.push(slice);
+        }
+        if total == 0 {
+            return None;
+        }
+
+        let step = total.div_ceil(MAX_PERCENTILE_SAMPLES).max(1);
+        let mut values: Vec<D> = Vec::with_capacity(total.div_ceil(step));
+        let mut i = 0usize;
+        for slice in slices {
+            for &v in slice {
+                if i.is_multiple_of(step) && value_is_finite(&v) {
+                    values.push(v);
                 }
-            })
-            .collect();
+                i += 1;
+            }
+        }
 
         if values.is_empty() {
             return None;
         }
-
-        // Sort for percentile calculation
-        values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         let len = values.len();
         let low_idx = ((p_low / 100.0) * len as f32) as usize;
         let high_idx = ((p_high / 100.0) * len as f32) as usize;
         let high_idx = high_idx.min(len - 1);
 
-        Some((values[low_idx], values[high_idx]))
+        let cmp = |a: &D, b: &D| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal);
+        let (_, &mut high, _) = values.select_nth_unstable_by(high_idx, cmp);
+        let (_, &mut low, _) = values[..=high_idx].select_nth_unstable_by(low_idx, cmp);
+
+        Some((low, high))
     }
 
     pub fn last(&self) -> Option<&Chunk<D>> {
@@ -1539,6 +2710,88 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             .map(|(_, c)| c.summary.end_timestamp)
     }
 
+    /// Inclusive-start, exclusive-end span of samples in the tree.
+    pub fn stored_exclusive_span(&self) -> Option<Range<Timestamp>> {
+        let start = self.first_timestamp()?;
+        let end = self.latest_sample_timestamp()?;
+        Some(start..Timestamp(end.0.saturating_add(1)))
+    }
+
+    fn projected_span(&self) -> Option<Range<Timestamp>> {
+        self.projected_range
+            .clone()
+            .or_else(|| self.stored_exclusive_span())
+    }
+
+    fn set_projected_range(&mut self, range: Range<Timestamp>) {
+        self.projected_range = Some(range);
+    }
+
+    pub fn range_with_predecessor(&self, range: Range<Timestamp>) -> Range<Timestamp> {
+        self.last_timestamp_strictly_before(range.start)
+            .unwrap_or(range.start)..range.end
+    }
+
+    /// Drop chunks that lie entirely outside `keep`. Overlapping chunks stay so
+    /// a slide cannot punch a hole in the still-visible strip.
+    pub fn evict_chunks_outside(&mut self, keep: Range<Timestamp>) {
+        let predecessor = self.projected_range.as_ref().and_then(|_| {
+            keep.start.0.checked_sub(1).and_then(|end| {
+                self.tree
+                    .overlapping(ii(i64::MIN, end))
+                    .last()
+                    .map(|(_, chunk)| {
+                        (
+                            chunk.summary.start_timestamp.0,
+                            chunk.summary.end_timestamp.0,
+                        )
+                    })
+            })
+        });
+        let doomed: Vec<(i64, i64)> = self
+            .tree
+            .iter()
+            .filter(|(_, chunk)| {
+                chunk.summary.end_timestamp < keep.start || chunk.summary.start_timestamp > keep.end
+            })
+            .filter_map(|(_, chunk)| {
+                let key = (
+                    chunk.summary.start_timestamp.0,
+                    chunk.summary.end_timestamp.0,
+                );
+                (Some(key) != predecessor).then_some((
+                    chunk.summary.start_timestamp.0,
+                    chunk.summary.end_timestamp.0,
+                ))
+            })
+            .collect();
+        if doomed.is_empty() {
+            return;
+        }
+        for (start, end) in doomed {
+            // Inclusive intervals share a bound with the next chunk. Cutting
+            // `end` back by 1 removes this chunk without eating its neighbor.
+            let cut = if end > start {
+                ii(start, end - 1)
+            } else {
+                ii(start, end)
+            };
+            for (_range, chunk) in self.tree.remove_overlapping(cut) {
+                if let Some(alloc) = &mut self.data_buffer_shard_alloc
+                    && let Some(gpu) = chunk.data.gpu.lock().take()
+                {
+                    alloc.dealloc(gpu);
+                }
+                if let Some(alloc) = &mut self.timestamp_buffer_shard_alloc
+                    && let Some(gpu) = chunk.timestamps_float.gpu.lock().take()
+                {
+                    alloc.dealloc(gpu);
+                }
+            }
+        }
+        self.content_gen = self.content_gen.wrapping_add(1);
+    }
+
     pub fn data_buffer_shard_alloc(&self) -> Option<&BufferShardAlloc> {
         self.data_buffer_shard_alloc.as_ref()
     }
@@ -1552,16 +2805,84 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         range: Range<Timestamp>,
         render_queue: &RenderQueue,
         render_device: &RenderDevice,
+        pool: &mut PlotGpuBufferPool,
     ) {
-        let data_buffer_alloc = self.data_buffer_shard_alloc.get_or_insert_with(|| {
-            BufferShardAlloc::with_nan_chunk(CHUNK_COUNT, CHUNK_LEN, render_device, render_queue)
-        });
-        let timestamp_buffer_alloc = self.timestamp_buffer_shard_alloc.get_or_insert_with(|| {
-            BufferShardAlloc::with_nan_chunk(CHUNK_COUNT, CHUNK_LEN, render_device, render_queue)
-        });
+        if !self.has_samples() {
+            return;
+        }
+        let (value_class, needs_resize) = self.value_buffer_plan(&range);
+        if needs_resize {
+            for (_, chunk) in self.tree.overlapping_mut(ii(i64::MIN, i64::MAX)) {
+                chunk.data.release_gpu();
+                chunk.timestamps_float.release_gpu();
+            }
+            reclaim_or_release(
+                &mut self.data_buffer_shard_alloc,
+                value_class,
+                pool,
+                render_queue,
+            );
+            reclaim_or_release(
+                &mut self.timestamp_buffer_shard_alloc,
+                value_class,
+                pool,
+                render_queue,
+            );
+        }
+        let data_buffer_alloc = self
+            .data_buffer_shard_alloc
+            .get_or_insert_with(|| pool.take_value(value_class, render_device, render_queue));
+        let timestamp_buffer_alloc = self
+            .timestamp_buffer_shard_alloc
+            .get_or_insert_with(|| pool.take_value(value_class, render_device, render_queue));
         for (_, chunk) in self.tree.overlapping_mut(ii(range.start.0, range.end.0)) {
             chunk.queue_load(render_queue, data_buffer_alloc, timestamp_buffer_alloc);
         }
+    }
+
+    pub fn required_value_shards(&self, range: Range<Timestamp>) -> usize {
+        self.range_iter(range).count().max(1)
+    }
+
+    /// The shard class `range` needs, and whether the current buffers have to be
+    /// rebuilt to host it.
+    fn value_buffer_plan(&self, range: &Range<Timestamp>) -> (usize, bool) {
+        let mut visible_shards = 0;
+        let mut missing_data_shards = 0;
+        let mut missing_timestamp_shards = 0;
+        for (_, chunk) in self.tree.overlapping(ii(range.start.0, range.end.0)) {
+            visible_shards += 1;
+            missing_data_shards += usize::from(!chunk.data.gpu_resident());
+            missing_timestamp_shards += usize::from(!chunk.timestamps_float.gpu_resident());
+        }
+        let class = value_shard_class(visible_shards);
+        let outgrown = |alloc: &BufferShardAlloc, missing: usize| {
+            alloc.capacity_shards() < class || alloc.free_shards() < missing
+        };
+        let needs_resize = self
+            .data_buffer_shard_alloc
+            .as_ref()
+            .is_some_and(|alloc| outgrown(alloc, missing_data_shards))
+            || self
+                .timestamp_buffer_shard_alloc
+                .as_ref()
+                .is_some_and(|alloc| outgrown(alloc, missing_timestamp_shards));
+        (class, needs_resize)
+    }
+
+    pub fn value_buffers_needing_allocation(&self, range: Range<Timestamp>) -> usize {
+        let (class, needs_resize) = self.value_buffer_plan(&range);
+        let capacity =
+            |slot: &Option<BufferShardAlloc>| slot.as_ref().map(BufferShardAlloc::capacity_shards);
+        usize::from(takes_from_pool(
+            capacity(&self.data_buffer_shard_alloc),
+            class,
+            needs_resize,
+        )) + usize::from(takes_from_pool(
+            capacity(&self.timestamp_buffer_shard_alloc),
+            class,
+            needs_resize,
+        ))
     }
 
     pub fn draw_index_count(&self, range: Range<Timestamp>) -> (usize, usize) {
@@ -1620,28 +2941,43 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         index_buffer: &Buffer,
         render_queue: &RenderQueue,
         line_visible_range: Range<Timestamp>,
-        pixel_width: usize,
-    ) -> u32 {
-        self.write_to_index_buffer_with_sampling_range(
+        terminal_hold: bool,
+    ) -> Option<u32> {
+        let step = self.fitted_index_step(line_visible_range.clone(), terminal_hold);
+        self.write_to_index_buffer_with_step_mode(
             index_buffer,
             render_queue,
-            line_visible_range.clone(),
             line_visible_range,
-            pixel_width,
+            step,
+            terminal_hold,
         )
     }
 
-    pub fn write_to_index_buffer_with_sampling_range(
-        &self,
-        index_buffer: &Buffer,
-        render_queue: &RenderQueue,
-        line_visible_range: Range<Timestamp>,
-        sampling_range: Range<Timestamp>,
-        pixel_width: usize,
-    ) -> u32 {
-        let (chunk_count, index_count) = self.range_index_stats(sampling_range);
-        let step = index_sampling_step(chunk_count, index_count, pixel_width);
-        self.write_to_index_buffer_with_step(index_buffer, render_queue, line_visible_range, step)
+    /// Stride for `range` that [`Self::write_to_index_buffer_with_step`] is
+    /// guaranteed to write in full.
+    ///
+    /// [`index_sampling_step`] budgets from a per-chunk overhead estimate, so a
+    /// dense range can still overshoot; the write loop would then stop mid-strip
+    /// and drop the *newest* samples, since chunks are visited oldest first.
+    /// Double until the exact count fits, as `plot_3d` does.
+    fn fitted_index_step(&self, range: Range<Timestamp>, terminal_hold: bool) -> usize {
+        let (chunk_count, index_count) = self.range_index_stats(range.clone());
+        let index_count = index_count.saturating_add(usize::from(terminal_hold) * 2);
+        let mut step = index_sampling_step(chunk_count, index_count);
+        // `index_count` bounds the strip from above, so only an over-budget range
+        // has to pay for the exact count.
+        if index_count <= INDEX_BUFFER_LEN {
+            return step;
+        }
+        for _ in 0..MAX_INDEX_STEP_DOUBLINGS {
+            if self.count_strip_index_u32s_mode(range.clone(), step, terminal_hold)
+                <= INDEX_BUFFER_LEN as u32
+            {
+                break;
+            }
+            step = step.saturating_mul(2).max(2);
+        }
+        step
     }
 
     /// Count of `u32` indices written by [`Self::write_to_index_buffer_with_step`] for this range
@@ -1650,43 +2986,30 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     /// Uses the same visibility clipping as [`Self::draw_index_chunk_iter`] but does **not**
     /// require GPU-resident chunks (counts from CPU timestamps + visible length only).
     pub fn count_strip_index_u32s(&self, line_visible_range: Range<Timestamp>, step: usize) -> u32 {
-        let step = step.max(1);
+        self.count_strip_index_u32s_mode(line_visible_range, step, false)
+    }
+
+    fn count_strip_index_u32s_mode(
+        &self,
+        line_visible_range: Range<Timestamp>,
+        step: usize,
+        terminal_hold: bool,
+    ) -> u32 {
         let mut n: u32 = 0;
-        for c in self.range_iter(line_visible_range.clone()) {
-            let Some((start_offset, end_offset)) =
-                chunk_visible_offsets(&c.timestamps, &line_visible_range)
-            else {
-                continue;
-            };
-            let vis_len = end_offset.saturating_sub(start_offset);
-            if vis_len == 0 {
-                continue;
-            }
-            // `into_index_iter` length depends only on `len`; absolute indices match GPU path
-            // after clip, but counts are identical for any `range.start` with sufficient span.
-            let chunk = IndexChunk {
-                range: 0..u32::MAX,
-                len: vis_len,
-            };
+        let chunks = self
+            .range_iter(line_visible_range.clone())
+            .filter_map(|chunk| {
+                let (start, end) = chunk_visible_offsets(&chunk.timestamps, &line_visible_range)?;
+                let len = end.saturating_sub(start);
+                (len > 0).then_some(IndexChunk {
+                    range: 0..u32::MAX,
+                    len,
+                })
+            });
+        let _ = for_each_strip_index(chunks, step, terminal_hold, |_| {
             n = n.saturating_add(1);
-            let end = chunk.clone().into_index_iter().last();
-            let mut index_iter = chunk.into_index_iter();
-            let mut last_written: Option<u32> = None;
-            if let Some(index) = index_iter.next() {
-                n = n.saturating_add(1);
-                last_written = Some(index);
-            }
-            for index in index_iter.step_by(step) {
-                n = n.saturating_add(1);
-                last_written = Some(index);
-            }
-            if let Some(end) = end
-                && last_written != Some(end)
-            {
-                n = n.saturating_add(1);
-            }
-            n = n.saturating_add(1);
-        }
+            ControlFlow::Continue(())
+        });
         n
     }
 
@@ -1696,89 +3019,210 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         render_queue: &RenderQueue,
         line_visible_range: Range<Timestamp>,
         step: usize,
-    ) -> u32 {
-        let mut view = render_queue
-            .write_buffer_with(
-                index_buffer,
-                0,
-                NonZeroU64::new((INDEX_BUFFER_LEN * 4) as u64).unwrap(),
-            )
-            .expect("no write buf");
-        let mut view = &mut view[..];
+    ) -> Option<u32> {
+        self.write_to_index_buffer_with_step_mode(
+            index_buffer,
+            render_queue,
+            line_visible_range,
+            step,
+            false,
+        )
+    }
+
+    fn write_to_index_buffer_with_step_mode(
+        &self,
+        index_buffer: &Buffer,
+        render_queue: &RenderQueue,
+        line_visible_range: Range<Timestamp>,
+        step: usize,
+        terminal_hold: bool,
+    ) -> Option<u32> {
+        let mut view = render_queue.write_buffer_with(
+            index_buffer,
+            0,
+            NonZeroU64::new((INDEX_BUFFER_LEN * 4) as u64).unwrap(),
+        )?;
+        let mut view = Some(view.slice(..));
         let mut written_u32s: u32 = 0;
-        'chunks: for chunk in self.draw_index_chunk_iter(line_visible_range) {
-            let Some(v) = try_append_u32(view, 0) else {
-                break 'chunks;
+        let _ = for_each_strip_index(
+            self.draw_index_chunk_iter(line_visible_range),
+            step,
+            terminal_hold,
+            |index| {
+                let Some(current) = view.take() else {
+                    return ControlFlow::Break(());
+                };
+                let Some(rest) = try_append_u32(current, index) else {
+                    return ControlFlow::Break(());
+                };
+                view = Some(rest);
+                written_u32s += 1;
+                ControlFlow::Continue(())
+            },
+        );
+        Some(written_u32s)
+    }
+
+    /// Visit `(chunk, offset)` for every sample in the visible strip that
+    /// [`Self::write_to_index_buffer_with_step`] would index (same step / clip).
+    ///
+    /// Shared by [`Self::collect_strip_values`] and
+    /// [`Self::collect_strip_timestamps`] so the two stay index-aligned: the
+    /// `line_3d` path pairs a timestamp with its value across both.
+    fn for_each_strip_sample(
+        &self,
+        line_visible_range: Range<Timestamp>,
+        step: usize,
+        mut f: impl FnMut(&Chunk<D>, usize),
+    ) {
+        let step = step.max(1);
+        for chunk in self.range_iter(line_visible_range.clone()) {
+            let Some((start_offset, end_offset)) =
+                chunk_visible_offsets(&chunk.timestamps, &line_visible_range)
+            else {
+                continue;
             };
-            view = v;
-            written_u32s += 1;
-            let end = chunk.clone().into_index_iter().last();
-            let mut index_iter = chunk.into_index_iter();
+            let vis_len = end_offset.saturating_sub(start_offset);
+            if vis_len == 0 {
+                continue;
+            }
+            let index_chunk = IndexChunk {
+                range: 0..u32::MAX,
+                len: vis_len,
+            };
+            let end = index_chunk.clone().into_index_iter().last();
+            let mut index_iter = index_chunk.into_index_iter();
             let mut last_written: Option<u32> = None;
             if let Some(index) = index_iter.next() {
-                let Some(v) = try_append_u32(view, index) else {
-                    break 'chunks;
-                };
-                view = v;
-                written_u32s += 1;
+                f(chunk, start_offset + index as usize);
                 last_written = Some(index);
             }
             for index in index_iter.step_by(step) {
-                let Some(v) = try_append_u32(view, index) else {
-                    break 'chunks;
-                };
-                view = v;
-                written_u32s += 1;
+                f(chunk, start_offset + index as usize);
                 last_written = Some(index);
             }
             if let Some(end) = end
                 && last_written != Some(end)
             {
-                let Some(v) = try_append_u32(view, end) else {
-                    break 'chunks;
-                };
-                view = v;
-                written_u32s += 1;
+                f(chunk, start_offset + end as usize);
             }
-            let Some(v) = try_append_u32(view, 0) else {
-                break 'chunks;
-            };
-            view = v;
-            written_u32s += 1;
         }
-        written_u32s
+    }
+
+    /// Collect CPU sample values for the visible strip.
+    ///
+    /// Does not require GPU-resident chunks — used by `line_3d` to build
+    /// floating-origin-local XYZ buffers.
+    pub fn collect_strip_values(&self, line_visible_range: Range<Timestamp>, step: usize) -> Vec<D>
+    where
+        D: Copy,
+    {
+        let mut out = Vec::new();
+        self.for_each_strip_sample(line_visible_range, step, |chunk, i| {
+            if let Some(&v) = chunk.data.cpu().get(i) {
+                out.push(v);
+            }
+        });
+        out
+    }
+
+    /// Collect the timestamps of the visible strip, index-aligned with
+    /// [`Self::collect_strip_values`].
+    ///
+    /// `line_3d` uses these to re-read each sample from the f64 telemetry cache,
+    /// so ECEF-scale coordinates keep full precision until after the anchor
+    /// subtraction.
+    pub fn collect_strip_timestamps(
+        &self,
+        line_visible_range: Range<Timestamp>,
+        step: usize,
+    ) -> Vec<Timestamp> {
+        let mut out = Vec::new();
+        self.for_each_strip_sample(line_visible_range, step, |chunk, i| {
+            // Guard on `data` so a value-less index is skipped in both
+            // collectors and the two stay aligned.
+            if chunk.data.cpu().len() > i
+                && let Some(&ts) = chunk.timestamps.get(i)
+            {
+                out.push(ts);
+            }
+        });
+        out
     }
 
     pub fn garbage_collect(&mut self, line_visible_range: Range<Timestamp>) {
         let first_half =
             nodit::interval::ii(i64::MIN, line_visible_range.start.0.saturating_sub(1));
         let second_half = nodit::interval::ii(line_visible_range.end.0.saturating_add(1), i64::MAX);
-        for (range, chunk) in self
-            .tree
-            .overlapping(first_half)
-            .chain(self.tree.overlapping(second_half))
-        {
-            if line_visible_range.contains(&Timestamp(range.start()))
-                || line_visible_range.contains(&Timestamp(range.end()))
-            {
-                continue;
+        for interval in [first_half, second_half] {
+            for (_range, chunk) in self.tree.remove_overlapping(interval) {
+                if let Some(alloc) = &mut self.data_buffer_shard_alloc
+                    && let Some(gpu) = chunk.data.gpu.lock().take()
+                {
+                    alloc.dealloc(gpu);
+                }
+                if let Some(alloc) = &mut self.timestamp_buffer_shard_alloc
+                    && let Some(gpu) = chunk.timestamps_float.gpu.lock().take()
+                {
+                    alloc.dealloc(gpu);
+                }
             }
+        }
+    }
+
+    /// Drop all CPU/GPU chunks (full rebuild from SeriesStore).
+    pub fn clear(&mut self) {
+        self.content_gen = self.content_gen.wrapping_add(1);
+        self.projected_range = None;
+        let full = nodit::interval::ii(i64::MIN, i64::MAX);
+        for (_range, chunk) in self.tree.remove_overlapping(full) {
             if let Some(alloc) = &mut self.data_buffer_shard_alloc
                 && let Some(gpu) = chunk.data.gpu.lock().take()
             {
                 alloc.dealloc(gpu);
-                chunk.data.gpu_dirty.store(true, atomic::Ordering::SeqCst);
             }
             if let Some(alloc) = &mut self.timestamp_buffer_shard_alloc
                 && let Some(gpu) = chunk.timestamps_float.gpu.lock().take()
             {
                 alloc.dealloc(gpu);
-                chunk
-                    .timestamps_float
-                    .gpu_dirty
-                    .store(true, atomic::Ordering::SeqCst);
             }
         }
+        self.clear_raw();
+    }
+
+    pub fn gpu_resident(&self) -> bool {
+        self.data_buffer_shard_alloc.is_some() || self.timestamp_buffer_shard_alloc.is_some()
+    }
+
+    pub fn unload_gpu(&mut self, pool: &mut PlotGpuBufferPool) {
+        if !self.gpu_resident() {
+            return;
+        }
+        for (_, chunk) in self.tree.overlapping_mut(ii(i64::MIN, i64::MAX)) {
+            chunk.data.release_gpu();
+            chunk.timestamps_float.release_gpu();
+        }
+        if let Some(alloc) = self.data_buffer_shard_alloc.take() {
+            pool.release_value(alloc);
+        }
+        if let Some(alloc) = self.timestamp_buffer_shard_alloc.take() {
+            pool.release_value(alloc);
+        }
+    }
+
+    #[cfg(test)]
+    fn mark_gpu_clean(&mut self) {
+        for (_, chunk) in self.tree.overlapping_mut(ii(i64::MIN, i64::MAX)) {
+            chunk.data.mark_gpu_clean();
+            chunk.timestamps_float.mark_gpu_clean();
+        }
+    }
+
+    #[cfg(test)]
+    fn all_gpu_dirty(&self) -> bool {
+        self.tree
+            .iter()
+            .all(|(_, chunk)| chunk.data.gpu_is_dirty() && chunk.timestamps_float.gpu_is_dirty())
     }
 }
 
@@ -1848,6 +3292,8 @@ impl LineTree<f32> {
         {
             return;
         }
+
+        self.content_gen = self.content_gen.wrapping_add(1);
 
         let mut new_tree: NoditMap<i64, nodit::Interval<i64>, Chunk<f32>> = NoditMap::default();
         let mut offset = 0usize;
@@ -1958,7 +3404,7 @@ fn recent_tail_keep_count(n: usize, keep_recent_fraction: f32) -> usize {
     keep.min(n.saturating_sub(1))
 }
 
-fn chunk_visible_offsets(
+pub(crate) fn chunk_visible_offsets(
     timestamps: &[Timestamp],
     range: &Range<Timestamp>,
 ) -> Option<(usize, usize)> {
@@ -1967,23 +3413,47 @@ fn chunk_visible_offsets(
     (end_offset > start_offset).then_some((start_offset, end_offset))
 }
 
-pub fn index_sampling_step(chunk_count: usize, index_count: usize, pixel_width: usize) -> usize {
-    let desired_index_len = INDEX_BUFFER_LEN.min(pixel_width.max(1) * 4);
+fn value_is_finite<D: Copy>(v: &D) -> bool {
+    if std::mem::size_of::<D>() == 4 {
+        let v_f32: f32 = unsafe { std::mem::transmute_copy(v) };
+        v_f32.is_finite()
+    } else {
+        true
+    }
+}
+
+/// Stride that fits a visible strip of `index_count` indices, spread over
+/// `chunk_count` chunks, into [`INDEX_BUFFER_LEN`].
+///
+/// Decimation exists only to respect that buffer; it is not a pixel-density
+/// heuristic. Budgeting on the widget width instead capped every window at a few
+/// indices per pixel — roughly 2% of the buffer — while windows within the
+/// short-accuracy threshold bypassed striding entirely, so fidelity fell off a
+/// cliff as soon as a graph was widened past it. `plot_3d` has always budgeted
+/// from the buffer.
+pub fn index_sampling_step(chunk_count: usize, index_count: usize) -> usize {
     // Per-chunk index overhead: leading sentinel, first point, strided interior, last point,
-    // trailing sentinel (see `write_to_index_buffer_with_step`).
+    // trailing sentinel (see `write_to_index_buffer_with_step`). `range_index_stats` folds it
+    // into `index_count`, so take it back out to get the samples the stride applies to.
     const PER_CHUNK_OVERHEAD: usize = 6;
     let overhead = PER_CHUNK_OVERHEAD.saturating_mul(chunk_count.max(1));
-    let divisor = desired_index_len.saturating_sub(overhead);
+    let samples = index_count.saturating_sub(overhead);
+    let divisor = INDEX_BUFFER_LEN.saturating_sub(overhead);
     if divisor > 0 {
-        return index_count.div_ceil(divisor).max(1);
+        return samples.div_ceil(divisor).max(1);
     }
-    // Many chunks: `2 * chunk_count` alone can exceed the index budget — never fall back to step 1.
-    index_count.div_ceil(desired_index_len.max(1)).max(1)
+    // Overhead alone exceeds the budget — never fall back to step 1.
+    index_count.div_ceil(INDEX_BUFFER_LEN).max(1)
 }
+
+/// Doublings allowed while fitting a strip into the index buffer. Enough to take
+/// any reachable sample count down to a handful of points.
+pub const MAX_INDEX_STEP_DOUBLINGS: usize = 26;
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use impeller_wkt::ComponentValue;
 
     #[test]
     fn next_timestamp_advances_by_one_microsecond() {
@@ -1999,14 +3469,16 @@ mod tests {
     fn next_range_skips_the_last_timestamp_of_the_existing_chunk() {
         let mut lines = Assets::<Line>::default();
         let handle = lines.add(Line::default());
-        let line = lines.get_mut(&handle).expect("line asset should exist");
         let chunk = Chunk::from_iter(
             &[Timestamp(10), Timestamp(20)],
             Timestamp(0),
             [1.0_f32, 2.0_f32].into_iter(),
         )
         .expect("chunk should exist");
-        line.data.insert(chunk);
+        {
+            let mut line = lines.get_mut(&handle).expect("line asset should exist");
+            line.data.insert(chunk);
+        }
 
         let mut component = PlotDataComponent::new("test", vec![]);
         component.lines.insert(0, handle);
@@ -2017,25 +3489,70 @@ mod tests {
     }
 
     #[test]
-    fn replay_query_range_uses_full_available_extent() {
+    fn replay_query_range_uses_selected_plus_margin() {
         let range = data_query_range(
-            Timestamp(50)..Timestamp(75),
-            Timestamp(10),
-            Timestamp(100),
+            Timestamp(5_000_000)..Timestamp(5_000_100),
+            Timestamp(0),
+            Timestamp(20_000_000),
             true,
+            false,
         );
-        assert_eq!(range, Timestamp(10)..Timestamp(100));
+        // span 100µs → margin max(100, 2s) = 2s
+        assert_eq!(range, Timestamp(3_000_000)..Timestamp(7_000_100));
     }
 
     #[test]
-    fn non_replay_query_range_stays_visible_window() {
+    fn non_replay_query_range_stays_visible_window_when_not_trailing() {
         let range = data_query_range(
             Timestamp(50)..Timestamp(75),
             Timestamp(10),
             Timestamp(100),
             false,
+            false,
         );
         assert_eq!(range, Timestamp(50)..Timestamp(75));
+    }
+
+    #[test]
+    fn trailing_query_range_expands_with_margin_clamped_to_db() {
+        // 5s window → margin max(5s, 2s) = 5s
+        let selected = Timestamp(10_000_000)..Timestamp(15_000_000);
+        let range =
+            expand_query_range_with_margin(selected, Timestamp(0), Timestamp(20_000_000), true);
+        assert_eq!(range.start, Timestamp(5_000_000));
+        assert_eq!(range.end, Timestamp(20_000_000));
+    }
+
+    #[test]
+    fn request_key_quantum_collides_sub_100ms_starts() {
+        let a = floor_ts_quantum(Timestamp(40_050_000), REQUEST_KEY_QUANTUM_MICROS);
+        let b = floor_ts_quantum(Timestamp(40_090_000), REQUEST_KEY_QUANTUM_MICROS);
+        assert_eq!(a, b);
+        assert_eq!(a, Timestamp(40_000_000));
+    }
+
+    #[test]
+    fn range_overlap_ratio_full_overlap_is_one() {
+        let a = Timestamp(0)..Timestamp(1_000_000);
+        let b = Timestamp(0)..Timestamp(1_000_000);
+        assert!((range_overlap_ratio(&a, &b) - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn range_overlap_ratio_half_slide_is_below_half() {
+        // Previous overview: [0, 20min]. Current: [15min, 35min] → 25% of prev remains.
+        let prev = Timestamp(0)..Timestamp(1_200_000_000);
+        let curr = Timestamp(900_000_000)..Timestamp(2_100_000_000);
+        let ratio = range_overlap_ratio(&prev, &curr);
+        assert!(ratio < 0.5, "ratio={ratio}");
+        assert!(ratio > 0.2, "ratio={ratio}");
+    }
+
+    #[test]
+    fn range_overlap_ratio_no_overlap_is_zero() {
+        let a = Timestamp(0)..Timestamp(100);
+        let b = Timestamp(200)..Timestamp(300);
+        assert_eq!(range_overlap_ratio(&a, &b), 0.0);
     }
 
     #[test]
@@ -2055,14 +3572,1507 @@ mod tests {
     }
 
     #[test]
-    fn index_sampling_step_matches_index_budget() {
-        assert_eq!(index_sampling_step(1, 100, 100), 1);
-        assert_eq!(index_sampling_step(1, 1_000, 100), 3);
+    fn index_sampling_step_only_strides_over_budget() {
+        // Whatever fits the index buffer is drawn in full; widget width no longer
+        // enters into it.
+        assert_eq!(index_sampling_step(1, 100), 1);
+        assert_eq!(index_sampling_step(1, 1_000), 1);
+        assert_eq!(index_sampling_step(40, INDEX_BUFFER_LEN), 1);
+        // Overhead comes off both sides, so 2× the buffer is just over two
+        // budgets and needs step 3.
+        assert_eq!(index_sampling_step(1, 2 * INDEX_BUFFER_LEN), 3);
+    }
+
+    #[test]
+    fn series_store_allowlist_unions_plots_and_adapters() {
+        let plot = ComponentId(10);
+        let adapter = ComponentId(20);
+        let ids = build_series_store_allowlist([plot].into_iter().collect(), [adapter]);
+        assert!(ids.contains(&plot));
+        assert!(ids.contains(&adapter));
+        assert_eq!(ids.len(), 2);
+    }
+
+    #[test]
+    fn series_store_allowlist_adapters_alone_still_subscribe() {
+        let adapter = ComponentId(7);
+        let ids = build_series_store_allowlist(HashSet::new(), [adapter]);
+        assert_eq!(ids, [adapter].into_iter().collect());
+    }
+
+    #[test]
+    fn tuple_array_access_eql_component_is_allowlisted() {
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
+
+        let name = "effector.cube_pos_ecef";
+        let component = Arc::new(eql::Component::new(
+            name.to_string(),
+            ComponentId::new(name),
+            Schema::new(PrimType::F64, vec![1950_u64]).expect("valid schema"),
+        ));
+        let eql_ctx = EqlContext(eql::Context::from_leaves(
+            [component],
+            Timestamp(0),
+            Timestamp(1),
+        ));
+        let mut ids = HashSet::new();
+        collect_eql_component_ids(
+            "(effector.cube_pos_ecef[0],effector.cube_pos_ecef[650],effector.cube_pos_ecef[1300])",
+            &eql_ctx,
+            &mut ids,
+        );
+        assert_eq!(ids, [ComponentId::new(name)].into_iter().collect());
+    }
+
+    #[test]
+    fn point_trails_components_are_allowlisted() {
+        let trails = PointTrails {
+            component: "effector.cube_pos_ecef".to_string(),
+            status: Some("effector.cube_hit_tick".to_string()),
+            start: Some("effector.cube_cloud_fired".to_string()),
+            head_size: 0.15,
+            head_shape: Default::default(),
+            line_width: 4.0,
+            max_length: Some(3.0),
+            color: None,
+            hit_color: None,
+            frame: None,
+            node_id: Default::default(),
+        };
+        let ids: HashSet<_> = point_trails_component_ids(&trails).collect();
+        assert_eq!(
+            ids,
+            [
+                ComponentId::new("effector.cube_pos_ecef"),
+                ComponentId::new("effector.cube_hit_tick"),
+                ComponentId::new("effector.cube_cloud_fired"),
+            ]
+            .into_iter()
+            .collect()
+        );
+    }
+
+    #[test]
+    fn ellipsoid_covariance_eql_components_are_allowlisted() {
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
+        use impeller_wkt::{
+            Object3DMesh, default_ellipsoid_color, default_ellipsoid_confidence_interval,
+            default_ellipsoid_grid_color,
+        };
+
+        let components = ["shape.scale", "shape.cholesky", "shape.covariance"].map(|name| {
+            Arc::new(eql::Component::new(
+                name.to_string(),
+                ComponentId::new(name),
+                Schema::new(PrimType::F64, vec![6_u64]).expect("valid schema"),
+            ))
+        });
+        let eql_ctx = EqlContext(eql::Context::from_leaves(
+            components,
+            Timestamp(0),
+            Timestamp(1),
+        ));
+        let mut mesh = Object3DMesh::Ellipsoid {
+            scale: "shape.scale".into(),
+            color: default_ellipsoid_color(),
+            error_covariance_cholesky: Some("shape.cholesky".into()),
+            error_covariance: Some("shape.covariance".into()),
+            error_covariance_cholesky_kernel: None,
+            error_covariance_kernel: None,
+            error_confidence_interval: default_ellipsoid_confidence_interval(),
+            show_grid: false,
+            grid_color: default_ellipsoid_grid_color(),
+        };
+
+        let mut ids = HashSet::new();
+        collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut ids);
+
+        assert_eq!(
+            ids,
+            [ComponentId::new("shape.cholesky")].into_iter().collect()
+        );
+
+        if let Object3DMesh::Ellipsoid {
+            error_covariance_cholesky,
+            ..
+        } = &mut mesh
+        {
+            *error_covariance_cholesky = None;
+        }
+        ids.clear();
+        collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut ids);
+        assert_eq!(
+            ids,
+            [ComponentId::new("shape.covariance")].into_iter().collect()
+        );
+
+        if let Object3DMesh::Ellipsoid {
+            error_covariance, ..
+        } = &mut mesh
+        {
+            *error_covariance = None;
+        }
+        ids.clear();
+        collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut ids);
+        assert_eq!(ids, [ComponentId::new("shape.scale")].into_iter().collect());
+    }
+
+    #[test]
+    fn glb_joint_animation_eql_components_are_allowlisted() {
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
+        use impeller_wkt::{JointAnimation, Object3DMesh};
+
+        let components = [
+            "CANOPENMOTORMESSAGE3.ACTUAL_POSITION",
+            "CONTROLMESSAGE.FIN_DEFLECTION_DEG",
+        ]
+        .map(|name| {
+            Arc::new(eql::Component::new(
+                name.to_string(),
+                ComponentId::new(name),
+                Schema::new(PrimType::F64, vec![4_u64]).expect("valid schema"),
+            ))
+        });
+        let eql_ctx = EqlContext(eql::Context::from_leaves(
+            components,
+            Timestamp(0),
+            Timestamp(1),
+        ));
+        let mesh = Object3DMesh::Glb {
+            path: "models/fins.glb".into(),
+            scale: 1.0,
+            translate: (0.0, 0.0, 0.0),
+            rotate: (0.0, 0.0, 0.0),
+            animations: vec![
+                JointAnimation {
+                    joint_name: "Root.Fin_3".into(),
+                    eql_expr:
+                        "(0, CANOPENMOTORMESSAGE3.ACTUAL_POSITION.cast(f32)/1000.0 - 22.0, 0)"
+                            .into(),
+                },
+                JointAnimation {
+                    joint_name: "FinGhost_0".into(),
+                    eql_expr: "(0, CONTROLMESSAGE.FIN_DEFLECTION_DEG[0], 0)".into(),
+                },
+            ],
+            emissivity: 0.0,
+            glow: 0.0,
+            glow_color: None,
+        };
+
+        let mut ids = HashSet::new();
+        collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut ids);
+        assert!(
+            ids.contains(&ComponentId::new("CANOPENMOTORMESSAGE3.ACTUAL_POSITION")),
+            "missing motor position, ids={ids:?}"
+        );
+        assert!(
+            ids.contains(&ComponentId::new("CONTROLMESSAGE.FIN_DEFLECTION_DEG")),
+            "missing ghost deflection, ids={ids:?}"
+        );
+    }
+
+    #[test]
+    fn viewport_adapter_ids_expand_pair_paths_by_leaf() {
+        use impeller_wkt::ComponentPath;
+        let leaf = ComponentId::new("world_pos");
+        let pair = ComponentId::new("ball_1.world_pos");
+        let mut path_reg = ComponentPathRegistry::default();
+        path_reg
+            .0
+            .insert(pair, ComponentPath::from_name("ball_1.world_pos"));
+        // Unrelated component must not be pulled in.
+        path_reg.0.insert(
+            ComponentId::new("ball_1.world_vel"),
+            ComponentPath::from_name("ball_1.world_vel"),
+        );
+        let adapter_leaves = [leaf].into_iter().collect();
+        let ids = viewport_adapter_component_ids(&path_reg, &adapter_leaves);
+        assert!(ids.contains(&leaf));
+        assert!(ids.contains(&pair));
+        assert!(!ids.contains(&ComponentId::new("ball_1.world_vel")));
+    }
+
+    #[test]
+    fn line_tree_content_gen_bumps_on_insert_and_clear() {
+        let mut tree = LineTree::<f32>::default();
+        assert_eq!(tree.content_gen(), 0);
+        let chunk =
+            Chunk::from_iter(&[Timestamp(1)], Timestamp(0), [1.0f32].into_iter()).expect("chunk");
+        tree.insert(chunk);
+        assert_eq!(tree.content_gen(), 1);
+        tree.clear();
+        assert_eq!(tree.content_gen(), 2);
+        tree.clear();
+        assert_eq!(tree.content_gen(), 3);
+    }
+
+    #[test]
+    fn plot_sync_plan_keeps_a_covered_trailing_window() {
+        let stored = Timestamp(1_000_000)..Timestamp(16_000_000);
+        let need = Timestamp(1_100_000)..Timestamp(16_000_000);
+        assert_eq!(
+            plot_sync_plan(Some(stored), &need, false),
+            PlotSyncPlan::Keep
+        );
+    }
+
+    #[test]
+    fn plot_sync_plan_extends_only_the_new_suffix() {
+        let stored = Timestamp(0)..Timestamp(15_000_000);
+        let need = Timestamp(100_000)..Timestamp(15_100_000);
+        assert_eq!(
+            plot_sync_plan(Some(stored), &need, false),
+            PlotSyncPlan::Extend {
+                prefix: None,
+                suffix: Some(Timestamp(15_000_000)..Timestamp(15_100_000)),
+            }
+        );
+    }
+
+    #[test]
+    fn plot_sync_plan_rebuilds_on_a_seek() {
+        let stored = Timestamp(0)..Timestamp(15_000_000);
+        let need = Timestamp(60_000_000)..Timestamp(75_000_000);
+        assert_eq!(
+            plot_sync_plan(Some(stored), &need, false),
+            PlotSyncPlan::FullRebuild
+        );
+    }
+
+    #[test]
+    fn plot_sync_plan_rebuilds_when_the_left_edge_is_missing() {
+        let stored = Timestamp(2_000_000)..Timestamp(16_000_000);
+        let need = Timestamp(1_000_000)..Timestamp(16_000_000);
+        assert_eq!(
+            plot_sync_plan(Some(stored), &need, false),
+            PlotSyncPlan::FullRebuild
+        );
+    }
+
+    #[test]
+    fn plot_sync_plan_rebuilds_when_interior_is_incomplete() {
+        let stored = Timestamp(0)..Timestamp(16_000_000);
+        let need = Timestamp(0)..Timestamp(16_000_000);
+        assert_eq!(
+            plot_sync_plan(Some(stored), &need, true),
+            PlotSyncPlan::FullRebuild
+        );
+    }
+
+    fn insert_f64(cache: &mut TelemetryCache, id: ComponentId, ts: i64, value: f64) {
+        cache.insert(
+            id,
+            Timestamp(ts),
+            ComponentValue::F64(nox::array![value].to_dyn()),
+        );
+    }
+
+    #[test]
+    fn line_layout_generation_targets_only_new_handles() {
+        let id = ComponentId::new("test.layout");
+        let mut graph_data = CollectedGraphData::default();
+        graph_data
+            .components
+            .insert(id, PlotDataComponent::new("layout", vec![]));
+        let mut lines = Assets::<Line>::default();
+        let first = graph_data.ensure_line_handle(id, 0, &mut lines).unwrap();
+        let fetch_ids = HashSet::from([id]);
+        let mut state = PlotSyncState::default();
+
+        assert_eq!(
+            refresh_line_layout(&mut state, &graph_data, &fetch_ids, true),
+            HashSet::from([(id, 0)])
+        );
+        assert!(refresh_line_layout(&mut state, &graph_data, &fetch_ids, false).is_empty());
+
+        graph_data.ensure_line_handle(id, 1, &mut lines).unwrap();
+        let added = refresh_line_layout(&mut state, &graph_data, &fetch_ids, false);
+        assert_eq!(added, HashSet::from([(id, 1)]));
+        let mut cache = TelemetryCache::default();
+        insert_f64(&mut cache, id, 0, 1.0);
+        for (component_id, index) in added {
+            let handle = graph_data.get_line(&component_id, index).unwrap();
+            apply_plot_sync_plan(
+                &cache,
+                component_id,
+                index,
+                &(Timestamp(0)..Timestamp(10)),
+                Timestamp(0),
+                None,
+                true,
+                &mut lines.get_mut(handle).unwrap().data,
+            );
+        }
+        assert_eq!(lines.get(&first).unwrap().data.content_gen(), 0);
+        assert!(
+            lines
+                .get(graph_data.get_line(&id, 1).unwrap())
+                .unwrap()
+                .data
+                .content_gen()
+                > 0
+        );
+
+        graph_data.remove_line_handle(first.id());
+        assert!(refresh_line_layout(&mut state, &graph_data, &fetch_ids, false).is_empty());
+        assert_eq!(state.last_layout, HashSet::from([(id, 1)]));
+    }
+
+    #[test]
+    fn projected_samples_keep_the_authoritative_predecessor() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.constant");
+        insert_f64(&mut cache, id, 0, 4.0);
+        let range = Timestamp(10)..Timestamp(20);
+        cache.mark_covered(id, range.start, range.end);
+        assert_eq!(
+            hold_anchor_decision(id, range.start, &cache, &VisiblePrefetchState::default()),
+            HoldAnchorDecision::Satisfied
+        );
+
+        assert_eq!(
+            element_samples_with_predecessor(&cache, id, 0, &range),
+            vec![(Timestamp(0), 4.0)]
+        );
+
+        let mut line = LineTree::<f32>::default();
+        assert_eq!(
+            project_series_element_to_line(&cache, id, 0, &range, Timestamp(0), &mut line, None,),
+            1
+        );
+        assert_eq!(line.first_timestamp(), Some(Timestamp(0)));
+        assert_eq!(line.latest_sample_timestamp(), Some(Timestamp(0)));
+    }
+
+    #[test]
+    fn reconnect_clears_unified_prefetch_requests() {
+        let id = ComponentId::new("test.reconnect");
+        let mut prefetch = VisiblePrefetchState::default();
+        prefetch
+            .begin(PrefetchKey::Window {
+                component_id: id,
+                start: 10,
+                end: 20,
+            })
+            .unwrap();
+        prefetch
+            .begin(PrefetchKey::Anchor {
+                component_id: id,
+                start: 10,
+            })
+            .unwrap();
+        assert_eq!(prefetch.request_count(), 2);
+        prefetch.clear_in_flight();
+        assert!(prefetch.requests.is_empty());
+    }
+
+    #[test]
+    fn unified_prefetch_counts_only_active_requests() {
+        let mut prefetch = VisiblePrefetchState::default();
+        for index in 0..32 {
+            let key = PrefetchKey::Window {
+                component_id: ComponentId(index),
+                start: 10,
+                end: 20,
+            };
+            assert!(prefetch.begin(key).is_some());
+            assert!(prefetch.begin(key).is_none());
+        }
+        prefetch.requests.insert(
+            PrefetchKey::Anchor {
+                component_id: ComponentId(100),
+                start: 10,
+            },
+            PrefetchRequestState::RetryAt(Instant::now() + Duration::from_secs(1)),
+        );
+        assert_eq!(prefetch.request_count(), 32);
+        assert_eq!(prefetch.requests.len(), 33);
+        assert!(!prefetch.has_capacity());
+        let key = PrefetchKey::Window {
+            component_id: ComponentId(31),
+            start: 10,
+            end: 20,
+        };
+        let PrefetchRequestState::InFlight(attempt) = prefetch.requests[&key] else {
+            panic!("expected active request");
+        };
+        prefetch.finish(key, attempt, true);
+        assert!(prefetch.has_capacity());
+    }
+
+    #[test]
+    fn unified_prefetch_retries_and_ignores_stale_completion() {
+        let mut prefetch = VisiblePrefetchState::default();
+        let key = PrefetchKey::Window {
+            component_id: ComponentId(1),
+            start: 10,
+            end: 20,
+        };
+        let first_attempt = prefetch.begin(key).unwrap();
+        prefetch.finish(key, first_attempt, false);
+        assert!(matches!(
+            prefetch.requests.get(&key),
+            Some(PrefetchRequestState::RetryAt(_))
+        ));
+        assert!(prefetch.begin(key).is_none());
+
+        prefetch.requests.insert(
+            key,
+            PrefetchRequestState::RetryAt(Instant::now() - Duration::from_millis(1)),
+        );
+        let second_attempt = prefetch.begin(key).unwrap();
+        prefetch.finish(key, first_attempt, true);
+        assert!(prefetch.is_current(key, second_attempt));
+        prefetch.finish(key, second_attempt, true);
+        assert!(prefetch.requests.is_empty());
+    }
+
+    #[test]
+    fn changing_range_does_not_orphan_in_flight_request() {
+        let mut prefetch = VisiblePrefetchState::default();
+        let component_id = ComponentId(1);
+        let old = PrefetchKey::Window {
+            component_id,
+            start: 0,
+            end: 10,
+        };
+        let old_attempt = prefetch.begin(old).unwrap();
+        for start in 1..=512 {
+            let current = PrefetchKey::Window {
+                component_id,
+                start: start * 10,
+                end: start * 10 + 10,
+            };
+            assert!(prefetch.begin(current).is_none());
+            assert!(prefetch.is_current(old, old_attempt));
+            assert_eq!(prefetch.request_count(), 1);
+            assert_eq!(prefetch.requests.len(), 1);
+        }
+
+        prefetch.finish(old, old_attempt, true);
+        let current = PrefetchKey::Window {
+            component_id,
+            start: 5_120,
+            end: 5_130,
+        };
+        assert!(prefetch.begin(current).is_some());
+    }
+
+    #[test]
+    fn cancelling_component_removes_visible_and_anchor_requests() {
+        let mut prefetch = VisiblePrefetchState::default();
+        let removed = ComponentId(1);
+        let kept = ComponentId(2);
+        for key in [
+            PrefetchKey::Window {
+                component_id: removed,
+                start: 10,
+                end: 20,
+            },
+            PrefetchKey::Anchor {
+                component_id: removed,
+                start: 10,
+            },
+            PrefetchKey::Window {
+                component_id: kept,
+                start: 10,
+                end: 20,
+            },
+        ] {
+            prefetch.begin(key).unwrap();
+        }
+
+        prefetch.cancel_component(removed);
+        assert_eq!(prefetch.request_count(), 1);
+        assert!(
+            prefetch
+                .requests
+                .keys()
+                .all(|key| key.component_id() == kept)
+        );
+    }
+
+    #[test]
+    fn hold_anchor_requests_are_bounded_and_deduplicated() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.anchor");
+        let mut prefetch = VisiblePrefetchState::default();
+        let start = Timestamp(100);
+        assert_eq!(
+            hold_anchor_decision(id, start, &cache, &prefetch),
+            HoldAnchorDecision::Request
+        );
+
+        let key = PrefetchKey::Anchor {
+            component_id: id,
+            start: start.0,
+        };
+        let attempt = prefetch.begin(key).unwrap();
+        assert_eq!(
+            hold_anchor_decision(id, start, &cache, &prefetch),
+            HoldAnchorDecision::Pending
+        );
+        prefetch.finish(key, attempt, false);
+        assert_eq!(
+            hold_anchor_decision(id, start, &cache, &prefetch),
+            HoldAnchorDecision::Pending
+        );
+        prefetch.requests.insert(
+            key,
+            PrefetchRequestState::RetryAt(Instant::now() - Duration::from_millis(1)),
+        );
+        assert_eq!(
+            hold_anchor_decision(id, start, &cache, &prefetch),
+            HoldAnchorDecision::Request
+        );
+        let attempt = prefetch.begin(key).unwrap();
+        prefetch.finish(key, attempt, true);
+        assert!(!prefetch.requests.contains_key(&key));
+        cache.mark_covered(
+            id,
+            Timestamp(i64::MIN),
+            Timestamp(start.0.saturating_add(1)),
+        );
+        assert_eq!(
+            hold_anchor_decision(id, start, &cache, &prefetch),
+            HoldAnchorDecision::Satisfied
+        );
+    }
+
+    #[test]
+    fn empty_visible_page_marks_coverage_and_completes_request() {
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
+
+        let id = ComponentId::new("test.visible.empty");
+        let mut schemas = ComponentSchemaRegistry::default();
+        schemas.0.insert(
+            id,
+            Schema::new(PrimType::F64, Vec::<u64>::new()).expect("valid schema"),
+        );
+        let mut cache = TelemetryCache::default();
+        let range = Timestamp(10)..Timestamp(20);
+        assert_eq!(
+            apply_visible_prefetch_payload(
+                &[],
+                &[],
+                id,
+                range.start,
+                range.end,
+                &mut cache,
+                &schemas,
+            ),
+            VisiblePageOutcome::Complete
+        );
+        assert!(cache.is_covered(&id, &range));
+    }
+
+    #[test]
+    fn empty_sparse_windows_do_not_leak_request_slots() {
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
+
+        let id = ComponentId::new("test.visible.sparse");
+        let mut schemas = ComponentSchemaRegistry::default();
+        schemas.0.insert(
+            id,
+            Schema::new(PrimType::F64, Vec::<u64>::new()).expect("valid schema"),
+        );
+        let mut cache = TelemetryCache::default();
+        let mut prefetch = VisiblePrefetchState::default();
+        for index in 0..40 {
+            let start = index * 10;
+            let end = start + 10;
+            let key = PrefetchKey::Window {
+                component_id: id,
+                start,
+                end,
+            };
+            let attempt = prefetch.begin(key).unwrap();
+            assert_eq!(
+                apply_visible_prefetch_payload(
+                    &[],
+                    &[],
+                    id,
+                    Timestamp(start),
+                    Timestamp(end),
+                    &mut cache,
+                    &schemas,
+                ),
+                VisiblePageOutcome::Complete
+            );
+            prefetch.finish(key, attempt, true);
+            assert_eq!(prefetch.request_count(), 0);
+            assert!(prefetch.requests.is_empty());
+        }
+        assert!(cache.is_covered(&id, &(Timestamp(0)..Timestamp(400))));
+    }
+
+    #[test]
+    fn visible_pages_share_one_logical_request_until_complete() {
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
+
+        let id = ComponentId::new("test.visible.pages");
+        let mut schemas = ComponentSchemaRegistry::default();
+        schemas.0.insert(
+            id,
+            Schema::new(PrimType::U8, Vec::<u64>::new()).expect("valid schema"),
+        );
+        let mut cache = TelemetryCache::default();
+        let mut prefetch = VisiblePrefetchState::default();
+        let key = PrefetchKey::Window {
+            component_id: id,
+            start: 0,
+            end: 10_000,
+        };
+        let attempt = prefetch.begin(key).unwrap();
+        let timestamps = (0..VISIBLE_PREFETCH_LIMIT)
+            .map(|timestamp| Timestamp(timestamp as i64))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            apply_visible_prefetch_payload(
+                &timestamps,
+                &vec![0; VISIBLE_PREFETCH_LIMIT],
+                id,
+                Timestamp(0),
+                Timestamp(10_000),
+                &mut cache,
+                &schemas,
+            ),
+            VisiblePageOutcome::Next(Timestamp(VISIBLE_PREFETCH_LIMIT as i64))
+        );
+        assert!(prefetch.is_current(key, attempt));
+
+        let next = VISIBLE_PREFETCH_LIMIT as i64;
+        assert_eq!(
+            apply_visible_prefetch_payload(
+                &[Timestamp(next)],
+                &[0],
+                id,
+                Timestamp(next),
+                Timestamp(10_000),
+                &mut cache,
+                &schemas,
+            ),
+            VisiblePageOutcome::Complete
+        );
+        prefetch.finish(key, attempt, true);
+        assert!(prefetch.requests.is_empty());
+        assert!(cache.is_covered(&id, &(Timestamp(0)..Timestamp(10_000))));
+    }
+
+    #[test]
+    fn malformed_visible_page_schedules_retry_without_coverage() {
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
+
+        let id = ComponentId::new("test.visible.malformed");
+        let mut schemas = ComponentSchemaRegistry::default();
+        schemas.0.insert(
+            id,
+            Schema::new(PrimType::F64, Vec::<u64>::new()).expect("valid schema"),
+        );
+        let mut cache = TelemetryCache::default();
+        let mut prefetch = VisiblePrefetchState::default();
+        let key = PrefetchKey::Window {
+            component_id: id,
+            start: 10,
+            end: 20,
+        };
+        let attempt = prefetch.begin(key).unwrap();
+        assert_eq!(
+            apply_visible_prefetch_payload(
+                &[Timestamp(10)],
+                &[],
+                id,
+                Timestamp(10),
+                Timestamp(20),
+                &mut cache,
+                &schemas,
+            ),
+            VisiblePageOutcome::Invalid
+        );
+        prefetch.finish(key, attempt, false);
+        assert!(matches!(
+            prefetch.requests.get(&key),
+            Some(PrefetchRequestState::RetryAt(_))
+        ));
+        assert!(!cache.is_covered(&id, &(Timestamp(10)..Timestamp(20))));
+    }
+
+    #[test]
+    fn hold_anchor_payload_confirms_only_empty_or_valid_replies() {
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
+
+        let id = ComponentId::new("test.anchor.payload");
+        let mut schemas = ComponentSchemaRegistry::default();
+        schemas.0.insert(
+            id,
+            Schema::new(PrimType::F64, Vec::<u64>::new()).expect("valid schema"),
+        );
+        let mut cache = TelemetryCache::default();
+
+        assert!(apply_hold_anchor_payload(
+            &[],
+            &[],
+            id,
+            Timestamp(10),
+            &mut cache,
+            &schemas,
+        ));
+        assert!(!apply_hold_anchor_payload(
+            &[Timestamp(5)],
+            &[],
+            id,
+            Timestamp(10),
+            &mut cache,
+            &schemas,
+        ));
+        assert!(!apply_hold_anchor_payload(
+            &[Timestamp(11)],
+            &1.0f64.to_le_bytes(),
+            id,
+            Timestamp(10),
+            &mut cache,
+            &schemas,
+        ));
+        assert!(apply_hold_anchor_payload(
+            &[Timestamp(5)],
+            &1.0f64.to_le_bytes(),
+            id,
+            Timestamp(10),
+            &mut cache,
+            &schemas,
+        ));
+        assert_eq!(
+            cache
+                .get_at_or_before(&id, Timestamp(10))
+                .and_then(|value| value.get(0))
+                .map(|value| value.as_f64()),
+            Some(1.0)
+        );
+    }
+
+    #[test]
+    fn projected_samples_are_not_expanded_for_zero_order_hold() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.steps");
+        insert_f64(&mut cache, id, 0, 1.0);
+        insert_f64(&mut cache, id, 10, 2.0);
+        insert_f64(&mut cache, id, 20, 3.0);
+
+        assert_eq!(
+            element_samples_with_predecessor(&cache, id, 0, &(Timestamp(5)..Timestamp(16))),
+            vec![(Timestamp(0), 1.0), (Timestamp(10), 2.0)]
+        );
+    }
+
+    #[test]
+    fn evaluate_series_projects_sqrt_per_sample() {
+        let id = ComponentId::new("sample.value");
+        let component = Arc::new(eql::Component::new(
+            "sample.value".to_string(),
+            id,
+            impeller::schema::Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new())
+                .unwrap(),
+        ));
+        let context = eql::Context::from_leaves([component], Timestamp(0), Timestamp(3));
+        let expr = context.parse_str("sample.value.sqrt()").unwrap();
+        let mut cache = TelemetryCache::default();
+        insert_f64(&mut cache, id, 0, 4.0);
+        insert_f64(&mut cache, id, 1, 9.0);
+        insert_f64(&mut cache, id, 2, 16.0);
+
+        let evaluated =
+            evaluate_series(&cache, &expr, &[id], Timestamp(0)..Timestamp(3), None).unwrap();
+
+        assert_eq!(
+            evaluated.timestamps,
+            vec![Timestamp(0), Timestamp(1), Timestamp(2)]
+        );
+        assert_eq!(evaluated.values, vec![vec![2.0, 3.0, 4.0]]);
+    }
+
+    #[test]
+    fn evaluate_series_projects_vector_norm() {
+        let id = ComponentId::new("sample.vector");
+        let component = Arc::new(eql::Component::new(
+            "sample.vector".to_string(),
+            id,
+            impeller::schema::Schema::new(impeller::types::PrimType::F64, vec![2_u64]).unwrap(),
+        ));
+        let context = eql::Context::from_leaves([component], Timestamp(0), Timestamp(2));
+        let expr = context.parse_str("sample.vector.norm()").unwrap();
+        let mut cache = TelemetryCache::default();
+        cache.insert(
+            id,
+            Timestamp(0),
+            ComponentValue::F64(nox::array![3.0, 4.0].to_dyn()),
+        );
+        cache.insert(
+            id,
+            Timestamp(1),
+            ComponentValue::F64(nox::array![5.0, 12.0].to_dyn()),
+        );
+
+        let evaluated =
+            evaluate_series(&cache, &expr, &[id], Timestamp(0)..Timestamp(2), None).unwrap();
+
+        assert_eq!(evaluated.values, vec![vec![5.0, 13.0]]);
+    }
+
+    #[test]
+    fn evaluate_series_unions_mixed_rate_timestamps() {
+        // Sparse series listed first so a hashed/first clock would drop the dense samples.
+        let fast = ComponentId::new("fast.value");
+        let slow = ComponentId::new("slow.value");
+        let schema =
+            impeller::schema::Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new())
+                .unwrap();
+        let context = eql::Context::from_leaves(
+            [
+                Arc::new(eql::Component::new(
+                    "fast.value".to_string(),
+                    fast,
+                    schema.clone(),
+                )),
+                Arc::new(eql::Component::new("slow.value".to_string(), slow, schema)),
+            ],
+            Timestamp(0),
+            Timestamp(5),
+        );
+        let expr = context.parse_str("fast.value + slow.value").unwrap();
+        let mut cache = TelemetryCache::default();
+        insert_f64(&mut cache, slow, 0, 10.0);
+        insert_f64(&mut cache, slow, 4, 20.0);
+        for t in 0..=4 {
+            insert_f64(&mut cache, fast, t, t as f64);
+        }
+
+        let evaluated = evaluate_series(
+            &cache,
+            &expr,
+            &[slow, fast],
+            Timestamp(0)..Timestamp(5),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(
+            evaluated.timestamps,
+            vec![
+                Timestamp(0),
+                Timestamp(1),
+                Timestamp(2),
+                Timestamp(3),
+                Timestamp(4)
+            ]
+        );
+        // Zero-order hold on slow: 10 until t=4, then 20.
+        assert_eq!(evaluated.values, vec![vec![10.0, 11.0, 12.0, 13.0, 24.0]]);
+    }
+
+    #[test]
+    fn apply_plot_sync_plan_rebuilds_holes_inside_a_covered_span() {
+        // Partial first project: only the endpoints. The exclusive span already
+        // covers the window, so endpoint-only planning would Keep forever.
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.holes");
+        insert_f64(&mut cache, id, 0, 0.0);
+        insert_f64(&mut cache, id, 15_000_000, 15.0);
+        let need = Timestamp(0)..Timestamp(15_000_001);
+        let mut tree = LineTree::<f32>::default();
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.total_points(), 2);
+        assert_eq!(
+            plot_sync_plan(tree.projected_span(), &need, false),
+            PlotSyncPlan::Keep
+        );
+        assert!(plot_line_matches_store_interior(
+            &cache, id, 0, &need, &tree
+        ));
+
+        insert_f64(&mut cache, id, 7_500_000, 7.5);
+        assert!(!plot_line_matches_store_interior(
+            &cache, id, 0, &need, &tree
+        ));
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.total_points(), 3);
+        assert_eq!(
+            tree.get_nearest(Timestamp(7_500_000)).map(|(ts, _)| ts),
+            Some(Timestamp(7_500_000))
+        );
+    }
+
+    #[test]
+    fn apply_plot_sync_plan_rebuilds_the_gap_between_prefetch_and_tip() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.prefetch.tip");
+        for i in 0..10 {
+            insert_f64(&mut cache, id, i * 1_000, i as f64);
+        }
+        for i in 0..10 {
+            insert_f64(&mut cache, id, 14_000_000 + i * 1_000, 100.0 + i as f64);
+        }
+        let need = Timestamp(0)..Timestamp(15_000_000);
+        let mut tree = LineTree::<f32>::default();
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.total_points(), 20);
+
+        insert_f64(&mut cache, id, 7_000_000, 50.0);
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.total_points(), 21);
+        assert!(tree.get_nearest(Timestamp(7_000_000)).is_some());
+    }
+
+    #[test]
+    fn apply_plot_sync_plan_extends_a_complete_window_without_dropping_the_left() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.slide");
+        for i in 0..=15 {
+            insert_f64(&mut cache, id, i * 1_000_000, i as f64);
+        }
+        let first = Timestamp(0)..Timestamp(15_000_001);
+        let mut tree = LineTree::<f32>::default();
+        apply_plot_sync_plan(&cache, id, 0, &first, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.total_points(), 16);
+        assert_eq!(tree.first_timestamp(), Some(Timestamp(0)));
+
+        insert_f64(&mut cache, id, 15_100_000, 15.1);
+        let slid = Timestamp(100_000)..Timestamp(15_100_001);
+        assert_eq!(
+            plot_sync_plan(tree.projected_span(), &slid, false),
+            PlotSyncPlan::Extend {
+                prefix: None,
+                suffix: Some(Timestamp(15_000_001)..Timestamp(15_100_001)),
+            }
+        );
+        assert!(plot_line_matches_store_interior(
+            &cache, id, 0, &slid, &tree
+        ));
+        apply_plot_sync_plan(&cache, id, 0, &slid, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.first_timestamp(), Some(Timestamp(0)));
+        assert_eq!(tree.latest_sample_timestamp(), Some(Timestamp(15_100_000)));
+        assert_eq!(tree.total_points(), 17);
+    }
+
+    #[test]
+    fn constant_trailing_extensions_do_not_materialize_hold_anchors() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.constant.trailing");
+        insert_f64(&mut cache, id, 0, 4.0);
+        let mut tree = LineTree::<f32>::default();
+
+        for step in 0..=100 {
+            let offset = step * REQUEST_KEY_QUANTUM_MICROS;
+            let range = Timestamp(offset)..Timestamp(10_000_000 + offset);
+            apply_plot_sync_plan(&cache, id, 0, &range, Timestamp(0), None, false, &mut tree);
+            assert_eq!(tree.total_points(), 1);
+            assert_eq!(tree.first_timestamp(), Some(Timestamp(0)));
+        }
+    }
+
+    #[test]
+    fn apply_plot_sync_plan_keep_evicts_chunks_left_of_the_padded_window() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.keep.evict");
+        insert_f64(&mut cache, id, 0, 0.0);
+        insert_f64(&mut cache, id, 1_000, 1.0);
+        insert_f64(&mut cache, id, 10_000_000, 10.0);
+        insert_f64(&mut cache, id, 16_000_000, 16.0);
+        let mut tree = LineTree::<f32>::default();
+        tree.insert(
+            Chunk::from_iter(
+                &[Timestamp(0), Timestamp(1_000)],
+                Timestamp(0),
+                [0.0f32, 1.0].into_iter(),
+            )
+            .expect("early"),
+        );
+        tree.insert(
+            Chunk::from_iter(
+                &[Timestamp(10_000_000), Timestamp(16_000_000)],
+                Timestamp(0),
+                [10.0f32, 16.0].into_iter(),
+            )
+            .expect("tip"),
+        );
+        let need = Timestamp(10_000_000)..Timestamp(16_000_001);
+        assert_eq!(
+            plot_sync_plan(tree.stored_exclusive_span(), &need, false),
+            PlotSyncPlan::Keep
+        );
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.first_timestamp(), Some(Timestamp(10_000_000)));
+        assert_eq!(tree.latest_sample_timestamp(), Some(Timestamp(16_000_000)));
+        assert_eq!(tree.total_points(), 2);
+    }
+
+    #[test]
+    fn apply_plot_sync_plan_clears_ghosts_when_the_window_is_empty() {
+        // Slide into a gap that still overlaps the tree by ≥25%. Endpoint
+        // planning would Keep; leftover samples would stay in the clip.
+        let cache = TelemetryCache::default();
+        let id = ComponentId::new("test.empty.gap");
+        let mut tree = LineTree::<f32>::default();
+        tree.insert(
+            Chunk::from_iter(
+                &[Timestamp(0), Timestamp(15_000_000)],
+                Timestamp(0),
+                [0.0f32, 15.0].into_iter(),
+            )
+            .expect("prior"),
+        );
+        let need = Timestamp(10_000_000)..Timestamp(15_000_001);
+        assert_eq!(
+            plot_sync_plan(tree.stored_exclusive_span(), &need, false),
+            PlotSyncPlan::Keep
+        );
+        assert!(!plot_line_matches_store_interior(
+            &cache, id, 0, &need, &tree
+        ));
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.total_points(), 0);
+    }
+
+    #[test]
+    fn should_clear_empty_store_on_covered_gap_even_when_overlap_would_keep() {
+        let stored = Timestamp(0)..Timestamp(15_000_001);
+        let need = Timestamp(10_000_000)..Timestamp(15_000_001);
+        assert_eq!(
+            plot_sync_plan(Some(stored.clone()), &need, false),
+            PlotSyncPlan::Keep
+        );
+        assert!(should_clear_line_on_empty_store(
+            Some(stored.clone()),
+            &need,
+            true,
+            true,
+            false
+        ));
+        assert!(!should_clear_line_on_empty_store(
+            Some(stored.clone()),
+            &need,
+            true,
+            false,
+            false
+        ));
+        assert!(!should_clear_line_on_empty_store(
+            Some(stored),
+            &need,
+            false,
+            false,
+            false
+        ));
+    }
+
+    #[test]
+    fn should_clear_empty_store_on_seek_even_when_uncovered() {
+        let stored = Timestamp(0)..Timestamp(15_000_001);
+        let need = Timestamp(60_000_000)..Timestamp(75_000_001);
+        assert!(should_clear_line_on_empty_store(
+            Some(stored),
+            &need,
+            true,
+            false,
+            false
+        ));
+    }
+
+    #[test]
+    fn evict_chunks_outside_keeps_overlapping() {
+        let mut tree = LineTree::<f32>::default();
+        let early = Chunk::from_iter(
+            &[Timestamp(0), Timestamp(1_000)],
+            Timestamp(0),
+            [0.0f32, 1.0].into_iter(),
+        )
+        .expect("early");
+        let mid = Chunk::from_iter(
+            &[Timestamp(10_000), Timestamp(11_000)],
+            Timestamp(0),
+            [2.0f32, 3.0].into_iter(),
+        )
+        .expect("mid");
+        tree.insert(early);
+        tree.insert(mid);
+        tree.evict_chunks_outside(Timestamp(9_000)..Timestamp(20_000));
+        assert_eq!(tree.chunk_count(), 1);
+        assert_eq!(tree.first_timestamp(), Some(Timestamp(10_000)));
+    }
+
+    #[test]
+    fn evict_chunks_outside_keeps_neighbor_that_shares_a_bound() {
+        let mut tree = LineTree::<f32>::default();
+        tree.insert(
+            Chunk::from_iter(
+                &[Timestamp(0), Timestamp(1_000)],
+                Timestamp(0),
+                [0.0f32, 1.0].into_iter(),
+            )
+            .expect("early"),
+        );
+        tree.insert(
+            Chunk::from_iter(
+                &[Timestamp(1_001), Timestamp(2_000)],
+                Timestamp(0),
+                [2.0f32, 3.0].into_iter(),
+            )
+            .expect("mid"),
+        );
+        tree.evict_chunks_outside(Timestamp(1_500)..Timestamp(3_000));
+        assert_eq!(tree.chunk_count(), 1);
+        assert_eq!(tree.first_timestamp(), Some(Timestamp(1_001)));
+        assert_eq!(tree.latest_sample_timestamp(), Some(Timestamp(2_000)));
+    }
+
+    #[test]
+    fn percentile_bounds_filters_sparse_outliers_on_large_series() {
+        let mut tree = LineTree::<f32>::default();
+        let n = MAX_PERCENTILE_SAMPLES * 4;
+        let timestamps: Vec<Timestamp> = (0..n).map(|i| Timestamp(i as i64)).collect();
+        let mut values = vec![1.0f32; n];
+        let outlier_count = n / 200;
+        for v in values.iter_mut().rev().take(outlier_count) {
+            *v = 1.0e9;
+        }
+        let chunk = Chunk::from_iter(&timestamps, Timestamp(0), values.into_iter()).expect("chunk");
+        tree.insert(chunk);
+        let (low, high) = tree
+            .percentile_bounds(Timestamp(0)..Timestamp(n as i64), 1.0, 99.0)
+            .expect("bounds");
+        assert!((low - 1.0).abs() < 1e-3, "low={low}");
+        assert!((high - 1.0).abs() < 1e-3, "high={high}");
+    }
+
+    #[test]
+    fn monitor_component_name_maps_to_component_id() {
+        let name = "PCDUMESSAGE.ADC_12V";
+        assert_eq!(
+            ComponentId::new(name),
+            ComponentId::new("PCDUMESSAGE.ADC_12V")
+        );
+    }
+
+    #[test]
+    fn sensor_camera_world_pos_ids_from_configs() {
+        use crate::sensor_camera::SensorCameraConfigs;
+        use impeller_wkt::SensorCameraConfig;
+        let configs = SensorCameraConfigs(vec![SensorCameraConfig {
+            entity_name: "cam_ball_a".into(),
+            camera_name: "scene_cam".into(),
+            width: 64,
+            height: 64,
+            fov_degrees: 90.0,
+            near: 0.1,
+            far: 100.0,
+            pos_offset: [0.0, 0.0, 0.0],
+            rot_offset: [0.0, 0.0, 0.0],
+            format: "rgba8".into(),
+            effect: String::new(),
+            effect_params: Default::default(),
+            create_frustum: false,
+            show_ellipsoids: false,
+            frustums_color: Default::default(),
+            projection_color: Default::default(),
+            frustums_thickness: 0.01,
+            fps: 30.0,
+            ..Default::default()
+        }]);
+        let ids = sensor_camera_world_pos_ids(&configs);
+        assert!(ids.contains(&ComponentId::new("cam_ball_a.world_pos")));
+    }
+
+    #[test]
+    fn allowlist_unions_consumers_and_extras() {
+        let consumer = ComponentId::new("CONTROLMESSAGE.ACC_CMD_BODY");
+        let extra = ComponentId::new("ball_1.world_pos");
+        let ids = build_series_store_allowlist([consumer].into_iter().collect(), [extra]);
+        assert!(ids.contains(&consumer));
+        assert!(ids.contains(&extra));
+    }
+
+    #[test]
+    fn sampling_step_has_no_cliff_at_the_old_short_window_boundary() {
+        // A 1 kHz series either side of the former 30 s threshold must be drawn
+        // at the same resolution: widening a graph past it used to drop ~90% of
+        // the samples in one step.
+        let stats = |secs: usize| {
+            let samples = 1_000 * secs;
+            let chunks = samples.div_ceil(CHUNK_LEN);
+            (chunks, samples + 6 * chunks)
+        };
+        let (chunks_30, indices_30) = stats(30);
+        let (chunks_31, indices_31) = stats(31);
+        assert_eq!(index_sampling_step(chunks_30, indices_30), 1);
+        assert_eq!(index_sampling_step(chunks_31, indices_31), 1);
+        // Still true two orders of magnitude further out, at 4 kHz over 5 min.
+        let samples: usize = 4_000 * 300;
+        let chunks = samples.div_ceil(CHUNK_LEN);
+        let step = index_sampling_step(chunks, samples + 6 * chunks);
+        assert!(step > 1, "over-budget range must stride, got {step}");
+        assert!(
+            samples / step >= INDEX_BUFFER_LEN / 2,
+            "stride must keep using the buffer: {} drawn",
+            samples / step
+        );
+    }
+
+    #[test]
+    fn collect_strip_values_matches_step_sampling() {
+        let mut tree = LineTree::<f32>::default();
+        let n = 10;
+        let ts: Vec<Timestamp> = (0..n).map(|i| Timestamp(i as i64 * 1_000)).collect();
+        let vals: Vec<f32> = (0..n).map(|i| i as f32).collect();
+        let chunk = Chunk::from_iter(&ts, Timestamp(0), vals.iter().copied()).expect("chunk");
+        tree.insert(chunk);
+        let range = Timestamp(0)..Timestamp(9_000);
+        let step1 = tree.collect_strip_values(range.clone(), 1);
+        assert_eq!(step1, vals);
+        let step3 = tree.collect_strip_values(range, 3);
+        // first, then step_by(3) on remainder, then last if needed
+        assert_eq!(step3, vec![0.0, 1.0, 4.0, 7.0, 9.0]);
+    }
+
+    #[test]
+    fn collect_strip_timestamps_aligns_with_values() {
+        // `line_3d` pairs strip timestamps with cached f64 samples by index, so
+        // the two collectors must select exactly the same samples. Multiple
+        // chunks exercise the per-chunk first/last sentinel handling.
+        let mut tree = LineTree::<f32>::default();
+        let n = 40;
+        for base in [0usize, 20] {
+            let ts: Vec<Timestamp> = (base..base + 20)
+                .map(|i| Timestamp(i as i64 * 1_000))
+                .collect();
+            let vals: Vec<f32> = (base..base + 20).map(|i| i as f32).collect();
+            tree.insert(Chunk::from_iter(&ts, Timestamp(0), vals.iter().copied()).expect("chunk"));
+        }
+        let range = Timestamp(0)..Timestamp((n as i64 - 1) * 1_000);
+        for step in [1usize, 2, 3, 7, 100] {
+            let values = tree.collect_strip_values(range.clone(), step);
+            let timestamps = tree.collect_strip_timestamps(range.clone(), step);
+            assert_eq!(values.len(), timestamps.len(), "step={step}");
+            // Values are the sample index, so each timestamp must be its value.
+            for (value, ts) in values.iter().zip(&timestamps) {
+                assert_eq!(Timestamp(*value as i64 * 1_000), *ts, "step={step}");
+            }
+        }
+    }
+
+    #[test]
+    fn sampling_step_follows_the_clip_not_the_window_length() {
+        // Zooming into a sub-range of a long window lowers the index count, so the
+        // stride relaxes back to 1 even though the selection is still minutes wide.
+        assert_eq!(index_sampling_step(1, 200), 1);
+        assert_eq!(index_sampling_step(2, 8_000), 1);
+        let over = 4 * INDEX_BUFFER_LEN;
+        assert!(index_sampling_step(over.div_ceil(CHUNK_LEN), over) > 1);
+    }
+
+    #[test]
+    fn short_window_1khz_5s_fits_index_buffer_at_step_one() {
+        // Synthetic 1 kHz × 5 s (~5000 samples), matching SITL IMU rate.
+        let mut tree = LineTree::<f32>::default();
+        let n = 5_000;
+        let ts: Vec<Timestamp> = (0..n).map(|i| Timestamp(i as i64 * 1_000)).collect();
+        let vals: Vec<f32> = (0..n).map(|i| (i as f32).sin()).collect();
+        // Insert in CHUNK_LEN-sized pieces like production.
+        let mut offset = 0;
+        while offset < n {
+            let end = (offset + CHUNK_LEN).min(n);
+            let chunk = Chunk::from_iter(
+                &ts[offset..end],
+                Timestamp(0),
+                vals[offset..end].iter().copied(),
+            )
+            .expect("chunk");
+            tree.insert(chunk);
+            offset = end;
+        }
+        let full = Timestamp(0)..Timestamp((n as i64 - 1) * 1_000);
+        let zoomed = Timestamp(1_000_000)..Timestamp(2_000_000); // 1 s sub-range
+        let full_count = tree.count_strip_index_u32s(full.clone(), 1);
+        let zoom_count = tree.count_strip_index_u32s(zoomed.clone(), 1);
+        assert!(
+            (full_count as usize) <= INDEX_BUFFER_LEN,
+            "full_count={full_count} INDEX_BUFFER_LEN={INDEX_BUFFER_LEN}"
+        );
+        assert!(zoom_count < full_count);
+        assert_eq!(tree.fitted_index_step(full, false), 1);
+        assert_eq!(tree.fitted_index_step(zoomed, false), 1);
+    }
+
+    #[test]
+    fn over_budget_range_raises_the_step_instead_of_truncating() {
+        // `write_to_index_buffer_with_step` stops mid-strip once the buffer is
+        // full, and chunks are visited oldest first — so an over-budget range
+        // must raise the step rather than silently dropping the newest samples.
+        let mut tree = LineTree::<f32>::default();
+        // INDEX_BUFFER_LEN + 1 samples so step-1 strip indices exceed the budget.
+        let n = INDEX_BUFFER_LEN + 1;
+        let ts: Vec<Timestamp> = (0..n).map(|i| Timestamp(i as i64)).collect();
+        let vals: Vec<f32> = (0..n).map(|i| i as f32).collect();
+        let mut offset = 0;
+        while offset < n {
+            let end = (offset + CHUNK_LEN).min(n);
+            let chunk = Chunk::from_iter(
+                &ts[offset..end],
+                Timestamp(0),
+                vals[offset..end].iter().copied(),
+            )
+            .expect("chunk");
+            tree.insert(chunk);
+            offset = end;
+        }
+        let range = Timestamp(0)..Timestamp(n as i64);
+        assert!(
+            tree.count_strip_index_u32s(range.clone(), 1) > INDEX_BUFFER_LEN as u32,
+            "fixture must be over budget at step 1"
+        );
+        let step = tree.fitted_index_step(range.clone(), false);
+        assert!(
+            step > 1,
+            "over-budget range must raise the step, got {step}"
+        );
+        assert!(tree.count_strip_index_u32s(range, step) <= INDEX_BUFFER_LEN as u32);
+    }
+
+    #[test]
+    fn series_store_coverage_contains_marked_range() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.cov");
+        cache.mark_covered(id, Timestamp(100), Timestamp(500));
+        assert!(cache.is_covered(&id, &(Timestamp(100)..Timestamp(500))));
+        assert!(cache.is_covered(&id, &(Timestamp(200)..Timestamp(400))));
+        assert!(!cache.is_covered(&id, &(Timestamp(50)..Timestamp(150))));
+        cache.mark_covered(id, Timestamp(500), Timestamp(800));
+        assert!(cache.is_covered(&id, &(Timestamp(100)..Timestamp(800))));
+    }
+
+    #[test]
+    fn series_store_refuses_cover_to_i64_max() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.cov.max");
+        cache.mark_covered(id, Timestamp(100), Timestamp(i64::MAX));
+        assert!(!cache.is_covered(&id, &(Timestamp(100)..Timestamp(200))));
+        assert_eq!(
+            cache.sample_count_in_range(&id, &(Timestamp(0)..Timestamp(i64::MAX))),
+            0
+        );
+    }
+
+    #[test]
+    fn series_store_sample_span_in_range() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.span");
+        cache.insert(
+            id,
+            Timestamp(1_000_000),
+            ComponentValue::F64(nox::array![1.0f64].to_dyn()),
+        );
+        cache.insert(
+            id,
+            Timestamp(2_000_000),
+            ComponentValue::F64(nox::array![2.0f64].to_dyn()),
+        );
+        let span = cache
+            .sample_span_in_range(&id, &(Timestamp(0)..Timestamp(3_000_000)))
+            .expect("span");
+        assert_eq!(span.0, Timestamp(1_000_000));
+        assert_eq!(span.1, Timestamp(2_000_000));
+        assert_eq!(
+            cache.sample_count_in_range(&id, &(Timestamp(0)..Timestamp(3_000_000))),
+            2
+        );
+    }
+
+    #[test]
+    fn project_from_store_rebuilds_visible_window_only() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.project");
+        // 10s of 100 Hz data (0..10_000_000 micros)
+        for i in 0..1000 {
+            let ts = Timestamp(i * 10_000);
+            cache.insert(id, ts, ComponentValue::F64(nox::array![i as f64].to_dyn()));
+        }
+        let earliest = Timestamp(0);
+        let mut line = LineTree::<f32>::default();
+        // Tip window: last 5s
+        let tip = Timestamp(5_000_000)..Timestamp(10_000_000);
+        let n = project_series_element_to_line(&cache, id, 0, &tip, earliest, &mut line, None);
+        assert_eq!(n, 501);
+        assert_eq!(line.total_points(), 501);
+
+        // Jump to start: first 5s — clear and rebuild
+        line.clear();
+        let start = Timestamp(0)..Timestamp(5_000_000);
+        let n2 = project_series_element_to_line(&cache, id, 0, &start, earliest, &mut line, None);
+        assert_eq!(n2, 500);
+        assert_eq!(line.total_points(), 500);
+        // Store still holds full history
+        assert_eq!(cache.total_sample_count(), 1000);
+    }
+
+    #[test]
+    fn project_stride_caps_long_window() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.stride");
+        for i in 0..10_000 {
+            cache.insert(
+                id,
+                Timestamp(i),
+                ComponentValue::F64(nox::array![i as f64].to_dyn()),
+            );
+        }
+        let mut line = LineTree::<f32>::default();
+        let range = Timestamp(0)..Timestamp(10_000);
+        let n = project_series_element_to_line(
+            &cache,
+            id,
+            0,
+            &range,
+            Timestamp(0),
+            &mut line,
+            Some(100),
+        );
+        assert!(n <= 101, "n={n}");
+        assert!(n >= 100, "n={n}");
+    }
+
+    #[test]
+    fn sync_skips_clear_when_store_empty_and_range_unchanged() {
+        // Mirrors the tip-window case: live LineTree has points, SeriesStore has
+        // not caught up yet — sync must not wipe the line.
+        let mut line = LineTree::<f32>::default();
+        let chunk = Chunk::from_iter(
+            &[Timestamp(1_000_000), Timestamp(2_000_000)],
+            Timestamp(0),
+            [1.0_f32, 2.0_f32].into_iter(),
+        )
+        .expect("chunk");
+        line.insert(chunk);
+        assert_eq!(line.total_points(), 2);
+
+        let cache = TelemetryCache::default();
+        let id = ComponentId::new("empty.yet");
+        let range = Timestamp(0)..Timestamp(5_000_000);
+        let n =
+            project_series_element_to_line(&cache, id, 0, &range, Timestamp(0), &mut line, None);
+        assert_eq!(n, 0);
+        // Caller must not clear on n==0 when range unchanged — points remain.
+        assert_eq!(line.total_points(), 2);
     }
 
     #[test]
     fn index_sampling_step_many_chunks_never_returns_one() {
-        let step = index_sampling_step(5000, 1_000_000, 1920);
+        let step = index_sampling_step(5000, 1_000_000);
         assert!(step > 1, "step={step}");
     }
 
@@ -2100,10 +5110,52 @@ mod tests {
         let chunk = Chunk::from_iter(&ts, Timestamp(0), vals.into_iter()).expect("chunk");
         tree.insert(chunk);
         let c = tree.count_strip_index_u32s(Timestamp(0)..Timestamp(10), 1);
-        assert_eq!(
-            c, 12,
-            "leading 0 + 10 indices + trailing 0 (no duplicate last)"
+        assert_eq!(c, 12, "leading separator + 10 indices + trailing separator");
+    }
+
+    #[test]
+    fn strip_separator_never_aliases_data_index_zero() {
+        let mut indices = Vec::new();
+        let result = for_each_strip_index(
+            [IndexChunk {
+                range: 0..3,
+                len: 3,
+            }],
+            1,
+            true,
+            |index| {
+                indices.push(index);
+                ControlFlow::Continue(())
+            },
         );
+
+        assert!(result.is_continue());
+        assert_eq!(
+            indices,
+            [
+                PLOT_STRIP_SEPARATOR_INDEX,
+                0,
+                1,
+                2,
+                PLOT_STRIP_SEPARATOR_INDEX,
+                2,
+                2,
+            ]
+        );
+    }
+
+    #[test]
+    fn zero_order_hold_adds_only_a_transient_terminal_pair() {
+        let mut tree = LineTree::<f32>::default();
+        let ts: Vec<Timestamp> = (0i64..10).map(Timestamp).collect();
+        let vals: Vec<f32> = (0..10).map(|i| i as f32).collect();
+        tree.insert(Chunk::from_iter(&ts, Timestamp(0), vals.into_iter()).expect("chunk"));
+
+        assert_eq!(
+            tree.count_strip_index_u32s_mode(Timestamp(0)..Timestamp(10), 1, true),
+            14
+        );
+        assert_eq!(tree.total_points(), 10);
     }
 
     // === Archive + view (non-destructive HC) tests ===
@@ -2313,33 +5365,417 @@ mod tests {
         // Timestamp(i64) = 8 bytes + f32 = 4 bytes => 12 bytes per sample.
         assert_eq!(tree.raw_archive_bytes(), 1_000 * 12);
     }
+
+    #[test]
+    fn empty_line_has_no_samples() {
+        assert!(!LineTree::<f32>::default().has_samples());
+        assert!(!XYLine::default().has_samples());
+    }
+
+    #[test]
+    fn line_reports_samples_after_insert() {
+        let mut tree = LineTree::<f32>::default();
+        let chunk = Chunk::from_iter(
+            &[Timestamp(10), Timestamp(20)],
+            Timestamp(0),
+            [1.0_f32, 2.0_f32].into_iter(),
+        )
+        .expect("chunk");
+        tree.insert(chunk);
+        assert!(tree.has_samples());
+        assert_eq!(tree.total_points(), 2);
+    }
+
+    #[test]
+    fn xy_line_reports_samples_after_push() {
+        let mut xy = XYLine::default();
+        xy.push_x_value(1.0);
+        xy.push_y_value(2.0);
+        assert!(xy.has_samples());
+        assert_eq!(xy.point_count(), 1);
+    }
+
+    #[test]
+    fn unload_gpu_is_noop_when_already_cleared() {
+        let mut tree = LineTree::<f32>::default();
+        let chunk = Chunk::from_iter(
+            &[Timestamp(10), Timestamp(20)],
+            Timestamp(0),
+            [1.0_f32, 2.0_f32].into_iter(),
+        )
+        .expect("chunk");
+        tree.insert(chunk);
+        tree.mark_gpu_clean();
+        assert!(!tree.all_gpu_dirty());
+        assert!(!tree.gpu_resident());
+
+        tree.unload_gpu(&mut PlotGpuBufferPool::default());
+        assert!(!tree.all_gpu_dirty());
+        assert!(!tree.gpu_resident());
+    }
+
+    #[test]
+    fn replace_points_swaps_content_instead_of_appending() {
+        let mut xy = XYLine::default();
+        xy.replace_points("first".into(), [(0.0, 1.0), (1.0, 2.0)]);
+        assert_eq!(xy.point_count(), 2);
+
+        xy.replace_points("second".into(), [(5.0, 6.0)]);
+
+        assert_eq!(xy.label, "second");
+        assert_eq!(xy.point_count(), 1);
+        let xs: Vec<f32> = xy.x_values.iter().flat_map(|c| c.cpu()).copied().collect();
+        let ys: Vec<f32> = xy.y_values.iter().flat_map(|c| c.cpu()).copied().collect();
+        assert_eq!(xs, vec![5.0]);
+        assert_eq!(ys, vec![6.0]);
+    }
+
+    #[test]
+    fn replace_points_marks_allocations_for_reclaim() {
+        let mut xy = XYLine::default();
+        xy.replace_points("first".into(), [(0.0, 1.0)]);
+        // `queue_load` needs a render queue, so the reclaim itself can only be
+        // exercised on a device; assert the request survives until then.
+        assert!(xy.content_replaced);
+    }
+
+    #[test]
+    fn xy_unload_gpu_is_noop_when_already_cleared() {
+        let mut xy = XYLine::default();
+        xy.push_x_value(1.0);
+        xy.push_y_value(2.0);
+        xy.mark_gpu_clean();
+        assert!(!xy.all_gpu_dirty());
+        assert!(!xy.gpu_resident());
+
+        xy.unload_gpu(&mut PlotGpuBufferPool::default());
+        assert!(!xy.all_gpu_dirty());
+        assert!(!xy.gpu_resident());
+    }
+
+    #[test]
+    fn shared_line_stays_loaded_while_any_pane_is_on_screen() {
+        use crate::ui::plot::gpu::{
+            LineHandle, unload_plot_gpu_not_on_screen, visible_plot_gpu_asset_ids,
+        };
+
+        let mut lines = Assets::<Line>::default();
+        let mut xy_lines = Assets::<XYLine>::default();
+        let handle = lines.add(Line::default());
+        {
+            let mut line = lines.get_mut(&handle).expect("line");
+            let chunk = Chunk::from_iter(
+                &[Timestamp(1), Timestamp(2)],
+                Timestamp(0),
+                [0.0_f32, 1.0_f32].into_iter(),
+            )
+            .expect("chunk");
+            line.data.insert(chunk);
+            line.data.mark_gpu_clean();
+        }
+
+        let a = LineHandle::Timeseries(handle.clone());
+        let b = LineHandle::Timeseries(handle.clone());
+        let cases = [
+            (true, false, true),
+            (false, true, true),
+            (true, true, true),
+            (false, false, false),
+        ];
+        for (a_on, b_on, expect_visible) in cases {
+            lines.get_mut(&handle).expect("line").data.mark_gpu_clean();
+            let (visible_ts, visible_xy) = visible_plot_gpu_asset_ids([(&a, a_on), (&b, b_on)]);
+            assert_eq!(
+                visible_ts.contains(&handle.id()),
+                expect_visible,
+                "a_on={a_on} b_on={b_on} expect_visible={expect_visible}"
+            );
+            unload_plot_gpu_not_on_screen(
+                &mut lines,
+                &mut xy_lines,
+                &visible_ts,
+                &visible_xy,
+                &mut PlotGpuBufferPool::default(),
+            );
+            // No shard allocs ⇒ already cleared; must not walk/lock or dirty shards.
+            assert!(!lines.get(&handle).expect("line").data.all_gpu_dirty());
+            assert!(!lines.get(&handle).expect("line").data.gpu_resident());
+        }
+    }
+
+    #[test]
+    fn unload_plot_gpu_skips_already_cleared_assets() {
+        use crate::ui::plot::gpu::unload_plot_gpu_not_on_screen;
+
+        let mut lines = Assets::<Line>::default();
+        let mut xy_lines = Assets::<XYLine>::default();
+        let ts = lines.add(Line::default());
+        let xy = xy_lines.add(XYLine::default());
+        {
+            let mut line = lines.get_mut(&ts).expect("line");
+            let chunk = Chunk::from_iter(
+                &[Timestamp(1), Timestamp(2)],
+                Timestamp(0),
+                [0.0_f32, 1.0_f32].into_iter(),
+            )
+            .expect("chunk");
+            line.data.insert(chunk);
+            line.data.mark_gpu_clean();
+        }
+        {
+            let mut xy_line = xy_lines.get_mut(&xy).expect("xy");
+            xy_line.push_x_value(1.0);
+            xy_line.push_y_value(2.0);
+            xy_line.mark_gpu_clean();
+        }
+
+        unload_plot_gpu_not_on_screen(
+            &mut lines,
+            &mut xy_lines,
+            &HashSet::new(),
+            &HashSet::new(),
+            &mut PlotGpuBufferPool::default(),
+        );
+        assert!(!lines.get(&ts).expect("line").data.all_gpu_dirty());
+        assert!(!xy_lines.get(&xy).expect("xy").all_gpu_dirty());
+    }
+
+    #[test]
+    fn quarantine_pool_is_unusable_until_ticks_elapse() {
+        let mut pool = QuarantinePool::default();
+        pool.release(1u32);
+        pool.release(2u32);
+        assert_eq!(pool.ready_count(), 0);
+        assert_eq!(pool.quarantined_count(), 2);
+        assert!(plot_gpu_upload_blocked(
+            pool.ready_count(),
+            pool.quarantined_count(),
+            2
+        ));
+
+        pool.tick();
+        assert_eq!(pool.ready_count(), 0);
+        assert!(plot_gpu_upload_blocked(
+            pool.ready_count(),
+            pool.quarantined_count(),
+            2
+        ));
+
+        pool.tick();
+        assert_eq!(pool.ready_count(), 0);
+
+        pool.tick();
+        assert_eq!(pool.ready_count(), 2);
+        assert_eq!(pool.quarantined_count(), 0);
+        assert!(!plot_gpu_upload_blocked(
+            pool.ready_count(),
+            pool.quarantined_count(),
+            2
+        ));
+        assert_eq!(pool.try_acquire(), Some(1));
+        assert_eq!(pool.try_acquire(), Some(2));
+        assert_eq!(pool.try_acquire(), None);
+    }
+
+    #[test]
+    fn shard_exhaustion_at_the_same_class_needs_no_pool_buffer() {
+        assert!(
+            takes_from_pool(None, 16, false),
+            "a line without a buffer must take one"
+        );
+        assert!(
+            !takes_from_pool(Some(16), 16, true),
+            "exhausted shards at the same class are reclaimed in place"
+        );
+        assert!(
+            takes_from_pool(Some(4), 16, true),
+            "outgrowing the class needs a bigger buffer from the pool"
+        );
+        assert!(
+            takes_from_pool(Some(64), 16, true),
+            "shrinking the class returns the oversized buffer to the pool"
+        );
+        assert!(
+            !takes_from_pool(Some(64), 16, false),
+            "an oversized buffer with free shards is left alone"
+        );
+    }
+
+    #[test]
+    fn a_shrinking_xy_refresh_is_counted_as_an_allocation() {
+        assert!(
+            xy_takes_from_pool(Some(64), 16, true),
+            "a refresh that drops a class hands its buffer back, so the gate must see it"
+        );
+        assert!(
+            !xy_takes_from_pool(Some(16), 16, true),
+            "a refresh that keeps its class is reclaimed in place"
+        );
+        assert!(
+            xy_takes_from_pool(Some(4), 16, true),
+            "a refresh that outgrows its class needs a bigger buffer"
+        );
+        assert!(
+            !xy_takes_from_pool(Some(64), 16, false),
+            "an untouched oversized buffer is left alone"
+        );
+        assert!(
+            xy_takes_from_pool(None, 16, false),
+            "a line without a buffer must take one"
+        );
+    }
+
+    #[test]
+    fn new_plot_gpu_upload_is_blocked_only_while_value_buffers_are_quarantined() {
+        assert!(!plot_gpu_upload_blocked(0, 0, 2));
+        assert!(plot_gpu_upload_blocked(0, 4, 2));
+        assert!(plot_gpu_upload_blocked(1, 4, 2));
+        assert!(!plot_gpu_upload_blocked(2, 4, 2));
+        assert!(!plot_gpu_upload_blocked(2, 0, 2));
+    }
+
+    #[test]
+    fn ready_pool_items_are_evicted_after_idle_limit() {
+        let mut pool = QuarantinePool::default();
+        pool.release(1u32);
+        for _ in 0..PLOT_GPU_QUARANTINE_FRAMES {
+            assert_eq!(pool.tick(), 0);
+        }
+        assert_eq!(pool.ready_count(), 1);
+        for _ in 1..PLOT_GPU_POOL_IDLE_EVICT_FRAMES {
+            assert_eq!(pool.tick(), 0);
+        }
+        assert_eq!(pool.ready_count(), 1);
+        assert_eq!(pool.tick(), 1);
+        assert_eq!(pool.ready_count(), 0);
+    }
+
+    #[test]
+    fn pressure_trim_keeps_quarantined_items() {
+        let mut pool = QuarantinePool::default();
+        pool.release(1u32);
+        assert_eq!(pool.trim_ready(), 0);
+        assert_eq!(pool.quarantined_count(), 1);
+        for _ in 0..PLOT_GPU_QUARANTINE_FRAMES {
+            pool.tick();
+        }
+        assert_eq!(pool.trim_ready(), 1);
+        assert_eq!(pool.ready_count(), 0);
+    }
+
+    #[test]
+    fn recovery_pause_blocks_immediate_plot_reallocation() {
+        let mut pause = PlotGpuAllocationPause::default();
+        assert!(!pause.is_active());
+        pause.pause_for_recovery();
+        assert!(pause.is_active());
+    }
+
+    #[test]
+    fn value_shard_classes_choose_smallest_fit() {
+        assert_eq!(value_shard_class(1), 4);
+        assert_eq!(value_shard_class(4), 4);
+        assert_eq!(value_shard_class(5), 16);
+        assert_eq!(value_shard_class(17), 64);
+        assert_eq!(value_shard_class(257), CHUNK_COUNT);
+        assert_eq!(
+            value_buffer_bytes(4),
+            (5 * CHUNK_LEN * size_of::<f32>()) as u64
+        );
+    }
+
+    #[test]
+    fn value_shard_zero_is_reserved_for_nan() {
+        let free = value_data_free_map(4);
+        assert!(!free.contains(0));
+        assert_eq!(free.iter().collect::<Vec<_>>(), vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn plot_gpu_snapshot_accounts_for_resident_and_pooled_buffers() {
+        let snapshot = PlotGpuPoolSnapshot {
+            value_live: 2,
+            value_ready: 1,
+            value_quarantined: 2,
+            value_allocations: 8,
+            value_destroyed: 3,
+            value_live_bytes: 2 * PLOT_VALUE_BUFFER_BYTES,
+            value_pooled_bytes: 3 * PLOT_VALUE_BUFFER_BYTES,
+            index_live: 3,
+            index_ready: 2,
+            index_quarantined: 1,
+            index_allocations: 10,
+            index_destroyed: 4,
+            value_shards_used: 12,
+            value_shards_capacity: 48,
+            ..Default::default()
+        };
+        assert_eq!(
+            snapshot.resident_bytes(),
+            2 * PLOT_VALUE_BUFFER_BYTES + 3 * PLOT_INDEX_BUFFER_BYTES
+        );
+        assert_eq!(
+            snapshot.pooled_bytes(),
+            3 * PLOT_VALUE_BUFFER_BYTES + 3 * PLOT_INDEX_BUFFER_BYTES
+        );
+        assert_eq!(
+            snapshot.value_allocations,
+            snapshot.value_live as u64
+                + snapshot.value_ready as u64
+                + snapshot.value_quarantined as u64
+                + snapshot.value_destroyed
+        );
+        assert_eq!(
+            snapshot.index_allocations,
+            snapshot.index_live as u64
+                + snapshot.index_ready as u64
+                + snapshot.index_quarantined as u64
+                + snapshot.index_destroyed
+        );
+        assert_eq!(snapshot.shard_occupancy_percent(), Some(25.0));
+    }
+
+    #[test]
+    fn resident_line_defers_when_index_pool_is_quarantined() {
+        assert!(
+            defer_new_plot_gpu_allocs(0, false, 0, 0, 0, 4),
+            "shared/resident values still need a recycled index buffer"
+        );
+        assert!(
+            !defer_new_plot_gpu_allocs(0, true, 0, 0, 0, 4),
+            "cached index must keep drawing while the pool cools down"
+        );
+        assert!(
+            !defer_new_plot_gpu_allocs(2, false, 0, 0, 0, 0),
+            "empty pools are a first load, not a tab-switch leak"
+        );
+        assert!(defer_new_plot_gpu_allocs(2, false, 0, 4, 0, 0));
+    }
+
+    #[test]
+    fn xy_line_uses_actual_value_buffer_need_when_deferring() {
+        assert!(
+            !defer_new_plot_gpu_allocs(1, true, 1, 4, 1, 0),
+            "one ready value buffer is enough when only one is needed"
+        );
+        assert!(
+            defer_new_plot_gpu_allocs(2, true, 1, 4, 1, 0),
+            "two-buffer uploads still wait for a second ready value buffer"
+        );
+        assert!(
+            defer_new_plot_gpu_allocs(1, true, 0, 4, 1, 0),
+            "a single needed buffer still waits while candidates are quarantined"
+        );
+    }
 }
 
-fn try_append_u32(view: &mut [u8], val: u32) -> Option<&mut [u8]> {
+fn try_append_u32(view: wgpu::WriteOnly<'_, [u8]>, val: u32) -> Option<wgpu::WriteOnly<'_, [u8]>> {
     if view.len() < size_of::<u32>() {
         return None;
     }
-    view[..size_of::<u32>()].copy_from_slice(&val.to_le_bytes());
-    Some(&mut view[size_of::<u32>()..])
-}
-
-pub fn collect_garbage(
-    behavior: Res<TimeRangeBehavior>,
-    selected_range: Res<SelectedTimeRange>,
-    graph_data: ResMut<CollectedGraphData>,
-    mut lines: ResMut<Assets<Line>>,
-) {
-    if !behavior.is_changed() {
-        return;
-    }
-    for component in graph_data.components.values() {
-        for line in component.lines.values() {
-            let Some(line) = lines.get_mut(line) else {
-                continue;
-            };
-            line.data.garbage_collect(selected_range.0.clone());
-        }
-    }
+    let (mut head, rest) = view.split_at(size_of::<u32>());
+    head.copy_from_slice(&val.to_le_bytes());
+    Some(rest)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2352,6 +5788,44 @@ impl IndexChunk {
     pub fn into_index_iter(self) -> impl Iterator<Item = u32> {
         self.range.take(self.len)
     }
+}
+
+fn for_each_strip_index(
+    chunks: impl IntoIterator<Item = IndexChunk>,
+    step: usize,
+    terminal_hold: bool,
+    mut emit: impl FnMut(u32) -> ControlFlow<()>,
+) -> ControlFlow<()> {
+    let step = step.max(1);
+    let mut final_index = None;
+    for chunk in chunks {
+        emit(PLOT_STRIP_SEPARATOR_INDEX)?;
+        let end = chunk.clone().into_index_iter().last();
+        let mut indices = chunk.into_index_iter();
+        let mut last_written = None;
+        if let Some(index) = indices.next() {
+            emit(index)?;
+            last_written = Some(index);
+            final_index = Some(index);
+        }
+        for index in indices.step_by(step) {
+            emit(index)?;
+            last_written = Some(index);
+            final_index = Some(index);
+        }
+        if let Some(end) = end
+            && last_written != Some(end)
+        {
+            emit(end)?;
+            final_index = Some(end);
+        }
+        emit(PLOT_STRIP_SEPARATOR_INDEX)?;
+    }
+    if terminal_hold && let Some(index) = final_index {
+        emit(index)?;
+        emit(index)?;
+    }
+    ControlFlow::Continue(())
 }
 
 pub trait BoundOrd {
@@ -2369,10 +5843,423 @@ impl BoundOrd for f32 {
     }
 }
 
+/// wgpu/Bevy keep 1–3 frames in flight. Value buffers released on a tab
+/// switch must not be rewritten until those bind groups are gone.
+pub(crate) const PLOT_GPU_QUARANTINE_FRAMES: u8 = 3;
+pub(crate) const PLOT_GPU_POOL_IDLE_EVICT_FRAMES: u16 = 300;
+pub(crate) const PLOT_GPU_NEW_VALUE_BUFFERS_PER_FRAME: usize = 16;
+const PLOT_GPU_RECOVERY_PAUSE: Duration = Duration::from_secs(2);
+
+#[derive(Resource, Default)]
+pub struct PlotGpuAllocationPause {
+    until: Option<Instant>,
+}
+
+impl PlotGpuAllocationPause {
+    pub fn pause_for_recovery(&mut self) {
+        self.until = Some(Instant::now() + PLOT_GPU_RECOVERY_PAUSE);
+    }
+
+    pub fn is_active(&mut self) -> bool {
+        let active = self.until.is_some_and(|until| Instant::now() < until);
+        if !active {
+            self.until = None;
+        }
+        active
+    }
+}
+
+pub(crate) struct QuarantinePool<T> {
+    items: Vec<(T, u8, u16)>,
+}
+
+impl<T> Default for QuarantinePool<T> {
+    fn default() -> Self {
+        Self { items: Vec::new() }
+    }
+}
+
+impl<T> QuarantinePool<T> {
+    fn tick(&mut self) -> usize {
+        for (_, quarantine_frames, idle_frames) in &mut self.items {
+            if *quarantine_frames > 0 {
+                *quarantine_frames -= 1;
+            } else {
+                *idle_frames = idle_frames.saturating_add(1);
+            }
+        }
+        let before = self.items.len();
+        self.items.retain(|(_, quarantine_frames, idle_frames)| {
+            *quarantine_frames > 0 || *idle_frames < PLOT_GPU_POOL_IDLE_EVICT_FRAMES
+        });
+        before - self.items.len()
+    }
+
+    fn release(&mut self, item: T) {
+        self.items.push((item, PLOT_GPU_QUARANTINE_FRAMES, 0));
+    }
+
+    fn try_acquire(&mut self) -> Option<T> {
+        let idx = self
+            .items
+            .iter()
+            .position(|(_, quarantine_frames, _)| *quarantine_frames == 0)?;
+        Some(self.items.swap_remove(idx).0)
+    }
+
+    fn ready_count(&self) -> usize {
+        self.items
+            .iter()
+            .filter(|(_, quarantine_frames, _)| *quarantine_frames == 0)
+            .count()
+    }
+
+    fn quarantined_count(&self) -> usize {
+        self.items
+            .iter()
+            .filter(|(_, quarantine_frames, _)| *quarantine_frames > 0)
+            .count()
+    }
+
+    fn trim_ready(&mut self) -> usize {
+        let before = self.items.len();
+        self.items
+            .retain(|(_, quarantine_frames, _)| *quarantine_frames > 0);
+        before - self.items.len()
+    }
+
+    fn clear(&mut self) -> usize {
+        let count = self.items.len();
+        self.items.clear();
+        count
+    }
+}
+
+pub(crate) fn plot_gpu_upload_blocked(ready: usize, quarantined: usize, need: usize) -> bool {
+    ready < need && quarantined > 0
+}
+
+pub(crate) fn defer_new_plot_gpu_allocs(
+    value_buffers_needed: usize,
+    has_index_cache: bool,
+    value_ready: usize,
+    value_quarantined: usize,
+    index_ready: usize,
+    index_quarantined: usize,
+) -> bool {
+    let values_blocked = value_buffers_needed > 0
+        && plot_gpu_upload_blocked(value_ready, value_quarantined, value_buffers_needed);
+    let index_blocked =
+        !has_index_cache && plot_gpu_upload_blocked(index_ready, index_quarantined, 1);
+    values_blocked || index_blocked
+}
+
+pub const PLOT_VALUE_SHARD_CLASSES: [usize; 5] = [4, 16, 64, 256, CHUNK_COUNT];
+pub const PLOT_VALUE_BUFFER_BYTES: u64 = value_buffer_bytes(CHUNK_COUNT);
+pub const PLOT_INDEX_BUFFER_BYTES: u64 = (INDEX_BUFFER_LEN * size_of::<u32>()) as u64;
+
+pub const fn value_buffer_bytes(data_shards: usize) -> u64 {
+    ((data_shards + 1) * CHUNK_LEN * size_of::<f32>()) as u64
+}
+
+pub fn value_shard_class(required: usize) -> usize {
+    PLOT_VALUE_SHARD_CLASSES
+        .into_iter()
+        .find(|class| *class >= required.max(1))
+        .unwrap_or(CHUNK_COUNT)
+}
+
+/// Whether `queue_load_range` will draw this slot's buffer from the pool. An
+/// empty slot always does; a resized one only when its class changes, since
+/// `reclaim_or_release` resets an unchanged class in place.
+fn takes_from_pool(capacity_shards: Option<usize>, value_class: usize, needs_resize: bool) -> bool {
+    match capacity_shards {
+        None => true,
+        Some(capacity) => needs_resize && capacity != value_class,
+    }
+}
+
+/// Same question for [`XYLine::queue_load`], which rebuilds on two triggers:
+/// replaced content, which hands back every class but its own, and an outgrown
+/// buffer. A shrinking refresh therefore allocates just like a growing one.
+fn xy_takes_from_pool(
+    capacity_shards: Option<usize>,
+    value_class: usize,
+    content_replaced: bool,
+) -> bool {
+    let needs_resize =
+        content_replaced || capacity_shards.is_some_and(|capacity| capacity < value_class);
+    takes_from_pool(capacity_shards, value_class, needs_resize)
+}
+
+/// Hand a value buffer whose shards were all just released back to its owner or
+/// to the pool. An unchanged class means the buffer only ran out of free shards,
+/// so reclaim it in place: the pool would keep it quarantined and hand out a
+/// second buffer of the same size in its place.
+fn reclaim_or_release(
+    slot: &mut Option<BufferShardAlloc>,
+    value_class: usize,
+    pool: &mut PlotGpuBufferPool,
+    render_queue: &RenderQueue,
+) {
+    match slot.take() {
+        Some(mut alloc) if alloc.capacity_shards() == value_class => {
+            alloc.reset_shards(render_queue);
+            *slot = Some(alloc);
+        }
+        Some(alloc) => pool.release_value(alloc),
+        None => {}
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PlotGpuPoolSnapshot {
+    pub value_live: usize,
+    pub value_ready: usize,
+    pub value_quarantined: usize,
+    pub value_allocations: u64,
+    pub value_reuses: u64,
+    pub value_destroyed: u64,
+    pub value_live_bytes: u64,
+    pub value_pooled_bytes: u64,
+    pub index_live: usize,
+    pub index_ready: usize,
+    pub index_quarantined: usize,
+    pub index_allocations: u64,
+    pub index_reuses: u64,
+    pub index_destroyed: u64,
+    pub value_shards_used: usize,
+    pub value_shards_capacity: usize,
+}
+
+impl PlotGpuPoolSnapshot {
+    pub fn resident_bytes(self) -> u64 {
+        self.value_live_bytes
+            .saturating_add((self.index_live as u64).saturating_mul(PLOT_INDEX_BUFFER_BYTES))
+    }
+
+    pub fn pooled_bytes(self) -> u64 {
+        self.value_pooled_bytes.saturating_add(
+            ((self.index_ready + self.index_quarantined) as u64)
+                .saturating_mul(PLOT_INDEX_BUFFER_BYTES),
+        )
+    }
+
+    pub fn shard_occupancy_percent(self) -> Option<f64> {
+        (self.value_shards_capacity > 0)
+            .then_some(self.value_shards_used as f64 / self.value_shards_capacity as f64 * 100.0)
+    }
+}
+
+/// Recycles plot value/index buffers across tab switches so hidden-graph
+/// unload does not immediately allocate a second full set (GPU OOM).
+struct PooledValueBuffer {
+    buffer: Buffer,
+    data_capacity: usize,
+}
+
+impl PooledValueBuffer {
+    fn bytes(&self) -> u64 {
+        value_buffer_bytes(self.data_capacity)
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct PlotGpuBufferPool {
+    value: QuarantinePool<PooledValueBuffer>,
+    index: QuarantinePool<Buffer>,
+    value_live: usize,
+    value_allocations: u64,
+    value_reuses: u64,
+    index_live: usize,
+    index_allocations: u64,
+    index_reuses: u64,
+    value_destroyed: u64,
+    index_destroyed: u64,
+    value_live_bytes: u64,
+    value_shards_used: usize,
+    value_shards_capacity: usize,
+}
+
+impl PlotGpuBufferPool {
+    pub fn tick(&mut self) {
+        self.value_destroyed += self.value.tick() as u64;
+        self.index_destroyed += self.index.tick() as u64;
+    }
+
+    pub fn release_value(&mut self, alloc: BufferShardAlloc) {
+        debug_assert!(self.value_live > 0);
+        self.value_live = self.value_live.saturating_sub(1);
+        let pooled = alloc.into_pooled_value();
+        self.value_live_bytes = self.value_live_bytes.saturating_sub(pooled.bytes());
+        self.value.release(pooled);
+    }
+
+    pub fn release_index(&mut self, buffer: Buffer) {
+        debug_assert!(self.index_live > 0);
+        self.index_live = self.index_live.saturating_sub(1);
+        self.index.release(buffer);
+    }
+
+    pub fn snapshot(&self) -> PlotGpuPoolSnapshot {
+        PlotGpuPoolSnapshot {
+            value_live: self.value_live,
+            value_ready: self.value.ready_count(),
+            value_quarantined: self.value.quarantined_count(),
+            value_allocations: self.value_allocations,
+            value_reuses: self.value_reuses,
+            value_destroyed: self.value_destroyed,
+            value_live_bytes: self.value_live_bytes,
+            value_pooled_bytes: self
+                .value
+                .items
+                .iter()
+                .map(|(buffer, _, _)| buffer.bytes())
+                .sum(),
+            index_live: self.index_live,
+            index_ready: self.index.ready_count(),
+            index_quarantined: self.index.quarantined_count(),
+            index_allocations: self.index_allocations,
+            index_reuses: self.index_reuses,
+            index_destroyed: self.index_destroyed,
+            value_shards_used: self.value_shards_used,
+            value_shards_capacity: self.value_shards_capacity,
+        }
+    }
+
+    pub fn set_live_shard_occupancy(&mut self, used: usize, capacity: usize) {
+        self.value_shards_used = used;
+        self.value_shards_capacity = capacity;
+    }
+
+    pub fn trim_ready(&mut self) -> PlotGpuPoolTrim {
+        let trim = PlotGpuPoolTrim {
+            values: self.value.trim_ready(),
+            indices: self.index.trim_ready(),
+        };
+        self.value_destroyed += trim.values as u64;
+        self.index_destroyed += trim.indices as u64;
+        trim
+    }
+
+    pub fn drain(&mut self) -> PlotGpuPoolTrim {
+        let trim = PlotGpuPoolTrim {
+            values: self.value.clear(),
+            indices: self.index.clear(),
+        };
+        self.value_destroyed += trim.values as u64;
+        self.index_destroyed += trim.indices as u64;
+        trim
+    }
+
+    pub fn defer_new_allocs(
+        &self,
+        value_buffers_needed: usize,
+        has_index_cache: bool,
+        min_value_shards: usize,
+    ) -> bool {
+        let class = value_shard_class(min_value_shards);
+        defer_new_plot_gpu_allocs(
+            value_buffers_needed,
+            has_index_cache,
+            self.value_count(class, true),
+            self.value_count(class, false),
+            self.index.ready_count(),
+            self.index.quarantined_count(),
+        )
+    }
+
+    pub fn new_value_allocations_needed(
+        &self,
+        buffers_needed: usize,
+        min_value_shards: usize,
+    ) -> usize {
+        buffers_needed.saturating_sub(self.value_count(value_shard_class(min_value_shards), true))
+    }
+
+    pub fn take_value(
+        &mut self,
+        min_shards: usize,
+        render_device: &RenderDevice,
+        render_queue: &RenderQueue,
+    ) -> BufferShardAlloc {
+        let class = value_shard_class(min_shards);
+        self.value_live += 1;
+        if let Some(pooled) = self.take_ready_value(class) {
+            self.value_reuses += 1;
+            self.value_live_bytes += pooled.bytes();
+            BufferShardAlloc::from_pooled_value(
+                pooled.buffer,
+                pooled.data_capacity,
+                CHUNK_LEN,
+                render_queue,
+            )
+        } else {
+            self.value_allocations += 1;
+            self.value_live_bytes += value_buffer_bytes(class);
+            BufferShardAlloc::with_nan_chunk(class, CHUNK_LEN, render_device, render_queue)
+        }
+    }
+
+    fn value_count(&self, min_shards: usize, ready: bool) -> usize {
+        self.value
+            .items
+            .iter()
+            .filter(|(buffer, quarantine_frames, _)| {
+                buffer.data_capacity >= min_shards && (*quarantine_frames == 0) == ready
+            })
+            .count()
+    }
+
+    fn take_ready_value(&mut self, min_shards: usize) -> Option<PooledValueBuffer> {
+        let index = self
+            .value
+            .items
+            .iter()
+            .enumerate()
+            .filter(|(_, (buffer, quarantine_frames, _))| {
+                *quarantine_frames == 0 && buffer.data_capacity >= min_shards
+            })
+            .min_by_key(|(_, (buffer, _, _))| buffer.data_capacity)
+            .map(|(index, _)| index)?;
+        Some(self.value.items.swap_remove(index).0)
+    }
+
+    pub fn take_index(&mut self, render_device: &RenderDevice) -> Option<Buffer> {
+        if let Some(buffer) = self.index.try_acquire() {
+            self.index_live += 1;
+            self.index_reuses += 1;
+            return Some(buffer);
+        }
+        if self.index.quarantined_count() > 0 {
+            return None;
+        }
+        self.index_live += 1;
+        self.index_allocations += 1;
+        Some(render_device.create_buffer(&BufferDescriptor {
+            label: Some("Line index Buffer"),
+            size: (INDEX_BUFFER_LEN * size_of::<u32>()) as u64,
+            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        }))
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PlotGpuPoolTrim {
+    pub values: usize,
+    pub indices: usize,
+}
+
 pub struct BufferShardAlloc {
     buffer: Buffer,
     chunk_size: usize,
+    data_capacity: usize,
     free_map: RoaringBitmap,
+}
+
+fn value_data_free_map(chunks: usize) -> RoaringBitmap {
+    (1..=chunks as u32).collect()
 }
 
 impl BufferShardAlloc {
@@ -2383,9 +6270,36 @@ impl BufferShardAlloc {
         render_queue: &RenderQueue,
     ) -> Self {
         let mut this = Self::new::<f32>(chunks + 1, chunk_len, render_device);
-        let shard = this.alloc().expect("couldn't alloc nan");
+        this.data_capacity = chunks;
+        this.free_map = value_data_free_map(chunks);
+        let shard = this.nan_shard();
         render_queue.write_buffer_shard(&shard, &f32::NAN.to_le_bytes());
         this
+    }
+
+    fn from_pooled_value(
+        buffer: Buffer,
+        chunks: usize,
+        chunk_len: usize,
+        render_queue: &RenderQueue,
+    ) -> Self {
+        let chunk_size = size_of::<f32>() * chunk_len;
+        let this = Self {
+            buffer,
+            free_map: value_data_free_map(chunks),
+            chunk_size,
+            data_capacity: chunks,
+        };
+        let shard = this.nan_shard();
+        render_queue.write_buffer_shard(&shard, &f32::NAN.to_le_bytes());
+        this
+    }
+
+    fn into_pooled_value(self) -> PooledValueBuffer {
+        PooledValueBuffer {
+            buffer: self.buffer,
+            data_capacity: self.data_capacity,
+        }
     }
 
     pub fn new<T: Sized>(chunks: usize, chunk_len: usize, render_device: &RenderDevice) -> Self {
@@ -2404,6 +6318,7 @@ impl BufferShardAlloc {
             buffer,
             free_map,
             chunk_size,
+            data_capacity: chunks,
         }
     }
 
@@ -2419,8 +6334,40 @@ impl BufferShardAlloc {
         })
     }
 
+    fn nan_shard(&self) -> BufferShard {
+        BufferShard {
+            buffer: self.buffer.clone(),
+            range: 0..self.chunk_size as u64,
+        }
+    }
+
     pub fn buffer(&self) -> &Buffer {
         &self.buffer
+    }
+
+    pub fn binding_size(&self) -> NonZeroU64 {
+        NonZeroU64::new(value_buffer_bytes(self.data_capacity)).unwrap()
+    }
+
+    pub fn capacity_shards(&self) -> usize {
+        self.data_capacity
+    }
+
+    pub fn free_shards(&self) -> usize {
+        self.free_map.len() as usize
+    }
+
+    pub fn used_shards(&self) -> usize {
+        self.data_capacity
+            .saturating_sub(self.free_map.len() as usize)
+    }
+
+    /// Free every shard at once. Callers must have released the GPU copies that
+    /// referenced them, since `release_gpu` drops a shard without deallocating it.
+    pub fn reset_shards(&mut self, render_queue: &RenderQueue) {
+        self.free_map = value_data_free_map(self.data_capacity);
+        let shard = self.nan_shard();
+        render_queue.write_buffer_shard(&shard, &f32::NAN.to_le_bytes());
     }
 
     pub fn dealloc(&mut self, shard: BufferShard) {
@@ -2430,7 +6377,10 @@ impl BufferShardAlloc {
             "trying to dealloc shard from wrong buffer",
         );
         let i = shard.range.start as usize / self.chunk_size;
-        self.free_map.insert(i as u32);
+        debug_assert_ne!(i, 0, "NaN shard must remain reserved");
+        if i != 0 {
+            self.free_map.insert(i as u32);
+        }
     }
 }
 

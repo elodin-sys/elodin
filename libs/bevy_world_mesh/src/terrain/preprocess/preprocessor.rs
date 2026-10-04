@@ -410,7 +410,7 @@ pub(crate) fn preprocessor_load_tile(
 ) {
     for mut preprocessor in preprocessors.iter_mut() {
         preprocessor.loading_tiles.retain_mut(|tile| {
-            if let Some(image) = images.get_mut(tile.id) {
+            if let Some(mut image) = images.get_mut(tile.id) {
                 image.texture_descriptor.format = tile.format.processing_format();
                 image.sampler = ImageSampler::linear();
                 false

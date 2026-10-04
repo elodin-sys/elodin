@@ -220,6 +220,52 @@ class ServoPacketRaw:
         )
 
 
+def flu_to_frd(vector: np.ndarray) -> np.ndarray:
+    """Convert a body-frame vector from Forward-Left-Up to Forward-Right-Down."""
+    vector = np.asarray(vector)
+    return np.array([vector[0], -vector[1], -vector[2]])
+
+
+def elodin_quaternion_to_fdm(quaternion_xyzw: np.ndarray) -> np.ndarray:
+    """Convert Elodin scalar-last FLU→ENU attitude to FDM scalar-first form.
+
+    Betaflight's default Gazebo bridge expects the quaternion conjugated by a
+    180-degree rotation about body X, which negates its Y and Z components.
+    """
+    qx, qy, qz, qw = np.asarray(quaternion_xyzw)
+    return np.array([qw, qx, -qy, -qz])
+
+
+def build_fdm_from_components(
+    world_pos: np.ndarray,
+    world_vel: np.ndarray,
+    accel: np.ndarray,
+    gyro: np.ndarray,
+    timestamp: float,
+    gravity: float = 9.80665,
+) -> FDMPacket:
+    """Build an FDM packet from Elodin component arrays.
+
+    ``world_pos`` is ``[qx, qy, qz, qw, x, y, z]`` and ``world_vel`` is
+    ``[wx, wy, wz, vx, vy, vz]``. World position and linear velocity remain
+    ENU; body-frame IMU vectors are converted from FLU to FRD.
+    """
+    position = np.array(world_pos[4:7])
+    linear_velocity = np.array(world_vel[3:6])
+    accel_flu = np.array(accel) if accel is not None else np.array([0.0, 0.0, gravity])
+    gyro_flu = np.array(gyro) if gyro is not None else np.array(world_vel[:3])
+
+    return FDMPacket(
+        timestamp=timestamp,
+        imu_angular_velocity_rpy=flu_to_frd(gyro_flu),
+        imu_linear_acceleration_xyz=flu_to_frd(accel_flu),
+        imu_orientation_quat=elodin_quaternion_to_fdm(world_pos[:4]),
+        velocity_xyz=linear_velocity,
+        position_xyz=position,
+        pressure=101325.0 - 12.0 * position[2],
+    )
+
+
 class BetaflightBridge:
     """
     UDP communication bridge between Elodin and Betaflight SITL.
@@ -418,35 +464,44 @@ class BetaflightBridge:
 
         Args:
             timestamp: Simulation time in seconds
-            angular_velocity: Body-frame angular velocity [roll, pitch, yaw] rad/s (ENU)
-            linear_acceleration: Body-frame acceleration [x, y, z] m/s² (ENU)
+            angular_velocity: Body-frame angular velocity [x, y, z] rad/s (FLU)
+            linear_acceleration: Body-frame specific force [x, y, z] m/s² (FLU)
             orientation_quat: Quaternion [w, x, y, z] (Elodin convention)
             velocity: World-frame velocity [east, north, up] m/s
             position: World-frame position [east, north, up] meters
             pressure: Barometric pressure in Pascals
         """
-        # Convert from Elodin ENU body frame to Betaflight NED body frame
-        # ENU to NED: x_ned = y_enu, y_ned = x_enu, z_ned = -z_enu
+        # Convert from Elodin FLU body frame to the FRD sensor frame that
+        # Betaflight 2026.6.1+ SITL expects (default ENABLE_GAZEBO_BRIDGE=1),
+        # mirroring the Gazebo BetaflightPlugin's IMU sensor frame:
+        #   accel: specific force in FRD = [FLU_x, -FLU_y, -FLU_z]
+        #   gyro:  body rates in FRD = [FLU_x, -FLU_y, -FLU_z]
         accel_ned = np.array(
             [
-                linear_acceleration[1],  # ENU-Y -> NED-X
-                linear_acceleration[0],  # ENU-X -> NED-Y
-                -linear_acceleration[2],  # ENU-Z -> NED-Z (inverted)
+                linear_acceleration[0],  # FRD_x = FLU_x
+                -linear_acceleration[1],  # FRD_y = -FLU_y
+                -linear_acceleration[2],  # FRD_z = -FLU_z (at rest: -1g)
             ]
         )
 
-        # Gyro conversion: same transform
         gyro_ned = np.array(
             [
-                angular_velocity[1],  # pitch rate
-                angular_velocity[0],  # roll rate
-                -angular_velocity[2],  # yaw rate (inverted)
+                angular_velocity[0],  # FRD_x = FLU_x
+                -angular_velocity[1],  # FRD_y = -FLU_y
+                -angular_velocity[2],  # FRD_z = -FLU_z
             ]
         )
 
-        # Quaternion needs to be adjusted for frame change
-        # For now, pass through as Betaflight handles quaternion internally
-        quat = orientation_quat
+        # Quaternion: send the Gazebo BetaflightPlugin convention (q conjugated
+        # by Rx(pi), i.e. qy/qz negated) expected by 2026.6.1+ SITL.
+        quat = np.array(
+            [
+                orientation_quat[0],
+                orientation_quat[1],
+                -orientation_quat[2],
+                -orientation_quat[3],
+            ]
+        )
 
         # Velocity and position are in world frame ENU, which Betaflight expects
         # for virtual GPS mode
@@ -751,12 +806,12 @@ class BetaflightSyncBridge:
         """
         Convenience method to step with raw state values.
 
-        Handles ENU to NED coordinate conversion internally.
+        Handles the FLU body frame to FRD sensor frame conversion internally.
 
         Args:
             timestamp: Simulation time in seconds
-            angular_velocity: Body-frame angular velocity [x, y, z] rad/s (ENU)
-            linear_acceleration: Body-frame acceleration [x, y, z] m/s² (ENU)
+            angular_velocity: Body-frame angular velocity [x, y, z] rad/s (FLU)
+            linear_acceleration: Body-frame specific force [x, y, z] m/s² (FLU)
             orientation_quat: Quaternion [w, x, y, z]
             velocity: World-frame velocity [x, y, z] m/s (ENU)
             position: World-frame position [x, y, z] meters (ENU)
@@ -770,28 +825,41 @@ class BetaflightSyncBridge:
         Returns:
             Array of 4 normalized motor values [0.0, 1.0]
         """
-        # Convert from Elodin FLU body frame to Betaflight FRD body frame
-        #
-        # Betaflight SITL (sitl.c) applies internal sign conversions:
-        #   accel: negates all axes (-X, -Y, -Z)
-        #   gyro:  keeps X, negates Y and Z (X, -Y, -Z)
-        #
-        # We pre-compensate so AFTER BF's conversion, correct FRD values result.
+        # Convert from Elodin FLU body frame to the FRD sensor frame that
+        # Betaflight 2026.6.1+ SITL expects (default ENABLE_GAZEBO_BRIDGE=1),
+        # mirroring the Gazebo BetaflightPlugin's IMU sensor frame:
+        #   accel: specific force in FRD = [FLU_x, -FLU_y, -FLU_z]
+        #          (sitl.c negates all axes, so at rest the attitude estimator
+        #          sees acc_z = +1g and converges to a level attitude)
+        #   gyro:  body rates in FRD = [FLU_x, -FLU_y, -FLU_z]
+        #          (sitlGyroBodyFromSim() maps (X, -Y, +Z) onto Betaflight's
+        #          roll/pitch/yaw sign convention)
         # See sensors.py build_fdm_from_components for detailed explanation.
         accel_ned = np.array(
             [
-                -linear_acceleration[0],  # BF: -(-X) = X
-                linear_acceleration[1],  # BF: -Y
-                linear_acceleration[2],  # BF: -Z
+                linear_acceleration[0],  # FRD_x = FLU_x
+                -linear_acceleration[1],  # FRD_y = -FLU_y
+                -linear_acceleration[2],  # FRD_z = -FLU_z (at rest: -1g)
             ]
         )
 
-        # Gyroscope: Negate pitch due to Elodin's inverted pitch convention
         gyro_ned = np.array(
             [
-                angular_velocity[0],  # Roll: correct sign
-                -angular_velocity[1],  # Pitch: negate (Elodin pitch is inverted)
-                angular_velocity[2],  # Yaw: BF negates to get -Z
+                angular_velocity[0],  # FRD_x = FLU_x
+                -angular_velocity[1],  # FRD_y = -FLU_y
+                -angular_velocity[2],  # FRD_z = -FLU_z
+            ]
+        )
+
+        # Quaternion: send the Gazebo BetaflightPlugin convention
+        # (q conjugated by Rx(pi), i.e. qy/qz negated) as 2026.6.1+ SITL
+        # expects; BF undoes the conjugation and rotates ENU -> NWU internally.
+        quat = np.array(
+            [
+                orientation_quat[0],
+                orientation_quat[1],
+                -orientation_quat[2],
+                -orientation_quat[3],
             ]
         )
 
@@ -799,7 +867,7 @@ class BetaflightSyncBridge:
             timestamp=timestamp,
             imu_angular_velocity_rpy=gyro_ned,
             imu_linear_acceleration_xyz=accel_ned,
-            imu_orientation_quat=orientation_quat,
+            imu_orientation_quat=quat,
             velocity_xyz=velocity,
             position_xyz=position,
             pressure=pressure,

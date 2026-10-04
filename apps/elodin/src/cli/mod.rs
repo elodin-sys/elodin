@@ -1,10 +1,16 @@
 use clap::{Parser, Subcommand};
-use miette::Context;
-use miette::IntoDiagnostic;
 use tracing_subscriber::{EnvFilter, fmt::time::ChronoLocal, prelude::*};
+<<<<<<< HEAD
 mod auth;
+=======
+mod db;
+>>>>>>> main
 mod editor;
+#[cfg(not(target_os = "windows"))]
 mod monte_carlo;
+mod schematic;
+#[cfg(not(target_os = "windows"))]
+mod ui;
 
 #[derive(Parser, Clone)]
 #[command(
@@ -61,6 +67,11 @@ enum Commands {
     /// Start the headless sensor camera render server (managed by s10)
     #[cfg(not(target_os = "windows"))]
     RenderServer(editor::RenderServerArgs),
+    /// Author / push schematics from Python (`elodin.ui`)
+    #[cfg(not(target_os = "windows"))]
+    Ui(ui::Args),
+    /// Convert and inspect schematic source
+    Schematic(schematic::Args),
 }
 
 impl Cli {
@@ -95,7 +106,9 @@ impl Cli {
 
         let filter = EnvFilter::try_from_default_env()
             .or_else(|_| {
-                EnvFilter::try_new("s10=info,elodin=info,impeller=info,impeller::bevy=error,error")
+                EnvFilter::try_new(
+                    "s10=info,elodin=info,elodin_db=info,impeller=info,impeller::bevy=error,error",
+                )
             })
             .unwrap_or_else(|_| EnvFilter::new("info"));
 
@@ -124,6 +137,7 @@ impl Cli {
             .build()
             .expect("tokio runtime failed to start");
 
+<<<<<<< HEAD
         // Auth commands manage their own config dir and must not be gated by the
         // first-launch onboarding (which exits early to nudge the Python SDK install).
         let is_auth_command = matches!(
@@ -139,6 +153,8 @@ impl Cli {
             std::process::exit(1);
         }
 
+=======
+>>>>>>> main
         match &self.command {
             Some(Commands::Signup(args)) => self.clone().signup(args.clone(), rt),
             Some(Commands::Login(args)) => self.clone().login(args.clone(), rt),
@@ -152,31 +168,11 @@ impl Cli {
             Some(Commands::MonteCarlo(args)) => self.clone().monte_carlo(args.clone(), rt),
             #[cfg(not(target_os = "windows"))]
             Some(Commands::RenderServer(args)) => self.clone().render_server(args.clone()),
+            #[cfg(not(target_os = "windows"))]
+            Some(Commands::Ui(args)) => self.clone().ui(args.clone()),
+            Some(Commands::Schematic(args)) => self.clone().schematic(args.clone()),
             None => self.clone().editor(editor::Args::default(), rt),
         }
-    }
-
-    fn first_launch(&self) -> miette::Result<()> {
-        let dirs = self.dirs().into_diagnostic()?;
-        let data_dir = dirs.data_dir();
-        let is_first_launch = !data_dir.exists();
-        std::fs::create_dir_all(data_dir)
-            .into_diagnostic()
-            .context("failed to create data directory")?;
-
-        if is_first_launch {
-            println!("This is your first use of the Elodin CLI!\n");
-
-            println!(
-                "Ensure the Elodin Python SDK is installed in your preferred Python virtual environment:"
-            );
-            println!("    pip install -U elodin\n");
-
-            println!("Check out our docs (at https://docs.elodin.systems) for more information.");
-            std::process::exit(0);
-        }
-
-        Ok(())
     }
 
     fn is_dev(&self) -> bool {

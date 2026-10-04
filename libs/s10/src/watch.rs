@@ -4,14 +4,22 @@ use futures::Future;
 use std::{io, path::PathBuf};
 use stellarator::util::CancelToken;
 use tokio::task::JoinSet;
+use tracing::error;
 
 use crate::error::Error;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WatchExitPolicy {
+    ReturnOnSuccess,
+    WaitForChange,
+}
 
 pub async fn watch<F>(
     timeout: Duration,
     builder: impl Fn(CancelToken) -> F,
     cancel_token: CancelToken,
     dirs: impl Iterator<Item = PathBuf>,
+    exit_policy: WatchExitPolicy,
 ) -> Result<(), Error>
 where
     F: Future<Output = Result<(), Error>> + Send + Sync + 'static,
@@ -40,6 +48,33 @@ where
                 set.join_next().await;
                 break;
             }
+            result = set.join_next() => {
+                match result {
+                    Some(Ok(Ok(())))
+                        if exit_policy == WatchExitPolicy::ReturnOnSuccess =>
+                    {
+                        return Ok(());
+                    }
+                    Some(Ok(result)) => {
+                        if let Err(err) = result {
+                            error!(?err, "error running watched process");
+                        }
+                        tokio::select! {
+                            _ = cancel_token.wait() => break,
+                            res = file_events.recv() => {
+                                let Some(event) = res else {
+                                    break;
+                                };
+                                if let Err(errors) = event {
+                                    eprintln!("errors occurred while watching dir {:?}", errors);
+                                }
+                            }
+                        }
+                    }
+                    Some(Err(_)) => return Err(Error::JoinError),
+                    None => break,
+                }
+            }
             res = file_events.recv() => {
                 let Some(event) = res else {
                     break;
@@ -54,4 +89,85 @@ where
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use stellarator::util::CancelToken;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn returns_when_builder_completes_ok() {
+        let result = tokio::time::timeout(
+            Duration::from_secs(2),
+            watch(
+                Duration::from_millis(50),
+                |_| async { Ok(()) },
+                CancelToken::new(),
+                std::iter::empty(),
+                WatchExitPolicy::ReturnOnSuccess,
+            ),
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "watch hung after the watched process exited cleanly"
+        );
+        assert!(result.unwrap().is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn success_stays_in_watch_loop_when_waiting_for_change() {
+        let cancel = CancelToken::new();
+        let cancel_for_watch = cancel.clone();
+        let handle = tokio::spawn(async move {
+            watch(
+                Duration::from_millis(50),
+                |_| async { Ok(()) },
+                cancel_for_watch,
+                std::iter::empty(),
+                WatchExitPolicy::WaitForChange,
+            )
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(
+            !handle.is_finished(),
+            "watch returned after a successful sidecar exit"
+        );
+        cancel.cancel();
+        let result = tokio::time::timeout(Duration::from_secs(2), handle)
+            .await
+            .expect("watch did not exit after cancel")
+            .expect("watch task panicked");
+        assert!(result.is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn error_stays_in_watch_loop_until_cancel() {
+        let cancel = CancelToken::new();
+        let cancel_for_watch = cancel.clone();
+        let handle = tokio::spawn(async move {
+            watch(
+                Duration::from_millis(50),
+                |_| async { Err(Error::JoinError) },
+                cancel_for_watch,
+                std::iter::empty(),
+                WatchExitPolicy::ReturnOnSuccess,
+            )
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(
+            !handle.is_finished(),
+            "watch returned on builder error instead of waiting for reload/cancel"
+        );
+        cancel.cancel();
+        let result = tokio::time::timeout(Duration::from_secs(2), handle)
+            .await
+            .expect("watch did not exit after cancel")
+            .expect("watch task panicked");
+        assert!(result.is_ok());
+    }
 }

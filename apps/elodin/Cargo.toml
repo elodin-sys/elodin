@@ -32,7 +32,7 @@ toml.version = "0.8"
 postcard = "1"
 
 tokio = { version = "1.35.1", features = ["full"] }
-tonic = { version = "0.12", features = ["tls", "tls-webpki-roots"] }
+tonic = { version = "=0.14.6", features = ["tls-webpki-roots"] }
 stellarator.path = "../../libs/stellarator"
 uuid = "1.7.0"
 directories = "5.0.1"
@@ -42,7 +42,9 @@ tracing-tracy = { version = "0.11", optional = true }
 
 elodin-editor.path = "../../libs/elodin-editor"
 elodin-editor.default-features = false
-impeller2-bevy.path = "../../libs/impeller2/bevy"
+elodin-db = { path = "../../libs/db", default-features = false, features = ["grpc"] }
+impeller-bevy.path = "../../libs/impeller/bevy"
+impeller-kdl.path = "../../libs/impeller/kdl"
 
 # crypto
 ring = "0.17"
@@ -50,8 +52,12 @@ ring = "0.17"
 # machine id
 machine-uid = "0.5.1"
 
+[target.'cfg(not(target_os = "windows"))'.dependencies]
 s10.path = "../../libs/s10"
 monte-carlo.path = "../../libs/monte-carlo"
+
+[dev-dependencies]
+tempfile = "3"
 
 [package.metadata.deb]
 maintainer = "info@elodin.systems"

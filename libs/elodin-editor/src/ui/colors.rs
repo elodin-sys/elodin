@@ -9,7 +9,7 @@ use std::{
 };
 
 use egui::Color32;
-use impeller2_wkt::Color;
+use impeller_wkt::Color;
 use serde::{Deserialize, Serialize};
 
 use crate::dirs;
@@ -327,10 +327,10 @@ fn prettify_label(name: &str) -> String {
 
 fn color_scheme_dirs() -> Vec<PathBuf> {
     let mut roots = Vec::new();
-    if let Some(dir) = std::env::var_os("ELODIN_ASSETS_DIR") {
-        roots.push(PathBuf::from(dir));
-    } else if let Ok(cwd) = std::env::current_dir() {
-        roots.push(cwd.join("assets"));
+    // Same resolution as the Bevy asset source ($ELODIN_ASSETS, then ./assets)
+    // so schemes live beside other assets.
+    if let Some(root) = crate::plugins::env_asset_source::resolve_assets_dir() {
+        roots.push(root);
     }
     roots.push(dirs().data_dir().to_path_buf());
     roots
@@ -629,6 +629,11 @@ pub fn current_selection() -> SchemeSelection {
                 mode: guard.mode.clone(),
             }
         })
+}
+
+/// True when the active color scheme is in light mode.
+pub fn is_light_mode() -> bool {
+    current_selection().mode.eq_ignore_ascii_case("light")
 }
 
 pub fn set_active_scheme(scheme: &str, mode: &str) -> SchemeSelection {

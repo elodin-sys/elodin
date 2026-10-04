@@ -21,7 +21,7 @@ impl IconTextureCache {
             return handle.clone();
         }
 
-        let Some(codepoint) = impeller2_wkt::builtin_icon_char(icon_name) else {
+        let Some(codepoint) = impeller_wkt::builtin_icon_char(icon_name) else {
             warn!(
                 "Unknown built-in icon '{}', using fallback circle",
                 icon_name
@@ -53,8 +53,13 @@ impl IconTextureCache {
     }
 }
 
+/// Same filled Material Symbols variant that `egui_material_icons` renders in
+/// the UI (its `FONT_DATA` became private in 0.6, so we vendor the TTF).
+const MATERIAL_ICONS_FONT_DATA: &[u8] =
+    include_bytes!("assets/fonts/MaterialSymbolsRounded_Filled-Regular.ttf");
+
 pub fn rasterize_material_icon(codepoint: char, px_size: u32) -> Image {
-    let font = FontRef::try_from_slice(egui_material_icons::FONT_DATA)
+    let font = FontRef::try_from_slice(MATERIAL_ICONS_FONT_DATA)
         .expect("Material Icons font data should be valid");
 
     let glyph_id = font.glyph_id(codepoint);

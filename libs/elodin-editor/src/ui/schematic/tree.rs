@@ -7,12 +7,13 @@ use crate::ui::tiles::WindowState;
 use crate::ui::widgets::WidgetSystem;
 
 use super::{CurrentSchematic, SchematicBindings};
+use crate::ui::widgets::SystemStateExt;
 use bevy::ecs::entity::Entity;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::{Component, Query, ResMut};
 use egui::collapsing_header::CollapsingState;
 use egui::load::SizedTexture;
-use impeller2_wkt::Panel;
+use impeller_wkt::Panel;
 
 #[derive(SystemParam)]
 pub struct TreeWidget<'w, 's> {
@@ -51,7 +52,7 @@ impl WidgetSystem for TreeWidget<'_, '_> {
             mut state,
             mut window_states,
             bindings,
-        } = state.get_mut(world);
+        } = state.params_mut(world);
         let Ok(mut window_state) = window_states.get_mut(target_window) else {
             return;
         };
@@ -72,10 +73,10 @@ impl WidgetSystem for TreeWidget<'_, '_> {
         egui::ScrollArea::vertical().show(ui, |ui| {
             for elem in &schematic.elems {
                 match elem {
-                    impeller2_wkt::SchematicElem::Panel(p) => {
+                    impeller_wkt::SchematicElem::Panel(p) => {
                         panel(ui, max_rect, &icons, p, selected_object, &bindings)
                     }
-                    impeller2_wkt::SchematicElem::Object3d(object_3d) => {
+                    impeller_wkt::SchematicElem::Object3d(object_3d) => {
                         let obj_entity = bindings.get(object_3d.node_id);
                         let selected = if obj_entity == selected_object.entity() {
                             *selected_object != SelectedObject::None
@@ -97,13 +98,14 @@ impl WidgetSystem for TreeWidget<'_, '_> {
                             *selected_object = SelectedObject::Object3D { entity };
                         }
                     }
-                    impeller2_wkt::SchematicElem::Line3d(_line3d) => {}
-                    impeller2_wkt::SchematicElem::VectorArrow(_arrow) => {}
-                    impeller2_wkt::SchematicElem::WorldMesh(_world_mesh) => {}
-                    impeller2_wkt::SchematicElem::Window(_window) => {}
-                    impeller2_wkt::SchematicElem::Theme(_) => {}
-                    impeller2_wkt::SchematicElem::Timeline(_) => {}
-                    impeller2_wkt::SchematicElem::Coordinate(_) => {}
+                    impeller_wkt::SchematicElem::Line3d(_line_3d) => {}
+                    impeller_wkt::SchematicElem::PointTrails(_trails) => {}
+                    impeller_wkt::SchematicElem::VectorArrow(_arrow) => {}
+                    impeller_wkt::SchematicElem::WorldMesh(_world_mesh) => {}
+                    impeller_wkt::SchematicElem::Window(_window) => {}
+                    impeller_wkt::SchematicElem::Theme(_) => {}
+                    impeller_wkt::SchematicElem::Timeline(_) => {}
+                    impeller_wkt::SchematicElem::Coordinate(_) => {}
                 }
             }
         });
@@ -124,6 +126,9 @@ fn panel(
         Panel::VSplit(_) | Panel::HSplit(_) => icons.container,
         Panel::Graph(_) => icons.plot,
         Panel::ComponentMonitor(_) => icons.viewport,
+        Panel::GeoPositionGauge(_) | Panel::OrientationGauge(_) | Panel::HorizonGauge(_) => {
+            icons.viewport
+        }
         Panel::ActionPane(_) => icons.viewport,
         Panel::QueryTable(_) => icons.viewport,
         Panel::QueryPlot(_) => icons.plot,
@@ -169,6 +174,21 @@ fn panel(
             Panel::QueryPlot(plot) => {
                 if let Some(graph_id) = bindings.get(plot.node_id) {
                     *selected_object = SelectedObject::Graph { graph_id };
+                }
+            }
+            Panel::GeoPositionGauge(gauge) => {
+                if let Some(gauge_id) = bindings.get(gauge.node_id) {
+                    *selected_object = SelectedObject::GeoPositionGauge { gauge_id };
+                }
+            }
+            Panel::OrientationGauge(gauge) => {
+                if let Some(gauge_id) = bindings.get(gauge.node_id) {
+                    *selected_object = SelectedObject::OrientationGauge { gauge_id };
+                }
+            }
+            Panel::HorizonGauge(gauge) => {
+                if let Some(gauge_id) = bindings.get(gauge.node_id) {
+                    *selected_object = SelectedObject::HorizonGauge { gauge_id };
                 }
             }
             _ => {}

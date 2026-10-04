@@ -2,6 +2,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::{Entity, Query, Res};
 use bevy_egui::egui;
 
+use crate::ui::widgets::SystemStateExt;
 use crate::{
     EqlContext,
     ui::{
@@ -32,7 +33,7 @@ impl WidgetSystem for InspectorMonitor<'_, '_> {
         let InspectorMonitor {
             mut monitors,
             eql_context,
-        } = state.get_mut(world);
+        } = state.params_mut(world);
         let Ok(mut monitor) = monitors.get_mut(entity) else {
             return;
         };

@@ -1,6 +1,5 @@
 target/
 .DS_Store
-.direnv/
 result
 result-*
 assets/terrains/

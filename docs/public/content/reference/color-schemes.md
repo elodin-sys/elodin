@@ -38,7 +38,7 @@ variant. Built-ins ship with the app and do not depend on your asset directory.
 
 ## File locations
 
-- Assets: `color_schemes` inside the asset root (`$ELODIN_ASSETS_DIR` if set, otherwise `./assets`).
+- Assets: `color_schemes` inside the asset root (`$ELODIN_ASSETS` if set, otherwise `./assets`).
 - User data: `color_schemes` under the app data directory (for example
   `~/Library/Application Support/systems.elodin.editor/color_schemes` on macOS,
   `~/.local/share/systems/elodin/editor/color_schemes` on Linux, or

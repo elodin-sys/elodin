@@ -16,5 +16,5 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
-glam = { version = "0.30", default-features = false, features = ["std"] }
+glam = { version = "0.32", default-features = false, features = ["std"] }
 clap = { version = "4.4.18", features = ["derive"] }

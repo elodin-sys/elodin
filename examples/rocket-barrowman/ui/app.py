@@ -3899,7 +3899,7 @@ def launch_elodin_editor(result: FlightResult, solver: FlightSolver):
         main_py = rocket_barrowman_dir / "main.py"
 
         # Get the elodin repository root (three levels up from ui/)
-        # This ensures ELODIN_ASSETS_DIR finds the root-level assets/ directory
+        # This ensures ELODIN_ASSETS finds the root-level assets/ directory
         elodin_root = script_dir.parent.parent.parent.resolve()  # Absolute path to repo root
 
         if not main_py.exists():
@@ -3921,7 +3921,7 @@ def launch_elodin_editor(result: FlightResult, solver: FlightSolver):
                     (["konsole", "-e"], "bash -c"),
                 ]
 
-                # Launch from elodin root so ELODIN_ASSETS_DIR defaults to ./assets/
+                # Launch from elodin root so ELODIN_ASSETS defaults to ./assets/
                 cmd_str = f"cd {elodin_root} && elodin editor {main_py_abs}"
 
                 for term_base, shell_prefix in terminals:

@@ -1,4 +1,6 @@
 use bevy::{
+    camera::Hdr,
+    camera::visibility::RenderLayers,
     camera::{RenderTarget, Viewport},
     ecs::{
         query::QueryData,
@@ -6,16 +8,15 @@ use bevy::{
     },
     // platform::collections::{HashMap, HashSet},
     input::keyboard::Key,
-    log::{error, info},
+    log::warn,
     prelude::*,
-    render::view::Hdr,
     window::{Monitor, NormalizedWindowRef, PrimaryWindow, WindowFocused},
     winit::WINIT_WINDOWS,
 };
 use bevy_defer::AsyncPlugin;
 use bevy_editor_cam::input::EditorCamInputMessage;
 use bevy_egui::{
-    EguiContext, EguiContexts, EguiPreUpdateSet,
+    EguiContext, EguiPreUpdateSet,
     egui::{self, Color32, Label, RichText},
 };
 use std::collections::{HashMap, HashSet};
@@ -59,9 +60,9 @@ use schematic::SchematicPlugin;
 
 use self::colors::get_scheme;
 use self::{command_palette::CommandPaletteState, plot::GraphState, timeline::timeline_slider};
-use impeller2::types::ComponentId;
-use impeller2_bevy::ComponentValueMap;
-use impeller2_wkt::{ComponentMetadata, ComponentValue, WindowRect};
+use impeller::types::ComponentId;
+use impeller_bevy::ComponentValueMap;
+use impeller_wkt::{ComponentMetadata, ComponentValue, WindowRect};
 
 use crate::ui::window::window_entity_from_target;
 use crate::{
@@ -76,6 +77,7 @@ use crate::{
 use self::inspector::entity::ComponentFilter;
 
 use self::command_palette::CommandPalette;
+pub use self::widgets::SystemStateExt;
 use self::widgets::{RootWidgetSystem, RootWidgetSystemExt, WidgetSystemExt};
 
 pub mod actions;
@@ -83,6 +85,7 @@ pub mod button;
 pub mod colors;
 pub mod command_palette;
 pub mod data_overview;
+pub mod gauges;
 pub mod hierarchy;
 pub mod images;
 pub mod input_owner;
@@ -96,10 +99,12 @@ pub mod plot_3d;
 pub mod query_plot;
 pub mod query_table;
 pub mod schematic;
+pub mod sql_eql;
 mod theme;
 pub mod tiles;
 pub mod time_label;
 pub mod timeline;
+pub mod up_marker;
 pub mod utils;
 pub mod video_stream;
 pub mod widgets;
@@ -153,6 +158,15 @@ pub enum SelectedObject {
     Monitor {
         monitor_id: Entity,
     },
+    GeoPositionGauge {
+        gauge_id: Entity,
+    },
+    OrientationGauge {
+        gauge_id: Entity,
+    },
+    HorizonGauge {
+        gauge_id: Entity,
+    },
     DataOverview,
     DataOverviewComponent {
         component_id: ComponentId,
@@ -166,7 +180,7 @@ pub enum SelectedObject {
 }
 
 impl SelectedObject {
-    pub fn is_entity_selected(&self, id: impeller2::types::ComponentId) -> bool {
+    pub fn is_entity_selected(&self, id: impeller::types::ComponentId) -> bool {
         matches!(self, SelectedObject::Entity(pair) if pair.impeller == id)
     }
 
@@ -180,6 +194,9 @@ impl SelectedObject {
             SelectedObject::Graph { graph_id } => Some(*graph_id),
             SelectedObject::QueryTable { table_id } => Some(*table_id),
             SelectedObject::Monitor { monitor_id } => Some(*monitor_id),
+            SelectedObject::GeoPositionGauge { gauge_id }
+            | SelectedObject::OrientationGauge { gauge_id }
+            | SelectedObject::HorizonGauge { gauge_id } => Some(*gauge_id),
             SelectedObject::DataOverview => None,
             SelectedObject::DataOverviewComponent { .. } => None,
             SelectedObject::Action { action_id } => Some(*action_id),
@@ -279,6 +296,7 @@ pub struct CameraQuery {
     entity: Entity,
     camera: &'static mut Camera,
     projection: &'static mut Projection,
+    render_layers: &'static mut RenderLayers,
     transform: &'static mut Transform,
     global_transform: &'static mut GlobalTransform,
     parent: Option<&'static ChildOf>,
@@ -315,7 +333,7 @@ fn resolve_input_owner_after_window_roots(world: &mut World, window: Entity, ctx
         .data(|data| data.get_temp::<bool>(egui_popup_hovered_id()))
         .unwrap_or(false);
 
-    if ctx.is_popup_open() && pointer_over_popup {
+    if ctx.any_popup_open() && pointer_over_popup {
         register_window_input_blocker(
             world,
             window,
@@ -335,14 +353,6 @@ fn resolve_input_owner_after_window_roots(world: &mut World, window: Entity, ctx
 
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
-        // Probe ELODIN_KDL_DIR once to inform or warn about an invalid
-        // directory surfaces immediately on startup.
-        match impeller2_kdl::env::schematic_dir() {
-            Ok(Some(path)) => info!("ELODIN_KDL_DIR set to {:?}", path.display()),
-            Ok(None) => info!("ELODIN_KDL_DIR defaulted to current working directory"),
-            Err(err) => error!("{err}, falling back to current working directory"),
-        }
-
         app.init_resource::<Paused>()
             .init_resource::<HoveredEntity>()
             .init_resource::<ComponentFilter>()
@@ -362,7 +372,7 @@ impl Plugin for UiPlugin {
             .add_systems(
                 PreUpdate,
                 sync_windows
-                    .after(impeller2_bevy::sink)
+                    .after(impeller_bevy::sink)
                     .before(EguiPreUpdateSet::BeginPass),
             )
             .add_systems(
@@ -445,23 +455,20 @@ impl SettingModalState {
 }
 
 #[derive(SystemParam)]
-pub struct MainLayout<'w, 's> {
-    _contexts: EguiContexts<'w, 's>,
-    _images: Local<'s, images::Images>,
+pub struct MainLayout<'s> {
+    _marker: Local<'s, ()>,
 }
 
-impl RootWidgetSystem for MainLayout<'_, '_> {
+impl RootWidgetSystem for MainLayout<'_> {
     type Args = ();
     type Output = ();
 
     fn ctx_system(
         world: &mut World,
-        state: &mut SystemState<Self>,
+        _state: &mut SystemState<Self>,
         ctx: &mut egui::Context,
         _args: Self::Args,
     ) {
-        let _state = state.get_mut(world);
-
         // Update theme every frame to reflect color scheme changes
         theme::set_theme(ctx);
 
@@ -478,7 +485,7 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
         #[cfg(not(target_os = "macos"))]
         let frame = egui::Frame::new();
 
-        egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
+        utils::show_central_panel(egui::CentralPanel::default().frame(frame), ctx, |ui| {
             ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");
             ui.add_widget_with::<tiles::TileSystem>(world, "tile_system", None);
         });
@@ -503,7 +510,7 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
         ctx: &mut egui::Context,
         _args: Self::Args,
     ) {
-        let state_mut = state.get_mut(world);
+        let state_mut = state.params_mut(world);
 
         let window = state_mut.window;
         let entities_meta = state_mut.entities_meta;
@@ -538,7 +545,7 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
                     .frame(egui::Frame {
                         fill: colors::with_opacity(get_scheme().bg_secondary, 0.5),
                         stroke: egui::Stroke::new(
-                            1.0,
+                            1.0_f32,
                             colors::with_opacity(get_scheme().text_primary, 0.5),
                         ),
                         inner_margin: egui::Margin::symmetric(16, 8),
@@ -705,7 +712,7 @@ type MainCameraViewportQueryItem = (
 );
 
 fn set_camera_viewport(
-    window: Query<(Entity, &Window, &bevy_egui::EguiContextSettings), With<PrimaryWindow>>,
+    window: Query<(Entity, &Window), With<PrimaryWindow>>,
     mut main_camera_query: Query<MainCameraViewportQueryItem, With<MainCamera>>,
     mut entries: Local<Vec<(Entity, bool)>>,
 ) {
@@ -721,10 +728,12 @@ fn set_camera_viewport(
     // Stable ordering: non-graph cameras first, then graphs; break ties by entity id.
     entries.sort_by_key(|(entity, is_graph)| (*is_graph, entity.index()));
 
-    let Some((primary_entity, window, egui_settings)) = window.iter().next() else {
+    let Some((primary_entity, window)) = window.iter().next() else {
         return;
     };
-    let scale_factor = window.scale_factor() * egui_settings.scale_factor;
+    // bevy_egui 0.40 removed `EguiContextSettings::scale_factor`; the window
+    // scale factor is the full logical→physical conversion now.
+    let scale_factor = window.scale_factor();
     let window_size: Vec2 = window.physical_size().as_vec2();
 
     for (entity, is_graph) in &entries {
@@ -783,19 +792,15 @@ fn set_camera_viewport(
 
 fn set_secondary_camera_viewport(
     mut cameras: Query<(&mut Camera, &ViewportRect, Option<&NavGizmoCamera>)>,
-    window_query: Query<(
-        Entity,
-        &Window,
-        &tiles::WindowId,
-        &tiles::WindowState,
-        &bevy_egui::EguiContextSettings,
-    )>,
+    window_query: Query<(Entity, &Window, &tiles::WindowId, &tiles::WindowState)>,
 ) {
-    for (_window_entity, window, id, state, egui_settings) in &window_query {
+    for (_window_entity, window, id, state) in &window_query {
         if id.is_primary() {
             continue;
         }
-        let scale_factor = window.scale_factor() * egui_settings.scale_factor;
+        // bevy_egui 0.40 removed `EguiContextSettings::scale_factor`; the window
+        // scale factor is the full logical→physical conversion now.
+        let scale_factor = window.scale_factor();
 
         let mut next_order = 0;
 
@@ -906,10 +911,18 @@ fn warn_camera_order_ambiguities(
     }
 }
 
+/// Main viewport cameras only: sensor cameras (Tonemapping::None) and the
+/// view-cube/nav-gizmo overlays must not be switched to HDR targets.
+type MainViewportCameraFilter = (
+    With<Camera>,
+    With<MainCamera>,
+    Without<crate::plugins::scene_environment::CinematicViewport>,
+);
+
 fn sync_hdr(
     hdr_enabled: Res<HdrEnabled>,
     mut commands: Commands,
-    cameras: Query<(Entity, Has<Hdr>), With<Camera>>,
+    cameras: Query<(Entity, Has<Hdr>), MainViewportCameraFilter>,
 ) {
     for (entity, has_hdr) in cameras.iter() {
         if hdr_enabled.0 && !has_hdr {

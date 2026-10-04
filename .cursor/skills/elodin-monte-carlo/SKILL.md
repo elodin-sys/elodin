@@ -134,11 +134,25 @@ and the state teaches more than hiding it.
   one tick after contact reads the zeroed post-contact state; capture it in
   the same system that detects the event, before state is clobbered.
 - Keep the LHS `seed` fixed while iterating so campaign-to-campaign deltas
-  reflect your changes, not resampling.
-- Use the `[build]` hook in `campaign.toml` to compile external FSW once
-  before workers start. Put per-worker resources under `[resources.ports]` and
-  read them with `el.monte_carlo.port("name", default)` or
+  reflect your changes, not resampling. If you edit `spec.toml`, re-run
+  `elodin monte-carlo sample` (the runner warns when a `--plan` CSV is older
+  than its sibling spec).
+- Control concurrency with `--workers N` / `workers = N` in `campaign.toml`
+  (exactly N runs at once). `S10_MAX_INFLIGHT` is only the low-level
+  process-count escape hatch.
+- Use `[[build]]` steps in `campaign.toml` to compile external FSW (and
+  generate configs) once before workers start; `[env]` sets campaign-wide
+  process environment. Put per-worker resources under `[resources.ports]` —
+  numeric bases give a validated static plan, `"auto"` allocates per run —
+  and read them with `el.monte_carlo.port("name", default)` or
   `ELODIN_MC_PORT_<NAME>`.
+- At scale: `scratch_dir = "auto"` moves per-run DB IO to tmpfs when the
+  artifact disk can't sustain `workers x` write IOPS; `[retention]`
+  `prune_on_pass`/`prune_on_fail` globs bound disk without hook-side cleanup;
+  `export_db(..., pattern="rocket.*")` exports only scored components; and a
+  `[quality] max_behind_deadline_frac = 0.05` gate marks load-degraded
+  real-time runs `degraded` instead of silently ingesting skewed samples.
+  Failed runs carry a one-line `failure_reason` in `results.csv`.
 
 ## 6. Diagnose with the data, not by staring at code
 

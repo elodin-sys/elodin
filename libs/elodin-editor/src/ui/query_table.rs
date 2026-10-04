@@ -9,9 +9,9 @@ use bevy::{
     prelude::{Commands, Component, Entity, In, Query, Res, ResMut},
 };
 use egui::RichText;
-use impeller2::types::Timestamp;
-use impeller2_bevy::CommandsExt;
-use impeller2_wkt::{
+use impeller::types::Timestamp;
+use impeller_bevy::CommandsExt;
+use impeller_wkt::{
     ArrowIPC, EarliestTimestamp, ErrorResponse, LastUpdated, QueryTable, QueryType, SQLQuery,
 };
 
@@ -22,6 +22,7 @@ use super::{
     colors::{ColorExt, get_scheme},
     widgets::WidgetSystem,
 };
+use crate::ui::widgets::SystemStateExt;
 
 #[derive(Clone)]
 pub struct QueryTablePane {
@@ -166,7 +167,7 @@ impl WidgetSystem for QueryTableWidget<'_, '_> {
             earliest_timestamp,
             last_updated,
             mut commands,
-        } = state.get_mut(world);
+        } = state.params_mut(world);
         let Ok(mut table) = states.get_mut(entity) else {
             return;
         };

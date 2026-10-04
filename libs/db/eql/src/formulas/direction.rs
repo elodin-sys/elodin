@@ -12,54 +12,22 @@ impl super::Formula for Direction {
     }
 
     fn parse(&self, recv: Expr, args: &[Expr]) -> Result<Expr, Error> {
-        // Syntax: pose.direction(x, y, z) or pose.direction((x, y, z))
-        let (x_expr, y_expr, z_expr) = if args.len() == 1 {
-            if let Expr::Tuple(outer_elements) = &args[0] {
-                if outer_elements.len() == 3 {
-                    (
-                        outer_elements[0].clone(),
-                        outer_elements[1].clone(),
-                        outer_elements[2].clone(),
-                    )
-                } else if outer_elements.len() == 2 {
-                    if let Expr::Tuple(inner_elements) = &outer_elements[0] {
-                        if inner_elements.len() == 2 {
-                            (
-                                inner_elements[0].clone(),
-                                inner_elements[1].clone(),
-                                outer_elements[1].clone(),
-                            )
-                        } else {
-                            return Err(Error::InvalidMethodCall(
-                                "direction requires three arguments: x, y, z".to_string(),
-                            ));
-                        }
-                    } else {
-                        return Err(Error::InvalidMethodCall(
-                            "direction requires three arguments: x, y, z".to_string(),
-                        ));
-                    }
-                } else {
-                    return Err(Error::InvalidMethodCall(
-                        "direction requires three arguments: x, y, z".to_string(),
-                    ));
-                }
-            } else {
+        let flat = super::flatten_comma_args(args);
+        let elems = match flat.as_slice() {
+            [x, y, z] => vec![recv, x.clone(), y.clone(), z.clone()],
+            [x, y, z, flag] => {
+                super::orientation_flag(flag)?;
+                vec![recv, x.clone(), y.clone(), z.clone(), flag.clone()]
+            }
+            _ => {
                 return Err(Error::InvalidMethodCall(
-                    "direction requires three arguments: x, y, z".to_string(),
+                    "direction requires three arguments: x, y, z (optional true/false)".to_string(),
                 ));
             }
-        } else if args.len() == 3 {
-            (args[0].clone(), args[1].clone(), args[2].clone())
-        } else {
-            return Err(Error::InvalidMethodCall(
-                "direction requires three arguments: x, y, z".to_string(),
-            ));
         };
-
         Ok(Expr::Formula(
             Arc::new(Direction),
-            Box::new(Expr::Tuple(vec![recv, x_expr, y_expr, z_expr])),
+            Box::new(Expr::Tuple(elems)),
         ))
     }
 
@@ -71,7 +39,7 @@ impl super::Formula for Direction {
 
     fn to_column_name(&self, expr: &Expr) -> Option<String> {
         if let Expr::Tuple(elements) = expr
-            && elements.len() == 4
+            && (elements.len() == 4 || elements.len() == 5)
         {
             let value_name = elements[0].to_column_name().unwrap_or_default();
             if !value_name.is_empty() {

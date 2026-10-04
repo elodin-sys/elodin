@@ -8,7 +8,7 @@ mkdir -p "${tracy_out}"
 bench_bin="./target/release/elodin-db-bench"
 
 if [[ ! -x "${bench_bin}" ]]; then
-  echo "error: ${bench_bin} not found -- build with: cargo build --release -p elodin-db --bin elodin-db-bench --features tracy"
+  echo "error: ${bench_bin} not found -- build with: cargo build --release -p elodin-db --bin elodin-db-bench --features grpc,tracy"
   exit 1
 fi
 
@@ -20,7 +20,11 @@ run_bench() {
   trace_file="${tracy_out}/trace-db-${label}.tracy"
 
   # Start Tracy capture on port 8090 (elodin-db) before the bench
-  tracy-capture -a 127.0.0.1 -p 8090 -o "${trace_file}" -s 30 >/dev/null 2>&1 &
+  local capture_seconds=30
+  if [[ "${label}" == grpc-* ]]; then
+    capture_seconds=5
+  fi
+  tracy-capture -a 127.0.0.1 -p 8090 -o "${trace_file}" -s "${capture_seconds}" >/dev/null 2>&1 &
   tracy_pid=$!
   sleep 0.5
 
@@ -65,3 +69,4 @@ run_bench "customer-batch" --scenario customer --mode batch
 run_bench "high-freq"      --scenario high-freq
 run_bench "high-fanout"    --scenario high-fanout
 run_bench "stress"         --scenario stress
+run_bench "grpc-packed-smoke" --components 40 --frequency 250 --duration 2 --clients 1 --mode grpc-packed

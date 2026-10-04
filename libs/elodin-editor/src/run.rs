@@ -3,15 +3,57 @@ use bevy::prelude::*;
 #[cfg(not(target_os = "windows"))]
 use miette::{Context, IntoDiagnostic, miette};
 #[cfg(not(target_os = "windows"))]
-use std::path::{Path, PathBuf};
+use std::{
+    net::{Ipv6Addr, SocketAddr},
+    path::{Path, PathBuf},
+};
 #[cfg(not(target_os = "windows"))]
 use stellarator::util::CancelToken;
+
+#[cfg(not(target_os = "windows"))]
+pub use s10::cli::RecipeExecution;
+
+// s10 is not supported on Windows, but the editor's public API and Windows
+// simulation stub still use this type.
+#[cfg(target_os = "windows")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RecipeExecution {
+    Once,
+    Watch,
+}
 
 #[cfg(not(target_os = "windows"))]
 pub async fn run_recipe(
     cache_dir: PathBuf,
     path: PathBuf,
     cancel_token: CancelToken,
+) -> miette::Result<()> {
+    run_recipe_at(
+        cache_dir,
+        path,
+        cancel_token,
+        SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 2240),
+    )
+    .await
+}
+
+#[cfg(not(target_os = "windows"))]
+pub async fn run_recipe_at(
+    cache_dir: PathBuf,
+    path: PathBuf,
+    cancel_token: CancelToken,
+    addr: SocketAddr,
+) -> miette::Result<()> {
+    run_recipe_at_with_execution(cache_dir, path, cancel_token, addr, RecipeExecution::Watch).await
+}
+
+#[cfg(not(target_os = "windows"))]
+pub async fn run_recipe_at_with_execution(
+    cache_dir: PathBuf,
+    path: PathBuf,
+    cancel_token: CancelToken,
+    addr: SocketAddr,
+    execution: RecipeExecution,
 ) -> miette::Result<()> {
     let mut path = if path.is_dir() {
         let toml = path.join("s10.toml");
@@ -38,6 +80,7 @@ pub async fn run_recipe(
             .arg(path.clone())
             .arg("plan")
             .arg(&out_dir)
+            .arg(addr.to_string())
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit())
             .output()
@@ -64,10 +107,43 @@ pub async fn run_recipe(
         pin_render_server_recipe(&mut recipe, &exe);
     }
 
-    recipe
-        .watch("sim".to_string(), false, cancel_token.clone(), None)
-        .await?;
+    // Run the whole sim stack (sim + Betaflight/controller/render-server) inside
+    // one prioritized cgroup so it is scheduled promptly under contention
+    // (Linux `cpu.weight`; a no-op on macOS/Windows, which are dev-only). Every
+    // spawned recipe process is added to this cgroup by s10. Best-effort:
+    // priority is never allowed to fail the run.
+    let cgroup = if s10::priority_enabled() {
+        let created_ns = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        let scope =
+            s10::CgroupScope::create(format!("elodin-sim-{}-{created_ns}", std::process::id()))
+                .ok()
+                .flatten();
+        if let Some(scope) = &scope {
+            scope.set_cpu_weight(s10::sim_cpu_weight());
+        }
+        scope
+    } else {
+        None
+    };
+
+    let result = s10::cli::execute_recipe_with_token_in_cgroup(
+        "sim".to_string(),
+        recipe,
+        execution,
+        false,
+        cancel_token.clone(),
+        cgroup.clone(),
+    )
+    .await;
     cancel_token.cancel();
+    if let Some(scope) = cgroup {
+        let _ = scope.kill();
+        let _ = scope.remove();
+    }
+    result?;
     Ok(())
 }
 
@@ -83,14 +159,22 @@ fn pin_render_server_recipe_inner(recipe: &mut s10::Recipe, exe: &str) {
         return;
     };
 
-    if let Some(s10::Recipe::Process(process)) = group.recipes.get_mut("render-server")
-        && process
+    if let Some(s10::Recipe::Process(process)) = group.recipes.get_mut("render-server") {
+        if process
             .process_args
             .args
             .first()
             .is_some_and(|arg| arg == "render-server")
-    {
-        process.cmd = exe.to_string();
+        {
+            process.cmd = exe.to_string();
+        } else if let Some(index) = process
+            .process_args
+            .args
+            .windows(2)
+            .position(|args| args == ["elodin", "render-server"])
+        {
+            process.process_args.args[index] = exe.to_string();
+        }
     }
 
     for recipe in group.recipes.values_mut() {
@@ -143,6 +227,39 @@ mod tests {
     }
 
     #[test]
+    fn pins_nice_wrapped_render_server_recipe() {
+        let mut recipe = Recipe::Group(GroupRecipe {
+            refs: vec!["render-server".to_string()],
+            recipes: HashMap::from([(
+                "render-server".to_string(),
+                Recipe::Process(ProcessRecipe {
+                    cmd: "nice".to_string(),
+                    process_args: process_args([
+                        "-n",
+                        "10",
+                        "elodin",
+                        "render-server",
+                        "--addr",
+                        "[::]:2240",
+                    ]),
+                    no_watch: true,
+                }),
+            )]),
+        });
+
+        pin_render_server_recipe(&mut recipe, Path::new("/tmp/current-elodin"));
+
+        let Recipe::Group(group) = recipe else {
+            panic!("expected group recipe");
+        };
+        let Some(Recipe::Process(render_server)) = group.recipes.get("render-server") else {
+            panic!("expected render-server process");
+        };
+        assert_eq!(render_server.cmd, "nice");
+        assert_eq!(render_server.process_args.args[2], "/tmp/current-elodin");
+    }
+
+    #[test]
     fn does_not_pin_unrelated_render_server_recipe() {
         let mut recipe = Recipe::Group(GroupRecipe {
             refs: vec!["render-server".to_string()],
@@ -183,6 +300,7 @@ mod tests {
             depends_on: Vec::new(),
             ready: None,
             ready_timeout: None,
+            own_process_group: false,
         }
     }
 }

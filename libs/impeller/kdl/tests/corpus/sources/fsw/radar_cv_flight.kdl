@@ -1,0 +1,130 @@
+theme mode=dark scheme=default
+tabs {
+    hsplit name="Radar CV Flight" {
+        vsplit name="3D + Truth" share=1.15 {
+            viewport name=Viewport pos="(0,0,0,0, 0.5,-5,1) + rocket.world_pos" look_at=rocket.world_pos show_grid=#true share=1.25
+            hsplit name="Truth vs Estimate (Target, ENU)" share=0.478943 {
+                component_monitor name=Truth_Target_ENU component_name=rocket.target_pos share=0.868548
+                vsplit share=1.257513 {
+                    component_monitor name=Radar_Target_Meas_ENU component_name=rocket.radar_target_pos share=0.5
+                    component_monitor name=Radar_Target_RAW_Meas_STD_ENU_m component_name=rocket.radar_target_meas_std share=0.5
+                }
+                component_monitor name=Radar_Target_KF_ENU component_name=rocket.radar_target_state_kalman share=0.873939
+            }
+            hsplit name="Truth vs Estimate (Missile, ENU)" share=0.608057 {
+                component_monitor name=Truth_Missile_ENU component_name=rocket.world_pos share=0.879701
+                vsplit share=1.249148 {
+                    component_monitor name=Radar_Missile_RAW_Meas_ENU component_name=rocket.radar_missile_pos share=0.501441
+                    component_monitor name=Radar_Missile_RAW_Meas_STD_ENU_m component_name=rocket.radar_missile_meas_std share=0.501441
+                }
+                component_monitor name=Radar_Missile_KF_ENU component_name=rocket.radar_missile_state_kalman share=0.87115
+            }
+            component_monitor name=target.world_pos component_name=target.world_pos share=0.363
+        }
+        vsplit name="Status + Model" share=0.95 {
+            hsplit share=1.0 {
+                component_monitor name=Radar_Pulse component_name=rocket.set_radar share=0.532528
+                component_monitor name=CV_Pulse component_name=rocket.trigger_camera share=0.472725
+                component_monitor name=Radar_Target_Valid component_name=rocket.radar_target_valid share=0.497374
+                component_monitor name=Radar_Missile_Valid component_name=rocket.radar_missile_valid share=0.497374
+            }
+            hsplit share=0.978236 {
+                component_monitor name=Radar_Target_FOV_Status component_name=rocket.radar_target_fov_status
+                component_monitor name=Radar_Missile_FOV_Status component_name=rocket.radar_missile_fov_status
+            }
+            hsplit share=1.021764 {
+                component_monitor name=CV_Visibility component_name=rocket.cv_visibility_plot share=0.806251
+                component_monitor name=CV_Pixel_Coords component_name=rocket.cv_pixel_coords share=0.768522
+                component_monitor name=CV_Pixel_Area component_name=rocket.cv_pixel_area share=0.425227
+            }
+            component_monitor name=Radar_Bias_AzElR component_name=rocket.radar_bias share=1.0
+            hsplit share=1.0 {
+                component_monitor name=uv_true component_name=rocket.cv_true_pixel_coords
+                component_monitor name=uvdot_true component_name=rocket.cv_true_pixel_flow
+            }
+            component_monitor name=Radar_Model_Stats component_name=rocket.radar_target_model_stats share=1.0
+            hsplit share=1.0 {
+                component_monitor name=Radar_Target_Area_vs_MinRCS component_name=rocket.radar_target_projected_area
+                component_monitor name=Radar_Missile_Area_vs_MinRCS component_name=rocket.radar_missile_projected_area
+            }
+            hsplit share=1.0 {
+                component_monitor name=Radar_Target_KF_STD_Pos_ENU_m component_name=rocket.radar_target_pos_std
+                component_monitor name=Radar_Target_KF_STD_Vel_ENU_mps component_name=rocket.radar_target_vel_std
+            }
+            hsplit share=1.0 {
+                component_monitor name=Radar_Missile_KF_STD_Pos_ENU_m component_name=rocket.radar_missile_pos_std
+                component_monitor name=Radar_Missile_KF_STD_Vel_ENU_mps component_name=rocket.radar_missile_vel_std
+            }
+        }
+        vsplit name=Graphs share=0.9 {
+            graph "rocket.radar_target_meas_std.std_x, rocket.radar_target_meas_std.std_y, rocket.radar_target_meas_std.std_z" name="Radar Tgt Std [ENU m]" {
+                color 106 155 165
+                color 114 87 179
+                color 198 107 66
+            }
+            graph "rocket.radar_bias.az_bias, rocket.radar_bias.el_bias, RADARDEBIASMESSAGE.AZ_BIAS_RAD, RADARDEBIASMESSAGE.EL_BIAS_RAD" name="Bias Truth vs Est [rad] (az/el)" {
+                color 106 155 165
+                color 114 87 179
+                color 198 107 66
+                color 214 164 54
+            }
+            graph TRACKERMESSAGE.RANGE_TO_GO name="Range [m] (Tracker)" {
+                color 214 164 54
+            }
+            graph "rocket.radar_missile_meas_std.std_x, rocket.radar_missile_meas_std.std_y, rocket.radar_missile_meas_std.std_z" name="Radar Msl Std [ENU m]" {
+                color 106 155 165
+                color 114 87 179
+                color 198 107 66
+            }
+        }
+    }
+    viewport name=Full_View pos="(0,0,0,0, 0.5,-5,1) + rocket.world_pos" look_at=rocket.world_pos show_grid=#true
+}
+object_3d "(0,0,0,1, MFNAVELODINENUMESSAGE.WORLD_POS[4],MFNAVELODINENUMESSAGE.WORLD_POS[5],MFNAVELODINENUMESSAGE.WORLD_POS[6])" {
+    glb path="models/compass.glb"
+}
+object_3d rocket.world_pos {
+    glb path="models/missile_FT10_20251205_2.glb"
+}
+object_3d MFNAVELODINENUMESSAGE.WORLD_POS {
+    glb path="models/missile_FT10_20251205_2.glb"
+}
+object_3d target.world_pos {
+    glb path="models/shahed.glb"
+}
+object_3d "(0,0,0,1,rocket.radar_target_state_kalman[0],rocket.radar_target_state_kalman[1],rocket.radar_target_state_kalman[2])" {
+    glb path="models/fixed_wing.glb"
+}
+line_3d rocket.world_pos perspective=#false {
+    color green
+}
+line_3d MFNAVELODINENUMESSAGE.WORLD_POS perspective=#false {
+    color blue
+}
+line_3d target.world_pos perspective=#false {
+    color red
+}
+line_3d "(0,0,0,1,rocket.radar_target_state_kalman[0],rocket.radar_target_state_kalman[1],rocket.radar_target_state_kalman[2])" perspective=#false {
+    color 214 164 54
+}
+vector_arrow "(rocket.world_vel[3], rocket.world_vel[4], rocket.world_vel[5])" origin=rocket.world_pos scale=0.1 name="Truth Velocity (ENU)" {
+    color 180 80 255
+}
+vector_arrow "(MFNAVELODINENUMESSAGE.VEL_ENU[0], MFNAVELODINENUMESSAGE.VEL_ENU[1], MFNAVELODINENUMESSAGE.VEL_ENU[2])" origin=MFNAVELODINENUMESSAGE.WORLD_POS scale=0.1 name="Nav Velocity (ENU)" {
+    color 180 80 255
+}
+// vector_arrow "(0, GUIDANCEMESSAGE.ACC_CMD_NED[0], GUIDANCEMESSAGE.ACC_CMD_NED[1])" origin=MFNAVELODINENUMESSAGE.WORLD_POS name="Guidance Cmd Accel (NED)" body_frame=#false {
+//     color 255 165 0
+// }
+vector_arrow "(0, CONTROLMESSAGE.ACC_CMD_BODY[0], CONTROLMESSAGE.ACC_CMD_BODY[1])" origin=MFNAVELODINENUMESSAGE.WORLD_POS name="Rocket Commanded Acceleration" body_frame=#true {
+    color cyan
+}
+vector_arrow "(0, CONTROLMESSAGE.ACC_MEAS_BODY[0], CONTROLMESSAGE.ACC_MEAS_BODY[1])" origin=MFNAVELODINENUMESSAGE.WORLD_POS name="Rocket Measured Acceleration" body_frame=#true {
+    color 255 0 255
+}
+// vector_arrow "(TRACKERMESSAGE.LOS_NED[1], TRACKERMESSAGE.LOS_NED[0], -TRACKERMESSAGE.LOS_NED[2])" origin=MFNAVELODINENUMESSAGE.WORLD_POS name="Target Controls LOS" body_frame=#false {
+//     color white
+// }
+window screen=0 {
+    rect 2 2 98 98
+}

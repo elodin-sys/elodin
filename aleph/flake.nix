@@ -10,7 +10,7 @@
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
     jetpack.url = "github:anduril/jetpack-nixos/4a4e93a7b3fbe1915870ec54002c616f01367195";
-    rust-overlay.url = "github:oxalica/rust-overlay";
+    rust-overlay.url = "github:oxalica/rust-overlay/c84e121aaede7ef8c7bd9fb5154ccc1599e07816";
 
     jetpack.inputs.nixpkgs.follows = "nixpkgs";
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
@@ -31,6 +31,10 @@
 
     rustToolchain = p: p.rust-bin.fromRustupToolchainFile ../rust-toolchain.toml;
     gitJSONOverlay = builtins.fromJSON (builtins.readFile ./gitrepos.json);
+    secureBzip2Overlay = _final: prev: {
+      # JetPack only needs a non-ancient unpacker; avoid nixpkgs' insecure 1.1 snapshot.
+      bzip2_1_1 = prev.bzip2;
+    };
     gitReposOverlay = final: prev: {
       # Our packing of deepstream7 still needs nvidia sources, so we can't use upstream nixpkgs yet!
       # Start with upstream nixpkgs _cuda/manifests and overlay jetpack ones (where prevCuda is jetpack-nixos cuda)
@@ -57,7 +61,15 @@
         callPackage = path: args: final.callPackage path (args // {inherit rustToolchain;});
       })
       // (rust-overlay.overlays.default final prev)
-      // (gitReposOverlay final prev);
+      // (secureBzip2Overlay final prev)
+      // (gitReposOverlay final prev)
+      // {
+        # cudaSupport (aleph-cuda.nix) pulls jax-cuda12-plugin -> nccl (badPlatforms
+        # aarch64), unused (sim=cranelift, render=Vulkan). Force CPU jax everywhere.
+        pythonPackagesExtensions =
+          (prev.pythonPackagesExtensions or [])
+          ++ [(_pyfinal: pyprev: {jax = pyprev.jax.override {cudaSupport = false;};})];
+      };
 
     baseModules = {
       default = defaultModule;
@@ -71,6 +83,7 @@
       wifi = ./modules/wifi.nix;
     };
     fswModules = {
+      elodin = ./modules/elodin.nix;
       elodin-db = ./modules/elodin-db.nix;
       aleph-serial-bridge = ./modules/aleph-serial-bridge.nix;
       tegrastats-bridge = ./modules/tegrastats-bridge.nix;
@@ -158,12 +171,20 @@
           ];
         };
       });
-      apps = forAllSystems (pkgs: {
-        deploy = {
-          type = "app";
-          program = "${pkgs.writeScript "deploy" (builtins.readFile ./deploy.sh)}";
+      apps =
+        nixpkgs.lib.recursiveUpdate
+        (forAllSystems (pkgs: {
+          deploy = {
+            type = "app";
+            program = "${pkgs.writeScript "deploy" (builtins.readFile ./deploy.sh)}";
+          };
+        }))
+        {
+          x86_64-linux.flash-initrd = {
+            type = "app";
+            program = "${self.packages.x86_64-linux.flash-initrd}/flash-initrd";
+          };
         };
-      });
     }
     // rec {
       nixosModules = baseModules // fswModules // stmModules // stmConfigurationModules // devModules // configurationPresets;
@@ -188,6 +209,7 @@
         flash-cross = jetpack.nixosConfigurations."orin-nx-devkit".extendModules {
           modules = [
             {nixpkgs.buildPlatform.system = "x86_64-linux";}
+            {nixpkgs.overlays = [secureBzip2Overlay];}
           ];
         };
       in {
@@ -197,6 +219,10 @@
           sed -i '46i\cp ${./tegra234-mb2-bct-misc-p3767-0000.dts} bootloader/generic/BCT/tegra234-mb2-bct-misc-p3767-0000.dts' $out/flash-uefi
           chmod +x $out/flash-uefi
         '';
+
+        flash-initrd = import ./lib/mk-initrd-flash.nix {
+          inherit nixpkgs alephSystem baseModules secureBzip2Overlay;
+        };
       };
       lib.installerSystem = installerSystem;
       templates.default = {

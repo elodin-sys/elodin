@@ -1,3 +1,4 @@
+use bevy::log::warn_once;
 use bevy::prelude::*;
 use egui_material_icons::{icon_button, icons::*};
 use std::collections::HashMap;
@@ -25,9 +26,11 @@ use bevy::{
     window::{PrimaryWindow, Window},
 };
 use bevy_egui::egui::{self, Align, CornerRadius, Frame, Layout, Margin, RichText, Stroke};
-use impeller2::types::Timestamp;
-use impeller2_bevy::{ComponentMetadataRegistry, ComponentPath, ComponentSchemaRegistry};
-use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp};
+use impeller::types::Timestamp;
+use impeller_bevy::{
+    ComponentMetadataRegistry, ComponentPath, ComponentSchemaRegistry, TelemetryCache,
+};
+use impeller_wkt::{CurrentTimestamp, EarliestTimestamp};
 use std::time::{Duration, Instant};
 use std::{
     fmt::Debug,
@@ -42,12 +45,14 @@ use crate::{
         colors::{ColorExt, get_scheme, with_opacity},
         input_owner::UiInputOwners,
         plot::{
-            CollectedGraphData, GraphState, Line, OVERVIEW_MAX_POINTS, element_names_for_graph,
+            CollectedGraphData, GraphState, GraphStateComponent, Line, OVERVIEW_MAX_POINTS,
+            data::evaluate_series,
+            element_names_for_graph,
             gpu::{LineBundle, LineConfig, LineUniform},
         },
         tiles::WindowState,
         time_label::{PrettyDuration, time_label},
-        timeline::DurationExt,
+        timeline::{DurationExt, TelemetryMode},
         utils::format_num,
         widgets::WidgetSystem,
         window::window_entity_from_target,
@@ -58,6 +63,7 @@ use super::{
     PlotDataComponent, XYLine,
     gpu::{self, LineHandle, LineVisibleRange, LineWidgetWidth},
 };
+use crate::ui::widgets::SystemStateExt;
 
 /// Tracks locked state transitions
 #[derive(Resource, Default)]
@@ -77,6 +83,7 @@ pub struct PlotWidget<'w, 's> {
     earliest_timestamp: Res<'w, EarliestTimestamp>,
     current_timestamp: Res<'w, CurrentTimestamp>,
     time_range_behavior: ResMut<'w, TimeRangeBehavior>,
+    telemetry_mode: Res<'w, TelemetryMode>,
     line_query: Query<'w, 's, &'static LineHandle>,
     window_states: Query<'w, 's, &'static mut WindowState>,
 }
@@ -100,20 +107,22 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             earliest_timestamp,
             current_timestamp,
             mut time_range_behavior,
+            telemetry_mode,
             line_query,
             mut window_states,
-        } = state.get_mut(world);
+        } = state.params_mut(world);
 
         let Ok(mut graph_state) = graphs_state.get_mut(id) else {
             return;
         };
 
+        let telemetry = telemetry_mode.0;
         let bounds = sync_bounds(
             &mut graph_state,
             selected_time_range.0.clone(),
             earliest_timestamp.0,
             ui.max_rect(),
-            get_inner_rect(ui.max_rect()),
+            get_inner_rect(ui.max_rect(), telemetry),
         );
 
         let line_visible_range = bounds.timestamp_range(earliest_timestamp.0);
@@ -130,6 +139,7 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             selected_time_range.0.clone(),
             earliest_timestamp.0,
             current_timestamp.0,
+            telemetry,
         );
         let data_source = PlotDataSource::Timeseries {
             lines: &lines,
@@ -147,6 +157,7 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             id,
             &mut window_state.ui_state.selected_object,
             &mut time_range_behavior,
+            telemetry,
         );
     }
 }
@@ -178,6 +189,13 @@ impl XAxisMode {
     }
 }
 
+/// One XY series for query-plot rendering / hover modal.
+pub struct XYPlotSeries {
+    pub handle: Handle<XYLine>,
+    pub label: String,
+    pub color: egui::Color32,
+}
+
 /// Data source for plot rendering - either timeseries (Line) or XY (XYLine) data
 pub enum PlotDataSource<'a> {
     Timeseries {
@@ -187,10 +205,69 @@ pub enum PlotDataSource<'a> {
     },
     XY {
         xy_lines: &'a Assets<XYLine>,
-        xy_line_handle: Handle<XYLine>,
+        /// Plot title shown at the top of the hover modal.
         query_label: String,
-        query_color: egui::Color32,
+        series: Vec<XYPlotSeries>,
     },
+}
+
+fn retain_enabled_line(
+    kernel: Option<(&impeller_bevy::ComponentPath, usize)>,
+    derived: Option<(&impeller_bevy::ComponentPath, usize)>,
+    components: &std::collections::BTreeMap<impeller_bevy::ComponentPath, GraphStateComponent>,
+    component_path: &impeller_bevy::ComponentPath,
+    index: usize,
+) -> bool {
+    if let Some((path, len)) = kernel
+        && component_path == path
+    {
+        return index < len;
+    }
+    if let Some((path, len)) = derived
+        && component_path == path
+    {
+        return index < len;
+    }
+    components
+        .get(component_path)
+        .and_then(|component| component.get(index))
+        .is_some()
+}
+
+fn despawn_stale_enabled_lines(graph_state: &mut GraphState, commands: &mut Commands) {
+    let kernel = graph_state
+        .kernel
+        .as_ref()
+        .map(|kernel| (&kernel.path, kernel.lines.len()));
+    let derived = graph_state
+        .derived
+        .as_ref()
+        .map(|derived| (&derived.path, derived.lines.len()));
+    let stale = graph_state
+        .enabled_lines
+        .keys()
+        .filter(|(component_path, index)| {
+            !retain_enabled_line(
+                kernel,
+                derived,
+                &graph_state.components,
+                component_path,
+                *index,
+            )
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    for key in stale {
+        if let Some((entity, _)) = graph_state.enabled_lines.remove(&key) {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
+fn has_timeseries_selection(graph_state: &GraphState) -> bool {
+    !graph_state.components.is_empty()
+        || graph_state.derived.is_some()
+        || graph_state.kernel.is_some()
 }
 
 #[derive(Debug)]
@@ -209,6 +286,8 @@ pub struct TimeseriesPlot {
     x_label: Option<String>,
     /// Optional label for Y-axis (displayed to the left of the axis, rotated)
     y_label: Option<String>,
+    /// Dense telemetry presentation (tight margins / short notches).
+    telemetry_mode: bool,
 }
 
 pub const MARGIN: egui::Margin = egui::Margin {
@@ -217,11 +296,23 @@ pub const MARGIN: egui::Margin = egui::Margin {
     top: 35,
     bottom: 45,
 };
+
+/// Compact chrome for telemetry dashboards: tight Y gutter, almost no top band,
+/// bottom reserve for short X notches only (labels are hidden when locked).
+pub const TELEMETRY_MARGIN: egui::Margin = egui::Margin {
+    left: 56,
+    right: 0,
+    top: 0,
+    bottom: 5,
+};
+
 pub const TICK_MARK_LINE_WIDTH: f32 = 1.0;
 pub const TICK_MARK_ASPECT_RATIO: f32 = 12.0 / 30.0;
 pub const NOTCH_LENGTH: f32 = 10.0;
+pub const TELEMETRY_NOTCH_LENGTH: f32 = 3.0;
 pub const AXIS_LABEL_MARGIN: f32 = 5.0;
 pub const Y_AXIS_LABEL_MARGIN: f32 = 10.0;
+pub const TELEMETRY_Y_AXIS_LABEL_MARGIN: f32 = 2.0;
 pub const Y_AXIS_FLAG_WIDTH: f32 = 70.0;
 pub const Y_AXIS_FLAG_HEIGHT: f32 = 20.0;
 pub const Y_AXIS_FLAG_MARGIN: f32 = 4.0;
@@ -236,6 +327,30 @@ pub const SCROLL_PIXELS_PER_LINE: f32 = 100.0;
 
 /// Percentage of the Y range to add as padding on each side (5% = 0.05)
 pub const Y_AXIS_PADDING_PERCENT: f64 = 0.05;
+
+pub fn plot_margin(telemetry_mode: bool) -> egui::Margin {
+    if telemetry_mode {
+        TELEMETRY_MARGIN
+    } else {
+        MARGIN
+    }
+}
+
+pub fn notch_length(telemetry_mode: bool) -> f32 {
+    if telemetry_mode {
+        TELEMETRY_NOTCH_LENGTH
+    } else {
+        NOTCH_LENGTH
+    }
+}
+
+pub fn y_axis_label_margin(telemetry_mode: bool) -> f32 {
+    if telemetry_mode {
+        TELEMETRY_Y_AXIS_LABEL_MARGIN
+    } else {
+        Y_AXIS_LABEL_MARGIN
+    }
+}
 
 /// Calculate padded Y bounds with appropriate buffer based on magnitude.
 /// - For a range of values, adds a percentage-based padding on each side.
@@ -261,8 +376,160 @@ pub fn calculate_padded_y_bounds(min_y: f64, max_y: f64) -> (f64, f64) {
     }
 }
 
-pub fn get_inner_rect(rect: egui::Rect) -> egui::Rect {
-    rect.shrink4(MARGIN)
+/// Whether a new auto-Y range should replace the current one for short trailing windows.
+/// Expands when data exceeds the current pad by >5% of span; shrinks only when the
+/// new span is &lt;75% of the old (avoids chatter as the window slides).
+pub(crate) fn should_update_short_window_y(
+    current: &std::ops::Range<f64>,
+    new_min: f64,
+    new_max: f64,
+) -> bool {
+    let old_span = (current.end - current.start).abs().max(1e-12);
+    let expand_thresh = old_span * 0.05;
+    if new_min < current.start - expand_thresh || new_max > current.end + expand_thresh {
+        return true;
+    }
+    let new_span = (new_max - new_min).abs();
+    new_span < old_span * 0.75
+}
+
+pub fn get_inner_rect(rect: egui::Rect, telemetry_mode: bool) -> egui::Rect {
+    rect.shrink4(plot_margin(telemetry_mode))
+}
+
+const MODAL_SWATCH: f32 = 8.0;
+const MODAL_SWATCH_GAP: f32 = 6.0;
+const MODAL_ROW_FONT_SIZE: f32 = 11.0;
+
+fn modal_swatch(ui: &mut egui::Ui, color: egui::Color32) {
+    let (rect, _) =
+        ui.allocate_exact_size(egui::vec2(MODAL_SWATCH, MODAL_SWATCH), egui::Sense::click());
+    ui.painter().rect(
+        rect,
+        egui::CornerRadius::same(2),
+        color,
+        egui::Stroke::NONE,
+        egui::StrokeKind::Middle,
+    );
+}
+
+/// Color swatch + series label + value. If they do not fit on one line, the
+/// value wraps as a whole (never mid-digit).
+fn modal_series_row(ui: &mut egui::Ui, color: egui::Color32, label: &str, value: &str) {
+    ui.scope(|ui| {
+        ui.style_mut().override_font_id = Some(egui::TextStyle::Monospace.resolve(ui.style()));
+        let font_id = egui::FontId::monospace(MODAL_ROW_FONT_SIZE);
+        let measure = |text: &str| {
+            ui.painter()
+                .layout_no_wrap(text.to_string(), font_id.clone(), egui::Color32::WHITE)
+                .size()
+                .x
+        };
+        let needed = MODAL_SWATCH + MODAL_SWATCH_GAP + measure(label) + measure(value);
+        let label_text = RichText::new(label).size(MODAL_ROW_FONT_SIZE);
+        let value_text = RichText::new(value).size(MODAL_ROW_FONT_SIZE);
+
+        if needed <= ui.available_width() {
+            ui.horizontal(|ui| {
+                modal_swatch(ui, color);
+                ui.add_space(MODAL_SWATCH_GAP);
+                ui.label(label_text);
+                ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
+                    ui.add_space(3.0);
+                    ui.add(egui::Label::new(value_text).wrap_mode(egui::TextWrapMode::Extend));
+                    ui.add_space(3.0);
+                });
+            });
+        } else {
+            ui.horizontal(|ui| {
+                modal_swatch(ui, color);
+                ui.add_space(MODAL_SWATCH_GAP);
+                ui.vertical(|ui| {
+                    ui.add(egui::Label::new(label_text).wrap());
+                    ui.add(egui::Label::new(value_text).wrap_mode(egui::TextWrapMode::Extend));
+                });
+            });
+        }
+    });
+}
+
+const PLOT_MODAL_ID: &str = "plot_modal";
+const PLOT_MODAL_FALLBACK_HEIGHT: f32 = 120.0;
+
+fn clamp_rect_to(rect: egui::Rect, screen: egui::Rect) -> egui::Rect {
+    let size = rect.size();
+    let mut min = rect.min;
+    if min.x + size.x > screen.max.x {
+        min.x = screen.max.x - size.x;
+    }
+    if min.y + size.y > screen.max.y {
+        min.y = screen.max.y - size.y;
+    }
+    min.x = min.x.max(screen.min.x);
+    min.y = min.y.max(screen.min.y);
+    egui::Rect::from_min_size(min, size)
+}
+
+fn pointer_gap(rect: egui::Rect, pointer: egui::Pos2) -> f32 {
+    if rect.contains(pointer) {
+        let dx = (pointer.x - rect.min.x).min(rect.max.x - pointer.x);
+        let dy = (pointer.y - rect.min.y).min(rect.max.y - pointer.y);
+        -dx.min(dy)
+    } else {
+        let dx = if pointer.x < rect.min.x {
+            rect.min.x - pointer.x
+        } else if pointer.x > rect.max.x {
+            pointer.x - rect.max.x
+        } else {
+            0.0
+        };
+        let dy = if pointer.y < rect.min.y {
+            rect.min.y - pointer.y
+        } else if pointer.y > rect.max.y {
+            pointer.y - rect.max.y
+        } else {
+            0.0
+        };
+        dx.hypot(dy)
+    }
+}
+
+/// Place the hover modal in a pointer-relative quadrant, clamped to `screen`,
+/// preferring a rect that does not contain the pointer.
+fn modal_pos(pointer: egui::Pos2, size: egui::Vec2, screen: egui::Rect) -> egui::Pos2 {
+    let m = MODAL_MARGIN;
+    let candidates = [
+        (
+            egui::Align2::LEFT_TOP,
+            egui::pos2(pointer.x + m, pointer.y + m),
+        ),
+        (
+            egui::Align2::RIGHT_TOP,
+            egui::pos2(pointer.x - m, pointer.y + m),
+        ),
+        (
+            egui::Align2::LEFT_BOTTOM,
+            egui::pos2(pointer.x + m, pointer.y - m),
+        ),
+        (
+            egui::Align2::RIGHT_BOTTOM,
+            egui::pos2(pointer.x - m, pointer.y - m),
+        ),
+    ];
+    let mut best_min = candidates[0].0.anchor_size(candidates[0].1, size).min;
+    let mut best_gap = f32::NEG_INFINITY;
+    for (pivot, pos) in candidates {
+        let clamped = clamp_rect_to(pivot.anchor_size(pos, size), screen);
+        if !clamped.contains(pointer) {
+            return clamped.min;
+        }
+        let gap = pointer_gap(clamped, pointer);
+        if gap > best_gap {
+            best_gap = gap;
+            best_min = clamped.min;
+        }
+    }
+    best_min
 }
 
 impl TimeseriesPlot {
@@ -273,6 +540,7 @@ impl TimeseriesPlot {
         selected_range: Range<Timestamp>,
         earliest_timestamp: Timestamp,
         current_timestamp: Timestamp,
+        telemetry_mode: bool,
     ) -> Self {
         Self::from_bounds_with_mode(
             rect,
@@ -281,6 +549,7 @@ impl TimeseriesPlot {
             earliest_timestamp,
             current_timestamp,
             XAxisMode::TimestampAbsolute,
+            telemetry_mode,
         )
     }
 
@@ -292,6 +561,7 @@ impl TimeseriesPlot {
         earliest_timestamp: Timestamp,
         current_timestamp: Timestamp,
         is_relative_time: bool,
+        telemetry_mode: bool,
     ) -> Self {
         Self::from_bounds_with_mode(
             rect,
@@ -304,6 +574,7 @@ impl TimeseriesPlot {
             } else {
                 XAxisMode::TimestampAbsolute
             },
+            telemetry_mode,
         )
     }
 
@@ -314,6 +585,7 @@ impl TimeseriesPlot {
         selected_range: Range<Timestamp>,
         earliest_timestamp: Timestamp,
         current_timestamp: Timestamp,
+        telemetry_mode: bool,
     ) -> Self {
         Self::from_bounds_with_mode(
             rect,
@@ -322,6 +594,7 @@ impl TimeseriesPlot {
             earliest_timestamp,
             current_timestamp,
             XAxisMode::Numeric,
+            telemetry_mode,
         )
     }
 
@@ -333,9 +606,10 @@ impl TimeseriesPlot {
         earliest_timestamp: Timestamp,
         current_timestamp: Timestamp,
         x_axis_mode: XAxisMode,
+        telemetry_mode: bool,
     ) -> Self {
         let mut selected_range = selected_range;
-        let inner_rect = get_inner_rect(rect);
+        let inner_rect = get_inner_rect(rect, telemetry_mode);
 
         if selected_range.start == selected_range.end {
             selected_range.end += Duration::from_secs(10);
@@ -359,6 +633,7 @@ impl TimeseriesPlot {
             x_axis_mode,
             x_label: None,
             y_label: None,
+            telemetry_mode,
         }
     }
 
@@ -369,7 +644,8 @@ impl TimeseriesPlot {
         self
     }
 
-    fn draw_x_axis(&self, ui: &mut egui::Ui, font_id: &egui::FontId) {
+    fn draw_x_axis(&self, ui: &mut egui::Ui, font_id: &egui::FontId, hide_labels: bool) {
+        let notch = notch_length(self.telemetry_mode);
         match self.x_axis_mode {
             XAxisMode::Numeric => {
                 // Numeric mode: Display arbitrary numeric values on X-axis (not time)
@@ -417,22 +693,21 @@ impl TimeseriesPlot {
                     ui.painter().line_segment(
                         [
                             egui::pos2(x_pos, self.inner_rect.max.y),
-                            egui::pos2(x_pos, self.inner_rect.max.y + (NOTCH_LENGTH)),
+                            egui::pos2(x_pos, self.inner_rect.max.y + notch),
                         ],
-                        egui::Stroke::new(1.0, get_scheme().border_primary),
+                        egui::Stroke::new(1.0_f32, get_scheme().border_primary),
                     );
 
-                    // Use numeric formatting for non-time X values
-                    ui.painter().text(
-                        egui::pos2(
-                            x_pos,
-                            self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
-                        ),
-                        egui::Align2::CENTER_TOP,
-                        format_num(i),
-                        font_id.clone(),
-                        get_scheme().text_primary,
-                    );
+                    if !hide_labels {
+                        // Use numeric formatting for non-time X values
+                        ui.painter().text(
+                            egui::pos2(x_pos, self.inner_rect.max.y + (notch + AXIS_LABEL_MARGIN)),
+                            egui::Align2::CENTER_TOP,
+                            format_num(i),
+                            font_id.clone(),
+                            get_scheme().text_primary,
+                        );
+                    }
 
                     i += nice_step;
                 }
@@ -469,23 +744,22 @@ impl TimeseriesPlot {
                     ui.painter().line_segment(
                         [
                             egui::pos2(x_pos, self.inner_rect.max.y),
-                            egui::pos2(x_pos, self.inner_rect.max.y + (NOTCH_LENGTH)),
+                            egui::pos2(x_pos, self.inner_rect.max.y + notch),
                         ],
-                        egui::Stroke::new(1.0, get_scheme().border_primary),
+                        egui::Stroke::new(1.0_f32, get_scheme().border_primary),
                     );
 
-                    // Convert seconds to Duration for PrettyDuration formatting
-                    let duration = hifitime::Duration::from_seconds(i);
-                    ui.painter().text(
-                        egui::pos2(
-                            x_pos,
-                            self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
-                        ),
-                        egui::Align2::CENTER_TOP,
-                        PrettyDuration(duration).to_string(),
-                        font_id.clone(),
-                        get_scheme().text_primary,
-                    );
+                    if !hide_labels {
+                        // Convert seconds to Duration for PrettyDuration formatting
+                        let duration = hifitime::Duration::from_seconds(i);
+                        ui.painter().text(
+                            egui::pos2(x_pos, self.inner_rect.max.y + (notch + AXIS_LABEL_MARGIN)),
+                            egui::Align2::CENTER_TOP,
+                            PrettyDuration(duration).to_string(),
+                            font_id.clone(),
+                            get_scheme().text_primary,
+                        );
+                    }
 
                     i += step_size_seconds;
                 }
@@ -529,21 +803,20 @@ impl TimeseriesPlot {
                     ui.painter().line_segment(
                         [
                             egui::pos2(x_pos, self.inner_rect.max.y),
-                            egui::pos2(x_pos, self.inner_rect.max.y + (NOTCH_LENGTH)),
+                            egui::pos2(x_pos, self.inner_rect.max.y + notch),
                         ],
-                        egui::Stroke::new(1.0, get_scheme().border_primary),
+                        egui::Stroke::new(1.0_f32, get_scheme().border_primary),
                     );
 
-                    ui.painter().text(
-                        egui::pos2(
-                            x_pos,
-                            self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
-                        ),
-                        egui::Align2::CENTER_TOP,
-                        PrettyDuration(offset).to_string(),
-                        font_id.clone(),
-                        get_scheme().text_primary,
-                    );
+                    if !hide_labels {
+                        ui.painter().text(
+                            egui::pos2(x_pos, self.inner_rect.max.y + (notch + AXIS_LABEL_MARGIN)),
+                            egui::Align2::CENTER_TOP,
+                            PrettyDuration(offset).to_string(),
+                            font_id.clone(),
+                            get_scheme().text_primary,
+                        );
+                    }
                 }
             }
         }
@@ -609,30 +882,28 @@ impl TimeseriesPlot {
         timestamp: Timestamp,
         relative_seconds: Option<f64>,
     ) {
-        let anchor_left = pointer_pos.x + MODAL_WIDTH + MODAL_MARGIN < self.rect.right();
+        let size = ui
+            .ctx()
+            .memory(|m| m.area_rect(PLOT_MODAL_ID).map(|r| r.size()))
+            .unwrap_or(egui::vec2(MODAL_WIDTH, PLOT_MODAL_FALLBACK_HEIGHT));
+        let size = egui::vec2(MODAL_WIDTH, size.y);
+        let fixed_pos = modal_pos(pointer_pos, size, ui.ctx().content_rect());
 
-        let (pivot, fixed_pos) = if anchor_left {
-            (
-                egui::Align2::LEFT_TOP,
-                egui::pos2(pointer_pos.x + MODAL_MARGIN, pointer_pos.y + MODAL_MARGIN),
-            )
-        } else {
-            (
-                egui::Align2::RIGHT_TOP,
-                egui::pos2(pointer_pos.x - MODAL_MARGIN, pointer_pos.y + MODAL_MARGIN),
-            )
-        };
-
-        egui::Window::new("plot_modal")
-            .pivot(pivot)
+        egui::Window::new(PLOT_MODAL_ID)
+            .pivot(egui::Align2::LEFT_TOP)
             .title_bar(false)
             .resizable(false)
+            .interactable(false)
+            .order(egui::Order::Tooltip)
+            .constrain(false)
             .fixed_pos(fixed_pos)
-            .fixed_size(egui::vec2(MODAL_WIDTH, self.inner_rect.height() / 2.))
+            .default_width(MODAL_WIDTH)
+            .min_width(MODAL_WIDTH)
+            .max_width(MODAL_WIDTH)
             .frame(
                 Frame::default()
                     .inner_margin(Margin::same(8))
-                    .stroke(Stroke::new(1.0, get_scheme().border_primary))
+                    .stroke(Stroke::new(1.0_f32, get_scheme().border_primary))
                     .corner_radius(corner_radius_sm())
                     .fill(get_scheme().bg_secondary)
                     .shadow(egui::epaint::Shadow {
@@ -658,7 +929,7 @@ impl TimeseriesPlot {
                         );
                         ui.label(PrettyDuration(offset).to_string());
                         let mut current_component_path: Option<&ComponentPath> = None;
-                        for ((component_path, line_index), (entity, color)) in
+                        for ((component_path, _line_index), (entity, color)) in
                             graph_state.enabled_lines.iter()
                         {
                             let Ok(line_handle) = line_handles.get(*entity) else {
@@ -685,130 +956,85 @@ impl TimeseriesPlot {
                                             .color(with_opacity(get_scheme().text_primary, 0.6)),
                                     );
                                     ui.add_space(8.0);
+                                } else if graph_state
+                                    .derived
+                                    .as_ref()
+                                    .is_some_and(|derived| derived.path == *component_path)
+                                    || graph_state
+                                        .kernel
+                                        .as_ref()
+                                        .is_some_and(|kernel| kernel.path == *component_path)
+                                {
+                                    ui.add_space(8.0);
+                                    ui.label(
+                                        egui::RichText::new(graph_state.label.clone())
+                                            .size(11.0)
+                                            .color(with_opacity(get_scheme().text_primary, 0.6)),
+                                    );
+                                    ui.add_space(8.0);
                                 }
                             }
 
-                            let Some(line_data) = collected_graph_data
-                                .get_line(&component_path.id, *line_index)
-                                .and_then(|h| lines.get(h))
-                            else {
-                                continue;
-                            };
-
-                            ui.horizontal(|ui| {
-                                ui.style_mut().override_font_id =
-                                    Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
-                                let (rect, _) = ui.allocate_exact_size(
-                                    egui::vec2(8.0, 8.0),
-                                    egui::Sense::click(),
-                                );
-                                ui.painter().rect(
-                                    rect,
-                                    egui::CornerRadius::same(2),
-                                    *color,
-                                    egui::Stroke::NONE,
-                                    egui::StrokeKind::Middle,
-                                );
-                                ui.add_space(6.);
-                                ui.label(RichText::new(line_data.label.clone()).size(11.0));
-                                let value = line
-                                    .data
-                                    .get_nearest(timestamp)
-                                    .map(|(_time, x)| format_num(*x as f64))
-                                    .unwrap_or_else(|| "N/A".to_string());
-                                ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
-                                    ui.add_space(3.0);
-                                    ui.label(RichText::new(value).size(11.0));
-                                    ui.add_space(3.0);
-                                })
-                            });
+                            let value = line
+                                .data
+                                .get_nearest(timestamp)
+                                .map(|(_time, x)| format_num(*x as f64))
+                                .unwrap_or_else(|| "N/A".to_string());
+                            modal_series_row(ui, *color, &line.label, &value);
                         }
                     }
                     PlotDataSource::XY {
                         xy_lines,
-                        xy_line_handle,
                         query_label,
-                        query_color,
+                        series,
                     } => {
-                        if let Some(xy_line) = xy_lines.get(xy_line_handle) {
-                            // Show query label
-                            ui.label(
-                                egui::RichText::new(query_label.clone())
-                                    .size(11.0)
-                                    .color(with_opacity(get_scheme().text_primary, 0.6)),
-                            );
-                            ui.add_space(8.0);
-                            ui.add(egui::Separator::default().grow(16.0 * 2.0));
-                            ui.add_space(8.0);
+                        // Show query label
+                        ui.label(
+                            egui::RichText::new(query_label.clone())
+                                .size(11.0)
+                                .color(with_opacity(get_scheme().text_primary, 0.6)),
+                        );
+                        ui.add_space(8.0);
+                        ui.add(egui::Separator::default().grow(16.0 * 2.0));
+                        ui.add_space(8.0);
 
-                            // Show X-axis value based on mode
-                            match self.x_axis_mode {
-                                XAxisMode::Numeric => {
-                                    // For numeric XY plots, show X as a number
-                                    if let Some(x_value) = relative_seconds {
-                                        ui.label(format!("X: {}", format_num(x_value)));
-                                    }
-                                }
-                                XAxisMode::TimestampRelative => {
-                                    // For relative time, show as duration
-                                    if let Some(relative_seconds) = relative_seconds {
-                                        let duration = hifitime::Duration::from_nanoseconds(
-                                            relative_seconds * 1_000_000_000.0,
-                                        );
-                                        ui.label(PrettyDuration(duration).to_string());
-                                    }
-                                }
-                                XAxisMode::TimestampAbsolute => {
-                                    // For absolute time, show as epoch
-                                    let time: hifitime::Epoch = timestamp.into();
-                                    ui.add(time_label(time));
+                        // Show X-axis value based on mode
+                        match self.x_axis_mode {
+                            XAxisMode::Numeric => {
+                                if let Some(x_value) = relative_seconds {
+                                    ui.label(format!("X: {}", format_num(x_value)));
                                 }
                             }
-
-                            // Find and show nearest value
-                            if let Some(relative_seconds) = relative_seconds {
-                                let mut nearest_value = None;
-                                let mut min_dist = f64::INFINITY;
-                                for (x_chunk, y_chunk) in
-                                    xy_line.x_values.iter().zip(xy_line.y_values.iter())
-                                {
-                                    for (x_val, y_val) in
-                                        x_chunk.cpu().iter().zip(y_chunk.cpu().iter())
-                                    {
-                                        let dist = (*x_val as f64 - relative_seconds).abs();
-                                        if dist < min_dist {
-                                            min_dist = dist;
-                                            nearest_value = Some(*y_val);
-                                        }
-                                    }
+                            XAxisMode::TimestampRelative => {
+                                if let Some(relative_seconds) = relative_seconds {
+                                    let duration = hifitime::Duration::from_nanoseconds(
+                                        relative_seconds * 1_000_000_000.0,
+                                    );
+                                    ui.label(PrettyDuration(duration).to_string());
                                 }
-
-                                ui.horizontal(|ui| {
-                                    ui.style_mut().override_font_id =
-                                        Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
-                                    let (rect, _) = ui.allocate_exact_size(
-                                        egui::vec2(8.0, 8.0),
-                                        egui::Sense::click(),
-                                    );
-                                    ui.painter().rect(
-                                        rect,
-                                        egui::CornerRadius::same(2),
-                                        *query_color,
-                                        egui::Stroke::NONE,
-                                        egui::StrokeKind::Middle,
-                                    );
-                                    ui.add_space(6.);
-                                    ui.label(RichText::new(query_label.clone()).size(11.0));
-                                    let value = nearest_value
-                                        .map(|v| format_num(v as f64))
-                                        .unwrap_or_else(|| "N/A".to_string());
-                                    ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
-                                        ui.add_space(3.0);
-                                        ui.label(RichText::new(value).size(11.0));
-                                        ui.add_space(3.0);
-                                    })
-                                });
                             }
+                            XAxisMode::TimestampAbsolute => {
+                                let time: hifitime::Epoch = timestamp.into();
+                                ui.add(time_label(time));
+                            }
+                        }
+
+                        let Some(relative_seconds) = relative_seconds else {
+                            return;
+                        };
+
+                        ui.add_space(8.0);
+                        for series in series {
+                            let Some(xy_line) = xy_lines.get(&series.handle) else {
+                                continue;
+                            };
+                            let nearest_value =
+                                nearest_xy_value(xy_line, relative_seconds).map(|(_, y)| y);
+
+                            let value = nearest_value
+                                .map(format_num)
+                                .unwrap_or_else(|| "N/A".to_string());
+                            modal_series_row(ui, series.color, &series.label, &value);
                         }
                     }
                 }
@@ -825,6 +1051,7 @@ impl TimeseriesPlot {
         graph_entity: Entity,
         selected_object: &mut SelectedObject,
         time_range_behavior: &mut TimeRangeBehavior,
+        telemetry_mode: bool,
     ) {
         egui_material_icons::initialize(ui.ctx());
 
@@ -837,14 +1064,9 @@ impl TimeseriesPlot {
             };
         }
 
-        // Lock toggle (icons)
-        {
-            let lock_size = egui::vec2(20.0, 20.0);
-            let lock_pos = egui::pos2(
-                self.inner_rect.max.x - lock_size.x - 6.0,
-                self.rect.min.y + 6.0,
-            );
-
+        if !telemetry_mode {
+            // Lock toggle (icons) — lives in the top chrome band reserved by normal margins.
+            let lock_pos = egui::pos2(self.inner_rect.max.x - 26.0, self.rect.min.y + 6.0);
             egui::Area::new(egui::Id::new(("plot_lock_btn", graph_entity)))
                 .order(egui::Order::Foreground)
                 .fixed_pos(lock_pos)
@@ -904,15 +1126,15 @@ impl TimeseriesPlot {
 
         // Check if we have data
         let (has_data, xy_point_count) = match &data_source {
-            PlotDataSource::Timeseries { .. } => (!graph_state.components.is_empty(), 0),
+            PlotDataSource::Timeseries { .. } => (has_timeseries_selection(graph_state), 0),
             PlotDataSource::XY {
-                xy_lines,
-                xy_line_handle,
-                ..
+                xy_lines, series, ..
             } => {
-                let count = xy_lines
-                    .get(xy_line_handle)
+                let count = series
+                    .iter()
+                    .filter_map(|s| xy_lines.get(&s.handle))
                     .map(|line| line.point_count())
+                    .max()
                     .unwrap_or(0);
                 (count > 1, count)
             }
@@ -941,13 +1163,32 @@ impl TimeseriesPlot {
         font_id.size = 11.0;
 
         draw_borders(ui, self.rect, self.inner_rect);
-        self.draw_x_axis(ui, &font_id);
-        draw_y_axis(ui, self.bounds, self.steps_y, self.rect, self.inner_rect);
+        self.draw_x_axis(ui, &font_id, telemetry_mode);
+        draw_y_axis(
+            ui,
+            self.bounds,
+            self.steps_y,
+            self.rect,
+            self.inner_rect,
+            self.telemetry_mode,
+        );
         self.draw_axis_labels(ui);
+
+        if telemetry_mode {
+            // Float title over plot ink (not in a reserved header band).
+            let mut title_font = egui::TextStyle::Small.resolve(ui.style());
+            title_font.size = 11.0;
+            ui.painter().text(
+                egui::pos2(self.inner_rect.center().x, self.inner_rect.min.y + 4.0),
+                egui::Align2::CENTER_TOP,
+                &graph_state.label,
+                title_font,
+                with_opacity(get_scheme().text_secondary, 0.85),
+            );
+        }
 
         if let Some(pointer_pos) = pointer_pos
             && self.inner_rect.contains(pointer_pos)
-            && ui.ui_contains_pointer()
         {
             let plot_point = self.bounds.screen_pos_to_value(self.rect, pointer_pos);
             draw_y_axis_flag(ui, pointer_pos, plot_point.y, self.inner_rect, font_id);
@@ -1005,44 +1246,30 @@ impl TimeseriesPlot {
                             pos,
                             4.5,
                             get_scheme().bg_secondary,
-                            egui::Stroke::new(2.0, *color),
+                            egui::Stroke::new(2.0_f32, *color),
                         );
                     }
                 }
                 PlotDataSource::XY {
-                    xy_lines,
-                    xy_line_handle,
-                    query_color,
-                    ..
+                    xy_lines, series, ..
                 } => {
-                    if let Some(xy_line) = xy_lines.get(xy_line_handle)
-                        && let Some(relative_seconds) = relative_seconds
-                    {
-                        // Find nearest point across all chunks
-                        let mut nearest_x = 0.0;
-                        let mut nearest_y = 0.0;
-                        let mut min_dist = f64::INFINITY;
-                        for (x_chunk, y_chunk) in
-                            xy_line.x_values.iter().zip(xy_line.y_values.iter())
-                        {
-                            for (x_val, y_val) in x_chunk.cpu().iter().zip(y_chunk.cpu().iter()) {
-                                let dist = (*x_val as f64 - relative_seconds).abs();
-                                if dist < min_dist {
-                                    min_dist = dist;
-                                    nearest_x = *x_val as f64;
-                                    nearest_y = *y_val as f64;
-                                }
-                            }
-                        }
-                        // Draw circle at nearest point
-                        if min_dist < f64::INFINITY {
+                    if let Some(relative_seconds) = relative_seconds {
+                        for series in series {
+                            let Some(xy_line) = xy_lines.get(&series.handle) else {
+                                continue;
+                            };
+                            let Some((nearest_x, nearest_y)) =
+                                nearest_xy_value(xy_line, relative_seconds)
+                            else {
+                                continue;
+                            };
                             let value = DVec2::new(nearest_x, nearest_y);
                             let pos = self.bounds.value_to_screen_pos(self.rect, value);
                             ui.painter().circle(
                                 pos,
                                 4.5,
                                 get_scheme().bg_secondary,
-                                egui::Stroke::new(2.0, *query_color),
+                                egui::Stroke::new(2.0_f32, series.color),
                             );
                         }
                     }
@@ -1119,29 +1346,48 @@ impl TimeseriesPlot {
     }
 }
 
+/// Nearest `(x, y)` sample on an XY line to the scrub X value.
+fn nearest_xy_value(xy_line: &XYLine, x: f64) -> Option<(f64, f64)> {
+    let mut nearest = None;
+    let mut min_dist = f64::INFINITY;
+    for (x_chunk, y_chunk) in xy_line.x_values.iter().zip(xy_line.y_values.iter()) {
+        for (x_val, y_val) in x_chunk.cpu().iter().zip(y_chunk.cpu().iter()) {
+            let dist = (*x_val as f64 - x).abs();
+            if dist < min_dist {
+                min_dist = dist;
+                nearest = Some((*x_val as f64, *y_val as f64));
+            }
+        }
+    }
+    nearest
+}
+
 pub fn draw_y_axis(
     ui: &mut egui::Ui,
     bounds: PlotBounds,
     steps_y: usize,
     rect: egui::Rect,
     inner_rect: egui::Rect,
+    telemetry_mode: bool,
 ) {
-    let border_stroke = egui::Stroke::new(1.0, get_scheme().border_primary);
+    let border_stroke = egui::Stroke::new(1.0_f32, get_scheme().border_primary);
     let scheme = get_scheme();
     let mut font_id = egui::TextStyle::Monospace.resolve(ui.style());
     font_id.size = 11.0;
+    let notch = notch_length(telemetry_mode);
+    let label_gap = y_axis_label_margin(telemetry_mode);
 
     let draw_tick = |tick| {
         let value = DVec2::new(bounds.min_x, tick);
         let screen_pos = bounds.value_to_screen_pos(rect, value);
         let screen_pos = egui::pos2(inner_rect.min.x, screen_pos.y);
         ui.painter().line_segment(
-            [screen_pos, screen_pos - egui::vec2(NOTCH_LENGTH, 0.0)],
+            [screen_pos, screen_pos - egui::vec2(notch, 0.0)],
             border_stroke,
         );
 
         ui.painter().text(
-            screen_pos - egui::vec2(NOTCH_LENGTH + Y_AXIS_LABEL_MARGIN, 0.0),
+            screen_pos - egui::vec2(notch + label_gap, 0.0),
             egui::Align2::RIGHT_CENTER,
             format_num(tick),
             font_id.clone(),
@@ -1225,13 +1471,13 @@ pub fn draw_cursor(
     ui.painter().vline(
         x_offset + rect.min.x,
         0.0..=inner_rect.max.y,
-        egui::Stroke::new(1.0, get_scheme().border_primary),
+        egui::Stroke::new(1.0_f32, get_scheme().border_primary),
     );
 
     ui.painter().hline(
         inner_rect.min.x..=inner_rect.max.x,
         pointer_pos.y,
-        egui::Stroke::new(1.0, get_scheme().border_primary),
+        egui::Stroke::new(1.0_f32, get_scheme().border_primary),
     );
 }
 
@@ -1244,7 +1490,7 @@ pub fn draw_borders(ui: &mut egui::Ui, rect: egui::Rect, inner_rect: egui::Rect)
     ui.painter()
         .rect_filled(x_bg_rect, CornerRadius::ZERO, border_bg_color);
 
-    let border_stroke = egui::Stroke::new(1.0, get_scheme().border_primary);
+    let border_stroke = egui::Stroke::new(1.0_f32, get_scheme().border_primary);
     let left_border = [inner_rect.left_top(), inner_rect.left_bottom()];
     ui.painter().line_segment(left_border, border_stroke);
 
@@ -1303,73 +1549,120 @@ pub fn auto_y_bounds(
     line_handles: Query<&LineHandle>,
     mut lines: ResMut<Assets<Line>>,
     mut xy_lines: ResMut<Assets<XYLine>>,
+    mut last_run: Local<Option<std::time::Instant>>,
 ) {
+    let short = crate::is_short_accuracy_window(&selected_range.0);
+    // Short windows: SelectedTimeRange tracks the playhead every frame — do not
+    // hard-resync Y on every tick. Long windows: still refresh on range change.
+    let range_changed = selected_range.is_changed();
+    let due = last_run
+        .map(|t| t.elapsed() >= std::time::Duration::from_millis(50))
+        .unwrap_or(true);
+
+    // Drop the cache while auto-Y is off, even between 50ms ticks, so turning
+    // Auto Bounds back on after a manual min/max does not reuse the old pass.
     for mut graph_state in graph_states.iter_mut() {
-        if graph_state.auto_y_range {
-            let mut y_min: Option<f32> = None;
-            let mut y_max: Option<f32> = None;
+        if !graph_state.auto_y_range {
+            graph_state.auto_y_cache = None;
+        }
+    }
 
-            for (entity, _) in graph_state.enabled_lines.values() {
-                let Ok(handle) = line_handles.get(*entity) else {
-                    continue;
-                };
-                let Some(line) = handle.get(&mut lines, &mut xy_lines) else {
-                    continue;
-                };
-                if let gpu::LineMut::Timeseries(line) = line {
-                    // For small datasets (live streaming), use fast range_summary
-                    // For large datasets (historical/overview), use percentile_bounds to filter outliers
-                    let summary = line.data.range_summary(selected_range.0.clone());
+    if short {
+        if !due {
+            return;
+        }
+    } else if !range_changed && !due {
+        return;
+    }
+    *last_run = Some(std::time::Instant::now());
 
-                    let (line_min, line_max) = if summary.len > OVERVIEW_MAX_POINTS {
-                        // Large dataset - use percentile bounds to filter outliers
-                        // This is expensive but necessary for historical data with corrupt values
-                        line.data
-                            .percentile_bounds(selected_range.0.clone(), 1.0, 99.0)
-                            .unwrap_or((summary.min.unwrap_or(0.0), summary.max.unwrap_or(1.0)))
-                    } else {
-                        // Small dataset (live streaming) - use fast summary
-                        // Fresh data from sensors doesn't have the outlier problem
-                        (summary.min.unwrap_or(0.0), summary.max.unwrap_or(1.0))
-                    };
+    for mut graph_state in graph_states.iter_mut() {
+        if !graph_state.auto_y_range {
+            continue;
+        }
 
-                    if line_min.is_finite() {
-                        if let Some(v) = &mut y_min {
-                            *v = v.min(line_min);
-                        } else {
-                            y_min = Some(line_min)
-                        }
-                    }
-                    if line_max.is_finite() {
-                        if let Some(v) = &mut y_max {
-                            *v = v.max(line_max);
-                        } else {
-                            y_max = Some(line_max)
-                        }
-                    }
-                }
+        let mut content_sig = graph_state.enabled_lines.len() as u64;
+        for (entity, _) in graph_state.enabled_lines.values() {
+            let Ok(handle) = line_handles.get(*entity) else {
+                continue;
+            };
+            let Some(line) = handle.get(&mut lines, &mut xy_lines) else {
+                continue;
+            };
+            content_sig = content_sig
+                .rotate_left(7)
+                .wrapping_add(line.content_gen())
+                .wrapping_add(entity.to_bits());
+        }
+        let cache_key = (
+            selected_range.0.start.0,
+            selected_range.0.end.0,
+            content_sig,
+            graph_state.graph_type,
+        );
+        if graph_state.auto_y_cache == Some(cache_key) {
+            continue;
+        }
+
+        let mut y_min: Option<f32> = None;
+        let mut y_max: Option<f32> = None;
+        for (entity, _) in graph_state.enabled_lines.values() {
+            let Ok(handle) = line_handles.get(*entity) else {
+                continue;
+            };
+            let Some(line) = handle.get(&mut lines, &mut xy_lines) else {
+                continue;
+            };
+            let gpu::LineMut::Timeseries(line) = line else {
+                continue;
+            };
+            let data_range =
+                gpu::timeseries_data_range(line, selected_range.0.clone(), graph_state.graph_type);
+            let summary = line.data.range_summary(data_range.clone());
+            let (line_min, line_max) = if summary.len > OVERVIEW_MAX_POINTS {
+                line.data
+                    .percentile_bounds(data_range, 1.0, 99.0)
+                    .unwrap_or((summary.min.unwrap_or(0.0), summary.max.unwrap_or(1.0)))
+            } else {
+                (summary.min.unwrap_or(0.0), summary.max.unwrap_or(1.0))
+            };
+
+            if line_min.is_finite() {
+                y_min = Some(y_min.map_or(line_min, |v| v.min(line_min)));
             }
-
-            // Only update y_range if we found valid data from enabled_lines
-            // Skip if no lines found - this prevents overwriting y_range set by other systems
-            // (e.g., query_plot's auto_bounds which uses line_entity, not enabled_lines)
-            if let (Some(min), Some(max)) = (y_min, y_max) {
-                let (padded_min, padded_max) = calculate_padded_y_bounds(min as f64, max as f64);
-                graph_state.y_range = padded_min..padded_max;
+            if line_max.is_finite() {
+                y_max = Some(y_max.map_or(line_max, |v| v.max(line_max)));
             }
+        }
+
+        // Skip if no lines found — do not overwrite y_range set by other systems
+        // (e.g., query_plot's auto_bounds which uses line_entity, not enabled_lines).
+        if let (Some(min), Some(max)) = (y_min, y_max) {
+            let (padded_min, padded_max) = calculate_padded_y_bounds(min as f64, max as f64);
+            if short && !should_update_short_window_y(&graph_state.y_range, padded_min, padded_max)
+            {
+                graph_state.auto_y_cache = Some(cache_key);
+                continue;
+            }
+            graph_state.y_range = padded_min..padded_max;
+            graph_state.auto_y_cache = Some(cache_key);
         }
     }
 }
 
 #[allow(clippy::type_complexity)]
 pub fn sync_graphs(
-    mut graph_states: Query<&mut GraphState>,
+    mut graph_states: Query<
+        (Entity, &mut GraphState),
+        Without<crate::ui::query_plot::QueryPlotData>,
+    >,
     metadata_store: Res<ComponentMetadataRegistry>,
     schema_store: Res<ComponentSchemaRegistry>,
     mut collected_graph_data: ResMut<CollectedGraphData>,
+    mut lines: ResMut<Assets<Line>>,
     mut commands: Commands,
 ) {
-    for mut graph_state in graph_states.iter_mut() {
+    for (graph_entity, mut graph_state) in graph_states.iter_mut() {
         let graph_state = &mut *graph_state;
 
         for (component_path, component_values) in &graph_state.components {
@@ -1377,7 +1670,7 @@ pub fn sync_graphs(
             let Some(component_metadata) = metadata_store.get_metadata(component_id) else {
                 continue;
             };
-            let component = collected_graph_data
+            collected_graph_data
                 .components
                 .entry(*component_id)
                 .or_insert_with(|| {
@@ -1398,18 +1691,21 @@ pub fn sync_graphs(
                 });
 
             for (value_index, (enabled, color)) in component_values.iter().enumerate() {
+                // Ensure a Line asset exists so we can spawn GPU entities before
+                // SeriesStore has projected samples into the tree.
+                let line = collected_graph_data
+                    .ensure_line_handle(*component_id, value_index, &mut lines)
+                    .expect("component was inserted above");
+
                 let entity = graph_state
                     .enabled_lines
                     .get_mut(&(component_path.clone(), value_index));
-                let Some(line) = component.lines.get(&value_index) else {
-                    continue;
-                };
 
                 match (entity, enabled) {
                     (None, true) => {
                         let entity = commands
                             .spawn(LineBundle {
-                                line: LineHandle::Timeseries(line.clone()),
+                                line: LineHandle::Timeseries(line),
                                 uniform: LineUniform::new(
                                     graph_state.line_width,
                                     color.into_bevy(),
@@ -1422,6 +1718,7 @@ pub fn sync_graphs(
                             })
                             .insert(Name::new("line"))
                             .insert(LineWidgetWidth(graph_state.widget_width as usize))
+                            .insert(ChildOf(graph_entity))
                             .id();
                         graph_state
                             .enabled_lines
@@ -1440,24 +1737,290 @@ pub fn sync_graphs(
                             .try_insert(LineUniform::new(graph_state.line_width, color.into_bevy()))
                             .try_insert(graph_state.graph_type)
                             .try_insert(LineWidgetWidth(graph_state.widget_width as usize))
-                            .try_insert(graph_state.visible_range.clone());
+                            .try_insert(graph_state.visible_range.clone())
+                            .try_insert(LineHandle::Timeseries(line))
+                            .try_insert(ChildOf(graph_entity));
                     }
                     (None, false) => {}
                 }
             }
         }
 
-        graph_state
-            .enabled_lines
-            .retain(|(component_path, index), _| {
-                graph_state
-                    .components
-                    .get(component_path)
-                    .and_then(|component| component.get(*index))
-                    .is_some()
-            });
+        despawn_stale_enabled_lines(graph_state, &mut commands);
     }
 }
+
+pub fn sync_derived_graphs(
+    mut graph_states: Query<(Entity, &mut GraphState)>,
+    cache: Res<TelemetryCache>,
+    selected_range: Res<SelectedTimeRange>,
+    earliest: Res<EarliestTimestamp>,
+    mut lines: ResMut<Assets<Line>>,
+    mut commands: Commands,
+) {
+    let range = selected_range.0.clone();
+    if range.start >= range.end {
+        return;
+    }
+    let range_key = (range.start.0, range.end.0);
+    let generation = cache.generation();
+    let max_points =
+        (range.end.0.saturating_sub(range.start.0) > 600_000_000).then_some(OVERVIEW_MAX_POINTS);
+
+    for (graph_entity, mut graph_state) in &mut graph_states {
+        let Some(derived) = graph_state.derived.as_ref() else {
+            continue;
+        };
+        if derived.last_generation == generation && derived.last_range == Some(range_key) {
+            continue;
+        }
+        let expr = derived.expr.clone();
+        let dependencies = derived.dependencies.clone();
+        let path = derived.path.clone();
+        let colors = derived.colors.clone();
+        let evaluated =
+            match evaluate_series(&cache, &expr, &dependencies, range.clone(), max_points) {
+                Ok(evaluated) => evaluated,
+                Err(err) => {
+                    warn_once!(?err, "derived graph evaluation failed");
+                    let derived = graph_state.derived.as_mut().expect("checked above");
+                    derived.last_generation = generation;
+                    derived.last_range = Some(range_key);
+                    continue;
+                }
+            };
+
+        {
+            let label = graph_state.label.clone();
+            let derived = graph_state.derived.as_mut().expect("checked above");
+            while derived.lines.len() < evaluated.values.len() {
+                let index = derived.lines.len();
+                let line_label = if evaluated.values.len() == 1 {
+                    label.clone()
+                } else {
+                    format!("{label}[{index}]")
+                };
+                derived.lines.push(lines.add(Line {
+                    label: line_label,
+                    ..Default::default()
+                }));
+            }
+            for (handle, values) in derived.lines.iter().zip(&evaluated.values) {
+                if let Some(mut line) = lines.get_mut(handle) {
+                    line.data.rebuild_from_time_value_pairs(
+                        earliest.0,
+                        &evaluated.timestamps,
+                        values,
+                    );
+                }
+            }
+            derived.last_generation = generation;
+            derived.last_range = Some(range_key);
+        }
+
+        let handles = graph_state
+            .derived
+            .as_ref()
+            .expect("checked above")
+            .lines
+            .iter()
+            .take(evaluated.values.len())
+            .cloned()
+            .collect::<Vec<_>>();
+        for (index, handle) in handles.into_iter().enumerate() {
+            let color = colors
+                .get(index)
+                .copied()
+                .unwrap_or_else(|| crate::ui::colors::get_color_by_index_all(index));
+            let key = (path.clone(), index);
+            if let Some((entity, existing_color)) = graph_state.enabled_lines.get_mut(&key) {
+                *existing_color = color;
+                commands
+                    .entity(*entity)
+                    .try_insert(LineHandle::Timeseries(handle))
+                    .try_insert(LineUniform::new(graph_state.line_width, color.into_bevy()))
+                    .try_insert(graph_state.graph_type)
+                    .try_insert(LineWidgetWidth(graph_state.widget_width as usize))
+                    .try_insert(graph_state.visible_range.clone());
+            } else {
+                let entity = commands
+                    .spawn(LineBundle {
+                        line: LineHandle::Timeseries(handle),
+                        uniform: LineUniform::new(graph_state.line_width, color.into_bevy()),
+                        config: LineConfig {
+                            render_layers: graph_state.render_layers.clone(),
+                        },
+                        line_visible_range: graph_state.visible_range.clone(),
+                        graph_type: graph_state.graph_type,
+                    })
+                    .insert(Name::new("derived line"))
+                    .insert(LineWidgetWidth(graph_state.widget_width as usize))
+                    .insert(ChildOf(graph_entity))
+                    .id();
+                graph_state.enabled_lines.insert(key, (entity, color));
+            }
+        }
+        let stale = graph_state
+            .enabled_lines
+            .keys()
+            .filter(|(component_path, index)| {
+                component_path == &path && *index >= evaluated.values.len()
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for key in stale {
+            if let Some((entity, _)) = graph_state.enabled_lines.remove(&key) {
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+}
+
+#[cfg(not(target_family = "wasm"))]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+pub fn sync_kernel_graphs(
+    mut graph_states: Query<(Entity, &mut GraphState)>,
+    cache: Res<TelemetryCache>,
+    selected_range: Res<SelectedTimeRange>,
+    earliest: Res<EarliestTimestamp>,
+    mut lines: ResMut<Assets<Line>>,
+    mut commands: Commands,
+    mut kernels: ResMut<crate::plugins::display_kernel::DisplayKernelCache>,
+    connection_addr: Option<Res<impeller_bevy::ConnectionAddr>>,
+    initial_kdl: Option<Res<crate::plugins::kdl_document::InitialKdlPath>>,
+) {
+    use crate::plugins::display_kernel::{KernelStatus, evaluate_kernel_series, kernel_fetch_ctx};
+
+    let range = selected_range.0.clone();
+    if range.start >= range.end {
+        return;
+    }
+    let range_key = (range.start.0, range.end.0);
+    let generation = cache.generation();
+    let max_points =
+        (range.end.0.saturating_sub(range.start.0) > 600_000_000).then_some(OVERVIEW_MAX_POINTS);
+    let fetch = kernel_fetch_ctx(connection_addr, initial_kdl);
+
+    for (graph_entity, mut graph_state) in &mut graph_states {
+        let Some(kernel) = graph_state.kernel.as_ref() else {
+            continue;
+        };
+        if kernel.last_generation == generation && kernel.last_range == Some(range_key) {
+            continue;
+        }
+        let binding = kernel.binding.clone();
+        let path = kernel.path.clone();
+        let colors = kernel.colors.clone();
+        let compiled = match kernels.poll(&binding, &fetch) {
+            KernelStatus::Ready(compiled) => compiled,
+            KernelStatus::Loading => continue,
+            // Do not stamp last_generation. `poll` retries a fetch miss on
+            // its own backoff; stamping skips that until telemetry or the
+            // visible range changes.
+            KernelStatus::Failed(err) => {
+                warn_once!(?err, "display kernel graph failed to load");
+                continue;
+            }
+        };
+        let evaluated =
+            match evaluate_kernel_series(&cache, compiled, &binding, range.clone(), max_points) {
+                Ok(evaluated) => evaluated,
+                Err(err) => {
+                    warn_once!(?err, "display kernel graph evaluation failed");
+                    // Leave the cursor unset so a later sample can succeed
+                    // without waiting for a telemetry generation bump.
+                    continue;
+                }
+            };
+
+        {
+            let label = graph_state.label.clone();
+            let kernel = graph_state.kernel.as_mut().expect("checked above");
+            while kernel.lines.len() < evaluated.values.len() {
+                let index = kernel.lines.len();
+                let line_label = if evaluated.values.len() == 1 {
+                    label.clone()
+                } else {
+                    format!("{label}[{index}]")
+                };
+                kernel.lines.push(lines.add(Line {
+                    label: line_label,
+                    ..Default::default()
+                }));
+            }
+            for (handle, values) in kernel.lines.iter().zip(&evaluated.values) {
+                if let Some(mut line) = lines.get_mut(handle) {
+                    line.data.rebuild_from_time_value_pairs(
+                        earliest.0,
+                        &evaluated.timestamps,
+                        values,
+                    );
+                }
+            }
+            kernel.last_generation = generation;
+            kernel.last_range = Some(range_key);
+        }
+
+        let handles = graph_state
+            .kernel
+            .as_ref()
+            .expect("checked above")
+            .lines
+            .iter()
+            .take(evaluated.values.len())
+            .cloned()
+            .collect::<Vec<_>>();
+        for (index, handle) in handles.into_iter().enumerate() {
+            let color = colors
+                .get(index)
+                .copied()
+                .unwrap_or_else(|| crate::ui::colors::get_color_by_index_all(index));
+            let key = (path.clone(), index);
+            if let Some((entity, existing_color)) = graph_state.enabled_lines.get_mut(&key) {
+                *existing_color = color;
+                commands
+                    .entity(*entity)
+                    .try_insert(LineHandle::Timeseries(handle))
+                    .try_insert(LineUniform::new(graph_state.line_width, color.into_bevy()))
+                    .try_insert(graph_state.graph_type)
+                    .try_insert(LineWidgetWidth(graph_state.widget_width as usize))
+                    .try_insert(graph_state.visible_range.clone());
+            } else {
+                let entity = commands
+                    .spawn(LineBundle {
+                        line: LineHandle::Timeseries(handle),
+                        uniform: LineUniform::new(graph_state.line_width, color.into_bevy()),
+                        config: LineConfig {
+                            render_layers: graph_state.render_layers.clone(),
+                        },
+                        line_visible_range: graph_state.visible_range.clone(),
+                        graph_type: graph_state.graph_type,
+                    })
+                    .insert(Name::new("kernel line"))
+                    .insert(LineWidgetWidth(graph_state.widget_width as usize))
+                    .insert(ChildOf(graph_entity))
+                    .id();
+                graph_state.enabled_lines.insert(key, (entity, color));
+            }
+        }
+        let stale = graph_state
+            .enabled_lines
+            .keys()
+            .filter(|(component_path, index)| {
+                component_path == &path && *index >= evaluated.values.len()
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        for key in stale {
+            if let Some((entity, _)) = graph_state.enabled_lines.remove(&key) {
+                commands.entity(entity).despawn();
+            }
+        }
+    }
+}
+
+#[cfg(target_family = "wasm")]
+pub fn sync_kernel_graphs() {}
 
 /// New locks adopt X from current leader but don't become leader yet.
 #[allow(clippy::type_complexity)]
@@ -2075,5 +2638,111 @@ pub fn graph_touch(
             }
             TouchGestures::None => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod short_window_y_tests {
+    use super::{
+        despawn_stale_enabled_lines, has_timeseries_selection, should_update_short_window_y,
+    };
+    use crate::{
+        plugins::render_layer_alloc::RenderLayerAllocator,
+        ui::plot::{DerivedGraph, GraphBundle, KernelGraph},
+    };
+    use bevy::{ecs::system::SystemState, prelude::*};
+    use impeller_bevy::ComponentPath;
+    use impeller_wkt::DisplayKernelBinding;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn derived_graph_counts_as_a_timeseries_selection() {
+        let mut allocator = RenderLayerAllocator::default();
+        let mut graph_state =
+            GraphBundle::try_new(&mut allocator, BTreeMap::new(), "sqrt".to_string())
+                .expect("render layer")
+                .graph_state;
+        assert!(!has_timeseries_selection(&graph_state));
+
+        graph_state.derived = Some(DerivedGraph {
+            source: "sample.value.sqrt()".to_string(),
+            expr: eql::Expr::FloatLiteral(0.0),
+            dependencies: Vec::new(),
+            lines: Vec::new(),
+            colors: Vec::new(),
+            path: ComponentPath::from_name("derived.sqrt"),
+            last_generation: 0,
+            last_range: None,
+        });
+        assert!(has_timeseries_selection(&graph_state));
+    }
+
+    #[test]
+    fn kernel_graph_lines_survive_eql_retain() {
+        let mut allocator = RenderLayerAllocator::default();
+        let mut graph_state =
+            GraphBundle::try_new(&mut allocator, BTreeMap::new(), "chol".to_string())
+                .expect("render layer")
+                .graph_state;
+        let path = ComponentPath::from_name("kernel.chol");
+        graph_state.kernel = Some(KernelGraph {
+            binding: DisplayKernelBinding {
+                hash: "abc".into(),
+                asset: "schematics/kernels/abc".into(),
+                inputs: Vec::new(),
+            },
+            dependencies: Vec::new(),
+            lines: vec![bevy::asset::Handle::default(); 2],
+            colors: Vec::new(),
+            path: path.clone(),
+            last_generation: 0,
+            last_range: None,
+        });
+        let mut world = World::new();
+        let line_0 = world.spawn_empty().id();
+        let line_1 = world.spawn_empty().id();
+        let stale_line = world.spawn_empty().id();
+        graph_state
+            .enabled_lines
+            .insert((path.clone(), 0), (line_0, bevy_egui::egui::Color32::WHITE));
+        graph_state
+            .enabled_lines
+            .insert((path.clone(), 1), (line_1, bevy_egui::egui::Color32::WHITE));
+        graph_state.enabled_lines.insert(
+            (path.clone(), 2),
+            (stale_line, bevy_egui::egui::Color32::WHITE),
+        );
+
+        let mut system_state: SystemState<Commands> = SystemState::new(&mut world);
+        let mut commands = system_state.get_mut(&mut world).expect("commands");
+        despawn_stale_enabled_lines(&mut graph_state, &mut commands);
+        system_state.apply(&mut world);
+
+        assert_eq!(graph_state.enabled_lines.len(), 2);
+        assert!(graph_state.enabled_lines.contains_key(&(path.clone(), 0)));
+        assert!(graph_state.enabled_lines.contains_key(&(path.clone(), 1)));
+        assert!(!graph_state.enabled_lines.contains_key(&(path, 2)));
+        assert!(world.get_entity(line_0).is_ok());
+        assert!(world.get_entity(line_1).is_ok());
+        assert!(world.get_entity(stale_line).is_err());
+    }
+
+    #[test]
+    fn short_y_hysteresis_ignores_small_drift() {
+        let current = 0.0..10.0;
+        assert!(!should_update_short_window_y(&current, 0.2, 9.8));
+    }
+
+    #[test]
+    fn short_y_hysteresis_expands_on_outlier() {
+        let current = 0.0..10.0;
+        assert!(should_update_short_window_y(&current, -1.0, 10.0));
+        assert!(should_update_short_window_y(&current, 0.0, 12.0));
+    }
+
+    #[test]
+    fn short_y_hysteresis_shrinks_when_much_smaller() {
+        let current = 0.0..10.0;
+        assert!(should_update_short_window_y(&current, 4.0, 6.0));
     }
 }

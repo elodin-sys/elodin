@@ -128,7 +128,6 @@ pub struct TerrainViewData {
 
 impl TerrainViewData {
     fn new(device: &RenderDevice, tile_tree: &TileTree, gpu_tile_tree: &GpuTileTree) -> Self {
-        // Todo: figure out a better way of limiting the tile buffer size
         let tile_buffer_size =
             TileCoordinate::min_size().get() * tile_tree.geometry_tile_count as BufferAddress;
 

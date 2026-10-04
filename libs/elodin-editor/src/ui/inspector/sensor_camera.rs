@@ -4,6 +4,7 @@ use bevy::ecs::{
 };
 use bevy::prelude::Entity;
 use bevy_egui::egui::{self, Align};
+use impeller_wkt::FrustumUpMarker;
 
 use crate::{
     sensor_camera::SensorCameraConfigs,
@@ -11,13 +12,16 @@ use crate::{
         button::EButton,
         colors::{EColor, get_scheme},
         label::ELabel,
+        theme,
         utils::MarginSides,
         video_stream::VideoStream,
         widgets::WidgetSystem,
     },
 };
 
+use super::viewport::frustum_up_marker_label;
 use super::{color_popup, empty_inspector};
+use crate::ui::widgets::SystemStateExt;
 
 #[derive(SystemParam)]
 pub struct InspectorSensorCamera<'w, 's> {
@@ -40,7 +44,7 @@ impl WidgetSystem for InspectorSensorCamera<'_, '_> {
         let InspectorSensorCamera {
             streams,
             mut configs,
-        } = state.get_mut(world);
+        } = state.params_mut(world);
 
         let Ok(stream) = streams.get(stream_entity) else {
             ui.add(empty_inspector());
@@ -137,7 +141,7 @@ impl WidgetSystem for InspectorSensorCamera<'_, '_> {
                             let swatch = ui.add(
                                 egui::Button::new("")
                                     .fill(frustums_color)
-                                    .stroke(egui::Stroke::new(1.0, scheme.border_primary))
+                                    .stroke(egui::Stroke::new(1.0_f32, scheme.border_primary))
                                     .corner_radius(egui::CornerRadius::same(10))
                                     .min_size(egui::vec2(20.0, 20.0)),
                             );
@@ -148,7 +152,7 @@ impl WidgetSystem for InspectorSensorCamera<'_, '_> {
                             color_popup(ui, &mut frustums_color, color_id, &swatch);
                         });
                     });
-                    config.frustums_color = impeller2_wkt::Color::from_color32(frustums_color);
+                    config.frustums_color = impeller_wkt::Color::from_color32(frustums_color);
 
                     ui.add_space(8.0);
                     let mut projection_color = config.projection_color.into_color32();
@@ -160,7 +164,7 @@ impl WidgetSystem for InspectorSensorCamera<'_, '_> {
                             let swatch = ui.add(
                                 egui::Button::new("")
                                     .fill(projection_color)
-                                    .stroke(egui::Stroke::new(1.0, scheme.border_primary))
+                                    .stroke(egui::Stroke::new(1.0_f32, scheme.border_primary))
                                     .corner_radius(egui::CornerRadius::same(10))
                                     .min_size(egui::vec2(20.0, 20.0)),
                             );
@@ -171,7 +175,7 @@ impl WidgetSystem for InspectorSensorCamera<'_, '_> {
                             color_popup(ui, &mut projection_color, color_id, &swatch);
                         });
                     });
-                    config.projection_color = impeller2_wkt::Color::from_color32(projection_color);
+                    config.projection_color = impeller_wkt::Color::from_color32(projection_color);
 
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
@@ -186,6 +190,29 @@ impl WidgetSystem for InspectorSensorCamera<'_, '_> {
                             }
                         });
                     });
+
+                    ui.add_space(8.0);
+                    ui.label(egui::RichText::new("UP MARKER").color(scheme.text_secondary));
+                    ui.add_space(4.0);
+                    theme::configure_combo_box(ui.style_mut());
+                    ui.style_mut().spacing.combo_width = ui.available_size().x;
+                    egui::ComboBox::from_id_salt("sensor_camera_frustums_up_marker")
+                        .selected_text(frustum_up_marker_label(config.frustums_up_marker))
+                        .show_ui(ui, |ui| {
+                            theme::configure_combo_item(ui.style_mut());
+                            for marker in [FrustumUpMarker::None, FrustumUpMarker::Highlight] {
+                                ui.selectable_value(
+                                    &mut config.frustums_up_marker,
+                                    marker,
+                                    frustum_up_marker_label(marker),
+                                );
+                            }
+                        });
+
+                    if config.frustums_up_marker != FrustumUpMarker::None {
+                        ui.add_space(4.0);
+                        ui.checkbox(&mut config.frustums_up_marker_overlay, "Show on this pane");
+                    }
                 }
             });
     }

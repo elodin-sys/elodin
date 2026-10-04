@@ -1,6 +1,6 @@
 use bevy_egui::egui;
 use egui::color_picker::{Alpha, color_picker_color32};
-use impeller2_wkt::QueryType;
+use impeller_wkt::QueryType;
 
 use crate::ui::{
     button::{ECheckboxButton, EColorButton},
@@ -30,15 +30,15 @@ pub fn inspector_text_field(query: &mut String, hint_text: &str) -> impl egui::W
                 weak_bg_fill: scheme.bg_primary,
                 bg_stroke: egui::Stroke::NONE,
                 corner_radius: theme::corner_radius_xs(),
-                fg_stroke: egui::Stroke::new(1.0, scheme.text_primary),
+                fg_stroke: egui::Stroke::new(1.0_f32, scheme.text_primary),
                 expansion: 0.0,
             };
             ui.style_mut().visuals.widgets.active = egui::style::WidgetVisuals {
-                bg_stroke: egui::Stroke::new(1.0, scheme.highlight),
+                bg_stroke: egui::Stroke::new(1.0_f32, scheme.highlight),
                 ..ui.style_mut().visuals.widgets.inactive
             };
             ui.style_mut().visuals.widgets.hovered = egui::style::WidgetVisuals {
-                bg_stroke: egui::Stroke::new(1.0, scheme.highlight.opacity(0.5)),
+                bg_stroke: egui::Stroke::new(1.0_f32, scheme.highlight.opacity(0.5)),
                 ..ui.style_mut().visuals.widgets.inactive
             };
             let mut font_id = egui::TextStyle::Button.resolve(ui.style());
@@ -242,7 +242,7 @@ pub fn search(
                     ui.add(
                         egui::TextEdit::singleline(filter)
                             .desired_width(ui.available_width())
-                            .frame(false)
+                            .frame(egui::Frame::NONE)
                             .font(font_id),
                     );
                 });
@@ -251,12 +251,13 @@ pub fn search(
     .response
 }
 
-pub fn node_color_picker(ui: &mut egui::Ui, label: &str, color: &mut impeller2_wkt::Color) -> bool {
+pub fn node_color_picker(ui: &mut egui::Ui, label: &str, color: &mut impeller_wkt::Color) -> bool {
     let mut egui_color = color.into_color32();
     let res = ui.add(
         ECheckboxButton::new(label, true)
             .margin(egui::Margin::symmetric(0, 8))
             .on_color(egui_color)
+            .border_color(get_scheme().text_primary)
             .text_color(get_scheme().text_secondary)
             .left_label(true),
     );
@@ -268,7 +269,7 @@ pub fn node_color_picker(ui: &mut egui::Ui, label: &str, color: &mut impeller2_w
 
     color_popup(ui, &mut egui_color, color_id, &res);
 
-    let new_color = impeller2_wkt::Color::from_color32(egui_color);
+    let new_color = impeller_wkt::Color::from_color32(egui_color);
     let changed = new_color != *color;
     *color = new_color;
     ui.separator();
@@ -283,7 +284,7 @@ pub fn eql_textfield(
 ) -> egui::Response {
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
-        let eql_res = ui.add_enabled(enabled, query(eql, impeller2_wkt::QueryType::EQL));
+        let eql_res = ui.add_enabled(enabled, query(eql, impeller_wkt::QueryType::EQL));
         eql_autocomplete(ui, eql_ctx, &eql_res, eql);
         eql_res
     })

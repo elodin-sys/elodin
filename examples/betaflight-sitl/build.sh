@@ -14,6 +14,23 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BETAFLIGHT_DIR="$SCRIPT_DIR/betaflight"
+# Betaflight 2026.6.1 renamed the sync option to an ENABLE_* boolean macro;
+# OPTIONS entries become -D flags, so this yields -DENABLE_SIMULATOR_GYROPID_SYNC=1
+#
+# VIRTUAL_GYRO_SAMPLE_RATE_HZ (new in 2026.6.1) is Betaflight's compile-time
+# assumption about the virtual gyro/acc rate; it drives filter Nyquist/notch/
+# LPF setup and PID dt. The actual loop rate is set at runtime by the FDM
+# packet rate from the Python side (config.py simulation_rate) via lockstep.
+# The two MUST match, so keep SITL_RATE_HZ in sync with simulation_rate.
+SITL_RATE_HZ="${SITL_RATE_HZ:-8000}"
+#
+# RUN_LOOP_DELAY_US (new in 2026.6.1) inserts a real-time nanosleep into
+# Betaflight's main loop to cap its spin rate. In lockstep mode host scheduler
+# wakeup latency is paid directly on every packet->motor round trip, so the 8kHz
+# default busy-waits for minimum latency. Set this above 0 to trade loop rate for
+# lower CPU usage; 0 consumes approximately one CPU core.
+RUN_LOOP_DELAY_US="${RUN_LOOP_DELAY_US:-0}"
+BETAFLIGHT_OPTIONS="ENABLE_SIMULATOR_GYROPID_SYNC=1 VIRTUAL_GYRO_SAMPLE_RATE_HZ=$SITL_RATE_HZ RUN_LOOP_DELAY_US=$RUN_LOOP_DELAY_US"
 
 # Check if betaflight submodule is cloned (directory may exist as empty gitlink before update)
 if [ ! -f "$BETAFLIGHT_DIR/Makefile" ]; then
@@ -23,6 +40,32 @@ if [ ! -f "$BETAFLIGHT_DIR/Makefile" ]; then
 fi
 
 cd "$BETAFLIGHT_DIR"
+
+# Apply the SITL lockstep event patch to the submodule (idempotent). In
+# ENABLE_SIMULATOR_GYROPID_SYNC mode it makes a fully published FDM packet the
+# trigger for one gyro/filter/PID/mixer iteration, instead of the virtual-clock
+# schedule:
+#   - scheduler.c: run the realtime gyro/filter/PID group once per FDM packet by
+#     gating it on lockMainPID() (the stock mainLoopLock token the UDP thread
+#     releases at the end of updateState()), not on the simulated-clock boundary.
+#     Stock SITL paces that boundary by a free-running simRate estimate, so a
+#     slow patch (warmup, CPU contention) lowers simRate, which delays the gyro
+#     task, which slows the loop further - the rate never recovers.
+#   - core.c: drop the now-redundant per-task PID mutex gate (the whole group is
+#     gated at the boundary now).
+#   - platform.h: RUN_LOOP_DELAY_US becomes overridable so it can be set to 0.
+# Asynchronous SITL (lockstep disabled) is unchanged.
+LOCKSTEP_PATCH="$SCRIPT_DIR/patches/sitl-lockstep-event.patch"
+if git apply --check "$LOCKSTEP_PATCH" 2>/dev/null; then
+    git apply "$LOCKSTEP_PATCH"
+    echo "Applied SITL lockstep event patch to betaflight submodule"
+elif git apply -R --check "$LOCKSTEP_PATCH" 2>/dev/null; then
+    echo "SITL lockstep event patch already applied"
+else
+    echo "Error: $LOCKSTEP_PATCH does not apply cleanly."
+    echo "The betaflight submodule may have changed - the patch needs updating."
+    exit 1
+fi
 
 # macOS compatibility: clang doesn't support -fuse-linker-plugin (GCC-specific LTO flag)
 # and some warnings need to be disabled due to compiler differences
@@ -34,13 +77,14 @@ if [[ "$(uname)" == "Darwin" ]]; then
     MACOS_CFLAGS_DISABLED="-Werror -Wunsafe-loop-optimizations -fuse-linker-plugin"
 fi
 
-# Helper function to run make with proper flags
+# Helper function to run make with lockstep enabled and the proper platform flags
 run_make() {
     if [[ -n "$MACOS_OPTIMISATION_BASE" ]]; then
         # Use EXTRA_FLAGS to add -Wno-error which disables treating warnings as errors
-        make "OPTIMISATION_BASE=$MACOS_OPTIMISATION_BASE" "EXTRA_FLAGS=-Wno-error" "$@"
+        make "OPTIONS=$BETAFLIGHT_OPTIONS" \
+            "OPTIMISATION_BASE=$MACOS_OPTIMISATION_BASE" "EXTRA_FLAGS=-Wno-error" "$@"
     else
-        make "$@"
+        make "OPTIONS=$BETAFLIGHT_OPTIONS" "$@"
     fi
 }
 
@@ -60,6 +104,8 @@ case "${1:-build}" in
     build|"")
         echo "Building Betaflight SITL..."
         echo "  Target: SITL"
+        echo "  Gyro/PID rate: ${SITL_RATE_HZ} Hz (must match config.py simulation_rate)"
+        echo "  Run-loop delay: ${RUN_LOOP_DELAY_US} us (0 = busy-wait, best lockstep latency)"
         echo "  Output: $BETAFLIGHT_DIR/obj/main/betaflight_SITL.elf"
         echo ""
         
@@ -76,44 +122,25 @@ case "${1:-build}" in
             make configs
         fi
         
-        # Enable SIMULATOR_GYROPID_SYNC for lockstep synchronization with Elodin
-        # This makes Betaflight block on FDM packets, allowing tight timing control
-        TARGET_H="$BETAFLIGHT_DIR/src/platform/SIMULATOR/target/SITL/target.h"
-        if grep -q "^//#define SIMULATOR_GYROPID_SYNC" "$TARGET_H"; then
-            echo "Enabling SIMULATOR_GYROPID_SYNC for lockstep mode..."
-            sed -i.bak 's|^//#define SIMULATOR_GYROPID_SYNC|#define SIMULATOR_GYROPID_SYNC|' "$TARGET_H"
-            rm -f "${TARGET_H}.bak"
-        elif grep -q "^#define SIMULATOR_GYROPID_SYNC" "$TARGET_H"; then
-            echo "SIMULATOR_GYROPID_SYNC already enabled."
-        else
-            echo "Warning: Could not find SIMULATOR_GYROPID_SYNC in target.h"
-        fi
-        
-        # Build SITL target
+        # Build SITL target with ENABLE_SIMULATOR_GYROPID_SYNC enabled through OPTIONS.
+        # This makes Betaflight pace its gyro/PID loop to incoming FDM packets.
         JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
         
         # On macOS, we need to create stubs for missing SITL symbols and do a two-pass build
         if [[ "$(uname)" == "Darwin" ]]; then
             STUBS_C="$SCRIPT_DIR/macos_sitl_stubs.c"
-            STUBS_O="$BETAFLIGHT_DIR/obj/main/SITL/sitl_stubs.o"
+            STUBS_O="$BETAFLIGHT_DIR/obj/macos_sitl_stubs.o"
             
-            # Create stubs file for macOS (provides missing symbols)
+            # Create stubs file for macOS (only symbols the SITL Makefile leaves unresolved)
             cat > "$STUBS_C" << 'STUBS_EOF'
 /* macOS SITL Stubs - provides missing symbols for Betaflight SITL on macOS */
 #include <stdint.h>
 #include <stdbool.h>
 #include <stddef.h>
 
-/* GPS stubs */
-typedef struct { int32_t lat, lon, alt; uint16_t groundSpeed, groundCourse; uint8_t numSat, fixType; } gpsSolutionData_t;
-gpsSolutionData_t gpsSol = {0};
+/* Lap-timer PG storage. io/gps.c is compiled for SITL; this config object is not. */
 typedef struct { uint8_t gateEnabled; int32_t gateLat, gateLon; uint16_t gateDirection; uint8_t minimumLapTimeSeconds; } gpsLapTimerConfig_t;
 gpsLapTimerConfig_t gpsLapTimerConfig_System = {0};
-bool gpsHasNewData(void) { return false; }
-float getGpsDataFrequencyHz(void) { return 10.0f; }
-float getGpsDataIntervalSeconds(void) { return 0.1f; }
-void GPS_distance2d(int32_t *lat1, int32_t *lon1, int32_t *lat2, int32_t *lon2, uint32_t *dist) { if (dist) *dist = 0; }
-void GPS_distance_cm_bearing(int32_t *lat1, int32_t *lon1, int32_t *lat2, int32_t *lon2, uint32_t *dist, int32_t *bearing) { if (dist) *dist = 0; if (bearing) *bearing = 0; }
 
 /* Audio stubs */
 void audioSetupIO(void) {}
@@ -124,9 +151,16 @@ void audioGenerateWhiteNoise(void) {}
 /* Clock/timing stubs */
 float clockCyclesToMicrosf(uint32_t cycles) { return (float)cycles / 500.0f; }
 
-/* DMA stubs */
+/* DMA stubs.
+ * 2026.6.1 moved handler-count lookup behind dmaGetHandlerCount(); SITL has no
+ * DMA channels (DMA_LAST_HANDLER is DMA_NONE). */
 typedef struct { void *dummy; } dmaChannelDescriptor_t;
 dmaChannelDescriptor_t dmaDescriptors[16] = {{0}};
+int dmaGetHandlerCount(void) { return 0; }
+
+/* serialPinConfig PG storage. SITL sets SERIAL_TRAIT_PIN_CONFIG=0 so
+ * serial_pinconfig.c is not compiled, but init still calls serialPinConfig(). */
+uint8_t serialPinConfig_System[256] = {0};
 
 /* IO stubs */
 typedef void* IO_t;
@@ -147,7 +181,7 @@ STUBS_EOF
             echo "Building objects (first pass)..."
             run_make TARGET=SITL -j"$JOBS" || true
             
-            # Compile stubs
+            # Compile stubs outside the SITL object tree so they are not mixed into TARGET_OBJS
             echo "Compiling SITL stubs for macOS..."
             mkdir -p "$(dirname "$STUBS_O")"
             gcc -c -O2 -I"$BETAFLIGHT_DIR/src/main" \
@@ -155,14 +189,25 @@ STUBS_EOF
                 -I"$BETAFLIGHT_DIR/src/platform/SIMULATOR/target/SITL" \
                 -o "$STUBS_O" "$STUBS_C"
             
-            # Manual link with stubs included
+            # Link the Makefile's object list (not every .o under obj/) plus stubs.
+            # A raw find also picks up compile-only extras (dma_common, alternate
+            # autopilot PGs) that 2026.6.1 leaves in the tree but does not link.
             echo "Linking with stubs..."
-            OBJS=$(find "$BETAFLIGHT_DIR/obj/main/SITL" -name "*.o" | tr '\n' ' ')
+            PRINT_MK=$(mktemp)
+            printf 'print-sitl-objs:\n\t@echo $(TARGET_OBJS)\n' > "$PRINT_MK"
+            OBJS=$(run_make TARGET=SITL -s --no-print-directory -f Makefile -f "$PRINT_MK" print-sitl-objs)
+            rm -f "$PRINT_MK"
+            if [ -z "$OBJS" ]; then
+                echo "Error: failed to read SITL TARGET_OBJS from the Betaflight Makefile"
+                rm -f "$STUBS_C"
+                exit 1
+            fi
             # Use system clang for linking to avoid Nix toolchain compatibility issues
             # -Wl,-no_compact_unwind suppresses "could not create compact unwind" warnings
             # which occur because Betaflight's firmware code doesn't use standard stack frames
             /usr/bin/clang -o "$BETAFLIGHT_DIR/obj/main/betaflight_SITL.elf" \
                 $OBJS \
+                "$STUBS_O" \
                 -lm -lpthread \
                 -Wl,-no_compact_unwind \
                 -Wl,-map,"$BETAFLIGHT_DIR/obj/main/betaflight_SITL.map"
@@ -195,7 +240,7 @@ STUBS_EOF
         echo "Building Betaflight SITL with debug symbols..."
         # DEBUG=GDB uses simpler LTO flags that work on macOS
         JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
-        make TARGET=SITL DEBUG=GDB -j"$JOBS"
+        run_make TARGET=SITL DEBUG=GDB -j"$JOBS"
         echo "Debug build complete."
         ;;
     

@@ -5,12 +5,12 @@ A production-ready Rust client that demonstrates dynamic component discovery, sc
 ## 🚀 Features
 
 ### Core Capabilities
-- **TCP Connection**: Robust connection to Elodin-DB server using `impeller2-stellar`
+- **TCP Connection**: Robust connection to Elodin-DB server using `impeller-stellar`
 - **Dynamic Discovery**: Automatically discovers all components registered in the database
 - **Schema Detection**: Retrieves component schemas with data types and tensor shapes
 - **Real-Time Streaming**: Subscribes to telemetry streams with proper packet handling
 - **Bidirectional Control**: Send control commands to influence running simulations
-- **Type-Safe Protocol**: Uses the impeller2 wire protocol for all communication
+- **Type-Safe Protocol**: Uses the impeller wire protocol for all communication
 - **Smart Categorization**: Automatically groups rocket components by function
 
 ### Key Innovation: Zero Configuration Required
@@ -251,7 +251,7 @@ Key architectural elements:
 1. **Metadata-Based Declaration**: Components marked with `external_control: "true"` are not written back by the simulation
 2. **Write Authority**: External clients have exclusive write access to these components
 3. **Dirty Flag System**: Modified components are marked dirty for GPU synchronization
-4. **Real-Time Streaming**: Uses Impeller2 protocol with VTables for efficient data transmission
+4. **Real-Time Streaming**: Uses Impeller protocol with VTables for efficient data transmission
 
 ### Running the External Control Example
 
@@ -353,7 +353,7 @@ libs/db/examples/rust_client/
 - Categorizes components by function
 
 #### 2. **Client Module** (`client.rs`)
-- Manages TCP connection via `impeller2-stellar::Client`
+- Manages TCP connection via `impeller-stellar::Client`
 - Sets up real-time streaming subscriptions
 - Coordinates discovery and processing phases
 
@@ -397,9 +397,9 @@ The client leverages the Elodin ecosystem:
 
 | Crate | Purpose |
 |-------|---------|
-| `impeller2` | Core protocol types (`ComponentId`, `Schema`, `PrimType`) |
-| `impeller2-stellar` | TCP client with async support |
-| `impeller2-wkt` | Well-known message types |
+| `impeller` | Core protocol types (`ComponentId`, `Schema`, `PrimType`) |
+| `impeller-stellar` | TCP client with async support |
+| `impeller-wkt` | Well-known message types |
 | `stellarator` | Async runtime (tokio-based) |
 | `postcard` | Efficient serialization |
 | `colored` | Terminal output formatting |
@@ -499,15 +499,15 @@ If the dashboard appears garbled:
 
 The client uses three layers of abstraction:
 
-1. **Wire Protocol** (`impeller2`): Binary message format
+1. **Wire Protocol** (`impeller`): Binary message format
 2. **Transport** (`stellarator`): TCP with async I/O
-3. **Messages** (`impeller2-wkt`): Application-level messages
+3. **Messages** (`impeller-wkt`): Application-level messages
 
 ### Extending the Client
 
 To add new functionality:
 
-1. **New Message Types**: Add to `impeller2-wkt`
+1. **New Message Types**: Add to `impeller-wkt`
 2. **Custom Processing**: Extend `TelemetryProcessor`
 3. **New Displays**: Modify `display_telemetry()`
 

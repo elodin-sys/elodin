@@ -18,7 +18,7 @@ use bevy::{
     },
     pbr::{
         MaterialBindGroupAllocators, MaterialPlugin, MeshMaterial3d, MeshPipeline,
-        MeshPipelineViewLayoutKey, PreparedMaterial, SetMeshViewBindGroup,
+        MeshPipelineViewLayoutKey, PreparedMaterial, SetMeshViewBindGroup, ViewKeyCache,
     },
     prelude::*,
     render::{
@@ -31,7 +31,7 @@ use bevy::{
         render_resource::*,
         renderer::RenderDevice,
         sync_world::{MainEntity, MainEntityHashMap},
-        view::{ExtractedView, Msaa, ViewTarget},
+        view::{ExtractedView, Msaa},
         Extract, ExtractSchedule, Render, RenderApp, RenderSystems,
     },
     shader::{ShaderDefVal, ShaderRef},
@@ -49,6 +49,18 @@ use std::{any::TypeId, hash::Hash, marker::PhantomData};
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, SpecializerKey)]
 pub struct TerrainPipelineKey {
     pub flags: TerrainPipelineFlags,
+    /// The color target format of the view being rendered to. Bevy 0.19
+    /// removed `ExtractedView::hdr` / `ViewTarget::TEXTURE_FORMAT_HDR`;
+    /// the actual format now comes from `ExtractedView::target_format`.
+    pub target_format: TextureFormat,
+    /// The view's mesh-view bind group layout key. bevy_pbr prepares one
+    /// `mesh_view_bind_group` per view whose layout varies with the view's
+    /// features (MSAA, atmosphere, tonemap-in-shader, prepasses, SSAO, ...).
+    /// The terrain pipeline draws with that bind group at slot 0, so it must
+    /// specialize against the same layout or wgpu rejects the draw with a
+    /// bind-group/layout incompatibility. Derived per view from bevy_pbr's
+    /// `ViewKeyCache` in `queue_terrain`.
+    pub view_layout_key: MeshPipelineViewLayoutKey,
 }
 
 bitflags::bitflags! {
@@ -73,7 +85,6 @@ bitflags::bitflags! {
         const TEST1              = 1 << 14;
         const TEST2              = 1 << 15;
         const TEST3              = 1 << 16;
-        const HDR                = 1 << 17;
         const MSAA_RESERVED_BITS = TerrainPipelineFlags::MSAA_MASK_BITS << TerrainPipelineFlags::MSAA_SHIFT_BITS;
     }
 }
@@ -221,8 +232,14 @@ impl TerrainPipelineFlags {
 /// group layout (swapped between msaa and non-msaa), and the dynamic shader
 /// defs get touched here.
 pub struct TerrainSpecializer<M: Material> {
-    view_layout: BindGroupLayoutDescriptor,
-    view_layout_multisampled: BindGroupLayoutDescriptor,
+    /// Clone of bevy_pbr's `MeshPipeline`, used to resolve the view bind
+    /// group layout for the exact `MeshPipelineViewLayoutKey` carried by the
+    /// pipeline key. Caching just the empty/multisampled layouts (the
+    /// pre-compositing behavior) breaks as soon as a view carries extra
+    /// features — the cinematic-Earth atmosphere bindings or a sensor
+    /// camera's tonemap-in-shader LUTs — because the view's actual bind
+    /// group then has entries the terrain pipeline's layout lacks.
+    mesh_pipeline: MeshPipeline,
     /// Snapshot of the bevy_pbr `MeshPipeline`'s runtime feature detection,
     /// cached at construction so `specialize` can push the same conditional
     /// shader_defs that `bevy_pbr::mesh_view_bindings.wgsl` expects. Without
@@ -262,25 +279,30 @@ impl<M: Material> Specializer<RenderPipeline> for TerrainSpecializer<M> {
             shader_defs.push("CLUSTERED_DECALS_ARE_USABLE".into());
         }
 
-        // Swap the view layout at index 0 depending on MSAA. Terrain/
+        // Use the view's own mesh-view layout at index 0 (MSAA, atmosphere,
+        // tonemapping, prepasses, ...). The terrain shader only references
+        // the always-present subset of the view bindings, which wgpu allows:
+        // the layout may be a superset of what the shader declares, but it
+        // must match the bind group bevy_pbr created for the view. Terrain/
         // terrain-view/material layouts at indices 1/2/3 stay as the base
         // descriptor set them.
-        if key.flags.msaa_samples() > 1 {
+        if key
+            .view_layout_key
+            .contains(MeshPipelineViewLayoutKey::MULTISAMPLED)
+        {
             shader_defs.push("MULTISAMPLED".into());
-            descriptor.layout[0] = self.view_layout_multisampled.clone();
-        } else {
-            descriptor.layout[0] = self.view_layout.clone();
         }
+        descriptor.layout[0] = self
+            .mesh_pipeline
+            .get_view_layout(key.view_layout_key)
+            .main_layout
+            .clone();
 
         descriptor.primitive.polygon_mode = key.flags.polygon_mode();
         descriptor.multisample.count = key.flags.msaa_samples();
         if let Some(fragment) = &mut descriptor.fragment {
             if let Some(Some(target)) = fragment.targets.first_mut() {
-                target.format = if key.flags.contains(TerrainPipelineFlags::HDR) {
-                    ViewTarget::TEXTURE_FORMAT_HDR
-                } else {
-                    TextureFormat::bevy_default()
-                };
+                target.format = key.target_format;
             }
         }
 
@@ -319,13 +341,11 @@ impl<M: Material> FromWorld for TerrainRenderPipeline<M> {
         // plus separate binding-array and empty layouts (wgpu 25 moved
         // binding-array resources into a separate bind group). We only need
         // the primary view layout at slot 0 -- we don't participate in
-        // bevy_pbr's binding array group.
+        // bevy_pbr's binding array group. The base descriptor carries the
+        // empty-key layout as a placeholder; the specializer swaps in the
+        // per-view layout for the actual `MeshPipelineViewLayoutKey`.
         let view_layout = mesh_pipeline
             .get_view_layout(MeshPipelineViewLayoutKey::empty())
-            .main_layout
-            .clone();
-        let view_layout_multisampled = mesh_pipeline
-            .get_view_layout(MeshPipelineViewLayoutKey::MULTISAMPLED)
             .main_layout
             .clone();
         let terrain_layout = create_terrain_layout();
@@ -355,7 +375,7 @@ impl<M: Material> FromWorld for TerrainRenderPipeline<M> {
                 terrain_view_layout,
                 material_layout,
             ],
-            push_constant_ranges: default(),
+            immediate_size: 0,
             zero_initialize_workgroup_memory: false,
             vertex: VertexState {
                 shader: vertex_shader,
@@ -377,15 +397,17 @@ impl<M: Material> FromWorld for TerrainRenderPipeline<M> {
                 shader_defs: Vec::new(),
                 entry_point: Some("fragment".into()),
                 targets: vec![Some(ColorTargetState {
-                    format: TextureFormat::bevy_default(),
+                    // Placeholder; the specializer overwrites this with the
+                    // view's actual `target_format`.
+                    format: TextureFormat::Rgba8UnormSrgb,
                     blend: Some(BlendState::REPLACE),
                     write_mask: ColorWrites::ALL,
                 })],
             }),
             depth_stencil: Some(DepthStencilState {
                 format: TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: CompareFunction::Greater,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(CompareFunction::Greater),
                 stencil: StencilState {
                     front: StencilFaceState::IGNORE,
                     back: StencilFaceState::IGNORE,
@@ -406,10 +428,9 @@ impl<M: Material> FromWorld for TerrainRenderPipeline<M> {
         };
 
         let specializer = TerrainSpecializer::<M> {
-            view_layout,
-            view_layout_multisampled,
             binding_arrays_are_usable: mesh_pipeline.binding_arrays_are_usable,
             clustered_decals_are_usable: mesh_pipeline.clustered_decals_are_usable,
+            mesh_pipeline: mesh_pipeline.clone(),
             marker: PhantomData,
         };
 
@@ -489,7 +510,6 @@ pub(crate) fn extract_terrain_materials<M: Material>(
 /// and `MaterialBindGroupAllocators` (indexed by `TypeId::of::<M>()`).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn queue_terrain<M: Material>(
-    change_tick: bevy::ecs::system::SystemChangeTick,
     draw_functions: Res<DrawFunctions<Opaque3d>>,
     debug: Option<Res<DebugTerrain>>,
     render_materials: Res<ErasedRenderAssets<PreparedMaterial>>,
@@ -498,15 +518,25 @@ pub(crate) fn queue_terrain<M: Material>(
     mut opaque_render_phases: ResMut<ViewBinnedRenderPhases<Opaque3d>>,
     gpu_tile_atlases: Res<TerrainComponents<GpuTileAtlas>>,
     material_instances: Res<TerrainMaterialInstances<M>>,
+    view_key_cache: Res<ViewKeyCache>,
     views: Query<(&ExtractedView, &Msaa)>,
 ) {
-    let change_tick = change_tick.this_run();
     let draw_function = draw_functions.read().get_id::<DrawTerrain<M>>().unwrap();
 
     for (view, msaa) in &views {
         let Some(phase) = opaque_render_phases.get_mut(&view.retained_view_entity) else {
             continue;
         };
+        // The view's mesh-view bind group layout varies with its features
+        // (atmosphere, tonemap-in-shader, prepasses, ...). bevy_pbr caches
+        // the per-view `MeshPipelineKey` precisely so specialized pipelines
+        // can build a matching view layout; converting it yields the same
+        // `MeshPipelineViewLayoutKey` (including bevy_pbr's compile-time
+        // feature bits) that `prepare_mesh_view_bind_groups` uses.
+        let Some(view_key) = view_key_cache.get(&view.retained_view_entity) else {
+            continue;
+        };
+        let view_layout_key = MeshPipelineViewLayoutKey::from(*view_key);
 
         for (main_entity, material_id) in &material_instances.instances {
             // Our `TerrainComponents` / terrain bind group are keyed by the
@@ -521,9 +551,6 @@ pub(crate) fn queue_terrain<M: Material>(
             };
 
             let mut flags = TerrainPipelineFlags::from_msaa_samples(msaa.samples());
-            if view.hdr {
-                flags |= TerrainPipelineFlags::HDR;
-            }
             if gpu_tile_atlas.is_spherical {
                 flags |= TerrainPipelineFlags::SPHERICAL;
             }
@@ -540,7 +567,11 @@ pub(crate) fn queue_terrain<M: Material>(
                     | TerrainPipelineFlags::HIGH_PRECISION;
             }
 
-            let key = TerrainPipelineKey { flags };
+            let key = TerrainPipelineKey {
+                flags,
+                target_format: view.target_format,
+                view_layout_key,
+            };
             let Ok(pipeline) = terrain_pipeline.variants.specialize(&pipeline_cache, key) else {
                 continue;
             };
@@ -549,20 +580,27 @@ pub(crate) fn queue_terrain<M: Material>(
                 pipeline,
                 draw_function,
                 material_bind_group_index: Some(material.binding.group.0),
-                vertex_slab: default(),
-                index_slab: None,
+                slabs: default(),
                 lightmap_slab: None,
             };
             let bin_key = Opaque3dBinKey {
                 asset_id: material_id.untyped(),
             };
+            // Evict any retained entry first: `BinnedRenderPhase::add` for
+            // NonMesh items updates the entity's cached bin key but does NOT
+            // remove the entity from its previous (batch, bin) bucket, so a
+            // pipeline change (e.g. the view gaining the cinematic-Earth
+            // atmosphere bindings) would leave a stale entry drawing with the
+            // old pipeline against the view's new bind group — a fatal wgpu
+            // bind-group/layout incompatibility. Terrain counts are tiny, so
+            // remove+add every frame is cheap and always consistent.
+            phase.remove(*main_entity);
             phase.add(
                 batch_set_key,
                 bin_key,
                 (render_entity, *main_entity),
                 InputUniformIndex::default(),
                 BinnedRenderPhaseType::NonMesh,
-                change_tick,
             );
         }
     }
@@ -661,14 +699,17 @@ where
     }
 
     fn finish(&self, app: &mut App) {
-        // Bevy 0.17 moved many render resources (including `MaterialPipeline`)
-        // from `Plugin::finish` to `RenderStartup` (migration guide PRs
-        // #19841..#20210). Our `TerrainRenderPipeline::<M>::from_world` only
-        // needs `MeshPipeline` + `RenderDevice` + `AssetServer`, all of which
-        // are still available during `finish`, so the resource init stays
-        // here. `Variants` owns the specialization cache internally, so
-        // there's no more `SpecializedRenderPipelines<_>` to register.
-        app.sub_app_mut(RenderApp)
-            .init_resource::<TerrainRenderPipeline<M>>();
+        // Bevy 0.19 creates `MeshPipeline` in a `RenderStartup` system
+        // (after `MeshPipelineSystems`), so our pipeline — whose `FromWorld`
+        // reads `MeshPipeline` — must also be initialized there rather than
+        // during plugin `finish`.
+        app.sub_app_mut(RenderApp).add_systems(
+            bevy::render::RenderStartup,
+            init_terrain_render_pipeline::<M>.after(bevy::pbr::MeshPipelineSystems),
+        );
     }
+}
+
+fn init_terrain_render_pipeline<M: Material>(world: &mut World) {
+    world.init_resource::<TerrainRenderPipeline<M>>();
 }

@@ -18,9 +18,9 @@
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use impeller2::types::{IntoLenPacket, Msg, OwnedPacket as Packet, PacketId, Timestamp};
-use impeller2_stellar::{PacketSink, PacketStream};
-use impeller2_wkt::*;
+use impeller::types::{IntoLenPacket, Msg, OwnedPacket as Packet, PacketId, Timestamp};
+use impeller_stellar::{PacketSink, PacketStream};
+use impeller_wkt::*;
 #[cfg(feature = "axum")]
 use stellarator::struc_con::Joinable;
 use stellarator::{io::SplitExt, net::TcpStream};
@@ -55,6 +55,7 @@ impl Default for FollowConfig {
 /// Fetch metadata/schemas from the source, sync `db:` assets, and apply local state
 /// before the follower accepts clients.
 pub async fn prime_follower_state(config: &FollowConfig, db: &Arc<DB>) -> Result<(), Error> {
+    mark_assets_read_only(db);
     let (_, metadata_resp, schema_resp) = request_source_snapshot(config, false).await?;
     apply_source_snapshot(
         config,
@@ -70,6 +71,7 @@ pub async fn prime_follower_state(config: &FollowConfig, db: &Arc<DB>) -> Result
 ///
 /// This function reconnects on failure and should be spawned as a background task.
 pub async fn run_follower(config: FollowConfig, db: Arc<DB>) -> Result<(), Error> {
+    mark_assets_read_only(&db);
     loop {
         info!(source = %config.source_addr, "connecting to source database");
         match run_follower_inner(&config, &db).await {
@@ -92,6 +94,15 @@ pub async fn run_follower(config: FollowConfig, db: Arc<DB>) -> Result<(), Error
         }
         stellarator::sleep(config.reconnect_delay).await;
     }
+}
+
+/// A follower's asset tree is a read-only mirror of its source. Setting this
+/// makes the Impeller `StoreAsset` handler reject client writes, matching the
+/// asset HTTP server's `PUT` 405 gate; otherwise a TCP client could diverge the
+/// mirror (and bump `assets.revision`) until the next full mirror pass.
+fn mark_assets_read_only(db: &Arc<DB>) {
+    db.assets_read_only
+        .store(true, std::sync::atomic::Ordering::Release);
 }
 
 struct FollowStreamSession {
@@ -216,13 +227,19 @@ async fn apply_source_snapshot(
         let _ = db.set_earliest_timestamp(Timestamp(ts_micros));
     }
     db.save_db_state()?;
+    // The wholesale replace above bypasses `apply_set_db_config`, so bump the
+    // config generation here too; otherwise `SubscribeLastUpdated` clients keep
+    // a stale `schematic.active`/`assets.revision` until unrelated telemetry
+    // moves `last_updated` (RFD #724).
+    db.db_config_gen
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
     for metadata in &metadata_resp.component_metadata {
         db.with_state_mut(|s| s.set_component_metadata(metadata.clone(), &db.path))?;
     }
 
     for msg_meta in &metadata_resp.msg_metadata {
-        let msg_id = impeller2::types::msg_id(&msg_meta.name);
+        let msg_id = impeller::types::msg_id(&msg_meta.name);
         db.with_state_mut(|s| s.set_msg_metadata(msg_id, msg_meta.clone(), &db.path))?;
     }
 
@@ -302,7 +319,7 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
     let msg_ids: Vec<PacketId> = metadata_resp
         .msg_metadata
         .iter()
-        .map(|m| impeller2::types::msg_id(&m.name))
+        .map(|m| impeller::types::msg_id(&m.name))
         .collect();
     let mut msg_last_ts: std::collections::HashMap<PacketId, Timestamp> =
         std::collections::HashMap::new();
@@ -332,13 +349,13 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
     // Connection-local VTable-to-ComponentId mapping for follow-stream data.
     // Stored locally (not in the global vtable_registry) to prevent ID collisions
     // with VTables registered by local clients connecting to this follower DB.
-    let mut follow_vtables: std::collections::HashMap<PacketId, impeller2::types::ComponentId> =
+    let mut follow_vtables: std::collections::HashMap<PacketId, impeller::types::ComponentId> =
         std::collections::HashMap::new();
 
     // Track how many samples each component had at connection start.
     // On reconnection, the source resends ALL data; we skip samples we
     // already have using these counters (decremented as chunks arrive).
-    let mut skip_remaining: std::collections::HashMap<impeller2::types::ComponentId, usize> = db
+    let mut skip_remaining: std::collections::HashMap<impeller::types::ComponentId, usize> = db
         .with_state(|state| {
             state
                 .components
@@ -390,7 +407,7 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                 db.with_state_mut(|s| s.set_msg_metadata(meta.id, meta.metadata, &db.path))?;
             }
 
-            // SetDbConfig – live db_config metadata (e.g. schematic.content).
+            // SetDbConfig – live db_config metadata (e.g. schematic.active).
             Packet::Msg(m) if m.id == SetDbConfig::ID => {
                 let update: SetDbConfig = m.parse()?;
                 apply_db_config_update(config, db, update)?;
@@ -540,7 +557,10 @@ mod tests {
         let db = Arc::new(DB::create(dir.path().join("db")).unwrap());
         db.apply_set_db_config(SetDbConfig {
             metadata: HashMap::from([
-                ("schematic.content".to_string(), "old schematic".to_string()),
+                (
+                    "schematic.active".to_string(),
+                    "schematics/old.kdl".to_string(),
+                ),
                 ("skybox.active".to_string(), "old_skybox".to_string()),
                 ("local.only".to_string(), "stale".to_string()),
             ]),
@@ -563,6 +583,7 @@ mod tests {
         };
         let config = FollowConfig::default();
 
+        let gen0 = db.db_config_gen.latest();
         apply_source_snapshot(
             &config,
             &db,
@@ -573,6 +594,10 @@ mod tests {
         .await
         .unwrap();
 
+        // The snapshot must wake `SubscribeLastUpdated` config pushes; without
+        // the bump clients keep the stale config until telemetry moves.
+        assert!(db.db_config_gen.latest() > gen0);
+
         db.with_state(|state| {
             assert_eq!(
                 state
@@ -582,7 +607,7 @@ mod tests {
                     .map(String::as_str),
                 Some("fresh")
             );
-            assert!(!state.db_config.metadata.contains_key("schematic.content"));
+            assert!(!state.db_config.metadata.contains_key("schematic.active"));
             assert!(!state.db_config.metadata.contains_key("skybox.active"));
             assert!(!state.db_config.metadata.contains_key("local.only"));
         });

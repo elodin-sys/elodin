@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 
 use elodin_db::DB;
-use impeller2::types::{ComponentId, PrimType, Timestamp};
+use impeller::types::{ComponentId, PrimType, Timestamp};
 use numpy::{PyArray1, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
@@ -19,43 +19,55 @@ fn buf_to_numpy_array<'py>(py: Python<'py>, buf: &[u8], prim_type: PrimType) -> 
     match prim_type {
         PrimType::F64 => {
             let data: Vec<f64> = buf
-                .chunks_exact(8)
-                .map(|chunk| f64::from_le_bytes(chunk.try_into().unwrap()))
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|chunk| f64::from_le_bytes(*chunk))
                 .collect();
             PyArray1::from_vec(py, data).into_any()
         }
         PrimType::F32 => {
             let data: Vec<f32> = buf
-                .chunks_exact(4)
-                .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap()))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|chunk| f32::from_le_bytes(*chunk))
                 .collect();
             PyArray1::from_vec(py, data).into_any()
         }
         PrimType::I64 => {
             let data: Vec<i64> = buf
-                .chunks_exact(8)
-                .map(|chunk| i64::from_le_bytes(chunk.try_into().unwrap()))
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|chunk| i64::from_le_bytes(*chunk))
                 .collect();
             PyArray1::from_vec(py, data).into_any()
         }
         PrimType::I32 => {
             let data: Vec<i32> = buf
-                .chunks_exact(4)
-                .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|chunk| i32::from_le_bytes(*chunk))
                 .collect();
             PyArray1::from_vec(py, data).into_any()
         }
         PrimType::U64 => {
             let data: Vec<u64> = buf
-                .chunks_exact(8)
-                .map(|chunk| u64::from_le_bytes(chunk.try_into().unwrap()))
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|chunk| u64::from_le_bytes(*chunk))
                 .collect();
             PyArray1::from_vec(py, data).into_any()
         }
         PrimType::U32 => {
             let data: Vec<u32> = buf
-                .chunks_exact(4)
-                .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|chunk| u32::from_le_bytes(*chunk))
                 .collect();
             PyArray1::from_vec(py, data).into_any()
         }
@@ -69,8 +81,10 @@ fn buf_to_numpy_array<'py>(py: Python<'py>, buf: &[u8], prim_type: PrimType) -> 
         }
         PrimType::U16 => {
             let data: Vec<u16> = buf
-                .chunks_exact(2)
-                .map(|chunk| u16::from_le_bytes(chunk.try_into().unwrap()))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|chunk| u16::from_le_bytes(*chunk))
                 .collect();
             PyArray1::from_vec(py, data).into_any()
         }
@@ -80,8 +94,10 @@ fn buf_to_numpy_array<'py>(py: Python<'py>, buf: &[u8], prim_type: PrimType) -> 
         }
         PrimType::I16 => {
             let data: Vec<i16> = buf
-                .chunks_exact(2)
-                .map(|chunk| i16::from_le_bytes(chunk.try_into().unwrap()))
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|chunk| i16::from_le_bytes(*chunk))
                 .collect();
             PyArray1::from_vec(py, data).into_any()
         }
@@ -124,6 +140,88 @@ impl StepContext {
             start_timestamp,
             recipe_cancel_token,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use impeller::types::msg_id;
+
+    #[test]
+    fn read_msg_latest_returns_timestamp_and_payload() {
+        pyo3::prepare_freethreaded_python();
+        let dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(DB::create(dir.path().join("db")).unwrap());
+        db.push_msg(Timestamp(42), msg_id("camera.gray"), &[1, 2, 3])
+            .unwrap();
+        let ctx = StepContext::new(
+            db,
+            Arc::new(AtomicU64::new(0)),
+            Timestamp(42),
+            0,
+            Timestamp::EPOCH,
+            None,
+        );
+
+        Python::with_gil(|py| {
+            let (timestamp, payload) = ctx.read_msg_latest(py, "camera.gray").unwrap().unwrap();
+            assert_eq!(timestamp, 42);
+            assert_eq!(
+                payload
+                    .call_method0("tolist")
+                    .unwrap()
+                    .extract::<Vec<u8>>()
+                    .unwrap(),
+                [1, 2, 3]
+            );
+        });
+    }
+
+    #[test]
+    fn read_msg_at_returns_selected_timestamp_and_payload() {
+        pyo3::prepare_freethreaded_python();
+        let dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(DB::create(dir.path().join("db")).unwrap());
+        db.push_msg(Timestamp(32), msg_id("camera.gray"), &[1, 2])
+            .unwrap();
+        db.push_msg(Timestamp(48), msg_id("camera.gray"), &[3, 4])
+            .unwrap();
+        let ctx = StepContext::new(
+            db,
+            Arc::new(AtomicU64::new(0)),
+            Timestamp(50),
+            0,
+            Timestamp::EPOCH,
+            None,
+        );
+
+        Python::with_gil(|py| {
+            let (timestamp, payload) = ctx.read_msg_at(py, "camera.gray", 40).unwrap().unwrap();
+            assert_eq!(timestamp, 32);
+            assert_eq!(
+                payload
+                    .call_method0("tolist")
+                    .unwrap()
+                    .extract::<Vec<u8>>()
+                    .unwrap(),
+                [1, 2]
+            );
+            assert!(ctx.read_msg_at(py, "camera.gray", 31).unwrap().is_none());
+            let (exact_early, _) = ctx.read_msg_at(py, "camera.gray", 32).unwrap().unwrap();
+            assert_eq!(exact_early, 32);
+            let (exact_late, late_payload) =
+                ctx.read_msg_at(py, "camera.gray", 48).unwrap().unwrap();
+            assert_eq!(exact_late, 48);
+            assert_eq!(
+                late_payload
+                    .call_method0("tolist")
+                    .unwrap()
+                    .extract::<Vec<u8>>()
+                    .unwrap(),
+                [3, 4]
+            );
+        });
     }
 }
 
@@ -288,7 +386,7 @@ impl StepContext {
         msg_name: &str,
         timestamp: Option<i64>,
     ) -> Result<Option<Bound<'py, PyAny>>, Error> {
-        let msg_id = impeller2::types::msg_id(msg_name);
+        let msg_id = impeller::types::msg_id(msg_name);
 
         self.db.with_state(|state| {
             let Some(msg_log) = state.get_msg_log(msg_id) else {
@@ -315,6 +413,53 @@ impl StepContext {
             } else {
                 Ok(None)
             }
+        })
+    }
+
+    /// Return the message selected at or before a timestamp and its actual timestamp.
+    fn read_msg_at<'py>(
+        &self,
+        py: Python<'py>,
+        msg_name: &str,
+        timestamp: i64,
+    ) -> Result<Option<(i64, Bound<'py, PyAny>)>, Error> {
+        let msg_id = impeller::types::msg_id(msg_name);
+        self.db.with_state(|state| {
+            let Some(msg_log) = state.get_msg_log(msg_id) else {
+                return Ok(None);
+            };
+            let requested = Timestamp(timestamp);
+            if msg_log
+                .timestamps()
+                .first()
+                .is_some_and(|first| requested < *first)
+            {
+                return Ok(None);
+            }
+            let Some((selected, payload)) = msg_log.get_nearest(requested) else {
+                return Ok(None);
+            };
+            let data = numpy::PyArray1::from_vec(py, payload.to_vec()).into_any();
+            Ok(Some((selected.0, data)))
+        })
+    }
+
+    /// Return the newest message's timestamp and payload.
+    fn read_msg_latest<'py>(
+        &self,
+        py: Python<'py>,
+        msg_name: &str,
+    ) -> Result<Option<(i64, Bound<'py, PyAny>)>, Error> {
+        let msg_id = impeller::types::msg_id(msg_name);
+        self.db.with_state(|state| {
+            let Some(msg_log) = state.get_msg_log(msg_id) else {
+                return Ok(None);
+            };
+            let Some((timestamp, payload)) = msg_log.latest() else {
+                return Ok(None);
+            };
+            let data = numpy::PyArray1::from_vec(py, payload.to_vec()).into_any();
+            Ok(Some((timestamp.0, data)))
         })
     }
 

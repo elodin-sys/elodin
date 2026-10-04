@@ -11,7 +11,7 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use colored::*;
-use impeller2_stellar::Client;
+use impeller_stellar::Client;
 use std::net::SocketAddr;
 use std::time::Duration;
 use tracing::info;
@@ -100,7 +100,7 @@ fn print_banner(stick_mode: StickMode) {
     println!();
     println!("  {}", "Keyboard Controls:".bold());
     println!("    {} Throttle up/down", "W/S".green());
-    println!("    {} Rudder left/right", "A/D".green());
+    println!("    {} Rudder left/right (yaw)", "Q/E or A/D".green());
     println!("    {} Elevator up/down (pitch)", "↑/↓".green());
     println!("    {} Aileron left/right (roll)", "←/→".green());
     println!();

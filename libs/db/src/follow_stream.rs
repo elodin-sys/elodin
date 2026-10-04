@@ -16,11 +16,11 @@ use std::{
     time::Duration,
 };
 
-use impeller2::{
+use impeller::{
     types::{ComponentId, IntoLenPacket, LenPacket, PacketId, Timestamp},
     vtable::builder::{component, raw_field, raw_table, schema, timestamp, vtable},
 };
-use impeller2_wkt::*;
+use impeller_wkt::*;
 use stellarator::io::AsyncWrite;
 use tracing::info;
 
@@ -72,7 +72,7 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
             let new_components: Vec<(
                 Component,
                 Option<ComponentMetadata>,
-                impeller2::schema::Schema<Vec<u64>>,
+                impeller::schema::Schema<Vec<u64>>,
             )> = db.with_state(|state| {
                 let mut new_comps = Vec::new();
                 for comp in state.components.values() {
@@ -174,7 +174,7 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
             known_msg_ids.insert(msg_id);
         }
 
-        // ── 2b. DbConfig updates (schematic.content, skybox, etc.) ───────
+        // ── 2b. DbConfig updates (schematic.active, skybox, etc.) ───────
         let (current_metadata, current_recording) =
             db.with_state(|state| (state.db_config.metadata.clone(), state.db_config.recording));
         let metadata_delta = db_config_metadata_delta(&last_db_metadata, &current_metadata);

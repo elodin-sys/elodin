@@ -2,23 +2,18 @@
 # Video streaming script for Elodin
 #
 # This script:
-# 1. Builds the elodinsink GStreamer plugin from source
-# 2. Waits for Elodin DB to be ready
-# 3. Runs a GStreamer pipeline to stream H.264 video to Elodin DB
+# 1. Waits for Elodin DB to be ready
+# 2. Runs a GStreamer pipeline to stream H.264 video to Elodin DB
 #
-# The plugin is built automatically - no manual prerequisite steps required.
+# Requires `nix develop` or `nix develop .#run` (elodinsink, x264enc, gst-launch).
 
 set -e
 
-# Get the repository root (this script is in examples/video-stream/)
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-
-# Build the GStreamer plugin (cargo will skip if already up-to-date)
-echo "Building elodinsink GStreamer plugin..."
-cargo build --release --manifest-path="$REPO_ROOT/fsw/gstreamer/Cargo.toml"
-
-# Set plugin path to include our built plugin (prepend so local build overrides nix)
-export GST_PLUGIN_PATH="$REPO_ROOT/target/release:${GST_PLUGIN_PATH}"
+if ! command -v gst-inspect-1.0 >/dev/null 2>&1 || ! gst-inspect-1.0 elodinsink >/dev/null 2>&1; then
+    echo "ERROR: GStreamer element elodinsink is not available." >&2
+    echo "Run from \`nix develop\` or \`nix develop .#run\` — those shells set GST_PLUGIN_PATH." >&2
+    exit 1
+fi
 
 echo "Waiting for elodin-db on 127.0.0.1:2240..."
 

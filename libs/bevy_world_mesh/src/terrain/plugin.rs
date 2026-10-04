@@ -6,7 +6,7 @@ use crate::terrain::{
         terrain_material::TerrainMaterialPlugin,
         terrain_view_bind_group::TerrainViewData,
         tiling_prepass::{
-            queue_tiling_prepass, TilingPrepassItem, TilingPrepassLabel, TilingPrepassNode,
+            dispatch_tiling_prepass, queue_tiling_prepass, TilingPrepassItem,
             TilingPrepassPipelines,
         },
         world_mesh_material::WorldMeshMaterial,
@@ -14,16 +14,20 @@ use crate::terrain::{
     shaders::{load_terrain_shaders, InternalShaders},
     terrain::TerrainComponents,
     terrain_data::{
-        gpu_tile_atlas::GpuTileAtlas, gpu_tile_tree::GpuTileTree, tile_atlas::TileAtlas,
-        tile_tree::TileTree,
+        gpu_tile_atlas::GpuTileAtlas,
+        gpu_tile_tree::GpuTileTree,
+        tile_atlas::TileAtlas,
+        tile_tree::{TerrainViewPosition, TileTree},
     },
     terrain_view::TerrainViewComponents,
 };
 use bevy::{
+    core_pipeline::schedule::camera_driver,
     prelude::*,
     render::{
-        graph::CameraDriverLabel, render_graph::RenderGraph, render_resource::*, Render, RenderApp,
-        RenderSystems,
+        render_resource::*,
+        renderer::{RenderGraph, RenderGraphSystems},
+        Render, RenderApp, RenderSystems,
     },
 };
 
@@ -49,11 +53,9 @@ pub struct TerrainPlugin;
 impl Plugin for TerrainPlugin {
     fn build(&self, app: &mut App) {
         #[cfg(feature = "high_precision")]
-        app.add_plugins(
-            big_space::prelude::BigSpaceDefaultPlugins
-                .build()
-                .disable::<big_space::debug::BigSpaceDebugPlugin>(),
-        );
+        // BigSpaceDebugPlugin is no longer part of BigSpaceDefaultPlugins;
+        // trying to disable the absent plugin panics during preprocessing.
+        app.add_plugins(big_space::prelude::BigSpaceDefaultPlugins);
 
         // `check_visibility` became non-generic in Bevy 0.16. Our terrain
         // entity carries `NoFrustumCulling` on the bundle, so it is always
@@ -64,6 +66,7 @@ impl Plugin for TerrainPlugin {
         // rather than a generic system.)
         app.init_resource::<InternalShaders>()
             .init_resource::<TerrainViewComponents<TileTree>>()
+            .init_resource::<TerrainViewComponents<TerrainViewPosition>>()
             .init_resource::<TerrainViewComponents<TerrainModelApproximation>>()
             .add_systems(
                 Last,
@@ -119,13 +122,16 @@ impl Plugin for TerrainPlugin {
     fn finish(&self, app: &mut App) {
         load_terrain_shaders(app);
 
-        let render_app = app
-            .sub_app_mut(RenderApp)
+        app.sub_app_mut(RenderApp)
             .init_resource::<TilingPrepassPipelines>()
-            .init_resource::<SpecializedComputePipelines<TilingPrepassPipelines>>();
-
-        let mut render_graph = render_app.world_mut().resource_mut::<RenderGraph>();
-        render_graph.add_node(TilingPrepassLabel, TilingPrepassNode);
-        render_graph.add_node_edge(TilingPrepassLabel, CameraDriverLabel);
+            .init_resource::<SpecializedComputePipelines<TilingPrepassPipelines>>()
+            // Fill the indirect buffers before any camera renders the terrain
+            // (previously a render-graph node edge to `CameraDriverLabel`).
+            .add_systems(
+                RenderGraph,
+                dispatch_tiling_prepass
+                    .in_set(RenderGraphSystems::Render)
+                    .before(camera_driver),
+            );
     }
 }

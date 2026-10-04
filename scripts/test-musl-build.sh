@@ -111,39 +111,29 @@ build_one_target() {
   local wrap_dir="${session_dir}/zig-cc-${env_target}"
   mkdir -p "$wrap_dir"
 
-  # Wrapper strips:
-  #   --target=*                       (Zig rejects Rust triple format)
-  #   */self-contained/*crt*.o         (rustc CRT objects, Zig adds its own)
-  printf '%s\n' \
-    '#!/bin/bash' \
-    'args=()' \
-    'for a in "$@"; do' \
-    '  case "$a" in' \
-    '    --target=*) ;;' \
-    '    */self-contained/*crt*.o) ;;' \
-    '    *) args+=("$a") ;;' \
-    '  esac' \
-    'done' \
-    "exec \"${zig_bin}\" cc -target ${zig_target} \"\${args[@]}\"" \
-    > "${wrap_dir}/cc"
-  printf '%s\n' \
-    '#!/bin/bash' \
-    'args=()' \
-    'for a in "$@"; do' \
-    '  case "$a" in' \
-    '    --target=*) ;;' \
-    '    */self-contained/*crt*.o) ;;' \
-    '    *) args+=("$a") ;;' \
-    '  esac' \
-    'done' \
-    "exec \"${zig_bin}\" c++ -target ${zig_target} \"\${args[@]}\"" \
-    > "${wrap_dir}/c++"
+  local wrapper_src="${repo_root}/scripts/zig-musl-wrapper.sh"
+  if [ ! -f "$wrapper_src" ]; then
+    echo "error: missing $wrapper_src" >&2
+    return 2
+  fi
+  write_zig_trampoline() {
+    local dest="$1" cmd="$2"
+    printf '%s\n' \
+      '#!/bin/bash' \
+      "export ELODIN_ZIG_BIN=\"${zig_bin}\"" \
+      "export ELODIN_ZIG_TARGET=\"${zig_target}\"" \
+      "export ELODIN_ZIG_CMD=\"${cmd}\"" \
+      "exec /bin/bash \"${wrapper_src}\" \"\$@\"" \
+      >"$dest"
+  }
+  write_zig_trampoline "${wrap_dir}/cc" cc
+  write_zig_trampoline "${wrap_dir}/c++" c++
   printf '%s\n' \
     '#!/bin/sh' \
     "exec \"${zig_bin}\" ar \"\$@\"" \
-    > "${wrap_dir}/ar"
+    >"${wrap_dir}/ar"
   chmod +x "${wrap_dir}/cc" "${wrap_dir}/c++" "${wrap_dir}/ar"
-  echo "--- generated cc wrapper ---"
+  echo "--- generated cc trampoline ---"
   cat "${wrap_dir}/cc"
 
   # Restore original .cargo/config.toml then append fresh target section
@@ -154,8 +144,14 @@ build_one_target() {
   fi
   mkdir -p .cargo
   touch "$cargo_config"
-  printf '\n[target.%s]\nlinker = "%s/cc"\nrustflags = ["-C", "link-self-contained=no"]\n' \
-    "$target" "$wrap_dir" >> "$cargo_config"
+  # aarch64: rustc CRT for zig ld.lld. x86_64: zig cc provides CRT.
+  if [ "$target" = "aarch64-unknown-linux-musl" ]; then
+    printf '\n[target.%s]\nlinker = "%s/cc"\n' \
+      "$target" "$wrap_dir" >> "$cargo_config"
+  else
+    printf '\n[target.%s]\nlinker = "%s/cc"\nrustflags = ["-C", "link-self-contained=no"]\n' \
+      "$target" "$wrap_dir" >> "$cargo_config"
+  fi
 
   export "CC_${env_target}=${wrap_dir}/cc"
   export "CXX_${env_target}=${wrap_dir}/c++"

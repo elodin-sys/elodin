@@ -13,11 +13,12 @@ pub use camera::{NeedsInitialSnap, ViewCubeTargetCamera};
 pub use components::*;
 pub use config::*;
 pub use events::*;
-pub use spawn::SpawnedViewCube;
+pub use spawn::{SpawnedViewCubeOverlay, ViewCubeFrames, spawn_view_cube_overlay};
 pub use theme::ViewCubeColors;
 
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
+use bevy::transform::TransformSystems;
 use bevy_fontmesh::prelude::*;
 
 #[derive(Resource)]
@@ -75,21 +76,25 @@ impl Plugin for ViewCubePlugin {
             .add_observer(interactions::on_action_button_click);
 
         app.init_resource::<camera::ViewCubeArrowTargetCache>()
+            .init_resource::<camera::ViewCubeOrbitTargetCache>()
             .add_systems(Update, camera::handle_view_cube_editor)
             .add_systems(Update, camera::snap_initial_camera);
 
         if self.config.sync_with_camera {
             app.add_systems(
                 PostUpdate,
-                (
-                    camera::sync_view_cube_rotation,
-                    camera::orient_axis_labels_to_screen_plane,
-                )
-                    .chain(),
+                camera::sync_view_cube_camera_orientation.before(TransformSystems::Propagate),
             );
-        } else {
-            app.add_systems(PostUpdate, camera::orient_axis_labels_to_screen_plane);
         }
+        app.add_systems(
+            PostUpdate,
+            (
+                camera::orient_axis_labels_to_screen_plane,
+                camera::orient_face_labels_to_view,
+            )
+                .chain()
+                .after(TransformSystems::Propagate),
+        );
 
         app.add_systems(Update, camera::apply_render_layers_to_scene);
     }
@@ -121,7 +126,8 @@ fn update_theme_on_mode_change(
             for child in children.iter() {
                 original_materials.colors.insert(child, new_color);
                 if let Ok(mat_handle) = material_query.get(child)
-                    && let Some(mat) = materials.get_mut(&mat_handle.0)
+                    && let Some(mut mat) = materials.get_mut(&mat_handle.0)
+                    && mat.base_color != new_color
                 {
                     mat.base_color = new_color;
                 }
@@ -130,7 +136,8 @@ fn update_theme_on_mode_change(
 
         original_materials.colors.insert(entity, new_color);
         if let Ok(mat_handle) = material_query.get(entity)
-            && let Some(mat) = materials.get_mut(&mat_handle.0)
+            && let Some(mut mat) = materials.get_mut(&mat_handle.0)
+            && mat.base_color != new_color
         {
             mat.base_color = new_color;
         }
@@ -138,7 +145,8 @@ fn update_theme_on_mode_change(
 
     for (entity, _) in arrows.iter() {
         if let Ok(mat_handle) = material_query.get(entity)
-            && let Some(mat) = materials.get_mut(&mat_handle.0)
+            && let Some(mut mat) = materials.get_mut(&mat_handle.0)
+            && mat.base_color != colors.arrow_normal
         {
             mat.base_color = colors.arrow_normal;
         }
@@ -146,7 +154,8 @@ fn update_theme_on_mode_change(
 
     for (entity, _) in action_buttons.iter() {
         if let Ok(mat_handle) = material_query.get(entity)
-            && let Some(mat) = materials.get_mut(&mat_handle.0)
+            && let Some(mut mat) = materials.get_mut(&mat_handle.0)
+            && mat.base_color != colors.arrow_normal
         {
             mat.base_color = colors.arrow_normal;
         }

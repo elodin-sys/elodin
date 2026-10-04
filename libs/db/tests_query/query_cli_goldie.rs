@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use elodin_db::{ComponentSchema, DB};
-use impeller2::types::{ComponentId, PrimType, Timestamp};
-use impeller2_wkt::ComponentMetadata;
+use impeller::types::{ComponentId, PrimType, Timestamp};
+use impeller_wkt::ComponentMetadata;
 
 fn testdata_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests_query/testdata")

@@ -22,8 +22,8 @@ mod elodinsink {
     use gstreamer::{self as gst, glib};
     use gstreamer::{prelude::*, subclass::prelude::*};
     use gstreamer_base::subclass::prelude::*;
-    use impeller2::types::{msg_id, IntoLenPacket, LenPacket, Timestamp};
-    use impeller2_wkt::{
+    use impeller::types::{msg_id, IntoLenPacket, LenPacket, Timestamp};
+    use impeller_wkt::{
         opaque_bytes_msg_schema, LastUpdated, MsgMetadata, SetMsgMetadata, SubscribeLastUpdated,
     };
     use std::{

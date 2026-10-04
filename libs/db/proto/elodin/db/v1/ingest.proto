@@ -1,0 +1,112 @@
+syntax = "proto3";
+
+package elodin.db.v1;
+
+import "elodin/db/v1/common.proto";
+
+service IngestService {
+  // First request must be SessionOpen; replies SessionAccept or SessionReject.
+  // Delivery is at-least-once: resend rows above SessionAccept.resume_from_seq
+  // after a reconnect. Rows at or below that sequence are skipped; after a
+  // server crash, complete rows above it may be stored again.
+  rpc Ingest(stream IngestRequest) returns (stream IngestResponse);
+}
+
+message IngestRequest {
+  oneof req {
+    SessionOpen open = 1;
+    TelemetryBatch batch = 2;
+  }
+}
+
+message IngestResponse {
+  oneof resp {
+    SessionAccept accept = 1;
+    WriteAck ack = 2;
+    RowError error = 3;
+    SessionReject reject = 4;
+  }
+}
+
+message SessionOpen {
+  string client_name = 1;
+  bytes schema_fingerprint = 2; // SHA-256 of the canonical SchemaSet
+  SchemaSet schema = 3;
+  AckPolicy ack_policy = 4;
+  // Stable across reconnects within one process; changes after a restart.
+  bytes client_instance_id = 5;
+}
+
+message SchemaSet {
+  repeated MessageSchema messages = 1;
+}
+
+message MessageSchema {
+  string name = 1;
+  RowEncoding encoding = 2;
+  uint32 packed_size = 3; // required for packed encoding
+  repeated ComponentSchema components = 4;
+}
+
+message ComponentSchema {
+  string name = 1;
+  PrimType prim_type = 2;
+  repeated uint64 dims = 3; // empty = scalar
+  repeated string element_names = 4;
+  uint32 packed_offset = 5;
+  bool timestamp_source = 6;
+}
+
+enum RowEncoding {
+  ROW_ENCODING_UNSPECIFIED = 0;
+  ROW_ENCODING_PACKED = 1;
+  ROW_ENCODING_TYPED = 2;
+}
+
+message SessionAccept {
+  map<string, uint32> message_handles = 1; // session-scoped
+  // Last applied client sequence for this (client_name, client_instance_id).
+  // Persisted periodically, so after a crash it may trail the last WriteAck;
+  // resend rows above it.
+  uint64 resume_from_seq = 2;
+}
+
+message SessionReject {
+  string detail = 1;
+  repeated ComponentSchemaConflict conflicts = 2;
+}
+
+message ComponentSchemaConflict {
+  string component = 1;
+  PrimType expected_prim_type = 2;
+  repeated uint64 expected_dims = 3;
+  PrimType actual_prim_type = 4;
+  repeated uint64 actual_dims = 5;
+}
+
+message TelemetryBatch {
+  uint64 first_seq = 1; // row i has sequence first_seq + i; starts at 1
+  repeated Row rows = 2; // empty = no-op; first_seq is ignored
+}
+
+message Row {
+  uint32 message_handle = 1;
+  // Record time, floored to the containing microsecond. May be omitted only
+  // when a component is timestamp_source; if both are present they must match.
+  optional sfixed64 time_monotonic_ns = 2;
+
+  oneof payload {
+    bytes packed = 3; // length must equal MessageSchema.packed_size
+    TypedValues typed = 4;
+  }
+}
+
+message TypedValues {
+  repeated ComponentValue values = 1;
+}
+
+message RowError {
+  uint64 seq = 1;
+  string component = 2;
+  string detail = 3; // non-fatal; stream continues
+}

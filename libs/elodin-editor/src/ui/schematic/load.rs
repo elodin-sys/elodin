@@ -1,21 +1,28 @@
 use crate::icon_rasterizer::IconTextureCache;
 use crate::object_3d::CompileError;
-use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
+use bevy::{
+    ecs::system::SystemParam,
+    prelude::*,
+    tasks::{IoTaskPool, Task, futures_lite::future},
+    window::PrimaryWindow,
+};
 #[cfg(target_os = "macos")]
 use bevy_defer::AsyncCommandsExtension;
 use bevy_egui::egui::{Color32, Id};
 use bevy_geo_frames::prelude::*;
 use bevy_mat3_material::Mat3Material;
 use egui_tiles::{Container, Tile, TileId};
-use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry, ConnectionAddr};
-use impeller2_kdl::FromKdl;
-use impeller2_wkt::{
-    Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport, WindowSchematic,
+use impeller_bevy::{ComponentPath, ComponentSchemaRegistry, ConnectionAddr};
+use impeller_kdl::FromKdl;
+use impeller_wkt::{
+    Graph, Line3d, Object3D, Panel, PointTrails, Schematic, VectorArrow3d, Viewport,
+    WindowSchematic,
 };
 use miette::{Diagnostic, miette};
 use std::{
     collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
+    time::{Duration, Instant},
 };
 
 #[cfg(not(target_os = "macos"))]
@@ -23,11 +30,11 @@ use crate::tiles::WindowRelayout;
 #[cfg(target_os = "macos")]
 use crate::ui::window::placement::apply_physical_screen_rect;
 use crate::{
-    EqlContext, MainCamera,
+    EqlContext, MainCamera, TimeRangeBehavior,
     plugins::{
         kdl_document::{
             CurrentDocument, DocumentCleared, DocumentCommandFailed, DocumentLoadFailed,
-            DocumentLoaded, DocumentReloaded, DocumentSaved, SchematicDocumentAsset,
+            DocumentLoaded, DocumentReloaded, LastActiveSchematicContent, SchematicDocumentAsset,
             SchematicWindow,
         },
         render_layer_alloc::RenderLayerAllocator,
@@ -38,14 +45,14 @@ use crate::{
         data_overview::DataOverviewPane,
         modal::ModalDialog,
         monitor::MonitorPane,
-        plot::GraphBundle,
+        plot::{DerivedGraph, GraphBundle, KernelGraph},
         query_plot::QueryPlotData,
         schematic::{CurrentSchematic, EqlExt},
         tiles::{
             GraphPane, Pane, TileState, TreePane, ViewportPane, WindowDescriptor, WindowId,
             WindowState,
         },
-        timeline::TimelineSettings,
+        timeline::{TelemetryMode, TimelineSettings},
     },
     vector_arrow::{VectorArrowState, ViewportArrow},
 };
@@ -56,12 +63,101 @@ enum PanelContext {
     Window(WindowId),
 }
 
+/// Unwrap singleton Tabs whose only child is a Graph pane so telemetry mode
+/// can reclaim tab-header chrome without affecting multi-tab viewport groups.
+fn strip_singleton_graph_tabs(tile_state: &mut TileState) {
+    let candidates: Vec<(TileId, TileId)> = tile_state
+        .tree
+        .tiles
+        .iter()
+        .filter_map(|(id, tile)| {
+            let Tile::Container(Container::Tabs(tabs)) = tile else {
+                return None;
+            };
+            if tabs.children.len() != 1 {
+                return None;
+            }
+            let child = tabs.children[0];
+            match tile_state.tree.tiles.get(child) {
+                Some(Tile::Pane(Pane::Graph(_))) => Some((*id, child)),
+                _ => None,
+            }
+        })
+        .collect();
+
+    for (tabs_id, graph_id) in candidates {
+        if tile_state.tree.root == Some(tabs_id) {
+            tile_state.tree.root = Some(graph_id);
+        } else if let Some(parent_id) = tile_state.tree.tiles.parent_of(tabs_id) {
+            match tile_state.tree.tiles.get_mut(parent_id) {
+                Some(Tile::Container(Container::Linear(linear))) => {
+                    if let Some(i) = linear.children.iter().position(|c| *c == tabs_id) {
+                        linear.children[i] = graph_id;
+                    }
+                    linear.shares.replace_with(tabs_id, graph_id);
+                }
+                Some(Tile::Container(Container::Tabs(tabs))) => {
+                    if let Some(i) = tabs.children.iter().position(|c| *c == tabs_id) {
+                        tabs.children[i] = graph_id;
+                    }
+                    if tabs.active == Some(tabs_id) {
+                        tabs.active = Some(graph_id);
+                    }
+                }
+                // Grid uses hole-aware indexing; leave singleton graph tabs nested there.
+                _ => {}
+            }
+        }
+        tile_state.tree.tiles.remove(tabs_id);
+        tile_state.container_titles.remove(&tabs_id);
+    }
+}
+
 fn tabs_parent_for_panels(tile_state: &TileState, panel_count: usize) -> Option<TileId> {
     if panel_count > 0 {
         tile_state.tree.root()
     } else {
         None
     }
+}
+
+/// The [`bevy_geo_frames::GeoContext`] origin a schematic asks for: its
+/// `coordinate` lat/lon/alt on the body's reference ellipsoid, reset to the
+/// default when absent so reloads are deterministic.
+///
+/// Shared with the headless loader ([`crate::headless`]), which spawns the
+/// same `object_3d`/`world_mesh` entities and so needs the same ellipsoid for
+/// its ECEF/LLA conversions.
+pub(crate) fn schematic_geo_origin(schematic: &Schematic) -> bevy_geo_frames::GeoOrigin {
+    schematic
+        .origin
+        .map(|o| bevy_geo_frames::GeoOrigin::new_from_degrees(o.latitude, o.longitude, o.altitude))
+        .unwrap_or_default()
+        .with_ellipsoid(body_ellipsoid(schematic.body))
+}
+
+/// Reference ellipsoid for the schematic's `coordinate body=…`; absent means
+/// Earth, so existing schematics keep WGS84.
+pub(crate) fn body_ellipsoid(
+    body: Option<impeller_wkt::CelestialBody>,
+) -> bevy_geo_frames::Ellipsoid {
+    match body.unwrap_or_default() {
+        impeller_wkt::CelestialBody::Earth => bevy_geo_frames::Ellipsoid::WGS84,
+        impeller_wkt::CelestialBody::Moon => bevy_geo_frames::Ellipsoid::Sphere {
+            radius: impeller_wkt::CelestialBody::MOON_RADIUS_M,
+        },
+    }
+}
+
+/// Inverse of [`body_ellipsoid`]: the `coordinate body=…` that reproduces a
+/// live [`bevy_geo_frames::GeoContext`] ellipsoid on reload. `None` for Earth
+/// (and for any ellipsoid no body maps to), so plain schematics stay unchanged.
+pub(crate) fn ellipsoid_body(
+    ellipsoid: bevy_geo_frames::Ellipsoid,
+) -> Option<impeller_wkt::CelestialBody> {
+    [impeller_wkt::CelestialBody::Moon]
+        .into_iter()
+        .find(|&body| body_ellipsoid(Some(body)).parameters() == ellipsoid.parameters())
 }
 
 fn apply_fallback_frame_to_panel(
@@ -76,6 +172,8 @@ fn apply_fallback_frame_to_panel(
             }
             Panel::Viewport(v)
         }
+        // Gauges keep `source: None` so they continue to track the schematic
+        // `coordinate` after save/reload (see Geo/OrientationGaugeData).
         Panel::Tabs(panels) => Panel::Tabs(
             panels
                 .iter()
@@ -110,6 +208,57 @@ pub struct SyncedViewport;
 #[derive(Component)]
 pub struct SchematicSpawned;
 
+/// Number of fetch/parse attempts for one window sub-schematic before it is
+/// dropped with a warning. A window's asset can 404 or parse torn bytes
+/// transiently — a follower still mirroring it, or a save's `PUT`s mid-flight —
+/// and a single silent failure would make the window vanish for the session.
+const MAX_WINDOW_FETCH_ATTEMPTS: u32 = 10;
+
+/// Delay between window sub-schematic fetch attempts.
+const WINDOW_FETCH_RETRY_DELAY: Duration = Duration::from_millis(400);
+
+/// A window sub-schematic whose `db:`/HTTP KDL is being fetched off the main
+/// thread. Spawned by `load_schematic` and drained by
+/// `apply_pending_window_schematics` once the fetch lands, so a slow or
+/// unreachable DB never blocks the load for each window's request timeout.
+struct PendingWindowLoad {
+    descriptor: WindowDescriptor,
+    theme_mode: Option<String>,
+    theme_scheme: String,
+    path: PathBuf,
+    /// `None` while waiting for a scheduled retry slot.
+    task: Option<Task<Result<String, String>>>,
+    /// Failed attempts so far; transient errors retry bounded instead of
+    /// silently dropping the window.
+    attempts: u32,
+    retry_at: Option<Instant>,
+}
+
+/// Queue of in-flight remote window sub-schematic fetches (RFD #724). Cleared at
+/// the start of every `load_schematic` so a superseded load's windows never
+/// spawn into the new document.
+#[derive(Resource, Default)]
+pub struct PendingWindowSchematics {
+    loads: Vec<PendingWindowLoad>,
+}
+
+#[derive(Component)]
+pub struct MonitorsRoot;
+
+/// `object_3d` nodes that failed to parse at load because EQL metadata was
+/// still incomplete. Retried in place so `--kdl` does not need a full reopen.
+#[derive(Resource, Default)]
+pub struct PendingObject3dSpawns {
+    objects: Vec<impeller_wkt::Object3D>,
+}
+
+pub(crate) fn plugin(app: &mut App) {
+    app.init_resource::<PendingObject3dSpawns>()
+        .add_systems(Startup, |mut commands: Commands| {
+            commands.spawn((MonitorsRoot, Name::new("monitors")));
+        });
+}
+
 #[derive(SystemParam)]
 pub struct LoadSchematicParams<'w, 's> {
     pub commands: Commands<'w, 's>,
@@ -125,10 +274,16 @@ pub struct LoadSchematicParams<'w, 's> {
     pub icon_cache: ResMut<'w, IconTextureCache>,
     pub render_layer_alloc: ResMut<'w, RenderLayerAllocator>,
     pub hdr_enabled: ResMut<'w, HdrEnabled>,
+    /// Optional: absent in minimal test apps (no SceneEnvironmentPlugin).
+    pub scene_environment: Option<ResMut<'w, crate::plugins::scene_environment::SceneEnvironment>>,
     pub timeline_settings: ResMut<'w, TimelineSettings>,
+    pub time_range_behavior: ResMut<'w, TimeRangeBehavior>,
+    pub telemetry_mode: ResMut<'w, TelemetryMode>,
     pub schema_reg: Res<'w, ComponentSchemaRegistry>,
     pub eql: Res<'w, EqlContext>,
     connection_addr: Option<Res<'w, ConnectionAddr>>,
+    /// Optional: absent in minimal test apps (no kdl_document plugin).
+    initial_kdl: Option<ResMut<'w, crate::plugins::kdl_document::InitialKdlPath>>,
     pub geo_context: ResMut<'w, GeoContext>,
     pub sensor_camera_configs: Res<'w, crate::sensor_camera::SensorCameraConfigs>,
     pub coordinate: ResMut<'w, crate::Coordinate>,
@@ -137,9 +292,19 @@ pub struct LoadSchematicParams<'w, 's> {
     window_states: Query<'w, 's, (Entity, &'static WindowId, &'static mut WindowState)>,
     pub schematic_bindings: ResMut<'w, super::SchematicBindings>,
     pub current_schematic: ResMut<'w, CurrentSchematic>,
+    pending_windows: ResMut<'w, PendingWindowSchematics>,
+    pending_object_3d: Option<ResMut<'w, PendingObject3dSpawns>>,
+    /// Records each spawned `db:` window's stored KDL so a revision-gated
+    /// refetch can tell a window-only remote save apart from an unrelated
+    /// asset write (RFD #724, Bug 2). Optional: absent in minimal test apps.
+    last_content: Option<ResMut<'w, LastActiveSchematicContent>>,
+    #[cfg(feature = "big_space")]
+    big_space_root: Option<Res<'w, crate::spatial::BigSpaceRootEntity>>,
+    // Optional: missing/duplicate root must not invalidate schematic load.
+    monitor_root: Option<Single<'w, 's, Entity, With<MonitorsRoot>>>,
 }
 
-fn apply_theme(theme: Option<&impeller2_wkt::ThemeConfig>) -> colors::SchemeSelection {
+fn apply_theme(theme: Option<&impeller_wkt::ThemeConfig>) -> colors::SchemeSelection {
     let current = colors::current_selection();
     let scheme = theme
         .and_then(|t| t.scheme.as_deref())
@@ -155,21 +320,63 @@ struct WindowDescriptors {
     windows: Vec<WindowDescriptor>,
 }
 
+/// True for window sub-schematics served by the DB Asset Server (`db:`) or a
+/// raw HTTP(S) URL, as opposed to a local filesystem path (RFD #724).
+fn is_remote_asset_path(path: &str) -> bool {
+    path.starts_with("db:") || path.starts_with("http://") || path.starts_with("https://")
+}
+
+/// Read a window sub-schematic's KDL. `db:`/HTTP references are fetched from the
+/// DB Asset Server (RFD #724); everything else is read from the local filesystem
+/// (offline `--kdl` dev). The fetch is bounded so an unreachable DB cannot hang
+/// the load.
+fn read_window_schematic_kdl(
+    path: &Path,
+    connection_addr: Option<std::net::SocketAddr>,
+) -> Result<String, String> {
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| "non-utf8 window path".to_string())?;
+    if !is_remote_asset_path(path_str) {
+        return std::fs::read_to_string(path).map_err(|err| err.to_string());
+    }
+
+    let url = crate::object_3d::resolve_db_asset_url(path_str, connection_addr);
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|err| format!("{url}: {err}"))?;
+    let response = client
+        .get(&url)
+        .send()
+        .map_err(|err| format!("{url}: {err}"))?;
+    if !response.status().is_success() {
+        return Err(format!("{url}: HTTP {}", response.status()));
+    }
+    response.text().map_err(|err| format!("{url}: {err}"))
+}
+
 fn resolve_window_descriptor(
     window: &WindowSchematic,
     base_dir: Option<&Path>,
     theme_mode: Option<&str>,
 ) -> Option<WindowDescriptor> {
     let path_str = window.path.as_ref()?;
-    let mut resolved = PathBuf::from(path_str);
-
-    if resolved.is_relative() {
-        if let Some(base) = base_dir {
-            resolved = base.join(resolved);
-        } else if let Ok(cwd) = std::env::current_dir() {
-            resolved = cwd.join(resolved);
+    // Keep `db:`/HTTP references verbatim; only local paths are anchored to the
+    // schematic's directory. The remote ones are fetched over HTTP at spawn time.
+    let resolved = if is_remote_asset_path(path_str) {
+        PathBuf::from(path_str)
+    } else {
+        let mut resolved = PathBuf::from(path_str);
+        if resolved.is_relative() {
+            if let Some(base) = base_dir {
+                resolved = base.join(resolved);
+            } else if let Ok(cwd) = std::env::current_dir() {
+                resolved = cwd.join(resolved);
+            }
         }
-    }
+        resolved
+    };
 
     Some(WindowDescriptor {
         path: Some(resolved),
@@ -189,7 +396,7 @@ fn collect_window_descriptors(
     let mut windows = Vec::new();
 
     for elem in &schematic.elems {
-        let impeller2_wkt::SchematicElem::Window(window) = elem else {
+        let impeller_wkt::SchematicElem::Window(window) = elem else {
             continue;
         };
 
@@ -225,32 +432,49 @@ pub fn render_diag(diagnostic: &dyn Diagnostic) -> String {
 }
 
 impl LoadSchematicParams<'_, '_> {
+    /// Drops the CLI `--kdl` pin so a local clear/open is not re-forced by
+    /// sticky config sync.
+    pub fn clear_initial_kdl_pin(&mut self) {
+        if let Some(pin) = self.initial_kdl.as_deref_mut() {
+            pin.0 = None;
+        }
+    }
+
     pub fn load_schematic(
         &mut self,
         schematic: &Schematic,
         base_dir: Option<&Path>,
         window_assets: Option<&[SchematicWindow]>,
     ) {
+        if let Err(err) = impeller_wkt::validate_single_cinematic_environment(
+            Some(schematic),
+            &self.sensor_camera_configs.0,
+        ) {
+            bevy::log::error!("{err}");
+            return;
+        }
         // Set global coordinate frame from schematic
         self.coordinate.0 = schematic.frame;
 
-        // Set the GeoContext origin from the schematic (degrees -> radians),
-        // resetting to the default when absent so reloads are deterministic.
+        // Set the GeoContext origin from the schematic (degrees -> radians).
         // Only write on change: mutating GeoContext re-touches every
         // GeoPosition/GeoRotation in the world.
-        let origin = schematic
-            .origin
-            .map(|o| {
-                bevy_geo_frames::GeoOrigin::new_from_degrees(o.latitude, o.longitude, o.altitude)
-            })
-            .unwrap_or_default();
+        let origin = schematic_geo_origin(schematic);
         let current = &self.geo_context.origin;
         if (current.latitude, current.longitude, current.altitude)
             != (origin.latitude, origin.longitude, origin.altitude)
+            || current.ellipsoid.parameters() != origin.ellipsoid.parameters()
         {
             self.geo_context.origin = origin;
         }
+        // `sync_eql_geo_origin` copies this into `EqlContext` for query_plot SQL.
 
+        // Drop any remote window fetches still in flight from a prior load so
+        // their windows can't spawn into this freshly-cleared document.
+        self.pending_windows.loads.clear();
+        if let Some(pending) = self.pending_object_3d.as_mut() {
+            pending.objects.clear();
+        }
         for (id, window_id, mut window_state) in &mut self.window_states {
             if window_id.is_primary() {
                 continue;
@@ -277,20 +501,28 @@ impl LoadSchematicParams<'_, '_> {
         let theme_mode = Some(theme_selection.mode.clone());
         let theme_mode_str = theme_mode.as_deref();
         let mut descriptors = collect_window_descriptors(schematic, base_dir, theme_mode_str);
-        *self.timeline_settings = schematic.timeline.clone().unwrap_or_default().into();
+        let timeline = schematic.timeline.clone().unwrap_or_default();
+        *self.timeline_settings = timeline.clone().into();
+        *self.time_range_behavior = timeline
+            .range
+            .as_deref()
+            .and_then(TimeRangeBehavior::from_schematic_range)
+            .unwrap_or_default();
+        *self.telemetry_mode = TelemetryMode(schematic.telemetry_mode);
 
         let panel_count = schematic
             .elems
             .iter()
-            .filter(|elem| matches!(elem, impeller2_wkt::SchematicElem::Panel(_)))
+            .filter(|elem| matches!(elem, impeller_wkt::SchematicElem::Panel(_)))
             .count();
         let tabs_parent = tabs_parent_for_panels(&main_state, panel_count);
         let mut main_ui_state = crate::ui::WindowUiState::default();
 
         let fallback_frame = self.coordinate.0;
+        let force_graph_lock = schematic.telemetry_mode;
         for elem in &schematic.elems {
             match elem {
-                impeller2_wkt::SchematicElem::Panel(p) => {
+                impeller_wkt::SchematicElem::Panel(p) => {
                     let p = apply_fallback_frame_to_panel(p, fallback_frame);
                     self.spawn_panel(
                         &mut main_state,
@@ -298,40 +530,48 @@ impl LoadSchematicParams<'_, '_> {
                         &p,
                         tabs_parent,
                         PanelContext::Main,
+                        force_graph_lock,
                     );
                 }
-                impeller2_wkt::SchematicElem::Object3d(object_3d) => {
+                impeller_wkt::SchematicElem::Object3d(object_3d) => {
                     let mut obj = object_3d.clone();
                     if obj.frame.is_none() {
                         obj.frame = fallback_frame;
                     }
                     self.spawn_object_3d(obj);
                 }
-                impeller2_wkt::SchematicElem::Line3d(line_3d) => {
+                impeller_wkt::SchematicElem::Line3d(line_3d) => {
                     let mut line = line_3d.clone();
                     if line.frame.is_none() {
                         line.frame = fallback_frame;
                     }
                     self.spawn_line_3d(line);
                 }
-                impeller2_wkt::SchematicElem::VectorArrow(vector_arrow) => {
+                impeller_wkt::SchematicElem::PointTrails(point_trails) => {
+                    let mut trails = point_trails.clone();
+                    if trails.frame.is_none() {
+                        trails.frame = fallback_frame;
+                    }
+                    self.spawn_point_trails(trails);
+                }
+                impeller_wkt::SchematicElem::VectorArrow(vector_arrow) => {
                     let mut arrow = vector_arrow.clone();
                     if arrow.frame.is_none() {
                         arrow.frame = fallback_frame;
                     }
                     self.spawn_vector_arrow(arrow, None);
                 }
-                impeller2_wkt::SchematicElem::WorldMesh(world_mesh) => {
+                impeller_wkt::SchematicElem::WorldMesh(world_mesh) => {
                     let mut wm = world_mesh.clone();
                     if wm.frame.is_none() {
                         wm.frame = fallback_frame;
                     }
                     self.spawn_world_mesh(wm);
                 }
-                impeller2_wkt::SchematicElem::Window(_) => {}
-                impeller2_wkt::SchematicElem::Theme(_) => {}
-                impeller2_wkt::SchematicElem::Timeline(_) => {}
-                impeller2_wkt::SchematicElem::Coordinate(_) => {}
+                impeller_wkt::SchematicElem::Window(_) => {}
+                impeller_wkt::SchematicElem::Theme(_) => {}
+                impeller_wkt::SchematicElem::Timeline(_) => {}
+                impeller_wkt::SchematicElem::Coordinate(_) => {}
             }
         }
 
@@ -357,6 +597,9 @@ impl LoadSchematicParams<'_, '_> {
             // Apply sidebar visibility from loaded schematic.
             window_state.ui_state.left_sidebar_visible = main_ui_state.left_sidebar_visible;
             window_state.ui_state.right_sidebar_visible = main_ui_state.right_sidebar_visible;
+            if schematic.telemetry_mode {
+                strip_singleton_graph_tabs(&mut window_state.tile_state);
+            }
             // Resize if necessary.
             //
             #[cfg(not(target_os = "macos"))]
@@ -419,8 +662,29 @@ impl LoadSchematicParams<'_, '_> {
             }
 
             if let Some(path) = descriptor.path.clone() {
-                match std::fs::read_to_string(&path) {
-                    Ok(kdl) => match impeller2_wkt::Schematic::from_kdl(&kdl) {
+                let connection_addr = self.connection_addr.as_ref().map(|addr| addr.0);
+                if path.to_str().is_some_and(is_remote_asset_path) {
+                    // Fetch `db:`/HTTP windows off the main thread: a blocking
+                    // request per window could otherwise stall the UI for the
+                    // full timeout each (RFD #724). The window spawns from
+                    // `apply_pending_window_schematics` once the fetch lands.
+                    let fetch_path = path.clone();
+                    let task = IoTaskPool::get().spawn(async move {
+                        read_window_schematic_kdl(&fetch_path, connection_addr)
+                    });
+                    self.pending_windows.loads.push(PendingWindowLoad {
+                        descriptor,
+                        theme_mode: theme_mode.clone(),
+                        theme_scheme: theme_selection.scheme.clone(),
+                        path,
+                        task: Some(task),
+                        attempts: 0,
+                        retry_at: None,
+                    });
+                    continue;
+                }
+                match read_window_schematic_kdl(&path, connection_addr) {
+                    Ok(kdl) => match impeller_wkt::Schematic::from_kdl(&kdl) {
                         Ok(window_schematic) => {
                             self.spawn_window(
                                 &window_schematic,
@@ -442,7 +706,7 @@ impl LoadSchematicParams<'_, '_> {
                     },
                     Err(err) => {
                         warn!(
-                            ?err,
+                            %err,
                             path = ?descriptor.path,
                             "Failed to read window schematic"
                         );
@@ -452,6 +716,101 @@ impl LoadSchematicParams<'_, '_> {
         }
 
         self.current_schematic.0.skybox = schematic.skybox.clone();
+        self.current_schematic.0.environment = schematic.environment.clone();
+        if let Some(scene_environment) = self.scene_environment.as_mut() {
+            scene_environment.0 = schematic.environment.clone();
+        }
+    }
+
+    /// Spawns windows whose remote sub-schematic fetch (queued by
+    /// `load_schematic`) has completed, draining the in-flight queue. Cheap when
+    /// nothing is pending; called every frame by `apply_pending_window_schematics`.
+    ///
+    /// Fetch and parse failures are retried bounded (Bug 4): a window's asset
+    /// can 404 or hold torn bytes transiently — a follower still mirroring it,
+    /// or a save's `PUT`s mid-flight — and a single silent failure would make
+    /// the window vanish for the rest of the session.
+    fn poll_pending_window_schematics(&mut self) {
+        if self.pending_windows.loads.is_empty() {
+            return;
+        }
+        let connection_addr = self.connection_addr.as_ref().map(|addr| addr.0);
+        let now = Instant::now();
+        let mut ready = Vec::new();
+        self.pending_windows.loads.retain_mut(|load| {
+            if load.task.is_none() {
+                if load.retry_at.is_some_and(|at| now < at) {
+                    return true;
+                }
+                let fetch_path = load.path.clone();
+                load.retry_at = None;
+                load.task =
+                    Some(IoTaskPool::get().spawn(async move {
+                        read_window_schematic_kdl(&fetch_path, connection_addr)
+                    }));
+            }
+            let task = load.task.as_mut().expect("window fetch task just spawned");
+            let Some(result) = future::block_on(future::poll_once(task)) else {
+                return true;
+            };
+            load.task = None;
+            // Parse here so torn bytes share the retry path with fetch errors.
+            let parsed = result.and_then(|kdl| {
+                impeller_wkt::Schematic::from_kdl(&kdl)
+                    .map(|schematic| (kdl, schematic))
+                    .map_err(|err| render_diag(&err))
+            });
+            match parsed {
+                Ok((kdl, schematic)) => {
+                    ready.push((
+                        std::mem::take(&mut load.descriptor),
+                        load.theme_mode.take(),
+                        std::mem::take(&mut load.theme_scheme),
+                        std::mem::take(&mut load.path),
+                        kdl,
+                        schematic,
+                    ));
+                    false
+                }
+                Err(err) => {
+                    load.attempts += 1;
+                    if load.attempts >= MAX_WINDOW_FETCH_ATTEMPTS {
+                        warn!(
+                            %err,
+                            path = ?load.path,
+                            "Failed to load window schematic; giving up"
+                        );
+                        false
+                    } else {
+                        debug!(
+                            %err,
+                            path = ?load.path,
+                            attempts = load.attempts,
+                            "Window schematic fetch failed; retrying"
+                        );
+                        load.retry_at = Some(now + WINDOW_FETCH_RETRY_DELAY);
+                        true
+                    }
+                }
+            }
+        });
+        for (descriptor, theme_mode, theme_scheme, path, kdl, window_schematic) in ready {
+            // Record the stored content so a revision-gated refetch can detect
+            // a later remote save that only touched this window (Bug 2).
+            if let (Some(key), Some(last_content)) = (
+                path.to_str().and_then(|p| p.strip_prefix("db:")),
+                self.last_content.as_deref_mut(),
+            ) {
+                last_content.record_window(key, &kdl);
+            }
+            self.spawn_window(
+                &window_schematic,
+                descriptor,
+                theme_mode.as_deref(),
+                &theme_scheme,
+                Some(path.as_path()),
+            );
+        }
     }
 
     fn spawn_window(
@@ -498,19 +857,20 @@ impl LoadSchematicParams<'_, '_> {
         let panel_count = sec_schematic
             .elems
             .iter()
-            .filter(|elem| matches!(elem, impeller2_wkt::SchematicElem::Panel(_)))
+            .filter(|elem| matches!(elem, impeller_wkt::SchematicElem::Panel(_)))
             .count();
         let tabs_parent = tabs_parent_for_panels(&tile_state, panel_count);
         let mut ui_state = crate::ui::WindowUiState::default();
 
         for elem in &sec_schematic.elems {
-            if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
+            if let impeller_wkt::SchematicElem::Panel(panel) = elem {
                 self.spawn_panel(
                     &mut tile_state,
                     &mut ui_state,
                     panel,
                     tabs_parent,
                     PanelContext::Window(id),
+                    false,
                 );
             }
         }
@@ -617,12 +977,26 @@ impl LoadSchematicParams<'_, '_> {
     }
 
     pub fn spawn_object_3d(&mut self, object_3d: Object3D) {
-        let Ok(expr) = self.eql.0.parse_str(&object_3d.eql) else {
-            return;
+        let expr = if object_3d.kernel.is_some() {
+            self.eql.0.parse_str("0").unwrap_or_else(|_| {
+                self.eql
+                    .0
+                    .parse_str(&object_3d.eql)
+                    .unwrap_or(eql::Expr::FloatLiteral(0.0))
+            })
+        } else {
+            let Ok(expr) = self.eql.0.parse_str(&object_3d.eql) else {
+                if let Some(pending) = self.pending_object_3d.as_mut() {
+                    pending.objects.push(object_3d);
+                }
+                return;
+            };
+            expr
         };
         let icon = object_3d.icon.clone();
         let mesh_vr = object_3d.mesh_visibility_range.clone();
         let connection_addr = self.connection_addr.as_ref().map(|addr| addr.0);
+        let local_root = crate::object_3d::local_assets_root(self.initial_kdl.as_deref());
         let result = crate::object_3d::create_object_3d_entity(
             &mut self.commands,
             object_3d.clone(),
@@ -634,10 +1008,16 @@ impl LoadSchematicParams<'_, '_> {
             &self.asset_server,
             &self.geo_context,
             connection_addr,
+            local_root.as_deref(),
         );
         match result {
             Ok(entity) => {
-                self.commands.entity(entity).insert(SchematicSpawned);
+                {
+                    let mut e = self.commands.entity(entity);
+                    e.insert(SchematicSpawned);
+                    #[cfg(feature = "big_space")]
+                    crate::spatial::parent_under_big_space(&mut e, self.big_space_root.as_deref());
+                }
                 if let Some(icon) = &icon {
                     crate::object_3d::spawn_billboard_icon(
                         &mut self.commands,
@@ -650,6 +1030,7 @@ impl LoadSchematicParams<'_, '_> {
                         &self.asset_server,
                         &mut self.icon_cache,
                         connection_addr,
+                        local_root.as_deref(),
                     );
                 }
             }
@@ -660,19 +1041,40 @@ impl LoadSchematicParams<'_, '_> {
     }
 
     pub fn spawn_line_3d(&mut self, line_3d: Line3d) {
-        let frame = line_3d.frame;
+        let frame = line_3d.frame.or_default().unwrap_or_default();
         let mut spawn = self.commands.spawn(line_3d);
-        spawn.insert(Name::new("line_3d"));
+        spawn.insert((
+            Name::new("line_3d"),
+            Transform::default(),
+            GlobalTransform::default(),
+            // Absolute: vertex data is frame-relative; GeoRotation carries
+            // the frame → Bevy basis. GeoPosition tracks the LineTree's first
+            // sample (visible-window anchor; see sync_line_3d_anchor).
+            bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
+            bevy_geo_frames::GeoRotation::absolute(frame, bevy::math::DQuat::IDENTITY),
+            #[cfg(feature = "big_space")]
+            crate::spatial::GridCell::default(),
+        ));
+        #[cfg(feature = "big_space")]
+        crate::spatial::parent_under_big_space(&mut spawn, self.big_space_root.as_deref());
+        spawn.insert(SchematicSpawned);
+    }
 
-        // Add GeoPosition and GeoRotation; use ENU if no frame is specified.
-        // The rotation is Absolute: the line's vertex data is raw frame
-        // coordinates, so its transform must carry the frame -> Bevy basis change.
-        if let Some(frame) = frame.or_default() {
-            spawn.insert((
-                bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
-                bevy_geo_frames::GeoRotation::absolute(frame, bevy::math::DQuat::IDENTITY),
-            ));
-        }
+    pub fn spawn_point_trails(&mut self, point_trails: PointTrails) {
+        let frame = point_trails.frame.or_default().unwrap_or_default();
+        let mut spawn = self.commands.spawn(point_trails);
+        spawn.insert((
+            Name::new("point_trails"),
+            Transform::default(),
+            GlobalTransform::default(),
+            Visibility::default(),
+            bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
+            bevy_geo_frames::GeoRotation::absolute(frame, bevy::math::DQuat::IDENTITY),
+            #[cfg(feature = "big_space")]
+            crate::spatial::GridCell::default(),
+        ));
+        #[cfg(feature = "big_space")]
+        crate::spatial::parent_under_big_space(&mut spawn, self.big_space_root.as_deref());
         spawn.insert(SchematicSpawned);
     }
 
@@ -681,14 +1083,15 @@ impl LoadSchematicParams<'_, '_> {
         vector_arrow: VectorArrow3d,
         viewport_camera: Option<Entity>,
     ) {
-        use crate::object_3d::compile_eql_expr;
+        use crate::object_3d::{EqlCompileCtx, compile_eql_expr_with_ctx};
 
+        let compile_ctx = EqlCompileCtx::new(&self.geo_context).with_frame(vector_arrow.frame);
         let vector_expr = self
             .eql
             .0
             .parse_str(&vector_arrow.vector)
             .map_err(CompileError::Parse)
-            .and_then(compile_eql_expr)
+            .and_then(|expr| compile_eql_expr_with_ctx(expr, &compile_ctx))
             .ok();
 
         let origin_expr = vector_arrow.origin.as_ref().and_then(|origin| {
@@ -696,7 +1099,7 @@ impl LoadSchematicParams<'_, '_> {
                 .0
                 .parse_str(origin)
                 .map_err(CompileError::Parse)
-                .and_then(compile_eql_expr)
+                .and_then(|expr| compile_eql_expr_with_ctx(expr, &compile_ctx))
                 .ok()
         });
 
@@ -719,7 +1122,7 @@ impl LoadSchematicParams<'_, '_> {
         }
     }
 
-    pub fn spawn_world_mesh(&mut self, world_mesh: impeller2_wkt::WorldMesh) {
+    pub fn spawn_world_mesh(&mut self, world_mesh: impeller_wkt::WorldMesh) {
         let entity = crate::plugins::world_mesh::spawn_world_mesh_terrain(
             &mut self.commands,
             &mut self.meshes,
@@ -727,9 +1130,10 @@ impl LoadSchematicParams<'_, '_> {
             &mut self.world_mesh_materials,
             &world_mesh,
         );
-        self.commands
-            .entity(entity)
-            .insert((SchematicSpawned, world_mesh));
+        let mut e = self.commands.entity(entity);
+        e.insert((SchematicSpawned, world_mesh));
+        #[cfg(feature = "big_space")]
+        crate::spatial::parent_under_big_space(&mut e, self.big_space_root.as_deref());
     }
 
     fn spawn_panel(
@@ -739,6 +1143,7 @@ impl LoadSchematicParams<'_, '_> {
         panel: &Panel,
         parent_id: Option<TileId>,
         context: PanelContext,
+        force_graph_lock: bool,
     ) -> Option<TileId> {
         match panel {
             Panel::Viewport(viewport) => {
@@ -750,17 +1155,21 @@ impl LoadSchematicParams<'_, '_> {
                     &mut self.materials,
                     &mut self.render_layer_alloc,
                     &self.eql.0,
+                    &self.geo_context,
                     viewport,
                     label,
                 );
-                self.hdr_enabled.0 |= viewport.hdr;
+                self.hdr_enabled.0 |= viewport.hdr && !viewport.cinematic;
                 if let Some(camera) = pane.camera {
                     for arrow in viewport.local_arrows.clone() {
                         self.spawn_vector_arrow(arrow, Some(camera));
                     }
                 }
                 if let Some(parent) = pane.parent {
-                    self.commands.entity(parent).insert(SchematicSpawned);
+                    let mut e = self.commands.entity(parent);
+                    e.insert(SchematicSpawned);
+                    #[cfg(feature = "big_space")]
+                    crate::spatial::parent_under_big_space(&mut e, self.big_space_root.as_deref());
                 }
                 if let Some(grid) = pane.grid {
                     self.commands.entity(grid).insert(SchematicSpawned);
@@ -785,7 +1194,14 @@ impl LoadSchematicParams<'_, '_> {
                     tile_state.container_titles.insert(tile_id, name);
                 }
                 for (i, panel) in split.panels.iter().enumerate() {
-                    let child_id = self.spawn_panel(tile_state, ui_state, panel, tile_id, context);
+                    let child_id = self.spawn_panel(
+                        tile_state,
+                        ui_state,
+                        panel,
+                        tile_id,
+                        context,
+                        force_graph_lock,
+                    );
                     let Some(tile_id) = tile_id else {
                         continue;
                     };
@@ -834,11 +1250,61 @@ impl LoadSchematicParams<'_, '_> {
                 }
 
                 for panel in tabs.iter() {
-                    self.spawn_panel(tile_state, ui_state, panel, parent_for_children, context);
+                    self.spawn_panel(
+                        tile_state,
+                        ui_state,
+                        panel,
+                        parent_for_children,
+                        context,
+                        force_graph_lock,
+                    );
                 }
                 tile_id
             }
             Panel::Graph(graph) => {
+                let graph_label = graph_label(graph);
+                if let Some(binding) = graph.kernel.clone() {
+                    let mut dependencies: Vec<_> = binding
+                        .inputs
+                        .iter()
+                        .map(|input| impeller::types::ComponentId::new(&input.component))
+                        .collect();
+                    dependencies.sort();
+                    dependencies.dedup();
+                    let mut bundle = GraphBundle::new(
+                        &mut self.render_layer_alloc,
+                        BTreeMap::new(),
+                        graph_label.clone(),
+                    );
+                    bundle.graph_state.locked = force_graph_lock || graph.locked;
+                    if matches!(context, PanelContext::Window(_)) {
+                        bundle.camera.is_active = false;
+                    }
+                    bundle.graph_state.auto_y_range = graph.auto_y_range;
+                    bundle.graph_state.y_range = graph.y_range.clone();
+                    bundle.graph_state.graph_type = graph.graph_type;
+                    bundle.graph_state.kernel = Some(KernelGraph {
+                        binding,
+                        dependencies,
+                        lines: Vec::new(),
+                        colors: graph
+                            .colors
+                            .iter()
+                            .copied()
+                            .map(EColor::into_color32)
+                            .collect(),
+                        path: ComponentPath::from_name(&format!("kernel.{graph_label}")),
+                        last_generation: u64::MAX,
+                        last_range: None,
+                    });
+                    let entity_cmds = self.commands.spawn(bundle);
+                    let graph_id = entity_cmds.id();
+                    if matches!(context, PanelContext::Window(_)) {
+                        self.commands.entity(graph_id).remove::<MainCamera>();
+                    }
+                    let pane = GraphPane::new(graph_id, graph_label);
+                    return tile_state.insert_tile(Tile::Pane(Pane::Graph(pane)), parent_id, false);
+                }
                 let eql = self
                     .eql
                     .0
@@ -877,46 +1343,106 @@ impl LoadSchematicParams<'_, '_> {
                         }
                     })
                     .ok()?;
-                let mut component_vec = eql.to_graph_components();
-                component_vec.sort();
+                let requires_evaluation = eql.requires_plot_evaluation();
+                let uses_derived_plot = requires_evaluation && eql::eval::supports(&eql);
+                let uses_query_plot = requires_evaluation && !uses_derived_plot;
+
                 let mut components_tree: BTreeMap<ComponentPath, Vec<(bool, Color32)>> =
                     BTreeMap::new();
-                for (j, (component, i)) in component_vec.iter().enumerate() {
-                    let line_color = graph
-                        .colors
-                        .get(j)
-                        .copied()
-                        .map(EColor::into_color32)
-                        .unwrap_or_else(|| colors::get_color_by_index_all(j));
-                    if let Some(elements) = components_tree.get_mut(component) {
-                        elements[*i] = (true, line_color);
-                    } else {
-                        let Some(schema) = self.schema_reg.0.get(&component.id) else {
-                            continue;
-                        };
-                        let len: usize = schema.shape().iter().copied().product();
-                        let mut elements: Vec<(bool, Color32)> =
-                            (0..len).map(|_| (false, line_color)).collect();
-                        elements[*i] = (true, line_color);
-                        components_tree.insert(component.clone(), elements);
+                if !requires_evaluation {
+                    let mut component_vec = eql.to_graph_components();
+                    component_vec.sort();
+                    for (j, (component, i)) in component_vec.iter().enumerate() {
+                        let line_color = graph
+                            .colors
+                            .get(j)
+                            .copied()
+                            .map(EColor::into_color32)
+                            .unwrap_or_else(|| colors::get_color_by_index_all(j));
+                        if let Some(elements) = components_tree.get_mut(component) {
+                            elements[*i] = (true, line_color);
+                        } else {
+                            let Some(schema) = self.schema_reg.0.get(&component.id) else {
+                                continue;
+                            };
+                            let len: usize = schema.shape().iter().copied().product();
+                            let mut elements: Vec<(bool, Color32)> =
+                                (0..len).map(|_| (false, line_color)).collect();
+                            elements[*i] = (true, line_color);
+                            components_tree.insert(component.clone(), elements);
+                        }
                     }
                 }
-
-                let graph_label = graph_label(graph);
 
                 let mut bundle = GraphBundle::new(
                     &mut self.render_layer_alloc,
                     components_tree,
                     graph_label.clone(),
                 );
-                bundle.graph_state.locked = graph.locked;
+                bundle.graph_state.locked = force_graph_lock || graph.locked;
                 if matches!(context, PanelContext::Window(_)) {
                     bundle.camera.is_active = false;
                 }
                 bundle.graph_state.auto_y_range = graph.auto_y_range;
                 bundle.graph_state.y_range = graph.y_range.clone();
                 bundle.graph_state.graph_type = graph.graph_type;
-                let graph_id = self.commands.spawn(bundle).id();
+                if uses_derived_plot {
+                    let mut dependencies: Vec<_> = eql
+                        .to_graph_components()
+                        .into_iter()
+                        .map(|(path, _)| path.id)
+                        .collect();
+                    dependencies.sort();
+                    dependencies.dedup();
+                    bundle.graph_state.derived = Some(DerivedGraph {
+                        source: graph.eql.clone(),
+                        expr: eql.clone(),
+                        dependencies,
+                        lines: Vec::new(),
+                        colors: graph
+                            .colors
+                            .iter()
+                            .copied()
+                            .map(EColor::into_color32)
+                            .collect(),
+                        path: ComponentPath::from_name(&format!("derived.{graph_label}")),
+                        last_generation: u64::MAX,
+                        last_range: None,
+                    });
+                }
+
+                let mut entity_cmds = self.commands.spawn(bundle);
+                if uses_query_plot {
+                    let series_colors: Vec<_> = graph
+                        .colors
+                        .iter()
+                        .copied()
+                        .map(EColor::into_color32)
+                        .collect();
+                    let default_color = series_colors
+                        .first()
+                        .copied()
+                        .unwrap_or_else(|| colors::get_scheme().highlight);
+                    entity_cmds.insert(QueryPlotData {
+                        data: impeller_wkt::QueryPlot {
+                            name: graph_label.clone(),
+                            query: graph.eql.clone(),
+                            refresh_interval: std::time::Duration::from_millis(500),
+                            auto_refresh: true,
+                            color: impeller_wkt::Color::from_color32(default_color),
+                            query_type: impeller_wkt::QueryType::EQL,
+                            plot_mode: impeller_wkt::PlotMode::TimeSeries,
+                            x_label: None,
+                            y_label: None,
+                            node_id: Default::default(),
+                        },
+                        auto_color: series_colors.is_empty(),
+                        series_colors,
+                        last_refresh: None,
+                        ..Default::default()
+                    });
+                }
+                let graph_id = entity_cmds.id();
                 if matches!(context, PanelContext::Window(_)) {
                     self.commands.entity(graph_id).remove::<MainCamera>();
                 }
@@ -928,14 +1454,67 @@ impl LoadSchematicParams<'_, '_> {
                     .name
                     .clone()
                     .unwrap_or_else(|| monitor.component_name.clone());
-                let entity = self
-                    .commands
-                    .spawn(super::monitor::MonitorData {
+                let mut entity = self.commands.spawn((
+                    super::monitor::MonitorData {
                         component_name: monitor.component_name.clone(),
-                    })
-                    .id();
+                    },
+                    Name::new(label.clone()),
+                ));
+                if let Some(root) = self.monitor_root.as_ref() {
+                    entity.insert(ChildOf(**root));
+                }
+                let entity = entity.id();
                 let pane = MonitorPane::new(entity, label);
                 tile_state.insert_tile(Tile::Pane(Pane::Monitor(pane)), parent_id, false)
+            }
+            Panel::GeoPositionGauge(gauge) => {
+                let label = gauge
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "Position Gauge".to_string());
+                // Preserve omitted `source` as None so the gauge keeps inheriting
+                // the live schematic `coordinate` (resolved at display time).
+                let entity = self
+                    .commands
+                    .spawn((
+                        crate::ui::gauges::GeoPositionGaugeData::new(gauge.source, gauge.display),
+                        crate::ui::gauges::EqlBinding::new(gauge.eql.clone()),
+                    ))
+                    .id();
+                let pane = crate::ui::gauges::GaugePane::new(entity, label);
+                tile_state.insert_tile(Tile::Pane(Pane::GeoPositionGauge(pane)), parent_id, false)
+            }
+            Panel::OrientationGauge(gauge) => {
+                let label = gauge
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "Orientation Gauge".to_string());
+                let entity = self
+                    .commands
+                    .spawn((
+                        crate::ui::gauges::OrientationGaugeData::new(gauge.source, gauge.display)
+                            .with_reference(gauge.reference),
+                        crate::ui::gauges::EqlBinding::new(gauge.eql.clone()),
+                    ))
+                    .id();
+                let pane = crate::ui::gauges::GaugePane::new(entity, label);
+                tile_state.insert_tile(Tile::Pane(Pane::OrientationGauge(pane)), parent_id, false)
+            }
+            Panel::HorizonGauge(gauge) => {
+                let label = gauge
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "Horizon Gauge".to_string());
+                let entity = self
+                    .commands
+                    .spawn((
+                        crate::ui::gauges::HorizonGaugeData::new(gauge.source)
+                            .with_reference(gauge.reference),
+                        crate::ui::gauges::EqlBinding::new(gauge.eql.clone()),
+                    ))
+                    .id();
+                let pane = crate::ui::gauges::GaugePane::new(entity, label);
+                tile_state.insert_tile(Tile::Pane(Pane::HorizonGauge(pane)), parent_id, false)
             }
             Panel::QueryTable(data) => {
                 let has_query = !data.query.trim().is_empty();
@@ -974,7 +1553,7 @@ impl LoadSchematicParams<'_, '_> {
                 tile_state.insert_tile(Tile::Pane(Pane::ActionTile(pane)), parent_id, false)
             }
             Panel::VideoStream(video_stream) => {
-                let msg_id = impeller2::types::msg_id(&video_stream.msg_name);
+                let msg_id = impeller::types::msg_id(&video_stream.msg_name);
                 let label = video_stream
                     .name
                     .clone()
@@ -1008,18 +1587,35 @@ impl LoadSchematicParams<'_, '_> {
                 tile_state.insert_tile(Tile::Pane(Pane::VideoStream(pane)), parent_id, false)
             }
             Panel::SensorView(sensor_view) => {
-                let msg_id = impeller2::types::msg_id(&sensor_view.msg_name);
+                let msg_id = impeller::types::msg_id(&sensor_view.msg_name);
                 let label = sensor_view
                     .name
                     .clone()
                     .unwrap_or_else(|| format!("Sensor View {}", sensor_view.msg_name));
 
-                let raw_rgba_dims = self
+                let sensor_config = self
                     .sensor_camera_configs
                     .0
                     .iter()
-                    .find(|c| c.camera_name == sensor_view.msg_name)
-                    .map(|c| (c.width, c.height));
+                    .find(|c| c.camera_name == sensor_view.msg_name);
+                let raw_dims = sensor_config.and_then(|config| match config.format.as_str() {
+                    "h264" => None,
+                    "gray8" => Some((
+                        config.width,
+                        config.height,
+                        crate::ui::video_stream::RawPixelFormat::Gray8,
+                    )),
+                    _ => Some((
+                        config.width,
+                        config.height,
+                        crate::ui::video_stream::RawPixelFormat::Rgba8,
+                    )),
+                });
+                let frame_cache = if sensor_config.is_some_and(|config| config.format == "h264") {
+                    crate::ui::video_stream::VideoFrameCache::default()
+                } else {
+                    crate::ui::video_stream::VideoFrameCache::for_raw()
+                };
 
                 let entity = self
                     .commands
@@ -1027,7 +1623,7 @@ impl LoadSchematicParams<'_, '_> {
                         crate::ui::video_stream::VideoStream {
                             msg_id,
                             msg_name: sensor_view.msg_name.clone(),
-                            raw_rgba_dims,
+                            raw_dims,
                             ..Default::default()
                         },
                         bevy::ui::Node {
@@ -1039,7 +1635,7 @@ impl LoadSchematicParams<'_, '_> {
                             ..Default::default()
                         },
                         crate::ui::video_stream::VideoDecoderHandle::default(),
-                        crate::ui::video_stream::VideoFrameCache::for_raw_rgba(),
+                        frame_cache,
                     ))
                     .id();
 
@@ -1050,7 +1646,7 @@ impl LoadSchematicParams<'_, '_> {
                 tile_state.insert_tile(Tile::Pane(Pane::SensorView(pane)), parent_id, false)
             }
             Panel::LogStream(log_stream) => {
-                let msg_id = impeller2::types::msg_id(&log_stream.msg_name);
+                let msg_id = impeller::types::msg_id(&log_stream.msg_name);
                 let label = log_stream
                     .name
                     .clone()
@@ -1130,9 +1726,9 @@ impl LoadSchematicParams<'_, '_> {
 
     /// Create a default Data Overview panel when no schematic is found.
     /// This provides immediate visibility into the database contents.
-    pub fn load_default_data_overview(&mut self) {
+    pub fn load_default_data_overview(&mut self) -> bool {
         if self.eql.0.component_parts.is_empty() {
-            return;
+            return false;
         }
 
         let primary_window = *self.primary_window;
@@ -1144,7 +1740,7 @@ impl LoadSchematicParams<'_, '_> {
 
         // Only add if the tile tree is empty (no non-sidebar content)
         if !window_state.tile_state.is_empty() {
-            return;
+            return true;
         }
 
         let target_id = {
@@ -1203,6 +1799,7 @@ impl LoadSchematicParams<'_, '_> {
                 }
             }
         }
+        true
     }
 }
 
@@ -1257,39 +1854,84 @@ pub fn apply_document_reloaded(
 pub fn apply_document_loaded(
     mut events: MessageReader<DocumentLoaded>,
     mut params: LoadSchematicParams,
+    mut pending: ResMut<PendingDataOverview>,
 ) {
     let Some(event) = events.read().last().cloned() else {
         return;
     };
+    pending.0 = false;
     apply_loaded_document(&mut params, event.save_path.as_deref(), &event.document);
 }
+
+pub fn reject_mixed_cinematic_environment(
+    schematic: Res<CurrentSchematic>,
+    configs: Res<crate::sensor_camera::SensorCameraConfigs>,
+    mut logged: Local<bool>,
+) {
+    if *logged {
+        return;
+    }
+    if let Err(err) =
+        impeller_wkt::validate_single_cinematic_environment(Some(&schematic.0), &configs.0)
+    {
+        bevy::log::error!("{err}");
+        *logged = true;
+    }
+}
+
+/// Spawns remote window sub-schematics once their off-thread fetch completes
+/// (RFD #724). Runs each frame and early-returns when nothing is pending.
+pub fn apply_pending_window_schematics(mut params: LoadSchematicParams) {
+    params.poll_pending_window_schematics();
+}
+
+/// Pending Data Overview load after DocumentCleared raced ahead of EQL metadata.
+#[derive(Resource, Default)]
+pub struct PendingDataOverview(pub bool);
 
 pub fn apply_document_cleared(
     mut events: MessageReader<DocumentCleared>,
     mut params: LoadSchematicParams,
+    mut pending: ResMut<PendingDataOverview>,
 ) {
     if events.read().next().is_none() {
         return;
     }
-    params.load_default_data_overview();
+    if !params.load_default_data_overview() {
+        pending.0 = true;
+    }
 }
 
-pub fn apply_document_saved(
-    mut events: MessageReader<DocumentSaved>,
-    mut windows_state: Query<(&WindowId, &mut WindowState)>,
-) {
-    for event in events.read() {
-        info!(path = %event.save_path.display(), "Saved schematic");
-        let base_dir = event.save_path.parent().unwrap_or_else(|| Path::new("."));
-        for (id, mut state) in &mut windows_state {
-            if id.is_primary() {
-                state.descriptor.path = Some(event.save_path.clone());
-                continue;
-            }
-            if let Some(info) = event.windows.iter().find(|w| w.window_id == *id) {
-                state.descriptor.path = Some(base_dir.join(&info.file_name));
-            }
+/// Spawn `object_3d` nodes that failed EQL parse on the first load, now that
+/// more components are registered. Failures are re-queued.
+pub fn retry_pending_object_3d_spawns(mut params: LoadSchematicParams) {
+    if params.eql.0.component_parts.is_empty() {
+        return;
+    }
+    let objects = {
+        let Some(pending) = params.pending_object_3d.as_mut() else {
+            return;
+        };
+        if pending.objects.is_empty() {
+            return;
         }
+        std::mem::take(&mut pending.objects)
+    };
+    for object_3d in objects {
+        params.spawn_object_3d(object_3d);
+    }
+}
+
+/// Finish a pending Data Overview once component metadata is available.
+pub fn retry_pending_data_overview(
+    mut pending: ResMut<PendingDataOverview>,
+    mut params: LoadSchematicParams,
+) {
+    if !pending.0 {
+        return;
+    }
+    if params.load_default_data_overview() {
+        pending.0 = false;
     }
 }
 
@@ -1317,7 +1959,8 @@ pub fn show_document_load_failures(
 
 #[cfg(test)]
 mod tests {
-    use super::LoadSchematicParams;
+    use super::{LoadSchematicParams, MonitorsRoot};
+    use crate::ui::widgets::SystemStateExt;
     use crate::{
         Coordinate, EqlContext,
         icon_rasterizer::IconTextureCache,
@@ -1339,11 +1982,11 @@ mod tests {
         prelude::*,
         window::{PrimaryWindow, Window},
     };
-    use bevy_geo_frames::{GeoFrame, GeoFramePlugin, GeoPosition, GeoRotation};
+    use bevy_geo_frames::{GeoFrame, GeoFramePlugin, GeoPosition, GeoRotation, RotationKind};
     use bevy_mat3_material::Mat3Material;
-    use impeller2_bevy::ComponentSchemaRegistry;
-    use impeller2_kdl::FromKdl;
-    use impeller2_wkt::Schematic;
+    use impeller_bevy::ComponentSchemaRegistry;
+    use impeller_kdl::FromKdl;
+    use impeller_wkt::Schematic;
     use test_case::test_case;
 
     fn test_app() -> App {
@@ -1369,14 +2012,20 @@ mod tests {
             .init_resource::<IconTextureCache>()
             .init_resource::<HdrEnabled>()
             .init_resource::<TimelineSettings>()
+            .init_resource::<crate::TimeRangeBehavior>()
+            .init_resource::<crate::ui::timeline::TelemetryMode>()
             .init_resource::<ComponentSchemaRegistry>()
             .init_resource::<EqlContext>()
             .init_resource::<SensorCameraConfigs>()
             .init_resource::<Coordinate>()
             .init_resource::<SchematicBindings>()
+            .init_resource::<crate::plugins::scene_environment::SceneEnvironment>()
+            .init_resource::<super::PendingWindowSchematics>()
+            .init_resource::<super::PendingObject3dSpawns>()
             .insert_resource(CurrentSchematic(Default::default()));
 
         app.world_mut().spawn((Window::default(), PrimaryWindow));
+        app.world_mut().spawn((MonitorsRoot, Name::new("monitors")));
         settle(&mut app);
         app
     }
@@ -1407,10 +2056,20 @@ mod tests {
 
     fn load_schematic(app: &mut App, schematic: &Schematic) {
         let mut system_state: SystemState<LoadSchematicParams> = SystemState::new(app.world_mut());
-        let mut params = system_state.get_mut(app.world_mut());
+        let mut params = system_state.params_mut(app.world_mut());
         params.load_schematic(schematic, None, None);
         system_state.apply(app.world_mut());
         settle(app);
+    }
+
+    /// Rebuilds `CurrentSchematic` from live editor state, as saving does.
+    fn save_schematic(app: &mut App) -> Schematic {
+        app.init_resource::<impeller_bevy::ComponentMetadataRegistry>()
+            .init_resource::<crate::ui::schematic::CurrentWindowSchematics>();
+        app.world_mut()
+            .run_system_cached(crate::ui::schematic::tiles_to_schematic)
+            .expect("run tiles_to_schematic");
+        app.world().resource::<CurrentSchematic>().0.clone()
     }
 
     #[test_case("line_3d \"(0,0,0)\""; "line_3d")]
@@ -1517,6 +2176,37 @@ mod tests {
     }
 
     #[test]
+    fn remote_asset_paths_are_detected() {
+        use super::is_remote_asset_path;
+        assert!(is_remote_asset_path("db:schematics/window.kdl"));
+        assert!(is_remote_asset_path(
+            "http://127.0.0.1:2241/schematics/w.kdl"
+        ));
+        assert!(is_remote_asset_path("https://example.com/w.kdl"));
+        assert!(!is_remote_asset_path("schematics/window.kdl"));
+        assert!(!is_remote_asset_path("/abs/path/window.kdl"));
+    }
+
+    #[test]
+    fn read_window_schematic_kdl_reads_local_file() {
+        use super::read_window_schematic_kdl;
+        let dir = std::env::temp_dir().join(format!(
+            "elodin-window-kdl-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("window.kdl");
+        std::fs::write(&path, "viewport name=\"W\"\n").unwrap();
+
+        let kdl = read_window_schematic_kdl(&path, None).expect("read local window kdl");
+        assert!(kdl.contains("viewport"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn coordinate_is_reset_on_clear() {
         let mut app = test_app();
         let schematic = Schematic::from_kdl("coordinate frame=NED").expect("parse test schematic");
@@ -1529,6 +2219,144 @@ mod tests {
 
         load_schematic(&mut app, &Schematic::default());
         assert_eq!(app.world().resource::<crate::Coordinate>().0, None);
+    }
+
+    /// "Clear Schematic" drops the CLI `--kdl` pin through these params: a
+    /// second `ResMut<InitialKdlPath>` in the same system is a conflicting
+    /// param and panics when the palette item is initialized.
+    #[test]
+    fn clear_initial_kdl_pin_drops_the_cli_path() {
+        use crate::plugins::kdl_document::InitialKdlPath;
+
+        let mut app = test_app();
+        // Absent in minimal apps (no kdl_document plugin): a no-op, not a panic.
+        clear_pin(&mut app);
+        assert!(app.world().get_resource::<InitialKdlPath>().is_none());
+
+        app.insert_resource(InitialKdlPath(Some(std::path::PathBuf::from(
+            "/tmp/sim.kdl",
+        ))));
+        clear_pin(&mut app);
+        assert!(app.world().resource::<InitialKdlPath>().0.is_none());
+    }
+
+    fn clear_pin(app: &mut App) {
+        let mut system_state: SystemState<LoadSchematicParams> = SystemState::new(app.world_mut());
+        system_state
+            .params_mut(app.world_mut())
+            .clear_initial_kdl_pin();
+        system_state.apply(app.world_mut());
+    }
+
+    #[test]
+    fn line_3d_spawns_with_frame_and_transform_components() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            line_3d frame="ECEF" "sat.world_pos"
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app.world_mut().query::<(
+            &impeller_wkt::Line3d,
+            &GeoPosition,
+            &GeoRotation,
+            &Transform,
+            &GlobalTransform,
+        )>();
+        let (line, geo_pos, geo_rot, _, _) = query
+            .iter(app.world())
+            .next()
+            .expect("line_3d should spawn");
+
+        assert_eq!(line.frame, Some(GeoFrame::ECEF));
+        assert_eq!(geo_pos.0, GeoFrame::ECEF);
+        assert_eq!(geo_rot.0, GeoFrame::ECEF);
+    }
+
+    #[test]
+    fn point_trails_spawns_with_frame_components() {
+        let mut app = test_app();
+        let schematic =
+            Schematic::from_kdl(r#"point_trails frame="ECEF" "effector.cube_pos_ecef""#)
+                .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app
+            .world_mut()
+            .query::<(&impeller_wkt::PointTrails, &GeoPosition, &GeoRotation)>();
+        let (trails, geo_pos, geo_rot) = query
+            .iter(app.world())
+            .next()
+            .expect("point_trails should spawn");
+        assert_eq!(trails.frame, Some(GeoFrame::ECEF));
+        assert_eq!(geo_pos.0, GeoFrame::ECEF);
+        assert_eq!(geo_rot.0, GeoFrame::ECEF);
+    }
+
+    #[test]
+    fn object_3d_spawns_with_absolute_orientation() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            object_3d frame="NED" orientation=absolute "(0,0,0,1, 0,0,0)" {
+                sphere radius=0.2 {
+                    color 0 0 0
+                }
+            }
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app
+            .world_mut()
+            .query::<(&crate::object_3d::Object3DState, &GeoRotation)>();
+        let (object_3d, geo_rot) = query
+            .iter(app.world())
+            .next()
+            .expect("object_3d should spawn");
+
+        assert_eq!(object_3d.data.frame, Some(GeoFrame::NED));
+        assert_eq!(object_3d.data.orientation, RotationKind::Absolute);
+        assert_eq!(geo_rot.0, GeoFrame::NED);
+        assert_eq!(geo_rot.2, RotationKind::Absolute);
+    }
+
+    #[test]
+    fn object_3d_spawns_with_separate_frame_orientation() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            object_3d frame="ECEF" frame_orientation="NED" orientation=absolute "(0,0,0,1, 0,0,0)" {
+                sphere radius=0.2 {
+                    color 0 0 0
+                }
+            }
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query =
+            app.world_mut()
+                .query::<(&crate::object_3d::Object3DState, &GeoPosition, &GeoRotation)>();
+        let (object_3d, geo_pos, geo_rot) = query
+            .iter(app.world())
+            .next()
+            .expect("object_3d should spawn");
+
+        assert_eq!(object_3d.data.frame, Some(GeoFrame::ECEF));
+        assert_eq!(object_3d.data.frame_orientation, Some(GeoFrame::NED));
+        assert_eq!(geo_pos.0, GeoFrame::ECEF);
+        assert_eq!(geo_rot.0, GeoFrame::NED);
+        assert_eq!(geo_rot.2, RotationKind::Absolute);
     }
 
     #[test]
@@ -1549,6 +2377,184 @@ mod tests {
         assert_eq!(origin.latitude, default_origin.latitude);
         assert_eq!(origin.longitude, default_origin.longitude);
         assert_eq!(origin.altitude, default_origin.altitude);
+    }
+
+    #[test]
+    fn coordinate_body_sets_the_reference_ellipsoid() {
+        let mut app = test_app();
+        let earth_radius = app
+            .world()
+            .resource::<bevy_geo_frames::GeoContext>()
+            .origin
+            .ellipsoid
+            .parameters()
+            .0;
+
+        let schematic = Schematic::from_kdl(r#"coordinate frame=ECEF lat=0 lon=0 body="moon""#)
+            .expect("parse lunar schematic");
+        load_schematic(&mut app, &schematic);
+        let ellipsoid = app
+            .world()
+            .resource::<bevy_geo_frames::GeoContext>()
+            .origin
+            .ellipsoid;
+        assert_eq!(
+            ellipsoid.parameters().0,
+            impeller_wkt::CelestialBody::MOON_RADIUS_M
+        );
+        // A lunar sphere has no flattening, unlike WGS84.
+        assert_eq!(ellipsoid.parameters().0, ellipsoid.parameters().1);
+
+        // Clearing the schematic restores Earth.
+        load_schematic(&mut app, &Schematic::default());
+        assert_eq!(
+            app.world()
+                .resource::<bevy_geo_frames::GeoContext>()
+                .origin
+                .ellipsoid
+                .parameters()
+                .0,
+            earth_radius
+        );
+    }
+
+    #[test]
+    fn coordinate_body_survives_a_save() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(r#"coordinate frame=ECEF lat=0 lon=0 body="moon""#)
+            .expect("parse lunar schematic");
+        load_schematic(&mut app, &schematic);
+
+        let saved = save_schematic(&mut app);
+        assert_eq!(saved.frame, Some(GeoFrame::ECEF));
+        assert_eq!(saved.body, Some(impeller_wkt::CelestialBody::Moon));
+        assert!(impeller_kdl::serialize_schematic(&saved).contains(r#"body=moon"#));
+
+        // Reloading the saved schematic keeps the lunar ellipsoid.
+        load_schematic(&mut app, &saved);
+        let ellipsoid = app
+            .world()
+            .resource::<bevy_geo_frames::GeoContext>()
+            .origin
+            .ellipsoid;
+        assert_eq!(
+            ellipsoid.parameters().0,
+            impeller_wkt::CelestialBody::MOON_RADIUS_M
+        );
+
+        // Earth stays implicit, and a stale lunar body does not linger.
+        load_schematic(&mut app, &Schematic::default());
+        assert_eq!(save_schematic(&mut app).body, None);
+    }
+
+    /// `schematic_geo_origin` is what both the editor and the headless render
+    /// server load, so the body must survive with or without an explicit
+    /// lat/lon.
+    #[test]
+    fn schematic_geo_origin_carries_the_body_ellipsoid() {
+        let moon_radius = impeller_wkt::CelestialBody::MOON_RADIUS_M;
+        let earth_radius = bevy_geo_frames::GeoOrigin::default()
+            .ellipsoid
+            .parameters()
+            .0;
+
+        let lunar_site = super::schematic_geo_origin(
+            &Schematic::from_kdl(r#"coordinate frame=ECEF lat=10 lon=20 body="moon""#)
+                .expect("parse lunar schematic"),
+        );
+        assert_eq!(lunar_site.ellipsoid.parameters().0, moon_radius);
+        assert_eq!(lunar_site.latitude, 10f64.to_radians());
+
+        // A body with no launch site still selects its ellipsoid.
+        let lunar_bare = super::schematic_geo_origin(
+            &Schematic::from_kdl(r#"coordinate frame=ECEF body="moon""#)
+                .expect("parse lunar schematic"),
+        );
+        assert_eq!(lunar_bare.ellipsoid.parameters().0, moon_radius);
+
+        // Earth and an empty schematic both give the default origin.
+        for kdl in [r#"coordinate frame=ECEF lat=1 lon=2 body="earth""#, ""] {
+            let origin =
+                super::schematic_geo_origin(&Schematic::from_kdl(kdl).expect("parse schematic"));
+            assert_eq!(origin.ellipsoid.parameters().0, earth_radius, "{kdl:?}");
+        }
+        assert_eq!(
+            super::schematic_geo_origin(&Schematic::default()).latitude,
+            bevy_geo_frames::GeoOrigin::default().latitude
+        );
+    }
+
+    #[test]
+    fn celestial_bodies_round_trip_through_their_ellipsoids() {
+        use impeller_wkt::CelestialBody;
+        assert_eq!(super::ellipsoid_body(super::body_ellipsoid(None)), None);
+        assert_eq!(
+            super::ellipsoid_body(super::body_ellipsoid(Some(CelestialBody::Earth))),
+            None,
+            "Earth is the default, so it stays implicit"
+        );
+        assert_eq!(
+            super::ellipsoid_body(super::body_ellipsoid(Some(CelestialBody::Moon))),
+            Some(CelestialBody::Moon)
+        );
+        assert_eq!(
+            super::ellipsoid_body(bevy_geo_frames::Ellipsoid::Sphere { radius: 1.0 }),
+            None,
+            "an ellipsoid no body maps to must not claim one"
+        );
+    }
+
+    #[test]
+    fn horizon_gauge_round_trips_source_and_reference() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            horizon_gauge "rocket.world_pos" name="ADI" source="ECEF" {
+                reference 0.0 0.7071068 0.0 0.7071068
+            }
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app
+            .world_mut()
+            .query::<&crate::ui::gauges::HorizonGaugeData>();
+        let data = query
+            .iter(app.world())
+            .next()
+            .expect("horizon_gauge entity");
+        assert_eq!(data.source, Some(GeoFrame::ECEF));
+        // The reference is normalized on load and stays non-identity.
+        assert!((data.reference.length() - 1.0).abs() < 1e-9);
+        assert!(data.reference_kdl().is_some());
+    }
+
+    #[test]
+    fn horizon_gauge_omitted_source_keeps_inheriting_coordinate() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            coordinate frame=NED
+            horizon_gauge "rocket.world_pos"
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app
+            .world_mut()
+            .query::<&crate::ui::gauges::HorizonGaugeData>();
+        let data = query
+            .iter(app.world())
+            .next()
+            .expect("horizon_gauge entity");
+        // Stored as None so a later `coordinate` change still applies.
+        assert_eq!(data.source, None);
+        assert_eq!(data.effective_source(Some(GeoFrame::NED)), GeoFrame::NED);
+        assert_eq!(data.reference_kdl(), None);
     }
 
     #[test]
@@ -1576,6 +2582,113 @@ mod tests {
     }
 
     #[test]
+    fn geo_position_gauge_omitted_source_stays_unset_and_tracks_coordinate() {
+        // Omitted `source` must remain None on GeoPositionGaugeData so a later
+        // `coordinate` change (or save/reload) keeps inheritance — not a
+        // snapshot of the frame at load time.
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            coordinate frame="ENU"
+            geo_position_gauge "rocket.world_pos" name="Pos" display="NED"
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        {
+            let mut query = app
+                .world_mut()
+                .query::<&crate::ui::gauges::GeoPositionGaugeData>();
+            let source = query
+                .iter(app.world())
+                .next()
+                .expect("geo_position_gauge entity")
+                .source;
+            assert_eq!(source, None, "omitted source must stay unset");
+            let coordinate = app.world().resource::<Coordinate>().0;
+            assert_eq!(
+                source.or(coordinate).unwrap_or(GeoFrame::ENU),
+                GeoFrame::ENU
+            );
+        }
+
+        app.world_mut().resource_mut::<Coordinate>().0 = Some(GeoFrame::NED);
+        {
+            let mut query = app
+                .world_mut()
+                .query::<&crate::ui::gauges::GeoPositionGaugeData>();
+            let source = query
+                .iter(app.world())
+                .next()
+                .expect("geo_position_gauge entity")
+                .source;
+            let coordinate = app.world().resource::<Coordinate>().0;
+            assert_eq!(
+                source.or(coordinate).unwrap_or(GeoFrame::ENU),
+                GeoFrame::NED,
+                "inherited source must track live coordinate"
+            );
+        }
+    }
+
+    #[test]
+    fn geo_position_gauge_explicit_source_is_preserved() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            coordinate frame="ENU"
+            geo_position_gauge "rocket.world_pos" source="ECEF" display="NED"
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app
+            .world_mut()
+            .query::<&crate::ui::gauges::GeoPositionGaugeData>();
+        let source = query
+            .iter(app.world())
+            .next()
+            .expect("geo_position_gauge entity")
+            .source;
+        assert_eq!(source, Some(GeoFrame::ECEF));
+        assert_eq!(
+            source.or(Some(GeoFrame::ENU)).unwrap_or(GeoFrame::ENU),
+            GeoFrame::ECEF,
+            "explicit source must not inherit coordinate"
+        );
+    }
+
+    #[test]
+    fn orientation_gauge_round_trips_display_and_reference() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            orientation_gauge "rocket.world_pos" name="Att" display="ECEF" {
+                reference 0.0 0.7071 0.0 0.7071
+            }
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app
+            .world_mut()
+            .query::<&crate::ui::gauges::OrientationGaugeData>();
+        let data = query
+            .iter(app.world())
+            .next()
+            .expect("orientation_gauge entity");
+        assert_eq!(data.display, Some(GeoFrame::ECEF));
+        assert!((data.reference.length() - 1.0).abs() < 1e-12);
+        assert!(data.reference_kdl().is_some(), "non-identity reference");
+    }
+
+    #[test]
     fn timeline_is_reset_on_clear() {
         let mut app = test_app();
         let schematic =
@@ -1591,6 +2704,124 @@ mod tests {
             !cleared.follow_latest,
             "clearing the schematic should restore default timeline settings"
         );
+    }
+
+    #[test]
+    fn timeline_range_and_telemetry_mode_apply_and_clear() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            timeline follow_latest=#true range="last_5s"
+            telemetry_mode #true
+            graph "1.0" name="Constant"
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let behavior = *app.world().resource::<crate::TimeRangeBehavior>();
+        assert_eq!(
+            behavior,
+            crate::TimeRangeBehavior::from_schematic_range("last_5s").unwrap(),
+            "timeline range should map to LAST_5S"
+        );
+        assert!(
+            app.world()
+                .resource::<crate::ui::timeline::TelemetryMode>()
+                .0,
+            "telemetry mode should be enabled"
+        );
+
+        let mut query = app.world_mut().query::<&crate::ui::plot::GraphState>();
+        let graphs: Vec<_> = query.iter(app.world()).collect();
+        assert!(!graphs.is_empty(), "expected a loaded graph");
+        assert!(
+            graphs.iter().all(|g| g.locked),
+            "telemetry mode should force graph locks"
+        );
+
+        load_schematic(&mut app, &Schematic::default());
+        assert_eq!(
+            *app.world().resource::<crate::TimeRangeBehavior>(),
+            crate::TimeRangeBehavior::default(),
+            "clearing should restore default time range"
+        );
+        assert!(
+            !app.world()
+                .resource::<crate::ui::timeline::TelemetryMode>()
+                .0,
+            "clearing should disable telemetry mode"
+        );
+    }
+
+    fn install_scalar_eql_component(app: &mut App) {
+        let component = std::sync::Arc::new(eql::Component::new(
+            "sample.value".to_string(),
+            impeller::types::ComponentId::new("sample.value"),
+            impeller::schema::Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new())
+                .expect("schema"),
+        ));
+        app.insert_resource(EqlContext(eql::Context::from_leaves(
+            [component],
+            impeller::types::Timestamp(0),
+            impeller::types::Timestamp(1),
+        )));
+    }
+
+    #[test]
+    fn formula_graph_uses_sample_evaluation() {
+        let mut app = test_app();
+        install_scalar_eql_component(&mut app);
+        let schematic = Schematic::from_kdl(r#"graph "sample.value.sqrt()" name="Square root""#)
+            .expect("schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut graph_query = app.world_mut().query::<&crate::ui::plot::GraphState>();
+        let graphs: Vec<_> = graph_query.iter(app.world()).collect();
+        assert_eq!(graphs.len(), 1);
+        assert!(graphs[0].components.is_empty());
+        let derived = graphs[0].derived.as_ref().expect("derived graph");
+        assert_eq!(
+            derived.dependencies,
+            vec![impeller::types::ComponentId::new("sample.value")]
+        );
+
+        let mut query_plot = app
+            .world_mut()
+            .query::<&crate::ui::query_plot::QueryPlotData>();
+        assert_eq!(query_plot.iter(app.world()).count(), 0);
+
+        let saved = save_schematic(&mut app);
+        assert!(
+            impeller_kdl::serialize_schematic(&saved)
+                .contains(r#"graph "sample.value.sqrt()" name="Square root""#)
+        );
+    }
+
+    #[test]
+    fn invalid_formula_graph_is_not_loaded() {
+        let mut app = test_app();
+        install_scalar_eql_component(&mut app);
+        let schematic =
+            Schematic::from_kdl(r#"graph "sample.value.sqrt(1.0)" name="Invalid square root""#)
+                .expect("schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app.world_mut().query::<&crate::ui::plot::GraphState>();
+        assert_eq!(query.iter(app.world()).count(), 0);
+    }
+
+    #[test]
+    fn from_schematic_range_last_5s() {
+        let last_5s = crate::TimeRangeBehavior::from_schematic_range("last_5s").unwrap();
+        assert_eq!(
+            crate::TimeRangeBehavior::from_schematic_range("5s"),
+            Some(last_5s)
+        );
+        assert_eq!(last_5s.to_schematic_range().as_deref(), Some("last_5s"));
     }
 
     #[test]
@@ -1623,6 +2854,71 @@ mod tests {
     }
 
     #[test]
+    fn viewport_far_configures_presentation_without_limiting_camera_or_zoom() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"viewport name="Frustum Source" show_view_cube=#false far=500.0"#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let world = app.world_mut();
+        let mut query = world.query_filtered::<(
+            &Projection,
+            &tiles::ViewportConfig,
+            &bevy_editor_cam::prelude::EditorCam,
+        ), With<crate::MainCamera>>();
+        let (projection, config, editor_cam) = query.iter(world).next().expect("viewport camera");
+        let Projection::Perspective(perspective) = projection else {
+            panic!("expected perspective projection");
+        };
+        let default_zoom = bevy_editor_cam::controller::zoom::ZoomLimits::default();
+
+        assert_eq!(default_zoom.min_size_per_pixel, 1.0e-6);
+        assert_eq!(default_zoom.max_size_per_pixel, 1.0e27);
+        assert_eq!(perspective.far, tiles::VIEWPORT_PROJECTION_FAR);
+        assert_eq!(config.configured_far, Some(500.0));
+        assert_eq!(
+            editor_cam.zoom_limits.min_size_per_pixel,
+            default_zoom.min_size_per_pixel
+        );
+        assert_eq!(
+            editor_cam.zoom_limits.max_size_per_pixel,
+            default_zoom.max_size_per_pixel
+        );
+    }
+
+    #[test]
+    fn viewport_near_without_far_remains_authoritative() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(r#"viewport show_view_cube=#false near=1000000.0"#)
+            .expect("parse voyager-scale viewport");
+
+        load_schematic(&mut app, &schematic);
+
+        let world = app.world_mut();
+        let mut query = world.query_filtered::<(
+            &Projection,
+            &tiles::ViewportConfig,
+            &bevy_editor_cam::prelude::EditorCam,
+        ), With<crate::MainCamera>>();
+        let (projection, config, editor_cam) = query.iter(world).next().expect("viewport camera");
+        let Projection::Perspective(perspective) = projection else {
+            panic!("expected perspective projection");
+        };
+
+        assert_eq!(perspective.near, 1_000_000.0);
+        assert_eq!(perspective.far, tiles::VIEWPORT_PROJECTION_FAR);
+        assert_eq!(config.configured_near, Some(1_000_000.0));
+        assert_eq!(config.configured_far, None);
+        assert_eq!(
+            editor_cam.perspective.near_clip_limits,
+            1_000_000.0..1_000_000.0
+        );
+    }
+
+    #[test]
     fn mixed_schematic_clears_cleanly() {
         let mut app = test_app();
         let baseline = entity_count(&mut app);
@@ -1651,5 +2947,87 @@ mod tests {
             cleared_count, baseline,
             "clearing the schematic should restore the entity count to baseline"
         );
+    }
+
+    /// ECEF converters on arrow vector/origin must bake the schematic
+    /// `coordinate` origin, not `GeoContext::default()` (lat/lon 0).
+    #[test]
+    fn vector_arrow_ecef_converters_use_schematic_origin() {
+        use crate::vector_arrow::VectorArrowState;
+        use bevy::ecs::system::SystemState;
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoOrigin};
+        use impeller::schema::Schema;
+        use impeller::types::{ComponentId, PrimType, Timestamp};
+        use impeller_bevy::EntityMap;
+        use impeller_wkt::ComponentValue;
+        use nox::Array;
+        use std::collections::HashMap;
+        use std::sync::Arc;
+
+        let origin = GeoOrigin::new_from_degrees(28.5, -80.6, 0.0);
+        let geo = GeoContext::from(origin);
+        let origin_ecef = GeoFrame::ECEF
+            ._M_(&GeoFrame::NED, &geo)
+            .transform_point3(DVec3::ZERO);
+
+        let component = Arc::new(eql::Component::new(
+            "rocket.world_pos".to_string(),
+            ComponentId::new("rocket.world_pos"),
+            Schema::new(PrimType::F64, vec![3u64]).unwrap(),
+        ));
+        let component_id = component.id;
+
+        let mut app = test_app();
+        app.insert_resource(EqlContext(eql::Context::from_leaves(
+            [component],
+            Timestamp(0),
+            Timestamp(1000),
+        )));
+
+        let schematic = Schematic::from_kdl(
+            r#"
+            coordinate frame=ECEF lat=28.5 lon=-80.6
+            vector_arrow "rocket.world_pos.ecef_to_ned()" origin="rocket.world_pos.ecef_to_ned()"
+            "#,
+        )
+        .expect("parse test schematic");
+        load_schematic(&mut app, &schematic);
+
+        let (vector_expr, origin_expr) = {
+            let mut query = app.world_mut().query::<&mut VectorArrowState>();
+            let mut state = query
+                .iter_mut(app.world_mut())
+                .next()
+                .expect("vector_arrow entity");
+            (
+                state.vector_expr.take().expect("compiled vector"),
+                state.origin_expr.take().expect("compiled origin"),
+            )
+        };
+
+        let mut world = World::new();
+        let entity = world
+            .spawn(ComponentValue::F64(
+                Array::<f64, nox::Dyn>::from_shape_vec(
+                    smallvec::smallvec![3],
+                    vec![origin_ecef.x, origin_ecef.y, origin_ecef.z],
+                )
+                .unwrap(),
+            ))
+            .id();
+        let entity_map = EntityMap(HashMap::from([(component_id, entity)]));
+        let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
+            SystemState::new(&mut world);
+        let (values,) = system_state.params(&world);
+
+        for (label, expr) in [("vector", &vector_expr), ("origin", &origin_expr)] {
+            let out = expr.execute(&entity_map, &values).expect(label);
+            let pos = crate::ui::gauges::component_value_to_position(&out)
+                .unwrap_or_else(|| panic!("{label}: expected a 3-vector"));
+            assert!(
+                pos.length() < 1e-6,
+                "{label}: ECEF of schematic origin must map to ~0 NED, got {pos:?}"
+            );
+        }
     }
 }

@@ -48,6 +48,7 @@
       [
         (rustToolchain pkgs)
         maturin
+        protobuf
         python3
         which
       ]
@@ -116,6 +117,8 @@
           polars
           pytest
           matplotlib
+          pyarrow
+          watchfiles
         ]
         ++ lib.optionals pkgs.stdenv.isDarwin [
           pkgs.libcxx

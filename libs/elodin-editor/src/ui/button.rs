@@ -109,6 +109,7 @@ pub struct ECheckboxButton {
     on_color: egui::Color32,
     off_color: egui::Color32,
     text_color: egui::Color32,
+    border_color: Option<egui::Color32>,
     margin: egui::Margin,
     is_on: bool,
     label: String,
@@ -122,6 +123,7 @@ impl ECheckboxButton {
             on_color: get_scheme().text_primary,
             off_color: get_scheme().bg_secondary,
             text_color: get_scheme().text_primary,
+            border_color: None,
             margin: egui::Margin::same(8),
             is_on,
             label: label.to_string(),
@@ -137,6 +139,13 @@ impl ECheckboxButton {
 
     pub fn on_color(mut self, color: egui::Color32) -> Self {
         self.on_color = color;
+        self
+    }
+
+    /// Resting border color. Defaults to `on_color` (the box is monochrome);
+    /// set this to keep a fixed border while the fill shows a different color.
+    pub fn border_color(mut self, color: egui::Color32) -> Self {
+        self.border_color = Some(color);
         self
     }
 
@@ -173,7 +182,8 @@ impl ECheckboxButton {
         // Paint the UI
         if ui.is_rect_visible(rect) {
             let style = ui.style_mut();
-            style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, self.on_color);
+            style.visuals.widgets.inactive.bg_stroke =
+                egui::Stroke::new(1.0_f32, self.border_color.unwrap_or(self.on_color));
             let visuals = ui.style().interact(&response);
 
             let inner_rect = rect.shrink4(self.margin);
@@ -259,7 +269,7 @@ impl EColorButton {
         // Paint the UI
         if ui.is_rect_visible(rect) {
             let style = ui.style_mut();
-            style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, self.color);
+            style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0_f32, self.color);
             let visuals = ui.style().interact(&response);
 
             let checkbox_rect = egui::Rect::from_min_size(rect.min, egui::Vec2::splat(16.0));
@@ -304,7 +314,7 @@ impl EButton {
             disabled: false,
             color: get_scheme().text_primary,
             bg_color: get_scheme().bg_secondary,
-            stroke: egui::Stroke::new(1.0, get_scheme().border_primary),
+            stroke: egui::Stroke::new(1.0_f32, get_scheme().border_primary),
             corner_radius: egui::CornerRadius::same(2),
             margin: egui::Margin::same(8),
             width: None,
@@ -316,28 +326,28 @@ impl EButton {
         EButton::new(label)
             .color(get_scheme().success)
             .bg_color(get_scheme().success.opacity(0.04))
-            .stroke(Stroke::new(1.0, get_scheme().success.opacity(0.4)))
+            .stroke(Stroke::new(1.0_f32, get_scheme().success.opacity(0.4)))
     }
 
     pub fn highlight(label: impl ToString) -> Self {
         EButton::new(label)
             .color(get_scheme().highlight)
             .bg_color(get_scheme().highlight.opacity(0.04))
-            .stroke(Stroke::new(1.0, get_scheme().highlight.opacity(0.4)))
+            .stroke(Stroke::new(1.0_f32, get_scheme().highlight.opacity(0.4)))
     }
 
     pub fn red(label: impl ToString) -> Self {
         EButton::new(label)
             .color(get_scheme().error)
             .bg_color(get_scheme().error.opacity(0.04))
-            .stroke(Stroke::new(1.0, get_scheme().error))
+            .stroke(Stroke::new(1.0_f32, get_scheme().error))
     }
 
     pub fn gray(label: impl ToString) -> Self {
         EButton::new(label)
             .color(get_scheme().text_primary)
             .bg_color(Color32::TRANSPARENT)
-            .stroke(Stroke::new(1.0, get_scheme().border_primary))
+            .stroke(Stroke::new(1.0_f32, get_scheme().border_primary))
     }
 
     pub fn disabled(mut self, disabled: bool) -> Self {
@@ -505,7 +515,7 @@ impl ETileButton {
                 rect,
                 egui::CornerRadius::same(1),
                 visuals.bg_fill,
-                egui::Stroke::new(1.0, get_scheme().border_primary),
+                egui::Stroke::new(1.0_f32, get_scheme().border_primary),
                 egui::StrokeKind::Middle,
             );
 

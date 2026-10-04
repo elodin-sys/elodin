@@ -5,10 +5,8 @@ use bevy::ecs::{
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::{EguiContexts, EguiTextureHandle, egui};
-use impeller2_bevy::CurrentStreamId;
-use impeller2_wkt::{
-    CurrentTimestamp, EarliestTimestamp, LastUpdated, SimulationTimeStep, StreamId,
-};
+use impeller_bevy::CurrentStreamId;
+use impeller_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated, StreamId};
 use timeline_controls::TimelineControls;
 
 use std::ops::RangeInclusive;
@@ -24,21 +22,39 @@ use crate::{
     },
 };
 
-use super::widgets::{WidgetSystem, WidgetSystemExt};
+use super::widgets::{SystemStateExt, WidgetSystem, WidgetSystemExt};
 
+pub mod playback;
 pub mod timeline_controls;
 pub mod timeline_slider;
 
 pub(crate) fn plugin(app: &mut App) {
     app.add_plugins(timeline_controls::plugin)
         .init_resource::<PlaybackSpeed>()
+        .init_resource::<playback::PlaybackLoop>()
+        .init_resource::<playback::PlaybackRegion>()
+        .init_resource::<playback::PlaybackDiscontinuities>()
         .init_resource::<TimelineSettings>()
+        .init_resource::<TelemetryMode>()
         .init_resource::<LatestFollow>()
         .init_resource::<AutoFollowLatestState>()
+        .add_systems(
+            PreUpdate,
+            playback::skip_discontinuities
+                .after(crate::advance_playback)
+                .before(crate::follow_latest),
+        )
         .add_systems(
             Update,
             (
                 reset_playback_speed_on_stream_change,
+                playback::apply_recorded_playback_speed,
+            )
+                .chain(),
+        )
+        .add_systems(
+            Update,
+            (
                 reset_latest_follow_on_stream_change,
                 reset_auto_follow_latest_state,
                 auto_start_follow_latest,
@@ -46,6 +62,12 @@ pub(crate) fn plugin(app: &mut App) {
         );
 }
 
+/// Multiplier on wall-clock time while the playhead advances.
+///
+/// Session state, like [`playback::PlaybackLoop`] and [`playback::PlaybackRegion`].
+/// None of them are written into the KDL schematic: a schematic is shared
+/// layout, and opening it must not resume the previous session's speed, loop,
+/// or selection.
 #[derive(bevy::prelude::Resource, Clone, Copy, Debug)]
 pub struct PlaybackSpeed(pub f64);
 
@@ -60,35 +82,38 @@ pub struct LatestFollow(pub bool);
 
 #[derive(bevy::prelude::Resource, Clone, Copy, Debug, PartialEq)]
 pub struct TimelineSettings {
-    pub played_color: impeller2_wkt::Color,
-    pub future_color: impeller2_wkt::Color,
-    pub future_trail_alpha: f32,
+    pub played_color: impeller_wkt::Color,
+    pub future_color: impeller_wkt::Color,
     pub follow_latest: bool,
 }
 
+/// When true, enable dense telemetry presentation for graph dashboards.
+#[derive(bevy::prelude::Resource, Default, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TelemetryMode(pub bool);
+
 impl Default for TimelineSettings {
     fn default() -> Self {
-        Self::from(impeller2_wkt::TimelineConfig::default())
+        Self::from(impeller_wkt::TimelineConfig::default())
     }
 }
 
-impl From<impeller2_wkt::TimelineConfig> for TimelineSettings {
-    fn from(value: impeller2_wkt::TimelineConfig) -> Self {
+impl From<impeller_wkt::TimelineConfig> for TimelineSettings {
+    fn from(value: impeller_wkt::TimelineConfig) -> Self {
         Self {
             played_color: value.played_color,
             future_color: value.future_color,
-            future_trail_alpha: 0.35,
             follow_latest: value.follow_latest,
         }
     }
 }
 
-impl From<TimelineSettings> for impeller2_wkt::TimelineConfig {
+impl From<TimelineSettings> for impeller_wkt::TimelineConfig {
     fn from(value: TimelineSettings) -> Self {
         Self {
             played_color: value.played_color,
             future_color: value.future_color,
             follow_latest: value.follow_latest,
+            range: None,
         }
     }
 }
@@ -96,7 +121,7 @@ impl From<TimelineSettings> for impeller2_wkt::TimelineConfig {
 #[derive(bevy::prelude::Resource, Default, Clone, Copy, Debug)]
 pub(crate) struct AutoFollowLatestState {
     stream_id: Option<StreamId>,
-    baseline_latest: Option<impeller2::types::Timestamp>,
+    baseline_latest: Option<impeller::types::Timestamp>,
     armed: bool,
 }
 
@@ -116,6 +141,7 @@ struct AutoFollowLatestParams<'w> {
     current_timestamp: ResMut<'w, CurrentTimestamp>,
     paused: ResMut<'w, crate::ui::Paused>,
     latest_follow: ResMut<'w, LatestFollow>,
+    playback_loop: ResMut<'w, playback::PlaybackLoop>,
     state: ResMut<'w, AutoFollowLatestState>,
 }
 
@@ -131,9 +157,18 @@ fn reset_playback_speed_on_stream_change(
 fn reset_latest_follow_on_stream_change(
     current_stream_id: Res<CurrentStreamId>,
     mut latest_follow: ResMut<LatestFollow>,
+    mut playback_loop: ResMut<playback::PlaybackLoop>,
+    mut playback_region: ResMut<playback::PlaybackRegion>,
+    mut discontinuities: ResMut<playback::PlaybackDiscontinuities>,
 ) {
     if current_stream_id.is_changed() {
         latest_follow.0 = false;
+        *discontinuities = playback::PlaybackDiscontinuities::default();
+        // Loop and region belong to one recording. Kept across a connect they
+        // name timestamps the new stream does not have, so step_loop pulls the
+        // playhead outside the new range on every frame.
+        playback_loop.0 = false;
+        playback_region.0 = None;
     }
 }
 
@@ -166,6 +201,7 @@ fn auto_start_follow_latest(params: AutoFollowLatestParams) {
         mut current_timestamp,
         mut paused,
         mut latest_follow,
+        mut playback_loop,
         mut state,
     } = params;
 
@@ -188,6 +224,10 @@ fn auto_start_follow_latest(params: AutoFollowLatestParams) {
         }
         Some(baseline_latest) if latest.0 > baseline_latest => {
             latest_follow.0 = true;
+            // Follow and loop are exclusive: the button paths turn the loop off
+            // when they enable follow, and this automatic path must too, or a
+            // schematic with `follow_latest` leaves both on.
+            playback_loop.0 = false;
             paused.0 = false;
             current_timestamp.0 = latest.0;
             state.armed = false;
@@ -199,7 +239,7 @@ fn auto_start_follow_latest(params: AutoFollowLatestParams) {
 #[derive(bevy::prelude::Resource, Default, Clone, Copy, Debug)]
 pub struct StreamTickOrigin {
     stream_id: Option<StreamId>,
-    timestamp: Option<impeller2::types::Timestamp>,
+    timestamp: Option<impeller::types::Timestamp>,
     pending_rebase: bool,
 }
 
@@ -218,8 +258,8 @@ impl StreamTickOrigin {
 
     pub fn observe_tick(
         &mut self,
-        tick: impeller2::types::Timestamp,
-        earliest: impeller2::types::Timestamp,
+        tick: impeller::types::Timestamp,
+        earliest: impeller::types::Timestamp,
     ) {
         if tick < earliest {
             return;
@@ -238,7 +278,7 @@ impl StreamTickOrigin {
         }
     }
 
-    pub fn origin(&self, fallback: impeller2::types::Timestamp) -> impeller2::types::Timestamp {
+    pub fn origin(&self, fallback: impeller::types::Timestamp) -> impeller::types::Timestamp {
         self.timestamp.unwrap_or(fallback)
     }
 }
@@ -248,7 +288,6 @@ pub struct TimelineArgs {
     pub available_width: f32,
     pub line_height: f32,
     pub segment_count: u8,
-    pub frames_per_second: f64,
     pub active_range: RangeInclusive<i64>,
     pub focus_range: Option<RangeInclusive<i64>>,
 }
@@ -407,7 +446,6 @@ pub struct TimelineIcons {
 pub struct TimelinePanel<'w, 's> {
     contexts: EguiContexts<'w, 's>,
     images: Local<'s, images::Images>,
-    tick_time: Res<'w, SimulationTimeStep>,
     selected_time_range: Res<'w, SelectedTimeRange>,
     full_time_range: Res<'w, FullTimeRange>,
     time_range_behavior: Res<'w, TimeRangeBehavior>,
@@ -424,13 +462,12 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
         ui: &mut egui::Ui,
         _args: Self::Args,
     ) {
-        let state_mut = state.get_mut(world);
+        let state_mut = state.params_mut(world);
         let Ok(target_window) = state_mut.primary_window.single() else {
             return;
         };
         let mut contexts = state_mut.contexts;
         let images = state_mut.images;
-        let tick_time = state_mut.tick_time;
         let active_range = state_mut.full_time_range.0.start.0..=state_mut.full_time_range.0.end.0;
         let is_full = *state_mut.time_range_behavior == TimeRangeBehavior::default();
         let focus_range = if is_full {
@@ -438,8 +475,6 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
         } else {
             Some(state_mut.selected_time_range.0.start.0..=state_mut.selected_time_range.0.end.0)
         };
-
-        let frames_per_second = 1.0 / tick_time.0;
 
         let timeline_icons = TimelineIcons {
             jump_to_start: contexts
@@ -459,10 +494,10 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
                 .add_image(EguiTextureHandle::Weak(images.icon_vertical_chevrons.id())),
         };
 
-        egui::TopBottomPanel::bottom("timeline_panel")
+        egui::Panel::bottom("timeline_panel")
             .frame(egui::Frame {
                 fill: get_scheme().bg_primary,
-                //stroke: egui::Stroke::new(1.0, get_scheme().border_primary),
+                //stroke: egui::Stroke::new(1.0_f32, get_scheme().border_primary),
                 ..Default::default()
             })
             .resizable(false)
@@ -477,7 +512,6 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
                     available_width,
                     line_height: 40.0,
                     segment_count: (available_width / 90.0) as u8,
-                    frames_per_second,
                     active_range,
                     focus_range,
                 };
@@ -500,5 +534,76 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
                     PointerOwnerPriority::Panel,
                 );
             });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use impeller::types::Timestamp;
+
+    #[test]
+    fn a_new_stream_drops_the_loop_and_its_region() {
+        let mut app = App::new();
+        app.insert_resource(CurrentStreamId(1))
+            .init_resource::<LatestFollow>()
+            .init_resource::<playback::PlaybackLoop>()
+            .init_resource::<playback::PlaybackRegion>()
+            .init_resource::<playback::PlaybackDiscontinuities>()
+            .add_systems(Update, reset_latest_follow_on_stream_change);
+
+        // The first run consumes the change from inserting the stream id.
+        app.update();
+        app.world_mut().resource_mut::<playback::PlaybackLoop>().0 = true;
+        app.world_mut().resource_mut::<playback::PlaybackRegion>().0 =
+            Some((Timestamp(10), Timestamp(20)));
+
+        app.update();
+        assert!(
+            app.world().resource::<playback::PlaybackLoop>().0,
+            "the same stream keeps the loop"
+        );
+
+        app.world_mut().resource_mut::<CurrentStreamId>().0 = 2;
+        app.update();
+        assert!(!app.world().resource::<playback::PlaybackLoop>().0);
+        assert!(
+            app.world()
+                .resource::<playback::PlaybackRegion>()
+                .0
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn auto_follow_turns_the_loop_off() {
+        let mut app = App::new();
+        app.insert_resource(CurrentStreamId(1))
+            .init_resource::<TimelineSettings>()
+            .insert_resource(EarliestTimestamp(Timestamp(0)))
+            .insert_resource(LastUpdated(Timestamp(1_000)))
+            .init_resource::<CurrentTimestamp>()
+            .init_resource::<crate::ui::Paused>()
+            .init_resource::<LatestFollow>()
+            .init_resource::<playback::PlaybackLoop>()
+            .init_resource::<AutoFollowLatestState>()
+            .add_systems(Update, auto_start_follow_latest);
+
+        app.world_mut()
+            .resource_mut::<TimelineSettings>()
+            .follow_latest = true;
+        app.world_mut().resource_mut::<playback::PlaybackLoop>().0 = true;
+
+        // First tick records the baseline; the data has not moved yet.
+        app.update();
+        assert!(!app.world().resource::<LatestFollow>().0);
+
+        app.world_mut().resource_mut::<LastUpdated>().0 = Timestamp(2_000);
+        app.update();
+        assert!(app.world().resource::<LatestFollow>().0);
+        assert!(
+            !app.world().resource::<playback::PlaybackLoop>().0,
+            "following the live edge and looping are exclusive"
+        );
     }
 }

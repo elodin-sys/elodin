@@ -6,14 +6,15 @@ use bevy::{
     prelude::{Commands, Component, Entity, Query, Res, Resource},
 };
 use egui::{CornerRadius, RichText};
-use impeller2_bevy::{ConnectionAddr, ConnectionStatus, ThreadConnectionStatus};
-use impeller2_cli::mlua::MultiValue;
+use impeller_bevy::{ConnectionAddr, ConnectionStatus, ThreadConnectionStatus};
+use impeller_cli::mlua::MultiValue;
 
 use super::{
     button::EButton,
     colors::{ColorExt, get_scheme},
     widgets::WidgetSystem,
 };
+use crate::ui::widgets::SystemStateExt;
 
 #[derive(Resource)]
 pub struct LuaActor {
@@ -25,8 +26,8 @@ impl LuaActor {
         let (cmd_tx, cmd_rx) =
             flume::unbounded::<(String, flume::Sender<Result<String, String>>)>();
         stellarator::struc_con::stellar(move || async move {
-            let lua = impeller2_cli::lua().unwrap();
-            let client = match impeller2_cli::Client::connect(addr).await {
+            let lua = impeller_cli::lua().unwrap();
+            let client = match impeller_cli::Client::connect(addr).await {
                 Ok(c) => c,
                 Err(err) => {
                     warn!(?err, "lua client couldn't connect");
@@ -101,7 +102,7 @@ impl WidgetSystem for ActionTileWidget<'_, '_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) -> Self::Output {
-        let mut state = state.get_mut(world);
+        let mut state = state.params_mut(world);
         let mut tile = state.action_tiles.get_mut(args).unwrap();
         egui::Frame::NONE
             .inner_margin(egui::Margin::same(32))
@@ -189,8 +190,8 @@ pub fn spawn_lua_actor(
     }
     if lua.is_some() {
         match status {
-            impeller2_bevy::ConnectionStatus::NoConnection
-            | impeller2_bevy::ConnectionStatus::Error => {
+            impeller_bevy::ConnectionStatus::NoConnection
+            | impeller_bevy::ConnectionStatus::Error => {
                 commands.remove_resource::<LuaActor>();
             }
             _ => {}

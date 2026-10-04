@@ -162,6 +162,16 @@ class StepContext:
             exists at all).
         """
         ...
+    def read_msg_at(
+        self,
+        msg_name: str,
+        timestamp: int,
+    ) -> Optional[Tuple[int, Any]]:
+        """Return the selected message's timestamp and NumPy ``uint8`` payload."""
+        ...
+    def read_msg_latest(self, msg_name: str) -> Optional[Tuple[int, Any]]:
+        """Return the latest message timestamp and NumPy ``uint8`` payload."""
+        ...
     def stop_recipes(self) -> None:
         """Gracefully terminate all s10-managed recipes (external processes).
 
@@ -197,22 +207,30 @@ class WorldBuilder:
         self,
         entity: EntityId,
         name: str,
-        width: int,
-        height: int,
-        fov: float = 90.0,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+        fov: Optional[float] = None,
         near: float = 0.01,
         far: float = 1000.0,
         pos_offset: Sequence[float] = (0.0, 0.0, 0.0),
         rot_offset: Sequence[float] = (0.0, 0.0, 0.0),
         format: str = "rgba",
         effect: str = "normal",
-        effect_params: Optional[dict[str, float]] = None,
+        effect_params: Optional[dict[str, object]] = None,
+        camera_model: Optional[str] = None,
+        lens_hfov: Optional[float] = None,
         create_frustum: bool = False,
         show_ellipsoids: bool = False,
         frustums_color: Optional[Sequence[float]] = None,
         projection_color: Optional[Sequence[float]] = None,
         frustums_thickness: float = 0.006,
-        fps: float = 30.0,
+        frustums_up_marker: str = "none",
+        frustums_up_marker_overlay: bool = True,
+        fps: Optional[float] = None,
+        cinematic: bool = False,
+        ev100: Optional[float] = None,
+        bloom: Optional[dict[str, object]] = None,
+        environment: Optional[dict[str, object]] = None,
     ) -> None:
         """Register a virtual sensor camera on an entity.
 
@@ -229,14 +247,45 @@ class WorldBuilder:
         ``(0, -15, 0)``, 30 degrees right bank ``(30, 0, 0)``, 90 degrees left
         yaw ``(0, 0, 90)``.
 
+        ``frustums_up_marker`` marks which frustum edge is the top of the camera
+        image when ``create_frustum=True``: ``"highlight"`` thickens the
+        far-plane top edge and puts a ball on the corner holding the image
+        origin. ``frustums_up_marker_overlay`` repeats it along the top of this
+        camera's own pane, and is on by default since that pane exists only to
+        show this camera's image.
+
+        ``cinematic=True`` enables the cinematic Earth stack in the render
+        server (same meaning as KDL ``viewport cinematic=#true``). ``ev100``,
+        ``bloom``, and ``environment`` match the schematic and require
+        ``cinematic=True``. Omitted ``environment`` uses the house look
+        (Earth, 100 klx sun, ambient 0.05). At most one cinematic owner is
+        allowed: a cinematic viewport or a cinematic sensor camera, never both.
+
+        ``camera_model="boson640p"`` supplies 640×512, 60 Hz, the Boson+ sensor
+        defaults, and an 18 degree horizontal lens. ``lens_hfov`` is converted
+        to the vertical ``fov`` used by Bevy after resolving the final image
+        aspect ratio. Explicit ``width``, ``height``, and ``fps`` override model
+        defaults; ``fov`` and ``lens_hfov`` are mutually exclusive.
+
         The simulation never blocks on rendering. Pick the apparent camera
         latency at read time by reading with a timestamp offset:
 
             frame = ctx.read_msg("drone.scene_cam", timestamp=ctx.timestamp - 33_000)
 
         Raises ``ValueError`` if ``rot_offset`` is not a finite 3-element
-        sequence or if ``fps`` is not a positive finite number.
+        sequence, if ``fps`` is not a positive finite number, if
+        ``frustums_up_marker`` is not a known marker, if look settings
+        are passed without ``cinematic=True``, or if more than one cinematic
+        environment owner is configured.
         """
+        ...
+    def thermal_tag(
+        self,
+        entity: EntityId,
+        temperature_c: float,
+        emissivity: float = 1.0,
+    ) -> None:
+        """Assign an apparent LWIR surface temperature to an entity's visual mesh."""
         ...
     def run(
         self,
@@ -444,10 +493,6 @@ class Component:
 
 class ShapeIndexer:
     def __getitem__(self, index: Any) -> ShapeIndexer: ...
-
-class Impeller:
-    @staticmethod
-    def tcp(addr: str) -> Impeller: ...
 
 class Exec:
     def run(

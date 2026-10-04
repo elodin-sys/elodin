@@ -8,14 +8,13 @@ use arrow::{
     compute,
     datatypes::*,
 };
-use convert_case::Casing;
 use datafusion::{
     catalog::streaming::StreamingTable, datasource::MemTable, execution::RecordBatchStream,
     physical_plan::streaming::PartitionStream, prelude::SessionContext,
 };
 use futures_lite::{Stream, StreamExt};
-use impeller2::types::{PrimType, Timestamp};
-use impeller2_wkt::ArchiveFormat;
+use impeller::types::{PrimType, Timestamp};
+use impeller_wkt::ArchiveFormat;
 use std::{
     collections::HashMap,
     fs::File,
@@ -354,9 +353,7 @@ impl DB {
                     .component_metadata
                     .get(&component.component_id)
                     .unwrap();
-                let component_name = sanitize_sql_table_name(
-                    &component_metadata.name.to_case(convert_case::Case::Snake),
-                );
+                let component_name = eql::sql_table_name(&component_metadata.name);
                 let name = component_name.clone();
                 let mem_table = component.as_mem_table_with_element_names(
                     &component_name,

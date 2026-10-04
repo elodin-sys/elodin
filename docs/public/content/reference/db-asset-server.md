@@ -26,7 +26,7 @@ flowchart LR
     Parse["Parse schematic KDL"]
     Copy["Copy bytes to db/assets"]
     Rewrite["Rewrite paths to db scheme"]
-    Meta["Store schematic.content"]
+    Meta["Set schematic.active"]
   end
   subgraph serve_phase ["Serve"]
     TCP["Impeller TCP port N"]
@@ -49,8 +49,8 @@ flowchart LR
 |-------|------|
 | **Blob store** | `{db_path}/assets/{relative_key}` — opaque bytes, any file type |
 | **DB Asset Server** | `GET http://host:(tcp_port+1)/{relative_key}` while `elodin-db run` is active |
-| **KDL rewrite** | Local paths at record time become `db:{relative_key}` in `schematic.content` |
-| **Consumers** | Editor resolves `db:` to HTTP (or mirrors to a local cache for skyboxes) |
+| **KDL rewrite** | Local paths at record time become `db:{relative_key}` in the stored active schematic asset |
+| **Consumers** | Editor loads the active schematic and all assets over HTTP |
 
 ### Ports
 
@@ -78,7 +78,7 @@ Persistence runs during simulation DB initialization (`init_db`), when the world
 - **`db_path`** argument to `world.run(…, db_path=…)`, or
 - **`ELODIN_DB_PATH`** environment variable (Python SDK)
 
-The schematic body is stored in DB metadata as `schematic.content` (with `db:` paths). The original `schematic.path` string is informational only; replay uses `schematic.content` from the DB when the file is missing.
+The active schematic is stored as an asset (default `schematics/main.kdl`) and pointed to by `schematic.active` metadata. Consumers fetch it over the DB Asset Server; there is no inline KDL mirror in DB metadata.
 
 ## Simulation source snapshot
 
@@ -122,16 +122,24 @@ Visual assets remain separate under `{db}/assets/`.
 
 See [Elodin CLI](/reference/elodin-cli) for `editor --replay` and `elodin-db --follows`.
 
+### Aleph / HITL
+
+On the Aleph flight computer, the `elodin-db` NixOS service passes
+`--assets /var/lib/elodin/assets` (the shared `ELODIN_ASSETS` root,
+configurable via `services.elodin-db.assetsDir`) so each fresh boot database
+ingests the asset tree on creation. A HITL recording copied off the vehicle is
+therefore a complete, portable record: serve it anywhere with `elodin-db run`
+and the editor loads schematic and meshes from the DB itself.
+
 ### Follow mode and assets
 
 When a follower connects to a source `elodin-db` on port `N`, it replicates telemetry over Impeller TCP. Schematic assets are **not** streamed on that socket — they are fetched separately from the source **DB Asset Server** on port `N+1`.
 
-On connect (and when schematic KDL updates), the follower:
+On connect (and when DB config updates), the follower:
 
-1. Reads `schematic.content` from replicated DB metadata
-2. Collects every `db:…` path referenced in the KDL (including skybox manifest sidecars)
-3. `GET`s each file from `http://source:(N+1)/{key}` with retries
-4. Writes bytes into its own `{follower_db}/assets/`
+1. `GET`s `http://source:(N+1)/__index__` to list the source asset tree
+2. Copies each key that is missing or size-different into `{follower_db}/assets/`
+3. Serves the mirrored tree from its own DB Asset Server on `(follower_port + 1)`
 
 The follower can then serve those files from its own DB Asset Server on `(follower_port + 1)` to local editors, without copying the full source database directory.
 
@@ -154,7 +162,7 @@ Point `--follows` at the source **Impeller** port (`N`), not the asset port (`N+
 
 | Stage | Behavior |
 |-------|----------|
-| **Local path** | Resolved via schematic directory, `ELODIN_ASSETS_DIR` (default `./assets`), or cwd |
+| **Local path** | Resolved via `$ELODIN_ASSETS` (default `./assets`), simulation entry directory, or cwd |
 | **On disk in DB** | `assets/{key}.glb` (key preserves subdirectories, e.g. `models/rocket.glb`) |
 | **Stored KDL** | `path="db:models/rocket.glb"` |
 | **Editor** | `db:…` → `http://127.0.0.1:2241/…` via Bevy `AssetServer` + `WebAssetPlugin` (non-blocking) |
@@ -181,7 +189,7 @@ The skybox plugin today reads from a **local cache directory**; the editor mirro
 
 ### Carried in the DB without extra asset files
 
-- Full schematic KDL in `schematic.content`
+- Active schematic KDL at `schematics/*.kdl` (see `schematic.active`)
 - Procedural meshes (`sphere`, `box`, `cylinder`, …)
 - Built-in [color scheme](/reference/color-schemes) names in `theme scheme=…`
 - Telemetry components (separate from this asset pipeline)
@@ -191,7 +199,7 @@ The skybox plugin today reads from a **local cache directory**; the editor mirro
 | Item | Why |
 |------|-----|
 | Custom `color_schemes/*.json` on disk | Only the scheme **name** is in KDL; JSON must exist locally |
-| `window path="other.kdl"` | Secondary schematic path is stored, not the file contents |
+| `window path="other.kdl"` | Window sub-schematics are stored as separate assets under `schematics/` |
 | `video_stream` panels | H.264 lives in message logs, not `assets/` |
 | Arbitrary external URLs in KDL | Not copied into the DB by design |
 
@@ -200,7 +208,7 @@ The skybox plugin today reads from a **local cache directory**; the editor mirro
 | Variable | Purpose |
 |----------|---------|
 | `ELODIN_DB_PATH` | Directory for the simulation database (record) |
-| `ELODIN_ASSETS_DIR` | Root for resolving local asset paths at record (default `./assets`) |
+| `ELODIN_ASSETS` | Root for resolving local asset paths at record (default `./assets`) |
 
 ## Verification
 
@@ -230,22 +238,22 @@ Expect HTTP `200` and non-empty files under `assets/` after a sim that reference
 
 Use this when the schematic stores a **direct relative path** (like a `.glb` mesh or `.png` icon).
 
-1. **KDL** (`libs/impeller2/kdl`) — parse and serialize the path field on the relevant node.
-2. **Collect & rewrite** (`libs/impeller2/kdl/src/rewrite.rs`):
+1. **KDL** (`libs/impeller/kdl`) — parse and serialize the path field on the relevant node.
+2. **Collect & rewrite** (`libs/impeller/kdl/src/rewrite.rs`):
    - `collect_local_asset_paths` — include new local paths
    - `collect_db_asset_names` — include `db:` keys (for [follow](/reference/elodin-cli) sync)
    - `rewrite_asset_paths` — rewrite local → `db:…` on record
-3. **Persist** — no change if the path appears in collect; `persist_schematic_assets` in `libs/nox-py/src/impeller2_server.rs` is generic.
-4. **Follow** — no change if the path appears in `collect_db_asset_names`; `sync_schematic_assets_from_source` copies all listed keys.
+3. **Persist** — no change if the path appears in collect; `persist_schematic_assets` in `libs/nox-py/src/impeller_server.rs` is generic.
+4. **Follow** — no change if the path appears in `collect_db_asset_names`; full-tree mirror via `GET /__index__` copies all assets.
 5. **Editor** — if Bevy can load the format: resolve with `resolve_db_asset_url` and `AssetServer.load(url)`. No blocking HTTP in Bevy systems.
-6. **Tests** — unit tests in `impeller2-kdl` (collect/rewrite) and `nox-py` (persist).
+6. **Tests** — unit tests in `impeller-kdl` (collect/rewrite) and `nox-py` (persist).
 
 ### B — Indirect reference (name → manifest → file)
 
 Use this when the KDL stores a **logical name** (like `skybox name=…`).
 
-1. Add a **single resolver** in `impeller2/kdl` (manifest parse → extra storage keys).
-2. **Persist** — extend collect after resolving (see `add_local_skybox_cubemap_path` in `impeller2_server.rs`).
+1. Add a **single resolver** in `impeller/kdl` (manifest parse → extra storage keys).
+2. **Persist** — extend collect after resolving (see `add_local_skybox_cubemap_path` in `impeller_server.rs`).
 3. **Follow** — after syncing the manifest bytes, resolve and fetch dependent files (`assets_http.rs`).
 4. **Editor** — either teach the consumer to load via HTTP, or mirror into a local cache (skybox pattern, async via `IoTaskPool`).
 5. **Avoid** copying manifest-resolution logic into three places; share one resolver.
@@ -256,29 +264,3 @@ Use this when the KDL stores a **logical name** (like `skybox name=…`).
 - [Replays](/reference/replays) — legacy replay directory layout (distinct from Elodin DB with `assets/`)
 - [Elodin DB overview](/home/db/overview) — database capabilities and follow mode
 - [Elodin CLI](/reference/elodin-cli) — `editor`, `elodin-db run`, `--replay`, `--follows`
-
-<script type="module">
-  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: document.body.classList.contains("dark") ? "dark" : "default",
-    securityLevel: "loose",
-  });
-
-  const nodes = [];
-  document.querySelectorAll("pre > code.language-mermaid").forEach((code) => {
-    const div = document.createElement("div");
-    div.className = "mermaid";
-    div.style.margin = "2rem 0";
-    div.style.overflowX = "auto";
-    div.style.textAlign = "center";
-    div.textContent = code.textContent;
-    code.parentElement.replaceWith(div);
-    nodes.push(div);
-  });
-
-  if (nodes.length) {
-    await mermaid.run({ nodes });
-  }
-</script>

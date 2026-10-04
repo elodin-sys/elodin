@@ -10,13 +10,16 @@ use std::{
 use stellarator::util::CancelToken;
 use tokio::io::AsyncBufReadExt;
 use tokio::process::Command;
-use tracing::{debug, error};
+use tracing::debug;
 use which::which;
 
 use crate::DEFAULT_WATCH_TIMEOUT;
 use crate::cgroup::CgroupScope;
 use crate::probe::ReadyProbe;
-use crate::{error::Error, watch::watch};
+use crate::{
+    error::Error,
+    watch::{WatchExitPolicy, watch},
+};
 use std::time::Duration;
 #[cfg(target_os = "linux")]
 use std::{collections::HashSet, fs};
@@ -40,6 +43,12 @@ pub struct SimRecipe {
     pub ready: Option<ReadyProbe>,
     #[serde(default)]
     pub ready_timeout: Option<String>,
+    /// Spawn the sim in its own process group and include a `killpg` sweep in
+    /// teardown (macOS always does this; on Linux it is opt-in for
+    /// orchestrated monte-carlo runs where daemonizing grandchildren escape
+    /// process-tree signalling).
+    #[serde(default)]
+    pub own_process_group: bool,
 }
 
 fn default_addr() -> SocketAddr {
@@ -102,20 +111,22 @@ fn signal_process_tree(root_pid: nix::unistd::Pid, signal: nix::sys::signal::Sig
 }
 
 #[cfg(all(unix, not(target_os = "linux")))]
-fn configure_sim_command(cmd: &mut Command) {
+fn configure_sim_command(cmd: &mut Command, _own_process_group: bool) {
     cmd.process_group(0);
 }
 
 #[cfg(target_os = "linux")]
-fn configure_sim_command(_cmd: &mut Command) {}
-
-#[cfg(all(unix, not(target_os = "linux")))]
-fn signal_process_group(root_pid: nix::unistd::Pid, signal: nix::sys::signal::Signal) {
-    let _ = nix::sys::signal::killpg(root_pid, signal);
+fn configure_sim_command(cmd: &mut Command, own_process_group: bool) {
+    if own_process_group {
+        cmd.process_group(0);
+    }
 }
 
-#[cfg(target_os = "linux")]
-fn signal_process_group(_root_pid: nix::unistd::Pid, _signal: nix::sys::signal::Signal) {}
+#[cfg(unix)]
+fn signal_process_group(root_pid: nix::unistd::Pid, signal: nix::sys::signal::Signal) {
+    // ESRCH when the child shares our group (Linux default): harmless no-op.
+    let _ = nix::sys::signal::killpg(root_pid, signal);
+}
 
 impl SimRecipe {
     pub async fn run(
@@ -126,7 +137,7 @@ impl SimRecipe {
         debug!("running sim");
 
         let mut cmd = python_tokio_command()?;
-        configure_sim_command(&mut cmd);
+        configure_sim_command(&mut cmd, self.own_process_group);
         // Close stdin to prevent SIGTTIN when child is in background process group.
         // Pipe stdout/stderr so the child (in its own process group via
         // process_group(0)) writes to pipes instead of the terminal, preventing
@@ -150,7 +161,7 @@ impl SimRecipe {
         let mut child = child.spawn()?;
         let child_pid = child.id().map(|pid| nix::unistd::Pid::from_raw(pid as i32));
         if let (Some(scope), Some(pid)) = (&cgroup, child.id()) {
-            scope.add_pid(pid)?;
+            scope.add_pid(pid);
         }
 
         if let Some(stdout) = child.stdout.take() {
@@ -203,10 +214,21 @@ impl SimRecipe {
                         let _ = child.wait().await;
                     }
                 }
+                // Reap any group members that survived the leader.
+                if let Some(pid) = child_pid
+                    && self.own_process_group
+                {
+                    signal_process_group(pid, nix::sys::signal::Signal::SIGKILL);
+                }
                 Ok(())
             }
             res = child.wait() => {
                 let status = res?;
+                if let Some(pid) = child_pid
+                    && self.own_process_group
+                {
+                    signal_process_group(pid, nix::sys::signal::Signal::SIGKILL);
+                }
                 if let Some(log_path) = &self.log_path {
                     let line = if let Some(code) = status.code() {
                         format!("killed with code {code}")
@@ -242,34 +264,42 @@ impl SimRecipe {
             |token| {
                 let this = self.clone();
                 let cgroup = cgroup.clone();
-                async move {
-                    if let Err(err) = this.run(token, cgroup).await {
-                        error!(?err, "error running sim");
-                    }
-                    Ok(())
-                }
+                async move { this.run(token, cgroup).await }
             },
             cancel_token,
             iter::once(dir),
+            WatchExitPolicy::ReturnOnSuccess,
         )
         .await
     }
+}
+
+fn python_from_venv(python: &std::path::Path) -> Option<std::process::Command> {
+    if !python.exists() {
+        return None;
+    }
+    let mut cmd = std::process::Command::new(python);
+    // When built with tracy, the nox-py .so is large enough (IREE+TracyClient)
+    // to exceed the default static TLS reservation. Increase the optional
+    // static TLS allocation so dlopen() succeeds. Unlike LD_PRELOAD, this
+    // env var is safe to inherit into child processes.
+    if std::env::var("TRACY_PORT").is_ok() {
+        cmd.env("GLIBC_TUNABLES", "glibc.rtld.optional_static_tls=16384");
+    }
+    Some(cmd)
 }
 
 pub fn python_command() -> Result<std::process::Command, Error> {
     if let Ok(python) = std::env::var("ELODIN_PYTHON") {
         return Ok(std::process::Command::new(python));
     }
-    let venv_python = std::path::Path::new(".venv/bin/python");
-    if venv_python.exists() {
-        let mut cmd = std::process::Command::new(venv_python);
-        // When built with tracy, the nox-py .so is large enough (IREE+TracyClient)
-        // to exceed the default static TLS reservation. Increase the optional
-        // static TLS allocation so dlopen() succeeds. Unlike LD_PRELOAD, this
-        // env var is safe to inherit into child processes.
-        if std::env::var("TRACY_PORT").is_ok() {
-            cmd.env("GLIBC_TUNABLES", "glibc.rtld.optional_static_tls=16384");
+    if let Ok(virtual_env) = std::env::var("VIRTUAL_ENV") {
+        let venv_python = std::path::Path::new(&virtual_env).join("bin/python");
+        if let Some(cmd) = python_from_venv(&venv_python) {
+            return Ok(cmd);
         }
+    }
+    if let Some(cmd) = python_from_venv(std::path::Path::new(".venv/bin/python")) {
         return Ok(cmd);
     }
     if let Ok(uv) = which("uv") {

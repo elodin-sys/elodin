@@ -1,5 +1,6 @@
 use bevy::camera::RenderTarget;
 use bevy::camera::visibility::RenderLayers;
+use bevy::material::AlphaMode;
 use bevy::picking::prelude::Pickable;
 use bevy::ui::{Node, PositionType, UiTargetCamera, Val, ZIndex};
 use bevy::window::WindowRef;
@@ -17,10 +18,9 @@ use bevy::{
     transform::components::Transform,
 };
 use bevy_geo_frames::prelude::*;
-use bevy_render::alpha::AlphaMode;
-use impeller2::types::ComponentId;
-use impeller2_bevy::EntityMap;
-use impeller2_wkt::{
+use impeller::types::ComponentId;
+use impeller_bevy::EntityMap;
+use impeller_wkt::{
     BodyAxes, Color as WktColor, ComponentValue as WktComponentValue, LabelPosition, VectorArrow3d,
     WorldPos,
 };
@@ -90,7 +90,7 @@ impl Plugin for GizmoPlugin {
         app.add_systems(
             bevy::app::PreUpdate,
             evaluate_vector_arrows
-                .after(impeller2_bevy::apply_cached_data)
+                .after(impeller_bevy::apply_cached_data)
                 .before(crate::sync_pos),
         );
         app.add_systems(
@@ -248,6 +248,7 @@ fn spawn_arrow_endpoint(
     world_pos: WorldPos,
     frame: Option<GeoFrame>,
     name: &'static str,
+    #[cfg(feature = "big_space")] root: Option<&crate::spatial::BigSpaceRootEntity>,
 ) -> Entity {
     let mut endpoint = commands.spawn((
         world_pos,
@@ -260,9 +261,11 @@ fn spawn_arrow_endpoint(
     if let Some(frame) = frame {
         endpoint.insert((
             GeoPosition(frame, DVec3::ZERO),
-            GeoRotation::new(frame, bevy::math::DQuat::IDENTITY),
+            GeoRotation::relative(frame, bevy::math::DQuat::IDENTITY),
         ));
     }
+    #[cfg(feature = "big_space")]
+    crate::spatial::parent_under_big_space(&mut endpoint, root);
     endpoint.id()
 }
 
@@ -282,6 +285,7 @@ pub fn evaluate_vector_arrows(
     )>,
     mut world_pos: Query<&mut WorldPos>,
     mut logged_missing: Local<HashSet<Entity>>,
+    #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
 ) {
     for (entity, arrow, mut state, endpoints) in arrows.iter_mut() {
         let Some((start, end)) =
@@ -309,8 +313,24 @@ pub fn evaluate_vector_arrows(
         } else {
             // Use ENU if no frame is specified.
             let frame = arrow.frame.or_default();
-            let start = spawn_arrow_endpoint(&mut commands, entity, start, frame, "arrow_start");
-            let end = spawn_arrow_endpoint(&mut commands, entity, end, frame, "arrow_end");
+            let start = spawn_arrow_endpoint(
+                &mut commands,
+                entity,
+                start,
+                frame,
+                "arrow_start",
+                #[cfg(feature = "big_space")]
+                root.as_deref(),
+            );
+            let end = spawn_arrow_endpoint(
+                &mut commands,
+                entity,
+                end,
+                frame,
+                "arrow_end",
+                #[cfg(feature = "big_space")]
+                root.as_deref(),
+            );
             commands
                 .entity(entity)
                 .insert(ArrowEndpoints { start, end });
@@ -928,7 +948,7 @@ fn update_arrow_label_ui(
                             },
                             Text::new(label_text.clone()),
                             TextFont {
-                                font_size: 14.0,
+                                font_size: bevy::text::FontSize::Px(14.0),
                                 ..default()
                             },
                             TextColor(label_color),
@@ -1050,7 +1070,7 @@ mod tests {
         let start = world_pos(DVec3::new(-3.0, 8.0, 1.0), att);
         let direction = DVec3::new(0.5, -1.5, 2.0);
 
-        for frame in [GeoFrame::ENU, GeoFrame::NED] {
+        for frame in [GeoFrame::ENU, GeoFrame::NED, GeoFrame::ECEF] {
             let end = arrow_end_pos(&start, direction, true);
             let delta = bevy_delta(&start, &end, frame, &ctx);
             let expected = GeoRotation::absolute(frame, att).to_bevy(&ctx) * direction;
@@ -1059,5 +1079,23 @@ mod tests {
                 "{frame:?}: got {delta:?}, expected {expected:?}"
             );
         }
+    }
+
+    /// Body-frame arrow at planetary ECEF magnitude: Bevy delta must stay
+    /// `Absolute(ECEF, att) * body_dir`, same contract as EQL `.translate()`.
+    #[test]
+    fn ecef_body_frame_arrow_at_planetary_scale() {
+        let ctx = GeoContext::default();
+        let att = DQuat::from_rotation_y(-std::f64::consts::FRAC_PI_2);
+        let start = world_pos(DVec3::new(918_000.0, -5_530_000.0, 3_040_000.0), att);
+        let direction = DVec3::new(-2.0, 0.0, 0.0);
+
+        let end = arrow_end_pos(&start, direction, true);
+        let delta = bevy_delta(&start, &end, GeoFrame::ECEF, &ctx);
+        let expected = GeoRotation::absolute(GeoFrame::ECEF, att).to_bevy(&ctx) * direction;
+        assert!(
+            (delta - expected).length() < 1e-6,
+            "ECEF body −X at planetary scale: got {delta:?}, expected {expected:?}"
+        );
     }
 }

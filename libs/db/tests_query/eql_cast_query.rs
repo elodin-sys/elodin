@@ -3,8 +3,8 @@ use std::path::Path;
 use std::process::Command;
 
 use elodin_db::{ComponentSchema, DB};
-use impeller2::types::{ComponentId, PrimType, Timestamp};
-use impeller2_wkt::ComponentMetadata;
+use impeller::types::{ComponentId, PrimType, Timestamp};
+use impeller_wkt::ComponentMetadata;
 
 fn create_fixture(name: &str, prim_type: PrimType, rows: &[Vec<u8>]) -> tempfile::TempDir {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -72,6 +72,22 @@ fn assert_query_success(output: std::process::Output) -> String {
     );
 
     String::from_utf8(output.stdout).expect("stdout utf8")
+}
+
+#[test]
+fn eql_query_resolves_screaming_snake_component_with_trailing_digit() {
+    let dir = create_fixture(
+        "CANOPENMOTORMESSAGE3.ACTUAL_POSITION",
+        PrimType::F64,
+        &[
+            1.0f64.to_le_bytes().to_vec(),
+            2.0f64.to_le_bytes().to_vec(),
+            3.0f64.to_le_bytes().to_vec(),
+        ],
+    );
+    let output = run_eql_query(dir.path(), "CANOPENMOTORMESSAGE3.ACTUAL_POSITION");
+    let stdout = assert_query_success(output);
+    assert_eq!(csv_values(&stdout), vec!["1", "2", "3"]);
 }
 
 #[test]

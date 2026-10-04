@@ -1,0 +1,28 @@
+[package]
+name = "impeller-kdl"
+version.workspace = true
+edition = "2024"
+
+[dependencies]
+# parse
+kdl = "6.3.4"
+ron = "0.10"
+serde = { version = "1", features = ["derive"] }
+
+# types
+impeller.path = ".."
+impeller-wkt.path = "../wkt"
+impeller-wkt.features = ["gui", "std"]
+
+# errors
+thiserror = "2.0"
+miette.version = "7.0"
+miette.features = ["fancy"]
+tracing = "0.1.41"
+
+bevy_geo_frames.path = "../../bevy_geo_frames"
+bevy_geo_frames.default-features = false
+bevy_geo_frames.features = ["strum", "serde"]
+
+[dev-dependencies]
+serde_json = "1"

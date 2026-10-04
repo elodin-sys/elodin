@@ -205,35 +205,21 @@ obs_receiver = el.s10.PyRecipe.process(
 )
 world.recipe(obs_receiver)
 
+# Register the RTSP receiver process via S10 recipe. It pulls from the RTSP URL
+# in $RTSP_URL (an IP camera, or OBS with the OBS-RTSPServer plugin) and streams
+# the H.264 into the DB. No-op until RTSP_URL is set. See README.md.
+rtsp_script = Path(__file__).parent / "receive-rtsp-stream.sh"
+rtsp_receiver = el.s10.PyRecipe.process(
+    name="rtsp-receiver",
+    cmd="bash",
+    args=[str(rtsp_script)],
+    cwd=str(Path(__file__).parent),
+)
+world.recipe(rtsp_receiver)
+
 # Define schematic with top-down camera view and video stream tiles
-world.schematic("""
-    hsplit {
-        tabs share=0.5 {
-            viewport name=Viewport pos="(0,0,0,0, 0,0,12)" look_at="(0,0,0,0, 0,0,0)" show_grid=#true
-        }
-        vsplit share=0.5 {
-            tabs {
-                video_stream "test-video" name="Test Pattern"
-                video_stream "obs-camera" name="OBS Camera"
-            }
-            graph "ball.wind" name="Wind (m/s)"
-        }
-    }
-    object_3d ball.world_pos {
-        sphere radius=0.3 {
-            color orange
-        }
-    }
-    object_3d "(0,0,0,1, 0,0,0)" {
-        plane width=10 depth=10 {
-            color 32 128 32 200
-        }
-    }
-    // Wind force visualization arrow at origin, slightly above ground
-    vector_arrow "ball.wind" origin="(0,0,0,1, 0,0,0.5)" scale=0.3 name="Wind" show_name=#true {
-        color cyan 200
-    }
-""")
+SCHEMATIC_PATH = Path(__file__).with_name("schematic.kdl")
+world.schematic(SCHEMATIC_PATH.read_text())
 
 print("Video Streaming Example - Rolling Ball")
 print("======================================")
@@ -267,6 +253,6 @@ sim = world.run(
     sys,
     simulation_rate=1.0 / SIM_TIME_STEP,
     generate_real_time=True,
-    start_timestamp=0,
+    # start_timestamp=0,
     db_path="./video-stream-db",
 )

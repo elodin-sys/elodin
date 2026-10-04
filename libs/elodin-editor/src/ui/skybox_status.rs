@@ -81,7 +81,7 @@ fn draw_busy_modal(ctx: &egui::Context, skybox: &SkyboxGenerationUi) {
         .backdrop_color(egui::Color32::from_black_alpha(120))
         .frame(egui::Frame {
             fill: with_opacity(scheme.bg_secondary, 0.98),
-            stroke: egui::Stroke::new(1.0, with_opacity(scheme.border_primary, 0.6)),
+            stroke: egui::Stroke::new(1.0_f32, with_opacity(scheme.border_primary, 0.6)),
             inner_margin: egui::Margin::symmetric(28, 20),
             corner_radius: egui::CornerRadius::same(12),
             ..Default::default()

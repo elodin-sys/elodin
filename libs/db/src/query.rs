@@ -9,7 +9,7 @@ use arrow::compute;
 use arrow::datatypes::{DataType, Field};
 use arrow::record_batch::RecordBatch;
 use futures_lite::StreamExt;
-use impeller2::schema::Schema;
+use impeller::schema::Schema;
 use miette::IntoDiagnostic;
 use tabled::builder::Builder;
 
@@ -780,7 +780,7 @@ fn format_cell(
 ) -> miette::Result<String> {
     use arrow::array::*;
     use arrow::datatypes::DataType;
-    use impeller2::types::Timestamp;
+    use impeller::types::Timestamp;
 
     if col.is_null(row) {
         return Ok("null".to_string());

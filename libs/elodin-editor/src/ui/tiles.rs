@@ -1,5 +1,5 @@
 use bevy::camera::visibility::RenderLayers;
-use bevy::camera::{Exposure, PhysicalCameraParameters};
+use bevy::camera::{Exposure, Hdr, PhysicalCameraParameters};
 use bevy::{
     core_pipeline::tonemapping::Tonemapping,
     ecs::system::{SystemParam, SystemState},
@@ -23,9 +23,9 @@ use egui::UiBuilder;
 use egui::response::Flags;
 use egui_material_icons::{icon_button, icons::*};
 use egui_tiles::{Container, Tile, TileId, Tiles};
-use impeller2_wkt::{BloomConfig, BloomPreset, Graph, Viewport, WindowRect};
+use impeller_wkt::{BloomConfig, BloomPreset, FrustumUpMarker, Graph, Viewport, WindowRect};
 use smallvec::{SmallVec, smallvec};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::{
     fmt::Write as _,
     path::PathBuf,
@@ -44,6 +44,7 @@ use super::{
     colors::{self, EColor, get_scheme, with_opacity},
     command_palette::{CommandPaletteState, palette_items},
     data_overview::{DataOverviewPane, DataOverviewWidget},
+    gauges::{GaugePane, GeoPositionGaugeWidget, HorizonGaugeWidget, OrientationGaugeWidget},
     hierarchy::{Hierarchy, HierarchyContent},
     images,
     input_owner::{PointerOwner, PointerOwnerPriority, UiBlocker, UiInputOwners},
@@ -52,38 +53,47 @@ use super::{
     plot::{GraphBundle, GraphState, PlotWidget},
     query_plot::QueryPlotData,
     query_table::{QueryTableData, QueryTablePane, QueryTableWidget},
-    schematic::{graph_label, viewport_label},
+    schematic::{MonitorsRoot, graph_label, viewport_label},
     video_stream::{IsTileVisible, VideoDecoderHandle, VideoFrameCache, VideoStreamWidgetArgs},
     widgets::{RootWidgetSystem, WidgetSystem, WidgetSystemExt},
 };
 use crate::{
     EqlContext, GridHandle, MainCamera,
-    object_3d::{CompileError, ELLIPSOID_RENDER_LAYER, EditableEQL, compile_eql_expr},
+    object_3d::{ELLIPSOID_RENDER_LAYER, EditableEQL},
     plugins::{
         LogicalKeyState,
         gizmos::GIZMO_RENDER_LAYER,
-        navigation_gizmo::{NavGizmoCamera, NavGizmoParent},
-        render_layer_alloc::{GRID_RENDER_LAYER, RenderLayerAllocator, RenderLayerLease},
+        render_layer_alloc::{
+            CINEMATIC_EARTH_RENDER_LAYER, GRID_RENDER_LAYERS, REGULAR_SKY_RENDER_LAYER,
+            RenderLayerAllocator, RenderLayerLease, THRUSTER_PARTICLES_RENDER_LAYER,
+            grid_render_layer, view_cube_render_layer,
+        },
+        scene_environment::CinematicViewport,
         view_cube::{
             CoordinateSystem, NeedsInitialSnap, ViewCubeConfig, ViewCubeTargetCamera,
-            spawn::spawn_view_cube,
+            spawn::spawn_view_cube_overlay,
         },
     },
     sensor_camera::SensorCameraConfigs,
     ui::colors::ColorExt,
+    ui::up_marker::paint_up_marker,
 };
 
 pub(crate) mod sidebar;
 
+use crate::plugins::frustum_common::frustum_up_marker_color;
+use crate::ui::widgets::SystemStateExt;
 use sidebar::tab_add_visible;
 
 pub(crate) const DEFAULT_VIEWPORT_NEAR: f32 = 0.05;
 pub(crate) const DEFAULT_VIEWPORT_FAR: f32 = 5.0;
+/// Finite only because Bevy's CPU frustum representation cannot use infinity.
+pub(crate) const VIEWPORT_PROJECTION_FAR: f32 = 1.0e16;
 
 fn default_viewport_perspective() -> PerspectiveProjection {
     PerspectiveProjection {
         near: DEFAULT_VIEWPORT_NEAR,
-        far: DEFAULT_VIEWPORT_FAR,
+        far: VIEWPORT_PROJECTION_FAR,
         near_clip_plane: crate::plugins::frustum_common::near_clip_plane(DEFAULT_VIEWPORT_NEAR),
         ..PerspectiveProjection::default()
     }
@@ -94,17 +104,25 @@ fn set_perspective_near(perspective: &mut PerspectiveProjection, near: f32) {
     perspective.near_clip_plane = crate::plugins::frustum_common::near_clip_plane(near);
 }
 
-/// Derive zoom bounds from the viewport far plane.
-pub(crate) fn zoom_limits_for_far(far: f32) -> (f64, f64) {
-    let far = (far as f64).max(DEFAULT_VIEWPORT_FAR as f64);
-    let min_size_per_pixel = (far * 1.0e-6).max(1.0e-3);
-    let max_size_per_pixel = (far * 2.0).max(10.0);
-    (min_size_per_pixel, max_size_per_pixel)
+pub(crate) fn cinematic_bloom_config() -> BloomConfig {
+    BloomConfig {
+        preset: BloomPreset::OldSchool,
+        intensity: Some(0.365),
+        threshold: Some(0.6),
+        threshold_softness: Some(0.2),
+    }
 }
 
-fn bloom_from_config(config: Option<&BloomConfig>) -> Bloom {
+pub(crate) const CINEMATIC_DEFAULT_EV100: f32 = 13.5;
+
+pub(crate) fn bloom_from_config(config: Option<&BloomConfig>, cinematic: bool) -> Bloom {
     let Some(config) = config else {
-        return Bloom::default();
+        // Cinematic defaults keep faint stars crisp.
+        return if cinematic {
+            bloom_from_config(Some(&cinematic_bloom_config()), true)
+        } else {
+            Bloom::default()
+        };
     };
     let mut bloom = match config.preset {
         BloomPreset::Natural => Bloom::NATURAL,
@@ -125,20 +143,120 @@ fn bloom_from_config(config: Option<&BloomConfig>) -> Bloom {
 pub(crate) fn plugin(app: &mut App) {
     app.register_type::<WindowId>()
         .add_message::<WindowRelayout>()
-        .add_systems(Startup, setup_primary_window_state)
-        .add_systems(Update, sync_editor_cam_zoom_limits);
+        .add_systems(Update, sync_viewport_grid_lod)
+        .add_systems(Startup, setup_primary_window_state);
+    // Must run after the BigSpace root exists; otherwise grids stay parentless
+    // and shimmer from float-origin precision loss.
+    #[cfg(feature = "big_space")]
+    app.add_systems(
+        Startup,
+        spawn_viewport_grids.after(crate::spatial::setup_floating_origin),
+    );
+    #[cfg(not(feature = "big_space"))]
+    app.add_systems(Startup, spawn_viewport_grids);
 }
 
-type EditorCamZoomLimitsQuery<'w> = (&'w Projection, Mut<'w, EditorCam>);
-
-fn sync_editor_cam_zoom_limits(
-    mut cameras: Query<EditorCamZoomLimitsQuery<'_>, (With<MainCamera>, Changed<Projection>)>,
+fn spawn_viewport_grids(
+    mut commands: Commands,
+    // Optional so headless/test apps without the spatial plugin don't panic;
+    // grids simply stay parentless there. In the editor the root always exists
+    // because this runs after `setup_floating_origin`.
+    #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
 ) {
-    for (projection, mut editor_cam) in &mut cameras {
-        if let Projection::Perspective(persp) = projection {
-            let (min_size_per_pixel, max_size_per_pixel) = zoom_limits_for_far(persp.far);
-            editor_cam.zoom_limits.min_size_per_pixel = min_size_per_pixel;
-            editor_cam.zoom_limits.max_size_per_pixel = max_size_per_pixel;
+    for (frame, layer) in GRID_RENDER_LAYERS {
+        let mut entity = commands.spawn((
+            bevy::dev_tools::infinite_grid::InfiniteGrid,
+            viewport_grid_settings(frame, 10.0, DEFAULT_VIEWPORT_FAR),
+            Visibility::Visible,
+            RenderLayers::layer(layer),
+            #[cfg(feature = "big_space")]
+            crate::spatial::GridCell::default(),
+            Name::new(format!("infinite grid {frame:?}")),
+            bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
+            bevy_geo_frames::GeoRotation::absolute(
+                frame,
+                bevy::math::DQuat::from_rotation_x(std::f64::consts::FRAC_PI_2),
+            ),
+        ));
+        #[cfg(feature = "big_space")]
+        crate::spatial::parent_under_big_space(&mut entity, root.as_deref());
+    }
+}
+
+fn viewport_grid_style(
+    _frame: bevy_geo_frames::GeoFrame,
+) -> bevy::dev_tools::infinite_grid::InfiniteGridSettings {
+    bevy::dev_tools::infinite_grid::InfiniteGridSettings {
+        minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
+        major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
+        x_axis_color: crate::ui::colors::bevy::RED,
+        z_axis_color: crate::ui::colors::bevy::GREEN,
+        ..Default::default()
+    }
+}
+
+/// Cell size (~10 cells from camera to subject) quantized to a power of 10 so
+/// lines don't crawl while orbiting. Bevy `scale` is inverse spacing.
+pub(crate) fn grid_lod(distance: f32, far: f32) -> (f32, f32) {
+    let dist = if distance.is_finite() && distance > 0.0 {
+        distance
+    } else {
+        1.0
+    }
+    .max(1.0e-3);
+    let cell = 10f32
+        .powf((dist / 10.0).log10().round())
+        .clamp(1.0e-12, 1.0e12);
+    let scale = 1.0 / cell;
+    let fadeout = (dist * 20.0).max(far.max(0.0)).max(cell * 50.0);
+    (scale, fadeout)
+}
+
+fn viewport_grid_settings(
+    frame: bevy_geo_frames::GeoFrame,
+    distance: f32,
+    far: f32,
+) -> bevy::dev_tools::infinite_grid::InfiniteGridSettings {
+    let mut settings = viewport_grid_style(frame);
+    let (scale, fadeout_distance) = grid_lod(distance, far);
+    settings.scale = scale;
+    settings.fadeout_distance = fadeout_distance;
+    settings
+}
+
+type ViewportGridLodQuery<'w> = (
+    Entity,
+    &'w EditorCam,
+    Option<&'w ViewportConfig>,
+    Option<&'w crate::ui::inspector::viewport::Viewport>,
+    Option<&'w mut bevy::dev_tools::infinite_grid::InfiniteGridSettings>,
+);
+
+fn sync_viewport_grid_lod(
+    mut cameras: Query<ViewportGridLodQuery<'_>, With<MainCamera>>,
+    mut commands: Commands,
+) {
+    for (entity, editor_cam, config, viewport, settings) in &mut cameras {
+        let near = config
+            .and_then(|config| config.configured_near)
+            .unwrap_or(DEFAULT_VIEWPORT_NEAR);
+        let far = crate::plugins::frustum_common::presentation_far(
+            near,
+            config.and_then(|config| config.configured_far),
+        );
+        let distance = (editor_cam.last_anchor_depth.abs() as f32).max(DEFAULT_VIEWPORT_NEAR);
+        let frame = viewport
+            .and_then(|viewport| viewport.frame)
+            .unwrap_or(GeoFrame::ENU);
+        let next = viewport_grid_settings(frame, distance, far);
+        if let Some(mut settings) = settings {
+            if (settings.scale - next.scale).abs() > f32::EPSILON
+                || (settings.fadeout_distance - next.fadeout_distance).abs() > 1.0e-3
+            {
+                *settings = next;
+            }
+        } else {
+            commands.entity(entity).insert(next);
         }
     }
 }
@@ -165,9 +283,9 @@ fn setup_primary_window_state(
 #[derive(Component)]
 pub struct ViewportConfig {
     pub aspect: Option<f32>,
-    /// Schematic near clip; omitted on save when unset. Not the runtime EditorCam value.
+    /// Frustum near distance; also pins the runtime camera near clip when set.
     pub configured_near: Option<f32>,
-    /// Schematic far clip; omitted on save when unset. Not the runtime EditorCam value.
+    /// Frustum far distance; never limits rendering or camera zoom.
     pub configured_far: Option<f32>,
     pub show_arrows: bool,
     pub create_frustum: bool,
@@ -176,10 +294,17 @@ pub struct ViewportConfig {
     pub show_coverage_in_viewport: bool,
     /// Display 2D projection of frustum∩ellipsoid on far plane.
     pub show_projection_2d: bool,
-    pub frustums_color: impeller2_wkt::Color,
+    pub frustums_color: impeller_wkt::Color,
     /// Color for this viewport's source frustum 2D projection in target viewports.
-    pub projection_color: impeller2_wkt::Color,
+    pub projection_color: impeller_wkt::Color,
     pub frustums_thickness: f32,
+    /// Marks the image-up direction on this viewport's frustum.
+    pub frustums_up_marker: FrustumUpMarker,
+    /// Repeats the up marker along the top of this viewport's own pane.
+    pub frustums_up_marker_overlay: bool,
+    pub cinematic: bool,
+    /// Authored bloom; `None` keeps house defaults.
+    pub bloom: Option<BloomConfig>,
 }
 
 #[derive(Clone)]
@@ -693,6 +818,21 @@ impl TileState {
         self.tree_actions.push(TreeAction::AddMonitor(tile_id, eql));
     }
 
+    pub fn create_geo_position_gauge_tile(&mut self, eql: String, tile_id: Option<TileId>) {
+        self.tree_actions
+            .push(TreeAction::AddGeoPositionGauge(tile_id, eql));
+    }
+
+    pub fn create_orientation_gauge_tile(&mut self, eql: String, tile_id: Option<TileId>) {
+        self.tree_actions
+            .push(TreeAction::AddOrientationGauge(tile_id, eql));
+    }
+
+    pub fn create_horizon_gauge_tile(&mut self, eql: String, tile_id: Option<TileId>) {
+        self.tree_actions
+            .push(TreeAction::AddHorizonGauge(tile_id, eql));
+    }
+
     pub fn create_action_tile(
         &mut self,
         button_name: String,
@@ -761,6 +901,13 @@ impl TileState {
                             Pane::Viewport(viewport) => ("Viewport", viewport.name.as_str()),
                             Pane::Graph(graph) => ("Graph", graph.name.as_str()),
                             Pane::Monitor(monitor) => ("Monitor", monitor.name.as_str()),
+                            Pane::GeoPositionGauge(gauge) => {
+                                ("GeoPositionGauge", gauge.name.as_str())
+                            }
+                            Pane::OrientationGauge(gauge) => {
+                                ("OrientationGauge", gauge.name.as_str())
+                            }
+                            Pane::HorizonGauge(gauge) => ("HorizonGauge", gauge.name.as_str()),
                             Pane::QueryTable(table) => ("QueryTable", table.name.as_str()),
                             Pane::QueryPlot(_) => ("QueryPlot", "QueryPlot"),
                             Pane::ActionTile(action) => ("Action", action.name.as_str()),
@@ -819,82 +966,40 @@ impl TileState {
         !self.has_content()
     }
 
-    pub fn clear(&mut self, commands: &mut Commands) {
-        for (tile_id, tile) in self.tree.tiles.iter() {
+    /// Despawn every pane entity under `tile_id`, including nested containers.
+    /// Named schematic tabs are containers; closing them must release graphs,
+    /// cameras, and other pane entities, not only the egui tile.
+    pub(crate) fn despawn_tile(&mut self, tile_id: TileId, commands: &mut Commands) {
+        fn visit(
+            tree: &egui_tiles::Tree<Pane>,
+            graphs: &mut HashMap<TileId, Entity>,
+            tile_id: TileId,
+            commands: &mut Commands,
+        ) {
+            let Some(tile) = tree.tiles.get(tile_id) else {
+                return;
+            };
             match tile {
-                Tile::Pane(Pane::Viewport(viewport)) => {
-                    if let Some(camera) = viewport.camera
-                        && let Ok(mut e) = commands.get_entity(camera)
-                    {
-                        e.despawn();
-                    }
-                    if let Some(nav_gizmo_camera) = viewport.nav_gizmo_camera
-                        && let Ok(mut e) = commands.get_entity(nav_gizmo_camera)
-                    {
-                        e.despawn();
-                    }
-                    if let Some(nav_gizmo) = viewport.nav_gizmo
-                        && let Ok(mut e) = commands.get_entity(nav_gizmo)
-                    {
-                        e.despawn();
+                Tile::Pane(pane) => {
+                    pane.despawn_entities(commands);
+                    if let Some(graph_id) = graphs.remove(&tile_id) {
+                        try_despawn(commands, graph_id);
                     }
                 }
-                Tile::Pane(Pane::Graph(graph)) => {
-                    if let Ok(mut e) = commands.get_entity(graph.id) {
-                        e.despawn();
-                    }
-                    if let Some(graph_id) = self.graphs.get(tile_id) {
-                        if let Ok(mut e) = commands.get_entity(*graph_id) {
-                            e.despawn();
-                        }
-                        self.graphs.remove(tile_id);
+                Tile::Container(container) => {
+                    for child in container.children().copied().collect::<Vec<_>>() {
+                        visit(tree, graphs, child, commands);
                     }
                 }
-
-                Tile::Pane(Pane::VideoStream(pane) | Pane::SensorView(pane)) => {
-                    if let Ok(mut e) = commands.get_entity(pane.entity) {
-                        e.despawn();
-                    }
-                }
-                Tile::Pane(Pane::LogStream(pane)) => {
-                    if let Ok(mut e) = commands.get_entity(pane.entity) {
-                        e.despawn();
-                    }
-                }
-                Tile::Pane(Pane::ActionTile(pane)) => {
-                    if let Ok(mut e) = commands.get_entity(pane.entity) {
-                        e.despawn();
-                    }
-                }
-                Tile::Pane(Pane::QueryTable(pane)) => {
-                    if let Ok(mut e) = commands.get_entity(pane.entity) {
-                        e.despawn();
-                    }
-                }
-                Tile::Pane(Pane::QueryPlot(pane)) => {
-                    if let Ok(mut e) = commands.get_entity(pane.entity) {
-                        e.despawn();
-                    }
-                }
-                Tile::Pane(Pane::SchematicTree(pane)) => {
-                    if let Ok(mut e) = commands.get_entity(pane.entity) {
-                        e.despawn();
-                    }
-                }
-                Tile::Pane(Pane::Monitor(monitor)) => {
-                    if let Ok(mut e) = commands.get_entity(monitor.entity) {
-                        e.despawn();
-                    }
-                }
-                _ => {}
             }
         }
+        visit(&self.tree, &mut self.graphs, tile_id, commands);
+    }
 
-        if let Some(root_id) = self.tree.root()
-            && let Some(Tile::Container(root)) = self.tree.tiles.get_mut(root_id)
-        {
-            root.retain(|_| false);
-        };
+    pub fn clear(&mut self, commands: &mut Commands) {
+        if let Some(root_id) = self.tree.root() {
+            self.despawn_tile(root_id, commands);
+        }
         self.graphs.clear();
         self.container_titles.clear();
         self.reset_tree();
@@ -950,6 +1055,9 @@ pub enum Pane {
     Viewport(ViewportPane),
     Graph(GraphPane),
     Monitor(MonitorPane),
+    GeoPositionGauge(GaugePane),
+    OrientationGauge(GaugePane),
+    HorizonGauge(GaugePane),
     QueryTable(QueryTablePane),
     QueryPlot(super::query_plot::QueryPlotPane),
     ActionTile(ActionTilePane),
@@ -958,6 +1066,12 @@ pub enum Pane {
     LogStream(super::log_stream::LogStreamPane),
     SchematicTree(TreePane),
     DataOverview(DataOverviewPane),
+}
+
+fn try_despawn(commands: &mut Commands, entity: Entity) {
+    if let Ok(mut e) = commands.get_entity(entity) {
+        e.despawn();
+    }
 }
 
 impl Pane {
@@ -976,11 +1090,39 @@ impl Pane {
             Pane::VideoStream(pane) => out.push_ui_node(pane.entity),
             Pane::SensorView(pane) => out.push_ui_node(pane.entity),
             Pane::Monitor(_)
+            | Pane::GeoPositionGauge(_)
+            | Pane::OrientationGauge(_)
+            | Pane::HorizonGauge(_)
             | Pane::QueryTable(_)
             | Pane::ActionTile(_)
             | Pane::LogStream(_)
             | Pane::SchematicTree(_)
             | Pane::DataOverview(_) => {}
+        }
+    }
+
+    fn despawn_entities(&self, commands: &mut Commands) {
+        match self {
+            Pane::Viewport(viewport) => {
+                if let Some(camera) = viewport.camera {
+                    try_despawn(commands, camera);
+                }
+                if let Some(nav_gizmo_camera) = viewport.nav_gizmo_camera {
+                    try_despawn(commands, nav_gizmo_camera);
+                }
+            }
+            Pane::Graph(graph) => try_despawn(commands, graph.id),
+            Pane::Monitor(pane) => try_despawn(commands, pane.entity),
+            Pane::GeoPositionGauge(pane)
+            | Pane::OrientationGauge(pane)
+            | Pane::HorizonGauge(pane) => try_despawn(commands, pane.entity),
+            Pane::QueryTable(pane) => try_despawn(commands, pane.entity),
+            Pane::QueryPlot(pane) => try_despawn(commands, pane.entity),
+            Pane::ActionTile(pane) => try_despawn(commands, pane.entity),
+            Pane::VideoStream(pane) | Pane::SensorView(pane) => try_despawn(commands, pane.entity),
+            Pane::LogStream(pane) => try_despawn(commands, pane.entity),
+            Pane::SchematicTree(pane) => try_despawn(commands, pane.entity),
+            Pane::DataOverview(_) => {}
         }
     }
 
@@ -994,6 +1136,9 @@ impl Pane {
             }
             Pane::Viewport(viewport) => viewport.name.to_string(),
             Pane::Monitor(monitor) => monitor.name.to_string(),
+            Pane::GeoPositionGauge(gauge)
+            | Pane::OrientationGauge(gauge)
+            | Pane::HorizonGauge(gauge) => gauge.name.to_string(),
             Pane::QueryTable(table) => table.name.to_string(),
             Pane::QueryPlot(query_plot) => {
                 if let Ok(graph_state) = graph_states.get(query_plot.entity) {
@@ -1022,6 +1167,11 @@ impl Pane {
             }
             Pane::Monitor(monitor) => {
                 monitor.name = title.to_string();
+            }
+            Pane::GeoPositionGauge(gauge)
+            | Pane::OrientationGauge(gauge)
+            | Pane::HorizonGauge(gauge) => {
+                gauge.name = title.to_string();
             }
             Pane::QueryTable(table) => {
                 table.name = title.to_string();
@@ -1060,6 +1210,8 @@ impl Pane {
         icons: &TileIcons,
         world: &mut World,
         target_window: Entity,
+        telemetry_mode: bool,
+        tabless: bool,
     ) -> egui_tiles::UiResponse {
         let content_rect = ui.available_rect_before_wrap();
         match self {
@@ -1073,16 +1225,36 @@ impl Pane {
                     PointerOwner::Graph { graph: pane.id },
                 );
 
-                ui.add_widget_with::<PlotWidget>(
-                    world,
-                    "graph",
-                    (pane.id, icons.scrub, target_window),
-                );
+                let has_query = world
+                    .get::<super::query_plot::QueryPlotData>(pane.id)
+                    .is_some();
+                if has_query {
+                    ui.add_widget_with::<super::query_plot::QueryPlotWidget>(
+                        world,
+                        "graph_sql",
+                        (
+                            super::query_plot::QueryPlotPane {
+                                entity: pane.id,
+                                rect: pane.rect,
+                                scrub_icon: Some(icons.scrub),
+                            },
+                            target_window,
+                        ),
+                    );
+                } else {
+                    ui.add_widget_with::<PlotWidget>(
+                        world,
+                        "graph",
+                        (pane.id, icons.scrub, target_window),
+                    );
+                }
 
                 egui_tiles::UiResponse::None
             }
             Pane::Viewport(pane) => {
                 const MONITOR_HEIGHT: f32 = 36.0;
+                const CLICK_DRAG_THRESHOLD: f32 = 5.0;
+                const VIEW_CUBE_HIT_PAD: f32 = 120.0;
                 let mut show_monitor = false;
                 let mut viewport_owner_rect = None;
                 let mut monitor_owner_rect = None;
@@ -1091,11 +1263,11 @@ impl Pane {
                     let mut state = SystemState::<(
                         Query<&ViewportConfig>,
                         Query<(
-                            &impeller2_wkt::ComponentMetadata,
-                            &impeller2_bevy::ComponentValue,
+                            &impeller_wkt::ComponentMetadata,
+                            &impeller_bevy::ComponentValue,
                         )>,
                     )>::new(world);
-                    let (configs, component_values) = state.get(world);
+                    let (configs, component_values) = state.params(world);
                     {
                         let monitor_enabled = configs
                             .get(cam)
@@ -1109,10 +1281,10 @@ impl Pane {
                                     return None;
                                 }
                                 let ratio = match value {
-                                    impeller2_bevy::ComponentValue::F32(array) => {
+                                    impeller_bevy::ComponentValue::F32(array) => {
                                         nox::ArrayBuf::as_buf(&array.buf).first().copied()
                                     }
-                                    impeller2_bevy::ComponentValue::F64(array) => {
+                                    impeller_bevy::ComponentValue::F64(array) => {
                                         nox::ArrayBuf::as_buf(&array.buf).first().map(|v| *v as f32)
                                     }
                                     _ => None,
@@ -1144,7 +1316,7 @@ impl Pane {
                                 .rect_filled(monitor_rect, 0.0, scheme.bg_secondary);
                             ui.painter().line_segment(
                                 [monitor_rect.left_top(), monitor_rect.right_top()],
-                                egui::Stroke::new(1.0, scheme.border_primary),
+                                egui::Stroke::new(1.0_f32, scheme.border_primary),
                             );
 
                             if relevant.is_empty() {
@@ -1192,6 +1364,24 @@ impl Pane {
                             rect,
                             PointerOwner::Viewport { camera: cam },
                         );
+
+                        // Same marker the sensor camera panes paint, since this
+                        // pane is likewise the image of a camera carrying a
+                        // frustum — but opt-in, and gated on create_frustum so
+                        // deleting the frustum cannot strand it.
+                        if let Some(config) = world.get::<ViewportConfig>(cam).filter(|config| {
+                            config.create_frustum
+                                && config.frustums_up_marker_overlay
+                                && config.frustums_up_marker != FrustumUpMarker::None
+                        }) {
+                            paint_up_marker(
+                                ui.painter(),
+                                rect,
+                                config.frustums_up_marker,
+                                config.frustums_color.into_color32(),
+                                frustum_up_marker_color(config.frustums_color).into_color32(),
+                            );
+                        }
                     }
                 } else {
                     register_ui_blocker(
@@ -1215,6 +1405,76 @@ impl Pane {
                     );
                 }
 
+                // Telemetry chrome: muted title on tabless viewports + click-to-select.
+                if telemetry_mode {
+                    let title_rect = viewport_owner_rect.unwrap_or(content_rect);
+                    if tabless && !pane.name.is_empty() {
+                        let mut title_font = egui::TextStyle::Small.resolve(ui.style());
+                        title_font.size = 11.0;
+                        // Top-center; also stays clear of a top-right ViewCube when present.
+                        ui.painter().text(
+                            egui::pos2(title_rect.center().x, title_rect.min.y + 4.0),
+                            egui::Align2::CENTER_TOP,
+                            &pane.name,
+                            title_font,
+                            with_opacity(get_scheme().text_secondary, 0.85),
+                        );
+                    }
+
+                    if let (Some(cam), Some(rect)) = (pane.camera, viewport_owner_rect) {
+                        let press_id = egui::Id::new(("viewport_click_press", cam));
+                        let pointer = ui.input(|i| {
+                            (
+                                i.pointer.interact_pos(),
+                                i.pointer.primary_pressed(),
+                                i.pointer.primary_released(),
+                            )
+                        });
+                        if let Some(pos) = pointer.0
+                            && rect.contains(pos)
+                        {
+                            if pointer.1 {
+                                ui.ctx().data_mut(|d| d.insert_temp(press_id, pos));
+                            }
+                            if pointer.2
+                                && let Some(press_pos) =
+                                    ui.ctx().data_mut(|d| d.remove_temp::<egui::Pos2>(press_id))
+                                && press_pos.distance(pos) <= CLICK_DRAG_THRESHOLD
+                            {
+                                let over_view_cube = pane.nav_gizmo.is_some() && {
+                                    let cube = egui::Rect::from_min_max(
+                                        egui::pos2(rect.max.x - VIEW_CUBE_HIT_PAD, rect.min.y),
+                                        egui::pos2(rect.max.x, rect.min.y + VIEW_CUBE_HIT_PAD),
+                                    );
+                                    cube.contains(pos)
+                                };
+                                // Prefer region lookup: ViewCube Overlay may not be
+                                // registered yet during pane_ui, so also exclude the
+                                // cube corner when a view cube exists on this pane.
+                                let owner_ok =
+                                    world.get_resource::<UiInputOwners>().is_some_and(|owners| {
+                                        matches!(
+                                            owners.resolve_owner_at(target_window, pos),
+                                            Some(PointerOwner::Viewport { camera })
+                                                if camera == cam
+                                        )
+                                    });
+                                if owner_ok
+                                    && !over_view_cube
+                                    && let Some(mut window_state) =
+                                        world.get_mut::<WindowState>(target_window)
+                                {
+                                    window_state.ui_state.selected_object =
+                                        SelectedObject::Viewport {
+                                            camera: cam,
+                                            title: pane.name.clone(),
+                                        };
+                                }
+                            }
+                        }
+                    }
+                }
+
                 egui_tiles::UiResponse::None
             }
             Pane::Monitor(pane) => {
@@ -1227,6 +1487,54 @@ impl Pane {
                     PointerOwnerPriority::Panel,
                 );
                 ui.add_widget_with::<MonitorWidget>(world, "monitor", pane.clone());
+                egui_tiles::UiResponse::None
+            }
+            Pane::GeoPositionGauge(pane) => {
+                register_ui_blocker(
+                    world,
+                    ui,
+                    target_window,
+                    content_rect,
+                    UiBlocker::OtherPanel,
+                    PointerOwnerPriority::Panel,
+                );
+                ui.add_widget_with::<GeoPositionGaugeWidget>(
+                    world,
+                    "geo_position_gauge",
+                    (pane.clone(), target_window),
+                );
+                egui_tiles::UiResponse::None
+            }
+            Pane::OrientationGauge(pane) => {
+                register_ui_blocker(
+                    world,
+                    ui,
+                    target_window,
+                    content_rect,
+                    UiBlocker::OtherPanel,
+                    PointerOwnerPriority::Panel,
+                );
+                ui.add_widget_with::<OrientationGaugeWidget>(
+                    world,
+                    "orientation_gauge",
+                    (pane.clone(), target_window),
+                );
+                egui_tiles::UiResponse::None
+            }
+            Pane::HorizonGauge(pane) => {
+                register_ui_blocker(
+                    world,
+                    ui,
+                    target_window,
+                    content_rect,
+                    UiBlocker::OtherPanel,
+                    PointerOwnerPriority::Panel,
+                );
+                ui.add_widget_with::<HorizonGaugeWidget>(
+                    world,
+                    "horizon_gauge",
+                    (pane.clone(), target_window),
+                );
                 egui_tiles::UiResponse::None
             }
             Pane::QueryTable(pane) => {
@@ -1417,54 +1725,32 @@ impl ViewportPane {
         materials: &mut ResMut<Assets<StandardMaterial>>,
         render_layer_alloc: &mut ResMut<RenderLayerAllocator>,
         eql_ctx: &eql::Context,
+        geo_context: &bevy_geo_frames::GeoContext,
         viewport: &Viewport,
         name: PaneName,
     ) -> Self {
-        // The grid render layer is reserved and shared by every viewport, so we
-        // never allocate one per viewport. See `RenderLayerAllocator::default`.
-        let mut main_camera_layers = RenderLayers::default()
-            .with(ELLIPSOID_RENDER_LAYER)
-            .with(GIZMO_RENDER_LAYER)
-            .with(GRID_RENDER_LAYER);
-        let grid_layers = RenderLayers::layer(GRID_RENDER_LAYER);
+        let mut main_camera_layers = RenderLayers::default().with(GIZMO_RENDER_LAYER);
+        if viewport.effects {
+            main_camera_layers = main_camera_layers.with(THRUSTER_PARTICLES_RENDER_LAYER);
+        }
+        if viewport.cinematic {
+            main_camera_layers = main_camera_layers.with(CINEMATIC_EARTH_RENDER_LAYER);
+        } else {
+            // Uncertainty ellipsoids and the sky dome are regular-viewport
+            // overlays; the cinematic view keeps a clean scene.
+            main_camera_layers = main_camera_layers
+                .with(ELLIPSOID_RENDER_LAYER)
+                .with(REGULAR_SKY_RENDER_LAYER);
+        }
+        let grid_layer = grid_render_layer(viewport.frame);
+        if viewport.show_grid {
+            main_camera_layers = main_camera_layers.with(grid_layer);
+        }
 
         let viewport_lease: Option<RenderLayerLease> =
             render_layer_alloc.alloc().inspect(|lease| {
                 main_camera_layers = main_camera_layers.union(&lease.render_layers());
             });
-
-        let grid_visibility = if viewport.show_grid {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-
-        // Swap axis colors for NED frame (X=North=Green, Z axis shows East=Red)
-        let (x_axis_color, z_axis_color) = if viewport.frame == Some(bevy_geo_frames::GeoFrame::NED)
-        {
-            (crate::ui::colors::bevy::GREEN, crate::ui::colors::bevy::RED)
-        } else {
-            (crate::ui::colors::bevy::RED, crate::ui::colors::bevy::GREEN)
-        };
-
-        let grid_id = commands
-            .spawn((
-                bevy_infinite_grid::InfiniteGridBundle {
-                    settings: bevy_infinite_grid::InfiniteGridSettings {
-                        minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
-                        major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
-                        z_axis_color,
-                        x_axis_color,
-                        fadeout_distance: 50_000.0,
-                        scale: 0.1,
-                        ..Default::default()
-                    },
-                    visibility: grid_visibility,
-                    ..Default::default()
-                },
-                grid_layers,
-            ))
-            .id();
 
         let transform =
             Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)).looking_at(Vec3::ZERO, Vec3::Y);
@@ -1473,7 +1759,7 @@ impl ViewportPane {
             transform,
             #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
-            impeller2_wkt::WorldPos::default(),
+            impeller_wkt::WorldPos::default(),
             Name::new("viewport"),
         ));
 
@@ -1481,71 +1767,47 @@ impl ViewportPane {
         if let Some(frame) = viewport.frame.or_default() {
             parent_cmd.insert((
                 bevy_geo_frames::GeoPosition(frame, transform.translation.as_dvec3()),
-                bevy_geo_frames::GeoRotation::new(frame, transform.rotation.as_dquat()),
+                bevy_geo_frames::GeoRotation::from_bevy_kind(
+                    frame,
+                    transform.rotation.as_dquat(),
+                    geo_context,
+                    bevy_geo_frames::RotationKind::Absolute,
+                ),
             ));
         }
 
         let parent = parent_cmd.id();
+        let compile_ctx =
+            crate::object_3d::EqlCompileCtx::new(geo_context).with_frame(viewport.frame);
+        let compile = |eql: &str, label: &str| match eql_ctx.parse_str(eql) {
+            Ok(expr) => crate::object_3d::compile_eql_expr_with_ctx(expr, &compile_ctx).ok(),
+            Err(e) => {
+                bevy::log::error!("Failed to parse viewport {label} expression '{eql}': {e}");
+                None
+            }
+        };
         let pos = viewport
             .pos
             .as_ref()
-            .map(|eql| {
-                let compiled_expr = eql_ctx
-                    .parse_str(eql)
-                    .inspect_err(|e| {
-                        bevy::log::error!(
-                            "Failed to parse viewport pos expression '{}': {}",
-                            eql,
-                            e
-                        )
-                    })
-                    .map_err(CompileError::Parse)
-                    .and_then(compile_eql_expr)
-                    .ok();
-                EditableEQL {
-                    eql: eql.to_string(),
-                    compiled_expr,
-                }
+            .map(|eql| EditableEQL {
+                eql: eql.to_string(),
+                compiled_expr: compile(eql, "pos"),
             })
             .unwrap_or_default();
         let look_at = viewport
             .look_at
             .as_ref()
-            .map(|eql| {
-                let compiled_expr = eql_ctx
-                    .parse_str(eql)
-                    .inspect_err(|e| {
-                        bevy::log::error!(
-                            "Failed to parse viewport look_at expression '{}': {}",
-                            eql,
-                            e
-                        )
-                    })
-                    .map_err(CompileError::Parse)
-                    .and_then(compile_eql_expr)
-                    .ok();
-                EditableEQL {
-                    eql: eql.to_string(),
-                    compiled_expr,
-                }
+            .map(|eql| EditableEQL {
+                eql: eql.to_string(),
+                compiled_expr: compile(eql, "look_at"),
             })
             .unwrap_or_default();
         let up = viewport
             .up
             .as_ref()
-            .map(|eql| {
-                let compiled_expr = eql_ctx
-                    .parse_str(eql)
-                    .inspect_err(|e| {
-                        bevy::log::error!("Failed to parse viewport up expression '{}': {}", eql, e)
-                    })
-                    .map_err(CompileError::Parse)
-                    .and_then(compile_eql_expr)
-                    .ok();
-                EditableEQL {
-                    eql: eql.to_string(),
-                    compiled_expr,
-                }
+            .map(|eql| EditableEQL {
+                eql: eql.to_string(),
+                compiled_expr: compile(eql, "up"),
             })
             .unwrap_or_default();
 
@@ -1557,22 +1819,42 @@ impl ViewportPane {
         if let Some(near) = viewport.near {
             set_perspective_near(&mut perspective, near);
         }
-        if let Some(far) = viewport.far {
-            perspective.far = far;
-        }
         if let Some(aspect) = viewport.aspect {
             perspective.aspect_ratio = aspect;
         }
-        if !(perspective.near > 0.0 && perspective.far > perspective.near) {
+        if !perspective.near.is_finite() || perspective.near <= 0.0 {
             warn!(
-                "Invalid viewport near/far (near={}, far={}), restoring defaults",
-                perspective.near, perspective.far
+                "Invalid viewport near (near={}), restoring default",
+                perspective.near
             );
-            perspective.near = DEFAULT_VIEWPORT_NEAR;
-            perspective.far = DEFAULT_VIEWPORT_FAR;
+            set_perspective_near(&mut perspective, DEFAULT_VIEWPORT_NEAR);
         }
 
-        let (min_size_per_pixel, max_size_per_pixel) = zoom_limits_for_far(perspective.far);
+        let mut editor_cam = EditorCam {
+            orbit_constraint: OrbitConstraint::Fixed {
+                up: bevy::math::DVec3::Y,
+                can_pass_tdc: false,
+            },
+            zoom_limits: ZoomLimits::default(),
+            sensitivity: Sensitivity {
+                zoom: 0.2,
+                ..default()
+            },
+            last_anchor_depth: -2.0,
+            ..Default::default()
+        };
+        if let Some(near) = viewport.near {
+            // A KDL-configured near plane is authoritative (same as editing near
+            // in the inspector). Without this pin, bevy_editor_cam derives near
+            // from the anchor depth (look_at distance * 0.05), so a chase cam
+            // aimed at a target kilometers away gets a near plane of 100m+ and
+            // clips its own near-field subject mesh.
+            editor_cam.perspective.near_clip_limits = near..near;
+        }
+
+        let viewport_far =
+            crate::plugins::frustum_common::presentation_far(perspective.near, viewport.far);
+        let grid_frame = viewport.frame.unwrap_or(GeoFrame::ENU);
 
         let mut camera = commands.spawn((
             Transform::default(),
@@ -1583,34 +1865,25 @@ impl ViewportPane {
             },
             Projection::Perspective(perspective),
             Tonemapping::TonyMcMapface,
-            Exposure::from_physical_camera(PhysicalCameraParameters {
-                aperture_f_stops: 2.8,
-                shutter_speed_s: 1.0 / 200.0,
-                sensitivity_iso: 400.0,
-                sensor_height: 24.0 / 1000.0,
-            }),
+            // Cinematic viewports default to a daylight exposure.
+            match viewport.ev100 {
+                Some(ev100) => Exposure { ev100 },
+                None if viewport.cinematic => Exposure {
+                    ev100: CINEMATIC_DEFAULT_EV100,
+                },
+                None => Exposure::from_physical_camera(PhysicalCameraParameters {
+                    aperture_f_stops: 2.8,
+                    shutter_speed_s: 1.0 / 200.0,
+                    sensitivity_iso: 400.0,
+                    sensor_height: 24.0 / 1000.0,
+                }),
+            },
             main_camera_layers,
             MainCamera,
             #[cfg(feature = "big_space")]
             crate::spatial::LowPrecisionRoot,
-            EditorCam {
-                orbit_constraint: OrbitConstraint::Fixed {
-                    up: Vec3::Y,
-                    can_pass_tdc: false,
-                },
-                zoom_limits: ZoomLimits {
-                    min_size_per_pixel,
-                    max_size_per_pixel,
-                    zoom_through_objects: false,
-                },
-                sensitivity: Sensitivity {
-                    zoom: 0.2,
-                    ..default()
-                },
-                last_anchor_depth: -2.0,
-                ..Default::default()
-            },
-            GridHandle { grid: grid_id },
+            editor_cam,
+            GridHandle { layer: grid_layer },
             ViewportConfig {
                 aspect: viewport.aspect,
                 configured_near: viewport.near,
@@ -1623,14 +1896,29 @@ impl ViewportPane {
                 frustums_color: viewport.frustums_color,
                 projection_color: viewport.projection_color,
                 frustums_thickness: viewport.frustums_thickness,
+                frustums_up_marker: viewport.frustums_up_marker,
+                frustums_up_marker_overlay: viewport.frustums_up_marker_overlay,
+                cinematic: viewport.cinematic,
+                bloom: viewport.bloom.clone(),
             },
-            crate::ui::inspector::viewport::Viewport::new(parent, pos, look_at, up, viewport.frame),
+            crate::ui::inspector::viewport::Viewport::new(
+                parent,
+                pos,
+                look_at,
+                up,
+                viewport.frame,
+                viewport.smoothing,
+            ),
             ChildOf(parent),
             Name::new("viewport camera3d"),
         ));
 
+        camera.insert(viewport_grid_settings(grid_frame, 2.0, viewport_far));
         camera.insert(MeshPickingCamera);
-        camera.insert(bloom_from_config(viewport.bloom.as_ref()));
+        camera.insert(bloom_from_config(
+            viewport.bloom.as_ref(),
+            viewport.cinematic,
+        ));
         camera.insert(PrimarySkybox);
         camera.insert(EnvironmentMapLight {
             diffuse_map: asset_server.load("embedded://elodin_editor/assets/diffuse.ktx2"),
@@ -1638,6 +1926,17 @@ impl ViewportPane {
             intensity: 2000.0,
             ..Default::default()
         });
+        if viewport.cinematic {
+            // Disable Bevy's ambient light for the cinematic view.
+            camera.insert((
+                Hdr,
+                CinematicViewport,
+                AmbientLight {
+                    brightness: 0.0,
+                    ..default()
+                },
+            ));
+        }
 
         let camera = camera.id();
 
@@ -1650,7 +1949,7 @@ impl ViewportPane {
         if !viewport.show_view_cube {
             return Self {
                 parent: Some(parent),
-                grid: Some(grid_id),
+                grid: None,
                 camera: Some(camera),
                 nav_gizmo: None,
                 nav_gizmo_camera: None,
@@ -1661,11 +1960,16 @@ impl ViewportPane {
             };
         }
 
-        // Allocate render layer for ViewCube (same approach as navigation_gizmo)
-        let Some(view_cube_lease) = render_layer_alloc.alloc() else {
+        // Shared frame cube layer plus a per-viewport layer for overlay UI.
+        let cube_frame = viewport
+            .view_cube_frame
+            .or(viewport.frame)
+            .unwrap_or_default();
+        let view_cube_layer = view_cube_render_layer(cube_frame);
+        let Some(ui_lease) = render_layer_alloc.alloc() else {
             return Self {
                 parent: Some(parent),
-                grid: Some(grid_id),
+                grid: None,
                 camera: Some(camera),
                 nav_gizmo: None,
                 nav_gizmo_camera: None,
@@ -1675,58 +1979,41 @@ impl ViewportPane {
                 view_cube_layer: None,
             };
         };
-        let view_cube_layer = view_cube_lease.layer();
 
-        // Do not insert `view_cube_lease` here: the main camera already carries the viewport
-        // `RenderLayerLease`, and a second lease would replace it (single component), breaking
-        // anything that reads the lease (e.g. vector arrows). The cube root and overlay camera
-        // still own clones of this lease.
-        commands
-            .entity(camera)
-            .insert((ViewCubeTargetCamera, NeedsInitialSnap));
-
-        // Spawn ViewCube with editor mode configuration, only override the per-viewport render layer
-        let mut view_cube_config = ViewCubeConfig::editor_mode();
-
-        // Set coordinate system based on viewport's geo frame
-        if let Some(frame) = viewport.frame {
-            view_cube_config.system = CoordinateSystem(frame);
-            info!("Setting frame to {:?}", &view_cube_config.system);
+        commands.entity(camera).insert(ViewCubeTargetCamera);
+        let has_kdl_pose = viewport
+            .pos
+            .as_ref()
+            .is_some_and(|eql| !eql.trim().is_empty())
+            || viewport
+                .look_at
+                .as_ref()
+                .is_some_and(|eql| !eql.trim().is_empty());
+        if !has_kdl_pose {
+            commands.entity(camera).insert(NeedsInitialSnap);
         }
 
-        let spawned = spawn_view_cube(
+        let mut view_cube_config = ViewCubeConfig::editor_mode();
+        view_cube_config.system = CoordinateSystem(cube_frame);
+        info!("Setting frame to {:?}", &view_cube_config.system);
+
+        let spawned = spawn_view_cube_overlay(
             commands,
             asset_server,
             meshes,
             materials,
             &view_cube_config,
-            view_cube_lease.clone(),
+            cube_frame,
             camera,
+            ui_lease,
         );
-
-        // Add NavGizmoParent and NavGizmoCamera to the ViewCube camera
-        // so the existing set_camera_viewport system works on it
-        if let Some(view_cube_camera) = spawned.camera {
-            commands.entity(view_cube_camera).insert((
-                NavGizmoParent {
-                    main_camera: camera,
-                },
-                NavGizmoCamera,
-            ));
-        }
-
-        // `cube_root` already received `view_cube_lease` inside `spawn_view_cube`.
-        // Re-inserting it here would silently drop the previous component (Bevy
-        // overwrites same-typed components on insert) — see the `debug_assert!`
-        // in `EntityCommandsExt::insert_render_layer_lease`.
-        let _ = view_cube_lease;
 
         Self {
             parent: Some(parent),
-            grid: Some(grid_id),
+            grid: None,
             camera: Some(camera),
-            nav_gizmo: Some(spawned.cube_root),
-            nav_gizmo_camera: spawned.camera,
+            nav_gizmo: None,
+            nav_gizmo_camera: Some(spawned.camera),
             rect: None,
             name,
             viewport_layer,
@@ -1837,6 +2124,21 @@ struct TreeBehavior<'w> {
     read_only: bool,
     target_window: Entity,
     inspector_visible: bool,
+    /// Pane tile IDs that are direct children of a Tabs container (have tab chrome).
+    panes_in_tabs: HashSet<TileId>,
+    telemetry_mode: bool,
+}
+
+/// Collect pane/container tile IDs that sit directly under a Tabs container.
+fn tiles_in_tabs(tiles: &Tiles<Pane>) -> HashSet<TileId> {
+    let mut out = HashSet::new();
+    for (_id, tile) in tiles.iter() {
+        let Tile::Container(Container::Tabs(tabs)) = tile else {
+            continue;
+        };
+        out.extend(tabs.children.iter().copied());
+    }
+    out
 }
 
 #[derive(Clone)]
@@ -1844,6 +2146,9 @@ pub enum TreeAction {
     AddViewport(Option<TileId>),
     AddGraph(Option<TileId>, Box<Option<GraphBundle>>),
     AddMonitor(Option<TileId>, PaneName),
+    AddGeoPositionGauge(Option<TileId>, PaneName),
+    AddOrientationGauge(Option<TileId>, PaneName),
+    AddHorizonGauge(Option<TileId>, PaneName),
     AddQueryTable(Option<TileId>),
     AddQueryPlot(Option<TileId>),
     AddActionTile(Option<TileId>, PaneName, String),
@@ -1915,7 +2220,7 @@ impl TreeBehavior<'_> {
             ui.painter().circle_stroke(
                 dot_center,
                 dot_radius,
-                egui::Stroke::new(1.0, get_scheme().border_primary),
+                egui::Stroke::new(1.0_f32, get_scheme().border_primary),
             );
         }
     }
@@ -1926,17 +2231,25 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
     fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
         let mut query = SystemState::<Query<&GraphState>>::new(self.world);
-        let graphs = query.get(self.world);
+        let graphs = query.params(self.world);
         pane.title(&graphs).into()
     }
 
     fn pane_ui(
         &mut self,
         ui: &mut egui::Ui,
-        _tile_id: egui_tiles::TileId,
+        tile_id: egui_tiles::TileId,
         pane: &mut Pane,
     ) -> egui_tiles::UiResponse {
-        pane.ui(ui, &self.icons, self.world, self.target_window)
+        let tabless = !self.panes_in_tabs.contains(&tile_id);
+        pane.ui(
+            ui,
+            &self.icons,
+            self.world,
+            self.target_window,
+            self.telemetry_mode,
+            tabless,
+        )
     }
 
     #[allow(clippy::fn_params_excessive_bools)]
@@ -2085,7 +2398,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                                 .font(egui::TextStyle::Button)
                                 .clip_text(true)
                                 .desired_width(edit_rect.width())
-                                .frame(false),
+                                .frame(egui::Frame::NONE),
                         )
                     })
                     .inner;
@@ -2159,24 +2472,24 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             ui.painter().hline(
                 rect.x_range(),
                 rect.top(),
-                egui::Stroke::new(1.0, scheme.border_primary),
+                egui::Stroke::new(1.0_f32, scheme.border_primary),
             );
             ui.painter().hline(
                 rect.x_range(),
                 rect.bottom(),
-                egui::Stroke::new(1.0, scheme.border_primary),
+                egui::Stroke::new(1.0_f32, scheme.border_primary),
             );
 
             // Draw separator lines on both sides of each tab
             ui.painter().vline(
                 rect.left(),
                 rect.y_range(),
-                egui::Stroke::new(1.0, scheme.border_primary),
+                egui::Stroke::new(1.0_f32, scheme.border_primary),
             );
             ui.painter().vline(
                 rect.right(),
                 rect.y_range(),
-                egui::Stroke::new(1.0, scheme.border_primary),
+                egui::Stroke::new(1.0_f32, scheme.border_primary),
             );
         }
 
@@ -2187,10 +2500,10 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 4.0);
             ui.style_mut().visuals.widgets.hovered.bg_fill = scheme.highlight;
             ui.style_mut().visuals.widgets.hovered.fg_stroke =
-                egui::Stroke::new(1.0, scheme.text_primary);
+                egui::Stroke::new(1.0_f32, scheme.text_primary);
             ui.style_mut().visuals.widgets.inactive.bg_fill = colors::TRANSPARENT;
             ui.style_mut().visuals.widgets.inactive.fg_stroke =
-                egui::Stroke::new(1.0, scheme.text_primary.opacity(0.5));
+                egui::Stroke::new(1.0_f32, scheme.text_primary.opacity(0.5));
 
             egui::Frame::NONE
                 .inner_margin(egui::Margin::same(10))
@@ -2227,7 +2540,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
     fn on_tab_button(
         &mut self,
-        _tiles: &Tiles<Pane>,
+        _tiles: &mut Tiles<Pane>,
         tile_id: TileId,
         button_response: egui::Response,
     ) -> egui::Response {
@@ -2249,9 +2562,16 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
     }
 
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
+        // Telemetry mode: allow singleton Tabs to collapse so graph panes sit
+        // directly in splits (no tab chrome / +). Multi-child Tabs (e.g. Strake
+        // cams) stay. Overlay titles replace graph tab labels.
+        let telemetry_mode = self
+            .world
+            .get_resource::<super::timeline::TelemetryMode>()
+            .is_some_and(|m| m.0);
         egui_tiles::SimplificationOptions {
             prune_empty_tabs: true,
-            all_panes_must_have_tabs: true,
+            all_panes_must_have_tabs: !telemetry_mode,
             join_nested_linear_containers: true,
             prune_single_child_tabs: true,
             ..Default::default()
@@ -2259,7 +2579,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
     }
 
     fn drag_preview_stroke(&self, _visuals: &Visuals) -> Stroke {
-        Stroke::new(1.0, get_scheme().text_primary)
+        Stroke::new(1.0_f32, get_scheme().text_primary)
     }
 
     fn drag_preview_color(&self, _visuals: &Visuals) -> Color32 {
@@ -2319,7 +2639,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         ui.painter().hline(
             top_bar_rect.x_range(),
             top_bar_rect.bottom(),
-            egui::Stroke::new(1.0, get_scheme().border_primary),
+            egui::Stroke::new(1.0_f32, get_scheme().border_primary),
         );
 
         ui.style_mut().visuals.widgets.hovered.bg_stroke = Stroke::NONE;
@@ -2328,7 +2648,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         let resp = ui.add(EImageButton::new(self.icons.add).scale(1.4, 1.4));
         if resp.clicked() {
             let mut layout = SystemState::<TileLayout>::new(self.world);
-            let mut layout = layout.get_mut(self.world);
+            let mut layout = layout.params_mut(self.world);
             layout
                 .cmd_palette_state
                 .open_page_for_window(Some(self.target_window), move || {
@@ -2353,7 +2673,7 @@ impl<'w, 's> TileSystem<'w, 's> {
         target: Option<Entity>,
     ) -> Option<(TileIcons, bool, bool)> {
         let read_only = false;
-        let params = state.get_mut(world);
+        let params = state.params_mut(world);
         let mut contexts = params.contexts;
         let images = params.images;
         let target_id = target.unwrap_or_else(|| *params.primary_window);
@@ -2483,9 +2803,9 @@ impl<'w, 's> TileSystem<'w, 's> {
 
         // Left sidebar - Hierarchy (only if visible)
         if left_sidebar_visible {
-            egui::SidePanel::left("hierarchy_sidebar")
-                .default_width(SIDEBAR_DEFAULT_WIDTH)
-                .width_range(SIDEBAR_MIN_WIDTH..=SIDEBAR_MAX_WIDTH)
+            egui::Panel::left("hierarchy_sidebar")
+                .default_size(SIDEBAR_DEFAULT_WIDTH)
+                .size_range(SIDEBAR_MIN_WIDTH..=SIDEBAR_MAX_WIDTH)
                 .resizable(true)
                 .frame(Frame {
                     fill: get_scheme().bg_primary,
@@ -2515,9 +2835,9 @@ impl<'w, 's> TileSystem<'w, 's> {
 
         // Right sidebar - Inspector (only if visible)
         if right_sidebar_visible {
-            egui::SidePanel::right("inspector_sidebar")
-                .default_width(SIDEBAR_DEFAULT_WIDTH)
-                .width_range(SIDEBAR_MIN_WIDTH..=SIDEBAR_MAX_WIDTH)
+            egui::Panel::right("inspector_sidebar")
+                .default_size(SIDEBAR_DEFAULT_WIDTH)
+                .size_range(SIDEBAR_MIN_WIDTH..=SIDEBAR_MAX_WIDTH)
                 .resizable(true)
                 .frame(Frame {
                     fill: get_scheme().bg_primary,
@@ -2646,7 +2966,7 @@ impl RootWidgetSystem for TileSystem<'_, '_> {
 
         let central = egui::CentralPanel::default().frame(frame);
 
-        central.show(ctx, |ui| {
+        super::utils::show_central_panel(central, ctx, |ui| {
             Self::render_panel_contents(
                 world,
                 ui,
@@ -2707,15 +3027,46 @@ impl WidgetSystem for TileLayoutEmpty<'_, '_> {
             _ => max_rect,
         };
 
-        let button_height = 160.0;
-        let base_button_width: f32 = 240.0;
+        // Creatable panels shown on the empty layout, laid out as a centred
+        // grid (rows of PER_ROW) so the list can grow without overflowing.
+        type ItemFactory = fn(Option<TileId>) -> palette_items::PaletteItem;
+        const BUTTONS: [(&str, &str, ItemFactory); 6] = [
+            ("Viewport", "3D Output", palette_items::create_viewport),
+            ("Graph", "Point Graph", palette_items::create_graph),
+            ("Monitor", "Component Values", palette_items::create_monitor),
+            (
+                "Position Gauge",
+                "Geo Position",
+                palette_items::create_geo_position_gauge,
+            ),
+            (
+                "Orientation Gauge",
+                "Attitude Gimbal",
+                palette_items::create_orientation_gauge,
+            ),
+            (
+                "Horizon Gauge",
+                "Artificial Horizon",
+                palette_items::create_horizon_gauge,
+            ),
+        ];
+        const PER_ROW: usize = 3;
+        let rows = BUTTONS.len().div_ceil(PER_ROW);
+
+        let button_height = 130.0;
+        let base_button_width: f32 = 210.0;
         let base_button_spacing: f32 = 20.0;
         let button_spacing = base_button_spacing.min((layout_rect.width() / 6.0).max(0.0));
-        let max_button_width = ((layout_rect.width() - 2.0 * button_spacing) / 3.0).max(0.0);
+        let max_button_width = ((layout_rect.width() - 2.0 * button_spacing) / PER_ROW as f32
+            - button_spacing)
+            .max(0.0);
         let button_width = max_button_width.min(base_button_width);
-        let desired_size = egui::vec2(button_width * 3.0 + button_spacing * 2.0, button_height);
+        let desired_size = egui::vec2(
+            button_width * PER_ROW as f32 + button_spacing * (PER_ROW - 1) as f32,
+            button_height * rows as f32 + button_spacing * (rows - 1) as f32,
+        );
 
-        let mut state_mut = state.get_mut(world);
+        let mut state_mut = state.params_mut(world);
         let target_window = window.or_else(|| state_mut.primary_window.iter().next());
 
         ui.scope_builder(
@@ -2724,46 +3075,29 @@ impl WidgetSystem for TileLayoutEmpty<'_, '_> {
                 desired_size,
             )),
             |ui| {
-                ui.horizontal(|ui| {
-                    ui.style_mut().spacing.item_spacing = egui::vec2(button_spacing, 0.0);
-
-                    let create_viewport_btn = ui.add(
-                        ETileButton::new("Viewport", icons.add)
-                            .description("3D Output")
-                            .width(button_width)
-                            .height(160.0),
-                    );
-
-                    if create_viewport_btn.clicked() {
-                        state_mut
-                            .cmd_palette_state
-                            .open_for_window(target_window, palette_items::create_viewport(None));
-                    }
-
-                    let create_graph_btn = ui.add(
-                        ETileButton::new("Graph", icons.add)
-                            .description("Point Graph")
-                            .width(button_width)
-                            .height(160.0),
-                    );
-
-                    if create_graph_btn.clicked() {
-                        state_mut
-                            .cmd_palette_state
-                            .open_for_window(target_window, palette_items::create_graph(None));
-                    }
-
-                    let create_monitor_btn = ui.add(
-                        ETileButton::new("Monitor", icons.add)
-                            .description("Monitor")
-                            .width(button_width)
-                            .height(160.0),
-                    );
-
-                    if create_monitor_btn.clicked() {
-                        state_mut
-                            .cmd_palette_state
-                            .open_for_window(target_window, palette_items::create_monitor(None));
+                ui.vertical(|ui| {
+                    ui.style_mut().spacing.item_spacing =
+                        egui::vec2(button_spacing, button_spacing);
+                    for row in BUTTONS.chunks(PER_ROW) {
+                        ui.horizontal(|ui| {
+                            // Centre a shorter last row under the full ones.
+                            let row_width = button_width * row.len() as f32
+                                + button_spacing * (row.len() - 1) as f32;
+                            ui.add_space((desired_size.x - row_width) / 2.0);
+                            for (title, description, factory) in row {
+                                let btn = ui.add(
+                                    ETileButton::new(*title, icons.add)
+                                        .description(*description)
+                                        .width(button_width)
+                                        .height(button_height),
+                                );
+                                if btn.clicked() {
+                                    state_mut
+                                        .cmd_palette_state
+                                        .open_for_window(target_window, factory(None));
+                                }
+                            }
+                        });
                     }
                 });
             },
@@ -2781,11 +3115,14 @@ pub struct TileLayout<'w, 's> {
     primary_window: Single<'w, 's, Entity, With<PrimaryWindow>>,
     cmd_palette_state: ResMut<'w, CommandPaletteState>,
     eql_ctx: Res<'w, EqlContext>,
+    geo_context: Res<'w, bevy_geo_frames::GeoContext>,
     tile_param: crate::ui::command_palette::palette_items::TileParam<'w, 's>,
     graph_states: Query<'w, 's, &'static mut GraphState>,
     query_plots: Query<'w, 's, &'static mut QueryPlotData>,
     query_tables: Query<'w, 's, &'static mut QueryTableData>,
     action_tiles: Query<'w, 's, &'static mut ActionTile>,
+    // Optional: missing/duplicate root must not invalidate tile UI.
+    monitor_root: Option<Single<'w, 's, Entity, With<MonitorsRoot>>>,
 }
 
 #[derive(Clone)]
@@ -2814,13 +3151,13 @@ impl WidgetSystem for TileLayout<'_, '_> {
         } = args;
 
         let target_window = {
-            let state_mut = state.get_mut(world);
+            let state_mut = state.params_mut(world);
             window.unwrap_or(*state_mut.primary_window)
         };
 
         let (tree, mut tree_actions, empty_overlay_rect, overlay_icons) = {
             let (tab_diffs, container_titles, mut tree, inspector_visible) = {
-                let mut state_mut = state.get_mut(world);
+                let mut state_mut = state.params_mut(world);
                 let Some(mut window_state) = state_mut.tile_param.target_state(Some(target_window))
                 else {
                     return;
@@ -2836,6 +3173,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 )
             };
             let overlay_icons = icons.clone();
+            let panes_in_tabs = tiles_in_tabs(&tree.tiles);
+            let telemetry_mode = world
+                .get_resource::<super::timeline::TelemetryMode>()
+                .is_some_and(|m| m.0);
             let mut behavior = TreeBehavior {
                 icons,
                 // This world here makes getting ui_state difficult.
@@ -2845,6 +3186,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 read_only,
                 target_window,
                 inspector_visible,
+                panes_in_tabs,
+                telemetry_mode,
             };
             tree.ui(&mut behavior, ui);
 
@@ -2872,7 +3215,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
         };
 
         {
-            let mut state_mut = state.get_mut(world);
+            let mut state_mut = state.params_mut(world);
             let Some(mut window_state) = state_mut.tile_param.target_state(Some(target_window))
             else {
                 return;
@@ -2893,56 +3236,9 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if read_only {
                             continue;
                         }
-                        let Some(tile) = tile_state.tree.tiles.get(tile_id) else {
+                        if tile_state.tree.tiles.get(tile_id).is_none() {
                             continue;
-                        };
-
-                        if let egui_tiles::Tile::Pane(Pane::Viewport(viewport)) = tile {
-                            if let Some(camera) = viewport.camera {
-                                state_mut.commands.entity(camera).despawn();
-                            }
-                            if let Some(nav_gizmo_camera) = viewport.nav_gizmo_camera {
-                                state_mut.commands.entity(nav_gizmo_camera).despawn();
-                            }
-                            if let Some(nav_gizmo) = viewport.nav_gizmo {
-                                state_mut.commands.entity(nav_gizmo).despawn();
-                            }
-                        };
-
-                        if let egui_tiles::Tile::Pane(Pane::Graph(graph)) = tile {
-                            state_mut.commands.entity(graph.id).despawn();
-                        };
-
-                        if let egui_tiles::Tile::Pane(Pane::ActionTile(action)) = tile {
-                            state_mut.commands.entity(action.entity).despawn();
-                        };
-
-                        if let egui_tiles::Tile::Pane(Pane::Monitor(pane)) = tile {
-                            state_mut.commands.entity(pane.entity).despawn();
-                        };
-
-                        if let egui_tiles::Tile::Pane(
-                            Pane::VideoStream(pane) | Pane::SensorView(pane),
-                        ) = tile
-                        {
-                            state_mut.commands.entity(pane.entity).despawn();
-                        };
-
-                        if let egui_tiles::Tile::Pane(Pane::LogStream(pane)) = tile {
-                            state_mut.commands.entity(pane.entity).despawn();
-                        };
-
-                        if let egui_tiles::Tile::Pane(Pane::QueryPlot(pane)) = tile {
-                            state_mut.commands.entity(pane.entity).despawn();
-                        };
-
-                        if let egui_tiles::Tile::Pane(Pane::QueryTable(pane)) = tile {
-                            state_mut.commands.entity(pane.entity).despawn();
-                        };
-
-                        if let egui_tiles::Tile::Pane(Pane::SchematicTree(pane)) = tile {
-                            state_mut.commands.entity(pane.entity).despawn();
-                        };
+                        }
 
                         // Find a sibling to select if the deleted tile was active
                         let sibling_to_select =
@@ -2963,6 +3259,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 }
                             });
 
+                        tile_state.despawn_tile(tile_id, &mut state_mut.commands);
                         tile_state.tree.remove_recursively(tile_id);
 
                         // Select the sibling if we found one
@@ -2971,11 +3268,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 tile_state.tree.tiles.get_mut(parent_id)
                         {
                             tabs.set_active(sibling_id);
-                        }
-
-                        if let Some(graph_id) = tile_state.graphs.get(&tile_id) {
-                            state_mut.commands.entity(*graph_id).despawn();
-                            tile_state.graphs.remove(&tile_id);
                         }
 
                         if tile_state.has_content() {
@@ -3003,6 +3295,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             &mut state_mut.materials,
                             &mut state_mut.render_layer_alloc,
                             &state_mut.eql_ctx.0,
+                            &state_mut.geo_context,
                             &viewport,
                             label,
                         );
@@ -3046,12 +3339,16 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if read_only {
                             continue;
                         }
-                        let entity = state_mut
-                            .commands
-                            .spawn(super::monitor::MonitorData {
+                        let mut entity = state_mut.commands.spawn((
+                            super::monitor::MonitorData {
                                 component_name: eql.clone(),
-                            })
-                            .id();
+                            },
+                            Name::new(eql.clone()),
+                        ));
+                        if let Some(root) = state_mut.monitor_root.as_ref() {
+                            entity.insert(ChildOf(**root));
+                        }
+                        let entity = entity.id();
                         let monitor = MonitorPane::new(entity, eql.clone());
 
                         let pane = Pane::Monitor(monitor);
@@ -3063,11 +3360,75 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             tile_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
+                    TreeAction::AddGeoPositionGauge(parent_tile_id, eql) => {
+                        if read_only {
+                            continue;
+                        }
+                        // Inherit schematic `coordinate` (same as omitting KDL `source`).
+                        let entity = state_mut
+                            .commands
+                            .spawn((
+                                super::gauges::GeoPositionGaugeData::new(
+                                    None,
+                                    impeller_wkt::DisplayFrame::default(),
+                                ),
+                                super::gauges::EqlBinding::new(eql.clone()),
+                            ))
+                            .id();
+                        let pane = Pane::GeoPositionGauge(GaugePane::new(entity, eql.clone()));
+                        if let Some(tile_id) =
+                            tile_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
+                        {
+                            ui_state.selected_object =
+                                SelectedObject::GeoPositionGauge { gauge_id: entity };
+                            tile_state.tree.make_active(|id, _| id == tile_id);
+                        }
+                    }
+                    TreeAction::AddOrientationGauge(parent_tile_id, eql) => {
+                        if read_only {
+                            continue;
+                        }
+                        let entity = state_mut
+                            .commands
+                            .spawn((
+                                super::gauges::OrientationGaugeData::new(None, None),
+                                super::gauges::EqlBinding::new(eql.clone()),
+                            ))
+                            .id();
+                        let pane = Pane::OrientationGauge(GaugePane::new(entity, eql.clone()));
+                        if let Some(tile_id) =
+                            tile_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
+                        {
+                            ui_state.selected_object =
+                                SelectedObject::OrientationGauge { gauge_id: entity };
+                            tile_state.tree.make_active(|id, _| id == tile_id);
+                        }
+                    }
+                    TreeAction::AddHorizonGauge(parent_tile_id, eql) => {
+                        if read_only {
+                            continue;
+                        }
+                        let entity = state_mut
+                            .commands
+                            .spawn((
+                                super::gauges::HorizonGaugeData::new(None),
+                                super::gauges::EqlBinding::new(eql.clone()),
+                            ))
+                            .id();
+                        let pane = Pane::HorizonGauge(GaugePane::new(entity, eql.clone()));
+                        if let Some(tile_id) =
+                            tile_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
+                        {
+                            ui_state.selected_object =
+                                SelectedObject::HorizonGauge { gauge_id: entity };
+                            tile_state.tree.make_active(|id, _| id == tile_id);
+                        }
+                    }
                     TreeAction::AddVideoStream(parent_tile_id, msg_name, name) => {
                         if read_only {
                             continue;
                         }
-                        let msg_id = impeller2::types::msg_id(&msg_name);
+                        let msg_id = impeller::types::msg_id(&msg_name);
                         let entity = state_mut
                             .commands
                             .spawn((
@@ -3102,7 +3463,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if read_only {
                             continue;
                         }
-                        let msg_id = impeller2::types::msg_id(&msg_name);
+                        let msg_id = impeller::types::msg_id(&msg_name);
                         let entity = state_mut
                             .commands
                             .spawn((
@@ -3143,6 +3504,21 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 Pane::Monitor(monitor) => {
                                     ui_state.selected_object = SelectedObject::Monitor {
                                         monitor_id: monitor.entity,
+                                    };
+                                }
+                                Pane::GeoPositionGauge(gauge) => {
+                                    ui_state.selected_object = SelectedObject::GeoPositionGauge {
+                                        gauge_id: gauge.entity,
+                                    };
+                                }
+                                Pane::OrientationGauge(gauge) => {
+                                    ui_state.selected_object = SelectedObject::OrientationGauge {
+                                        gauge_id: gauge.entity,
+                                    };
+                                }
+                                Pane::HorizonGauge(gauge) => {
+                                    ui_state.selected_object = SelectedObject::HorizonGauge {
+                                        gauge_id: gauge.entity,
                                     };
                                 }
                                 Pane::QueryTable(table) => {
@@ -3186,6 +3562,34 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                     ui_state.selected_object = SelectedObject::Graph {
                                         graph_id: plot.entity,
                                     };
+                                }
+                                Pane::Monitor(monitor) => {
+                                    ui_state.selected_object = SelectedObject::Monitor {
+                                        monitor_id: monitor.entity,
+                                    };
+                                }
+                                Pane::GeoPositionGauge(gauge) => {
+                                    ui_state.selected_object = SelectedObject::GeoPositionGauge {
+                                        gauge_id: gauge.entity,
+                                    };
+                                }
+                                Pane::OrientationGauge(gauge) => {
+                                    ui_state.selected_object = SelectedObject::OrientationGauge {
+                                        gauge_id: gauge.entity,
+                                    };
+                                }
+                                Pane::HorizonGauge(gauge) => {
+                                    ui_state.selected_object = SelectedObject::HorizonGauge {
+                                        gauge_id: gauge.entity,
+                                    };
+                                }
+                                Pane::QueryTable(table) => {
+                                    ui_state.selected_object = SelectedObject::QueryTable {
+                                        table_id: table.entity,
+                                    };
+                                }
+                                Pane::DataOverview(_) => {
+                                    ui_state.selected_object = SelectedObject::DataOverview;
                                 }
                                 Pane::Viewport(viewport) => {
                                     if let Some(camera) = viewport.camera {
@@ -3355,6 +3759,9 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         }
                     }
                     Pane::Monitor(_) => {}
+                    Pane::GeoPositionGauge(_)
+                    | Pane::OrientationGauge(_)
+                    | Pane::HorizonGauge(_) => {}
                     Pane::QueryTable(_) => {}
                     Pane::QueryPlot(query_plot) => {
                         if visible {
@@ -3414,11 +3821,11 @@ fn render_sidebar_toolbar(
 ) -> Option<ToolbarAction> {
     let mut action = None;
 
-    egui::TopBottomPanel::top("sidebar_toggle_toolbar")
-        .exact_height(32.0)
+    egui::Panel::top("sidebar_toggle_toolbar")
+        .exact_size(32.0)
         .frame(Frame {
             fill: get_scheme().bg_secondary,
-            stroke: egui::Stroke::new(1.0, get_scheme().border_primary),
+            stroke: egui::Stroke::new(1.0_f32, get_scheme().border_primary),
             inner_margin: egui::Margin::symmetric(8, 0),
             ..Default::default()
         })
@@ -3535,5 +3942,206 @@ pub fn shortcuts(
             return;
         };
         tabs.set_active(*new_active_id);
+    }
+}
+
+#[cfg(test)]
+mod grid_lod_tests {
+    use super::grid_lod;
+
+    fn cell_size(distance: f32, far: f32) -> f32 {
+        1.0 / grid_lod(distance, far).0
+    }
+
+    #[test]
+    fn n_body_au_camera_gets_unit_cells() {
+        let cell = cell_size(10.0, 5.0);
+        assert!(
+            (cell - 1.0).abs() < 1.0e-5,
+            "10 AU framing should LOD to 1 AU cells, got {cell}"
+        );
+        let (_, fadeout) = grid_lod(10.0, 5.0);
+        assert!(
+            fadeout >= 200.0,
+            "fadeout must cover the framed solar system, got {fadeout}"
+        );
+    }
+
+    #[test]
+    fn metre_chase_uses_sub_ten_metre_cells() {
+        let cell = cell_size(8.0, 5.0);
+        assert!(
+            cell <= 10.0,
+            "close chase must not inherit the planetary ECEF cell, got {cell}"
+        );
+    }
+
+    #[test]
+    fn earth_scale_view_keeps_thousand_kilometre_cells() {
+        let cell = cell_size(80_000_000.0, 150_000_000.0);
+        assert!(
+            (cell - 10_000_000.0).abs() / 10_000_000.0 < 1.0e-6,
+            "80,000 km ECEF view should stay ~10,000 km cells, got {cell}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod close_tests {
+    use super::{Container, GraphPane, Pane, Tile, TileId, TileState};
+    use crate::plugins::render_layer_alloc::RenderLayerAllocator;
+    use crate::ui::plot::{
+        CollectedGraphData, GraphBundle, GraphState, Line, LineHandle, PlotDataComponent,
+        PlotGpuBufferPool, PlotLineKey, PlotLineUsers,
+        gpu::{PendingUnusedPlotLines, apply_pending_unused_plot_lines},
+    };
+    use bevy::asset::Assets;
+    use bevy::ecs::hierarchy::ChildOf;
+    use bevy::ecs::system::SystemState;
+    use bevy::prelude::{Commands, Entity, World};
+    use bevy_egui::egui::Color32;
+    use impeller::types::ComponentId;
+    use impeller_bevy::ComponentPath;
+    use std::collections::BTreeMap;
+
+    fn plot_world() -> World {
+        let mut world = World::new();
+        world.init_resource::<PlotLineUsers>();
+        world.init_resource::<PendingUnusedPlotLines>();
+        world.init_resource::<CollectedGraphData>();
+        world.init_resource::<PlotGpuBufferPool>();
+        world.insert_resource(Assets::<Line>::default());
+        world
+    }
+
+    fn spawn_graph_with_line(
+        world: &mut World,
+        handle: bevy::asset::Handle<Line>,
+        path: &str,
+    ) -> (Entity, Entity) {
+        let mut alloc = RenderLayerAllocator::default();
+        let bundle = GraphBundle::try_new(&mut alloc, BTreeMap::new(), path.to_string())
+            .expect("a free render layer");
+        let graph_id = world.spawn(bundle).id();
+        let line_id = world
+            .spawn((LineHandle::Timeseries(handle), ChildOf(graph_id)))
+            .id();
+        world
+            .get_mut::<GraphState>(graph_id)
+            .expect("graph state")
+            .enabled_lines
+            .insert((ComponentPath::from_name(path), 0), (line_id, Color32::RED));
+        (graph_id, line_id)
+    }
+
+    fn named_tab_with_graph(tile_state: &mut TileState, graph_id: Entity) -> TileId {
+        let pane_id = tile_state
+            .tree
+            .tiles
+            .insert_new(Tile::Pane(Pane::Graph(GraphPane::new(
+                graph_id,
+                "graph".into(),
+            ))));
+        let named_id = tile_state
+            .tree
+            .tiles
+            .insert_new(Tile::Container(Container::new_tabs(vec![pane_id])));
+        let root = tile_state.tree.root().expect("root tabs");
+        if let Some(Tile::Container(Container::Tabs(tabs))) = tile_state.tree.tiles.get_mut(root) {
+            tabs.add_child(named_id);
+        }
+        tile_state.graphs.insert(pane_id, graph_id);
+        named_id
+    }
+
+    fn close_tile(world: &mut World, tile_state: &mut TileState, tile_id: TileId) {
+        let mut system_state: SystemState<Commands> = SystemState::new(world);
+        let mut commands = system_state.get_mut(world).expect("commands");
+        tile_state.despawn_tile(tile_id, &mut commands);
+        tile_state.tree.remove_recursively(tile_id);
+        system_state.apply(world);
+        world.flush();
+        apply_pending_unused_plot_lines(world);
+    }
+
+    #[test]
+    fn closing_container_tab_despawns_graphs_and_unused_line_assets() {
+        let mut world = plot_world();
+        let handle = world.resource_mut::<Assets<Line>>().add(Line::default());
+        let component_id = ComponentId::new("rocket.mach");
+        {
+            let mut collected = world.resource_mut::<CollectedGraphData>();
+            let mut component = PlotDataComponent::new("rocket.mach", vec!["x".into()]);
+            component.lines.insert(0, handle.clone());
+            collected.components.insert(component_id, component);
+        }
+        let (graph_id, line_id) = spawn_graph_with_line(&mut world, handle.clone(), "rocket.mach");
+        let key = PlotLineKey::Timeseries(handle.id());
+        assert_eq!(world.resource::<PlotLineUsers>().count(key), 1);
+
+        let mut tile_state = TileState::default();
+        let tab_id = named_tab_with_graph(&mut tile_state, graph_id);
+        close_tile(&mut world, &mut tile_state, tab_id);
+
+        assert!(
+            world.get_entity(graph_id).is_err(),
+            "graph pane entity must be despawned"
+        );
+        assert!(
+            world.get_entity(line_id).is_err(),
+            "line entity must be despawned with the graph"
+        );
+        assert!(
+            world.query::<&GraphState>().iter(&world).next().is_none(),
+            "no GraphState remains"
+        );
+        assert!(
+            world.query::<&LineHandle>().iter(&world).next().is_none(),
+            "no LineHandle remains"
+        );
+        assert!(
+            world
+                .resource::<CollectedGraphData>()
+                .get_line(&component_id, 0)
+                .is_none(),
+            "unused CollectedGraphData line handle must be dropped"
+        );
+        assert_eq!(world.resource::<PlotLineUsers>().count(key), 0);
+        assert!(tile_state.graphs.is_empty());
+    }
+
+    #[test]
+    fn closing_one_tab_keeps_shared_line_used_by_another_graph() {
+        let mut world = plot_world();
+        let handle = world.resource_mut::<Assets<Line>>().add(Line::default());
+        let component_id = ComponentId::new("rocket.mach");
+        {
+            let mut collected = world.resource_mut::<CollectedGraphData>();
+            let mut component = PlotDataComponent::new("rocket.mach", vec!["x".into()]);
+            component.lines.insert(0, handle.clone());
+            collected.components.insert(component_id, component);
+        }
+        let (graph_a, line_a) = spawn_graph_with_line(&mut world, handle.clone(), "rocket.mach");
+        let (graph_b, line_b) = spawn_graph_with_line(&mut world, handle.clone(), "rocket.mach");
+        let key = PlotLineKey::Timeseries(handle.id());
+        assert_eq!(world.resource::<PlotLineUsers>().count(key), 2);
+
+        let mut tile_state = TileState::default();
+        let tab_a = named_tab_with_graph(&mut tile_state, graph_a);
+        let _tab_b = named_tab_with_graph(&mut tile_state, graph_b);
+        close_tile(&mut world, &mut tile_state, tab_a);
+
+        assert!(world.get_entity(graph_a).is_err());
+        assert!(world.get_entity(line_a).is_err());
+        assert!(world.get_entity(graph_b).is_ok());
+        assert!(world.get_entity(line_b).is_ok());
+        assert!(
+            world
+                .resource::<CollectedGraphData>()
+                .get_line(&component_id, 0)
+                .is_some(),
+            "shared line asset must stay while another graph uses it"
+        );
+        assert_eq!(world.resource::<PlotLineUsers>().count(key), 1);
     }
 }

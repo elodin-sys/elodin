@@ -7,9 +7,9 @@ use bevy::{
 use bevy_egui::{EguiContexts, EguiTextureHandle};
 use egui::{Color32, CornerRadius, RichText, Stroke, load::SizedTexture};
 use hifitime::Epoch;
-use impeller2_bevy::{
-    ConnectionAddr, ConnectionStatus, CurrentStreamId, PacketRx, PacketTx, ThreadConnectionStatus,
-    spawn_tcp_connect,
+use impeller_bevy::{
+    ConnectionAddr, ConnectionStatus, CurrentStreamId, MsgPacketRx, MsgPacketTx, PacketRx,
+    PacketTx, ThreadConnectionStatus, spawn_msg_tcp_connect, spawn_tcp_connect,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -29,6 +29,7 @@ use super::{
     theme::corner_radius_sm,
     widgets::{RootWidgetSystem, RootWidgetSystemExt},
 };
+use crate::ui::widgets::SystemStateExt;
 
 #[derive(Component)]
 pub struct StartupWindow;
@@ -125,6 +126,8 @@ pub struct StartupLayout<'w, 's> {
     modal_state: Local<'s, ModalState>,
     packet_tx: ResMut<'w, PacketTx>,
     packet_rx: ResMut<'w, PacketRx>,
+    msg_packet_tx: ResMut<'w, MsgPacketTx>,
+    msg_packet_rx: ResMut<'w, MsgPacketRx>,
     current_stream_id: ResMut<'w, CurrentStreamId>,
     status: ResMut<'w, ThreadConnectionStatus>,
     recent_files: ResMut<'w, RecentItems>,
@@ -189,8 +192,10 @@ impl std::fmt::Display for ConnectError {
 impl StartupLayout<'_, '_> {
     fn connect(&mut self, addr: SocketAddr, reconnect: bool) -> ThreadConnectionStatus {
         let (packet_tx, packet_rx, outgoing_packet_rx, incoming_packet_tx) =
-            impeller2_bevy::channels();
+            impeller_bevy::channels();
+        let (msg_tx, msg_rx, msg_outgoing_rx, msg_incoming_tx) = impeller_bevy::msg_channels();
         let stream_id = fastrand::u64(..);
+        spawn_msg_tcp_connect(addr, msg_outgoing_rx, msg_incoming_tx);
         let status = spawn_tcp_connect(
             addr,
             outgoing_packet_rx,
@@ -202,6 +207,8 @@ impl StartupLayout<'_, '_> {
         *self.current_stream_id = CurrentStreamId(stream_id);
         *self.packet_tx = packet_tx;
         *self.packet_rx = packet_rx;
+        *self.msg_packet_tx = msg_tx;
+        *self.msg_packet_rx = msg_rx;
         *self.status = status.clone();
         status
     }
@@ -284,7 +291,7 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
         ctx: &mut egui::Context,
         _args: Self::Args,
     ) -> Self::Output {
-        let mut state = state.get_mut(world);
+        let mut state = state.params_mut(world);
         let logo_full = state
             .contexts
             .add_image(EguiTextureHandle::Weak(state.images.logo_full.id()));
@@ -299,9 +306,10 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
             .contexts
             .add_image(EguiTextureHandle::Weak(state.images.icon_ip_addr.id()));
 
-        egui::CentralPanel::default()
-            .frame(egui::Frame::NONE)
-            .show(ctx, |ui| {
+        super::utils::show_central_panel(
+            egui::CentralPanel::default().frame(egui::Frame::NONE),
+            ctx,
+            |ui| {
                 ui.allocate_ui_with_layout(
                     egui::vec2(408.0, 470.0),
                     egui::Layout::top_down(egui::Align::Center),
@@ -352,13 +360,16 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                         }
                     },
                 )
-            });
+            },
+        );
 
-        egui::SidePanel::right("right")
-            .exact_width(322.0)
-            .frame(egui::Frame::NONE.fill(get_scheme().bg_secondary))
-            .resizable(false)
-            .show(ctx, |ui| {
+        super::utils::show_panel(
+            egui::Panel::right("right")
+                .exact_size(322.0)
+                .frame(egui::Frame::NONE.fill(get_scheme().bg_secondary))
+                .resizable(false),
+            ctx,
+            |ui| {
                 egui::ScrollArea::vertical().show(ui, |ui| {
                     for item in state.recent_files.recent_files.clone().into_values().rev() {
                         if ui.add(recent_item_button(item.clone(), arrow)).clicked() {
@@ -373,7 +384,8 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                         }
                     }
                 });
-            });
+            },
+        );
         match state.modal_state.clone() {
             ModalState::None => {}
             ModalState::ConnectToIp {
@@ -418,17 +430,17 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                         style.visuals.widgets.open.corner_radius = CornerRadius::ZERO;
 
                         style.visuals.widgets.active.fg_stroke =
-                            Stroke::new(0.0, Color32::TRANSPARENT);
+                            Stroke::new(0.0_f32, Color32::TRANSPARENT);
                         style.visuals.widgets.active.bg_stroke =
-                            Stroke::new(0.0, Color32::TRANSPARENT);
+                            Stroke::new(0.0_f32, Color32::TRANSPARENT);
                         style.visuals.widgets.hovered.fg_stroke =
-                            Stroke::new(0.0, Color32::TRANSPARENT);
+                            Stroke::new(0.0_f32, Color32::TRANSPARENT);
                         style.visuals.widgets.hovered.bg_stroke =
-                            Stroke::new(0.0, Color32::TRANSPARENT);
+                            Stroke::new(0.0_f32, Color32::TRANSPARENT);
                         style.visuals.widgets.open.fg_stroke =
-                            Stroke::new(0.0, Color32::TRANSPARENT);
+                            Stroke::new(0.0_f32, Color32::TRANSPARENT);
                         style.visuals.widgets.open.bg_stroke =
-                            Stroke::new(0.0, Color32::TRANSPARENT);
+                            Stroke::new(0.0_f32, Color32::TRANSPARENT);
 
                         style.spacing.button_padding = [16.0, 16.0].into();
 

@@ -1,6 +1,11 @@
 #![doc(html_root_url = "https://docs.rs/bevy_geo_frames/0.1.0")]
 // #![doc = include_str!("../README.md")]
 //#![forbid(missing_docs)]
+
+pub use map_3d::Ellipsoid;
+
+mod transforms;
+
 #[cfg(feature = "bevy")]
 mod geo;
 #[cfg(feature = "bevy")]
@@ -50,6 +55,59 @@ pub enum GeoFrame {
     // breaks the naming for it being a "Geo" or "Earth" frame.
 }
 
+/// Where the Bevy world origin lives on Earth.
+///
+/// Used to turn ECEF positions into local ENU, then ENU → Bevy.
+#[derive(Default, Debug, Clone, Copy)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Reflect))]
+pub struct GeoOrigin {
+    /// Geodetic latitude [rad]
+    pub latitude: f64,
+    /// Geodetic longitude [rad]
+    pub longitude: f64,
+    /// Altitude above mean radius [m]
+    pub altitude: f64,
+    #[cfg_attr(feature = "bevy", reflect(ignore))]
+    /// Planet/body shape model (currently used primarily for reference radius).
+    pub ellipsoid: Ellipsoid,
+}
+
+impl GeoOrigin {
+    /// Uses default Earth radius.
+    pub fn new_from_degrees(latitude_deg: f64, longitude_deg: f64, altitude: f64) -> Self {
+        let latitude = latitude_deg.to_radians();
+        let longitude = longitude_deg.to_radians();
+        Self {
+            latitude,
+            longitude,
+            altitude,
+            ..Default::default()
+        }
+    }
+
+    /// Provide an ellipsoid.
+    pub fn with_ellipsoid(mut self, shape: Ellipsoid) -> Self {
+        self.ellipsoid = shape;
+        self
+    }
+}
+
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Reflect))]
+pub enum RotationKind {
+    #[default]
+    /// Re-express the local→frame attitude as a rotation operator in Bevy
+    /// (`bevy_R * att * bevy_R⁻¹`). Identity attitude therefore leaves the
+    /// mesh in its authored Bevy / glTF axes (Y-up).
+    Relative,
+    /// Compose the local→frame attitude with the frame→Bevy basis
+    /// (`bevy_R * att`). Identity attitude aligns mesh local axes with the
+    /// schematic frame (ENU: +X east, +Y north, +Z up).
+    Absolute,
+}
+
 /// Provide a means of specifying a default possibly. Meant to be used with
 /// `Option<GeoFrame>`.
 pub trait OrDefault {
@@ -75,5 +133,8 @@ impl OrDefault for Option<GeoFrame> {
 
 #[cfg(feature = "big_space")]
 pub mod big_space;
+
+#[cfg(feature = "bevy")]
+pub mod solar;
 
 pub mod prelude;

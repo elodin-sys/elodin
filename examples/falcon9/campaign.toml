@@ -1,0 +1,25 @@
+timeout = "600s"
+retries = 0
+continue_on_error = true
+
+[[build]]
+command = "cargo"
+args = ["build", "--release", "--manifest-path", "examples/falcon9/controller/Cargo.toml"]
+
+[resources]
+port_stride = 40
+db_port = 2340
+
+[resources.ports]
+state = 9114
+command = 9115
+
+# Calibration campaigns score in-sim and read result.json only; at 1000 Hz
+# every-tick telemetry a kept run DB is ~1 GB, so never retain them here.
+# Flip to "on-fail" for debugging a specific failure mode.
+[retention]
+keep_run_db = "never"
+
+[hooks]
+post_run = "examples/falcon9/hooks/score.py"
+post_campaign = "examples/falcon9/hooks/report.py"

@@ -594,6 +594,24 @@ Use `bevy_defer` if you have an operation that runs asynchronously over multiple
 
 # Bevy Ergonomics
 
+## Prefer spawn-time correctness over per-frame fix-up systems
+
+Do not add systems that scan every frame to repair entities that were spawned
+incorrectly (wrong parent, missing required components, invalid hierarchy).
+Those janitors hide the root cause, burn frame time even when nothing is wrong,
+and can fight the systems that keep rewriting the bad state.
+
+Instead:
+
+- Spawn entities with the correct components and parents up front.
+- Use required components (`register_required_components`) so dependents appear
+  with the owner.
+- Use `OnAdd` / `OnInsert` observers (or component hooks) for cross-cutting
+  invariants that many spawn sites share — they run at insert time, not every
+  frame.
+- If a producer re-applies a bad relationship every packet (e.g. `ChildOf`), fix
+  that producer so it wires hierarchy once; do not paper over it with a janitor.
+
 ## Avoid type names that contain "Secondary" or "Primary".
 
 We had two distinct code paths: one for the primary window, and another for secondary windows. This was codified in the type names that would sometimes impede them from code reuse. I have tried to unify these things where appropriate. 

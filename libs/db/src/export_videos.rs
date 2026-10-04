@@ -9,8 +9,8 @@ use std::io::{self, Cursor};
 use std::path::PathBuf;
 
 use glob::Pattern;
-use impeller2::types::{PacketId, msg_id};
-use impeller2_wkt::SensorCameraConfig;
+use impeller::types::{PacketId, msg_id};
+use impeller_wkt::SensorCameraConfig;
 use muxide::api::{MuxerBuilder, VideoCodec};
 use muxide::codec::h264::is_h264_keyframe;
 use openh264::OpenH264API;
@@ -85,7 +85,11 @@ fn find_sps_nal(payload: &[u8]) -> Option<&[u8]> {
 }
 
 /// Convert one packed RGBA frame into the I420 layout expected by OpenH264.
-fn rgba_to_i420(payload: &[u8], width: usize, height: usize) -> Result<YUVBuffer, Error> {
+pub(crate) fn rgba_to_i420(
+    payload: &[u8],
+    width: usize,
+    height: usize,
+) -> Result<YUVBuffer, Error> {
     if !width.is_multiple_of(2) || !height.is_multiple_of(2) {
         return Err(invalid_data(format!(
             "sensor camera dimensions must be even for I420: {}x{}",
@@ -107,12 +111,43 @@ fn rgba_to_i420(payload: &[u8], width: usize, height: usize) -> Result<YUVBuffer
     Ok(YUVBuffer::from_rgb_source(rgba))
 }
 
-struct SensorEncoder {
+pub(crate) fn gray8_to_i420(
+    payload: &[u8],
+    width: usize,
+    height: usize,
+) -> Result<YUVBuffer, Error> {
+    if !width.is_multiple_of(2) || !height.is_multiple_of(2) {
+        return Err(invalid_data(format!(
+            "sensor camera dimensions must be even for I420: {}x{}",
+            width, height
+        )));
+    }
+    let pixels = width
+        .checked_mul(height)
+        .ok_or_else(|| invalid_data("sensor camera frame dimensions overflow"))?;
+    if payload.len() != pixels {
+        return Err(invalid_data(format!(
+            "unexpected gray8 sensor camera frame size {} (expected {})",
+            payload.len(),
+            pixels
+        )));
+    }
+    let mut yuv = Vec::with_capacity(pixels + pixels / 2);
+    yuv.extend(
+        payload
+            .iter()
+            .map(|&value| ((u16::from(value) * 219 + 127) / 255 + 16) as u8),
+    );
+    yuv.resize(pixels + pixels / 2, 128);
+    Ok(YUVBuffer::from_vec(yuv, width, height))
+}
+
+pub(crate) struct SensorEncoder {
     encoder: Encoder,
 }
 
 impl SensorEncoder {
-    fn new(width: u32, height: u32, fps: f32) -> Result<Self, Error> {
+    pub(crate) fn new(width: u32, height: u32, fps: f32) -> Result<Self, Error> {
         let fps = if fps.is_finite() && fps > 0.0 {
             fps
         } else {
@@ -133,7 +168,7 @@ impl SensorEncoder {
         Ok(Self { encoder })
     }
 
-    fn encode_frame(&mut self, yuv: &YUVBuffer) -> Result<Vec<u8>, Error> {
+    pub(crate) fn encode_frame(&mut self, yuv: &YUVBuffer) -> Result<Vec<u8>, Error> {
         self.encoder
             .encode(yuv)
             .map(|bitstream| bitstream.to_vec())
@@ -141,7 +176,7 @@ impl SensorEncoder {
     }
 }
 
-fn sensor_camera_export_fps(cfg: &SensorCameraConfig, default_fps: u32) -> f32 {
+pub(crate) fn sensor_camera_export_fps(cfg: &SensorCameraConfig, default_fps: u32) -> f32 {
     if cfg.fps.is_finite() && cfg.fps > 0.0 {
         cfg.fps
     } else {
@@ -162,19 +197,19 @@ fn export_one_h264(
         return Ok(false);
     }
 
-    let mut sps_bytes: Option<&[u8]> = None;
-    for &ts in timestamps.iter().take(20) {
+    let mut sps_bytes: Option<Vec<u8>> = None;
+    for &ts in timestamps {
         if let Some(payload) = msg_log.get(ts)
-            && let Some(sps) = find_sps_nal(payload)
+            && let Some(sps) = find_sps_nal(&payload)
         {
-            sps_bytes = Some(sps);
+            sps_bytes = Some(sps.to_vec());
             break;
         }
     }
     let sps_bytes = match sps_bytes {
         Some(b) => b,
         None => {
-            eprintln!("  {}: no SPS NAL found in first frames, skipping", name);
+            eprintln!("  {}: no SPS NAL found, skipping", name);
             return Ok(false);
         }
     };
@@ -203,38 +238,54 @@ fn export_one_h264(
             ))
         })?;
 
-    let first_ts = timestamps[0];
+    let remove_partial = |path: &std::path::Path| {
+        let _ = std::fs::remove_file(path);
+    };
+
+    let mut start_ts = None;
+    let mut written = 0usize;
     for &ts in timestamps {
         let payload = match msg_log.get(ts) {
             Some(p) => p,
             None => continue,
         };
+        let keyframe = is_h264_keyframe(&payload);
+        if start_ts.is_none() {
+            if !keyframe {
+                continue;
+            }
+            start_ts = Some(ts);
+        }
+        let first_ts = start_ts.expect("start_ts set");
         let pts_secs = (ts.0 - first_ts.0) as f64 / 1_000_000.0;
-        let keyframe = is_h264_keyframe(payload);
-        muxer
-            .write_video(pts_secs, payload, keyframe)
-            .map_err(|e| {
-                Error::Io(std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    format!("muxide write_video: {}", e),
-                ))
-            })?;
+        if let Err(e) = muxer.write_video(pts_secs, &payload, keyframe) {
+            drop(muxer);
+            remove_partial(&mp4_path);
+            return Err(invalid_data(format!("muxide write_video: {}", e)));
+        }
+        written += 1;
     }
 
-    let _stats = muxer.finish_with_stats().map_err(|e| {
-        Error::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!("muxide finish: {}", e),
-        ))
-    })?;
+    if written == 0 {
+        eprintln!("  {}: no IDR after leading P-frames, skipping", name);
+        drop(muxer);
+        remove_partial(&mp4_path);
+        return Ok(false);
+    }
 
-    let frame_count = timestamps.len();
-    let duration_secs = if frame_count > 0 {
-        (timestamps[frame_count - 1].0 - first_ts.0) as f64 / 1_000_000.0
-    } else {
-        0.0
-    };
-    println!("  {}: {} frames, {:.1}s", name, frame_count, duration_secs);
+    if let Err(e) = muxer.finish_with_stats() {
+        remove_partial(&mp4_path);
+        return Err(invalid_data(format!("muxide finish: {}", e)));
+    }
+
+    let first_ts = start_ts.expect("start_ts set");
+    let last_ts = timestamps[timestamps.len() - 1];
+    let duration_secs = (last_ts.0 - first_ts.0) as f64 / 1_000_000.0;
+    let skipped = timestamps.len().saturating_sub(written);
+    println!("  {}: {} frames, {:.1}s", name, written, duration_secs);
+    if skipped > 0 {
+        println!("    Skipped {skipped} leading non-IDR frame(s) (e.g. after trim)");
+    }
     println!(
         "    Detected resolution: {}x{} from SPS (frame rate: {} fps)",
         width, height, fps
@@ -242,7 +293,7 @@ fn export_one_h264(
     println!(
         "    Exported {} ({} frames, {} fps, fast-start)",
         mp4_path.display(),
-        frame_count,
+        written,
         fps
     );
     Ok(true)
@@ -282,7 +333,11 @@ fn export_one_sensor(
         let Some(payload) = msg_log.get(ts) else {
             continue;
         };
-        let yuv = match rgba_to_i420(payload, width as usize, height as usize) {
+        let yuv = match if cfg.format == "gray8" {
+            gray8_to_i420(&payload, width as usize, height as usize)
+        } else {
+            rgba_to_i420(&payload, width as usize, height as usize)
+        } {
             Ok(yuv) => yuv,
             Err(e) => {
                 eprintln!("  {}: skipping frame at {}: {}", name, ts.0, e);
@@ -343,6 +398,10 @@ fn export_one(
     sensor_cfg: Option<&SensorCameraConfig>,
 ) -> Result<bool, Error> {
     match sensor_cfg {
+        Some(cfg) if cfg.format == "h264" => {
+            let fps = sensor_camera_export_fps(cfg, default_fps).round().max(1.0) as u32;
+            export_one_h264(msg_log, name, output_path, fps)
+        }
         Some(cfg) => export_one_sensor(msg_log, name, output_path, cfg, default_fps),
         None => export_one_h264(msg_log, name, output_path, default_fps),
     }
@@ -353,7 +412,7 @@ fn export_one(
 fn video_name_map_from_schematic(schematic: &str) -> HashMap<PacketId, String> {
     let mut map = HashMap::new();
     // Parse KDL entries like:  video_stream "test-video" name="Test Pattern"
-    // The first string argument after video_stream is the msg_name.
+    // The first string argument after the node name is the msg_name.
     for line in schematic.lines() {
         let trimmed = line.trim();
         if let Some(rest) = trimmed.strip_prefix("video_stream") {
@@ -413,14 +472,14 @@ pub fn run(
     }
     println!();
 
-    let exported = db.with_state(|state| {
-        // Build a fallback name map from the schematic's video_stream entries
-        let schematic_names = state
-            .db_config
-            .schematic_content()
-            .map(video_name_map_from_schematic)
-            .unwrap_or_default();
+    // Build a fallback name map from the active schematic's video_stream entries
+    // (read outside `with_state` to avoid re-entrant locking on the asset read).
+    let schematic_names = db
+        .read_active_schematic()
+        .map(|content| video_name_map_from_schematic(&content))
+        .unwrap_or_default();
 
+    let exported = db.with_state(|state| {
         let sensor_cameras: Vec<SensorCameraConfig> =
             match state.db_config.metadata.get("sensor_cameras") {
                 Some(json) => match serde_json::from_str(json) {
@@ -482,8 +541,8 @@ mod tests {
     use super::*;
     use openh264::formats::YUVSource;
 
-    fn color(r: f32, g: f32, b: f32, a: f32) -> impeller2_wkt::Color {
-        impeller2_wkt::Color { r, g, b, a }
+    fn color(r: f32, g: f32, b: f32, a: f32) -> impeller_wkt::Color {
+        impeller_wkt::Color { r, g, b, a }
     }
 
     fn sensor_camera_config(fps: f32) -> SensorCameraConfig {
@@ -499,13 +558,14 @@ mod tests {
             rot_offset: [0.0; 3],
             format: "rgba".to_string(),
             effect: "normal".to_string(),
-            effect_params: HashMap::new(),
+            effect_params: serde_json::json!({}),
             create_frustum: false,
             show_ellipsoids: false,
             frustums_color: color(0.0, 1.0, 0.4, 0.4),
             projection_color: color(0.0, 1.0, 0.4, 0.1),
             frustums_thickness: 0.008,
             fps,
+            ..Default::default()
         }
     }
 
@@ -553,5 +613,13 @@ mod tests {
         assert_eq!(yuv.y().len(), width * height);
         assert_eq!(yuv.u().len(), width * height / 4);
         assert_eq!(yuv.v().len(), width * height / 4);
+    }
+
+    #[test]
+    fn gray8_to_i420_maps_full_range_luma_to_video_range() {
+        let yuv = gray8_to_i420(&[0, 64, 128, 255], 2, 2).expect("gray8_to_i420");
+        assert_eq!(yuv.y(), [16, 71, 126, 235]);
+        assert_eq!(yuv.u(), [128]);
+        assert_eq!(yuv.v(), [128]);
     }
 }

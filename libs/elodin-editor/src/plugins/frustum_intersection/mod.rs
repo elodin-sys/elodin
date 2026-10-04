@@ -9,7 +9,7 @@ mod volume;
 
 use super::frustum_common::{
     MainViewportQueryItem, SensorCameraFrustumQueryItem, color_component_to_u8,
-    frustum_local_points,
+    frustum_local_points, presentation_perspective,
 };
 use crate::{
     MainCamera,
@@ -43,7 +43,7 @@ struct EllipsoidVolume {
     radii: Vec3,
     aabb_min: Vec3,
     aabb_max: Vec3,
-    base_color: impeller2_wkt::Color,
+    base_color: impeller_wkt::Color,
     material_target: Option<EllipsoidMaterialTarget>,
 }
 
@@ -123,7 +123,7 @@ struct DesiredTintOverlay {
 
 struct FrustumSource {
     volume: FrustumVolume,
-    color: impeller2_wkt::Color,
+    color: impeller_wkt::Color,
 }
 
 #[derive(SystemParam)]
@@ -168,12 +168,12 @@ struct EllipsoidTintSwapped(HashMap<Entity, Handle<StandardMaterial>>);
 
 impl Plugin for FrustumIntersectionPlugin {
     fn build(&self, app: &mut App) {
-        use impeller2_bevy::AppExt;
+        use impeller_bevy::AppExt;
         app.init_resource::<IntersectionMaterialCache>()
             .init_resource::<IntersectionRatios>()
             .init_resource::<EllipsoidTintSwapped>()
             .add_plugins(MaterialPlugin::<FrustumTintMaterial>::default())
-            .add_impeller_component::<impeller2_wkt::FrustumCoverage>()
+            .add_impeller_component::<impeller_wkt::FrustumCoverage>()
             .add_systems(
                 PostUpdate,
                 (
@@ -201,7 +201,7 @@ const ELLIPSOID_TINT_MAX_BLEND: f32 = 0.65;
 const ELLIPSOID_TINT_EMISSIVE_SCALE: f32 = 0.12;
 
 fn projection_material_for_color(
-    color: impeller2_wkt::Color,
+    color: impeller_wkt::Color,
     materials: &mut Assets<StandardMaterial>,
     cache: &mut IntersectionMaterialCache,
 ) -> Handle<StandardMaterial> {
@@ -240,7 +240,7 @@ fn projection_material_for_color(
 fn intersection_light_for(
     frustum: &FrustumVolume,
     ellipsoid: &EllipsoidVolume,
-    color: impeller2_wkt::Color,
+    color: impeller_wkt::Color,
 ) -> (PointLight, Transform) {
     let radius = ellipsoid.radii.max_element().max(0.05);
     let to_camera = frustum.camera_pos - ellipsoid.center;
@@ -254,13 +254,13 @@ fn intersection_light_for(
         color: Color::srgb(color.r, color.g, color.b),
         intensity: INTERSECTION_LIGHT_INTENSITY,
         range: (radius * 8.0).max(1.0),
-        shadows_enabled: false,
+        shadow_maps_enabled: false,
         ..Default::default()
     };
     (light, Transform::from_translation(translation))
 }
 
-fn ellipsoid_tinted_color(base: impeller2_wkt::Color, ratio: f32) -> (Color, Color) {
+fn ellipsoid_tinted_color(base: impeller_wkt::Color, ratio: f32) -> (Color, Color) {
     let ratio = ratio.clamp(0.0, 1.0);
     if ratio <= SURFACE_EPS {
         return (
@@ -292,7 +292,7 @@ fn ellipsoid_tinted_color(base: impeller2_wkt::Color, ratio: f32) -> (Color, Col
 
 fn apply_ellipsoid_tint(
     target: &EllipsoidMaterialTarget,
-    base: impeller2_wkt::Color,
+    base: impeller_wkt::Color,
     ratio: f32,
     standard_materials: &mut Assets<StandardMaterial>,
     mat3_materials: &mut Assets<Mat3Material>,
@@ -303,13 +303,13 @@ fn apply_ellipsoid_tint(
             // Tint is applied by FrustumTintMaterial shader; no CPU-side edit.
         }
         EllipsoidMaterialTarget::Standard(handle) => {
-            if let Some(material) = standard_materials.get_mut(handle) {
+            if let Some(mut material) = standard_materials.get_mut(handle) {
                 material.base_color = tinted;
                 material.emissive = emissive.into();
             }
         }
         EllipsoidMaterialTarget::Mat3(handle) => {
-            if let Some(material) = mat3_materials.get_mut(handle) {
+            if let Some(mut material) = mat3_materials.get_mut(handle) {
                 material.base.base_color = tinted;
                 material.base.emissive = emissive.into();
             }
@@ -342,7 +342,7 @@ fn reset_ellipsoid_tints(params: &mut FrustumIntersectionParams<'_, '_>, command
             .insert(MeshMaterial3d(original));
     }
     for (entity, _global_transform, object_state) in params.ellipsoids.iter() {
-        let impeller2_wkt::Object3DMesh::Ellipsoid { color, .. } = object_state.data.mesh else {
+        let impeller_wkt::Object3DMesh::Ellipsoid { color, .. } = object_state.data.mesh else {
             continue;
         };
         let Ok(children) = params.children.get(entity) else {
@@ -461,6 +461,7 @@ fn draw_frustum_ellipsoid_intersections(
             camera_viewport_aspect(camera),
             params.projection_cache.get(camera_entity).ok(),
         );
+        let source_perspective = presentation_perspective(&source_perspective, Some(config));
         let Some(local_points) = frustum_local_points(&source_perspective) else {
             continue;
         };
@@ -533,7 +534,7 @@ fn draw_frustum_ellipsoid_intersections(
 
     let mut ellipsoids = Vec::new();
     for (entity, global_transform, object_state) in params.ellipsoids.iter() {
-        let impeller2_wkt::Object3DMesh::Ellipsoid { color, .. } = object_state.data.mesh else {
+        let impeller_wkt::Object3DMesh::Ellipsoid { color, .. } = object_state.data.mesh else {
             continue;
         };
 
@@ -791,7 +792,7 @@ fn draw_frustum_ellipsoid_intersections(
 
     for visual in desired {
         if let Some((entity, mesh_handle)) = existing_by_key.remove(&visual.key) {
-            if let Some(mesh_asset) = params.meshes.get_mut(&mesh_handle) {
+            if let Some(mut mesh_asset) = params.meshes.get_mut(&mesh_handle) {
                 *mesh_asset = visual.mesh;
             } else {
                 let new_mesh = params.meshes.add(visual.mesh);

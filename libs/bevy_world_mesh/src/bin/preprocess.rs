@@ -14,7 +14,7 @@ use bevy::{
     winit::WinitPlugin,
 };
 use bevy_world_mesh::prelude::*;
-use bevy_world_mesh::scenes::planar::{planar_path, terrain_config, LOD_COUNT};
+use bevy_world_mesh::scenes::planar::{planar_path, preprocess_terrain_config, LOD_COUNT};
 use bevy_world_mesh::terrain::util::{asset_path, assets_root};
 use std::time::Duration;
 
@@ -48,7 +48,7 @@ fn main() {
 }
 
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
-    let config = terrain_config();
+    let config = preprocess_terrain_config();
     let mut tile_atlas = TileAtlas::new(&config);
     let path = planar_path();
 

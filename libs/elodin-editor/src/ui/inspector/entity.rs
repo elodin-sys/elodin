@@ -7,12 +7,12 @@ use bevy::ecs::{
 use bevy::prelude::{Children, Resource};
 use bevy_egui::egui::{self, Align, Color32, Layout, RichText, emath};
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
-use impeller2::types::ComponentId;
-use impeller2_bevy::{
+use impeller::types::ComponentId;
+use impeller_bevy::{
     ComponentMetadataRegistry, ComponentPath, ComponentPathRegistry, ComponentSchemaRegistry,
     ComponentValue, ComponentValueExt, ElementValueMut,
 };
-use impeller2_wkt::{ComponentMetadata, MetadataExt};
+use impeller_wkt::{ComponentMetadata, MetadataExt};
 use smallvec::SmallVec;
 
 use crate::{
@@ -30,6 +30,7 @@ use crate::{
 };
 
 use super::{InspectorIcons, empty_inspector};
+use crate::ui::widgets::SystemStateExt;
 
 #[derive(SystemParam)]
 pub struct InspectorEntity<'w, 's> {
@@ -66,7 +67,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
             path_reg,
             mut render_layer_alloc,
             mut filter,
-        } = state.get_mut(world);
+        } = state.params_mut(world);
 
         let (icons, pair) = args;
 

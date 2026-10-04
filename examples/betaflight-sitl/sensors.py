@@ -4,17 +4,17 @@ Sensor Simulation for Betaflight SITL
 This module simulates the IMU (Inertial Measurement Unit) and other sensors
 that provide data to Betaflight's flight controller algorithms.
 
-Sensor Models:
-- Gyroscope: Measures angular velocity in body frame (8 kHz - drives PID)
-- Accelerometer: Measures linear acceleration in body frame (4.8 kHz)
-- Barometer: Measures altitude via pressure (480 Hz)
-- Magnetometer: Measures heading reference (200 Hz)
+Sensor Models (configured targets; effective rates are capped by the physics rate):
+- Gyroscope: Measures angular velocity in body frame (8 kHz target and default)
+- Accelerometer: Measures linear acceleration in body frame (4.8 kHz target, 4 kHz effective)
+- Barometer: Measures altitude via pressure (480 Hz target, ~471 Hz effective)
+- Magnetometer: Measures heading reference (200 Hz target and effective)
 
 Multi-Rate Simulation:
-Sensors update at their realistic hardware rates based on Aleph flight controller
-specs (BMI270 IMU, BMP581 barometer, BMM350 magnetometer). The simulation runs
-at 8kHz to match Betaflight's high-performance PID loop, but slower sensors
-only update at their native rates using tick decimation.
+Sensors request rates based on the Elodin Aleph flight controller hardware
+(BMI270 IMU, BMP581 barometer, BMM350 magnetometer). The physics/PID lockstep
+runs at 8kHz by default. Slower sensors use whole-tick decimation, so their
+actual rates are the closest rates representable at 8kHz.
 
 Noise Model (from proven drone example):
 - Gaussian measurement noise on each sample
@@ -25,9 +25,9 @@ filtering. This is a Software-In-The-Loop test, so we want to send realistic
 noisy sensor data and let Betaflight process it.
 
 Coordinate Systems:
-- Elodin: ENU (East-North-Up) with X=forward, Y=left, Z=up
-- Betaflight: NED (North-East-Down) for sensor data
-- Conversion handled in comms.py send_state method
+- Elodin: ENU (East-North-Up) world frame with FLU (Forward-Left-Up) body frame
+- Betaflight SITL (2026.6.1+, Gazebo bridge): FRD (Forward-Right-Down) sensor frame
+- Conversion handled in build_fdm_from_components below
 """
 
 import typing as ty
@@ -40,7 +40,7 @@ import jax.random as rng
 import numpy as np
 
 from config import DroneConfig
-from comms import FDMPacket
+from comms import FDMPacket, build_fdm_from_components
 
 
 class Noise:
@@ -93,7 +93,7 @@ class Noise:
 # Note: Betaflight's attitude estimator is sensitive to noise during the
 # bootgrace/calibration period. High noise causes attitude drift and
 # motor imbalance at liftoff.
-gyro_noise = Noise(0, 0, 0.01, 0.001)  # Gyro noise + bias drift
+gyro_noise = Noise(0, 0, 1e-7, 1e-8)  # Gyro noise + bias drift
 accel_noise = Noise(0, 1, 0.01, 0.001)  # Accel noise (no drift)
 baro_noise = Noise(0, 2, 0.01, 0.001)  # ~0.03m std dev
 mag_noise = Noise(0, 3, 0.01, 0.001)  # Magnetometer noise (very low)
@@ -296,8 +296,8 @@ def create_accel_system(config: DroneConfig):
     in body frame. Applies noise and bias when enabled.
     No filtering - Betaflight handles that.
 
-    Multi-rate: Updates at ~4.8kHz (BMI270 1.6kHz × 3 IMUs). Between updates,
-    the previous reading is held.
+    Multi-rate: Requests ~4.8kHz (BMI270 1.6kHz × 3 IMUs), capped by the
+    physics/PID rate. Between updates, the previous reading is held.
 
     Detects ground contact to correctly report +g when at rest (the ground
     constraint zeros velocity but doesn't add normal force to the Force component).
@@ -364,7 +364,7 @@ def create_accel_system(config: DroneConfig):
         """
         Compute accelerometer reading with multi-rate decimation.
 
-        Updates at accel_tick_interval (e.g., every 2 ticks for 4.8kHz at 8kHz PID).
+        Updates at accel_tick_interval, capped at one update per physics tick.
         Returns previous reading when not updating.
         """
         new_reading = _compute_accel_reading(tick, pos, vel, force, inertia, bias)
@@ -427,7 +427,7 @@ def create_baro_system(config: DroneConfig):
         """
         Compute barometer reading with multi-rate decimation.
 
-        Updates at baro_tick_interval (e.g., every 17 ticks for 480Hz at 8kHz PID).
+        Updates at baro_tick_interval (every 17 ticks at the default 8kHz rate).
         Returns previous reading when not updating.
         """
         new_reading = _compute_baro_reading(tick, pos)
@@ -482,7 +482,7 @@ def create_mag_system(config: DroneConfig):
         """
         Compute magnetometer reading with multi-rate decimation.
 
-        Updates at mag_tick_interval (e.g., every 40 ticks for 200Hz at 8kHz PID).
+        Updates at mag_tick_interval (every 40 ticks at the default 8kHz rate).
         Returns previous reading when not updating.
         """
         new_reading = _compute_mag_reading(tick, pos)
@@ -533,11 +533,11 @@ def create_sensor_system(config: DroneConfig) -> el.System:
     """
     Create the complete sensor system with multi-rate simulation.
 
-    Combines sensors at their realistic hardware rates:
-    - Gyroscope: 8 kHz (matches PID loop, driven by 3x BMI270)
-    - Accelerometer: 4.8 kHz (3x BMI270 @ 1.6 kHz each)
-    - Barometer: 480 Hz (BMP581 continuous mode)
-    - Magnetometer: 200 Hz (BMM350)
+    Combines sensors at their configured target rates, capped by the physics rate:
+    - Gyroscope: 8 kHz target and effective default rate
+    - Accelerometer: 4.8 kHz target (4 kHz after whole-tick rounding at 8 kHz)
+    - Barometer: 480 Hz target (~471 Hz after whole-tick rounding at 8 kHz)
+    - Magnetometer: 200 Hz target and effective rate
 
     Args:
         config: Drone configuration
@@ -601,102 +601,6 @@ def extract_sensor_data(
     }
 
 
-def build_fdm_from_components(
-    world_pos: np.ndarray,
-    world_vel: np.ndarray,
-    accel: np.ndarray,
-    gyro: np.ndarray,
-    timestamp: float,
-    gravity: float = 9.80665,
-) -> FDMPacket:
-    """
-    Build an FDM packet directly from Elodin component data.
-
-    This is the primary function for extracting sensor data from the simulation
-    and packaging it for Betaflight. It handles:
-    - Quaternion extraction from world_pos (Elodin scalar-last to Betaflight scalar-first)
-    - Velocity extraction from world_vel
-    - ENU to NED coordinate conversion for gyro/accel
-    - Pressure calculation from altitude
-
-    Args:
-        world_pos: Position array [qx, qy, qz, qw, x, y, z] (Elodin scalar-last format)
-        world_vel: Velocity array [wx, wy, wz, vx, vy, vz] (angular first in Elodin)
-        accel: Accelerometer [ax, ay, az] in body frame (ENU)
-        gyro: Gyroscope [wx, wy, wz] in body frame (ENU)
-        timestamp: Simulation time in seconds
-        gravity: Gravity constant (for reference)
-
-    Returns:
-        FDMPacket ready for transmission to Betaflight
-    """
-    # Import here to avoid circular dependency
-    from comms import FDMPacket
-
-    # Extract quaternion from Elodin format [qx, qy, qz, qw] and convert to [qw, qx, qy, qz]
-    quat_xyzw = np.array(world_pos[:4])
-    quat = np.array([quat_xyzw[3], quat_xyzw[0], quat_xyzw[1], quat_xyzw[2]])  # [w, x, y, z]
-
-    # Extract position [x, y, z] (ENU)
-    position = np.array(world_pos[4:7])
-
-    # Elodin stores world_vel as [wx, wy, wz, vx, vy, vz]
-    linear_vel = np.array(world_vel[3:6])
-
-    # Use provided sensor readings or compute from velocity
-    accel_enu = np.array(accel) if accel is not None else np.array([0.0, 0.0, gravity])
-    gyro_enu = np.array(gyro) if gyro is not None else np.array(world_vel[:3])
-
-    # Convert from Elodin FLU body frame to Betaflight FRD body frame
-    #
-    # Betaflight SITL (sitl.c) applies internal sign conversions to incoming data:
-    #   accel: negates all axes (-X, -Y, -Z)
-    #   gyro:  keeps X, negates Y and Z (X, -Y, -Z)
-    #
-    # We pre-compensate so that AFTER BF's conversion, correct FRD values result.
-    #
-    # FLU→FRD conversion (conceptually):
-    #   FRD_x = FLU_x   (forward stays forward)
-    #   FRD_y = -FLU_y  (right = -left)
-    #   FRD_z = -FLU_z  (down = -up)
-    #
-    # Accelerometer: We want [FLU_x, -FLU_y, -FLU_z] after BF negates all.
-    #   Send [-FLU_x, FLU_y, FLU_z] → BF gets [FLU_x, -FLU_y, -FLU_z] ✓
-    accel_ned = np.array(
-        [
-            -accel_enu[0],  # BF: -(-X) = X
-            accel_enu[1],  # BF: -Y
-            accel_enu[2],  # BF: -Z
-        ]
-    )
-
-    # Gyroscope: We want [FLU_x, -FLU_y, -FLU_z] after BF's (X, -Y, -Z).
-    #   Note: Elodin pitch sign is inverted, so we negate Y before conversion.
-    #   Send [FLU_x, -FLU_y, FLU_z] → BF gets [FLU_x, FLU_y, -FLU_z]
-    #   But with pitch already negated: [FLU_x, FLU_y, -FLU_z] (correct FRD)
-    gyro_ned = np.array(
-        [
-            gyro_enu[0],  # Roll: correct sign
-            -gyro_enu[1],  # Pitch: negate (Elodin pitch is inverted)
-            gyro_enu[2],  # Yaw: BF negates to get -Z
-        ]
-    )
-
-    # Calculate pressure from altitude (simplified atmosphere model)
-    altitude = position[2]
-    pressure = 101325.0 - 12.0 * altitude
-
-    return FDMPacket(
-        timestamp=timestamp,
-        imu_angular_velocity_rpy=gyro_ned,
-        imu_linear_acceleration_xyz=accel_ned,
-        imu_orientation_quat=quat,
-        velocity_xyz=linear_vel,  # ENU, which Betaflight expects for GPS
-        position_xyz=position,  # ENU
-        pressure=pressure,
-    )
-
-
 def extract_from_history(df, tick: int = -1) -> dict:
     """
     Extract sensor data from an Elodin history DataFrame.
@@ -756,18 +660,26 @@ class SensorDataBuffer:
         gyro: np.ndarray = None,
         baro: np.ndarray = None,
         timestamp: float = None,
+        *,
+        copy: bool = True,
     ):
-        """Update sensor buffer with new values."""
+        """Update sensor values, copying them unless the caller transfers ownership."""
+        if copy:
+            world_pos = None if world_pos is None else np.array(world_pos)
+            world_vel = None if world_vel is None else np.array(world_vel)
+            accel = None if accel is None else np.array(accel)
+            gyro = None if gyro is None else np.array(gyro)
+            baro = None if baro is None else np.array(baro)
         if world_pos is not None:
-            self.world_pos = np.array(world_pos)
+            self.world_pos = world_pos
         if world_vel is not None:
-            self.world_vel = np.array(world_vel)
+            self.world_vel = world_vel
         if accel is not None:
-            self.accel = np.array(accel)
+            self.accel = accel
         if gyro is not None:
-            self.gyro = np.array(gyro)
+            self.gyro = gyro
         if baro is not None:
-            self.baro = np.array(baro)
+            self.baro = baro
         if timestamp is not None:
             self.timestamp = timestamp
 

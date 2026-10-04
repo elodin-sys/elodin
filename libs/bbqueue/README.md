@@ -2,7 +2,7 @@
 
 Elodin vendors [bbqueue](https://github.com/jamesmunns/bbqueue) in `libs/bbqueue` instead of
 depending on external git forks. This crate is a lock-free SPSC ring buffer used as the bridge
-between Impeller2 TCP I/O threads and the Bevy editor main loop (`impeller2-bbq`, `impeller2-bevy`).
+between Impeller TCP I/O threads and the Bevy editor main loop (`impeller-bbq`, `impeller-bevy`).
 
 ## Upstream
 

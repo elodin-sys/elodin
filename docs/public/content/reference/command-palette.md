@@ -50,7 +50,7 @@ order = 8
 ## Skybox
 
 - `Skybox...`: submenu for skybox actions against `assets/skyboxes/manifest.ron` or
-  `$ELODIN_ASSETS_DIR/skyboxes/manifest.ron`.
+  `$ELODIN_ASSETS/skyboxes/manifest.ron`.
   - `Generate Skybox...`: prompt for a description, then choose a Blockade style and local cubemap
     resolution before generating the skybox, adding it to the manifest, and activating it.
   - `Clear Skybox`: shown when a skybox is active; removes it from viewports and sensor cameras and
@@ -72,7 +72,7 @@ tier. Generated assets are written next to the manifest used by the editor.
 
 ## Time
 
-- `Set Playback Speed`: pick a preset playback speed.
+- `Set Playback Speed`: pick a preset playback speed. The timeline `SPEED` label does the same thing; this entry is an alias.
 - `Goto Tick...`: jump to a specific tick (pauses playback).
 - `Fix Current Time Range`: lock the current selected range as fixed start/end.
 - `Set Time Range`: set start/end offsets using `+`, `-`, or `=` formats (e.g. `+5m`, `-10s`,

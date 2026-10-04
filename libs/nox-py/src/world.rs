@@ -1,21 +1,20 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::utils::SchemaExt;
 use bytemuck::Pod;
 use elodin_db::{ComponentSchema, MetadataExt};
-use impeller2::com_de::FromComponentView;
-use impeller2::{
+use impeller::com_de::FromComponentView;
+use impeller::{
     component::Component,
     types::{ComponentView, EntityId},
 };
-use impeller2_wkt::{ComponentMetadata, EntityMetadata};
+use impeller_wkt::{ComponentMetadata, EntityMetadata};
 
 use crate::error::Error;
 use crate::globals::SimulationTimeStep;
 use crate::globals::SystemGlobals;
-use impeller2::types::ComponentId;
+use impeller::types::ComponentId;
 use nox::ArrayTy;
 use serde::{Deserialize, Serialize};
 
@@ -45,7 +44,8 @@ pub struct World {
     pub metadata: WorldMetadata,
 }
 
-pub use impeller2_wkt::SensorCameraConfig;
+pub use impeller_wkt::SensorCameraConfig;
+pub use impeller_wkt::ThermalTagConfig;
 
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub struct WorldMetadata {
@@ -60,10 +60,14 @@ pub struct WorldMetadata {
     pub ticks_per_telemetry: u64,
     pub default_playback_speed: f64,
     pub max_tick: u64,
-    pub schematic_path: Option<PathBuf>,
     pub schematic: Option<String>,
+    /// Content-addressed display-kernel sidecars (`schematics/kernels/<sha256>`).
+    #[serde(default)]
+    pub schematic_kernels: HashMap<String, Vec<u8>>,
     #[serde(default)]
     pub sensor_cameras: Vec<SensorCameraConfig>,
+    #[serde(default)]
+    pub thermal_tags: Vec<ThermalTagConfig>,
 }
 
 impl MetadataExt for World {}
@@ -81,8 +85,9 @@ impl Default for WorldMetadata {
             default_playback_speed: 1.0,
             max_tick: u64::MAX,
             schematic: None,
-            schematic_path: None,
+            schematic_kernels: HashMap::new(),
             sensor_cameras: Vec::new(),
+            thermal_tags: Vec::new(),
         }
     }
 }
@@ -113,7 +118,7 @@ pub struct Entity<'a> {
 }
 
 impl Entity<'_> {
-    pub fn metadata(self, metadata: impeller2_wkt::EntityMetadata) -> Self {
+    pub fn metadata(self, metadata: impeller_wkt::EntityMetadata) -> Self {
         self.world
             .metadata
             .entity_metadata

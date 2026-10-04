@@ -74,7 +74,7 @@ The deployment is handled by `.github/workflows/deploy-docs.yml`:
 #### Production Deployment (main branch):
 1. **Build Stage:**
    - Checks out the repository
-   - Installs Zola v0.19.2
+   - Installs Zola v0.22.1
    - Runs `zola build` in `docs/public/`
    - Deploys to root of `gh-pages` branch
 
@@ -127,7 +127,7 @@ This creates optimized H.264 and AV1 versions.
 
 ### Build Failures
 - Check [GitHub Actions](../../actions) for error logs
-- Ensure Zola version matches (0.19.2)
+- Ensure Zola version matches (0.22.1)
 - Validate `config.toml` syntax
 - Check for broken internal links
 

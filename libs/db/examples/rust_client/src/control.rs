@@ -1,8 +1,8 @@
 use anyhow::Result;
-use impeller2::types::{ComponentId, LenPacket, PrimType, Timestamp};
-use impeller2::vtable::builder::{component, raw_field, raw_table, schema, timestamp, vtable};
-use impeller2_stellar::Client;
-use impeller2_wkt::VTableMsg;
+use impeller::types::{ComponentId, LenPacket, PrimType, Timestamp};
+use impeller::vtable::builder::{component, raw_field, raw_table, schema, timestamp, vtable};
+use impeller_stellar::Client;
+use impeller_wkt::VTableMsg;
 use std::time::{Duration, Instant};
 use tracing::info;
 

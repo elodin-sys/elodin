@@ -1,25 +1,28 @@
 import os
-import elodin as el
-from jax import numpy as jnp
-from jax.numpy import linalg as la
-import spiceypy as spice
-import numpy as np
+import typing as ty
 from pathlib import Path
 
-# SIM_TIME_STEP = 1.0 / 120.0
+import elodin as el
+import jax
+import numpy as np
+import spiceypy as spice
+from jax import numpy as jnp
+from jax.numpy import linalg as la
+
+from dynamics import heliocentric_relative_acceleration, state_error
+
 SIM_TIME_STEP = 3600.0
-# SIM_TIME_STEP = 86400.0
-# Set the gravitational constant for Newton's law of universal gravitation
 SIMULATION_RATE_HZ = 1 / SIM_TIME_STEP
-G = 6.6743e-11
 DEFAULT_DB_PATH = "dbs/voyager"
 DB_PATH_ENV = "DB_PATH"
 MAX_TICKS_ENV = "MAX_TICKS"
+DYNAMICS_CHAPTER_ENV = "VOYAGER_DYNAMICS_CHAPTER"
 
 SPICE_DIR = Path(__file__).resolve().parent / "nasa_spice_data"
 SPICE_KERNELS = [
     SPICE_DIR / "naif0012.tls",
     SPICE_DIR / "de440.bsp",
+    SPICE_DIR / "gm_de440.tpc",
     SPICE_DIR / "Voyager_1.a54206u_V0.2_merged.bsp",
     SPICE_DIR / "Voyager_2.m05016u.merged.bsp",
 ]
@@ -29,6 +32,17 @@ for kernel in SPICE_KERNELS:
 
 start_time_et = spice.utc2et("1978-01-01T00:00:00")
 start_time_epoch_us = 252_452_400_000_000
+
+
+def gravitational_parameter_m3_s2(spice_name: str) -> float:
+    return float(spice.bodvrd(spice_name, "GM", 1)[1][0]) * 1.0e9
+
+
+def spice_state_si(spice_name: str, time_et: float) -> tuple[np.ndarray, np.ndarray]:
+    state, _ = spice.spkezr(spice_name, time_et, "ECLIPJ2000", "NONE", "SUN")
+    state = np.asarray(state, dtype=np.float64)
+    return state[:3] * 1000.0, state[3:] * 1000.0
+
 
 PLANETS = [
     {
@@ -96,6 +110,9 @@ PLANETS = [
         "mass": 1.02413e26,
     },
 ]
+for planet in PLANETS:
+    planet["gm"] = gravitational_parameter_m3_s2(planet["spice_name"])
+
 PROBE_RADIUS = 4000000000.0
 PROBES = [
     {
@@ -133,9 +150,33 @@ TRUTH_PROBES = [
         "mass": 825.0,
     },
 ]
-EPHEMERIS_BODIES = PLANETS
+GravitationalParameter = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "gravitational_parameter_m3_s2",
+        el.ComponentType(el.PrimitiveType.F64, (1,)),
+    ),
+]
+PositionErrorKm = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "position_error_km",
+        el.ComponentType(el.PrimitiveType.F64, (1,)),
+        metadata={"external_control": "true"},
+    ),
+]
+VelocityErrorMps = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "velocity_error_mps",
+        el.ComponentType(el.PrimitiveType.F64, (1,)),
+        metadata={"external_control": "true"},
+    ),
+]
+
 DISPLAY_BODIES = PLANETS + PROBES + TRUTH_PROBES
-SUN_MASS = 1.9885e30
+SUN_MASS_KG = 1.9885e30
+SUN_GM = gravitational_parameter_m3_s2("SUN")
 
 
 w = el.World()
@@ -145,32 +186,42 @@ sun = w.spawn(
         el.Body(
             world_pos=el.WorldPos(linear=jnp.array([0.0, 0.0, 0.0])),
             world_vel=el.WorldVel(linear=jnp.array([0.0, 0.0, 0.0])),
-            inertia=el.Inertia(SUN_MASS),
+            inertia=el.Inertia(SUN_MASS_KG),
         ),
+        el.C(GravitationalParameter, jnp.array([SUN_GM], dtype=jnp.float64)),
     ],
     name="Sun",
 )
 
 body_entity_ids = {"Sun": sun}
 
-for body in EPHEMERIS_BODIES + PROBES + TRUTH_PROBES:
-    init_state, _ = spice.spkezr(body["spice_name"], start_time_et, "ECLIPJ2000", "NONE", "SUN")
+for body in PLANETS + PROBES + TRUTH_PROBES:
+    init_pos_m, init_vel_mps = spice_state_si(body["spice_name"], start_time_et)
 
-    init_pos = jnp.array(init_state[:3]) * 1000.0
-    init_vel = jnp.array(init_state[3:]) * 1000.0
-
-    print(body["spice_name"])
-    print(init_pos)
-    print(init_vel)
+    components = [
+        el.Body(
+            world_pos=el.WorldPos(linear=jnp.asarray(init_pos_m)),
+            world_vel=el.WorldVel(linear=jnp.asarray(init_vel_mps)),
+            inertia=el.Inertia(body["mass"]),
+        ),
+    ]
+    if body in PLANETS:
+        components.append(
+            el.C(
+                GravitationalParameter,
+                jnp.array([body["gm"]], dtype=jnp.float64),
+            )
+        )
+    if body in PROBES:
+        components.extend(
+            [
+                el.C(PositionErrorKm, jnp.array([0.0], dtype=jnp.float64)),
+                el.C(VelocityErrorMps, jnp.array([0.0], dtype=jnp.float64)),
+            ]
+        )
 
     body_entity_ids[body["entity_name"]] = w.spawn(
-        [
-            el.Body(
-                world_pos=el.WorldPos(linear=init_pos),
-                world_vel=el.WorldVel(linear=init_vel),
-                inertia=el.Inertia(body["mass"]),
-            ),
-        ],
+        components,
         name=body["entity_name"],
     )
 
@@ -178,10 +229,8 @@ for body in EPHEMERIS_BODIES + PROBES + TRUTH_PROBES:
 def pre_step(tick: int, ctx: el.StepContext):
     current_time_et = start_time_et + tick * SIM_TIME_STEP
 
-    for body in EPHEMERIS_BODIES + TRUTH_PROBES:
-        state, _ = spice.spkezr(body["spice_name"], current_time_et, "ECLIPJ2000", "NONE", "SUN")
-        pos_m = np.asarray(state[:3], dtype=np.float64) * 1000.0
-        vel_ms = np.asarray(state[3:], dtype=np.float64) * 1000.0
+    for body in PLANETS + TRUTH_PROBES:
+        pos_m, vel_mps = spice_state_si(body["spice_name"], current_time_et)
 
         ctx.write_component(
             f"{body['entity_name']}.world_pos",
@@ -189,7 +238,40 @@ def pre_step(tick: int, ctx: el.StepContext):
         )
         ctx.write_component(
             f"{body['entity_name']}.world_vel",
-            np.array([0.0, 0.0, 0.0, vel_ms[0], vel_ms[1], vel_ms[2]], dtype=np.float64),
+            np.array([0.0, 0.0, 0.0, vel_mps[0], vel_mps[1], vel_mps[2]], dtype=np.float64),
+        )
+
+
+def post_step(tick: int, ctx: el.StepContext) -> None:
+    """Record numerical divergence from SPICE at the completed tick epoch."""
+    current_time_et = start_time_et + (tick + 1) * SIM_TIME_STEP
+
+    for probe in PROBES:
+        simulated_pos = np.asarray(
+            ctx.read_component(f"{probe['entity_name']}.world_pos"),
+            dtype=np.float64,
+        )[4:7]
+        simulated_vel = np.asarray(
+            ctx.read_component(f"{probe['entity_name']}.world_vel"),
+            dtype=np.float64,
+        )[3:6]
+
+        truth_pos, truth_vel = spice_state_si(probe["spice_name"], current_time_et)
+
+        position_error_km, velocity_error_mps = state_error(
+            simulated_pos,
+            simulated_vel,
+            truth_pos,
+            truth_vel,
+        )
+
+        ctx.write_component(
+            f"{probe['entity_name']}.position_error_km",
+            np.array([position_error_km], dtype=np.float64),
+        )
+        ctx.write_component(
+            f"{probe['entity_name']}.velocity_error_mps",
+            np.array([velocity_error_mps], dtype=np.float64),
         )
 
 
@@ -207,19 +289,41 @@ class GravityConstraint(el.Archetype):
 @el.system
 def gravity(
     graph: el.GraphQuery[GravityEdge],
-    query: el.Query[el.WorldPos, el.Inertia],
+    probe_query: el.Query[el.WorldPos, el.Inertia],
+    source_query: el.Query[el.WorldPos, GravitationalParameter],
 ) -> el.Query[el.Force]:
-    def gravity_fn(force, a_pos, a_inertia, b_pos, b_inertia):
-        r = a_pos.linear() - b_pos.linear()
-        m = a_inertia.mass()
-        M = b_inertia.mass()
+    def gravity_fn(force, probe_pos, probe_inertia, source_pos, source_gm):
+        r = probe_pos.linear() - source_pos.linear()
+        mass = probe_inertia.mass()
+        mu = source_gm[0]
         norm = la.norm(r)
-        f = G * M * m * r / (norm * norm * norm)
+        f = mu * mass * r / (norm * norm * norm)
         return el.Force(linear=force.force() - f)
 
     return graph.edge_fold(
-        left_query=query,
-        right_query=query,
+        left_query=probe_query,
+        right_query=source_query,
+        return_type=el.Force,
+        init_value=el.Force(),
+        fold_fn=gravity_fn,
+    )
+
+
+@el.system
+def heliocentric_gravity(
+    graph: el.GraphQuery[GravityEdge],
+    probe_query: el.Query[el.WorldPos, el.Inertia],
+    source_query: el.Query[el.WorldPos, GravitationalParameter],
+) -> el.Query[el.Force]:
+    def gravity_fn(force, probe_pos, probe_inertia, source_pos, source_gm):
+        acc = heliocentric_relative_acceleration(
+            probe_pos.linear(), source_pos.linear(), source_gm[0]
+        )
+        return el.Force(linear=force.force() + probe_inertia.mass() * acc)
+
+    return graph.edge_fold(
+        left_query=probe_query,
+        right_query=source_query,
         return_type=el.Force,
         init_value=el.Force(),
         fold_fn=gravity_fn,
@@ -248,18 +352,21 @@ body_objects = "\n".join(
 
 w.schematic(
     """
+    timeline follow_latest=#true
     hsplit {{
         tabs share=0.2 {{
             hierarchy
         }}
         tabs share=0.6 {{
-            //viewport name=Viewport pos="(0,0,0,0,0,0,100)" look_at="(0,0,0,0,0,0,0)" hdr=#true
             viewport name=Viewport pos="(0,0,0,0, 0,0,2000000000000.0)" look_at="(0,0,0,0, 0,0,0)" fov=45.0 near=1000000.0
 
-            graph "sun.world_pos" name=Graph
+            graph "voyager1.position_error_km" name="Voyager 1 position error (km)"
+            graph "voyager2.position_error_km" name="Voyager 2 position error (km)"
         }}
         tabs share=0.2 {{
             inspector
+            graph "voyager1.velocity_error_mps" name="Voyager 1 velocity error (m/s)"
+            graph "voyager2.velocity_error_mps" name="Voyager 2 velocity error (m/s)"
         }}
     }}
     object_3d sun.world_pos {{
@@ -271,16 +378,21 @@ w.schematic(
 """.format(body_objects=body_objects)
 )
 
-sys = el.six_dof(sys=gravity)
+dynamics_chapter = os.environ.get(DYNAMICS_CHAPTER_ENV, "1")
+if dynamics_chapter not in ("1", "2"):
+    raise ValueError(f"{DYNAMICS_CHAPTER_ENV} must be '1' or '2'")
+
+gravity_system = gravity if dynamics_chapter == "1" else heliocentric_gravity
+sys = el.six_dof(sys=gravity_system)
 db_path = Path(os.environ.get(DB_PATH_ENV, DEFAULT_DB_PATH))
 max_ticks_env = os.environ.get(MAX_TICKS_ENV)
 max_ticks = int(max_ticks_env) if max_ticks_env is not None else None
 
-# sim = w.run(sys, SIM_TIME_STEP, run_time_step=1 / 120.0, pre_step=pre_step)
-sim = w.run(
+w.run(
     sys,
     simulation_rate=SIMULATION_RATE_HZ,
     pre_step=pre_step,
+    post_step=post_step,
     max_ticks=max_ticks,
     start_timestamp=start_time_epoch_us,
     db_path=str(db_path),

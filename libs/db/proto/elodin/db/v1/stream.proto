@@ -1,0 +1,123 @@
+syntax = "proto3";
+
+package elodin.db.v1;
+
+import "elodin/db/v1/common.proto";
+import "elodin/db/v1/query.proto";
+
+service StreamService {
+  // Coalescing latest-value stream: each update carries the newest row for a
+  // component at send time, so intermediate rows may be skipped under load.
+  // Use QueryService.GetTimeSeries for lossless historical reads.
+  rpc StreamComponents(stream StreamComponentsRequest) returns (stream StreamComponentsResponse);
+  // Live mode primes each subscribed log with its latest stored message,
+  // then delivers every message appended while connected. There is no resume
+  // across reconnects: reconnecting re-delivers the latest message, so
+  // consumers must tolerate that duplicate. Fixed-rate mode samples the
+  // message at or before the playback cursor (coalescing).
+  rpc StreamMessages(stream StreamMessagesRequest) returns (stream StreamMessagesResponse);
+  rpc WatchDb(WatchDbRequest) returns (stream WatchDbResponse);
+}
+
+message RealTime {
+  bool immediate = 1;
+}
+
+enum InitialTimestamp {
+  INITIAL_TIMESTAMP_UNSPECIFIED = 0;
+  INITIAL_TIMESTAMP_EARLIEST = 1;
+  INITIAL_TIMESTAMP_LATEST = 2;
+  INITIAL_TIMESTAMP_MANUAL = 3;
+}
+
+message FixedRate {
+  InitialTimestamp initial = 1;
+  sfixed64 initial_timestamp_ns = 2;
+  uint64 timestep_ns = 3; // >= 1000: the database records at 1 µs resolution
+  uint64 frequency = 4; // frames per second, 1..=1000
+}
+
+message StreamOpen {
+  repeated string components = 1; // empty = all
+
+  oneof behavior {
+    RealTime real_time = 2;
+    FixedRate fixed_rate = 3;
+  }
+}
+
+// Only valid on streams that own a fixed-rate clock. An invalid control
+// terminates the stream with INVALID_ARGUMENT.
+message StreamControl {
+  optional bool playing = 1;
+  optional sfixed64 seek_ns = 2;
+  optional uint64 timestep_ns = 3; // >= 1000
+  optional uint64 frequency = 4; // 1..=1000
+}
+
+message StreamComponentsRequest {
+  oneof request {
+    StreamOpen open = 1;
+    StreamControl control = 2;
+  }
+}
+
+message ComponentUpdate {
+  string component = 1;
+  sfixed64 timestamp_ns = 2;
+  bytes packed_value = 3;
+}
+
+message StreamTimestamp {
+  sfixed64 timestamp_ns = 1;
+}
+
+message StreamComponentsResponse {
+  oneof response {
+    TimeSeriesHeader header = 1;
+    ComponentUpdate update = 2;
+    StreamTimestamp timestamp = 3;
+    StreamOpened opened = 4;
+  }
+}
+
+message StreamOpened {
+  uint64 stream_id = 1;
+}
+
+message MessageStreamOpen {
+  repeated string messages = 1; // empty = all
+
+  oneof behavior {
+    RealTime real_time = 2;
+    FixedRate fixed_rate = 3;
+  }
+
+  // Attach to the fixed-rate clock owned by a component stream: this stream
+  // mirrors the owner's playback position (including pauses and seeks) and
+  // ends when the owning stream ends. Controls go to the owning stream.
+  // Omitted = independent clock from `fixed_rate`.
+  optional uint64 playback_stream_id = 4;
+}
+
+message StreamMessagesRequest {
+  oneof request {
+    MessageStreamOpen open = 1;
+    StreamControl control = 2;
+  }
+}
+
+message StreamMessagesResponse {
+  string name = 1;
+  sfixed64 timestamp_ns = 2;
+  bytes payload = 3;
+}
+
+message WatchDbRequest {}
+
+message WatchDbResponse {
+  oneof event {
+    sfixed64 last_updated_ns = 1;
+    DbConfig config = 2;
+  }
+}

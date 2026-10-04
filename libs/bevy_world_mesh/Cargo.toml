@@ -56,7 +56,7 @@ bincode = "2.0.0-rc.3"
 async-channel = "2.1"
 
 # Optional — gated behind feature flags.
-big_space = { version = "0.12", optional = true, default-features = false, features = ["camera", "debug"] }
+big_space = { workspace = true, optional = true, features = ["camera", "debug"] }
 ureq = { version = "2", optional = true, default-features = false, features = ["tls"] }
 indicatif = { version = "0.18", optional = true }
 rayon = { version = "1", optional = true }

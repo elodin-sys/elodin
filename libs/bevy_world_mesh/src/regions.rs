@@ -176,7 +176,23 @@ pub const MOJAVE_DESERT: Region = Region {
     camera_target_xyz_norm: [0.3, -0.001, 0.0],
 };
 
-pub const PRESETS: &[&Region] = &[&BRIENZ, &DEATH_VALLEY, &MOJAVE_DESERT];
+/// Mojave RC field near Ridgecrest, CA. 40 km square centred on the pilot's
+/// ground position so a full-throttle 180 s dash stays inside the mesh.
+/// Elevation range is a conservative envelope for the Coso / El Paso / Rand
+/// basin-and-range around the pad; the fetch verifies it against the DEM.
+pub const MOJAVE_RC_FIELD: Region = Region {
+    name: "mojave_rc_field",
+    center_lon: -117.809027,
+    center_lat: 35.350664,
+    side_km: 40.0,
+    min_height_m: 450.0,
+    max_height_m: 2200.0,
+    // Low orbit south of the pad, looking north across the playa.
+    camera_offset_xyz_norm: [0.0, 0.03, 0.35],
+    camera_target_xyz_norm: [0.0, -0.01, 0.0],
+};
+
+pub const PRESETS: &[&Region] = &[&BRIENZ, &DEATH_VALLEY, &MOJAVE_DESERT, &MOJAVE_RC_FIELD];
 
 pub fn lookup(name: &str) -> Option<&'static Region> {
     PRESETS.iter().copied().find(|r| r.name == name)

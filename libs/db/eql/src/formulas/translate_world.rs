@@ -199,9 +199,13 @@ impl super::Formula for TranslateWorld {
                     ));
                 }
             } else {
-                return Err(Error::InvalidMethodCall(
-                    "translate_world requires three arguments: x, y, z distances".to_string(),
-                ));
+                // Single 3-vector: translate_world(offset.enu_to_ecef_vector())
+                let v = args[0].clone();
+                (
+                    Expr::ArrayAccess(Box::new(v.clone()), 0),
+                    Expr::ArrayAccess(Box::new(v.clone()), 1),
+                    Expr::ArrayAccess(Box::new(v), 2),
+                )
             }
         } else if args.len() == 3 {
             (args[0].clone(), args[1].clone(), args[2].clone())
@@ -250,8 +254,8 @@ impl super::Formula for TranslateWorld {
 mod tests {
     use super::*;
     use crate::{Component, Context};
-    use impeller2::schema::Schema;
-    use impeller2::types::{ComponentId, PrimType, Timestamp};
+    use impeller::schema::Schema;
+    use impeller::types::{ComponentId, PrimType, Timestamp};
     use std::sync::Arc;
 
     fn create_test_world_pos_component() -> Arc<Component> {
@@ -316,6 +320,25 @@ mod tests {
                 assert!(matches!(elements[1], Expr::FloatLiteral(-8.0)));
                 assert!(matches!(elements[2], Expr::FloatLiteral(-8.0)));
                 assert!(matches!(elements[3], Expr::FloatLiteral(4.0)));
+            }
+        } else {
+            panic!("Expected Formula expression");
+        }
+    }
+
+    #[test]
+    fn test_translate_world_accepts_rotated_vector() {
+        let context = create_test_context();
+        let expr = context
+            .parse_str("bdx.world_pos.translate_world((0.0, 2.0, 2.0).enu_to_ecef_vector())")
+            .expect("3-vector offset");
+        if let Expr::Formula(formula, inner) = expr {
+            assert_eq!(formula.name(), "translate_world");
+            if let Expr::Tuple(elements) = *inner {
+                assert_eq!(elements.len(), 4);
+                assert!(matches!(elements[1], Expr::ArrayAccess(_, 0)));
+                assert!(matches!(elements[2], Expr::ArrayAccess(_, 1)));
+                assert!(matches!(elements[3], Expr::ArrayAccess(_, 2)));
             }
         } else {
             panic!("Expected Formula expression");

@@ -1,13 +1,12 @@
-use convert_case::Casing;
 use datafusion::common::HashSet;
 use futures_lite::StreamExt;
-use impeller2::registry::VTableRegistry;
-use impeller2::types::{PacketHeader, PacketTy};
-use impeller2::vtable::builder::{
+use impeller::registry::VTableRegistry;
+use impeller::types::{PacketHeader, PacketTy};
+use impeller::vtable::builder::{
     OpBuilder, component, raw_field, raw_table, schema, timestamp, vtable,
 };
-use impeller2::vtable::{Op, RealizedField, TIMESTAMP_NS_EXT_ID, builder};
-use impeller2::{
+use impeller::vtable::{Op, RealizedField, TIMESTAMP_NS_EXT_ID, builder};
+use impeller::{
     com_de::Decomponentize,
     registry,
     schema::Schema,
@@ -17,8 +16,8 @@ use impeller2::{
     },
     vtable::VTable,
 };
-use impeller2_stellar::{PacketSink, PacketStream};
-use impeller2_wkt::*;
+use impeller_stellar::{PacketSink, PacketStream};
+use impeller_wkt::*;
 use msg_log::MsgLog;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use smallvec::SmallVec;
@@ -58,20 +57,29 @@ const RESPONSE_PACKET_CAPACITY: usize = 8 * 1024 * 1024;
 
 pub mod append_log;
 mod arrow;
+pub use arrow::sanitize_sql_table_name;
+pub use eql::sql_table_name;
+#[cfg(feature = "axum")]
+pub mod assets;
 #[cfg(feature = "axum")]
 pub mod assets_http;
 #[cfg(feature = "axum")]
 pub mod axum;
 pub mod cancellation;
 pub(crate) mod coalescing_sink;
+pub mod compact;
 pub mod drop;
 mod error;
 pub mod export;
+#[cfg(feature = "mcap-export")]
+pub mod export_mcap;
 #[cfg(feature = "video-export")]
 pub mod export_videos;
 pub mod fix_timestamps;
 pub mod follow;
 mod follow_stream;
+#[cfg(feature = "grpc")]
+pub mod grpc;
 pub mod list_components;
 pub mod merge;
 pub mod msg_log;
@@ -87,12 +95,12 @@ mod vtable_stream;
 /// Analyzes a VTable to find byte ranges that are used as timestamp sources.
 /// Returns a vector of (offset, end) tuples representing the byte ranges.
 fn find_timestamp_source_ranges<Ops, Data, Fields>(
-    vtable: &impeller2::vtable::VTable<Ops, Data, Fields>,
+    vtable: &impeller::vtable::VTable<Ops, Data, Fields>,
 ) -> Vec<(usize, usize)>
 where
-    Ops: impeller2::buf::Buf<Op>,
-    Data: impeller2::buf::Buf<u8>,
-    Fields: impeller2::buf::Buf<impeller2::vtable::Field>,
+    Ops: impeller::buf::Buf<Op>,
+    Data: impeller::buf::Buf<u8>,
+    Fields: impeller::buf::Buf<impeller::vtable::Field>,
 {
     let mut ranges = Vec::new();
     for (op_idx, op) in vtable.ops.as_slice().iter().enumerate() {
@@ -241,6 +249,9 @@ pub struct DB {
     pub default_stream_time_step: AtomicU64,
     pub last_updated: AtomicCell<Timestamp>,
     pub earliest_timestamp: AtomicCell<Timestamp>,
+    /// Bumped whenever `db_config` changes (metadata patch or asset write), so
+    /// subscribers can be woken to re-read the config without polling (RFD #724).
+    pub db_config_gen: AtomicCell<u64>,
     // Wall-clock timestamp at the moment the DB start anchor was set.
     db_start_wall_clock: AtomicCell<Timestamp>,
     /// When true, last_updated advances with playback position instead of
@@ -252,6 +263,17 @@ pub struct DB {
     /// Fast-path flag: true when `followed_components` is non-empty.
     /// Avoids acquiring the read lock on every `apply_value` call.
     has_followed_components: std::sync::atomic::AtomicBool,
+    /// True on a follower replica: the asset tree is a read-only mirror of the
+    /// source, so client-originated asset writes (Impeller `StoreAsset`) are
+    /// rejected, matching the HTTP `PUT` 405 gate. Otherwise a TCP client could
+    /// diverge the mirror until the next full mirror pass (RFD #724).
+    pub assets_read_only: std::sync::atomic::AtomicBool,
+    /// Serializes follower full-tree asset mirrors so overlapping
+    /// `SetDbConfig`-driven syncs can't prune/download against each other
+    /// (RFD #724, Bug 1). Idle on a non-follower DB. Only present with the asset
+    /// server (`axum`), which is the sole producer of mirror requests.
+    #[cfg(feature = "axum")]
+    pub asset_mirror: crate::assets_http::AssetMirrorCoordinator,
 }
 
 #[derive(Default)]
@@ -264,10 +286,63 @@ pub struct State {
 
     vtable_registry: registry::HashMapRegistry,
     streams: HashMap<StreamId, Arc<FixedRateStreamState>>,
+    real_time_stream_filters: HashMap<StreamId, Arc<RealTimeStreamFilter>>,
+    pending_real_time_stream_filters: HashMap<StreamId, (Vec<ComponentId>, Option<u64>)>,
 
     udp_vtable_streams: HashSet<(SocketAddr, [u8; 2])>,
 
     pub db_config: DbConfig,
+}
+
+struct RealTimeStreamFilter {
+    component_ids: RwLock<Option<HashSet<ComponentId>>>,
+    frequency: AtomicU64,
+    generation: AtomicU64,
+    changed: WaitQueue,
+}
+
+impl RealTimeStreamFilter {
+    fn new() -> Self {
+        Self {
+            component_ids: RwLock::new(None),
+            frequency: AtomicU64::new(0),
+            generation: AtomicU64::new(0),
+            changed: WaitQueue::new(),
+        }
+    }
+
+    fn set(&self, component_ids: Vec<ComponentId>, frequency: Option<u64>) {
+        let mut current = self.component_ids.write().unwrap();
+        *current = if component_ids.is_empty() {
+            None
+        } else {
+            Some(component_ids.into_iter().collect())
+        };
+        self.frequency
+            .store(frequency.unwrap_or(0), atomic::Ordering::Release);
+        self.generation.fetch_add(1, atomic::Ordering::Release);
+        drop(current);
+        self.changed.wake_all();
+    }
+
+    fn generation(&self) -> u64 {
+        self.generation.load(atomic::Ordering::Acquire)
+    }
+
+    fn component_ids(&self) -> Option<HashSet<ComponentId>> {
+        self.component_ids.read().unwrap().clone()
+    }
+
+    fn frequency(&self) -> Option<u64> {
+        match self.frequency.load(atomic::Ordering::Acquire) {
+            0 => None,
+            frequency => Some(frequency),
+        }
+    }
+}
+
+fn stream_interval_us(frequency: u64) -> i64 {
+    (1_000_000 / frequency.max(1)).max(1) as i64
 }
 
 pub(crate) fn component_creation_index(metadata: &ComponentMetadata) -> Option<u64> {
@@ -317,9 +392,13 @@ impl DB {
             default_stream_time_step,
             last_updated: AtomicCell::new(Timestamp(i64::MIN)),
             earliest_timestamp: AtomicCell::new(now),
+            db_config_gen: AtomicCell::new(0),
             db_start_wall_clock: AtomicCell::new(now),
             followed_components: RwLock::new(HashSet::default()),
             has_followed_components: std::sync::atomic::AtomicBool::new(false),
+            assets_read_only: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(feature = "axum")]
+            asset_mirror: crate::assets_http::AssetMirrorCoordinator::default(),
         };
         db.save_db_state()?;
         Ok(db)
@@ -357,18 +436,28 @@ impl DB {
 
     /// Apply a `SetDbConfig` patch and persist.
     ///
-    /// Returns whether schematic assets should be re-synced (`schematic.content` or
-    /// `skybox.active` in the patch).
+    /// Returns whether schematic assets should be re-synced (`schematic.active`
+    /// or `skybox.active` in the patch). The schematic bytes themselves travel
+    /// as an asset via [`store_asset`](Self::store_asset) (RFD #724), so a patch
+    /// only repoints `schematic.active`; this never carries inline content.
     pub fn apply_set_db_config(&self, update: SetDbConfig) -> Result<bool, Error> {
-        let needs_asset_sync = update.metadata.contains_key("schematic.content")
-            || update.metadata.contains_key("skybox.active");
+        // A follower must re-mirror when the pointer moves (`schematic.active`,
+        // `skybox.active`) *or* when asset bytes change under an unchanged
+        // pointer — the latter arrives as an `assets.revision` bump (RFD #724).
+        let needs_asset_sync = update.metadata.contains_key("schematic.active")
+            || update.metadata.contains_key("skybox.active")
+            || update.metadata.contains_key(DbConfig::ASSETS_REVISION_KEY);
         if let Some(recording) = update.recording {
             self.with_state_mut(|s| s.db_config.recording = recording);
             self.recording_cell.set_playing(recording);
         }
         self.with_state_mut(|s| {
             for (key, value) in update.metadata {
-                if value.is_empty() {
+                // `skybox.active` uses empty-string as an explicit "cleared"
+                // signal (distinct from an absent key); keep it so consumers can
+                // tell a user clear apart from "never set". Other keys drop on
+                // empty as a delete.
+                if value.is_empty() && key != "skybox.active" {
                     s.db_config.metadata.remove(&key);
                 } else {
                     s.db_config.metadata.insert(key, value);
@@ -376,7 +465,109 @@ impl DB {
             }
         });
         self.save_db_state()?;
+        self.db_config_gen.fetch_add(1, atomic::Ordering::SeqCst);
         Ok(needs_asset_sync)
+    }
+
+    /// [`apply_set_db_config`](Self::apply_set_db_config) entry point for client
+    /// connections. On a follower the db_config is replicated from the source,
+    /// so a patch touching the asset pointers (`schematic.active`,
+    /// `skybox.active`, `assets.revision`) is rejected — the metadata
+    /// counterpart of [`store_asset_from_client`](Self::store_asset_from_client)
+    /// (RFD #724); otherwise a local TCP client could diverge the mirror and
+    /// trigger spurious re-syncs. The follow stream applies source patches via
+    /// `apply_set_db_config` directly and is unaffected.
+    pub fn apply_set_db_config_from_client(&self, update: SetDbConfig) -> Result<bool, Error> {
+        const GUARDED_KEYS: [&str; 3] = [
+            "schematic.active",
+            "skybox.active",
+            DbConfig::ASSETS_REVISION_KEY,
+        ];
+        if self.assets_read_only.load(atomic::Ordering::Acquire)
+            && let Some(key) = GUARDED_KEYS
+                .iter()
+                .find(|key| update.metadata.contains_key(**key))
+        {
+            return Err(Error::Io(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                format!("'{key}' is replicated from the source on a follower mirror"),
+            )));
+        }
+        self.apply_set_db_config(update)
+    }
+
+    /// Bump `assets.revision` and persist, waking config subscribers. Called on
+    /// every asset write (HTTP `PUT`, `StoreAsset`) so consumers reload/re-mirror
+    /// when bytes change without the `schematic.active` pointer moving.
+    pub fn bump_assets_revision(&self) -> Result<(), Error> {
+        self.with_state_mut(|s| s.db_config.bump_assets_revision());
+        self.save_db_state()?;
+        self.db_config_gen.fetch_add(1, atomic::Ordering::SeqCst);
+        Ok(())
+    }
+
+    /// Read the active schematic's KDL from its asset file under `{db}/assets/`,
+    /// if `schematic.active` is set and the file is valid UTF-8. This is the
+    /// single source consumers use instead of any inline mirror (RFD #724).
+    pub fn read_active_schematic(&self) -> Option<String> {
+        let key = self.with_state(|s| s.db_config.schematic_active().map(str::to_owned))?;
+        let assets_dir = crate::assets_http::assets_dir(&self.path);
+        let bytes = crate::assets_http::read_asset_file(&assets_dir, &key).ok()?;
+        String::from_utf8(bytes).ok()
+    }
+
+    /// Store an uploaded asset at `{db}/assets/<key>`.
+    ///
+    /// `key` is sanitized (rejects `..` and absolute paths) by
+    /// `assets_http::write_asset_file`, so an out-of-tree key is refused rather
+    /// than escaping the assets directory.
+    ///
+    /// A stored `.kdl` schematic has its local asset paths rewritten to `db:`
+    /// (same path as tree ingest), so uploads route their assets through the
+    /// Asset Server too. Unparsable or non-schematic `.kdl` is stored verbatim.
+    pub fn store_asset(&self, key: &str, bytes: &[u8]) -> std::io::Result<()> {
+        let assets_dir = crate::assets_http::assets_dir(&self.path);
+        crate::assets::write_uploaded_asset(&assets_dir, key, bytes)?;
+        // Bytes changed: bump the revision so followers re-mirror and editors
+        // reload even if `schematic.active` is unchanged. A persistence hiccup
+        // must not fail the (already written) asset, so log rather than error.
+        if let Err(err) = self.bump_assets_revision() {
+            tracing::warn!(asset = %key, ?err, "failed to bump asset revision after store");
+        }
+        Ok(())
+    }
+
+    /// [`store_asset`](Self::store_asset) entry point for client connections
+    /// (Impeller `StoreAsset`). On a follower the asset tree is a read-only
+    /// mirror of the source, so the write is rejected — the TCP counterpart of
+    /// the asset HTTP server's `PUT` 405 gate (RFD #724). Internal writers
+    /// (e.g. the follow mirror) call `store_asset` directly and are unaffected.
+    pub fn store_asset_from_client(&self, key: &str, bytes: &[u8]) -> std::io::Result<()> {
+        if self.assets_read_only.load(atomic::Ordering::Acquire) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "asset writes are disabled on a read-only follower mirror",
+            ));
+        }
+        self.store_asset(key, bytes)
+    }
+
+    /// Point `schematic.active` at a stored schematic asset and persist.
+    ///
+    /// `key` must already be stored via [`store_asset`](Self::store_asset); it is
+    /// validated as a readable in-tree asset so the pointer never dangles.
+    /// Consumers fetch the bytes over the Asset Server HTTP (RFD #724).
+    pub fn set_active_schematic(&self, key: &str) -> Result<(), Error> {
+        let assets_dir = crate::assets_http::assets_dir(&self.path);
+        // Validate the asset exists and is readable before repointing.
+        crate::assets_http::read_asset_file(&assets_dir, key)?;
+        self.with_state_mut(|s| s.db_config.set_schematic_active(key));
+        self.save_db_state()?;
+        // Wake the subscribe loop's config push so clients observe the new
+        // `schematic.active` promptly, matching `apply_set_db_config` and
+        // `bump_assets_revision` (RFD #724).
+        self.db_config_gen.fetch_add(1, atomic::Ordering::SeqCst);
+        Ok(())
     }
 
     pub fn flush_all(&self) -> Result<(), Error> {
@@ -646,9 +837,13 @@ impl DB {
             ),
             last_updated: AtomicCell::new(Timestamp(last_updated)),
             earliest_timestamp: AtomicCell::new(earliest_timestamp),
+            db_config_gen: AtomicCell::new(0),
             db_start_wall_clock: AtomicCell::new(now),
             followed_components: RwLock::new(HashSet::default()),
             has_followed_components: std::sync::atomic::AtomicBool::new(false),
+            assets_read_only: std::sync::atomic::AtomicBool::new(false),
+            #[cfg(feature = "axum")]
+            asset_mirror: crate::assets_http::AssetMirrorCoordinator::default(),
         };
         // Save updated version info
         db.save_db_state()?;
@@ -670,7 +865,7 @@ impl DB {
         self.with_state_mut(|state| {
             if let Err(err) = vtable.vtable.validate_field_alignment(vtable.id) {
                 return Err(match err {
-                    impeller2::error::Error::VtableFieldMisaligned {
+                    impeller::error::Error::VtableFieldMisaligned {
                         packet_id,
                         component_id,
                         offset,
@@ -852,6 +1047,132 @@ impl DB {
         Ok(())
     }
 
+    // Repairs components missing from a partially persisted historical row.
+    // Complete rows always append, even when their content matches.
+    #[cfg(feature = "grpc")]
+    pub(crate) fn apply_component_row(
+        &self,
+        timestamp: Timestamp,
+        values: &[(ComponentId, Vec<u8>)],
+        repair_partial: bool,
+    ) -> Result<(), ComponentRowApplyError> {
+        self.with_state_mut(|state| {
+            let mut seen = HashSet::with_capacity(values.len());
+            let mut occurrences = Vec::with_capacity(values.len());
+            let mut max_occurrences = 0;
+            let mut would_time_travel = false;
+            for (component_id, value) in values {
+                if !seen.insert(*component_id) {
+                    return Err(ComponentRowApplyError::Internal(Error::BadMessage));
+                }
+                let component =
+                    state
+                        .components
+                        .get(component_id)
+                        .ok_or(ComponentRowApplyError::Internal(Error::ComponentNotFound(
+                            *component_id,
+                        )))?;
+                if value.len() != component.schema.size() {
+                    return Err(ComponentRowApplyError::Internal(Error::BadMessage));
+                }
+                let count = component
+                    .time_series
+                    .get_all(timestamp)
+                    .map_or(0, |data| data.len() / value.len());
+                would_time_travel |= component
+                    .time_series
+                    .latest()
+                    .is_some_and(|(latest, _)| *latest > timestamp);
+                max_occurrences = max_occurrences.max(count);
+                occurrences.push(count);
+            }
+
+            let mut pending = vec![true; values.len()];
+            if repair_partial {
+                let mut complete_historical_match = false;
+                for occurrence in 0..max_occurrences {
+                    let mut candidate = Vec::with_capacity(values.len());
+                    let mut matched = false;
+                    let mut valid = true;
+                    for ((component_id, value), count) in values.iter().zip(&occurrences) {
+                        if occurrence < *count {
+                            let component = state.components.get(component_id).unwrap();
+                            let data = component.time_series.get_all(timestamp).unwrap();
+                            let start = occurrence * value.len();
+                            if data.get(start..start + value.len()) != Some(value.as_slice()) {
+                                valid = false;
+                                break;
+                            }
+                            matched = true;
+                            candidate.push(false);
+                        } else if occurrence == *count {
+                            candidate.push(true);
+                        } else {
+                            valid = false;
+                            break;
+                        }
+                    }
+                    if valid && matched {
+                        if candidate.iter().any(|write| *write) {
+                            pending = candidate;
+                            break;
+                        }
+                        complete_historical_match |= would_time_travel;
+                    }
+                }
+                if complete_historical_match && pending.iter().all(|write| *write) {
+                    return Ok(());
+                }
+            }
+
+            for ((component_id, _), should_write) in values.iter().zip(&pending) {
+                if *should_write
+                    && state
+                        .components
+                        .get(component_id)
+                        .unwrap()
+                        .time_series
+                        .latest()
+                        .is_some_and(|(latest, _)| *latest > timestamp)
+                {
+                    return Err(ComponentRowApplyError::TimeTravel(*component_id));
+                }
+            }
+
+            let mut sink = DBSink {
+                components: &state.components,
+                component_metadata: &state.component_metadata,
+                last_updated: &self.last_updated,
+                earliest_timestamp: &self.earliest_timestamp,
+                sunk_new_time_series: false,
+                table_received: timestamp,
+                followed_components: &self.followed_components,
+                has_followed_components: self
+                    .has_followed_components
+                    .load(atomic::Ordering::Acquire),
+                is_follower: false,
+                batch_max_ts: Timestamp(i64::MIN),
+                batch_min_ts: Timestamp(i64::MAX),
+                batch_has_ts: false,
+            };
+            for ((component_id, value), should_write) in values.iter().zip(pending) {
+                if !should_write {
+                    continue;
+                }
+                sink.apply_buf(*component_id, value, Some(timestamp))
+                    .map_err(|err| match err {
+                        Error::TimeTravel => ComponentRowApplyError::TimeTravel(*component_id),
+                        other => ComponentRowApplyError::Internal(other),
+                    })?;
+            }
+            sink.flush_timestamps();
+            if sink.sunk_new_time_series {
+                self.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
+            }
+            Ok(())
+        })
+    }
+
     /// Truncate a specific message log (clears all messages, preserves metadata).
     /// Used when the log hits MapOverflow so sensor camera frames can continue.
     pub fn truncate_msg_log(&self, id: PacketId) {
@@ -1004,12 +1325,13 @@ impl State {
                       "schema mismatch");
                 return Err(Error::SchemaMismatch);
             }
-            // If this component is a timestamp source, update the metadata
-            if is_timestamp_source
-                && let Some(existing_meta) = self.component_metadata.get_mut(&component_id)
-                && !existing_meta.is_timestamp_source()
+            // Sync the flag with the current declaration in both directions:
+            // a stale sticky flag would keep the sink from advancing
+            // last_updated for a component that is no longer a clock.
+            if let Some(existing_meta) = self.component_metadata.get_mut(&component_id)
+                && existing_meta.is_timestamp_source() != is_timestamp_source
             {
-                existing_meta.set_timestamp_source(true);
+                existing_meta.set_timestamp_source(is_timestamp_source);
                 // Re-save the metadata - ensure directory exists first
                 let component_metadata_dir = db_path.join(component_id.to_string());
                 if let Err(err) = std::fs::create_dir_all(&component_metadata_dir) {
@@ -1206,52 +1528,52 @@ impl ComponentSchema {
         let size = self.size();
         let buf = buf
             .get(..size)
-            .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?;
+            .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?;
         let dim = &self.dim;
         let view = match self.prim_type {
             PrimType::U8 => ComponentView::U8(
                 nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
-                    .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
+                    .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?,
             ),
             PrimType::U16 => ComponentView::U16(
                 nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
-                    .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
+                    .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?,
             ),
             PrimType::U32 => ComponentView::U32(
                 nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
-                    .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
+                    .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?,
             ),
             PrimType::U64 => ComponentView::U64(
                 nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
-                    .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
+                    .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?,
             ),
             PrimType::I8 => ComponentView::I8(
                 nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
-                    .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
+                    .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?,
             ),
             PrimType::I16 => ComponentView::I16(
                 nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
-                    .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
+                    .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?,
             ),
             PrimType::I32 => ComponentView::I32(
                 nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
-                    .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
+                    .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?,
             ),
             PrimType::I64 => ComponentView::I64(
                 nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
-                    .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
+                    .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?,
             ),
             PrimType::Bool => ComponentView::Bool(
                 nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
-                    .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
+                    .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?,
             ),
             PrimType::F32 => ComponentView::F32(
                 nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
-                    .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
+                    .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?,
             ),
             PrimType::F64 => ComponentView::F64(
                 nox::ArrayView::from_bytes_shape_unchecked(buf, dim)
-                    .ok_or(Error::Impeller(impeller2::error::Error::BufferOverflow))?,
+                    .ok_or(Error::Impeller(impeller::error::Error::BufferOverflow))?,
             ),
         };
         Ok((size, view))
@@ -1376,6 +1698,13 @@ impl Component {
     }
 }
 
+#[cfg(feature = "grpc")]
+#[derive(Debug)]
+pub(crate) enum ComponentRowApplyError {
+    TimeTravel(ComponentId),
+    Internal(Error),
+}
+
 pub(crate) struct DBSink<'a> {
     pub(crate) components: &'a HashMap<ComponentId, Component>,
     pub(crate) component_metadata: &'a HashMap<ComponentId, ComponentMetadata>,
@@ -1411,20 +1740,14 @@ impl DBSink<'_> {
             }
         }
     }
-}
 
-impl Decomponentize for DBSink<'_> {
-    type Error = Error;
-    fn apply_value(
+    fn apply_buf(
         &mut self,
         component_id: ComponentId,
-        value: impeller2::types::ComponentView<'_>,
+        value_buf: &[u8],
         timestamp: Option<Timestamp>,
     ) -> Result<(), Error> {
         let _span = tracing::trace_span!("apply_value", %component_id).entered();
-        // Warn if a non-follower connection writes to a component being
-        // replicated from a followed source. The atomic flag avoids
-        // acquiring the RwLock on every call when no follow is active.
         if !self.is_follower
             && self.has_followed_components
             && self
@@ -1438,15 +1761,11 @@ impl Decomponentize for DBSink<'_> {
                  this may result in data corruption if not intentionally done"
             );
         }
+        let implicit_timestamp = timestamp.is_none();
         let mut timestamp = timestamp.unwrap_or(self.table_received);
-        let value_buf = value.as_bytes();
         let Some(component) = self.components.get(&component_id) else {
             return Err(Error::ComponentNotFound(component_id));
         };
-        // When processing data from a followed source, skip samples that
-        // are not strictly newer than the latest in the local time series.
-        // This prevents duplicates when the follow stream re-sends the
-        // "latest" value that was already written during backfill.
         if self.is_follower
             && component
                 .time_series
@@ -1456,17 +1775,12 @@ impl Decomponentize for DBSink<'_> {
             return Ok(());
         }
         let time_series_empty = component.time_series.index().is_empty();
-        // When timestamps are auto-generated (no explicit timestamp provided), concurrent writers
-        // may occasionally observe a slightly newer last timestamp and reject with
-        // TimeTravel. In that case, clamp the timestamp to last+1 and retry.
         if let Err(err) = component.time_series.push_buf(timestamp, value_buf) {
             match err {
-                Error::TimeTravel if timestamp == self.table_received => {
-                    // Retry with a monotonic bump based on the latest sample seen.
+                Error::TimeTravel if implicit_timestamp => {
                     let mut attempts = 0u8;
                     loop {
                         if let Some((last_ts, _)) = component.time_series.latest() {
-                            // ensure strictly non-decreasing order
                             timestamp = Timestamp(last_ts.0.saturating_add(1));
                         } else {
                             timestamp = self.table_received;
@@ -1475,7 +1789,6 @@ impl Decomponentize for DBSink<'_> {
                             Ok(()) => break,
                             Err(Error::TimeTravel) if attempts < 8 => {
                                 attempts = attempts.saturating_add(1);
-                                continue;
                             }
                             Err(e) => return Err(e),
                         }
@@ -1503,6 +1816,18 @@ impl Decomponentize for DBSink<'_> {
             self.batch_has_ts = true;
         }
         Ok(())
+    }
+}
+
+impl Decomponentize for DBSink<'_> {
+    type Error = Error;
+    fn apply_value(
+        &mut self,
+        component_id: ComponentId,
+        value: impeller::types::ComponentView<'_>,
+        timestamp: Option<Timestamp>,
+    ) -> Result<(), Error> {
+        self.apply_buf(component_id, value.as_bytes(), timestamp)
     }
 }
 
@@ -1545,16 +1870,22 @@ impl Server {
     pub async fn handle_udp(addr: SocketAddr, db: Arc<DB>) -> Result<(), Error> {
         let socket = UdpSocket::bind(addr)?;
         let (rx, tx) = socket.split();
-        let rx = PacketStream::new(rx);
+        let rx = PacketStream::new(rx).with_max_len(MAX_PACKET_LEN);
         let tx = Arc::new(Mutex::new(PacketSink::new(tx)));
         handle_conn_inner(tx, rx, db).await?;
         Ok(())
     }
 }
 
+/// Upper bound on a single inbound packet. Large asset uploads (e.g. skybox
+/// cubemaps, several MB) arrive as one [`StoreAsset`] message, so the
+/// per-connection read buffer grows on demand; this caps that growth to bound
+/// memory and reject malformed/hostile length prefixes.
+const MAX_PACKET_LEN: usize = 256 * 1024 * 1024;
+
 pub async fn handle_conn(stream: TcpStream, db: Arc<DB>) {
     let (rx, tx) = stream.split();
-    let rx = PacketStream::new(rx);
+    let rx = PacketStream::new(rx).with_max_len(MAX_PACKET_LEN);
     let tx = Arc::new(Mutex::new(PacketSink::new(tx)));
     match handle_conn_inner(tx, rx, db).await {
         Ok(_) => {}
@@ -1575,7 +1906,9 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + Send + Sync + 'static>(
     let mut resp_pkt = LenPacket::new(PacketTy::Msg, [0, 0], RESPONSE_PACKET_CAPACITY);
     let mut silent = false;
     loop {
-        let pkt = rx.next(buf).await?;
+        // `next_grow` lets the buffer grow past its initial 8 MiB for large
+        // asset uploads; `with_max_len` above bounds that growth.
+        let pkt = rx.next_grow(buf).await?;
         let req_id = pkt.req_id();
         let mut pkt_tx = PacketTx {
             req_id,
@@ -1701,7 +2034,7 @@ impl<A: AsyncWrite + 'static> PacketTx<A> {
         let req_id = self.req_id;
         self.send_with_builder(|pkt| {
             let header = PacketHeader {
-                packet_ty: impeller2::types::PacketTy::Msg,
+                packet_ty: impeller::types::PacketTy::Msg,
                 id: M::ID,
                 req_id,
             };
@@ -1751,7 +2084,7 @@ impl<A: AsyncWrite + 'static> PacketTx<A> {
         let req_id = self.req_id;
         self.send_with_builder(|pkt| {
             let header = PacketHeader {
-                packet_ty: impeller2::types::PacketTy::TimeSeries,
+                packet_ty: impeller::types::PacketTy::TimeSeries,
                 id,
                 req_id,
             };
@@ -1772,6 +2105,7 @@ fn silent_connection_ignores_msg(id: PacketId) -> bool {
         Stream::ID,
         GetSchema::ID,
         GetTimeSeries::ID,
+        GetTimeSeriesPredecessor::ID,
         GetComponentMetadata::ID,
         DumpMetadata::ID,
         DumpSchema::ID,
@@ -1840,6 +2174,17 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             let db = db.clone();
             handle_stream(tx, stream, db, m.req_id);
         }
+        Packet::Msg(m) if m.id == SetStreamFilter::ID => {
+            let filter = m.parse::<SetStreamFilter>()?;
+            db.with_state_mut(|state| {
+                if let Some(live) = state.real_time_stream_filters.get(&filter.id) {
+                    live.set(filter.component_ids.clone(), filter.frequency);
+                }
+                state
+                    .pending_real_time_stream_filters
+                    .insert(filter.id, (filter.component_ids, filter.frequency));
+            });
+        }
         Packet::Msg(m) if m.id == SetStreamState::ID => {
             let set_stream_state = m.parse::<SetStreamState>()?;
             let stream_id = set_stream_state.id;
@@ -1891,11 +2236,8 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                 Ok(component.clone())
             })?;
             let Some((timestamps, data)) = component.get_range(&range) else {
-                return Err(Error::TimeRangeOutOfBounds {
-                    range,
-                    component_id: component.component_id,
-                    latest: component.time_series.latest().map(|x| *x.0),
-                });
+                tx.send_time_series(id, &[], &[]).await?;
+                return Ok(PacketAction::Continue);
             };
             let size = component.schema.size();
             let (timestamps, data) = if let Some(limit) = limit {
@@ -1906,6 +2248,23 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             };
             tx.send_time_series(id, timestamps, data).await?;
         }
+        Packet::Msg(m) if m.id == GetTimeSeriesPredecessor::ID => {
+            let request = m.parse::<GetTimeSeriesPredecessor>()?;
+            let component = db.with_state(|state| {
+                state
+                    .components
+                    .get(&request.component_id)
+                    .cloned()
+                    .ok_or(Error::ComponentNotFound(request.component_id))
+            })?;
+            if let Some((timestamp, data)) =
+                component.time_series.get_at_or_before(request.timestamp)
+            {
+                tx.send_time_series(request.id, &[timestamp], data).await?;
+            } else {
+                tx.send_time_series(request.id, &[], &[]).await?;
+            }
+        }
         Packet::Msg(m) if m.id == SetComponentMetadata::ID => {
             let SetComponentMetadata(metadata) = m.parse::<SetComponentMetadata>()?;
             db.with_state_mut(|state| state.set_component_metadata(metadata, &db.path))?;
@@ -1915,7 +2274,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
 
             tx.send_with_builder(|pkt| {
                 let header = PacketHeader {
-                    packet_ty: impeller2::types::PacketTy::Msg,
+                    packet_ty: impeller::types::PacketTy::Msg,
                     id: ComponentMetadata::ID,
                     req_id: m.req_id,
                 };
@@ -1977,8 +2336,25 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             let mut tx = tx.clone();
             let db = db.clone();
             stellarator::spawn(async move {
+                let mut last_config_gen = db.db_config_gen.latest();
                 loop {
                     let last_updated = db.last_updated.latest();
+                    // Push a fresh DbConfig whenever it changed (metadata patch
+                    // or asset write) so passive clients reload/re-mirror without
+                    // polling — asset bytes can change under an unchanged
+                    // `schematic.active` (RFD #724).
+                    let config_gen = db.db_config_gen.latest();
+                    if config_gen != last_config_gen {
+                        last_config_gen = config_gen;
+                        match tx.send_msg(&db.db_config()).await {
+                            Err(err) if err.is_stream_closed() => return,
+                            Err(err) => {
+                                warn!(?err, "failed to send db config");
+                                return;
+                            }
+                            _ => (),
+                        }
+                    }
                     {
                         match tx.send_msg(&LastUpdated(last_updated)).await {
                             Err(err) if err.is_stream_closed() => return,
@@ -1990,15 +2366,39 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                         }
                     }
                     // Wake on any change (not only increase) so rolling windows
-                    // track correctly.
-                    db.last_updated.wait_for(|time| time != last_updated).await;
+                    // track correctly, or on a config change so the push above
+                    // fires without waiting for the next data tick.
+                    let last_seen_gen = last_config_gen;
+                    futures_lite::future::race(
+                        db.last_updated.wait_for(|time| time != last_updated),
+                        db.db_config_gen.wait_for(move |cur| cur != last_seen_gen),
+                    )
+                    .await;
                 }
             });
         }
         Packet::Msg(m) if m.id == SetDbConfig::ID => {
             let update = m.parse::<SetDbConfig>()?;
-            db.apply_set_db_config(update)?;
+            // A rejected patch (read-only follower guarding its replicated
+            // asset pointers) is logged but must not drop the connection; the
+            // echoed config lets the client observe the actual state.
+            if let Err(err) = db.apply_set_db_config_from_client(update) {
+                tracing::warn!(?err, "rejected db config patch");
+            }
             tx.send_msg(&db.db_config()).await?;
+        }
+        Packet::Msg(m) if m.id == StoreAsset::ID => {
+            let StoreAsset { key, bytes } = m.parse::<StoreAsset>()?;
+            // A bad/unwritable asset (or a read-only follower rejecting the
+            // write) is logged but must not drop the connection.
+            match db.store_asset_from_client(&key, &bytes) {
+                Ok(()) => {
+                    tracing::info!(asset = %key, len = bytes.len(), "stored uploaded asset")
+                }
+                Err(err) => {
+                    tracing::warn!(asset = %key, ?err, "failed to store uploaded asset")
+                }
+            }
         }
         Packet::Msg(m) if m.id == GetEarliestTimestamp::ID => {
             tx.send_msg(&EarliestTimestamp(db.earliest_timestamp.latest()))
@@ -2092,9 +2492,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                     else {
                         continue;
                     };
-                    let component_name = crate::arrow::sanitize_sql_table_name(
-                        &component_metadata.name.to_case(convert_case::Case::Snake),
-                    );
+                    let component_name = eql::sql_table_name(&component_metadata.name);
 
                     if component_name == table_name {
                         // Get the raw data as byte slices
@@ -2452,7 +2850,7 @@ pub async fn handle_msg_stream<A: AsyncWrite>(
             continue;
         };
         pkt.clear();
-        pkt.extend_from_slice(msg);
+        pkt.extend_from_slice(&msg);
         pkt = send_with_timeout(&tx, pkt).await?;
     }
 }
@@ -2473,7 +2871,7 @@ pub async fn handle_timestamped_msg_stream<A: AsyncWrite>(
         };
         pkt.clear();
         pkt.extend_from_slice(timestamp.as_bytes());
-        pkt.extend_from_slice(msg);
+        pkt.extend_from_slice(&msg);
         pkt = send_with_timeout(&tx, pkt).await?;
     }
 }
@@ -2521,7 +2919,7 @@ pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite + Send + Sync>(
         {
             pkt.clear();
             pkt.extend_from_slice(msg_timestamp.as_bytes());
-            pkt.extend_from_slice(msg);
+            pkt.extend_from_slice(&msg);
             pkt = send_with_timeout(&tx, pkt).await?;
         }
         last_sent_timestamp = Some(msg_timestamp);
@@ -2741,15 +3139,39 @@ fn handle_stream<A: AsyncWrite + 'static>(
                 }
             })
         }
-        StreamBehavior::RealTimeBatched => stellarator::spawn(async move {
-            match handle_real_time_stream_batched(tx, req_id, db).await {
-                Ok(_) => {}
-                Err(err) if err.is_stream_closed() => {}
-                Err(err) => {
-                    warn!(?err, "error streaming data");
+        StreamBehavior::RealTimeBatched => {
+            let stream_id = stream.id;
+            let filter = Arc::new(RealTimeStreamFilter::new());
+            db.with_state_mut(|state| {
+                if let Some((component_ids, frequency)) =
+                    state.pending_real_time_stream_filters.remove(&stream_id)
+                {
+                    filter.set(component_ids, frequency);
                 }
-            }
-        }),
+                state
+                    .real_time_stream_filters
+                    .insert(stream_id, filter.clone());
+            });
+            stellarator::spawn(async move {
+                let result =
+                    handle_real_time_stream_batched(tx, req_id, db.clone(), filter.clone()).await;
+                db.with_state_mut(
+                    |state| match state.real_time_stream_filters.get(&stream_id) {
+                        Some(current) if Arc::ptr_eq(current, &filter) => {
+                            state.real_time_stream_filters.remove(&stream_id);
+                        }
+                        _ => {}
+                    },
+                );
+                match result {
+                    Ok(_) => {}
+                    Err(err) if err.is_stream_closed() => {}
+                    Err(err) => {
+                        warn!(?err, "error streaming data");
+                    }
+                }
+            })
+        }
     }
 }
 
@@ -2859,20 +3281,24 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
     sink: Arc<Mutex<PacketSink<A>>>,
     req_id: RequestId,
     db: Arc<DB>,
+    filter: Arc<RealTimeStreamFilter>,
 ) -> Result<(), Error> {
-    let mut current_gen = u64::MAX;
+    let mut current_vtable_gen = u64::MAX;
+    let mut current_filter_gen = u64::MAX;
     let mut table = LenPacket::table([0; 2], 2048 - 16);
-    let mut components = HashMap::new();
+    let mut all_components = HashMap::new();
+    let mut stream_components = HashMap::new();
+    let mut last_sent = None;
 
     loop {
-        // Re-check for new components when vtable_gen changes.
         let vtable_gen = db.vtable_gen.latest();
-        if vtable_gen != current_gen {
+        let filter_gen = filter.generation();
+        if vtable_gen != current_vtable_gen {
             let new_components: Vec<(Component, Option<ComponentMetadata>, Schema<Vec<u64>>)> = db
                 .with_state(|state| {
                     let mut new_comps = Vec::new();
                     for component in state.components.values() {
-                        if components.contains_key(&component.component_id) {
+                        if all_components.contains_key(&component.component_id) {
                             continue;
                         }
                         let metadata = state
@@ -2884,7 +3310,6 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
                     new_comps
                 });
 
-            // Send metadata and schema for each new component.
             for (component, metadata, schema) in new_components {
                 if let Some(metadata) = metadata {
                     send_with_timeout(&sink, metadata.into_len_packet().with_request_id(req_id))
@@ -2899,11 +3324,22 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
                 send_with_timeout(&sink, schema_msg.into_len_packet().with_request_id(req_id))
                     .await?;
 
-                components.insert(component.component_id, component);
+                all_components.insert(component.component_id, component);
             }
+        }
 
-            // Rebuild the VTable with the full component set.
-            let vtable_msg = DBVisitor.vtable(&components)?;
+        let stream_changed = vtable_gen != current_vtable_gen || filter_gen != current_filter_gen;
+        if stream_changed {
+            let component_filter = filter.component_ids();
+            stream_components = match &component_filter {
+                Some(filter) => all_components
+                    .iter()
+                    .filter(|(component_id, _)| filter.contains(*component_id))
+                    .map(|(component_id, component)| (*component_id, component.clone()))
+                    .collect(),
+                None => all_components.clone(),
+            };
+            let vtable_msg = DBVisitor.vtable(&stream_components)?;
             let id: PacketId = fastrand::u16(..).to_le_bytes();
             table = LenPacket::table(id, 2048 - 16);
             {
@@ -2914,20 +3350,26 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
                 .into_len_packet();
                 send_with_timeout(&sink, pkt.with_request_id(req_id)).await?;
             }
-            current_gen = vtable_gen;
+            current_vtable_gen = vtable_gen;
+            current_filter_gen = filter_gen;
         }
 
-        // Populate the table with every component's latest data point.
-        table.clear();
-        DBVisitor.populate_table_latest(&components, &mut table);
-
-        // Single lock + send for all components.
-        {
+        let timestamp = db.last_updated.latest();
+        let due = filter.frequency().is_none_or(|frequency| {
+            let interval_us = stream_interval_us(frequency);
+            last_sent
+                .is_none_or(|last: Timestamp| timestamp.0.saturating_sub(last.0) >= interval_us)
+        });
+        if stream_changed || due {
+            table.clear();
+            DBVisitor.populate_table_latest(&stream_components, &mut table);
             table = send_with_timeout(&sink, table.with_request_id(req_id)).await?;
+            last_sent = Some(timestamp);
         }
-
-        // Wait for the simulation to write new data (1 wake per sim tick).
-        db.last_updated.wait().await;
+        futures_lite::future::race(db.last_updated.wait(), async {
+            let _ = filter.changed.wait().await;
+        })
+        .await;
     }
 }
 
@@ -3119,7 +3561,7 @@ impl DBVisitor {
         components: &HashMap<ComponentId, Component>,
         table: &mut LenPacket,
     ) {
-        for (_, component) in components.iter() {
+        for component in components.values() {
             // Skip components with no data – the VTable builder
             // (vtable()) excludes them, so we must too.
             if component.time_series.index().is_empty() {
@@ -3212,6 +3654,27 @@ impl AtomicTimestampExt for AtomicCell<Timestamp> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn stream_interval_matches_microsecond_timestamps() {
+        assert_eq!(stream_interval_us(60), 16_666);
+        assert_eq!(stream_interval_us(120), 8_333);
+        assert_eq!(stream_interval_us(2_000_000), 1);
+    }
+
+    #[test]
+    fn empty_real_time_stream_filter_is_unfiltered() {
+        let filter = RealTimeStreamFilter::new();
+        assert!(filter.component_ids().is_none());
+        filter.set(vec![ComponentId::new("a")], Some(60));
+        assert_eq!(
+            filter.component_ids(),
+            Some([ComponentId::new("a")].into_iter().collect())
+        );
+        filter.set(vec![], Some(60));
+        assert!(filter.component_ids().is_none());
+        assert_eq!(filter.frequency(), Some(60));
+    }
+
     struct PendingWrite;
 
     struct ReadyWrite;
@@ -3284,28 +3747,352 @@ mod tests {
     }
 
     #[test]
+    fn db_sink_preserves_distinct_values_at_one_timestamp() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        let component_id = ComponentId::new("test.duplicate");
+        db.with_state_mut(|state| {
+            state
+                .insert_component(
+                    component_id,
+                    ComponentSchema::new(PrimType::U64, &[]),
+                    &db.path,
+                )
+                .unwrap();
+        });
+
+        db.with_state(|state| {
+            let mut sink = DBSink {
+                components: &state.components,
+                component_metadata: &state.component_metadata,
+                last_updated: &db.last_updated,
+                earliest_timestamp: &db.earliest_timestamp,
+                sunk_new_time_series: false,
+                table_received: Timestamp(10),
+                followed_components: &db.followed_components,
+                has_followed_components: false,
+                is_follower: false,
+                batch_max_ts: Timestamp(i64::MIN),
+                batch_min_ts: Timestamp(i64::MAX),
+                batch_has_ts: false,
+            };
+            let value = 42_u64.to_le_bytes();
+            sink.apply_buf(component_id, &value, Some(Timestamp(10)))
+                .unwrap();
+            sink.apply_buf(component_id, &43_u64.to_le_bytes(), Some(Timestamp(10)))
+                .unwrap();
+        });
+
+        assert_eq!(
+            db.with_state(|state| state
+                .get_component(component_id)
+                .unwrap()
+                .time_series
+                .sample_count()),
+            2
+        );
+    }
+
+    #[test]
     fn apply_set_db_config_empty_metadata_removes_key() {
         let dir = tempfile::tempdir().unwrap();
         let db = DB::create(dir.path().join("db")).unwrap();
         db.apply_set_db_config(SetDbConfig {
-            metadata: HashMap::from([("schematic.content".to_string(), "graph {}".to_string())]),
+            metadata: HashMap::from([("ui.theme".to_string(), "dark".to_string())]),
             ..Default::default()
         })
         .unwrap();
         assert_eq!(
-            db.with_state(|s| s.db_config.schematic_content().map(str::to_owned)),
-            Some("graph {}".to_string())
+            db.with_state(|s| s.db_config.metadata.get("ui.theme").cloned()),
+            Some("dark".to_string())
         );
 
         db.apply_set_db_config(SetDbConfig {
-            metadata: HashMap::from([("schematic.content".to_string(), String::new())]),
+            metadata: HashMap::from([("ui.theme".to_string(), String::new())]),
             ..Default::default()
         })
         .unwrap();
 
         assert_eq!(
-            db.with_state(|s| s.db_config.schematic_content().map(str::to_owned)),
+            db.with_state(|s| s.db_config.metadata.get("ui.theme").cloned()),
             None
         );
+    }
+
+    #[test]
+    fn apply_set_db_config_keeps_empty_skybox_active_as_clear_signal() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        // An explicit clear pushes `skybox.active=""`; it must survive so
+        // `skybox_active_desired()` reports `Some(None)` (cleared) rather than
+        // `None` (never set).
+        db.apply_set_db_config(SetDbConfig {
+            metadata: HashMap::from([("skybox.active".to_string(), String::new())]),
+            ..Default::default()
+        })
+        .unwrap();
+
+        db.with_state(|s| {
+            assert_eq!(s.db_config.skybox_active(), None);
+            assert_eq!(s.db_config.skybox_active_desired(), Some(None));
+        });
+    }
+
+    #[test]
+    fn store_asset_writes_into_assets_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        db.store_asset("skyboxes/manifest.ron", b"manifest")
+            .unwrap();
+
+        let assets_dir = crate::assets_http::assets_dir(&db.path);
+        assert_eq!(
+            std::fs::read(assets_dir.join("skyboxes/manifest.ron")).unwrap(),
+            b"manifest".to_vec()
+        );
+    }
+
+    #[test]
+    fn store_asset_rejects_path_traversal() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        let err = db.store_asset("../escape.bin", b"x").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(!dir.path().join("escape.bin").exists());
+    }
+
+    #[test]
+    fn store_asset_rewrites_kdl_to_db() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        let assets_dir = crate::assets_http::assets_dir(&db.path);
+
+        // The referenced asset must be present for the path to be rewritten.
+        db.store_asset("meshes/rocket.glb", b"glb").unwrap();
+        db.store_asset(
+            "schematics/main.kdl",
+            b"object_3d \"rocket.world_pos\" {\n    glb path=\"meshes/rocket.glb\"\n}\n",
+        )
+        .unwrap();
+
+        let stored = std::fs::read_to_string(assets_dir.join("schematics/main.kdl")).unwrap();
+        assert!(
+            stored.contains("path=\"db:meshes/rocket.glb\""),
+            "expected db: rewrite, got:\n{stored}"
+        );
+    }
+
+    #[test]
+    fn store_asset_keeps_kdl_local_when_asset_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        let assets_dir = crate::assets_http::assets_dir(&db.path);
+
+        // No glb stored, so the path must NOT be rewritten (would 404).
+        db.store_asset(
+            "schematics/main.kdl",
+            b"object_3d \"rocket.world_pos\" {\n    glb path=\"meshes/rocket.glb\"\n}\n",
+        )
+        .unwrap();
+
+        let stored = std::fs::read_to_string(assets_dir.join("schematics/main.kdl")).unwrap();
+        assert!(stored.contains("path=\"meshes/rocket.glb\""));
+        assert!(!stored.contains("db:meshes/rocket.glb"));
+    }
+
+    #[test]
+    fn store_asset_stores_unparsable_kdl_verbatim() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        let assets_dir = crate::assets_http::assets_dir(&db.path);
+
+        db.store_asset("schematics/broken.kdl", b"object_3d {\n")
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read(assets_dir.join("schematics/broken.kdl")).unwrap(),
+            b"object_3d {\n".to_vec()
+        );
+    }
+
+    #[test]
+    fn store_asset_from_client_rejected_on_read_only_follower() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        db.assets_read_only.store(true, atomic::Ordering::Release);
+
+        let gen0 = db.db_config_gen.latest();
+        let err = db
+            .store_asset_from_client("meshes/injected.glb", b"tampered")
+            .unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+
+        // Nothing written, no revision bump advertised to subscribers.
+        let assets_dir = crate::assets_http::assets_dir(&db.path);
+        assert!(!assets_dir.join("meshes/injected.glb").exists());
+        assert_eq!(db.with_state(|s| s.db_config.assets_revision()), 0);
+        assert_eq!(db.db_config_gen.latest(), gen0);
+    }
+
+    #[test]
+    fn set_db_config_from_client_guards_asset_keys_on_read_only_follower() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        db.assets_read_only.store(true, atomic::Ordering::Release);
+
+        // Asset-pointer keys are replicated from the source: a local client
+        // patch must be rejected without touching state or waking subscribers.
+        let gen0 = db.db_config_gen.latest();
+        for key in ["schematic.active", "skybox.active", "assets.revision"] {
+            let err = db
+                .apply_set_db_config_from_client(SetDbConfig {
+                    metadata: [(key.to_string(), "hijacked".to_string())]
+                        .into_iter()
+                        .collect(),
+                    ..Default::default()
+                })
+                .unwrap_err();
+            assert!(
+                matches!(&err, Error::Io(io) if io.kind() == std::io::ErrorKind::PermissionDenied),
+                "{key}: {err:?}"
+            );
+        }
+        db.with_state(|s| {
+            assert!(s.db_config.schematic_active().is_none());
+            assert!(!s.db_config.metadata.contains_key("skybox.active"));
+            assert_eq!(s.db_config.assets_revision(), 0);
+        });
+        assert_eq!(db.db_config_gen.latest(), gen0);
+
+        // Non-asset patches (recording toggle, plain metadata) still apply.
+        db.apply_set_db_config_from_client(SetDbConfig {
+            metadata: [("ui.theme".to_string(), "dark".to_string())]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            db.with_state(|s| s.db_config.metadata.get("ui.theme").cloned()),
+            Some("dark".to_string())
+        );
+    }
+
+    #[test]
+    fn apply_set_db_config_repoints_active_and_requests_sync() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        // The schematic bytes travel as an asset; the patch only repoints.
+        db.store_asset("schematics/main.kdl", b"viewport {\n}\n")
+            .unwrap();
+        let needs_sync = db
+            .apply_set_db_config(SetDbConfig {
+                metadata: [(
+                    "schematic.active".to_string(),
+                    "schematics/main.kdl".to_string(),
+                )]
+                .into_iter()
+                .collect(),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert!(needs_sync);
+        db.with_state(|s| assert_eq!(s.db_config.schematic_active(), Some("schematics/main.kdl")));
+    }
+
+    #[test]
+    fn store_asset_bumps_revision_and_config_gen() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        let gen0 = db.db_config_gen.latest();
+        assert_eq!(db.with_state(|s| s.db_config.assets_revision()), 0);
+
+        db.store_asset("schematics/main.kdl", b"viewport {\n}\n")
+            .unwrap();
+
+        // A byte write bumps the revision and wakes config subscribers so
+        // followers re-mirror / editors reload without a pointer move (Bug 1/2).
+        assert_eq!(db.with_state(|s| s.db_config.assets_revision()), 1);
+        assert!(db.db_config_gen.latest() > gen0);
+    }
+
+    #[test]
+    fn apply_set_db_config_requests_sync_on_revision_bump_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        // A follower receives a bare `assets.revision` bump (a source PUT with no
+        // pointer move) and must still re-mirror its asset tree (Bug 2).
+        let needs_sync = db
+            .apply_set_db_config(SetDbConfig {
+                metadata: [(DbConfig::ASSETS_REVISION_KEY.to_string(), "7".to_string())]
+                    .into_iter()
+                    .collect(),
+                ..Default::default()
+            })
+            .unwrap();
+
+        assert!(needs_sync);
+        assert_eq!(db.with_state(|s| s.db_config.assets_revision()), 7);
+    }
+
+    #[test]
+    fn read_active_schematic_returns_stored_asset_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        assert_eq!(db.read_active_schematic(), None);
+
+        db.store_asset("schematics/main.kdl", b"viewport {\n}\n")
+            .unwrap();
+        db.set_active_schematic("schematics/main.kdl").unwrap();
+
+        // `read_active_schematic` returns the full stored asset bytes as UTF-8,
+        // not a parsed token. `store_asset` may re-serialize a `.kdl` (path
+        // rewrite / normalization), so compare against what actually landed on
+        // disk rather than the raw input bytes.
+        let stored = String::from_utf8(
+            crate::assets_http::read_asset_file(
+                &crate::assets_http::assets_dir(&db.path),
+                "schematics/main.kdl",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(
+            stored.contains("viewport"),
+            "stored active schematic should carry the full KDL body, got {stored:?}"
+        );
+        assert_eq!(db.read_active_schematic(), Some(stored));
+    }
+
+    #[test]
+    fn set_active_schematic_bumps_config_gen() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        db.store_asset("schematics/main.kdl", b"viewport {\n}\n")
+            .unwrap();
+
+        let gen0 = db.db_config_gen.latest();
+        db.set_active_schematic("schematics/main.kdl").unwrap();
+
+        // Repointing the active schematic must wake the subscribe loop's config
+        // push so clients observe the new pointer promptly (Bug 3).
+        assert!(db.db_config_gen.latest() > gen0);
+    }
+
+    #[test]
+    fn set_active_schematic_rejects_missing_asset() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+
+        assert!(db.set_active_schematic("schematics/missing.kdl").is_err());
+        db.with_state(|s| assert_eq!(s.db_config.schematic_active(), None));
     }
 }

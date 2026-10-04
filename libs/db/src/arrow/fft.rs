@@ -68,7 +68,9 @@ impl ScalarUDFImpl for FrequencyDomainUDF {
                 let b = window[1] as f64;
                 (b - a) * 1e-6
             })
-            .fold((0, 0.0), |(count, sum), x| (count + 1, sum + x));
+            .fold((0, 0.0f64), |(count, sum), x| {
+                (count + 1, sum.algebraic_add(x))
+            });
         let period = sum / count as f64;
 
         let n = input.len();

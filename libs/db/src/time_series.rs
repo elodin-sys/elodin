@@ -1,6 +1,6 @@
 use std::{ops::Range, path::Path, sync::Arc, sync::RwLock};
 
-use impeller2::types::Timestamp;
+use impeller::types::Timestamp;
 use stellarator::sync::WaitQueue;
 use tracing::warn;
 use zerocopy::FromBytes;
@@ -87,6 +87,12 @@ impl TimeSeries {
         self.data.get(i..i + element_size)
     }
 
+    #[cfg(feature = "grpc")]
+    pub(crate) fn get_all(&self, timestamp: Timestamp) -> Option<&[u8]> {
+        self.get_range(&(timestamp..timestamp))
+            .map(|(_, data)| data)
+    }
+
     pub fn get_nearest(&self, timestamp: Timestamp) -> Option<(Timestamp, &[u8])> {
         let timestamps = self.timestamps();
         let index = match timestamps.binary_search(&timestamp) {
@@ -100,27 +106,53 @@ impl TimeSeries {
         Some((*timestamp, buf))
     }
 
-    pub fn get_range(&self, range: &Range<Timestamp>) -> Option<(&[Timestamp], &[u8])> {
+    pub fn get_at_or_before(&self, timestamp: Timestamp) -> Option<(Timestamp, &[u8])> {
         let timestamps = self.timestamps();
+        let index = timestamps.partition_point(|&candidate| candidate <= timestamp);
+        let index = index.checked_sub(1)?;
+        let element_size = self.element_size();
+        let timestamp = *timestamps.get(index)?;
+        let offset = index * element_size;
+        Some((timestamp, self.data.get(offset..offset + element_size)?))
+    }
 
-        let start = range.start;
-        let end = range.end;
-        let start_index = match timestamps.binary_search(&start) {
-            Ok(i) => i,
-            Err(i) => i,
-        };
+    pub fn get_range(&self, range: &Range<Timestamp>) -> Option<(&[Timestamp], &[u8])> {
+        let indices = self.range_indices(range)?;
+        self.get_indices(indices)
+    }
 
-        let end_index = match timestamps.binary_search(&end) {
-            Ok(i) => i,
-            Err(i) => i.saturating_sub(1),
-        };
+    #[cfg(feature = "grpc")]
+    pub(crate) fn get_range_chunk(
+        &self,
+        range: &Range<Timestamp>,
+        offset: usize,
+        limit: usize,
+    ) -> Option<(&[Timestamp], &[u8])> {
+        let indices = self.range_indices(range)?;
+        let start = indices.start.saturating_add(offset).min(indices.end);
+        let end = start.saturating_add(limit).min(indices.end);
+        if start >= end {
+            return None;
+        }
+        self.get_indices(start..end)
+    }
 
-        let timestamps = timestamps.get(start_index..=end_index)?;
+    fn range_indices(&self, range: &Range<Timestamp>) -> Option<Range<usize>> {
+        let timestamps = self.timestamps();
+        let start_index = timestamps.partition_point(|&t| t < range.start);
+        let end_index = timestamps.partition_point(|&t| t <= range.end);
+        if start_index >= end_index {
+            return None;
+        }
+        Some(start_index..end_index)
+    }
+
+    fn get_indices(&self, indices: Range<usize>) -> Option<(&[Timestamp], &[u8])> {
+        let timestamps = self.timestamps().get(indices.clone())?;
         let element_size = self.element_size();
         let data = self
             .data
-            .get(start_index * element_size..end_index.saturating_add(1) * element_size)?;
-
+            .get(indices.start * element_size..indices.end * element_size)?;
         Some((timestamps, data))
     }
 
@@ -212,5 +244,32 @@ impl TimeSeries {
     /// Returns the number of samples currently stored.
     pub fn sample_count(&self) -> usize {
         self.index.len() as usize / size_of::<i64>()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn get_at_or_before_respects_boundaries() {
+        let dir = tempfile::tempdir().unwrap();
+        let series = TimeSeries::create(dir.path(), "test".into(), Timestamp(0), 8).unwrap();
+        assert!(series.get_at_or_before(Timestamp(10)).is_none());
+
+        series.push_buf(Timestamp(20), &2u64.to_le_bytes()).unwrap();
+        series.push_buf(Timestamp(40), &4u64.to_le_bytes()).unwrap();
+
+        assert!(series.get_at_or_before(Timestamp(19)).is_none());
+        for (query, expected_timestamp, expected_value) in [
+            (20, 20, 2u64),
+            (30, 20, 2u64),
+            (40, 40, 4u64),
+            (50, 40, 4u64),
+        ] {
+            let (timestamp, data) = series.get_at_or_before(Timestamp(query)).unwrap();
+            assert_eq!(timestamp, Timestamp(expected_timestamp));
+            assert_eq!(data, expected_value.to_le_bytes());
+        }
     }
 }

@@ -1,6 +1,30 @@
 use bevy_egui::egui;
 use hifitime::Epoch;
 
+/// Show a [`egui::CentralPanel`] on a bevy_egui [`egui::Context`].
+///
+/// egui 0.34 deprecated Context-level panel APIs in favor of a root [`egui::Ui`];
+/// bevy_egui still only hands out a `Context`, so keep the allow here until that
+/// changes. Call sites should use these helpers instead of local `#[allow]`.
+#[allow(deprecated, reason = "bevy_egui exposes a Context, not a root Ui")]
+pub fn show_central_panel<R>(
+    panel: egui::CentralPanel,
+    ctx: &egui::Context,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    panel.show(ctx, add_contents)
+}
+
+/// Same as [`show_central_panel`] for side/top/bottom [`egui::Panel`]s.
+#[allow(deprecated, reason = "bevy_egui exposes a Context, not a root Ui")]
+pub fn show_panel<R>(
+    panel: egui::Panel,
+    ctx: &egui::Context,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<R> {
+    panel.show(ctx, add_contents)
+}
+
 pub fn get_galley_layout_job(
     text: impl ToString,
     wrap_width: f32,

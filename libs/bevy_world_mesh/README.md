@@ -15,8 +15,7 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full walkthrough.
 
 ## Prerequisites
 
-- **Recommended**: [Nix](https://nixos.org/download.html) with flakes enabled
-  (+ optionally [`direnv`](https://direnv.net) for auto-activation).
+- **Recommended**: [Nix](https://nixos.org/download.html) with flakes enabled.
   The dev shell pins stable Rust 1.91 from nixpkgs 25.11 and pulls in `clang`,
   `cmake`, `pkg-config`, and the platform GPU stack.
 - **Manual alternative**: stable Rust 1.90+ (via `rustup`), plus `clang`,
@@ -36,9 +35,7 @@ cd world_mesh
 ### Enter the dev shell
 
 ```bash
-direnv allow        # if you use direnv — picks up .envrc automatically
-# or
-nix develop         # drops you into the pinned dev shell manually
+nix develop         # drops you into the pinned dev shell
 ```
 
 If you are going the manual Rust route, skip this step and just be sure

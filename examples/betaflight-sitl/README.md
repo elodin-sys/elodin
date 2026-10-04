@@ -1,7 +1,10 @@
 # Betaflight SITL Drone Simulation
 
-This example demonstrates how to run a Software-In-The-Loop (SITL) drone simulation
-using Elodin's physics engine with Betaflight's flight controller software.
+This is the reference SITL (Software-In-The-Loop) example: an Elodin physics
+simulation driving a real Betaflight flight controller in lockstep, recorded to
+a portable Elodin DB. The same integration pattern (`post_step` + `StepContext`)
+scales to HITL on the Aleph flight computer, where the on-board `elodin-db`
+service produces the same kind of self-contained recording.
 
 ## Overview
 
@@ -9,8 +12,8 @@ The simulation provides:
 - **6-DOF Physics**: Rigid body dynamics with motor thrust, drag, and gravity
 - **Betaflight Integration**: Real Betaflight flight controller running as SITL
 - **UDP Communication**: Bidirectional sensor/motor data exchange
-- **8kHz PID Loop**: High-performance control matching Betaflight's fastest rate
-- **Multi-Rate Sensors**: Realistic sensor update rates (gyro 8kHz, accel 4.8kHz, baro 480Hz, mag 200Hz)
+- **8kHz Lockstep Loop**: Real-time physics and Betaflight PID updates by default
+- **Multi-Rate Sensors**: Requested sensor rates are capped by the simulation rate
 
 ```
 ┌─────────────────────┐        UDP        ┌─────────────────────┐
@@ -53,10 +56,20 @@ cd examples/betaflight-sitl
 This compiles the Betaflight firmware for SITL mode. The binary will be at:
 `betaflight/obj/main/betaflight_SITL.elf`
 
-### First-Time Setup: Configure Arming
+### First-Time Setup: Configure Arming and ANGLE Mode
 
-**IMPORTANT**: Before running the simulation, you must configure an ARM switch in Betaflight.
-This only needs to be done once - the config is saved to `eeprom.bin`.
+**IMPORTANT**: Before running the simulation, configure the ARM switch on AUX1
+and ANGLE mode on AUX2. This only needs to be done once; the config is saved to
+`eeprom.bin`.
+
+Run the initialization script from the repository root:
+
+```bash
+./examples/betaflight-sitl/init_eeprom.py
+```
+
+It starts SITL, sends the CLI commands, saves `eeprom.bin`, then restarts SITL
+and verifies the persisted settings. To do the same setup manually:
 
 1. **Start SITL** (in terminal 1):
    ```bash
@@ -73,22 +86,24 @@ This only needs to be done once - the config is saved to `eeprom.bin`.
    screen /tmp/bf
    ```
 
-3. **Configure Betaflight for 8kHz operation** (in screen session):
+3. **Configure arming and full-rate PID processing** (in screen session):
    ```
    #
    status
    
-   # Configure ARM switch (AUX1 channel, activated when > 1700)
+   # Configure ARM on AUX1 and ANGLE on AUX2 (both active above 1700)
    aux 0 0 0 1700 2100 0 0
+   aux 1 1 1 1700 2100 0 0
    
-   # Configure 8kHz gyro/PID loop rate
+   # Process every available gyro/PID update
    set gyro_hardware_lpf = NORMAL
    set pid_process_denom = 1
    
    save
    ```
    
-   This sets ARM mode on AUX1 channel and configures Betaflight for 8kHz PID loop operation.
+   This configures ARM on AUX1 and processes every lockstep update. The actual
+   lockstep rate is set by `simulation_rate` (8kHz by default).
 
 4. **Exit screen**: Press `Ctrl+A` then `K` then `Y`
 
@@ -104,42 +119,283 @@ elodin editor examples/betaflight-sitl/main.py
 elodin run examples/betaflight-sitl/main.py
 ```
 
-**Direct Python (subprocess starts Betaflight):**
+**Direct Python:**
 ```bash
 python3 examples/betaflight-sitl/main.py run
 ```
 
-### Quick Arming Test
+### Manual Piloting
 
-Test that arming works correctly:
+Manual input is opt-in; the no-environment-variable default remains the Package
+A scripted takeoff. Start the editor and s10-managed controller with:
+
 ```bash
-# Start SITL in one terminal
-./examples/betaflight-sitl/betaflight/obj/main/betaflight_SITL.elf
+RACE_GUIDANCE=manual elodin editor examples/betaflight-sitl/main.py
+```
 
-# In another terminal, run the test
+The controller polls at approximately 100 Hz and supports a gamepad or global X11
+keyboard input. Mode 2 is the default. Set `RACE_STICK_MODE=1` for Mode 1.
+
+| Input | Keyboard | Gamepad |
+|---|---|---|
+| Throttle | W / S (incremental) | Mode 2 left Y; Mode 1 right Y |
+| Yaw left / right | Q / E or A / D | Left X |
+| Pitch forward / back | Up / Down | Mode 2 right Y; Mode 1 left Y |
+| Roll left / right | Left / Right | Right X |
+| Arm | Shift+R, only at minimum throttle | A/South, only at minimum throttle |
+| Disarm | F | B/East |
+| Toggle ANGLE | M | Y/North |
+
+ANGLE mode starts enabled. Throttle never implicitly arms the vehicle. Gamepad
+disconnection immediately resets arm, throttle, and axes. If the controller
+process exits or its heartbeat stops for 250 ms, the simulation sends centered
+axes, minimum throttle, and disarm. A host with neither a reachable X display
+nor a gamepad continuously sends that same safe input rather than panicking.
+Raw `[roll,pitch,throttle,yaw,armed,angle_mode,heartbeat]` input is recorded as
+`drone.manual_control`; the six resulting PWM channels are recorded as
+`drone.rc_command`.
+
+The measured semantic signs are: positive roll = right wing down, positive pitch
+= nose down/forward, and positive yaw = nose right/clockwise from above. Roll
+and pitch map directly above RC center. Right yaw maps below RC center because
+the verified SITL yaw RC sign is inverted. `controls.py` is the single tested
+semantic-to-RC conversion path.
+
+Run the deterministic physical sign/ANGLE audit headlessly with:
+
+```bash
+RACE_GUIDANCE=manual RACE_MANUAL_AUDIT=1 \
+  elodin run examples/betaflight-sitl/main.py
+```
+
+The simulation-side `AuditGuidance` source injects bounded roll, pitch, yaw,
+and throttle commands from `GuidanceUpdate.sim_time`; host load therefore cannot
+shift its phase boundaries or shorten its five-simulated-second boot grace. The
+external manual controller is not started for this run. Audit commands still
+follow the ordinary `SemanticControl` → `semantic_to_rc` → one-tick RC latch →
+Betaflight path before `AxisAudit` observes the physical response. A successful
+run emits a `[D-AUDIT] ... status=PASS` line and exits nonzero if an axis responds
+with the wrong sign, throttle has no motor response, or ANGLE was not requested.
+
+### FPV Camera
+
+`RACE_CAMERA=0` (the default) registers no camera and does not start the render
+server. `RACE_CAMERA=1` registers `drone.fpv`: 640×360 RGBA, 30 frames per
+simulation second, read with 33 ms of latency. Any other value fails at startup.
+The camera is independent of `RACE_GUIDANCE` and `RACE_COURSE`. The frustum is off
+by default; turn it on with CREATE in the FPV camera inspector, then SHOW
+FRUSTUMS in the viewport inspector. The drone model is drawn at 10× physical
+size so it stays easy to see from the chase camera, and it is hidden from the
+FPV image so the camera shows the world ahead instead of the model interior.
+
+```bash
+RACE_CAMERA=1 elodin run examples/betaflight-sitl/main.py
+RACE_CAMERA=1 elodin editor examples/betaflight-sitl/main.py
+elodin-db export-videos <db> --output /tmp/bf_fpv --fps 30
+```
+
+`<db>` is the database path printed at the end of the run. A camera-enabled run
+prints one shutdown line:
+
+```text
+[FPV] total_frames=... window_frames=... observed_fps=... status=PASS|FAIL reason=...
+```
+
+`status=FAIL` exits 1. `frame_fresh` is true only for a newly rendered frame. A
+held frame is still supplied, with `frame_fresh=False`. The exported video can
+be one frame ahead of `total_frames`, because the render server may write one
+more frame while it shuts down after the final tick.
+
+### Race Course and Referee
+
+Course selection is independent of the command source:
+
+```bash
+# No course (default): preserves the C0 scripted takeoff.
+elodin run examples/betaflight-sitl/main.py
+
+# One static training gate plus truth-based scoring.
+RACE_COURSE=single elodin run examples/betaflight-sitl/main.py
+
+# Render the same course in the editor.
+RACE_COURSE=single elodin editor examples/betaflight-sitl/main.py
+```
+
+`RACE_COURSE` accepts `none` (default) and `single`. `c1_straight` is a
+reserved value and fails clearly until Package F implements it; every other
+value is also rejected at startup. Course parsing does not select or alter
+`RACE_GUIDANCE`, so the no-environment default remains the scripted C0 run.
+
+The single gate is centered at ENU `(10, 0, 1.8)` metres with yaw `0` and an
+exact `2.5 m` square inner opening. Yaw is about world +Z; yaw zero gives a
+plane normal along world +X. A pass approaches from negative gate-local X and
+crosses toward positive local X. Four static `0.2 m` saturated-orange matte
+bars render the frame; they carry only `WorldPos` and do not participate in
+rigid-body integration or collision physics.
+
+The referee scores simulation truth after command selection, independently of
+guidance mode. It interpolates each sampled segment at the next ordered gate
+plane, checks the interpolated local Y/Z point against the inclusive opening
+bounds, and records each gate once. The pass timestamp is interpolated between
+the segment endpoints in simulation time (never wall-clock time); lap time runs
+from simulation time zero through the final gate crossing. Guidance receives
+the resulting ordered progress on the next physics tick and only public course
+rules—never gate poses, the crossing point, or drone truth through this seam.
+
+An enabled course emits exactly one final machine-readable line, including on
+an incomplete or interrupted run. The default vertical script does not steer
+through the gate, so `single` normally reports:
+
+```text
+[RACE] course=single gates_passed=0/1 lap_time=na status=INCOMPLETE pass_times=[]
+```
+
+A completed synthetic or future guided run uses seconds with six decimal
+places, for example `lap_time=2.125000 pass_times=[2.125000]`. Referee-owned
+telemetry is recorded as:
+
+- `drone.last_gate_passed`: ordered gate index, initially `-1`;
+- `drone.gate_pass_times`: fixed three-entry simulation-seconds array, with
+  unpassed slots set to `-1.0` (reserved for the three-gate core course).
+
+#### Package C referee qualification
+
+The expensive live positive-path check is opt-in and separate from the pure
+pytest suite:
+
+```bash
+# Headless pass/fail qualification.
+RACE_COURSE=single RACE_REFEREE_AUDIT=1 \
+  elodin run examples/betaflight-sitl/main.py
+
+# The same fixture with audit-specific course framing and referee graphs.
+RACE_COURSE=single RACE_REFEREE_AUDIT=1 \
+  elodin editor examples/betaflight-sitl/main.py
+```
+
+The audit requires `RACE_COURSE=single` and the default
+`RACE_GUIDANCE=scripted`; invalid combinations fail at startup. It starts the
+disarmed drone at `(5.0, 0.0, 4.9)` m with world velocity
+`(10.0, 0.0, 0.0)` m/s and runs for 2.5 simulated seconds. The run ends before
+the scripted source leaves its safe boot phase, so no steering or motor command
+causes the pass. Ordinary six-DOF gravity and drag carry the drone through the
+unchanged vertical 2.5 m gate, then leave it visible beyond the plane.
+
+On the verified fixture, the interpolated pass time is `1.085149 s`, the sampled
+crossing height is approximately `1.7958 m`, and final X is `11.7776 m` (the
+qualification accepts the deliberate `0.9–1.3 s` simulation-time interval and
+requires at least X=10.5 m departure). The simulation portion takes about 3.0
+wall seconds after bridge startup. The audit reads referee telemetry on a later
+callback tick and requires exactly one gate-0 event, `last_gate_passed == 0`,
+matching pass time, untouched `-1.0` slots, and a complete `1/1` `RaceResult`.
+Success emits exactly one line of each contract and exits zero:
+
+```text
+[RACE] course=single gates_passed=1/1 lap_time=1.085149 status=COMPLETE pass_times=[1.085149]
+[C-REFEREE-AUDIT] gate=0 passes=1 telemetry=true result=COMPLETE pass_time=1.085149 status=PASS
+```
+
+A convenient visual record starts capture as soon as Gamescope publishes its
+PipeWire source, so the two-second Betaflight initialization remains in the
+recording before the short flight. Follow the repository headless-capture skill;
+on a standard development shell use its `target-object` serial workflow. On a
+host whose PipeWire plugin rejects that serial but supports its deprecated node
+path, the tested fallback is:
+
+```bash
+# Terminal 1, after confirming the selected GPU is idle:
+RACE_COURSE=single RACE_REFEREE_AUDIT=1 \
+  gamescope --backend headless -w 1280 -h 720 -W 1280 -H 720 -r 30 -- \
+  ./target/release/elodin editor examples/betaflight-sitl/main.py
+
+# Terminal 2: resolve the sole live Gamescope node immediately, then record.
+NODE_ID="$(pw-dump | jq -r '[.[] | select(.type == "PipeWire:Interface:Node")
+  | select(.info.props["media.name"] == "gamescope")] | last | .id')"
+gst-launch-1.0 -e pipewiresrc path="$NODE_ID" do-timestamp=true \
+  ! video/x-raw,format=BGRx ! queue ! videoconvert \
+  ! video/x-raw,format=I420 \
+  ! x264enc bitrate=8000 speed-preset=veryfast \
+  ! video/x-h264,profile=main ! h264parse config-interval=-1 \
+  ! mpegtsmux ! filesink location=/tmp/package-c-referee-audit.ts
+ffmpeg -fflags +genpts -i /tmp/package-c-referee-audit.ts -c copy \
+  -movflags +faststart /tmp/package-c-referee-audit.mp4
+```
+
+MPEG-TS is intentional in the fallback: it remains recoverable if the short
+editor run removes the PipeWire source before GStreamer receives EOS. This
+qualification proves the production truth extraction, referee, telemetry write
+and later readback, and final-result path. It does **not** prove autonomous
+control, powered level flight, collision handling, or future truth/vision
+guidance.
+
+
+### Recorded Database
+
+Each run records to an auto-numbered `betaflight_dbXXX` directory. The schematic
+and its assets (the drone GLB) are ingested under `{db}/assets/`, so the
+directory is a complete, portable record — copy it anywhere and replay it:
+
+```bash
+elodin-db run 127.0.0.1:2240 betaflight_db000
+elodin editor 127.0.0.1:2240          # add --replay for live-style playback
+```
+
+On the Aleph flight computer the on-board `elodin-db` service applies the same
+ingest to each fresh boot database, so a HITL recording pulled off the vehicle
+replays the same way. See [DB Asset Server](https://docs.elodin.systems/reference/db-asset-server/).
+
+### Baseline Verification
+
+Activate the Elodin Python environment, then run the pure protocol and
+conversion tests from the repository root:
+
+```bash
 source .venv/bin/activate
-python3 examples/betaflight-sitl/test_comms.py
+python3 -m pytest examples/betaflight-sitl/tests -q
 ```
 
-Expected output when working:
+Run the default scripted integration scenario with no racing environment
+variables:
+
+```bash
+elodin run examples/betaflight-sitl/main.py
 ```
-Phase 2: Setting AUX1=1800 to ARM (2 seconds)...
-  t=5.5s motors=[0.055 0.055 0.055 0.055]  # Motors at idle!
-Phase 3: Raising throttle...
-  t=7.2s motors=[0.402 0.402 0.402 0.402]  # Motors responding!
+
+A successful run prints one machine-readable C0 result in addition to the human
+diagnostics:
+
+```text
+[C0] lockstep_steps=119995 motor_response=true max_motor=0.574 takeoff_delta_m=56.836 status=PASS
 ```
+
+The measured values may vary slightly by host. C0 requires at least one
+successful simulation-loop lockstep response, motor output greater than 0.06,
+and a peak altitude at least 0.1 m above the configured initial altitude. If any
+criterion is unmet, the result reports `status=FAIL` and the command exits
+nonzero.
 
 ## Project Structure
 
 ```
 examples/betaflight-sitl/
+├── audit.py           # Simulation-time audit guidance and physical assessment
+├── baseline.py        # Default C0 scenario pass/fail assessment
+├── controls.py        # Guidance, semantic input, RC conversion, and failsafe
+├── course.py          # Pure gate/course geometry and KDL bar generation
+├── fpv_camera.py      # FPV sampling, freshness, frame accounting, and acceptance
+├── referee.py         # Pure ordered crossing scorer and race result
+├── referee_audit.py   # Pure opt-in live-audit config and acceptance evaluator
+├── race_runtime.py    # Static scene entities and referee telemetry adapters
+├── controller/        # s10-managed Rust gamepad/keyboard input provider
 ├── build.sh           # Build script for Betaflight SITL
+├── init_eeprom.py     # Create and configure eeprom.bin
 ├── main.py            # Main simulation entry point
 ├── config.py          # Drone physical parameters
 ├── sim.py             # Physics simulation systems
 ├── sensors.py         # IMU sensor simulation
-├── comms.py           # UDP communication bridge
-├── test_comms.py      # Standalone communication test
+├── comms.py           # UDP packets, conversions, and communication bridge
+├── tests/             # Pure protocol, control, course, and referee tests
+├── RACING_PLAN.md     # Incremental vision-guided racing plan
 ├── eeprom.bin         # Betaflight saved config (created on first run)
 ├── betaflight/        # Betaflight submodule
 │   └── obj/main/
@@ -153,8 +409,8 @@ examples/betaflight-sitl/
 
 **FDM Packet (Port 9003)**: Flight Dynamics Model data
 - Timestamp (seconds)
-- IMU angular velocity (rad/s, body frame)
-- IMU linear acceleration (m/s², NED body frame)
+- IMU angular velocity (rad/s, FRD body frame)
+- IMU linear acceleration (m/s², FRD body frame)
 - Orientation quaternion (w, x, y, z)
 - Velocity (m/s, ENU world frame)
 - Position (m, ENU world frame)
@@ -201,17 +457,34 @@ The simulation handles complex coordinate frame conversions:
 
 ### Body Frame Conversion (FLU → FRD)
 
-Betaflight's SITL (sitl.c) applies internal sign conversions to incoming sensor data:
-- **Accelerometer**: Negates all axes (-X, -Y, -Z)
-- **Gyroscope**: Keeps X, negates Y and Z (X, -Y, -Z)
+The simulation sends IMU data in the FRD sensor frame, mirroring the Gazebo
+BetaflightPlugin whose IMU sensor frame is FRD (Rx(π) relative to the FLU body
+link). Both quantities use the same FLU → FRD conversion (negate Y and Z):
 
-The simulation pre-compensates for these conversions so that the correct FRD values
-result after Betaflight's processing. Additionally, Elodin's pitch axis convention
-is inverted relative to Betaflight's expectation, requiring explicit negation.
+- **Accelerometer**: specific force in FRD, e.g. `[0, 0, -1g]` at rest
+- **Gyroscope**: body rates in FRD
 
-### Motor Mapping (Betaflight Quad-X with SITL Gazebo Remapping)
+Betaflight's SITL (sitl.c) then maps these onto its internal axes:
+- **Accelerometer**: Negates all axes, so at rest the attitude estimator sees
+  acc_z = +1g (up) and the Mahony filter converges to a level attitude
+- **Gyroscope** (2026.6.1+, default `ENABLE_GAZEBO_BRIDGE=1`): Keeps X and Z,
+  negates Y (X, -Y, +Z) — see `sitlGyroBodyFromSim()` in `sitl_gyro.h` —
+  yielding Betaflight's (roll right, pitch nose-down, yaw CW) sign convention
 
-Betaflight SITL remaps motor indices for Gazebo ArduCopterPlugin compatibility:
+The attitude quaternion is sent in the Gazebo BetaflightPlugin convention
+(conjugated by Rx(π), i.e. qy/qz negated). SITL undoes the conjugation and rotates
+the world frame from ENU to NWU internally; the result drives the virtual
+magnetometer feed and the attitude estimator's heading reference.
+
+Note: 2026.6.1+ SITL runs the real Mahony attitude estimator fusing the virtual
+gyro/accel/mag feeds. (The legacy behavior of setting attitude directly from the
+FDM quaternion is still available by building with `-DSITL_ATTITUDE_DIRECT`.)
+
+### Motor Mapping (Betaflight Quad-X, Native Order)
+
+Betaflight 2026.6.1+ SITL sends motor outputs in native Betaflight order
+(the old Gazebo ArduCopterPlugin remapping was removed from
+`pwmCompleteMotorUpdate()`):
 
 ```
 Standard Betaflight Quad-X Layout (looking down):
@@ -226,11 +499,11 @@ Standard Betaflight Quad-X Layout (looking down):
     3 (BL, CCW)    1 (BR, CW)
          BACK
 
-SITL Gazebo Remapping (what we receive):
-  motor[0] = FR (Front Right, CCW)  - originally BF Motor 1
-  motor[1] = BL (Back Left, CCW)    - originally BF Motor 2
-  motor[2] = FL (Front Left, CW)    - originally BF Motor 3
-  motor[3] = BR (Back Right, CW)    - originally BF Motor 0
+What we receive (native Betaflight motor indices):
+  motor[0] = BF Motor 0 = BR (Back Right, CW)
+  motor[1] = BF Motor 1 = FR (Front Right, CCW)
+  motor[2] = BF Motor 2 = BL (Back Left, CCW)
+  motor[3] = BF Motor 3 = FL (Front Left, CW)
 ```
 
 See `config.py` for motor positions and spin directions matching this mapping.
@@ -245,11 +518,11 @@ DroneConfig(
     arm_length=0.12,             # meters
     motor_max_thrust=15.0,       # Newtons per motor
     motor_time_constant=0.02,    # seconds
-    simulation_rate=8000.0,      # 8kHz physics (matches Betaflight PID)
+    simulation_rate=8000.0,      # 8kHz physics/PID lockstep
     sensor_noise=True,           # Enable realistic sensor noise
-    # Sensor rates (Aleph hardware defaults)
-    gyro_rate=8000.0,            # 8kHz (BMI270 3x IMU)
-    accel_rate=4800.0,           # 4.8kHz (BMI270 3x IMU)
+    # Requested sensor rates (capped by the simulation rate)
+    gyro_rate=8000.0,            # Effective rate is 8kHz by default
+    accel_rate=4800.0,           # Effective rate is 4kHz after tick rounding
     baro_rate=480.0,             # 480Hz (BMP581)
     mag_rate=200.0,              # 200Hz (BMM350)
 )
@@ -267,9 +540,11 @@ The simulation includes a realistic sensor noise model based on the proven drone
 - **Accelerometer**: Gaussian noise
 - **Barometer**: Gaussian noise (~0.03m std dev)
 
-Noise levels are tuned for SITL stability (1e-7 covariance). Higher noise levels
-can cause Betaflight's attitude estimator to drift during the bootgrace period,
-leading to motor imbalance at liftoff.
+The gyro uses `1e-7 (rad/s)²` measurement covariance and `1e-8` bias-drift
+covariance. The measurement covariance corresponds to approximately
+`0.000316 rad/s` (`0.018 deg/s`) RMS noise per sample. This matches the
+original example's recommended stable SITL setting while keeping sensor noise
+enabled. Higher gyro noise can produce motor imbalance or destabilize liftoff.
 
 ### Ground Physics
 
@@ -283,7 +558,7 @@ The ground constraint includes angular damping to simulate landing gear friction
 
 ### Architecture Overview
 
-The wrapper leverages Betaflight's native `SIMULATOR_GYROPID_SYNC` mechanism.
+The wrapper leverages Betaflight's native `ENABLE_SIMULATOR_GYROPID_SYNC` mechanism.
 
 ```mermaid
 sequenceDiagram
@@ -297,15 +572,17 @@ sequenceDiagram
         Sim->>Sim: Run physics (JAX)
         Sim->>DB: Commit world state
         Sim->>PS: Call post_step(tick)
-        
-        PS->>DB: Read sensor data (pos, vel, quat)
-        PS->>Bridge: Build FDM packet
-        Bridge->>BF: Send FDM (UDP 9003)
+
+        PS->>DB: Batch-read current sensors/state
+        PS->>Bridge: Send FDM + RC retained on tick N-1
+        Bridge->>BF: UDP 9003/9004
         Note over BF: GYROPID_SYNC unblocks
         BF->>BF: Run 1 PID iteration
         BF->>Bridge: Send motor output (UDP 9002)
         Bridge->>PS: Return motor values
-        PS->>DB: Write motor_command (external_control)
+        PS->>DB: Write motor_command
+        PS->>PS: Run selected command source
+        PS->>DB: Record RC command retained for tick N+1
         PS->>Sim: Return from post_step
     end
 ```
@@ -316,14 +593,41 @@ sequenceDiagram
 
 #### 1. Betaflight Build with GYROPID_SYNC
 
-Modify [build.sh](examples/betaflight-sitl/build.sh) to enable lockstep mode:
+[build.sh](build.sh) enables lockstep mode through Betaflight's `OPTIONS`
+make variable:
 
-```c
-// In target.h - uncomment this line:
-#define SIMULATOR_GYROPID_SYNC
+```bash
+make TARGET=SITL OPTIONS="ENABLE_SIMULATOR_GYROPID_SYNC=1 VIRTUAL_GYRO_SAMPLE_RATE_HZ=8000 RUN_LOOP_DELAY_US=0"
 ```
 
-When enabled, Betaflight's main loop blocks on a mutex that is only released when a new FDM packet arrives. This provides synchronization without needing custom semaphores.
+(2026.6.1 renamed the option to an `ENABLE_*` boolean macro; `OPTIONS` entries
+become `-D` flags, so this yields `-DENABLE_SIMULATOR_GYROPID_SYNC=1`.
+`VIRTUAL_GYRO_SAMPLE_RATE_HZ` is Betaflight's compile-time assumption about the
+virtual gyro/acc rate — it drives filter/Nyquist setup and PID dt, so it must
+match `simulation_rate` in `config.py`.)
+
+The build also applies [patches/sitl-lockstep-event.patch](patches/sitl-lockstep-event.patch)
+to the submodule (idempotently). In lockstep mode a fully published FDM packet
+is the trigger for one gyro/filter/PID/mixer iteration — one packet in, one
+iteration, one motor response out:
+
+- **scheduler.c**: the realtime gyro/filter/PID group runs once per FDM packet,
+  gated on `lockMainPID()` — the stock `mainLoopLock` token that the UDP receive
+  thread releases at the end of `updateState()` once a full packet is published —
+  instead of on the simulated-clock boundary. Stock SITL paces that boundary by
+  a free-running `simRate` estimate (`micros64() = realtime × simRate`), so a
+  slow patch (warmup, CPU contention) lowers `simRate`, which delays the gyro
+  task, which slows the loop further — the rate never recovers.
+- **core.c**: the now-redundant per-task PID mutex gate is dropped; the whole
+  realtime group is gated at the boundary.
+- **platform.h**: `RUN_LOOP_DELAY_US` becomes overridable. The 8 kHz default
+  build sets it to `0`, making the main loop busy-wait for the lowest possible
+  packet→motor latency. This consumes approximately one CPU core. Set a nonzero
+  value to trade lockstep performance for lower CPU usage; host scheduler wakeup
+  latency is paid on every iteration and may prevent the loop from sustaining
+  8 kHz.
+
+Asynchronous SITL (lockstep disabled) is unchanged.
 
 #### 2. External Control Component for Motor Commands
 
@@ -362,7 +666,7 @@ class BetaflightSyncBridge:
         2. Wait for motor response (blocking)
         3. Return motor values
         
-        This works because SIMULATOR_GYROPID_SYNC makes Betaflight
+        This works because ENABLE_SIMULATOR_GYROPID_SYNC makes Betaflight
         block until FDM arrives, then immediately send motor output.
         """
 ```
@@ -375,7 +679,7 @@ class BetaflightSyncBridge:
 Update [main.py](examples/betaflight-sitl/main.py) to use the `post_step` pattern from the SITL example:
 
 ```python
-def create_sitl_step_callback(bridge: BetaflightSyncBridge, client: Impeller2):
+def create_sitl_step_callback(bridge: BetaflightSyncBridge, client: Impeller):
     """Create the post_step callback for SITL synchronization."""
     
     def sitl_step(tick: int):
@@ -497,11 +801,13 @@ lsof -i :5761
 
 ### Performance
 
-**Simulation too slow**: The simulation runs at 8kHz by default to match Betaflight's
-high-performance PID loop. For optimal performance:
-- `simulation_rate = 8000.0` (8kHz) is the default
-- Ensure sufficient CPU for both Elodin and Betaflight
-- 8kHz produces ~160,000 ticks for a 20-second simulation
+**Simulation too slow**: The default `simulation_rate = 8000.0` gives the
+Python/UDP lockstep bridge a 125µs budget per tick and requires Betaflight's
+busy-waiting `RUN_LOOP_DELAY_US=0` build to hold real time. This consumes
+approximately one CPU core on the Betaflight side. Lower rates or a nonzero
+run-loop delay reduce CPU usage, but a sleeping Betaflight loop may not sustain
+8kHz because every tick includes DB access and a synchronous UDP round trip.
+The default 15-second run produces 120,000 simulation ticks.
 
 ## Development
 
@@ -534,19 +840,24 @@ This simulation models realistic sensor update rates based on the Elodin Aleph f
 controller hardware. Different sensors update at different frequencies within the
 high-rate physics/PID loop.
 
-### Default Rates (Aleph Hardware)
+### Configured and Effective Rates
 
-| Sensor | Hardware | Rate | Datasheet |
-|--------|----------|------|-----------|
-| Gyroscope | BMI270 (3x with timing offset) | 8 kHz | [bst-bmi270-ds000.pdf](https://www.mouser.com/datasheet/3/1046/1/bst-bmi270-ds000.pdf) |
-| Accelerometer | BMI270 (3x with timing offset) | 4.8 kHz | [bst-bmi270-ds000.pdf](https://www.mouser.com/datasheet/3/1046/1/bst-bmi270-ds000.pdf) |
-| Barometer | BMP581 | 480 Hz | [bst_bmp581_ds004.pdf](https://www.mouser.com/datasheet/3/1046/1/bst_bmp581_ds004.pdf) |
-| Magnetometer | BMM350 | 200 Hz | [bst-bmm350-ds001.pdf](https://www.mouser.com/datasheet/3/1046/1/bst-bmm350-ds001.pdf) |
+Configured sensor rates represent hardware targets. A sensor cannot update more
+than once per physics tick, so its effective rate is capped by the 8kHz default
+simulation rate and rounded to a whole number of ticks.
+
+| Sensor | Hardware | Configured rate | Effective default rate | Datasheet |
+|--------|----------|-----------------|------------------------|-----------|
+| Gyroscope | BMI270 (3x with timing offset) | 8 kHz | 8 kHz | [bst-bmi270-ds000.pdf](https://www.mouser.com/datasheet/3/1046/1/bst-bmi270-ds000.pdf) |
+| Accelerometer | BMI270 (3x with timing offset) | 4.8 kHz | 4 kHz | [bst-bmi270-ds000.pdf](https://www.mouser.com/datasheet/3/1046/1/bst-bmi270-ds000.pdf) |
+| Barometer | BMP581 | 480 Hz | ~471 Hz | [bst_bmp581_ds004.pdf](https://www.mouser.com/datasheet/3/1046/1/bst_bmp581_ds004.pdf) |
+| Magnetometer | BMM350 | 200 Hz | 200 Hz | [bst-bmm350-ds001.pdf](https://www.mouser.com/datasheet/3/1046/1/bst-bmm350-ds001.pdf) |
 
 ### Why Multi-Rate?
 
-Real sensors don't all sample at the same frequency. The PID loop runs at 8kHz driven
-by gyroscope data, but other sensors update less frequently:
+Real sensors don't all sample at the same frequency. The physics/PID lockstep
+runs at 8kHz by default. The gyroscope updates every physics tick, while slower
+sensors update less frequently:
 
 - **Gyroscope (8 kHz)**: Drives the PID loop. The BMI270 supports up to 6.4 kHz per
   sensor; with 3 IMUs running with timing offsets, effective rate exceeds 8 kHz.
@@ -558,11 +869,11 @@ by gyroscope data, but other sensors update less frequently:
 
 ### How It Works
 
-The simulation uses tick decimation with `jax.lax.cond` to update sensors at their
-native rates while the physics/PID loop runs at 8kHz:
+The simulation uses tick decimation with `jax.lax.cond` to approximate requested
+sensor rates using whole physics ticks:
 
 ```python
-tick_interval = round(PID_RATE / SENSOR_RATE)
+tick_interval = max(1, round(PID_RATE / SENSOR_RATE))
 
 # Sensor updates only when tick is divisible by interval
 sensor_out = jax.lax.cond(
@@ -573,8 +884,8 @@ sensor_out = jax.lax.cond(
 )
 ```
 
-For example, with 8 kHz PID and 200 Hz magnetometer: `tick_interval = 40`
-(magnetometer updates every 40th physics tick).
+For example, with the default 8kHz PID rate and a 200Hz magnetometer,
+`tick_interval = 40` (the magnetometer updates every fortieth physics tick).
 
 ### Customizing for Different Hardware
 
@@ -585,7 +896,7 @@ DroneConfig(
     # ... other parameters ...
     
     # Sensor update rates (Hz)
-    gyro_rate=8000.0,    # Must match PID loop rate
+    gyro_rate=8000.0,    # Requested rate; capped by the PID rate
     accel_rate=4800.0,   # BMI270: 1.6kHz × 3 IMUs
     baro_rate=480.0,     # BMP581 continuous mode
     mag_rate=200.0,      # BMM350

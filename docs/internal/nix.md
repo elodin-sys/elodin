@@ -11,6 +11,33 @@ Elodin provides a unified development shell that includes all necessary tools fo
 - This single shell includes tools for Rust, Python, C/C++, cloud operations, documentation, and git-lfs
 - No need to switch between different shells for different tasks
 - git-lfs is included to handle large files in the repository
+- On Linux the shell and the packaged binaries render on the discrete NVIDIA GPU whenever its driver is usable; set `ELODIN_GPU=mesa` to stay on Mesa, or `ELODIN_GPU=nvk` to reach an NVIDIA GPU through Mesa's own driver. `ELODIN_GPU` is a Nix shell setting: export it **before** `nix develop`.
+
+### GPU-not-found help
+
+If the editor panics with `Unable to find a GPU`, it prints how to pick a path (`ELODIN_GPU=nvidia|mesa|nvk nix develop`). To preview that message without unplugging a GPU:
+
+```bash
+ELODIN_GPU_PANIC=true elodin editor
+```
+
+Only the exact value `true` triggers it (`1` / `false` are ignored). The process exits immediately with status 101.
+
+## Linux headless capture
+
+Both `nix develop` and `nix develop .#run` include Gamescope, Nix's Xwayland,
+PipeWire/GStreamer tools, and VA-API diagnostics. Run the capture helper from
+the repository root inside either shell:
+
+```bash
+./scripts/elodin_capture.sh --duration 10 --output /tmp/elodin.mp4 examples/cube-sat/main.py
+```
+
+The helper keeps capture-specific GBM configuration scoped to Gamescope,
+automatically selects validated VA-API or NVENC encoding when available, and
+falls back to x264. It preserves an explicit `GBM_BACKENDS_PATH`. Set
+`ELODIN_GPU=mesa|nvidia` before entering the development shell for manual vendor
+selection.
 
 # macOS VM
 Often you want to build Linux binaries with Nix on your mac. This guide shows how to setup a VM using OrbStack, that supports remote builds.

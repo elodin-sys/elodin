@@ -4,16 +4,40 @@
 //! emitter geometry (position, direction, scale, rate, cutoff). Apollo's RCS and
 //! DPS plumes are authored this way in the lander schematic; this plugin only
 //! evaluates the nodes and drives the particle effects.
+//!
+//! Particle integration uses hanabi `Time<EffectSimulation>`, synced each
+//! frame to the Impeller playhead (`CurrentTimestamp` / `Paused`): pause freezes
+//! trails, playback speed scales spawn/integration, and playhead seeks despawn
+//! jet entities so Hanabi frees the GPU particle slab (there is no clear API).
+//! `ensure_kdl_thrusters` rebuilds from cached effect/image handles. Live 1x
+//! viewing does not require paced sim ticks for trail correctness.
+//!
+//! Effects come from two sources:
+//! - built-in Rust presets (`plume`, `cold_gas`), or
+//! - hanabi `.effect` RON files (`effect="db:effects/<project>/<name>.effect"`),
+//!   authored/tuned externally (pyrotechnique) and served by the DB Asset
+//!   Server like GLBs. File effects load asynchronously; the jet stays hidden
+//!   and `ParticleEffect` + `EffectMaterial` are inserted *together* once the
+//!   asset is ready, so hanabi never sees a compiled effect whose texture
+//!   slots have no bound images (that mismatch asserts in
+//!   `prepare_bind_groups`). Sprite textures bind by slot-name convention:
+//!   `mask` -> the built-in procedural soft circle, `smoke` ->
+//!   `db:textures/smoke_puff.png`, anything else ->
+//!   `db:textures/soft_circle.png`.
 
-use bevy::asset::RenderAssetUsages;
-use bevy::math::{DVec3, Quat, Vec4};
+use std::collections::HashMap;
+
+use bevy::asset::{LoadState, RenderAssetUsages};
+use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
+use bevy::math::{DQuat, DVec3, Quat, Vec4};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::transform::TransformSystems;
-use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation};
+use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use bevy_hanabi::{
-    AlphaMode, Attribute, EffectAsset, EffectMaterial, EffectSpawner, Gradient, HanabiPlugin,
-    Module, ParticleEffect, SimulationSpace, SpawnerSettings,
+    AlphaMode, Attribute, CpuValue, EffectAsset, EffectMaterial, EffectProperties,
+    EffectSimulation, EffectSimulationTime, EffectSpawner, Gradient, HanabiPlugin, Module,
+    ParticleEffect, SimulationSpace, SlotDimension, SpawnerSettings,
     modifier::{
         ShapeDimension,
         attr::SetAttributeModifier,
@@ -26,17 +50,40 @@ use bevy_hanabi::{
         velocity::SetVelocitySphereModifier,
     },
 };
-use impeller2_bevy::EntityMap;
-use impeller2_wkt::{ComponentValue as WktComponentValue, Thruster, WorldPos};
+use impeller_bevy::{ConnectionAddr, EntityMap};
+use impeller_wkt::{ComponentValue as WktComponentValue, CurrentTimestamp, Thruster, WorldPos};
 
 use crate::EqlContext;
 use crate::WorldPosExt;
-use crate::object_3d::{CompiledExpr, Object3DState, compile_eql_expr};
+use crate::object_3d::{
+    CompiledExpr, Object3DState, WorldPosReceived, compile_eql_expr, local_assets_root,
+    resolve_db_asset_url_prefer_local,
+};
+use crate::plugins::kdl_document::InitialKdlPath;
+use crate::plugins::render_layer_alloc::THRUSTER_PARTICLES_RENDER_LAYER;
+use crate::ui::Paused;
+use crate::ui::timeline::LatestFollow;
 use crate::vector_arrow::component_value_tail_to_vec3;
 
 /// Reference exhaust axis used to build each emitter's local orientation (Bevy Y-up).
 const DPS_EXHAUST_BODY: Vec3 = Vec3::NEG_Y;
 const MIN_THRUST_VECTOR_LENGTH_SQUARED: f32 = 1e-12;
+
+/// Property names of the anchored-trail contract, shared with pyrotechnique
+/// (see its `builders::exhaust_smoke`): a `.effect` declaring these vec3
+/// properties runs `SimulationSpace::Local` on a **world-fixed anchor entity**
+/// and receives the live nozzle pose (in the anchor's frame) through them
+/// every frame. Particles hang in world space — a persistent smoke trail —
+/// while surviving big_space floating-origin rebases, which
+/// `SimulationSpace::Global` cannot.
+pub const SPAWN_ORIGIN_PROPERTY: &str = "spawn_origin";
+pub const SPAWN_AXIS_PROPERTY: &str = "spawn_axis";
+
+/// Optional throttle property (shared convention with pyrotechnique): effects
+/// declaring `intensity` receive the live 0..1 signal as a shader uniform
+/// every frame, next to the spawner-rate scaling, so throttle can drive plume
+/// length/brightness instead of only particle density.
+pub const INTENSITY_PROPERTY: &str = "intensity";
 
 #[derive(Resource)]
 struct ThrusterEffectAssets {
@@ -56,10 +103,107 @@ impl ThrusterEffectAssets {
     }
 }
 
+/// Retained strong handles for hanabi `.effect` files. Schematic refresh still
+/// despawns jets; this map keeps the asset resident across that rebuild.
+#[derive(Resource, Default)]
+struct FileEffectAssets {
+    /// Keyed by the resolved load path (`db:…` → `http://…` URL, or bare path).
+    handles: HashMap<String, Handle<EffectAsset>>,
+}
+
+impl FileEffectAssets {
+    fn get_or_load(&mut self, path: String, asset_server: &AssetServer) -> Handle<EffectAsset> {
+        if let Some(handle) = self.handles.get(&path) {
+            return handle.clone();
+        }
+        let handle = asset_server.load::<EffectAsset>(path.clone());
+        self.handles.insert(path, handle.clone());
+        handle
+    }
+}
+
+/// Server-loaded images must be `Loaded` before `EffectMaterial` is inserted.
+/// `Assets::add` handles have no load state (`None`) and are ready immediately.
+pub(crate) fn images_ready(images: &[Handle<Image>], server: &AssetServer) -> bool {
+    images
+        .iter()
+        .all(|h| server.get_load_state(h.id()).is_none_or(|s| s.is_loaded()))
+}
+
+fn images_failed(images: &[Handle<Image>], server: &AssetServer) -> bool {
+    images
+        .iter()
+        .any(|h| matches!(server.get_load_state(h.id()), Some(LoadState::Failed(_))))
+}
+
+/// Retained sprite handles (`smoke` / fallback). Seek despawns jets; this map
+/// keeps textures resident so `slot_image` does not call `AssetServer::load`.
+#[derive(Resource, Default)]
+struct FileImageAssets {
+    /// Keyed by the logical `db:` path so resolve + load run only on first miss.
+    handles: HashMap<String, Handle<Image>>,
+}
+
+impl FileImageAssets {
+    fn get_or_load(
+        &mut self,
+        db_path: &str,
+        asset_server: &AssetServer,
+        connection_addr: Option<std::net::SocketAddr>,
+        local_root: Option<&std::path::Path>,
+    ) -> Handle<Image> {
+        if let Some(handle) = self.handles.get(db_path) {
+            return handle.clone();
+        }
+        let resolved = resolve_db_asset_url_prefer_local(db_path, connection_addr, local_root);
+        let handle = asset_server.load::<Image>(resolved);
+        self.handles.insert(db_path.to_string(), handle.clone());
+        handle
+    }
+}
+
+/// One-shot flag: a playhead seek should despawn jets so Hanabi drops GPU particles.
+#[derive(Resource, Default)]
+struct SeekParticleReset(bool);
+
 #[derive(Component)]
 struct KdlThrusterRig {
     jets: Vec<Entity>,
+    /// The thruster configs this rig was built from. A schematic live-reload
+    /// that changes them tears the rig down so it is rebuilt from the new
+    /// configs (stale emitter positions were invisible otherwise).
+    configs: Vec<Thruster>,
 }
+
+/// Back-reference from a jet entity to the `object_3d` it belongs to. Jets are
+/// parented under that object (`ChildOf`) so they inherit its `GridCell` /
+/// floating-origin pose; this handle is what lets orphaned jets be swept when
+/// their object despawns.
+#[derive(Component)]
+struct KdlThrusterJetOf(Entity);
+
+/// Light child of a jet entity (KDL `thruster { light ... }`). Luminous power
+/// follows the jet's live intensity; the local transform holds the authored
+/// down-exhaust offset (and, for spots, the -Z -> -Y exhaust aim).
+#[derive(Component)]
+struct KdlThrusterLight {
+    /// Peak luminous power (lumens) at intensity = 1.
+    peak_lm: f32,
+}
+
+/// Jet re-homed onto a world-fixed anchor because its `.effect` declares the
+/// anchored-trail properties. The jet rides the anchor with an identity
+/// transform; `sync_kdl_thruster_transforms` writes the nozzle pose into the
+/// effect properties instead of moving the jet.
+#[derive(Component)]
+struct TrailAnchoredJet {
+    anchor: Entity,
+}
+
+/// World-fixed anchor entity of an anchored-trail jet (back-reference for
+/// cleanup when the jet despawns).
+#[derive(Component)]
+struct KdlTrailAnchorOf(Entity);
 
 #[derive(Component)]
 struct KdlThrusterJet {
@@ -70,7 +214,18 @@ struct KdlThrusterJet {
     frame: Option<GeoFrame>,
     intensity: Option<CompiledExpr>,
     scale: f32,
-    base_rate: f32,
+    /// `Some(rate)`: spawn `intensity × rate`/s (presets always; file effects
+    /// when the KDL sets `emission_rate` as an override).
+    /// `None`: scale the rate authored inside the `.effect` file
+    /// (`authored_settings`) by `intensity`.
+    base_rate: Option<f32>,
+    /// `.effect` file handle awaiting load; `ParticleEffect` + `EffectMaterial`
+    /// are inserted together once the asset is ready, then this is cleared.
+    pending_effect: Option<Handle<EffectAsset>>,
+    /// Spawner settings authored in the loaded `.effect` (file effects only).
+    authored_settings: Option<SpawnerSettings>,
+    /// The loaded `.effect` declares the `intensity` throttle property.
+    has_intensity_property: bool,
     cutoff: f32,
 }
 
@@ -84,17 +239,132 @@ pub struct ThrusterParticlesPlugin;
 impl Plugin for ThrusterParticlesPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(HanabiPlugin)
+            .init_resource::<EffectPlayheadClock>()
+            .init_resource::<FileEffectAssets>()
+            .init_resource::<FileImageAssets>()
+            .init_resource::<SeekParticleReset>()
             .add_systems(Startup, setup_thruster_effects)
+            // Drive hanabi's EffectSimulation clock from the Impeller playhead
+            // before TimeSystems advances it from Virtual.
+            .add_systems(
+                First,
+                (
+                    sync_effect_simulation_clock,
+                    reset_thruster_particles_on_seek,
+                )
+                    .chain()
+                    .before(bevy::time::TimeSystems),
+            )
             .add_systems(
                 PostUpdate,
                 (
+                    refresh_kdl_thrusters,
+                    sweep_trail_anchors,
                     ensure_kdl_thrusters,
+                    bind_file_effect_assets,
                     sync_kdl_thruster_transforms,
                     sync_kdl_thruster_particles,
                 )
                     .chain()
                     .after(TransformSystems::Propagate),
             );
+    }
+}
+
+/// Tracks the last Impeller playhead sample so we can derive sim-time Δt and
+/// detect playhead seeks (which reset thruster GPU instances).
+#[derive(Resource, Default)]
+struct EffectPlayheadClock {
+    last_playhead_us: Option<i64>,
+    last_wall: Option<std::time::Instant>,
+    last_seek_wall: Option<std::time::Instant>,
+}
+
+/// Max sim-time advance applied to particles in one render frame (avoids
+/// spawn bursts / capacity clamps at high playback speeds).
+const MAX_EFFECT_DT_S: f64 = 0.25;
+
+/// Playhead jump (seconds) that counts as a timeline scrub in either direction.
+const SEEK_SIM_DT_S: f64 = 5.0;
+/// Wall-time gap between jet despawns so a dragged slider cannot rebuild every frame.
+const SEEK_DEBOUNCE_S: f64 = 0.5;
+
+/// True when the playhead jumped by more than [`SEEK_SIM_DT_S`] and the user
+/// is not in follow-latest (live-tail snaps are not scrubs).
+fn is_playhead_seek(sim_dt: f64, following_latest: bool) -> bool {
+    !following_latest && sim_dt.abs() > SEEK_SIM_DT_S
+}
+
+/// Sync `Time<EffectSimulation>` to the editor playhead: pause when the
+/// timeline is paused or the playhead stalls; set `relative_speed` so particle
+/// integration tracks sim time; on a seek, despawn jets so Hanabi frees the
+/// GPU slab (no reverse integration; caches keep assets resident).
+fn sync_effect_simulation_clock(
+    mut effect_time: ResMut<Time<EffectSimulation>>,
+    current: Res<CurrentTimestamp>,
+    paused: Res<Paused>,
+    latest_follow: Res<LatestFollow>,
+    mut clock: ResMut<EffectPlayheadClock>,
+    mut seek_reset: ResMut<SeekParticleReset>,
+) {
+    let now = std::time::Instant::now();
+    let playhead = current.0.0;
+    let (Some(last_ph), Some(last_wall)) = (clock.last_playhead_us, clock.last_wall) else {
+        clock.last_playhead_us = Some(playhead);
+        clock.last_wall = Some(now);
+        effect_time.pause();
+        return;
+    };
+
+    let wall_dt = now
+        .saturating_duration_since(last_wall)
+        .as_secs_f64()
+        .max(1e-6);
+    let sim_dt = (playhead - last_ph) as f64 * 1e-6;
+
+    if is_playhead_seek(sim_dt, latest_follow.0) {
+        let cooled_down = clock
+            .last_seek_wall
+            .is_none_or(|t| now.saturating_duration_since(t).as_secs_f64() >= SEEK_DEBOUNCE_S);
+        if cooled_down {
+            seek_reset.0 = true;
+            clock.last_seek_wall = Some(now);
+        }
+        effect_time.pause();
+        clock.last_playhead_us = Some(playhead);
+        clock.last_wall = Some(now);
+        return;
+    }
+
+    if paused.0 || sim_dt <= 1e-9 {
+        effect_time.pause();
+    } else {
+        effect_time.unpause();
+        let speed = (sim_dt / wall_dt).clamp(0.0, 64.0);
+        let max_speed = MAX_EFFECT_DT_S / wall_dt;
+        effect_time.set_relative_speed_f64(speed.min(max_speed));
+    }
+
+    clock.last_playhead_us = Some(playhead);
+    clock.last_wall = Some(now);
+}
+
+/// Despawn jet entities so Hanabi drops the GPU particle slab (no public
+/// clear API; the cache is keyed by entity). `ensure_kdl_thrusters` rebuilds
+/// from `FileEffectAssets` / `FileImageAssets`.
+fn reset_thruster_particles_on_seek(
+    mut pending: ResMut<SeekParticleReset>,
+    mut commands: Commands,
+    rigs: Query<(Entity, &KdlThrusterRig)>,
+) {
+    if !std::mem::take(&mut pending.0) {
+        return;
+    }
+    for (object, rig) in &rigs {
+        for &jet in &rig.jets {
+            commands.entity(jet).despawn();
+        }
+        commands.entity(object).remove::<KdlThrusterRig>();
     }
 }
 
@@ -170,8 +440,7 @@ fn build_dps_exhaust() -> EffectAsset {
     size_over_life.add_key(0.75, Vec3::new(1.18, 0.52, 0.52));
     size_over_life.add_key(1.0, Vec3::new(0.42, 0.2, 0.2));
 
-    let mask_slot = module.lit(0u32);
-    module.add_texture_slot("mask");
+    module.add_texture_slot("mask", SlotDimension::D2);
 
     EffectAsset::new(16384, SpawnerSettings::rate(220.0.into()), module)
         .with_name("dps_exhaust")
@@ -185,7 +454,7 @@ fn build_dps_exhaust() -> EffectAsset {
         .render(OrientModifier::new(OrientMode::AlongVelocity))
         // Soft round mask so the quads are not visible flat squares up close.
         .render(ParticleTextureModifier {
-            texture_slot: mask_slot,
+            texture_slot: 0,
             sample_mapping: ImageSampleMapping::ModulateOpacityFromR,
         })
         .render(SizeOverLifetimeModifier {
@@ -243,8 +512,7 @@ fn build_rcs_jet() -> EffectAsset {
     size_over_life.add_key(0.75, Vec3::splat(0.17));
     size_over_life.add_key(1.0, Vec3::splat(0.07));
 
-    let mask_slot = module.lit(0u32);
-    module.add_texture_slot("mask");
+    module.add_texture_slot("mask", SlotDimension::D2);
 
     EffectAsset::new(16384, SpawnerSettings::rate(1100.0.into()), module)
         .with_name("rcs_jet")
@@ -259,7 +527,7 @@ fn build_rcs_jet() -> EffectAsset {
         .render(OrientModifier::new(OrientMode::FaceCameraPosition))
         // Soft round mask so the quads are not visible flat squares up close.
         .render(ParticleTextureModifier {
-            texture_slot: mask_slot,
+            texture_slot: 0,
             sample_mapping: ImageSampleMapping::ModulateOpacityFromR,
         })
         .render(SizeOverLifetimeModifier {
@@ -273,12 +541,64 @@ fn build_rcs_jet() -> EffectAsset {
         })
 }
 
+/// Tears down thruster rigs that no longer match their schematic data and
+/// sweeps jets orphaned by their object despawning.
+///
+/// Both happen during schematic live-reload: a full reload despawns every
+/// `object_3d` (leaking the free-standing jet entities, which would keep
+/// emitting at their last world transform), and in-place edits change
+/// `Object3DState.data.thrusters` under an existing rig (which would keep
+/// stale emitter positions/rates until restart). After teardown,
+/// `ensure_kdl_thrusters` rebuilds from the current configs.
+fn refresh_kdl_thrusters(
+    mut commands: Commands,
+    rigs: Query<(Entity, &KdlThrusterRig, &Object3DState)>,
+    jets: Query<(Entity, &KdlThrusterJetOf)>,
+    objects: Query<(), With<Object3DState>>,
+) {
+    for (object, rig, state) in &rigs {
+        if rig.configs != state.data.thrusters {
+            for &jet in &rig.jets {
+                commands.entity(jet).despawn();
+            }
+            commands.entity(object).remove::<KdlThrusterRig>();
+        }
+    }
+    for (jet, owner) in &jets {
+        if objects.get(owner.0).is_err() {
+            commands.entity(jet).despawn();
+        }
+    }
+}
+
+/// Sweeps trail anchors whose jet has despawned (rig teardown, live reload).
+/// Runs separately from `refresh_kdl_thrusters` so the jet despawn commands
+/// from the previous frame have applied.
+fn sweep_trail_anchors(
+    mut commands: Commands,
+    anchors: Query<(Entity, &KdlTrailAnchorOf)>,
+    jets: Query<(), With<KdlThrusterJet>>,
+) {
+    for (anchor, of) in &anchors {
+        if jets.get(of.0).is_err() {
+            commands.entity(anchor).despawn();
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn ensure_kdl_thrusters(
     mut commands: Commands,
     objects: Query<(Entity, &Object3DState), Without<KdlThrusterRig>>,
     assets: Res<ThrusterEffectAssets>,
+    mut file_effects: ResMut<FileEffectAssets>,
+    asset_server: Res<AssetServer>,
+    connection_addr: Option<Res<ConnectionAddr>>,
+    initial_kdl: Option<Res<InitialKdlPath>>,
     eql: Res<EqlContext>,
 ) {
+    let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
+    let local_root = local_assets_root(initial_kdl.as_deref());
     for (object, state) in &objects {
         if state.data.thrusters.is_empty() {
             continue;
@@ -286,40 +606,316 @@ fn ensure_kdl_thrusters(
 
         let mut jets = Vec::with_capacity(state.data.thrusters.len());
         for (idx, config) in state.data.thrusters.iter().enumerate() {
-            let intensity = eql
-                .0
-                .parse_str(&config.intensity)
-                .map_err(crate::object_3d::CompileError::Parse)
-                .and_then(compile_eql_expr)
-                .inspect_err(|err| {
-                    warn!(
-                        "unable to compile thruster intensity '{}' on {}: {err}",
-                        config.intensity, state.data.eql
+            // One jet entity per effect layer, all sharing the emitter config
+            // (position/direction/intensity). Layers exist so a single KDL
+            // node can stack e.g. a camera-facing volume halo over a
+            // velocity-stretched core instead of declaring duplicate emitters.
+            for (layer_idx, effect) in config.effect_layers().enumerate() {
+                let intensity = eql
+                    .0
+                    .parse_str(&config.intensity)
+                    .map_err(crate::object_3d::CompileError::Parse)
+                    .and_then(compile_eql_expr)
+                    .inspect_err(|err| {
+                        if layer_idx == 0 {
+                            warn!(
+                                "unable to compile thruster intensity '{}' on {}: {err}",
+                                config.intensity, state.data.eql
+                            );
+                        }
+                    })
+                    .ok();
+                let mut jet = KdlThrusterJet::from_config(config, state.data.frame, intensity);
+                jet.base_rate = layer_base_rate(config, layer_idx);
+                let effect_is_file = Thruster::effect_path_is_file(effect);
+                if effect_is_file {
+                    // Resolved like GLBs: `db:` keys hit the DB Asset Server;
+                    // bare paths fall back to the Bevy asset root (offline
+                    // --kdl dev). Retained in FileEffectAssets so seek/schematic
+                    // rebuilds clone the same strong handle instead of unloading.
+                    let url = resolve_db_asset_url_prefer_local(
+                        effect,
+                        connection_addr,
+                        local_root.as_deref(),
                     );
-                })
-                .ok();
-            let jet = commands
-                .spawn((
-                    KdlThrusterJet::from_config(config, state.data.frame, intensity),
-                    ParticleEffect::new(assets.by_name(&config.effect)),
-                    EffectMaterial {
-                        images: vec![assets.mask.clone()],
-                    },
+                    jet.pending_effect = Some(file_effects.get_or_load(url, &asset_server));
+                }
+                let base_name = config
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| format!("thruster_{idx}"));
+                let name = if layer_idx == 0 {
+                    base_name
+                } else {
+                    format!("{base_name}_layer{layer_idx}")
+                };
+                let mut entity = commands.spawn((
+                    jet,
+                    KdlThrusterJetOf(object),
+                    ChildOf(object),
                     Transform::default(),
                     GlobalTransform::default(),
                     Visibility::Hidden,
-                    Name::new(
-                        config
-                            .name
-                            .clone()
-                            .unwrap_or_else(|| format!("thruster_{idx}")),
-                    ),
-                ))
-                .id();
-            jets.push(jet);
+                    // Explicit layer (not inherited): particles must stay on the
+                    // thruster layer even though the parent mesh is on layer 0.
+                    RenderLayers::layer(THRUSTER_PARTICLES_RENDER_LAYER),
+                    Name::new(name),
+                ));
+                if !effect_is_file {
+                    // Presets are ready immediately; file effects get their
+                    // ParticleEffect + EffectMaterial in bind_file_effect_assets.
+                    entity.insert((
+                        ParticleEffect::new(assets.by_name(effect)),
+                        EffectMaterial {
+                            images: vec![assets.mask.clone()],
+                        },
+                    ));
+                }
+                let jet_entity = entity.id();
+                // The light belongs to the nozzle, not to each layer.
+                if layer_idx == 0
+                    && let Some(light) = &config.light
+                {
+                    spawn_thruster_light(&mut commands, jet_entity, light);
+                }
+                jets.push(jet_entity);
+            }
         }
 
-        commands.entity(object).insert(KdlThrusterRig { jets });
+        commands.entity(object).insert(KdlThrusterRig {
+            jets,
+            configs: state.data.thrusters.clone(),
+        });
+    }
+}
+
+/// Spawns the Bevy light child for a thruster (KDL `light` node): a point
+/// light, or a spot aimed down the exhaust when `spot_angle` is set (Bevy
+/// spots shine along local -Z; the jet's exhaust is local -Y). Starts at zero
+/// intensity; `sync_kdl_thruster_particles` drives it with the live signal.
+fn spawn_thruster_light(commands: &mut Commands, jet: Entity, light: &impeller_wkt::ThrusterLight) {
+    let color = Color::srgb(light.color.0, light.color.1, light.color.2);
+    let transform = Transform {
+        translation: Vec3::new(0.0, -light.offset, 0.0),
+        rotation: Quat::from_rotation_arc(Vec3::NEG_Z, Vec3::NEG_Y),
+        scale: Vec3::ONE,
+    };
+    let mut entity = commands.spawn((
+        KdlThrusterLight {
+            peak_lm: light.intensity.max(0.0),
+        },
+        transform,
+        GlobalTransform::default(),
+        Visibility::default(),
+        ChildOf(jet),
+        Name::new("thruster_light"),
+    ));
+    match light.spot_angle {
+        Some(angle) => {
+            entity.insert(SpotLight {
+                color,
+                intensity: 0.0,
+                range: light.range,
+                shadow_maps_enabled: light.shadows,
+                outer_angle: (angle.to_radians() * 0.5).clamp(0.0, std::f32::consts::FRAC_PI_2),
+                inner_angle: 0.0,
+                ..Default::default()
+            });
+        }
+        None => {
+            entity.insert(PointLight {
+                color,
+                intensity: 0.0,
+                range: light.range,
+                shadow_maps_enabled: light.shadows,
+                ..Default::default()
+            });
+        }
+    }
+}
+
+/// Sprite for a `.effect` texture slot, by name convention (shared with
+/// pyrotechnique): `mask` uses the built-in procedural soft circle, `smoke`
+/// the shared smoke sprite from the DB, anything else the DB soft circle.
+fn slot_image(
+    slot: &str,
+    assets: &ThrusterEffectAssets,
+    file_images: &mut FileImageAssets,
+    asset_server: &AssetServer,
+    connection_addr: Option<std::net::SocketAddr>,
+    local_root: Option<&std::path::Path>,
+) -> Handle<Image> {
+    match slot {
+        "mask" => assets.mask.clone(),
+        "smoke" => file_images.get_or_load(
+            "db:textures/smoke_puff.png",
+            asset_server,
+            connection_addr,
+            local_root,
+        ),
+        _ => file_images.get_or_load(
+            "db:textures/soft_circle.png",
+            asset_server,
+            connection_addr,
+            local_root,
+        ),
+    }
+}
+
+/// True when a loaded `.effect` declares the anchored-trail properties.
+fn is_anchored_trail(asset: &EffectAsset) -> bool {
+    asset
+        .properties()
+        .iter()
+        .any(|p| p.name() == SPAWN_ORIGIN_PROPERTY)
+}
+
+/// "Up" in a geo frame's own coordinates, for orienting trail anchors so the
+/// effect's authored +Y (buoyancy, kill planes) points away from the ground.
+fn frame_up(frame: GeoFrame, position_in_frame: DVec3) -> DVec3 {
+    match frame {
+        GeoFrame::ENU => DVec3::Z,
+        GeoFrame::NED => DVec3::NEG_Z,
+        // Geocentric up: within 0.2 deg of geodetic up, invisible at trail scale.
+        GeoFrame::ECEF => position_in_frame.try_normalize().unwrap_or(DVec3::Z),
+    }
+}
+
+/// Spawns the world-fixed anchor for an anchored-trail jet: a regular
+/// high-precision world entity (GeoPosition + grid cell) frozen at the owning
+/// object's telemetry pose, oriented so anchor-local +Y is up.
+///
+/// Caller must pass a pose that has already been set from telemetry
+/// (`WorldPosReceived`); default/missing `(0,0,0)` would pin ECEF trails at
+/// Earth's center for the whole flight.
+fn trail_anchor_pose(frame: Option<GeoFrame>, world_pos: &WorldPos) -> (GeoPosition, GeoRotation) {
+    let frame = frame.unwrap_or_default();
+    let position = world_pos.pos();
+    let up = frame_up(frame, position);
+    let rotation = DQuat::from_rotation_arc(DVec3::Y, up);
+    (
+        GeoPosition(frame, position),
+        GeoRotation::absolute(frame, rotation),
+    )
+}
+
+fn spawn_trail_anchor(
+    commands: &mut Commands,
+    jet_entity: Entity,
+    frame: Option<GeoFrame>,
+    world_pos: &WorldPos,
+) -> Entity {
+    let (geo_pos, geo_rot) = trail_anchor_pose(frame, world_pos);
+    commands
+        .spawn((
+            KdlTrailAnchorOf(jet_entity),
+            Name::new("thruster_trail_anchor"),
+            Transform::default(),
+            GlobalTransform::default(),
+            Visibility::default(),
+            // The `GridCell` add hook parents this under the big_space root.
+            #[cfg(feature = "big_space")]
+            crate::spatial::GridCell::default(),
+            geo_pos,
+            geo_rot,
+        ))
+        .id()
+}
+
+/// Completes file-effect jets whose `.effect` asset has finished loading:
+/// captures the authored spawner settings and inserts `ParticleEffect` +
+/// `EffectMaterial` in one command so hanabi compiles the effect with its
+/// texture slots already bound. Effects declaring the anchored-trail
+/// properties are additionally re-homed from the vehicle onto a world-fixed
+/// anchor entity — but only once the owner has a telemetry `WorldPos`
+/// (`WorldPosReceived`), so the freeze does not capture the spawn default
+/// at ECEF origin.
+#[allow(clippy::too_many_arguments)]
+fn bind_file_effect_assets(
+    mut commands: Commands,
+    mut jets: Query<(Entity, &mut KdlThrusterJet, &KdlThrusterJetOf)>,
+    objects: Query<&WorldPos, (With<Object3DState>, With<WorldPosReceived>)>,
+    effects: Res<Assets<EffectAsset>>,
+    assets: Res<ThrusterEffectAssets>,
+    mut file_images: ResMut<FileImageAssets>,
+    asset_server: Res<AssetServer>,
+    connection_addr: Option<Res<ConnectionAddr>>,
+    initial_kdl: Option<Res<InitialKdlPath>>,
+) {
+    let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
+    let local_root = local_assets_root(initial_kdl.as_deref());
+    for (entity, mut jet, owner) in &mut jets {
+        let Some(handle) = jet.pending_effect.clone() else {
+            continue;
+        };
+        let Some(asset) = effects.get(&handle) else {
+            continue;
+        };
+        let anchored = is_anchored_trail(asset);
+        // Anchored trails freeze a world pose at bind time. Object3D spawns
+        // with `WorldPos::default()` (zero); binding before the first
+        // telemetry sample would pin ECEF trails at Earth's center forever.
+        let owner_pose = if anchored {
+            let Some(pose) = objects.get(owner.0).ok() else {
+                continue;
+            };
+            Some(pose)
+        } else {
+            None
+        };
+        jet.authored_settings = Some(asset.spawner);
+        let images: Vec<Handle<Image>> = asset
+            .texture_layout()
+            .layout
+            .iter()
+            .map(|slot| {
+                slot_image(
+                    &slot.name,
+                    &assets,
+                    &mut file_images,
+                    &asset_server,
+                    connection_addr,
+                    local_root.as_deref(),
+                )
+            })
+            .collect();
+        if images_failed(&images, &asset_server) {
+            warn!(
+                "hanabi effect textures failed to load; skipping bind for {}",
+                handle.path().map(|p| p.to_string()).unwrap_or_default()
+            );
+            jet.pending_effect = None;
+            continue;
+        }
+        if !images_ready(&images, &asset_server) {
+            continue;
+        }
+        jet.has_intensity_property = asset
+            .properties()
+            .iter()
+            .any(|p| p.name() == INTENSITY_PROPERTY);
+        if let Some(world_pos) = owner_pose {
+            let anchor = spawn_trail_anchor(&mut commands, entity, jet.frame, world_pos);
+            commands.entity(entity).insert((
+                TrailAnchoredJet { anchor },
+                EffectProperties::default(),
+                // The trail spans kilometers away from the anchor entity;
+                // entity-AABB culling would freeze/hide it whenever the anchor
+                // leaves the frustum.
+                NoFrustumCulling,
+                ChildOf(anchor),
+                Transform::IDENTITY,
+            ));
+        } else if jet.has_intensity_property {
+            commands.entity(entity).insert(EffectProperties::default());
+        }
+        let mut entity = commands.entity(entity);
+        if images.is_empty() {
+            entity.insert(ParticleEffect::new(handle));
+        } else {
+            entity.insert((ParticleEffect::new(handle), EffectMaterial { images }));
+        }
+        jet.pending_effect = None;
     }
 }
 
@@ -342,6 +938,7 @@ impl KdlThrusterJet {
                 }
             })
             .unwrap_or(DPS_EXHAUST_BODY);
+        let base_rate = layer_base_rate(config, 0);
         Self {
             body_offset: position,
             fixed_exhaust,
@@ -350,15 +947,53 @@ impl KdlThrusterJet {
             frame,
             intensity,
             scale: config.scale.max(0.0),
-            base_rate: config.emission_rate.max(0.0),
+            base_rate,
+            pending_effect: None,
+            authored_settings: None,
+            has_intensity_property: false,
             cutoff: config.cutoff.max(0.0),
         }
     }
 }
 
+/// Spawner base rate for one effect layer of a thruster.
+///
+/// Presets always have a fixed base rate (KDL value or the default). File
+/// effects use the rate authored in the `.effect` unless the KDL sets an
+/// explicit `emission_rate` override — and that override applies to the
+/// **primary layer only**: stacked layers (e.g. the volume halo) are tuned
+/// against their own authored rates.
+fn layer_base_rate(config: &Thruster, layer_idx: usize) -> Option<f32> {
+    let effect = if layer_idx == 0 {
+        config.effect.as_str()
+    } else {
+        config
+            .extra_effects
+            .get(layer_idx - 1)
+            .map(String::as_str)
+            .unwrap_or_default()
+    };
+    if Thruster::effect_path_is_file(effect) {
+        if layer_idx == 0 {
+            config.emission_rate.map(|rate| rate.max(0.0))
+        } else {
+            None
+        }
+    } else {
+        let rate = if layer_idx == 0 {
+            config
+                .emission_rate
+                .unwrap_or_else(Thruster::default_emission_rate)
+        } else {
+            Thruster::default_emission_rate()
+        };
+        Some(rate.max(0.0))
+    }
+}
+
 fn body_rotation(world_pos: &WorldPos, frame: Option<GeoFrame>, geo_context: &GeoContext) -> Quat {
     if let Some(frame) = frame {
-        GeoRotation::new(frame, world_pos.att())
+        GeoRotation::relative(frame, world_pos.att())
             .to_bevy(geo_context)
             .as_quat()
     } else {
@@ -402,18 +1037,24 @@ fn evaluate_kdl_thruster(
 
     if jet.vector_intensity {
         let thrust = component_value_tail_to_vec3(&value)?;
-        // Vector thrusters carry their visual direction in telemetry, so keep
-        // the original world-pos attitude path. Fixed-direction scalar jets use
-        // the rendered object transform below to line up with GLB nozzle meshes.
-        let thrust = jet.scale
-            * vector_to_bevy(
-                thrust.as_vec3(),
-                jet.body_frame,
-                jet.frame,
-                body_att,
-                None,
-                geo_context,
-            );
+        // Body-frame vector intensity is parent-local thrust — same space as
+        // scalar `direction=`. Keep exhaust in that frame so sync can aim
+        // with `from_rotation_arc` directly; converting through world with a
+        // mismatched WorldPos vs GlobalTransform attitude was the Falcon 9
+        // Merlin ~90° plume bug.
+        let thrust = if jet.body_frame {
+            jet.scale * thrust.as_vec3()
+        } else {
+            jet.scale
+                * vector_to_bevy(
+                    thrust.as_vec3(),
+                    false,
+                    jet.frame,
+                    body_att,
+                    body_transform,
+                    geo_context,
+                )
+        };
         Some(evaluate_vector_thruster(thrust, jet.cutoff))
     } else {
         let intensity = component_value_scalar(&value)?.clamp(0.0, 1.0);
@@ -444,16 +1085,69 @@ fn evaluate_vector_thruster(thrust: Vec3, cutoff: f32) -> KdlThrusterEval {
     }
 }
 
+/// Rig-object query for the transform sync: `Without<KdlThrusterLight>` keeps
+/// it provably disjoint from `LightTransformQuery`'s mutable `GlobalTransform`.
+type RigObjectQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static KdlThrusterRig,
+        &'static WorldPos,
+        &'static GlobalTransform,
+    ),
+    (Without<KdlThrusterJet>, Without<KdlThrusterLight>),
+>;
+
+/// Light children get their `GlobalTransform` written manually, in lockstep
+/// with the jets (which bypass transform propagation).
+type LightTransformQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static Transform, &'static mut GlobalTransform),
+    (With<KdlThrusterLight>, Without<KdlThrusterJet>),
+>;
+
+/// Anchor transforms are read-only here; disjoint from the jets' mutable
+/// `GlobalTransform` access via the marker filters.
+type TrailAnchorQuery<'w, 's> = Query<
+    'w,
+    's,
+    &'static GlobalTransform,
+    (
+        With<KdlTrailAnchorOf>,
+        Without<KdlThrusterJet>,
+        Without<KdlThrusterLight>,
+    ),
+>;
+
+/// Jet mutation set for the transform sync (kept as a `type` for clippy).
+type JetTransformQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static KdlThrusterJet,
+        &'static mut Transform,
+        &'static mut GlobalTransform,
+        Option<&'static Children>,
+        Option<&'static TrailAnchoredJet>,
+        Option<&'static mut EffectProperties>,
+    ),
+>;
+
 fn sync_kdl_thruster_transforms(
-    objects: Query<(&KdlThrusterRig, &WorldPos, &GlobalTransform), Without<KdlThrusterJet>>,
-    mut jets: Query<(&KdlThrusterJet, &mut Transform, &mut GlobalTransform)>,
+    objects: RigObjectQuery,
+    mut jets: JetTransformQuery,
+    anchors: TrailAnchorQuery,
+    mut lights: LightTransformQuery,
     entity_map: Res<EntityMap>,
     component_values: Query<&'static WktComponentValue>,
     geo_context: Res<GeoContext>,
 ) {
     for (rig, world_pos, object_global_transform) in &objects {
         for &entity in &rig.jets {
-            let Ok((jet, mut transform, mut global_transform)) = jets.get_mut(entity) else {
+            let Ok((jet, mut transform, mut global_transform, children, anchored, properties)) =
+                jets.get_mut(entity)
+            else {
                 continue;
             };
             let body_att = body_rotation(world_pos, jet.frame, &geo_context);
@@ -483,26 +1177,105 @@ fn sync_kdl_thruster_transforms(
             } else {
                 eval.exhaust
             };
-            *transform = Transform {
-                translation: object_global_transform.transform_point(jet.body_offset),
-                rotation: Quat::from_rotation_arc(DPS_EXHAUST_BODY, exhaust.normalize_or_zero()),
+            // Jets are `ChildOf` the object_3d: write LOCAL pose so big_space /
+            // GridCell propagation stays consistent with the mesh. Body-frame
+            // jets (scalar `direction=` or vector intensity) aim in parent-
+            // local space: mesh-relative -Y → authored/exhaust direction.
+            // World-space exhaust (non-body-frame) is converted into the
+            // parent's frame.
+            let parent_rot = object_global_transform.to_scale_rotation_translation().1;
+            let local_rotation = if jet.body_frame {
+                let local_dir = if jet.vector_intensity {
+                    // evaluate_vector_thruster already returns −thrust (body).
+                    exhaust.normalize_or_zero()
+                } else {
+                    jet.fixed_exhaust.normalize_or_zero()
+                };
+                if local_dir.length_squared() < 1e-12 {
+                    Quat::IDENTITY
+                } else {
+                    Quat::from_rotation_arc(DPS_EXHAUST_BODY, local_dir)
+                }
+            } else {
+                let dir = exhaust.normalize_or_zero();
+                if dir.length_squared() < 1e-12 {
+                    Quat::IDENTITY
+                } else {
+                    // World exhaust → parent-local, then align effect -Y.
+                    let local_dir = parent_rot.inverse() * dir;
+                    Quat::from_rotation_arc(DPS_EXHAUST_BODY, local_dir.normalize_or_zero())
+                }
+            };
+            let nozzle_local = Transform {
+                translation: jet.body_offset,
+                rotation: local_rotation,
                 scale: Vec3::ONE,
             };
-            *global_transform = GlobalTransform::from(*transform);
+            let nozzle_global = *object_global_transform * nozzle_local;
+
+            if let (Some(anchored), Some(mut properties)) = (anchored, properties) {
+                // Anchored-trail jet: the jet entity stays put on its anchor
+                // (identity transform, normal propagation); the moving nozzle
+                // pose flows through the effect properties in anchor-local
+                // coordinates. Both globals live in the same render space, so
+                // the relative pose is invariant under floating-origin
+                // rebases; f32 is exact to ~2 mm at the trail's 20 km reach.
+                let Ok(anchor_global) = anchors.get(anchored.anchor) else {
+                    continue;
+                };
+                let relative = anchor_global.affine().inverse() * nozzle_global.affine();
+                let origin = Vec3::from(relative.translation);
+                let axis = (relative.matrix3 * DPS_EXHAUST_BODY).normalize_or(DPS_EXHAUST_BODY);
+                properties.set(SPAWN_ORIGIN_PROPERTY, origin.into());
+                properties.set(SPAWN_AXIS_PROPERTY, axis.into());
+                continue;
+            }
+
+            *transform = nozzle_local;
+            // Sync runs after Propagate, so write globals manually (same for
+            // light children) or they lag one frame — meters at descent speeds.
+            *global_transform = nozzle_global;
+            if let Some(children) = children {
+                for &child in children {
+                    if let Ok((light_local, mut light_global)) = lights.get_mut(child) {
+                        *light_global = nozzle_global * *light_local;
+                    }
+                }
+            }
         }
     }
 }
 
+/// Jet mutation set for the spawner/visibility sync (kept as a `type` for
+/// clippy).
+type JetSpawnerQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static KdlThrusterJet,
+        &'static mut EffectSpawner,
+        &'static mut Visibility,
+        Option<&'static Children>,
+        Option<&'static mut EffectProperties>,
+    ),
+>;
+
 fn sync_kdl_thruster_particles(
     rig_objects: Query<(&KdlThrusterRig, &WorldPos)>,
-    mut jets: Query<(&KdlThrusterJet, &mut EffectSpawner, &mut Visibility)>,
+    mut jets: JetSpawnerQuery,
+    mut lights: Query<(
+        &KdlThrusterLight,
+        Option<&mut PointLight>,
+        Option<&mut SpotLight>,
+    )>,
     entity_map: Res<EntityMap>,
     component_values: Query<&'static WktComponentValue>,
     geo_context: Res<GeoContext>,
 ) {
     for (rig, world_pos) in &rig_objects {
         for &entity in &rig.jets {
-            let Ok((jet, mut spawner, mut visibility)) = jets.get_mut(entity) else {
+            let Ok((jet, mut spawner, mut visibility, children, properties)) = jets.get_mut(entity)
+            else {
                 continue;
             };
             let intensity = evaluate_kdl_thruster(
@@ -515,14 +1288,43 @@ fn sync_kdl_thruster_particles(
             )
             .map(|eval| eval.intensity)
             .unwrap_or(0.0);
-            apply_kdl_spawner(
-                &mut spawner,
-                &mut visibility,
-                intensity,
-                jet.cutoff,
-                jet.base_rate,
-            );
+            apply_kdl_spawner(&mut spawner, &mut visibility, intensity, jet);
+            if jet.has_intensity_property
+                && let Some(mut properties) = properties
+            {
+                properties.set(INTENSITY_PROPERTY, intensity.clamp(0.0, 1.0).into());
+            }
+            // Light luminous power tracks the same signal (0 below cutoff).
+            if let Some(children) = children {
+                let lm = if intensity <= jet.cutoff {
+                    0.0
+                } else {
+                    intensity
+                };
+                for &child in children {
+                    let Ok((light, point, spot)) = lights.get_mut(child) else {
+                        continue;
+                    };
+                    if let Some(mut point) = point {
+                        point.intensity = light.peak_lm * lm;
+                    }
+                    if let Some(mut spot) = spot {
+                        spot.intensity = light.peak_lm * lm;
+                    }
+                }
+            }
         }
+    }
+}
+
+/// Scales a spawner count by `factor`, preserving `Uniform` ranges (the same
+/// formula pyrotechnique uses, so intensity semantics match the authoring
+/// tool).
+fn scale_cpu_value(value: &CpuValue<f32>, factor: f32) -> CpuValue<f32> {
+    match value {
+        CpuValue::Single(v) => CpuValue::Single(v * factor),
+        CpuValue::Uniform((lo, hi)) => CpuValue::Uniform((lo * factor, hi * factor)),
+        other => *other,
     }
 }
 
@@ -530,17 +1332,32 @@ fn apply_kdl_spawner(
     spawner: &mut EffectSpawner,
     visibility: &mut Visibility,
     intensity: f32,
-    cutoff: f32,
-    base_rate: f32,
+    jet: &KdlThrusterJet,
 ) {
-    if intensity <= cutoff {
+    if intensity <= jet.cutoff {
+        // Stop spawning only — keep Visible so trails/smoke already emitted can age out.
         spawner.active = false;
-        *visibility = Visibility::Hidden;
         return;
     }
+    let settings = match (jet.base_rate, jet.authored_settings) {
+        // Fixed rate: presets, or file effects with an emission_rate override.
+        (Some(base_rate), _) => SpawnerSettings::rate((intensity * base_rate).into()),
+        // File effect: authored settings from the asset, count scaled.
+        (None, Some(authored)) => {
+            let mut settings = authored;
+            settings.set_count(scale_cpu_value(&settings.count(), intensity));
+            settings
+        }
+        // File effect still loading; keep hidden until bound.
+        (None, None) => {
+            spawner.active = false;
+            *visibility = Visibility::Hidden;
+            return;
+        }
+    };
     *visibility = Visibility::Visible;
     spawner.active = true;
-    spawner.settings = SpawnerSettings::rate((intensity * base_rate).into());
+    spawner.settings = settings;
 }
 
 fn component_value_f64_array(value: &WktComponentValue) -> Option<Vec<f64>> {
@@ -613,6 +1430,17 @@ mod tests {
     }
 
     #[test]
+    fn body_frame_vector_thrust_plus_x_aims_exhaust_aft() {
+        // Falcon 9 plume_viz ≈ (1, 0, 0) · throttle: thrust along body +X,
+        // exhaust must be body −X (same as scalar direction=(-1,0,0)).
+        let eval = evaluate_vector_thruster(Vec3::X, 0.0);
+        assert_vec3_near(eval.exhaust, Vec3::NEG_X);
+        let local_rot = Quat::from_rotation_arc(DPS_EXHAUST_BODY, eval.exhaust);
+        let aimed = local_rot * DPS_EXHAUST_BODY;
+        assert_vec3_near(aimed, Vec3::NEG_X);
+    }
+
+    #[test]
     fn sync_transform_queries_are_disjoint() {
         let mut app = App::new();
         app.init_resource::<EntityMap>()
@@ -620,5 +1448,382 @@ mod tests {
             .add_systems(Update, sync_kdl_thruster_transforms);
 
         app.update();
+    }
+
+    fn test_thruster(position: (f32, f32, f32)) -> Thruster {
+        Thruster {
+            name: Some("DPS".to_string()),
+            body_frame: true,
+            position,
+            direction: Some((0.0, -1.0, 0.0)),
+            intensity: "lander.main_thrust_viz[2]".to_string(),
+            effect: Thruster::default_effect(),
+            extra_effects: Vec::new(),
+            emission_rate: None,
+            cutoff: 0.0,
+            scale: 1.0,
+            light: None,
+        }
+    }
+
+    fn test_object_state(thrusters: Vec<Thruster>) -> Object3DState {
+        Object3DState {
+            compiled_expr: None,
+            scale_expr: None,
+            scale_error: None,
+            error_covariance_cholesky_expr: None,
+            error_covariance_expr: None,
+            last_pose_kernel_input: None,
+            last_cov_kernel_input: None,
+            joint_animations: Vec::new(),
+            data: impeller_wkt::Object3D {
+                eql: "lander.world_pos".to_string(),
+                mesh: impeller_wkt::Object3DMesh::glb("lander.glb"),
+                frame: None,
+                frame_orientation: None,
+                orientation: Default::default(),
+                sensor_visible: true,
+                icon: None,
+                thrusters,
+                mesh_visibility_range: None,
+                node_id: Default::default(),
+                kernel: None,
+            },
+        }
+    }
+
+    #[test]
+    fn refresh_tears_down_rig_when_configs_change() {
+        let mut app = App::new();
+        app.add_systems(Update, refresh_kdl_thrusters);
+
+        let object = app
+            .world_mut()
+            .spawn(test_object_state(vec![test_thruster((0.0, -1.9, 0.0))]))
+            .id();
+        let jet = app.world_mut().spawn(KdlThrusterJetOf(object)).id();
+        app.world_mut().entity_mut(object).insert(KdlThrusterRig {
+            jets: vec![jet],
+            configs: vec![test_thruster((0.0, -0.12, 0.0))],
+        });
+
+        app.update();
+
+        assert!(
+            app.world().get::<KdlThrusterRig>(object).is_none(),
+            "changed configs must remove the rig so it rebuilds"
+        );
+        assert!(
+            app.world().get_entity(jet).is_err(),
+            "stale jets must despawn"
+        );
+    }
+
+    #[test]
+    fn refresh_keeps_rig_when_configs_match() {
+        let mut app = App::new();
+        app.add_systems(Update, refresh_kdl_thrusters);
+
+        let configs = vec![test_thruster((0.0, -1.9, 0.0))];
+        let object = app
+            .world_mut()
+            .spawn(test_object_state(configs.clone()))
+            .id();
+        let jet = app.world_mut().spawn(KdlThrusterJetOf(object)).id();
+        app.world_mut().entity_mut(object).insert(KdlThrusterRig {
+            jets: vec![jet],
+            configs,
+        });
+
+        app.update();
+
+        assert!(app.world().get::<KdlThrusterRig>(object).is_some());
+        assert!(app.world().get_entity(jet).is_ok());
+    }
+
+    #[test]
+    fn layer_base_rate_override_applies_to_primary_only() {
+        let mut config = test_thruster((0.0, -1.9, 0.0));
+        config.effect = "effects/apollo-lander/descent_plume.effect".to_string();
+        config.extra_effects = vec!["effects/apollo-lander/descent_glow.effect".to_string()];
+
+        // No override: both layers use their authored rates.
+        assert_eq!(layer_base_rate(&config, 0), None);
+        assert_eq!(layer_base_rate(&config, 1), None);
+
+        // KDL emission_rate override pins the primary; the halo layer keeps
+        // its authored rate.
+        config.emission_rate = Some(1234.0);
+        assert_eq!(layer_base_rate(&config, 0), Some(1234.0));
+        assert_eq!(layer_base_rate(&config, 1), None);
+
+        // Presets always have a fixed rate.
+        config.effect = "plume".to_string();
+        assert_eq!(layer_base_rate(&config, 0), Some(1234.0));
+        config.emission_rate = None;
+        assert_eq!(
+            layer_base_rate(&config, 0),
+            Some(Thruster::default_emission_rate())
+        );
+    }
+
+    #[test]
+    fn refresh_sweeps_jets_of_despawned_objects() {
+        let mut app = App::new();
+        app.add_systems(Update, refresh_kdl_thrusters);
+
+        let object = app
+            .world_mut()
+            .spawn(test_object_state(vec![test_thruster((0.0, -1.9, 0.0))]))
+            .id();
+        let jet = app.world_mut().spawn(KdlThrusterJetOf(object)).id();
+        app.world_mut().entity_mut(object).despawn();
+
+        app.update();
+
+        assert!(
+            app.world().get_entity(jet).is_err(),
+            "jets orphaned by schematic reload must despawn"
+        );
+    }
+
+    fn test_jet(frame: Option<GeoFrame>) -> KdlThrusterJet {
+        KdlThrusterJet {
+            body_offset: Vec3::ZERO,
+            fixed_exhaust: DPS_EXHAUST_BODY,
+            vector_intensity: false,
+            body_frame: true,
+            frame,
+            intensity: None,
+            scale: 1.0,
+            base_rate: Some(100.0),
+            pending_effect: None,
+            authored_settings: None,
+            has_intensity_property: false,
+            cutoff: 0.0,
+        }
+    }
+
+    #[test]
+    fn trail_anchor_freezes_telemetry_pose_not_default_origin() {
+        let mut world = World::new();
+        let jet = world.spawn_empty().id();
+        let world_pos = WorldPos {
+            att: Default::default(),
+            pos: nox::Vector3::new(916_000.0, -5_540_000.0, 3_040_000.0),
+        };
+        let anchor = {
+            let mut commands = world.commands();
+            spawn_trail_anchor(&mut commands, jet, Some(GeoFrame::ECEF), &world_pos)
+        };
+        world.flush();
+
+        let geo = world
+            .get::<GeoPosition>(anchor)
+            .expect("anchor GeoPosition");
+        assert_eq!(geo.0, GeoFrame::ECEF);
+        assert_eq!(
+            geo.1,
+            DVec3::new(916_000.0, -5_540_000.0, 3_040_000.0),
+            "anchor must freeze the telemetry ECEF pose, not (0,0,0)"
+        );
+        assert!(
+            world.get::<KdlTrailAnchorOf>(anchor).is_some(),
+            "anchor must back-reference its jet"
+        );
+    }
+
+    #[test]
+    fn file_effect_cache_survives_seek_teardown() {
+        let mut effects = Assets::<EffectAsset>::default();
+        let mut cache = FileEffectAssets::default();
+        let path = "http://127.0.0.1:2240/assets/effects/apollo-lander/rcs_puff.effect".to_string();
+
+        let loaded = effects.add(build_rcs_jet());
+        cache.handles.insert(path.clone(), loaded.clone());
+
+        // First ensure: jet takes a clone (pending_effect / ParticleEffect).
+        let jet_handle = cache
+            .handles
+            .get(&path)
+            .cloned()
+            .expect("cache populated on first load");
+        assert_eq!(jet_handle.id(), loaded.id());
+
+        // Backward seek: despawn jets → drop jet-held handles only.
+        drop(jet_handle);
+        drop(loaded);
+
+        let retained = cache
+            .handles
+            .get(&path)
+            .expect("FileEffectAssets must retain across seek rebuild");
+        assert!(
+            effects.get(retained).is_some(),
+            "EffectAsset must stay resident while the cache holds a strong handle"
+        );
+
+        // Second ensure: same path returns the same handle (no new load).
+        let again = cache.handles.get(&path).cloned().unwrap();
+        assert_eq!(
+            retained.id(),
+            again.id(),
+            "rebuild must clone the retained handle, not allocate a new asset"
+        );
+        assert_eq!(cache.handles.len(), 1);
+    }
+
+    #[test]
+    fn file_image_cache_survives_material_drop() {
+        let mut images = Assets::<Image>::default();
+        let mut cache = FileImageAssets::default();
+        let path = "db:textures/smoke_puff.png".to_string();
+
+        let loaded = images.add(build_soft_particle_image());
+        cache.handles.insert(path.clone(), loaded.clone());
+
+        let jet_handle = cache
+            .handles
+            .get(&path)
+            .cloned()
+            .expect("cache populated on first load");
+        assert_eq!(jet_handle.id(), loaded.id());
+
+        drop(jet_handle);
+        drop(loaded);
+
+        let retained = cache
+            .handles
+            .get(&path)
+            .expect("FileImageAssets must retain across seek recycle");
+        assert!(
+            images.get(retained).is_some(),
+            "Image must stay resident while the cache holds a strong handle"
+        );
+
+        let again = cache.handles.get(&path).cloned().unwrap();
+        assert_eq!(
+            retained.id(),
+            again.id(),
+            "rebind must clone the retained handle, not allocate a new asset"
+        );
+        assert_eq!(cache.handles.len(), 1);
+    }
+
+    #[test]
+    fn playhead_seek_is_five_second_jump() {
+        assert!(is_playhead_seek(5.1, false), "forward jump over 5s");
+        assert!(is_playhead_seek(-5.1, false), "backward jump over 5s");
+        assert!(!is_playhead_seek(5.0, false), "exactly 5s is not a seek");
+        assert!(
+            !is_playhead_seek(1.0, false),
+            "playback-sized step is not a seek"
+        );
+        assert!(
+            !is_playhead_seek(0.0, false),
+            "still playhead is not a seek"
+        );
+        assert!(
+            !is_playhead_seek(6.0, true),
+            "follow-latest catch-up is not a scrub"
+        );
+    }
+
+    #[test]
+    fn seek_despawns_jets_and_removes_rig() {
+        let mut app = App::new();
+        app.init_resource::<SeekParticleReset>()
+            .add_systems(Update, reset_thruster_particles_on_seek);
+
+        let configs = vec![test_thruster((0.0, -1.9, 0.0))];
+        let object = app
+            .world_mut()
+            .spawn(test_object_state(configs.clone()))
+            .id();
+        let jet = app
+            .world_mut()
+            .spawn((test_jet(None), KdlThrusterJetOf(object)))
+            .id();
+        app.world_mut().entity_mut(object).insert(KdlThrusterRig {
+            jets: vec![jet],
+            configs,
+        });
+
+        app.world_mut().resource_mut::<SeekParticleReset>().0 = true;
+        app.update();
+
+        assert!(
+            app.world().get::<KdlThrusterRig>(object).is_none(),
+            "seek must remove the rig so ensure rebuilds new jet entities"
+        );
+        assert!(
+            app.world().get_entity(jet).is_err(),
+            "seek must despawn jets so Hanabi frees the GPU slab"
+        );
+    }
+
+    #[test]
+    fn backward_seek_clock_flags_reset() {
+        let mut app = App::new();
+        app.init_resource::<Time<EffectSimulation>>()
+            .init_resource::<EffectPlayheadClock>()
+            .init_resource::<SeekParticleReset>()
+            .insert_resource(Paused(false))
+            .insert_resource(LatestFollow(false))
+            .insert_resource(CurrentTimestamp(impeller::types::Timestamp(6_000_000)))
+            .add_systems(Update, sync_effect_simulation_clock);
+
+        app.update();
+        app.world_mut().resource_mut::<CurrentTimestamp>().0 = impeller::types::Timestamp(0);
+        app.update();
+
+        assert!(
+            app.world().resource::<SeekParticleReset>().0,
+            "backward jump over 5s must flag a particle reset"
+        );
+    }
+
+    #[test]
+    fn forward_seek_clock_flags_reset() {
+        let mut app = App::new();
+        app.init_resource::<Time<EffectSimulation>>()
+            .init_resource::<EffectPlayheadClock>()
+            .init_resource::<SeekParticleReset>()
+            .insert_resource(Paused(false))
+            .insert_resource(LatestFollow(false))
+            .insert_resource(CurrentTimestamp(impeller::types::Timestamp(0)))
+            .add_systems(Update, sync_effect_simulation_clock);
+
+        app.update();
+        app.world_mut().resource_mut::<CurrentTimestamp>().0 =
+            impeller::types::Timestamp(6_000_000);
+        app.update();
+
+        assert!(
+            app.world().resource::<SeekParticleReset>().0,
+            "forward jump over 5s must flag a particle reset"
+        );
+    }
+
+    #[test]
+    fn follow_latest_jump_does_not_flag_reset() {
+        let mut app = App::new();
+        app.init_resource::<Time<EffectSimulation>>()
+            .init_resource::<EffectPlayheadClock>()
+            .init_resource::<SeekParticleReset>()
+            .insert_resource(Paused(false))
+            .insert_resource(LatestFollow(true))
+            .insert_resource(CurrentTimestamp(impeller::types::Timestamp(0)))
+            .add_systems(Update, sync_effect_simulation_clock);
+
+        app.update();
+        app.world_mut().resource_mut::<CurrentTimestamp>().0 =
+            impeller::types::Timestamp(6_000_000);
+        app.update();
+
+        assert!(
+            !app.world().resource::<SeekParticleReset>().0,
+            "follow-latest must not despawn jets on a live-tail jump"
+        );
     }
 }

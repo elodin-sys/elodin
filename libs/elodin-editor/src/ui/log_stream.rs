@@ -2,15 +2,16 @@ use bevy::ecs::query::QueryData;
 use bevy::ecs::system::{In, InRef, SystemParam};
 use bevy::prelude::{Commands, Component, Entity, Query, Res, World};
 use egui::{self, Color32, RichText, ScrollArea};
-use impeller2::types::{OwnedPacket, Timestamp};
-use impeller2_bevy::{CommandsExt, CurrentStreamId, PacketGrantR};
-use impeller2_wkt::{
+use impeller::types::{OwnedPacket, Timestamp};
+use impeller_bevy::{CommandsExt, CurrentStreamId, PacketGrantR};
+use impeller_wkt::{
     CurrentTimestamp, ErrorResponse, FixedRateMsgStream, FixedRateOp, GetMsgs, LogEntry, MsgBatch,
 };
 use std::collections::BTreeMap;
 use std::time::Instant;
 
 use super::PaneName;
+use crate::ui::widgets::SystemStateExt;
 
 const FRAMES_BEFORE_CONNECT: u32 = 5;
 const MAX_LOG_ENTRIES: usize = 10_000;
@@ -244,7 +245,7 @@ impl super::widgets::WidgetSystem for LogStreamWidget<'_, '_> {
         ui: &mut egui::Ui,
         LogStreamWidgetArgs { entity }: Self::Args,
     ) -> Self::Output {
-        let mut state = state.get_mut(world);
+        let mut state = state.params_mut(world);
         let current_ts = state.current_time.0;
         let Ok(LogWidgetQueryItem {
             state: log_state,

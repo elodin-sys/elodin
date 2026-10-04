@@ -41,6 +41,7 @@ __pycache__
 # examples
 betaflight_*
 eeprom.bin
+nasa_spice_data/
 
 examples/rocket-barrowman/motor_cache/
 examples/rocket-barrowman/*.log
@@ -51,6 +52,8 @@ logstream-db/
 testvids/
 *.log
 **/testdata/*
+screenlog*
+assets/terrains/*
 
 # macOS debug symbols
 *.dSYM/

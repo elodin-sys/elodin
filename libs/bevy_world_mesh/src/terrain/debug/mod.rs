@@ -315,7 +315,7 @@ fn finish_loading_images(
 ) {
     loading_images.0.retain(|&(id, dimension, format)| {
         if matches!(asset_server.load_state(id), LoadState::Loaded) {
-            let image = images.get_mut(id).unwrap();
+            let mut image = images.get_mut(id).unwrap();
             image.texture_descriptor.dimension = dimension;
             image.texture_descriptor.format = format;
 

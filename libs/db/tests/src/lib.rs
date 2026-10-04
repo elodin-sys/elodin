@@ -7,11 +7,11 @@ mod tests {
     };
     use elodin_db::{AtomicTimestampExt, DB, Error, Server};
 
-    use impeller2::{
+    use impeller::{
         types::{ComponentId, IntoLenPacket, LenPacket, Msg, PrimType, Timestamp},
         vtable::builder::{component, raw_field, raw_table, schema, timestamp, vtable},
     };
-    use impeller2_stellar::Client;
+    use impeller_stellar::Client;
     use postcard_schema::{Schema, schema::owned::OwnedNamedType};
     use std::{
         collections::{BTreeMap, BTreeSet},
@@ -24,7 +24,7 @@ mod tests {
     use zerocopy::FromBytes;
     use zerocopy::IntoBytes;
 
-    use impeller2_wkt::*;
+    use impeller_wkt::*;
 
     async fn setup_test_db() -> Result<(SocketAddr, Arc<DB>), Error> {
         let subscriber = tracing_subscriber::FmtSubscriber::new();
@@ -60,6 +60,108 @@ mod tests {
     #[test]
     async fn test_connect() {
         let (_client, _db) = setup_test_db().await.unwrap();
+    }
+
+    #[test]
+    async fn test_time_series_predecessor_request() {
+        let (addr, _db) = setup_test_db().await.unwrap();
+        let mut client = Client::connect(addr).await.unwrap();
+        let component_id = ComponentId::new("predecessor.value");
+        client
+            .send(&SetComponentMetadata::new(
+                component_id,
+                "predecessor.value",
+            ))
+            .await
+            .0
+            .unwrap();
+
+        let vtable_id = 1u16.to_le_bytes();
+        client
+            .send(&VTableMsg {
+                id: vtable_id,
+                vtable: vtable([raw_field(
+                    0,
+                    8,
+                    timestamp(
+                        raw_table(8, 8),
+                        schema(PrimType::U64, &[], component(component_id)),
+                    ),
+                )]),
+            })
+            .await
+            .0
+            .unwrap();
+
+        let request = |timestamp| GetTimeSeriesPredecessor {
+            id: vtable_id,
+            timestamp: Timestamp(timestamp),
+            component_id,
+        };
+        let empty = client.request(&request(10)).await.unwrap();
+        assert!(empty.timestamps().unwrap().is_empty());
+        assert!(empty.data().unwrap().is_empty());
+        let empty_range = client
+            .request(&GetTimeSeries {
+                id: vtable_id,
+                range: Timestamp(0)..Timestamp(10),
+                component_id,
+                limit: None,
+            })
+            .await
+            .unwrap();
+        assert!(empty_range.timestamps().unwrap().is_empty());
+        assert!(empty_range.data().unwrap().is_empty());
+
+        for (timestamp, value) in [(20, 2u64), (40, 4u64)] {
+            let mut packet = LenPacket::table(vtable_id, 16);
+            packet.extend_from_slice(&value.to_le_bytes());
+            packet.extend_aligned(&[i64::from(timestamp)]);
+            client.send(packet).await.0.unwrap();
+        }
+        sleep(Duration::from_millis(100)).await;
+
+        for (query, expected_timestamp, expected_value) in [
+            (19, None, None),
+            (20, Some(20), Some(2u64)),
+            (30, Some(20), Some(2u64)),
+            (40, Some(40), Some(4u64)),
+            (50, Some(40), Some(4u64)),
+        ] {
+            let response = client.request(&request(query)).await.unwrap();
+            assert_eq!(
+                response
+                    .timestamps()
+                    .unwrap()
+                    .first()
+                    .map(|timestamp| timestamp.0),
+                expected_timestamp
+            );
+            let value = response
+                .data()
+                .unwrap()
+                .get(..8)
+                .map(|data| u64::from_le_bytes(data.try_into().unwrap()));
+            assert_eq!(value, expected_value);
+        }
+
+        for range in [
+            Timestamp(0)..Timestamp(19),
+            Timestamp(21)..Timestamp(39),
+            Timestamp(41)..Timestamp(50),
+        ] {
+            let response = client
+                .request(&GetTimeSeries {
+                    id: vtable_id,
+                    range,
+                    component_id,
+                    limit: None,
+                })
+                .await
+                .unwrap();
+            assert!(response.timestamps().unwrap().is_empty());
+            assert!(response.data().unwrap().is_empty());
+        }
     }
 
     #[test]
@@ -301,6 +403,261 @@ mod tests {
             let expected_value = i as f64;
             assert_eq!(&table.buf[..], expected_value.as_bytes());
         }
+    }
+
+    #[test]
+    async fn test_batched_stream_filter_updates_and_late_components() {
+        let (addr, _db) = setup_test_db().await.unwrap();
+        let mut writer = Client::connect(addr).await.unwrap();
+        let component_a = ComponentId::new("filtered.a");
+        let component_b = ComponentId::new("filtered.b");
+        let component_c = ComponentId::new("filtered.c");
+        send_f64_samples(
+            &mut writer,
+            component_a,
+            "Filtered A",
+            [20, 0],
+            &[(Timestamp(1), 1.0)],
+        )
+        .await;
+        send_f64_samples(
+            &mut writer,
+            component_b,
+            "Filtered B",
+            [21, 0],
+            &[(Timestamp(1), 2.0)],
+        )
+        .await;
+        sleep(Duration::from_millis(50)).await;
+
+        let stream_id = 42;
+        let mut reader = Client::connect(addr).await.unwrap();
+        let mut stream = reader
+            .stream(&Stream {
+                behavior: StreamBehavior::RealTimeBatched,
+                id: stream_id,
+            })
+            .await
+            .unwrap();
+
+        let initial = loop {
+            if let StreamReply::VTable(vtable) = stream.next().await.unwrap() {
+                break vtable;
+            }
+        };
+        assert_eq!(initial.vtable.fields.len(), 2);
+
+        stream
+            .send(&SetStreamFilter {
+                id: stream_id,
+                component_ids: vec![component_a],
+                frequency: Some(60),
+            })
+            .await
+            .0
+            .unwrap();
+        let filtered = loop {
+            if let StreamReply::VTable(vtable) = stream.next().await.unwrap() {
+                break vtable;
+            }
+        };
+        assert_eq!(filtered.vtable.fields.len(), 1);
+
+        stream
+            .send(&SetStreamFilter {
+                id: stream_id,
+                component_ids: vec![component_a, component_c],
+                frequency: Some(60),
+            })
+            .await
+            .0
+            .unwrap();
+        let before_late_registration = loop {
+            if let StreamReply::VTable(vtable) = stream.next().await.unwrap() {
+                break vtable;
+            }
+        };
+        assert_eq!(before_late_registration.vtable.fields.len(), 1);
+
+        send_f64_samples(
+            &mut writer,
+            component_c,
+            "Filtered C",
+            [22, 0],
+            &[(Timestamp(2), 3.0)],
+        )
+        .await;
+        let after_late_registration = loop {
+            if let StreamReply::VTable(vtable) = stream.next().await.unwrap() {
+                break vtable;
+            }
+        };
+        assert_eq!(after_late_registration.vtable.fields.len(), 2);
+    }
+
+    #[test]
+    async fn test_batched_stream_filter_survives_reconnect() {
+        let (addr, _db) = setup_test_db().await.unwrap();
+        let mut writer = Client::connect(addr).await.unwrap();
+        let component_a = ComponentId::new("reconnect.a");
+        let component_b = ComponentId::new("reconnect.b");
+        send_f64_samples(
+            &mut writer,
+            component_a,
+            "Reconnect A",
+            [23, 0],
+            &[(Timestamp(1), 1.0)],
+        )
+        .await;
+        send_f64_samples(
+            &mut writer,
+            component_b,
+            "Reconnect B",
+            [24, 0],
+            &[(Timestamp(1), 2.0)],
+        )
+        .await;
+        sleep(Duration::from_millis(50)).await;
+
+        let stream_id = 43;
+        {
+            let mut reader = Client::connect(addr).await.unwrap();
+            let mut stream = reader
+                .stream(&Stream {
+                    behavior: StreamBehavior::RealTimeBatched,
+                    id: stream_id,
+                })
+                .await
+                .unwrap();
+            let initial = loop {
+                if let StreamReply::VTable(vtable) = stream.next().await.unwrap() {
+                    break vtable;
+                }
+            };
+            assert_eq!(initial.vtable.fields.len(), 2);
+            stream
+                .send(&SetStreamFilter {
+                    id: stream_id,
+                    component_ids: vec![component_a],
+                    frequency: Some(60),
+                })
+                .await
+                .0
+                .unwrap();
+            let filtered = loop {
+                if let StreamReply::VTable(vtable) = stream.next().await.unwrap() {
+                    break vtable;
+                }
+            };
+            assert_eq!(filtered.vtable.fields.len(), 1);
+        }
+        sleep(Duration::from_millis(50)).await;
+
+        let mut reader = Client::connect(addr).await.unwrap();
+        reader
+            .send(&SetStreamFilter {
+                id: stream_id,
+                component_ids: vec![component_a],
+                frequency: Some(60),
+            })
+            .await
+            .0
+            .unwrap();
+        let mut stream = reader
+            .stream(&Stream {
+                behavior: StreamBehavior::RealTimeBatched,
+                id: stream_id,
+            })
+            .await
+            .unwrap();
+        let reconnected = loop {
+            if let StreamReply::VTable(vtable) = stream.next().await.unwrap() {
+                break vtable;
+            }
+        };
+        assert_eq!(reconnected.vtable.fields.len(), 1);
+    }
+
+    #[test]
+    async fn test_empty_batched_stream_filter_keeps_full_stream() {
+        let (addr, _db) = setup_test_db().await.unwrap();
+        let mut writer = Client::connect(addr).await.unwrap();
+        let component_a = ComponentId::new("empty.a");
+        let component_b = ComponentId::new("empty.b");
+        send_f64_samples(
+            &mut writer,
+            component_a,
+            "Empty A",
+            [25, 0],
+            &[(Timestamp(1), 1.0)],
+        )
+        .await;
+        send_f64_samples(
+            &mut writer,
+            component_b,
+            "Empty B",
+            [26, 0],
+            &[(Timestamp(1), 2.0)],
+        )
+        .await;
+        sleep(Duration::from_millis(50)).await;
+
+        let stream_id = 44;
+        let mut reader = Client::connect(addr).await.unwrap();
+        reader
+            .send(&SetStreamFilter {
+                id: stream_id,
+                component_ids: vec![],
+                frequency: Some(60),
+            })
+            .await
+            .0
+            .unwrap();
+        let mut stream = reader
+            .stream(&Stream {
+                behavior: StreamBehavior::RealTimeBatched,
+                id: stream_id,
+            })
+            .await
+            .unwrap();
+        let pending_empty = loop {
+            if let StreamReply::VTable(vtable) = stream.next().await.unwrap() {
+                break vtable;
+            }
+        };
+        assert_eq!(pending_empty.vtable.fields.len(), 2);
+
+        stream
+            .send(&SetStreamFilter {
+                id: stream_id,
+                component_ids: vec![component_a],
+                frequency: Some(60),
+            })
+            .await
+            .0
+            .unwrap();
+        let filtered = loop {
+            if let StreamReply::VTable(vtable) = stream.next().await.unwrap() {
+                break vtable;
+            }
+        };
+        assert_eq!(filtered.vtable.fields.len(), 1);
+
+        stream
+            .send(&SetStreamFilter {
+                id: stream_id,
+                component_ids: vec![],
+                frequency: Some(60),
+            })
+            .await
+            .0
+            .unwrap();
+        let restored = loop {
+            if let StreamReply::VTable(vtable) = stream.next().await.unwrap() {
+                break vtable;
+            }
+        };
+        assert_eq!(restored.vtable.fields.len(), 2);
     }
 
     #[test]
@@ -840,7 +1197,7 @@ mod tests {
     }
 
     #[test]
-    async fn test_get_time_series_not_found() {
+    async fn test_get_time_series_empty_and_not_found() {
         let (addr, _db) = setup_test_db().await.unwrap();
         let mut client = Client::connect(addr).await.unwrap();
 
@@ -866,9 +1223,9 @@ mod tests {
             limit: None,
         };
 
-        let result = client.request(&query).await;
-
-        result.unwrap_err();
+        let result = client.request(&query).await.unwrap();
+        assert!(result.timestamps().unwrap().is_empty());
+        assert!(result.data().unwrap().is_empty());
 
         // Now try with non-existent component
         let non_existent_component_id = ComponentId::new("non_existent_component");
@@ -900,7 +1257,7 @@ mod tests {
         };
 
         let result = client.request(&get_schema).await;
-        let Err(impeller2_stellar::Error::Response(resp)) = result else {
+        let Err(impeller_stellar::Error::Response(resp)) = result else {
             panic!("invalid error");
         };
         assert_eq!(
@@ -922,7 +1279,7 @@ mod tests {
         };
 
         let result = client.request(&get_metadata).await.unwrap_err();
-        let impeller2_stellar::Error::Response(resp) = result else {
+        let impeller_stellar::Error::Response(resp) = result else {
             panic!("invalid error");
         };
         assert_eq!(
@@ -941,7 +1298,7 @@ mod tests {
         let get_metadata = GetMsgMetadata { msg_id };
 
         let result = client.request(&get_metadata).await.unwrap_err();
-        let impeller2_stellar::Error::Response(resp) = result else {
+        let impeller_stellar::Error::Response(resp) = result else {
             panic!("invalid error");
         };
         assert_eq!(
@@ -965,7 +1322,7 @@ mod tests {
         };
 
         let result = client.request(&get_msgs).await.unwrap_err();
-        let impeller2_stellar::Error::Response(resp) = result else {
+        let impeller_stellar::Error::Response(resp) = result else {
             panic!("invalid error");
         };
         assert_eq!(resp.description, format!("msg not found {:?}", msg_id));
@@ -1446,7 +1803,7 @@ mod tests {
             .0
             .unwrap();
 
-        let Err(impeller2_stellar::Error::Response(err)) = client.recv::<()>(42).await else {
+        let Err(impeller_stellar::Error::Response(err)) = client.recv::<()>(42).await else {
             panic!("invalid response");
         };
         assert_eq!(
@@ -1490,7 +1847,7 @@ mod tests {
         client.send(pkt.with_request_id(42)).await.0.unwrap();
         sleep(Duration::from_millis(10)).await;
 
-        let Err(impeller2_stellar::Error::Response(err)) = client.recv::<()>(42).await else {
+        let Err(impeller_stellar::Error::Response(err)) = client.recv::<()>(42).await else {
             panic!("invalid response");
         };
         assert_eq!(elodin_db::Error::TimeTravel.to_string(), err.description);
@@ -1661,7 +2018,7 @@ mod tests {
     /// Helper: poll until a message log has at least `min_count` messages.
     async fn wait_for_msg_count(
         db: &Arc<DB>,
-        msg_id: impeller2::types::PacketId,
+        msg_id: impeller::types::PacketId,
         min_count: usize,
         timeout: Duration,
     ) -> bool {
@@ -1967,7 +2324,7 @@ mod tests {
         let component_id = ComponentId::new("follow_sensor");
         let vtable_id = 10u16.to_le_bytes();
         let msg_name = "follow_telemetry";
-        let msg_id = impeller2::types::msg_id(msg_name);
+        let msg_id = impeller::types::msg_id(msg_name);
 
         // Pre-connect: write 3 component samples with realistic timestamps.
         {
@@ -1991,7 +2348,7 @@ mod tests {
                     id: msg_id,
                     metadata: MsgMetadata {
                         name: msg_name.to_string(),
-                        schema: <impeller2_wkt::OpaqueBytes as postcard_schema::Schema>::SCHEMA
+                        schema: <impeller_wkt::OpaqueBytes as postcard_schema::Schema>::SCHEMA
                             .into(),
                         metadata: Default::default(),
                     },
@@ -2377,7 +2734,7 @@ mod tests {
         let component_id = ComponentId::new("dedup_test");
         let vtable_id = 20u16.to_le_bytes();
         let msg_name = "dedup_msg";
-        let msg_id = impeller2::types::msg_id(msg_name);
+        let msg_id = impeller::types::msg_id(msg_name);
 
         // ── Era 1: write 3 component samples + 1 message ────────────────
         let src_listener_1 = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -2406,7 +2763,7 @@ mod tests {
                     id: msg_id,
                     metadata: MsgMetadata {
                         name: msg_name.to_string(),
-                        schema: <impeller2_wkt::OpaqueBytes as postcard_schema::Schema>::SCHEMA
+                        schema: <impeller_wkt::OpaqueBytes as postcard_schema::Schema>::SCHEMA
                             .into(),
                         metadata: Default::default(),
                     },
@@ -2699,7 +3056,7 @@ mod tests {
 
         // 5 messages.
         let msg_name = "multi_log";
-        let msg_id = impeller2::types::msg_id(msg_name);
+        let msg_id = impeller::types::msg_id(msg_name);
         {
             let mut client = Client::connect(src_addr).await.unwrap();
             client
@@ -2707,7 +3064,7 @@ mod tests {
                     id: msg_id,
                     metadata: MsgMetadata {
                         name: msg_name.to_string(),
-                        schema: <impeller2_wkt::OpaqueBytes as postcard_schema::Schema>::SCHEMA
+                        schema: <impeller_wkt::OpaqueBytes as postcard_schema::Schema>::SCHEMA
                             .into(),
                         metadata: Default::default(),
                     },

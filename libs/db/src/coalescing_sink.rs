@@ -1,4 +1,4 @@
-use impeller2::types::{IntoLenPacket, LenPacket};
+use impeller::types::{IntoLenPacket, LenPacket};
 use std::time::{Duration, Instant};
 use stellarator::io::AsyncWrite;
 
@@ -11,7 +11,7 @@ use crate::Error;
 /// updates (e.g. 100 components at 300 Hz → ~30 000 tiny packets/sec).
 /// With a 1500-byte target those coalesce into ~600 well-packed writes/sec.
 ///
-/// The receiver sees no difference – the impeller2 length-delimited framing
+/// The receiver sees no difference – the impeller length-delimited framing
 /// lets `LengthDelReader` parse individual packets from the coalesced byte
 /// stream as usual.
 pub struct CoalescingSink<'a, W: AsyncWrite> {

@@ -7,6 +7,8 @@ from jax import numpy as jnp
 from jax import random
 from jax.numpy import linalg as la
 
+from schematic import build as build_schematic
+
 SIM_TIME_STEP = 1.0 / 120.0
 
 BALL_RADIUS = 0.2
@@ -22,34 +24,7 @@ def world(seed: int = 0) -> el.World:
         name="ball",
     )
 
-    world.schematic(
-        """
-        coordinate frame=ENU
-        hsplit {
-            tabs {
-                viewport name=Viewport pos="(0,0,0,0, 8,2,4)" look_at="(0,0,0,0, 0,0,3)" hdr=#true show_grid=#true active=#true
-                inspector
-            }
-        }
-        object_3d frame="ENU" ball.world_pos {
-            sphere radius=0.2 {
-                color orange
-            }
-        }
-        line_3d ball.world_pos line_width=2.0 {
-            color white
-        }
-        vector_arrow "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" origin="ball.world_pos" scale=1.0 name="Ball Velocity" show_name=#true label_position="0.3m" {
-            color yalk 100
-        }
-        object_3d "(0,0,0,1, 0,0,0)" {
-            plane width=2000 depth=2000 {
-                color 32 128 32 125
-            }
-        }
-    """,
-        "ball.kdl",
-    )
+    world.schematic(build_schematic(), "ball.kdl")
     return world
 
 

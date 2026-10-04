@@ -1,25 +1,32 @@
 use std::collections::HashMap;
 
 use crate::{
-    GridHandle,
+    GridHandle, TimeRangeBehavior,
     object_3d::Object3DState,
+    plugins::render_layer_alloc::VIEW_CUBE_RENDER_LAYERS,
     ui::{
         HdrEnabled, actions, colors,
         colors::EColor,
-        inspector, monitor, plot, query_plot, query_table,
-        tiles::{self, Pane},
-        timeline::TimelineSettings,
+        gauges, inspector, monitor, plot, query_plot, query_table,
+        tiles::{self, CINEMATIC_DEFAULT_EV100, Pane},
+        timeline::{TelemetryMode, TimelineSettings},
         window::compute_window_title,
     },
     vector_arrow::ViewportArrow,
 };
-use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
+use bevy::{
+    camera::{Exposure, PhysicalCameraParameters, visibility::RenderLayers},
+    ecs::system::SystemParam,
+    prelude::*,
+    window::PrimaryWindow,
+};
 use bevy_geo_frames::{GeoFrame, GeoPosition};
 use egui_tiles::{Tile, TileId};
-use impeller2_bevy::ComponentMetadataRegistry;
-use impeller2_wkt::{
-    ActionPane, ComponentMonitor, ComponentPath, Line3d, Panel, Schematic, SchematicElem, Split,
-    VectorArrow3d, VideoStream as WktVideoStream, Viewport, WindowSchematic, WorldMesh,
+use impeller_bevy::ComponentMetadataRegistry;
+use impeller_wkt::{
+    ActionPane, ComponentMonitor, ComponentPath, GeoPositionGauge, HorizonGauge, Line3d,
+    OrientationGauge, Panel, PointTrails, Schematic, SchematicElem, Split, VectorArrow3d,
+    VideoStream as WktVideoStream, Viewport, WindowSchematic, WorldMesh,
 };
 
 pub mod bindings;
@@ -29,9 +36,8 @@ pub use tree::*;
 mod load;
 pub use crate::plugins::kdl_document::{
     CurrentDocument, DocumentCleared, DocumentLoadFailed, DocumentLoaded, DocumentReloaded,
-    DocumentSaved, InitialKdlPath, KdlDocumentSet, OpenDocumentFromContentRequest,
-    OpenDocumentRequest, SaveCurrentDocumentRequest, SavedWindowInfo, SchematicDocumentAsset,
-    SchematicWindow, WindowDocumentSave, apply_initial_kdl_path, sync_document_from_config,
+    InitialKdlPath, KdlDocumentSet, OpenDocumentRequest, SchematicDocumentAsset, SchematicWindow,
+    WindowDocumentSave, apply_initial_kdl_path, sync_document_from_config,
 };
 pub use load::*;
 
@@ -53,16 +59,22 @@ pub struct CurrentWindowSchematics(pub Vec<WindowSchematicEntry>);
 pub struct SchematicParam<'w, 's> {
     pub query_tables: Query<'w, 's, &'static query_table::QueryTableData>,
     pub monitors: Query<'w, 's, &'static monitor::MonitorData>,
+    pub geo_position_gauges: Query<'w, 's, &'static gauges::GeoPositionGaugeData>,
+    pub orientation_gauges: Query<'w, 's, &'static gauges::OrientationGaugeData>,
+    pub horizon_gauges: Query<'w, 's, &'static gauges::HorizonGaugeData>,
+    pub eql_bindings: Query<'w, 's, &'static gauges::EqlBinding>,
     pub action_tiles: Query<'w, 's, &'static actions::ActionTile>,
     pub graph_states: Query<'w, 's, &'static plot::GraphState>,
     pub query_plots: Query<'w, 's, &'static query_plot::QueryPlotData>,
     pub viewports: Query<'w, 's, &'static inspector::viewport::Viewport>,
     pub projections: Query<'w, 's, &'static Projection>,
     pub viewport_configs: Query<'w, 's, &'static tiles::ViewportConfig>,
+    pub exposures: Query<'w, 's, &'static Exposure>,
     pub camera_grids: Query<'w, 's, &'static GridHandle>,
-    pub grid_visibility: Query<'w, 's, &'static Visibility>,
+    pub camera_layers: Query<'w, 's, &'static RenderLayers>,
     pub objects_3d: Query<'w, 's, (Entity, &'static Object3DState)>,
     pub lines_3d: Query<'w, 's, (Entity, &'static Line3d)>,
+    pub point_trails: Query<'w, 's, (Entity, &'static PointTrails)>,
     pub world_meshes: Query<'w, 's, (Entity, &'static WorldMesh)>,
     pub vector_arrows: Query<
         'w,
@@ -80,10 +92,13 @@ pub struct SchematicParam<'w, 's> {
     pub log_streams: Query<'w, 's, &'static super::log_stream::LogStreamState>,
     pub hdr_enabled: Res<'w, HdrEnabled>,
     pub timeline_settings: Res<'w, TimelineSettings>,
+    pub time_range_behavior: Res<'w, TimeRangeBehavior>,
+    pub telemetry_mode: Res<'w, TelemetryMode>,
     pub metadata: Res<'w, ComponentMetadataRegistry>,
     pub geo_positions: Query<'w, 's, &'static GeoPosition>,
     pub coordinate: Res<'w, crate::Coordinate>,
     pub geo_context: Res<'w, bevy_geo_frames::GeoContext>,
+    pub scene_environment: Res<'w, crate::plugins::scene_environment::SceneEnvironment>,
 }
 
 impl SchematicParam<'_, '_> {
@@ -96,6 +111,9 @@ impl SchematicParam<'_, '_> {
                 .ok()
                 .map(|state| state.label.clone()),
             Pane::Monitor(monitor) => Some(monitor.name.clone()),
+            Pane::GeoPositionGauge(gauge)
+            | Pane::OrientationGauge(gauge)
+            | Pane::HorizonGauge(gauge) => Some(gauge.name.clone()),
             Pane::QueryTable(table) => Some(table.name.clone()),
             Pane::QueryPlot(plot) => self
                 .graph_states
@@ -182,9 +200,10 @@ impl SchematicParam<'_, '_> {
 
                         let mut show_grid = false;
                         if let Ok(grid_handle) = self.camera_grids.get(cam_entity)
-                            && let Ok(visibility) = self.grid_visibility.get(grid_handle.grid)
+                            && let Ok(render_layers) = self.camera_layers.get(cam_entity)
                         {
-                            show_grid = matches!(*visibility, Visibility::Visible);
+                            show_grid =
+                                render_layers.intersects(&RenderLayers::layer(grid_handle.layer));
                         }
 
                         let show_arrows = vp_config.map(|c| c.show_arrows).unwrap_or(true);
@@ -192,14 +211,26 @@ impl SchematicParam<'_, '_> {
                         let show_frustums = vp_config.map(|c| c.show_frustums).unwrap_or(false);
                         let frustums_color = vp_config
                             .map(|c| c.frustums_color)
-                            .unwrap_or_else(impeller2_wkt::default_viewport_frustums_color);
+                            .unwrap_or_else(impeller_wkt::default_viewport_frustums_color);
                         let projection_color = vp_config
                             .map(|c| c.projection_color)
-                            .unwrap_or_else(impeller2_wkt::default_viewport_projection_color);
+                            .unwrap_or_else(impeller_wkt::default_viewport_projection_color);
                         let frustums_thickness = vp_config
                             .map(|c| c.frustums_thickness)
-                            .unwrap_or_else(impeller2_wkt::default_viewport_frustums_thickness);
+                            .unwrap_or_else(impeller_wkt::default_viewport_frustums_thickness);
+                        let frustums_up_marker =
+                            vp_config.map(|c| c.frustums_up_marker).unwrap_or_default();
+                        let frustums_up_marker_overlay = vp_config
+                            .map(|c| c.frustums_up_marker_overlay)
+                            .unwrap_or(false);
                         let show_view_cube = viewport.view_cube_layer.is_some();
+                        let cinematic = vp_config.map(|c| c.cinematic).unwrap_or(false);
+                        let view_cube_frame = viewport.view_cube_layer.and_then(|layer| {
+                            VIEW_CUBE_RENDER_LAYERS
+                                .iter()
+                                .find(|(_, l)| *l == layer)
+                                .map(|(frame, _)| *frame)
+                        });
 
                         let local_arrows: Vec<VectorArrow3d> = self
                             .vector_arrows
@@ -219,7 +250,7 @@ impl SchematicParam<'_, '_> {
                             .map(|geo_pos| geo_pos.0)
                             .ok();
 
-                        let node_id = impeller2_wkt::NodeId::next();
+                        let node_id = impeller_wkt::NodeId::next();
                         bindings.bind_ephemeral(node_id, cam_entity);
                         Some(Panel::Viewport(Viewport {
                             fov,
@@ -234,14 +265,26 @@ impl SchematicParam<'_, '_> {
                             frustums_color,
                             projection_color,
                             frustums_thickness,
+                            frustums_up_marker,
+                            frustums_up_marker_overlay,
                             show_view_cube,
-                            hdr: self.hdr_enabled.0,
-                            bloom: None,
+                            view_cube_frame,
+                            // ViewportConfig does not yet track `effects`; default
+                            // on so schematic dumps keep thruster particles visible.
+                            effects: true,
+                            hdr: self.hdr_enabled.0 && !cinematic,
+                            cinematic,
+                            bloom: vp_config.and_then(|c| c.bloom.clone()),
+                            ev100: persist_viewport_ev100(
+                                cinematic,
+                                self.exposures.get(cam_entity).ok().map(|e| e.ev100),
+                            ),
                             name: pane_name,
                             pos: Some(viewport_data.pos.eql.clone()),
                             look_at: Some(viewport_data.look_at.eql.clone()),
                             up: (!viewport_data.up.eql.is_empty())
                                 .then(|| viewport_data.up.eql.clone()),
+                            smoothing: viewport_data.smoothing,
                             local_arrows,
                             frame,
                             node_id,
@@ -252,28 +295,60 @@ impl SchematicParam<'_, '_> {
                     Pane::Graph(graph) => {
                         let graph_state = self.graph_states.get(graph.id).ok()?;
                         let mut eql = String::new();
-                        let mut colors: Vec<impeller2_wkt::Color> = vec![];
+                        let mut colors: Vec<impeller_wkt::Color> = vec![];
                         let mut parts: Vec<String> = Vec::new();
+                        let kernel = graph_state.kernel.as_ref().map(|k| k.binding.clone());
 
-                        for (component_path, component_values) in &graph_state.components {
-                            for (index, (enabled, color)) in component_values.iter().enumerate() {
-                                if !*enabled {
-                                    continue;
+                        if let Some(kernel_state) = &graph_state.kernel {
+                            for index in 0..kernel_state.lines.len().max(kernel_state.colors.len())
+                            {
+                                let color = graph_state
+                                    .enabled_lines
+                                    .get(&(kernel_state.path.clone(), index))
+                                    .map(|(_, color)| *color)
+                                    .or_else(|| kernel_state.colors.get(index).copied());
+                                if let Some(color) = color {
+                                    colors.push(impeller_wkt::Color::from_color32(color));
                                 }
-                                parts.push(component_expr(component_path, index, &self.metadata));
-                                colors.push(impeller2_wkt::Color::from_color32(*color));
+                            }
+                        } else if let Some(derived) = &graph_state.derived {
+                            eql = derived.source.clone();
+                            for index in 0..derived.lines.len().max(derived.colors.len()) {
+                                let color = graph_state
+                                    .enabled_lines
+                                    .get(&(derived.path.clone(), index))
+                                    .map(|(_, color)| *color)
+                                    .or_else(|| derived.colors.get(index).copied());
+                                if let Some(color) = color {
+                                    colors.push(impeller_wkt::Color::from_color32(color));
+                                }
+                            }
+                        } else {
+                            for (component_path, component_values) in &graph_state.components {
+                                for (index, (enabled, color)) in component_values.iter().enumerate()
+                                {
+                                    if !*enabled {
+                                        continue;
+                                    }
+                                    parts.push(component_expr(
+                                        component_path,
+                                        index,
+                                        &self.metadata,
+                                    ));
+                                    colors.push(impeller_wkt::Color::from_color32(*color));
+                                }
+                            }
+
+                            if !parts.is_empty() {
+                                eql = parts.join(", ");
+                            } else if !graph_state.label.is_empty() {
+                                eql = graph_state.label.clone();
                             }
                         }
 
-                        if !parts.is_empty() {
-                            eql = parts.join(", ");
-                        } else if !graph_state.label.is_empty() {
-                            eql = graph_state.label.clone();
-                        }
-
-                        let node_id = impeller2_wkt::NodeId::next();
+                        let node_id = impeller_wkt::NodeId::next();
                         bindings.bind_ephemeral(node_id, graph.id);
-                        Some(Panel::Graph(impeller2_wkt::Graph {
+                        Some(Panel::Graph(impeller_wkt::Graph {
                             eql,
                             name: pane_name,
                             graph_type: graph_state.graph_type,
@@ -282,6 +357,7 @@ impl SchematicParam<'_, '_> {
                             y_range: graph_state.y_range.clone(),
                             node_id,
                             colors,
+                            kernel,
                         }))
                     }
 
@@ -290,6 +366,53 @@ impl SchematicParam<'_, '_> {
                         Some(Panel::ComponentMonitor(ComponentMonitor {
                             component_name: monitor_data.component_name.clone(),
                             name: pane_name,
+                        }))
+                    }
+
+                    Pane::GeoPositionGauge(gauge) => {
+                        let data = self.geo_position_gauges.get(gauge.entity).ok()?;
+                        let binding = self.eql_bindings.get(gauge.entity).ok()?;
+                        let node_id = impeller_wkt::NodeId::next();
+                        bindings.bind_ephemeral(node_id, gauge.entity);
+                        Some(Panel::GeoPositionGauge(GeoPositionGauge {
+                            eql: binding.eql.clone(),
+                            // Keep None so save omits `source=` and inheritance
+                            // from `coordinate` survives a round-trip.
+                            source: data.source,
+                            display: data.display,
+                            name: pane_name,
+                            node_id,
+                        }))
+                    }
+
+                    Pane::OrientationGauge(gauge) => {
+                        let data = self.orientation_gauges.get(gauge.entity).ok()?;
+                        let binding = self.eql_bindings.get(gauge.entity).ok()?;
+                        let node_id = impeller_wkt::NodeId::next();
+                        bindings.bind_ephemeral(node_id, gauge.entity);
+                        Some(Panel::OrientationGauge(OrientationGauge {
+                            eql: binding.eql.clone(),
+                            source: data.source,
+                            display: data.display,
+                            // None when identity so the default stays implicit.
+                            reference: data.reference_kdl(),
+                            name: pane_name,
+                            node_id,
+                        }))
+                    }
+
+                    Pane::HorizonGauge(gauge) => {
+                        let data = self.horizon_gauges.get(gauge.entity).ok()?;
+                        let binding = self.eql_bindings.get(gauge.entity).ok()?;
+                        let node_id = impeller_wkt::NodeId::next();
+                        bindings.bind_ephemeral(node_id, gauge.entity);
+                        Some(Panel::HorizonGauge(HorizonGauge {
+                            eql: binding.eql.clone(),
+                            source: data.source,
+                            // None when identity so the default stays implicit.
+                            reference: data.reference_kdl(),
+                            name: pane_name,
+                            node_id,
                         }))
                     }
 
@@ -302,7 +425,7 @@ impl SchematicParam<'_, '_> {
 
                     Pane::QueryPlot(plot) => {
                         let query_plot_data = self.query_plots.get(plot.entity).ok()?;
-                        let node_id = impeller2_wkt::NodeId::next();
+                        let node_id = impeller_wkt::NodeId::next();
                         bindings.bind_ephemeral(node_id, plot.entity);
                         let mut qp = query_plot_data.data.clone();
                         qp.node_id = node_id;
@@ -329,14 +452,14 @@ impl SchematicParam<'_, '_> {
                     }
                     Pane::SensorView(sv_pane) => {
                         let video_stream = self.video_streams.get(sv_pane.entity).ok()?;
-                        Some(Panel::SensorView(impeller2_wkt::SensorView {
+                        Some(Panel::SensorView(impeller_wkt::SensorView {
                             msg_name: video_stream.msg_name.clone(),
                             name: pane_name,
                         }))
                     }
                     Pane::LogStream(ls_pane) => {
                         let log_state = self.log_streams.get(ls_pane.entity).ok()?;
-                        Some(Panel::LogStream(impeller2_wkt::LogStream {
+                        Some(Panel::LogStream(impeller_wkt::LogStream {
                             msg_name: log_state.msg_name.clone(),
                             name: pane_name,
                         }))
@@ -404,6 +527,22 @@ impl SchematicParam<'_, '_> {
     }
 }
 
+fn persist_viewport_ev100(cinematic: bool, live: Option<f32>) -> Option<f32> {
+    let ev = live?;
+    let default_ev = if cinematic {
+        CINEMATIC_DEFAULT_EV100
+    } else {
+        Exposure::from_physical_camera(PhysicalCameraParameters {
+            aperture_f_stops: 2.8,
+            shutter_speed_s: 1.0 / 200.0,
+            sensitivity_iso: 400.0,
+            sensor_height: 24.0 / 1000.0,
+        })
+        .ev100
+    };
+    ((ev - default_ev).abs() > 1e-3).then_some(ev)
+}
+
 pub fn tiles_to_schematic(
     param: SchematicParam,
     mut schematic: ResMut<CurrentSchematic>,
@@ -411,6 +550,7 @@ pub fn tiles_to_schematic(
     mut bindings: ResMut<SchematicBindings>,
 ) {
     schematic.elems.clear();
+    schematic.environment = param.scene_environment.0.clone();
     schematic.frame = param.coordinate.0;
 
     // Persist the GeoContext origin (radians -> degrees), omitting the
@@ -423,11 +563,14 @@ pub fn tiles_to_schematic(
             default_origin.longitude,
             default_origin.altitude,
         ))
-        .then(|| impeller2_wkt::GeoOriginConfig {
+        .then(|| impeller_wkt::GeoOriginConfig {
             latitude: origin.latitude.to_degrees(),
             longitude: origin.longitude.to_degrees(),
             altitude: origin.altitude,
         });
+    // The ellipsoid rides along with the origin: without it a lunar schematic
+    // would reload as WGS84, breaking ECEF verticals and LLA conversions.
+    schematic.body = load::ellipsoid_body(origin.ellipsoid);
     bindings.clear_ephemeral();
 
     if let Some(root_panels) =
@@ -447,7 +590,7 @@ pub fn tiles_to_schematic(
         .elems
         .extend(param.objects_3d.iter().map(|(entity, o)| {
             let mut obj = o.data.clone();
-            let node_id = impeller2_wkt::NodeId::next();
+            let node_id = impeller_wkt::NodeId::next();
             bindings.bind_ephemeral(node_id, entity);
             obj.node_id = node_id;
             SchematicElem::Object3d(obj)
@@ -456,10 +599,19 @@ pub fn tiles_to_schematic(
         .elems
         .extend(param.lines_3d.iter().map(|(entity, line)| {
             let mut l = line.clone();
-            let node_id = impeller2_wkt::NodeId::next();
+            let node_id = impeller_wkt::NodeId::next();
             bindings.bind_ephemeral(node_id, entity);
             l.node_id = node_id;
             SchematicElem::Line3d(l)
+        }));
+    schematic
+        .elems
+        .extend(param.point_trails.iter().map(|(entity, trails)| {
+            let mut t = trails.clone();
+            let node_id = impeller_wkt::NodeId::next();
+            bindings.bind_ephemeral(node_id, entity);
+            t.node_id = node_id;
+            SchematicElem::PointTrails(t)
         }));
     schematic.elems.extend(
         param
@@ -468,7 +620,7 @@ pub fn tiles_to_schematic(
             .filter(|(_, _, viewport_arrow)| viewport_arrow.is_none())
             .map(|(entity, arrow, _)| {
                 let mut a = arrow.clone();
-                let node_id = impeller2_wkt::NodeId::next();
+                let node_id = impeller_wkt::NodeId::next();
                 bindings.bind_ephemeral(node_id, entity);
                 a.node_id = node_id;
                 SchematicElem::VectorArrow(a)
@@ -479,7 +631,7 @@ pub fn tiles_to_schematic(
         .elems
         .extend(param.world_meshes.iter().map(|(entity, world_mesh)| {
             let mut wm = world_mesh.clone();
-            let node_id = impeller2_wkt::NodeId::next();
+            let node_id = impeller_wkt::NodeId::next();
             bindings.bind_ephemeral(node_id, entity);
             wm.node_id = node_id;
             SchematicElem::WorldMesh(wm)
@@ -488,6 +640,24 @@ pub fn tiles_to_schematic(
     window_schematics.0.clear();
     let mut window_elems = Vec::new();
     let mut name_counts: HashMap<String, usize> = HashMap::new();
+    // A window loaded from the DB keeps its stored asset key on save, so
+    // ingest-keyed sub-schematics (e.g. `windows/detail.kdl`, kept at their
+    // original keys by `resolve_stored_asset_key`) are overwritten in place
+    // instead of being re-keyed under `schematics/<stem>.kdl` — which would
+    // strand the stored reference for other consumers. Seed the generated-name
+    // counter with the stems of preserved `schematics/<stem>.kdl` keys so a
+    // freshly created window can never claim the same key.
+    for (state, window_id) in &param.windows_state {
+        if window_id.is_primary() {
+            continue;
+        }
+        if let Some(stem) = preserved_window_key(state)
+            .as_deref()
+            .and_then(schematics_key_stem)
+        {
+            name_counts.entry(stem.to_string()).or_insert(1);
+        }
+    }
     for (state, window_id) in &param.windows_state {
         let mut file_name: Option<String> = None;
         let mut window_title: Option<String> = None;
@@ -497,9 +667,12 @@ pub fn tiles_to_schematic(
             if computed_title != "Panel" {
                 window_title = Some(computed_title);
             }
-            let base_stem = preferred_window_stem(state);
-            let unique_stem = ensure_unique_stem(&mut name_counts, &base_stem);
-            file_name = Some(format!("{unique_stem}.kdl"));
+            let name = preserved_window_key(state).unwrap_or_else(|| {
+                let base_stem = preferred_window_stem(state);
+                let unique_stem = ensure_unique_stem(&mut name_counts, &base_stem);
+                format!("{unique_stem}.kdl")
+            });
+            file_name = Some(name);
 
             let mut win_schematic = Schematic::default();
             win_schematic.elems.extend(
@@ -527,12 +700,15 @@ pub fn tiles_to_schematic(
     }
 
     schematic.elems.extend(window_elems);
-    schematic.timeline = Some((*param.timeline_settings).into());
+    let mut timeline: impeller_wkt::TimelineConfig = (*param.timeline_settings).into();
+    timeline.range = param.time_range_behavior.to_schematic_range();
+    schematic.timeline = Some(timeline);
+    schematic.telemetry_mode = param.telemetry_mode.0;
     if let Ok((state, _)) = param.windows_state.get(*param.primary_window)
         && let Some(mode) = state.descriptor.mode.clone()
     {
         let selection = colors::current_selection();
-        schematic.theme = Some(impeller2_wkt::ThemeConfig {
+        schematic.theme = Some(impeller_wkt::ThemeConfig {
             mode: Some(mode),
             scheme: Some(selection.scheme),
         });
@@ -546,7 +722,14 @@ impl Plugin for SchematicPlugin {
         app.insert_resource(CurrentSchematic(Default::default()))
             .insert_resource(CurrentWindowSchematics::default())
             .init_resource::<SchematicBindings>()
+            .init_resource::<load::PendingWindowSchematics>()
+            .init_resource::<load::PendingDataOverview>()
+            .add_plugins(load::plugin)
             .add_systems(PostUpdate, tiles_to_schematic)
+            .add_systems(
+                PostUpdate,
+                load::reject_mixed_cinematic_environment.after(tiles_to_schematic),
+            )
             .add_systems(
                 PostUpdate,
                 apply_initial_kdl_path
@@ -557,15 +740,32 @@ impl Plugin for SchematicPlugin {
                 PreUpdate,
                 (
                     load::apply_document_cleared,
+                    load::retry_pending_data_overview,
+                    load::retry_pending_object_3d_spawns,
                     load::apply_document_loaded.before(crate::ui::sync_windows),
-                    load::apply_document_saved,
                     load::apply_document_reloaded.before(crate::ui::sync_windows),
+                    load::apply_pending_window_schematics.before(crate::ui::sync_windows),
                     load::show_document_command_failures,
                     load::show_document_load_failures,
                 )
                     .after(KdlDocumentSet::AssetEvents),
             );
     }
+}
+
+/// The DB asset key a window was loaded from (a `db:<key>` descriptor path),
+/// if any. Preserved on save so the window overwrites its stored asset instead
+/// of forking to a newly generated `schematics/<stem>.kdl` key.
+fn preserved_window_key(state: &tiles::WindowState) -> Option<String> {
+    let path = state.descriptor.path.as_ref()?.to_str()?;
+    impeller_kdl::db_asset_name(path)
+}
+
+/// The stem of a single-level `schematics/<stem>.kdl` key, i.e. the namespace
+/// generated window names are keyed into.
+fn schematics_key_stem(key: &str) -> Option<&str> {
+    let stem = key.strip_prefix("schematics/")?.strip_suffix(".kdl")?;
+    (!stem.is_empty() && !stem.contains('/')).then_some(stem)
 }
 
 fn preferred_window_stem(state: &tiles::WindowState) -> String {
@@ -650,46 +850,483 @@ fn component_expr(
     format!("{base}[{index}]")
 }
 
+/// The `value * scale + offset` an expression applies to a component element.
+///
+/// Consumers that plot a bare element (2D graphs, monitors) ignore this;
+/// `line_3d` applies it so `ball.pos[0] + 1.5` offsets the trail rather than
+/// silently rendering the unshifted component.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ElementAffine {
+    pub scale: f64,
+    pub offset: f64,
+}
+
+impl Default for ElementAffine {
+    fn default() -> Self {
+        Self {
+            scale: 1.0,
+            offset: 0.0,
+        }
+    }
+}
+
+impl ElementAffine {
+    pub fn apply(self, value: f64) -> f64 {
+        value.mul_add(self.scale, self.offset)
+    }
+
+    pub fn is_identity(self) -> bool {
+        self == Self::default()
+    }
+
+    fn scaled(self, k: f64) -> Self {
+        Self {
+            scale: self.scale * k,
+            offset: self.offset * k,
+        }
+    }
+
+    fn shifted(self, k: f64) -> Self {
+        Self {
+            scale: self.scale,
+            offset: self.offset + k,
+        }
+    }
+}
+
+/// Fold an expression made only of float literals into its value.
+fn const_value(expr: &eql::Expr) -> Option<f64> {
+    match expr {
+        eql::Expr::FloatLiteral(f) => Some(*f),
+        eql::Expr::BinaryOp(left, right, op) => {
+            let (left, right) = (const_value(left)?, const_value(right)?);
+            Some(match op {
+                eql::BinaryOp::Add => left + right,
+                eql::BinaryOp::Sub => left - right,
+                eql::BinaryOp::Mul => left * right,
+                eql::BinaryOp::Div => left / right,
+            })
+        }
+        _ => None,
+    }
+}
+
 pub trait EqlExt {
     fn to_graph_components(&self) -> Vec<(ComponentPath, usize)>;
+    fn to_graph_component_affines(&self) -> Vec<(ComponentPath, usize, ElementAffine)>;
+    /// Whether plotting this expression requires evaluating its AST instead of
+    /// displaying its source components directly.
+    fn requires_plot_evaluation(&self) -> bool;
+    /// First geo-frame converter in the expression, if any (`ecef_to_ned`, …).
+    /// Schematic load attaches SQL-backed `QueryPlotData` when this is `Some`.
+    fn frame_conversion_name(&self) -> Option<&'static str>;
 }
 
 impl EqlExt for eql::Expr {
+    fn requires_plot_evaluation(&self) -> bool {
+        match self {
+            eql::Expr::Formula(_, _) | eql::Expr::BinaryOp(_, _, _) => true,
+            eql::Expr::ArrayAccess(expr, _)
+            | eql::Expr::Last(expr, _)
+            | eql::Expr::First(expr, _) => expr.requires_plot_evaluation(),
+            eql::Expr::Tuple(exprs) => exprs.iter().any(|e| e.requires_plot_evaluation()),
+            eql::Expr::ComponentPart(_)
+            | eql::Expr::Time(_)
+            | eql::Expr::FloatLiteral(_)
+            | eql::Expr::StringLiteral(_) => false,
+        }
+    }
+
+    /// Name of the first geo-frame converter in the expression, if any.
+    fn frame_conversion_name(&self) -> Option<&'static str> {
+        match self {
+            eql::Expr::Formula(formula, expr) => {
+                if formula.frame_conversion().is_some() {
+                    Some(formula.name())
+                } else {
+                    expr.frame_conversion_name()
+                }
+            }
+            eql::Expr::ArrayAccess(expr, _) => expr.frame_conversion_name(),
+            eql::Expr::Tuple(exprs) => exprs.iter().find_map(|e| e.frame_conversion_name()),
+            eql::Expr::BinaryOp(left, right, _) => left
+                .frame_conversion_name()
+                .or_else(|| right.frame_conversion_name()),
+            _ => None,
+        }
+    }
+
     fn to_graph_components(&self) -> Vec<(ComponentPath, usize)> {
+        self.to_graph_component_affines()
+            .into_iter()
+            .map(|(path, index, _)| (path, index))
+            .collect()
+    }
+
+    fn to_graph_component_affines(&self) -> Vec<(ComponentPath, usize, ElementAffine)> {
         match self {
             eql::Expr::ComponentPart(component_part) => {
                 let Some(component) = &component_part.component else {
                     return vec![];
                 };
                 (0..component.element_names.len())
-                    .map(|i| (ComponentPath::from_name(&component_part.name), i))
+                    .map(|i| {
+                        (
+                            ComponentPath::from_name(&component_part.name),
+                            i,
+                            ElementAffine::default(),
+                        )
+                    })
                     .collect()
             }
             eql::Expr::ArrayAccess(expr, i) => {
                 // Handle array access - recursively get components from the inner expression
                 match &**expr {
                     eql::Expr::ComponentPart(component_part) => {
-                        vec![(ComponentPath::from_name(&component_part.name), *i)]
+                        vec![(
+                            ComponentPath::from_name(&component_part.name),
+                            *i,
+                            ElementAffine::default(),
+                        )]
                     }
                     // For formulas or binary ops, extract components recursively
-                    _ => expr.to_graph_components(),
+                    _ => expr.to_graph_component_affines(),
                 }
             }
             eql::Expr::Tuple(exprs) => exprs
                 .iter()
-                .flat_map(|expr| expr.to_graph_components().into_iter())
+                .flat_map(|expr| expr.to_graph_component_affines().into_iter())
                 .collect(),
-            eql::Expr::BinaryOp(left, right, _) => {
-                // Extract components from both operands
-                let mut components = left.to_graph_components();
-                components.extend(right.to_graph_components());
+            eql::Expr::BinaryOp(left, right, op) => {
+                // Arithmetic against a constant stays exactly representable, so
+                // fold it into the affine. Anything else (component against
+                // component, non-affine ops) falls back to listing both sides'
+                // components untransformed.
+                if let Some(k) = const_value(right) {
+                    let folded = match op {
+                        eql::BinaryOp::Add => Some(Folded::Shift(k)),
+                        eql::BinaryOp::Sub => Some(Folded::Shift(-k)),
+                        eql::BinaryOp::Mul => Some(Folded::Scale(k)),
+                        eql::BinaryOp::Div if k != 0.0 => Some(Folded::Scale(1.0 / k)),
+                        eql::BinaryOp::Div => None,
+                    };
+                    if let Some(folded) = folded {
+                        return folded.apply_to(left.to_graph_component_affines());
+                    }
+                } else if let Some(k) = const_value(left) {
+                    // `k - expr` is `-expr + k`; `k / expr` is not affine.
+                    let folded = match op {
+                        eql::BinaryOp::Add => Some(vec![Folded::Shift(k)]),
+                        eql::BinaryOp::Sub => Some(vec![Folded::Scale(-1.0), Folded::Shift(k)]),
+                        eql::BinaryOp::Mul => Some(vec![Folded::Scale(k)]),
+                        eql::BinaryOp::Div => None,
+                    };
+                    if let Some(folded) = folded {
+                        let mut components = right.to_graph_component_affines();
+                        for step in folded {
+                            components = step.apply_to(components);
+                        }
+                        return components;
+                    }
+                }
+                let mut components = left.to_graph_component_affines();
+                components.extend(right.to_graph_component_affines());
                 components
             }
             eql::Expr::Formula(_, expr) => {
-                // Extract components from the formula's receiver/operand
-                expr.to_graph_components()
+                // Extract components from the formula's receiver/operand. The
+                // formula itself is not affine, so the transform is dropped.
+                expr.to_graph_component_affines()
+                    .into_iter()
+                    .map(|(path, index, _)| (path, index, ElementAffine::default()))
+                    .collect()
             }
             _ => vec![],
         }
+    }
+}
+
+/// A constant folded out of a [`eql::Expr::BinaryOp`], ready to compose onto the
+/// other operand's affines.
+enum Folded {
+    Scale(f64),
+    Shift(f64),
+}
+
+impl Folded {
+    fn apply_to(
+        &self,
+        components: Vec<(ComponentPath, usize, ElementAffine)>,
+    ) -> Vec<(ComponentPath, usize, ElementAffine)> {
+        components
+            .into_iter()
+            .map(|(path, index, affine)| {
+                let affine = match self {
+                    Folded::Scale(k) => affine.scaled(*k),
+                    Folded::Shift(k) => affine.shifted(*k),
+                };
+                (path, index, affine)
+            })
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod element_affine_tests {
+    use super::*;
+    use std::sync::Arc;
+
+    /// `<name>[<index>]`, the shape `line_3d` axes come in.
+    fn element(name: &str, index: usize) -> eql::Expr {
+        eql::Expr::ArrayAccess(
+            Box::new(eql::Expr::ComponentPart(Arc::new(eql::ComponentPart {
+                name: name.to_string(),
+                id: impeller::types::ComponentId::new(name),
+                component: None,
+                children: Default::default(),
+            }))),
+            index,
+        )
+    }
+
+    fn binary(left: eql::Expr, right: eql::Expr, op: eql::BinaryOp) -> eql::Expr {
+        eql::Expr::BinaryOp(Box::new(left), Box::new(right), op)
+    }
+
+    fn affines(expr: &eql::Expr) -> Vec<ElementAffine> {
+        expr.to_graph_component_affines()
+            .into_iter()
+            .map(|(_, _, affine)| affine)
+            .collect()
+    }
+
+    fn only_affine(expr: &eql::Expr) -> ElementAffine {
+        let affines = affines(expr);
+        assert_eq!(affines.len(), 1, "{affines:?}");
+        affines[0]
+    }
+
+    #[test]
+    fn bare_element_is_identity() {
+        assert!(only_affine(&element("ball.pos", 0)).is_identity());
+    }
+
+    #[test]
+    fn constant_offsets_fold_in() {
+        // `pos[0] + 1.5` is what separates two otherwise-coincident trails.
+        let shifted = binary(
+            element("ball.pos", 0),
+            eql::Expr::FloatLiteral(1.5),
+            eql::BinaryOp::Add,
+        );
+        assert_eq!(only_affine(&shifted).apply(10.0), 11.5);
+
+        // Addition commutes.
+        let flipped = binary(
+            eql::Expr::FloatLiteral(1.5),
+            element("ball.pos", 0),
+            eql::BinaryOp::Add,
+        );
+        assert_eq!(only_affine(&flipped).apply(10.0), 11.5);
+
+        let subtracted = binary(
+            element("ball.pos", 0),
+            eql::Expr::FloatLiteral(1.5),
+            eql::BinaryOp::Sub,
+        );
+        assert_eq!(only_affine(&subtracted).apply(10.0), 8.5);
+
+        // `k - expr` negates the element.
+        let negated = binary(
+            eql::Expr::FloatLiteral(1.5),
+            element("ball.pos", 0),
+            eql::BinaryOp::Sub,
+        );
+        assert_eq!(only_affine(&negated).apply(10.0), -8.5);
+    }
+
+    #[test]
+    fn constant_scales_fold_in() {
+        let scaled = binary(
+            element("ball.pos", 0),
+            eql::Expr::FloatLiteral(3.0),
+            eql::BinaryOp::Mul,
+        );
+        assert_eq!(only_affine(&scaled).apply(10.0), 30.0);
+
+        let divided = binary(
+            element("ball.pos", 0),
+            eql::Expr::FloatLiteral(4.0),
+            eql::BinaryOp::Div,
+        );
+        assert_eq!(only_affine(&divided).apply(10.0), 2.5);
+    }
+
+    #[test]
+    fn nested_constants_compose_in_order() {
+        // `(pos[0] + 1) * 2` scales the existing offset too.
+        let expr = binary(
+            binary(
+                element("ball.pos", 0),
+                eql::Expr::FloatLiteral(1.0),
+                eql::BinaryOp::Add,
+            ),
+            eql::Expr::FloatLiteral(2.0),
+            eql::BinaryOp::Mul,
+        );
+        assert_eq!(only_affine(&expr).apply(10.0), 22.0);
+    }
+
+    #[test]
+    fn division_by_zero_is_not_folded() {
+        let expr = binary(
+            element("ball.pos", 0),
+            eql::Expr::FloatLiteral(0.0),
+            eql::BinaryOp::Div,
+        );
+        assert!(only_affine(&expr).is_identity());
+    }
+
+    #[test]
+    fn component_arithmetic_stays_untransformed() {
+        // Two components can't collapse to one affine, so both are listed as-is
+        // (the pre-existing behavior).
+        let expr = binary(element("a.pos", 0), element("b.pos", 1), eql::BinaryOp::Add);
+        let affines = affines(&expr);
+        assert_eq!(affines.len(), 2);
+        assert!(affines.iter().all(|a| a.is_identity()));
+    }
+
+    #[test]
+    fn plot_evaluation_detects_math_without_routing_plain_components() {
+        let plain = element("ball.pos", 0);
+        assert!(!plain.requires_plot_evaluation());
+
+        let arithmetic = binary(
+            element("ball.pos", 0),
+            eql::Expr::FloatLiteral(2.0),
+            eql::BinaryOp::Mul,
+        );
+        assert!(arithmetic.requires_plot_evaluation());
+
+        let sqrt = eql::Expr::Formula(Arc::new(eql::formulas::Sqrt), Box::new(plain.clone()));
+        assert!(sqrt.requires_plot_evaluation());
+
+        // Comma graphs are tuples of components and must stay independent series.
+        let comma = eql::Expr::Tuple(vec![plain.clone(), element("ball.vel", 0)]);
+        assert!(!comma.requires_plot_evaluation());
+
+        let tuple = eql::Expr::Tuple(vec![plain, sqrt]);
+        assert!(tuple.requires_plot_evaluation());
+    }
+
+    #[test]
+    fn to_graph_components_matches_the_affine_traversal() {
+        // The plain accessor must stay a projection of the affine one; graphs and
+        // monitors rely on its exact ordering.
+        let expr = eql::Expr::Tuple(vec![
+            eql::Expr::FloatLiteral(0.0),
+            binary(
+                element("ball.pos", 0),
+                eql::Expr::FloatLiteral(1.5),
+                eql::BinaryOp::Add,
+            ),
+            element("ball.pos", 1),
+        ]);
+        let plain = expr.to_graph_components();
+        let with_affine = expr.to_graph_component_affines();
+        assert_eq!(plain.len(), 2);
+        assert_eq!(
+            plain,
+            with_affine
+                .iter()
+                .map(|(path, index, _)| (path.clone(), *index))
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+#[cfg(test)]
+mod frame_conversion_tests {
+    use super::*;
+    use impeller::schema::Schema;
+    use impeller::types::{ComponentId, PrimType, Timestamp};
+    use std::sync::Arc;
+
+    fn ctx() -> eql::Context {
+        let component = Arc::new(eql::Component::new(
+            "rocket.world_pos".to_string(),
+            ComponentId::new("rocket.world_pos"),
+            Schema::new(PrimType::F64, vec![7u64]).unwrap(),
+        ));
+        eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000))
+    }
+
+    #[test]
+    fn detects_converter_under_element_tuple() {
+        let ctx = ctx();
+        let expr = ctx
+            .parse_str(
+                "(rocket.world_pos[4], rocket.world_pos[5], rocket.world_pos[6]).ecef_to_ned()",
+            )
+            .unwrap();
+        assert_eq!(expr.frame_conversion_name(), Some("ecef_to_ned"));
+        // SeriesStore extraction would yield the raw ECEF elements; the graph
+        // loader routes converters through SQL-backed QueryPlotData instead.
+        assert_eq!(expr.to_graph_components().len(), 3);
+    }
+
+    #[test]
+    fn plain_tuple_has_no_conversion() {
+        let ctx = ctx();
+        let expr = ctx
+            .parse_str("(rocket.world_pos[4], rocket.world_pos[5])")
+            .unwrap();
+        assert_eq!(expr.frame_conversion_name(), None);
+    }
+}
+
+#[cfg(test)]
+mod window_key_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn window_state(path: Option<&str>) -> tiles::WindowState {
+        tiles::WindowState {
+            descriptor: tiles::WindowDescriptor {
+                path: path.map(PathBuf::from),
+                ..Default::default()
+            },
+            graph_entities: Vec::new(),
+            tile_state: tiles::TileState::default(),
+            ui_state: Default::default(),
+        }
+    }
+
+    #[test]
+    fn preserved_window_key_keeps_db_keys_only() {
+        // Ingest-keyed and editor-keyed stored windows keep their exact key.
+        assert_eq!(
+            preserved_window_key(&window_state(Some("db:windows/detail.kdl"))).as_deref(),
+            Some("windows/detail.kdl")
+        );
+        assert_eq!(
+            preserved_window_key(&window_state(Some("db:schematics/detail.kdl"))).as_deref(),
+            Some("schematics/detail.kdl")
+        );
+        // Local file paths and pathless (new) windows get generated names.
+        assert_eq!(
+            preserved_window_key(&window_state(Some("/abs/detail.kdl"))),
+            None
+        );
+        assert_eq!(preserved_window_key(&window_state(None)), None);
+    }
+
+    #[test]
+    fn schematics_key_stem_extracts_single_level_stems() {
+        assert_eq!(schematics_key_stem("schematics/detail.kdl"), Some("detail"));
+        assert_eq!(schematics_key_stem("schematics/sub/detail.kdl"), None);
+        assert_eq!(schematics_key_stem("windows/detail.kdl"), None);
+        assert_eq!(schematics_key_stem("schematics/.kdl"), None);
     }
 }

@@ -153,7 +153,7 @@ recipes = {
 
 Features:
 - Parallel execution of recipes once their `depends_on` dependencies are ready
-- Terminates all when any recipe fails
+- Terminates all when the **simulation** finishes or any recipe **fails**; successful sidecar exits do not tear down the group
 - Combines output with colored prefixes
 
 ## Command Line Usage

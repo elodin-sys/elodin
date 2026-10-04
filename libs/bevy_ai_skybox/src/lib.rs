@@ -203,14 +203,22 @@ impl SkyboxManifest {
         Self::from_ron_str(&contents)
     }
 
+    pub fn to_ron_string(&self) -> Result<String> {
+        Ok(format!(
+            "{}\n",
+            ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default())?
+        ))
+    }
+
+    pub fn to_ron_bytes(&self) -> Result<Vec<u8>> {
+        Ok(self.to_ron_string()?.into_bytes())
+    }
+
     pub fn write_atomic(&self, path: &Path) -> Result<()> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let contents = format!(
-            "{}\n",
-            ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default())?
-        );
+        let contents = self.to_ron_string()?;
         let mut tmp = path.to_path_buf();
         let extension = path
             .extension()
@@ -993,7 +1001,11 @@ fn strip_unconfigured_skybox_components(
     mut commands: Commands,
 ) {
     for (entity, skybox) in &cameras {
-        if !is_cubemap_configured(&skybox.image, &images) {
+        let configured = skybox
+            .image
+            .as_ref()
+            .is_some_and(|image| is_cubemap_configured(image, &images));
+        if !configured {
             commands.entity(entity).remove::<Skybox>();
         }
     }
@@ -1142,7 +1154,7 @@ fn camera_targets_skybox(
     if !settings.apply_to_all_cameras && primary.is_none() {
         return false;
     }
-    skybox.is_none() || skybox.is_some_and(|skybox| skybox.image != *handle)
+    skybox.is_none() || skybox.is_some_and(|skybox| skybox.image.as_ref() != Some(handle))
 }
 
 fn manifest_entry_for_activation(cache: &mut SkyboxCache, name: &str) -> Result<ManifestEntry> {
@@ -1255,7 +1267,7 @@ fn apply_skybox_to_camera(mut params: ApplySkyboxParams) {
                 entity_commands.remove::<Skybox>();
             }
             entity_commands.insert(Skybox {
-                image: handle.clone(),
+                image: Some(handle.clone()),
                 brightness,
                 ..default()
             });
@@ -1352,7 +1364,7 @@ fn configure_cubemap_image(handle: &Handle<Image>, images: &mut Assets<Image>) -
 
     let array_layers = image.texture_descriptor.array_layer_count();
     if array_layers == 6 {
-        let Some(image) = images.get_mut(handle) else {
+        let Some(mut image) = images.get_mut(handle) else {
             return false;
         };
         image.texture_view_descriptor = Some(TextureViewDescriptor {
@@ -1365,7 +1377,7 @@ fn configure_cubemap_image(handle: &Handle<Image>, images: &mut Assets<Image>) -
     if array_layers == 1 {
         let layers = image.height() / image.width();
         if layers == 6 {
-            let Some(image) = images.get_mut(handle) else {
+            let Some(mut image) = images.get_mut(handle) else {
                 return false;
             };
             let _ = image.reinterpret_stacked_2d_as_array(layers);
@@ -1886,7 +1898,10 @@ mod tests {
     fn camera_skybox_handle(app: &mut App) -> Option<Handle<Image>> {
         let world = app.world_mut();
         let mut query = world.query::<&Skybox>();
-        query.iter(world).next().map(|skybox| skybox.image.clone())
+        query
+            .iter(world)
+            .next()
+            .and_then(|skybox| skybox.image.clone())
     }
 
     #[test]

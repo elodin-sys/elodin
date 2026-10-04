@@ -1,11 +1,11 @@
 ---
 name: elodin-db
-description: Work with Elodin-DB, the time-series telemetry database. Use when running elodin-db, writing client integrations (C, C++, Rust, Python), configuring replication/follow mode, querying data via the Lua REPL, or connecting the Elodin Editor to a database.
+description: Work with Elodin-DB, the time-series telemetry database. Use when running elodin-db, writing client integrations (C, C++, Rust, Python), configuring replication/follow mode, the DB Asset Server / assets ingest, querying data via the Lua REPL, or connecting the Elodin Editor to a database.
 ---
 
 # Elodin-DB
 
-Elodin-DB is a high-performance time-series database for telemetry data. It stores components, messages, and metadata using the Impeller2 protocol, and serves as the central data bus between simulations, flight software, and the Elodin Editor.
+Elodin-DB is a high-performance time-series database for telemetry data. It stores components, messages, and metadata using the Impeller protocol, and serves as the central data bus between simulations, flight software, and the Elodin Editor.
 
 ## Quick Start
 
@@ -26,7 +26,7 @@ elodin-db lua
 ## Running the Database
 
 ```bash
-elodin-db run <bind_addr> <data_dir> [--config <lua_file>] [--log-level <level>]
+elodin-db run <bind_addr> <data_dir> [--config <lua_file>] [--assets <dir>] [--log-level <level>]
 ```
 
 | Parameter | Example | Purpose |
@@ -34,7 +34,71 @@ elodin-db run <bind_addr> <data_dir> [--config <lua_file>] [--log-level <level>]
 | `bind_addr` | `[::]:2240` | Listen address (IPv4/IPv6 + port) |
 | `data_dir` | `$HOME/.local/share/elodin/db` | Storage directory |
 | `--config` | `libs/db/examples/db-config.lua` | Lua configuration script |
+| `--assets` | `/var/lib/elodin/assets` | Source `assets/` tree to ingest on **fresh** DB create (overrides `ELODIN_ASSETS`) |
 | `--log-level` | `warn` | Log verbosity: error, warn, info, debug, trace |
+
+Impeller TCP listens on port `N` (e.g. `2240`). The **DB Asset Server** always binds `N+1` (e.g. `2241`) and serves `{data_dir}/assets/` over HTTP. Do not put a follower Impeller listener on `N+1`.
+
+## Assets and the DB Asset Server
+
+Visual files for schematics live under `{db}/assets/{relative_key}` and are served at `http://host:(tcp_port+1)/{relative_key}` while the DB runs. Record once, copy the DB directory, replay anywhere — no separate `assets/` tree required on the consumer.
+
+### Source asset root (ingest)
+
+On first create of an empty DB, `elodin-db run` (and Python `world.run(..., db_path=…)`) copies a source tree into `{db}/assets/` **once**, then writes a `.elodin-ingested` marker. Later opens skip ingest so recorded/editor assets are never wiped.
+
+Source resolution (CLI `--assets` wins when set; otherwise):
+
+1. `$ELODIN_ASSETS`
+2. `<sim_entry>/assets` (simulations only)
+3. `<cwd>/assets`
+4. Nearest ancestor `assets/` (simulations only)
+
+```bash
+# Seed a fresh DB from an explicit tree (Aleph / HITL pattern)
+elodin-db run [::]:2240 ./my-db --assets /var/lib/elodin/assets
+```
+
+### Conventional keys inside `{db}/assets/`
+
+Same layout as the simulation asset root (see elodin-simulation skill):
+
+| Key prefix | Contents |
+|------------|----------|
+| `*.glb`, `meshes/…`, `models/…` | Meshes referenced by `glb path=` (rewritten to `db:…` in stored KDL) |
+| `schematics/*.kdl` | Active schematic (default `schematics/main.kdl`) and window sub-schematics |
+| `skyboxes/manifest.ron` + `*.cubemap.ktx2` | Named skyboxes |
+| `terrains/…` | Terrain atlases for `world_mesh` |
+| `color_schemes/…` | Optional theme JSON (local editor; not required for replay of built-in names) |
+
+`schematic.active` metadata points at the active KDL asset key (usually `schematics/main.kdl`). Consumers fetch that KDL over HTTP — there is no inline KDL mirror in DB metadata.
+
+### Paths and the `db:` scheme
+
+At record/ingest, local paths like `models/jet.glb` become `db:models/jet.glb` in stored schematics. Already-`db:` / `http(s):` / `icon builtin=…` paths are left alone. Keys must not contain `..`.
+
+### Follow mode and assets
+
+Telemetry replicates over Impeller TCP. Assets do **not** — the follower `GET`s `http://source:(N+1)/__index__` and mirrors missing/changed keys into its own `{db}/assets/`, then serves them on `(follower_port+1)`.
+
+```bash
+elodin-db run 127.0.0.1:2240 ./source-db
+elodin-db run 127.0.0.1:2242 ./follower-db --follows 127.0.0.1:2240   # assets on 2243
+elodin editor 127.0.0.1:2242
+```
+
+Point `--follows` at the source **Impeller** port (`N`), not the asset port.
+
+### Verify
+
+```bash
+curl -sf -o /dev/null -w "%{http_code}\n" http://127.0.0.1:2241/schematics/main.kdl
+ls -lh "$DB_PATH/assets/"
+```
+
+Empty `assets/` after a sim usually means a temp DB (`world.run` without `db_path` / `ELODIN_DB_PATH`). Mesh 404s mean the source tree was never ingested — re-run against a fresh DB with the correct `--assets` / `ELODIN_ASSETS`.
+
+Full reference: [docs/public/content/reference/db-asset-server.md](../../../docs/public/content/reference/db-asset-server.md)
 
 ## Lua REPL
 
@@ -70,7 +134,7 @@ The C++ library is C++20 compatible. See `libs/db/examples/client.cpp` for subsc
 
 ### Rust Client
 
-See `libs/db/examples/rust_client/` for a complete Rust client using Impeller2.
+See `libs/db/examples/rust_client/` for a complete Rust client using Impeller.
 
 ### C++ Header Generation
 
@@ -111,6 +175,7 @@ The follower:
 1. Synchronizes all existing metadata and schemas
 2. Backfills historical component data and message logs
 3. Streams real-time updates as they arrive
+4. Mirrors schematic assets from the source DB Asset Server on port `N+1` (see Assets above)
 
 ### Packet Size Tuning
 
@@ -153,6 +218,40 @@ elodin-db merge -o merged --prefix1 sitl --prefix2 real \
 
 Use `--from-playback-start` when alignment timestamps come from the Editor's playback timeline (relative to recording start). Without it, `--align1`/`--align2` are absolute timestamps.
 
+## Exporting a Database
+
+Offline export to analysis formats or a Foxglove-ready MCAP recording:
+
+```bash
+# Parquet / arrow-ipc / csv (one file per component)
+elodin-db export --format parquet --output ./out ./my-db
+
+# Foxglove-compatible MCAP + generated Foxglove layout JSON
+elodin-db export --format mcap --output ./out ./my-db
+
+# Pre-1970 epochs (e.g. Apollo 1969) auto-rebase to t=0 (also if --epoch-offset-us
+# would leave samples pre-epoch — MCAP log_time is unsigned)
+# Large GLBs (moon.glb) stay attached; model primitive omitted above --max-embed-mb (default 32)
+# Follow-entity mesh always embeds. Dynamic arrows go to /scene_dynamic.
+elodin-db export --format mcap --max-embed-mb 32 --output ./out ./apollo-db
+```
+
+The MCAP export maps components to JSON channels (`/drone/world_pos.q0` message
+paths), emits `/tf` from `*.world_pos` poses (with world→NED/ENU anchors from a
+schematic `coordinate` node), publishes `foxglove.SceneUpdate` **one topic per
+entity** (`/scene/<id>`: GLBs, literal-pose objects with composed
+translate/rotate, pixel-width `line_3d` trails, static arrows,
+`world_mesh "globe"` → `earth.glb`) plus ≤30 Hz dynamic arrows on
+`/scene_dynamic/<name>` (Foxglove backfills latest-per-topic on panel remount,
+so shared scene topics silently drop entities), encodes sensor-camera RGBA to
+H.264 `CompressedVideo` when `video-export` is enabled, attaches schematic
+KDLs/assets, and generates `{db}.foxglove-layout.json` (per-viewport followTf
+from `look_at`, camera offsets incl. `translate_world(...)`, far ≥ 4× distance).
+Upload with [`scripts/foxglove-upload.sh`](../../../scripts/foxglove-upload.sh)
+or manually via `POST /v1/data/upload` + `PUT` then `POST /v1/layouts`. See
+[elodin-cli.md](../../../docs/public/content/reference/elodin-cli.md) `Foxglove MCAP Export`
+and [foxglove-mcap-export-design.md](../../../ai-context/foxglove-mcap-export-design.md).
+
 ## Trimming a Database
 
 Remove data from the beginning or end of a recording. Values are in microseconds. Without `--output`, modifies in place.
@@ -183,7 +282,7 @@ From a simulation, the editor connects automatically when launched via `elodin e
 
 ## Architecture
 
-Elodin-DB uses the Impeller2 protocol internally:
+Elodin-DB uses the Impeller protocol internally:
 - **Components**: Time-series data indexed by entity + component name + timestamp
 - **Messages**: Ordered log entries (commands, events)
 - **Metadata**: Schema information, entity names, component types
@@ -193,6 +292,7 @@ Storage is append-only with configurable retention. The database supports concur
 ## Key References
 
 - Full documentation: [libs/db/README.md](../../../libs/db/README.md)
+- DB Asset Server: [docs/public/content/reference/db-asset-server.md](../../../docs/public/content/reference/db-asset-server.md)
 - C client example: [libs/db/examples/client.c](../../../libs/db/examples/client.c)
 - C++ client example: [libs/db/examples/client.cpp](../../../libs/db/examples/client.cpp)
 - Rust client example: [libs/db/examples/rust_client/](../../../libs/db/examples/rust_client/)

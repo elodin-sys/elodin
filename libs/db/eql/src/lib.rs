@@ -7,18 +7,41 @@ use std::{
 };
 use unicode_ident::*;
 
-use impeller2::{
+use convert_case::Casing;
+use impeller::{
     schema::Schema,
     types::{ComponentId, Timestamp},
 };
-use impeller2_wkt::ComponentPath;
+use impeller_wkt::ComponentPath;
 use peg::error::ParseError;
 
+/// DataFusion table/column ident for a component name.
+///
+/// Must match `elodin-db` table registration: snake_case (digits are word
+/// boundaries) then replace non-alphanumeric characters with `_`.
+///
+/// `CANOPENMOTORMESSAGE3.ACTUAL_POSITION` → `canopenmotormessage_3_actual_position`
+pub fn sql_table_name(component_name: &str) -> String {
+    component_name
+        .to_case(convert_case::Case::Snake)
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+pub mod eval;
 pub mod formulas;
 
 use formulas::{FormulaRegistry, create_default_registry};
 
-pub use formulas::{CastTarget, Formula};
+pub use bevy_geo_frames::GeoFrame;
+pub use formulas::{CastTarget, Formula, FrameConversion, FrameConvertKind};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AstNode<'input> {
@@ -124,7 +147,7 @@ pub enum Expr {
 impl Expr {
     fn to_field(&self) -> Result<String, Error> {
         match self {
-            Expr::ComponentPart(component) => Ok(component.name.replace(".", "_")),
+            Expr::ComponentPart(component) => Ok(sql_table_name(&component.name)),
             Expr::Time(_) => Ok("time".to_string()),
             Expr::Formula(formula, expr) => formula.to_field(expr),
             Expr::BinaryOp(left, right, op) => Ok(format!(
@@ -136,7 +159,7 @@ impl Expr {
 
             Expr::ArrayAccess(inner_expr, index) => match inner_expr.as_ref() {
                 Expr::ComponentPart(part) if part.component.is_some() => {
-                    Ok(format!("{}[{}]", part.name.replace(".", "_"), index + 1))
+                    Ok(format!("{}[{}]", sql_table_name(&part.name), index + 1))
                 }
                 _ => Err(Error::InvalidFieldAccess(
                     "array access on non-component".to_string(),
@@ -152,9 +175,9 @@ impl Expr {
 
     fn to_table(&self) -> Result<String, Error> {
         match self {
-            Expr::ComponentPart(component) => Ok(component.name.replace(".", "_")),
+            Expr::ComponentPart(component) => Ok(sql_table_name(&component.name)),
 
-            Expr::Time(component) => Ok(component.name.replace(".", "_")),
+            Expr::Time(component) => Ok(sql_table_name(&component.name)),
             Expr::Formula(_, expr) => expr.to_table(),
             Expr::BinaryOp(left, right, _) => {
                 // Try left first, fall back to right if left is a literal
@@ -484,6 +507,8 @@ pub struct Context {
     pub earliest_timestamp: Timestamp,
     pub last_timestamp: Timestamp,
     pub formula_registry: FormulaRegistry,
+    /// Schematic / editor geo origin for ECEF ↔ ENU/NED EQL converters.
+    pub geo_origin: Option<bevy_geo_frames::GeoOrigin>,
 }
 
 impl Default for Context {
@@ -493,6 +518,7 @@ impl Default for Context {
             earliest_timestamp: Timestamp(i64::MIN),
             last_timestamp: Timestamp(i64::MAX),
             formula_registry: create_default_registry(),
+            geo_origin: None,
         }
     }
 }
@@ -502,6 +528,25 @@ impl Context {
         match (method_name, ast_node) {
             // `cast(f64)` reads naturally, but bare identifiers normally parse as component names.
             ("cast", AstNode::Ident(name)) => Ok(Expr::StringLiteral(name.to_string())),
+            ("translate" | "translate_x" | "translate_y" | "translate_z" | "direction", ast) => {
+                self.parse_orientation_flag_arg(ast)
+            }
+            _ => self.parse(ast_node),
+        }
+    }
+
+    /// Map bare `true`/`false` to string literals (they are not components),
+    /// including inside the nested arg tuples the comma rule produces.
+    fn parse_orientation_flag_arg(&self, ast_node: &AstNode) -> Result<Expr, Error> {
+        match ast_node {
+            AstNode::Ident(name) if name == "true" || name == "false" => {
+                Ok(Expr::StringLiteral(name.to_string()))
+            }
+            AstNode::Tuple(nodes) => nodes
+                .iter()
+                .map(|n| self.parse_orientation_flag_arg(n))
+                .collect::<Result<Vec<_>, _>>()
+                .map(Expr::Tuple),
             _ => self.parse(ast_node),
         }
     }
@@ -549,6 +594,7 @@ impl Context {
             earliest_timestamp,
             last_timestamp,
             formula_registry: create_default_registry(),
+            geo_origin: None,
         }
     }
 
@@ -562,7 +608,14 @@ impl Context {
             earliest_timestamp,
             last_timestamp,
             formula_registry: create_default_registry(),
+            geo_origin: None,
         }
+    }
+
+    /// Set the geo origin used by `ecef_to_ned()` / friends when emitting SQL.
+    pub fn with_geo_origin(mut self, origin: bevy_geo_frames::GeoOrigin) -> Self {
+        self.geo_origin = Some(origin);
+        self
     }
 
     pub fn sql(&self, query: &str) -> Result<String, Error> {
@@ -826,7 +879,7 @@ mod tests {
     }
 
     fn create_test_entity_component() -> Arc<Component> {
-        use impeller2::types::{ComponentId, PrimType};
+        use impeller::types::{ComponentId, PrimType};
 
         Arc::new(Component::new(
             "a.world_pos".to_string(),
@@ -850,6 +903,36 @@ mod tests {
             Timestamp(0),    // earliest_timestamp
             Timestamp(1000), // last_timestamp
         )
+    }
+
+    #[test]
+    fn sql_table_name_splits_digits_like_datafusion_registration() {
+        assert_eq!(
+            sql_table_name("CANOPENMOTORMESSAGE3.ACTUAL_POSITION"),
+            "canopenmotormessage_3_actual_position"
+        );
+        assert_eq!(
+            sql_table_name("GpsPosMessage1.VACC"),
+            "gps_pos_message_1_vacc"
+        );
+        assert_eq!(sql_table_name("a.world_pos"), "a_world_pos");
+    }
+
+    #[test]
+    fn test_screaming_snake_component_sql() {
+        let component = Arc::new(Component::new(
+            "CANOPENMOTORMESSAGE3.ACTUAL_POSITION".to_string(),
+            ComponentId::new("CANOPENMOTORMESSAGE3.ACTUAL_POSITION"),
+            Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+        ));
+        let context = Context::from_leaves([component.clone()], Timestamp(0), Timestamp(1000));
+        let expr = context
+            .parse_str("CANOPENMOTORMESSAGE3.ACTUAL_POSITION")
+            .unwrap();
+        assert_eq!(
+            expr.to_sql(&context).unwrap(),
+            "select canopenmotormessage_3_actual_position.canopenmotormessage_3_actual_position as 'CANOPENMOTORMESSAGE3.ACTUAL_POSITION' from canopenmotormessage_3_actual_position"
+        );
     }
 
     #[test]
@@ -974,7 +1057,7 @@ mod tests {
 
     #[test]
     fn test_two_table_join_sql() {
-        use impeller2::types::{ComponentId, PrimType};
+        use impeller::types::{ComponentId, PrimType};
 
         let part1 = create_test_component_part();
         let context = create_test_context();
@@ -1028,7 +1111,7 @@ mod tests {
 
     #[test]
     fn test_three_table_join_sql() {
-        use impeller2::types::{ComponentId, PrimType};
+        use impeller::types::{ComponentId, PrimType};
 
         let part1 = create_test_component_part();
         let context = create_test_context();
@@ -1265,7 +1348,7 @@ mod tests {
             let v_body_comp = Arc::new(Component::new(
                 "rocket.v_body".to_string(),
                 ComponentId::new("rocket.v_body"),
-                Schema::new(impeller2::types::PrimType::F64, vec![3u64]).unwrap(),
+                Schema::new(impeller::types::PrimType::F64, vec![3u64]).unwrap(),
             ));
             Context::from_leaves([v_body_comp], Timestamp(0), Timestamp(1000))
         }
@@ -1312,7 +1395,7 @@ mod tests {
             let component = Arc::new(Component::new(
                 "a.value".to_string(),
                 ComponentId::new("a.value"),
-                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+                Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
             ));
             let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
 
@@ -1356,12 +1439,12 @@ mod tests {
             let y_comp = Arc::new(Component::new(
                 "a.y".to_string(),
                 ComponentId::new("a.y"),
-                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+                Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
             ));
             let x_comp = Arc::new(Component::new(
                 "a.x".to_string(),
                 ComponentId::new("a.x"),
-                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+                Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
             ));
             let context = Context::from_leaves([y_comp, x_comp], Timestamp(0), Timestamp(1000));
 
@@ -1384,7 +1467,7 @@ mod tests {
             let component = Arc::new(Component::new(
                 "a.value".to_string(),
                 ComponentId::new("a.value"),
-                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+                Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
             ));
             let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
 
@@ -1402,7 +1485,7 @@ mod tests {
             let component = Arc::new(Component::new(
                 "a.value".to_string(),
                 ComponentId::new("a.value"),
-                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+                Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
             ));
             let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
 
@@ -1484,7 +1567,7 @@ mod tests {
             let component = Arc::new(Component::new(
                 "a.value".to_string(),
                 ComponentId::new("a.value"),
-                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+                Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
             ));
             let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
 
@@ -1505,7 +1588,7 @@ mod tests {
             let component = Arc::new(Component::new(
                 "a.value".to_string(),
                 ComponentId::new("a.value"),
-                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+                Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
             ));
             let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
 
@@ -1523,7 +1606,7 @@ mod tests {
             let component = Arc::new(Component::new(
                 "a.temperature".to_string(),
                 ComponentId::new("a.temperature"),
-                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+                Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
             ));
             let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
 
@@ -1574,7 +1657,7 @@ mod tests {
             let component = Arc::new(Component::new(
                 "a.value".to_string(),
                 ComponentId::new("a.value"),
-                Schema::new(impeller2::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
+                Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new()).unwrap(),
             ));
             let context = Context::from_leaves([component], Timestamp(0), Timestamp(1000));
 

@@ -1,26 +1,31 @@
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::{hierarchy::ChildOf, relationship::Relationship};
 use bevy::log::warn_once;
-use bevy::math::{DQuat, DVec3};
+use bevy::material::AlphaMode;
+use bevy::math::{DMat3, DQuat, DVec3};
 use bevy::prelude::Mesh;
 use bevy::prelude::*;
-use bevy::scene::{SceneInstance, SceneRoot, SceneSpawner};
-use bevy_geo_frames::{GeoPosition, GeoRotation};
+use bevy::world_serialization::{WorldAssetRoot, WorldInstance, WorldInstanceSpawner};
+use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use bevy_mat3_material::{Mat3Material, Mat3Params, Mat3TransformExt, uv_sphere_grid_line_mesh};
-use bevy_render::alpha::AlphaMode;
 use bitvec::prelude::*;
 use eql::Expr;
-use impeller2_bevy::EntityMap;
-use impeller2_wkt::{ComponentValue, Object3D, Object3DIconSource};
+use impeller_bevy::EntityMap;
+use impeller_wkt::{ComponentValue, Object3D, Object3DIconSource};
 use nox::Array;
 use smallvec::smallvec;
 
 use crate::icon_rasterizer::IconTextureCache;
 use crate::iter::JoinDisplayExt;
-use crate::plugins::render_layer_alloc::RenderLayerLease;
+use crate::plugins::{
+    render_layer_alloc::{CINEMATIC_EARTH_RENDER_LAYER, RenderLayerLease},
+    scene_environment::CinematicViewport,
+};
 use crate::rim_glow_material::{RimGlowExt, RimGlowMaterial, RimGlowParams};
 use crate::ui::tiles::ViewportConfig;
-use crate::{BevyExt, EqlContext, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
+use crate::{
+    BevyExt, Coordinate, EqlContext, MainCamera, plugins::navigation_gizmo::NavGizmoCamera,
+};
 use bevy::platform::hash::FixedHasher;
 use bevy_geo_frames::prelude::*;
 use std::borrow::Cow;
@@ -32,7 +37,7 @@ type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<Mai
 
 type ImportedCameraQuery<'w, 's> = Query<'w, 's, (Entity, &'static ChildOf), ImportedCameraFilter>;
 type GlbSceneQuery<'w, 's> =
-    Query<'w, 's, (Entity, &'static ChildOf), (With<Object3DMeshChild>, With<SceneRoot>)>;
+    Query<'w, 's, (Entity, &'static ChildOf), (With<Object3DMeshChild>, With<WorldAssetRoot>)>;
 
 pub const ELLIPSOID_RENDER_LAYER: usize = 29;
 
@@ -44,13 +49,22 @@ fn client_asset_ip(ip: IpAddr) -> IpAddr {
     }
 }
 
+/// Socket address of the DB assets HTTP server for a DB TCP address
+/// (TCP port + offset; unspecified bind IPs mapped to loopback).
+pub fn assets_http_addr(connection_addr: SocketAddr) -> SocketAddr {
+    SocketAddr::new(
+        client_asset_ip(connection_addr.ip()),
+        connection_addr
+            .port()
+            .saturating_add(impeller::ASSETS_HTTP_PORT_OFFSET),
+    )
+}
+
 pub fn assets_http_base(connection_addr: SocketAddr) -> String {
-    let port = connection_addr
-        .port()
-        .saturating_add(impeller2::ASSETS_HTTP_PORT_OFFSET);
-    match client_asset_ip(connection_addr.ip()) {
-        IpAddr::V4(v4) => format!("http://{v4}:{port}"),
-        IpAddr::V6(v6) => format!("http://[{v6}]:{port}"),
+    let addr = assets_http_addr(connection_addr);
+    match addr.ip() {
+        IpAddr::V4(v4) => format!("http://{v4}:{}", addr.port()),
+        IpAddr::V6(v6) => format!("http://[{v6}]:{}", addr.port()),
     }
 }
 
@@ -65,8 +79,41 @@ pub fn resolve_db_asset_url(path: &str, connection_addr: Option<SocketAddr>) -> 
     }
 }
 
-pub fn resolve_glb_asset_url(path: &str, connection_addr: Option<SocketAddr>) -> String {
+/// Like [`resolve_db_asset_url`], but when `local_root` is set (local
+/// iteration via CLI `--kdl`) a `db:` key that exists under the local assets
+/// root resolves to the bare relative path instead, so it loads — and
+/// hot-reloads — from disk rather than the DB.
+pub fn resolve_db_asset_url_prefer_local(
+    path: &str,
+    connection_addr: Option<SocketAddr>,
+    local_root: Option<&std::path::Path>,
+) -> String {
+    if let Some(root) = local_root
+        && let Some(key) = path.strip_prefix("db:")
+    {
+        let key = key.trim_start_matches('/');
+        if root.join(key).is_file() {
+            bevy::log::info_once!(
+                key = %key,
+                root = %root.display(),
+                "db asset shadowed by local file (--kdl session)"
+            );
+            return key.to_string();
+        }
+    }
     resolve_db_asset_url(path, connection_addr)
+}
+
+/// Local assets root override for `db:` keys: set when the session was opened
+/// with a CLI `--kdl` schematic (local iteration), `None` otherwise.
+pub fn local_assets_root(
+    initial_kdl: Option<&crate::plugins::kdl_document::InitialKdlPath>,
+) -> Option<std::path::PathBuf> {
+    if initial_kdl?.0.is_some() {
+        crate::plugins::env_asset_source::resolve_assets_dir()
+    } else {
+        None
+    }
 }
 
 /// ExprObject3D component that holds an EQL expression for dynamic positioning
@@ -77,13 +124,17 @@ pub struct Object3DState {
     pub scale_error: Option<CompileError>,
     /// When set, ellipsoid shape is driven by error covariance (Mat3 path); evaluated each frame.
     pub error_covariance_cholesky_expr: Option<CompiledExpr>,
+    /// When set, ellipsoid shape is driven by symmetric error covariance P; Cholesky-decomposed each frame.
+    pub error_covariance_expr: Option<CompiledExpr>,
+    pub last_pose_kernel_input: Option<Vec<u8>>,
+    pub last_cov_kernel_input: Option<Vec<u8>>,
     pub joint_animations: Vec<(String, String)>, // (joint_name, eql_expr) - compiled in attach_joint_animations
     pub data: Object3D,
 }
 
 #[derive(Component, Reflect)]
 pub struct EllipsoidVisual {
-    pub color: impeller2_wkt::Color,
+    pub color: impeller_wkt::Color,
     pub oversized: bool,
     pub max_extent: f32,
 }
@@ -109,6 +160,43 @@ impl EditableEQL {
             eql,
             compiled_expr: Some(compiled_expr),
         }
+    }
+
+    /// Retry a spawn-time compile that failed because the component set was
+    /// still empty or partial. No-op when the text is empty or already compiled.
+    ///
+    /// `geo` must be the schematic `coordinate` origin: a retry that fell back
+    /// to the default origin would silently misplace ECEF converters.
+    pub fn retry_compile(&mut self, ctx: &eql::Context, geo: &GeoContext) {
+        self.retry_compile_with(ctx, &EqlCompileCtx::new(geo));
+    }
+
+    /// Same as [`Self::retry_compile`], keeping the viewport/object `frame=`.
+    pub fn retry_compile_with(&mut self, ctx: &eql::Context, compile_ctx: &EqlCompileCtx<'_>) {
+        if self.eql.trim().is_empty() || self.compiled_expr.is_some() {
+            return;
+        }
+        if let Ok(expr) = ctx.parse_str(&self.eql) {
+            self.compiled_expr = compile_eql_expr_with_ctx(expr, compile_ctx).ok();
+        }
+    }
+}
+
+/// Schematic origin plus the compile-site `frame=` for body-frame translate/direction.
+#[derive(Clone, Copy)]
+pub struct EqlCompileCtx<'a> {
+    pub geo: &'a GeoContext,
+    pub frame: Option<GeoFrame>,
+}
+
+impl<'a> EqlCompileCtx<'a> {
+    pub fn new(geo: &'a GeoContext) -> Self {
+        Self { geo, frame: None }
+    }
+
+    pub fn with_frame(mut self, frame: Option<GeoFrame>) -> Self {
+        self.frame = frame;
+        self
     }
 }
 
@@ -512,19 +600,59 @@ fn cast_component_value(
     }
 }
 
+fn schematic_to_bevy_s() -> DMat3 {
+    DMat3::from_cols(DVec3::X, DVec3::NEG_Z, DVec3::Y)
+}
+
+/// Relative-sense correction `bevy_R_(frame)ᵀ · bevy_R_enu_plane`.
+/// Identity when `frame` is ENU or omitted; skipped when `absolute`.
+fn body_offset_correction(ctx: &EqlCompileCtx<'_>, absolute: bool) -> DMat3 {
+    if absolute {
+        return DMat3::IDENTITY;
+    }
+    let frame = ctx.frame.unwrap_or(GeoFrame::ENU);
+    GeoFrame::bevy_R_(&frame, ctx.geo).transpose() * schematic_to_bevy_s()
+}
+
+fn apply_mat3(m: DMat3, (x, y, z): (f64, f64, f64)) -> (f64, f64, f64) {
+    let v = m * DVec3::new(x, y, z);
+    (v.x, v.y, v.z)
+}
+
+fn pop_orientation_flag(elements: &[eql::Expr]) -> Result<(&[eql::Expr], bool), CompileError> {
+    match elements.last() {
+        Some(eql::Expr::StringLiteral(s)) if s.eq_ignore_ascii_case("true") => {
+            Ok((&elements[..elements.len() - 1], true))
+        }
+        Some(eql::Expr::StringLiteral(s)) if s.eq_ignore_ascii_case("false") => {
+            Ok((&elements[..elements.len() - 1], false))
+        }
+        Some(eql::Expr::StringLiteral(s)) => Err(ComponentError::Message(
+            format!("orientation flag must be true or false, got {s:?}").into(),
+        )
+        .into()),
+        _ => Ok((elements, false)),
+    }
+}
+
 /// Compiles a formula expression into a runtime closure
 fn compile_formula(
     formula: Arc<dyn eql::Formula>,
     inner_expr: eql::Expr,
+    ctx: &EqlCompileCtx<'_>,
 ) -> Result<CompiledExpr, CompileError> {
     if let Some(target) = formula.editor_cast_target() {
-        let inner_compiled = compile_eql_expr(inner_expr)?;
+        let inner_compiled = compile_eql_expr_with_ctx(inner_expr, ctx)?;
         return Ok(CompiledExpr::closure(
             move |entity_map, component_values| {
                 let v = inner_compiled.execute(entity_map, component_values)?;
                 cast_component_value(v, target)
             },
         ));
+    }
+
+    if let Some(conv) = formula.frame_conversion() {
+        return compile_frame_conversion(conv, inner_expr, ctx);
     }
 
     let n = formula.name();
@@ -549,8 +677,8 @@ fn compile_formula(
                 return Err(ComponentError::RequiresReceiverAndAngle(n).into());
             }
 
-            let receiver_compiled = compile_eql_expr(elements[0].clone())?;
-            let angle_compiled = compile_eql_expr(elements[1].clone())?;
+            let receiver_compiled = compile_eql_expr_with_ctx(elements[0].clone(), ctx)?;
+            let angle_compiled = compile_eql_expr_with_ctx(elements[1].clone(), ctx)?;
 
             CompiledExpr::closure(move |entity_map, component_values| {
                 let spatial = receiver_compiled.execute(entity_map, component_values)?;
@@ -586,10 +714,10 @@ fn compile_formula(
                 return Err(ComponentError::RequiresReceiverAndThreeAngles(n).into());
             }
 
-            let receiver_compiled = compile_eql_expr(elements[0].clone())?;
-            let x_angle_compiled = compile_eql_expr(elements[1].clone())?;
-            let y_angle_compiled = compile_eql_expr(elements[2].clone())?;
-            let z_angle_compiled = compile_eql_expr(elements[3].clone())?;
+            let receiver_compiled = compile_eql_expr_with_ctx(elements[0].clone(), ctx)?;
+            let x_angle_compiled = compile_eql_expr_with_ctx(elements[1].clone(), ctx)?;
+            let y_angle_compiled = compile_eql_expr_with_ctx(elements[2].clone(), ctx)?;
+            let z_angle_compiled = compile_eql_expr_with_ctx(elements[3].clone(), ctx)?;
 
             CompiledExpr::closure(move |entity_map, component_values| {
                 let spatial = receiver_compiled.execute(entity_map, component_values)?;
@@ -635,12 +763,17 @@ fn compile_formula(
             let eql::Expr::Tuple(elements) = inner_expr else {
                 return Err(ComponentError::RequiresTuple(n).into());
             };
+            let (elements, absolute) = pop_orientation_flag(&elements)?;
             if elements.len() != 2 {
                 return Err(ComponentError::RequiresReceiverAndDistance(n).into());
             }
 
-            let receiver_compiled = compile_eql_expr(elements[0].clone())?;
-            let distance_compiled = compile_eql_expr(elements[1].clone())?;
+            let receiver_compiled = compile_eql_expr_with_ctx(elements[0].clone(), ctx)?;
+            let distance_compiled = compile_eql_expr_with_ctx(elements[1].clone(), ctx)?;
+            let correction = match frame {
+                Frame::Body => body_offset_correction(ctx, absolute),
+                Frame::World => DMat3::IDENTITY,
+            };
 
             CompiledExpr::closure(move |entity_map, component_values| {
                 let spatial = receiver_compiled.execute(entity_map, component_values)?;
@@ -655,6 +788,7 @@ fn compile_formula(
                     2 => (0.0, 0.0, dist),
                     _ => unreachable!(),
                 };
+                let offset_body = apply_mat3(correction, offset_body);
 
                 // Body-frame: rotate offset to world frame; World-frame: use directly
                 let (dx, dy, dz) = match frame {
@@ -680,14 +814,19 @@ fn compile_formula(
             let eql::Expr::Tuple(elements) = inner_expr else {
                 return Err(ComponentError::RequiresTuple(n).into());
             };
+            let (elements, absolute) = pop_orientation_flag(&elements)?;
             if elements.len() != 4 {
                 return Err(ComponentError::RequiresReceiverAndThreeDistances(n).into());
             }
 
-            let receiver_compiled = compile_eql_expr(elements[0].clone())?;
-            let x_dist_compiled = compile_eql_expr(elements[1].clone())?;
-            let y_dist_compiled = compile_eql_expr(elements[2].clone())?;
-            let z_dist_compiled = compile_eql_expr(elements[3].clone())?;
+            let receiver_compiled = compile_eql_expr_with_ctx(elements[0].clone(), ctx)?;
+            let x_dist_compiled = compile_eql_expr_with_ctx(elements[1].clone(), ctx)?;
+            let y_dist_compiled = compile_eql_expr_with_ctx(elements[2].clone(), ctx)?;
+            let z_dist_compiled = compile_eql_expr_with_ctx(elements[3].clone(), ctx)?;
+            let correction = match frame {
+                Frame::Body => body_offset_correction(ctx, absolute),
+                Frame::World => DMat3::IDENTITY,
+            };
 
             CompiledExpr::closure(move |entity_map, component_values| {
                 let spatial = receiver_compiled.execute(entity_map, component_values)?;
@@ -698,11 +837,12 @@ fn compile_formula(
                 let dz = extract_scalar(z_dist_compiled.execute(entity_map, component_values)?)?;
 
                 let q = (data[0], data[1], data[2], data[3]);
+                let offset = apply_mat3(correction, (dx, dy, dz));
 
                 // Body-frame: rotate offset to world frame; World-frame: use directly
                 let (rx, ry, rz) = match frame {
-                    Frame::Body => rotate_vector_by_quat(q, (dx, dy, dz)),
-                    Frame::World => (dx, dy, dz),
+                    Frame::Body => rotate_vector_by_quat(q, offset),
+                    Frame::World => offset,
                 };
 
                 Ok(build_spatial_result(
@@ -717,14 +857,16 @@ fn compile_formula(
             let eql::Expr::Tuple(elements) = inner_expr else {
                 return Err(ComponentError::RequiresTuple(n).into());
             };
+            let (elements, absolute) = pop_orientation_flag(&elements)?;
             if elements.len() != 4 {
                 return Err(ComponentError::RequiresReceiverAndThreeComponents(n).into());
             }
 
-            let receiver_compiled = compile_eql_expr(elements[0].clone())?;
-            let x_compiled = compile_eql_expr(elements[1].clone())?;
-            let y_compiled = compile_eql_expr(elements[2].clone())?;
-            let z_compiled = compile_eql_expr(elements[3].clone())?;
+            let receiver_compiled = compile_eql_expr_with_ctx(elements[0].clone(), ctx)?;
+            let x_compiled = compile_eql_expr_with_ctx(elements[1].clone(), ctx)?;
+            let y_compiled = compile_eql_expr_with_ctx(elements[2].clone(), ctx)?;
+            let z_compiled = compile_eql_expr_with_ctx(elements[3].clone(), ctx)?;
+            let correction = body_offset_correction(ctx, absolute);
 
             CompiledExpr::closure(move |entity_map, component_values| {
                 let spatial = receiver_compiled.execute(entity_map, component_values)?;
@@ -733,7 +875,8 @@ fn compile_formula(
                 let dy = extract_scalar(y_compiled.execute(entity_map, component_values)?)?;
                 let dz = extract_scalar(z_compiled.execute(entity_map, component_values)?)?;
                 let q = (data[0], data[1], data[2], data[3]);
-                let world = rotate_vector_by_quat(q, (dx, dy, dz));
+                let offset = apply_mat3(correction, (dx, dy, dz));
+                let world = rotate_vector_by_quat(q, offset);
                 Ok(build_vec3_result(world))
             })
         }
@@ -744,8 +887,82 @@ fn compile_formula(
     })
 }
 
-/// Compiles an EQL expression into a closure-based form
+fn compile_frame_conversion(
+    conv: eql::FrameConversion,
+    inner_expr: eql::Expr,
+    ctx: &EqlCompileCtx<'_>,
+) -> Result<CompiledExpr, CompileError> {
+    use eql::FrameConvertKind;
+    use nox::ArrayBuf;
+
+    let from = conv.from;
+    let to = conv.to;
+    let geo = ctx.geo.clone();
+    let receiver_compiled = compile_eql_expr_with_ctx(inner_expr, ctx)?;
+
+    Ok(CompiledExpr::closure(
+        move |entity_map, component_values| {
+            let val = receiver_compiled.execute(entity_map, component_values)?;
+            let ComponentValue::F64(array) = val else {
+                return Err(ComponentError::Message(
+                    "frame conversion expects an f64 array".into(),
+                ));
+            };
+            let data = array.buf.as_buf();
+            match (conv.kind, data.len()) {
+                (FrameConvertKind::Direction, 3) => {
+                    let v = DVec3::new(data[0], data[1], data[2]);
+                    let out = to._R_(&from, &geo) * v;
+                    Ok(build_vec3_result((out.x, out.y, out.z)))
+                }
+                (FrameConvertKind::Point, 3) => {
+                    let v = DVec3::new(data[0], data[1], data[2]);
+                    let out = to._M_(&from, &geo).transform_point3(v);
+                    Ok(build_vec3_result((out.x, out.y, out.z)))
+                }
+                (FrameConvertKind::Point, 7) => {
+                    let att = DQuat::from_xyzw(data[0], data[1], data[2], data[3]);
+                    let pos = DVec3::new(data[4], data[5], data[6]);
+                    let new_pos = to._M_(&from, &geo).transform_point3(pos);
+                    let new_att = GeoRotation::absolute(from, att).as_frame(to, &geo).1;
+                    Ok(build_spatial_result(
+                        (new_att.x, new_att.y, new_att.z, new_att.w),
+                        (new_pos.x, new_pos.y, new_pos.z),
+                    ))
+                }
+                (FrameConvertKind::Direction, n) => Err(ComponentError::Message(
+                    format!("vector frame conversion expects a 3-vector, got {n} elements").into(),
+                )),
+                (FrameConvertKind::Point, n) => Err(ComponentError::Message(
+                    format!("frame conversion expects a 3-vector or 7-element pose, got {n}")
+                        .into(),
+                )),
+            }
+        },
+    ))
+}
+
+/// Compiles an EQL expression with the default geo origin (lat/lon 0).
+/// Prefer [`compile_eql_expr_with_geo`] when the schematic `coordinate` origin is available.
 pub fn compile_eql_expr(expression: eql::Expr) -> Result<CompiledExpr, CompileError> {
+    compile_eql_expr_with_geo(expression, &GeoContext::default())
+}
+
+/// Compiles an EQL expression into a closure-based form.
+///
+/// `geo` supplies the schematic origin for ECEF ↔ ENU/NED converters.
+pub fn compile_eql_expr_with_geo(
+    expression: eql::Expr,
+    geo: &GeoContext,
+) -> Result<CompiledExpr, CompileError> {
+    compile_eql_expr_with_ctx(expression, &EqlCompileCtx::new(geo))
+}
+
+/// Compiles an EQL expression with an optional schematic `frame=` for body-frame offsets.
+pub fn compile_eql_expr_with_ctx(
+    expression: eql::Expr,
+    ctx: &EqlCompileCtx<'_>,
+) -> Result<CompiledExpr, CompileError> {
     Ok(match expression {
         Expr::ComponentPart(component) => {
             let component_id = component.id;
@@ -760,7 +977,7 @@ pub fn compile_eql_expr(expression: eql::Expr) -> Result<CompiledExpr, CompileEr
             })
         }
         Expr::ArrayAccess(expr, index) => {
-            let compiled_expr = compile_eql_expr(*expr)?;
+            let compiled_expr = compile_eql_expr_with_ctx(*expr, ctx)?;
             CompiledExpr::closure(move |entity_map, component_value_maps| {
                 let resolved_expr = compiled_expr.execute(entity_map, component_value_maps)?;
                 match resolved_expr {
@@ -797,8 +1014,10 @@ pub fn compile_eql_expr(expression: eql::Expr) -> Result<CompiledExpr, CompileEr
             })
         }
         Expr::Tuple(exprs) => {
-            let compiled_exprs: Result<Vec<CompiledExpr>, CompileError> =
-                exprs.into_iter().map(compile_eql_expr).collect();
+            let compiled_exprs: Result<Vec<CompiledExpr>, CompileError> = exprs
+                .into_iter()
+                .map(|e| compile_eql_expr_with_ctx(e, ctx))
+                .collect();
             let compiled_exprs = compiled_exprs?;
             CompiledExpr::closure(move |entity_map, component_value_maps| {
                 use nox::ArrayBuf;
@@ -821,8 +1040,8 @@ pub fn compile_eql_expr(expression: eql::Expr) -> Result<CompiledExpr, CompileEr
             })
         }
         Expr::BinaryOp(left, right, op) => {
-            let left_compiled = compile_eql_expr(*left)?;
-            let right_compiled = compile_eql_expr(*right)?;
+            let left_compiled = compile_eql_expr_with_ctx(*left, ctx)?;
+            let right_compiled = compile_eql_expr_with_ctx(*right, ctx)?;
             CompiledExpr::closure(move |entity_map, component_value_maps| {
                 let left_val = left_compiled.execute(entity_map, component_value_maps)?;
                 let right_val = right_compiled.execute(entity_map, component_value_maps)?;
@@ -841,7 +1060,7 @@ pub fn compile_eql_expr(expression: eql::Expr) -> Result<CompiledExpr, CompileEr
             })
         }
         Expr::FloatLiteral(f) => CompiledExpr::Value(ComponentValue::F64(nox::array!(f).to_dyn())),
-        Expr::Formula(formula, inner_expr) => compile_formula(formula, *inner_expr)?,
+        Expr::Formula(formula, inner_expr) => compile_formula(formula, *inner_expr, ctx)?,
         expr => {
             return Err(CompileError::CannotConvert(expr));
         }
@@ -859,11 +1078,59 @@ pub fn compile_scale_eql(scale: &str, ctx: &eql::Context) -> Result<CompiledExpr
 
 /// Compiles an EQL expression that must yield at least 6 floats (lower-triangular Cholesky L).
 pub fn compile_cholesky_eql(expr: &str, ctx: &eql::Context) -> Result<CompiledExpr, CompileError> {
+    compile_6float_eql(expr, "error_covariance_cholesky", ctx)
+}
+
+/// Compiles an EQL expression that must yield at least 6 floats (symmetric covariance P).
+pub fn compile_covariance_eql(
+    expr: &str,
+    ctx: &eql::Context,
+) -> Result<CompiledExpr, CompileError> {
+    compile_6float_eql(expr, "error_covariance", ctx)
+}
+
+fn compile_6float_eql(
+    expr: &str,
+    field: &'static str,
+    ctx: &eql::Context,
+) -> Result<CompiledExpr, CompileError> {
     let trimmed = expr.trim();
     if trimmed.is_empty() {
-        return Err(ComponentError::InvalidEmptyIn("error_covariance_cholesky expression").into());
+        return Err(ComponentError::InvalidEmptyIn(field).into());
     }
     ctx.parse_str(trimmed).map(compile_eql_expr)?
+}
+
+/// Ellipsoid shape driver selected by field presence.
+/// Cholesky takes precedence over symmetric covariance when both are set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EllipsoidShapeMode {
+    Scale,
+    Cholesky,
+    Covariance,
+}
+
+fn ellipsoid_shape_mode(mesh: &impeller_wkt::Object3DMesh) -> Option<EllipsoidShapeMode> {
+    match mesh {
+        impeller_wkt::Object3DMesh::Ellipsoid {
+            error_covariance_cholesky: Some(_),
+            ..
+        }
+        | impeller_wkt::Object3DMesh::Ellipsoid {
+            error_covariance_cholesky_kernel: Some(_),
+            ..
+        } => Some(EllipsoidShapeMode::Cholesky),
+        impeller_wkt::Object3DMesh::Ellipsoid {
+            error_covariance: Some(_),
+            ..
+        }
+        | impeller_wkt::Object3DMesh::Ellipsoid {
+            error_covariance_kernel: Some(_),
+            ..
+        } => Some(EllipsoidShapeMode::Covariance),
+        impeller_wkt::Object3DMesh::Ellipsoid { .. } => Some(EllipsoidShapeMode::Scale),
+        _ => None,
+    }
 }
 
 const ELLIPSOID_OVERSIZED_THRESHOLD: f32 = 10_000.0;
@@ -909,11 +1176,11 @@ fn find_entities<'a, T>(
 /// least one scene is ready, false otherwise.
 pub fn on_scene_ready(
     mut scene_queue: Local<HashSet<Entity>>,
-    added_scenes: Query<Entity, Added<SceneRoot>>,
-    scene_instances: Query<&SceneInstance>,
-    scene_roots: Query<&SceneRoot>,
+    added_scenes: Query<Entity, Added<WorldAssetRoot>>,
+    scene_instances: Query<&WorldInstance>,
+    scene_roots: Query<&WorldAssetRoot>,
     names: Query<&Name>,
-    scene_spawner: Res<SceneSpawner>,
+    scene_spawner: Res<WorldInstanceSpawner>,
 ) -> Option<Entity> {
     // Add newly added scenes to the queue.
     for entity in added_scenes.iter() {
@@ -935,7 +1202,7 @@ pub fn on_scene_ready(
                 true // Keep in queue since it's not ready yet.
             }
         } else {
-            // SceneInstance not found yet; keep in queue.
+            // WorldInstance not found yet; keep in queue.
             true
         }
     });
@@ -948,7 +1215,7 @@ pub fn on_scene_ready(
         let scene_info = scene_roots
             .get(*entity)
             .map(|r| format!("handle id={:?}", r.0.id()))
-            .unwrap_or_else(|_| "<no SceneRoot>".to_string());
+            .unwrap_or_else(|_| "<no WorldAssetRoot>".to_string());
         info!(
             entity = ?entity,
             name = %name,
@@ -960,13 +1227,13 @@ pub fn on_scene_ready(
 }
 
 /// System that updates 3D object entities based on their EQL expressions
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn update_object_3d_system(
     mut commands: Commands,
     mut objects_query: Query<(
         Entity,
         &mut Object3DState,
-        &mut impeller2_wkt::WorldPos,
+        &mut impeller_wkt::WorldPos,
         Option<&mut EllipsoidVisual>,
         Has<WorldPosReceived>,
         Option<&Children>,
@@ -976,7 +1243,11 @@ pub fn update_object_3d_system(
     mesh_child_markers: Query<(), With<Object3DMeshChild>>,
     entity_map: Res<EntityMap>,
     component_value_maps: Query<&'static ComponentValue>,
+    geo_context: Res<GeoContext>,
+    coordinate: Res<Coordinate>,
+    eql_ctx: Res<EqlContext>,
 ) {
+    let eql_ctx_changed = eql_ctx.is_changed();
     for (entity, mut object_3d, mut pos, ellipse, has_received, children_maybe) in
         objects_query.iter_mut()
     {
@@ -994,12 +1265,27 @@ pub fn update_object_3d_system(
             continue;
         };
 
-        if !matches!(
-            object_3d.data.mesh,
-            impeller2_wkt::Object3DMesh::Ellipsoid { .. }
-        ) {
+        let impeller_wkt::Object3DMesh::Ellipsoid {
+            error_confidence_interval,
+            ..
+        } = &object_3d.data.mesh
+        else {
             continue;
+        };
+        let error_confidence_interval = *error_confidence_interval;
+
+        let Some(shape_mode) = ellipsoid_shape_mode(&object_3d.data.mesh) else {
+            continue;
+        };
+
+        // Schematics can load before the sim registers its components, in
+        // which case the spawn-time compile of the shape-driver expression
+        // fails. Retry whenever the EQL context gains components.
+        if eql_ctx_changed {
+            retry_ellipsoid_expr_compile(&mut object_3d, shape_mode, &eql_ctx.0);
         }
+
+        let covariance_frame = resolve_covariance_frame(&object_3d.data, &coordinate);
 
         let mesh_child = children_maybe.and_then(|children| {
             let mut mesh_children = children
@@ -1022,45 +1308,84 @@ pub fn update_object_3d_system(
             first
         });
 
-        if let Some(ref cholesky_expr) = object_3d.error_covariance_cholesky_expr {
-            if let impeller2_wkt::Object3DMesh::Ellipsoid {
-                error_confidence_interval,
-                ..
-            } = &object_3d.data.mesh
-                && let Ok(cv) = cholesky_expr.execute(&entity_map, &component_value_maps)
-                && let Ok(l) = component_value_to_6floats(&cv)
-            {
-                let linear = cholesky_6_to_mat3(&l, *error_confidence_interval);
-                if let Some(child) = mesh_child
-                    && let Ok(mut params) = mat3_params.get_mut(child)
+        // Branch on field presence (not successful compile) so a failed Cholesky/covariance
+        // compile stays on the Mat3 path instead of falling through to scale / the other mode.
+        match shape_mode {
+            EllipsoidShapeMode::Cholesky => {
+                if let Some(ref cholesky_expr) = object_3d.error_covariance_cholesky_expr
+                    && let Ok(cv) = cholesky_expr.execute(&entity_map, &component_value_maps)
+                    && let Ok(l) = component_value_to_6floats(&cv)
                 {
-                    params.linear = linear;
+                    let linear = covariance_linear_from_l(
+                        &l,
+                        error_confidence_interval,
+                        covariance_frame,
+                        &geo_context,
+                    );
+                    if let Some(child) = mesh_child
+                        && let Ok(mut params) = mat3_params.get_mut(child)
+                    {
+                        params.set_if_neq(Mat3Params { linear });
+                    }
+                    ellipse.max_extent = max_linear_extent(&linear);
+                    ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
                 }
-                let scale = chi2_3_quantile((*error_confidence_interval) / 100.0).sqrt();
-                ellipse.max_extent = (l[0].abs().max(l[2].abs()).max(l[5].abs())) * scale;
-                ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
             }
-        } else {
-            match evaluate_scale(&object_3d, &entity_map, &component_value_maps) {
-                Ok(scale) => {
-                    let scale_enu = scale.max(Vec3::splat(f32::EPSILON));
-                    let scale = enu_scale_to_bevy(scale_enu);
-                    if let Some(child) = mesh_child {
-                        if let Ok(mut child_transform) = transforms.get_mut(child) {
-                            child_transform.scale = scale;
-                            child_transform.translation = Vec3::ZERO;
+            EllipsoidShapeMode::Covariance => {
+                if let Some(ref covariance_expr) = object_3d.error_covariance_expr
+                    && let Ok(cv) = covariance_expr.execute(&entity_map, &component_value_maps)
+                    && let Ok(p) = component_value_to_6floats(&cv)
+                {
+                    let p_mat = symmetric_6_to_mat3(&p);
+                    if let Some(l) = cholesky_3x3_spd(&p_mat) {
+                        let linear = covariance_linear_from_l(
+                            &l,
+                            error_confidence_interval,
+                            covariance_frame,
+                            &geo_context,
+                        );
+                        if let Some(child) = mesh_child
+                            && let Ok(mut params) = mat3_params.get_mut(child)
+                        {
+                            params.set_if_neq(Mat3Params { linear });
                         }
-                        ellipse.max_extent = scale.max_element();
+                        ellipse.max_extent = max_linear_extent(&linear);
                         ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
-                        if object_3d.scale_expr.is_some() {
-                            object_3d.scale_error = None;
-                        }
+                    } else {
+                        warn_once!(
+                            entity = ?entity,
+                            "ellipsoid error_covariance is not positive-definite; skipping update"
+                        );
                     }
                 }
-                Err(err) => {
-                    object_3d.scale_error = Some(err.into());
-                    ellipse.oversized = false;
-                    ellipse.max_extent = 0.0;
+            }
+            EllipsoidShapeMode::Scale => {
+                match evaluate_scale(&object_3d, &entity_map, &component_value_maps) {
+                    Ok(scale) => {
+                        let scale_enu = scale.max(Vec3::splat(f32::EPSILON));
+                        let scale = enu_scale_to_bevy(scale_enu);
+                        if let Some(child) = mesh_child {
+                            if let Ok(mut child_transform) = transforms.get_mut(child) {
+                                child_transform.scale = scale;
+                                child_transform.translation = Vec3::ZERO;
+                            }
+                            ellipse.max_extent = scale.max_element();
+                            ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
+                            if object_3d.scale_expr.is_some() {
+                                object_3d.scale_error = None;
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        warn_once!(
+                            entity = ?entity,
+                            error = %err,
+                            "ellipsoid scale failed to evaluate"
+                        );
+                        object_3d.scale_error = Some(err.into());
+                        ellipse.oversized = false;
+                        ellipse.max_extent = 0.0;
+                    }
                 }
             }
         }
@@ -1143,7 +1468,7 @@ pub fn attach_joint_animations(
 
     if let Ok(object_3d) = objects_query.get(object_3d_entity) {
         // Only process GLB meshes with animations.
-        if !matches!(object_3d.data.mesh, impeller2_wkt::Object3DMesh::Glb { .. }) {
+        if !matches!(object_3d.data.mesh, impeller_wkt::Object3DMesh::Glb { .. }) {
             debug!("Not a mesh for object 3d {object_3d_entity}.");
             return;
         }
@@ -1237,7 +1562,7 @@ pub fn attach_joint_animations(
             );
         }
     } else {
-        warn!(
+        debug!(
             "Could not get `Object3dState` for entity {object_3d_entity} for scene {scene_entity}."
         );
     }
@@ -1325,7 +1650,7 @@ pub fn warn_imported_cameras(
 
         if let Ok(state) = object_states.get(object_root) {
             let source = match &state.data.mesh {
-                impeller2_wkt::Object3DMesh::Glb { path, .. } => format!("GLB '{path}'"),
+                impeller_wkt::Object3DMesh::Glb { path, .. } => format!("GLB '{path}'"),
                 _ => "object_3d".to_string(),
             };
             warn_once!(
@@ -1338,6 +1663,54 @@ pub fn warn_imported_cameras(
                  embedded cameras stay active. Remove the camera from the asset if this is unintended."
             );
         }
+    }
+}
+
+/// Retries the spawn-time compile of the field-selected shape-driver
+/// expression if it failed (e.g. the schematic loaded before the sim's
+/// components were registered).
+fn retry_ellipsoid_expr_compile(
+    state: &mut Object3DState,
+    shape_mode: EllipsoidShapeMode,
+    ctx: &eql::Context,
+) {
+    let (scale, cholesky, covariance) = match &state.data.mesh {
+        impeller_wkt::Object3DMesh::Ellipsoid {
+            scale,
+            error_covariance_cholesky,
+            error_covariance,
+            ..
+        } => (
+            scale.clone(),
+            error_covariance_cholesky.clone(),
+            error_covariance.clone(),
+        ),
+        _ => return,
+    };
+    match shape_mode {
+        EllipsoidShapeMode::Scale if state.scale_expr.is_none() => {
+            match compile_scale_eql(&scale, ctx) {
+                Ok(compiled) => {
+                    state.scale_expr = Some(compiled);
+                    state.scale_error = None;
+                }
+                Err(err) => {
+                    warn_once!(scale = %scale, error = %err, "ellipsoid scale failed to compile");
+                    state.scale_error = Some(err);
+                }
+            }
+        }
+        EllipsoidShapeMode::Cholesky if state.error_covariance_cholesky_expr.is_none() => {
+            if let Some(expr) = cholesky {
+                state.error_covariance_cholesky_expr = compile_cholesky_eql(&expr, ctx).ok();
+            }
+        }
+        EllipsoidShapeMode::Covariance if state.error_covariance_expr.is_none() => {
+            if let Some(expr) = covariance {
+                state.error_covariance_expr = compile_covariance_eql(&expr, ctx).ok();
+            }
+        }
+        _ => {}
     }
 }
 
@@ -1430,40 +1803,101 @@ fn enu_scale_to_bevy(enu: Vec3) -> Vec3 {
     Vec3::new(enu.x, enu.z, enu.y)
 }
 
-/// ENU (East-North-Up) to Bevy (East-Up-South) basis change.
-/// ENU: X=East, Y=North, Z=Up. Bevy: X=East, Y=Up, Z=South.
-/// So Bevy = (ENU.x, ENU.z, -ENU.y).
-const ENU_TO_BEVY: Mat3 = Mat3::from_cols(
-    Vec3::new(1.0, 0.0, 0.0),  // ENU East  -> Bevy X
-    Vec3::new(0.0, 0.0, -1.0), // ENU North -> Bevy -Z
-    Vec3::new(0.0, 1.0, 0.0),  // ENU Up    -> Bevy Y
-);
+fn resolve_covariance_frame(object: &Object3D, coordinate: &Coordinate) -> GeoFrame {
+    object.frame.or(coordinate.0).unwrap_or(GeoFrame::ENU)
+}
 
-/// Build Mat3 from lower-triangular Cholesky L in **ENU** (row-major: a,b,c,d,e,f -> L00,L10,L11,L20,L21,L22),
-/// scaled by sqrt(chi2_3(confidence)), then converted to Bevy (East-Up-South) so the ellipsoid displays correctly.
-fn cholesky_6_to_mat3(l: &[f32; 6], confidence_percent: f32) -> Mat3 {
+/// Build symmetric covariance P from 6-pack (a,b,c,d,e,f) -> [[a,b,c],[b,d,e],[c,e,f]].
+fn symmetric_6_to_mat3(p: &[f32; 6]) -> Mat3 {
+    Mat3::from_cols(
+        Vec3::new(p[0], p[1], p[2]),
+        Vec3::new(p[1], p[3], p[4]),
+        Vec3::new(p[2], p[4], p[5]),
+    )
+}
+
+/// Build lower-triangular Cholesky L from 6-pack (a,b,c,d,e,f).
+fn lower_cholesky_pack_to_mat3(l: &[f32; 6]) -> Mat3 {
+    Mat3::from_cols(
+        Vec3::new(l[0], l[1], l[3]),
+        Vec3::new(0.0, l[2], l[4]),
+        Vec3::new(0.0, 0.0, l[5]),
+    )
+}
+
+fn cholesky_3x3_spd(p: &Mat3) -> Option<[f32; 6]> {
+    let cols = p.to_cols_array();
+    let p00 = cols[0];
+    let p10 = cols[3];
+    let p20 = cols[6];
+    let p11 = cols[4];
+    let p21 = cols[7];
+    let p22 = cols[8];
+
+    if !(p00 > 0.0 && p00.is_finite()) {
+        return None;
+    }
+    let l00 = p00.sqrt();
+
+    let l10 = p10 / l00;
+    let l20 = p20 / l00;
+
+    let d11 = p11 - l10 * l10;
+    if !(d11 > 0.0 && d11.is_finite()) {
+        return None;
+    }
+    let l11 = d11.sqrt();
+
+    let l21 = (p21 - l20 * l10) / l11;
+
+    let d22 = p22 - l20 * l20 - l21 * l21;
+    if !(d22 > 0.0 && d22.is_finite()) {
+        return None;
+    }
+    let l22 = d22.sqrt();
+
+    Some([l00, l10, l11, l20, l21, l22])
+}
+
+fn dmat3_to_mat3(m: DMat3) -> Mat3 {
+    Mat3::from_cols(m.x_axis.as_vec3(), m.y_axis.as_vec3(), m.z_axis.as_vec3())
+}
+
+fn frame_rotation_to_bevy(frame: GeoFrame, geo_context: &GeoContext) -> Mat3 {
+    dmat3_to_mat3(GeoFrame::bevy_R_(&frame, geo_context))
+}
+
+fn covariance_linear_from_l(
+    l: &[f32; 6],
+    confidence_percent: f32,
+    frame: GeoFrame,
+    geo_context: &GeoContext,
+) -> Mat3 {
     let confidence_fraction = (confidence_percent / 100.0).clamp(0.01, 0.999);
     let scale = chi2_3_quantile(confidence_fraction).sqrt();
-    #[rustfmt::skip]
-    let l_enu = Mat3::from_cols_array(&[
-        l[0] * scale, 0.0,          0.0,
-        l[1] * scale, l[2] * scale, 0.0,
-        l[3] * scale, l[4] * scale, l[5] * scale,
-    ]);
-    ENU_TO_BEVY * l_enu
+    let l_mat = lower_cholesky_pack_to_mat3(l) * scale;
+    frame_rotation_to_bevy(frame, geo_context) * l_mat
+}
+
+fn max_linear_extent(linear: &Mat3) -> f32 {
+    let cols = linear.to_cols_array();
+    let c0 = Vec3::new(cols[0], cols[1], cols[2]).length();
+    let c1 = Vec3::new(cols[3], cols[4], cols[5]).length();
+    let c2 = Vec3::new(cols[6], cols[7], cols[8]).length();
+    c0.max(c1).max(c2)
 }
 
 pub trait ComponentArrayExt {
-    fn as_world_pos(&self) -> Option<impeller2_wkt::WorldPos>;
+    fn as_world_pos(&self) -> Option<impeller_wkt::WorldPos>;
 }
 
 impl ComponentArrayExt for ComponentValue {
-    fn as_world_pos(&self) -> Option<impeller2_wkt::WorldPos> {
+    fn as_world_pos(&self) -> Option<impeller_wkt::WorldPos> {
         if let ComponentValue::F64(array) = self {
             use nox::ArrayBuf;
             let data = array.buf.as_buf();
             if data.len() >= 7 {
-                return Some(impeller2_wkt::WorldPos {
+                return Some(impeller_wkt::WorldPos {
                     att: nox::Quaternion::new(data[3], data[0], data[1], data[2]),
                     pos: nox::Vector3::new(data[4], data[5], data[6]),
                 });
@@ -1476,7 +1910,7 @@ impl ComponentArrayExt for ComponentValue {
 #[allow(clippy::too_many_arguments)]
 pub fn create_object_3d_entity(
     commands: &mut Commands,
-    data: impeller2_wkt::Object3D,
+    data: impeller_wkt::Object3D,
     expr: eql::Expr,
     ctx: &eql::Context,
     material_assets: &mut Assets<StandardMaterial>,
@@ -1485,28 +1919,46 @@ pub fn create_object_3d_entity(
     assets: &AssetServer,
     geo_context: &GeoContext,
     connection_addr: Option<SocketAddr>,
+    local_root: Option<&std::path::Path>,
 ) -> Result<Entity, CompileError> {
-    let (scale_expr, scale_error) = match &data.mesh {
-        impeller2_wkt::Object3DMesh::Ellipsoid {
-            scale,
-            error_covariance_cholesky: None,
-            ..
-        } => match compile_scale_eql(scale, ctx) {
-            Ok(compiled) => (Some(compiled), None),
-            Err(err) => (None, Some(err)),
-        },
-        _ => (None, None),
-    };
-    let error_covariance_cholesky_expr = match &data.mesh {
-        impeller2_wkt::Object3DMesh::Ellipsoid {
-            error_covariance_cholesky: Some(cholesky),
-            ..
-        } => compile_cholesky_eql(cholesky, ctx).ok(),
-        _ => None,
-    };
+    // Compile only the field-selected driver. Failed Cholesky/covariance compiles leave the
+    // expr as None but keep Mat3 spawning (spawn_mesh keys off field presence); update must
+    // not fall through to scale or the other covariance mode.
+    let (scale_expr, scale_error, error_covariance_cholesky_expr, error_covariance_expr) =
+        match (&data.mesh, ellipsoid_shape_mode(&data.mesh)) {
+            (
+                impeller_wkt::Object3DMesh::Ellipsoid {
+                    error_covariance_cholesky: Some(cholesky),
+                    error_covariance_cholesky_kernel: None,
+                    ..
+                },
+                Some(EllipsoidShapeMode::Cholesky),
+            ) => (None, None, compile_cholesky_eql(cholesky, ctx).ok(), None),
+            (
+                impeller_wkt::Object3DMesh::Ellipsoid {
+                    error_covariance: Some(covariance),
+                    error_covariance_kernel: None,
+                    ..
+                },
+                Some(EllipsoidShapeMode::Covariance),
+            ) => (
+                None,
+                None,
+                None,
+                compile_covariance_eql(covariance, ctx).ok(),
+            ),
+            (
+                impeller_wkt::Object3DMesh::Ellipsoid { scale, .. },
+                Some(EllipsoidShapeMode::Scale),
+            ) => match compile_scale_eql(scale, ctx) {
+                Ok(compiled) => (Some(compiled), None, None, None),
+                Err(err) => (None, Some(err), None, None),
+            },
+            _ => (None, None, None, None),
+        };
 
     let joint_animations = match &data.mesh {
-        impeller2_wkt::Object3DMesh::Glb {
+        impeller_wkt::Object3DMesh::Glb {
             animations, path, ..
         } => {
             info!(
@@ -1528,14 +1980,25 @@ pub fn create_object_3d_entity(
     };
 
     let geo_frame = data.frame;
+    let rotation_frame = data.frame_orientation.or(geo_frame);
 
     let entity_id = commands
         .spawn((
             Object3DState {
-                compiled_expr: Some(compile_eql_expr(expr)?),
+                compiled_expr: if data.kernel.is_some() {
+                    None
+                } else {
+                    Some(compile_eql_expr_with_ctx(
+                        expr,
+                        &EqlCompileCtx::new(geo_context).with_frame(geo_frame),
+                    )?)
+                },
                 scale_expr,
                 scale_error,
                 error_covariance_cholesky_expr,
+                error_covariance_expr,
+                last_pose_kernel_input: None,
+                last_cov_kernel_input: None,
                 joint_animations,
                 data: data.clone(),
             },
@@ -1546,16 +2009,17 @@ pub fn create_object_3d_entity(
             ViewVisibility::default(),
             #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
-            impeller2_wkt::WorldPos::default(),
-            Name::new(format!("object_3d {}", &data.mesh)),
+            impeller_wkt::WorldPos::default(),
+            Name::new(format!("object_3d {}", data.mesh)),
         ))
         .id();
 
     // Add GeoPosition and GeoRotation components.
-    if let Some(frame) = geo_frame.or_default() {
+    if let Some(pos_frame) = geo_frame.or_default() {
+        let rot_frame = rotation_frame.or_default().unwrap_or(pos_frame);
         commands.entity(entity_id).insert((
-            GeoPosition(frame, DVec3::ZERO),
-            GeoRotation::from_bevy(frame, DQuat::IDENTITY, geo_context),
+            GeoPosition(pos_frame, DVec3::ZERO),
+            GeoRotation::from_bevy_kind(rot_frame, DQuat::IDENTITY, geo_context, data.orientation),
         ));
     }
 
@@ -1568,6 +2032,7 @@ pub fn create_object_3d_entity(
         mat3_material_assets,
         assets,
         connection_addr,
+        local_root,
     );
     Ok(entity_id)
 }
@@ -1576,18 +2041,19 @@ pub fn create_object_3d_entity(
 pub fn spawn_billboard_icon(
     commands: &mut Commands,
     parent: Entity,
-    icon: &impeller2_wkt::Object3DIcon,
-    mesh_visibility_range: Option<&impeller2_wkt::VisRange>,
+    icon: &impeller_wkt::Object3DIcon,
+    mesh_visibility_range: Option<&impeller_wkt::VisRange>,
     material_assets: &mut ResMut<Assets<StandardMaterial>>,
     mesh_assets: &mut ResMut<Assets<Mesh>>,
     image_assets: &mut ResMut<Assets<Image>>,
     asset_server: &Res<AssetServer>,
     icon_cache: &mut ResMut<IconTextureCache>,
     connection_addr: Option<SocketAddr>,
+    local_root: Option<&std::path::Path>,
 ) {
     let texture_handle: Handle<Image> = match &icon.source {
         Object3DIconSource::Path(path) => {
-            let url = resolve_db_asset_url(path, connection_addr);
+            let url = resolve_db_asset_url_prefer_local(path, connection_addr, local_root);
             asset_server.load(url)
         }
         Object3DIconSource::Builtin(name) => {
@@ -1640,15 +2106,16 @@ const ELLIPSOID_GRID_STACKS: u32 = 10;
 pub fn spawn_mesh(
     commands: &mut Commands,
     entity: Entity,
-    mesh: &impeller2_wkt::Object3DMesh,
+    mesh: &impeller_wkt::Object3DMesh,
     material_assets: &mut Assets<StandardMaterial>,
     mesh_assets: &mut Assets<Mesh>,
     mat3_material_assets: &mut Assets<Mat3Material>,
     assets: &AssetServer,
     connection_addr: Option<SocketAddr>,
+    local_root: Option<&std::path::Path>,
 ) {
     match mesh {
-        impeller2_wkt::Object3DMesh::Glb {
+        impeller_wkt::Object3DMesh::Glb {
             path,
             scale,
             translate,
@@ -1658,7 +2125,7 @@ pub fn spawn_mesh(
             glow: _,
             glow_color: _,
         } => {
-            let resolved = resolve_glb_asset_url(path, connection_addr);
+            let resolved = resolve_db_asset_url_prefer_local(path, connection_addr, local_root);
             let url = format!("{resolved}#Scene0");
             let scene = assets.load(&url);
 
@@ -1676,7 +2143,7 @@ pub fn spawn_mesh(
             };
 
             commands.spawn((
-                SceneRoot(scene),
+                WorldAssetRoot(scene),
                 offset_transform,
                 GlobalTransform::default(),
                 Visibility::default(),
@@ -1691,11 +2158,14 @@ pub fn spawn_mesh(
                 .entity(entity)
                 .insert(Name::new(format!("object_3d {}", path)));
         }
-        impeller2_wkt::Object3DMesh::Mesh { mesh, material } => {
+        impeller_wkt::Object3DMesh::Mesh { mesh, material } => {
             let mut material = material.clone().into_bevy();
-            if matches!(mesh, impeller2_wkt::Mesh::Plane { .. }) {
+            if matches!(mesh, impeller_wkt::Mesh::Plane { .. }) {
                 material.double_sided = true;
                 material.cull_mode = None;
+                // Prefer losing depth tests against the editor infinite grid so
+                // coplanar ground planes (ball example) do not shimmer.
+                material.depth_bias = 2.0;
             }
             let material = material_assets.add(material);
             let mesh = mesh.clone().into_bevy();
@@ -1713,9 +2183,12 @@ pub fn spawn_mesh(
                 Name::new("object_3d_mesh"),
             ));
         }
-        impeller2_wkt::Object3DMesh::Ellipsoid {
+        impeller_wkt::Object3DMesh::Ellipsoid {
             color,
             error_covariance_cholesky,
+            error_covariance,
+            error_covariance_cholesky_kernel,
+            error_covariance_kernel,
             error_confidence_interval: _error_confidence_interval,
             show_grid,
             grid_color,
@@ -1729,13 +2202,17 @@ pub fn spawn_mesh(
                 AlphaMode::Opaque
             };
 
-            if error_covariance_cholesky.is_some() {
+            if error_covariance_cholesky.is_some()
+                || error_covariance.is_some()
+                || error_covariance_cholesky_kernel.is_some()
+                || error_covariance_kernel.is_some()
+            {
                 let initial_linear = Mat3::IDENTITY;
                 let mat3_material = mat3_material_assets.add(Mat3Material {
                     base: StandardMaterial {
                         base_color: bevy_color,
                         alpha_mode,
-                        unlit: false,
+                        unlit: color.a < 1.0,
                         double_sided: true,
                         cull_mode: None,
                         perceptual_roughness: 0.6,
@@ -1859,6 +2336,23 @@ pub fn spawn_mesh(
     }
 }
 
+fn add_camera_mesh_layers(
+    mesh_layers: RenderLayers,
+    camera_layers: &RenderLayers,
+    shows_mesh: bool,
+    is_cinematic: bool,
+) -> RenderLayers {
+    if !shows_mesh {
+        return mesh_layers;
+    }
+    let layers = mesh_layers.union(camera_layers);
+    if is_cinematic {
+        layers.with(CINEMATIC_EARTH_RENDER_LAYER)
+    } else {
+        layers
+    }
+}
+
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn update_object_3d_billboard_system(
     mut commands: Commands,
@@ -1870,6 +2364,7 @@ pub fn update_object_3d_billboard_system(
             &GlobalTransform,
             &Projection,
             &RenderLayerLease,
+            Has<CinematicViewport>,
         ),
         (With<MainCamera>, With<ViewportConfig>),
     >,
@@ -1899,7 +2394,9 @@ pub fn update_object_3d_billboard_system(
         let bb_mesh_handle = icon_state.billboard_mesh.clone();
         let bb_mat_source = icon_state.billboard_material.clone();
 
-        for (cam_entity, camera, cam_gt, projection, render_layer_lease) in cameras.iter() {
+        for (cam_entity, camera, cam_gt, projection, render_layer_lease, is_cinematic) in
+            cameras.iter()
+        {
             let viewport_h = camera.logical_viewport_size().map(|s| s.y).unwrap_or(0.0);
             if viewport_h < 1.0 {
                 continue;
@@ -1915,9 +2412,8 @@ pub fn update_object_3d_billboard_system(
             let shows_billboard = distance >= icon_min && distance <= icon_max;
             let shows_mesh = distance >= mesh_min && distance <= mesh_max;
 
-            if shows_mesh {
-                mesh_layers = mesh_layers.union(&render_layers);
-            }
+            mesh_layers =
+                add_camera_mesh_layers(mesh_layers, &render_layers, shows_mesh, is_cinematic);
 
             if shows_billboard {
                 let cam_rotation = cam_gt.to_scale_rotation_translation().1;
@@ -1973,7 +2469,7 @@ pub fn update_object_3d_billboard_system(
                 };
 
                 if let Ok(mat_handle) = billboard_materials_query.get(*bb_entity)
-                    && let Some(mat) = materials.get_mut(mat_handle)
+                    && let Some(mut mat) = materials.get_mut(mat_handle)
                 {
                     let mut c = mat.base_color;
                     c.set_alpha(base_alpha * alpha);
@@ -2069,7 +2565,7 @@ pub fn apply_glb_material_overrides(
         let Ok(state) = objects.get(child_of.0) else {
             continue;
         };
-        let impeller2_wkt::Object3DMesh::Glb {
+        let impeller_wkt::Object3DMesh::Glb {
             emissivity,
             glow,
             glow_color,
@@ -2107,7 +2603,7 @@ pub fn apply_glb_material_overrides(
         }
         for (child, material, glow, glow_color) in updates {
             if glow > 0.0 {
-                let color = glow_color.unwrap_or(impeller2_wkt::Color::WHITE);
+                let color = glow_color.unwrap_or(impeller_wkt::Color::WHITE);
                 let linear = Color::srgba(color.r, color.g, color.b, color.a).to_linear();
                 let handle = rim_glow_materials.add(RimGlowMaterial {
                     base: material,
@@ -2132,6 +2628,248 @@ pub fn apply_glb_material_overrides(
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
+#[allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::too_many_lines
+)]
+pub fn update_object_3d_kernels(
+    mut commands: Commands,
+    mut objects_query: Query<(
+        Entity,
+        &mut Object3DState,
+        &mut impeller_wkt::WorldPos,
+        Option<&mut EllipsoidVisual>,
+        Has<WorldPosReceived>,
+        Option<&Children>,
+    )>,
+    mut mat3_params: Query<&mut Mat3Params>,
+    mesh_child_markers: Query<(), With<Object3DMeshChild>>,
+    entity_map: Res<EntityMap>,
+    component_value_maps: Query<&'static ComponentValue>,
+    geo_context: Res<GeoContext>,
+    coordinate: Res<Coordinate>,
+    mut kernels: ResMut<crate::plugins::display_kernel::DisplayKernelCache>,
+    connection_addr: Option<Res<impeller_bevy::ConnectionAddr>>,
+    initial_kdl: Option<Res<crate::plugins::kdl_document::InitialKdlPath>>,
+) {
+    use crate::plugins::display_kernel::{
+        KernelStatus, current_kernel_inputs, invoke_scalar, kernel_fetch_ctx, output_floats,
+    };
+
+    let fetch = kernel_fetch_ctx(connection_addr, initial_kdl);
+
+    for (entity, mut object_3d, mut pos, ellipse, has_received, children_maybe) in
+        objects_query.iter_mut()
+    {
+        if let Some(binding) = object_3d.data.kernel.clone()
+            && let Some(inputs) =
+                current_kernel_inputs(&binding, &entity_map, &component_value_maps)
+        {
+            let fingerprint: Vec<u8> = inputs.iter().flatten().copied().collect();
+            if object_3d.last_pose_kernel_input.as_deref() != Some(fingerprint.as_slice()) {
+                match kernels.poll(&binding, &fetch) {
+                    KernelStatus::Ready(compiled) => match invoke_scalar(compiled, &inputs) {
+                        Ok(outputs) => {
+                            if let Some(world_pos) = kernel_outputs_to_world_pos(&outputs) {
+                                *pos = world_pos;
+                                if !has_received {
+                                    commands.entity(entity).insert(WorldPosReceived);
+                                }
+                                object_3d.last_pose_kernel_input = Some(fingerprint);
+                            }
+                        }
+                        Err(err) => {
+                            warn_once!(?err, "object_3d display kernel failed");
+                        }
+                    },
+                    KernelStatus::Loading => {}
+                    KernelStatus::Failed(err) => {
+                        warn_once!(?err, "object_3d display kernel failed");
+                    }
+                }
+            }
+        }
+
+        let Some(mut ellipse) = ellipse else {
+            continue;
+        };
+        let Some(shape_mode) = ellipsoid_shape_mode(&object_3d.data.mesh) else {
+            continue;
+        };
+        let impeller_wkt::Object3DMesh::Ellipsoid {
+            error_confidence_interval,
+            error_covariance_cholesky_kernel,
+            error_covariance_kernel,
+            ..
+        } = &object_3d.data.mesh
+        else {
+            continue;
+        };
+        let binding = match shape_mode {
+            EllipsoidShapeMode::Cholesky => error_covariance_cholesky_kernel.clone(),
+            EllipsoidShapeMode::Covariance => error_covariance_kernel.clone(),
+            EllipsoidShapeMode::Scale => None,
+        };
+        let Some(binding) = binding else {
+            continue;
+        };
+        let Some(inputs) = current_kernel_inputs(&binding, &entity_map, &component_value_maps)
+        else {
+            continue;
+        };
+        let fingerprint: Vec<u8> = inputs.iter().flatten().copied().collect();
+        if object_3d.last_cov_kernel_input.as_deref() == Some(fingerprint.as_slice()) {
+            continue;
+        }
+        let compiled = match kernels.poll(&binding, &fetch) {
+            KernelStatus::Ready(compiled) => compiled,
+            KernelStatus::Loading => continue,
+            KernelStatus::Failed(err) => {
+                warn_once!(?err, "ellipsoid display kernel failed to load");
+                continue;
+            }
+        };
+        let dtype = compiled
+            .artifact
+            .outputs
+            .first()
+            .map(|tensor| tensor.dtype.clone())
+            .unwrap_or_else(|| "f64".into());
+        let Ok(outputs) = invoke_scalar(compiled, &inputs) else {
+            continue;
+        };
+        let Some(values) = outputs
+            .first()
+            .and_then(|bytes| output_floats(bytes, &dtype).ok())
+        else {
+            continue;
+        };
+        let Some(packed) = (match shape_mode {
+            EllipsoidShapeMode::Cholesky => floats_to_cholesky_6(&values),
+            EllipsoidShapeMode::Covariance => floats_to_6(&values),
+            EllipsoidShapeMode::Scale => None,
+        }) else {
+            warn_once!("ellipsoid kernel output must be 6 packed values or a 3x3 matrix");
+            continue;
+        };
+        let covariance_frame = resolve_covariance_frame(&object_3d.data, &coordinate);
+        let l = match shape_mode {
+            EllipsoidShapeMode::Cholesky => packed,
+            EllipsoidShapeMode::Covariance => {
+                let p_mat = symmetric_6_to_mat3(&packed);
+                let Some(l) = cholesky_3x3_spd(&p_mat) else {
+                    warn_once!("ellipsoid kernel covariance is not positive-definite");
+                    continue;
+                };
+                l
+            }
+            EllipsoidShapeMode::Scale => continue,
+        };
+        let linear = covariance_linear_from_l(
+            &l,
+            *error_confidence_interval,
+            covariance_frame,
+            &geo_context,
+        );
+        let mesh_child = children_maybe.and_then(|children| {
+            children
+                .iter()
+                .find(|child| mesh_child_markers.contains(*child))
+        });
+        // The mesh child is spawned with a deferred command, so it can be
+        // missing on the frame the kernel first succeeds. Stamp the input
+        // only after Mat3Params is written, or later frames skip the apply.
+        let Some(child) = mesh_child else {
+            continue;
+        };
+        let Ok(mut params) = mat3_params.get_mut(child) else {
+            continue;
+        };
+        params.set_if_neq(Mat3Params { linear });
+        ellipse.max_extent = max_linear_extent(&linear);
+        ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
+        object_3d.last_cov_kernel_input = Some(fingerprint);
+    }
+}
+
+fn kernel_outputs_to_world_pos(outputs: &[Vec<u8>]) -> Option<impeller_wkt::WorldPos> {
+    let bytes = outputs.first()?;
+    let values = output_f64s(bytes)?;
+    match values.as_slice() {
+        [x, y, z] => Some(impeller_wkt::WorldPos {
+            att: nox::Quaternion::identity(),
+            pos: nox::Vector3::new(*x, *y, *z),
+        }),
+        [qx, qy, qz, qw, x, y, z] => Some(impeller_wkt::WorldPos {
+            att: nox::Quaternion::new(*qw, *qx, *qy, *qz),
+            pos: nox::Vector3::new(*x, *y, *z),
+        }),
+        _ => None,
+    }
+}
+
+fn output_f64s(bytes: &[u8]) -> Option<Vec<f64>> {
+    let (chunks8, rest8) = bytes.as_chunks::<8>();
+    if rest8.is_empty() {
+        return Some(
+            chunks8
+                .iter()
+                .map(|&chunk| f64::from_le_bytes(chunk))
+                .collect(),
+        );
+    }
+    let (chunks4, rest4) = bytes.as_chunks::<4>();
+    if rest4.is_empty() {
+        return Some(
+            chunks4
+                .iter()
+                .map(|&chunk| f32::from_le_bytes(chunk) as f64)
+                .collect(),
+        );
+    }
+    None
+}
+
+fn floats_to_6(values: &[f64]) -> Option<[f32; 6]> {
+    match values {
+        [a, b, c, d, e, f] => Some([
+            *a as f32, *b as f32, *c as f32, *d as f32, *e as f32, *f as f32,
+        ]),
+        [p00, p10, p20, p01, p11, p21, p02, p12, p22] => {
+            let _ = (p01, p02, p12);
+            Some([
+                *p00 as f32,
+                *p10 as f32,
+                *p20 as f32,
+                *p11 as f32,
+                *p21 as f32,
+                *p22 as f32,
+            ])
+        }
+        _ => None,
+    }
+}
+
+/// Packed Cholesky `[l00, l10, l11, l20, l21, l22]`, or a row-major 3×3 L (JAX).
+fn floats_to_cholesky_6(values: &[f64]) -> Option<[f32; 6]> {
+    match values {
+        [a, b, c, d, e, f] => Some([
+            *a as f32, *b as f32, *c as f32, *d as f32, *e as f32, *f as f32,
+        ]),
+        [l00, _u01, _u02, l10, l11, _u12, l20, l21, l22] => Some([
+            *l00 as f32,
+            *l10 as f32,
+            *l11 as f32,
+            *l20 as f32,
+            *l21 as f32,
+            *l22 as f32,
+        ]),
+        _ => None,
+    }
+}
+
 pub struct Object3DPlugin;
 
 impl Plugin for Object3DPlugin {
@@ -2150,19 +2888,45 @@ impl Plugin for Object3DPlugin {
 }
 
 #[cfg(test)]
+mod billboard_render_layer_tests {
+    use super::add_camera_mesh_layers;
+    use crate::plugins::render_layer_alloc::CINEMATIC_EARTH_RENDER_LAYER;
+    use bevy::camera::visibility::RenderLayers;
+
+    #[test]
+    fn cinematic_layer_tracks_cinematic_mesh_visibility() {
+        let regular_lease = RenderLayers::layer(4);
+        let cinematic_lease = RenderLayers::layer(5);
+
+        let layers = add_camera_mesh_layers(RenderLayers::none(), &regular_lease, true, false);
+        assert_eq!(layers, regular_lease);
+
+        let layers = add_camera_mesh_layers(layers, &cinematic_lease, true, true);
+        assert_eq!(
+            layers,
+            RenderLayers::from_layers(&[4, 5, CINEMATIC_EARTH_RENDER_LAYER])
+        );
+
+        let layers = add_camera_mesh_layers(RenderLayers::none(), &cinematic_lease, false, true);
+        assert_eq!(layers, RenderLayers::none());
+    }
+}
+
+#[cfg(test)]
 mod joint_eql_cast_tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
     use bevy::ecs::system::SystemState;
     use bevy::prelude::{Query, World};
-    use impeller2::schema::Schema;
-    use impeller2::types::{ComponentId, PrimType, Timestamp};
-    use impeller2_bevy::EntityMap;
-    use impeller2_wkt::ComponentValue;
+    use impeller::schema::Schema;
+    use impeller::types::{ComponentId, PrimType, Timestamp};
+    use impeller_bevy::EntityMap;
+    use impeller_wkt::ComponentValue;
     use nox::{Array, ArrayBuf};
 
     use super::compile_eql_expr;
+    use crate::ui::widgets::SystemStateExt;
 
     #[test]
     fn joint_rotation_vector_string_with_cast_evaluates_like_kdl_example() {
@@ -2187,7 +2951,7 @@ mod joint_eql_cast_tests {
 
         let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
             SystemState::new(&mut world);
-        let (q,) = system_state.get(&world);
+        let (q,) = system_state.params(&world);
         let out = compiled
             .expect("compiled expr")
             .execute(&entity_map, &q)
@@ -2211,13 +2975,14 @@ mod ellipsoid_scale_eql_tests {
 
     use bevy::ecs::system::SystemState;
     use bevy::prelude::{Query, Vec3, World};
-    use impeller2::schema::Schema;
-    use impeller2::types::{ComponentId, PrimType, Timestamp};
-    use impeller2_bevy::EntityMap;
-    use impeller2_wkt::ComponentValue;
+    use impeller::schema::Schema;
+    use impeller::types::{ComponentId, PrimType, Timestamp};
+    use impeller_bevy::EntityMap;
+    use impeller_wkt::ComponentValue;
     use nox::Array;
 
     use super::{compile_scale_eql, component_value_to_vec3};
+    use crate::ui::widgets::SystemStateExt;
 
     fn pos_std_var_component(name: &str) -> Arc<eql::Component> {
         f64_component(name, &[3])
@@ -2281,7 +3046,7 @@ mod ellipsoid_scale_eql_tests {
 
         let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
             SystemState::new(&mut world);
-        let (component_values,) = system_state.get(&world);
+        let (component_values,) = system_state.params(&world);
         let compiled = compile_scale_eql("left + right", &ctx).expect("expression should compile");
 
         let err = compiled
@@ -2313,7 +3078,7 @@ mod ellipsoid_scale_eql_tests {
 
         let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
             SystemState::new(&mut world);
-        let (component_values,) = system_state.get(&world);
+        let (component_values,) = system_state.params(&world);
 
         for (scale_expr, expected) in [
             (
@@ -2339,6 +3104,706 @@ mod ellipsoid_scale_eql_tests {
 
             assert_vec3_close(scale, expected);
         }
+    }
+}
+
+#[cfg(test)]
+mod ellipsoid_covariance_tests {
+    use bevy::prelude::Mat3;
+    use bevy_geo_frames::{GeoContext, GeoFrame, Present};
+
+    use crate::{Coordinate, WorldPosExt};
+
+    use super::{
+        EllipsoidShapeMode, cholesky_3x3_spd, covariance_linear_from_l, ellipsoid_shape_mode,
+        lower_cholesky_pack_to_mat3, resolve_covariance_frame, symmetric_6_to_mat3,
+    };
+    use impeller_wkt::{
+        Object3D, Object3DMesh, default_ellipsoid_color, default_ellipsoid_confidence_interval,
+        default_ellipsoid_grid_color, default_ellipsoid_scale_expr, default_ellipsoid_show_grid,
+    };
+
+    fn assert_mat3_close(actual: Mat3, expected: Mat3) {
+        let delta = (actual - expected).to_cols_array();
+        let max = delta.iter().map(|v| v.abs()).fold(0.0_f32, f32::max);
+        assert!(max < 1e-4, "expected {expected:?}, got {actual:?}");
+    }
+
+    fn ellipsoid_mesh(cholesky: Option<&str>, covariance: Option<&str>) -> Object3DMesh {
+        Object3DMesh::Ellipsoid {
+            scale: default_ellipsoid_scale_expr(),
+            color: default_ellipsoid_color(),
+            error_covariance_cholesky: cholesky.map(str::to_string),
+            error_covariance: covariance.map(str::to_string),
+            error_covariance_cholesky_kernel: None,
+            error_covariance_kernel: None,
+            error_confidence_interval: default_ellipsoid_confidence_interval(),
+            show_grid: default_ellipsoid_show_grid(),
+            grid_color: default_ellipsoid_grid_color(),
+        }
+    }
+
+    #[test]
+    fn shape_mode_prefers_cholesky_field_over_covariance() {
+        assert_eq!(
+            ellipsoid_shape_mode(&ellipsoid_mesh(
+                Some("(1,0,1,0,0,1)"),
+                Some("(1,0,0,1,0,1)")
+            )),
+            Some(EllipsoidShapeMode::Cholesky)
+        );
+        assert_eq!(
+            ellipsoid_shape_mode(&ellipsoid_mesh(None, Some("(1,0,0,1,0,1)"))),
+            Some(EllipsoidShapeMode::Covariance)
+        );
+        assert_eq!(
+            ellipsoid_shape_mode(&ellipsoid_mesh(None, None)),
+            Some(EllipsoidShapeMode::Scale)
+        );
+    }
+
+    #[test]
+    fn shape_mode_keeps_cholesky_when_expression_is_invalid() {
+        // Field presence alone selects the driver; a failed compile must not fall through.
+        assert_eq!(
+            ellipsoid_shape_mode(&ellipsoid_mesh(Some(""), Some("(1,0,0,1,0,1)"))),
+            Some(EllipsoidShapeMode::Cholesky)
+        );
+    }
+
+    #[test]
+    fn symmetric_cholesky_recovers_llt() {
+        let l_in = [2.0, 0.5, 3.0, 1.0, 0.25, 4.0];
+        let l = lower_cholesky_pack_to_mat3(&l_in);
+        let p = l * l.transpose();
+        let recovered = cholesky_3x3_spd(&p).expect("SPD matrix should factorize");
+        let l_out = lower_cholesky_pack_to_mat3(&recovered);
+        assert_mat3_close(l_out * l_out.transpose(), p);
+    }
+
+    #[test]
+    fn identity_symmetric_covariance_factors_to_identity_cholesky() {
+        let p = symmetric_6_to_mat3(&[1.0, 0.0, 0.0, 1.0, 0.0, 1.0]);
+        let l = cholesky_3x3_spd(&p).expect("identity covariance");
+        assert!((l[0] - 1.0).abs() < 1e-5);
+        assert!(l[1].abs() < 1e-5);
+        assert!((l[2] - 1.0).abs() < 1e-5);
+        assert!(l[3].abs() < 1e-5);
+        assert!(l[4].abs() < 1e-5);
+        assert!((l[5] - 1.0).abs() < 1e-5);
+    }
+
+    #[test]
+    fn world_frame_enu_differs_from_ned() {
+        let ctx = GeoContext::default().with_present(Present::Plane);
+        let l = [1.0, 0.0, 1.0, 0.0, 0.0, 1.0];
+        let enu = covariance_linear_from_l(&l, 70.0, GeoFrame::ENU, &ctx);
+        let ned = covariance_linear_from_l(&l, 70.0, GeoFrame::NED, &ctx);
+        assert!(!enu.abs_diff_eq(ned, 1e-5));
+    }
+
+    #[test]
+    fn resolve_covariance_frame_uses_position_frame() {
+        let object = Object3D {
+            eql: "x".to_string(),
+            mesh: Object3DMesh::glb("m.glb"),
+            frame: Some(GeoFrame::NED),
+            frame_orientation: Some(GeoFrame::ECEF),
+            orientation: Default::default(),
+            sensor_visible: true,
+            icon: None,
+            thrusters: Vec::new(),
+            mesh_visibility_range: None,
+            node_id: Default::default(),
+            kernel: None,
+        };
+        assert_eq!(
+            resolve_covariance_frame(&object, &Coordinate(None)),
+            GeoFrame::NED
+        );
+    }
+
+    #[test]
+    fn kernel_pose_accepts_3_or_7_values() {
+        let pos = super::kernel_outputs_to_world_pos(&[16.0_f64
+            .to_le_bytes()
+            .into_iter()
+            .chain(0.0_f64.to_le_bytes())
+            .chain(2.0_f64.to_le_bytes())
+            .collect()]);
+        let pos = pos.expect("xyz pose");
+        assert!((pos.pos().x - 16.0).abs() < 1e-12);
+
+        let mut seven = Vec::new();
+        for value in [0.0_f64, 0.0, 0.0, 1.0, 1.0, 2.0, 3.0] {
+            seven.extend_from_slice(&value.to_le_bytes());
+        }
+        let pose = super::kernel_outputs_to_world_pos(&[seven]).expect("7-value pose");
+        assert!((pose.pos().z - 3.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn kernel_covariance_accepts_packed_or_matrix() {
+        let packed = super::floats_to_6(&[1.0, 0.0, 0.0, 2.0, 0.0, 3.0]).unwrap();
+        assert_eq!(packed[3], 2.0);
+        let matrix = super::floats_to_6(&[1.0, 0.1, 0.2, 0.1, 2.0, 0.3, 0.2, 0.3, 3.0]).unwrap();
+        assert_eq!(matrix[0], 1.0);
+        assert_eq!(matrix[3], 2.0);
+        assert_eq!(matrix[5], 3.0);
+        assert!(super::floats_to_6(&[1.0, 2.0]).is_none());
+    }
+
+    #[test]
+    fn kernel_cholesky_accepts_row_major_matrix() {
+        // JAX row-major L = [[2, 0, 0], [0, 1, 0], [0, 0, 3]]
+        let packed =
+            super::floats_to_cholesky_6(&[2.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 3.0]).unwrap();
+        assert_eq!(packed, [2.0, 0.0, 1.0, 0.0, 0.0, 3.0]);
+        let linear = super::lower_cholesky_pack_to_mat3(&packed);
+        let cols = linear.to_cols_array();
+        assert!((cols[0] - 2.0).abs() < 1e-6);
+        assert!((cols[4] - 1.0).abs() < 1e-6);
+        assert!((cols[8] - 3.0).abs() < 1e-6);
+        assert!(cols[3].abs() < 1e-6);
+    }
+}
+
+#[cfg(test)]
+mod translate_body_frame_tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use bevy::ecs::system::SystemState;
+    use bevy::math::{DMat3, DQuat, DVec3};
+    use bevy::prelude::{Query, World};
+    use impeller::schema::Schema;
+    use impeller::types::{ComponentId, PrimType, Timestamp};
+    use impeller_bevy::EntityMap;
+    use impeller_wkt::ComponentValue;
+    use nox::Array;
+
+    use super::{ComponentArrayExt, EqlCompileCtx, compile_eql_expr, compile_eql_expr_with_ctx};
+    use crate::WorldPosExt;
+    use crate::ui::widgets::SystemStateExt;
+
+    /// Cape Canaveral–scale ECEF position so we exercise planetary magnitudes.
+    const ROCKET_ECEF: DVec3 = DVec3::new(918_000.0, -5_530_000.0, 3_040_000.0);
+
+    fn world_pos_component() -> Arc<eql::Component> {
+        Arc::new(eql::Component::new(
+            "rocket.world_pos".to_string(),
+            ComponentId::new("rocket.world_pos"),
+            Schema::new(PrimType::F64, vec![7u64]).unwrap(),
+        ))
+    }
+
+    fn spatial_value(att: DQuat, pos: DVec3) -> ComponentValue {
+        let buf = vec![att.x, att.y, att.z, att.w, pos.x, pos.y, pos.z];
+        ComponentValue::F64(
+            Array::<f64, nox::Dyn>::from_shape_vec(smallvec::smallvec![7], buf)
+                .expect("spatial buffer"),
+        )
+    }
+
+    fn eval_eql(expr: &str, att: DQuat, pos: DVec3) -> impeller_wkt::WorldPos {
+        let component = world_pos_component();
+        let component_id = component.id;
+        let ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+        let compiled = compile_eql_expr(
+            ctx.parse_str(expr)
+                .unwrap_or_else(|e| panic!("parse {expr:?}: {e}")),
+        )
+        .unwrap_or_else(|e| panic!("compile {expr:?}: {e}"));
+
+        let mut world = World::new();
+        let entity = world.spawn(spatial_value(att, pos)).id();
+        let entity_map = EntityMap(HashMap::from([(component_id, entity)]));
+        let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
+            SystemState::new(&mut world);
+        let (values,) = system_state.params(&world);
+        compiled
+            .execute(&entity_map, &values)
+            .expect("execute")
+            .as_world_pos()
+            .expect("WorldPos")
+    }
+
+    fn eval_eql_with_ctx(
+        expr: &str,
+        att: DQuat,
+        pos: DVec3,
+        compile_ctx: &EqlCompileCtx<'_>,
+    ) -> impeller_wkt::WorldPos {
+        let component = world_pos_component();
+        let component_id = component.id;
+        let ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+        let compiled = compile_eql_expr_with_ctx(
+            ctx.parse_str(expr)
+                .unwrap_or_else(|e| panic!("parse {expr:?}: {e}")),
+            compile_ctx,
+        )
+        .unwrap_or_else(|e| panic!("compile {expr:?}: {e}"));
+
+        let mut world = World::new();
+        let entity = world.spawn(spatial_value(att, pos)).id();
+        let entity_map = EntityMap(HashMap::from([(component_id, entity)]));
+        let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
+            SystemState::new(&mut world);
+        let (values,) = system_state.params(&world);
+        compiled
+            .execute(&entity_map, &values)
+            .expect("execute")
+            .as_world_pos()
+            .expect("WorldPos")
+    }
+
+    fn eval_direction_with_ctx(
+        expr: &str,
+        att: DQuat,
+        pos: DVec3,
+        compile_ctx: &EqlCompileCtx<'_>,
+    ) -> DVec3 {
+        let component = world_pos_component();
+        let component_id = component.id;
+        let ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+        let compiled = compile_eql_expr_with_ctx(
+            ctx.parse_str(expr)
+                .unwrap_or_else(|e| panic!("parse {expr:?}: {e}")),
+            compile_ctx,
+        )
+        .unwrap_or_else(|e| panic!("compile {expr:?}: {e}"));
+
+        let mut world = World::new();
+        let entity = world.spawn(spatial_value(att, pos)).id();
+        let entity_map = EntityMap(HashMap::from([(component_id, entity)]));
+        let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
+            SystemState::new(&mut world);
+        let (values,) = system_state.params(&world);
+        let out = compiled.execute(&entity_map, &values).expect("execute");
+        let ComponentValue::F64(arr) = out else {
+            panic!("expected f64");
+        };
+        use nox::ArrayBuf;
+        let d = arr.buf.as_buf();
+        DVec3::new(d[0], d[1], d[2])
+    }
+
+    #[test]
+    fn body_translate_with_identity_matches_world_axes() {
+        let out = eval_eql(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0)",
+            DQuat::IDENTITY,
+            ROCKET_ECEF,
+        );
+        let delta = out.pos() - ROCKET_ECEF;
+        assert!(
+            (delta - DVec3::new(-2.0, 0.0, 0.0)).length() < 1e-9,
+            "identity attitude: body translate must equal ECEF axes, got {delta:?}"
+        );
+    }
+
+    /// Chase camera: 2 m aft along body −X with a non-identity ECEF attitude.
+    /// Body +X is pitched 90° onto ECEF +Z (nose "up" along +Z).
+    #[test]
+    fn body_translate_neg_x_follows_attitude_in_ecef() {
+        let att = DQuat::from_rotation_y(-std::f64::consts::FRAC_PI_2);
+        let out = eval_eql(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0)",
+            att,
+            ROCKET_ECEF,
+        );
+        let delta = out.pos() - ROCKET_ECEF;
+        let expected = att * DVec3::new(-2.0, 0.0, 0.0);
+        assert!(
+            (delta - expected).length() < 1e-9,
+            "body −X must rotate into ECEF by attitude: got {delta:?}, expected {expected:?}"
+        );
+        // Must not silently fall back to world-frame axes.
+        assert!(
+            (delta - DVec3::new(-2.0, 0.0, 0.0)).length() > 1.0,
+            "body translate must differ from world translate for this attitude"
+        );
+    }
+
+    #[test]
+    fn body_translate_differs_from_translate_world_when_rotated() {
+        let att = DQuat::from_euler(bevy::math::EulerRot::XYZ, 0.4, -1.1, 0.7);
+        let body = eval_eql(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0)",
+            att,
+            ROCKET_ECEF,
+        );
+        let world = eval_eql(
+            "rocket.world_pos.translate_world(-2.0, 0.0, 0.0)",
+            att,
+            ROCKET_ECEF,
+        );
+        let body_delta = body.pos() - ROCKET_ECEF;
+        let world_delta = world.pos() - ROCKET_ECEF;
+        assert!(
+            (world_delta - DVec3::new(-2.0, 0.0, 0.0)).length() < 1e-9,
+            "translate_world must ignore attitude"
+        );
+        assert!(
+            (body_delta - (att * DVec3::new(-2.0, 0.0, 0.0))).length() < 1e-9,
+            "translate must apply attitude: got {body_delta:?}"
+        );
+        assert!(
+            (body_delta - world_delta).length() > 1e-6,
+            "body and world translates must diverge when attitude is non-identity"
+        );
+    }
+
+    #[test]
+    fn body_translate_xyz_combined_in_ecef() {
+        let att = DQuat::from_euler(bevy::math::EulerRot::ZYX, 0.9, -0.3, 1.2);
+        let offset = DVec3::new(-2.0, 0.5, 1.0);
+        let out = eval_eql(
+            "rocket.world_pos.translate(-2.0, 0.5, 1.0)",
+            att,
+            ROCKET_ECEF,
+        );
+        let delta = out.pos() - ROCKET_ECEF;
+        let expected = att * offset;
+        assert!(
+            (delta - expected).length() < 1e-9,
+            "combined body translate: got {delta:?}, expected {expected:?}"
+        );
+    }
+
+    /// Compiled **without** a `frame=` (identity correction). `.translate()`
+    /// then equals Absolute composition. Pass `true` or compile with an ECEF
+    /// `frame=` to pick Absolute vs Relative explicitly — see
+    /// `ecef_translate_flag_matches_relative_and_absolute`.
+    #[test]
+    fn ecef_body_translate_diverges_from_default_relative_mesh() {
+        use bevy_geo_frames::{
+            GeoContext, GeoFrame, GeoPosition, GeoRotation, Present, RotationKind,
+        };
+
+        let ctx = GeoContext::default().with_present(Present::Plane);
+        let att = DQuat::from_euler(bevy::math::EulerRot::XYZ, 0.5, -0.8, 1.2);
+        let body_aft = DVec3::new(-2.0, 0.0, 0.0);
+
+        let translated = eval_eql(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0)",
+            att,
+            ROCKET_ECEF,
+        );
+        let cam_delta_bevy = GeoPosition(GeoFrame::ECEF, translated.pos()).to_bevy(&ctx)
+            - GeoPosition(GeoFrame::ECEF, ROCKET_ECEF).to_bevy(&ctx);
+
+        assert_eq!(RotationKind::default(), RotationKind::Relative);
+        let relative_aft = GeoRotation::relative(GeoFrame::ECEF, att).to_bevy(&ctx) * body_aft;
+        let absolute_aft = GeoRotation::absolute(GeoFrame::ECEF, att).to_bevy(&ctx) * body_aft;
+
+        assert!(
+            (cam_delta_bevy - absolute_aft).length() < 1e-6,
+            "body translate is Absolute composition: Δ={cam_delta_bevy:?}, aft={absolute_aft:?}"
+        );
+        assert!(
+            (cam_delta_bevy - relative_aft).length() > 0.1,
+            "Relative similarity must not match ECEF body translate"
+        );
+    }
+
+    /// Same contract, still compiled without a `frame=` (identity correction).
+    /// `.translate(..., true)` is the explicit Absolute form when a frame is set.
+    #[test]
+    fn ecef_body_translate_matches_rendered_aft_with_absolute_orientation() {
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation, Present};
+
+        let ctx = GeoContext::default().with_present(Present::Plane);
+        let att = DQuat::from_euler(bevy::math::EulerRot::XYZ, 0.5, -0.8, 1.2);
+        let body_aft = DVec3::new(-2.0, 0.0, 0.0);
+
+        let translated = eval_eql(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0)",
+            att,
+            ROCKET_ECEF,
+        );
+        let cam_delta_bevy = GeoPosition(GeoFrame::ECEF, translated.pos()).to_bevy(&ctx)
+            - GeoPosition(GeoFrame::ECEF, ROCKET_ECEF).to_bevy(&ctx);
+        let rendered_aft = GeoRotation::absolute(GeoFrame::ECEF, att).to_bevy(&ctx) * body_aft;
+
+        assert!(
+            (cam_delta_bevy - rendered_aft).length() < 1e-6,
+            "ECEF Absolute mesh aft must match body translate: Δ={cam_delta_bevy:?}, aft={rendered_aft:?}"
+        );
+    }
+
+    /// With an ECEF compile-site `frame=`, bare `.translate()` matches Relative
+    /// mesh aft; `.translate(..., true)` matches Absolute.
+    #[test]
+    fn ecef_translate_flag_matches_relative_and_absolute() {
+        use bevy_geo_frames::{
+            GeoContext, GeoFrame, GeoPosition, GeoRotation, Present, RotationKind,
+        };
+
+        let geo = GeoContext::default().with_present(Present::Plane);
+        let compile_ctx = EqlCompileCtx::new(&geo).with_frame(Some(GeoFrame::ECEF));
+        let att = DQuat::from_euler(bevy::math::EulerRot::XYZ, 0.5, -0.8, 1.2);
+        let body_aft = DVec3::new(-2.0, 0.0, 0.0);
+        let s = DMat3::from_cols(DVec3::X, DVec3::NEG_Z, DVec3::Y);
+
+        let relative = eval_eql_with_ctx(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0)",
+            att,
+            ROCKET_ECEF,
+            &compile_ctx,
+        );
+        let absolute = eval_eql_with_ctx(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0, true)",
+            att,
+            ROCKET_ECEF,
+            &compile_ctx,
+        );
+
+        let rel_delta = GeoPosition(GeoFrame::ECEF, relative.pos()).to_bevy(&geo)
+            - GeoPosition(GeoFrame::ECEF, ROCKET_ECEF).to_bevy(&geo);
+        let abs_delta = GeoPosition(GeoFrame::ECEF, absolute.pos()).to_bevy(&geo)
+            - GeoPosition(GeoFrame::ECEF, ROCKET_ECEF).to_bevy(&geo);
+
+        assert_eq!(RotationKind::default(), RotationKind::Relative);
+        let relative_aft =
+            GeoRotation::relative(GeoFrame::ECEF, att).to_bevy(&geo) * (s * body_aft);
+        let absolute_aft = GeoRotation::absolute(GeoFrame::ECEF, att).to_bevy(&geo) * body_aft;
+
+        assert!(
+            (rel_delta - relative_aft).length() < 1e-6,
+            "bare translate must match Relative aft: Δ={rel_delta:?}, aft={relative_aft:?}"
+        );
+        assert!(
+            (abs_delta - absolute_aft).length() < 1e-6,
+            "translate(..., true) must match Absolute: Δ={abs_delta:?}, aft={absolute_aft:?}"
+        );
+        assert!(
+            (rel_delta - abs_delta).length() > 0.1,
+            "Relative and Absolute ECEF offsets must diverge"
+        );
+    }
+
+    #[test]
+    fn enu_translate_flag_coincides() {
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, Present};
+
+        let geo = GeoContext::default().with_present(Present::Plane);
+        let compile_ctx = EqlCompileCtx::new(&geo).with_frame(Some(GeoFrame::ENU));
+        let att = DQuat::from_euler(bevy::math::EulerRot::XYZ, 0.5, -0.8, 1.2);
+
+        let bare = eval_eql_with_ctx(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0)",
+            att,
+            ROCKET_ECEF,
+            &compile_ctx,
+        );
+        let flagged = eval_eql_with_ctx(
+            "rocket.world_pos.translate(-2.0, 0.0, 0.0, true)",
+            att,
+            ROCKET_ECEF,
+            &compile_ctx,
+        );
+        let bare_delta = GeoPosition(GeoFrame::ENU, bare.pos()).to_bevy(&geo)
+            - GeoPosition(GeoFrame::ENU, ROCKET_ECEF).to_bevy(&geo);
+        let flagged_delta = GeoPosition(GeoFrame::ENU, flagged.pos()).to_bevy(&geo)
+            - GeoPosition(GeoFrame::ENU, ROCKET_ECEF).to_bevy(&geo);
+        assert!(
+            (bare_delta - flagged_delta).length() < 1e-9,
+            "ENU correction is identity: bare={bare_delta:?}, flagged={flagged_delta:?}"
+        );
+    }
+
+    #[test]
+    fn ecef_direction_flag_matches_relative_and_absolute() {
+        use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation, Present};
+
+        let geo = GeoContext::default().with_present(Present::Plane);
+        let compile_ctx = EqlCompileCtx::new(&geo).with_frame(Some(GeoFrame::ECEF));
+        let att = DQuat::from_euler(bevy::math::EulerRot::XYZ, 0.5, -0.8, 1.2);
+        let up = DVec3::Z;
+        let s = DMat3::from_cols(DVec3::X, DVec3::NEG_Z, DVec3::Y);
+
+        let relative = eval_direction_with_ctx(
+            "rocket.world_pos.direction(0.0, 0.0, 1.0)",
+            att,
+            ROCKET_ECEF,
+            &compile_ctx,
+        );
+        let absolute = eval_direction_with_ctx(
+            "rocket.world_pos.direction(0.0, 0.0, 1.0, true)",
+            att,
+            ROCKET_ECEF,
+            &compile_ctx,
+        );
+
+        let relative_up = GeoRotation::relative(GeoFrame::ECEF, att).to_bevy(&geo) * (s * up);
+        let absolute_up = GeoRotation::absolute(GeoFrame::ECEF, att).to_bevy(&geo) * up;
+        // direction() returns a frame-space vector; convert to Bevy for comparison.
+        let rel_bevy = GeoFrame::bevy_R_(&GeoFrame::ECEF, &geo) * relative;
+        let abs_bevy = GeoFrame::bevy_R_(&GeoFrame::ECEF, &geo) * absolute;
+
+        assert!(
+            (rel_bevy - relative_up).length() < 1e-6,
+            "bare direction must match Relative: {rel_bevy:?} vs {relative_up:?}"
+        );
+        assert!(
+            (abs_bevy - absolute_up).length() < 1e-6,
+            "direction(..., true) must match Absolute: {abs_bevy:?} vs {absolute_up:?}"
+        );
+    }
+}
+
+#[cfg(test)]
+mod frame_convert_eql_tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use bevy::ecs::system::SystemState;
+    use bevy::math::{DQuat, DVec3};
+    use bevy::prelude::{Query, World};
+    use bevy_geo_frames::{GeoContext, GeoFrame, GeoOrigin, Present};
+    use impeller::schema::Schema;
+    use impeller::types::{ComponentId, PrimType, Timestamp};
+    use impeller_bevy::EntityMap;
+    use impeller_wkt::ComponentValue;
+    use nox::Array;
+
+    use super::{ComponentArrayExt, compile_eql_expr_with_geo};
+    use crate::WorldPosExt;
+    use crate::ui::widgets::SystemStateExt;
+
+    const ROCKET_ECEF: DVec3 = DVec3::new(918_000.0, -5_530_000.0, 3_040_000.0);
+
+    fn world_pos_component(name: &str, dim: u64) -> Arc<eql::Component> {
+        Arc::new(eql::Component::new(
+            name.to_string(),
+            ComponentId::new(name),
+            Schema::new(PrimType::F64, vec![dim]).unwrap(),
+        ))
+    }
+
+    fn eval_vec3(expr: &str, value: ComponentValue, geo: &GeoContext) -> DVec3 {
+        let component = world_pos_component("rocket.world_pos", 3);
+        let component_id = component.id;
+        let ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+        let compiled = compile_eql_expr_with_geo(
+            ctx.parse_str(expr)
+                .unwrap_or_else(|e| panic!("parse {expr:?}: {e}")),
+            geo,
+        )
+        .unwrap_or_else(|e| panic!("compile {expr:?}: {e}"));
+
+        let mut world = World::new();
+        let entity = world.spawn(value).id();
+        let entity_map = EntityMap(HashMap::from([(component_id, entity)]));
+        let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
+            SystemState::new(&mut world);
+        let (values,) = system_state.params(&world);
+        let out = compiled.execute(&entity_map, &values).expect("execute");
+        let ComponentValue::F64(arr) = out else {
+            panic!("expected f64");
+        };
+        use nox::ArrayBuf;
+        let d = arr.buf.as_buf();
+        DVec3::new(d[0], d[1], d[2])
+    }
+
+    fn f64_vec3(v: DVec3) -> ComponentValue {
+        ComponentValue::F64(
+            Array::<f64, nox::Dyn>::from_shape_vec(smallvec::smallvec![3], vec![v.x, v.y, v.z])
+                .unwrap(),
+        )
+    }
+
+    #[test]
+    fn enu_to_ned_swaps_axes() {
+        let geo = GeoContext::default();
+        let out = eval_vec3(
+            "rocket.world_pos.enu_to_ned()",
+            f64_vec3(DVec3::new(1.0, 2.0, 3.0)),
+            &geo,
+        );
+        assert!((out - DVec3::new(2.0, 1.0, -3.0)).length() < 1e-12);
+    }
+
+    #[test]
+    fn ecef_to_ned_origin_is_near_zero() {
+        let origin = GeoOrigin::new_from_degrees(28.5, -80.6, 0.0);
+        let geo = GeoContext::from(origin).with_present(Present::Plane);
+        let origin_ecef = GeoFrame::ECEF
+            ._M_(&GeoFrame::NED, &geo)
+            .transform_point3(DVec3::ZERO);
+        // Inverse: ECEF of NED origin → NED ≈ 0
+        let out = eval_vec3(
+            "rocket.world_pos.ecef_to_ned()",
+            f64_vec3(origin_ecef),
+            &geo,
+        );
+        assert!(
+            out.length() < 1e-6,
+            "ECEF of local origin must map to ~0 NED, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn ecef_vector_differs_from_point_far_from_origin() {
+        let origin = GeoOrigin::new_from_degrees(28.5, -80.6, 0.0);
+        let geo = GeoContext::from(origin).with_present(Present::Plane);
+        let v = DVec3::new(1000.0, 0.0, 0.0);
+        let point = eval_vec3("rocket.world_pos.ecef_to_ned()", f64_vec3(v), &geo);
+        let dir = eval_vec3("rocket.world_pos.ecef_to_ned_vector()", f64_vec3(v), &geo);
+        assert!(
+            (point - dir).length() > 1.0,
+            "point affine must include origin translation; got point={point:?} dir={dir:?}"
+        );
+    }
+
+    #[test]
+    fn ecef_to_ned_pose_converts_position() {
+        let origin = GeoOrigin::new_from_degrees(28.5, -80.6, 0.0);
+        let geo = GeoContext::from(origin).with_present(Present::Plane);
+        let component = world_pos_component("rocket.world_pos", 7);
+        let component_id = component.id;
+        let ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+        let compiled = compile_eql_expr_with_geo(
+            ctx.parse_str("rocket.world_pos.ecef_to_ned()").unwrap(),
+            &geo,
+        )
+        .unwrap();
+
+        let att = DQuat::IDENTITY;
+        let buf = vec![
+            att.x,
+            att.y,
+            att.z,
+            att.w,
+            ROCKET_ECEF.x,
+            ROCKET_ECEF.y,
+            ROCKET_ECEF.z,
+        ];
+        let mut world = World::new();
+        let entity = world
+            .spawn(ComponentValue::F64(
+                Array::<f64, nox::Dyn>::from_shape_vec(smallvec::smallvec![7], buf).unwrap(),
+            ))
+            .id();
+        let entity_map = EntityMap(HashMap::from([(component_id, entity)]));
+        let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
+            SystemState::new(&mut world);
+        let (values,) = system_state.params(&world);
+        let wp = compiled
+            .execute(&entity_map, &values)
+            .unwrap()
+            .as_world_pos()
+            .unwrap();
+        let expected = GeoFrame::NED
+            ._M_(&GeoFrame::ECEF, &geo)
+            .transform_point3(ROCKET_ECEF);
+        assert!(
+            (wp.pos() - expected).length() < 1e-6,
+            "got {:?}, expected {expected:?}",
+            wp.pos()
+        );
     }
 }
 
@@ -2404,5 +3869,60 @@ mod db_asset_url_tests {
             resolve_db_asset_url("db:icons/marker.png", Some(conn)),
             "http://127.0.0.1:2241/icons/marker.png"
         );
+    }
+
+    #[test]
+    fn assets_http_addr_offsets_port_and_maps_unspecified_to_loopback() {
+        let conn: SocketAddr = "0.0.0.0:2240".parse().unwrap();
+        assert_eq!(
+            super::assets_http_addr(conn),
+            "127.0.0.1:2241".parse::<SocketAddr>().unwrap()
+        );
+    }
+
+    #[test]
+    fn prefer_local_resolves_existing_file_to_bare_path() {
+        let root = std::env::temp_dir().join(format!(
+            "elodin-prefer-local-{}-{}",
+            std::process::id(),
+            line!()
+        ));
+        std::fs::create_dir_all(root.join("textures")).unwrap();
+        std::fs::write(root.join("textures/soft_circle.png"), b"png").unwrap();
+        let conn: SocketAddr = "10.0.0.5:2240".parse().unwrap();
+
+        assert_eq!(
+            super::resolve_db_asset_url_prefer_local(
+                "db:textures/soft_circle.png",
+                Some(conn),
+                Some(&root)
+            ),
+            "textures/soft_circle.png"
+        );
+        // Missing locally: falls through to the DB URL.
+        assert_eq!(
+            super::resolve_db_asset_url_prefer_local(
+                "db:textures/missing.png",
+                Some(conn),
+                Some(&root)
+            ),
+            "http://10.0.0.5:2241/textures/missing.png"
+        );
+        // Bare (non-db:) paths pass through untouched.
+        assert_eq!(
+            super::resolve_db_asset_url_prefer_local("models/x.glb", Some(conn), Some(&root)),
+            "models/x.glb"
+        );
+        // No local root (no --kdl): DB URL as before.
+        assert_eq!(
+            super::resolve_db_asset_url_prefer_local(
+                "db:textures/soft_circle.png",
+                Some(conn),
+                None
+            ),
+            "http://10.0.0.5:2241/textures/soft_circle.png"
+        );
+
+        std::fs::remove_dir_all(&root).ok();
     }
 }

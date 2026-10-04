@@ -61,8 +61,8 @@ pub fn lttb_downsample(data: &[DataPoint], target_points: usize) -> Vec<DataPoin
             let count = (next_bucket_end - next_bucket_start) as f64;
 
             for point in data.iter().take(next_bucket_end).skip(next_bucket_start) {
-                sum_time += point.time as f64;
-                sum_value += point.value;
+                sum_time = sum_time.algebraic_add(point.time as f64);
+                sum_value = sum_value.algebraic_add(point.value);
             }
 
             (sum_time / count, sum_value / count)
@@ -80,8 +80,14 @@ pub fn lttb_downsample(data: &[DataPoint], target_points: usize) -> Vec<DataPoin
         for (j, point) in data.iter().enumerate().take(bucket_end).skip(bucket_start) {
             // Calculate triangle area using the cross product formula
             // Area = 0.5 * |x1(y2 - y3) + x2(y3 - y1) + x3(y1 - y2)|
-            let area = ((a.time as f64 - avg_time) * (point.value - a.value)
-                - (a.time as f64 - point.time as f64) * (avg_value - a.value))
+            let area = (a.time as f64)
+                .algebraic_sub(avg_time)
+                .algebraic_mul(point.value - a.value)
+                .algebraic_sub(
+                    (a.time as f64)
+                        .algebraic_sub(point.time as f64)
+                        .algebraic_mul(avg_value - a.value),
+                )
                 .abs();
 
             if area > max_area {
@@ -318,5 +324,30 @@ mod tests {
 
         assert_eq!(out_times.len(), 10);
         assert_eq!(out_values.len(), 10);
+    }
+
+    #[test]
+    #[ignore]
+    fn bench_lttb_1m_to_3072() {
+        use std::hint::black_box;
+        use std::time::Instant;
+
+        let data: Vec<DataPoint> = (0..1_000_000)
+            .map(|i| DataPoint {
+                time: i as i64 * 1000,
+                value: (i as f64 * 0.001).sin(),
+            })
+            .collect();
+        for _ in 0..2 {
+            black_box(lttb_downsample(&data, 3072));
+        }
+        let iters = 8u32;
+        let start = Instant::now();
+        for _ in 0..iters {
+            black_box(lttb_downsample(&data, 3072));
+        }
+        let elapsed = start.elapsed();
+        let ns = elapsed.as_nanos() as f64 / f64::from(iters);
+        println!("lttb_downsample 1M→3072: {ns:.1} ns/iter ({iters} iters, {elapsed:?})");
     }
 }

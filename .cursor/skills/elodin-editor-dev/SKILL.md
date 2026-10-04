@@ -5,7 +5,7 @@ description: Contribute to the Elodin Editor, the 3D viewer and graphing tool. U
 
 # Elodin Editor Development
 
-The Elodin Editor is a 3D visualization and telemetry graphing tool built with Bevy (ECS game engine) and Egui (immediate-mode UI). It connects to Elodin-DB via Impeller2 for real-time data.
+The Elodin Editor is a 3D visualization and telemetry graphing tool built with Bevy (ECS game engine) and Egui (immediate-mode UI). It connects to Elodin-DB via Impeller for real-time data.
 
 ## Running
 
@@ -25,14 +25,17 @@ cargo run --bin elodin editor 127.0.0.1:2240
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `ELODIN_ASSETS_DIR` | `./assets` | Directory for meshes, images, GLB files |
+| `ELODIN_ASSETS` | `./assets` | Directory for meshes, images, GLB files |
 | `ELODIN_KDL_DIR` | `.` (cwd) | Directory for `.kdl` schematic files |
+| `ELODIN_GPU` | `auto` | Nix shell GPU path (`nvidia` / `mesa` / `nvk`). Set **before** `nix develop`. |
+| `ELODIN_GPU_PANIC` | unset | Set to `true` to force the GPU-not-found panic and print the `ELODIN_GPU=… nix develop` help. |
+| `ELODIN_H264_ENCODER` | `auto` | Live `sensor_camera` `format="h264"`: `auto` tries NVENC / VideoToolbox then OpenH264; `cpu` forces OpenH264; any other value is an FFmpeg encoder name (`h264_nvenc`, …). `h264_vaapi` is not supported. |
 
 ## Cargo features
 
 Optional features declared in `libs/elodin-editor/Cargo.toml` (re-exported by `apps/elodin/Cargo.toml`):
 
-- `big_space` (default): upstream `big_space` 0.12 floating-origin layer.
+- `big_space` (default): upstream `big_space` 0.13 floating-origin layer.
 - `inspector`: adds the `bevy-inspector-egui` runtime entity inspector.
 - `debug`: enables `big_space`'s debug diagnostics.
 - `tracy`: enables Tracy profiling (see `.cursor/skills/elodin-tracy/SKILL.md`).
@@ -95,14 +98,14 @@ src/
     ├── navigation_gizmo/
     ├── editor_cam_touch/ # Touch input for camera
     ├── asset_cache/    # Asset caching
-    ├── env_asset_source/ # ELODIN_ASSETS_DIR integration
+    ├── env_asset_source/ # ELODIN_ASSETS integration
     ├── web_asset/      # Web asset loading
     └── logical_key/    # Keyboard input handling
 ```
 
 ### `apps/elodin/` — CLI binary
 
-The main entry point that ties together the editor with nox-py, s10, and Impeller2. Handles CLI argument parsing (`elodin editor`, `elodin run`, etc.).
+The main entry point that ties together the editor with nox-py, s10, and Impeller. Handles CLI argument parsing (`elodin editor`, `elodin run`, etc.).
 
 ## Key Subsystems
 
@@ -114,12 +117,30 @@ The editor registers as a set of Bevy plugins. Each feature area (view cube, cam
 
 The `ui/` module contains all immediate-mode UI rendering. Egui runs inside Bevy via `bevy_egui`. The tile-based layout system (`ui/tiles.rs`) manages panel arrangement (viewports, graphs, inspectors).
 
-### Telemetry Data Flow
+### Telemetry cache (SeriesStore)
 
-1. Impeller2 client subscribes to component streams from Elodin-DB
-2. Data arrives as time-series samples
-3. Plot system buffers and renders via GPU-accelerated rendering (`ui/plot/gpu.rs`)
-4. Inspector panels show latest values
+**Strategy:** cache only what the UI uses. Full history per subscribed ID (no time-based SeriesStore GC). Menus use metadata/`EqlContext`, not store keys. Playback/scrub never wait on backfill — project whatever is already in RAM.
+
+```text
+DB ──► allowlisted GetTimeSeries backfill + live ──► TelemetryCache (SeriesStore)
+                                                      ├─► project SelectedTimeRange → LineTree → GPU
+                                                      └─► apply_cached_data @ playhead → 3D / inspectors
+Metadata ──► EqlContext ──► ADD COMPONENT / palettes (full list)
+```
+
+| Piece | Where |
+|-------|--------|
+| Allowlist + reclaim | `ui/plot/data.rs` → `update_series_fetch_priority` |
+| Backfill / live filter | `impeller_bevy` → `backfill_cache`, `SeriesFetchPriority` |
+| Schedule | editor + headless: priority then `backfill_cache` (`lib.rs`, `headless.rs`) |
+
+**Allowlist** (`SeriesFetchPriority.high`): enabled graph lines; `Line3d` / `object_3d` EQL (including `thruster` intensity EQL for particle plumes); monitors; viewport `pos`/`look_at`/`up` EQL; `vector_arrow` EQL; path-registry adapter pairs (`*.world_pos`, …); sensor-camera `{entity}.world_pos`. Empty ⇒ no SeriesStore I/O. Leaving an ID drops it from RAM. **Any new live consumer must extend this allowlist** or it will be blank/stale. Adapter leaf match is case-sensitive (`WORLD_POS` ≠ `world_pos`).
+
+**Plots:** LineTree is a visible-window projection only (sliding GC here ≠ SeriesStore). Tip/`LAST_*` fetches quantized (~100 ms) + prefetch margin; also immediate visible-window prefetch so tip fills before begin→end backfill. Do not clear a LineTree when the store has zero samples in-window (unless camera range moved). ≤30 s (`SHORT_WINDOW_ACCURACY_MICROS`): GPU `step = 1`, skip Hamann–Chen (`INDEX_BUFFER_LEN` = 131072 in `ui/plot/gpu.rs`, sized for ~4 kHz × 30 s). Longer windows: GPU stride on clip; CPU project stride only for &gt;10 min.
+
+**Headless:** separate process, separate store — same priority + backfill or `sensor_view` poses freeze while effects still animate.
+
+**Do not:** gate menus on SeriesStore keys; wait on `SeriesStoreLoadState.complete` for scrub; reintroduce full-metadata backfill; time-GC SeriesStore without fixing jump-to-start/scrub holes first.
 
 ### KDL Schematics
 
@@ -141,7 +162,7 @@ Key crates used in the editor:
 | `bevy` | ECS game engine, 3D rendering, windowing |
 | `bevy_egui` | Egui integration for Bevy |
 | `egui` | Immediate-mode UI framework |
-| `impeller2-bevy` | Bevy plugin for Impeller2 telemetry |
+| `impeller-bevy` | Bevy plugin for Impeller telemetry |
 | `arrow` | Arrow data format for time-series |
 | `eql` | Elodin Query Language parser |
 | `nox` | Spatial math types |
@@ -154,9 +175,81 @@ Key crates used in the editor:
 - GPU plot rendering is in `ui/plot/gpu.rs` — changes here affect all telemetry graphs
 - The command palette (`ui/command_palette/`) is the entry point for user actions
 
+## Screenshot-driven design, build, and test
+
+Prefer Bevy's native window screenshot path over OS screen capture. It captures the full editor window (3D viewports **and** egui chrome) without macOS Screen Recording permissions, and works the same in local iteration and CI-style scripts.
+
+### Harness
+
+| Piece | Path / env |
+|-------|------------|
+| Plugin | `libs/elodin-editor/src/plugins/screenshot.rs` (`EnvScreenshotPlugin`) |
+| Batch script | `scripts/ci/screenshot_examples.sh <out-dir> [example …]` |
+| Activate | `ELODIN_SCREENSHOT=/abs/path/out.png` |
+| Delay before capture | `ELODIN_SCREENSHOT_DELAY` (seconds; default **8**; use **12–20** for heavy examples) |
+| Exit after write | `ELODIN_SCREENSHOT_EXIT=1` (required for bounded runs) |
+
+The plugin queues `Screenshot::primary_window()`, waits until the PNG is non-empty on disk (async GPU readback), then sends `AppExit::Success` when exit is requested. Do **not** kill the process on a timer alone — that tears down the render thread mid-readback and yields a missing/empty PNG.
+
+### One-shot capture (design / verify a change)
+
+```bash
+# Release binary is much faster for visual loops
+cargo build -p elodin --release
+
+rm -f /tmp/editor-shot.png
+ELODIN_SCREENSHOT=/tmp/editor-shot.png \
+ELODIN_SCREENSHOT_DELAY=12 \
+ELODIN_SCREENSHOT_EXIT=1 \
+  ./target/release/elodin editor examples/ball/main.py
+```
+
+Then **Read the PNG** in the agent (vision) and check concrete UI/scene facts — e.g. status-bar `RAM Usage: X.Y GB` (not `N/A` / not stuck at `0.0`), trajectory line present, view cube visible, graph panels populated. OCR (`tesseract`) is optional backup for status-bar text.
+
+### Batch regression (examples gallery)
+
+```bash
+# Default set: ball three-body drone rc-jet apollo-lander video-stream
+#             sensor-camera cube-sat voyager geo-frames
+scripts/ci/screenshot_examples.sh /tmp/elodin-shots ball three-body drone
+```
+
+Env overrides: `ELODIN_BIN`, `ELODIN_SCREENSHOT_DELAY` (script default 20), `SCREENSHOT_WATCHDOG` (default 180). One editor at a time; each run has a watchdog so a hung capture cannot block forever.
+
+### Workflow for UI / rendering changes
+
+1. **Baseline** — screenshot the affected example(s) before the change into `/tmp/elodin-shots-baseline/`.
+2. **Implement** — keep the change scoped; rebuild `elodin` (release for visual checks).
+3. **Compare** — re-screenshot into `/tmp/elodin-shots-after/` and Read both PNGs. Assert the intended delta and that unrelated chrome (timeline, status bar, view cube) still looks healthy.
+4. **Stress the failure mode** — if the bug was GPU/render-path specific (e.g. FPV + HDR + plot_3d), pick the example that exercises that path (`rc-jet`, `sensor-camera`, …), not only `ball`.
+5. **Stale DBs** — if an example refuses to start with DB/time-travel errors, delete its on-disk DB (e.g. `rm -rf examples/voyager/dbs/voyager`, `rm -rf video-stream-db`) and retry. Do not dig into GStreamer until a clean DB still fails.
+
+### Gotchas
+
+- **Port 2240** — live `elodin editor` / `elodin run` binds the sim DB; do not parallelize with monte-carlo or another editor. Group-kill leftovers before the next case.
+- **RAM gauge** — status-bar RSS is read via platform APIs in `ui/status_bar.rs` (not Bevy `SystemInformationDiagnosticsPlugin`). On macOS Bevy's sysinfo is built with `apple-app-store` and always reports 0 GiB for the current process.
+- **video-stream** — clear `./video-stream-db` if the editor hangs or video never appears. `elodinsink` / `x264enc` / `srtsrc` come from `nix develop` or `nix develop .#run` (`GST_PLUGIN_PATH`). Do not prepend cargo `target/release` (`libelodin` makes `gst-plugin-scanner` abort the scan on GStreamer 1.26).
+- **voyager** — needs SPICE kernels under `examples/voyager/nasa_spice_data/` and a clean DB dir after interrupted runs.
+- **nix develop** — prefer it for CI-parity builds; for a tight screenshot loop, a warm `cargo build -p elodin --release` outside a full env rebuild is fine once the toolchain is already installed.
+
+### When to use which example
+
+| Goal | Example |
+|------|---------|
+| Lightest viewport + trail + vector label | `ball` |
+| Multi-body + graph panels | `three-body` |
+| GLB + joint animation | `drone` |
+| FPV / plot_3d / aero | `rc-jet` |
+| SITL + thrusters / descent | `apollo-lander` |
+| H.264 tile in UI | `video-stream` |
+| GPU sensor cameras / frusta | `sensor-camera` |
+| Terrain / geo frames | `geo-frames` |
+| Spacecraft + MEKF graphs | `cube-sat` |
+
 ## Key References
 
 - Bevy Tips (ECS): [../bevy/SKILL.md](../bevy/SKILL.md)
+- Editor QA plan: [../qa-test-plan/elodin-editor/test-plan.md](../qa-test-plan/elodin-editor/test-plan.md)
 - Editor README: [apps/elodin/README.md](../../../apps/elodin/README.md)
 - KDL schematic syntax: [docs/public/content/reference/schematic.md](../../../docs/public/content/reference/schematic.md)
 - Command palette reference: [docs/public/content/reference/command-palette.md](../../../docs/public/content/reference/command-palette.md)

@@ -888,7 +888,9 @@ macro_rules! reduce_op {
     };
 }
 
-reduce_op!(tensor_reduce_sum_f64, 0.0, |acc: f64, v: f64| acc + v);
+reduce_op!(tensor_reduce_sum_f64, 0.0, |acc: f64, v: f64| {
+    acc.algebraic_add(v)
+});
 reduce_op!(
     tensor_reduce_max_f64,
     f64::NEG_INFINITY,
@@ -1147,13 +1149,16 @@ pub extern "C" fn tensor_matmul_f64(
     let a = unsafe { slice::from_raw_parts(a, m * k) };
     let b = unsafe { slice::from_raw_parts(b, k * n) };
     let dst = unsafe { slice::from_raw_parts_mut(dst, m * n) };
+    // ikj keeps B and C rows contiguous so the inner loop can vectorize.
     for i in 0..m {
-        for j in 0..n {
-            let mut acc = 0.0f64;
-            for p in 0..k {
-                acc += a[i * k + p] * b[p * n + j];
+        let dst_row = &mut dst[i * n..][..n];
+        dst_row.fill(0.0);
+        for p in 0..k {
+            let a_ip = a[i * k + p];
+            let b_row = &b[p * n..][..n];
+            for (d, &bv) in dst_row.iter_mut().zip(b_row) {
+                *d = d.algebraic_add(a_ip.algebraic_mul(bv));
             }
-            dst[i * n + j] = acc;
         }
     }
 }
@@ -1997,7 +2002,7 @@ pub extern "C" fn tensor_conv_f64(
                                     rf += rhs_idx[d] * rhs_strides[d];
                                 }
                                 if lf < n_lhs && rf < n_rhs {
-                                    acc += lhs[lf] * rhs[rf];
+                                    acc = acc.algebraic_add(lhs[lf].algebraic_mul(rhs[rf]));
                                 }
                             }
                         }
@@ -2077,14 +2082,18 @@ fn naive_dft_out(
     let sign = if inverse { 1.0 } else { -1.0 };
     let norm = if inverse { 1.0 / n as f64 } else { 1.0 };
     for k in 0..n {
-        let mut sum_re = 0.0;
-        let mut sum_im = 0.0;
+        let mut sum_re = 0.0f64;
+        let mut sum_im = 0.0f64;
         for j in 0..n {
             let angle = sign * 2.0 * std::f64::consts::PI * (k as f64) * (j as f64) / (n as f64);
             let cos_a = angle.cos();
             let sin_a = angle.sin();
-            sum_re += re_in[j] * cos_a - im_in[j] * sin_a;
-            sum_im += re_in[j] * sin_a + im_in[j] * cos_a;
+            sum_re = sum_re
+                .algebraic_add(re_in[j].algebraic_mul(cos_a))
+                .algebraic_sub(im_in[j].algebraic_mul(sin_a));
+            sum_im = sum_im
+                .algebraic_add(re_in[j].algebraic_mul(sin_a))
+                .algebraic_add(im_in[j].algebraic_mul(cos_a));
         }
         re_out[k] = sum_re * norm;
         im_out[k] = sum_im * norm;

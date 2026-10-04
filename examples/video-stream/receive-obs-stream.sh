@@ -2,12 +2,11 @@
 # OBS Studio SRT Receiver for Elodin
 #
 # This script:
-# 1. Builds the elodinsink GStreamer plugin from source
-# 2. Waits for Elodin DB to be ready
-# 3. Listens for an SRT stream (e.g. from OBS Studio) and forwards
+# 1. Waits for Elodin DB to be ready
+# 2. Listens for an SRT stream (e.g. from OBS Studio) and forwards
 #    the H.264 video into Elodin DB via elodinsink
 #
-# The plugin is built automatically - no manual prerequisite steps required.
+# Requires `nix develop` or `nix develop .#run` (elodinsink, srtsrc, gst-launch).
 #
 # Usage:
 #   ./receive-obs-stream.sh [OPTIONS]
@@ -73,19 +72,11 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# =============================================================================
-# Build elodinsink Plugin
-# =============================================================================
-
-# Get the repository root (this script is in examples/video-stream/)
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-
-# Build the GStreamer plugin (cargo will skip if already up-to-date)
-echo "Building elodinsink GStreamer plugin..."
-cargo build --release --manifest-path="$REPO_ROOT/fsw/gstreamer/Cargo.toml"
-
-# Set plugin path to include our built plugin (prepend so local build overrides nix)
-export GST_PLUGIN_PATH="$REPO_ROOT/target/release:${GST_PLUGIN_PATH}"
+if ! command -v gst-inspect-1.0 >/dev/null 2>&1 || ! gst-inspect-1.0 elodinsink >/dev/null 2>&1; then
+    echo "ERROR: GStreamer element elodinsink is not available." >&2
+    echo "Run from \`nix develop\` or \`nix develop .#run\` — those shells set GST_PLUGIN_PATH." >&2
+    exit 1
+fi
 
 # =============================================================================
 # Wait for Elodin DB

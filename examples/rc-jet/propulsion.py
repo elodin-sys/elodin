@@ -1,8 +1,21 @@
-"""
-BDX Turbine Propulsion Model
+"""BDX propulsion: package map interpolation, spool state, fuel, thrust line.
 
-Implements first-order spool dynamics and thrust generation for JetCat-class turbines.
-Following Section 4 of BDX_Simulation_Whitepaper.md.
+Steady thrust and fuel flow come from trilinear interpolation of the
+package's `propulsion_map.csv` over (geodetic altitude, Mach, effective
+throttle). The map is class-D (analytic lapse/TSFC, no identified engine
+deck) — see the package provenance. Elodin owns the dynamics around it:
+
+- stick 0..1 maps to effective throttle `min_throttle`..1 (turbines idle at
+  min_throttle; this replaces the old dead `idle_spool` field),
+- a first-order spool state lags the commanded effective throttle before the
+  map lookup (spool tau is a class-D estimate),
+- fuel integrates map fuel flow and drives total mass; an empty tank is a
+  flameout (thrust and flow drop to zero, fuel never goes negative),
+- thrust applies at the package thrust line (+0.044 m above the CG), which
+  adds the nose-down pitch moment the pre-campaign example omitted.
+
+Queries outside the map's grid hull are clamped to the hull (the map's own
+axes bound the class-D model's stated domain).
 """
 
 import typing as ty
@@ -11,127 +24,146 @@ import elodin as el
 import jax
 import jax.numpy as jnp
 
-from config import BDXConfig
+from aero import Mach
 from actuators import ControlCommands
-
-# Component type definitions
+from bdx_model import BdxModel
+from class_d_fallbacks import ClassDFallbacks
+from frames import geodetic_altitude
 
 SpoolSpeed = ty.Annotated[
     jax.Array,
-    el.Component(
-        "spool_speed",
-        el.ComponentType.F64,
-        metadata={"priority": 60},
-    ),
+    el.Component("spool_speed", el.ComponentType.F64, metadata={"priority": 60}),
 ]
-
 ThrottleCommand = ty.Annotated[
     jax.Array,
-    el.Component(
-        "throttle_command",
-        el.ComponentType.F64,
-        metadata={"priority": 61},
-    ),
+    el.Component("throttle_command", el.ComponentType.F64, metadata={"priority": 61}),
 ]
-
 Thrust = ty.Annotated[
     jax.Array,
-    el.Component(
-        "thrust",
-        el.ComponentType.F64,
-        metadata={"priority": 59},
-    ),
+    el.Component("thrust", el.ComponentType.F64, metadata={"priority": 59}),
 ]
+FuelMass = ty.Annotated[
+    jax.Array,
+    el.Component("fuel_mass", el.ComponentType.F64, metadata={"priority": 58}),
+]
+FuelFlow = ty.Annotated[
+    jax.Array,
+    el.Component("fuel_flow", el.ComponentType.F64, metadata={"priority": 57}),
+]
+
+
+def _axis_fraction(axis: jnp.ndarray, value):
+    index = jnp.clip(jnp.searchsorted(axis, value, side="right") - 1, 0, axis.size - 2)
+    x0 = axis[index]
+    x1 = axis[index + 1]
+    fraction = jnp.clip((value - x0) / (x1 - x0), 0.0, 1.0)
+    return index, fraction
+
+
+def trilinear(axes, table, point):
+    """Trilinear interpolation on a regular grid, clamped to the hull.
+
+    axes: three sorted 1-D arrays; table: array shaped by the axes;
+    point: three scalars. jnp-traceable.
+    """
+    i, fi = _axis_fraction(axes[0], point[0])
+    j, fj = _axis_fraction(axes[1], point[1])
+    k, fk = _axis_fraction(axes[2], point[2])
+    result = 0.0
+    for di, wi in ((0, 1.0 - fi), (1, fi)):
+        for dj, wj in ((0, 1.0 - fj), (1, fj)):
+            for dk, wk in ((0, 1.0 - fk), (1, fk)):
+                result = result + wi * wj * wk * table[i + di, j + dj, k + dk]
+    return result
+
+
+def effective_throttle(model: BdxModel, stick):
+    """Commanded effective throttle: the stick value floored at engine idle.
+
+    Keeping stick == effective throttle above idle makes the telemetry read
+    directly against the package trim rows and anchors (cruise 0.2125).
+    """
+    return jnp.maximum(jnp.clip(stick, 0.0, 1.0), model.propulsion.min_throttle)
 
 
 @el.map
 def extract_throttle_command(commands: ControlCommands) -> ThrottleCommand:
-    """Extract throttle from control commands array."""
-    return commands[3]  # Throttle is 4th element
+    return commands[3]
 
 
-@el.map
-def spool_dynamics(
-    throttle_cmd: ThrottleCommand,
-    spool_speed: SpoolSpeed,
-) -> SpoolSpeed:
-    """
-    First-order spool speed dynamics.
+def build_spool_dynamics(model: BdxModel, fallbacks: ClassDFallbacks, dt: float):
+    tau = fallbacks.propulsion.spool_tau_s
 
-    From Section 4.1 of whitepaper:
-    dn/dt = (n_cmd - n) / τ_spool
+    @el.map
+    def spool_dynamics(throttle_cmd: ThrottleCommand, spool: SpoolSpeed) -> SpoolSpeed:
+        target = effective_throttle(model, throttle_cmd)
+        return jnp.clip(spool + (target - spool) * dt / tau, 0.0, 1.0)
 
-    where n is normalized spool speed (0-1) and n_cmd is throttle command.
-    """
-    config = BDXConfig.GLOBAL()
-    dt = config.dt
-    tau = config.propulsion.spool_tau
-
-    # Clamp throttle command to valid range
-    n_cmd = jnp.clip(throttle_cmd, 0.0, 1.0)
-
-    # First-order dynamics
-    n_new = spool_speed + (n_cmd - spool_speed) * dt / tau
-
-    # Ensure spool speed stays in valid range
-    n_new = jnp.clip(n_new, 0.0, 1.0)
-
-    return n_new
+    return spool_dynamics
 
 
-@el.map
-def compute_thrust(
-    spool_speed: SpoolSpeed,
-    pos: el.WorldPos,
-) -> Thrust:
-    """
-    Compute thrust from spool speed with atmospheric corrections.
+def build_thrust_and_fuel_flow(model: BdxModel):
+    grid = model.propulsion_map
+    axes = (
+        jnp.asarray(grid.altitudes_m),
+        jnp.asarray(grid.machs),
+        jnp.asarray(grid.throttles),
+    )
+    thrust_table = jnp.asarray(grid.thrust_n)
+    fuel_table = jnp.asarray(grid.fuel_flow_kg_s)
 
-    From Section 4.2-4.3 of whitepaper:
-    T(n) = T_max * (a₁·n + a₂·n²) * (ρ/ρ₀) * f(M)
+    @el.map
+    def compute_thrust(
+        pos: el.WorldPos, mach: Mach, spool: SpoolSpeed, fuel: FuelMass
+    ) -> tuple[Thrust, FuelFlow]:
+        altitude = geodetic_altitude(pos.linear())
+        point = (altitude, mach, spool)
+        running = jnp.where(fuel > 0.0, 1.0, 0.0)  # empty tank = flameout
+        thrust = running * trilinear(axes, thrust_table, point)
+        flow = running * trilinear(axes, fuel_table, point)
+        return thrust, flow
 
-    For simplicity, we use density correction but ignore Mach effects at low speeds.
-    """
-    config = BDXConfig.GLOBAL()
-
-    # Atmospheric density at current altitude
-    altitude = pos.linear()[2]
-    T_atm = 288.15 - 0.0065 * altitude
-    T_atm = jnp.clip(T_atm, 216.65, 288.15)
-    p = 101325.0 * (T_atm / 288.15) ** 5.2561
-    rho = p / (287.05 * T_atm)
-    rho_0 = 1.225  # Sea level density
-
-    # Quadratic thrust map
-    T_max = config.propulsion.max_thrust
-    a1 = config.propulsion.thrust_a1
-    a2 = config.propulsion.thrust_a2
-
-    # Base thrust
-    T_base = T_max * (a1 * spool_speed + a2 * spool_speed**2)
-
-    # Density correction (thrust lapse with altitude)
-    T = T_base * (rho / rho_0)
-
-    return T
+    return compute_thrust
 
 
-@el.map
-def apply_thrust(
-    thrust: Thrust,
-    pos: el.WorldPos,
-    force: el.Force,
-) -> el.Force:
-    """
-    Apply thrust force along body X-axis (forward).
+def build_fuel_integration(model: BdxModel, dt: float):
+    capacity = model.mass.fuel_capacity_kg
 
-    Thrust vector is aligned with aircraft centerline.
-    """
-    # Thrust vector in body frame (along +X axis)
-    thrust_body = jnp.array([thrust, 0.0, 0.0])
+    @el.map
+    def integrate_fuel(fuel: FuelMass, flow: FuelFlow) -> FuelMass:
+        return jnp.clip(fuel - flow * dt, 0.0, capacity)
 
-    # Transform to world frame
-    thrust_world = pos.angular() @ thrust_body
+    return integrate_fuel
 
-    # Apply as spatial force
-    return force + el.SpatialForce(linear=thrust_world)
+
+def build_mass_update(model: BdxModel, fallbacks: ClassDFallbacks):
+    empty_mass = model.mass.operating_empty_mass_kg
+    inertia_diag = jnp.array(
+        [
+            fallbacks.inertia.ixx_kg_m2,
+            fallbacks.inertia.iyy_kg_m2,
+            fallbacks.inertia.izz_kg_m2,
+        ]
+    )
+
+    @el.map
+    def update_mass(fuel: FuelMass, _inertia: el.Inertia) -> el.Inertia:
+        """Total mass tracks fuel burn; CG stays at the package point and the
+        class-D inertia diagonal is held constant (no mass-distribution model)."""
+        return el.SpatialInertia(mass=empty_mass + fuel, inertia=inertia_diag)
+
+    return update_mass
+
+
+def build_apply_thrust(model: BdxModel):
+    axis = jnp.array(model.propulsion.thrust_axis_body)
+    offset = jnp.array(model.propulsion.thrust_application_body_m)
+
+    @el.map
+    def apply_thrust(thrust: Thrust, pos: el.WorldPos, force: el.Force) -> el.Force:
+        force_body = axis * thrust
+        torque_body = jnp.cross(offset, force_body)
+        wrench = el.SpatialForce(linear=force_body, torque=torque_body)
+        return force + pos.angular() @ wrench
+
+    return apply_thrust

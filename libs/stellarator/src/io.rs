@@ -56,6 +56,10 @@ pub trait AsyncWrite {
 pub struct LengthDelReader<A: AsyncRead, L = u32> {
     reader: A,
     scratch: VecDeque<u8>,
+    /// Optional upper bound on a single packet's length. When set, a length
+    /// prefix exceeding it fails with [`Error::PacketTooLarge`] before any
+    /// buffer growth, bounding per-connection memory for growable reads.
+    max_len: Option<usize>,
     phantom_data: PhantomData<L>,
 }
 
@@ -64,8 +68,15 @@ impl<A: AsyncRead, L: Length> LengthDelReader<A, L> {
         Self {
             reader,
             scratch: VecDeque::default(),
+            max_len: None,
             phantom_data: PhantomData,
         }
+    }
+
+    /// Reject packets whose length prefix exceeds `max` bytes.
+    pub fn with_max_len(mut self, max: usize) -> Self {
+        self.max_len = Some(max);
+        self
     }
 
     async fn read<B: IoBufMut>(&mut self, mut buf: B) -> BufResult<usize, B> {
@@ -115,6 +126,11 @@ impl<A: AsyncRead, L: Length> LengthDelReader<A, L> {
             .expect("slice wasn't L::SIZE long");
         let len = L::from_le_bytes(len);
         let len = len.as_usize();
+        if let Some(max) = self.max_len
+            && len > max
+        {
+            return Err(Error::PacketTooLarge { len, max });
+        }
         let required_len = len.checked_add(L::SIZE).ok_or(Error::IntegerOverflow)?;
         buf.grow(required_len);
         while total_read < required_len {
@@ -317,6 +333,52 @@ mod tests {
         let buf = out.into_inner();
         let out = stream.recv(buf).await.unwrap();
         assert_eq!(&out[..], &[0xff]);
+
+        handle.await.unwrap();
+    }
+
+    #[test]
+    async fn recv_growable_grows_past_initial_buffer() {
+        let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let payload = vec![0xab_u8; 100];
+        let payload_for_server = payload.clone();
+        let handle = crate::spawn(async move {
+            let stream = listener.accept().await.unwrap();
+            let prefix = (payload_for_server.len() as u32).to_le_bytes().to_vec();
+            stream.write(prefix).await.0.unwrap();
+            stream.write(payload_for_server).await.0.unwrap();
+        });
+        let stream = TcpStream::connect(addr).await.unwrap();
+        let mut stream = LengthDelReader::<_, u32>::new(stream);
+
+        // Initial buffer is far smaller than the 100-byte packet; the growable
+        // path must resize it rather than overflow.
+        let out = stream.recv_growable(vec![0u8; 8]).await.unwrap();
+        assert_eq!(&out[..], &payload[..]);
+
+        handle.await.unwrap();
+    }
+
+    #[test]
+    async fn with_max_len_rejects_oversized_packet() {
+        let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = crate::spawn(async move {
+            let stream = listener.accept().await.unwrap();
+            // Length prefix declares 100 bytes; the cap check fires before any
+            // payload read, so we only need to send the prefix.
+            stream
+                .write((100u32).to_le_bytes().to_vec())
+                .await
+                .0
+                .unwrap();
+        });
+        let stream = TcpStream::connect(addr).await.unwrap();
+        let mut stream = LengthDelReader::<_, u32>::new(stream).with_max_len(10);
+
+        let err = stream.recv_growable(vec![0u8; 8]).await.unwrap_err();
+        assert!(matches!(err, Error::PacketTooLarge { len: 100, max: 10 }));
 
         handle.await.unwrap();
     }

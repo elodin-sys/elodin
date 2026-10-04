@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::time::Duration;
 
-use impeller2::types::ComponentId;
-use impeller2::types::Timestamp;
+use impeller::types::ComponentId;
+use impeller::types::Timestamp;
 use nox::{CompFn, Noxpr};
 use serde::{Deserialize, Serialize};
 
@@ -97,7 +97,7 @@ impl WorldExec {
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
-use pyo3::types::IntoPyDict;
+use pyo3::types::PyDict;
 
 #[pyclass(name = "Exec")]
 pub struct PyExec {
@@ -145,7 +145,7 @@ impl PyExec {
             );
             let commit_timestamp = timestamp + commit_offset;
             self.db.with_state(|state| {
-                crate::impeller2_server::commit_world_head_unified(
+                crate::impeller_server::commit_world_head_unified(
                     state,
                     &mut self.exec,
                     commit_timestamp,
@@ -177,9 +177,9 @@ impl PyExec {
 
     pub fn save_archive(&self, path: String, format: String) -> Result<(), Error> {
         let format = match format.as_str() {
-            "arrow_ipc" | "arrow" => impeller2_wkt::ArchiveFormat::ArrowIpc,
-            "parquet" | "pq" => impeller2_wkt::ArchiveFormat::Parquet,
-            "csv" => impeller2_wkt::ArchiveFormat::Csv,
+            "arrow_ipc" | "arrow" => impeller_wkt::ArchiveFormat::ArrowIpc,
+            "parquet" | "pq" => impeller_wkt::ArchiveFormat::Parquet,
+            "csv" => impeller_wkt::ArchiveFormat::Csv,
             _ => return Err(Error::UnknownCommand(format)),
         };
         self.db.save_archive(path, format)?;
@@ -206,9 +206,16 @@ impl PyExec {
 
         let mut result_df = dataframes[0].clone();
         for df in dataframes.into_iter().skip(1) {
-            result_df =
-                result_df.call_method("join", (df,), Some(&[("on", "time")].into_py_dict(py)?))?;
+            let kwargs = PyDict::new(py);
+            kwargs.set_item("on", "time")?;
+            kwargs.set_item("how", "full")?;
+            kwargs.set_item("coalesce", true)?;
+            result_df = result_df.call_method("join", (df,), Some(&kwargs))?;
         }
+        result_df = result_df.call_method1("sort", ("time",))?;
+        let kwargs = PyDict::new(py);
+        kwargs.set_item("strategy", "forward")?;
+        result_df = result_df.call_method("fill_null", (), Some(&kwargs))?;
         Ok(result_df)
     }
 }

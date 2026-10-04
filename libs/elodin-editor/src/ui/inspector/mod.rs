@@ -8,7 +8,7 @@ use bevy_egui::egui;
 use egui::CornerRadius;
 use smallvec::SmallVec;
 
-use super::widgets::{WidgetSystem, WidgetSystemExt};
+use super::widgets::{SystemStateExt, WidgetSystem, WidgetSystemExt};
 use crate::ui::tiles::WindowState;
 use crate::ui::{
     SelectedObject,
@@ -20,7 +20,9 @@ use crate::ui::{
 pub mod action;
 pub mod data_overview;
 pub mod entity;
+pub mod gauges;
 pub mod graph;
+pub mod line3d;
 pub mod monitor;
 pub mod object3d;
 pub mod query_table;
@@ -32,9 +34,16 @@ mod widgets;
 pub use widgets::*;
 
 use self::{
-    data_overview::InspectorDataOverview, entity::InspectorEntity, graph::InspectorGraph,
-    monitor::InspectorMonitor, object3d::InspectorObject3D, query_table::InspectorQueryTable,
-    sensor_camera::InspectorSensorCamera, timeline::InspectorTimeline, viewport::InspectorViewport,
+    data_overview::InspectorDataOverview,
+    entity::InspectorEntity,
+    gauges::{InspectorGeoPositionGauge, InspectorHorizonGauge, InspectorOrientationGauge},
+    graph::InspectorGraph,
+    monitor::InspectorMonitor,
+    object3d::InspectorObject3D,
+    query_table::InspectorQueryTable,
+    sensor_camera::InspectorSensorCamera,
+    timeline::InspectorTimeline,
+    viewport::InspectorViewport,
 };
 
 pub struct InspectorIcons {
@@ -75,7 +84,7 @@ impl WidgetSystem for InspectorContent<'_, '_> {
         ui: &mut egui::Ui,
         args: Self::Args,
     ) -> Self::Output {
-        let mut state_mut = state.get_mut(world);
+        let mut state_mut = state.params_mut(world);
 
         let (icons, is_side_panel, target_window) = args;
         let selected_object = {
@@ -157,6 +166,30 @@ impl WidgetSystem for InspectorContent<'_, '_> {
                                         world,
                                         "inspector_monitor",
                                         monitor_id,
+                                    );
+                                    Default::default()
+                                }
+                                SelectedObject::GeoPositionGauge { gauge_id } => {
+                                    ui.add_widget_with::<InspectorGeoPositionGauge>(
+                                        world,
+                                        "inspector_geo_position_gauge",
+                                        gauge_id,
+                                    );
+                                    Default::default()
+                                }
+                                SelectedObject::OrientationGauge { gauge_id } => {
+                                    ui.add_widget_with::<InspectorOrientationGauge>(
+                                        world,
+                                        "inspector_orientation_gauge",
+                                        gauge_id,
+                                    );
+                                    Default::default()
+                                }
+                                SelectedObject::HorizonGauge { gauge_id } => {
+                                    ui.add_widget_with::<InspectorHorizonGauge>(
+                                        world,
+                                        "inspector_horizon_gauge",
+                                        gauge_id,
                                     );
                                     Default::default()
                                 }

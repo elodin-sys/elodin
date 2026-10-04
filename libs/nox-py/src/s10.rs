@@ -158,6 +158,7 @@ impl Recipe {
                     depends_on: depends_on.clone(),
                     ready: ready.as_ref().map(|ready| ready.inner.clone()),
                     ready_timeout: ready_timeout.clone(),
+                    own_process_group: false,
                 },
                 destination: s10::Destination::Local,
             })),
@@ -189,6 +190,7 @@ impl Recipe {
                     depends_on: depends_on.clone(),
                     ready: ready.as_ref().map(|ready| ready.inner.clone()),
                     ready_timeout: ready_timeout.clone(),
+                    own_process_group: false,
                 },
                 no_watch: *no_watch,
             })),
@@ -217,6 +219,7 @@ impl Recipe {
                 depends_on: depends_on.clone(),
                 ready: ready.as_ref().map(|ready| ready.inner.clone()),
                 ready_timeout: ready_timeout.clone(),
+                own_process_group: false,
             })),
         }
     }

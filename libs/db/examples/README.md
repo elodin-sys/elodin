@@ -1,6 +1,7 @@
-# Elodin-DB C/C++ Client Examples
+# Elodin-DB Client Examples
 
-Examples showing how to send telemetry data to [elodin-db](https://github.com/elodin-sys/elodin) over TCP.
+Examples showing how to use [elodin-db](https://github.com/elodin-sys/elodin)
+from C, C++, Python, and Rust.
 
 ## Which example should I use?
 
@@ -11,6 +12,9 @@ Examples showing how to send telemetry data to [elodin-db](https://github.com/el
 | **rocket-client.cpp** | 1 connection, 1 component | Single-component use case. |
 | **client.c** | Raw C, no db.hpp | Minimal C integration without C++ dependencies. |
 | **log-client.cpp** | Structured log messages | Sending flight software logs to elodin-db. |
+| **grpc-client-batched.cpp** | C++ gRPC packed ingest | Contract-first batched telemetry writer. |
+| **grpc_gse_client.py** | Python gRPC typed ingest + logs | Mixed schemas, batching, resume, and restart verification. |
+| **grpc_full_api_demo.py** | Python gRPC full API | Query, streams, messages, assets, auth, health, and reflection. |
 | **rust_client/** | Rust + TUI | Interactive Rust client with discovery and control. |
 
 ### Performance

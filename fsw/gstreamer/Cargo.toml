@@ -10,9 +10,9 @@ gstreamer-base = { version = "0.23", features = ["v1_18"] }
 gstreamer-video = { version = "0.23", features = ["v1_18"] }
 
 # impeller
-impeller2.path = "../../libs/impeller2"
-impeller2.features = ["std"]
-impeller2-wkt = { path = "../../libs/impeller2/wkt" }
+impeller.path = "../../libs/impeller"
+impeller.features = ["std"]
+impeller-wkt = { path = "../../libs/impeller/wkt" }
 
 # Serialization
 postcard = "1"

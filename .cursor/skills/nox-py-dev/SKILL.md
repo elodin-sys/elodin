@@ -5,7 +5,7 @@ description: Contribute to the Elodin Python SDK (nox-py). Use when editing PyO3
 
 # nox-py Development
 
-nox-py is the Elodin Python SDK — PyO3 bindings that bridge Python simulations to the Rust ECS engine (in nox-py/src/), the NOX tensor compiler (→ cranelift / JAX), and Impeller2 telemetry.
+nox-py is the Elodin Python SDK — PyO3 bindings that bridge Python simulations to the Rust ECS engine (in nox-py/src/), the NOX tensor compiler (→ cranelift / JAX), and Impeller telemetry.
 
 ## Build & Test
 
@@ -43,7 +43,7 @@ libs/nox-py/src/lib.rs       ← PyO3 module registration
     ├── exec.rs               ← WorldExec enum (Iree/Jax), profiling, DB integration
     ├── jax_exec.rs           ← JaxExec, JaxWorldExec (JAX JIT per-tick execution)
     ├── step_context.rs       ← StepContext for pre/post step callbacks
-    ├── impeller_client.rs    ← Impeller2 client for DB connection
+    ├── impeller_client.rs    ← Impeller client for DB connection
     ├── asset.rs              ← Mesh, Material, GLB asset handling
     ├── linalg.rs             ← Linear algebra utilities
     ├── ukf.rs                ← Unscented Kalman Filter
@@ -130,7 +130,7 @@ Graph query implementation. `edge_fold` is the core operation — it iterates ed
 | `numpy` | NumPy array interop (via pyo3-numpy) |
 | nox-py (Rust core) | ECS world, component storage, system execution |
 | `nox` | Tensor library, spatial math |
-| `impeller2` | Telemetry protocol |
+| `impeller` | Telemetry protocol |
 | `stellarator` | Async runtime for DB connections |
 | `tokio` | Async runtime (for some I/O paths) |
 
@@ -139,4 +139,4 @@ Graph query implementation. `edge_fold` is the core operation — it iterates ed
 - Full SDK documentation: [libs/nox-py/README.md](../../../libs/nox-py/README.md)
 - Python API reference: [docs/public/content/reference/python-api.md](../../../docs/public/content/reference/python-api.md)
 - nox-py Rust source: [libs/nox-py/src/](../../../libs/nox-py/src/)
-- Impeller2 protocol: [libs/impeller2/](../../../libs/impeller2/)
+- Impeller protocol: [libs/impeller/](../../../libs/impeller/)

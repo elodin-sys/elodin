@@ -91,6 +91,7 @@ body.dark h4 {
 }
 
 body {
+    color-scheme: light;
     color: #0d0d0d99;
     font-family: "IBM Plex Sans";
     font-size: 16px !important;
@@ -102,6 +103,7 @@ body {
 }
 
 body.dark {
+    color-scheme: dark;
     color: #fffbf099;
     font-family: "IBM Plex Sans";
     font-size: 16px !important;
@@ -129,6 +131,14 @@ body.dark code {
     color: #fffbf0;
     border: 1px solid #454544;
     background: rgba(23, 22, 21, 0.6);
+}
+
+pre.giallo {
+    color-scheme: light !important;
+}
+
+body.dark pre.giallo {
+    color-scheme: dark !important;
 }
 
 table {

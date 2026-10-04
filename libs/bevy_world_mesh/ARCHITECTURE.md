@@ -441,7 +441,6 @@ These are defined in
 ├── CHANGELOG.md               keep-a-changelog history
 ├── Cargo.toml                 single-crate manifest (Bevy 0.18)
 ├── flake.nix                  Nix devShell (nixpkgs 25.11, Rust 1.91)
-├── .envrc                     direnv hook (`use flake`)
 ├── LICENSE                    Apache-2.0
 ├── NOTICE                     third-party attribution (incl. upstream bevy_terrain MIT)
 ├── src/

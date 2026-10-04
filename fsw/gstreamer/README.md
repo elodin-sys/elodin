@@ -22,19 +22,23 @@ brew install gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plu
 
 ## Installation
 
+`elodinsink` is a flake package. `nix develop` and `nix develop .#run` put it on
+`GST_PLUGIN_PATH` automatically (same pattern as `x264enc` / `srtsrc`).
+
 ```
-cd elodin/fsw/gstreamer
-cargo build --release
+nix build .#elodinsink
 ```
 
-The compiled plugin will be available at `target/release/libgstelodin.so`
+The plugin lands at `result/lib/gstreamer-1.0/libgstelodin.{so,dylib}`.
+
+Do not add cargo `target/release` to `GST_PLUGIN_PATH`. That directory also
+contains `libelodin`, and `gst-plugin-scanner` will try to dlopen every dylib
+there — on GStreamer 1.26 a failed scan can hide the rest of the plugin set.
 
 ## Usage
 
-For local testing set the `GST_PLUGIN_PATH` env var to `target/release`:
-```sh
-GST_PLUGIN_PATH=./target/release
-```
+Run pipelines from `nix develop` or `nix develop .#run`. Aleph sets the same
+path via the `elodinsink` NixOS module.
 
 The plugin provides a new GStreamer element called `elodinsink`. elodin-db expects the h264 stream to be made up of annex-b NAL units. For best results it is important to send frequency keyframes -- 12 seems to provide good results.
 Further you will want to ensure that SPS and PPS are sent with every IDR frame. You can do that with `h264 parse config-interva=-1`

@@ -25,6 +25,11 @@ impl TcpStream {
         socket.set_nonblocking(!cfg!(target_os = "linux"))?;
         let addr: SockAddr = addr.into();
         Completion::run(ops::Connect::new(&socket, Box::new(addr.into()))?).await?;
+        // Stellarator TCP streams carry latency-sensitive telemetry and control
+        // packets. Do not let Nagle's algorithm batch a fresh value behind an
+        // earlier unacknowledged write; live views have no playback buffer to
+        // hide that delay.
+        socket.set_nodelay(true)?;
 
         Ok(TcpStream { socket })
     }
@@ -93,6 +98,8 @@ impl TcpListener {
         let socket = Completion::run(op).await.0?;
         #[cfg(not(target_os = "windows"))]
         socket.set_cloexec(true)?;
+        // Apply the same low-latency policy to the server side of the stream.
+        socket.set_nodelay(true)?;
         Ok(TcpStream { socket })
     }
 
@@ -114,12 +121,14 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let handle = crate::spawn(async move {
             let stream = listener.accept().await.unwrap();
+            assert!(stream.socket.nodelay().unwrap());
             let mut buf = vec![0u8; 128];
             let n = rent!(stream.read(buf).await, buf).unwrap();
             buf.truncate(n);
             stream.write(buf).await.0.unwrap();
         });
         let stream = TcpStream::connect(addr).await.unwrap();
+        assert!(stream.socket.nodelay().unwrap());
         stream.write(b"foo").await.0.unwrap();
         let mut buf = vec![0; 128];
         let n = rent!(stream.read(buf).await, buf).unwrap();

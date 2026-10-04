@@ -1,0 +1,11 @@
+[package]
+name = "rtsp-ingest"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license = "MIT OR Apache-2.0"
+description = "RTSP H.264 ingest glue for Elodin-DB (AVC→Annex-B framing, clock mapping)"
+publish = false
+
+[dependencies]
+thiserror = "2"

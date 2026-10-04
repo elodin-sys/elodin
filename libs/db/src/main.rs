@@ -2,7 +2,7 @@ use std::{io::Write, net::SocketAddr, path::PathBuf};
 
 use clap::{Parser, Subcommand, ValueEnum};
 use elodin_db::Server;
-use impeller2::vtable;
+use impeller::vtable;
 use miette::IntoDiagnostic;
 use postcard_c_codegen::SchemaExt;
 use tracing::info;
@@ -26,7 +26,7 @@ enum Commands {
     #[command(about = "Run the Elodin database server")]
     Run(RunArgs),
     #[command(about = "Run a Lua script or launch a REPL")]
-    Lua(impeller2_cli::Args),
+    Lua(impeller_cli::Args),
     #[command(about = "Generate C++ header files")]
     GenCpp,
     #[command(
@@ -38,6 +38,10 @@ enum Commands {
     Merge(MergeArgs),
     #[command(about = "Remove empty components from a database")]
     Prune(PruneArgs),
+    #[command(
+        about = "Truncate preallocated (sparse) database files to their real size for archival"
+    )]
+    Compact(CompactArgs),
     #[command(about = "Trim a database to a time range, removing data outside the window")]
     Trim(TrimArgs),
     #[command(about = "Clear all data from a database, preserving schemas")]
@@ -88,8 +92,20 @@ struct RunArgs {
     #[cfg(feature = "axum")]
     #[clap(long, help = "Address to bind the HTTP server to")]
     http_addr: Option<SocketAddr>,
+    #[cfg(feature = "grpc")]
+    #[clap(
+        long,
+        value_parser = clap::builder::NonEmptyStringValueParser::new(),
+        help = "Bearer token required by the gRPC server"
+    )]
+    grpc_auth_token: Option<String>,
     #[clap(long, hide = true)]
     reset: bool,
+    #[clap(
+        long,
+        help = "Source assets/ tree to ingest into the DB on creation (overrides ELODIN_ASSETS)"
+    )]
+    assets: Option<PathBuf>,
     #[clap(long, help = "Follow another elodin-db instance, replicating all data")]
     follows: Option<SocketAddr>,
     #[clap(
@@ -125,6 +141,14 @@ struct PruneArgs {
     dry_run: bool,
     #[clap(long, short, help = "Skip confirmation prompt")]
     yes: bool,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+struct CompactArgs {
+    #[clap(help = "Path to the database directory")]
+    path: PathBuf,
+    #[clap(long, help = "Show what would be reclaimed without modifying")]
+    dry_run: bool,
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -295,6 +319,22 @@ struct ExportArgs {
         help = "Include components whose metadata has `private: true`. Off by default \u{2014} those components are skipped."
     )]
     include_private: bool,
+    #[clap(
+        long,
+        help = "MCAP-only: attach every file under {db}/assets/ instead of only schematic-referenced assets"
+    )]
+    all_assets: bool,
+    #[clap(
+        long,
+        help = "MCAP-only: microsecond offset added to all timestamps (auto-computed when earliest < 0)"
+    )]
+    epoch_offset_us: Option<i64>,
+    #[clap(
+        long,
+        default_value = "32",
+        help = "MCAP-only: max GLB embed size in MiB; larger models are attached but not base64-inlined"
+    )]
+    max_embed_mb: u64,
 }
 
 #[cfg(feature = "video-export")]
@@ -390,10 +430,14 @@ async fn main() -> miette::Result<()> {
     match args.command {
         Commands::Run(RunArgs {
             addr,
+            #[cfg(feature = "axum")]
             http_addr,
+            #[cfg(feature = "grpc")]
+            grpc_auth_token,
             path,
             config,
             reset,
+            assets,
             start_timestamp,
             follows,
             follow_packet_size,
@@ -434,14 +478,78 @@ async fn main() -> miette::Result<()> {
                     .into_diagnostic()?;
             }
             #[cfg(feature = "axum")]
-            elodin_db::assets_http::spawn_assets_http(&path, addr).into_diagnostic()?;
+            if follow_config.is_none() {
+                let source = assets
+                    .clone()
+                    .or_else(|| elodin_db::assets::resolve_assets_root(None));
+                if let Some(source) = source {
+                    if !source.is_dir() {
+                        tracing::warn!(
+                            source = %source.display(),
+                            "asset source path does not exist; starting without asset ingest"
+                        );
+                    } else {
+                        match elodin_db::assets::ingest_asset_dir(&path, &source) {
+                            Ok(report) if report.skipped => {
+                                info!(source = %source.display(), "assets already ingested; skipping")
+                            }
+                            Ok(report) => info!(
+                                source = %source.display(),
+                                files = report.file_count,
+                                bytes = report.byte_count,
+                                "ingested assets into db"
+                            ),
+                            Err(err) => {
+                                tracing::warn!(?err, source = %source.display(), "failed to ingest assets")
+                            }
+                        }
+                    }
+                }
+
+                // A CLI-started DB should also advertise an active schematic so
+                // connected editors auto-load it over HTTP (RFD #724), matching
+                // what the Python SDK primes. If the ingested tree carries the
+                // conventional schematics/main.kdl and no active pointer is set
+                // yet, point at it so clients fetch it over the Asset Server.
+                if !server
+                    .db
+                    .with_state(|s| s.db_config.schematic_active().is_some())
+                {
+                    match server.db.set_active_schematic("schematics/main.kdl") {
+                        Ok(()) => info!("set active schematic to schematics/main.kdl"),
+                        Err(err) => {
+                            tracing::debug!(?err, "no schematics/main.kdl to set active; skipping")
+                        }
+                    }
+                }
+            }
+            #[cfg(feature = "axum")]
+            // A follower mirrors its source read-only; only a primary DB accepts
+            // asset uploads.
+            elodin_db::assets_http::spawn_assets_http(
+                &path,
+                addr,
+                follows.is_none(),
+                Some(server.db.clone()),
+            )
+            .into_diagnostic()?;
+            #[cfg(feature = "grpc")]
+            let grpc_listener = {
+                let grpc_addr = elodin_db::grpc::grpc_addr(addr);
+                std::net::TcpListener::bind(grpc_addr).map_err(|e| {
+                    miette::miette!("failed to bind gRPC server at {grpc_addr}: {e}")
+                })?
+            };
             if let Some(start_timestamp) = start_timestamp {
                 server
                     .db
-                    .set_earliest_timestamp(impeller2::types::Timestamp(start_timestamp))
+                    .set_earliest_timestamp(impeller::types::Timestamp(start_timestamp))
                     .into_diagnostic()?;
             }
+            #[cfg(feature = "axum")]
             let axum_db = server.db.clone();
+            #[cfg(feature = "grpc")]
+            let grpc_db = server.db.clone();
             if let Some(config) = follow_config {
                 let follow_db = server.db.clone();
                 stellarator::struc_con::stellar(move || {
@@ -449,24 +557,37 @@ async fn main() -> miette::Result<()> {
                 });
             }
             let db = stellarator::spawn(server.run());
+            #[cfg(feature = "axum")]
             if let Some(http_addr) = http_addr {
                 stellarator::struc_con::tokio(move |_| async move {
                     elodin_db::axum::serve(http_addr, axum_db).await.unwrap()
                 });
             }
+            #[cfg(feature = "grpc")]
+            stellarator::struc_con::tokio(move |_| async move {
+                if let Err(error) = elodin_db::grpc::serve_listener_with_auth(
+                    grpc_listener,
+                    grpc_db,
+                    grpc_auth_token,
+                )
+                .await
+                {
+                    tracing::error!(?error, "gRPC server exited");
+                }
+            });
             if let Some(lua_config) = config {
-                let args = impeller2_cli::Args {
+                let args = impeller_cli::Args {
                     config: Some(lua_config),
                     db: Some(path.clone()),
                     lua_args: vec![],
                 };
-                impeller2_cli::run(args)
+                impeller_cli::run(args)
                     .await
                     .map_err(|e| miette::miette!(e))?;
             }
             db.await.unwrap().into_diagnostic()
         }
-        Commands::Lua(args) => impeller2_cli::run(args)
+        Commands::Lua(args) => impeller_cli::run(args)
             .await
             .map_err(|e| miette::miette!(e)),
         Commands::GenCpp => {
@@ -474,21 +595,21 @@ async fn main() -> miette::Result<()> {
                 "ELODIN_DB",
                 [
                     include_str!("../../postcard-c/postcard.h").to_string(),
-                    impeller2_wkt::InitialTimestamp::to_cpp()?,
-                    impeller2_wkt::FixedRateBehavior::to_cpp()?,
-                    impeller2_wkt::StreamBehavior::to_cpp()?,
-                    impeller2_wkt::Stream::to_cpp()?,
-                    impeller2_wkt::MsgStream::to_cpp()?,
+                    impeller_wkt::InitialTimestamp::to_cpp()?,
+                    impeller_wkt::FixedRateBehavior::to_cpp()?,
+                    impeller_wkt::StreamBehavior::to_cpp()?,
+                    impeller_wkt::Stream::to_cpp()?,
+                    impeller_wkt::MsgStream::to_cpp()?,
                     vtable::Field::to_cpp()?,
                     vtable::Op::to_cpp()?,
                     vtable::OpRef::to_cpp()?,
-                    impeller2::types::PrimType::to_cpp()?,
+                    impeller::types::PrimType::to_cpp()?,
                     vtable::VTable::<Vec<vtable::Op>, Vec<u8>, Vec<vtable::Field>>::to_cpp()?,
-                    impeller2_wkt::VTableMsg::to_cpp()?,
-                    impeller2_wkt::VTableStream::to_cpp()?,
-                    impeller2_wkt::ComponentMetadata::to_cpp()?,
-                    impeller2_wkt::SetComponentMetadata::to_cpp()?,
-                    impeller2_wkt::LogEntry::to_cpp()?,
+                    impeller_wkt::VTableMsg::to_cpp()?,
+                    impeller_wkt::VTableStream::to_cpp()?,
+                    impeller_wkt::ComponentMetadata::to_cpp()?,
+                    impeller_wkt::SetComponentMetadata::to_cpp()?,
+                    impeller_wkt::LogEntry::to_cpp()?,
                     include_str!("../cpp/helpers.hpp").to_string(),
                     gen_log_helpers()?,
                     include_str!("../cpp/vtable.hpp").to_string(),
@@ -517,6 +638,9 @@ async fn main() -> miette::Result<()> {
         }
         Commands::Prune(PruneArgs { path, dry_run, yes }) => {
             elodin_db::prune::run(path, dry_run, yes).into_diagnostic()
+        }
+        Commands::Compact(CompactArgs { path, dry_run }) => {
+            elodin_db::compact::run(path, dry_run).into_diagnostic()
         }
         Commands::Merge(MergeArgs {
             db1,
@@ -645,9 +769,36 @@ async fn main() -> miette::Result<()> {
             mono_ns,
             mono_us,
             include_private,
+            all_assets,
+            epoch_offset_us,
+            max_embed_mb,
         }) => {
             // Install signal handlers only for Export command which uses check_cancelled()
             elodin_db::cancellation::install_signal_handlers();
+
+            if matches!(format, elodin_db::export::ExportFormat::Mcap) {
+                if flatten || join || csv_fast_floats || mono_ns || mono_us {
+                    return Err(miette::miette!(
+                        "--flatten, --join, --csv-fast-floats, --mono-ns, and --mono-us do not apply to --format mcap"
+                    ));
+                }
+                #[cfg(feature = "mcap-export")]
+                {
+                    let options = elodin_db::export_mcap::McapExportOptions {
+                        pattern,
+                        include_private,
+                        all_assets,
+                        epoch_offset_us,
+                        max_embed_mb,
+                    };
+                    return elodin_db::export_mcap::run(path, output, options).into_diagnostic();
+                }
+                #[cfg(not(feature = "mcap-export"))]
+                return Err(miette::miette!(
+                    "this build of elodin-db was compiled without the `mcap-export` feature"
+                ));
+            }
+            let _ = all_assets;
 
             // clap's `conflicts_with` ensures these aren't both set.
             let time_format = match (mono_ns, mono_us) {
@@ -675,7 +826,7 @@ async fn main() -> miette::Result<()> {
 }
 
 fn run_info(args: InfoArgs) -> miette::Result<()> {
-    use impeller2_wkt::DbConfig;
+    use impeller_wkt::DbConfig;
 
     let db_state_path = match args.path {
         Some(path) => {
@@ -743,7 +894,7 @@ fn format_duration(duration: std::time::Duration) -> String {
     }
 }
 
-fn print_metadata(config: &impeller2_wkt::DbConfig) {
+fn print_metadata(config: &impeller_wkt::DbConfig) {
     let meta = &config.metadata;
 
     // Filter out version keys (displayed separately) and collect remaining metadata
@@ -765,8 +916,8 @@ fn print_metadata(config: &impeller2_wkt::DbConfig) {
 
 /// Generate C++ logging helpers with precomputed LogEntry schema bytes.
 fn gen_log_helpers() -> miette::Result<String> {
-    use impeller2::types::Msg;
-    use impeller2_wkt::{MsgMetadata, SetMsgMetadata, log_entry_msg_schema};
+    use impeller::types::Msg;
+    use impeller_wkt::{MsgMetadata, SetMsgMetadata, log_entry_msg_schema};
 
     let schema = log_entry_msg_schema();
     let set_msg_meta_id = SetMsgMetadata::ID;
@@ -918,4 +1069,41 @@ void send_log(SocketT& sock, const std::string_view log_name, LogLevel level, co
         id0 = set_msg_meta_id[0],
         id1 = set_msg_meta_id[1],
     ))
+}
+
+#[cfg(all(test, feature = "grpc"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn grpc_addr_is_not_a_run_flag() {
+        assert!(
+            Cli::try_parse_from([
+                "elodin-db",
+                "run",
+                "127.0.0.1:2240",
+                "/tmp/elodin-db-grpc-cli-test",
+                "--grpc-addr",
+                "127.0.0.1:2242",
+            ])
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn grpc_auth_token_uses_derived_address() {
+        let cli = Cli::try_parse_from([
+            "elodin-db",
+            "run",
+            "127.0.0.1:2240",
+            "/tmp/elodin-db-grpc-cli-test",
+            "--grpc-auth-token",
+            "secret",
+        ])
+        .unwrap();
+        let Commands::Run(args) = cli.command else {
+            panic!("expected run command");
+        };
+        assert_eq!(args.grpc_auth_token.as_deref(), Some("secret"));
+    }
 }

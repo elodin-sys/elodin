@@ -1,7 +1,6 @@
 use std::{
     fs::{self, File, OpenOptions},
     io::Write,
-    os::fd::AsRawFd,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -56,7 +55,7 @@ pub fn intern_bytes(elem_type: ElementType, bytes: &[u8]) -> Result<Arc<CachedCo
         .write(true)
         .open(&path)
         .map_err(|e| format!("open cached constant {path:?}: {e}"))?;
-    let map = MmapRaw::map_raw(file.as_raw_fd()).map_err(|e| format!("mmap {path:?}: {e}"))?;
+    let map = MmapRaw::map_raw(&file).map_err(|e| format!("mmap {path:?}: {e}"))?;
     Ok(Arc::new(CachedConst {
         hash,
         symbol,
@@ -91,7 +90,9 @@ fn cache_dir() -> PathBuf {
     if let Ok(dir) = std::env::var("ELODIN_CACHE_DIR") {
         return PathBuf::from(dir);
     }
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string());
     PathBuf::from(home).join(".cache/elodin/const-cache")
 }
 

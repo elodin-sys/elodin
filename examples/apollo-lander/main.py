@@ -36,6 +36,16 @@ DEFAULT_COMMAND_PORT = 9012
 MAX_TICKS_ENV = "ELODIN_APOLLO_MAX_TICKS"
 
 
+def _interactive() -> bool:
+    # Editor stays alive after max_ticks. Monte Carlo injects
+    # ELODIN_MONTE_CARLO_CONTEXT (same as ELODIN_DB_PATH) and must exit.
+    # elodin run / QA set ELODIN_NON_INTERACTIVE=1 (same as rc-jet).
+    return (
+        os.environ.get("ELODIN_MONTE_CARLO_CONTEXT") is None
+        and os.environ.get("ELODIN_NON_INTERACTIVE") != "1"
+    )
+
+
 class SitlBridge:
     def __init__(self, throttle: float, attitude: list[float]) -> None:
         self.state_port = el.monte_carlo.port("state", DEFAULT_STATE_PORT)
@@ -277,7 +287,7 @@ world.run(
     max_ticks=max_ticks,
     db_path=params.db_path or os.environ.get("ELODIN_DB_PATH"),
     post_step=post_step,
-    interactive=False,
+    interactive=_interactive(),
     start_timestamp=START_TIMESTAMP_US,
     log_level="warn",
 )

@@ -1,4 +1,4 @@
-use impeller2::{
+use impeller::{
     component::Component,
     types::{ComponentId, ComponentView, EntityId},
 };
@@ -78,8 +78,8 @@ impl crate::component::Component for Edge {}
 impl Component for Edge {
     const NAME: &'static str = "edge";
 
-    fn schema() -> impeller2::schema::Schema<Vec<u64>> {
-        impeller2::schema::Schema::new(impeller2::types::PrimType::U64, [2usize]).unwrap()
+    fn schema() -> impeller::schema::Schema<Vec<u64>> {
+        impeller::schema::Schema::new(impeller::types::PrimType::U64, [2usize]).unwrap()
     }
 }
 
@@ -442,7 +442,7 @@ impl GraphQueryInner {
         let mut entity_map = BTreeMap::new();
         let mut len = 0;
         let exprs = exprs_from_edges_queries(&self.query.edges, from_query.query, to_query.query);
-        for (_, (from, _to)) in exprs.iter() {
+        for (from, _to) in exprs.values() {
             for (id, index) in from.entity_map.iter() {
                 entity_map.insert(*id, index + len);
             }

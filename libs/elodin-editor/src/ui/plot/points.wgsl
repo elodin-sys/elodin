@@ -5,7 +5,7 @@
 struct LineUniform {
     line_width : f32,
                  color : vec4<f32>,
-                         chunk_size : f32,
+                         zoh : f32,
 #ifdef SIXTEEN_BYTE_ALIGNMENT
                                       // WebGL2 structs must be 16 byte aligned.
                                       _padding : vec2<f32>,
@@ -17,6 +17,8 @@ struct LineUniform {
 @group(2) @binding(0) var<storage> x_values : array<f32>;
 @group(2) @binding(1) var<storage> y_values : array<f32>;
 @group(2) @binding(2) var<storage> index_buffer : array<u32>;
+
+const STRIP_SEPARATOR_INDEX: u32 = 0xffffffffu;
 
 struct VertexInput {
 
@@ -43,6 +45,15 @@ struct VertexOutput {
     let resolution = view.viewport.zw;
     let width = line_uniform.line_width / resolution;
     let index = index_buffer[vertex.instance_index];
+    if index == STRIP_SEPARATOR_INDEX {
+        return VertexOutput(
+            vec4(2.0, 2.0, 0.0, 1.0),
+            vec2(0.0),
+            vec2(0.0),
+            vec2(1.0),
+            vec4(0.0),
+        );
+    }
     let time = x_values[index];
     let data = y_values[index];
 

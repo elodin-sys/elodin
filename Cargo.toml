@@ -22,12 +22,12 @@ members = [
     "libs/wmm",
     "libs/bbqueue",
     "libs/s10",
-    "libs/impeller2",
-    "libs/impeller2/stellar",
-    "libs/impeller2/bevy",
-    "libs/impeller2/wkt",
-    "libs/impeller2/bbq",
-    "libs/impeller2/frame",
+    "libs/impeller",
+    "libs/impeller/stellar",
+    "libs/impeller/bevy",
+    "libs/impeller/wkt",
+    "libs/impeller/bbq",
+    "libs/impeller/frame",
     "libs/db",
     "libs/db/cli",
     "libs/db/tests",
@@ -47,24 +47,26 @@ members = [
     "fsw/blackbox",
     "apps/inscriber",
     "fsw/video-streamer",
+    "fsw/rtsp-streamer",
     "fsw/gstreamer",
     "fsw/msp-osd",
-    "fsw/udp_component_broadcast/impeller_py",
     "libs/db/eql",
-    "libs/impeller2/kdl",
+    "libs/impeller/kdl",
     "libs/db/examples/rust_client",
     "examples/rc-jet/controller",
+    "examples/betaflight-sitl/controller",
     "libs/bevy_geo_frames",
     "libs/bevy_mat3_material",
     "libs/bevy_world_mesh",
     "libs/bevy_ai_skybox",
     "libs/cranelift-mlir",
     "libs/monte-carlo",
+    "libs/rtsp-ingest",
  ]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 
 [workspace.package]
-version = "0.17.4-alpha.0"
+version = "0.19.3-alpha.0"
 edition = "2024"
 repository = "https://github.com/elodin-sys/elodin"
 
@@ -100,12 +102,22 @@ wmm.path = "libs/wmm"
 inherits = "release"
 debug = true
 
+# TODO: switch back to crates.io once bevy_editor_cam ships a Bevy 0.19 release
+# (tracking upstream PR https://github.com/aevyrie/bevy_editor_cam/pull/66).
 [workspace.dependencies.bevy_editor_cam]
-version = "0.8"
+git = "https://github.com/m-edlund/bevy_editor_cam"
+rev = "90460341ab6a3b5ff803cbe4f9463655705490ce"
+# bevy_editor_cam's bevy-0.19 branch pins bevy_framepace to a personal git
+# branch; use the same official tagged source everywhere (see [patch] below)
+# so only one FramepacePlugin instance exists. Switch back to crates.io "0.22"
+# together with bevy_editor_cam.
+[workspace.dependencies.bevy_framepace]
+git = "https://github.com/aevyrie/bevy_framepace"
+tag = "v0.22.0"
 [workspace.dependencies.bevy_math]
-version = "0.18"
+version = "0.19"
 [workspace.dependencies.bevy]
-version = "0.18.1"
+version = "0.19.0"
 default-features = false
 features = [
   "std",
@@ -118,6 +130,7 @@ features = [
   "bevy_core_pipeline",
   "bevy_post_process",
   "bevy_anti_alias",
+  "bevy_dev_tools",
   "bevy_gilrs",
   "bevy_gizmos",
   "bevy_gltf",
@@ -126,7 +139,7 @@ features = [
   "bevy_pbr",
   "bevy_picking",
   "bevy_render",
-  "bevy_scene",
+  "bevy_world_serialization",
   "bevy_image",
   "bevy_mesh",
   "bevy_camera",
@@ -156,12 +169,16 @@ features = [
   "ui_picking",
   "webgl2",
   "x11",
+  "wayland",
   "debug",
-  "zstd_rust",
+  "zstd_c",
 ]
 
+# TODO: switch back to crates.io once big_space 0.13 is released for Bevy 0.19
+# (tracking upstream PR https://github.com/aevyrie/big_space/pull/78).
 [workspace.dependencies.big_space]
-version = "0.12.0"
+git = "https://github.com/aevyrie/big_space"
+rev = "5f255228e9b4ff30756347b80f92b19ebf7b5c56"
 features = ["i128"]
 
 [workspace.dependencies.muxide]
@@ -169,3 +186,13 @@ version = "0.2.5"
 
 [patch.crates-io]
 map_3d = { git = "https://github.com/shanecelis/map_3d.git", branch = "feat/sphere" }
+# Local-space FaceCamera/AlongVelocity: full inverse affine for camera
+# position in effect space (elodin-sys fork; upstream candidate).
+bevy_hanabi = { git = "https://github.com/elodin-sys/bevy_hanabi", rev = "485c0a6ca18065a8a5b6de30190a9fe94a337176" }
+
+# bevy_editor_cam's bevy-0.19 branch depends on bevy_framepace from this
+# personal git branch; redirect it to the official v0.22.0 tag so the whole
+# graph shares a single bevy_framepace instance. Remove together with the
+# bevy_editor_cam git pin above.
+[patch."https://github.com/hacknus/bevy_framepace.git"]
+bevy_framepace = { git = "https://github.com/aevyrie/bevy_framepace", tag = "v0.22.0" }

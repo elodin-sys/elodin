@@ -7,11 +7,12 @@ edition = "2024"
 # parse
 peg = "0.8.5"
 unicode-ident = "1.0.18"
+convert_case = "0.8.0"
 
 # data-structures
 smallvec = "1.15"
-impeller2.path = "../../impeller2"
-impeller2-wkt.path = "../../impeller2/wkt"
+impeller.path = "../../impeller"
+impeller-wkt.path = "../../impeller/wkt"
 
 # errors
 thiserror = "1"
@@ -19,3 +20,7 @@ thiserror = "1"
 # time
 hifitime = "4"
 jiff = "0.2"
+
+# geo-frame math for ecef_to_ned() / friends (SQL emission; no Bevy ECS)
+bevy_geo_frames = { path = "../../bevy_geo_frames", default-features = false }
+bevy_math = { workspace = true }

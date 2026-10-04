@@ -14,6 +14,8 @@ What it demonstrates:
 - Simulation starts at the truth epoch (`2020-01-01T00:00:00Z`) via `start_timestamp`.
 - `simulation_rate` and `telemetry_rate` are in **Hz** (per second).
 - Timeline is configured with `follow_latest=#true` so live view stays current.
+- Schematic `coordinate frame=ENU` (Z-up). Viewport `pos` / `look_at` are in that
+  frame, not Bevy. `(-6,6,6)` is a corner view above the XY orbit plane.
 
 ## Run
 

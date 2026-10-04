@@ -9,14 +9,14 @@ publish = false
 # async
 stellarator.path = "../../libs/stellarator"
 stellarator.features = ["miette"]
-impeller2-stellar.path = "../../libs/impeller2/stellar"
+impeller-stellar.path = "../../libs/impeller/stellar"
 futures-concurrency = "7.6"
 
 # ser-de
-impeller2.path = "../../libs/impeller2"
-impeller2.features = ["std"]
-impeller2-wkt.path = "../../libs/impeller2/wkt"
-impeller2-wkt.features = ["gui", "std"]
+impeller.path = "../../libs/impeller"
+impeller.features = ["std"]
+impeller-wkt.path = "../../libs/impeller/wkt"
+impeller-wkt.features = ["gui", "std"]
 zerocopy.version = "0.8.2"
 db-macros.workspace = true
 

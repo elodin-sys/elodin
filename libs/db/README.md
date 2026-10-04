@@ -17,6 +17,55 @@ Install the elodin-db from the [releases](https://github.com/elodin-sys/elodin/r
 elodin-db run [::]:2240 $HOME/.local/share/elodin/db --config examples/db-config.lua --log-level warn
 ```
 
+### gRPC API for foreign clients
+
+```sh
+elodin-db run [::]:2240 ./db
+```
+
+The always-on gRPC API listens two ports above the native endpoint (`2242` for
+the default `2240`). It includes acknowledged telemetry ingest, historical and
+SQL queries, live/fixed-rate streams, message logs, config, metadata, and
+assets. Health checking and server reflection are enabled. Contracts live under
+[`proto/elodin/db/v1`](proto/elodin/db/v1). CMake clients use
+`elodin-db-protos`; see [`grpc-client-batched.cpp`](examples/grpc-client-batched.cpp).
+
+```cmake
+find_package(elodin-db-protos REQUIRED CONFIG)
+target_link_libraries(my_client PRIVATE elodin-db-protos::elodin-db-protos)
+```
+
+Sessions register a schema, receive handles, then send packed or typed batches.
+With `timestamp_source`, clients may omit `time_monotonic_ns` (server derives
+it). Max message 16 MiB (also reported by `GetServerInfo`); ack policy 1–1e6
+rows / 1–10_000 ms (0 → 256 / 100 ms). Query ranges are half-open
+`[start_ns, end_ns)` on the database's microsecond grid; omitted bounds mean
+earliest/open-ended. `StreamControl` applies only to fixed-rate sessions and an
+invalid control terminates the stream; a message stream attached to a component
+playback clock mirrors the owner's position and is controlled through the
+owning component stream. Common failures carry `google.rpc.ErrorInfo` reasons
+(domain `db.elodin.systems`), e.g. `COMPONENT_NOT_FOUND`, `TIME_RANGE_EMPTY`.
+The server is unauthenticated by default. Add `--grpc-auth-token TOKEN` to
+require `authorization: Bearer TOKEN` on application RPCs and reflection; the
+standard health endpoint remains unauthenticated for load balancers. Transport
+remains insecure, so bind only on a trusted network. Ingest and message publish
+resume positions persist across server restarts (ingest periodically at ack
+time), so delivery is at-least-once: acknowledged sequences are skipped during
+normal reconnects, while a crash may cause recent complete rows to appear twice.
+
+The full Python demo records a 10-second RC jet run with its controller and
+headless renderer, exercises live and recorded streaming, numeric SQL,
+downsampling, multi-chunk assets, and every service, then runs a mixed-schema
+writer through a database restart:
+
+```sh
+nix develop .#run --command scripts/ci/db_grpc_full_api_demo.sh
+```
+
+[`grpc_gse_client.py`](examples/grpc_gse_client.py) is the smaller Python
+writer reference for typed telemetry batches, structured logs, and
+resume/replay.
+
 ### Stream data to the database with C
 
 See [./examples/client.c](./examples/client.c) for an example C client that streams fake sensor data to the database. Build and run the client:

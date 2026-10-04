@@ -29,7 +29,7 @@ nox-py provides a high-performance Python API for building aerospace simulations
       ┌──────┴─────┬───────────────┐
       │            │               │
 ┌─────▼─────┐ ┌────▼────┐ ┌────────▼─────┐
-│    NOX    │ │Cranelift│ │  Impeller2   │
+│    NOX    │ │Cranelift│ │  Impeller   │
 │  Compiler │ │   JAX   │ │  (Pub-Sub)   │
 └───────────┘ └─────────┘ └───────┬──────┘
                                   │
@@ -47,12 +47,17 @@ nox-py provides a high-performance Python API for building aerospace simulations
 git clone https://github.com/elodin-sys/elodin
 cd elodin
 
-# Create virtual environment
-uv venv
-source .venv/bin/activate  # or activate.fish for fish shell
+# Prefer the nix shell (venv is auto-active; no source needed)
+nix develop
+just install py
+```
 
-# Install with maturin
+Without nix:
+
+```bash
+uv venv --python 3.13
 uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
+.venv/bin/python -c "import elodin"
 ```
 
 ### Quick Start Examples
@@ -444,7 +449,7 @@ w.run(physics_system,
 ### Connecting External Controllers
 
 External controllers (flight computers, ground stations, test harnesses) can connect via:
-- **TCP/UDP**: Using Impeller2 protocol
+- **TCP/UDP**: Using Impeller protocol
 - **Shared Memory**: For local hardware-in-the-loop
 - **Serial**: For embedded systems
 
@@ -521,7 +526,7 @@ Telemetry = el.Annotated[
 ]
 ```
 
-### Impeller2 Streaming
+### Impeller Streaming
 Real-time telemetry to external systems:
 ```python
 # Automatic streaming when connected to Elodin-DB
@@ -808,7 +813,7 @@ Transforms Python-defined systems into compiled executables:
 - **JAX backend**: JAX → `jax.jit()` → Python/XLA execution per tick
 - Automatic vectorization and memory layout optimization
 
-### Impeller2 Protocol
+### Impeller Protocol
 High-performance pub-sub for telemetry:
 - Zero-copy serialization
 - Automatic component discovery
@@ -863,7 +868,7 @@ Components are referenced by their full hierarchical path:
 # In simulation
 exec.history(["drone.world_pos", "drone.imu.accel", "drone.motors.0.rpm"])
 
-# Flight software sees the same paths via Impeller2
+# Flight software sees the same paths via Impeller
 // Component: "drone.imu.accel" -> [ax, ay, az]
 ```
 
@@ -871,7 +876,7 @@ exec.history(["drone.world_pos", "drone.imu.accel", "drone.motors.0.rpm"])
 
 - [Elodin Editor](../../apps/elodin) - 3D visualization and debugging
 - [Elodin-DB](../db) - Time-series telemetry database
-- [Impeller2](../impeller2) - High-performance pub-sub protocol
+- [Impeller](../impeller) - High-performance pub-sub protocol
 - [NOX](../nox) - Tensor compiler
 - [Roci](../roci) - Flight software framework
 

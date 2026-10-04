@@ -16,6 +16,7 @@
 #   ./scripts/prepare_editor_terrain_region.sh brienz
 #   ./scripts/prepare_editor_terrain_region.sh death_valley
 #   ./scripts/prepare_editor_terrain_region.sh mojave_desert
+#   ./scripts/prepare_editor_terrain_region.sh mojave_rc_field
 #
 # Environment overrides:
 #   WORLD_MESH_FETCH_WORKERS    rayon worker count for each provider fetch pool
@@ -28,7 +29,7 @@ cd "$repo_root"
 usage() {
     cat >&2 <<'EOF'
 usage: ./scripts/prepare_editor_terrain_region.sh <region>
-  known regions: brienz, death_valley, mojave_desert
+  known regions: brienz, death_valley, mojave_desert, mojave_rc_field
 EOF
 }
 
@@ -56,8 +57,8 @@ fi
 
 # Force the asset root expected by the editor's default configuration. The
 # fetcher writes under ./assets relative to cwd, while the atlas writer honors
-# ELODIN_ASSETS_DIR; setting both cwd and env keeps them aligned.
-export ELODIN_ASSETS_DIR="$repo_root/assets"
+# ELODIN_ASSETS; setting both cwd and env keeps them aligned.
+export ELODIN_ASSETS="$repo_root/assets"
 export BEVY_ASSET_ROOT="$repo_root"
 export WORLD_MESH_REGION="$region"
 

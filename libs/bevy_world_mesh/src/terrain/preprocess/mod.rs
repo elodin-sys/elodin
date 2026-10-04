@@ -11,21 +11,17 @@ use crate::terrain::{
     terrain_data::gpu_tile_atlas::{create_attachment_layout, GpuTileAtlas},
 };
 use bevy::{
+    core_pipeline::schedule::camera_driver,
     prelude::*,
     render::{
-        graph::CameraDriverLabel,
-        render_graph::{self, RenderGraph, RenderLabel},
         render_resource::*,
-        renderer::{RenderContext, RenderDevice},
+        renderer::{RenderContext, RenderDevice, RenderGraph, RenderGraphSystems},
         Render, RenderApp, RenderSystems,
     },
 };
 
 pub mod gpu_preprocessor;
 pub mod preprocessor;
-
-#[derive(Debug, Hash, PartialEq, Eq, Clone, RenderLabel)]
-pub struct TerrainPreprocessLabel;
 
 bitflags::bitflags! {
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -134,7 +130,7 @@ impl SpecializedComputePipeline for TerrainPreprocessPipelines {
         ComputePipelineDescriptor {
             label: Some("terrain_preprocess_pipeline".into()),
             layout,
-            push_constant_ranges: default(),
+            immediate_size: 0,
             zero_initialize_workgroup_memory: false,
             shader,
             shader_defs,
@@ -143,82 +139,64 @@ impl SpecializedComputePipeline for TerrainPreprocessPipelines {
     }
 }
 
-pub struct TerrainPreprocessNode;
+/// Encodes the terrain preprocessing compute passes. Runs in the root
+/// [`bevy::render::renderer::RenderGraph`] schedule before
+/// [`camera_driver`] so the tile atlas is updated before any camera samples
+/// it (previously a render-graph node with an edge to `CameraDriverLabel`).
+pub(crate) fn dispatch_terrain_preprocess(
+    preprocess_items: Res<TerrainComponents<TerrainPreprocessItem>>,
+    pipeline_cache: Res<PipelineCache>,
+    preprocess_data: Res<TerrainComponents<GpuPreprocessor>>,
+    gpu_tile_atlases: Res<TerrainComponents<GpuTileAtlas>>,
+    mut context: RenderContext,
+) {
+    let command_encoder = context.command_encoder();
 
-impl render_graph::Node for TerrainPreprocessNode {
-    fn run<'w>(
-        &self,
-        _graph: &mut render_graph::RenderGraphContext,
-        context: &mut RenderContext<'w>,
-        world: &'w World,
-    ) -> Result<(), render_graph::NodeRunError> {
-        let preprocess_items = world.resource::<TerrainComponents<TerrainPreprocessItem>>();
-        let pipeline_cache = world.resource::<PipelineCache>();
-        let preprocess_data = world.resource::<TerrainComponents<GpuPreprocessor>>();
-        let gpu_tile_atlases = world.resource::<TerrainComponents<GpuTileAtlas>>();
+    for (&terrain, preprocess_item) in preprocess_items.iter() {
+        let Some((split_pipeline, stitch_pipeline, downsample_pipeline)) =
+            preprocess_item.pipelines(&pipeline_cache)
+        else {
+            continue;
+        };
 
-        context.add_command_buffer_generation_task(move |device| {
-            let mut command_encoder =
-                device.create_command_encoder(&CommandEncoderDescriptor::default());
+        let preprocess_data = preprocess_data.get(&terrain).unwrap();
+        let gpu_tile_atlas = gpu_tile_atlases.get(&terrain).unwrap();
 
-            for (&terrain, preprocess_item) in preprocess_items.iter() {
-                let Some((split_pipeline, stitch_pipeline, downsample_pipeline)) =
-                    preprocess_item.pipelines(pipeline_cache)
-                else {
-                    continue;
+        for attachment in &gpu_tile_atlas.attachments {
+            attachment.copy_tiles_to_write_section(command_encoder);
+        }
+
+        if !preprocess_data.processing_tasks.is_empty() {
+            let mut compute_pass =
+                command_encoder.begin_compute_pass(&ComputePassDescriptor::default());
+
+            for task in &preprocess_data.processing_tasks {
+                let attachment =
+                    &gpu_tile_atlas.attachments[task.task.tile.attachment_index as usize];
+
+                let pipeline = match task.task.task_type {
+                    PreprocessTaskType::Split { .. } => split_pipeline,
+                    PreprocessTaskType::Stitch { .. } => stitch_pipeline,
+                    PreprocessTaskType::Downsample { .. } => downsample_pipeline,
+                    _ => continue,
                 };
 
-                let preprocess_data = preprocess_data.get(&terrain).unwrap();
-                let gpu_tile_atlas = gpu_tile_atlases.get(&terrain).unwrap();
-
-                for attachment in &gpu_tile_atlas.attachments {
-                    attachment.copy_tiles_to_write_section(&mut command_encoder);
-                }
-
-                if !preprocess_data.processing_tasks.is_empty() {
-                    let mut compute_pass =
-                        command_encoder.begin_compute_pass(&ComputePassDescriptor::default());
-
-                    for task in &preprocess_data.processing_tasks {
-                        let attachment =
-                            &gpu_tile_atlas.attachments[task.task.tile.attachment_index as usize];
-
-                        let pipeline = match task.task.task_type {
-                            PreprocessTaskType::Split { .. } => split_pipeline,
-                            PreprocessTaskType::Stitch { .. } => stitch_pipeline,
-                            PreprocessTaskType::Downsample { .. } => downsample_pipeline,
-                            _ => continue,
-                        };
-
-                        compute_pass.set_pipeline(pipeline);
-                        compute_pass.set_bind_group(0, &attachment.bind_group, &[]);
-                        compute_pass.set_bind_group(1, task.bind_group.as_ref().unwrap(), &[]);
-                        compute_pass.dispatch_workgroups(
-                            attachment.buffer_info.workgroup_count.x,
-                            attachment.buffer_info.workgroup_count.y,
-                            attachment.buffer_info.workgroup_count.z,
-                        );
-                    }
-                }
-
-                for attachment in &gpu_tile_atlas.attachments {
-                    attachment.copy_tiles_from_write_section(&mut command_encoder);
-
-                    attachment.download_tiles(&mut command_encoder);
-
-                    // if !attachment.atlas_write_slots.is_empty() {
-                    //     println!(
-                    //         "Ran preprocessing pipeline with {} tiles.",
-                    //         attachment.atlas_write_slots.len()
-                    //     )
-                    // }
-                }
+                compute_pass.set_pipeline(pipeline);
+                compute_pass.set_bind_group(0, &attachment.bind_group, &[]);
+                compute_pass.set_bind_group(1, task.bind_group.as_ref().unwrap(), &[]);
+                compute_pass.dispatch_workgroups(
+                    attachment.buffer_info.workgroup_count.x,
+                    attachment.buffer_info.workgroup_count.y,
+                    attachment.buffer_info.workgroup_count.z,
+                );
             }
+        }
 
-            command_encoder.finish()
-        });
+        for attachment in &gpu_tile_atlas.attachments {
+            attachment.copy_tiles_from_write_section(command_encoder);
 
-        Ok(())
+            attachment.download_tiles(command_encoder);
+        }
     }
 }
 
@@ -288,13 +266,16 @@ impl Plugin for TerrainPreprocessPlugin {
     fn finish(&self, app: &mut App) {
         load_preprocess_shaders(app);
 
-        let render_app = app
-            .sub_app_mut(RenderApp)
+        app.sub_app_mut(RenderApp)
             .init_resource::<SpecializedComputePipelines<TerrainPreprocessPipelines>>()
-            .init_resource::<TerrainPreprocessPipelines>();
-
-        let mut render_graph = render_app.world_mut().resource_mut::<RenderGraph>();
-        render_graph.add_node(TerrainPreprocessLabel, TerrainPreprocessNode);
-        render_graph.add_node_edge(TerrainPreprocessLabel, CameraDriverLabel);
+            .init_resource::<TerrainPreprocessPipelines>()
+            // Update the tile atlas before any camera samples it (previously
+            // a render-graph node edge to `CameraDriverLabel`).
+            .add_systems(
+                RenderGraph,
+                dispatch_terrain_preprocess
+                    .in_set(RenderGraphSystems::Render)
+                    .before(camera_driver),
+            );
     }
 }

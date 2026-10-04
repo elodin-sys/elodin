@@ -1,12 +1,13 @@
 use bevy::{ecs::system::SystemParam, prelude::*};
 use bevy_egui::egui::{self, Frame, RichText, Stroke};
-use impeller2::types::ComponentId;
-use impeller2_bevy::ComponentValue;
-use impeller2_bevy::ComponentValueExt;
-use impeller2_bevy::{ComponentMetadataRegistry, EntityMap, TelemetryCache};
-use impeller2_wkt::{ComponentMetadata, CurrentTimestamp};
+use impeller::types::ComponentId;
+use impeller_bevy::ComponentValue;
+use impeller_bevy::ComponentValueExt;
+use impeller_bevy::{ComponentMetadataRegistry, EntityMap, TelemetryCache};
+use impeller_wkt::{ComponentMetadata, CurrentTimestamp};
 
 use super::{PaneName, colors::get_scheme, widgets::WidgetSystem};
+use crate::ui::widgets::SystemStateExt;
 
 #[derive(Clone)]
 pub struct MonitorPane {
@@ -53,7 +54,7 @@ impl WidgetSystem for MonitorWidget<'_, '_> {
             entity_map,
             telemetry_cache,
             current_timestamp,
-        } = state.get_mut(world);
+        } = state.params_mut(world);
         let Ok(monitor) = monitors.get(pane.entity) else {
             return;
         };
@@ -105,7 +106,7 @@ fn render_no_sample_at_playhead(ui: &mut egui::Ui, metadata: &ComponentMetadata)
             let layout = egui::Layout::centered_and_justified(ui.layout().main_dir());
             ui.allocate_ui_with_layout([130., 60.].into(), layout, |ui| {
                 Frame::NONE
-                    .stroke(Stroke::new(1.0, get_scheme().border_primary))
+                    .stroke(Stroke::new(1.0_f32, get_scheme().border_primary))
                     .outer_margin(egui::Margin::symmetric(8, 8))
                     .inner_margin(egui::Margin::symmetric(8, 0))
                     .show(ui, |ui| {
@@ -144,55 +145,70 @@ fn render_component_value_cards(
     metadata: &ComponentMetadata,
     value: &mut ComponentValue,
 ) {
+    let element_names = metadata
+        .element_names()
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(Option::Some)
+        .chain(std::iter::repeat(None));
+
+    let cards: Vec<(String, String)> = value
+        .indexed_iter_mut()
+        .zip(element_names)
+        .map(|((dim_i, value), element_name)| {
+            let label = element_name
+                .map(|name| name.to_string())
+                .unwrap_or_else(|| format!("{dim_i:?}"));
+
+            let value = match value {
+                impeller_bevy::ElementValueMut::U8(v) => v.to_string(),
+                impeller_bevy::ElementValueMut::U16(v) => v.to_string(),
+                impeller_bevy::ElementValueMut::U32(v) => v.to_string(),
+                impeller_bevy::ElementValueMut::U64(v) => v.to_string(),
+                impeller_bevy::ElementValueMut::I8(v) => v.to_string(),
+                impeller_bevy::ElementValueMut::I16(v) => v.to_string(),
+                impeller_bevy::ElementValueMut::I32(v) => v.to_string(),
+                impeller_bevy::ElementValueMut::I64(v) => v.to_string(),
+                impeller_bevy::ElementValueMut::F64(v) => {
+                    let mut str = format!("{v:.8}");
+                    str.truncate(10);
+                    str
+                }
+                impeller_bevy::ElementValueMut::F32(v) => {
+                    let mut str = format!("{v:.8}");
+                    str.truncate(10);
+                    str
+                }
+                impeller_bevy::ElementValueMut::Bool(v) => v.to_string(),
+            };
+            (label, value)
+        })
+        .collect();
+
+    render_value_cards(ui, &cards);
+}
+
+/// Render a horizontally wrapping row of labelled value cards (shared by the
+/// component monitor and the geo-position gauge, so both panels read the same).
+pub fn render_value_cards(ui: &mut egui::Ui, cards: &[(String, String)]) {
     let width = ui.max_rect().width();
     ui.horizontal_wrapped(|ui| {
         ui.set_width(width);
-        let element_names = metadata
-            .element_names()
-            .split(',')
-            .filter(|s| !s.is_empty())
-            .map(Option::Some)
-            .chain(std::iter::repeat(None));
         ui.spacing_mut().item_spacing.x = 0.0;
         ui.spacing_mut().item_spacing.y = 0.0;
 
-        for ((dim_i, value), element_name) in value.indexed_iter_mut().zip(element_names) {
+        for (label, value) in cards {
             let layout = egui::Layout::centered_and_justified(ui.layout().main_dir());
 
             ui.allocate_ui_with_layout([130., 60.].into(), layout, |ui| {
                 Frame::NONE
-                    .stroke(Stroke::new(1.0, get_scheme().border_primary))
+                    .stroke(Stroke::new(1.0_f32, get_scheme().border_primary))
                     .outer_margin(egui::Margin::symmetric(8, 8))
                     .inner_margin(egui::Margin::symmetric(8, 0))
                     .show(ui, |ui| {
                         ui.set_width(120. - 8.);
                         ui.set_height(50.);
                         ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                            let label = element_name
-                                .map(|name| name.to_string())
-                                .unwrap_or_else(|| format!("{dim_i:?}"));
-
-                            let value = match value {
-                                impeller2_bevy::ElementValueMut::U8(v) => v.to_string(),
-                                impeller2_bevy::ElementValueMut::U16(v) => v.to_string(),
-                                impeller2_bevy::ElementValueMut::U32(v) => v.to_string(),
-                                impeller2_bevy::ElementValueMut::U64(v) => v.to_string(),
-                                impeller2_bevy::ElementValueMut::I8(v) => v.to_string(),
-                                impeller2_bevy::ElementValueMut::I16(v) => v.to_string(),
-                                impeller2_bevy::ElementValueMut::I32(v) => v.to_string(),
-                                impeller2_bevy::ElementValueMut::I64(v) => v.to_string(),
-                                impeller2_bevy::ElementValueMut::F64(v) => {
-                                    let mut str = format!("{v:.8}");
-                                    str.truncate(10);
-                                    str
-                                }
-                                impeller2_bevy::ElementValueMut::F32(v) => {
-                                    let mut str = format!("{v:.8}");
-                                    str.truncate(10);
-                                    str
-                                }
-                                impeller2_bevy::ElementValueMut::Bool(v) => v.to_string(),
-                            };
                             ui.add_space(8.0);
                             let scheme = get_scheme();
                             let value = RichText::new(value)

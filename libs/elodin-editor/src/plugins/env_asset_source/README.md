@@ -3,7 +3,7 @@
 Configures Bevy's default asset source from environment.
 
 ## What it does
-- Reads `ELODIN_ASSETS_DIR`.
+- Reads `ELODIN_ASSETS`.
 - Falls back to `assets` when the variable is not set.
 - Resolves relative paths from current working directory.
 - Registers the resulting path as default `AssetSource`.

@@ -1,6 +1,6 @@
 {
   nixConfig = {
-    extra-substituters = ["https://elodin-nix-cache.s3.us-west-2.amazonaws.com"];
+    extra-substituters = ["https://s3-us-west-2.amazonaws.com/elodin-nix-cache"];
     extra-trusted-public-keys = [
       "elodin-cache-1:vvbmIQvTOjcBjIs8Ri7xlT2I3XAmeJyF5mNlWB+fIwM="
     ];
@@ -34,6 +34,7 @@
         minimal # strips down nixos to an even more minimal set of defaults
 
         # elodin-db and integrations
+        elodin # elodin simulation CLI and packaged examples
         elodin-db # brings in elodin-db as a default service
         aleph-serial-bridge # pushes sensor data into elodin-db from the default expansion board firmware
         tegrastats-bridge # pushes telemetry form the Orin SoC into elodin-db (i.e cpu usage, temps, etc)
@@ -80,8 +81,25 @@
       #   enable = true;                    # Enable elodin-db (default: true)
       #   autostart = true;                 # Set to false to configure but not auto-start
       #   dbUniqueOnBoot = true;            # Create unique db folder on each boot
-      #   openFirewall = true;              # Open ports 2240 and 2248
+      #   openFirewall = true;              # Open TCP & UDP ports for external access
+      #   assetsDir = null;                 # DB-only default; examples below set /var/lib/elodin/assets
       # };
+
+      # Elodin simulation CLI, examples, and assets
+      # services.elodin = {
+      #   enable = true;                    # Install the elodin CLI (default: true)
+      #   examples = true;                  # Seed packaged examples + default assets, and feed them to elodin-db
+      #   enableRenderer = true;            # Enable headless sensor-camera renderer support
+      # };
+      #
+      # Any user can run sims. Shared, writable asset root:
+      #   ELODIN_ASSETS=/var/lib/elodin/assets   (drop your own meshes/skyboxes here)
+      # Packaged examples: /var/lib/elodin/examples
+      # To deploy your own assets/sims declaratively, override
+      #   services.elodin.assetsPackage / services.elodin.examplesPackage
+      # or, without packaged examples, point elodin-db at your own assets:
+      #   services.elodin.examples = false;
+      #   services.elodin-db.assetsDir = "/var/lib/my-sim/assets";
 
       # GPS module (optional, connected on J7)
       # Uncomment ONE line to enable GPS-disciplined timestamping:

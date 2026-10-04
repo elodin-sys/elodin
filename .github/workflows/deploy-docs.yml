@@ -61,7 +61,7 @@ jobs:
       - name: Setup Zola
         if: github.event.action != 'closed'
         run: |
-          curl -sL https://github.com/getzola/zola/releases/download/v0.19.2/zola-v0.19.2-x86_64-unknown-linux-gnu.tar.gz | sudo tar xz -C /usr/local/bin
+          curl -sL https://github.com/getzola/zola/releases/download/v0.22.1/zola-v0.22.1-x86_64-unknown-linux-gnu.tar.gz | sudo tar xz -C /usr/local/bin
           zola --version
 
       - name: Checkout gh-pages branch
@@ -139,8 +139,18 @@ jobs:
               ;;
           esac
           
-          git pull --rebase origin gh-pages
-          git push origin gh-pages
+          # Main and PR runs push gh-pages concurrently (e.g. a merge fires both
+          # the production deploy and the preview cleanup), so retry on a lost race.
+          for attempt in 1 2 3 4 5; do
+            git pull --rebase origin gh-pages
+            if git push origin gh-pages; then
+              exit 0
+            fi
+            echo "Push rejected (attempt $attempt), retrying..."
+            sleep $((attempt * 3))
+          done
+          echo "Failed to push gh-pages after 5 attempts"
+          exit 1
 
       # Comment on PR with preview link
       - name: Comment PR with preview link

@@ -1,0 +1,35 @@
+{
+  "mission": "SpaceX CRS-12",
+  "spacex_flight_number": 45,
+  "launch_utc": "2017-08-14T16:31:37Z",
+  "launch_pad": {
+    "name": "Kennedy Space Center LC-39A",
+    "lat_deg": 28.60839,
+    "lon_deg": -80.60433
+  },
+  "landing_zone": {
+    "name": "Landing Zone 1, Cape Canaveral",
+    "lat_deg": 28.48580,
+    "lon_deg": -80.54440,
+    "outcome": "success"
+  },
+  "booster": {
+    "serial": "B1039",
+    "flight": 1,
+    "version": "Falcon 9 Block 4"
+  },
+  "payload": {
+    "spacecraft": "Dragon 1 C113 (new)",
+    "dragon_dry_mass_kg_est": 4200,
+    "cargo_total_kg": 2910,
+    "cargo_pressurized_kg": 1652,
+    "cargo_unpressurized_kg": 1258
+  },
+  "sources": {
+    "launch_utc": "https://en.wikipedia.org/wiki/SpaceX_CRS-12",
+    "pad_and_landing": "https://www.nasaspaceflight.com/2017/08/spacex-falcon-9-launch-crs-12-dragon-mission-iss/",
+    "booster": "https://spacelaunchlive.com/launches/falcon-9-block-4-spx-crs-12/",
+    "cargo_masses": "https://www.nasa.gov/wp-content/uploads/2018/07/spacex_crs-12_missionoverview.pdf",
+    "dragon_dry_mass": "https://en.wikipedia.org/wiki/SpaceX_CRS-12"
+  }
+}

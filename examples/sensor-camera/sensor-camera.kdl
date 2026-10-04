@@ -1,0 +1,26 @@
+timeline follow_latest=#true
+hsplit {
+    viewport name=Main pos="(0,0,0,0, 14,14,10)" look_at="(0,0,0,0, 0,0,1)" show_grid=#true show_frustums=#true
+    vsplit {
+        sensor_view "cam_ball_a.scene_cam" name="RGB Camera (Cyan Ball)"
+        sensor_view "cam_ball_b.thermal_cam" name="Thermal (Magenta Ball)"
+    }
+}
+object_3d cam_ball_a.world_pos {
+    sphere radius=0.3 { color 0 220 220 }
+}
+object_3d cam_ball_b.world_pos {
+    sphere radius=0.3 { color 220 0 220 }
+}
+object_3d ball_1.world_pos {
+    sphere radius=0.3 { color 255 140 0 }
+}
+object_3d ball_2.world_pos {
+    sphere radius=0.3 { color 255 255 100 }
+}
+object_3d ball_3.world_pos {
+    sphere radius=0.3 { color 100 255 100 }
+}
+object_3d "(0,0,0,1, 0,0,0)" {
+    plane width=12 depth=12 { color 60 120 60 }
+}

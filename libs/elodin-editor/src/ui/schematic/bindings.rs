@@ -1,5 +1,5 @@
 use bevy::prelude::{Entity, Resource};
-use impeller2_wkt::NodeId;
+use impeller_wkt::NodeId;
 use std::collections::HashMap;
 
 /// Maps schematic `NodeId`s to Bevy `Entity`s at runtime.

@@ -1,13 +1,17 @@
 //! GPU rendering for plot data
 #![allow(dead_code)] // Shader struct fields appear unused to Rust but are used by GPU
 
-use bevy::asset::{AssetApp, Assets, uuid_handle};
+use bevy::asset::{AssetApp, AssetId, Assets, Handle, uuid_handle};
 use bevy::color::ColorToComponents;
 use bevy::core_pipeline::core_2d::CORE_2D_DEPTH_FORMAT;
 use bevy::ecs::bundle::Bundle;
 use bevy::ecs::entity::Entity;
+use bevy::ecs::hierarchy::ChildOf;
+use bevy::ecs::lifecycle::HookContext;
 use bevy::ecs::schedule::{IntoScheduleConfigs, SystemSet};
 use bevy::ecs::system::{Commands, Query, Res, ResMut, SystemState};
+use bevy::ecs::world::DeferredWorld;
+use bevy::log::warn_once;
 use bevy::math::{FloatOrd, Vec4};
 use bevy::prelude::Deref;
 use bevy::render::extract_component::{ComponentUniforms, DynamicUniformIndex};
@@ -17,53 +21,77 @@ use bevy::render::render_phase::{
 };
 
 use bevy::camera::visibility::RenderLayers;
-use bevy::image::BevyDefault;
 use bevy::mesh::VertexBufferLayout;
 use bevy::render::renderer::RenderQueue;
 use bevy::render::view::{ExtractedView, Msaa};
 use bevy::render::{ExtractSchedule, MainWorld, Render, RenderStartup, RenderSystems};
 use bevy::shader::Shader;
-use bevy::sprite_render::{
-    Mesh2dPipeline, Mesh2dPipelineKey, SetMesh2dViewBindGroup, init_mesh_2d_pipeline,
-};
+use bevy::sprite_render::{Mesh2dPipeline, SetMesh2dViewBindGroup, init_mesh_2d_pipeline};
 use bevy::{
-    app::Plugin,
-    asset::{Handle, load_internal_asset},
+    app::{Last, Plugin},
+    asset::load_internal_asset,
     core_pipeline::core_2d::Transparent2d,
     ecs::{
         component::Component,
         system::lifetimeless::{Read, SRes},
-        world::FromWorld,
     },
-    prelude::{Color, Resource},
+    prelude::{Color, Mut, Resource, World},
     render::{
         RenderApp,
         extract_component::UniformComponentPlugin,
         render_phase::{AddRenderCommand, PhaseItem, RenderCommand},
         render_resource::{binding_types::uniform_buffer, *},
         renderer::RenderDevice,
-        view::ViewTarget,
     },
 };
 use bevy_render::extract_component::ExtractComponent;
 use bevy_render::sync_world::{MainEntity, SyncToRenderWorld, TemporaryRenderEntity};
 use binding_types::storage_buffer_read_only_sized;
-use impeller2::types::Timestamp;
-use impeller2_wkt::GraphType;
+use impeller::types::Timestamp;
+use impeller_wkt::GraphType;
+use std::collections::HashSet;
 use std::num::NonZeroU64;
 use std::ops::Range;
 
-use crate::ui::plot::{CHUNK_COUNT, CHUNK_LEN, Line, XYLine};
+#[cfg(not(target_family = "wasm"))]
+use crate::plugins::hw_stats::HardwareStats;
+use crate::ui::ViewportRect;
+use crate::ui::plot::{CHUNK_COUNT, Line, XYLine};
 
-use super::BufferShardAlloc;
+use super::data::{
+    PLOT_GPU_NEW_VALUE_BUFFERS_PER_FRAME, PLOT_VALUE_SHARD_CLASSES, value_buffer_bytes,
+};
+use super::{
+    BufferShardAlloc, CollectedGraphData, PlotGpuAllocationPause, PlotGpuBufferPool,
+    PlotGpuPoolTrim, PlotLineKey, PlotLineUsers,
+};
+use crate::ui::widgets::SystemStateExt;
 
 const LINE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("e44f3b60-cb86-42a2-b7d8-d8dbf1f0299a");
 const POINT_SHADER_HANDLE: Handle<Shader> = uuid_handle!("4f1aa57d-aacd-4d17-859f-0dad0ee3890f");
 const BAR_SHADER_HANDLE: Handle<Shader> = uuid_handle!("091989F7-D5B1-4C6C-B9C1-EDD5EE51F1B1");
 
-pub const VALUE_BUFFER_SIZE: NonZeroU64 =
-    NonZeroU64::new((CHUNK_COUNT * CHUNK_LEN * size_of::<f32>()) as u64).unwrap();
-pub const INDEX_BUFFER_LEN: usize = 1024 * 4;
+pub(crate) fn timeseries_uses_zoh(graph_type: GraphType) -> bool {
+    matches!(graph_type, GraphType::Line)
+}
+
+pub(crate) fn timeseries_data_range(
+    line: &Line,
+    range: Range<Timestamp>,
+    graph_type: GraphType,
+) -> Range<Timestamp> {
+    if timeseries_uses_zoh(graph_type) {
+        line.data.range_with_predecessor(range)
+    } else {
+        range
+    }
+}
+
+pub const VALUE_BUFFER_SIZE: NonZeroU64 = NonZeroU64::new(value_buffer_bytes(CHUNK_COUNT)).unwrap();
+pub const MIN_VALUE_BUFFER_SIZE: NonZeroU64 =
+    NonZeroU64::new(value_buffer_bytes(PLOT_VALUE_SHARD_CLASSES[0])).unwrap();
+/// Sized for ≤30 s @ ~4 kHz truth strips (plus per-chunk sentinel overhead).
+pub const INDEX_BUFFER_LEN: usize = 1024 * 128;
 pub const INDEX_BUFFER_SIZE: NonZeroU64 =
     NonZeroU64::new((INDEX_BUFFER_LEN * size_of::<u32>()) as u64).unwrap();
 
@@ -77,8 +105,14 @@ pub struct PlotGpuPlugin;
 impl Plugin for PlotGpuPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_plugins(UniformComponentPlugin::<LineUniform>::default())
+            .init_resource::<ExtractLinesState>()
+            .init_resource::<PlotGpuAllocationPause>()
+            .init_resource::<PlotGpuBufferPool>()
+            .init_resource::<PlotLineUsers>()
+            .init_resource::<PendingUnusedPlotLines>()
             .init_asset::<Line>()
-            .init_asset::<XYLine>();
+            .init_asset::<XYLine>()
+            .add_systems(Last, apply_pending_unused_plot_lines);
 
         load_internal_asset!(app, LINE_SHADER_HANDLE, "./line.wgsl", Shader::from_wgsl);
         load_internal_asset!(app, POINT_SHADER_HANDLE, "./points.wgsl", Shader::from_wgsl);
@@ -127,8 +161,8 @@ impl Plugin for PlotGpuPlugin {
         let layout_entries = BindGroupLayoutEntries::sequential(
             ShaderStages::VERTEX,
             (
-                storage_buffer_read_only_sized(false, Some(VALUE_BUFFER_SIZE)),
-                storage_buffer_read_only_sized(false, Some(VALUE_BUFFER_SIZE)),
+                storage_buffer_read_only_sized(false, Some(MIN_VALUE_BUFFER_SIZE)),
+                storage_buffer_read_only_sized(false, Some(MIN_VALUE_BUFFER_SIZE)),
                 storage_buffer_read_only_sized(false, Some(INDEX_BUFFER_SIZE)),
             ),
         );
@@ -150,9 +184,115 @@ impl Plugin for PlotGpuPlugin {
 
 #[derive(Component, Debug, Clone, ExtractComponent)]
 #[require(SyncToRenderWorld)]
+#[component(on_add = on_line_handle_add, on_remove = on_line_handle_remove)]
 pub enum LineHandle {
     Timeseries(Handle<Line>),
     XY(Handle<XYLine>),
+}
+
+impl LineHandle {
+    fn plot_line_key(&self) -> PlotLineKey {
+        match self {
+            Self::Timeseries(handle) => PlotLineKey::Timeseries(handle.id()),
+            Self::XY(handle) => PlotLineKey::XY(handle.id()),
+        }
+    }
+}
+
+fn on_line_handle_add(mut world: DeferredWorld, ctx: HookContext) {
+    let Some(handle) = world.get::<LineHandle>(ctx.entity) else {
+        return;
+    };
+    let key = handle.plot_line_key();
+    if let Some(mut users) = world.get_resource_mut::<PlotLineUsers>() {
+        users.retain(key);
+    }
+    if let Some(mut pending) = world.get_resource_mut::<PendingUnusedPlotLines>() {
+        pending.cancel(key);
+    }
+}
+
+fn on_line_handle_remove(mut world: DeferredWorld, ctx: HookContext) {
+    if let Some(mut cache) = world.get_mut::<GpuLineCache>(ctx.entity)
+        && let Some(index_buffer) = cache.take_index_buffer()
+        && let Some(mut pool) = world.get_resource_mut::<PlotGpuBufferPool>()
+    {
+        pool.release_index(index_buffer);
+    }
+    let Some(handle) = world.get::<LineHandle>(ctx.entity) else {
+        return;
+    };
+    let key = handle.plot_line_key();
+    let remaining = world
+        .get_resource_mut::<PlotLineUsers>()
+        .map(|mut users| users.release(key))
+        .unwrap_or(0);
+    if remaining == 0
+        && let Some(mut pending) = world.get_resource_mut::<PendingUnusedPlotLines>()
+    {
+        pending.insert(key);
+    }
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct PendingUnusedPlotLines {
+    keys: HashSet<PlotLineKey>,
+}
+
+impl PendingUnusedPlotLines {
+    fn insert(&mut self, key: PlotLineKey) {
+        self.keys.insert(key);
+    }
+
+    fn cancel(&mut self, key: PlotLineKey) {
+        self.keys.remove(&key);
+    }
+
+    fn drain(&mut self) -> Vec<PlotLineKey> {
+        self.keys.drain().collect()
+    }
+}
+
+/// After the current command flush, so a same-batch retain can cancel first.
+pub(crate) fn apply_pending_unused_plot_lines(world: &mut World) {
+    let keys = world
+        .get_resource_mut::<PendingUnusedPlotLines>()
+        .map(|mut pending| pending.drain())
+        .unwrap_or_default();
+    for key in keys {
+        release_unused_plot_line(world, key);
+    }
+}
+
+fn release_unused_plot_line(world: &mut World, key: PlotLineKey) {
+    if world
+        .get_resource::<PlotLineUsers>()
+        .is_some_and(|users| users.is_used(key))
+    {
+        return;
+    }
+    if world.get_resource::<PlotGpuBufferPool>().is_none() {
+        world.init_resource::<PlotGpuBufferPool>();
+    }
+    world.resource_scope(|world, mut pool: Mut<PlotGpuBufferPool>| match key {
+        PlotLineKey::Timeseries(id) => {
+            if let Some(mut lines) = world.get_resource_mut::<Assets<Line>>()
+                && let Some(mut line) = lines.get_mut(id)
+            {
+                line.data.unload_gpu(&mut pool);
+            }
+            if let Some(mut collected) = world.get_resource_mut::<CollectedGraphData>() {
+                collected.remove_line_handle(id);
+            }
+        }
+        PlotLineKey::XY(id) => {
+            if let Some(mut xy_lines) = world.get_resource_mut::<Assets<XYLine>>()
+                && let Some(mut xy) = xy_lines.get_mut(id)
+            {
+                xy.unload_gpu(&mut pool);
+            }
+        }
+    });
 }
 
 pub enum LineMut<'a> {
@@ -161,37 +301,85 @@ pub enum LineMut<'a> {
 }
 
 impl LineMut<'_> {
+    fn uses_zoh(&self, graph_type: GraphType) -> bool {
+        matches!(self, Self::Timeseries(_)) && timeseries_uses_zoh(graph_type)
+    }
+
+    fn data_range(&self, range: Range<Timestamp>, graph_type: GraphType) -> Range<Timestamp> {
+        match self {
+            Self::Timeseries(line) => timeseries_data_range(line, range, graph_type),
+            _ => range,
+        }
+    }
+
     pub fn queue_load_range(
         &mut self,
         range: Range<Timestamp>,
         render_queue: &RenderQueue,
         render_device: &RenderDevice,
+        pool: &mut PlotGpuBufferPool,
     ) {
         match self {
             LineMut::Timeseries(line) => {
                 line.data
-                    .queue_load_range(range, render_queue, render_device)
+                    .queue_load_range(range, render_queue, render_device, pool)
             }
             LineMut::XY(xy_line) => {
-                xy_line.queue_load(render_queue, render_device);
+                xy_line.queue_load(render_queue, render_device, pool);
             }
         }
     }
 
+    pub fn gpu_resident(&self) -> bool {
+        match self {
+            LineMut::Timeseries(line) => line.data.gpu_resident(),
+            LineMut::XY(xy_line) => xy_line.gpu_resident(),
+        }
+    }
+
+    pub fn value_buffers_needing_allocation(&self, range: Range<Timestamp>) -> usize {
+        match self {
+            LineMut::Timeseries(line) => line.data.value_buffers_needing_allocation(range),
+            LineMut::XY(line) => line.value_buffers_needing_allocation(),
+        }
+    }
+
+    pub fn required_value_shards(&self, range: Range<Timestamp>) -> usize {
+        match self {
+            LineMut::Timeseries(line) => line.data.required_value_shards(range),
+            LineMut::XY(line) => line.required_value_shards(),
+        }
+    }
+
+    pub fn has_samples(&self) -> bool {
+        match self {
+            LineMut::Timeseries(line) => line.data.has_samples(),
+            LineMut::XY(xy_line) => xy_line.has_samples(),
+        }
+    }
+
+    pub fn unload_gpu(&mut self, pool: &mut PlotGpuBufferPool) {
+        match self {
+            LineMut::Timeseries(line) => line.data.unload_gpu(pool),
+            LineMut::XY(xy_line) => xy_line.unload_gpu(pool),
+        }
+    }
+
+    /// `pixel_width` only sizes the XY stride; timeseries strips are budgeted
+    /// from the index buffer alone (see [`super::data::index_sampling_step`]).
     pub fn write_to_index_buffer(
         &mut self,
         index_buffer: &Buffer,
         render_queue: &RenderQueue,
         line_visible_range: Range<Timestamp>,
         pixel_width: usize,
-    ) -> u32 {
+        zoh: bool,
+    ) -> Option<u32> {
         match self {
-            LineMut::Timeseries(line) => line.data.write_to_index_buffer(
-                index_buffer,
-                render_queue,
-                line_visible_range,
-                pixel_width,
-            ),
+            LineMut::Timeseries(line) => {
+                line.data
+                    .write_to_index_buffer(index_buffer, render_queue, line_visible_range, zoh)
+            }
             LineMut::XY(xy_line) => {
                 xy_line.write_to_index_buffer(index_buffer, render_queue, pixel_width)
             }
@@ -209,6 +397,17 @@ impl LineMut<'_> {
         match self {
             LineMut::Timeseries(line) => line.data.data_buffer_shard_alloc(),
             LineMut::XY(xy_line) => xy_line.y_shard_alloc.as_ref(),
+        }
+    }
+
+    /// Content generation for index-cache invalidation: bumps on any tree
+    /// content change — live appends, clear, rebuild (shard offsets can move
+    /// within the same buffers, and the live tip must keep advancing).
+    /// XY lines are append-only, so the point count serves as their gen.
+    pub fn content_gen(&self) -> u64 {
+        match self {
+            LineMut::Timeseries(line) => line.data.content_gen(),
+            LineMut::XY(xy_line) => xy_line.point_count() as u64,
         }
     }
 }
@@ -235,9 +434,17 @@ impl LineHandle {
         lines: &'m mut Assets<Line>,
         xy_lines: &'m mut Assets<XYLine>,
     ) -> Option<LineMut<'m>> {
+        // Untracked: the only caller (`extract_lines`) mutates GPU buffers every
+        // frame; marking `AssetEvent::Modified` here would dirty every visible
+        // line each extract. CPU-side Line/XYLine edits use `Assets::get_mut`
+        // directly and stay change-tracked.
         match self {
-            Self::Timeseries(handle) => lines.get_mut(handle).map(LineMut::Timeseries),
-            Self::XY(handle) => xy_lines.get_mut(handle).map(LineMut::XY),
+            Self::Timeseries(handle) => lines
+                .get_mut(handle)
+                .map(|line| LineMut::Timeseries(line.into_inner_untracked())),
+            Self::XY(handle) => xy_lines
+                .get_mut(handle)
+                .map(|line| LineMut::XY(line.into_inner_untracked())),
         }
     }
 }
@@ -261,7 +468,7 @@ pub struct LineBundle {
 pub struct LineUniform {
     pub line_width: f32,
     pub color: Vec4,
-    pub chunk_size: f32,
+    pub zoh: f32,
     #[cfg(target_arch = "wasm32")]
     _padding: bevy::math::Vec2,
 }
@@ -271,10 +478,15 @@ impl LineUniform {
         Self {
             line_width,
             color: Vec4::from_array(color.to_linear().to_f32_array()),
-            chunk_size: 1.0,
+            zoh: 0.0,
             #[cfg(target_arch = "wasm32")]
             _padding: Default::default(),
         }
+    }
+
+    fn with_zoh(mut self, zoh: bool) -> Self {
+        self.zoh = if zoh { 1.0 } else { 0.0 };
+        self
     }
 }
 
@@ -319,16 +531,6 @@ pub struct LinePipeline {
     storage_layout: BindGroupLayoutDescriptor,
 }
 
-impl FromWorld for LinePipeline {
-    fn from_world(world: &mut bevy::prelude::World) -> Self {
-        Self {
-            mesh_pipeline: world.resource::<Mesh2dPipeline>().clone(),
-            uniform_layout: world.resource::<UniformLayout>().descriptor.clone(),
-            storage_layout: world.resource::<LineValuesLayout>().descriptor.clone(),
-        }
-    }
-}
-
 fn init_line_pipeline(
     mut commands: Commands,
     mesh_pipeline: Res<Mesh2dPipeline>,
@@ -344,7 +546,10 @@ fn init_line_pipeline(
 
 #[derive(PartialEq, Eq, Hash, Clone)]
 pub struct LinePipelineKey {
-    view_key: Mesh2dPipelineKey,
+    msaa_samples: u32,
+    /// The view's color target format (Bevy 0.19 removed the
+    /// `Mesh2dPipelineKey::HDR` bit in favor of `ExtractedView::target_format`).
+    target_format: TextureFormat,
     graph_type: GraphType,
 }
 
@@ -368,11 +573,7 @@ impl SpecializedRenderPipeline for LinePipeline {
             self.storage_layout.clone(),
         ];
 
-        let format = if key.view_key.contains(Mesh2dPipelineKey::HDR) {
-            ViewTarget::TEXTURE_FORMAT_HDR
-        } else {
-            TextureFormat::bevy_default()
-        };
+        let format = key.target_format;
         let shader = match key.graph_type {
             GraphType::Line => LINE_SHADER_HANDLE,
             GraphType::Point => POINT_SHADER_HANDLE,
@@ -404,8 +605,8 @@ impl SpecializedRenderPipeline for LinePipeline {
             },
             depth_stencil: Some(DepthStencilState {
                 format: CORE_2D_DEPTH_FORMAT,
-                depth_write_enabled: false,
-                depth_compare: CompareFunction::Always,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(CompareFunction::Always),
                 stencil: StencilState {
                     front: StencilFaceState::IGNORE,
                     back: StencilFaceState::IGNORE,
@@ -419,12 +620,12 @@ impl SpecializedRenderPipeline for LinePipeline {
                 },
             }),
             multisample: MultisampleState {
-                count: key.view_key.msaa_samples(),
+                count: key.msaa_samples,
                 mask: !0,
                 alpha_to_coverage_enabled: false,
             },
             label: Some("Plot Line Pipeline".into()),
-            push_constant_ranges: vec![],
+            immediate_size: 0,
             zero_initialize_workgroup_memory: false,
         }
     }
@@ -447,6 +648,32 @@ pub struct GpuLine {
     values_bind_group: BindGroup,
     index_buffer: Buffer,
     count: u32,
+    zoh: bool,
+    /// Cache key part A: `(selected_span_micros, clip_start)`.
+    last_index_range: Option<(i64, i64)>,
+    /// Cache key part B: `(clip_end, pixel_width)`.
+    last_clip_range: Option<(i64, i64)>,
+    /// Cache key part C: LineTree `content_gen` — a clear/rebuild moves shard
+    /// offsets inside the same buffers, so the index strip must be rewritten
+    /// even when the visible range is unchanged (same as `plot_3d`).
+    content_gen: u64,
+    /// Identity of the x/y value buffers the bind group references; the bind
+    /// group must be rebuilt if the underlying `BufferShardAlloc` changes.
+    value_buffer_ids: (BufferId, BufferId),
+}
+
+/// Main-world cache of the per-line GPU resources, written back by
+/// `extract_lines` — same pattern as `plot_3d::gpu::GpuLineIndexCache`.
+/// Without it, every frame allocated a fresh 512 KB index buffer, created a
+/// new bind group and rewrote the full index strip for every line, which
+/// dominates frame time on graph-heavy schematics.
+#[derive(Component, Default)]
+pub struct GpuLineCache(Option<GpuLine>);
+
+impl GpuLineCache {
+    fn take_index_buffer(&mut self) -> Option<Buffer> {
+        self.0.take().map(|gpu| gpu.index_buffer)
+    }
 }
 
 pub struct SetLineBindGroup;
@@ -495,7 +722,12 @@ impl<P: PhaseItem> RenderCommand<P> for DrawLine {
             return RenderCommandResult::Failure("no gpu line");
         };
         pass.set_bind_group(2, &gpu_line.values_bind_group, &[]);
-        let instances = gpu_line.count.saturating_sub(1);
+        let segments = gpu_line.count.saturating_sub(1);
+        let instances = if gpu_line.zoh {
+            segments.saturating_mul(2)
+        } else {
+            segments
+        };
         pass.draw(0..4, 0..instances);
         RenderCommandResult::Success
     }
@@ -511,13 +743,175 @@ type DrawLine2d = (
 type LineQueryMut = (
     Entity,
     &'static LineHandle,
+    Option<&'static ChildOf>,
     &'static LineConfig,
     &'static mut LineUniform,
     &'static mut LineVisibleRange,
     &'static mut LineWidgetWidth,
     &'static mut GraphType,
-    Option<&'static mut GpuLine>,
+    Option<&'static mut GpuLineCache>,
 );
+
+type ExtractLinesParams = (
+    Query<'static, 'static, LineQueryMut>,
+    Query<'static, 'static, &'static ViewportRect>,
+    ResMut<'static, Assets<Line>>,
+    ResMut<'static, Assets<XYLine>>,
+    Res<'static, crate::SelectedTimeRange>,
+    ResMut<'static, PlotGpuBufferPool>,
+    Commands<'static, 'static>,
+);
+
+/// Main-world `SystemState` kept across frames; rebuilding it every extract
+/// re-runs query archetype matching.
+#[derive(Resource)]
+struct ExtractLinesState {
+    state: SystemState<ExtractLinesParams>,
+}
+
+impl bevy::prelude::FromWorld for ExtractLinesState {
+    fn from_world(world: &mut bevy::prelude::World) -> Self {
+        Self {
+            state: SystemState::new(world),
+        }
+    }
+}
+
+/// Whether last frame's draw may stand in for a line whose upload was deferred.
+///
+/// Only when the cache still names the value buffers the line owns. An
+/// allocation the line has given up may already have been handed to another
+/// line and overwritten, and replaying that bind group would draw the wrong
+/// data — a far worse failure than a gap.
+pub(crate) fn plot_draw_replay_allowed<T: PartialEq>(cached: Option<T>, owned: Option<T>) -> bool {
+    owned.is_some() && cached == owned
+}
+
+/// Last frame's draw for this line, if replaying it is safe.
+fn replayable_gpu_line<'a>(
+    cache: Option<&'a GpuLineCache>,
+    line: &LineMut<'_>,
+    zoh: bool,
+) -> Option<&'a GpuLine> {
+    let owned = line
+        .x_buffer_shard_alloc()
+        .zip(line.y_buffer_shard_alloc())
+        .map(|(x, y)| (x.buffer().id(), y.buffer().id()));
+    let gpu = cache?.0.as_ref()?;
+    (gpu.zoh == zoh && plot_draw_replay_allowed(Some(gpu.value_buffer_ids), owned)).then_some(gpu)
+}
+
+fn line_gpu_pane_on_screen(
+    child_of: Option<&ChildOf>,
+    viewport_rects: &Query<&ViewportRect>,
+) -> bool {
+    let Some(child) = child_of else {
+        return true;
+    };
+    viewport_rects
+        .get(child.parent())
+        .ok()
+        .and_then(|rect| rect.0)
+        .is_some()
+}
+
+pub(crate) fn visible_plot_gpu_asset_ids<'a>(
+    entries: impl IntoIterator<Item = (&'a LineHandle, bool)>,
+) -> (HashSet<AssetId<Line>>, HashSet<AssetId<XYLine>>) {
+    let mut timeseries = HashSet::new();
+    let mut xy = HashSet::new();
+    for (handle, on_screen) in entries {
+        if !on_screen {
+            continue;
+        }
+        match handle {
+            LineHandle::Timeseries(h) => {
+                timeseries.insert(h.id());
+            }
+            LineHandle::XY(h) => {
+                xy.insert(h.id());
+            }
+        }
+    }
+    (timeseries, xy)
+}
+
+pub(crate) fn unload_plot_gpu_not_on_screen(
+    line_assets: &mut Assets<Line>,
+    xy_assets: &mut Assets<XYLine>,
+    visible_ts: &HashSet<AssetId<Line>>,
+    visible_xy: &HashSet<AssetId<XYLine>>,
+    pool: &mut PlotGpuBufferPool,
+) {
+    let ts_unload: Vec<AssetId<Line>> = line_assets
+        .iter()
+        .filter_map(|(id, line)| {
+            if visible_ts.contains(&id) || !line.data.gpu_resident() {
+                None
+            } else {
+                Some(id)
+            }
+        })
+        .collect();
+    for id in ts_unload {
+        if let Some(mut line) = line_assets.get_mut(id) {
+            line.data.unload_gpu(pool);
+        }
+    }
+
+    let xy_unload: Vec<AssetId<XYLine>> = xy_assets
+        .iter()
+        .filter_map(|(id, xy_line)| {
+            if visible_xy.contains(&id) || !xy_line.gpu_resident() {
+                None
+            } else {
+                Some(id)
+            }
+        })
+        .collect();
+    for id in xy_unload {
+        if let Some(mut xy_line) = xy_assets.get_mut(id) {
+            xy_line.unload_gpu(pool);
+        }
+    }
+}
+
+pub(crate) fn evict_all_plot_gpu(
+    main_world: &mut bevy::prelude::World,
+    render_world: &mut bevy::prelude::World,
+) -> PlotGpuPoolTrim {
+    let trim =
+        main_world.resource_scope(|world, mut pool: bevy::prelude::Mut<PlotGpuBufferPool>| {
+            if let Some(mut lines) = world.get_resource_mut::<Assets<Line>>() {
+                for (_, line) in lines.iter_mut() {
+                    line.data.unload_gpu(&mut pool);
+                }
+            }
+            if let Some(mut xy_lines) = world.get_resource_mut::<Assets<XYLine>>() {
+                for (_, line) in xy_lines.iter_mut() {
+                    line.unload_gpu(&mut pool);
+                }
+            }
+            let mut caches = world.query::<&mut GpuLineCache>();
+            for mut cache in caches.iter_mut(world) {
+                if let Some(gpu) = cache.0.take() {
+                    pool.release_index(gpu.index_buffer);
+                }
+            }
+            pool.set_live_shard_occupancy(0, 0);
+            pool.drain()
+        });
+    if let Some(mut pause) = main_world.get_resource_mut::<PlotGpuAllocationPause>() {
+        pause.pause_for_recovery();
+    }
+
+    let mut gpu_lines = render_world.query_filtered::<Entity, bevy::prelude::With<GpuLine>>();
+    let entities: Vec<_> = gpu_lines.iter(render_world).collect();
+    for entity in entities {
+        render_world.despawn(entity);
+    }
+    trim
+}
 
 fn extract_lines(
     mut main_world: ResMut<MainWorld>,
@@ -526,92 +920,324 @@ fn extract_lines(
     render_queue: Res<RenderQueue>,
     values_layout: Res<LineValuesLayout>,
 ) {
-    let mut state = SystemState::<(
-        Query<'static, 'static, LineQueryMut>,
-        ResMut<'static, Assets<Line>>,
-        ResMut<'static, Assets<XYLine>>,
-    )>::new(&mut main_world);
-    let (mut lines, mut line_assets, mut xy_lines) = state.get_mut(&mut main_world);
-    for (entity, line_handle, config, uniform, line_visible_range, width, graph_type, gpu_line) in
-        lines.iter_mut()
-    {
-        let Some(mut line) = line_handle.get(&mut line_assets, &mut xy_lines) else {
-            continue;
-        };
-        line.queue_load_range(line_visible_range.0.clone(), &render_queue, &render_device);
-        let index_buffer = if let Some(ref gpu_line) = gpu_line {
-            gpu_line.index_buffer.clone()
-        } else {
-            render_device.create_buffer(
-                &(BufferDescriptor {
-                    label: Some("Line index Buffer"),
-                    size: (INDEX_BUFFER_LEN * size_of::<u32>()) as u64,
-                    usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                }),
-            )
-        };
+    main_world.resource_scope(
+        |world, mut cached_state: bevy::prelude::Mut<ExtractLinesState>| {
+            if world
+                .get_resource_mut::<PlotGpuAllocationPause>()
+                .is_some_and(|mut pause| pause.is_active())
+            {
+                return;
+            }
+            #[cfg(not(target_family = "wasm"))]
+            let gpu_pressure_high = world
+                .get_resource::<HardwareStats>()
+                .and_then(|stats| stats.device_memory)
+                .is_some_and(|memory| {
+                    memory.total_bytes > 0
+                        && memory.used_bytes.saturating_mul(100)
+                            >= memory.total_bytes.saturating_mul(92)
+                });
+            #[cfg(target_family = "wasm")]
+            let gpu_pressure_high = false;
+            let mut new_value_budget = if gpu_pressure_high {
+                0
+            } else {
+                PLOT_GPU_NEW_VALUE_BUFFERS_PER_FRAME
+            };
+            let (
+                mut lines,
+                viewport_rects,
+                mut line_assets,
+                mut xy_lines,
+                selected_range,
+                mut plot_gpu_pool,
+                mut main_commands,
+            ) = cached_state.state.params_mut(world);
+            let selected = selected_range.0.clone();
+            let selected_span_micros = selected.end.0.saturating_sub(selected.start.0);
+            let short_window = crate::is_short_accuracy_window(&selected);
 
-        let values_bind_group = if let Some(ref gpu_line) = gpu_line {
-            gpu_line.values_bind_group.clone()
-        } else {
-            let size = Some(VALUE_BUFFER_SIZE);
-            render_device.create_bind_group(
-                "line values",
-                &values_layout.layout,
-                &[
-                    BindGroupEntry {
-                        binding: 0,
-                        resource: BindingResource::Buffer(BufferBinding {
-                            buffer: line.x_buffer_shard_alloc().expect("no x buf").buffer(),
-                            offset: 0,
-                            size,
-                        }),
-                    },
-                    BindGroupEntry {
-                        binding: 1,
-                        resource: BindingResource::Buffer(BufferBinding {
-                            buffer: line.y_buffer_shard_alloc().expect("no y buf").buffer(),
-                            offset: 0,
-                            size,
-                        }),
-                    },
-                    BindGroupEntry {
-                        binding: 2,
-                        resource: BindingResource::Buffer(BufferBinding {
-                            buffer: &index_buffer,
-                            offset: 0,
-                            size: Some(INDEX_BUFFER_SIZE),
-                        }),
-                    },
-                ],
-            )
-        };
-        let count = line.write_to_index_buffer(
-            &index_buffer,
-            &render_queue,
-            line_visible_range.0.clone(),
-            width.0,
-        );
-        let gpu_line = GpuLine {
-            values_bind_group,
-            index_buffer,
-            count,
-        };
+            plot_gpu_pool.tick();
 
-        commands.spawn((
-            MainEntity::from(entity),
-            LineBundle {
-                line: line_handle.clone(),
-                config: config.clone(),
-                uniform: *uniform,
-                line_visible_range: line_visible_range.clone(),
-                graph_type: *graph_type,
-            },
-            gpu_line,
-            TemporaryRenderEntity,
-        ));
-    }
+            let mut on_screen_entries = Vec::new();
+            for (entity, line_handle, child_of, _, _, _, _, _, mut cache) in lines.iter_mut() {
+                let on_screen = line_gpu_pane_on_screen(child_of, &viewport_rects);
+                if !on_screen
+                    && let Some(ref mut cache) = cache
+                    && let Some(gpu) = cache.0.take()
+                {
+                    plot_gpu_pool.release_index(gpu.index_buffer);
+                }
+                on_screen_entries.push((entity, line_handle.clone(), on_screen));
+            }
+            let (visible_ts, visible_xy) = visible_plot_gpu_asset_ids(
+                on_screen_entries
+                    .iter()
+                    .map(|(_, handle, on_screen)| (handle, *on_screen)),
+            );
+            unload_plot_gpu_not_on_screen(
+                &mut line_assets,
+                &mut xy_lines,
+                &visible_ts,
+                &visible_xy,
+                &mut plot_gpu_pool,
+            );
+
+            for (
+                entity,
+                line_handle,
+                child_of,
+                config,
+                uniform,
+                line_visible_range,
+                width,
+                graph_type,
+                mut cache,
+            ) in lines.iter_mut()
+            {
+                if !line_gpu_pane_on_screen(child_of, &viewport_rects) {
+                    continue;
+                }
+                let Some(mut line) = line_handle.get(&mut line_assets, &mut xy_lines) else {
+                    continue;
+                };
+                if !line.has_samples() {
+                    if line.gpu_resident() {
+                        line.unload_gpu(&mut plot_gpu_pool);
+                    }
+                    if let Some(ref mut cache) = cache
+                        && let Some(gpu) = cache.0.take()
+                    {
+                        plot_gpu_pool.release_index(gpu.index_buffer);
+                    }
+                    continue;
+                }
+                let zoh = line.uses_zoh(*graph_type);
+                let draw_uniform = uniform.with_zoh(zoh);
+                let has_index_cache = cache.as_ref().is_some_and(|c| c.0.is_some());
+                // Camera / clip: continuous visible range for short windows (silky scrub);
+                // long windows keep 100 ms quantum to limit index rewrite churn.
+                let visible = line_visible_range.0.clone();
+                let clip_range = if short_window {
+                    visible.clone()
+                } else {
+                    crate::quantize_visible_range(
+                        visible.clone(),
+                        crate::TRAILING_RANGE_QUANTUM_MICROS,
+                    )
+                };
+                let data_range = line.data_range(clip_range.clone(), *graph_type);
+                let required_value_shards = line.required_value_shards(data_range.clone());
+                let value_buffers_needed =
+                    line.value_buffers_needing_allocation(data_range.clone());
+                let new_values = plot_gpu_pool
+                    .new_value_allocations_needed(value_buffers_needed, required_value_shards);
+                if plot_gpu_pool.defer_new_allocs(
+                    value_buffers_needed,
+                    has_index_cache,
+                    required_value_shards,
+                ) || new_values > new_value_budget
+                {
+                    // Replay last frame's geometry rather than leaving the line
+                    // out of this frame: the draw is rebuilt from scratch every
+                    // frame, so a gap here is a visible flicker while a few
+                    // stale frames are not.
+                    if let Some(gpu_line) = replayable_gpu_line(cache.as_deref(), &line, zoh) {
+                        commands.spawn((
+                            MainEntity::from(entity),
+                            LineBundle {
+                                line: line_handle.clone(),
+                                config: config.clone(),
+                                uniform: draw_uniform,
+                                line_visible_range: line_visible_range.clone(),
+                                graph_type: *graph_type,
+                            },
+                            gpu_line.clone(),
+                            TemporaryRenderEntity,
+                        ));
+                    }
+                    continue;
+                }
+                new_value_budget -= new_values;
+                // Short windows: step = 1 on clip (truth). Long windows: pixel stride on clip.
+                line.queue_load_range(
+                    data_range.clone(),
+                    &render_queue,
+                    &render_device,
+                    &mut plot_gpu_pool,
+                );
+                let Some(x_alloc) = line.x_buffer_shard_alloc() else {
+                    continue;
+                };
+                let x_size = Some(x_alloc.binding_size());
+                let x_buffer = x_alloc.buffer().clone();
+                let Some(y_alloc) = line.y_buffer_shard_alloc() else {
+                    continue;
+                };
+                let y_size = Some(y_alloc.binding_size());
+                let y_buffer = y_alloc.buffer().clone();
+                let value_buffer_ids = (x_buffer.id(), y_buffer.id());
+                // The bind group must be rebuilt when the value buffers move, but the
+                // index buffer does not reference them and is rewritten below. Carry it
+                // over instead of releasing it: quarantining it here would make
+                // `take_index` refuse a replacement for the whole quarantine window.
+                let mut salvaged_index = None;
+                if let Some(ref mut cache) = cache
+                    && cache
+                        .0
+                        .as_ref()
+                        .is_some_and(|gpu| gpu.value_buffer_ids != value_buffer_ids)
+                    && let Some(stale) = cache.0.take()
+                {
+                    salvaged_index = Some(stale.index_buffer);
+                }
+                // Reuse the cached buffers/bind group unless the value buffers were
+                // reallocated (new `BufferShardAlloc`).
+                let cached = cache
+                    .as_ref()
+                    .and_then(|c| c.0.as_ref())
+                    .filter(|g| g.value_buffer_ids == value_buffer_ids);
+                let (index_buffer, values_bind_group) = if let Some(gpu_line) = cached {
+                    (
+                        gpu_line.index_buffer.clone(),
+                        gpu_line.values_bind_group.clone(),
+                    )
+                } else {
+                    let Some(index_buffer) =
+                        salvaged_index.or_else(|| plot_gpu_pool.take_index(&render_device))
+                    else {
+                        continue;
+                    };
+                    let values_bind_group = render_device.create_bind_group(
+                        "line values",
+                        &values_layout.layout,
+                        &[
+                            BindGroupEntry {
+                                binding: 0,
+                                resource: BindingResource::Buffer(BufferBinding {
+                                    buffer: &x_buffer,
+                                    offset: 0,
+                                    size: x_size,
+                                }),
+                            },
+                            BindGroupEntry {
+                                binding: 1,
+                                resource: BindingResource::Buffer(BufferBinding {
+                                    buffer: &y_buffer,
+                                    offset: 0,
+                                    size: y_size,
+                                }),
+                            },
+                            BindGroupEntry {
+                                binding: 2,
+                                resource: BindingResource::Buffer(BufferBinding {
+                                    buffer: &index_buffer,
+                                    offset: 0,
+                                    size: Some(INDEX_BUFFER_SIZE),
+                                }),
+                            },
+                        ],
+                    );
+                    (index_buffer, values_bind_group)
+                };
+                let content_gen = line.content_gen();
+                let range_key = (
+                    selected_span_micros,
+                    clip_range.start.0,
+                    clip_range.end.0,
+                    width.0 as i64,
+                );
+                let prev_key = cached.and_then(|g| {
+                    let (sa, sb) = g.last_index_range?;
+                    let (ca, cb) = g.last_clip_range?;
+                    Some((sa, sb, ca, cb, g.content_gen, g.zoh))
+                });
+                let count = if prev_key
+                    == Some((
+                        range_key.0,
+                        range_key.1,
+                        range_key.2,
+                        range_key.3,
+                        content_gen,
+                        zoh,
+                    )) {
+                    Some(cached.map(|g| g.count).unwrap_or(0))
+                } else {
+                    line.write_to_index_buffer(
+                        &index_buffer,
+                        &render_queue,
+                        data_range,
+                        width.0,
+                        zoh,
+                    )
+                };
+                let Some(count) = count else {
+                    if cached.is_none() {
+                        plot_gpu_pool.release_index(index_buffer);
+                    }
+                    warn_once!("Plot index upload failed; waiting for renderer recovery");
+                    continue;
+                };
+                let gpu_line = GpuLine {
+                    values_bind_group,
+                    index_buffer,
+                    count,
+                    zoh,
+                    last_index_range: Some((range_key.0, range_key.1)),
+                    last_clip_range: Some((range_key.2, range_key.3)),
+                    content_gen,
+                    value_buffer_ids,
+                };
+
+                // Persist for the next frame's extract.
+                if let Some(ref mut cache) = cache {
+                    cache.0 = Some(gpu_line.clone());
+                } else {
+                    main_commands
+                        .entity(entity)
+                        .insert(GpuLineCache(Some(gpu_line.clone())));
+                }
+
+                commands.spawn((
+                    MainEntity::from(entity),
+                    LineBundle {
+                        line: line_handle.clone(),
+                        config: config.clone(),
+                        uniform: draw_uniform,
+                        line_visible_range: line_visible_range.clone(),
+                        graph_type: *graph_type,
+                    },
+                    gpu_line,
+                    TemporaryRenderEntity,
+                ));
+            }
+            let mut shards_used = 0;
+            let mut shards_capacity = 0;
+            for (_, line) in line_assets.iter() {
+                for alloc in [
+                    line.data.data_buffer_shard_alloc(),
+                    line.data.timestamp_buffer_shard_alloc(),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    shards_used += alloc.used_shards();
+                    shards_capacity += alloc.capacity_shards();
+                }
+            }
+            for (_, line) in xy_lines.iter() {
+                for alloc in [line.x_shard_alloc.as_ref(), line.y_shard_alloc.as_ref()]
+                    .into_iter()
+                    .flatten()
+                {
+                    shards_used += alloc.used_shards();
+                    shards_capacity += alloc.capacity_shards();
+                }
+            }
+            plot_gpu_pool.set_live_shard_occupancy(shards_used, shards_capacity);
+            cached_state.state.apply(world);
+        },
+    );
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -632,9 +1258,6 @@ fn queue_line(
             continue;
         };
 
-        let mesh_key = Mesh2dPipelineKey::from_msaa_samples(msaa.samples())
-            | Mesh2dPipelineKey::from_hdr(view.hdr);
-
         let render_layers = render_layers.unwrap_or_default();
         for (entity, main_entity, config, graph_type) in &lines {
             if !config.render_layers.intersects(render_layers) {
@@ -645,12 +1268,13 @@ fn queue_line(
                 &pipeline_cache,
                 &pipeline,
                 LinePipelineKey {
-                    view_key: mesh_key,
+                    msaa_samples: msaa.samples(),
+                    target_format: view.target_format,
                     graph_type: *graph_type,
                 },
             );
 
-            transparent_phase.add(Transparent2d {
+            transparent_phase.add_transient(Transparent2d {
                 entity: (entity, *main_entity),
                 draw_function,
                 pipeline,
@@ -661,5 +1285,197 @@ fn queue_line(
                 indexed: true,
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        LineHandle, PendingUnusedPlotLines, apply_pending_unused_plot_lines,
+        plot_draw_replay_allowed, release_unused_plot_line, timeseries_data_range,
+        timeseries_uses_zoh,
+    };
+    use crate::ui::plot::data::Chunk;
+    use crate::ui::plot::{
+        CollectedGraphData, Line, PlotDataComponent, PlotGpuBufferPool, PlotLineKey, PlotLineUsers,
+        XYLine,
+    };
+    use bevy::asset::Assets;
+    use bevy::ecs::system::SystemState;
+    use bevy::prelude::{Commands, World};
+    use impeller::types::{ComponentId, Timestamp};
+    use impeller_wkt::GraphType;
+
+    fn plot_world() -> World {
+        let mut world = World::new();
+        world.init_resource::<PlotLineUsers>();
+        world.init_resource::<PendingUnusedPlotLines>();
+        world.init_resource::<CollectedGraphData>();
+        world.init_resource::<PlotGpuBufferPool>();
+        world.insert_resource(Assets::<Line>::default());
+        world
+    }
+
+    fn insert_collected_line(world: &mut World, handle: bevy::asset::Handle<Line>) -> ComponentId {
+        let component_id = ComponentId::new("rocket.mach");
+        let mut collected = world.resource_mut::<CollectedGraphData>();
+        let mut component = PlotDataComponent::new("rocket.mach", vec!["x".into()]);
+        component.lines.insert(0, handle);
+        collected.components.insert(component_id, component);
+        component_id
+    }
+
+    #[test]
+    fn release_is_noop_while_line_still_has_users() {
+        let mut world = plot_world();
+        let handle = world.resource_mut::<Assets<Line>>().add(Line::default());
+        let component_id = insert_collected_line(&mut world, handle.clone());
+        world.spawn(LineHandle::Timeseries(handle.clone()));
+        let key = PlotLineKey::Timeseries(handle.id());
+
+        release_unused_plot_line(&mut world, key);
+
+        assert!(
+            world
+                .resource::<CollectedGraphData>()
+                .get_line(&component_id, 0)
+                .is_some(),
+            "in-use line must not be removed from collected data"
+        );
+        assert_eq!(world.resource::<PlotLineUsers>().count(key), 1);
+    }
+
+    #[test]
+    fn deferred_release_skips_line_reacquired_before_apply() {
+        let mut world = plot_world();
+        let handle = world.resource_mut::<Assets<Line>>().add(Line::default());
+        let component_id = insert_collected_line(&mut world, handle.clone());
+        let entity = world.spawn(LineHandle::Timeseries(handle.clone())).id();
+        let key = PlotLineKey::Timeseries(handle.id());
+        assert_eq!(world.resource::<PlotLineUsers>().count(key), 1);
+
+        // Same command batch: last user drops, then a new handle retains the key.
+        // A hook-queued Command would flush after despawn and unload the live line.
+        let mut system_state: SystemState<Commands> = SystemState::new(&mut world);
+        {
+            let mut commands = system_state.get_mut(&mut world).expect("commands");
+            commands.entity(entity).despawn();
+            commands.spawn(LineHandle::Timeseries(handle));
+        }
+        system_state.apply(&mut world);
+        world.flush();
+        apply_pending_unused_plot_lines(&mut world);
+
+        assert!(
+            world
+                .resource::<CollectedGraphData>()
+                .get_line(&component_id, 0)
+                .is_some(),
+            "reacquired line must stay collected after deferred release"
+        );
+        assert_eq!(world.resource::<PlotLineUsers>().count(key), 1);
+        assert_eq!(world.query::<&LineHandle>().iter(&world).count(), 1);
+    }
+
+    #[test]
+    fn deferred_release_drops_line_that_stays_unused() {
+        let mut world = plot_world();
+        let handle = world.resource_mut::<Assets<Line>>().add(Line::default());
+        let component_id = insert_collected_line(&mut world, handle.clone());
+        let entity = world.spawn(LineHandle::Timeseries(handle.clone())).id();
+        let key = PlotLineKey::Timeseries(handle.id());
+
+        world.despawn(entity);
+        apply_pending_unused_plot_lines(&mut world);
+
+        assert!(
+            world
+                .resource::<CollectedGraphData>()
+                .get_line(&component_id, 0)
+                .is_none(),
+            "unused line must still be dropped"
+        );
+        assert_eq!(world.resource::<PlotLineUsers>().count(key), 0);
+    }
+
+    #[test]
+    fn draw_replay_needs_the_line_to_still_own_the_cached_buffers() {
+        assert!(plot_draw_replay_allowed(Some((1, 2)), Some((1, 2))));
+        assert!(
+            !plot_draw_replay_allowed(Some((1, 2)), Some((3, 4))),
+            "buffers moved: the cached bind group may now hold another line's data"
+        );
+        assert!(
+            !plot_draw_replay_allowed(Some((1, 2)), None),
+            "line owns no buffers, so nothing keeps the cached ones out of the pool"
+        );
+        assert!(
+            !plot_draw_replay_allowed(None, Some((1, 2))),
+            "nothing drawn yet"
+        );
+        assert!(!plot_draw_replay_allowed::<(u32, u32)>(None, None));
+    }
+
+    #[test]
+    fn graph_type_controls_predecessor_rendering_and_bounds() {
+        let mut line = Line::default();
+        line.data.insert(
+            Chunk::from_iter(
+                &[Timestamp(0), Timestamp(10)],
+                Timestamp(0),
+                [100.0f32, 2.0].into_iter(),
+            )
+            .expect("chunk"),
+        );
+        let visible = Timestamp(10)..Timestamp(20);
+
+        assert!(timeseries_uses_zoh(GraphType::Line));
+        assert!(!timeseries_uses_zoh(GraphType::Point));
+        assert!(!timeseries_uses_zoh(GraphType::Bar));
+        let line_range = timeseries_data_range(&line, visible.clone(), GraphType::Line);
+        assert_eq!(line_range, Timestamp(0)..Timestamp(20));
+        assert_eq!(line.data.range_summary(line_range).max, Some(100.0));
+        for graph_type in [GraphType::Point, GraphType::Bar] {
+            let range = timeseries_data_range(&line, visible.clone(), graph_type);
+            assert_eq!(range, visible);
+            assert_eq!(line.data.range_summary(range).max, Some(2.0));
+        }
+    }
+
+    /// Bevy runs `on_discard`/`on_insert` — not `on_add`/`on_remove` — when a
+    /// component is overwritten, so `LineHandle`'s hooks skip a replacement and
+    /// neither retain the new asset nor release the old one. No caller replaces
+    /// a handle with a different asset today; this records the latent trap.
+    #[test]
+    #[ignore = "LineHandle still uses on_add/on_remove; see #822 follow-up"]
+    fn replacing_line_handle_runs_retain_and_release_hooks() {
+        let mut world = plot_world();
+        world.insert_resource(Assets::<XYLine>::default());
+        let old = world
+            .resource_mut::<Assets<XYLine>>()
+            .add(XYLine::default());
+        let new = world
+            .resource_mut::<Assets<XYLine>>()
+            .add(XYLine::default());
+        let old_key = PlotLineKey::XY(old.id());
+        let new_key = PlotLineKey::XY(new.id());
+
+        let entity = world.spawn(LineHandle::XY(old.clone())).id();
+        assert_eq!(world.resource::<PlotLineUsers>().count(old_key), 1);
+
+        world.entity_mut(entity).insert(LineHandle::XY(new.clone()));
+        world.flush();
+        apply_pending_unused_plot_lines(&mut world);
+
+        assert_eq!(
+            world.resource::<PlotLineUsers>().count(new_key),
+            1,
+            "replacement handle must be retained"
+        );
+        assert_eq!(
+            world.resource::<PlotLineUsers>().count(old_key),
+            0,
+            "replaced handle must be released"
+        );
     }
 }

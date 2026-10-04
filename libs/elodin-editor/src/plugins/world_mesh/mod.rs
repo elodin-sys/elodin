@@ -2,6 +2,7 @@ use bevy::{
     ecs::query::Or,
     math::{DQuat, DVec3},
     pbr::wireframe::{Wireframe, WireframeColor},
+    platform::collections::HashSet,
     prelude::*,
 };
 use bevy_geo_frames::{GeoPosition, GeoRotation, OrDefault};
@@ -17,9 +18,13 @@ use bevy_world_mesh::terrain::{
     terrain_view::{TerrainViewComponents, TerrainViewConfig},
 };
 
-use crate::{MainCamera, sensor_camera::SensorCamera};
+use crate::{MainCamera, sensor_camera::SensorCamera, ui::tiles::ViewportConfig};
 
-type WorldMeshViewFilter = Or<(With<MainCamera>, With<SensorCamera>)>;
+/// 3D viewports and sensor feeds — not 2D graph cameras, which also carry
+/// [`MainCamera`] and would each allocate a full terrain view (~30 MiB).
+type WorldMeshViewFilter = Or<((With<MainCamera>, With<ViewportConfig>), With<SensorCamera>)>;
+type WorldMeshTerrainQuery<'w, 's> =
+    Query<'w, 's, (Entity, &'static ChildOf), (With<WorldMeshTerrain>, With<TileAtlas>)>;
 #[cfg(feature = "big_space")]
 type WorldMeshViewPositionQuery<'w, 's> = Query<
     'w,
@@ -47,9 +52,16 @@ const SPHERICAL_MAX_HEIGHT_M: f32 = 9_000.0;
 const SPHERICAL_FALLBACK_GRID_SECTORS: u32 = 64;
 const SPHERICAL_FALLBACK_GRID_STACKS: u32 = 32;
 
-/// Marker for terrain entities spawned from a schematic `world_mesh` element.
+/// Marker for terrain renderer entities spawned from a schematic `world_mesh` element.
 #[derive(Component)]
 pub struct WorldMeshTerrain;
+
+/// Spatial anchor for a real terrain renderer.
+///
+/// Geo-frame and big-space systems own this entity's transform. The renderer
+/// stays below it so its [`TerrainBundle`] model-local transform is preserved.
+#[derive(Component)]
+struct WorldMeshTerrainAnchor;
 
 /// Editor integration layer for the real `bevy_world_mesh` terrain renderer.
 ///
@@ -71,7 +83,7 @@ pub(crate) fn spawn_world_mesh_terrain(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     world_mesh_materials: &mut Assets<bevy_world_mesh::prelude::WorldMeshMaterial>,
-    world_mesh: &impeller2_wkt::WorldMesh,
+    world_mesh: &impeller_wkt::WorldMesh,
 ) -> Entity {
     let region = world_mesh.region.clone();
     let config = if region == "globe" {
@@ -84,23 +96,12 @@ pub(crate) fn spawn_world_mesh_terrain(
         WorldMeshConfig::Terrain(config) => {
             let tile_atlas = TileAtlas::new(&config);
             let mut terrain_bundle = TerrainBundle::new(tile_atlas);
-            apply_world_mesh_transform_and_visibility(&mut terrain_bundle, world_mesh);
+            terrain_bundle.visibility = world_mesh_visibility(world_mesh);
 
             let material =
                 world_mesh_materials.add(bevy_world_mesh::prelude::WorldMeshMaterial::default());
 
-            let entity = commands
-                .spawn((
-                    terrain_bundle,
-                    MeshMaterial3d(material),
-                    WorldMeshTerrain,
-                    Name::new(format!("world_mesh terrain ({region})")),
-                ))
-                .id();
-
-            insert_geo_components(commands, entity, world_mesh);
-            insert_big_space_cell(commands, entity);
-            entity
+            spawn_world_mesh_terrain_bundle(commands, terrain_bundle, material, world_mesh, &region)
         }
         WorldMeshConfig::Fallback(fallback) => {
             spawn_world_mesh_fallback(commands, meshes, materials, world_mesh, &region, fallback)
@@ -118,15 +119,36 @@ enum WorldMeshFallback {
     Globe,
 }
 
-fn apply_world_mesh_transform_and_visibility(
-    terrain_bundle: &mut TerrainBundle,
-    world_mesh: &impeller2_wkt::WorldMesh,
-) {
-    terrain_bundle.transform = world_mesh_transform(world_mesh);
-    terrain_bundle.visibility = world_mesh_visibility(world_mesh);
+fn spawn_world_mesh_terrain_bundle(
+    commands: &mut Commands,
+    terrain_bundle: TerrainBundle,
+    material: Handle<bevy_world_mesh::prelude::WorldMeshMaterial>,
+    world_mesh: &impeller_wkt::WorldMesh,
+    region: &str,
+) -> Entity {
+    let anchor = commands
+        .spawn((
+            WorldMeshTerrainAnchor,
+            world_mesh_transform(world_mesh),
+            Visibility::Visible,
+            Name::new(format!("world_mesh terrain ({region})")),
+        ))
+        .id();
+
+    commands.spawn((
+        terrain_bundle,
+        MeshMaterial3d(material),
+        WorldMeshTerrain,
+        ChildOf(anchor),
+        Name::new(format!("world_mesh terrain renderer ({region})")),
+    ));
+
+    insert_geo_components(commands, anchor, world_mesh);
+    insert_big_space_cell(commands, anchor);
+    anchor
 }
 
-fn world_mesh_transform(world_mesh: &impeller2_wkt::WorldMesh) -> Transform {
+fn world_mesh_transform(world_mesh: &impeller_wkt::WorldMesh) -> Transform {
     let mut transform = Transform::default();
     if world_mesh.frame.or_default().is_some() {
         return transform;
@@ -140,7 +162,7 @@ fn world_mesh_transform(world_mesh: &impeller2_wkt::WorldMesh) -> Transform {
 fn insert_geo_components(
     commands: &mut Commands,
     entity: Entity,
-    world_mesh: &impeller2_wkt::WorldMesh,
+    world_mesh: &impeller_wkt::WorldMesh,
 ) {
     let Some(frame) = world_mesh.frame.or_default() else {
         return;
@@ -148,11 +170,11 @@ fn insert_geo_components(
     let (x, y, z) = world_mesh.translate.unwrap_or_default();
     commands.entity(entity).insert((
         GeoPosition(frame, DVec3::new(x, y, z)),
-        GeoRotation::absolute(frame, DQuat::IDENTITY),
+        GeoRotation::relative(frame, DQuat::IDENTITY),
     ));
 }
 
-fn world_mesh_visibility(world_mesh: &impeller2_wkt::WorldMesh) -> Visibility {
+fn world_mesh_visibility(world_mesh: &impeller_wkt::WorldMesh) -> Visibility {
     if world_mesh.visible {
         Visibility::Visible
     } else {
@@ -198,6 +220,12 @@ fn planar_terrain_config(region: &str, lod_count: Option<u32>) -> WorldMeshConfi
         "fetch_real_terrain and preprocess",
     );
 
+    let dataset_tiles = bevy_world_mesh::terrain::formats::TC::load_file(
+        bevy_world_mesh::terrain::util::asset_path(format!("{terrain_path}/config.tc")),
+    )
+    .map(|tc| tc.tiles.len() as u32)
+    .unwrap_or(0);
+
     let config = TerrainConfig {
         lod_count: planar_lod_count(lod_count),
         model: TerrainModel::planar(
@@ -207,6 +235,7 @@ fn planar_terrain_config(region: &str, lod_count: Option<u32>) -> WorldMeshConfi
             height,
         ),
         path: terrain_path,
+        atlas_size: bevy_world_mesh::terrain::terrain::planar_atlas_size(dataset_tiles),
         ..default()
     }
     .add_attachment(AttachmentConfig {
@@ -351,7 +380,7 @@ fn spawn_world_mesh_fallback(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
-    world_mesh: &impeller2_wkt::WorldMesh,
+    world_mesh: &impeller_wkt::WorldMesh,
     region: &str,
     fallback: WorldMeshFallback,
 ) -> Entity {
@@ -369,17 +398,15 @@ fn spawn_world_mesh_fallback(
 
 fn spawn_planar_fallback_grid(
     commands: &mut Commands,
-    world_mesh: &impeller2_wkt::WorldMesh,
+    world_mesh: &impeller_wkt::WorldMesh,
     region: &str,
 ) -> Entity {
     commands
         .spawn((
-            bevy_infinite_grid::InfiniteGridBundle {
-                settings: fallback_grid_settings(world_mesh.frame),
-                transform: world_mesh_transform(world_mesh),
-                visibility: world_mesh_visibility(world_mesh),
-                ..default()
-            },
+            bevy::dev_tools::infinite_grid::InfiniteGrid,
+            fallback_grid_settings(world_mesh.frame),
+            world_mesh_transform(world_mesh),
+            world_mesh_visibility(world_mesh),
             WorldMeshTerrain,
             Name::new(format!("world_mesh fallback grid ({region})")),
         ))
@@ -388,14 +415,14 @@ fn spawn_planar_fallback_grid(
 
 fn fallback_grid_settings(
     frame: Option<bevy_geo_frames::GeoFrame>,
-) -> bevy_infinite_grid::InfiniteGridSettings {
+) -> bevy::dev_tools::infinite_grid::InfiniteGridSettings {
     let (x_axis_color, z_axis_color) = if frame == Some(bevy_geo_frames::GeoFrame::NED) {
         (crate::ui::colors::bevy::GREEN, crate::ui::colors::bevy::RED)
     } else {
         (crate::ui::colors::bevy::RED, crate::ui::colors::bevy::GREEN)
     };
 
-    bevy_infinite_grid::InfiniteGridSettings {
+    bevy::dev_tools::infinite_grid::InfiniteGridSettings {
         minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
         major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
         z_axis_color,
@@ -410,7 +437,7 @@ fn spawn_globe_fallback(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
-    world_mesh: &impeller2_wkt::WorldMesh,
+    world_mesh: &impeller_wkt::WorldMesh,
     region: &str,
 ) -> Entity {
     let mut transform = world_mesh_transform(world_mesh);
@@ -448,34 +475,65 @@ fn spawn_globe_fallback(
 }
 
 /// The terrain renderer needs one [`TileTree`] per `(terrain, camera)` pair.
-/// Editor viewports are spawned dynamically from KDL, so wire the pairs after
-/// both the terrain entity and viewport cameras exist.
+/// Only schematic viewports and sensor cameras participate — graph
+/// `MainCamera`s are excluded by [`WorldMeshViewFilter`].
 fn sync_terrain_view_components(
-    terrains: Query<(Entity, &TileAtlas), With<WorldMeshTerrain>>,
+    mut terrains: Query<(Entity, &mut TileAtlas), With<WorldMeshTerrain>>,
     cameras: Query<Entity, WorldMeshViewFilter>,
     mut tile_trees: ResMut<TerrainViewComponents<TileTree>>,
 ) {
-    tile_trees
-        .retain(|(terrain, view), _| terrains.get(*terrain).is_ok() && cameras.get(*view).is_ok());
+    let live_terrains: HashSet<Entity> = terrains.iter().map(|(terrain, _)| terrain).collect();
+    let live_views: HashSet<Entity> = cameras.iter().collect();
+    let dropped: Vec<(Entity, Entity)> = tile_trees
+        .keys()
+        .copied()
+        .filter(|(terrain, view)| !live_terrains.contains(terrain) || !live_views.contains(view))
+        .collect();
+
+    for key in dropped {
+        if let Some(mut tree) = tile_trees.remove(&key)
+            && let Ok((_, mut tile_atlas)) = terrains.get_mut(key.0)
+        {
+            tree.disconnect(&mut tile_atlas);
+        }
+    }
 
     let view_config = TerrainViewConfig::default();
-    for (terrain, tile_atlas) in &terrains {
+    for (terrain, tile_atlas) in &mut terrains {
         for view in &cameras {
             tile_trees
                 .entry((terrain, view))
-                .or_insert_with(|| TileTree::new(tile_atlas, &view_config));
+                .or_insert_with(|| TileTree::new(&tile_atlas, &view_config));
         }
     }
 }
 
+/// A world-absolute position expressed in a terrain's model space.
+///
+/// The terrain renderer's model coordinates live under its anchor entity, so
+/// tile LOD selection needs the camera position pulled back through the
+/// anchor's global pose. With the anchor at the origin this is the identity,
+/// which is all the pre-geo-anchor code supported.
+fn terrain_model_view_position(
+    anchor_translation: DVec3,
+    anchor_rotation: DQuat,
+    view_absolute: DVec3,
+) -> DVec3 {
+    anchor_rotation.inverse() * (view_absolute - anchor_translation)
+}
+
 #[cfg(feature = "big_space")]
 fn sync_terrain_view_positions(
-    mut commands: Commands,
+    terrains: WorldMeshTerrainQuery,
+    anchors: Query<(&Transform, Option<&crate::spatial::GridCell>), With<WorldMeshTerrainAnchor>>,
     cameras: WorldMeshViewPositionQuery,
     parents: Query<(&Transform, &crate::spatial::GridCell)>,
     floating_origin: Res<crate::spatial::FloatingOriginSettings>,
+    mut view_positions: ResMut<TerrainViewComponents<TerrainViewPosition>>,
 ) {
-    for (entity, transform, cell, parent) in &cameras {
+    view_positions
+        .retain(|(terrain, view), _| terrains.get(*terrain).is_ok() && cameras.get(*view).is_ok());
+    for (camera, transform, cell, parent) in &cameras {
         let absolute = cell
             .map(|cell| floating_origin.grid_position_double(cell, transform))
             .or_else(|| {
@@ -486,29 +544,217 @@ fn sync_terrain_view_positions(
             })
             .unwrap_or_else(|| transform.translation.as_dvec3());
 
-        commands
-            .entity(entity)
-            .insert(TerrainViewPosition(absolute));
+        for (terrain, anchor) in &terrains {
+            let Ok((anchor_transform, anchor_cell)) = anchors.get(anchor.parent()) else {
+                continue;
+            };
+            let anchor_translation = anchor_cell
+                .map(|cell| floating_origin.grid_position_double(cell, anchor_transform))
+                .unwrap_or_else(|| anchor_transform.translation.as_dvec3());
+            let local = terrain_model_view_position(
+                anchor_translation,
+                anchor_transform.rotation.as_dquat(),
+                absolute,
+            );
+            view_positions.insert((terrain, camera), TerrainViewPosition(local));
+        }
     }
 }
 
 #[cfg(not(feature = "big_space"))]
 fn sync_terrain_view_positions(
-    mut commands: Commands,
+    terrains: WorldMeshTerrainQuery,
+    anchors: Query<&Transform, With<WorldMeshTerrainAnchor>>,
     cameras: Query<(Entity, &Transform), WorldMeshViewFilter>,
+    mut view_positions: ResMut<TerrainViewComponents<TerrainViewPosition>>,
 ) {
-    for (entity, transform) in &cameras {
-        commands
-            .entity(entity)
-            .insert(TerrainViewPosition(transform.translation.as_dvec3()));
+    view_positions
+        .retain(|(terrain, view), _| terrains.get(*terrain).is_ok() && cameras.get(*view).is_ok());
+    for (camera, transform) in &cameras {
+        let absolute = transform.translation.as_dvec3();
+        for (terrain, anchor) in &terrains {
+            let Ok(anchor_transform) = anchors.get(anchor.parent()) else {
+                continue;
+            };
+            let local = terrain_model_view_position(
+                anchor_transform.translation.as_dvec3(),
+                anchor_transform.rotation.as_dquat(),
+                absolute,
+            );
+            view_positions.insert((terrain, camera), TerrainViewPosition(local));
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bevy_geo_frames::GeoFrame;
-    use impeller2_wkt::{NodeId, WorldMesh};
+    use bevy::ecs::system::RunSystemOnce;
+    use bevy_geo_frames::{GeoContext, GeoFrame};
+    use impeller_wkt::{NodeId, WorldMesh};
+
+    #[test]
+    fn terrain_model_view_position_is_identity_at_origin() {
+        let view = DVec3::new(10.0, 20.0, 30.0);
+        let local = terrain_model_view_position(DVec3::ZERO, DQuat::IDENTITY, view);
+        assert!((local - view).length() < 1e-12);
+    }
+
+    #[test]
+    fn terrain_model_view_position_pulls_back_through_the_anchor_pose() {
+        // A terrain anchored far from the origin (the ECEF case): a camera
+        // sitting exactly at the anchor must select tiles as if it were at
+        // the terrain model origin, not 6,371 km away.
+        let anchor = DVec3::new(-2.0e6, -4.5e6, 3.8e6);
+        let rotation = DQuat::from_rotation_z(0.7) * DQuat::from_rotation_x(-0.3);
+        let local = terrain_model_view_position(anchor, rotation, anchor);
+        assert!(
+            local.length() < 1e-6,
+            "camera at anchor => model origin, got {local:?}"
+        );
+
+        // A point offset from the anchor along a rotated axis lands on that
+        // axis in model space with the offset preserved.
+        let offset = rotation * DVec3::new(0.0, 123.0, 0.0);
+        let local = terrain_model_view_position(anchor, rotation, anchor + offset);
+        assert!(
+            (local - DVec3::new(0.0, 123.0, 0.0)).length() < 1e-6,
+            "got {local:?}"
+        );
+    }
+
+    #[test]
+    fn sync_writes_terrain_relative_view_positions() {
+        let translate = (1_000.0, 2_000.0, 50.0);
+        let (mut app, anchor, renderer) = spawn_model_terrain(
+            TerrainModel::planar(DVec3::ZERO, 250.0, 0.0, 100.0),
+            world_mesh(Some(GeoFrame::ENU), Some(translate)),
+        );
+        apply_geo_transforms(&mut app);
+
+        app.init_resource::<TerrainViewComponents<TerrainViewPosition>>();
+        #[cfg(feature = "big_space")]
+        app.insert_resource(crate::spatial::FloatingOriginSettings::new(10_000.0, 100.0));
+
+        let anchor_transform = *app.world().get::<Transform>(anchor).unwrap();
+        let camera_pos = anchor_transform.translation + Vec3::new(3.0, 4.0, 5.0);
+        let camera = app
+            .world_mut()
+            .spawn((
+                Transform::from_translation(camera_pos),
+                MainCamera,
+                test_viewport_config(),
+            ))
+            .id();
+        #[cfg(feature = "big_space")]
+        app.world_mut()
+            .entity_mut(camera)
+            .insert(crate::spatial::GridCell::default());
+
+        app.world_mut()
+            .run_system_once(sync_terrain_view_positions)
+            .unwrap();
+
+        let view_positions = app
+            .world()
+            .resource::<TerrainViewComponents<TerrainViewPosition>>();
+        let local = view_positions
+            .get(&(renderer, camera))
+            .expect("keyed view position for the (terrain, camera) pair")
+            .0;
+        let expected = terrain_model_view_position(
+            anchor_transform.translation.as_dvec3(),
+            anchor_transform.rotation.as_dquat(),
+            camera_pos.as_dvec3(),
+        );
+        assert!(
+            (local - expected).length() < 1e-4,
+            "keyed position {local:?} != expected {expected:?}"
+        );
+        // The pulled-back position must be near the model origin, not out at
+        // the anchor's world offset.
+        assert!(local.length() < 10.0, "not terrain-relative: {local:?}");
+    }
+
+    #[test]
+    fn sync_skips_graph_cameras_that_only_have_main_camera() {
+        let (mut app, _, renderer) = spawn_model_terrain(
+            TerrainModel::planar(DVec3::ZERO, 250.0, 0.0, 100.0),
+            world_mesh(Some(GeoFrame::ENU), None),
+        );
+        app.init_resource::<TerrainViewComponents<TileTree>>();
+        let graph_cam = app.world_mut().spawn(MainCamera).id();
+
+        app.world_mut()
+            .run_system_once(sync_terrain_view_components)
+            .unwrap();
+
+        let trees = app.world().resource::<TerrainViewComponents<TileTree>>();
+        assert!(
+            trees.get(&(renderer, graph_cam)).is_none(),
+            "2D graph cameras must not allocate a terrain view"
+        );
+    }
+
+    #[test]
+    fn sync_creates_views_for_viewports_and_sensor_cameras() {
+        let (mut app, _, renderer) = spawn_model_terrain(
+            TerrainModel::planar(DVec3::ZERO, 250.0, 0.0, 100.0),
+            world_mesh(Some(GeoFrame::ENU), None),
+        );
+        app.init_resource::<TerrainViewComponents<TileTree>>();
+        let viewport = app
+            .world_mut()
+            .spawn((MainCamera, test_viewport_config()))
+            .id();
+        let sensor = app.world_mut().spawn(SensorCamera { config_index: 0 }).id();
+        let graph_cam = app.world_mut().spawn(MainCamera).id();
+
+        app.world_mut()
+            .run_system_once(sync_terrain_view_components)
+            .unwrap();
+
+        let trees = app.world().resource::<TerrainViewComponents<TileTree>>();
+        assert!(trees.get(&(renderer, viewport)).is_some());
+        assert!(trees.get(&(renderer, sensor)).is_some());
+        assert!(trees.get(&(renderer, graph_cam)).is_none());
+        assert_eq!(trees.len(), 2);
+    }
+
+    #[test]
+    fn sync_drops_trees_for_despawned_viewports() {
+        let (mut app, _, renderer) = spawn_model_terrain(
+            TerrainModel::planar(DVec3::ZERO, 250.0, 0.0, 100.0),
+            world_mesh(Some(GeoFrame::ENU), None),
+        );
+        app.init_resource::<TerrainViewComponents<TileTree>>();
+        let viewport = app
+            .world_mut()
+            .spawn((MainCamera, test_viewport_config()))
+            .id();
+
+        app.world_mut()
+            .run_system_once(sync_terrain_view_components)
+            .unwrap();
+        assert!(
+            app.world()
+                .resource::<TerrainViewComponents<TileTree>>()
+                .get(&(renderer, viewport))
+                .is_some()
+        );
+
+        app.world_mut().entity_mut(viewport).despawn();
+        app.world_mut()
+            .run_system_once(sync_terrain_view_components)
+            .unwrap();
+        assert!(
+            app.world()
+                .resource::<TerrainViewComponents<TileTree>>()
+                .get(&(renderer, viewport))
+                .is_none(),
+            "despawned viewports must drop their terrain tree"
+        );
+    }
 
     #[test]
     fn planar_lod_count_defaults_to_preprocessed_depth() {
@@ -526,17 +772,173 @@ mod tests {
     }
 
     #[test]
-    fn framed_world_mesh_transform_stays_at_origin_for_geo_pipeline() {
+    fn planar_model_transform_survives_geo_and_big_space_integration() {
+        let model_translation = Vec3::new(0.0, -40.0, 0.0);
+        let model_scale = Vec3::splat(250.0);
+        let (mut app, anchor, renderer) = spawn_model_terrain(
+            TerrainModel::planar(model_translation.as_dvec3(), 250.0, 0.0, 100.0),
+            world_mesh(Some(GeoFrame::NED), Some((1.0, 2.0, 3.0))),
+        );
+
+        apply_geo_transforms(&mut app);
+
+        let transform = app.world().get::<Transform>(renderer).unwrap();
+        assert_eq!(transform.translation, model_translation);
+        assert_eq!(transform.scale, model_scale);
+        assert_eq!(
+            app.world().get::<ChildOf>(renderer).unwrap().parent(),
+            anchor
+        );
+        assert!(app.world().get::<GeoPosition>(renderer).is_none());
+        assert!(app.world().get::<GeoRotation>(renderer).is_none());
+        assert!(app.world().get::<GeoPosition>(anchor).is_some());
+        assert!(app.world().get::<TileAtlas>(renderer).is_some());
+        #[cfg(feature = "big_space")]
+        {
+            assert!(
+                app.world()
+                    .get::<crate::spatial::GridCell>(anchor)
+                    .is_some()
+            );
+            assert!(
+                app.world()
+                    .get::<crate::spatial::GridCell>(renderer)
+                    .is_none()
+            );
+        }
+
+        assert!(app.world_mut().despawn(anchor));
+        assert!(
+            app.world().get_entity(renderer).is_err(),
+            "despawning the schematic root must clean up its renderer child"
+        );
+    }
+
+    #[test]
+    fn globe_ellipsoid_scale_survives_geo_and_big_space_integration() {
+        let major_axis = 6_378_137.0;
+        let minor_axis = 6_356_752.0;
+        let (mut app, _, renderer) = spawn_model_terrain(
+            TerrainModel::ellipsoid(
+                DVec3::ZERO,
+                major_axis,
+                minor_axis,
+                SPHERICAL_MIN_HEIGHT_M,
+                SPHERICAL_MAX_HEIGHT_M,
+            ),
+            world_mesh(Some(GeoFrame::ECEF), Some((10.0, 20.0, 30.0))),
+        );
+
+        apply_geo_transforms(&mut app);
+
+        let transform = app.world().get::<Transform>(renderer).unwrap();
+        assert_eq!(transform.translation, Vec3::ZERO);
+        assert_eq!(
+            transform.scale,
+            Vec3::new(major_axis as f32, minor_axis as f32, major_axis as f32)
+        );
+    }
+
+    #[test]
+    fn planar_enu_anchor_stays_level_in_bevy() {
+        let (mut app, anchor, _) = spawn_model_terrain(
+            TerrainModel::planar(DVec3::ZERO, 250.0, 0.0, 100.0),
+            world_mesh(Some(GeoFrame::ENU), None),
+        );
+        apply_geo_transforms(&mut app);
+        let rotation = app.world().get::<Transform>(anchor).unwrap().rotation;
+        assert!(
+            rotation.dot(Quat::IDENTITY).abs() > 1.0 - 1e-5,
+            "planar ENU terrain should sit level in Bevy, got {rotation:?}"
+        );
+    }
+
+    #[test]
+    fn planar_ned_anchor_stays_level_in_bevy() {
+        let (mut app, anchor, _) = spawn_model_terrain(
+            TerrainModel::planar(DVec3::ZERO, 250.0, 0.0, 100.0),
+            world_mesh(Some(GeoFrame::NED), None),
+        );
+        apply_geo_transforms(&mut app);
+        let rotation = app.world().get::<Transform>(anchor).unwrap().rotation;
+        assert!(
+            rotation.dot(Quat::IDENTITY).abs() > 1.0 - 1e-5,
+            "planar NED terrain should sit level in Bevy, got {rotation:?}"
+        );
+    }
+
+    #[test]
+    fn framed_world_mesh_anchor_stays_at_origin_for_geo_pipeline() {
         let world_mesh = world_mesh(Some(GeoFrame::NED), Some((1.0, 2.0, 3.0)));
 
         assert_eq!(world_mesh_transform(&world_mesh).translation, Vec3::ZERO);
     }
 
     #[test]
-    fn unframed_world_mesh_transform_uses_default_geo_frame() {
+    fn unframed_world_mesh_anchor_uses_default_geo_frame() {
         let world_mesh = world_mesh(None, Some((1.0, 2.0, 3.0)));
 
         assert_eq!(world_mesh_transform(&world_mesh).translation, Vec3::ZERO);
+    }
+
+    fn spawn_model_terrain(model: TerrainModel, world_mesh: WorldMesh) -> (App, Entity, Entity) {
+        let config = TerrainConfig {
+            model,
+            path: "terrain-transform-regression-test".to_string(),
+            ..default()
+        };
+        let terrain_bundle = TerrainBundle::new(TileAtlas::new(&config));
+        let mut app = App::new();
+        app.insert_resource(GeoContext::default());
+
+        let anchor = {
+            let mut commands = app.world_mut().commands();
+            spawn_world_mesh_terrain_bundle(
+                &mut commands,
+                terrain_bundle,
+                Handle::default(),
+                &world_mesh,
+                &world_mesh.region,
+            )
+        };
+        app.world_mut().flush();
+
+        let renderer = {
+            let world = app.world_mut();
+            let mut renderers =
+                world.query_filtered::<Entity, (With<WorldMeshTerrain>, With<TileAtlas>)>();
+            renderers.single(world).expect("one terrain renderer")
+        };
+        (app, anchor, renderer)
+    }
+
+    fn apply_geo_transforms(app: &mut App) {
+        app.world_mut()
+            .run_system_once(bevy_geo_frames::apply_transforms)
+            .unwrap();
+        app.world_mut()
+            .run_system_once(bevy_geo_frames::apply_geo_rotation)
+            .unwrap();
+    }
+
+    fn test_viewport_config() -> ViewportConfig {
+        ViewportConfig {
+            aspect: None,
+            configured_near: None,
+            configured_far: None,
+            show_arrows: false,
+            create_frustum: false,
+            show_frustums: false,
+            show_coverage_in_viewport: false,
+            show_projection_2d: false,
+            frustums_color: default(),
+            projection_color: default(),
+            frustums_thickness: 0.006,
+            frustums_up_marker: default(),
+            frustums_up_marker_overlay: false,
+            cinematic: false,
+            bloom: None,
+        }
     }
 
     fn world_mesh(frame: Option<GeoFrame>, translate: Option<(f64, f64, f64)>) -> WorldMesh {

@@ -48,7 +48,6 @@ cargo fmt -p cranelift-mlir -- --check
 
 # Full simulation regression (requires `just install` first):
 just install
-source .venv/bin/activate
 ELODIN_BACKEND=cranelift bash scripts/ci/regress.sh --all                                 # every example
 ELODIN_BACKEND=cranelift bash scripts/ci/regress.sh ball examples/ball/main.py            # one example
 ELODIN_BACKEND=cranelift bash scripts/ci/regress.sh --update ball examples/ball/main.py   # re-baseline after verifying correctness

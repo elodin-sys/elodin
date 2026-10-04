@@ -1,0 +1,73 @@
+diff --git a/src/main/fc/core.c b/src/main/fc/core.c
+index 390006d64..f8d06ac79 100644
+--- a/src/main/fc/core.c
++++ b/src/main/fc/core.c
+@@ -1497,10 +1497,6 @@ FAST_CODE void taskFiltering(timeUs_t currentTimeUs)
+ FAST_CODE void taskMainPidLoop(timeUs_t currentTimeUs)
+ {
+ 
+-#if ENABLE_SIMULATOR_GYROPID_SYNC
+-    if (lockMainPID() != 0) return;
+-#endif
+-
+     // DEBUG_PIDLOOP, timings for:
+     // 0 - gyroUpdate()
+     // 1 - subTaskPidController()
+diff --git a/src/main/scheduler/scheduler.c b/src/main/scheduler/scheduler.c
+index eace67b46..a662db495 100644
+--- a/src/main/scheduler/scheduler.c
++++ b/src/main/scheduler/scheduler.c
+@@ -537,6 +537,18 @@ FAST_CODE void scheduler(void)
+ #if defined(UNIT_TEST)
+         lastTargetCycles = clockMicrosToCycles(gyroTask->lastExecutedAtUs);
+ #endif
++#if ENABLE_SIMULATOR_GYROPID_SYNC
++        // In gyro/PID lockstep the FDM packet is the gyro data-ready event and the
++        // only trigger for one gyro/filter/PID/mixer iteration. lockMainPID()
++        // trylocks mainLoopLock, which the UDP receive thread releases at the end
++        // of updateState() once a full packet is published, so a successful trylock
++        // means exactly one fresh sample. Anchor the cycle bookkeeping to the
++        // present so the non-realtime guard below sees a full gyro-period window.
++        lastTargetCycles = nowCycles;
++        nextTargetCycles = nowCycles + desiredPeriodCycles;
++        schedLoopRemainingCycles = desiredPeriodCycles;
++        const bool runRealtimeGroup = (lockMainPID() == 0);
++#else
+         nextTargetCycles = lastTargetCycles + desiredPeriodCycles;
+         schedLoopRemainingCycles = cmpTimeCycles(nextTargetCycles, nowCycles);
+ 
+@@ -557,7 +569,11 @@ FAST_CODE void scheduler(void)
+         }
+ 
+         // Once close to the timing boundary, poll for it's arrival
+-        if (schedLoopRemainingCycles < schedLoopStartCycles) {
++        const bool runRealtimeGroup = schedLoopRemainingCycles < schedLoopStartCycles;
++#endif
++
++        if (runRealtimeGroup) {
++#if !ENABLE_SIMULATOR_GYROPID_SYNC
+             if (schedLoopStartCycles > schedLoopStartMinCycles) {
+                 schedLoopStartCycles -= schedLoopStartDeltaDownCycles;
+             }
+@@ -566,6 +582,7 @@ FAST_CODE void scheduler(void)
+                 nowCycles = getCycleCounter();
+                 schedLoopRemainingCycles = cmpTimeCycles(nextTargetCycles, nowCycles);
+             }
++#endif
+ #endif
+             currentTimeUs = micros();
+             taskExecutionTimeUs += schedulerExecuteTask(gyroTask, currentTimeUs);
+diff --git a/src/platform/SIMULATOR/include/platform/platform.h b/src/platform/SIMULATOR/include/platform/platform.h
+index 3759c26a1..dc6582c53 100644
+--- a/src/platform/SIMULATOR/include/platform/platform.h
++++ b/src/platform/SIMULATOR/include/platform/platform.h
+@@ -38,7 +38,9 @@
+ 
+ #define I2CDEV_COUNT        0
+ 
++#ifndef RUN_LOOP_DELAY_US
+ #define RUN_LOOP_DELAY_US 50 // max 20khz run loop frequency
++#endif
+ #define USE_MAIN_ARGS
+ #define GYRO_COUNT 1 // 1 Gyro
+ 
