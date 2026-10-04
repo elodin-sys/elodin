@@ -648,9 +648,10 @@ sim = w.to_jax(sys, simulation_rate=1.0 / SIM_TIME_STEP)
 att_est = []
 for index in range(0, 500):
     sim.step(1)
-    att_est.append(sim.get_state(component_name="att_est", entity_name="ore_sat"))
+    # OreSat is the only entity with att_est; its state is already a (4,) quaternion.
+    att_est.append(sim.get_state(component_name="att_est"))
 
-att_est = np.array(att_est)
+att_est = np.stack(att_est)
 plt.figure(figsize=(10, 6))
 for i in range(4):
     plt.plot(att_est[:, i].flatten(), label=f"Element {i + 1}")
