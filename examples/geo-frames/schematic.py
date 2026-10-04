@@ -127,7 +127,7 @@ def build() -> ui.Schematic:
         # TODO: These compasses are rotated such that they're correct with
         # respect to the ENU origin, not with respect to where they are on the
         # world proper.
-        # 
+        #
         # ui.object_3d(
         #     "(0,0,0,1, ecef_equator_x_pos.world_pos[4],ecef_equator_x_pos.world_pos[5],ecef_equator_x_pos.world_pos[6])",
         #     mesh=ui.glb(
