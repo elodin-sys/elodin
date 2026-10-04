@@ -124,20 +124,24 @@ def build() -> ui.Schematic:
                 size=48.0,
             ),
         ),
-        ui.object_3d(
-            "(0,0,0,1, ecef_equator_x_pos.world_pos[4],ecef_equator_x_pos.world_pos[5],ecef_equator_x_pos.world_pos[6])",
-            mesh=ui.glb(
-                "db:compass.glb",
-                scale=1000000.0,
-                translate=(0.0, 0.0, 0.0),
-                rotate=(0.0, 0.0, 0.0),
-                emissivity=0.0,
-                glow=0.0,
-            ),
-            frame="ECEF",
-            frame_orientation="ENU",
-            orientation="absolute",
-        ),
+        # TODO: These compasses are rotated such that they're correct with
+        # respect to the ENU origin, not with respect to where they are on the
+        # world proper.
+        # 
+        # ui.object_3d(
+        #     "(0,0,0,1, ecef_equator_x_pos.world_pos[4],ecef_equator_x_pos.world_pos[5],ecef_equator_x_pos.world_pos[6])",
+        #     mesh=ui.glb(
+        #         "db:compass.glb",
+        #         scale=1000000.0,
+        #         translate=(0.0, 0.0, 0.0),
+        #         rotate=(0.0, 0.0, 0.0),
+        #         emissivity=0.0,
+        #         glow=0.0,
+        #     ),
+        #     frame="ECEF",
+        #     frame_orientation="ENU",
+        #     orientation="absolute",
+        # ),
         ui.object_3d(
             "ecef_equator_y_pos.world_pos",
             mesh=ui.box(
@@ -165,20 +169,20 @@ def build() -> ui.Schematic:
                 size=48.0,
             ),
         ),
-        ui.object_3d(
-            "(0,0,0,1, ecef_equator_y_pos.world_pos[4],ecef_equator_y_pos.world_pos[5],ecef_equator_y_pos.world_pos[6])",
-            mesh=ui.glb(
-                "db:compass.glb",
-                scale=1000000.0,
-                translate=(0.0, 0.0, 0.0),
-                rotate=(0.0, 0.0, 0.0),
-                emissivity=0.0,
-                glow=0.0,
-            ),
-            frame="ECEF",
-            frame_orientation="ENU",
-            orientation="absolute",
-        ),
+        # ui.object_3d(
+        #     "(0,0,0,1, ecef_equator_y_pos.world_pos[4],ecef_equator_y_pos.world_pos[5],ecef_equator_y_pos.world_pos[6])",
+        #     mesh=ui.glb(
+        #         "db:compass.glb",
+        #         scale=1000000.0,
+        #         translate=(0.0, 0.0, 0.0),
+        #         rotate=(0.0, 0.0, 0.0),
+        #         emissivity=0.0,
+        #         glow=0.0,
+        #     ),
+        #     frame="ECEF",
+        #     frame_orientation="ENU",
+        #     orientation="absolute",
+        # ),
         ui.object_3d(
             "ecef_equator_x_neg.world_pos",
             mesh=ui.box(
@@ -206,20 +210,20 @@ def build() -> ui.Schematic:
                 size=48.0,
             ),
         ),
-        ui.object_3d(
-            "(0,0,0,1, ecef_equator_x_neg.world_pos[4],ecef_equator_x_neg.world_pos[5],ecef_equator_x_neg.world_pos[6])",
-            mesh=ui.glb(
-                "db:compass.glb",
-                scale=1000000.0,
-                translate=(0.0, 0.0, 0.0),
-                rotate=(0.0, 0.0, 0.0),
-                emissivity=0.0,
-                glow=0.0,
-            ),
-            frame="ECEF",
-            frame_orientation="ENU",
-            orientation="absolute",
-        ),
+        # ui.object_3d(
+        #     "(0,0,0,1, ecef_equator_x_neg.world_pos[4],ecef_equator_x_neg.world_pos[5],ecef_equator_x_neg.world_pos[6])",
+        #     mesh=ui.glb(
+        #         "db:compass.glb",
+        #         scale=1000000.0,
+        #         translate=(0.0, 0.0, 0.0),
+        #         rotate=(0.0, 0.0, 0.0),
+        #         emissivity=0.0,
+        #         glow=0.0,
+        #     ),
+        #     frame="ECEF",
+        #     frame_orientation="ENU",
+        #     orientation="absolute",
+        # ),
         ui.object_3d(
             "ecef_equator_y_neg.world_pos",
             mesh=ui.box(
@@ -247,20 +251,20 @@ def build() -> ui.Schematic:
                 size=48.0,
             ),
         ),
-        ui.object_3d(
-            "(0,0,0,1, ecef_equator_y_neg.world_pos[4],ecef_equator_y_neg.world_pos[5],ecef_equator_y_neg.world_pos[6])",
-            mesh=ui.glb(
-                "db:compass.glb",
-                scale=1000000.0,
-                translate=(0.0, 0.0, 0.0),
-                rotate=(0.0, 0.0, 0.0),
-                emissivity=0.0,
-                glow=0.0,
-            ),
-            frame="ECEF",
-            frame_orientation="ENU",
-            orientation="absolute",
-        ),
+        # ui.object_3d(
+        #     "(0,0,0,1, ecef_equator_y_neg.world_pos[4],ecef_equator_y_neg.world_pos[5],ecef_equator_y_neg.world_pos[6])",
+        #     mesh=ui.glb(
+        #         "db:compass.glb",
+        #         scale=1000000.0,
+        #         translate=(0.0, 0.0, 0.0),
+        #         rotate=(0.0, 0.0, 0.0),
+        #         emissivity=0.0,
+        #         glow=0.0,
+        #     ),
+        #     frame="ECEF",
+        #     frame_orientation="ENU",
+        #     orientation="absolute",
+        # ),
         ui.object_3d(
             "ecef_north_pole.world_pos",
             mesh=ui.box(
@@ -288,20 +292,20 @@ def build() -> ui.Schematic:
                 size=48.0,
             ),
         ),
-        ui.object_3d(
-            "(0,0,0,1, ecef_north_pole.world_pos[4],ecef_north_pole.world_pos[5],ecef_north_pole.world_pos[6])",
-            mesh=ui.glb(
-                "db:compass.glb",
-                scale=1000000.0,
-                translate=(0.0, 0.0, 0.0),
-                rotate=(0.0, 0.0, 0.0),
-                emissivity=0.0,
-                glow=0.0,
-            ),
-            frame="ECEF",
-            frame_orientation="ENU",
-            orientation="absolute",
-        ),
+        # ui.object_3d(
+        #     "(0,0,0,1, ecef_north_pole.world_pos[4],ecef_north_pole.world_pos[5],ecef_north_pole.world_pos[6])",
+        #     mesh=ui.glb(
+        #         "db:compass.glb",
+        #         scale=1000000.0,
+        #         translate=(0.0, 0.0, 0.0),
+        #         rotate=(0.0, 0.0, 0.0),
+        #         emissivity=0.0,
+        #         glow=0.0,
+        #     ),
+        #     frame="ECEF",
+        #     frame_orientation="ENU",
+        #     orientation="absolute",
+        # ),
         ui.object_3d(
             "ecef_south_pole.world_pos",
             mesh=ui.box(
@@ -329,20 +333,20 @@ def build() -> ui.Schematic:
                 size=48.0,
             ),
         ),
-        ui.object_3d(
-            "(0,0,0,1, ecef_south_pole.world_pos[4],ecef_south_pole.world_pos[5],ecef_south_pole.world_pos[6])",
-            mesh=ui.glb(
-                "db:compass.glb",
-                scale=1000000.0,
-                translate=(0.0, 0.0, 0.0),
-                rotate=(0.0, 0.0, 0.0),
-                emissivity=0.0,
-                glow=0.0,
-            ),
-            frame="ECEF",
-            frame_orientation="ENU",
-            orientation="absolute",
-        ),
+        # ui.object_3d(
+        #     "(0,0,0,1, ecef_south_pole.world_pos[4],ecef_south_pole.world_pos[5],ecef_south_pole.world_pos[6])",
+        #     mesh=ui.glb(
+        #         "db:compass.glb",
+        #         scale=1000000.0,
+        #         translate=(0.0, 0.0, 0.0),
+        #         rotate=(0.0, 0.0, 0.0),
+        #         emissivity=0.0,
+        #         glow=0.0,
+        #     ),
+        #     frame="ECEF",
+        #     frame_orientation="ENU",
+        #     orientation="absolute",
+        # ),
         ui.object_3d(
             "ned_origin.world_pos",
             mesh=ui.box(
