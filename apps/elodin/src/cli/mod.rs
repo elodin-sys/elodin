@@ -1,10 +1,7 @@
 use clap::{Parser, Subcommand};
 use tracing_subscriber::{EnvFilter, fmt::time::ChronoLocal, prelude::*};
-<<<<<<< HEAD
 mod auth;
-=======
 mod db;
->>>>>>> main
 mod editor;
 #[cfg(not(target_os = "windows"))]
 mod monte_carlo;
@@ -137,24 +134,6 @@ impl Cli {
             .build()
             .expect("tokio runtime failed to start");
 
-<<<<<<< HEAD
-        // Auth commands manage their own config dir and must not be gated by the
-        // first-launch onboarding (which exits early to nudge the Python SDK install).
-        let is_auth_command = matches!(
-            self.command,
-            Some(Commands::Signup(_))
-                | Some(Commands::Login(_))
-                | Some(Commands::Logout)
-                | Some(Commands::Whoami(_))
-                | Some(Commands::Projects(_))
-        );
-        if !is_auth_command && let Err(err) = self.first_launch() {
-            eprintln!("Error: {:#}", err);
-            std::process::exit(1);
-        }
-
-=======
->>>>>>> main
         match &self.command {
             Some(Commands::Signup(args)) => self.clone().signup(args.clone(), rt),
             Some(Commands::Login(args)) => self.clone().login(args.clone(), rt),
