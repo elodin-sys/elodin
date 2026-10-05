@@ -13,6 +13,9 @@ big_space = ["dep:big_space", "bevy_geo_frames/big_space"]
 inspector = ["dep:bevy-inspector-egui", "bevy_geo_frames/inspector"]
 debug = ["big_space", "big_space/debug"]
 tracy = ["bevy/trace_tracy", "bevy/debug"]
+# Temporarily drop code that does not compile for wasm. Search `feature = "wasm-cut"`
+# for remaining work. Only takes effect on wasm32 so native workspace builds stay complete.
+wasm-cut = []
 
 [dependencies]
 # math
@@ -25,7 +28,6 @@ ab_glyph = "0.2"
 
 # bevy
 bevy = { workspace = true, features = [
-  "file_watcher",
   "bevy_audio",
   "vorbis",
   "jpeg",
@@ -47,14 +49,12 @@ egui_table = "0.8"
 winit = { version = "0.30.12", default-features = false, features = [
   "rwh_05",
   "rwh_06",
-  "x11",
 ] }
 raw-window-handle = "0.5"
 big_space.workspace = true
 big_space.optional = true
 bevy_editor_cam.workspace = true
 bevy_framepace.workspace = true
-bevy_ai_skybox.path = "../bevy_ai_skybox"
 
 # rand
 fastrand.version = "2"
@@ -70,7 +70,6 @@ postcard.version = "1.0.8"
 reqwest = { version = "0.12", features = [
   "rustls-tls",
   "gzip",
-  "blocking",
 ], default-features = false }
 impeller.path = "../../libs/impeller"
 impeller.features = ["hifitime"]
@@ -99,21 +98,16 @@ arc-swap = "1.7.1"
 
 # helpers
 itertools = "0.12.1"
-opener = "0.7.1"
 hex = "0.4.3"
 web-time = "1.1.0"
 const-fnv1a-hash = "1.1.0"
 zerocopy = "0.8.14"
 hifitime.version = "4.0"
-stacker = "0.1.19"
 strum = "0.27"
 
 # arrow
 arrow.version = "55"
 arrow.features = ["canonical_extension_types"]
-
-# lua
-impeller-cli.path = "../db/cli"
 
 # channels
 flume = "0.11.1"
@@ -129,17 +123,42 @@ bevy-inspector-egui.version = "0.37"
 bevy-inspector-egui.optional = true
 bevy_defer = "0.18"
 bitvec = "1.0.1"
+thiserror.version = "2"
+miette.version = "7.2"
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 impeller-bevy.path = "../../libs/impeller/bevy"
 impeller-bevy.default-features = false
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+bevy = { workspace = true, features = [
+  "file_watcher",
+  "multi_threaded",
+  "sysinfo_plugin",
+  "x11",
+  "wayland",
+  "basis-universal",
+  "zstd_c",
+] }
+winit = { version = "0.30.12", default-features = false, features = [
+  "rwh_05",
+  "rwh_06",
+  "x11",
+] }
+reqwest = { version = "0.12", features = [
+  "rustls-tls",
+  "gzip",
+  "blocking",
+], default-features = false }
 bevy_hanabi = { version = "0.20.0-dev", default-features = false, features = ["3d"] }
+bevy_ai_skybox.path = "../bevy_ai_skybox"
 tokio = { version = "1.34", features = ["rt-multi-thread", "net"] }
 # os
 directories = "5.0"
 rfd = "0.15.2"
+opener = "0.7.1"
+stacker = "0.1.19"
+impeller-cli.path = "../db/cli"
 
 # async
 stellarator.path = "../../libs/stellarator"
@@ -180,8 +199,8 @@ image.features = ["png"]
 s10.path = "../s10"
 ffmpeg-next = "8.0.0"
 
-# non-macos
-[target.'cfg(not(target_os = "macos"))'.dependencies]
+# non-macos native video decode
+[target.'cfg(all(not(target_family = "wasm"), not(target_os = "macos")))'.dependencies]
 openh264 = "0.8"
 pic-scale = "0.6"
 

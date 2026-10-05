@@ -5782,6 +5782,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "elodin-web"
+version = "0.19.3-alpha.0"
+dependencies = [
+ "bevy",
+ "console_error_panic_hook",
+ "elodin-editor",
+ "getrandom 0.3.4",
+]
+
+[[package]]
 name = "emath"
 version = "0.34.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

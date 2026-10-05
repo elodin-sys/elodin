@@ -19,6 +19,19 @@ pub(crate) use operations::{
 };
 pub use types::*;
 
+pub(crate) fn active_write_key(
+    pending_active: &PendingActiveSchematic,
+    last_synced: &LastSyncedActiveKey,
+    config: &impeller_wkt::DbConfig,
+) -> String {
+    pending_active
+        .target
+        .clone()
+        .or_else(|| last_synced.0.clone())
+        .or_else(|| config.schematic_active().map(str::to_string))
+        .unwrap_or_else(|| ACTIVE_SCHEMATIC_KEY.to_string())
+}
+
 use bevy::prelude::*;
 
 pub(crate) fn plugin(app: &mut App) {
@@ -56,6 +69,7 @@ pub(crate) fn plugin(app: &mut App) {
         (
             systems::emit_document_reloads,
             systems::emit_document_load_failures,
+            #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
             systems::activate_document_skybox,
         )
             .chain()
