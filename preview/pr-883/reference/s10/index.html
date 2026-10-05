@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    
+<link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css" media="print" onload="this.media='all'; this.onload = null">
+<noscript><link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css"></noscript>
+
+    
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-883/fonts/spacegrotesk.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-883/fonts/ibm-plex-sans-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-883/fonts/ibm-plex-sans-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-883/fonts/ibm-plex-sans-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-883/fonts/ibm-plex-sans-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-883/fonts/ibm-plex-sans-700.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-883/fonts/ibm-plex-mono-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-883/fonts/ibm-plex-mono-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-883/fonts/ibm-plex-mono-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-883/fonts/ibm-plex-mono-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-883/fonts/ibm-plex-mono-700.woff2" type="font/woff2" crossorigin>
+
+    
+<link rel="stylesheet" href="https://docs.elodin.systems/preview/pr-883/main.css">
+
+    
+  <meta name="theme-color" content="#fff">
+  <link rel="apple-touch-icon" sizes="180x180" href="https://docs.elodin.systems/preview/pr-883/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="https://docs.elodin.systems/preview/pr-883/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="https://docs.elodin.systems/preview/pr-883/favicon-16x16.png">
+  
+    <link rel="manifest" href="https://docs.elodin.systems/preview/pr-883/site.webmanifest" crossorigin>
+  
+
+
+  
+  
+    
+  
+
+  
+  
+    
+    
+  
+
+  
+    
+  
+  
+  
+  
+    
+  
+
+  
+
+
+  <meta name="robots" content="index, follow">
+  <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+  <meta name="bingbot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+
+
+	
+
+
+	
+
+<title>Process Orchestration (s10) | Elodin</title>
+<meta name="description" content="Launch, order, and tear down flight software and helper processes alongside a simulation with s10 recipes">
+<link rel="canonical" href="https://docs.elodin.systems/preview/pr-883/reference/s10/">
+
+
+  <meta name="twitter:card" content="summary_large_image">
+  
+    <meta name="twitter:image" content="https://docs.elodin.systems/preview/pr-883/logo.png">
+  
+  <meta name="twitter:title" content="Process Orchestration (s10)">
+  <meta name="twitter:description" content="Launch, order, and tear down flight software and helper processes alongside a simulation with s10 recipes">
+  <meta name="twitter:site" content="@elodinsystems">
+  <meta name="twitter:creator" content="@elodinsystems">
+
+  <meta property="og:title" content="Process Orchestration (s10)">
+  <meta property="og:description" content="Launch, order, and tear down flight software and helper processes alongside a simulation with s10 recipes">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://docs.elodin.systems/preview/pr-883/reference/s10/">
+
+  
+    <meta property="og:image" content="https://docs.elodin.systems/preview/pr-883/logo.png">
+  
+
+  <meta property="og:updated_time" content="">
+  <meta property="og:site_name" content="Process Orchestration (s10)">
+
+  
+
+  
+
+  
+  <meta property="og:locale" content="en_US">
+
+
+
+
+
+  
+
+
+
+
+
+<script type="application/ld+json">
+  {
+    "@context": "http://schema.org",
+    "@type": "BreadcrumbList",
+    
+      
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          {
+            "@type": "ListItem",
+            "position":  1 ,
+            "name": "Home",
+            "item": "https://docs.elodin.systems/preview/pr-883/"
+          },
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  2 ,
+            "name": "Reference",
+            "item": "https://docs.elodin.systems/preview/pr-883/reference/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  3 ,
+            "name": "S10",
+            "item": "https://docs.elodin.systems/preview/pr-883/reference/s10/"
+          },
+        
+      
+    
+  }
+</script>
+
+
+
+
+</head>
+
+<body class="docs single">
+  
+    
+    
+    
+  
+  
+    
+<header class="navbar fixed-top navbar-expand-md navbar-light">
+    <div class="container">
+        <div class="col-2" style="display: flex; gap: 20px">
+            <a
+                href="https://elodin.systems"
+                class="nav-link-icon"
+                target="_blank"
+                rel="noopener noreferrer"
+                ><svg
+                    width="20"
+                    height="25"
+                    viewBox="0 0 20 25"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                >
+                    <path
+                        d="M10 0H15C17.7615 0 20 2.23858 20 5V20.0001C20 22.7615 17.7615 25.0001 15 25.0001H5C2.23853 25.0001 0 22.7615 0 20V5C0 2.23858 2.23853 1.90735e-06 5 1.90735e-06V5V20.0001H15V5L5 5C5 2.23858 7.23853 0 10 0Z"
+                        fill="currentColor"
+                    />
+                </svg>
+            </a>
+            <span>
+                <select name="version" class="version-select" disabled>
+                    <option value="v0.20.0" selected>
+                        v0.20.0
+                    </option>
+                </select>
+            </span>
+        </div>
+
+        <div
+            class="col-2 d-none d-lg-block"
+            style="margin-left: 56px"
+        >
+            <form style="width: 264px">
+                <input
+                    id="userinput"
+                    class="form-control is-search"
+                    type="search"
+                    placeholder="Search"
+                    aria-label="Search"
+                    autocomplete="off"
+                />
+                <div id="suggestions" class="shadow bg-white rounded"></div>
+            </form>
+        </div>
+        <div class="col-2 d-none d-md-block"></div>
+        <div class="col-2" style="margin-left: 35px">
+            <ul class="navbar-nav main-nav me-auto">
+                      
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-883/home/quickstart"
+                        >HOME</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item reference active"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-883/reference/overview"
+                        >Reference</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-883/releases/changelog"
+                        >Releases</a
+                    >
+                </li>
+                  
+            </ul>
+        </div>
+        <div class="col-1"></div>
+        <div
+            class="col-2 d-none d-xl-block"
+            style="margin-right: 63px"
+        >
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://github.com/elodin-sys/elodin">
+                        <i class="bx bxl-github"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://discord.gg/ywPGjarS">
+                        <i class="bx bxl-discord-alt"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a id="mode-1" class="nav-link nav-link-icon toggle-dark">
+                        <i class='bx bxs-sun'></i>
+                    </a>
+                    <a id="mode-2" class="nav-link nav-link-icon toggle-light">
+                        <i class='bx bxs-moon'></i>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</header>
+
+  
+  <div class="wrap container tom-blue" role="document">
+      <div class="content">
+          <div class="row flex-xxl-nowrap justify-content-center">
+              
+<div class="col-lg-5 col-xl-4 docs-sidebar d-none d-lg-block">
+    <nav class="docs-links" aria-label="Main navigation">
+          
+        <h3>Reference</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-883/reference/overview/"
+                    >Overview</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-883/reference/coords/"
+                    >Coordinate Systems</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-883/reference/db-asset-server/"
+                    >DB Asset Server</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-883/reference/python-api/"
+                    >Python API</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-883/reference/elodin-cli/"
+                    >Elodin CLI</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-883/reference/grpc-client/"
+                    >gRPC API</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-883/reference/replays/"
+                    >Replays</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link active"
+                    href="https://docs.elodin.systems/preview/pr-883/reference/s10/"
+                    >Process Orchestration (s10)</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-883/reference/schematic/"
+                    >Schematic KDL</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-883/reference/color-schemes/"
+                    >Color Schemes</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-883/reference/command-palette/"
+                    >Command Palette</a
+                >
+            </li>
+            
+        </ul>
+          
+         
+        <h3>Migration Guides</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-883/reference/migration/to-0-15/"
+                    >v0.14 to v0.15</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-883/reference/migration/kdl-to-python/"
+                    >Migrate KDL schematics to Python</a
+                >
+            </li>
+            
+        </ul>
+          
+    </nav>
+</div>
+
+               
+<nav
+    class="docs-toc d-none d-xxl-block col-xl-3"
+    aria-label="Secondary navigation"
+>
+    <div class="page-links">
+        <h3>On this page</h3>
+        <nav id="TableOfContents">
+            <ul>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-883/reference/s10/#when-to-use-a-recipe">When to use a recipe</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-883/reference/s10/#quick-start">Quick start</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-883/reference/s10/#recipe-types">Recipe types</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-883/reference/s10/#readiness-and-ordering">Readiness and ordering</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-883/reference/s10/#readiness-probes">Readiness probes</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-883/reference/s10/#the-simulation-waits-for-every-probed-recipe">The simulation waits for every probed recipe</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-883/reference/s10/#several-services-in-parallel">Several services in parallel</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-883/reference/s10/#services-that-must-start-one-at-a-time">Services that must start one at a time</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-883/reference/s10/#run-a-setup-script-to-completion-first">Run a setup script to completion first</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-883/reference/s10/#how-you-launch-changes-the-behavior">How you launch changes the behavior</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-883/reference/s10/#lifecycle-and-shutdown">Lifecycle and shutdown</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-883/reference/s10/#sitl-patterns">SITL patterns</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-883/reference/s10/#build-from-source-in-the-editor-prebuilt-in-campaigns">Build from source in the editor, prebuilt in campaigns</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-883/reference/s10/#per-worker-ports">Per-worker ports</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-883/reference/s10/#hitl-patterns">HITL patterns</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-883/reference/s10/#gotchas">Gotchas</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-883/reference/s10/#debugging">Debugging</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-883/reference/s10/#examples">Examples</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-883/reference/s10/#related-docs">Related docs</a>
+                    
+                </li>
+                
+            </ul>
+        </nav>
+    </div>
+</nav>
+ 
+              <main class="docs-content col-lg-11 col-xxl-10">
+                  <h1>Process Orchestration (s10)</h1>
+                  
+                  <p class="lead">Register external processes with world.recipe(...) and Elodin starts them in order, gates the sim on their readiness, and tears them down with it.</p>
+                   <p>A software-in-the-loop (SITL) or hardware-in-the-loop (HITL) simulation is rarely a single process. Flight software, SITL firmware, controllers, link bridges, and video receivers all run next to the physics. Each one needs to start in the right order and find its ports, and each one must stop when the simulation stops.</p>
+<p><strong>s10</strong> is Elodin's process orchestrator. You describe each external program as a <strong>recipe</strong>. When you launch the simulation, s10:</p>
+<ol>
+<li>starts every recipe, building Cargo recipes first,</li>
+<li>waits for each recipe's <strong>readiness probe</strong> before starting anything that depends on it, including the simulation,</li>
+<li>prefixes every line of each process's output with the recipe name,</li>
+<li>stops everything when the simulation exits or a recipe fails.</li>
+</ol>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="mermaid"><span class="giallo-l"><span>flowchart LR</span></span>
+<span class="giallo-l"><span>  Launch[&quot;elodin editor / run / monte-carlo&quot;] --&gt; Plan[&quot;python main.py plan&quot;]</span></span>
+<span class="giallo-l"><span>  Plan --&gt; Group[&quot;s10 group: recipes + sim&quot;]</span></span>
+<span class="giallo-l"><span>  Group --&gt; Ready[&quot;Recipes start, readiness probes pass&quot;]</span></span>
+<span class="giallo-l"><span>  Ready --&gt; Sim[&quot;Simulation starts&quot;]</span></span>
+<span class="giallo-l"><span>  Sim --&gt; Teardown[&quot;Simulation exits: SIGTERM, 2 s, SIGKILL&quot;]</span></span></code></pre><h3 id="when-to-use-a-recipe">When to use a recipe</h3>
+<table><thead><tr><th>You want to…</th><th>Use</th></tr></thead><tbody>
+<tr><td>Exchange data with external code in lockstep every tick</td><td>An in-process bridge in <code>pre_step</code> / <code>post_step</code> with <a href="/reference/python-api/#class-elodin-stepcontext"><code>StepContext</code></a></td></tr>
+<tr><td>Have Elodin <strong>launch and clean up</strong> an external binary next to the sim</td><td>An s10 recipe (this page)</td></tr>
+<tr><td>Connect a separately managed program or a hardware rig over the network</td><td>An Impeller2 / <a href="/reference/grpc-client">gRPC</a> client talking to Elodin DB</td></tr>
+</tbody></table>
+<p>These approaches combine. A typical SITL setup launches the flight software as a recipe and talks to it through a socket opened in <code>post_step</code>.</p>
+<h2 id="quick-start">Quick start</h2>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> elodin</span><span style="color: light-dark(#859900, #859900);"> as</span><span> el</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">from</span><span> pathlib</span><span style="color: light-dark(#859900, #859900);"> import</span><span> Path</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>world</span><span style="color: light-dark(#859900, #859900);"> =</span><span> el</span><span>.</span><span>World</span><span>(</span><span>)</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> ... entities, systems, schematic ...</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>world</span><span>.</span><span>recipe</span><span>(</span></span>
+<span class="giallo-l"><span>    el</span><span>.</span><span>s10</span><span>.</span><span>PyRecipe</span><span>.</span><span>process</span><span>(</span></span>
+<span class="giallo-l"><span>        name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">controller</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>        cmd</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#859900, #859900);">str</span><span>(</span><span>Path</span><span>(</span><span>__file__</span><span>)</span><span>.</span><span>parent</span><span style="color: light-dark(#859900, #859900);"> /</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">controller.sh</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>        ready</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>s10</span><span>.</span><span>Ready</span><span>.</span><span>tcp</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">127.0.0.1:9000</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    )</span></span>
+<span class="giallo-l"><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>world</span><span>.</span><span>run</span><span>(</span><span>system</span><span>,</span><span> simulation_rate</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">1000.0</span><span>)</span></span></code></pre><pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#2AA198, #2AA198);"> main.py</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">   #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> interactive</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> run</span><span style="color: light-dark(#2AA198, #2AA198);"> main.py</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">      #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> headless, exits with the sim&#39;s status</span></span></code></pre>
+<p>The controller starts first. The simulation starts once something accepts connections on <code>127.0.0.1:9000</code>. Controller output appears in the terminal prefixed with <code>controller</code>, and the controller is stopped when the simulation exits.</p>
+<h2 id="recipe-types">Recipe types</h2>
+<p><code>el.s10.PyRecipe.process(...)</code> runs any command. <code>el.s10.PyRecipe.cargo(...)</code> builds a Rust crate with <code>cargo build</code>, then runs the resulting binary. Both accept the same options:</p>
+<table><thead><tr><th>Parameter</th><th>Type</th><th>Default</th><th>Meaning</th></tr></thead><tbody>
+<tr><td><code>name</code></td><td><code>str</code></td><td>required</td><td>Log prefix, and the key other recipes use in <code>depends_on</code></td></tr>
+<tr><td><code>cmd</code> (process)</td><td><code>str</code></td><td>required</td><td>Executable path or command name on <code>PATH</code></td></tr>
+<tr><td><code>path</code> (cargo)</td><td><code>str</code></td><td>required</td><td>Crate directory or <code>Cargo.toml</code> path</td></tr>
+<tr><td><code>package</code>, <code>bin</code> (cargo)</td><td><code>str</code></td><td><code>None</code></td><td>Select a package or binary in a workspace</td></tr>
+<tr><td><code>args</code></td><td><code>list[str]</code></td><td><code>[]</code></td><td>Command-line arguments</td></tr>
+<tr><td><code>cwd</code></td><td><code>str</code></td><td>inherited</td><td>Working directory</td></tr>
+<tr><td><code>env</code></td><td><code>dict[str, str]</code></td><td><code>{}</code></td><td>Extra environment variables, layered on the inherited environment</td></tr>
+<tr><td><code>restart_policy</code></td><td><code>el.s10.RestartPolicy</code></td><td><code>Never</code></td><td><code>Never</code> or <code>Instant</code> (respawn on every exit)</td></tr>
+<tr><td><code>depends_on</code></td><td><code>list[str]</code></td><td><code>[]</code></td><td>Recipe names that must be ready before this one starts</td></tr>
+<tr><td><code>ready</code></td><td><code>el.s10.Ready</code></td><td><code>None</code></td><td>Readiness probe (see below)</td></tr>
+<tr><td><code>ready_timeout</code></td><td><code>str</code></td><td><code>"30s"</code></td><td>Probe deadline: <code>"500ms"</code>, <code>"10s"</code>, <code>"2m"</code>, <code>"1h"</code></td></tr>
+<tr><td><code>silence</code></td><td><code>bool</code></td><td><code>False</code></td><td>Discard the process's stdout and stderr</td></tr>
+</tbody></table>
+<p>Recipes are registered with <code>world.recipe(recipe)</code>, keyed by <code>name</code>. See the <a href="/reference/python-api/#s10-recipe-api">Python API</a> for signatures.</p>
+<h2 id="readiness-and-ordering">Readiness and ordering</h2>
+<h3 id="readiness-probes">Readiness probes</h3>
+<p>A recipe without a probe counts as ready as soon as it is spawned. A probe makes s10 wait for a real signal. Probes are checked every 50 ms until they pass or <code>ready_timeout</code> expires. A timeout is an error and stops the whole run.</p>
+<table><thead><tr><th>Probe</th><th>Passes when</th></tr></thead><tbody>
+<tr><td><code>el.s10.Ready.tcp("127.0.0.1:9000")</code></td><td>A TCP connection to the address succeeds. Use an IP literal, not a hostname.</td></tr>
+<tr><td><code>el.s10.Ready.unix("/tmp/app.sock")</code></td><td>A Unix socket connection succeeds</td></tr>
+<tr><td><code>el.s10.Ready.file("/tmp/app.ready")</code></td><td>The path exists</td></tr>
+<tr><td><code>el.s10.Ready.delay(100)</code></td><td>The given number of milliseconds have passed since spawn (not bounded by <code>ready_timeout</code>)</td></tr>
+<tr><td><code>el.s10.Ready.log("listening")</code></td><td>A line containing the pattern appears in the recipe's log. <strong>Only works in <code>elodin monte-carlo</code> campaigns</strong>, where s10 writes per-recipe log files.</td></tr>
+</tbody></table>
+<p>For <code>cargo</code> recipes, the build finishes before the readiness clock starts, so a slow compile doesn't use up <code>delay</code> or <code>ready_timeout</code>.</p>
+<h3 id="the-simulation-waits-for-every-probed-recipe">The simulation waits for every probed recipe</h3>
+<p>When Elodin plans the run, it makes the simulation depend on <strong>every recipe that has a readiness probe</strong>. You don't list the simulation anywhere. Add probes to the services you want to wait for.</p>
+<h3 id="several-services-in-parallel">Several services in parallel</h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>world</span><span>.</span><span>recipe</span><span>(</span><span>el</span><span>.</span><span>s10</span><span>.</span><span>PyRecipe</span><span>.</span><span>process</span><span>(</span></span>
+<span class="giallo-l"><span>    name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">telemetry</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> cmd</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">./run-telemetry.sh</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>    ready</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>s10</span><span>.</span><span>Ready</span><span>.</span><span>tcp</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">127.0.0.1:5000</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>)</span><span>)</span></span>
+<span class="giallo-l"><span>world</span><span>.</span><span>recipe</span><span>(</span><span>el</span><span>.</span><span>s10</span><span>.</span><span>PyRecipe</span><span>.</span><span>process</span><span>(</span></span>
+<span class="giallo-l"><span>    name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">video</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> cmd</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">./run-video.sh</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>    ready</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>s10</span><span>.</span><span>Ready</span><span>.</span><span>unix</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">/tmp/video.sock</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>)</span><span>)</span></span></code></pre>
+<p>Both start at once, and the simulation starts after both report ready.</p>
+<h3 id="services-that-must-start-one-at-a-time">Services that must start one at a time</h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>world</span><span>.</span><span>recipe</span><span>(</span><span>el</span><span>.</span><span>s10</span><span>.</span><span>PyRecipe</span><span>.</span><span>process</span><span>(</span></span>
+<span class="giallo-l"><span>    name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">router</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> cmd</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">./run-router.sh</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>    ready</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>s10</span><span>.</span><span>Ready</span><span>.</span><span>unix</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">/tmp/router.sock</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>)</span><span>)</span></span>
+<span class="giallo-l"><span>world</span><span>.</span><span>recipe</span><span>(</span><span>el</span><span>.</span><span>s10</span><span>.</span><span>PyRecipe</span><span>.</span><span>process</span><span>(</span></span>
+<span class="giallo-l"><span>    name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">flight-software</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> cmd</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">./run-flight-software.sh</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>    depends_on</span><span style="color: light-dark(#859900, #859900);">=</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">router</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>]</span><span>,</span></span>
+<span class="giallo-l"><span>    ready</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>s10</span><span>.</span><span>Ready</span><span>.</span><span>tcp</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">127.0.0.1:9005</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>)</span><span>)</span></span></code></pre>
+<p><code>flight-software</code> starts only after <code>router</code> is ready, and the simulation starts after both. Give the earlier service a probe: without one, <code>depends_on</code> only waits for it to be spawned. A <code>cargo</code> recipe with <code>depends_on</code> also waits to <em>build</em> until its dependency is ready.</p>
+<p>If a dependency exits or times out before it is ready, its dependents fail immediately with <code>dependency "router" exited before "flight-software" became ready</code>, and the run stops. s10 does not detect dependency cycles, so a cycle waits forever.</p>
+<h3 id="run-a-setup-script-to-completion-first">Run a setup script to completion first</h3>
+<p>Readiness means "up", not "finished". To hold the simulation until a script completes, have the script create a marker file as its last step, and probe for that file:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> tempfile</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>setup_done</span><span style="color: light-dark(#859900, #859900);"> =</span><span> Path</span><span>(</span><span>tempfile</span><span>.</span><span>mkdtemp</span><span>(</span><span>prefix</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">sim-setup-</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>)</span><span style="color: light-dark(#859900, #859900);"> /</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">done</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>world</span><span>.</span><span>recipe</span><span>(</span><span>el</span><span>.</span><span>s10</span><span>.</span><span>PyRecipe</span><span>.</span><span>process</span><span>(</span></span>
+<span class="giallo-l"><span>    name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">setup</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>    cmd</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">bash</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>    args</span><span style="color: light-dark(#859900, #859900);">=</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">-c</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;"> f</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;$0</span><span style="color: light-dark(#2AA198, #2AA198);">&quot; &amp;&amp; touch </span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#CB4B16, #CB4B16);">{</span><span>setup_done</span><span style="color: light-dark(#CB4B16, #CB4B16);">}</span><span style="color: light-dark(#2AA198, #2AA198);">&quot; &amp;&amp; sleep 1</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span>,</span><span style="color: light-dark(#859900, #859900);"> str</span><span>(</span><span>Path</span><span>(</span><span>__file__</span><span>)</span><span>.</span><span>parent</span><span style="color: light-dark(#859900, #859900);"> /</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">setup.sh</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>]</span><span>,</span></span>
+<span class="giallo-l"><span>    ready</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>s10</span><span>.</span><span>Ready</span><span>.</span><span>file</span><span>(</span><span style="color: light-dark(#859900, #859900);">str</span><span>(</span><span>setup_done</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    ready_timeout</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">5m</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>)</span><span>)</span></span></code></pre>
+<ul>
+<li><code>&amp;&amp;</code> means a failing <code>setup.sh</code> never creates the marker, so the simulation never starts and the run fails.</li>
+<li>The <code>sleep 1</code> gives the 50 ms probe time to see the marker. A process that exits before its probe passes counts as having died before becoming ready.</li>
+<li>A fresh temporary directory prevents a marker left over from an earlier run from passing the probe immediately.</li>
+</ul>
+<h2 id="how-you-launch-changes-the-behavior">How you launch changes the behavior</h2>
+<table><thead><tr><th>Launch</th><th>What happens</th></tr></thead><tbody>
+<tr><td><code>elodin editor main.py</code></td><td>Plans the run, starts recipes and the sim, and <strong>watches files</strong>. Saving a file in the sim's directory restarts the sim, and saving a file in a <code>cargo</code> recipe's crate rebuilds and restarts that recipe. Process recipes are not restarted.</td></tr>
+<tr><td><code>elodin run main.py</code></td><td>Same plan, run <strong>once</strong>. Exits with the simulation's status.</td></tr>
+<tr><td><code>elodin monte-carlo run main.py …</code></td><td>Plans <strong>once</strong>, then patches the plan for each run with per-worker ports and environment. See <a href="https://docs.elodin.systems/preview/pr-883/reference/s10/#sitl-patterns">SITL patterns</a>.</td></tr>
+<tr><td><code>python main.py run</code></td><td>No plan. The Python process <em>is</em> the simulation, and recipes run on a background thread. <code>depends_on</code> ordering between recipes still applies, but <strong>the simulation does not wait for readiness probes</strong>.</td></tr>
+</tbody></table>
+<p>Prefer the <code>elodin</code> CLI for anything that depends on startup order.</p>
+<h2 id="lifecycle-and-shutdown">Lifecycle and shutdown</h2>
+<table><thead><tr><th>Event</th><th>Effect</th></tr></thead><tbody>
+<tr><td>The simulation exits, successfully or not</td><td>Every recipe is stopped</td></tr>
+<tr><td>A recipe fails: spawn error, build error, readiness timeout, or a dependency that died before becoming ready</td><td>Every recipe and the simulation are stopped (under <code>python main.py run</code>, the simulation keeps running)</td></tr>
+<tr><td>A recipe exits on its own after becoming ready</td><td>Nothing else stops (with <code>restart_policy=Instant</code>, it respawns)</td></tr>
+<tr><td>The editor closes, you press Ctrl-C, or a campaign run times out</td><td>Everything is stopped</td></tr>
+</tbody></table>
+<p>"Stopped" means SIGTERM, up to 2 seconds to exit, then SIGKILL. On Linux, the editor and campaign runner also place the whole stack in a cgroup and clean it up at the end. That catches daemonized grandchildren that would otherwise keep ports bound.</p>
+<p><code>ctx.stop_recipes()</code> lets a step callback stop recipes before the simulation finishes. It only has an effect with <code>python main.py run</code>. Under the <code>elodin</code> CLI the simulation runs with <code>--no-s10</code>, so the call does nothing, and the simulation exiting already stops every recipe.</p>
+<h2 id="sitl-patterns">SITL patterns</h2>
+<h3 id="build-from-source-in-the-editor-prebuilt-in-campaigns">Build from source in the editor, prebuilt in campaigns</h3>
+<p>Rebuilding the flight software from source is convenient while editing. It is wasteful in a campaign, where every worker would run <code>cargo build</code>. While the campaign runner plans, it sets <code>ELODIN_MONTE_CARLO_PLANNING=1</code>, so a simulation can switch to a binary built once by the campaign's <code>[[build]]</code> step:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>controller_dir</span><span style="color: light-dark(#859900, #859900);"> =</span><span> Path</span><span>(</span><span>__file__</span><span>)</span><span>.</span><span>parent</span><span style="color: light-dark(#859900, #859900);"> /</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">controller</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">if</span><span> os</span><span>.</span><span>environ</span><span>.</span><span>get</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">ELODIN_MONTE_CARLO_PLANNING</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span style="color: light-dark(#859900, #859900);"> ==</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">1</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span></span>
+<span class="giallo-l"><span>    controller</span><span style="color: light-dark(#859900, #859900);"> =</span><span> el</span><span>.</span><span>s10</span><span>.</span><span>PyRecipe</span><span>.</span><span>process</span><span>(</span></span>
+<span class="giallo-l"><span>        name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">controller</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>        cmd</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#859900, #859900);">str</span><span>(</span><span>controller_dir</span><span style="color: light-dark(#859900, #859900);"> /</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">target</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#859900, #859900);"> /</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">release</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#859900, #859900);"> /</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">controller</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>        ready</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>s10</span><span>.</span><span>Ready</span><span>.</span><span>delay</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">100</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    )</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">else</span><span>:</span></span>
+<span class="giallo-l"><span>    controller</span><span style="color: light-dark(#859900, #859900);"> =</span><span> el</span><span>.</span><span>s10</span><span>.</span><span>PyRecipe</span><span>.</span><span>cargo</span><span>(</span></span>
+<span class="giallo-l"><span>        name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">controller</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>        path</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#859900, #859900);">str</span><span>(</span><span>controller_dir</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>        ready</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>s10</span><span>.</span><span>Ready</span><span>.</span><span>delay</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">100</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    )</span></span>
+<span class="giallo-l"><span>world</span><span>.</span><span>recipe</span><span>(</span><span>controller</span><span>)</span></span></code></pre>
+<p><a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/falcon9">falcon9</a>, <a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/apollo-lander">apollo-lander</a>, and <a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/rc-jet">rc-jet</a> all use this pattern.</p>
+<h3 id="per-worker-ports">Per-worker ports</h3>
+<p>Parallel campaign runs can't share fixed ports. Declare named ports in <code>campaign.toml</code> under <code>[resources.ports]</code>. The runner gives each worker its own slot and exports it as <code>ELODIN_MC_PORT_&lt;NAME&gt;</code>. There are two ways to use it:</p>
+<p><strong>From Python</strong>, <code>el.monte_carlo.port("state", 9013)</code> returns the worker's port in a campaign and the default otherwise. Pass the value to the recipe through <code>env</code>:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>state_port</span><span style="color: light-dark(#859900, #859900);"> =</span><span> el</span><span>.</span><span>monte_carlo</span><span>.</span><span>port</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">state</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 9013</span><span>)</span></span>
+<span class="giallo-l"><span>controller</span><span style="color: light-dark(#859900, #859900);"> =</span><span> el</span><span>.</span><span>s10</span><span>.</span><span>PyRecipe</span><span>.</span><span>cargo</span><span>(</span></span>
+<span class="giallo-l"><span>    name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">controller</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>    path</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#859900, #859900);">str</span><span>(</span><span>controller_dir</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    env</span><span style="color: light-dark(#859900, #859900);">=</span><span>{</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">ELODIN_MC_PORT_STATE</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span style="color: light-dark(#859900, #859900);"> str</span><span>(</span><span>state_port</span><span>)</span><span>}</span><span>,</span></span>
+<span class="giallo-l"><span>)</span></span></code></pre>
+<p>At planning time this bakes in the default port. For each run, the campaign runner overwrites <code>ELODIN_MC_PORT_*</code> in every recipe's environment with that worker's values, so the process always sees its own port.</p>
+<p><strong>Inside recipe arguments</strong>, s10 expands <code>${NAME}</code> and <code>${NAME:-default}</code> placeholders when it spawns the process:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>el</span><span>.</span><span>s10</span><span>.</span><span>PyRecipe</span><span>.</span><span>process</span><span>(</span></span>
+<span class="giallo-l"><span>    name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">controller</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>    cmd</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">./controller</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>    args</span><span style="color: light-dark(#859900, #859900);">=</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">--port</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">$</span><span style="color: light-dark(#CB4B16, #CB4B16);">{ELODIN_MC_PORT_CONTROLLER</span><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">:-31337</span><span style="color: light-dark(#CB4B16, #CB4B16);">}</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>]</span><span>,</span></span>
+<span class="giallo-l"><span>    ready</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>s10</span><span>.</span><span>Ready</span><span>.</span><span>unix</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">$</span><span style="color: light-dark(#CB4B16, #CB4B16);">{ELODIN_MONTE_CARLO_RUN_DIR</span><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">:</span><span style="color: light-dark(#CB4B16, #CB4B16);">-/tmp}</span><span style="color: light-dark(#2AA198, #2AA198);">/controller.sock</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>)</span></span></code></pre>
+<p>Placeholders are expanded in <code>args</code>, <code>cwd</code>, and probe addresses and paths. They are <strong>not</strong> expanded in <code>cmd</code> or in <code>env</code> values. <code>$$</code> produces a literal <code>$</code>. For a tool that reads its port from an environment variable, export it through a small shell wrapper:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>el</span><span>.</span><span>s10</span><span>.</span><span>PyRecipe</span><span>.</span><span>process</span><span>(</span></span>
+<span class="giallo-l"><span>    name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">controller</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>    cmd</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">sh</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>    args</span><span style="color: light-dark(#859900, #859900);">=</span><span>[</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">        &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">-c</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">        &#39;</span><span style="color: light-dark(#2AA198, #2AA198);">export CONTROLLER_PORT=&quot;$</span><span style="color: light-dark(#CB4B16, #CB4B16);">{ELODIN_MC_PORT_CONTROLLER</span><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">:-31337</span><span style="color: light-dark(#CB4B16, #CB4B16);">}</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;; exec &quot;$@&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span>,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">        &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">controller-wrapper</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">  #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> becomes $0</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">        &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">./controller</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">--config</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">sitl.toml</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>    ]</span><span>,</span></span>
+<span class="giallo-l"><span>)</span></span></code></pre>
+<p>s10 fills in the <code>${...}</code> value. <code>"$@"</code> has no braces, so s10 passes it through for the shell to expand.</p>
+<p>In campaigns, every recipe also gets <code>fail_on_error</code> turned on, so a non-zero exit fails the run. Each recipe's output goes to <code>runs/&lt;run_id&gt;/logs/&lt;recipe&gt;.log</code>.</p>
+<h2 id="hitl-patterns">HITL patterns</h2>
+<p>In a HITL rig, the flight software runs on the vehicle hardware, not on the host. s10 manages the <strong>host-side</strong> companions: link bridges (serial, radio, or UDP), log and video receivers, and operator tools. The same readiness rules let you hold the simulation until the link to the hardware is actually up:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>world</span><span>.</span><span>recipe</span><span>(</span><span>el</span><span>.</span><span>s10</span><span>.</span><span>PyRecipe</span><span>.</span><span>process</span><span>(</span></span>
+<span class="giallo-l"><span>    name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">radio-bridge</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>    cmd</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">./radio-bridge</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>    args</span><span style="color: light-dark(#859900, #859900);">=</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">--device</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">/dev/ttyACM0</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">--listen</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">127.0.0.1:9100</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>]</span><span>,</span></span>
+<span class="giallo-l"><span>    ready</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>s10</span><span>.</span><span>Ready</span><span>.</span><span>tcp</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">127.0.0.1:9100</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    ready_timeout</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">60s</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>)</span><span>)</span></span></code></pre>
+<ul>
+<li><strong>Gate on the link, not on spawn.</strong> Probe the bridge's socket so the simulation never ticks against a link that isn't up yet. If the bridge itself waits for a device node to appear, <code>Ready.file("/dev/ttyACM0")</code> works too.</li>
+<li><strong>Allow for slow hardware.</strong> Radios, USB enumeration, and boot sequences can take far longer than the 30 s default <code>ready_timeout</code>.</li>
+<li><strong>Choose a restart policy deliberately.</strong> Under the default <code>Never</code>, a bridge that crashes mid-run stays down while the simulation keeps running. <code>Instant</code> respawns it immediately, every time, including in a tight loop if the device is missing.</li>
+<li><strong>Use <code>elodin run</code> for repeatable rig runs.</strong> It exits with the simulation's status and stops every companion process.</li>
+</ul>
+<p>For the hardware side, see <a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/crazyflie-edu">crazyflie-edu</a>, which runs the same controls in SITL or HITL, and the <a href="/home/aleph/setup">Aleph</a> flight computer docs.</p>
+<h2 id="gotchas">Gotchas</h2>
+<div class="el-warning warning container-fluid">
+    <div class="row g-0 align-items-center">
+        <div class="col-1" style="padding: 4px">
+            <i class="bx bx-error" style="font-size: 1.5rem"></i>
+        </div>
+        <div class="col-15"><p>Outside campaigns, a recipe that crashes <strong>does not stop the simulation</strong>. The simulation keeps ticking against a dead process. Detect the lost connection in your bridge if you need to fail fast interactively.</p>
+</div>
+    </div>
+</div>
+<ul>
+<li>From Python, <code>restart_policy</code> defaults to <code>Never</code> and processes are never restarted on file changes.</li>
+<li><code>Ready.log(...)</code> only works inside <code>elodin monte-carlo</code> campaigns.</li>
+<li><code>Ready.tcp</code> needs an IP literal such as <code>127.0.0.1:9000</code>. <code>localhost:9000</code> is rejected.</li>
+<li><code>${...}</code> placeholders are not expanded in <code>cmd</code> or <code>env</code> values.</li>
+<li>Readiness probes only hold the simulation when it is launched through the <code>elodin</code> CLI.</li>
+<li><code>ctx.stop_recipes()</code> does nothing under the <code>elodin</code> CLI.</li>
+<li><code>cargo</code> recipes run <code>target/debug/&lt;package name&gt;</code>. Passing <code>bin=</code> changes what is built, not what is run, so keep the binary name equal to the package name.</li>
+<li><code>sim</code> and <code>render-server</code> are reserved recipe names. Elodin adds the render server automatically when the world has <a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/sensor-camera">sensor cameras</a>.</li>
+<li>In the editor, saving <code>main.py</code> restarts the simulation but reuses the original plan. Restart the editor after adding or removing <code>world.recipe(...)</code> calls.</li>
+<li>s10 orchestration is not available on Windows.</li>
+</ul>
+<h2 id="debugging">Debugging</h2>
+<ul>
+<li><strong>Read the plan.</strong> <code>python main.py plan /tmp/plan</code> writes the exact recipe group the CLI will run to <code>/tmp/plan/s10.toml</code>. Check that each recipe appears, and that the <code>sim</code> entry's <code>depends-on</code> lists the recipes you expect it to wait for.</li>
+<li><strong>Follow the prefixes.</strong> Each recipe's output is prefixed with its <code>name</code> (stdout in blue, stderr in red), and the simulation's own output with <code>sim</code>. A line like <code>controller killed with code 1</code> shows how a recipe exited.</li>
+<li><strong>Campaign logs.</strong> In <code>elodin monte-carlo</code> runs, each recipe writes to <code>runs/&lt;run_id&gt;/logs/&lt;recipe&gt;.log</code>, and <code>results.csv</code> records a <code>failure_reason</code> naming the recipe that failed.</li>
+<li><strong>Pick the Python interpreter.</strong> Set <code>ELODIN_PYTHON</code> to choose the interpreter used to plan and run the simulation. Otherwise Elodin uses the active virtualenv, <code>./.venv</code>, <code>uv run</code>, or <code>python3</code>, in that order.</li>
+</ul>
+<h2 id="examples">Examples</h2>
+<table><thead><tr><th>Example</th><th>Shows</th></tr></thead><tbody>
+<tr><td><a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/betaflight-sitl">betaflight-sitl</a></td><td>Betaflight SITL firmware as a plain process recipe, plus an optional controller</td></tr>
+<tr><td><a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/falcon9">falcon9</a></td><td>Rust flight software: cargo in the editor, prebuilt in campaigns, named ports</td></tr>
+<tr><td><a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/apollo-lander">apollo-lander</a></td><td>The same split in a full Monte Carlo campaign (<a href="/home/apollo-lander">tutorial</a>)</td></tr>
+<tr><td><a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/rc-jet">rc-jet</a></td><td>Controller with an override to a prebuilt binary and a long <code>ready_timeout</code></td></tr>
+<tr><td><a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/monte-carlo">monte-carlo</a></td><td>Minimal Python controller recipe in a campaign</td></tr>
+<tr><td><a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/video-stream">video-stream</a></td><td>Several shell-script recipes, including one that exits immediately when unused</td></tr>
+<tr><td><a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/logstream">logstream</a></td><td>A C++ client built and run by a script recipe</td></tr>
+</tbody></table>
+<h2 id="related-docs">Related docs</h2>
+<!-- title="Double Pendulum Tutorial", icon="tornado", href="tutorial/double-pend" -->
+
+<a class="el-cardlink" href="&#x2F;reference&#x2F;python-api&#x2F;#s10-recipe-api">
+    <div class="el-cardlink-text">
+        <p>
+            <i
+                class="bx bxs-book"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+            Python API: s10 recipes
+            <i
+                class="bx bxs-right-arrow-alt"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+        </p>
+    </div>
+    <div class="el-cardlink-subtext"
+        <p><p>Signatures for <code>world.recipe</code>, <code>el.s10.PyRecipe</code>, <code>el.s10.Ready</code>, and <code>el.s10.RestartPolicy</code>.</p>
+</p>
+    </div>
+</a>
+<!-- title="Double Pendulum Tutorial", icon="tornado", href="tutorial/double-pend" -->
+
+<a class="el-cardlink" href="&#x2F;reference&#x2F;elodin-cli">
+    <div class="el-cardlink-text">
+        <p>
+            <i
+                class="bx bxs-cog"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+            Elodin CLI
+            <i
+                class="bx bxs-right-arrow-alt"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+        </p>
+    </div>
+    <div class="el-cardlink-subtext"
+        <p><p><code>elodin editor</code>, <code>elodin run</code>, and <code>elodin monte-carlo</code> options.</p>
+</p>
+    </div>
+</a>
+<!-- title="Double Pendulum Tutorial", icon="tornado", href="tutorial/double-pend" -->
+
+<a class="el-cardlink" href="&#x2F;home&#x2F;apollo-lander">
+    <div class="el-cardlink-text">
+        <p>
+            <i
+                class="bx bxs-rocket"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+            Apollo Lander Tutorial
+            <i
+                class="bx bxs-right-arrow-alt"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+        </p>
+    </div>
+    <div class="el-cardlink-subtext"
+        <p><p>A complete SITL Monte Carlo campaign that launches its flight software as a recipe.</p>
+</p>
+    </div>
+</a>
+
+                  
+<div class="footer-line-padding"></div>
+<div class="footer-line"></div>
+<div class="docs-navigation d-flex justify-content-between">
+                   
+</div>
+
+              </main>
+          </div>
+      </div>
+  </div>
+  
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-883/js/main.js"></script>
+<script>
+    // https://mathjax.github.io/MathJax-demos-web/convert-configuration/convert-configuration.html
+    window.MathJax = {
+        tex: {
+            inlineMath: [
+                ["$", "$"],
+                ["\\(", "\\)"],
+            ],
+            displayMath: [
+                ["$$", "$$"],
+                ["\[\[", "\]\]"],
+            ],
+            processEscapes: true,
+            processEnvironments: true,
+        },
+        options: {
+            skipHtmlTags: ["script", "noscript", "style", "textarea", "pre"],
+        },
+    };
+</script>
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-883/js/tex-mml-chtml.js"></script>
+<script type="module">
+    // Zola < 0.22 emits class="language-mermaid"; 0.22+ (giallo) emits data-lang="mermaid".
+    const blocks = document.querySelectorAll('pre > code.language-mermaid, pre > code[data-lang="mermaid"]');
+    if (blocks.length) {
+        const { default: mermaid } = await import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs");
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: document.body.classList.contains("dark") ? "dark" : "default",
+            securityLevel: "loose",
+        });
+        const nodes = [...blocks].map((code) => {
+            const div = document.createElement("div");
+            div.className = "mermaid";
+            div.style.margin = "2rem 0";
+            div.style.overflowX = "auto";
+            div.style.textAlign = "center";
+            div.textContent = code.textContent;
+            code.parentElement.replaceWith(div);
+            return div;
+        });
+        await mermaid.run({ nodes });
+    }
+</script>
+
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-883/js/elasticlunr.min.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-883/search_index.en.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-883/js/search.js"></script>
+
+
+</body>
+
+</html>
