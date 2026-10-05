@@ -3,7 +3,6 @@
 
 import math
 import typing as ty
-from pathlib import Path
 
 import elodin as el
 import jax

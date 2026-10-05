@@ -11,6 +11,7 @@ from pathlib import Path
 import elodin as el
 import numpy as np
 
+from schematic import build as build_schematic
 from sim import DEFAULT_MAX_TICKS, PARAMS, SIMULATION_RATE_HZ, build
 
 DEFAULT_STATE_PORT = 9003
@@ -48,7 +49,6 @@ class SitlBridge:
 
 params = el.monte_carlo.params(PARAMS)
 world, system = build(params)
-from schematic import build as build_schematic
 
 world.schematic(build_schematic(), "monte-carlo.kdl")
 bridge: SitlBridge | None = None
