@@ -450,7 +450,7 @@ impl WindowIngest<'_> {
                 .map(inline_window_stem)
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| format!("window-{index}"));
-            let key = self.assign_inline_window_key(stem);
+            let key = self.assign_inline_window_key(stem.as_str());
             let mut stored = content;
             let nested = self.ingest_referenced_windows(&stored, None)?;
             if !nested.is_empty() {
