@@ -1,10 +1,9 @@
 use crate::*;
 use bevy::app::{Plugin, PreUpdate};
 use impeller::types::LenPacket;
+use impeller_bbq::AsyncArcQueueTx;
 use impeller_stellar::queue::tcp_connect;
 use impeller_wkt::StreamId;
-use std::sync::Arc;
-use std::sync::atomic::AtomicU64;
 use std::{net::SocketAddr, time::Duration};
 use thingbuf::mpsc;
 
@@ -20,8 +19,9 @@ impl TcpImpellerPlugin {
 
 impl Plugin for TcpImpellerPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
-        let (packet_tx, packet_rx, outgoing_packet_rx, incoming_packet_tx) = channels();
-        let (msg_tx, msg_rx, msg_outgoing_rx, msg_incoming_tx) = msg_channels();
+        let (packet_tx, packet_rx, outgoing_packet_rx, incoming_packet_tx) =
+            crate::channels::channels();
+        let (msg_tx, msg_rx, msg_outgoing_rx, msg_incoming_tx) = crate::channels::msg_channels();
         let stream_id = fastrand::u64(..);
         let status = if let Some(addr) = self.addr {
             app.insert_resource(ConnectionAddr(addr));
@@ -53,7 +53,7 @@ pub fn spawn_tcp_connect(
     stream_id: StreamId,
     mut reconnect: bool,
 ) -> ThreadConnectionStatus {
-    let connection_status = ThreadConnectionStatus(Arc::new(AtomicU64::new(0)));
+    let connection_status = ThreadConnectionStatus::new(ConnectionStatus::NoConnection);
     let ret_connection_status = connection_status.clone();
     std::thread::spawn(move || {
         let res: Result<(), miette::Error> = stellarator::run(|| async move {
