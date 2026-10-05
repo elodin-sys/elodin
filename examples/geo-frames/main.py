@@ -6,6 +6,8 @@ import elodin as el
 import jax.numpy as jnp
 import numpy as np
 
+from schematic import build as build_schematic
+
 SIM_RATE = 60.0
 
 LAT_DEG = 34.72
@@ -14,15 +16,10 @@ ALT_M = 180.5
 WGS84_A_M = 6_378_137.0
 WGS84_E2 = 6.6943799901413165e-3
 WGS84_B_M = WGS84_A_M * math.sqrt(1.0 - WGS84_E2)
-CUBE_SIZE_M = 500_000.0
 CUBE_SEPARATION_M = 1_500_000.0
-ASSET_MESH_SCALE_M = 1_000_000.0
-AXIS_ARROW_SCALE_M = 1_000_000.0
-AXIS_ARROW_THICKNESS = 2500.0
 ORBIT_RADIUS_M = WGS84_A_M + 1_200_000.0
 ORBIT_PERIOD_S = 20.0
 SPIN_RATE_RAD_S = math.radians(10.0)
-PURPLE = "156 39 176"
 ECEF_MARKERS = (
     ("ecef_equator_x_pos", (WGS84_A_M, 0.0, 0.0)),
     ("ecef_equator_y_pos", (0.0, WGS84_A_M, 0.0)),
@@ -72,24 +69,6 @@ def _body(pos: jnp.ndarray, angular_vel: jnp.ndarray | None = None) -> el.Body:
     )
 
 
-def _ecef_marker_objects() -> str:
-    return "\n".join(
-        f"""
-        object_3d frame="ECEF" {name}.world_pos {{
-            box x={CUBE_SIZE_M} y={CUBE_SIZE_M} z={CUBE_SIZE_M} {{
-                color {PURPLE}
-            }}
-            icon builtin="location_on" size=48 {{
-                color {PURPLE}
-            }}
-        }}
-        object_3d frame="ECEF" frame_orientation="ENU" orientation=absolute "(0,0,0,1, {name}.world_pos[4],{name}.world_pos[5],{name}.world_pos[6])" {{
-            glb path="compass.glb" scale={ASSET_MESH_SCALE_M}
-        }}""".rstrip()
-        for name, _ in ECEF_MARKERS
-    )
-
-
 def world() -> el.World:
     world = el.World()
     y_axis_spin = jnp.array([0.0, SPIN_RATE_RAD_S, 0.0])
@@ -108,95 +87,7 @@ def world() -> el.World:
     world.spawn(_body(jnp.array([0.0, 0.0, 0.0])), name="earth")
     world.spawn(_body(jnp.array([ORBIT_RADIUS_M, 0.0, 0.0])), name="ecef_orbit_line")
 
-    world.schematic(
-        f"""
-        coordinate frame=NED lat={LAT_DEG} lon={LON_DEG} alt={ALT_M}
-        hsplit {{
-            vsplit {{
-                viewport name="ECEF Equator" frame="ECEF" pos="(0,0,0,1, 8000000,-80000000, 0)" look_at="(0,0,0,1, 0,0,0)" up="(0,0,1)" hdr=#true show_grid=#true active=#true
-                viewport name="ECEF Oblique" frame="ECEF" pos="(0,0,0,1, 46000000,-46000000, 46000000)" look_at="(0,0,0,1, 0,0,0)" up="(0,0,1)" hdr=#true show_grid=#true active=#true
-            }}
-            tabs {{
-                viewport name=Frames frame="NED" pos="(0,0,0,1, 4000000,4000000,-3000000)" look_at="(0,0,0,1, 0,0,0)" hdr=#true show_grid=#false active=#true
-                inspector
-                hierarchy
-            }}
-        }}
-
-        object_3d frame="ECEF" orientation=absolute earth.world_pos {{
-            glb path="earth.glb"
-            icon builtin="public" size=64 {{
-                color 255 255 255
-            }}
-        }}
-        {_ecef_marker_objects()}
-        object_3d frame="NED" ned_origin.world_pos {{
-            box x={CUBE_SIZE_M} y={CUBE_SIZE_M} z={CUBE_SIZE_M} {{
-                color 244 67 54
-            }}
-            icon builtin="my_location" size=56 {{
-                color 244 67 54
-            }}
-        }}
-        object_3d frame="NED" frame_orientation="ENU" orientation=absolute "(0,0,0,1, ned_origin.world_pos[4],ned_origin.world_pos[5],ned_origin.world_pos[6])" {{
-            glb path="compass.glb" scale={ASSET_MESH_SCALE_M}
-        }}
-        object_3d frame="ENU" enu_far_east.world_pos {{
-            box x={CUBE_SIZE_M} y={CUBE_SIZE_M} z={CUBE_SIZE_M} {{
-                color 33 150 243
-            }}
-            icon builtin="explore" size=56 {{
-                color 33 150 243
-            }}
-        }}
-        object_3d frame="ENU" frame_orientation="ENU" orientation=absolute "(0,0,0,1, enu_far_east.world_pos[4],enu_far_east.world_pos[5],enu_far_east.world_pos[6])" {{
-            glb path="compass.glb" scale={ASSET_MESH_SCALE_M}
-        }}
-        object_3d frame="ECEF" ecef_far_up.world_pos {{
-            box x={CUBE_SIZE_M} y={CUBE_SIZE_M} z={CUBE_SIZE_M} {{
-                color 76 175 80
-            }}
-            icon builtin="gps_fixed" size=56 {{
-                color 76 175 80
-            }}
-        }}
-        object_3d frame="ECEF" frame_orientation="ENU" orientation=absolute "(0,0,0,1, ecef_far_up.world_pos[4],ecef_far_up.world_pos[5],ecef_far_up.world_pos[6])" {{
-            glb path="compass.glb" scale={ASSET_MESH_SCALE_M}
-        }}
-        object_3d frame="ECEF" ecef_orbit_line.world_pos {{
-            sphere radius={CUBE_SIZE_M * 0.25} {{
-                color cyan
-            }}
-            icon builtin="satellite_alt" size=48 {{
-                color cyan
-            }}
-        }}
-
-        line_3d frame="NED" ned_origin.world_pos line_width=2.0 {{
-            color 244 67 54
-        }}
-        line_3d frame="ENU" enu_far_east.world_pos line_width=2.0 {{
-            color 33 150 243
-        }}
-        line_3d frame="ECEF" ecef_far_up.world_pos line_width=2.0 {{
-            color 76 175 80
-        }}
-        line_3d frame="ECEF" ecef_orbit_line.world_pos line_width=4.0 perspective=#false {{
-            color cyan
-        }}
-
-        vector_arrow frame="NED" "(0, 1, 0)" origin="ned_origin.world_pos" scale={AXIS_ARROW_SCALE_M} normalize=#true arrow_thickness={AXIS_ARROW_THICKNESS} label_position=0.0 name="NED Y-axis" show_name=#true body_frame=#true {{
-            color 244 67 54
-        }}
-        vector_arrow frame="ENU" "(0, 1, 0)" origin="enu_far_east.world_pos" scale={AXIS_ARROW_SCALE_M} normalize=#true arrow_thickness={AXIS_ARROW_THICKNESS} label_position=0.0 name="ENU Y-axis" show_name=#true body_frame=#true {{
-            color 33 150 243
-        }}
-        vector_arrow frame="ECEF" "(0, 1, 0)" origin="ecef_far_up.world_pos" scale={AXIS_ARROW_SCALE_M} normalize=#true arrow_thickness={AXIS_ARROW_THICKNESS} label_position=0.0 name="ECEF Y-axis" show_name=#true body_frame=#true {{
-            color 76 175 80
-        }}
-        """,
-        "geo-frames.kdl",
-    )
+    world.schematic(build_schematic(), "geo-frames.kdl")
     return world
 
 
