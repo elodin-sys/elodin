@@ -9,7 +9,7 @@ Elodin release builds need more RAM than free GitHub-hosted runners provide. Hea
 | `ci-linux-arm64` | Mac Studio, Apple Container, same Ubuntu 24.04 image | `aarch64-unknown-linux-musl` (`elodin-db`) |
 | `ci-windows-x64` | Windows 11 x64 box, native runner service | `x86_64-pc-windows-msvc` dist build + MSI |
 
-Do not merge these workflow changes until the corresponding runner is online. A `push` to `main` will sit in queue forever if the label is missing. Emergency fallback: **Actions → Release → Run workflow → runners = `hosted-large`**.
+Do not merge these workflow changes until the corresponding runner is online. A `push` to `main` will sit in queue forever if the label is missing.
 
 PR builds still only run `dist plan` plus `Windows Check` on free hosted runners.
 
@@ -174,8 +174,7 @@ Target: Windows 11 x64, ≥ 8 cores, ≥ 32 GB RAM, ≥ 200 GB free, always on (
 ## Final verification
 
 1. Reboot the Studio, unlock FileVault as `ci`. Both Studio runners (`ci-macos-arm64`, `ci-linux-arm64`) should return online. Reboot the x86 box; `ci-linux-x64` should return. Reboot the Windows box; `ci-windows-x64` returns as a service without login.
-2. Dispatch Release with `runners=hosted-large` once to prove the paid fallback still works.
-3. Watch the next `push` to `main`. GitHub Actions minutes for this repo should then be $0.
+2. Watch the next `push` to `main`. GitHub Actions minutes for this repo should then be $0.
 
 ## Resource budget
 
