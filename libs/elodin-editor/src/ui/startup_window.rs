@@ -192,8 +192,9 @@ impl std::fmt::Display for ConnectError {
 impl StartupLayout<'_, '_> {
     fn connect(&mut self, addr: SocketAddr, reconnect: bool) -> ThreadConnectionStatus {
         let (packet_tx, packet_rx, outgoing_packet_rx, incoming_packet_tx) =
-            impeller_bevy::channels();
-        let (msg_tx, msg_rx, msg_outgoing_rx, msg_incoming_tx) = impeller_bevy::msg_channels();
+            impeller_bevy::channels::channels();
+        let (msg_tx, msg_rx, msg_outgoing_rx, msg_incoming_tx) =
+            impeller_bevy::channels::msg_channels();
         let stream_id = fastrand::u64(..);
         spawn_msg_tcp_connect(addr, msg_outgoing_rx, msg_incoming_tx);
         let status = spawn_tcp_connect(
