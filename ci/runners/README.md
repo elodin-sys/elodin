@@ -1,10 +1,10 @@
 # Self-hosted GitHub Actions runners
 
-Elodin release builds need more RAM than free GitHub-hosted runners provide. Heavy jobs now target machines you own. Tiny orchestration jobs (`plan`, `build-global-artifacts`, `host`, `announce`, `pypi-publish`, `release-dry-run`) stay on free `ubuntu-24.04`.
+Elodin release builds need more RAM than free GitHub-hosted runners provide. Heavy jobs and release orchestration run on machines you own. Pull-request `plan` stays on free `ubuntu-24.04`.
 
 | Label | Machine | Workload |
 |---|---|---|
-| `ci-linux-x64` | x86_64 Linux box, Docker, Ubuntu 24.04 image | `x86_64-unknown-linux-{gnu,musl}` dist builds, `linux-wheel`, `cargo-deb` |
+| `ci-linux-x64` | x86_64 Linux box, Docker, Ubuntu 24.04 image | `x86_64-unknown-linux-{gnu,musl}` dist builds, `linux-wheel`, `cargo-deb`, `build-global-artifacts`, `host`, `announce`, `pypi-publish`, `release-dry-run`, and `plan` except on pull requests |
 | `ci-macos-arm64` | Mac Studio, native runner | `aarch64-apple-darwin` dist build, `macos-wheel` |
 | `ci-linux-arm64` | Mac Studio, Apple Container, same Ubuntu 24.04 image | `aarch64-unknown-linux-musl` (`elodin-db`) |
 | `ci-windows-x64` | Windows 11 x64 box, native runner service | `x86_64-pc-windows-msvc` dist build + MSI |
