@@ -23,7 +23,7 @@ fn all_example_schematics_parse() {
                 let text = std::fs::read_to_string(&path).expect("read kdl");
                 // Validate each generated visual-check viewport separately.
                 if path.file_name().is_some_and(|n| n == "visual_check.kdl") {
-                    for keep in ["Chase", "Landing", "NightSky"] {
+                    for keep in ["Chase", "Landing", "Waterline", "NightSky"] {
                         let filtered: String = text
                             .lines()
                             .filter(|line| {

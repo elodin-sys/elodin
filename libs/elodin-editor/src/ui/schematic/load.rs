@@ -662,6 +662,17 @@ impl LoadSchematicParams<'_, '_> {
 
         let mut loaded_windows = window_assets.unwrap_or(&[]).iter();
         for descriptor in descriptors.windows {
+            if let Some(inline) = descriptor.inline_content.clone() {
+                self.spawn_window(
+                    &inline,
+                    descriptor,
+                    theme_mode.as_deref(),
+                    &theme_selection.scheme,
+                    None,
+                );
+                continue;
+            }
+
             if let Some(window) = loaded_windows.next()
                 && let Some(root) = self
                     .document_assets
@@ -679,15 +690,7 @@ impl LoadSchematicParams<'_, '_> {
                 continue;
             }
 
-            if let Some(inline) = descriptor.inline_content.clone() {
-                self.spawn_window(
-                    &inline,
-                    descriptor,
-                    theme_mode.as_deref(),
-                    &theme_selection.scheme,
-                    None,
-                );
-            } else if let Some(path) = descriptor.path.clone() {
+            if let Some(path) = descriptor.path.clone() {
                 let connection_addr = self.connection_addr.as_ref().map(|addr| addr.0);
                 if path.to_str().is_some_and(is_remote_asset_path) {
                     // Fetch `db:`/HTTP windows off the main thread: a blocking
