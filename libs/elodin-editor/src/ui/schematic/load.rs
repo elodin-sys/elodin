@@ -401,6 +401,7 @@ fn resolve_window_descriptor(
         screen: window.screen.map(|idx| idx as usize),
         mode: theme_mode.map(|m| m.to_string()),
         screen_rect: window.screen_rect.or(Some(DEFAULT_SECONDARY_RECT)),
+        inline_content: None,
     })
 }
 
