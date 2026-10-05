@@ -1,0 +1,898 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    
+<link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css" media="print" onload="this.media='all'; this.onload = null">
+<noscript><link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css"></noscript>
+
+    
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-884/fonts/spacegrotesk.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-884/fonts/ibm-plex-sans-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-884/fonts/ibm-plex-sans-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-884/fonts/ibm-plex-sans-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-884/fonts/ibm-plex-sans-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-884/fonts/ibm-plex-sans-700.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-884/fonts/ibm-plex-mono-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-884/fonts/ibm-plex-mono-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-884/fonts/ibm-plex-mono-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-884/fonts/ibm-plex-mono-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-884/fonts/ibm-plex-mono-700.woff2" type="font/woff2" crossorigin>
+
+    
+<link rel="stylesheet" href="https://docs.elodin.systems/preview/pr-884/main.css">
+
+    
+  <meta name="theme-color" content="#fff">
+  <link rel="apple-touch-icon" sizes="180x180" href="https://docs.elodin.systems/preview/pr-884/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="https://docs.elodin.systems/preview/pr-884/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="https://docs.elodin.systems/preview/pr-884/favicon-16x16.png">
+  
+    <link rel="manifest" href="https://docs.elodin.systems/preview/pr-884/site.webmanifest" crossorigin>
+  
+
+
+  
+  
+    
+  
+
+  
+  
+    
+    
+  
+
+  
+    
+  
+  
+  
+  
+    
+  
+
+  
+
+
+  <meta name="robots" content="index, follow">
+  <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+  <meta name="bingbot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+
+
+	
+
+
+	
+
+<title>Migrate KDL schematics to Python | Elodin</title>
+<meta name="description" content="Convert an Elodin KDL schematic to the typed Python UI API, then verify model and visual parity.">
+<link rel="canonical" href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/">
+
+
+  <meta name="twitter:card" content="summary_large_image">
+  
+    <meta name="twitter:image" content="https://docs.elodin.systems/preview/pr-884/logo.png">
+  
+  <meta name="twitter:title" content="Migrate KDL schematics to Python">
+  <meta name="twitter:description" content="Convert an Elodin KDL schematic to the typed Python UI API, then verify model and visual parity.">
+  <meta name="twitter:site" content="@elodinsystems">
+  <meta name="twitter:creator" content="@elodinsystems">
+
+  <meta property="og:title" content="Migrate KDL schematics to Python">
+  <meta property="og:description" content="Convert an Elodin KDL schematic to the typed Python UI API, then verify model and visual parity.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/">
+
+  
+    <meta property="og:image" content="https://docs.elodin.systems/preview/pr-884/logo.png">
+  
+
+  <meta property="og:updated_time" content="">
+  <meta property="og:site_name" content="Migrate KDL schematics to Python">
+
+  
+
+  
+
+  
+  <meta property="og:locale" content="en_US">
+
+
+
+
+
+  
+
+
+
+
+
+<script type="application/ld+json">
+  {
+    "@context": "http://schema.org",
+    "@type": "BreadcrumbList",
+    
+      
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          {
+            "@type": "ListItem",
+            "position":  1 ,
+            "name": "Home",
+            "item": "https://docs.elodin.systems/preview/pr-884/"
+          },
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  2 ,
+            "name": "Reference",
+            "item": "https://docs.elodin.systems/preview/pr-884/reference/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  3 ,
+            "name": "Migration",
+            "item": "https://docs.elodin.systems/preview/pr-884/reference/migration/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  4 ,
+            "name": "Kdl To Python",
+            "item": "https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/"
+          },
+        
+      
+    
+  }
+</script>
+
+
+
+
+</head>
+
+<body class="docs single">
+  
+    
+    
+    
+  
+  
+    
+<header class="navbar fixed-top navbar-expand-md navbar-light">
+    <div class="container">
+        <div class="col-2" style="display: flex; gap: 20px">
+            <a
+                href="https://elodin.systems"
+                class="nav-link-icon"
+                target="_blank"
+                rel="noopener noreferrer"
+                ><svg
+                    width="20"
+                    height="25"
+                    viewBox="0 0 20 25"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                >
+                    <path
+                        d="M10 0H15C17.7615 0 20 2.23858 20 5V20.0001C20 22.7615 17.7615 25.0001 15 25.0001H5C2.23853 25.0001 0 22.7615 0 20V5C0 2.23858 2.23853 1.90735e-06 5 1.90735e-06V5V20.0001H15V5L5 5C5 2.23858 7.23853 0 10 0Z"
+                        fill="currentColor"
+                    />
+                </svg>
+            </a>
+            <span>
+                <select name="version" class="version-select" disabled>
+                    <option value="v0.19.2" selected>
+                        v0.19.2
+                    </option>
+                </select>
+            </span>
+        </div>
+
+        <div
+            class="col-2 d-none d-lg-block"
+            style="margin-left: 56px"
+        >
+            <form style="width: 264px">
+                <input
+                    id="userinput"
+                    class="form-control is-search"
+                    type="search"
+                    placeholder="Search"
+                    aria-label="Search"
+                    autocomplete="off"
+                />
+                <div id="suggestions" class="shadow bg-white rounded"></div>
+            </form>
+        </div>
+        <div class="col-2 d-none d-md-block"></div>
+        <div class="col-2" style="margin-left: 35px">
+            <ul class="navbar-nav main-nav me-auto">
+                      
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-884/home/quickstart"
+                        >HOME</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item reference active"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-884/reference/overview"
+                        >Reference</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-884/releases/changelog"
+                        >Releases</a
+                    >
+                </li>
+                  
+            </ul>
+        </div>
+        <div class="col-1"></div>
+        <div
+            class="col-2 d-none d-xl-block"
+            style="margin-right: 63px"
+        >
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://github.com/elodin-sys/elodin">
+                        <i class="bx bxl-github"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://discord.gg/ywPGjarS">
+                        <i class="bx bxl-discord-alt"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a id="mode-1" class="nav-link nav-link-icon toggle-dark">
+                        <i class='bx bxs-sun'></i>
+                    </a>
+                    <a id="mode-2" class="nav-link nav-link-icon toggle-light">
+                        <i class='bx bxs-moon'></i>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</header>
+
+  
+  <div class="wrap container tom-green" role="document">
+      <div class="content">
+          <div class="row flex-xxl-nowrap justify-content-center">
+              
+<div class="col-lg-5 col-xl-4 docs-sidebar d-none d-lg-block">
+    <nav class="docs-links" aria-label="Main navigation">
+          
+        <h3>Reference</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-884/reference/overview/"
+                    >Overview</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-884/reference/coords/"
+                    >Coordinate Systems</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-884/reference/db-asset-server/"
+                    >DB Asset Server</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-884/reference/python-api/"
+                    >Python API</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-884/reference/elodin-cli/"
+                    >Elodin CLI</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-884/reference/grpc-client/"
+                    >gRPC API</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-884/reference/replays/"
+                    >Replays</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-884/reference/s10/"
+                    >Process Orchestration (s10)</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-884/reference/schematic/"
+                    >Schematic KDL</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-884/reference/color-schemes/"
+                    >Color Schemes</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-884/reference/command-palette/"
+                    >Command Palette</a
+                >
+            </li>
+            
+        </ul>
+          
+         
+        <h3>Migration Guides</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-884/reference/migration/to-0-15/"
+                    >v0.14 to v0.15</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link active"
+                    href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/"
+                    >Migrate KDL schematics to Python</a
+                >
+            </li>
+            
+        </ul>
+          
+    </nav>
+</div>
+
+               
+<nav
+    class="docs-toc d-none d-xxl-block col-xl-3"
+    aria-label="Secondary navigation"
+>
+    <div class="page-links">
+        <h3>On this page</h3>
+        <nav id="TableOfContents">
+            <ul>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#prerequisites">Prerequisites</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#1-inventory-the-existing-schematic">1. Inventory the existing schematic</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#2-generate-a-python-scaffold">2. Generate a Python scaffold</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#3-read-the-generated-builders">3. Read the generated builders</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#4-check-model-parity">4. Check model parity</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#import-and-build">Import and build</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#inspect-emitted-kdl">Inspect emitted KDL</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#compare-canonical-models">Compare canonical models</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#5-load-it-in-the-editor">5. Load it in the editor</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#6-refactor-after-parity">6. Refactor after parity</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#7-adopt-expressions-schemas-and-kernels">7. Adopt expressions, schemas, and kernels</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#expressions">Expressions</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#schemas">Schemas</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#display-kernels">Display kernels</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#layout-overlays">Layout overlays</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#cut-over-safely">Cut over safely</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#troubleshooting">Troubleshooting</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#build-is-missing-or-returns-the-wrong-value">build() is missing or returns the wrong value</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#python-cannot-import-elodin">Python cannot import elodin</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#a-sibling-import-fails">A sibling import fails</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#an-asset-disappeared">An asset disappeared</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#canonical-models-differ">Canonical models differ</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#the-model-matches-but-the-view-does-not">The model matches but the view does not</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#saving-a-layout-did-not-edit-the-python-file">Saving a layout did not edit the Python file</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-884/reference/migration/kdl-to-python/#examples-and-reference">Examples and reference</a>
+                    
+                </li>
+                
+            </ul>
+        </nav>
+    </div>
+</nav>
+ 
+              <main class="docs-content col-lg-11 col-xxl-10">
+                  <h1>Migrate KDL schematics to Python</h1>
+                  
+                  <p class="lead">Move an existing KDL schematic to typed Python builders without changing its behavior.</p>
+                   <p>Python schematics make repeated UI structures easier to maintain, provide typed
+builders, and allow display expressions and kernels to live beside the rest of
+the simulation code. KDL remains the format consumed by the editor; the Python
+API builds the same schematic model and emits KDL for the editor.</p>
+<p>This guide treats migration as a parity exercise first. Convert and validate the
+existing schematic before introducing loops, helper functions, expressions, or
+kernels.</p>
+<h2 id="prerequisites">Prerequisites</h2>
+<p>Build Elodin from the repository root so the CLI and Python package match:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">nix</span><span style="color: light-dark(#2AA198, #2AA198);"> develop</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">just</span><span style="color: light-dark(#2AA198, #2AA198);"> install</span></span></code></pre>
+<p>Use the resulting development shell for the rest of this guide.</p>
+<h2 id="1-inventory-the-existing-schematic">1. Inventory the existing schematic</h2>
+<p>Before converting, identify:</p>
+<ul>
+<li>The root <code>.kdl</code> file passed to the editor.</li>
+<li>Other KDL files referenced by the root document.</li>
+<li>Relative paths to GLB models, textures, terrain, and other assets.</li>
+<li>Saved layout overlays that users expect the editor to apply.</li>
+<li>Repeated nodes that are good candidates for helpers or loops later.</li>
+</ul>
+<p>Keep the KDL and Python files next to each other during migration. This preserves
+the most common relative asset-path assumptions and gives you a known-good
+fallback.</p>
+<h2 id="2-generate-a-python-scaffold">2. Generate a Python scaffold</h2>
+<p>Convert the root document:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> schematic</span><span style="color: light-dark(#2AA198, #2AA198);"> to-python</span><span style="color: light-dark(#2AA198, #2AA198);"> path/to/schematic.kdl</span><span style="color: light-dark(#CB4B16, #CB4B16);"> \</span></span>
+<span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">  -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-output</span><span style="color: light-dark(#2AA198, #2AA198);"> path/to/schematic.py</span></span></code></pre>
+<p>The converter emits typed <code>elodin.ui</code> builders. It does not wrap the original
+KDL in <code>ui.from_kdl</code>, so the result is a useful starting point for Python
+maintenance.</p>
+<p>The generated module follows this contract:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> elodin</span><span>.</span><span>ui</span><span style="color: light-dark(#859900, #859900);"> as</span><span> ui</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">def</span><span style="color: light-dark(#268BD2, #268BD2);"> build</span><span>(</span><span>)</span><span> -&gt;</span><span> ui</span><span>.</span><span>Schematic</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">    return</span><span> ui</span><span>.</span><span>schematic</span><span>(</span></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">        #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Generated builders.</span></span>
+<span class="giallo-l"><span>    )</span></span></code></pre>
+<p>Do not refactor the generated file yet. First make sure that it imports, builds,
+and describes the same model as the KDL source.</p>
+<h2 id="3-read-the-generated-builders">3. Read the generated builders</h2>
+<p>The Python API closely follows the KDL hierarchy:</p>
+<ul>
+<li>The KDL root becomes <code>ui.schematic(...)</code>.</li>
+<li><code>tabs</code>, <code>hsplit</code>, and <code>vsplit</code> become nested builders with the same names.</li>
+<li>Views such as <code>viewport</code>, <code>graph</code>, and monitor views become typed builder
+calls.</li>
+<li>Scene nodes become builders such as <code>object_3d</code>, <code>line_3d</code>, <code>point_trails</code>,
+<code>vector_arrow</code>, <code>world_mesh</code>, and <code>window</code>.</li>
+<li>Object primitives such as spheres, ellipsoids, and GLB models become nested
+primitive builders.</li>
+<li>KDL properties become keyword arguments.</li>
+<li>Repeated child nodes become Python lists or repeated positional children.</li>
+<li>KDL booleans become <code>True</code> and <code>False</code>.</li>
+<li>KDL tuples become Python tuples.</li>
+<li>Colors become a <code>color=</code> argument or a <code>ui.color(...)</code> value.</li>
+<li>Existing EQL queries remain strings unless you deliberately replace them with
+<code>ui.Expr</code> objects.</li>
+</ul>
+<p>Compare the generated nesting with the source from the outside in. A misplaced
+layout or scene child can still produce valid Python while changing what the
+editor displays.</p>
+<h2 id="4-check-model-parity">4. Check model parity</h2>
+<p>Start with the cheapest checks.</p>
+<h3 id="import-and-build">Import and build</h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">uv</span><span style="color: light-dark(#2AA198, #2AA198);"> run</span><span style="color: light-dark(#2AA198, #2AA198);"> python</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">c</span><span style="color: light-dark(#CB4B16, #CB4B16);"> \</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">  &#39;</span><span style="color: light-dark(#2AA198, #2AA198);">import elodin.ui as ui; import schematic; assert isinstance(schematic.build(), ui.Schematic)</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span></span></code></pre>
+<p>Run this from the directory containing <code>schematic.py</code>, or adjust the import.</p>
+<h3 id="inspect-emitted-kdl">Inspect emitted KDL</h3>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">uv</span><span style="color: light-dark(#2AA198, #2AA198);"> run</span><span style="color: light-dark(#2AA198, #2AA198);"> python</span><span style="color: light-dark(#2AA198, #2AA198);"> schematic.py</span><span style="color: light-dark(#859900, #859900);"> &gt;</span><span style="color: light-dark(#2AA198, #2AA198);"> /tmp/schematic.generated.kdl</span></span></code></pre>
+<p>A Python schematic module prints its emitted KDL when executed directly. A text
+diff can be informative, but it is not definitive because formatting and
+equivalent model representations may differ.</p>
+<h3 id="compare-canonical-models">Compare canonical models</h3>
+<p>Compare parsed models instead of raw KDL text:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">from</span><span> pathlib</span><span style="color: light-dark(#859900, #859900);"> import</span><span> Path</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> elodin</span><span>.</span><span>ui</span><span style="color: light-dark(#859900, #859900);"> as</span><span> ui</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">from</span><span> schematic</span><span style="color: light-dark(#859900, #859900);"> import</span><span> build</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">def</span><span style="color: light-dark(#268BD2, #268BD2);"> canonical</span><span>(</span><span>schematic</span><span>:</span><span> ui</span><span>.</span><span>Schematic</span><span>)</span><span> -&gt;</span><span> ui</span><span>.</span><span>Schematic</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">    return</span><span> ui</span><span>.</span><span>from_kdl</span><span>(</span><span>schematic</span><span>.</span><span>emit_kdl</span><span>(</span><span>)</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>source</span><span style="color: light-dark(#859900, #859900);"> =</span><span> ui</span><span>.</span><span>from_kdl</span><span>(</span><span>Path</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">schematic.kdl</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>.</span><span>read_text</span><span>(</span><span>)</span><span>)</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">assert</span><span> canonical</span><span>(</span><span>build</span><span>(</span><span>)</span><span>)</span><span style="color: light-dark(#859900, #859900);"> ==</span><span> canonical</span><span>(</span><span>source</span><span>)</span></span></code></pre>
+<p>Run the check with <code>uv run python</code>. If it fails, inspect one section at a time:
+root options, layout, views, scene objects, and styling. Do not compensate for a
+conversion mismatch by redesigning the schematic.</p>
+<h2 id="5-load-it-in-the-editor">5. Load it in the editor</h2>
+<p>Preload the Python schematic with a simulation or database target:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#859900, #859900);"> &lt;</span><span style="color: light-dark(#2AA198, #2AA198);">targe</span><span>t</span><span style="color: light-dark(#859900, #859900);">&gt;</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-schematic</span><span style="color: light-dark(#2AA198, #2AA198);"> path/to/schematic.py</span></span></code></pre>
+<p>Use <code>--schematic</code> for new commands. The older <code>--kdl</code> option is deprecated.</p>
+<p>For active development, watch the Python entry point and publish updates to a
+running database:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> ui</span><span style="color: light-dark(#2AA198, #2AA198);"> watch</span><span style="color: light-dark(#2AA198, #2AA198);"> path/to/schematic.py</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-db</span><span style="color: light-dark(#2AA198, #2AA198);"> 127.0.0.1:2240</span></span></code></pre>
+<p>The watcher supports imports from sibling Python modules. Changes to an imported
+module may require touching or resaving the watched entry-point file before the
+schematic is rebuilt.</p>
+<p>Check the editor at a representative point in the data:</p>
+<ul>
+<li>The same tabs and split panes exist.</li>
+<li>Graphs use the same series, ranges, and colors.</li>
+<li>Viewport objects have the same transforms, assets, and visibility.</li>
+<li>Lines, trails, arrows, and world geometry use the same component data.</li>
+<li>Relative assets load without warnings.</li>
+<li>Saved layout overlays still behave as expected.</li>
+</ul>
+<p>Model equality cannot catch rendering, asset loading, or runtime query issues,
+so visual parity is a required migration check.</p>
+<h2 id="6-refactor-after-parity">6. Refactor after parity</h2>
+<p>Once the generated scaffold passes model and visual checks, use normal Python to
+remove repetition:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">def</span><span style="color: light-dark(#268BD2, #268BD2);"> body</span><span>(</span><span>position</span><span>:</span><span style="color: light-dark(#859900, #859900);"> str</span><span>)</span><span> -&gt;</span><span> ui</span><span>.</span><span>Object3D</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">    return</span><span> ui</span><span>.</span><span>object_3d</span><span>(</span></span>
+<span class="giallo-l"><span>        position</span><span>,</span></span>
+<span class="giallo-l"><span>        mesh</span><span style="color: light-dark(#859900, #859900);">=</span><span>ui</span><span>.</span><span>sphere</span><span>(</span><span>radius</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">0.1</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    )</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">def</span><span style="color: light-dark(#268BD2, #268BD2);"> build</span><span>(</span><span>)</span><span> -&gt;</span><span> ui</span><span>.</span><span>Schematic</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">    return</span><span> ui</span><span>.</span><span>schematic</span><span>(</span></span>
+<span class="giallo-l"><span>        ui</span><span>.</span><span>viewport</span><span>(</span><span>name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">Viewport</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> active</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#B58900, #B58900);">True</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>        body</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">vehicle.world_pos</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>        body</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">target.world_pos</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    )</span></span></code></pre>
+<p>Prefer small, deterministic helpers. <code>build()</code> can be called repeatedly by the
+watcher, tests, and CLI, so keep it side-effect-light:</p>
+<ul>
+<li>Do not start a simulation, network client, or background task from <code>build()</code>.</li>
+<li>Do not depend on mutable process-global state.</li>
+<li>Avoid environment-dependent output unless it is an intentional input.</li>
+<li>Keep output order stable.</li>
+</ul>
+<p>After each refactor, rerun the model comparison and visual check. If the
+refactor intentionally changes the model, update the expected result and review
+that change separately from the migration.</p>
+<h2 id="7-adopt-expressions-schemas-and-kernels">7. Adopt expressions, schemas, and kernels</h2>
+<p>These features are optional improvements, not prerequisites for conversion.</p>
+<h3 id="expressions">Expressions</h3>
+<p>Use <code>ui.Expr</code> to compose readable EQL expressions instead of interpolating
+large strings:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>position</span><span style="color: light-dark(#859900, #859900);"> =</span><span> ui</span><span>.</span><span>Expr</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">vehicle.world_pos</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span></span>
+<span class="giallo-l"><span>speed</span><span style="color: light-dark(#859900, #859900);"> =</span><span> ui</span><span>.</span><span>Expr</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">vehicle.world_vel</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>.</span><span>norm</span><span>(</span><span>)</span></span></code></pre><h3 id="schemas">Schemas</h3>
+<p>Use <code>ui.Schema</code> when the Python code needs the component's tensor shape and data
+type, especially when passing inputs to a display kernel:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>schema</span><span style="color: light-dark(#859900, #859900);"> =</span><span> ui</span><span>.</span><span>Schema</span><span>(</span></span>
+<span class="giallo-l"><span>    {</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">        &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">vehicle.world_pos</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> {</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">            &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">shape</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> [</span><span style="color: light-dark(#D33682, #D33682);">3</span><span>]</span><span>,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">            &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">prim_type</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">f64</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>        }</span></span>
+<span class="giallo-l"><span>    }</span></span>
+<span class="giallo-l"><span>)</span></span>
+<span class="giallo-l"><span>world_pos</span><span style="color: light-dark(#859900, #859900);"> =</span><span> schema</span><span>[</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">vehicle.world_pos</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>]</span></span></code></pre>
+<p>A plain component-name string is convenient for direct bindings, but it does
+not communicate a non-scalar tensor shape to kernel compilation.</p>
+<h3 id="display-kernels">Display kernels</h3>
+<p>Use <code>@ui.kernel</code> for display-side transformations that benefit from JAX math,
+matrix operations, or typed tensor inputs. Keep kernels pure and deterministic.
+See <code>examples/display-kernels/schematic.py</code> for complete graph and viewport
+examples.</p>
+<p>When a schematic contains kernels, validate it through <code>elodin ui watch</code> or an
+explicit Python publish/write flow in addition to editor preload. Kernel
+metadata includes sidecar artifacts that are not covered by a plain emitted-KDL
+comparison.</p>
+<h2 id="layout-overlays">Layout overlays</h2>
+<p>The editor's <strong>Save Layout</strong> action writes a KDL overlay. It does not rewrite the
+Python source. The watcher reapplies the active overlay after publishing a new
+base schematic.</p>
+<p>Treat the Python module as the authored base layout and the overlay as user
+state. If a saved layout should become the new default, make the equivalent
+change in Python deliberately, validate it, and then decide whether the old
+overlay should be retained.</p>
+<h2 id="cut-over-safely">Cut over safely</h2>
+<p>Before replacing the KDL entry point:</p>
+<ol>
+<li>Confirm the Python module imports and <code>build()</code> returns a schematic.</li>
+<li>Confirm canonical model equality, or document every intentional difference.</li>
+<li>Exercise the schematic against representative telemetry.</li>
+<li>Compare editor screenshots for layout and rendering parity.</li>
+<li>Verify all relative assets resolve from the intended launch directory.</li>
+<li>Verify watch updates and saved overlays.</li>
+<li>Verify every display kernel with its actual component shapes and data types.</li>
+<li>Keep the old KDL available until downstream launch scripts and users have
+switched to <code>--schematic</code>.</li>
+</ol>
+<p>Update launch commands, examples, and documentation together. Delete the old KDL
+only when it is no longer a runtime input or rollback path.</p>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<h3 id="build-is-missing-or-returns-the-wrong-value"><code>build()</code> is missing or returns the wrong value</h3>
+<p>The module must expose a zero-argument <code>build()</code> function returning
+<code>ui.Schematic</code>. Return the result of <code>ui.schematic(...)</code>, not a layout node or
+raw KDL string.</p>
+<h3 id="python-cannot-import-elodin">Python cannot import <code>elodin</code></h3>
+<p>Run <code>just install</code> in <code>nix develop</code>, then execute Python with <code>uv run</code>. Confirm
+that the CLI and Python package were built from the same checkout.</p>
+<h3 id="a-sibling-import-fails">A sibling import fails</h3>
+<p>Keep imported modules beside the schematic entry point or make them part of an
+installed package. The CLI adds the schematic's directory to <code>sys.path</code>.</p>
+<h3 id="an-asset-disappeared">An asset disappeared</h3>
+<p>Check the asset path before changing the builder. Relative paths are sensitive
+to where the schematic is compiled and where assets are served. Keeping the
+Python file beside the old KDL during migration avoids many path changes.</p>
+<h3 id="canonical-models-differ">Canonical models differ</h3>
+<p>Reduce the comparison by temporarily building one top-level section at a time.
+Check root properties before layouts, layouts before views, and views before
+their scene children. Compare parsed models rather than formatting.</p>
+<h3 id="the-model-matches-but-the-view-does-not">The model matches but the view does not</h3>
+<p>Inspect runtime queries, component tensor shapes, asset-server logs, and display
+kernel diagnostics. Then compare at a known simulation timestamp. A structural
+comparison cannot validate live data or rendering.</p>
+<h3 id="saving-a-layout-did-not-edit-the-python-file">Saving a layout did not edit the Python file</h3>
+<p>This is expected. Saved layouts are overlays; copy intentional default changes
+back into the Python builders manually.</p>
+<h2 id="examples-and-reference">Examples and reference</h2>
+<ul>
+<li><code>examples/ball/schematic.py</code> shows layouts, viewport objects, lines, arrows,
+and coordinate frames.</li>
+<li><code>examples/display-kernels/schematic.py</code> shows expressions, schemas, and
+display kernels.</li>
+<li><a href="https://docs.elodin.systems/preview/pr-884/reference/schematic/">Schematic reference</a> documents the model and
+editor-facing concepts represented by both authoring formats.</li>
+</ul>
+
+                  
+<div class="footer-line-padding"></div>
+<div class="footer-line"></div>
+<div class="docs-navigation d-flex justify-content-between">
+           
+    <a href="https:&#x2F;&#x2F;docs.elodin.systems&#x2F;preview&#x2F;pr-884&#x2F;reference&#x2F;migration&#x2F;to-0-15&#x2F;">
+        <div>
+            <div class="footer-card">&larr; v0.14 to v0.15</div>
+        </div>
+    </a>
+       
+    <!-- this is a spacing hack for expediency -->
+    <div class="footer-separator"></div>
+         
+</div>
+
+              </main>
+          </div>
+      </div>
+  </div>
+  
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-884/js/main.js"></script>
+<script>
+    // https://mathjax.github.io/MathJax-demos-web/convert-configuration/convert-configuration.html
+    window.MathJax = {
+        tex: {
+            inlineMath: [
+                ["$", "$"],
+                ["\\(", "\\)"],
+            ],
+            displayMath: [
+                ["$$", "$$"],
+                ["\[\[", "\]\]"],
+            ],
+            processEscapes: true,
+            processEnvironments: true,
+        },
+        options: {
+            skipHtmlTags: ["script", "noscript", "style", "textarea", "pre"],
+        },
+    };
+</script>
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-884/js/tex-mml-chtml.js"></script>
+<script type="module">
+    // Zola < 0.22 emits class="language-mermaid"; 0.22+ (giallo) emits data-lang="mermaid".
+    const blocks = document.querySelectorAll('pre > code.language-mermaid, pre > code[data-lang="mermaid"]');
+    if (blocks.length) {
+        const { default: mermaid } = await import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs");
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: document.body.classList.contains("dark") ? "dark" : "default",
+            securityLevel: "loose",
+        });
+        const nodes = [...blocks].map((code) => {
+            const div = document.createElement("div");
+            div.className = "mermaid";
+            div.style.margin = "2rem 0";
+            div.style.overflowX = "auto";
+            div.style.textAlign = "center";
+            div.textContent = code.textContent;
+            code.parentElement.replaceWith(div);
+            return div;
+        });
+        await mermaid.run({ nodes });
+    }
+</script>
+
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-884/js/elasticlunr.min.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-884/search_index.en.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-884/js/search.js"></script>
+
+
+</body>
+
+</html>
