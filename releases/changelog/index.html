@@ -199,8 +199,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.19.2" selected>
-                        v0.19.2
+                    <option value="v0.20.0" selected>
+                        v0.20.0
                     </option>
                 </select>
             </span>
@@ -320,6 +320,20 @@
         <h3>On this page</h3>
         <nav id="TableOfContents">
             <ul>
+                
+                <li>
+                    <a href="/releases/changelog/#v0-20">v0.20</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="/releases/changelog/#v0-20-0">v0.20.0</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
                 
                 <li>
                     <a href="/releases/changelog/#v0-19">v0.19</a>
@@ -766,7 +780,30 @@
  
               <main class="docs-content col-lg-11 col-xxl-10">
                   <h1>Changelog</h1>
-                   <h2 id="v0-19">v0.19</h2>
+                   <h2 id="v0-20">v0.20</h2>
+<h3 id="v0-20-0">v0.20.0</h3>
+<ul>
+<li><strong>(breaking:rust)</strong> Rename the <code>impeller2</code> Rust crates, imports, and source paths to <code>impeller</code> now that the earlier protocol is gone. Update downstream Cargo dependencies and imports accordingly.</li>
+<li><strong>(breaking)</strong> Record component samples only when their bytes change by default; use component metadata <code>record_every_tick="true"</code> to opt into dense telemetry. (#868)</li>
+<li><strong>(feat)</strong> Define schematics in Python with typed <code>elodin.ui</code> builders, composable expressions, schemas, and JAX display kernels for graphs and viewport objects. Add <code>elodin schematic to-python</code> and <code>elodin ui watch</code>, and support KDL or Python preloads with <code>elodin editor --schematic</code>; <code>--kdl</code> remains a deprecated alias. (#846)</li>
+<li><strong>(feat)</strong> Add transient simulation components that remain available to systems in memory without being registered with or recorded to Elodin DB. (#871)</li>
+<li><strong>(feat)</strong> Add the <code>point_trails</code> schematic node: batched trails and cube/sphere heads for every point in one flat <code>3 × N</code> component, with status colors and an optional path-length cap. (#868)</li>
+<li><strong>(feat)</strong> Add optional up-direction markers for viewport and sensor-camera frustums, with video-view up indicators. (#860)</li>
+<li><strong>(feat)</strong> Add a clickable command-palette shortcut to the editor status bar. (#870)</li>
+<li><strong>(feat:examples)</strong> Add a Betaflight SITL race course, referee, race audit, and FPV sensor-camera view. (#864, #853)</li>
+<li><strong>(fix)</strong> Fix editor tick stepping, playback, and timeline controls for live simulations and recorded databases. (#861, #865)</li>
+<li><strong>(fix)</strong> Stop stellarator's kqueue reactor on macOS and other non-Linux hosts from busy-spinning when its event buffer fills, remove completed operations from the reactor, and preserve concurrent reader/writer registrations on the same socket. (#869)</li>
+<li><strong>(fix)</strong> Skip the bare timeline node when saving schematics. (#844)</li>
+<li><strong>(fix)</strong> Reject Python component names containing whitespace with a clear error. (#870)</li>
+<li><strong>(fix:examples)</strong> Preserve quaternion components in cube-sat-pysim plots. (#880)</li>
+<li><strong>(fix:examples)</strong> Use DE440 gravitational parameters in Voyager and document its model limits and trajectory-error telemetry. (#862, #867)</li>
+<li><strong>(fix:examples)</strong> Keep interactive RC-jet flights running until stopped while retaining bounded headless runs and tick overrides. (#870)</li>
+<li><strong>(chore)</strong> Make <code>just install</code> independent of the terminal session, support named development environments, and pin maturin to avoid empty staged Python libraries. (#852)</li>
+<li><strong>(chore:examples)</strong> Migrate example layouts to Python schematics, including Apollo lander, Falcon 9, RC-jet, n-body, and geo-frames. (#873, #874, #875, #876, #882)</li>
+<li><strong>(doc)</strong> Add the KDL-to-Python schematic migration guide and s10 reference documentation. (#846, #881)</li>
+<li><strong>(fix:ci)</strong> Retry documentation deployment pushes when concurrent updates race. (#866)</li>
+</ul>
+<h2 id="v0-19">v0.19</h2>
 <h3 id="v0-19-2">v0.19.2</h3>
 <ul>
 <li><strong>(feat)</strong> Add <code>StepContext.read_msg_at()</code> to read a message at a given timestamp. (#851)</li>
