@@ -1,6 +1,7 @@
 use bevy::asset::{AssetEvent, AssetLoadFailedEvent};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 use bevy_ai_skybox::prelude::{SetActiveSkybox, SkyboxCache};
 use impeller_wkt::{DbConfig, SkyboxConfig};
 use std::net::SocketAddr;
@@ -477,6 +478,7 @@ pub(super) fn emit_document_reloads(
     }
 }
 
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 pub(super) fn activate_document_skybox(
     mut loaded: MessageReader<DocumentLoaded>,
     mut reloaded: MessageReader<DocumentReloaded>,
@@ -517,6 +519,7 @@ pub(super) fn activate_document_skybox(
     }
 }
 
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 fn activate_skybox_config(
     skybox: Option<&SkyboxConfig>,
     skyboxes: &mut MessageWriter<SetActiveSkybox>,

@@ -125,19 +125,27 @@ pub fn fetch_active_schematic_kdl(
     key: &str,
     connection_addr: Option<SocketAddr>,
 ) -> Result<String, String> {
-    let url = crate::object_3d::resolve_db_asset_url(&format!("db:{key}"), connection_addr);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .map_err(|err| format!("{url}: {err}"))?;
-    let response = client
-        .get(&url)
-        .send()
-        .map_err(|err| format!("{url}: {err}"))?;
-    if !response.status().is_success() {
-        return Err(format!("{url}: HTTP {}", response.status()));
+    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+    {
+        let _ = (key, connection_addr);
+        return Err("wasm-cut: blocking HTTP".into());
     }
-    response.text().map_err(|err| format!("{url}: {err}"))
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+    {
+        let url = crate::object_3d::resolve_db_asset_url(&format!("db:{key}"), connection_addr);
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .map_err(|err| format!("{url}: {err}"))?;
+        let response = client
+            .get(&url)
+            .send()
+            .map_err(|err| format!("{url}: {err}"))?;
+        if !response.status().is_success() {
+            return Err(format!("{url}: HTTP {}", response.status()));
+        }
+        response.text().map_err(|err| format!("{url}: {err}"))
+    }
 }
 
 /// List the schematic asset keys (`schematics/*.kdl`) the DB Asset Server holds,
@@ -146,31 +154,40 @@ pub fn fetch_active_schematic_kdl(
 pub(crate) fn fetch_schematic_index(
     connection_addr: Option<SocketAddr>,
 ) -> Result<Vec<String>, String> {
-    #[derive(serde::Deserialize)]
-    struct IndexEntry {
-        key: String,
+    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+    {
+        let _ = connection_addr;
+        return Err("wasm-cut: blocking HTTP".into());
     }
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+    {
+        #[derive(serde::Deserialize)]
+        struct IndexEntry {
+            key: String,
+        }
 
-    let url = crate::object_3d::resolve_db_asset_url("db:__index__/schematics/", connection_addr);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .map_err(|err| format!("{url}: {err}"))?;
-    let response = client
-        .get(&url)
-        .send()
-        .map_err(|err| format!("{url}: {err}"))?;
-    if !response.status().is_success() {
-        return Err(format!("{url}: HTTP {}", response.status()));
+        let url =
+            crate::object_3d::resolve_db_asset_url("db:__index__/schematics/", connection_addr);
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .map_err(|err| format!("{url}: {err}"))?;
+        let response = client
+            .get(&url)
+            .send()
+            .map_err(|err| format!("{url}: {err}"))?;
+        if !response.status().is_success() {
+            return Err(format!("{url}: HTTP {}", response.status()));
+        }
+        let entries: Vec<IndexEntry> = response.json().map_err(|err| format!("{url}: {err}"))?;
+        let mut keys: Vec<String> = entries
+            .into_iter()
+            .map(|entry| entry.key)
+            .filter(|key| key.ends_with(".kdl"))
+            .collect();
+        keys.sort();
+        Ok(keys)
     }
-    let entries: Vec<IndexEntry> = response.json().map_err(|err| format!("{url}: {err}"))?;
-    let mut keys: Vec<String> = entries
-        .into_iter()
-        .map(|entry| entry.key)
-        .filter(|key| key.ends_with(".kdl"))
-        .collect();
-    keys.sort();
-    Ok(keys)
 }
 
 /// Builds the DB asset key (`schematics/<name>.kdl`) for a user-entered "Save
@@ -381,20 +398,28 @@ pub(crate) fn upload_db_save_plan(
     plan: &DbSavePlan,
     connection_addr: Option<SocketAddr>,
 ) -> Result<(), String> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|err| err.to_string())?;
+    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+    {
+        let _ = (plan, connection_addr);
+        return Err("wasm-cut: blocking HTTP".into());
+    }
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+    {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .map_err(|err| err.to_string())?;
 
-    for (key, src) in &plan.local_assets {
-        let path = local_asset_file(src);
-        let bytes = std::fs::read(&path).map_err(|err| format!("{}: {err}", path.display()))?;
-        put_db_asset(&client, key, bytes, connection_addr)?;
+        for (key, src) in &plan.local_assets {
+            let path = local_asset_file(src);
+            let bytes = std::fs::read(&path).map_err(|err| format!("{}: {err}", path.display()))?;
+            put_db_asset(&client, key, bytes, connection_addr)?;
+        }
+        for (key, bytes) in &plan.schematic_uploads {
+            put_db_asset(&client, key, bytes.clone(), connection_addr)?;
+        }
+        Ok(())
     }
-    for (key, bytes) in &plan.schematic_uploads {
-        put_db_asset(&client, key, bytes.clone(), connection_addr)?;
-    }
-    Ok(())
 }
 
 /// Resolves a local mesh/icon path referenced by a schematic to a filesystem
@@ -418,18 +443,28 @@ pub(crate) fn upload_overlay_bytes(
     bytes: Vec<u8>,
     connection_addr: SocketAddr,
 ) -> Result<(), String> {
-    let url = crate::object_3d::resolve_db_asset_url(&format!("db:{key}"), Some(connection_addr));
-    let len = bytes.len();
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|err| err.to_string())?;
-    put_db_asset(&client, key, bytes, Some(connection_addr))?;
-    bevy::log::info!(key, url = %url, bytes = len, "wrote layout overlay");
-    eprintln!("[elodin] wrote layout overlay {key} → {url} ({len} bytes)");
-    Ok(())
+    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+    {
+        let _ = (key, bytes, connection_addr);
+        return Err("wasm-cut: blocking HTTP".into());
+    }
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+    {
+        let url =
+            crate::object_3d::resolve_db_asset_url(&format!("db:{key}"), Some(connection_addr));
+        let len = bytes.len();
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .map_err(|err| err.to_string())?;
+        put_db_asset(&client, key, bytes, Some(connection_addr))?;
+        bevy::log::info!(key, url = %url, bytes = len, "wrote layout overlay");
+        eprintln!("[elodin] wrote layout overlay {key} → {url} ({len} bytes)");
+        Ok(())
+    }
 }
 
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 fn put_db_asset(
     client: &reqwest::blocking::Client,
     key: &str,
