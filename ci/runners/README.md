@@ -62,7 +62,7 @@ Target: ≥ 8 cores, ≥ 32 GB RAM, ≥ 200 GB free. Any distro is fine; jobs ru
 
 5. Confirm **Settings → Actions → Runners** shows `ci-linux-x64` online.
 
-6. From the Studio, dispatch **CI runner smoke tests** with `linux_x64`. Then dispatch **Release** (dry-run, `runners=self-hosted`) and compare the x86_64 artifacts, `--print=linkage` output, wheel manylinux tag, and `.deb` against [run 34528998758](https://github.com/elodin-sys/elodin/actions/runs/34528998758).
+6. From the Studio, dispatch **CI runner smoke tests** with `linux_x64`. Then dispatch a Release dry-run and compare the x86_64 artifacts, `--print=linkage` output, wheel manylinux tag, and `.deb` against [run 34528998758](https://github.com/elodin-sys/elodin/actions/runs/34528998758).
 
 7. Reboot the box. The container should return on its own. Confirm the runner is online, then merge Phase 1.
 
