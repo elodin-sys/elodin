@@ -434,6 +434,59 @@ fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlS
     }
 }
 
+fn push_parsed_schematic_node(
+    schematic: &mut Schematic,
+    node: &KdlNode,
+    src: &str,
+) -> Result<(), KdlSchematicError> {
+    if node.name().value() == "skybox" {
+        schematic.skybox = Some(parse_skybox(node, src)?);
+        return Ok(());
+    }
+    if node.name().value() == "environment" {
+        schematic.environment = Some(parse_environment(node, src)?);
+        return Ok(());
+    }
+    if node.name().value() == "telemetry_mode" {
+        schematic.telemetry_mode = parse_telemetry_mode(node, src)?;
+        return Ok(());
+    }
+
+    let elem = parse_schematic_elem(node, src)?;
+    match elem {
+        SchematicElem::Theme(theme) => schematic.theme = Some(theme),
+        SchematicElem::Timeline(timeline) => {
+            if schematic.timeline.is_some() {
+                return Err(KdlSchematicError::InvalidValue {
+                    property: "timeline".to_string(),
+                    node: "timeline".to_string(),
+                    expected: "at most one timeline node per schematic".to_string(),
+                    src: src.to_string(),
+                    span: node.span(),
+                });
+            }
+            schematic.timeline = Some(timeline);
+        }
+        SchematicElem::Coordinate(coordinate) => {
+            schematic.frame = Some(coordinate.frame);
+            schematic.origin = coordinate.origin;
+            schematic.body = coordinate.body;
+        }
+        other => schematic.elems.push(other),
+    }
+    Ok(())
+}
+
+fn window_content_is_nonempty(content: &Schematic) -> bool {
+    !content.elems.is_empty()
+        || content.skybox.is_some()
+        || content.environment.is_some()
+        || content.theme.is_some()
+        || content.timeline.is_some()
+        || content.frame.is_some()
+        || content.telemetry_mode
+}
+
 fn parse_window(node: &KdlNode, src: &str) -> Result<WindowSchematic, KdlSchematicError> {
     let path = node
         .get("path")
@@ -477,12 +530,14 @@ fn parse_window(node: &KdlNode, src: &str) -> Result<WindowSchematic, KdlSchemat
         .map(|value| value as u32);
 
     let mut screen_rect = None;
+    let mut content = Schematic::default();
     if let Some(children) = node.children() {
         for child in children.nodes() {
             if child.name().value() == "rect" {
                 screen_rect = Some(parse_window_rect(child, src)?);
-                break;
+                continue;
             }
+            push_parsed_schematic_node(&mut content, child, src)?;
         }
     }
 
@@ -491,6 +546,7 @@ fn parse_window(node: &KdlNode, src: &str) -> Result<WindowSchematic, KdlSchemat
         path,
         screen: screen_idx,
         screen_rect,
+        content: window_content_is_nonempty(&content).then_some(content),
     })
 }
 
@@ -2754,6 +2810,20 @@ mod tests {
     use crate::ser::serialize_schematic;
 
     use super::*;
+
+    #[test]
+    fn parse_window_inline_content_roundtrip() {
+        let kdl = r#"window title="Motor Panel" {
+    tabs {
+        graph "drone.motor_input"
+    }
+}
+"#;
+        let parsed = parse_schematic(kdl).unwrap();
+        let serialized = serialize_schematic(&parsed);
+        let again = parse_schematic(&serialized).unwrap();
+        assert_eq!(parsed, again);
+    }
 
     #[test]
     fn test_parse_timeline_config() {

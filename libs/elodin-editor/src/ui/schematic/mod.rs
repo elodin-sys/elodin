@@ -696,6 +696,7 @@ pub fn tiles_to_schematic(
             path: file_name,
             screen: state.descriptor.screen.map(|idx| idx as u32),
             screen_rect: state.descriptor.screen_rect,
+            ..WindowSchematic::default()
         }));
     }
 

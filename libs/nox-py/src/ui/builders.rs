@@ -1594,14 +1594,26 @@ fn world_mesh(
 }
 
 #[pyfunction]
-#[pyo3(signature = (path=None, title=None, screen=None, rect=None))]
+#[pyo3(signature = (*children, path=None, title=None, screen=None, rect=None))]
 fn window(
+    _py: Python<'_>,
+    children: Vec<Bound<'_, PyAny>>,
     path: Option<String>,
     title: Option<String>,
     screen: Option<u32>,
     rect: Option<(u32, u32, u32, u32)>,
-) -> PyWindow {
-    PyWindow {
+) -> PyResult<PyWindow> {
+    if !children.is_empty() && path.is_some() {
+        return Err(PyValueError::new_err(
+            "window accepts either path= or inline panel children, not both",
+        ));
+    }
+    let mut content = Schematic::default();
+    for child in children {
+        super::push_elem(&mut content, &child)?;
+    }
+    let inline = (!content.elems.is_empty()).then_some(content);
+    Ok(PyWindow {
         inner: WindowSchematic {
             title,
             path,
@@ -1612,8 +1624,9 @@ fn window(
                 width,
                 height,
             }),
+            content: inline,
         },
-    }
+    })
 }
 
 pub(super) fn register_builders(module: &Bound<'_, PyModule>) -> PyResult<()> {

@@ -369,6 +369,21 @@ pub fn ingest_window_schematics(
     ingest.rewrite_content(content, None)
 }
 
+fn inline_window_stem(title: &str) -> String {
+    let mut stem = String::new();
+    let mut prev_hyphen = true;
+    for ch in title.chars() {
+        if ch.is_ascii_alphanumeric() {
+            stem.push(ch.to_ascii_lowercase());
+            prev_hyphen = false;
+        } else if !prev_hyphen {
+            stem.push('-');
+            prev_hyphen = true;
+        }
+    }
+    stem.trim_matches('-').to_string()
+}
+
 struct WindowIngest<'a> {
     assets_dir: &'a Path,
     search_dirs: &'a [PathBuf],
@@ -391,15 +406,67 @@ impl WindowIngest<'_> {
         let Ok(mut root) = impeller_kdl::parse_schematic(content) else {
             return Ok(None);
         };
+        let inline_changed = self.materialize_inline_windows(&mut root)?;
         let map = self.ingest_referenced_windows(&root, base_dir)?;
-        if map.is_empty() {
+        if !inline_changed && map.is_empty() {
             return Ok(None);
         }
-        impeller_kdl::rewrite_asset_paths(&mut root, |path| {
-            map.get(path).map(|key| format!("db:{key}"))
-        });
+        if !map.is_empty() {
+            impeller_kdl::rewrite_asset_paths(&mut root, |path| {
+                map.get(path).map(|key| format!("db:{key}"))
+            });
+        }
         let serialized = impeller_kdl::serialize_schematic(&root);
         Ok((serialized != content).then_some(serialized))
+    }
+
+    /// Write inline window layouts into `schematics/` and point `path` at them.
+    fn materialize_inline_windows(
+        &mut self,
+        schematic: &mut impeller_wkt::Schematic,
+    ) -> io::Result<bool> {
+        let mut changed = false;
+        let mut index = 0usize;
+        for elem in &mut schematic.elems {
+            let impeller_wkt::SchematicElem::Window(window) = elem else {
+                continue;
+            };
+            if window.path.is_some() {
+                continue;
+            }
+            let Some(content) = window.content.clone() else {
+                continue;
+            };
+            if content.elems.is_empty() {
+                continue;
+            }
+            index += 1;
+            let stem = window
+                .title
+                .as_deref()
+                .map(inline_window_stem)
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| format!("window-{index}"));
+            let key = self.assign_key(&PathBuf::from(format!("{stem}.kdl")));
+            let mut stored = content;
+            let nested = self.ingest_referenced_windows(&stored, None)?;
+            if !nested.is_empty() {
+                impeller_kdl::rewrite_asset_paths(&mut stored, |path| {
+                    nested.get(path).map(|key| format!("db:{key}"))
+                });
+            }
+            let bytes = impeller_kdl::serialize_schematic(&stored);
+            write_uploaded_asset(self.assets_dir, &key, bytes.as_bytes())?;
+            tracing::info!(
+                key = %key,
+                title = ?window.title,
+                "materialized inline window sub-schematic into db assets"
+            );
+            window.path = Some(format!("db:{key}"));
+            window.content = None;
+            changed = true;
+        }
+        Ok(changed)
     }
 
     /// Resolve, ingest and key every local window reference of `schematic`
@@ -1081,6 +1148,34 @@ mod tests {
         assert!(
             rewritten.contains("path=\"db:schematics/motor-panel.kdl\""),
             "window reference should point at the stored key, got:\n{rewritten}"
+        );
+        let stored = std::fs::read_to_string(assets.join("schematics/motor-panel.kdl")).unwrap();
+        assert!(stored.contains("drone.motor_input"));
+    }
+
+    #[test]
+    fn window_ingest_materializes_inline_layout() {
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("db/assets");
+        std::fs::create_dir_all(&assets).unwrap();
+
+        let content = r#"window title="Motor Panel" {
+    tabs {
+        graph "drone.motor_input"
+    }
+}
+"#;
+        let rewritten = ingest_window_schematics(&assets, content, &[])
+            .unwrap()
+            .expect("inline window should be materialized");
+
+        assert!(
+            rewritten.contains("path=\"db:schematics/motor-panel.kdl\""),
+            "inline window should become a db: path, got:\n{rewritten}"
+        );
+        assert!(
+            !rewritten.contains("graph \"drone.motor_input\""),
+            "inline layout should not remain in the root schematic, got:\n{rewritten}"
         );
         let stored = std::fs::read_to_string(assets.join("schematics/motor-panel.kdl")).unwrap();
         assert!(stored.contains("drone.motor_input"));

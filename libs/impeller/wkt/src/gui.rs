@@ -575,6 +575,9 @@ pub struct WindowSchematic {
     pub screen: Option<u32>,
     #[serde(default)]
     pub screen_rect: Option<WindowRect>,
+    /// Panel layout for this window when not loaded from `path`.
+    #[serde(default)]
+    pub content: Option<Schematic>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]

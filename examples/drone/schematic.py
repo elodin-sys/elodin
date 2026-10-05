@@ -51,8 +51,37 @@ def build(*, drone_glb: str = DEFAULT_DRONE_GLB) -> ui.Schematic:
                 name="Sensor Panel",
             ),
         ),
-        ui.window(path="examples/drone/motor-panel.kdl"),
-        ui.window(path="examples/drone/rate-control-panel.kdl"),
+        ui.window(
+            title="Motor Panel",
+            ui.tabs(
+                ui.hsplit(
+                    name="Motor Panel",
+                    ui.vsplit(
+                        ui.graph("drone.motor_input"),
+                        ui.graph("drone.motor_pwm"),
+                        ui.graph("drone.motor_rpm"),
+                        share=0.4,
+                    ),
+                    ui.graph("drone.thrust"),
+                ),
+            ),
+        ),
+        ui.window(
+            title="Rate Control Panel",
+            ui.hsplit(
+                name="Rate Control Panel",
+                ui.vsplit(
+                    ui.graph("drone.rate_pid_state"),
+                    ui.component_monitor(component_name="drone.rate_pid_state"),
+                ),
+                ui.vsplit(
+                    ui.graph(
+                        "drone.gyro, drone.ang_vel_setpoint",
+                        name="Drone: rate_control",
+                    ),
+                ),
+            ),
+        ),
         _body_axis("(1, 0, 0)", "Drone X"),
         _body_axis("(0, 1, 0)", "Drone Y"),
         _body_axis("(0, 0, 1)", "Drone Z"),

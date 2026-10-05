@@ -356,11 +356,28 @@ fn read_window_schematic_kdl(
     response.text().map_err(|err| format!("{url}: {err}"))
 }
 
+fn window_has_inline_content(window: &WindowSchematic) -> bool {
+    window
+        .content
+        .as_ref()
+        .is_some_and(|content| !content.elems.is_empty())
+}
+
 fn resolve_window_descriptor(
     window: &WindowSchematic,
     base_dir: Option<&Path>,
     theme_mode: Option<&str>,
 ) -> Option<WindowDescriptor> {
+    if window.path.is_none() && window_has_inline_content(window) {
+        return Some(WindowDescriptor {
+            path: None,
+            title: window.title.clone(),
+            screen: window.screen.map(|idx| idx as usize),
+            mode: theme_mode.map(|m| m.to_string()),
+            screen_rect: window.screen_rect.or(Some(DEFAULT_SECONDARY_RECT)),
+            inline_content: window.content.clone(),
+        });
+    }
     let path_str = window.path.as_ref()?;
     // Keep `db:`/HTTP references verbatim; only local paths are anchored to the
     // schematic's directory. The remote ones are fetched over HTTP at spawn time.
@@ -661,7 +678,15 @@ impl LoadSchematicParams<'_, '_> {
                 continue;
             }
 
-            if let Some(path) = descriptor.path.clone() {
+            if let Some(inline) = descriptor.inline_content.clone() {
+                self.spawn_window(
+                    &inline,
+                    descriptor,
+                    theme_mode.as_deref(),
+                    &theme_selection.scheme,
+                    None,
+                );
+            } else if let Some(path) = descriptor.path.clone() {
                 let connection_addr = self.connection_addr.as_ref().map(|addr| addr.0);
                 if path.to_str().is_some_and(is_remote_asset_path) {
                     // Fetch `db:`/HTTP windows off the main thread: a blocking

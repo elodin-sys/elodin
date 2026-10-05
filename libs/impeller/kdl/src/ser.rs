@@ -720,6 +720,14 @@ fn serialize_window(window: &WindowSchematic) -> KdlNode {
         node.set_children(children);
     }
 
+    if let Some(content) = &window.content {
+        let mut children = node.children().cloned().unwrap_or_else(KdlDocument::new);
+        for elem in &content.elems {
+            children.nodes_mut().push(serialize_schematic_elem(elem));
+        }
+        node.set_children(children);
+    }
+
     node
 }
 

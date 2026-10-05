@@ -133,6 +133,16 @@ def test_extended_typed_builders_roundtrip():
     assert ui.from_kdl(built.emit_kdl()) == built
 
 
+def test_window_inline_children_roundtrip():
+    built = ui.schematic(
+        ui.window(
+            title="Motor Panel",
+            ui.tabs(ui.graph("drone.motor_input", name="motors")),
+        ),
+    )
+    assert ui.from_kdl(built.emit_kdl()) == built
+
+
 def test_viewport_frustums_up_marker_roundtrip():
     built = ui.schematic(
         ui.viewport(
