@@ -685,11 +685,13 @@ fn serialize_viewport(viewport: &Viewport) -> KdlNode {
 
 fn append_window_content_nodes(children: &mut KdlDocument, content: &Schematic) {
     if let Some(frame) = content.frame {
-        children.nodes_mut().push(serialize_coordinate(&CoordinateConfig {
-            frame,
-            origin: content.origin,
-            body: content.body,
-        }));
+        children
+            .nodes_mut()
+            .push(serialize_coordinate(&CoordinateConfig {
+                frame,
+                origin: content.origin,
+                body: content.body,
+            }));
     }
     if let Some(theme) = content.theme.as_ref() {
         children.nodes_mut().push(serialize_theme(theme));
@@ -709,7 +711,9 @@ fn append_window_content_nodes(children: &mut KdlDocument, content: &Schematic) 
         children.nodes_mut().push(serialize_skybox(skybox));
     }
     if let Some(environment) = content.environment.as_ref() {
-        children.nodes_mut().push(serialize_environment(environment));
+        children
+            .nodes_mut()
+            .push(serialize_environment(environment));
     }
     for elem in &content.elems {
         children.nodes_mut().push(serialize_schematic_elem(elem));
