@@ -197,6 +197,6 @@
 
 These components exist in the tree but have no markdown documentation; their behavior is documented indirectly (skills, sibling READMEs) or not at all — worth noting for the coverage effort:
 
-- `examples/`: `geo-frames`, `stablehlo`, `linalg-iree` have no README.
+- `examples/`: `stablehlo`, `linalg-iree` have no README (`geo-frames` is covered by `.cursor/skills/elodin-simulation/examples.md`).
 - `fsw/`: `aleph-setup`, `aleph-status`, `blackbox`, `lqr`, `openocd`, `rtsp-streamer`, `serial-bridge`, `tegrastats-bridge` have no README (serial-bridge and blackbox are partially covered by `fsw/mekf/README.md` and `fsw/sensor-fw/README.md`).
 - `libs/`: `bevy_ai_skybox`, `build-common`, `monte-carlo` (campaign runner crate), `rtsp-ingest`, and the top-level `elodin-editor` crate have no README (monte-carlo is covered by CLI/docs-site reference; rtsp-ingest by `examples/video-stream/README.md`).

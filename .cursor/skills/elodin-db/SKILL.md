@@ -218,6 +218,8 @@ elodin-db merge -o merged --prefix1 sitl --prefix2 real \
 
 Use `--from-playback-start` when alignment timestamps come from the Editor's playback timeline (relative to recording start). Without it, `--align1`/`--align2` are absolute timestamps.
 
+Copy alignment values from the editor **TIME** field: click to select, **µs** copies raw microseconds, Enter seeks to a pasted value (seconds with `s`, UTC, or plain µs).
+
 ## Exporting a Database
 
 Offline export to analysis formats or a Foxglove-ready MCAP recording:

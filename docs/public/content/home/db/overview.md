@@ -122,6 +122,8 @@ elodin-db merge -o merged --prefix1 sitl --prefix2 real \
   --align1 15000000 --align2 14000000 --from-playback-start ./sitl-db ./real-db
 ```
 
-Use `--from-playback-start` when alignment timestamps come from the Elodin Editor's playback timeline. Without it, `--align1`/`--align2` are interpreted as absolute timestamps.
+Use `--from-playback-start` when alignment timestamps come from the Elodin Editor's playback timeline. Without it, `--align1`/`--align2` are absolute timestamps.
+
+In the editor status bar, the **TIME** field shows monotonic recordings as seconds (for example `12 s`) and wall-clock recordings as UTC. Click the value to select it, press Enter to seek, or use the **µs** button to copy the raw microsecond timestamp for `--align1` / `--align2`.
 
 **Database tools** -- Additional offline commands for post-processing: `drop` (delete components by name or glob), `prune` (remove empties), `truncate` (clear data, keep schemas), `time-align` (shift timestamps), and `fix-timestamps` (normalize clock sources).
