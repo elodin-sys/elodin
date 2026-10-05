@@ -37,7 +37,7 @@ uv run python examples/db-client/main.py --no-editor --duration 5
 
 ## Editor schematic
 
-[`schematic.kdl`](schematic.kdl) shows:
+[`schematic.py`](schematic.py) shows:
 
 - a chase-camera viewport tracking `drone.world_pos` with the `crazyflie.glb`
   model (from the repo `assets/` folder — the script sets `ELODIN_ASSETS_DIR`),

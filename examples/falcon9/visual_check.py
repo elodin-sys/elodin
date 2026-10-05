@@ -303,7 +303,10 @@ world.spawn(StaticSceneObject(el.WorldPos(linear=jnp.zeros(3))), name="earth")
 world.spawn(StaticSceneObject(el.WorldPos(angular=pad_att, linear=pad)), name="pad")
 world.spawn(StaticSceneObject(el.WorldPos(angular=lz1_att, linear=lz1)), name="lz1")
 
-kdl_path = Path(__file__).with_name("visual_check.kdl")
+kdl_path = (
+    Path(__file__).resolve().parents[2]
+    / "libs/impeller/kdl/tests/corpus/sources/examples/visual_check.kdl"
+)
 # One viewport per scenario so the cinematic camera is unique.
 if SCENARIO == "barge":
     keep = "Landing"

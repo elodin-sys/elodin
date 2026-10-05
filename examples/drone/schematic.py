@@ -1,6 +1,6 @@
 """Typed schematic for the drone example.
 
-Layout matches `drone.kdl`. The drone GLB follows `Config.GLOBAL.drone_glb`.
+The drone GLB follows `Config.GLOBAL.drone_glb`.
 """
 
 from __future__ import annotations
@@ -51,7 +51,6 @@ def build(*, drone_glb: str = DEFAULT_DRONE_GLB) -> ui.Schematic:
                 name="Sensor Panel",
             ),
         ),
-        # Keep these windows: they are the only regression tests for extra panels.
         ui.window(path="examples/drone/motor-panel.kdl"),
         ui.window(path="examples/drone/rate-control-panel.kdl"),
         _body_axis("(1, 0, 0)", "Drone X"),

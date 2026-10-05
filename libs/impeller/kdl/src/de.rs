@@ -2825,7 +2825,7 @@ timeline
 
     #[test]
     fn test_parse_rc_jet_schematic_has_no_skybox() {
-        let kdl = include_str!("../../../../examples/rc-jet/bdx.kdl");
+        let kdl = include_str!("../tests/corpus/sources/examples/bdx.kdl");
         let schematic = parse_schematic(kdl).expect("rc-jet schematic should parse");
         assert!(
             schematic.skybox.is_none(),
@@ -2835,7 +2835,7 @@ timeline
 
     #[test]
     fn test_parse_apollo_lander_schematic_keeps_truth_as_trail_only() {
-        let kdl = include_str!("../../../../examples/apollo-lander/apollo-lander.kdl");
+        let kdl = include_str!("../tests/corpus/sources/examples/apollo-lander.kdl");
         let schematic = parse_schematic(kdl).expect("apollo lander schematic should parse");
 
         let object_eqls: Vec<_> = schematic

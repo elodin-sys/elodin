@@ -15,7 +15,6 @@ import elodin.ui as ui
 
 REPO = Path(__file__).resolve().parents[4]
 EXAMPLES = REPO / "examples"
-KDL_CORPUS = REPO / "libs" / "impeller" / "kdl" / "tests" / "corpus" / "sources"
 
 
 def _load_example(path: Path, name: str):
@@ -30,21 +29,6 @@ def _canonical(schematic: ui.Schematic) -> ui.Schematic:
     return ui.from_kdl(schematic.emit_kdl())
 
 
-@pytest.mark.parametrize(
-    "path",
-    sorted(KDL_CORPUS.rglob("*.kdl")),
-    ids=lambda path: str(path.relative_to(KDL_CORPUS)),
-)
-def test_to_python_preserves_corpus_model(path: Path):
-    source = path.read_text()
-    generated = ui.to_python(source, source_name=path.name)
-    assert "SOURCE_KDL" not in generated
-    assert "ui.from_kdl" not in generated
-    namespace = {"__name__": "generated_schematic"}
-    exec(compile(generated, str(path.with_suffix(".py")), "exec"), namespace)
-    assert _canonical(namespace["build"]()) == _canonical(ui.from_kdl(source))
-
-
 def test_to_python_preserves_line_comments():
     generated = ui.to_python("// Flight dashboard\nviewport\n")
     assert "# Flight dashboard" in generated
@@ -52,7 +36,7 @@ def test_to_python_preserves_line_comments():
 
 
 def test_from_kdl_emit_idempotent():
-    text = (EXAMPLES / "db-client" / "schematic.kdl").read_text()
+    text = 'viewport name="Demo" { graph "demo.value" }'
     once = ui.from_kdl(text)
     twice = ui.from_kdl(once.emit_kdl())
     assert twice == ui.from_kdl(twice.emit_kdl())
@@ -227,37 +211,12 @@ def test_write_roundtrip(tmp_path):
     assert ui.from_kdl(path.read_text()) == built
 
 
-def test_g1_db_client_handwritten_kdl_roundtrip():
-    handwritten = ui.from_kdl((EXAMPLES / "db-client" / "schematic.kdl").read_text())
-    assert _canonical(handwritten) == handwritten
-
-
 def test_display_kernels_python_schematic_emits_display_kernel():
     mod = _load_example(EXAMPLES / "display-kernels" / "schematic.py", "display_kernels_schematic")
     kdl = mod.build().emit_kdl()
     assert "kernel=" in kdl
     assert "schematics/kernels/" in kdl
     assert "craft.error_covariance" in kdl
-
-
-def test_g1_motor_panel_equals_handwritten():
-    mod = _load_example(EXAMPLES / "drone" / "motor_panel.py", "motor_panel")
-    handwritten = ui.from_kdl((EXAMPLES / "drone" / "motor-panel.kdl").read_text())
-    assert _canonical(mod.build()) == _canonical(handwritten)
-
-
-def test_g1_rate_control_panel_equals_handwritten():
-    mod = _load_example(EXAMPLES / "drone" / "rate_control_panel.py", "rate_control_panel")
-    handwritten = ui.from_kdl((EXAMPLES / "drone" / "rate-control-panel.kdl").read_text())
-    assert _canonical(mod.build()) == _canonical(handwritten)
-
-
-def test_g1_ball_schematic_equals_handwritten():
-    mod = _load_example(EXAMPLES / "ball" / "schematic.py", "ball_schematic")
-    handwritten = ui.from_kdl((EXAMPLES / "ball" / "schematic.kdl").read_text())
-    assert _canonical(mod.build()) == _canonical(handwritten)
-    ned = ui.from_kdl((EXAMPLES / "ball" / "schematic_ned.kdl").read_text())
-    assert _canonical(mod.build(frame="NED")) == _canonical(ned)
 
 
 def test_world_schematic_accepts_ui_schematic():

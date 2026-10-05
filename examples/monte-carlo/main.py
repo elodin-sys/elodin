@@ -48,11 +48,9 @@ class SitlBridge:
 
 params = el.monte_carlo.params(PARAMS)
 world, system = build(params)
-SCHEMATIC_PATH = Path(__file__).with_name("monte-carlo.kdl")
-world.schematic(
-    SCHEMATIC_PATH.read_text(),
-    "monte-carlo.kdl",
-)
+from schematic import build as build_schematic
+
+world.schematic(build_schematic(), "monte-carlo.kdl")
 bridge: SitlBridge | None = None
 use_controller = os.environ.get(CONTROLLER_ENV, "1") != "0"
 
