@@ -52,7 +52,6 @@ def build(*, drone_glb: str = DEFAULT_DRONE_GLB) -> ui.Schematic:
             ),
         ),
         ui.window(
-            title="Motor Panel",
             ui.tabs(
                 ui.hsplit(
                     name="Motor Panel",
@@ -65,9 +64,9 @@ def build(*, drone_glb: str = DEFAULT_DRONE_GLB) -> ui.Schematic:
                     ui.graph("drone.thrust"),
                 ),
             ),
+            title="Motor Panel",
         ),
         ui.window(
-            title="Rate Control Panel",
             ui.hsplit(
                 name="Rate Control Panel",
                 ui.vsplit(
@@ -81,6 +80,7 @@ def build(*, drone_glb: str = DEFAULT_DRONE_GLB) -> ui.Schematic:
                     ),
                 ),
             ),
+            title="Rate Control Panel",
         ),
         _body_axis("(1, 0, 0)", "Drone X"),
         _body_axis("(0, 1, 0)", "Drone Y"),
