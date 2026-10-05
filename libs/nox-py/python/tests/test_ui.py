@@ -267,6 +267,35 @@ def test_world_schematic_accepts_ui_schematic():
     world.schematic(s.emit_kdl())
 
 
+def test_sensor_camera_accepts_frustum_face_alpha():
+    world = el.World()
+    host = world.spawn(el.Body(), "camera_host")
+    world.sensor_camera(
+        entity=host,
+        name="camera",
+        width=16,
+        height=16,
+        frustums_face_alpha=0.25,
+    )
+
+
+@pytest.mark.parametrize("alpha", [-0.01, 1.01, float("nan")])
+def test_sensor_camera_rejects_invalid_frustum_face_alpha(alpha):
+    world = el.World()
+    host = world.spawn(el.Body(), "camera_host")
+    with pytest.raises(
+        ValueError,
+        match="frustums_face_alpha must be finite and between 0 and 1",
+    ):
+        world.sensor_camera(
+            entity=host,
+            name="camera",
+            width=16,
+            height=16,
+            frustums_face_alpha=alpha,
+        )
+
+
 def _wait_for(predicate, timeout: float = 5.0) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:

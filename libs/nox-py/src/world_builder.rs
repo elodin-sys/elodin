@@ -515,6 +515,7 @@ impl WorldBuilder {
         create_frustum = false,
         show_ellipsoids = false,
         frustums_color = None,
+        frustums_face_alpha = 0.17647059,
         projection_color = None,
         frustums_thickness = 0.006,
         frustums_up_marker = "none",
@@ -545,6 +546,7 @@ impl WorldBuilder {
         create_frustum: bool,
         show_ellipsoids: bool,
         frustums_color: Option<Vec<f32>>,
+        frustums_face_alpha: f32,
         projection_color: Option<Vec<f32>>,
         frustums_thickness: f32,
         frustums_up_marker: &str,
@@ -702,6 +704,13 @@ impl WorldBuilder {
                 ),
             ));
         }
+        if !frustums_face_alpha.is_finite() || !(0.0..=1.0).contains(&frustums_face_alpha) {
+            return Err(crate::error::Error::PyO3(
+                pyo3::exceptions::PyValueError::new_err(
+                    "sensor_camera frustums_face_alpha must be finite and between 0 and 1",
+                ),
+            ));
+        }
         if !(fps > 0.0 && fps.is_finite()) {
             return Err(crate::error::Error::PyO3(
                 pyo3::exceptions::PyValueError::new_err(format!(
@@ -777,6 +786,7 @@ impl WorldBuilder {
                     impeller_wkt::default_viewport_frustums_color(),
                     "frustums_color",
                 )?,
+                frustums_face_alpha,
                 projection_color: color_from_vec(
                     projection_color,
                     impeller_wkt::default_viewport_projection_color(),

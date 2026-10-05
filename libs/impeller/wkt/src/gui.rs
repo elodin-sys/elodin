@@ -43,6 +43,14 @@ pub fn default_viewport_frustums_thickness() -> f32 {
     0.006
 }
 
+/// Default opacity for the filled faces of a camera frustum.
+///
+/// This preserves the editor's historical hard-coded alpha of 45/255 while
+/// allowing sensor cameras to opt into a different presentation.
+pub fn default_frustums_face_alpha() -> f32 {
+    45.0 / 255.0
+}
+
 /// Marks which frustum edge corresponds to the top of the camera image, so the
 /// image orientation can be read off a frustum drawn in another viewport.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -2160,6 +2168,11 @@ pub struct SensorCameraConfig {
     /// [`cinematic_house_environment`].
     #[serde(default)]
     pub environment: Option<EnvironmentConfig>,
+    /// Opacity of the filled 3D frustum volume, independent of the edge and
+    /// 2D-projection colors. Kept last so older serialized camera records can
+    /// default the newly appended field.
+    #[serde(default = "default_frustums_face_alpha")]
+    pub frustums_face_alpha: f32,
 }
 
 impl Default for SensorCameraConfig {
@@ -2182,6 +2195,7 @@ impl Default for SensorCameraConfig {
             create_frustum: false,
             show_ellipsoids: false,
             frustums_color: default_viewport_frustums_color(),
+            frustums_face_alpha: default_frustums_face_alpha(),
             projection_color: default_viewport_projection_color(),
             frustums_thickness: default_viewport_frustums_thickness(),
             frustums_up_marker: FrustumUpMarker::None,
@@ -2410,11 +2424,13 @@ mod tests {
         let object = value.as_object_mut().unwrap();
         object.remove("camera_model");
         object.remove("lens_hfov_degrees");
+        object.remove("frustums_face_alpha");
         object.insert("effect_params".into(), serde_json::json!({"contrast": 1.5}));
         let config: SensorCameraConfig = serde_json::from_value(value).unwrap();
         assert_eq!(config.effect_param_f32(&["contrast"], 0.0), 1.5);
         assert!(config.camera_model.is_none());
         assert!(config.lens_hfov_degrees.is_none());
+        assert!((config.frustums_face_alpha - default_frustums_face_alpha()).abs() < f32::EPSILON);
     }
 
     #[test]
