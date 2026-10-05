@@ -1,0 +1,16 @@
+[package]
+name = "elodin-web"
+license = "MIT OR Apache-2.0"
+description = "Elodin Editor wasm entrypoint (Trunk)"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[dependencies]
+elodin-editor = { path = "../../libs/elodin-editor", default-features = false, features = [
+  "big_space",
+  "wasm-cut",
+] }
+bevy.workspace = true
+console_error_panic_hook = "0.1"
+getrandom = { version = "0.3", features = ["wasm_js"] }

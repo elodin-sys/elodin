@@ -7,6 +7,7 @@ use bevy::ecs::hierarchy::ChildOf;
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
 use bevy::render::render_resource::BlendState;
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 use bevy_fontmesh::prelude::*;
 use bevy_geo_frames::GeoFrame;
 use std::collections::HashMap;
@@ -317,6 +318,7 @@ fn spawn_axes(
     let axis_origin = -points_to * (CUBE_HALF_EXTENT + axis_center_offset);
 
     let shaft_mesh = meshes.add(Cylinder::new(axis_radius, axis_length));
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
     let font: Handle<Font> =
         asset_server.load("embedded://elodin_editor/assets/fonts/Roboto-Bold.ttf");
     let axis_label_scale = 0.37;
@@ -353,35 +355,38 @@ fn spawn_axes(
             shaft_cmd.insert(layers.clone());
         }
 
-        let label_pos = axis_origin + direction * axis_label_distance;
-        let mut label_cmd = commands.spawn((
-            TextMesh {
-                text: name.to_string(),
-                font: font.clone(),
-                style: TextMeshStyle {
-                    depth: axis_label_depth,
-                    anchor: TextAnchor::Center,
-                    ..default()
+        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+        {
+            let label_pos = axis_origin + direction * axis_label_distance;
+            let mut label_cmd = commands.spawn((
+                TextMesh {
+                    text: name.to_string(),
+                    font: font.clone(),
+                    style: TextMeshStyle {
+                        depth: axis_label_depth,
+                        anchor: TextAnchor::Center,
+                        ..default()
+                    },
                 },
-            },
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: color,
-                emissive: LinearRgba::BLACK,
-                unlit: true,
-                cull_mode: None,
-                ..default()
-            })),
-            Transform::from_translation(label_pos).with_scale(Vec3::splat(axis_label_scale)),
-            Pickable::IGNORE,
-            AxisLabelBillboard {
-                axis_direction: direction,
-                base_position: label_pos,
-            },
-            ChildOf(parent),
-            Name::new(format!("axis_{}_label", name)),
-        ));
-        if let Some(layers) = render_layers {
-            label_cmd.insert(layers.clone());
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: color,
+                    emissive: LinearRgba::BLACK,
+                    unlit: true,
+                    cull_mode: None,
+                    ..default()
+                })),
+                Transform::from_translation(label_pos).with_scale(Vec3::splat(axis_label_scale)),
+                Pickable::IGNORE,
+                AxisLabelBillboard {
+                    axis_direction: direction,
+                    base_position: label_pos,
+                },
+                ChildOf(parent),
+                Name::new(format!("axis_{}_label", name)),
+            ));
+            if let Some(layers) = render_layers {
+                label_cmd.insert(layers.clone());
+            }
         }
     }
 }
@@ -476,50 +481,66 @@ fn spawn_face_labels(
     parent: Entity,
     camera: Entity,
 ) {
-    let font: Handle<Font> =
-        asset_server.load("embedded://elodin_editor/assets/fonts/Roboto-Bold.ttf");
+    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+    {
+        let _ = (
+            commands,
+            asset_server,
+            materials,
+            config,
+            render_layers,
+            parent,
+            camera,
+        );
+        return;
+    }
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+    {
+        let font: Handle<Font> =
+            asset_server.load("embedded://elodin_editor/assets/fonts/Roboto-Bold.ttf");
 
-    let label_scale = 0.6;
-    let label_depth = 0.008;
-    let face_offset = 0.535;
+        let label_scale = 0.6;
+        let label_depth = 0.008;
+        let face_offset = 0.535;
 
-    let face_labels = config.system.get_face_labels(face_offset);
+        let face_labels = config.system.get_face_labels(face_offset);
 
-    for label in face_labels {
-        let material = materials.add(StandardMaterial {
-            base_color: label.color,
-            emissive: LinearRgba::BLACK,
-            unlit: true,
-            cull_mode: None,
-            ..default()
-        });
+        for label in face_labels {
+            let material = materials.add(StandardMaterial {
+                base_color: label.color,
+                emissive: LinearRgba::BLACK,
+                unlit: true,
+                cull_mode: None,
+                ..default()
+            });
 
-        commands.spawn((
-            TextMesh {
-                text: label.text.to_string(),
-                font: font.clone(),
-                style: TextMeshStyle {
-                    depth: label_depth,
-                    anchor: TextAnchor::Center,
-                    ..default()
+            commands.spawn((
+                TextMesh {
+                    text: label.text.to_string(),
+                    font: font.clone(),
+                    style: TextMeshStyle {
+                        depth: label_depth,
+                        anchor: TextAnchor::Center,
+                        ..default()
+                    },
                 },
-            },
-            MeshMaterial3d(material),
-            Transform::from_translation(label.position)
-                .with_rotation(label.rotation)
-                .with_scale(Vec3::splat(label_scale)),
-            Pickable::IGNORE,
-            FaceLabel {
-                base_rotation: label.rotation,
-                camera,
-                last_angle: 0.0,
-                last_view: None,
-            },
-            KeepsRenderLayers,
-            render_layers.clone(),
-            ChildOf(parent),
-            Name::new(format!("label_{}", label.text)),
-        ));
+                MeshMaterial3d(material),
+                Transform::from_translation(label.position)
+                    .with_rotation(label.rotation)
+                    .with_scale(Vec3::splat(label_scale)),
+                Pickable::IGNORE,
+                FaceLabel {
+                    base_rotation: label.rotation,
+                    camera,
+                    last_angle: 0.0,
+                    last_view: None,
+                },
+                KeepsRenderLayers,
+                render_layers.clone(),
+                ChildOf(parent),
+                Name::new(format!("label_{}", label.text)),
+            ));
+        }
     }
 }
 

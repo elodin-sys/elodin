@@ -1,4 +1,8 @@
 #![recursion_limit = "256"]
+#![cfg_attr(
+    all(feature = "wasm-cut", target_family = "wasm"),
+    allow(dead_code, unused_imports, unused_variables, unused_mut)
+)]
 
 use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
@@ -10,9 +14,7 @@ use bevy::{
     DefaultPlugins,
     asset::{UnapprovedPathMode, embedded_asset},
     camera::RenderTarget,
-    diagnostic::{
-        DiagnosticsPlugin, FrameTimeDiagnosticsPlugin, SystemInformationDiagnosticsPlugin,
-    },
+    diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
     ecs::observer::Observer,
     ecs::system::{NonSendMarker, SystemParam},
     light::DirectionalLightShadowMap,
@@ -95,7 +97,9 @@ pub mod rim_glow_material;
 pub mod sensor_camera;
 #[cfg(all(not(target_family = "wasm"), target_family = "unix"))]
 mod sensor_h264;
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 mod skybox_db_assets;
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 mod skybox_generation;
 #[cfg(feature = "big_space")]
 pub(crate) mod spatial;
@@ -104,6 +108,8 @@ pub(crate) mod spatial;
 pub(crate) mod spatial;
 pub mod ui;
 pub mod vector_arrow;
+#[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+mod wasm_cut;
 
 #[cfg(all(not(target_family = "wasm"), target_family = "unix"))]
 pub mod headless;
@@ -112,6 +118,7 @@ pub mod run;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 pub(crate) fn skybox_asset_plugin() -> bevy_ai_skybox::prelude::SkyboxAssetPlugin {
     let assets_dir = plugins::env_asset_source::resolve_assets_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("assets"));
@@ -130,6 +137,7 @@ pub(crate) fn skybox_asset_plugin() -> bevy_ai_skybox::prelude::SkyboxAssetPlugi
     }
 }
 
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 pub(crate) fn skybox_generation_plugin() -> bevy_ai_skybox::prelude::BlockadeSkyboxPlugin {
     bevy_ai_skybox::prelude::BlockadeSkyboxPlugin {
         default_resolution: bevy_ai_skybox::prelude::SkyboxResolution::EightK,
@@ -276,6 +284,7 @@ impl Plugin for EditorPlugin {
                             title: "Elodin".into(),
                             present_mode: ui::window::present_mode_from_env(),
                             canvas: Some("#editor".to_string()),
+                            fit_canvas_to_parent: cfg!(target_family = "wasm"),
                             resolution: self.window_resolution.clone(),
                             resize_constraints: WindowResizeConstraints {
                                 min_width: 400.,
@@ -285,13 +294,20 @@ impl Plugin for EditorPlugin {
                             composite_alpha_mode,
                             prevent_default_event_handling: true,
                             decorations: true,
-                            visible: cfg!(target_os = "linux"),
+                            visible: cfg!(target_os = "linux") || cfg!(target_family = "wasm"),
                             ..default()
                         }),
                         ..default()
                     })
                     .set(AssetPlugin {
-                        watch_for_changes_override: Some(true),
+                        watch_for_changes_override: if cfg!(all(
+                            feature = "wasm-cut",
+                            target_family = "wasm"
+                        )) {
+                            None
+                        } else {
+                            Some(true)
+                        },
                         unapproved_path_mode: UnapprovedPathMode::Allow,
                         // NOTE: `Processed` interferes with WebAssetPlugin.
                         // mode: AssetMode::Processed,
@@ -311,11 +327,15 @@ impl Plugin for EditorPlugin {
         app.add_plugins(plugins::hw_stats::HardwareStatsPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::display_kernel::DisplayKernelPlugin);
-        app.add_plugins(plugins::kdl_document::plugin)
-            .add_plugins(skybox_asset_plugin())
-            .add_plugins(skybox_generation_plugin())
-            .init_resource::<skybox_db_assets::DbSkyboxAssetMirror>()
-            .init_resource::<skybox_db_assets::DbSkyboxSyncInFlight>()
+        app.add_plugins(plugins::kdl_document::plugin);
+        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+        {
+            app.add_plugins(skybox_asset_plugin())
+                .add_plugins(skybox_generation_plugin())
+                .init_resource::<skybox_db_assets::DbSkyboxAssetMirror>()
+                .init_resource::<skybox_db_assets::DbSkyboxSyncInFlight>();
+        }
+        app
             // Note: we added this because bevy 0.17.3 changed its behavior
             // which broke bevy_editor_cam. See here:
             // https://github.com/aevyrie/bevy_editor_cam/issues/61
@@ -361,9 +381,10 @@ impl Plugin for EditorPlugin {
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::fps_log::EnvFpsLogPlugin);
         app.add_plugins(ui::UiPlugin)
-            .add_plugins(FrameTimeDiagnosticsPlugin::default())
-            .add_plugins(SystemInformationDiagnosticsPlugin)
-            .add_plugins(WireframePlugin::default())
+            .add_plugins(FrameTimeDiagnosticsPlugin::default());
+        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+        app.add_plugins(bevy::diagnostic::SystemInformationDiagnosticsPlugin);
+        app.add_plugins(WireframePlugin::default())
             .add_plugins(editor_cam_touch::EditorCamTouchPlugin)
             .add_plugins(crate::ui::plot::PlotPlugin)
             .add_plugins(crate::plugins::LogicalKeyPlugin)
@@ -441,31 +462,34 @@ impl Plugin for EditorPlugin {
                     .after(update_eql_context),
             )
             .add_systems(Startup, spawn_ui_cam)
-            .add_systems(Update, ui::video_stream::connect_streams)
-            .init_resource::<skybox_generation::LocallyPushedSkyboxActive>()
-            .add_systems(
-                Update,
-                skybox_generation::sync_generated_skybox_to_schematic,
-            )
-            .add_systems(Update, skybox_generation::on_document_loaded)
-            .add_systems(Update, skybox_generation::record_reloaded_schematic_key)
-            .add_systems(Update, skybox_generation::push_skybox_active_on_pending)
-            .add_systems(Update, skybox_generation::decay_skybox_status_message)
-            .add_systems(
-                Update,
-                ui::video_stream::invalidate_sensor_frames_on_db_skybox_change,
-            )
-            .add_systems(Update, ui::log_stream::connect_streams)
+            .add_systems(Update, ui::video_stream::connect_streams);
+        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+        {
+            app.init_resource::<skybox_generation::LocallyPushedSkyboxActive>()
+                .add_systems(
+                    Update,
+                    skybox_generation::sync_generated_skybox_to_schematic,
+                )
+                .add_systems(Update, skybox_generation::on_document_loaded)
+                .add_systems(Update, skybox_generation::record_reloaded_schematic_key)
+                .add_systems(Update, skybox_generation::push_skybox_active_on_pending)
+                .add_systems(Update, skybox_generation::decay_skybox_status_message)
+                .add_systems(
+                    Update,
+                    ui::video_stream::invalidate_sensor_frames_on_db_skybox_change,
+                )
+                .init_resource::<skybox_db_assets::DbSkyboxUploaded>()
+                .add_systems(
+                    PostUpdate,
+                    skybox_db_assets::sync_db_skybox_assets_from_config,
+                )
+                .add_systems(
+                    PostUpdate,
+                    skybox_db_assets::upload_active_skybox_assets_to_db,
+                );
+        }
+        app.add_systems(Update, ui::log_stream::connect_streams)
             .add_systems(PostUpdate, ui::video_stream::set_visibility)
-            .init_resource::<skybox_db_assets::DbSkyboxUploaded>()
-            .add_systems(
-                PostUpdate,
-                skybox_db_assets::sync_db_skybox_assets_from_config,
-            )
-            .add_systems(
-                PostUpdate,
-                skybox_db_assets::upload_active_skybox_assets_to_db,
-            )
             .add_systems(PostUpdate, set_clear_color)
             .insert_resource(WireframeConfig {
                 global: false,
@@ -2582,6 +2606,7 @@ pub fn set_eql_context_range(fetch_range: Res<FetchTimeRange>, mut eql: ResMut<E
     eql.0.last_timestamp = fetch_range.0.end;
 }
 
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 pub fn dirs() -> directories::ProjectDirs {
     directories::ProjectDirs::from("systems", "elodin", "editor").unwrap()
 }

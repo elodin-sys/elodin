@@ -42,8 +42,6 @@ synth = ["dep:noise"]
 
 [dependencies]
 bevy.workspace = true
-
-# `terrain` (default): the renderer itself.
 ndarray = "0.15"
 itertools = "0.12"
 image = "0.25"
@@ -63,6 +61,16 @@ rayon = { version = "1", optional = true }
 toml = { version = "0.8", optional = true }
 serde = { version = "1", optional = true, features = ["derive"] }
 noise = { version = "0.9", optional = true }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+bevy = { workspace = true, features = [
+  "multi_threaded",
+  "sysinfo_plugin",
+  "x11",
+  "wayland",
+  "basis-universal",
+  "zstd_c",
+] }
 
 # Binaries -----------------------------------------------------------------
 

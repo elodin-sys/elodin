@@ -12,6 +12,7 @@ use egui::Color32;
 use impeller_wkt::Color;
 use serde::{Deserialize, Serialize};
 
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 use crate::dirs;
 
 mod presets;
@@ -326,18 +327,25 @@ fn prettify_label(name: &str) -> String {
 }
 
 fn color_scheme_dirs() -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    // Same resolution as the Bevy asset source ($ELODIN_ASSETS, then ./assets)
-    // so schemes live beside other assets.
-    if let Some(root) = crate::plugins::env_asset_source::resolve_assets_dir() {
-        roots.push(root);
+    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+    {
+        return Vec::new();
     }
-    roots.push(dirs().data_dir().to_path_buf());
-    roots
-        .into_iter()
-        .map(|root| root.join("color_schemes"))
-        .filter(|path| path.exists() && path.is_dir())
-        .collect()
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+    {
+        let mut roots = Vec::new();
+        // Same resolution as the Bevy asset source ($ELODIN_ASSETS, then ./assets)
+        // so schemes live beside other assets.
+        if let Some(root) = crate::plugins::env_asset_source::resolve_assets_dir() {
+            roots.push(root);
+        }
+        roots.push(dirs().data_dir().to_path_buf());
+        roots
+            .into_iter()
+            .map(|root| root.join("color_schemes"))
+            .filter(|path| path.exists() && path.is_dir())
+            .collect()
+    }
 }
 
 fn parse_scheme_target(path: &Path, parent_name: Option<&str>) -> Option<(String, String)> {
@@ -562,23 +570,38 @@ enum StoredColorScheme {
 }
 
 fn load_color_scheme() -> Option<StoredColorScheme> {
-    let color_scheme_path = dirs().data_dir().join("color_scheme.json");
-    let json = fs::read_to_string(color_scheme_path).ok()?;
-    serde_json::from_str(&json).ok()
+    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+    {
+        return None;
+    }
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+    {
+        let color_scheme_path = dirs().data_dir().join("color_scheme.json");
+        let json = fs::read_to_string(color_scheme_path).ok()?;
+        serde_json::from_str(&json).ok()
+    }
 }
 
 fn persist_selection(scheme: &str, mode: &str, colors: &ColorScheme) {
-    let payload = StoredColorScheme::Named {
-        scheme: scheme.to_string(),
-        mode: Some(mode.to_string()),
-        colors: colors.clone(),
-    };
-    let color_scheme_path = dirs().data_dir().join("color_scheme.json");
-    if let Ok(json) = serde_json::to_string(&payload) {
-        if let Some(parent) = color_scheme_path.parent() {
-            let _ = fs::create_dir_all(parent);
+    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+    {
+        let _ = (scheme, mode, colors);
+        return;
+    }
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+    {
+        let payload = StoredColorScheme::Named {
+            scheme: scheme.to_string(),
+            mode: Some(mode.to_string()),
+            colors: colors.clone(),
+        };
+        let color_scheme_path = dirs().data_dir().join("color_scheme.json");
+        if let Ok(json) = serde_json::to_string(&payload) {
+            if let Some(parent) = color_scheme_path.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            let _ = fs::write(color_scheme_path, json);
         }
-        let _ = fs::write(color_scheme_path, json);
     }
 }
 

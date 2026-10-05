@@ -17,8 +17,11 @@ use impeller::types::Timestamp;
 use impeller_wkt::{AtmosphereConfig, CurrentTimestamp, EnvironmentConfig, SunConfig};
 
 use crate::MainCamera;
-use crate::plugins::cinematic_earth::CinematicEarthRoot;
 use crate::plugins::render_layer_alloc::CINEMATIC_EARTH_RENDER_LAYER;
+
+/// Globe root: ECEF origin, model→ECEF alignment rotation, no scale.
+#[derive(Component)]
+pub struct CinematicEarthRoot;
 
 /// Marks the viewport that owns the cinematic Earth camera pipeline.
 #[derive(Component)]

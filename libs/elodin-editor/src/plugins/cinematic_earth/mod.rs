@@ -18,6 +18,8 @@ use bevy::render::render_resource::{TextureViewDescriptor, TextureViewDimension}
 use bevy::transform::TransformSystems;
 use bevy::world_serialization::{WorldAsset, WorldAssetRoot};
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
+
+pub use super::scene_environment::CinematicEarthRoot;
 use bevy_hanabi::{EffectAsset, EffectMaterial, EffectProperties, ParticleEffect};
 
 use crate::plugins::render_layer_alloc::CINEMATIC_EARTH_RENDER_LAYER;
@@ -88,10 +90,6 @@ const SUN_FLARE_DIST_M: f32 = 2_000.0;
 const SUN_FLARE_SIZE_M: f32 = 700.0;
 /// Unlit colors skip exposure, so this gain must stay order-1.
 const SUN_FLARE_GAIN: f32 = 3.0;
-
-/// Globe root: ECEF origin, model→ECEF alignment rotation, no scale.
-#[derive(Component)]
-pub struct CinematicEarthRoot;
 
 #[derive(Component)]
 struct CinematicEarthEllipsoid;

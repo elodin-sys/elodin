@@ -9,6 +9,7 @@ use bevy::{
     prelude::*,
     window::{Monitor, PrimaryWindow, Window, WindowPosition},
 };
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 use bevy_ai_skybox::prelude::PrimarySkybox;
 use bevy_editor_cam::{
     controller::{component::Sensitivity, zoom::ZoomLimits},
@@ -1919,6 +1920,7 @@ impl ViewportPane {
             viewport.bloom.as_ref(),
             viewport.cinematic,
         ));
+        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
         camera.insert(PrimarySkybox);
         camera.insert(EnvironmentMapLight {
             diffuse_map: asset_server.load("embedded://elodin_editor/assets/diffuse.ktx2"),

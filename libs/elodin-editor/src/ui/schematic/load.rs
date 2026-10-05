@@ -342,18 +342,26 @@ fn read_window_schematic_kdl(
     }
 
     let url = crate::object_3d::resolve_db_asset_url(path_str, connection_addr);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .map_err(|err| format!("{url}: {err}"))?;
-    let response = client
-        .get(&url)
-        .send()
-        .map_err(|err| format!("{url}: {err}"))?;
-    if !response.status().is_success() {
-        return Err(format!("{url}: HTTP {}", response.status()));
+    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+    {
+        let _ = url;
+        return Err("wasm-cut: blocking HTTP".into());
     }
-    response.text().map_err(|err| format!("{url}: {err}"))
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+    {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .map_err(|err| format!("{url}: {err}"))?;
+        let response = client
+            .get(&url)
+            .send()
+            .map_err(|err| format!("{url}: {err}"))?;
+        if !response.status().is_success() {
+            return Err(format!("{url}: HTTP {}", response.status()));
+        }
+        response.text().map_err(|err| format!("{url}: {err}"))
+    }
 }
 
 fn resolve_window_descriptor(

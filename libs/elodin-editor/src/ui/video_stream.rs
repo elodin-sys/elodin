@@ -470,14 +470,20 @@ pub struct VideoDecoderHandle {
     width: Arc<AtomicUsize>,
     /// Shared with the decoder thread so it can skip stale seek batches.
     latest_seek_generation: Arc<AtomicU64>,
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
     _handle: std::thread::JoinHandle<()>,
+    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+    _handle: (),
 }
 
 // ---------------------------------------------------------------------------
 // Decoder implementations (platform-specific)
 // ---------------------------------------------------------------------------
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(
+    not(target_os = "macos"),
+    not(all(feature = "wasm-cut", target_family = "wasm"))
+))]
 fn decode_one_frame(
     decoder: &mut openh264::decoder::Decoder,
     packet: &[u8],
@@ -505,7 +511,10 @@ fn decode_one_frame(
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(
+    not(target_os = "macos"),
+    not(all(feature = "wasm-cut", target_family = "wasm"))
+))]
 fn decode_video(
     _frame_width: Arc<AtomicUsize>,
     packet_rx: flume::Receiver<DecoderInput>,
@@ -669,8 +678,14 @@ impl Default for VideoDecoderHandle {
         let frame_width = width.clone();
         let latest_gen = Arc::new(AtomicU64::new(0));
         let decoder_gen = latest_gen.clone();
+        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
         let _handle =
             std::thread::spawn(move || decode_video(frame_width, packet_rx, image_tx, decoder_gen));
+        #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+        let _handle = {
+            let _ = (frame_width, packet_rx, image_tx, decoder_gen);
+            ()
+        };
         VideoDecoderHandle {
             tx: packet_tx,
             rx: image_rx,
@@ -1313,8 +1328,12 @@ pub(crate) fn invalidate_sensor_frames_if_loaded_skybox_differs(
 
 pub(crate) fn invalidate_sensor_frames_on_db_skybox_change(
     config: Res<impeller_wkt::DbConfig>,
-    skybox_ui: Option<Res<bevy_ai_skybox::prelude::SkyboxGenerationUi>>,
-    mut locally_pushed: ResMut<crate::skybox_generation::LocallyPushedSkyboxActive>,
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))] skybox_ui: Option<
+        Res<bevy_ai_skybox::prelude::SkyboxGenerationUi>,
+    >,
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))] mut locally_pushed: ResMut<
+        crate::skybox_generation::LocallyPushedSkyboxActive,
+    >,
     mut last_active: Local<Option<String>>,
     mut caches: Query<&mut VideoFrameCache>,
 ) {
@@ -1322,16 +1341,19 @@ pub(crate) fn invalidate_sensor_frames_on_db_skybox_change(
     if *last_active == active {
         return;
     }
-    if locally_pushed.consume_matching(active.as_deref()) {
-        *last_active = active;
-        return;
-    }
-    if let (Some(active), Some(skybox_ui)) = (active.as_deref(), skybox_ui.as_deref())
-        && skybox_ui.is_busy()
-        && skybox_ui.target_name.as_deref() == Some(active)
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
     {
-        *last_active = Some(active.to_string());
-        return;
+        if locally_pushed.consume_matching(active.as_deref()) {
+            *last_active = active;
+            return;
+        }
+        if let (Some(active), Some(skybox_ui)) = (active.as_deref(), skybox_ui.as_deref())
+            && skybox_ui.is_busy()
+            && skybox_ui.target_name.as_deref() == Some(active)
+        {
+            *last_active = Some(active.to_string());
+            return;
+        }
     }
     *last_active = active;
     clear_sensor_raw_frame_caches(&mut caches);

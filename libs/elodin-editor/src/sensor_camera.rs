@@ -37,6 +37,7 @@ use bevy::{
         view::{ViewDepthTexture, ViewTarget},
     },
 };
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 use bevy_ai_skybox::prelude::PrimarySkybox;
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use impeller::types::{ComponentId, Timestamp};
@@ -809,6 +810,7 @@ fn spawn_sensor_cameras(
         // Earth owns the cinematic cubemap (`CinematicSkybox`). Tagging this
         // camera as `PrimarySkybox` makes the render-server wait forever for
         // that cubemap to disappear before emitting frames.
+        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
         if !config.cinematic {
             entity.insert(PrimarySkybox);
         }
@@ -1242,7 +1244,10 @@ struct ReadbackJob {
 
 struct SensorReadbackWorker {
     sender: Option<std::sync::mpsc::Sender<ReadbackJob>>,
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
     handle: Option<std::thread::JoinHandle<()>>,
+    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+    handle: Option<()>,
 }
 
 impl SensorReadbackWorker {
@@ -1251,27 +1256,38 @@ impl SensorReadbackWorker {
         render_device: RenderDevice,
         frame_sender: SensorFrameSender,
     ) -> Result<Self, std::io::Error> {
-        let (sender, receiver) = std::sync::mpsc::channel::<ReadbackJob>();
-        let handle = std::thread::Builder::new()
-            .name(format!("sensor-readback-{index}"))
-            .spawn(move || {
-                while let Ok(mut job) = receiver.recv() {
-                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        readback_sensor_frame(&render_device, &frame_sender, &mut job);
-                    }))
-                    .is_err()
-                    {
-                        tracing::error!(
-                            worker = index,
-                            "sensor readback worker recovered from panic"
-                        );
+        #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+        {
+            let _ = (index, render_device, frame_sender);
+            return Ok(Self {
+                sender: None,
+                handle: None,
+            });
+        }
+        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+        {
+            let (sender, receiver) = std::sync::mpsc::channel::<ReadbackJob>();
+            let handle = std::thread::Builder::new()
+                .name(format!("sensor-readback-{index}"))
+                .spawn(move || {
+                    while let Ok(mut job) = receiver.recv() {
+                        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            readback_sensor_frame(&render_device, &frame_sender, &mut job);
+                        }))
+                        .is_err()
+                        {
+                            tracing::error!(
+                                worker = index,
+                                "sensor readback worker recovered from panic"
+                            );
+                        }
                     }
-                }
-            })?;
-        Ok(Self {
-            sender: Some(sender),
-            handle: Some(handle),
-        })
+                })?;
+            Ok(Self {
+                sender: Some(sender),
+                handle: Some(handle),
+            })
+        }
     }
 
     fn send(&self, job: ReadbackJob) {
@@ -1284,8 +1300,13 @@ impl SensorReadbackWorker {
 impl Drop for SensorReadbackWorker {
     fn drop(&mut self) {
         self.sender.take();
+        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
+        }
+        #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+        {
+            self.handle.take();
         }
     }
 }
@@ -1295,14 +1316,21 @@ fn release_slot_after_late_map<E: Send + 'static>(
     buffer: Buffer,
     slot: Option<InFlightSlot>,
 ) {
-    let _ = std::thread::Builder::new()
-        .name("sensor-readback-late-map".to_string())
-        .spawn(move || {
-            if let Ok(Ok(())) = receiver.recv() {
-                drop(MappedBufferGuard(&buffer));
-            }
-            drop(slot);
-        });
+    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+    {
+        let _ = (receiver, buffer, slot);
+    }
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+    {
+        let _ = std::thread::Builder::new()
+            .name("sensor-readback-late-map".to_string())
+            .spawn(move || {
+                if let Ok(Ok(())) = receiver.recv() {
+                    drop(MappedBufferGuard(&buffer));
+                }
+                drop(slot);
+            });
+    }
 }
 
 fn readback_sensor_frame(
