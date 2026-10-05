@@ -26,8 +26,8 @@ use impeller_bbq::{AsyncArcQueueRx, RxExt};
 use impeller_wkt::{
     ComponentMetadata, CurrentTimestamp, DbConfig, DumpMetadata, DumpMetadataResp, DumpSchema,
     DumpSchemaResp, EarliestTimestamp, ErrorResponse, GetDbSettings, GetEarliestTimestamp,
-    GetTimeSeries, IsRecording, LastUpdated, Stream, StreamBehavior, StreamId, StreamTimestamp,
-    SubscribeLastUpdated, VTableMsg, WorldPos,
+    GetTimeSeries, IsRecording, LastUpdated, SetStreamComponentFilter, Stream, StreamBehavior,
+    StreamId, StreamTimestamp, SubscribeLastUpdated, VTableMsg, WorldPos,
 };
 use serde::de::DeserializeOwned;
 use std::{
@@ -1952,7 +1952,36 @@ impl CommandsExt for Commands<'_, '_> {
 }
 
 pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPacket> {
-    [
+    connection_packets(stream_id, false)
+}
+
+/// Initial packets for a client that will explicitly select its live component
+/// set after its schematic has loaded.
+///
+/// The empty allowlist is installed before `RealTimeBatched` opens, so the
+/// connection never receives an unfiltered startup burst.
+pub fn new_component_filtered_connection_packets(
+    stream_id: StreamId,
+) -> impl Iterator<Item = LenPacket> {
+    connection_packets(stream_id, true)
+}
+
+pub(crate) fn connection_packets(
+    stream_id: StreamId,
+    component_filtered: bool,
+) -> std::vec::IntoIter<LenPacket> {
+    let mut packets = Vec::with_capacity(if component_filtered { 7 } else { 6 });
+    if component_filtered {
+        packets.push(
+            SetStreamComponentFilter {
+                id: stream_id,
+                component_ids: Vec::new(),
+                frequency: None,
+            }
+            .into_len_packet(),
+        );
+    }
+    packets.extend([
         // RealTimeBatched delivers all component data whenever new data
         // arrives (batched per last_updated change).  For recorded DBs this
         // sends one table then blocks — historical data is loaded via
@@ -1967,8 +1996,8 @@ pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPa
         GetDbSettings.into_len_packet(),
         SubscribeLastUpdated.into_len_packet(),
         DumpSchema.into_len_packet(),
-    ]
-    .into_iter()
+    ]);
+    packets.into_iter()
 }
 
 /// Initial packets for the msg TCP connection. Returns empty; main connection
@@ -2233,6 +2262,27 @@ mod series_store_allowlist_tests {
     use super::*;
     use impeller::types::PrimType;
     use std::collections::HashSet;
+
+    #[test]
+    fn component_filtered_connection_primes_filter_before_stream() {
+        let packets: Vec<_> = new_component_filtered_connection_packets(42).collect();
+        assert_eq!(
+            packets[0].as_packet().header.id,
+            SetStreamComponentFilter::ID
+        );
+        assert_eq!(packets[1].as_packet().header.id, Stream::ID);
+        let filter: SetStreamComponentFilter =
+            postcard::from_bytes(&packets[0].as_packet().body).expect("valid filter packet");
+        assert_eq!(filter.id, 42);
+        assert!(filter.component_ids.is_empty());
+        assert_eq!(filter.frequency, None);
+    }
+
+    #[test]
+    fn default_connection_opens_stream_without_a_filter() {
+        let packets: Vec<_> = new_connection_packets(42).collect();
+        assert_eq!(packets[0].as_packet().header.id, Stream::ID);
+    }
 
     #[test]
     fn backfill_candidates_only_allowlisted_with_schema() {

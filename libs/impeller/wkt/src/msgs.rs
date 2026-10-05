@@ -39,6 +39,19 @@ pub struct SetStreamFilter {
     pub frequency: Option<u64>,
 }
 
+/// Select the exact components delivered by a `RealTimeBatched` stream.
+///
+/// Unlike [`SetStreamFilter`], an empty `component_ids` list selects no
+/// component values. This separate message preserves the legacy empty-list
+/// behavior for existing clients.
+#[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
+pub struct SetStreamComponentFilter {
+    pub id: StreamId,
+    pub component_ids: Vec<ComponentId>,
+    #[serde(default)]
+    pub frequency: Option<u64>,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
 pub struct VTableStream {
     pub id: PacketId,

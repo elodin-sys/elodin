@@ -202,6 +202,7 @@ impl StartupLayout<'_, '_> {
             incoming_packet_tx,
             stream_id,
             reconnect,
+            true,
         );
         self.commands.insert_resource(ConnectionAddr(addr));
         *self.current_stream_id = CurrentStreamId(stream_id);

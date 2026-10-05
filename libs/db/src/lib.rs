@@ -287,7 +287,7 @@ pub struct State {
     vtable_registry: registry::HashMapRegistry,
     streams: HashMap<StreamId, Arc<FixedRateStreamState>>,
     real_time_stream_filters: HashMap<StreamId, Arc<RealTimeStreamFilter>>,
-    pending_real_time_stream_filters: HashMap<StreamId, (Vec<ComponentId>, Option<u64>)>,
+    pending_real_time_stream_filters: HashMap<StreamId, (Vec<ComponentId>, Option<u64>, bool)>,
 
     udp_vtable_streams: HashSet<(SocketAddr, [u8; 2])>,
 
@@ -311,9 +311,9 @@ impl RealTimeStreamFilter {
         }
     }
 
-    fn set(&self, component_ids: Vec<ComponentId>, frequency: Option<u64>) {
+    fn set(&self, component_ids: Vec<ComponentId>, frequency: Option<u64>, exact_components: bool) {
         let mut current = self.component_ids.write().unwrap();
-        *current = if component_ids.is_empty() {
+        *current = if component_ids.is_empty() && !exact_components {
             None
         } else {
             Some(component_ids.into_iter().collect())
@@ -2178,11 +2178,22 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             let filter = m.parse::<SetStreamFilter>()?;
             db.with_state_mut(|state| {
                 if let Some(live) = state.real_time_stream_filters.get(&filter.id) {
-                    live.set(filter.component_ids.clone(), filter.frequency);
+                    live.set(filter.component_ids.clone(), filter.frequency, false);
                 }
                 state
                     .pending_real_time_stream_filters
-                    .insert(filter.id, (filter.component_ids, filter.frequency));
+                    .insert(filter.id, (filter.component_ids, filter.frequency, false));
+            });
+        }
+        Packet::Msg(m) if m.id == SetStreamComponentFilter::ID => {
+            let filter = m.parse::<SetStreamComponentFilter>()?;
+            db.with_state_mut(|state| {
+                if let Some(live) = state.real_time_stream_filters.get(&filter.id) {
+                    live.set(filter.component_ids.clone(), filter.frequency, true);
+                }
+                state
+                    .pending_real_time_stream_filters
+                    .insert(filter.id, (filter.component_ids, filter.frequency, true));
             });
         }
         Packet::Msg(m) if m.id == SetStreamState::ID => {
@@ -3143,10 +3154,10 @@ fn handle_stream<A: AsyncWrite + 'static>(
             let stream_id = stream.id;
             let filter = Arc::new(RealTimeStreamFilter::new());
             db.with_state_mut(|state| {
-                if let Some((component_ids, frequency)) =
+                if let Some((component_ids, frequency, exact_components)) =
                     state.pending_real_time_stream_filters.remove(&stream_id)
                 {
-                    filter.set(component_ids, frequency);
+                    filter.set(component_ids, frequency, exact_components);
                 }
                 state
                     .real_time_stream_filters
@@ -3360,7 +3371,7 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
             last_sent
                 .is_none_or(|last: Timestamp| timestamp.0.saturating_sub(last.0) >= interval_us)
         });
-        if stream_changed || due {
+        if stream_changed || (due && !stream_components.is_empty()) {
             table.clear();
             DBVisitor.populate_table_latest(&stream_components, &mut table);
             table = send_with_timeout(&sink, table.with_request_id(req_id)).await?;
@@ -3662,15 +3673,17 @@ mod tests {
     }
 
     #[test]
-    fn empty_real_time_stream_filter_is_unfiltered() {
+    fn real_time_stream_filter_distinguishes_empty_from_unfiltered() {
         let filter = RealTimeStreamFilter::new();
         assert!(filter.component_ids().is_none());
-        filter.set(vec![ComponentId::new("a")], Some(60));
+        filter.set(vec![ComponentId::new("a")], Some(60), false);
         assert_eq!(
             filter.component_ids(),
             Some([ComponentId::new("a")].into_iter().collect())
         );
-        filter.set(vec![], Some(60));
+        filter.set(vec![], Some(60), true);
+        assert_eq!(filter.component_ids(), Some(HashSet::new()));
+        filter.set(vec![], Some(60), false);
         assert!(filter.component_ids().is_none());
         assert_eq!(filter.frequency(), Some(60));
     }

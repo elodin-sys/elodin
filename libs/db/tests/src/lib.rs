@@ -579,7 +579,7 @@ mod tests {
     }
 
     #[test]
-    async fn test_empty_batched_stream_filter_keeps_full_stream() {
+    async fn test_batched_stream_filter_distinguishes_empty_from_full() {
         let (addr, _db) = setup_test_db().await.unwrap();
         let mut writer = Client::connect(addr).await.unwrap();
         let component_a = ComponentId::new("empty.a");
@@ -605,7 +605,7 @@ mod tests {
         let stream_id = 44;
         let mut reader = Client::connect(addr).await.unwrap();
         reader
-            .send(&SetStreamFilter {
+            .send(&SetStreamComponentFilter {
                 id: stream_id,
                 component_ids: vec![],
                 frequency: Some(60),
@@ -625,10 +625,10 @@ mod tests {
                 break vtable;
             }
         };
-        assert_eq!(pending_empty.vtable.fields.len(), 2);
+        assert_eq!(pending_empty.vtable.fields.len(), 0);
 
         stream
-            .send(&SetStreamFilter {
+            .send(&SetStreamComponentFilter {
                 id: stream_id,
                 component_ids: vec![component_a],
                 frequency: Some(60),
@@ -658,6 +658,87 @@ mod tests {
             }
         };
         assert_eq!(restored.vtable.fields.len(), 2);
+    }
+
+    #[test]
+    async fn test_batched_stream_filter_without_frequency_keeps_every_update() {
+        let (addr, _db) = setup_test_db().await.unwrap();
+        let mut writer = Client::connect(addr).await.unwrap();
+        let component_id = ComponentId::new("full_rate.selected");
+        let vtable_id = [27, 0];
+
+        writer
+            .send(&SetComponentMetadata::new(
+                component_id,
+                "Full Rate Selected",
+            ))
+            .await
+            .0
+            .unwrap();
+        writer
+            .send(&VTableMsg {
+                id: vtable_id,
+                vtable: vtable([raw_field(
+                    0,
+                    8,
+                    timestamp(
+                        raw_table(8, 8),
+                        schema(PrimType::F64, &[], component(component_id)),
+                    ),
+                )]),
+            })
+            .await
+            .0
+            .unwrap();
+        sleep(Duration::from_millis(50)).await;
+
+        let mut initial = LenPacket::table(vtable_id, 16);
+        initial.extend_from_slice(&0.0_f64.to_le_bytes());
+        initial.extend_aligned(&[0_i64]);
+        writer.send(initial).await.0.unwrap();
+        sleep(Duration::from_millis(20)).await;
+
+        let stream_id = 45;
+        let mut reader = Client::connect(addr).await.unwrap();
+        reader
+            .send(&SetStreamComponentFilter {
+                id: stream_id,
+                component_ids: vec![component_id],
+                frequency: None,
+            })
+            .await
+            .0
+            .unwrap();
+        let mut stream = reader
+            .stream(&Stream {
+                behavior: StreamBehavior::RealTimeBatched,
+                id: stream_id,
+            })
+            .await
+            .unwrap();
+
+        // Consume the stream's initial latest-value table.
+        loop {
+            if matches!(stream.next().await.unwrap(), StreamReply::Table(_)) {
+                break;
+            }
+        }
+
+        for tick in 1_i64..=20 {
+            let timestamp = Timestamp(tick * 1_000);
+            let mut packet = LenPacket::table(vtable_id, 16);
+            packet.extend_from_slice(&(tick as f64).to_le_bytes());
+            packet.extend_aligned(&[timestamp.0]);
+            writer.send(packet).await.0.unwrap();
+
+            let observed = loop {
+                if let StreamReply::Table(table) = stream.next().await.unwrap() {
+                    let bytes: [u8; 8] = table.buf[..8].try_into().unwrap();
+                    break Timestamp(i64::from_le_bytes(bytes));
+                }
+            };
+            assert_eq!(observed, timestamp);
+        }
     }
 
     #[test]

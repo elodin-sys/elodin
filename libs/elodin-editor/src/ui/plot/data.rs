@@ -1603,6 +1603,7 @@ fn enabled_fetch_component_ids(
     point_trails: &Query<&PointTrails>,
     object_3ds: &Query<&Object3DState>,
     monitors: &Query<&MonitorData>,
+    gauge_bindings: &Query<&crate::ui::gauges::EqlBinding>,
     viewports: &Query<&Viewport>,
     vector_arrows: &Query<&VectorArrow3d>,
     eql_ctx: &EqlContext,
@@ -1613,6 +1614,9 @@ fn enabled_fetch_component_ids(
         if !monitor.component_name.trim().is_empty() {
             ids.insert(ComponentId::new(&monitor.component_name));
         }
+    }
+    for binding in gauge_bindings.iter() {
+        collect_eql_component_ids(&binding.eql, eql_ctx, &mut ids);
     }
     for viewport in viewports.iter() {
         collect_eql_component_ids(&viewport.pos.eql, eql_ctx, &mut ids);
@@ -1673,6 +1677,7 @@ pub fn update_series_fetch_priority(
     point_trails: Query<&PointTrails>,
     object_3ds: Query<&Object3DState>,
     monitors: Query<&MonitorData>,
+    gauge_bindings: Query<&crate::ui::gauges::EqlBinding>,
     viewports: Query<&Viewport>,
     vector_arrows: Query<&VectorArrow3d>,
     eql_ctx: Res<EqlContext>,
@@ -1695,6 +1700,7 @@ pub fn update_series_fetch_priority(
             &point_trails,
             &object_3ds,
             &monitors,
+            &gauge_bindings,
             &viewports,
             &vector_arrows,
             &eql_ctx,
@@ -3584,20 +3590,20 @@ mod tests {
     }
 
     #[test]
-    fn series_store_allowlist_unions_plots_and_adapters() {
+    fn series_store_allowlist_unions_consumers_and_extras() {
         let plot = ComponentId(10);
-        let adapter = ComponentId(20);
-        let ids = build_series_store_allowlist([plot].into_iter().collect(), [adapter]);
+        let extra = ComponentId(20);
+        let ids = build_series_store_allowlist([plot].into_iter().collect(), [extra]);
         assert!(ids.contains(&plot));
-        assert!(ids.contains(&adapter));
+        assert!(ids.contains(&extra));
         assert_eq!(ids.len(), 2);
     }
 
     #[test]
-    fn series_store_allowlist_adapters_alone_still_subscribe() {
-        let adapter = ComponentId(7);
-        let ids = build_series_store_allowlist(HashSet::new(), [adapter]);
-        assert_eq!(ids, [adapter].into_iter().collect());
+    fn series_store_allowlist_extras_alone_still_subscribe() {
+        let extra = ComponentId(7);
+        let ids = build_series_store_allowlist(HashSet::new(), [extra]);
+        assert_eq!(ids, [extra].into_iter().collect());
     }
 
     #[test]
@@ -3622,6 +3628,28 @@ mod tests {
             &eql_ctx,
             &mut ids,
         );
+        assert_eq!(ids, [ComponentId::new(name)].into_iter().collect());
+    }
+
+    #[test]
+    fn gauge_eql_component_is_allowlisted() {
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
+
+        let name = "quad.world_pos";
+        let component = Arc::new(eql::Component::new(
+            name.to_string(),
+            ComponentId::new(name),
+            Schema::new(PrimType::F64, vec![7_u64]).expect("valid schema"),
+        ));
+        let eql_ctx = EqlContext(eql::Context::from_leaves(
+            [component],
+            Timestamp(0),
+            Timestamp(1),
+        ));
+        let binding = crate::ui::gauges::EqlBinding::new(name.into());
+        let mut ids = HashSet::new();
+        collect_eql_component_ids(&binding.eql, &eql_ctx, &mut ids);
         assert_eq!(ids, [ComponentId::new(name)].into_iter().collect());
     }
 

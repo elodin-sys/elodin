@@ -13,11 +13,22 @@ use thingbuf::mpsc;
 
 pub struct TcpImpellerPlugin {
     addr: Option<SocketAddr>,
+    component_filtered: bool,
 }
 
 impl TcpImpellerPlugin {
     pub fn new(addr: Option<SocketAddr>) -> Self {
-        Self { addr }
+        Self {
+            addr,
+            component_filtered: false,
+        }
+    }
+
+    /// Start the real-time stream with an empty component allowlist. A client
+    /// system must subsequently publish the component IDs it consumes.
+    pub fn with_component_filtering(mut self) -> Self {
+        self.component_filtered = true;
+        self
     }
 }
 
@@ -35,6 +46,7 @@ impl Plugin for TcpImpellerPlugin {
                 incoming_packet_tx,
                 stream_id,
                 true,
+                self.component_filtered,
             )
         } else {
             ThreadConnectionStatus::new(ConnectionStatus::NoConnection)
@@ -91,11 +103,14 @@ pub fn spawn_tcp_connect(
     mut incoming_packet_tx: AsyncArcQueueTx,
     stream_id: StreamId,
     mut reconnect: bool,
+    component_filtered: bool,
 ) -> ThreadConnectionStatus {
     let connection_status = ThreadConnectionStatus(Arc::new(AtomicU64::new(0)));
     let ret_connection_status = connection_status.clone();
     std::thread::spawn(move || {
         let res: Result<(), miette::Error> = stellarator::run(|| async move {
+            let connection_packets =
+                |stream_id| crate::connection_packets(stream_id, component_filtered);
             loop {
                 connection_status.set_status(ConnectionStatus::Connecting);
                 match tcp_connect(
@@ -103,7 +118,7 @@ pub fn spawn_tcp_connect(
                     &mut outgoing_packet_rx,
                     &mut incoming_packet_tx,
                     stream_id,
-                    &new_connection_packets,
+                    &connection_packets,
                     || {
                         reconnect = true;
                         connection_status.set_status(ConnectionStatus::Success);
