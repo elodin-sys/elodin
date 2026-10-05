@@ -139,13 +139,8 @@ jobs:
       # actions/checkout only smudges files that changed since the last checkout.
       - name: Materialize Git LFS objects
         if: runner.environment != 'github-hosted'
-        working-directory: ${{ github.workspace }}
         shell: bash
-        run: |
-          set -euo pipefail
-          cd "$GITHUB_WORKSPACE"
-          git rev-parse --is-inside-work-tree >/dev/null
-          git lfs pull
+        run: git lfs pull
       - name: Install Rust non-interactively if not already installed
         if: ${{ matrix.container }}
         run: |
@@ -393,13 +388,8 @@ jobs:
           lfs: true
       - name: Materialize Git LFS objects
         if: runner.environment != 'github-hosted'
-        working-directory: ${{ github.workspace }}
         shell: bash
-        run: |
-          set -euo pipefail
-          cd "$GITHUB_WORKSPACE"
-          git rev-parse --is-inside-work-tree >/dev/null
-          git lfs pull
+        run: git lfs pull
       - uses: DeterminateSystems/nix-installer-action@main
         if: runner.environment == 'github-hosted'
       - name: Install Python
@@ -443,13 +433,8 @@ jobs:
           lfs: true
       - name: Materialize Git LFS objects
         if: runner.environment != 'github-hosted'
-        working-directory: ${{ github.workspace }}
         shell: bash
-        run: |
-          set -euo pipefail
-          cd "$GITHUB_WORKSPACE"
-          git rev-parse --is-inside-work-tree >/dev/null
-          git lfs pull
+        run: git lfs pull
       - name: Install Python
         uses: actions/setup-python@v5
         with:
@@ -539,13 +524,8 @@ jobs:
           lfs: true
       - name: Materialize Git LFS objects
         if: runner.environment != 'github-hosted'
-        working-directory: ${{ github.workspace }}
         shell: bash
-        run: |
-          set -euo pipefail
-          cd "$GITHUB_WORKSPACE"
-          git rev-parse --is-inside-work-tree >/dev/null
-          git lfs pull
+        run: git lfs pull
       - uses: DeterminateSystems/nix-installer-action@main
         if: runner.environment == 'github-hosted'
       - name: Install Python
