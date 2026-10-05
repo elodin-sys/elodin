@@ -369,6 +369,9 @@ pub fn ingest_window_schematics(
     ingest.rewrite_content(content, None)
 }
 
+/// Written by the Python SDK as the active schematic after ingest; inline windows must not take it.
+const ACTIVE_SCHEMATIC_ASSET_KEY: &str = "schematics/main.kdl";
+
 fn inline_window_stem(title: &str) -> String {
     let mut stem = String::new();
     let mut prev_hyphen = true;
@@ -447,7 +450,7 @@ impl WindowIngest<'_> {
                 .map(inline_window_stem)
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| format!("window-{index}"));
-            let key = self.assign_key(&PathBuf::from(format!("{stem}.kdl")));
+            let key = self.assign_inline_window_key(stem);
             let mut stored = content;
             let nested = self.ingest_referenced_windows(&stored, None)?;
             if !nested.is_empty() {
@@ -548,6 +551,28 @@ impl WindowIngest<'_> {
             "ingested window sub-schematic into db assets"
         );
         Ok(key)
+    }
+
+    /// Like [`Self::assign_key`], but never assigns [`ACTIVE_SCHEMATIC_ASSET_KEY`].
+    fn assign_inline_window_key(&self, stem: &str) -> String {
+        let mut n = 1usize;
+        loop {
+            let key = if n == 1 {
+                format!("schematics/{stem}.kdl")
+            } else {
+                format!("schematics/{stem}-{n}.kdl")
+            };
+            if key == ACTIVE_SCHEMATIC_ASSET_KEY {
+                n += 1;
+                continue;
+            }
+            let claimed = self.file_keys.values().any(|existing| *existing == key)
+                || self.assets_dir.join(&key).exists();
+            if !claimed {
+                return key;
+            }
+            n += 1;
+        }
     }
 
     /// First free `schematics/<stem>.kdl` key, suffixing `-2`, `-3`, … when the
@@ -1179,6 +1204,34 @@ mod tests {
         );
         let stored = std::fs::read_to_string(assets.join("schematics/motor-panel.kdl")).unwrap();
         assert!(stored.contains("drone.motor_input"));
+    }
+
+    #[test]
+    fn inline_window_title_main_skips_active_schematic_key() {
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("db/assets");
+        std::fs::create_dir_all(&assets).unwrap();
+
+        let content = r#"window title="Main" {
+    tabs {
+        graph "panel.value"
+    }
+}
+"#;
+        let rewritten = ingest_window_schematics(&assets, content, &[])
+            .unwrap()
+            .expect("inline window should be materialized");
+
+        assert!(
+            rewritten.contains("path=\"db:schematics/main-2.kdl\""),
+            "title Main must not claim schematics/main.kdl, got:\n{rewritten}"
+        );
+        assert!(
+            !assets.join(ACTIVE_SCHEMATIC_ASSET_KEY).exists(),
+            "active schematic key must stay free for the root layout"
+        );
+        let stored = std::fs::read_to_string(assets.join("schematics/main-2.kdl")).unwrap();
+        assert!(stored.contains("panel.value"));
     }
 
     #[test]
