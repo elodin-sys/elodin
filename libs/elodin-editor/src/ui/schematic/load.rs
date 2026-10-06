@@ -40,7 +40,7 @@ use crate::{
         render_layer_alloc::RenderLayerAllocator,
     },
     ui::{
-        DEFAULT_SECONDARY_RECT, HdrEnabled,
+        HdrEnabled,
         colors::{self, EColor},
         data_overview::DataOverviewPane,
         modal::ModalDialog,
@@ -374,7 +374,7 @@ fn resolve_window_descriptor(
             title: window.title.clone(),
             screen: window.screen.map(|idx| idx as usize),
             mode: theme_mode.map(|m| m.to_string()),
-            screen_rect: window.screen_rect.or(Some(DEFAULT_SECONDARY_RECT)),
+            screen_rect: window.screen_rect,
             inline_content: window.content.clone(),
         });
     }
@@ -400,7 +400,7 @@ fn resolve_window_descriptor(
         title: window.title.clone(),
         screen: window.screen.map(|idx| idx as usize),
         mode: theme_mode.map(|m| m.to_string()),
-        screen_rect: window.screen_rect.or(Some(DEFAULT_SECONDARY_RECT)),
+        screen_rect: window.screen_rect,
         inline_content: None,
     })
 }

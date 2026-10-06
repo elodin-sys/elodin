@@ -22,12 +22,6 @@ use bevy_egui::{
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use tracing::instrument;
-pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
-    x: 10,
-    y: 10,
-    width: 80,
-    height: 80,
-};
 // Order ranges:
 // 10..        primary viewports (3D, gizmo/axes…)
 // 100..       primary graphs
@@ -62,7 +56,7 @@ use self::colors::get_scheme;
 use self::{command_palette::CommandPaletteState, plot::GraphState, timeline::timeline_slider};
 use impeller::types::ComponentId;
 use impeller_bevy::ComponentValueMap;
-use impeller_wkt::{ComponentMetadata, ComponentValue, WindowRect};
+use impeller_wkt::{ComponentMetadata, ComponentValue};
 
 use crate::ui::window::window_entity_from_target;
 use crate::{
