@@ -947,7 +947,17 @@ impl Timestamp {
 
     #[cfg(feature = "std")]
     pub fn now() -> Self {
-        std::time::SystemTime::now().into()
+        #[cfg(target_family = "wasm")]
+        {
+            match web_time::SystemTime::now().duration_since(web_time::SystemTime::UNIX_EPOCH) {
+                Ok(dur) => Self(dur.as_micros() as i64),
+                Err(err) => Self(-(err.duration().as_micros() as i64)),
+            }
+        }
+        #[cfg(not(target_family = "wasm"))]
+        {
+            std::time::SystemTime::now().into()
+        }
     }
 
     #[inline]
