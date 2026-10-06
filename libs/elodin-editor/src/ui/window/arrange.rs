@@ -10,6 +10,10 @@ use crate::ui::tiles::WindowDescriptor;
 #[derive(bevy::prelude::Component)]
 pub struct AutoArranged;
 
+/// Requests the same per-display layout used when windows are created.
+#[derive(bevy::prelude::Resource, Default)]
+pub struct ArrangeWindowsRequest(pub bool);
+
 pub fn arrange_windows(
     primary: Entity,
     main: &mut Option<WindowDescriptor>,

@@ -2452,6 +2452,15 @@ impl Default for PalettePage {
             fix_current_time_range(),
             set_time_range_behavior(),
             create_window(),
+            PaletteItem::new(
+                "Arrange Windows",
+                "Windows",
+                |_: In<String>,
+                 mut request: ResMut<crate::ui::window::arrange::ArrangeWindowsRequest>| {
+                    request.0 = true;
+                    PaletteEvent::Exit
+                },
+            ),
             create_graph(None),
             create_action(None),
             create_monitor(None),

@@ -353,6 +353,7 @@ impl Plugin for UiPlugin {
             .init_resource::<SettingModalState>()
             .init_resource::<HdrEnabled>()
             .init_resource::<FocusedWindow>()
+            .init_resource::<window::arrange::ArrangeWindowsRequest>()
             .init_resource::<input_owner::UiInputOwners>()
             .init_resource::<timeline_slider::UITick>()
             .init_resource::<timeline::StreamTickOrigin>()

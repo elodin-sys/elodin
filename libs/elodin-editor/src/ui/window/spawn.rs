@@ -28,6 +28,7 @@ pub fn sync_windows(
     mut existing_map: Local<HashMap<WindowId, Entity>>,
     mut arranged_windows: Local<Vec<Entity>>,
     mut automatic_rects: Local<HashMap<Entity, impeller_wkt::WindowRect>>,
+    mut arrange_request: ResMut<super::arrange::ArrangeWindowsRequest>,
     _non_send_marker: NonSendMarker,
 ) {
     let screens_any = WINIT_WINDOWS.with_borrow(|winit_windows| {
@@ -47,7 +48,7 @@ pub fn sync_windows(
         .map(|(entity, _, _, _)| entity)
         .collect();
     ids.sort();
-    if screens_any.is_some() && *arranged_windows != ids {
+    if screens_any.is_some() && (*arranged_windows != ids || arrange_request.0) {
         let mut main_entry = None;
         let mut secondary = Vec::new();
         for (entity, marker, state, _) in windows_state.iter() {
@@ -72,6 +73,7 @@ pub fn sync_windows(
                 if let Ok((_, _, mut state, _)) = windows_state.get_mut(entity) {
                     if state.descriptor.screen != descriptor.screen
                         || state.descriptor.screen_rect != descriptor.screen_rect
+                        || (arrange_request.0 && automatic_rects.contains_key(&entity))
                     {
                         state.descriptor = descriptor;
                         commands.entity(entity).insert(super::arrange::AutoArranged);
@@ -86,6 +88,7 @@ pub fn sync_windows(
                 }
             }
             *arranged_windows = ids;
+            arrange_request.0 = false;
             automatic_rects.retain(|entity, _| arranged_windows.contains(entity));
         }
     }
