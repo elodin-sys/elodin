@@ -5857,7 +5857,7 @@ dependencies = [
 
 [[package]]
 name = "elodin-web"
-version = "0.19.3-alpha.0"
+version = "0.20.1-alpha.0"
 dependencies = [
  "bevy",
  "console_error_panic_hook",
@@ -8106,6 +8106,7 @@ dependencies = [
  "stellarator-buf",
  "thingbuf",
  "tracing",
+ "web-time",
 ]
 
 [[package]]
