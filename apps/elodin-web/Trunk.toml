@@ -5,7 +5,7 @@ dist = "dist"
 cargo_profile = "wasm-release"
 
 [watch]
-watch = [".", "../../libs/elodin-editor"]
+watch = [".", "../../libs/elodin-editor", "../../libs/impeller"]
 
 [serve]
 port = 8080

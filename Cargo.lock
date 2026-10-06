@@ -8003,6 +8003,7 @@ dependencies = [
  "thingbuf",
  "thiserror 2.0.18",
  "tracing",
+ "web-time",
  "zerocopy",
 ]
 
