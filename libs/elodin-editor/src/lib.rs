@@ -273,8 +273,8 @@ impl Plugin for EditorPlugin {
             .add_plugins(plugins::WebAssetPlugin)
             .add_plugins(plugins::env_asset_source::plugin)
             .add_plugins(plugins::kdl_asset_source::plugin)
-            .add_plugins(
-                DefaultPlugins
+            .add_plugins({
+                let plugins = DefaultPlugins
                     .set(RenderPlugin {
                         render_creation: editor_wgpu_settings().into(),
                         ..default()
@@ -315,13 +315,16 @@ impl Plugin for EditorPlugin {
                     })
                     .disable::<TransformPlugin>()
                     .disable::<DiagnosticsPlugin>()
-                    .disable::<LogPlugin>()
                     // Pulled into DefaultPlugins by the `bevy_dev_tools`
                     // cargo feature (needed for the native infinite grid);
                     // keep 0.18 behavior — no F1 render-debug keybind.
-                    .disable::<bevy::dev_tools::render_debug::RenderDebugOverlayPlugin>()
-                    .build(),
-            )
+                    .disable::<bevy::dev_tools::render_debug::RenderDebugOverlayPlugin>();
+                // Native editor installs its own tracing subscriber. Wasm has none
+                // unless LogPlugin stays enabled, so panics were the only console signal.
+                #[cfg(not(target_family = "wasm"))]
+                let plugins = plugins.disable::<LogPlugin>();
+                plugins.build()
+            })
             .add_plugins(plugins::gpu_info::GpuInfoPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::hw_stats::HardwareStatsPlugin);

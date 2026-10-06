@@ -4,6 +4,35 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Elodin Editor</title>
+    <script>
+      window.__eloBoot = [];
+      function eloBoot(msg, extra) {
+        const rec = {
+          t: Date.now(),
+          msg,
+          extra: extra == null ? null : String(extra),
+        };
+        window.__eloBoot.push(rec);
+        console.log("[elodin-boot]", msg, extra || "");
+        const el = document.getElementById("boot");
+        if (el) el.textContent = extra ? msg + " — " + extra : msg;
+      }
+      window.addEventListener("error", (e) => {
+        eloBoot(
+          "window.error",
+          e.message + " " + (e.filename || "") + ":" + e.lineno,
+        );
+      });
+      window.addEventListener("unhandledrejection", (e) => {
+        eloBoot("unhandledrejection", e.reason);
+      });
+      window.addEventListener("TrunkApplicationStarted", () => {
+        eloBoot("wasm started");
+        const el = document.getElementById("boot");
+        if (el) el.style.display = "none";
+      });
+      eloBoot("page loaded, waiting for wasm");
+    </script>
     <link data-trunk rel="rust" data-wasm-opt="0" />
     <style>
       html,
@@ -19,9 +48,21 @@
         display: block;
         outline: none;
       }
+      #boot {
+        position: fixed;
+        z-index: 10;
+        left: 8px;
+        top: 8px;
+        color: #8fd4a0;
+        font: 12px/1.4 ui-monospace, monospace;
+        pointer-events: none;
+        max-width: 90vw;
+        white-space: pre-wrap;
+      }
     </style>
   </head>
   <body>
+    <div id="boot"></div>
     <canvas id="editor"></canvas>
   </body>
 </html>

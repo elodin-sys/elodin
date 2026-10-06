@@ -5789,6 +5789,7 @@ dependencies = [
  "console_error_panic_hook",
  "elodin-editor",
  "getrandom 0.3.4",
+ "web-sys",
 ]
 
 [[package]]

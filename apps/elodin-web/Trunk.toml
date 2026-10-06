@@ -1,6 +1,8 @@
 [build]
 target = "index.html"
 dist = "dist"
+# Debug wasm is ~500MB and never finishes compiling in the browser.
+cargo_profile = "wasm-release"
 
 [watch]
 watch = [".", "../../libs/elodin-editor"]
@@ -8,3 +10,4 @@ watch = [".", "../../libs/elodin-editor"]
 [serve]
 port = 8080
 addresses = ["127.0.0.1"]
+no_autoreload = true
