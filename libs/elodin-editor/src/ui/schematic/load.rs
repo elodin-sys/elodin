@@ -269,7 +269,9 @@ pub struct LoadSchematicParams<'w, 's> {
     pub document_assets: Res<'w, Assets<SchematicDocumentAsset>>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
     pub materials: ResMut<'w, Assets<StandardMaterial>>,
-    pub world_mesh_materials: ResMut<'w, Assets<bevy_world_mesh::prelude::WorldMeshMaterial>>,
+    /// Optional: absent on wasm (world-mesh plugin is native-only).
+    pub world_mesh_materials:
+        Option<ResMut<'w, Assets<bevy_world_mesh::prelude::WorldMeshMaterial>>>,
     pub mat3_materials: ResMut<'w, Assets<Mat3Material>>,
     pub images: ResMut<'w, Assets<Image>>,
     pub icon_cache: ResMut<'w, IconTextureCache>,
@@ -1132,11 +1134,15 @@ impl LoadSchematicParams<'_, '_> {
     }
 
     pub fn spawn_world_mesh(&mut self, world_mesh: impeller_wkt::WorldMesh) {
+        let Some(world_mesh_materials) = self.world_mesh_materials.as_mut() else {
+            warn!("skipping world_mesh: WorldMeshMaterial assets are unavailable");
+            return;
+        };
         let entity = crate::plugins::world_mesh::spawn_world_mesh_terrain(
             &mut self.commands,
             &mut self.meshes,
             &mut self.materials,
-            &mut self.world_mesh_materials,
+            world_mesh_materials,
             &world_mesh,
         );
         let mut e = self.commands.entity(entity);

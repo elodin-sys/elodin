@@ -511,12 +511,15 @@ impl Plugin for PointTrailsPlugin {
                 .chain()
                 .after(crate::ui::plot::queue_timestamp_read),
         );
-        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
-            return;
-        };
-        render_app
-            .init_resource::<PointTrailsGpuCache>()
-            .add_systems(ExtractSchedule, extract_point_trails);
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+                return;
+            };
+            render_app
+                .init_resource::<PointTrailsGpuCache>()
+                .add_systems(ExtractSchedule, extract_point_trails);
+        }
     }
 }
 

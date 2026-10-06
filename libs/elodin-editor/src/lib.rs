@@ -510,27 +510,28 @@ impl Plugin for EditorPlugin {
             .init_resource::<ui::data_overview::ComponentTimeRanges>()
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(rim_glow_material::RimGlowMaterialPlugin)
-            .add_plugins(object_3d::Object3DPlugin)
-            .add_plugins(plugins::world_mesh::EditorWorldMeshPlugin)
-            .add_plugins(GeoFramePlugin {
-                apply_transforms: false,
-                ..default()
-            })
-            .init_resource::<sensor_camera::SensorCameraConfigs>()
-            .init_resource::<sensor_camera::SensorCamerasSpawned>()
-            .init_resource::<sensor_camera::SensorCameraFrustumSourcesSpawned>()
-            .add_systems(PreUpdate, sensor_camera::load_sensor_configs_from_db)
-            .add_systems(
-                PreUpdate,
-                sensor_camera::spawn_sensor_camera_frustum_sources
-                    .run_if(sensor_camera::should_spawn_sensor_camera_frustum_sources),
-            )
-            .add_systems(
-                PreUpdate,
-                sensor_camera::update_sensor_camera_frustum_source_transforms.after(PositionSync),
-            )
-            .add_systems(Update, sensor_camera::patch_sensor_view_dims)
-            .add_systems(Update, throttle_for_sensor_cameras);
+            .add_plugins(object_3d::Object3DPlugin);
+        #[cfg(not(target_family = "wasm"))]
+        app.add_plugins(plugins::world_mesh::EditorWorldMeshPlugin);
+        app.add_plugins(GeoFramePlugin {
+            apply_transforms: false,
+            ..default()
+        })
+        .init_resource::<sensor_camera::SensorCameraConfigs>()
+        .init_resource::<sensor_camera::SensorCamerasSpawned>()
+        .init_resource::<sensor_camera::SensorCameraFrustumSourcesSpawned>()
+        .add_systems(PreUpdate, sensor_camera::load_sensor_configs_from_db)
+        .add_systems(
+            PreUpdate,
+            sensor_camera::spawn_sensor_camera_frustum_sources
+                .run_if(sensor_camera::should_spawn_sensor_camera_frustum_sources),
+        )
+        .add_systems(
+            PreUpdate,
+            sensor_camera::update_sensor_camera_frustum_source_transforms.after(PositionSync),
+        )
+        .add_systems(Update, sensor_camera::patch_sensor_view_dims)
+        .add_systems(Update, throttle_for_sensor_cameras);
 
         app.add_systems(PreUpdate, warn_missing_geo.before(PositionSync));
         #[cfg(feature = "big_space")]

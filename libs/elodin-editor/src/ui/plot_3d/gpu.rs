@@ -78,90 +78,100 @@ impl Plugin for Plot3dGpuPlugin {
                 update_uniform_model.after(TransformSystems::Propagate),
             );
 
-        load_internal_asset!(app, LINE_SHADER_HANDLE, "./line.wgsl", Shader::from_wgsl);
-        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
-            return;
-        };
+        #[cfg(not(target_family = "wasm"))]
+        {
+            load_internal_asset!(app, LINE_SHADER_HANDLE, "./line.wgsl", Shader::from_wgsl);
+            let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+                return;
+            };
 
-        render_app
-            .add_render_command::<Transparent3d, DrawLineData>()
-            .init_resource::<SpecializedRenderPipelines<LinePipeline>>()
-            .configure_sets(
-                Render,
-                PlotSystem::QueueLine
-                    .in_set(RenderSystems::Queue)
-                    .ambiguous_with(bevy::pbr::queue_material_meshes),
-            )
-            .add_systems(ExtractSchedule, extract_lines)
-            .add_systems(
-                Render,
-                prepare_uniform_bind_group.in_set(RenderSystems::PrepareBindGroups),
-            )
-            .add_systems(
-                Render,
-                queue_line.in_set(PlotSystem::QueueLine), //.after(prepare_gpu_line),
-            );
+            render_app
+                .add_render_command::<Transparent3d, DrawLineData>()
+                .init_resource::<SpecializedRenderPipelines<LinePipeline>>()
+                .configure_sets(
+                    Render,
+                    PlotSystem::QueueLine
+                        .in_set(RenderSystems::Queue)
+                        .ambiguous_with(bevy::pbr::queue_material_meshes),
+                )
+                .add_systems(ExtractSchedule, extract_lines)
+                .add_systems(
+                    Render,
+                    prepare_uniform_bind_group.in_set(RenderSystems::PrepareBindGroups),
+                )
+                .add_systems(
+                    Render,
+                    queue_line.in_set(PlotSystem::QueueLine), //.after(prepare_gpu_line),
+                );
+        }
     }
 
     fn finish(&self, app: &mut bevy::prelude::App) {
-        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
-            return;
-        };
+        #[cfg(target_family = "wasm")]
+        {
+            let _ = app;
+        }
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+                return;
+            };
 
-        let render_device = render_app.world().resource::<RenderDevice>();
-        let single = BindGroupLayoutEntries::single(
-            ShaderStages::VERTEX,
-            uniform_buffer::<LineUniform>(true),
-        );
-        let uniform_descriptor = BindGroupLayoutDescriptor::new("LineUniform Layout", &single);
+            let render_device = render_app.world().resource::<RenderDevice>();
+            let single = BindGroupLayoutEntries::single(
+                ShaderStages::VERTEX,
+                uniform_buffer::<LineUniform>(true),
+            );
+            let uniform_descriptor = BindGroupLayoutDescriptor::new("LineUniform Layout", &single);
 
-        let layout_entries = BindGroupLayoutEntries::sequential(
-            ShaderStages::VERTEX,
-            (
-                storage_buffer_read_only_sized(false, None),
-                storage_buffer_read_only_sized(false, None),
-                storage_buffer_read_only_sized(false, None),
-            ),
-        );
-        let values_descriptor =
-            BindGroupLayoutDescriptor::new("LineValues layout", &layout_entries);
-        let values_layout =
-            render_device.create_bind_group_layout("LineValues layout", &layout_entries);
+            let layout_entries = BindGroupLayoutEntries::sequential(
+                ShaderStages::VERTEX,
+                (
+                    storage_buffer_read_only_sized(false, None),
+                    storage_buffer_read_only_sized(false, None),
+                    storage_buffer_read_only_sized(false, None),
+                ),
+            );
+            let values_descriptor =
+                BindGroupLayoutDescriptor::new("LineValues layout", &layout_entries);
+            let values_layout =
+                render_device.create_bind_group_layout("LineValues layout", &layout_entries);
 
-        let index_layout_entries = BindGroupLayoutEntries::sequential(
-            ShaderStages::VERTEX,
-            (
-                storage_buffer_read_only_sized(false, None),
-                storage_buffer_read_only_sized(false, None),
-                storage_buffer_read_only_sized(false, None),
-            ),
-        );
-        let index_descriptor =
-            BindGroupLayoutDescriptor::new("LineIndex layout", &index_layout_entries);
-        let index_layout =
-            render_device.create_bind_group_layout("LineIndex layout", &index_layout_entries);
+            let index_layout_entries = BindGroupLayoutEntries::sequential(
+                ShaderStages::VERTEX,
+                (
+                    storage_buffer_read_only_sized(false, None),
+                    storage_buffer_read_only_sized(false, None),
+                    storage_buffer_read_only_sized(false, None),
+                ),
+            );
+            let index_descriptor =
+                BindGroupLayoutDescriptor::new("LineIndex layout", &index_layout_entries);
+            let index_layout =
+                render_device.create_bind_group_layout("LineIndex layout", &index_layout_entries);
 
-        let line_layout = render_device.create_bind_group_layout("LineUniform Layout", &single);
+            let line_layout = render_device.create_bind_group_layout("LineUniform Layout", &single);
 
-        render_app.insert_resource(UniformLayout {
-            layout: line_layout,
-            descriptor: uniform_descriptor,
-        });
+            render_app.insert_resource(UniformLayout {
+                layout: line_layout,
+                descriptor: uniform_descriptor,
+            });
 
-        render_app.insert_resource(LineValuesLayout {
-            layout: values_layout,
-            descriptor: values_descriptor,
-        });
+            render_app.insert_resource(LineValuesLayout {
+                layout: values_layout,
+                descriptor: values_descriptor,
+            });
 
-        render_app.insert_resource(LineIndexLayout {
-            layout: index_layout,
-            descriptor: index_descriptor,
-        });
+            render_app.insert_resource(LineIndexLayout {
+                layout: index_layout,
+                descriptor: index_descriptor,
+            });
 
-        render_app.add_systems(
-            bevy::render::RenderStartup,
-            init_line_pipeline_3d.after(bevy::pbr::MeshPipelineSystems),
-        );
+            render_app.add_systems(
+                bevy::render::RenderStartup,
+                init_line_pipeline_3d.after(bevy::pbr::MeshPipelineSystems),
+            );
+        }
     }
 }
 

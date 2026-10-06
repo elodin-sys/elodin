@@ -6,6 +6,7 @@
     <title>Elodin Editor</title>
     <script>
       window.__eloBoot = [];
+      window.__eloLogs = [];
       function eloBoot(msg, extra) {
         const rec = {
           t: Date.now(),
@@ -15,8 +16,31 @@
         window.__eloBoot.push(rec);
         console.log("[elodin-boot]", msg, extra || "");
         const el = document.getElementById("boot");
-        if (el) el.textContent = extra ? msg + " — " + extra : msg;
+        if (el) {
+          el.style.display = "block";
+          el.textContent = extra ? msg + " — " + extra : msg;
+        }
       }
+      ["log", "info", "warn", "error"].forEach((level) => {
+        const orig = console[level].bind(console);
+        console[level] = function (...args) {
+          const extra = args.map(String).join(" ");
+          window.__eloLogs.push({ t: Date.now(), level, extra });
+          if (level === "error" || /panic|unreachable|elodin-web/.test(extra)) {
+            window.__eloBoot.push({
+              t: Date.now(),
+              msg: "console." + level,
+              extra,
+            });
+            const el = document.getElementById("boot");
+            if (el) {
+              el.style.display = "block";
+              el.textContent = extra.slice(0, 800);
+            }
+          }
+          orig.apply(console, args);
+        };
+      });
       window.addEventListener("error", (e) => {
         eloBoot(
           "window.error",
@@ -28,6 +52,8 @@
       });
       window.addEventListener("TrunkApplicationStarted", () => {
         eloBoot("wasm started");
+      });
+      window.addEventListener("elodin-ready", () => {
         const el = document.getElementById("boot");
         if (el) el.style.display = "none";
       });
