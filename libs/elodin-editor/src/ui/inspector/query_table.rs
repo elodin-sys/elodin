@@ -1,4 +1,4 @@
-use std::time::Instant;
+use web_time::Instant;
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::{Commands, Entity, In, Query, Res, ResMut};

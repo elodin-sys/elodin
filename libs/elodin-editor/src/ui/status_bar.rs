@@ -15,7 +15,8 @@ use impeller_bevy::{
     ConnectionStatus, SimTimeStepFetch, SimTimeStepSource, ThreadConnectionStatus,
 };
 use impeller_wkt::SimulationTimeStep;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use crate::ui::{
     command_palette::CommandPaletteState,

@@ -40,6 +40,7 @@ futures-lite = "2.5.0"
 smallvec.version = "1.11.2"
 compact_str = "0.9"
 tracing = "0.1"
+web-time = "1.1.0"
 
 # error
 miette.version = "7.2"

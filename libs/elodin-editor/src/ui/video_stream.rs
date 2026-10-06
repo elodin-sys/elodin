@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{self};
-use std::time::Instant;
+use web_time::Instant;
 
 use super::{
     PaneName,

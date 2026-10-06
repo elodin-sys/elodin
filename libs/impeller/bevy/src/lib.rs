@@ -34,9 +34,10 @@ use std::{
     convert::Infallible,
     marker::PhantomData,
     ops::Bound,
-    time::{Duration, Instant},
+    time::Duration,
 };
 use stellarator_buf::Slice;
+use web_time::Instant;
 
 pub use impeller_bbq::PacketGrantR;
 pub use impeller_wkt::ComponentValue;
@@ -826,7 +827,7 @@ fn sink_inner(
     world_sink_state: &mut SystemState<WorldSink>,
 ) -> Result<(), impeller::error::Error> {
     let mut count = 0;
-    let sink_deadline = std::time::Instant::now() + std::time::Duration::from_millis(8);
+    let sink_deadline = Instant::now() + Duration::from_millis(8);
     let mut pending_cache_entries: Vec<(ComponentId, Timestamp, ComponentValue)> = Vec::new();
     let allowlist = world
         .get_resource::<SeriesFetchPriority>()
@@ -839,7 +840,7 @@ fn sink_inner(
                 cache.insert(cid, ts, val);
             }
         }
-        if count > 2048 || (count >= 16 && std::time::Instant::now() > sink_deadline) {
+        if count > 2048 || (count >= 16 && Instant::now() > sink_deadline) {
             break;
         }
         let Some(pkt) = packet_rx.try_recv_pkt() else {
@@ -1046,10 +1047,10 @@ pub struct MsgSinkState<'w> {
 }
 
 pub fn msg_sink(world: &mut World, msg_sink_state: &mut SystemState<MsgSinkState>) {
-    let sink_deadline = std::time::Instant::now() + std::time::Duration::from_millis(8);
+    let sink_deadline = Instant::now() + Duration::from_millis(8);
     let mut count = 0;
     loop {
-        if count > 2048 || (count >= 16 && std::time::Instant::now() > sink_deadline) {
+        if count > 2048 || (count >= 16 && Instant::now() > sink_deadline) {
             return;
         }
         let pkt = {

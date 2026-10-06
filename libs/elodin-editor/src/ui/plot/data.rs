@@ -30,8 +30,9 @@ use std::num::NonZeroU64;
 use std::ops::{ControlFlow, RangeInclusive};
 use std::sync::Arc;
 use std::sync::atomic::{self, AtomicBool};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use std::{collections::BTreeMap, fmt::Debug, ops::Range};
+use web_time::Instant;
 
 use crate::object_3d::Object3DState;
 use crate::sensor_camera::SensorCameraConfigs;
@@ -2407,7 +2408,7 @@ pub struct LineTree<D: Clone + BoundOrd> {
     /// Archive length at the end of the last HC pass, for throttling decisions.
     last_hc_archive_len: usize,
     /// Wall-clock instant of the last HC pass, for time-based throttling.
-    last_hc_instant: Option<std::time::Instant>,
+    last_hc_instant: Option<Instant>,
     /// Bumped on any view-content mutation ([`Self::insert`] — including live
     /// appends via [`Self::update_last`] — [`Self::clear`], and view rebuild)
     /// so GPU index caches invalidate when LineTree contents change without a
@@ -2566,7 +2567,7 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     /// Record that an HC pass has just run (updates throttle bookkeeping).
     pub fn mark_compressed(&mut self) {
         self.last_hc_archive_len = self.raw_len();
-        self.last_hc_instant = Some(std::time::Instant::now());
+        self.last_hc_instant = Some(Instant::now());
     }
 
     /// Approximate memory cost of the raw archive in bytes (timestamps + values).

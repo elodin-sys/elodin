@@ -22,8 +22,9 @@ use miette::{Diagnostic, miette};
 use std::{
     collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 #[cfg(not(target_os = "macos"))]
 use crate::tiles::WindowRelayout;

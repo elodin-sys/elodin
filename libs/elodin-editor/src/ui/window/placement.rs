@@ -1,4 +1,5 @@
 use std::{collections::HashMap, time::Duration};
+use web_time::Instant;
 
 #[cfg(not(target_os = "macos"))]
 use bevy::log::error;
@@ -112,7 +113,7 @@ pub async fn wait_for_winit_window(
     window_id: Entity,
     timeout: Duration,
 ) -> Result<bool, AccessError> {
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     while start.elapsed() < timeout {
         let window_ready = AsyncWorld.run(|_world| {
             WINIT_WINDOWS.with_borrow(|winit_windows| winit_windows.get_window(window_id).is_some())
@@ -390,7 +391,7 @@ async fn apply_window_rect(
         && rect.width == 100
         && rect.height == 100;
 
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     let mut wait = true;
     while wait && start.elapsed() < timeout {
         AsyncWorld.yield_now().await;
@@ -460,7 +461,7 @@ async fn wait_for_window_to_change_screens(
     target_screen: usize,
     timeout: Duration,
 ) -> Result<bool, AccessError> {
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     loop {
         if start.elapsed() > timeout {
             info!(

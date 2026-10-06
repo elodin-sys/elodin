@@ -1,4 +1,5 @@
-use std::{net::SocketAddr, time::Instant};
+use std::net::SocketAddr;
+use web_time::Instant;
 
 use bevy::{
     ecs::system::{Local, SystemParam},

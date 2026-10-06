@@ -301,8 +301,8 @@ impl ModalDialog<'_, '_> {
     pub fn show_message(&mut self, title: impl Into<String>, message: impl Into<String>) {
         let id = format!(
             "message_{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
+            web_time::SystemTime::now()
+                .duration_since(web_time::UNIX_EPOCH)
                 .unwrap()
                 .as_millis()
         );
