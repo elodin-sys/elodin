@@ -6,7 +6,8 @@ use bevy_ai_skybox::prelude::{SetActiveSkybox, SkyboxCache};
 use impeller_wkt::{DbConfig, SkyboxConfig};
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use super::commands::*;
 use super::messages::*;

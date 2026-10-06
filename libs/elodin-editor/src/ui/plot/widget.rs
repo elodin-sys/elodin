@@ -31,11 +31,12 @@ use impeller_bevy::{
     ComponentMetadataRegistry, ComponentPath, ComponentSchemaRegistry, TelemetryCache,
 };
 use impeller_wkt::{CurrentTimestamp, EarliestTimestamp};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use std::{
     fmt::Debug,
     ops::{Range, RangeInclusive},
 };
+use web_time::Instant;
 
 use crate::{
     Offset, SelectedTimeRange, TimeRangeBehavior,
@@ -1549,7 +1550,7 @@ pub fn auto_y_bounds(
     line_handles: Query<&LineHandle>,
     mut lines: ResMut<Assets<Line>>,
     mut xy_lines: ResMut<Assets<XYLine>>,
-    mut last_run: Local<Option<std::time::Instant>>,
+    mut last_run: Local<Option<Instant>>,
 ) {
     let short = crate::is_short_accuracy_window(&selected_range.0);
     // Short windows: SelectedTimeRange tracks the playhead every frame — do not
@@ -1574,7 +1575,7 @@ pub fn auto_y_bounds(
     } else if !range_changed && !due {
         return;
     }
-    *last_run = Some(std::time::Instant::now());
+    *last_run = Some(Instant::now());
 
     for mut graph_state in graph_states.iter_mut() {
         if !graph_state.auto_y_range {

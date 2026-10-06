@@ -8036,6 +8036,7 @@ dependencies = [
  "stellarator-buf",
  "thingbuf",
  "tracing",
+ "web-time",
 ]
 
 [[package]]
