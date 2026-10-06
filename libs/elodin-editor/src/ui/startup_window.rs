@@ -205,6 +205,8 @@ impl StartupLayout<'_, '_> {
             true,
         );
         self.commands.insert_resource(ConnectionAddr(addr));
+        self.commands
+            .insert_resource(impeller_bevy::ComponentFilteredStream::default());
         *self.current_stream_id = CurrentStreamId(stream_id);
         *self.packet_tx = packet_tx;
         *self.packet_rx = packet_rx;

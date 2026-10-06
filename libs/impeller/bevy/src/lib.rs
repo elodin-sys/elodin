@@ -26,8 +26,8 @@ use impeller_bbq::{AsyncArcQueueRx, RxExt};
 use impeller_wkt::{
     ComponentMetadata, CurrentTimestamp, DbConfig, DumpMetadata, DumpMetadataResp, DumpSchema,
     DumpSchemaResp, EarliestTimestamp, ErrorResponse, GetDbSettings, GetEarliestTimestamp,
-    GetTimeSeries, IsRecording, LastUpdated, SetStreamComponentFilter, Stream, StreamBehavior,
-    StreamId, StreamTimestamp, SubscribeLastUpdated, VTableMsg, WorldPos,
+    GetTimeSeries, IsRecording, LastUpdated, NewConnection, SetStreamFilter, Stream,
+    StreamBehavior, StreamId, StreamTimestamp, SubscribeLastUpdated, VTableMsg, WorldPos,
 };
 use serde::de::DeserializeOwned;
 use std::{
@@ -952,6 +952,7 @@ fn sink_inner(
                 bevy::log::error!(?err, "packet handler error");
             }
         }
+        negotiate_component_filtered_stream(world, &pkt)?;
         let mut world_sink = world_sink_state
             .get_mut(world)
             .expect("WorldSink params invalid");
@@ -1958,8 +1959,9 @@ pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPa
 /// Initial packets for a client that will explicitly select its live component
 /// set after its schematic has loaded.
 ///
-/// The empty allowlist is installed before `RealTimeBatched` opens, so the
-/// connection never receives an unfiltered startup burst.
+/// `RealTimeBatched` is deferred until this connection's `DbConfig` reply
+/// reveals whether the DB treats an empty [`SetStreamFilter`] as "no
+/// components"; see [`ComponentFilteredStream`].
 pub fn new_component_filtered_connection_packets(
     stream_id: StreamId,
 ) -> impl Iterator<Item = LenPacket> {
@@ -1970,27 +1972,11 @@ pub(crate) fn connection_packets(
     stream_id: StreamId,
     component_filtered: bool,
 ) -> std::vec::IntoIter<LenPacket> {
-    let mut packets = Vec::with_capacity(if component_filtered { 7 } else { 6 });
-    if component_filtered {
-        packets.push(
-            SetStreamComponentFilter {
-                id: stream_id,
-                component_ids: Vec::new(),
-                frequency: None,
-            }
-            .into_len_packet(),
-        );
+    let mut packets = Vec::with_capacity(6);
+    if !component_filtered {
+        packets.push(real_time_stream_packet(stream_id));
     }
     packets.extend([
-        // RealTimeBatched delivers all component data whenever new data
-        // arrives (batched per last_updated change).  For recorded DBs this
-        // sends one table then blocks — historical data is loaded via
-        // GetTimeSeries backfill (triggered after DumpMetadata).
-        Stream {
-            behavior: StreamBehavior::RealTimeBatched,
-            id: stream_id,
-        }
-        .into_len_packet(),
         GetEarliestTimestamp.into_len_packet(),
         DumpMetadata.into_len_packet(),
         GetDbSettings.into_len_packet(),
@@ -1998,6 +1984,86 @@ pub(crate) fn connection_packets(
         DumpSchema.into_len_packet(),
     ]);
     packets.into_iter()
+}
+
+// RealTimeBatched delivers all component data whenever new data arrives
+// (batched per last_updated change).  For recorded DBs this sends one table
+// then blocks — historical data is loaded via GetTimeSeries backfill
+// (triggered after DumpMetadata).
+fn real_time_stream_packet(stream_id: StreamId) -> LenPacket {
+    Stream {
+        behavior: StreamBehavior::RealTimeBatched,
+        id: stream_id,
+    }
+    .into_len_packet()
+}
+
+/// Packets that open a component-filtered client's live stream once the DB's
+/// capabilities are known. A supporting DB gets an empty allowlist first so the
+/// stream starts with no components; any other DB gets a plain unfiltered
+/// stream, since older DBs either ignore an empty filter or persist the filter
+/// message as telemetry.
+fn component_filtered_stream_packets(stream_id: StreamId, supported: bool) -> Vec<LenPacket> {
+    let mut packets = Vec::with_capacity(2);
+    if supported {
+        packets.push(
+            SetStreamFilter {
+                id: stream_id,
+                component_ids: Vec::new(),
+                frequency: None,
+            }
+            .into_len_packet(),
+        );
+    }
+    packets.push(real_time_stream_packet(stream_id));
+    packets
+}
+
+/// Per-connection negotiation state for component-filtered clients. Present
+/// only when the connection uses [`new_component_filtered_connection_packets`].
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ComponentFilteredStream {
+    /// Bumped on every `NewConnection`.
+    pub connection: u64,
+    /// `None` until this connection's `DbConfig` arrives.
+    pub supported: Option<bool>,
+}
+
+fn negotiate_component_filtered_stream(
+    world: &mut World,
+    pkt: &OwnedPacket<PacketGrantR>,
+) -> Result<(), impeller::error::Error> {
+    let OwnedPacket::Msg(m) = pkt else {
+        return Ok(());
+    };
+    let Some(mut state) = world.get_resource_mut::<ComponentFilteredStream>() else {
+        return Ok(());
+    };
+    if m.id == NewConnection::ID {
+        state.connection += 1;
+        state.supported = None;
+        return Ok(());
+    }
+    if m.id != DbConfig::ID || state.supported.is_some() {
+        return Ok(());
+    }
+    let supported = m.parse::<DbConfig>()?.supports_exact_stream_filter();
+    state.supported = Some(supported);
+    if !supported {
+        bevy::log::warn!(
+            "DB does not support component-filtered streams; streaming all components"
+        );
+    }
+    let (Some(stream_id), Some(packet_tx)) = (
+        world.get_resource::<CurrentStreamId>(),
+        world.get_resource::<PacketTx>(),
+    ) else {
+        return Ok(());
+    };
+    for packet in component_filtered_stream_packets(stream_id.0, supported) {
+        let _ = packet_tx.0.try_send(Some(packet));
+    }
+    Ok(())
 }
 
 /// Initial packets for the msg TCP connection. Returns empty; main connection
@@ -2263,19 +2329,37 @@ mod series_store_allowlist_tests {
     use impeller::types::PrimType;
     use std::collections::HashSet;
 
+    fn packet_ids(packets: &[LenPacket]) -> Vec<PacketId> {
+        packets
+            .iter()
+            .map(|packet| packet.as_packet().header.id)
+            .collect()
+    }
+
     #[test]
-    fn component_filtered_connection_primes_filter_before_stream() {
+    fn component_filtered_connection_defers_stream_until_capabilities_known() {
         let packets: Vec<_> = new_component_filtered_connection_packets(42).collect();
-        assert_eq!(
-            packets[0].as_packet().header.id,
-            SetStreamComponentFilter::ID
-        );
-        assert_eq!(packets[1].as_packet().header.id, Stream::ID);
-        let filter: SetStreamComponentFilter =
+        let ids = packet_ids(&packets);
+        assert!(ids.contains(&GetDbSettings::ID));
+        assert!(!ids.contains(&Stream::ID));
+        assert!(!ids.contains(&SetStreamFilter::ID));
+    }
+
+    #[test]
+    fn supported_db_gets_empty_filter_before_stream() {
+        let packets = component_filtered_stream_packets(42, true);
+        assert_eq!(packet_ids(&packets), [SetStreamFilter::ID, Stream::ID]);
+        let filter: SetStreamFilter =
             postcard::from_bytes(&packets[0].as_packet().body).expect("valid filter packet");
         assert_eq!(filter.id, 42);
         assert!(filter.component_ids.is_empty());
         assert_eq!(filter.frequency, None);
+    }
+
+    #[test]
+    fn unsupported_db_never_receives_filter_message() {
+        let packets = component_filtered_stream_packets(42, false);
+        assert_eq!(packet_ids(&packets), [Stream::ID]);
     }
 
     #[test]

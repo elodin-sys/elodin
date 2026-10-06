@@ -29,23 +29,10 @@ pub struct Stream {
     pub id: StreamId,
 }
 
-/// Restrict a `RealTimeBatched` stream. An empty `component_ids` list means
-/// the full stream (no component filter).
+/// Select the exact components delivered by a `RealTimeBatched` stream. An
+/// empty `component_ids` list selects no component values.
 #[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
 pub struct SetStreamFilter {
-    pub id: StreamId,
-    pub component_ids: Vec<ComponentId>,
-    #[serde(default)]
-    pub frequency: Option<u64>,
-}
-
-/// Select the exact components delivered by a `RealTimeBatched` stream.
-///
-/// Unlike [`SetStreamFilter`], an empty `component_ids` list selects no
-/// component values. This separate message preserves the legacy empty-list
-/// behavior for existing clients.
-#[derive(Serialize, Deserialize, Debug, Clone, postcard_schema::Schema)]
-pub struct SetStreamComponentFilter {
     pub id: StreamId,
     pub component_ids: Vec<ComponentId>,
     #[serde(default)]
@@ -458,6 +445,22 @@ impl DbConfig {
         self.metadata
             .get(Self::TIME_START_TIMESTAMP_KEY)
             .and_then(|value| value.parse().ok())
+    }
+
+    /// Advertised by the serving DB on client-facing replies only; never
+    /// persisted or replicated, so it reflects the running binary.
+    const EXACT_STREAM_FILTER_KEY: &'static str = "capability.exact_stream_filter";
+
+    pub fn advertise_exact_stream_filter(&mut self) {
+        self.metadata
+            .insert(Self::EXACT_STREAM_FILTER_KEY.to_string(), "1".to_string());
+    }
+
+    /// Whether the DB treats an empty [`SetStreamFilter`] as "no components".
+    /// Older DBs treat it as unfiltered, and DBs predating the message log it
+    /// as telemetry instead of applying it.
+    pub fn supports_exact_stream_filter(&self) -> bool {
+        self.metadata.contains_key(Self::EXACT_STREAM_FILTER_KEY)
     }
 }
 

@@ -579,7 +579,7 @@ mod tests {
     }
 
     #[test]
-    async fn test_batched_stream_filter_distinguishes_empty_from_full() {
+    async fn test_batched_stream_filter_empty_selects_nothing() {
         let (addr, _db) = setup_test_db().await.unwrap();
         let mut writer = Client::connect(addr).await.unwrap();
         let component_a = ComponentId::new("empty.a");
@@ -605,7 +605,7 @@ mod tests {
         let stream_id = 44;
         let mut reader = Client::connect(addr).await.unwrap();
         reader
-            .send(&SetStreamComponentFilter {
+            .send(&SetStreamFilter {
                 id: stream_id,
                 component_ids: vec![],
                 frequency: Some(60),
@@ -628,7 +628,7 @@ mod tests {
         assert_eq!(pending_empty.vtable.fields.len(), 0);
 
         stream
-            .send(&SetStreamComponentFilter {
+            .send(&SetStreamFilter {
                 id: stream_id,
                 component_ids: vec![component_a],
                 frequency: Some(60),
@@ -652,12 +652,12 @@ mod tests {
             .await
             .0
             .unwrap();
-        let restored = loop {
+        let emptied = loop {
             if let StreamReply::VTable(vtable) = stream.next().await.unwrap() {
                 break vtable;
             }
         };
-        assert_eq!(restored.vtable.fields.len(), 2);
+        assert_eq!(emptied.vtable.fields.len(), 0);
     }
 
     #[test]
@@ -701,7 +701,7 @@ mod tests {
         let stream_id = 45;
         let mut reader = Client::connect(addr).await.unwrap();
         reader
-            .send(&SetStreamComponentFilter {
+            .send(&SetStreamFilter {
                 id: stream_id,
                 component_ids: vec![component_id],
                 frequency: None,

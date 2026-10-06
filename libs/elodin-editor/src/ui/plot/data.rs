@@ -1,10 +1,10 @@
 use bevy::asset::Asset;
 use bevy::log::warn_once;
-use bevy::prelude::{InRef, Res, ResMut};
+use bevy::prelude::{Children, InRef, Res, ResMut};
 use bevy::reflect::TypePath;
 use bevy::{
     asset::{AssetId, Assets, Handle},
-    ecs::system::{Commands, Query},
+    ecs::system::{Commands, Query, SystemParam},
     prelude::Resource,
 };
 use bevy_render::render_resource::{Buffer, BufferDescriptor, BufferSlice, BufferUsages};
@@ -35,6 +35,7 @@ use std::{collections::BTreeMap, fmt::Debug, ops::Range};
 
 use crate::object_3d::Object3DState;
 use crate::sensor_camera::SensorCameraConfigs;
+use crate::ui::SelectedObject;
 use crate::ui::inspector::viewport::Viewport;
 use crate::ui::monitor::MonitorData;
 use crate::ui::plot::gpu::INDEX_BUFFER_LEN;
@@ -1659,6 +1660,28 @@ pub(crate) fn viewport_adapter_component_ids(
     ids
 }
 
+/// Components of the entity open in the inspector, which reads their
+/// `ComponentValue`s directly rather than through the SeriesStore.
+#[derive(SystemParam)]
+pub struct InspectedComponents<'w, 's> {
+    selected: Option<Res<'w, SelectedObject>>,
+    children: Query<'w, 's, &'static Children>,
+    component_ids: Query<'w, 's, &'static ComponentId>,
+}
+
+impl InspectedComponents<'_, '_> {
+    fn component_ids(&self) -> HashSet<ComponentId> {
+        let Some(SelectedObject::Entity(pair)) = self.selected.as_deref() else {
+            return HashSet::new();
+        };
+        self.children
+            .iter_descendants(pair.bevy)
+            .chain(std::iter::once(pair.bevy))
+            .filter_map(|entity| self.component_ids.get(entity).ok().copied())
+            .collect()
+    }
+}
+
 /// `{entity}.world_pos` for each configured sensor camera parent entity.
 pub(crate) fn sensor_camera_world_pos_ids(configs: &SensorCameraConfigs) -> HashSet<ComponentId> {
     configs
@@ -1681,9 +1704,10 @@ pub fn update_series_fetch_priority(
     viewports: Query<&Viewport>,
     vector_arrows: Query<&VectorArrow3d>,
     eql_ctx: Res<EqlContext>,
-    path_reg: Res<ComponentPathRegistry>,
-    adapters: Res<ComponentAdapters>,
+    // Grouped to stay within Bevy's 16-parameter system limit.
+    (path_reg, adapters): (Res<ComponentPathRegistry>, Res<ComponentAdapters>),
     sensor_cameras: Res<SensorCameraConfigs>,
+    inspected: InspectedComponents,
     mut priority: ResMut<SeriesFetchPriority>,
     mut cache: ResMut<TelemetryCache>,
     mut backfill: ResMut<BackfillState>,
@@ -1693,6 +1717,7 @@ pub fn update_series_fetch_priority(
     let adapter_leaves: HashSet<ComponentId> = adapters.keys().copied().collect();
     let mut extras = viewport_adapter_component_ids(&path_reg, &adapter_leaves);
     extras.extend(sensor_camera_world_pos_ids(&sensor_cameras));
+    extras.extend(inspected.component_ids());
     let next = build_series_store_allowlist(
         enabled_fetch_component_ids(
             &graph_states,
@@ -3651,6 +3676,36 @@ mod tests {
         let mut ids = HashSet::new();
         collect_eql_component_ids(&binding.eql, &eql_ctx, &mut ids);
         assert_eq!(ids, [ComponentId::new(name)].into_iter().collect());
+    }
+
+    #[test]
+    fn inspected_entity_components_are_allowlisted() {
+        use bevy::ecs::system::RunSystemOnce;
+        use bevy::prelude::{ChildOf, World};
+
+        let mut world = World::new();
+        let parent_id = ComponentId::new("ball");
+        let pos_id = ComponentId::new("ball.world_pos");
+        let vel_id = ComponentId::new("ball.world_vel");
+        let parent = world.spawn(parent_id).id();
+        world.spawn((pos_id, ChildOf(parent)));
+        world.spawn((vel_id, ChildOf(parent)));
+        let collect = |world: &mut World| {
+            world
+                .run_system_once(|inspected: InspectedComponents| inspected.component_ids())
+                .expect("system runs")
+        };
+
+        assert!(collect(&mut world).is_empty());
+
+        world.insert_resource(SelectedObject::Entity(crate::ui::EntityPair {
+            bevy: parent,
+            impeller: parent_id,
+        }));
+        assert_eq!(
+            collect(&mut world),
+            [parent_id, pos_id, vel_id].into_iter().collect()
+        );
     }
 
     #[test]

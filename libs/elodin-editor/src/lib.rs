@@ -119,9 +119,10 @@ mod stream_filter {
     use bevy::prelude::*;
     use impeller::types::ComponentId;
     use impeller_bevy::{
-        ConnectionStatus, CurrentStreamId, PacketTx, SeriesFetchPriority, ThreadConnectionStatus,
+        ComponentFilteredStream, ConnectionStatus, CurrentStreamId, PacketTx, SeriesFetchPriority,
+        ThreadConnectionStatus,
     };
-    use impeller_wkt::{SetStreamComponentFilter, SetStreamFilter};
+    use impeller_wkt::SetStreamFilter;
 
     use crate::sensor_camera::SensorCameraConfigs;
 
@@ -158,41 +159,41 @@ mod stream_filter {
         }
     }
 
+    /// Identifies one negotiated live stream: `(connection, stream_id)`.
+    type StreamKey = (u64, u64);
+
     #[derive(Default)]
     pub(crate) struct SentStreamFilter {
-        stream_id: Option<u64>,
+        stream: Option<StreamKey>,
         component_ids: HashSet<ComponentId>,
         frequency: Option<u64>,
-        connected: bool,
     }
 
     impl SentStreamFilter {
         fn disconnect(&mut self) {
-            self.connected = false;
+            self.stream = None;
         }
 
         fn needs_update(
             &self,
-            stream_id: u64,
+            stream: StreamKey,
             component_ids: &HashSet<ComponentId>,
             frequency: Option<u64>,
         ) -> bool {
-            !self.connected
-                || self.stream_id != Some(stream_id)
+            self.stream != Some(stream)
                 || self.component_ids != *component_ids
                 || self.frequency != frequency
         }
 
         fn record(
             &mut self,
-            stream_id: u64,
+            stream: StreamKey,
             component_ids: &HashSet<ComponentId>,
             frequency: Option<u64>,
         ) {
-            self.stream_id = Some(stream_id);
+            self.stream = Some(stream);
             self.component_ids.clone_from(component_ids);
             self.frequency = frequency;
-            self.connected = true;
         }
     }
 
@@ -200,28 +201,22 @@ mod stream_filter {
         stream_id: u64,
         component_ids: &HashSet<ComponentId>,
         frequency: Option<u64>,
-    ) -> SetStreamComponentFilter {
+    ) -> SetStreamFilter {
         let mut component_ids: Vec<_> = component_ids.iter().copied().collect();
         component_ids.sort_unstable_by_key(|id| id.0);
-        SetStreamComponentFilter {
+        SetStreamFilter {
             id: stream_id,
             component_ids,
             frequency,
         }
     }
 
-    fn legacy_stream_filter_message(filter: &SetStreamComponentFilter) -> Option<SetStreamFilter> {
-        (!filter.component_ids.is_empty()).then(|| SetStreamFilter {
-            id: filter.id,
-            component_ids: filter.component_ids.clone(),
-            frequency: filter.frequency,
-        })
-    }
-
     /// Keep the DB-side `RealTimeBatched` component allowlist synchronized
     /// with the consumers registered by the active schematic.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn sync_stream_filter(
         priority: Res<SeriesFetchPriority>,
+        filtered_stream: Option<Res<ComponentFilteredStream>>,
         stream_id: Option<Res<CurrentStreamId>>,
         packet_tx: Option<Res<PacketTx>>,
         connection: Option<Res<ThreadConnectionStatus>>,
@@ -229,31 +224,31 @@ mod stream_filter {
         rate: Res<StreamFilterRate>,
         mut sent: Local<SentStreamFilter>,
     ) {
-        let (Some(stream_id), Some(packet_tx), Some(connection)) =
-            (stream_id, packet_tx, connection)
+        let (Some(filtered_stream), Some(stream_id), Some(packet_tx), Some(connection)) =
+            (filtered_stream, stream_id, packet_tx, connection)
         else {
             sent.disconnect();
             return;
         };
-        if connection.status() != ConnectionStatus::Success {
+        // Older DBs ignore an empty filter or persist the message as telemetry.
+        if filtered_stream.supported != Some(true)
+            || connection.status() != ConnectionStatus::Success
+        {
             sent.disconnect();
             return;
         }
 
+        let stream = (filtered_stream.connection, stream_id.0);
         let frequency = rate.frequency(configs.as_deref());
-        if !sent.needs_update(stream_id.0, &priority.high, frequency) {
+        if !sent.needs_update(stream, &priority.high, frequency) {
             return;
         }
 
-        let filter = stream_filter_message(stream_id.0, &priority.high, frequency);
-        let legacy_filter = legacy_stream_filter_message(&filter);
-        packet_tx.send_msg(filter);
-        // Older DBs do not know `SetStreamComponentFilter`; once the schematic
-        // has resolved to a non-empty set, also send the legacy non-empty
-        // allowlist so mixed-version remote sessions remain component-filtered.
-        if let Some(legacy_filter) = legacy_filter {
-            packet_tx.send_msg(legacy_filter);
-        }
+        packet_tx.send_msg(stream_filter_message(
+            stream_id.0,
+            &priority.high,
+            frequency,
+        ));
         tracing::info!(
             client = rate.client_name(),
             components = priority.high.len(),
@@ -262,7 +257,7 @@ mod stream_filter {
                 .unwrap_or_else(|| "full resolution".to_string()),
             "live stream filter updated"
         );
-        sent.record(stream_id.0, &priority.high, frequency);
+        sent.record(stream, &priority.high, frequency);
     }
 
     #[cfg(test)]
@@ -304,18 +299,19 @@ mod stream_filter {
             let one = [a].into_iter().collect();
             let mut sent = SentStreamFilter::default();
 
-            assert!(sent.needs_update(7, &empty, None));
-            sent.record(7, &empty, None);
-            assert!(!sent.needs_update(7, &empty, None));
-            assert!(sent.needs_update(7, &one, None));
+            assert!(sent.needs_update((1, 7), &empty, None));
+            sent.record((1, 7), &empty, None);
+            assert!(!sent.needs_update((1, 7), &empty, None));
+            assert!(sent.needs_update((1, 7), &one, None));
 
-            sent.record(7, &one, None);
-            assert!(sent.needs_update(7, &empty, None));
-            sent.record(7, &empty, None);
+            sent.record((1, 7), &one, None);
+            assert!(sent.needs_update((1, 7), &empty, None));
+            sent.record((1, 7), &empty, None);
             sent.disconnect();
-            assert!(sent.needs_update(7, &empty, None));
-            sent.record(7, &empty, None);
-            assert!(sent.needs_update(8, &empty, None));
+            assert!(sent.needs_update((1, 7), &empty, None));
+            sent.record((1, 7), &empty, None);
+            assert!(sent.needs_update((1, 8), &empty, None));
+            assert!(sent.needs_update((2, 7), &empty, None));
         }
 
         #[test]
@@ -335,17 +331,41 @@ mod stream_filter {
         fn empty_message_subscribes_to_no_components() {
             let message = stream_filter_message(9, &HashSet::new(), None);
             assert!(message.component_ids.is_empty());
-            assert!(legacy_stream_filter_message(&message).is_none());
+        }
+
+        fn run_sync(
+            supported: Option<bool>,
+            status: ConnectionStatus,
+        ) -> Vec<impeller::types::LenPacket> {
+            let (packet_tx, _packet_rx, outgoing_rx, _incoming_tx) = impeller_bevy::channels();
+            let mut app = App::new();
+            app.insert_resource(SeriesFetchPriority {
+                high: [ComponentId::new("a")].into_iter().collect(),
+            })
+            .insert_resource(ComponentFilteredStream {
+                connection: 1,
+                supported,
+            })
+            .insert_resource(CurrentStreamId(9))
+            .insert_resource(packet_tx)
+            .insert_resource(ThreadConnectionStatus::new(status))
+            .insert_resource(StreamFilterRate::FullResolution)
+            .add_systems(Update, sync_stream_filter);
+            app.update();
+            std::iter::from_fn(|| outgoing_rx.try_recv().ok().flatten()).collect()
         }
 
         #[test]
-        fn nonempty_message_has_a_legacy_compatibility_filter() {
-            let ids = [ComponentId::new("a")].into_iter().collect();
-            let message = stream_filter_message(9, &ids, None);
-            let legacy = legacy_stream_filter_message(&message).expect("legacy filter");
-            assert_eq!(legacy.id, message.id);
-            assert_eq!(legacy.component_ids, message.component_ids);
-            assert_eq!(legacy.frequency, message.frequency);
+        fn filter_is_sent_only_to_supporting_dbs() {
+            let sent = run_sync(Some(true), ConnectionStatus::Success);
+            assert_eq!(sent.len(), 1);
+            assert_eq!(
+                sent[0].as_packet().header.id,
+                <SetStreamFilter as impeller::types::Msg>::ID
+            );
+            assert!(run_sync(Some(false), ConnectionStatus::Success).is_empty());
+            assert!(run_sync(None, ConnectionStatus::Success).is_empty());
+            assert!(run_sync(Some(true), ConnectionStatus::Connecting).is_empty());
         }
     }
 }

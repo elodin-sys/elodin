@@ -515,7 +515,7 @@ impl WorldBuilder {
         create_frustum = false,
         show_ellipsoids = false,
         frustums_color = None,
-        frustums_face_alpha = 0.17647059,
+        frustums_face_alpha = impeller_wkt::default_frustums_face_alpha(),
         projection_color = None,
         frustums_thickness = 0.006,
         frustums_up_marker = "none",

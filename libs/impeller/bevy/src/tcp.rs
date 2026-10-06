@@ -24,8 +24,9 @@ impl TcpImpellerPlugin {
         }
     }
 
-    /// Start the real-time stream with an empty component allowlist. A client
-    /// system must subsequently publish the component IDs it consumes.
+    /// Start the real-time stream with an empty component allowlist when the DB
+    /// supports it. A client system must subsequently publish the component
+    /// IDs it consumes, gated on [`ComponentFilteredStream::supported`].
     pub fn with_component_filtering(mut self) -> Self {
         self.component_filtered = true;
         self
@@ -51,6 +52,9 @@ impl Plugin for TcpImpellerPlugin {
         } else {
             ThreadConnectionStatus::new(ConnectionStatus::NoConnection)
         };
+        if self.component_filtered {
+            app.init_resource::<ComponentFilteredStream>();
+        }
         app.insert_resource(packet_tx)
             .insert_resource(packet_rx)
             .insert_resource(msg_tx)
