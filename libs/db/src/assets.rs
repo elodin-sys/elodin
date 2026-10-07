@@ -413,7 +413,7 @@ impl WindowIngest<'_> {
         let Ok(mut root) = impeller_kdl::parse_schematic(content) else {
             return Ok(None);
         };
-        let inline_changed = self.materialize_inline_windows(&mut root)?;
+        let inline_changed = self.materialize_inline_windows(&mut root, base_dir)?;
         let map = self.ingest_referenced_windows(&root, base_dir)?;
         if !inline_changed && map.is_empty() {
             return Ok(None);
@@ -431,6 +431,7 @@ impl WindowIngest<'_> {
     fn materialize_inline_windows(
         &mut self,
         schematic: &mut impeller_wkt::Schematic,
+        base_dir: Option<&Path>,
     ) -> io::Result<bool> {
         let mut changed = false;
         let mut index = 0usize;
@@ -456,7 +457,8 @@ impl WindowIngest<'_> {
                 .unwrap_or_else(|| format!("window-{index}"));
             let key = self.assign_inline_window_key(stem.as_str());
             let mut stored = content;
-            let nested = self.ingest_referenced_windows(&stored, None)?;
+            self.materialize_inline_windows(&mut stored, base_dir)?;
+            let nested = self.ingest_referenced_windows(&stored, base_dir)?;
             if !nested.is_empty() {
                 impeller_kdl::rewrite_asset_paths(&mut stored, |path| {
                     nested.get(path).map(|key| format!("db:{key}"))
@@ -537,15 +539,9 @@ impl WindowIngest<'_> {
         // save fallback): it still becomes fetchable over HTTP, it just cannot
         // be scanned for further references.
         if let Ok(content) = std::str::from_utf8(&bytes)
-            && let Ok(mut schematic) = impeller_kdl::parse_schematic(content)
+            && let Some(rewritten) = self.rewrite_content(content, canonical.parent())?
         {
-            let map = self.ingest_referenced_windows(&schematic, canonical.parent())?;
-            if !map.is_empty() {
-                impeller_kdl::rewrite_asset_paths(&mut schematic, |path| {
-                    map.get(path).map(|key| format!("db:{key}"))
-                });
-                bytes = impeller_kdl::serialize_schematic(&schematic).into_bytes();
-            }
+            bytes = rewritten.into_bytes();
         }
 
         write_uploaded_asset(self.assets_dir, &key, &bytes)?;
@@ -1211,6 +1207,50 @@ mod tests {
         );
         let stored = std::fs::read_to_string(assets.join("schematics/motor-panel.kdl")).unwrap();
         assert!(stored.contains("drone.motor_input"));
+    }
+
+    #[test]
+    fn inline_nested_windows_resolve_relative_to_parent_file() {
+        for through_file in [false, true] {
+            let dir = tempdir().unwrap();
+            let assets = dir.path().join("db/assets");
+            std::fs::create_dir_all(&assets).unwrap();
+            let panels = dir.path().join("panels");
+            write(&panels.join("child.kdl"), b"graph \"sibling.value\"\n");
+            let content = r#"window title="Outer" {
+    window title="Inner" {
+        window path="child.kdl"
+    }
+}
+"#;
+            if through_file {
+                write(&panels.join("parent.kdl"), content.as_bytes());
+                ingest_window_schematics(
+                    &assets,
+                    "window path=\"panels/parent.kdl\"\n",
+                    &[dir.path().to_path_buf()],
+                )
+                .unwrap()
+                .unwrap();
+            } else {
+                let mut ingest = WindowIngest {
+                    assets_dir: &assets,
+                    search_dirs: &[],
+                    file_keys: HashMap::new(),
+                    reserved_inline_keys: HashSet::new(),
+                };
+                ingest
+                    .rewrite_content(content, Some(&panels))
+                    .unwrap()
+                    .unwrap();
+            }
+            let outer = std::fs::read_to_string(assets.join("schematics/outer.kdl")).unwrap();
+            let inner = std::fs::read_to_string(assets.join("schematics/inner.kdl")).unwrap();
+            let child = std::fs::read_to_string(assets.join("schematics/child.kdl")).unwrap();
+            assert!(outer.contains("db:schematics/inner.kdl"));
+            assert!(inner.contains("db:schematics/child.kdl"));
+            assert!(child.contains("sibling.value"));
+        }
     }
 
     #[test]

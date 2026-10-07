@@ -70,6 +70,12 @@ pub fn sync_windows(
                 let placements = std::iter::once((primary, main.unwrap()))
                     .chain(secondary.iter().map(|(entity, _)| *entity).zip(descriptors));
                 for (entity, descriptor) in placements {
+                    // Cleared automatic rectangles remain absent when their display
+                    // is skipped because another window has an explicit placement.
+                    // Keep the original state (and native window) in that case.
+                    if descriptor.screen_rect.is_none() {
+                        continue;
+                    }
                     if let Ok((_, _, mut state, _)) = windows_state.get_mut(entity) {
                         if state.descriptor.screen != descriptor.screen
                             || state.descriptor.screen_rect != descriptor.screen_rect
