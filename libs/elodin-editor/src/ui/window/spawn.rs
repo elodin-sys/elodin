@@ -20,17 +20,27 @@ use crate::ui::{
 
 use super::placement::collect_sorted_screens;
 
+#[derive(Default)]
+pub struct WindowSyncState {
+    existing_map: HashMap<WindowId, Entity>,
+    arranged_windows: Vec<Entity>,
+    automatic_rects: HashMap<Entity, impeller_wkt::WindowRect>,
+}
+
 pub fn sync_windows(
     mut commands: Commands,
     mut windows_state: Query<(Entity, &WindowId, &mut WindowState, Option<&mut Window>)>,
     mut cameras: Query<(&mut Camera, &mut RenderTarget)>,
     children: Query<&Children>,
-    mut existing_map: Local<HashMap<WindowId, Entity>>,
-    mut arranged_windows: Local<Vec<Entity>>,
-    mut automatic_rects: Local<HashMap<Entity, impeller_wkt::WindowRect>>,
+    mut sync_state: Local<WindowSyncState>,
     mut arrange_request: ResMut<super::arrange::ArrangeWindowsRequest>,
     _non_send_marker: NonSendMarker,
 ) {
+    let WindowSyncState {
+        existing_map,
+        arranged_windows,
+        automatic_rects,
+    } = &mut *sync_state;
     let screens_any = WINIT_WINDOWS.with_borrow(|winit_windows| {
         winit_windows
             .windows
@@ -76,20 +86,19 @@ pub fn sync_windows(
                     if descriptor.screen_rect.is_none() {
                         continue;
                     }
-                    if let Ok((_, _, mut state, _)) = windows_state.get_mut(entity) {
-                        if state.descriptor.screen != descriptor.screen
+                    if let Ok((_, _, mut state, _)) = windows_state.get_mut(entity)
+                        && (state.descriptor.screen != descriptor.screen
                             || state.descriptor.screen_rect != descriptor.screen_rect
-                            || (arrange_request.0 && automatic_rects.contains_key(&entity))
-                        {
-                            state.descriptor = descriptor;
-                            commands.entity(entity).insert(super::arrange::AutoArranged);
-                            if let Some(rect) = state.descriptor.screen_rect {
-                                automatic_rects.insert(entity, rect);
-                                commands.write_message(WindowRelayout::Rect {
-                                    window: entity,
-                                    rect,
-                                });
-                            }
+                            || (arrange_request.0 && automatic_rects.contains_key(&entity)))
+                    {
+                        state.descriptor = descriptor;
+                        commands.entity(entity).insert(super::arrange::AutoArranged);
+                        if let Some(rect) = state.descriptor.screen_rect {
+                            automatic_rects.insert(entity, rect);
+                            commands.write_message(WindowRelayout::Rect {
+                                window: entity,
+                                rect,
+                            });
                         }
                     }
                 }
