@@ -5,7 +5,7 @@
 //! consumers of the DB Asset Server. This replaces the selective, type-aware copy
 //! that previously lived in `nox-py`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
@@ -280,6 +280,7 @@ fn rewrite_stored_schematics(dir: &Path, source_root: &Path) -> io::Result<()> {
         assets_dir: dir,
         search_dirs: &search_dirs,
         file_keys: HashMap::new(),
+        reserved_inline_keys: HashSet::new(),
     };
     for key in keys {
         if !key.ends_with(".kdl") {
@@ -365,6 +366,7 @@ pub fn ingest_window_schematics(
         assets_dir,
         search_dirs,
         file_keys: HashMap::new(),
+        reserved_inline_keys: HashSet::new(),
     };
     ingest.rewrite_content(content, None)
 }
@@ -394,6 +396,8 @@ struct WindowIngest<'a> {
     /// a key is recorded *before* the file's own references are followed, so
     /// mutually referencing windows terminate with each other's key.
     file_keys: HashMap<PathBuf, String>,
+    /// Reserved before following nested references, which may use the same stem.
+    reserved_inline_keys: HashSet<String>,
 }
 
 impl WindowIngest<'_> {
@@ -554,7 +558,7 @@ impl WindowIngest<'_> {
     }
 
     /// Like [`Self::assign_key`], but never assigns [`ACTIVE_SCHEMATIC_ASSET_KEY`].
-    fn assign_inline_window_key(&self, stem: &str) -> String {
+    fn assign_inline_window_key(&mut self, stem: &str) -> String {
         let mut n = 1usize;
         loop {
             let key = if n == 1 {
@@ -566,9 +570,11 @@ impl WindowIngest<'_> {
                 n += 1;
                 continue;
             }
-            let claimed = self.file_keys.values().any(|existing| *existing == key)
+            let claimed = self.reserved_inline_keys.contains(&key)
+                || self.file_keys.values().any(|existing| *existing == key)
                 || self.assets_dir.join(&key).exists();
             if !claimed {
+                self.reserved_inline_keys.insert(key.clone());
                 return key;
             }
             n += 1;
@@ -590,7 +596,8 @@ impl WindowIngest<'_> {
             } else {
                 format!("schematics/{stem}-{n}.kdl")
             };
-            let claimed = self.file_keys.values().any(|existing| *existing == key)
+            let claimed = self.reserved_inline_keys.contains(&key)
+                || self.file_keys.values().any(|existing| *existing == key)
                 || self.assets_dir.join(&key).exists();
             if !claimed {
                 return key;
@@ -1204,6 +1211,29 @@ mod tests {
         );
         let stored = std::fs::read_to_string(assets.join("schematics/motor-panel.kdl")).unwrap();
         assert!(stored.contains("drone.motor_input"));
+    }
+
+    #[test]
+    fn window_ingest_reserves_inline_key_before_nested_file() {
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("db/assets");
+        std::fs::create_dir_all(&assets).unwrap();
+        write(&dir.path().join("panel.kdl"), b"graph \"nested.value\"\n");
+        let content = r#"window title="Panel" {
+    graph "inline.value"
+    window path="panel.kdl"
+}
+"#;
+        let rewritten = ingest_window_schematics(&assets, content, &[dir.path().to_path_buf()])
+            .unwrap()
+            .unwrap();
+        assert!(rewritten.contains("db:schematics/panel.kdl"));
+        let inline = std::fs::read_to_string(assets.join("schematics/panel.kdl")).unwrap();
+        let nested = std::fs::read_to_string(assets.join("schematics/panel-2.kdl")).unwrap();
+        assert!(inline.contains("inline.value"));
+        assert!(inline.contains("db:schematics/panel-2.kdl"));
+        assert!(nested.contains("nested.value"));
+        assert!(!nested.contains("inline.value"));
     }
 
     #[test]

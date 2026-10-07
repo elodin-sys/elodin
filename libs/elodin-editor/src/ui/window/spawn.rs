@@ -66,30 +66,31 @@ pub fn sync_windows(
         if let Some((primary, descriptor)) = main_entry {
             let mut main = Some(descriptor);
             let mut descriptors: Vec<_> = secondary.iter().map(|(_, d)| d.clone()).collect();
-            super::arrange::arrange_windows(primary, &mut main, &mut descriptors);
-            let placements = std::iter::once((primary, main.unwrap()))
-                .chain(secondary.iter().map(|(entity, _)| *entity).zip(descriptors));
-            for (entity, descriptor) in placements {
-                if let Ok((_, _, mut state, _)) = windows_state.get_mut(entity) {
-                    if state.descriptor.screen != descriptor.screen
-                        || state.descriptor.screen_rect != descriptor.screen_rect
-                        || (arrange_request.0 && automatic_rects.contains_key(&entity))
-                    {
-                        state.descriptor = descriptor;
-                        commands.entity(entity).insert(super::arrange::AutoArranged);
-                        if let Some(rect) = state.descriptor.screen_rect {
-                            automatic_rects.insert(entity, rect);
-                            commands.write_message(WindowRelayout::Rect {
-                                window: entity,
-                                rect,
-                            });
+            if super::arrange::arrange_windows(primary, &mut main, &mut descriptors) {
+                let placements = std::iter::once((primary, main.unwrap()))
+                    .chain(secondary.iter().map(|(entity, _)| *entity).zip(descriptors));
+                for (entity, descriptor) in placements {
+                    if let Ok((_, _, mut state, _)) = windows_state.get_mut(entity) {
+                        if state.descriptor.screen != descriptor.screen
+                            || state.descriptor.screen_rect != descriptor.screen_rect
+                            || (arrange_request.0 && automatic_rects.contains_key(&entity))
+                        {
+                            state.descriptor = descriptor;
+                            commands.entity(entity).insert(super::arrange::AutoArranged);
+                            if let Some(rect) = state.descriptor.screen_rect {
+                                automatic_rects.insert(entity, rect);
+                                commands.write_message(WindowRelayout::Rect {
+                                    window: entity,
+                                    rect,
+                                });
+                            }
                         }
                     }
                 }
+                *arranged_windows = ids;
+                arrange_request.0 = false;
+                automatic_rects.retain(|entity, _| arranged_windows.contains(entity));
             }
-            *arranged_windows = ids;
-            arrange_request.0 = false;
-            automatic_rects.retain(|entity, _| arranged_windows.contains(entity));
         }
     }
 

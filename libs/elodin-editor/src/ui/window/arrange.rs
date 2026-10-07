@@ -14,13 +14,14 @@ pub struct AutoArranged;
 #[derive(bevy::prelude::Resource, Default)]
 pub struct ArrangeWindowsRequest(pub bool);
 
+/// Returns false when monitor information is not ready; callers must retry.
 pub fn arrange_windows(
     primary: Entity,
     main: &mut Option<WindowDescriptor>,
     secondary: &mut [WindowDescriptor],
-) {
+) -> bool {
     if secondary.is_empty() && main.as_ref().is_none_or(|d| d.screen.is_none()) {
-        return;
+        return true;
     }
     let Some((screens, fallback)) = WINIT_WINDOWS.with_borrow(|windows| {
         let window = windows.get_window(primary)?;
@@ -28,7 +29,7 @@ pub fn arrange_windows(
         let fallback = detect_window_screen(window, &screens)?;
         Some((screens, fallback))
     }) else {
-        return;
+        return false;
     };
     let main = main.get_or_insert_with(Default::default);
     let primary_screen = main.screen.unwrap_or(fallback);
@@ -72,6 +73,7 @@ pub fn arrange_windows(
             });
         }
     }
+    true
 }
 
 fn grid(count: usize, width: u32, height: u32, percent_height: u32) -> Vec<WindowRect> {
@@ -116,6 +118,26 @@ fn grid(count: usize, width: u32, height: u32, percent_height: u32) -> Vec<Windo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_primary_handle_keeps_arrangement_pending() {
+        let mut main = None;
+        let mut secondary = [WindowDescriptor::default()];
+        for _ in 0..2 {
+            assert!(!arrange_windows(
+                Entity::PLACEHOLDER,
+                &mut main,
+                &mut secondary
+            ));
+            assert!(main.is_none());
+            assert!(secondary[0].screen_rect.is_none());
+        }
+    }
+
+    #[test]
+    fn no_secondary_windows_need_no_monitor() {
+        assert!(arrange_windows(Entity::PLACEHOLDER, &mut None, &mut []));
+    }
 
     #[test]
     fn two_secondary_windows_share_the_top_third() {
