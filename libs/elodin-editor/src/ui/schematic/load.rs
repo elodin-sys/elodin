@@ -1359,12 +1359,15 @@ impl LoadSchematicParams<'_, '_> {
                             .map(EColor::into_color32)
                             .unwrap_or_else(|| colors::get_color_by_index_all(j));
                         if let Some(elements) = components_tree.get_mut(component) {
+                            if *i >= elements.len() {
+                                elements.resize(*i + 1, (false, line_color));
+                            }
                             elements[*i] = (true, line_color);
                         } else {
                             let Some(schema) = self.schema_reg.0.get(&component.id) else {
                                 continue;
                             };
-                            let len: usize = schema.shape().iter().copied().product();
+                            let len = schema.element_count().max(*i + 1);
                             let mut elements: Vec<(bool, Color32)> =
                                 (0..len).map(|_| (false, line_color)).collect();
                             elements[*i] = (true, line_color);

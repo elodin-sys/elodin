@@ -202,7 +202,7 @@ pub fn element_names_for_graph(
     if !from_metadata.is_empty() {
         return from_metadata;
     }
-    let len = schema.shape().iter().copied().product::<usize>().max(1);
+    let len = schema.element_count().max(1);
     if len == 1 {
         return vec![metadata.name.clone()];
     }
@@ -213,7 +213,7 @@ pub fn graph_lines_from_component(
     component_path: &ComponentPath,
     schema: &Schema<Vec<u64>>,
 ) -> GraphStateComponent {
-    let len = schema.shape().iter().copied().product::<usize>().max(1);
+    let len = schema.element_count().max(1);
     let color_base = component_path.id.0 as usize;
     (0..len)
         .map(|i| (true, colors::get_color_by_index_all(color_base + i)))

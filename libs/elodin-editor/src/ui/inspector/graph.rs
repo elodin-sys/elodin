@@ -723,7 +723,7 @@ fn component_len(
     }
 
     if let Some(schema) = schema_store.0.get(&path.id) {
-        let len = schema.shape().iter().copied().product::<usize>();
+        let len = schema.element_count();
         if len > 0 {
             return len.max(required_index + 1);
         }
