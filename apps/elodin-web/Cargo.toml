@@ -14,4 +14,10 @@ elodin-editor = { path = "../../libs/elodin-editor", default-features = false, f
 bevy.workspace = true
 console_error_panic_hook = "0.1"
 getrandom = { version = "0.3", features = ["wasm_js"] }
-web-sys = { version = "0.3", features = ["console", "Window", "Event"] }
+web-sys = { version = "0.3", features = [
+  "console",
+  "Window",
+  "Event",
+  "Location",
+  "UrlSearchParams",
+] }

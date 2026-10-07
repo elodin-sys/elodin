@@ -129,6 +129,17 @@ miette.version = "7.2"
 [target.'cfg(target_family = "wasm")'.dependencies]
 impeller-bevy.path = "../../libs/impeller/bevy"
 impeller-bevy.default-features = false
+js-sys = "0.3"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = [
+  "Headers",
+  "Request",
+  "RequestInit",
+  "RequestMode",
+  "Response",
+  "Window",
+] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 bevy = { workspace = true, features = [
