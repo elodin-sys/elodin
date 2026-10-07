@@ -35,6 +35,8 @@ use bevy_geo_frames::GeoContext;
 use egui_tiles::{Tile, TileId};
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller::types::Timestamp;
+#[cfg(target_family = "wasm")]
+use impeller_bevy::WsConnect;
 use impeller_bevy::{
     ComponentMetadataRegistry, ComponentPathRegistry, ConnectionAddr, EntityMap, PacketTx,
 };
@@ -1093,6 +1095,37 @@ fn set_time_range_behavior() -> PaletteItem {
     })
 }
 
+#[cfg(target_family = "wasm")]
+fn connect_database() -> PaletteItem {
+    PaletteItem::new(
+        "Connect to Database...",
+        SIMULATION_LABEL,
+        |_: In<String>| {
+            PalettePage::new(vec![PaletteItem::new(
+                LabelSource::placeholder("127.0.0.1:2240"),
+                "",
+                |In(addr): In<String>, mut connect: MessageWriter<WsConnect>| {
+                    let trimmed = addr.trim();
+                    let parsed = if trimmed.is_empty() {
+                        "127.0.0.1:2240".parse()
+                    } else {
+                        trimmed.parse()
+                    };
+                    match parsed {
+                        Ok(addr) => {
+                            connect.write(WsConnect(addr));
+                            PaletteEvent::Exit
+                        }
+                        Err(err) => PaletteEvent::Error(format!("Invalid address: {err}")),
+                    }
+                },
+            )])
+            .prompt("Database address (host:port)")
+            .into_event()
+        },
+    )
+}
+
 fn goto_tick() -> PaletteItem {
     PaletteItem::new("Goto Tick...", TIME_LABEL, |_: In<String>| {
         PalettePage::new(vec![
@@ -1277,7 +1310,8 @@ fn queue_save_layout_now(
         bytes.len()
     );
     in_flight.task = Some(
-        IoTaskPool::get().spawn(async move { upload_overlay_bytes(&overlay_key, bytes, addr) }),
+        IoTaskPool::get()
+            .spawn(async move { upload_overlay_bytes(&overlay_key, bytes, addr).await }),
     );
 }
 
@@ -1459,7 +1493,7 @@ fn queue_save_schematic_db_now(
     // only after every `PUT` is acknowledged, so the pointer never claims a save
     // that did not land.
     save_in_flight.task =
-        Some(IoTaskPool::get().spawn(async move { upload_db_save_plan(&plan, Some(addr)) }));
+        Some(IoTaskPool::get().spawn(async move { upload_db_save_plan(&plan, Some(addr)).await }));
 }
 
 /// Applies the outcome of an in-flight DB-native save: on success, record the
@@ -1616,7 +1650,8 @@ fn refresh_schematic_index(
         return;
     }
     cache.addr = Some(addr);
-    cache.task = Some(IoTaskPool::get().spawn(async move { fetch_schematic_index(Some(addr)) }));
+    cache.task =
+        Some(IoTaskPool::get().spawn(async move { fetch_schematic_index(Some(addr)).await }));
 }
 
 pub fn clear_schematic() -> PaletteItem {
@@ -2470,6 +2505,8 @@ impl Default for PalettePage {
             ),
             #[cfg(not(target_family = "wasm"))]
             dump_gpu_allocations_item(),
+            #[cfg(target_family = "wasm")]
+            connect_database(),
             reset_cameras(),
             PaletteItem::new(
                 "Toggle Recording",

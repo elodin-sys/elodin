@@ -21,6 +21,7 @@ use impeller_wkt::{
 use miette::{Diagnostic, miette};
 use std::{
     collections::{BTreeMap, HashMap},
+    future::Future,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -336,34 +337,18 @@ fn is_remote_asset_path(path: &str) -> bool {
 fn read_window_schematic_kdl(
     path: &Path,
     connection_addr: Option<std::net::SocketAddr>,
-) -> Result<String, String> {
-    let path_str = path
-        .to_str()
-        .ok_or_else(|| "non-utf8 window path".to_string())?;
-    if !is_remote_asset_path(path_str) {
-        return std::fs::read_to_string(path).map_err(|err| err.to_string());
-    }
-
-    let url = crate::object_3d::resolve_db_asset_url(path_str, connection_addr);
-    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
-    {
-        let _ = url;
-        return Err("wasm-cut: blocking HTTP".into());
-    }
-    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
-    {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(std::time::Duration::from_secs(5))
-            .build()
-            .map_err(|err| format!("{url}: {err}"))?;
-        let response = client
-            .get(&url)
-            .send()
-            .map_err(|err| format!("{url}: {err}"))?;
-        if !response.status().is_success() {
-            return Err(format!("{url}: HTTP {}", response.status()));
+) -> impl Future<Output = Result<String, String>> {
+    let path = path.to_path_buf();
+    async move {
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| "non-utf8 window path".to_string())?;
+        if !is_remote_asset_path(path_str) {
+            return std::fs::read_to_string(&path).map_err(|err| err.to_string());
         }
-        response.text().map_err(|err| format!("{url}: {err}"))
+
+        let url = crate::object_3d::resolve_db_asset_url(path_str, connection_addr);
+        crate::plugins::http_client::get_text(&url).await
     }
 }
 
@@ -681,7 +666,7 @@ impl LoadSchematicParams<'_, '_> {
                     // `apply_pending_window_schematics` once the fetch lands.
                     let fetch_path = path.clone();
                     let task = IoTaskPool::get().spawn(async move {
-                        read_window_schematic_kdl(&fetch_path, connection_addr)
+                        read_window_schematic_kdl(&fetch_path, connection_addr).await
                     });
                     self.pending_windows.loads.push(PendingWindowLoad {
                         descriptor,
@@ -694,7 +679,7 @@ impl LoadSchematicParams<'_, '_> {
                     });
                     continue;
                 }
-                match read_window_schematic_kdl(&path, connection_addr) {
+                match std::fs::read_to_string(&path) {
                     Ok(kdl) => match impeller_wkt::Schematic::from_kdl(&kdl) {
                         Ok(window_schematic) => {
                             self.spawn_window(
@@ -755,10 +740,9 @@ impl LoadSchematicParams<'_, '_> {
                 }
                 let fetch_path = load.path.clone();
                 load.retry_at = None;
-                load.task =
-                    Some(IoTaskPool::get().spawn(async move {
-                        read_window_schematic_kdl(&fetch_path, connection_addr)
-                    }));
+                load.task = Some(IoTaskPool::get().spawn(async move {
+                    read_window_schematic_kdl(&fetch_path, connection_addr).await
+                }));
             }
             let task = load.task.as_mut().expect("window fetch task just spawned");
             let Some(result) = future::block_on(future::poll_once(task)) else {
@@ -2216,7 +2200,8 @@ mod tests {
         let path = dir.join("window.kdl");
         std::fs::write(&path, "viewport name=\"W\"\n").unwrap();
 
-        let kdl = read_window_schematic_kdl(&path, None).expect("read local window kdl");
+        let kdl = future::block_on(read_window_schematic_kdl(&path, None))
+            .expect("read local window kdl");
         assert!(kdl.contains("viewport"));
         let _ = std::fs::remove_dir_all(&dir);
     }

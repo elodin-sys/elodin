@@ -1,10 +1,13 @@
 use axum::Json;
 use axum::Router;
 use axum::body::Bytes;
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{DefaultBodyLimit, Path as AxumPath, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, Method, Request, StatusCode, header};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
+use futures_util::{SinkExt, StreamExt};
 use miette::IntoDiagnostic;
 use std::collections::HashSet;
 use std::collections::hash_map::DefaultHasher;
@@ -68,6 +71,9 @@ struct AssetsState {
     /// followers re-mirror and editors reload after a byte-only change (RFD
     /// #724). `None` when the server runs without a co-located DB.
     db: Option<Arc<DB>>,
+    /// Impeller TCP bind address. `/impeller` WebSockets proxy to loopback on
+    /// this port. Unspecified IPs are mapped with [`client_asset_ip`].
+    impeller_addr: SocketAddr,
 }
 
 /// Upper bound on a single `PUT` asset upload. Generous enough for large GLB
@@ -717,9 +723,149 @@ async fn index_response(assets_dir: PathBuf, prefix: Option<String>) -> Response
     }
 }
 
+/// Upper bound on a proxied Impeller packet body (the `u32` length prefix).
+const MAX_IMPELLER_PACKET_BYTES: usize = 64 * 1024 * 1024;
+
+/// Browser origins allowed to call this server from JS (Trunk on localhost).
+/// A public `0.0.0.0` bind plus `Access-Control-Allow-Origin: *` would expose
+/// unauthenticated Impeller; v1 stays localhost-oriented, same as open TCP.
+fn is_localhost_origin(origin: &str) -> bool {
+    let Some(rest) = origin.strip_prefix("http://") else {
+        return false;
+    };
+    if let Some(after) = rest.strip_prefix("[::1]") {
+        return after.is_empty() || after.starts_with(':');
+    }
+    let host = rest.split(':').next().unwrap_or(rest);
+    host == "127.0.0.1" || host.eq_ignore_ascii_case("localhost")
+}
+
+fn apply_localhost_cors(res: &mut Response, origin: &HeaderValue) {
+    res.headers_mut()
+        .insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin.clone());
+    res.headers_mut()
+        .insert(header::VARY, HeaderValue::from_static("Origin"));
+    res.headers_mut().insert(
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        HeaderValue::from_static("GET, PUT, OPTIONS"),
+    );
+    res.headers_mut().insert(
+        header::ACCESS_CONTROL_ALLOW_HEADERS,
+        HeaderValue::from_static("content-type, if-none-match, etag"),
+    );
+    res.headers_mut().insert(
+        header::ACCESS_CONTROL_EXPOSE_HEADERS,
+        HeaderValue::from_static("etag"),
+    );
+}
+
+async fn localhost_cors(req: Request<axum::body::Body>, next: Next) -> Response {
+    let origin = req.headers().get(header::ORIGIN).cloned();
+    let origin_ok = origin
+        .as_ref()
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(is_localhost_origin);
+
+    if req.method() == Method::OPTIONS {
+        let mut res = StatusCode::NO_CONTENT.into_response();
+        if origin_ok && let Some(origin) = origin.as_ref() {
+            apply_localhost_cors(&mut res, origin);
+        }
+        return res;
+    }
+
+    let mut res = next.run(req).await;
+    if origin_ok && let Some(origin) = origin.as_ref() {
+        apply_localhost_cors(&mut res, origin);
+    }
+    res
+}
+
+fn impeller_connect_addr(addr: SocketAddr) -> SocketAddr {
+    SocketAddr::new(client_asset_ip(addr.ip()), addr.port())
+}
+
+async fn read_len_packet<R: tokio::io::AsyncRead + Unpin>(r: &mut R) -> io::Result<Vec<u8>> {
+    use tokio::io::AsyncReadExt;
+    let mut len_buf = [0u8; 4];
+    r.read_exact(&mut len_buf).await?;
+    let n = u32::from_le_bytes(len_buf) as usize;
+    if n > MAX_IMPELLER_PACKET_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "impeller packet too large",
+        ));
+    }
+    let mut pkt = vec![0u8; 4 + n];
+    pkt[..4].copy_from_slice(&len_buf);
+    r.read_exact(&mut pkt[4..]).await?;
+    Ok(pkt)
+}
+
+async fn ws_impeller(
+    ws: WebSocketUpgrade,
+    State(state): State<Arc<AssetsState>>,
+) -> impl IntoResponse {
+    let addr = impeller_connect_addr(state.impeller_addr);
+    ws.on_upgrade(move |socket| proxy_impeller_ws(socket, addr))
+}
+
+async fn proxy_impeller_ws(ws: WebSocket, addr: SocketAddr) {
+    use tokio::io::AsyncWriteExt;
+    let mut tcp = match tokio::net::TcpStream::connect(addr).await {
+        Ok(stream) => stream,
+        Err(err) => {
+            tracing::warn!(?err, %addr, "impeller websocket proxy connect failed");
+            let mut ws = ws;
+            let _ = ws.close().await;
+            return;
+        }
+    };
+    let _ = tcp.set_nodelay(true);
+    tracing::debug!(%addr, "impeller websocket proxy connected");
+    let (mut tcp_read, mut tcp_write) = tcp.split();
+    let (mut ws_sink, mut ws_stream) = ws.split();
+
+    let tcp_to_ws = async {
+        while let Ok(pkt) = read_len_packet(&mut tcp_read).await {
+            if ws_sink.send(Message::Binary(pkt.into())).await.is_err() {
+                break;
+            }
+        }
+    };
+    let ws_to_tcp = async {
+        while let Some(msg) = ws_stream.next().await {
+            match msg {
+                Ok(Message::Binary(bytes)) => {
+                    if tcp_write.write_all(&bytes).await.is_err() {
+                        break;
+                    }
+                }
+                Ok(Message::Close(_)) | Err(_) => break,
+                Ok(Message::Ping(_) | Message::Pong(_) | Message::Text(_)) => {}
+            }
+        }
+    };
+    tokio::select! {
+        _ = tcp_to_ws => {}
+        _ = ws_to_tcp => {}
+    }
+}
+
+fn assets_router(state: Arc<AssetsState>) -> Router {
+    Router::new()
+        .route("/impeller", get(ws_impeller))
+        .route("/impeller/msg", get(ws_impeller))
+        .route("/{*path}", get(get_asset).put(put_asset))
+        .layer(DefaultBodyLimit::max(MAX_ASSET_UPLOAD_BYTES))
+        .layer(middleware::from_fn(localhost_cors))
+        .with_state(state)
+}
+
 async fn serve_assets_with_listener(
     listener: tokio::net::TcpListener,
     addr: SocketAddr,
+    impeller_addr: SocketAddr,
     assets_dir: PathBuf,
     writable: bool,
     db: Option<Arc<DB>>,
@@ -728,12 +874,15 @@ async fn serve_assets_with_listener(
         assets_dir,
         writable,
         db,
+        impeller_addr,
     });
-    let app = Router::new()
-        .route("/{*path}", get(get_asset).put(put_asset))
-        .layer(DefaultBodyLimit::max(MAX_ASSET_UPLOAD_BYTES))
-        .with_state(state);
-    tracing::info!(?addr, writable, "assets http server listening");
+    let app = assets_router(state);
+    tracing::info!(
+        ?addr,
+        ?impeller_addr,
+        writable,
+        "assets http server listening"
+    );
     axum::serve(listener, app).await.into_diagnostic()?;
     Ok(())
 }
@@ -747,7 +896,7 @@ pub async fn serve_assets(
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .into_diagnostic()?;
-    serve_assets_with_listener(listener, addr, assets_dir, writable, None).await
+    serve_assets_with_listener(listener, addr, addr, assets_dir, writable, None).await
 }
 
 pub fn spawn_assets_http(
@@ -766,8 +915,10 @@ pub fn spawn_assets_http(
         match tokio::net::TcpListener::from_std(listener) {
             Ok(listener) => {
                 if ready_tx.send(Ok(())).is_ok()
-                    && let Err(err) =
-                        serve_assets_with_listener(listener, addr, assets_dir, writable, db).await
+                    && let Err(err) = serve_assets_with_listener(
+                        listener, addr, tcp_addr, assets_dir, writable, db,
+                    )
+                    .await
                 {
                     tracing::error!(?err, "assets http server failed");
                 }
@@ -920,6 +1071,72 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(not_modified.status(), StatusCode::NOT_MODIFIED);
+
+        let cors = client
+            .get(format!("http://{assets_addr}/rocket.glb"))
+            .header(header::ORIGIN, "http://127.0.0.1:8080")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(cors.status(), StatusCode::OK);
+        assert_eq!(
+            cors.headers()
+                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                .and_then(|v| v.to_str().ok()),
+            Some("http://127.0.0.1:8080")
+        );
+    }
+
+    #[test]
+    fn localhost_origin_matches_trunk_ports() {
+        assert!(is_localhost_origin("http://127.0.0.1:8080"));
+        assert!(is_localhost_origin("http://localhost:8080"));
+        assert!(is_localhost_origin("http://[::1]:8080"));
+        assert!(is_localhost_origin("http://127.0.0.1"));
+        assert!(!is_localhost_origin("http://example.com"));
+        assert!(!is_localhost_origin("https://127.0.0.1:8080"));
+    }
+
+    #[tokio::test]
+    async fn impeller_websocket_proxies_length_prefixed_packets() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio_tungstenite::tungstenite::Message as WsMessage;
+
+        let impeller = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let impeller_addr = impeller.local_addr().unwrap();
+        tokio::spawn(async move {
+            let (mut stream, _) = impeller.accept().await.unwrap();
+            let mut len_buf = [0u8; 4];
+            stream.read_exact(&mut len_buf).await.unwrap();
+            let n = u32::from_le_bytes(len_buf) as usize;
+            let mut body = vec![0u8; n];
+            stream.read_exact(&mut body).await.unwrap();
+            stream.write_all(&len_buf).await.unwrap();
+            stream.write_all(&body).await.unwrap();
+        });
+
+        let dir = tempdir().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let http_addr = listener.local_addr().unwrap();
+        let state = Arc::new(AssetsState {
+            assets_dir: dir.path().join("assets"),
+            writable: true,
+            db: None,
+            impeller_addr,
+        });
+        tokio::spawn(async move {
+            axum::serve(listener, assets_router(state)).await.unwrap();
+        });
+
+        let url = format!("ws://{http_addr}/impeller");
+        let (mut ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+        let mut pkt = 12u32.to_le_bytes().to_vec();
+        pkt.extend_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+        ws.send(WsMessage::Binary(pkt.clone().into()))
+            .await
+            .unwrap();
+        let echoed = ws.next().await.unwrap().unwrap();
+        assert_eq!(echoed.into_data(), pkt);
     }
 
     #[tokio::test]
@@ -934,6 +1151,7 @@ mod tests {
             assets_dir: assets.clone(),
             writable: true,
             db: None,
+            impeller_addr: "127.0.0.1:0".parse().unwrap(),
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -970,6 +1188,7 @@ mod tests {
             assets_dir: assets,
             writable: true,
             db: None,
+            impeller_addr: "127.0.0.1:0".parse().unwrap(),
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -998,6 +1217,7 @@ mod tests {
             assets_dir,
             writable,
             db: None,
+            impeller_addr: "127.0.0.1:0".parse().unwrap(),
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset).put(put_asset))
@@ -1156,6 +1376,7 @@ mod tests {
             assets_dir: source_assets.clone(),
             writable: true,
             db: None,
+            impeller_addr: "127.0.0.1:0".parse().unwrap(),
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -1250,6 +1471,7 @@ object_3d "rocket.world_pos" {
             assets_dir: source_assets.clone(),
             writable: true,
             db: None,
+            impeller_addr: "127.0.0.1:0".parse().unwrap(),
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -1345,6 +1567,7 @@ object_3d "rocket.world_pos" {
             assets_dir: source_assets.clone(),
             writable: true,
             db: None,
+            impeller_addr: "127.0.0.1:0".parse().unwrap(),
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -1444,6 +1667,7 @@ object_3d "rocket.world_pos" {
             assets_dir: source_assets.clone(),
             writable: true,
             db: None,
+            impeller_addr: "127.0.0.1:0".parse().unwrap(),
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -1490,6 +1714,7 @@ viewport "main" { }
             assets_dir: assets.clone(),
             writable: true,
             db: None,
+            impeller_addr: "127.0.0.1:0".parse().unwrap(),
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))
@@ -1559,6 +1784,7 @@ viewport "main" { }
             assets_dir: source_assets,
             writable: true,
             db: None,
+            impeller_addr: "127.0.0.1:0".parse().unwrap(),
         });
         let app = Router::new()
             .route("/{*path}", get(get_asset))

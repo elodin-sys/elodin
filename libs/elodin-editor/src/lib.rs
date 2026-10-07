@@ -4,6 +4,8 @@
     allow(dead_code, unused_imports, unused_variables, unused_mut)
 )]
 
+#[cfg(target_family = "wasm")]
+use std::net::SocketAddr;
 use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
 use crate::plugins::{editor_cam_input, editor_cam_touch};
@@ -222,6 +224,8 @@ pub(crate) fn register_ibl_embedded_assets(app: &mut App) {
 #[derive(Default)]
 pub struct EditorPlugin {
     window_resolution: WindowResolution,
+    #[cfg(target_family = "wasm")]
+    connection_addr: Option<SocketAddr>,
 }
 
 /// The positions of camera of object_3d are sync'd in `PreUpdate`.
@@ -232,7 +236,15 @@ impl EditorPlugin {
     pub fn new(width: f32, height: f32) -> Self {
         Self {
             window_resolution: WindowResolution::new(width as u32, height as u32),
+            #[cfg(target_family = "wasm")]
+            connection_addr: None,
         }
+    }
+
+    #[cfg(target_family = "wasm")]
+    pub fn with_connection_addr(mut self, addr: SocketAddr) -> Self {
+        self.connection_addr = Some(addr);
+        self
     }
 }
 
@@ -367,8 +379,15 @@ impl Plugin for EditorPlugin {
             .add_plugins(ViewCubePlugin {
                 config: ViewCubeConfig::editor_mode(),
             })
-            .add_plugins(impeller_bevy::ImpellerPlugin)
-            .add_plugins(FrustumPlugin)
+            .add_plugins(impeller_bevy::ImpellerPlugin);
+        #[cfg(target_family = "wasm")]
+        {
+            let addr = self
+                .connection_addr
+                .unwrap_or_else(|| "127.0.0.1:2240".parse().expect("default Impeller address"));
+            app.add_plugins(impeller_bevy::WsImpellerPlugin::new(Some(addr)));
+        }
+        app.add_plugins(FrustumPlugin)
             .add_plugins(FrustumIntersectionPlugin)
             .add_plugins(GizmoPlugin);
         #[cfg(not(target_family = "wasm"))]

@@ -55,6 +55,11 @@ mod tcp;
 #[cfg(feature = "tcp")]
 pub use tcp::*;
 
+#[cfg(target_family = "wasm")]
+mod ws;
+#[cfg(target_family = "wasm")]
+pub use ws::*;
+
 #[derive(Debug, Message)]
 pub enum DbMessage {
     UpdateConfig,
@@ -1531,7 +1536,7 @@ impl Plugin for ImpellerPlugin {
             .init_resource::<SeriesStoreLoadState>()
             .init_resource::<SeriesFetchPriority>()
             .init_resource::<SimTimeStepFetch>();
-        #[cfg(not(feature = "tcp"))]
+        #[cfg(all(not(feature = "tcp"), not(target_family = "wasm")))]
         {
             let (packet_tx, packet_rx, _outgoing, _incoming) = channels::channels();
             let (msg_tx, msg_rx, _msg_outgoing, _msg_incoming) = channels::msg_channels();

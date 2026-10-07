@@ -408,7 +408,7 @@ fn load_headless_scene(
         };
         pending.fetch_target = Some((key.clone(), revision));
         pending.task = Some(IoTaskPool::get().spawn(async move {
-            crate::plugins::kdl_document::fetch_active_schematic_kdl(&key, Some(addr))
+            crate::plugins::kdl_document::fetch_active_schematic_kdl(&key, Some(addr)).await
         }));
         return;
     };
