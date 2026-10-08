@@ -515,7 +515,6 @@ impl WorldBuilder {
         create_frustum = false,
         show_ellipsoids = false,
         frustums_color = None,
-        frustums_face_alpha = impeller_wkt::default_frustums_face_alpha(),
         projection_color = None,
         frustums_thickness = 0.006,
         frustums_up_marker = "none",
@@ -525,6 +524,7 @@ impl WorldBuilder {
         ev100 = None,
         bloom = None,
         environment = None,
+        frustums_face_alpha = impeller_wkt::default_frustums_face_alpha(),
     ))]
     #[allow(clippy::too_many_arguments)]
     fn sensor_camera(
@@ -546,7 +546,6 @@ impl WorldBuilder {
         create_frustum: bool,
         show_ellipsoids: bool,
         frustums_color: Option<Vec<f32>>,
-        frustums_face_alpha: f32,
         projection_color: Option<Vec<f32>>,
         frustums_thickness: f32,
         frustums_up_marker: &str,
@@ -556,6 +555,7 @@ impl WorldBuilder {
         ev100: Option<f32>,
         bloom: Option<&Bound<'_, PyAny>>,
         environment: Option<&Bound<'_, PyAny>>,
+        frustums_face_alpha: f32,
     ) -> Result<(), crate::error::Error> {
         if name.chars().any(|c| c.is_whitespace()) {
             return Err(crate::error::Error::PyO3(

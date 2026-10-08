@@ -117,7 +117,7 @@ mod stream_filter {
     use std::collections::HashSet;
 
     use bevy::prelude::*;
-    use impeller::types::ComponentId;
+    use impeller::types::{ComponentId, IntoLenPacket};
     use impeller_bevy::{
         ComponentFilteredStream, ConnectionStatus, CurrentStreamId, PacketTx, SeriesFetchPriority,
         ThreadConnectionStatus,
@@ -244,11 +244,10 @@ mod stream_filter {
             return;
         }
 
-        packet_tx.send_msg(stream_filter_message(
-            stream_id.0,
-            &priority.high,
-            frequency,
-        ));
+        packet_tx.send_required(
+            stream_filter_message(stream_id.0, &priority.high, frequency).into_len_packet(),
+            "live stream filter update",
+        );
         tracing::info!(
             client = rate.client_name(),
             components = priority.high.len(),

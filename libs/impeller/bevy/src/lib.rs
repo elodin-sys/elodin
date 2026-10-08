@@ -77,6 +77,15 @@ impl PacketTx {
         let pkt = msg.into_len_packet();
         let _ = self.0.try_send(Some(pkt));
     }
+
+    /// Queue a packet whose loss would leave the client silently
+    /// out of sync with the DB; panics naming `operation` if it cannot be queued.
+    pub fn send_required(&self, pkt: LenPacket, operation: &str) {
+        if let Err(err) = self.0.try_send(Some(pkt)) {
+            let reason = if err.is_full() { "full" } else { "closed" };
+            panic!("{operation} failed: outgoing packet queue is {reason}");
+        }
+    }
 }
 
 #[derive(Resource)]
@@ -2061,7 +2070,7 @@ fn negotiate_component_filtered_stream(
         return Ok(());
     };
     for packet in component_filtered_stream_packets(stream_id.0, supported) {
-        let _ = packet_tx.0.try_send(Some(packet));
+        packet_tx.send_required(packet, "live stream handshake");
     }
     Ok(())
 }
@@ -2354,6 +2363,23 @@ mod series_store_allowlist_tests {
         assert_eq!(filter.id, 42);
         assert!(filter.component_ids.is_empty());
         assert_eq!(filter.frequency, None);
+    }
+
+    #[test]
+    #[should_panic(expected = "live stream handshake failed: outgoing packet queue is full")]
+    fn required_send_panics_when_queue_is_full() {
+        let (tx, _rx) = thingbuf::mpsc::channel::<Option<LenPacket>>(1);
+        let tx = PacketTx(tx);
+        tx.send_required(GetDbSettings.into_len_packet(), "live stream handshake");
+        tx.send_required(GetDbSettings.into_len_packet(), "live stream handshake");
+    }
+
+    #[test]
+    #[should_panic(expected = "live stream handshake failed: outgoing packet queue is closed")]
+    fn required_send_panics_when_queue_is_closed() {
+        let (tx, rx) = thingbuf::mpsc::channel::<Option<LenPacket>>(1);
+        drop(rx);
+        PacketTx(tx).send_required(GetDbSettings.into_len_packet(), "live stream handshake");
     }
 
     #[test]

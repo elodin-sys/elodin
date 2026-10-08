@@ -279,6 +279,31 @@ def test_sensor_camera_accepts_frustum_face_alpha():
     )
 
 
+def test_sensor_camera_keeps_positional_parameter_order():
+    world = el.World()
+    host = world.spawn(el.Body(), "camera_host")
+    world.sensor_camera(
+        host,
+        "camera",
+        16,
+        16,
+        None,
+        0.01,
+        1000.0,
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0],
+        "rgba",
+        "normal",
+        None,
+        None,
+        None,
+        False,
+        False,
+        None,
+        [1.0, 0.0, 0.0],
+    )
+
+
 @pytest.mark.parametrize("alpha", [-0.01, 1.01, float("nan")])
 def test_sensor_camera_rejects_invalid_frustum_face_alpha(alpha):
     world = el.World()
