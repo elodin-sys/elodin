@@ -26,8 +26,8 @@ use impeller_bbq::{AsyncArcQueueRx, RxExt};
 use impeller_wkt::{
     ComponentMetadata, CurrentTimestamp, DbConfig, DumpMetadata, DumpMetadataResp, DumpSchema,
     DumpSchemaResp, EarliestTimestamp, ErrorResponse, GetDbSettings, GetEarliestTimestamp,
-    GetTimeSeries, IsRecording, LastUpdated, NewConnection, SetStreamFilter, Stream,
-    StreamBehavior, StreamId, StreamTimestamp, SubscribeLastUpdated, VTableMsg, WorldPos,
+    GetTimeSeries, IsRecording, LastUpdated, NewConnection, Stream, StreamBehavior, StreamId,
+    StreamTimestamp, SubscribeLastUpdated, VTableMsg, WorldPos,
 };
 use serde::de::DeserializeOwned;
 use std::{
@@ -961,7 +961,7 @@ fn sink_inner(
                 bevy::log::error!(?err, "packet handler error");
             }
         }
-        negotiate_component_filtered_stream(world, &pkt)?;
+        track_component_filter_support(world, &pkt)?;
         let mut world_sink = world_sink_state
             .get_mut(world)
             .expect("WorldSink params invalid");
@@ -1962,74 +1962,27 @@ impl CommandsExt for Commands<'_, '_> {
 }
 
 pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPacket> {
-    connection_packets(stream_id, false)
-}
-
-/// Initial packets for a client that will explicitly select its live component
-/// set after its schematic has loaded.
-///
-/// `RealTimeBatched` is deferred until this connection's `DbConfig` reply
-/// reveals whether the DB treats an empty [`SetStreamFilter`] as "no
-/// components"; see [`ComponentFilteredStream`].
-pub fn new_component_filtered_connection_packets(
-    stream_id: StreamId,
-) -> impl Iterator<Item = LenPacket> {
-    connection_packets(stream_id, true)
-}
-
-pub(crate) fn connection_packets(
-    stream_id: StreamId,
-    component_filtered: bool,
-) -> std::vec::IntoIter<LenPacket> {
-    let mut packets = Vec::with_capacity(6);
-    if !component_filtered {
-        packets.push(real_time_stream_packet(stream_id));
-    }
-    packets.extend([
+    [
+        // RealTimeBatched delivers all component data whenever new data
+        // arrives (batched per last_updated change).  For recorded DBs this
+        // sends one table then blocks — historical data is loaded via
+        // GetTimeSeries backfill (triggered after DumpMetadata).
+        Stream {
+            behavior: StreamBehavior::RealTimeBatched,
+            id: stream_id,
+        }
+        .into_len_packet(),
         GetEarliestTimestamp.into_len_packet(),
         DumpMetadata.into_len_packet(),
         GetDbSettings.into_len_packet(),
         SubscribeLastUpdated.into_len_packet(),
         DumpSchema.into_len_packet(),
-    ]);
-    packets.into_iter()
+    ]
+    .into_iter()
 }
 
-// RealTimeBatched delivers all component data whenever new data arrives
-// (batched per last_updated change).  For recorded DBs this sends one table
-// then blocks — historical data is loaded via GetTimeSeries backfill
-// (triggered after DumpMetadata).
-fn real_time_stream_packet(stream_id: StreamId) -> LenPacket {
-    Stream {
-        behavior: StreamBehavior::RealTimeBatched,
-        id: stream_id,
-    }
-    .into_len_packet()
-}
-
-/// Packets that open a component-filtered client's live stream once the DB's
-/// capabilities are known. A supporting DB gets an empty allowlist first so the
-/// stream starts with no components; any other DB gets a plain unfiltered
-/// stream, since older DBs either ignore an empty filter or persist the filter
-/// message as telemetry.
-fn component_filtered_stream_packets(stream_id: StreamId, supported: bool) -> Vec<LenPacket> {
-    let mut packets = Vec::with_capacity(2);
-    if supported {
-        packets.push(
-            SetStreamFilter {
-                id: stream_id,
-                component_ids: Vec::new(),
-                frequency: None,
-            }
-            .into_len_packet(),
-        );
-    }
-    packets.push(real_time_stream_packet(stream_id));
-    packets
-}
-
-/// Per-connection negotiation state for component-filtered clients. Present
-/// only when the connection uses [`new_component_filtered_connection_packets`].
+/// Per-connection `SetStreamFilter` support for component-filtered clients.
+/// Present only when the client opts into component filtering.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ComponentFilteredStream {
     /// Bumped on every `NewConnection`.
@@ -2038,7 +1991,7 @@ pub struct ComponentFilteredStream {
     pub supported: Option<bool>,
 }
 
-fn negotiate_component_filtered_stream(
+fn track_component_filter_support(
     world: &mut World,
     pkt: &OwnedPacket<PacketGrantR>,
 ) -> Result<(), impeller::error::Error> {
@@ -2062,15 +2015,6 @@ fn negotiate_component_filtered_stream(
         bevy::log::warn!(
             "DB does not support component-filtered streams; streaming all components"
         );
-    }
-    let (Some(stream_id), Some(packet_tx)) = (
-        world.get_resource::<CurrentStreamId>(),
-        world.get_resource::<PacketTx>(),
-    ) else {
-        return Ok(());
-    };
-    for packet in component_filtered_stream_packets(stream_id.0, supported) {
-        packet_tx.send_required(packet, "live stream handshake");
     }
     Ok(())
 }
@@ -2338,54 +2282,21 @@ mod series_store_allowlist_tests {
     use impeller::types::PrimType;
     use std::collections::HashSet;
 
-    fn packet_ids(packets: &[LenPacket]) -> Vec<PacketId> {
-        packets
-            .iter()
-            .map(|packet| packet.as_packet().header.id)
-            .collect()
-    }
-
     #[test]
-    fn component_filtered_connection_defers_stream_until_capabilities_known() {
-        let packets: Vec<_> = new_component_filtered_connection_packets(42).collect();
-        let ids = packet_ids(&packets);
-        assert!(ids.contains(&GetDbSettings::ID));
-        assert!(!ids.contains(&Stream::ID));
-        assert!(!ids.contains(&SetStreamFilter::ID));
-    }
-
-    #[test]
-    fn supported_db_gets_empty_filter_before_stream() {
-        let packets = component_filtered_stream_packets(42, true);
-        assert_eq!(packet_ids(&packets), [SetStreamFilter::ID, Stream::ID]);
-        let filter: SetStreamFilter =
-            postcard::from_bytes(&packets[0].as_packet().body).expect("valid filter packet");
-        assert_eq!(filter.id, 42);
-        assert!(filter.component_ids.is_empty());
-        assert_eq!(filter.frequency, None);
-    }
-
-    #[test]
-    #[should_panic(expected = "live stream handshake failed: outgoing packet queue is full")]
+    #[should_panic(expected = "live stream filter update failed: outgoing packet queue is full")]
     fn required_send_panics_when_queue_is_full() {
         let (tx, _rx) = thingbuf::mpsc::channel::<Option<LenPacket>>(1);
         let tx = PacketTx(tx);
-        tx.send_required(GetDbSettings.into_len_packet(), "live stream handshake");
-        tx.send_required(GetDbSettings.into_len_packet(), "live stream handshake");
+        tx.send_required(GetDbSettings.into_len_packet(), "live stream filter update");
+        tx.send_required(GetDbSettings.into_len_packet(), "live stream filter update");
     }
 
     #[test]
-    #[should_panic(expected = "live stream handshake failed: outgoing packet queue is closed")]
+    #[should_panic(expected = "live stream filter update failed: outgoing packet queue is closed")]
     fn required_send_panics_when_queue_is_closed() {
         let (tx, rx) = thingbuf::mpsc::channel::<Option<LenPacket>>(1);
         drop(rx);
-        PacketTx(tx).send_required(GetDbSettings.into_len_packet(), "live stream handshake");
-    }
-
-    #[test]
-    fn unsupported_db_never_receives_filter_message() {
-        let packets = component_filtered_stream_packets(42, false);
-        assert_eq!(packet_ids(&packets), [Stream::ID]);
+        PacketTx(tx).send_required(GetDbSettings.into_len_packet(), "live stream filter update");
     }
 
     #[test]
