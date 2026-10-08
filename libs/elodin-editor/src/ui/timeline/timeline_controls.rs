@@ -516,7 +516,9 @@ fn time_value_field(
             input.key_pressed(egui::Key::Enter),
         )
     });
-    let finish = response.lost_focus() || (response.has_focus() && (escape || enter));
+    // Copy is an explicit commit; TextEdit may keep focus on the click frame.
+    let finish =
+        copy.clicked() || response.lost_focus() || (response.has_focus() && (escape || enter));
     if response.has_focus() && !finish {
         ui.data_mut(|data| data.insert_temp(buffer_id, text.clone()));
     }
@@ -1084,6 +1086,73 @@ fn time_range_window(
 #[cfg(test)]
 mod time_edit_tests {
     use super::*;
+
+    #[test]
+    fn time_copy_commits_focused_buffer() {
+        for (buffer, expected) in [("25 s", 25_000_000), ("invalid", 10_000_000)] {
+            let ctx = egui::Context::default();
+            let mut tick = CurrentTimestamp(Timestamp(10_000_000));
+            let mut paused = Paused(false);
+            let mut latest = LatestFollow(true);
+            let mut auto_follow = AutoFollowLatestState::default();
+            let mut edit_id = egui::Id::NULL;
+            let mut copy_pos = egui::Pos2::ZERO;
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                edit_id = ui.make_persistent_id("timeline_time_edit");
+                copy_pos = ui.next_widget_position() + egui::vec2(8.0, 8.0);
+                ui.memory_mut(|m| m.request_focus(edit_id));
+                time_value_field(
+                    ui,
+                    &mut tick,
+                    &mut paused,
+                    &mut latest,
+                    &mut auto_follow,
+                    false,
+                );
+            });
+            ctx.data_mut(|data| {
+                data.insert_temp(edit_id.with("buffer"), buffer.to_owned());
+                data.insert_temp(edit_id.with("origin"), "10 s".to_owned());
+            });
+            let input = egui::RawInput {
+                events: vec![
+                    egui::Event::PointerMoved(copy_pos),
+                    egui::Event::PointerButton {
+                        pos: copy_pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                    egui::Event::PointerButton {
+                        pos: copy_pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                ..Default::default()
+            };
+            let output = ctx.run_ui(input, |ui| {
+                time_value_field(
+                    ui,
+                    &mut tick,
+                    &mut paused,
+                    &mut latest,
+                    &mut auto_follow,
+                    false,
+                );
+            });
+            assert!(output.platform_output.commands.iter().any(|command| {
+                matches!(command, egui::OutputCommand::CopyText(text) if text == &expected.to_string())
+            }), "copy must use the committed value for {buffer}");
+            assert_eq!(tick.0.0, expected);
+            assert!(!ctx.memory(|m| m.has_focus(edit_id)));
+            assert!(
+                ctx.data(|d| d.get_temp::<String>(edit_id.with("buffer")))
+                    .is_none()
+            );
+        }
+    }
 
     #[test]
     fn short_step_click_is_handled_without_repeating_a_held_step() {
