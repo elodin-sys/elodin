@@ -110,18 +110,43 @@ fn parse_seconds(text: &str) -> Option<i64> {
 }
 
 fn parse_wall_clock(text: &str) -> Option<i64> {
-    let text = text.strip_suffix('Z').unwrap_or(text);
-    let epoch = Epoch::from_format_str(text, "%Y-%m-%dT%H:%M:%S.%f")
-        .or_else(|_| Epoch::from_format_str(text, "%Y-%m-%dT%H:%M:%S"))
-        .or_else(|_| Epoch::from_format_str(text, "%Y-%m-%d %H:%M:%S.%f"))
-        .or_else(|_| Epoch::from_format_str(text, "%Y-%m-%d %H:%M:%S"))
-        .ok()?;
-    let nanos =
-        (epoch.to_utc_duration() - hifitime::UNIX_REF_EPOCH.to_utc_duration()).total_nanoseconds();
-    if nanos % 1000 != 0 {
+    // hifitime's format parser can accept a prefix and silently ignore a suffix.
+    // Validate the entire UTC input before handing it a canonical value.
+    let text = text
+        .strip_suffix('Z')
+        .or_else(|| text.strip_suffix("+00:00"))
+        .unwrap_or(text);
+    if !text.is_ascii() || text.len() < 19 {
         return None;
     }
-    i64::try_from(nanos / 1000).ok()
+    let (date, tail) = text.split_at(19);
+    for (index, byte) in date.bytes().enumerate() {
+        let valid = match index {
+            4 | 7 => byte == b'-',
+            10 => byte == b'T' || byte == b' ',
+            13 | 16 => byte == b':',
+            _ => byte.is_ascii_digit(),
+        };
+        if !valid {
+            return None;
+        }
+    }
+    let fraction = if tail.is_empty() {
+        0
+    } else {
+        let digits = tail.strip_prefix('.')?;
+        if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        parse_seconds(&format!("0.{digits}"))?
+    };
+    let canonical = format!("{}.{fraction:06}Z", date.replace(' ', "T"));
+    let epoch = Epoch::from_format_str(&canonical[..19], "%Y-%m-%dT%H:%M:%S").ok()?;
+    let nanos =
+        (epoch.to_utc_duration() - hifitime::UNIX_REF_EPOCH.to_utc_duration()).total_nanoseconds();
+    let micros = i64::try_from(nanos / 1000).ok()?.checked_add(fraction)?;
+    // Reject normalized invalid dates (and unrepresentable leap seconds).
+    (format_wall_clock(micros) == canonical).then_some(micros)
 }
 
 pub fn time_label(time: Epoch) -> impl for<'a> FnOnce(&'a mut Ui) -> Response {
@@ -217,6 +242,38 @@ mod tests {
             parse_time_input("1700000000.123457s"),
             Some(1_700_000_000_123_457)
         );
+    }
+
+    #[test]
+    fn utc_requires_complete_exact_input() {
+        for input in [
+            "2023-11-14T22:13:20+00:00",
+            "2023-11-14T22:13:20Z",
+            "2023-11-14 22:13:20",
+        ] {
+            assert_eq!(
+                parse_time_input(input),
+                Some(1_700_000_000_000_000),
+                "{input}"
+            );
+        }
+        assert_eq!(
+            parse_time_input("2023-11-14T22:13:20.123456000Z"),
+            Some(1_700_000_000_123_456)
+        );
+        for input in [
+            "2023-11-14T22:13:20.1234567890Z",
+            "2023-11-14T22:13:20.0000001Z",
+            "2023-11-14T22:13:20.Z",
+            "2023-11-14T22:13:20+01:00",
+            "2023-11-14T22:13:20Zgarbage",
+            "2023-11-14T22:13:20.123456Zgarbage",
+            "2023-02-30T22:13:20Z",
+            "2023-11-14T22:13:99Z",
+            "2023-11-14T22:13:２０Z",
+        ] {
+            assert_eq!(parse_time_input(input), None, "{input}");
+        }
     }
 
     #[test]

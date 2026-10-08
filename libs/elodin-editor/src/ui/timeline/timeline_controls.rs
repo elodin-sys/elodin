@@ -124,6 +124,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
         let typical_mouse_click = Duration::from_millis(85);
         let wait_before_advancing = typical_mouse_click * 2;
 
+        let mut navigation_requested = false;
         egui::Frame::NONE
             .inner_margin(egui::Margin::symmetric(8, 8))
             .show(ui, |ui| {
@@ -143,6 +144,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 .on_hover_text("Jump to start");
 
                             if jump_to_start_btn.clicked() {
+                                navigation_requested = true;
                                 auto_follow_latest_state.cancel();
                                 latest_follow.0 = false;
                                 tick.0 = earliest_timestamp.0;
@@ -166,6 +168,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 });
 
                                 if first || down.elapsed() > wait_before_advancing {
+                                    navigation_requested = true;
                                     tick.0 = target;
                                     if tick.0 <= earliest_timestamp.0 {
                                         tick_origin.request_rebase();
@@ -180,6 +183,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                     .add(EImageButton::new(icons.play).scale(btn_scale, btn_scale));
 
                                 if play_btn.clicked() {
+                                    navigation_requested = true;
                                     auto_follow_latest_state.cancel();
                                     paused.0 = false;
                                 }
@@ -189,6 +193,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 );
 
                                 if pause_btn.clicked() {
+                                    navigation_requested = true;
                                     auto_follow_latest_state.cancel();
                                     paused.0 = true;
                                     latest_follow.0 = false;
@@ -212,6 +217,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 });
 
                                 if first || down.elapsed() > wait_before_advancing {
+                                    navigation_requested = true;
                                     tick.0 = target;
                                 }
                             } else {
@@ -226,6 +232,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 .on_hover_text("Jump to end");
 
                             if jump_to_end_btn.clicked() {
+                                navigation_requested = true;
                                 auto_follow_latest_state.cancel();
                                 tick.0 = max_tick.0;
                                 paused.0 = false;
@@ -251,6 +258,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                     "Loop recording"
                                 });
                             if loop_btn.clicked() {
+                                navigation_requested = true;
                                 playback_loop.0 = !playback_loop.0;
                                 if playback_loop.0 {
                                     auto_follow_latest_state.cancel();
@@ -318,6 +326,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                         &mut paused,
                                         &mut latest_follow,
                                         &mut auto_follow_latest_state,
+                                        navigation_requested,
                                     );
 
                                     let time_label = egui::RichText::new("TIME")
@@ -402,6 +411,7 @@ fn time_value_field(
     paused: &mut Paused,
     latest_follow: &mut LatestFollow,
     auto_follow: &mut AutoFollowLatestState,
+    navigation_requested: bool,
 ) {
     let scheme = get_scheme();
     let edit_id = ui.make_persistent_id("timeline_time_edit");
@@ -466,7 +476,9 @@ fn time_value_field(
     }
     if finish {
         let origin = ui.data(|data| data.get_temp::<String>(origin_id));
-        if !escape
+        // Explicit playback controls take precedence over a pending blur commit.
+        if !navigation_requested
+            && !escape
             && origin.as_deref() != Some(text.as_str())
             && let Some(micros) = parse_time_input(&text)
             && micros != tick.0.0
@@ -1020,5 +1032,71 @@ fn time_range_window(
                 }
             },
         );
+    }
+}
+
+#[cfg(test)]
+mod time_edit_tests {
+    use super::*;
+
+    #[test]
+    fn navigation_wins_over_pending_time_edit_on_blur() {
+        for navigation_requested in [false, true] {
+            let ctx = egui::Context::default();
+            let mut tick = CurrentTimestamp(Timestamp(10_000_000));
+            let mut paused = Paused(false);
+            let mut latest = LatestFollow(true);
+            let mut auto_follow = AutoFollowLatestState::default();
+            let mut edit_id = egui::Id::NULL;
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                egui::CentralPanel::default().show_inside(ui, |ui| {
+                    edit_id = ui.make_persistent_id("timeline_time_edit");
+                    ui.memory_mut(|m| m.request_focus(edit_id));
+                    time_value_field(
+                        ui,
+                        &mut tick,
+                        &mut paused,
+                        &mut latest,
+                        &mut auto_follow,
+                        false,
+                    );
+                });
+            });
+            ctx.data_mut(|data| {
+                data.insert_temp(edit_id.with("buffer"), "25 s".to_owned());
+                data.insert_temp(edit_id.with("origin"), "10 s".to_owned());
+            });
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                egui::CentralPanel::default().show_inside(ui, |ui| {
+                    // Playback controls run before TIME in the same frame.
+                    if navigation_requested {
+                        tick.0 = Timestamp(100_000_000);
+                    }
+                    ui.memory_mut(|m| m.request_focus(egui::Id::new("other_control")));
+                    time_value_field(
+                        ui,
+                        &mut tick,
+                        &mut paused,
+                        &mut latest,
+                        &mut auto_follow,
+                        navigation_requested,
+                    );
+                });
+            });
+            assert_eq!(
+                tick.0.0,
+                if navigation_requested {
+                    100_000_000
+                } else {
+                    25_000_000
+                }
+            );
+            assert_eq!(paused.0, !navigation_requested);
+            assert_eq!(latest.0, navigation_requested);
+            assert!(
+                ctx.data(|d| d.get_temp::<String>(edit_id.with("buffer")))
+                    .is_none()
+            );
+        }
     }
 }

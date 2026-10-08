@@ -517,7 +517,9 @@ Merge two databases into one with optional prefixes. This enables viewing simula
 
 * `--align2 <MICROSECONDS>` — Alignment timestamp (in microseconds) for the same event in DB2. DB2 is shifted to align its anchor with DB1's anchor.
 
-* `--from-playback-start` — Treat `--align1` / `--align2` as offsets from each database's first sample (use values copied from the Elodin Editor **TIME** field with **µs**, or seconds shown for monotonic recordings, after scrubbing to the alignment event).
+* `--from-playback-start` — Treat `--align1` / `--align2` as offsets from each database's playback start (recorded start metadata, falling back to the first data timestamp) ; elapsed offsets must be expressed in microseconds. Do not use this flag with raw timestamps copied by the Editor **µs** button. A displayed seconds value is not necessarily an offset from recording start; convert seconds to microseconds for CLI arguments.
+
+For example, a DB starting at 100 s with an event at 110 s has a raw anchor of `110000000` (no flag), or an elapsed offset of `10000000` with `--from-playback-start`.
 
 ###### **Component Naming**
 
@@ -551,7 +553,7 @@ elodin-db merge ./sim-db ./flight-db -o ./merged-db \
   --prefix1 sim --prefix2 truth \
   --align1 15000000 --align2 45000000
 
-# Same anchors, but values came from the editor TIME field (playback-relative)
+# Events 15 s and 45 s after each DB starts (elapsed offsets, converted to µs)
 elodin-db merge ./sim-db ./flight-db -o ./merged-db \
   --prefix1 sim --prefix2 truth \
   --from-playback-start \
