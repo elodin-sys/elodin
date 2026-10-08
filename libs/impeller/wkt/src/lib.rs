@@ -223,12 +223,32 @@ impl impeller::com_de::Decomponentize for WorldPos {
         let impeller::types::ComponentView::F64(view) = value else {
             return Ok(());
         };
-        let buf = view.buf();
-        let att: [f64; 4] = buf[..4].try_into().expect("slice size wrong");
+        let Ok(buf): Result<&[f64; 7], _> = view.buf().try_into() else {
+            return Ok(());
+        };
+        let att: [f64; 4] = buf[..4].try_into().expect("fixed-size slice");
         self.att = nox::Quaternion(nox::Tensor::from_buf(att));
-        let pos: [f64; 3] = buf[4..].try_into().expect("slice size wrong");
+        let pos: [f64; 3] = buf[4..].try_into().expect("fixed-size slice");
         self.pos = nox::Tensor::from_buf(pos);
         Ok(())
+    }
+}
+
+#[cfg(all(test, feature = "nox"))]
+mod world_pos_tests {
+    use super::WorldPos;
+    use impeller::{com_de::Decomponentize, component::Component, types::ComponentView};
+
+    #[test]
+    fn ignores_malformed_value() {
+        let values: [f64; 0] = [];
+        let shape = [0];
+        let view = ComponentView::F64(nox::ArrayView::from_buf_shape_unchecked(&values, &shape));
+        let mut pos = WorldPos::default();
+
+        pos.apply_value(WorldPos::COMPONENT_ID, view, None).unwrap();
+
+        assert_eq!(pos, WorldPos::default());
     }
 }
 
