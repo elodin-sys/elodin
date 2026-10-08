@@ -202,8 +202,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.19.2" selected>
-                        v0.19.2
+                    <option value="v0.20.0" selected>
+                        v0.20.0
                     </option>
                 </select>
             </span>
@@ -1367,7 +1367,11 @@ on the gRPC endpoint; omitted means unauthenticated.</p>
 <li>
 <p><code>--align2 &lt;MICROSECONDS&gt;</code> — Alignment timestamp (in microseconds) for the same event in DB2. DB2 is shifted to align its anchor with DB1's anchor.</p>
 </li>
+<li>
+<p><code>--from-playback-start</code> — Treat <code>--align1</code> / <code>--align2</code> as offsets from each database's playback start (recorded start metadata, falling back to the first data timestamp) ; elapsed offsets must be expressed in microseconds. Do not use this flag with raw timestamps copied by the Editor <strong>µs</strong> button. A displayed seconds value is not necessarily an offset from recording start; convert seconds to microseconds for CLI arguments.</p>
+</li>
 </ul>
+<p>For example, a DB starting at 100 s with an event at 110 s has a raw anchor of <code>110000000</code> (no flag), or an elapsed offset of <code>10000000</code> with <code>--from-playback-start</code>.</p>
 <h6 id="component-naming"><strong>Component Naming</strong></h6>
 <p>When prefixes are applied, component names are transformed using an underscore separator:</p>
 <ul>
@@ -1396,6 +1400,12 @@ on the gRPC endpoint; omitted means unauthenticated.</p>
 <span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> DB2 (flight) is shifted backward by 30s to align</span></span>
 <span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin-db</span><span style="color: light-dark(#2AA198, #2AA198);"> merge</span><span style="color: light-dark(#2AA198, #2AA198);"> ./sim-db</span><span style="color: light-dark(#2AA198, #2AA198);"> ./flight-db</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">o</span><span style="color: light-dark(#2AA198, #2AA198);"> ./merged-db</span><span style="color: light-dark(#CB4B16, #CB4B16);"> \</span></span>
 <span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">  -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-prefix1</span><span style="color: light-dark(#2AA198, #2AA198);"> sim</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-prefix2</span><span style="color: light-dark(#2AA198, #2AA198);"> truth</span><span style="color: light-dark(#CB4B16, #CB4B16);"> \</span></span>
+<span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">  -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-align1</span><span style="color: light-dark(#D33682, #D33682);"> 15000000</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-align2</span><span style="color: light-dark(#D33682, #D33682);"> 45000000</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Events 15 s and 45 s after each DB starts (elapsed offsets, converted to µs)</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin-db</span><span style="color: light-dark(#2AA198, #2AA198);"> merge</span><span style="color: light-dark(#2AA198, #2AA198);"> ./sim-db</span><span style="color: light-dark(#2AA198, #2AA198);"> ./flight-db</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">o</span><span style="color: light-dark(#2AA198, #2AA198);"> ./merged-db</span><span style="color: light-dark(#CB4B16, #CB4B16);"> \</span></span>
+<span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">  -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-prefix1</span><span style="color: light-dark(#2AA198, #2AA198);"> sim</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-prefix2</span><span style="color: light-dark(#2AA198, #2AA198);"> truth</span><span style="color: light-dark(#CB4B16, #CB4B16);"> \</span></span>
+<span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">  -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-from-playback-start</span><span style="color: light-dark(#CB4B16, #CB4B16);"> \</span></span>
 <span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">  -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-align1</span><span style="color: light-dark(#D33682, #D33682);"> 15000000</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-align2</span><span style="color: light-dark(#D33682, #D33682);"> 45000000</span></span>
 <span class="giallo-l"></span>
 <span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Align wall-clock timestamps to monotonic (start DB2 at 0)</span></span>
