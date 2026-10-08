@@ -894,7 +894,7 @@ exact bitwise equality is not required if Betaflight prevents it.
 **Handoff:** Record the three pass-time sets, time cap, completion command, and
 known control limitations.
 
-### [ ] G — Vision contracts and synthetic geometry
+### [x] G — Vision contracts and synthetic geometry
 
 **Objective:** Establish and prove camera/detection geometry without depending on
 rendered image detection or flight behavior.
@@ -921,6 +921,36 @@ Tests fail on wrong corner order, intrinsics, tilt sign, or camera/body transfor
 
 **Handoff:** Record exact matrix conventions, tolerances, and fixture-generation
 command.
+
+**Verified 2026-10-05 on `pkg-g-vision-contracts` from `origin/main` (`d6354da1`);
+re-verified 2026-10-07 after syncing to `origin/main` (`3bc1d991`):**
+
+- `python3 -m pytest examples/betaflight-sitl/tests -q` → 143 passed.
+  `ruff format --check`, `ruff check`, and `typos -c typos.toml` passed.
+- `K` is `fx = fy = 320`, `cx = 320`, `cy = 180`, derived from `FOCAL_PX` and
+  the 640×360 vertical FoV. Horizontal FoV is 90°.
+- `R_flu_from_opencv` columns are camera X → body `(0, -1, 0)`, camera Y →
+  body `(0, 0, -1)`, camera Z → body `(1, 0, 0)`.
+  `R_body_cam = Ry(-tilt) @ R_flu_from_opencv`. Positive tilt pitches the
+  optical axis up, the same sign as renderer pitch.
+- Inner corners are TL, TR, BR, BL. Gate-frame object points, with
+  `h = inner_size / 2`, are `(0, +h, +h)`, `(0, -h, +h)`, `(0, -h, -h)`,
+  `(0, +h, -h)`.
+- Noise-free bearing tolerance is 0.25°. Translation tolerance is
+  `1e-6·range + 1e-6` m. Integer-pixel depth tolerance is
+  `Z² / (f·S)` m, twice `Z²·0.5/(f·S)`, with `f = 320` and `S = 2.5`.
+  The 2 m range does not fit in the 360 px image.
+- Fixture command, from the repository root:
+  `python3 examples/betaflight-sitl/synthetic_vision.py`.
+- The editor schematic is a Python `elodin.ui` builder. Canonical
+  `from_kdl(emit_kdl())` matches the previous KDL for every course, audit,
+  and camera combination. Named `orange` is the 8-bit color `(255, 128, 0)`.
+- PnP is pure NumPy. OpenCV stays in Package H.
+- Camera plus course:
+  `RACE_CAMERA=1 RACE_COURSE=single elodin run examples/betaflight-sitl/main.py`
+  → `[FPV] total_frames=450 window_frames=389 observed_fps=29.92 status=PASS`,
+  `[RACE] course=single gates_passed=0/1 status=INCOMPLETE`, C0 `PASS`,
+  exit 0 (DB `betaflight_db039`). The scripted climb does not steer at the gate.
 
 ### [ ] H — Classical detector, offline
 
@@ -1115,7 +1145,7 @@ branch for later resumption.
 | D | In progress | Command seam, one-tick ordering, AUX2 ANGLE configuration, s10 manual controller, 250 ms heartbeat failsafe, DB telemetry, and simulation-time physical sign audit implemented. The audit bypasses the external controller but retains the common semantic-to-RC/Betaflight path. The combined qualification passed with roll 1.006, pitch 1.011, yaw 1.479 rad/s and accepted max motor 0.391; 5 controller tests also pass. Manual hardware qualification remains. |
 | E | Blocked by C, D | No truth guidance |
 | F | Blocked by E | No course controller |
-| G | Ready (needs B) | Camera contract available; racing geometry helpers not yet in code |
+| G | Complete | `vision.py` owns intrinsics, corner order, the camera-to-body helper, and NumPy planar PnP. `synthetic_vision.py` is the only truth-projection path. 143 pure tests pass, including centered, translated, yawed, and ranged round trips. |
 | H | Blocked by B, C, G | No detector |
 | I | Blocked by G | No tracker |
 | J | Blocked by E, H, I | No vision guidance |
@@ -1126,15 +1156,16 @@ branch for later resumption.
 
 Complete Package D's **manual hardware qualification** using the documented
 gamepad or keyboard controls. Package B is complete. Package C remains a valid
-independent alternative; Package G can begin on the perception path.
+independent alternative. Package G is complete, so Package H can begin on the
+perception path.
 
 The Package D implementation and deterministic physical audit are complete, but
 Package D must remain open until an operator has armed, taken off, exercised
 roll/pitch/yaw/throttle, landed, and disarmed.
 
-Record that result in this plan. Package E is then the recommended implementation
-continuation because its C and D code prerequisites are present. Package G can
-begin on the perception path because Package B's camera contract is present.
+Record that result in this plan. Package E is then the recommended control
+continuation because its C and D code prerequisites are present. Package H can
+begin because B, C, and G are present.
 
 Package C's durable qualification command, output contract, measured result, and
 scope are recorded with its work-package acceptance evidence above. User-facing
@@ -1145,6 +1176,8 @@ recoverable MPEG-TS fallback, are maintained in `README.md`.
 
 | Date | Decision | Reason and affected packages |
 |---|---|---|
+| 2026-10-05 | Port the Betaflight SITL schematic to `elodin.ui` builders. | The KDL string builder was the last example still emitting a schematic by hand. The parsed model matches the previous layout. Affects the editor surface used by B and later packages. |
+| 2026-10-05 | Positive camera tilt pitches the optical axis up, matching `sensor_camera` pitch. Package G solves planar PnP in NumPy and leaves OpenCV to Package H. | The renderer documents positive pitch as nose-up. A NumPy solver keeps the geometry tests on the existing CI environment. Affects G and H. |
 | 2026-10-01 | Hide the frustum by default and set the 10× drone mesh to `sensor_visible=#false` when the FPV camera is on. The mount contract stays `[0.08, 0.0, 0.02]` m, body +X, tilt 0. | The frustum filled the chase view, and the camera sat inside the display mesh. Hiding the mesh from the sensor camera shows the world ahead without changing the camera-to-body geometry Package G tests. Affects B and later G, H, and J. |
 | 2026-09-26 | Keep FPV sampling in `fpv_camera.py`. `frame_fresh` means a new `read_msg_at` timestamp, and shutdown FPS uses only timestamps inside the post-warmup window. | Held frames were marked fresh, and the cursor sweep was not an exact frame count. The schematic injects only the FPV fragments. Affects B and later G, H, and J. |
 | 2026-09-03 | Run headless recipes once while retaining watched recipes in the editor. | Package A exposed that a failed simulation child was logged and then waited for source reload, so `elodin run` could not return nonzero. The approved shared fixes (`301ae367`, `#837`; lifecycle follow-up `36ee3431`, `#838`) make headless execution one-shot without changing interactive editor recovery, centralize recipe execution dispatch in s10, and add an end-to-end lifecycle CI check. This enables failure contracts in A, F, K, and L. |

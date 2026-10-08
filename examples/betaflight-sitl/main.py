@@ -56,7 +56,19 @@ from referee_audit import (
     referee_audit_from_env,
 )
 from race_runtime import RaceTelemetry, spawn_course
-from fpv_camera import FAR, FOV_DEG, FPS, HEIGHT, LATENCY_US, MOUNT, MSG, NEAR, WIDTH, FpvCamera
+from fpv_camera import (
+    FAR,
+    FOV_DEG,
+    FPS,
+    HEIGHT,
+    LATENCY_US,
+    MOUNT,
+    MSG,
+    NEAR,
+    TILT_DEG,
+    WIDTH,
+    FpvCamera,
+)
 from sim import Drone, create_physics_system
 from sensors import IMU, create_sensor_system, SensorDataBuffer
 from comms import (
@@ -194,7 +206,7 @@ if CAMERA_ENABLED:
         near=NEAR,
         far=FAR,
         pos_offset=MOUNT,
-        rot_offset=[0.0, 0.0, 0.0],
+        rot_offset=[0.0, TILT_DEG, 0.0],
         format="rgba",
         fps=FPS,
     )
