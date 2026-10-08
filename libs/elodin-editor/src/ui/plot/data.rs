@@ -41,6 +41,7 @@ use crate::ui::monitor::MonitorData;
 use crate::ui::plot::gpu::INDEX_BUFFER_LEN;
 use crate::ui::plot::state::GraphState;
 use crate::ui::schematic::EqlExt;
+use crate::ui::tiles::WindowState;
 use crate::{EqlContext, SelectedTimeRange};
 use hamann_chen_line::{select_polyline3_indices, select_time_value_indices};
 
@@ -1660,23 +1661,28 @@ pub(crate) fn viewport_adapter_component_ids(
     ids
 }
 
-/// Components of the entity open in the inspector, which reads their
-/// `ComponentValue`s directly rather than through the SeriesStore.
+/// Components of the entities open in each window's inspector, which reads
+/// their `ComponentValue`s directly rather than through the SeriesStore.
 #[derive(SystemParam)]
 pub struct InspectedComponents<'w, 's> {
-    selected: Option<Res<'w, SelectedObject>>,
+    windows: Query<'w, 's, &'static WindowState>,
     children: Query<'w, 's, &'static Children>,
     component_ids: Query<'w, 's, &'static ComponentId>,
 }
 
 impl InspectedComponents<'_, '_> {
     fn component_ids(&self) -> HashSet<ComponentId> {
-        let Some(SelectedObject::Entity(pair)) = self.selected.as_deref() else {
-            return HashSet::new();
-        };
-        self.children
-            .iter_descendants(pair.bevy)
-            .chain(std::iter::once(pair.bevy))
+        self.windows
+            .iter()
+            .filter_map(|window| match &window.ui_state.selected_object {
+                SelectedObject::Entity(pair) => Some(pair.bevy),
+                _ => None,
+            })
+            .flat_map(|root| {
+                self.children
+                    .iter_descendants(root)
+                    .chain(std::iter::once(root))
+            })
             .filter_map(|entity| self.component_ids.get(entity).ok().copied())
             .collect()
     }
@@ -3696,15 +3702,36 @@ mod tests {
                 .expect("system runs")
         };
 
+        let other_id = ComponentId::new("cube");
+        let other = world.spawn(other_id).id();
+        let window_state = |selected_object| WindowState {
+            descriptor: Default::default(),
+            graph_entities: Vec::new(),
+            tile_state: Default::default(),
+            ui_state: crate::ui::WindowUiState {
+                selected_object,
+                ..Default::default()
+            },
+        };
+
+        world.spawn(window_state(SelectedObject::None));
         assert!(collect(&mut world).is_empty());
 
-        world.insert_resource(SelectedObject::Entity(crate::ui::EntityPair {
-            bevy: parent,
-            impeller: parent_id,
-        }));
+        world.spawn(window_state(SelectedObject::Entity(
+            crate::ui::EntityPair {
+                bevy: parent,
+                impeller: parent_id,
+            },
+        )));
+        world.spawn(window_state(SelectedObject::Entity(
+            crate::ui::EntityPair {
+                bevy: other,
+                impeller: other_id,
+            },
+        )));
         assert_eq!(
             collect(&mut world),
-            [parent_id, pos_id, vel_id].into_iter().collect()
+            [parent_id, pos_id, vel_id, other_id].into_iter().collect()
         );
     }
 
