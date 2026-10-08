@@ -9,7 +9,7 @@ from course import (
     course_bars,
     course_from_env,
     course_from_name,
-    gate_schematic,
+    gate_objects,
 )
 
 
@@ -21,7 +21,7 @@ def test_no_course_is_default_or_explicit_and_has_no_geometry(env):
     assert course.gates == ()
     assert course.inner_size is None
     assert course_bars(course) == ()
-    assert gate_schematic(course) == ""
+    assert gate_objects(course) == []
 
 
 def test_single_course_has_exact_contract_geometry():
@@ -83,12 +83,15 @@ def test_gate_render_geometry_is_four_static_box_poses_with_exact_opening():
     assert all(bar.quaternion_xyzw == (0.0, 0.0, 0.0, 1.0) for bar in bars)
 
 
-def test_gate_schematic_has_four_saturated_orange_matte_boxes():
-    schematic = gate_schematic(course_from_name("single"))
+def test_gate_objects_are_four_saturated_orange_matte_boxes():
+    import elodin.ui as ui
+
+    schematic = ui.schematic(*gate_objects(course_from_name("single"))).emit_kdl()
 
     assert schematic.count("object_3d gate_0_") == 4
     assert schematic.count("orientation=absolute") == 4
-    assert schematic.count("box x=") == 4
-    rgb = " ".join(str(channel) for channel in SATURATED_ORANGE_RGB)
-    assert schematic.count(f"color {rgb}") == 4
+    assert schematic.count("box ") == 4
+    # 255,128,0 rounds to the editor's named orange, rgb(1, 0.5, 0).
+    assert schematic.count("color orange") == 4
+    assert SATURATED_ORANGE_RGB == (255, 128, 0)
     assert "emissivity" not in schematic
