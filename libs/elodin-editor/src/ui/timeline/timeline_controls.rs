@@ -155,7 +155,9 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 EImageButton::new(icons.frame_back).scale(btn_scale, btn_scale),
                             );
 
-                            if frame_back_btn.is_pointer_button_down_on()
+                            navigation_requested |= frame_back_btn.clicked()
+                                || frame_back_btn.is_pointer_button_down_on();
+                            if step_button_active(&frame_back_btn, step_buttons.back.is_some())
                                 && tick.0 > earliest_timestamp.0
                                 && let Some(target) = step_back_to
                             {
@@ -204,8 +206,12 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 EImageButton::new(icons.frame_forward).scale(btn_scale, btn_scale),
                             );
 
-                            if frame_forward_btn.is_pointer_button_down_on()
-                                && tick.0 < max_tick.0
+                            navigation_requested |= frame_forward_btn.clicked()
+                                || frame_forward_btn.is_pointer_button_down_on();
+                            if step_button_active(
+                                &frame_forward_btn,
+                                step_buttons.forward.is_some(),
+                            ) && tick.0 < max_tick.0
                                 && let Some(target) = step_forward_to
                             {
                                 auto_follow_latest_state.cancel();
@@ -320,12 +326,19 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                     // TIME. The row is right-to-left, so the copy button is
                                     // added first and lands to the right of the value.
 
+                                    // Stage the edit until all controls (including LIVE)
+                                    // have handled this frame's input.
+                                    let original_tick = tick.0;
+                                    let mut edited_tick = CurrentTimestamp(original_tick);
+                                    let mut edited_paused = Paused(paused.0);
+                                    let mut edited_follow = LatestFollow(latest_follow.0);
+                                    let mut edited_auto_follow = *auto_follow_latest_state;
                                     time_value_field(
                                         ui,
-                                        &mut tick,
-                                        &mut paused,
-                                        &mut latest_follow,
-                                        &mut auto_follow_latest_state,
+                                        &mut edited_tick,
+                                        &mut edited_paused,
+                                        &mut edited_follow,
+                                        &mut edited_auto_follow,
                                         navigation_requested,
                                     );
 
@@ -385,7 +398,10 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                         lag_micros,
                                         played_color,
                                     );
+                                    navigation_requested |= latest_enabled
+                                        && latest_response.is_pointer_button_down_on();
                                     if latest_enabled && latest_response.clicked() {
+                                        navigation_requested = true;
                                         auto_follow_latest_state.cancel();
                                         // The speed field may have committed on
                                         // this same click and dropped LIVE already.
@@ -394,11 +410,41 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                             playback_loop.0 = false;
                                         }
                                     }
+                                    commit_time_edit(
+                                        (edited_tick.0 != original_tick).then_some(edited_tick.0),
+                                        navigation_requested,
+                                        &mut tick,
+                                        &mut paused,
+                                        &mut latest_follow,
+                                        &mut auto_follow_latest_state,
+                                    );
                                 });
                         },
                     );
                 });
             });
+    }
+}
+
+// A press/release delivered in one frame has clicked() but is no longer down.
+// A release after a held press must not produce a second step.
+fn step_button_active(response: &egui::Response, already_pressed: bool) -> bool {
+    response.is_pointer_button_down_on() || (response.clicked() && !already_pressed)
+}
+
+fn commit_time_edit(
+    pending: Option<Timestamp>,
+    navigation_requested: bool,
+    tick: &mut CurrentTimestamp,
+    paused: &mut Paused,
+    latest_follow: &mut LatestFollow,
+    auto_follow: &mut AutoFollowLatestState,
+) {
+    if !navigation_requested && let Some(timestamp) = pending {
+        tick.0 = timestamp;
+        paused.0 = true;
+        latest_follow.0 = false;
+        auto_follow.cancel();
     }
 }
 
@@ -1038,6 +1084,76 @@ fn time_range_window(
 #[cfg(test)]
 mod time_edit_tests {
     use super::*;
+
+    #[test]
+    fn short_step_click_is_handled_without_repeating_a_held_step() {
+        let ctx = egui::Context::default();
+        let mut rect = egui::Rect::NOTHING;
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            rect = ui.button("Step forward").rect;
+        });
+        let pos = rect.center();
+        let input = egui::RawInput {
+            events: vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| {
+            let response = ui.button("Step forward");
+            assert!(response.clicked());
+            assert!(!response.is_pointer_button_down_on());
+            assert!(step_button_active(&response, false));
+            assert!(!step_button_active(&response, true));
+        });
+    }
+
+    #[test]
+    fn live_toggle_wins_over_staged_time_edit() {
+        for initially_live in [false, true] {
+            let mut tick = CurrentTimestamp(Timestamp(10_000_000));
+            let mut paused = Paused(false);
+            let mut latest = LatestFollow(initially_live);
+            let mut auto_follow = AutoFollowLatestState::default();
+            // The pending TIME value must not alter the state used by LIVE.
+            let pending = Some(Timestamp(25_000_000));
+            latest.0 = !latest.0;
+            commit_time_edit(
+                pending,
+                true,
+                &mut tick,
+                &mut paused,
+                &mut latest,
+                &mut auto_follow,
+            );
+            assert_eq!(latest.0, !initially_live);
+            assert_eq!(tick.0.0, 10_000_000);
+            assert!(!paused.0);
+            commit_time_edit(
+                pending,
+                false,
+                &mut tick,
+                &mut paused,
+                &mut latest,
+                &mut auto_follow,
+            );
+            assert_eq!(tick.0.0, 25_000_000);
+            assert!(paused.0);
+            assert!(!latest.0);
+        }
+    }
 
     #[test]
     fn navigation_wins_over_pending_time_edit_on_blur() {
