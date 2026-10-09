@@ -23,7 +23,7 @@ use crate::{
         colors::{ColorExt, EColor, get_scheme},
         theme::configure_combo_box,
         tiles::WindowState,
-        time_label::time_label,
+        time_label::{format_time_input, parse_time_input},
         widgets::WidgetSystem,
     },
 };
@@ -124,6 +124,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
         let typical_mouse_click = Duration::from_millis(85);
         let wait_before_advancing = typical_mouse_click * 2;
 
+        let mut navigation_requested = false;
         egui::Frame::NONE
             .inner_margin(egui::Margin::symmetric(8, 8))
             .show(ui, |ui| {
@@ -143,6 +144,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 .on_hover_text("Jump to start");
 
                             if jump_to_start_btn.clicked() {
+                                navigation_requested = true;
                                 auto_follow_latest_state.cancel();
                                 latest_follow.0 = false;
                                 tick.0 = earliest_timestamp.0;
@@ -153,7 +155,9 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 EImageButton::new(icons.frame_back).scale(btn_scale, btn_scale),
                             );
 
-                            if frame_back_btn.is_pointer_button_down_on()
+                            navigation_requested |= frame_back_btn.clicked()
+                                || frame_back_btn.is_pointer_button_down_on();
+                            if step_button_active(&frame_back_btn, step_buttons.back.is_some())
                                 && tick.0 > earliest_timestamp.0
                                 && let Some(target) = step_back_to
                             {
@@ -166,6 +170,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 });
 
                                 if first || down.elapsed() > wait_before_advancing {
+                                    navigation_requested = true;
                                     tick.0 = target;
                                     if tick.0 <= earliest_timestamp.0 {
                                         tick_origin.request_rebase();
@@ -180,6 +185,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                     .add(EImageButton::new(icons.play).scale(btn_scale, btn_scale));
 
                                 if play_btn.clicked() {
+                                    navigation_requested = true;
                                     auto_follow_latest_state.cancel();
                                     paused.0 = false;
                                 }
@@ -189,6 +195,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 );
 
                                 if pause_btn.clicked() {
+                                    navigation_requested = true;
                                     auto_follow_latest_state.cancel();
                                     paused.0 = true;
                                     latest_follow.0 = false;
@@ -199,8 +206,12 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 EImageButton::new(icons.frame_forward).scale(btn_scale, btn_scale),
                             );
 
-                            if frame_forward_btn.is_pointer_button_down_on()
-                                && tick.0 < max_tick.0
+                            navigation_requested |= frame_forward_btn.clicked()
+                                || frame_forward_btn.is_pointer_button_down_on();
+                            if step_button_active(
+                                &frame_forward_btn,
+                                step_buttons.forward.is_some(),
+                            ) && tick.0 < max_tick.0
                                 && let Some(target) = step_forward_to
                             {
                                 auto_follow_latest_state.cancel();
@@ -212,6 +223,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 });
 
                                 if first || down.elapsed() > wait_before_advancing {
+                                    navigation_requested = true;
                                     tick.0 = target;
                                 }
                             } else {
@@ -226,6 +238,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 .on_hover_text("Jump to end");
 
                             if jump_to_end_btn.clicked() {
+                                navigation_requested = true;
                                 auto_follow_latest_state.cancel();
                                 tick.0 = max_tick.0;
                                 paused.0 = false;
@@ -251,6 +264,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                     "Loop recording"
                                 });
                             if loop_btn.clicked() {
+                                navigation_requested = true;
                                 playback_loop.0 = !playback_loop.0;
                                 if playback_loop.0 {
                                     auto_follow_latest_state.cancel();
@@ -309,10 +323,24 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                         }
                                     }
 
-                                    // TIME
+                                    // TIME. The row is right-to-left, so the copy button is
+                                    // added first and lands to the right of the value.
 
-                                    let time: hifitime::Epoch = tick.0.into();
-                                    ui.add(time_label(time));
+                                    // Stage the edit until all controls (including LIVE)
+                                    // have handled this frame's input.
+                                    let original_tick = tick.0;
+                                    let mut edited_tick = CurrentTimestamp(original_tick);
+                                    let mut edited_paused = Paused(paused.0);
+                                    let mut edited_follow = LatestFollow(latest_follow.0);
+                                    let mut edited_auto_follow = *auto_follow_latest_state;
+                                    time_value_field(
+                                        ui,
+                                        &mut edited_tick,
+                                        &mut edited_paused,
+                                        &mut edited_follow,
+                                        &mut edited_auto_follow,
+                                        navigation_requested,
+                                    );
 
                                     let time_label = egui::RichText::new("TIME")
                                         .color(get_scheme().text_secondary);
@@ -370,7 +398,10 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                         lag_micros,
                                         played_color,
                                     );
+                                    navigation_requested |= latest_enabled
+                                        && latest_response.is_pointer_button_down_on();
                                     if latest_enabled && latest_response.clicked() {
+                                        navigation_requested = true;
                                         auto_follow_latest_state.cancel();
                                         // The speed field may have committed on
                                         // this same click and dropped LIVE already.
@@ -379,12 +410,147 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                             playback_loop.0 = false;
                                         }
                                     }
+                                    commit_time_edit(
+                                        (edited_tick.0 != original_tick).then_some(edited_tick.0),
+                                        navigation_requested,
+                                        &mut tick,
+                                        &mut paused,
+                                        &mut latest_follow,
+                                        &mut auto_follow_latest_state,
+                                    );
                                 });
                         },
                     );
                 });
             });
     }
+}
+
+// A press/release delivered in one frame has clicked() but is no longer down.
+// A release after a held press must not produce a second step.
+fn step_button_active(response: &egui::Response, already_pressed: bool) -> bool {
+    response.is_pointer_button_down_on() || (response.clicked() && !already_pressed)
+}
+
+fn commit_time_edit(
+    pending: Option<Timestamp>,
+    navigation_requested: bool,
+    tick: &mut CurrentTimestamp,
+    paused: &mut Paused,
+    latest_follow: &mut LatestFollow,
+    auto_follow: &mut AutoFollowLatestState,
+) {
+    if !navigation_requested && let Some(timestamp) = pending {
+        tick.0 = timestamp;
+        paused.0 = true;
+        latest_follow.0 = false;
+        auto_follow.cancel();
+    }
+}
+
+/// Editable playhead time. Click selects the value. Enter or clicking away
+/// seeks. The `µs` button copies the raw microsecond timestamp used by
+/// `elodin-db merge --align`.
+fn time_value_field(
+    ui: &mut egui::Ui,
+    tick: &mut CurrentTimestamp,
+    paused: &mut Paused,
+    latest_follow: &mut LatestFollow,
+    auto_follow: &mut AutoFollowLatestState,
+    navigation_requested: bool,
+) {
+    let scheme = get_scheme();
+    let edit_id = ui.make_persistent_id("timeline_time_edit");
+    let buffer_id = edit_id.with("buffer");
+    let origin_id = edit_id.with("origin");
+    let copied_id = edit_id.with("copied");
+    let micros = tick.0.0;
+    let current = format_time_input(micros);
+    let mut text = ui
+        .data(|data| data.get_temp::<String>(buffer_id))
+        .unwrap_or_else(|| current.clone());
+
+    let font_id = egui::TextStyle::Body.resolve(ui.style());
+    let text_color = scheme.text_primary;
+    let painter = ui.painter().clone();
+    let width = painter
+        .layout_no_wrap(text.clone(), font_id.clone(), text_color)
+        .size()
+        .x
+        .max(24.0)
+        + 4.0;
+
+    let copied_recently = ui
+        .data(|data| data.get_temp::<Instant>(copied_id))
+        .is_some_and(|at| at.elapsed() < Duration::from_secs(1));
+    let copy_label = if copied_recently { "copied" } else { "µs" };
+    let copy = ui
+        .add(
+            egui::Button::new(egui::RichText::new(copy_label).size(11.0).color(
+                if copied_recently {
+                    scheme.highlight
+                } else {
+                    scheme.text_secondary
+                },
+            ))
+            .frame(false),
+        )
+        .on_hover_text("Copy this time as microseconds");
+    let response = ui.add(
+        egui::TextEdit::singleline(&mut text)
+            .id(edit_id)
+            .frame(egui::Frame::NONE)
+            .font(font_id)
+            .text_color(text_color)
+            .desired_width(width)
+            .margin(egui::Margin::ZERO),
+    );
+
+    if response.gained_focus() {
+        ui.data_mut(|data| data.insert_temp(origin_id, current));
+        select_all(ui.ctx(), edit_id, text.chars().count());
+    }
+    let (escape, enter) = ui.input(|input| {
+        (
+            input.key_pressed(egui::Key::Escape),
+            input.key_pressed(egui::Key::Enter),
+        )
+    });
+    // Copy is an explicit commit; TextEdit may keep focus on the click frame.
+    let finish =
+        copy.clicked() || response.lost_focus() || (response.has_focus() && (escape || enter));
+    if response.has_focus() && !finish {
+        ui.data_mut(|data| data.insert_temp(buffer_id, text.clone()));
+    }
+    if finish {
+        let origin = ui.data(|data| data.get_temp::<String>(origin_id));
+        // Explicit playback controls take precedence over a pending blur commit.
+        if !navigation_requested
+            && !escape
+            && origin.as_deref() != Some(text.as_str())
+            && let Some(micros) = parse_time_input(&text)
+            && micros != tick.0.0
+        {
+            paused.0 = true;
+            auto_follow.cancel();
+            latest_follow.0 = false;
+            tick.0 = Timestamp(micros);
+        }
+        ui.data_mut(|data| {
+            data.remove::<String>(buffer_id);
+            data.remove::<String>(origin_id);
+        });
+        ui.memory_mut(|memory| memory.surrender_focus(edit_id));
+    }
+    if copy.clicked() {
+        // Clicking the button also commits an active edit. Copy that value,
+        // not the playhead captured at the start of this frame.
+        ui.ctx().copy_text(tick.0.0.to_string());
+        ui.data_mut(|data| data.insert_temp(copied_id, Instant::now()));
+    }
+
+    response
+        .on_hover_text("Enter to seek · Esc to cancel\nMicroseconds, seconds with s, or UTC date");
 }
 
 /// Speed field drawn as the same pill as [`live_follow_button`]. Whichever of
@@ -914,5 +1080,208 @@ fn time_range_window(
                 }
             },
         );
+    }
+}
+
+#[cfg(test)]
+mod time_edit_tests {
+    use super::*;
+
+    #[test]
+    fn time_copy_commits_focused_buffer() {
+        for (buffer, expected) in [("25 s", 25_000_000), ("invalid", 10_000_000)] {
+            let ctx = egui::Context::default();
+            let mut tick = CurrentTimestamp(Timestamp(10_000_000));
+            let mut paused = Paused(false);
+            let mut latest = LatestFollow(true);
+            let mut auto_follow = AutoFollowLatestState::default();
+            let mut edit_id = egui::Id::NULL;
+            let mut copy_pos = egui::Pos2::ZERO;
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                edit_id = ui.make_persistent_id("timeline_time_edit");
+                copy_pos = ui.next_widget_position() + egui::vec2(8.0, 8.0);
+                ui.memory_mut(|m| m.request_focus(edit_id));
+                time_value_field(
+                    ui,
+                    &mut tick,
+                    &mut paused,
+                    &mut latest,
+                    &mut auto_follow,
+                    false,
+                );
+            });
+            ctx.data_mut(|data| {
+                data.insert_temp(edit_id.with("buffer"), buffer.to_owned());
+                data.insert_temp(edit_id.with("origin"), "10 s".to_owned());
+            });
+            let input = egui::RawInput {
+                events: vec![
+                    egui::Event::PointerMoved(copy_pos),
+                    egui::Event::PointerButton {
+                        pos: copy_pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: true,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                    egui::Event::PointerButton {
+                        pos: copy_pos,
+                        button: egui::PointerButton::Primary,
+                        pressed: false,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+                ..Default::default()
+            };
+            let output = ctx.run_ui(input, |ui| {
+                time_value_field(
+                    ui,
+                    &mut tick,
+                    &mut paused,
+                    &mut latest,
+                    &mut auto_follow,
+                    false,
+                );
+            });
+            assert!(output.platform_output.commands.iter().any(|command| {
+                matches!(command, egui::OutputCommand::CopyText(text) if text == &expected.to_string())
+            }), "copy must use the committed value for {buffer}");
+            assert_eq!(tick.0.0, expected);
+            assert!(!ctx.memory(|m| m.has_focus(edit_id)));
+            assert!(
+                ctx.data(|d| d.get_temp::<String>(edit_id.with("buffer")))
+                    .is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn short_step_click_is_handled_without_repeating_a_held_step() {
+        let ctx = egui::Context::default();
+        let mut rect = egui::Rect::NOTHING;
+        let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+            rect = ui.button("Step forward").rect;
+        });
+        let pos = rect.center();
+        let input = egui::RawInput {
+            events: vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| {
+            let response = ui.button("Step forward");
+            assert!(response.clicked());
+            assert!(!response.is_pointer_button_down_on());
+            assert!(step_button_active(&response, false));
+            assert!(!step_button_active(&response, true));
+        });
+    }
+
+    #[test]
+    fn live_toggle_wins_over_staged_time_edit() {
+        for initially_live in [false, true] {
+            let mut tick = CurrentTimestamp(Timestamp(10_000_000));
+            let mut paused = Paused(false);
+            let mut latest = LatestFollow(initially_live);
+            let mut auto_follow = AutoFollowLatestState::default();
+            // The pending TIME value must not alter the state used by LIVE.
+            let pending = Some(Timestamp(25_000_000));
+            latest.0 = !latest.0;
+            commit_time_edit(
+                pending,
+                true,
+                &mut tick,
+                &mut paused,
+                &mut latest,
+                &mut auto_follow,
+            );
+            assert_eq!(latest.0, !initially_live);
+            assert_eq!(tick.0.0, 10_000_000);
+            assert!(!paused.0);
+            commit_time_edit(
+                pending,
+                false,
+                &mut tick,
+                &mut paused,
+                &mut latest,
+                &mut auto_follow,
+            );
+            assert_eq!(tick.0.0, 25_000_000);
+            assert!(paused.0);
+            assert!(!latest.0);
+        }
+    }
+
+    #[test]
+    fn navigation_wins_over_pending_time_edit_on_blur() {
+        for navigation_requested in [false, true] {
+            let ctx = egui::Context::default();
+            let mut tick = CurrentTimestamp(Timestamp(10_000_000));
+            let mut paused = Paused(false);
+            let mut latest = LatestFollow(true);
+            let mut auto_follow = AutoFollowLatestState::default();
+            let mut edit_id = egui::Id::NULL;
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                egui::CentralPanel::default().show_inside(ui, |ui| {
+                    edit_id = ui.make_persistent_id("timeline_time_edit");
+                    ui.memory_mut(|m| m.request_focus(edit_id));
+                    time_value_field(
+                        ui,
+                        &mut tick,
+                        &mut paused,
+                        &mut latest,
+                        &mut auto_follow,
+                        false,
+                    );
+                });
+            });
+            ctx.data_mut(|data| {
+                data.insert_temp(edit_id.with("buffer"), "25 s".to_owned());
+                data.insert_temp(edit_id.with("origin"), "10 s".to_owned());
+            });
+            let _ = ctx.run_ui(egui::RawInput::default(), |ui| {
+                egui::CentralPanel::default().show_inside(ui, |ui| {
+                    // Playback controls run before TIME in the same frame.
+                    if navigation_requested {
+                        tick.0 = Timestamp(100_000_000);
+                    }
+                    ui.memory_mut(|m| m.request_focus(egui::Id::new("other_control")));
+                    time_value_field(
+                        ui,
+                        &mut tick,
+                        &mut paused,
+                        &mut latest,
+                        &mut auto_follow,
+                        navigation_requested,
+                    );
+                });
+            });
+            assert_eq!(
+                tick.0.0,
+                if navigation_requested {
+                    100_000_000
+                } else {
+                    25_000_000
+                }
+            );
+            assert_eq!(paused.0, !navigation_requested);
+            assert_eq!(latest.0, navigation_requested);
+            assert!(
+                ctx.data(|d| d.get_temp::<String>(edit_id.with("buffer")))
+                    .is_none()
+            );
+        }
     }
 }
