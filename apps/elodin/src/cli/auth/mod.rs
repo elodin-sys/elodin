@@ -45,15 +45,9 @@ pub struct WhoamiArgs {
 
 #[derive(Args, Clone, Default)]
 pub struct SignupArgs {
-    /// Email to register (prompted if omitted).
+    /// Print the registration URL instead of opening a browser.
     #[arg(long)]
-    pub email: Option<String>,
-    /// Initial password (prompted if omitted).
-    #[arg(long)]
-    pub password: Option<String>,
-    /// Organization name (defaults to the email's local part).
-    #[arg(long)]
-    pub org_name: Option<String>,
+    pub no_browser: bool,
 }
 
 #[derive(Args, Clone)]

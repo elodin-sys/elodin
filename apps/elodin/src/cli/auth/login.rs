@@ -11,12 +11,20 @@ use super::tokens::{self, Credentials};
 use super::{AuthCtx, LoginArgs, OidcConfig, TokenResponse, pkce, random_token, urlencode};
 use super::{CLIENT_ID, SCOPE};
 
+/// How long the loopback listener waits for the browser; signing up includes verifying an email.
+const BROWSER_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+
 pub async fn run(ctx: &AuthCtx, args: &LoginArgs) -> miette::Result<()> {
+    sign_in(ctx, args, None).await
+}
+
+/// Log in, or with `prompt = Some("create")` open the registration page first (`elodin signup`).
+pub async fn sign_in(ctx: &AuthCtx, args: &LoginArgs, prompt: Option<&str>) -> miette::Result<()> {
     let oidc = ctx.discover().await.wrap_err("OIDC discovery failed")?;
     let creds = if args.device {
         device_flow(ctx, &oidc).await?
     } else {
-        browser_flow(ctx, &oidc, args).await?
+        browser_flow(ctx, &oidc, args, prompt).await?
     };
     creds.save(&ctx.creds_path)?;
     println!(
@@ -31,6 +39,7 @@ async fn browser_flow(
     ctx: &AuthCtx,
     oidc: &OidcConfig,
     args: &LoginArgs,
+    prompt: Option<&str>,
 ) -> miette::Result<Credentials> {
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
@@ -41,7 +50,7 @@ async fn browser_flow(
 
     let (verifier, challenge) = pkce();
     let state = random_token();
-    let auth_url = format!(
+    let mut auth_url = format!(
         "{endpoint}?response_type=code&client_id={client}&redirect_uri={redirect}&scope={scope}\
          &code_challenge={challenge}&code_challenge_method=S256&state={state}",
         endpoint = oidc.authorization_endpoint,
@@ -51,6 +60,9 @@ async fn browser_flow(
         challenge = urlencode(&challenge),
         state = urlencode(&state),
     );
+    if let Some(prompt) = prompt {
+        auth_url.push_str(&format!("&prompt={}", urlencode(prompt)));
+    }
 
     if args.no_browser {
         println!("Open this URL to log in:\n  {auth_url}");
@@ -61,7 +73,14 @@ async fn browser_flow(
         }
     }
 
-    let (code, returned_state) = wait_for_callback(listener).await?;
+    let (code, returned_state) = tokio::time::timeout(BROWSER_TIMEOUT, wait_for_callback(listener))
+        .await
+        .map_err(|_| {
+            miette::miette!(
+                "timed out waiting for the browser after {} minutes; run the command again",
+                BROWSER_TIMEOUT.as_secs() / 60
+            )
+        })??;
     if returned_state != state {
         return Err(miette::miette!("OAuth state mismatch; aborting login"));
     }
@@ -218,7 +237,7 @@ async fn device_flow(ctx: &AuthCtx, oidc: &OidcConfig) -> miette::Result<Credent
     }
     println!("Waiting for authorization...");
 
-    let interval = device.interval.unwrap_or(5).max(1);
+    let mut interval = device.interval.unwrap_or(5).max(1);
     let deadline = tokens::now() + device.expires_in.unwrap_or(600);
     loop {
         tokio::time::sleep(Duration::from_secs(interval)).await;
@@ -255,7 +274,8 @@ async fn device_flow(ctx: &AuthCtx, oidc: &OidcConfig) -> miette::Result<Credent
         });
         match err.error.as_str() {
             "authorization_pending" => continue,
-            "slow_down" => tokio::time::sleep(Duration::from_secs(interval)).await,
+            // RFC 8628 §3.5: add 5 seconds to this and every later poll.
+            "slow_down" => interval += 5,
             other => return Err(miette::miette!("device login failed: {other}")),
         }
     }

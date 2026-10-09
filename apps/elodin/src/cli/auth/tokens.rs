@@ -1,5 +1,7 @@
-//! Credential storage (`credentials.json`, mode 600) and refresh handling.
+//! Credential storage (`credentials.json`, mode 600) and refresh handling. The file keeps one
+//! session per issuer, so logging in to one Elodin Cloud environment leaves the others signed in.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -17,6 +19,12 @@ pub struct Credentials {
     pub expires_at: u64,
     pub issuer: String,
     pub api_url: String,
+}
+
+/// Sessions keyed by issuer.
+#[derive(Default, Serialize, Deserialize)]
+struct Store {
+    sessions: BTreeMap<String, Credentials>,
 }
 
 pub fn now() -> u64 {
@@ -47,24 +55,59 @@ impl Credentials {
         now() + 30 >= self.expires_at
     }
 
-    pub fn load(path: &Path) -> miette::Result<Option<Credentials>> {
-        match std::fs::read(path) {
-            Ok(bytes) => Ok(Some(
-                serde_json::from_slice(&bytes)
-                    .into_diagnostic()
-                    .wrap_err("failed to parse credentials.json")?,
-            )),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-            Err(e) => Err(e)
-                .into_diagnostic()
-                .wrap_err("failed to read credentials.json"),
-        }
+    /// The session for `issuer`, if any.
+    pub fn load(path: &Path, issuer: &str) -> miette::Result<Option<Credentials>> {
+        Ok(read_store(path)?.sessions.remove(issuer))
     }
 
     pub fn save(&self, path: &Path) -> miette::Result<()> {
-        let json = serde_json::to_vec_pretty(self).into_diagnostic()?;
-        write_private(path, &json).wrap_err("failed to write credentials.json")
+        let mut store = read_store(path)?;
+        store.sessions.insert(self.issuer.clone(), self.clone());
+        write_store(path, &store)
     }
+
+    /// Forget the session for `issuer`; false if there was none.
+    pub fn remove(path: &Path, issuer: &str) -> miette::Result<bool> {
+        let mut store = read_store(path)?;
+        if store.sessions.remove(issuer).is_none() {
+            return Ok(false);
+        }
+        write_store(path, &store)?;
+        Ok(true)
+    }
+}
+
+fn read_store(path: &Path) -> miette::Result<Store> {
+    match std::fs::read(path) {
+        Ok(bytes) => {
+            if let Ok(store) = serde_json::from_slice::<Store>(&bytes) {
+                return Ok(store);
+            }
+            // Before per-issuer sessions the file held a single session.
+            let single: Credentials = serde_json::from_slice(&bytes)
+                .into_diagnostic()
+                .wrap_err("failed to parse credentials.json")?;
+            Ok(Store {
+                sessions: BTreeMap::from([(single.issuer.clone(), single)]),
+            })
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Store::default()),
+        Err(e) => Err(e)
+            .into_diagnostic()
+            .wrap_err("failed to read credentials.json"),
+    }
+}
+
+/// Write a temporary file and rename it over the old one, so a crash never leaves a truncated
+/// file and the result is always mode 600.
+fn write_store(path: &Path, store: &Store) -> miette::Result<()> {
+    let json = serde_json::to_vec_pretty(store).into_diagnostic()?;
+    let tmp = path.with_extension("json.tmp");
+    let _ = std::fs::remove_file(&tmp);
+    write_private(&tmp, &json).wrap_err("failed to write credentials.json")?;
+    std::fs::rename(&tmp, path)
+        .into_diagnostic()
+        .wrap_err("failed to replace credentials.json")
 }
 
 #[cfg(unix)]
@@ -73,12 +116,12 @@ fn write_private(path: &Path, bytes: &[u8]) -> miette::Result<()> {
     use std::os::unix::fs::OpenOptionsExt;
     let mut file = std::fs::OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .mode(0o600)
         .open(path)
         .into_diagnostic()?;
     file.write_all(bytes).into_diagnostic()?;
+    file.sync_all().into_diagnostic()?;
     Ok(())
 }
 
@@ -123,10 +166,10 @@ pub async fn refresh(
     Ok(())
 }
 
-/// Load credentials, transparently refreshing the access token if expired.
+/// Load this issuer's credentials, transparently refreshing the access token if expired.
 pub async fn ensure_valid(ctx: &AuthCtx) -> miette::Result<Credentials> {
-    let mut creds = Credentials::load(&ctx.creds_path)?
-        .ok_or_else(|| miette::miette!("not logged in; run `elodin login`"))?;
+    let mut creds = Credentials::load(&ctx.creds_path, &ctx.issuer)?
+        .ok_or_else(|| miette::miette!("not logged in to {}; run `elodin login`", ctx.issuer))?;
     if creds.is_expired() {
         let oidc = discover_at(&ctx.client, &creds.issuer).await?;
         refresh(ctx, &oidc, &mut creds)
@@ -135,4 +178,66 @@ pub async fn ensure_valid(ctx: &AuthCtx) -> miette::Result<Credentials> {
         creds.save(&ctx.creds_path)?;
     }
     Ok(creds)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn session(issuer: &str) -> Credentials {
+        Credentials {
+            access_token: format!("token-{issuer}"),
+            refresh_token: None,
+            expires_at: now() + 300,
+            issuer: issuer.to_string(),
+            api_url: "https://api.example.test".to_string(),
+        }
+    }
+
+    #[test]
+    fn sessions_are_kept_per_issuer() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("credentials.json");
+        session("https://a.test/realms/elodin").save(&path).unwrap();
+        session("https://b.test/realms/elodin").save(&path).unwrap();
+        let a = Credentials::load(&path, "https://a.test/realms/elodin").unwrap();
+        assert_eq!(
+            a.unwrap().access_token,
+            "token-https://a.test/realms/elodin"
+        );
+        assert!(Credentials::remove(&path, "https://b.test/realms/elodin").unwrap());
+        assert!(
+            Credentials::load(&path, "https://b.test/realms/elodin")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            Credentials::load(&path, "https://a.test/realms/elodin")
+                .unwrap()
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn reads_the_single_session_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("credentials.json");
+        let old = session("https://old.test/realms/elodin");
+        std::fs::write(&path, serde_json::to_vec(&old).unwrap()).unwrap();
+        let loaded = Credentials::load(&path, "https://old.test/realms/elodin").unwrap();
+        assert_eq!(loaded.unwrap().access_token, old.access_token);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rewrites_with_private_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("credentials.json");
+        std::fs::write(&path, b"{\"sessions\":{}}").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        session("https://a.test/realms/elodin").save(&path).unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
 }

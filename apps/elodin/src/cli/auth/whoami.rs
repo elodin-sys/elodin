@@ -51,7 +51,7 @@ pub async fn run(ctx: &AuthCtx, args: &WhoamiArgs) -> miette::Result<()> {
     println!("Logged in as {}", field("preferred_username"));
     println!("  subject:  {}", field("sub"));
     println!("  email:    {}", field("email"));
-    println!("  org:      {}", field("org_id"));
+    println!("  org:      {} ({})", field("org_name"), field("org_id"));
     println!("  org role: {}", field("org_role"));
     println!("  issuer:   {}", field("issuer"));
     println!("  api:      {}", creds.api_url);

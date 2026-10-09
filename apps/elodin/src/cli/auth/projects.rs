@@ -81,18 +81,21 @@ async fn parse(resp: reqwest::Response) -> miette::Result<serde_json::Value> {
             "the API rejected the token (401); run `elodin login` again"
         ));
     }
-    if status == reqwest::StatusCode::FORBIDDEN {
-        return Err(miette::miette!(
-            "your account has no organization scope; run `elodin signup` first"
-        ));
-    }
     let value: serde_json::Value = resp.json().await.unwrap_or_default();
     if !status.is_success() {
         let detail = value
             .get("error")
             .and_then(|v| v.as_str())
             .unwrap_or("request failed");
-        return Err(miette::miette!("API error ({status}): {detail}"));
+        return Err(match detail {
+            "verify_email_required" => miette::miette!(
+                "verify your email address first (check your inbox), then run `elodin login` again"
+            ),
+            "org_access_revoked" => miette::miette!(
+                "you were removed from your organization; ask one of its admins to add you back"
+            ),
+            _ => miette::miette!("API error ({status}): {detail}"),
+        });
     }
     Ok(value)
 }

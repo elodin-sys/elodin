@@ -43,7 +43,7 @@ pub struct Cli {
 
 #[derive(Subcommand, Clone)]
 enum Commands {
-    /// Sign up for Elodin Cloud (creates your account + organization)
+    /// Create an Elodin Cloud account in your browser, then log in
     Signup(auth::SignupArgs),
     /// Log in to Elodin Cloud through your browser (OIDC + PKCE)
     Login(auth::LoginArgs),
