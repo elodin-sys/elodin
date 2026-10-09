@@ -52,7 +52,7 @@ The Elodin simulation world.
     Load a GLB asset as an Elodin Scene Archetype.
     - `url`: the URL or filepath of the GLB asset
 
-- `sensor_camera(entity, name, width=None, height=None, fov=None, near=0.01, far=1000.0, pos_offset=[0,0,0], rot_offset=[0,0,0], format="rgba", effect="normal", effect_params={}, camera_model=None, lens_hfov=None, create_frustum=False, show_ellipsoids=False, frustums_color=None, projection_color=None, frustums_thickness=0.006, frustums_up_marker="none", frustums_up_marker_overlay=True, fps=None, cinematic=False, ev100=None, bloom=None, environment=None)` -> None
+- `sensor_camera(entity, name, width=None, height=None, fov=None, near=0.01, far=1000.0, pos_offset=[0,0,0], rot_offset=[0,0,0], format="rgba", effect="normal", effect_params={}, camera_model=None, lens_hfov=None, create_frustum=False, show_ellipsoids=False, frustums_color=None, projection_color=None, frustums_thickness=0.006, frustums_up_marker="none", frustums_up_marker_overlay=True, fps=None, cinematic=False, ev100=None, bloom=None, environment=None, frustums_face_alpha=0.17647059)` -> None
 
     Register a virtual sensor camera on an entity. The headless GPU render-server emits one frame per camera every `1 / fps` µs of simulation time and pushes the bytes back to the database. The simulation reads frames asynchronously with `ctx.read_msg("entity.name", timestamp=...)`.
 
@@ -70,12 +70,16 @@ The Elodin simulation world.
     - `effect_params` : `dict`, effect-specific nested parameters. LWIR supports `palette`, `agc`, `dde`, `mtf_blur_px`, detector noise, scene temperatures, atmospheric transmission, and `sky_offset_dn` (cosmetic sky black level). Auto AGC adapts from the scene temperature statistics with sky masked out and freezes on sky-only views.
     - `camera_model` : `string | None`, calibrated camera preset. `"boson640p"` supplies 640×512, 60 Hz, the Boson+ detector defaults, and an 18° horizontal lens.
     - `lens_hfov` : `float | None`, physical horizontal field of view in degrees. Converted to vertical `fov` using the resolved image aspect ratio. Mutually exclusive with `fov`.
+    - `create_frustum` : `bool`, draw this camera's 3D frustum in schematic viewports that enable `show_frustums`. Defaults to `False`.
+    - `frustums_color` : three- or four-element normalized RGB(A) list for the frustum edges.
+    - `projection_color` : three- or four-element normalized RGB(A) list for the separate 2D far-plane projection overlay.
     - `show_ellipsoids` : `bool`, render ellipsoid debug objects in this sensor camera. Defaults to `False`.
     - `fps` : `float | None`, target rendering rate in frames per second of sim time. The renderer treats this as a target — if the GPU cannot sustain it (e.g., several high-resolution cameras), frames are spaced further apart in sim time but the simulation never blocks. Defaults to the camera-model rate, or `30.0` without a model.
     - `cinematic` : `bool`, same meaning as KDL `viewport cinematic=#true`. When true, the sibling render-server loads the cinematic Earth stack for this camera. Defaults to `False`.
     - `ev100` : `float | None`, camera exposure. With `cinematic=True` the default is `13.5`. Requires `cinematic=True`.
     - `bloom` : `dict | None`, viewport bloom settings (`preset`, `intensity`, `threshold`, `threshold_softness`). `None` with `cinematic=True` uses the cinematic preset. Requires `cinematic=True`.
     - `environment` : `dict | None`, schematic `environment { }` (`sun`, `ambient_scale`, `sky_color`, `atmosphere`, `earth`). `earth` may be `True` for the house look. Omitted with `cinematic=True` implies Earth, a 100 klx sun, and ambient `0.05`. Requires `cinematic=True`.
+    - `frustums_face_alpha` : `float`, opacity of the filled 3D frustum volume from `0.0` to `1.0`, independent of edge and 2D-projection alpha. Defaults to the historical `45/255` (`0.17647059`).
 
     At most one cinematic environment owner is allowed: a KDL `viewport cinematic=#true` **or** `sensor_camera(cinematic=True)`, never both, never two of either. Mixing them raises `ValueError` before the GPU starts.
 

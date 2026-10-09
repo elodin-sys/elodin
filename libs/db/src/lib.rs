@@ -313,11 +313,7 @@ impl RealTimeStreamFilter {
 
     fn set(&self, component_ids: Vec<ComponentId>, frequency: Option<u64>) {
         let mut current = self.component_ids.write().unwrap();
-        *current = if component_ids.is_empty() {
-            None
-        } else {
-            Some(component_ids.into_iter().collect())
-        };
+        *current = Some(component_ids.into_iter().collect());
         self.frequency
             .store(frequency.unwrap_or(0), atomic::Ordering::Release);
         self.generation.fetch_add(1, atomic::Ordering::Release);
@@ -416,6 +412,13 @@ impl DB {
 
     fn db_config(&self) -> DbConfig {
         self.with_state(|db| db.db_config.clone())
+    }
+
+    /// `DbConfig` for client replies, including runtime capability flags.
+    fn client_db_config(&self) -> DbConfig {
+        let mut config = self.db_config();
+        config.advertise_exact_stream_filter();
+        config
     }
 
     pub fn save_db_state(&self) -> Result<(), Error> {
@@ -2346,7 +2349,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                     let config_gen = db.db_config_gen.latest();
                     if config_gen != last_config_gen {
                         last_config_gen = config_gen;
-                        match tx.send_msg(&db.db_config()).await {
+                        match tx.send_msg(&db.client_db_config()).await {
                             Err(err) if err.is_stream_closed() => return,
                             Err(err) => {
                                 warn!(?err, "failed to send db config");
@@ -2385,7 +2388,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             if let Err(err) = db.apply_set_db_config_from_client(update) {
                 tracing::warn!(?err, "rejected db config patch");
             }
-            tx.send_msg(&db.db_config()).await?;
+            tx.send_msg(&db.client_db_config()).await?;
         }
         Packet::Msg(m) if m.id == StoreAsset::ID => {
             let StoreAsset { key, bytes } = m.parse::<StoreAsset>()?;
@@ -2405,8 +2408,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                 .await?;
         }
         Packet::Msg(m) if m.id == GetDbSettings::ID => {
-            let settings = db.db_config();
-            tx.send_msg(&settings).await?;
+            tx.send_msg(&db.client_db_config()).await?;
         }
         Packet::Table(table) => {
             let _table_span = tracing::info_span!("sink_table").entered();
@@ -2442,10 +2444,6 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             }
         }
 
-        Packet::Msg(m) if m.id == GetDbSettings::ID => {
-            let settings = db.db_config();
-            tx.send_msg(&settings).await?;
-        }
         Packet::Msg(m) if m.id == SQLQuery::ID => {
             let SQLQuery(query) = m.parse::<SQLQuery>()?;
             let db = db.clone();
@@ -3360,7 +3358,7 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
             last_sent
                 .is_none_or(|last: Timestamp| timestamp.0.saturating_sub(last.0) >= interval_us)
         });
-        if stream_changed || due {
+        if stream_changed || (due && !stream_components.is_empty()) {
             table.clear();
             DBVisitor.populate_table_latest(&stream_components, &mut table);
             table = send_with_timeout(&sink, table.with_request_id(req_id)).await?;
@@ -3662,7 +3660,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_real_time_stream_filter_is_unfiltered() {
+    fn empty_real_time_stream_filter_selects_nothing() {
         let filter = RealTimeStreamFilter::new();
         assert!(filter.component_ids().is_none());
         filter.set(vec![ComponentId::new("a")], Some(60));
@@ -3671,7 +3669,7 @@ mod tests {
             Some([ComponentId::new("a")].into_iter().collect())
         );
         filter.set(vec![], Some(60));
-        assert!(filter.component_ids().is_none());
+        assert_eq!(filter.component_ids(), Some(HashSet::new()));
         assert_eq!(filter.frequency(), Some(60));
     }
 
@@ -3791,6 +3789,18 @@ mod tests {
                 .sample_count()),
             2
         );
+    }
+
+    #[test]
+    fn exact_stream_filter_capability_is_advertised_but_not_persisted() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let db = DB::create(path.clone()).unwrap();
+        assert!(db.client_db_config().supports_exact_stream_filter());
+        assert!(!db.db_config().supports_exact_stream_filter());
+        db.save_db_state().unwrap();
+        let persisted = DbConfig::read(path.join("db_state")).unwrap();
+        assert!(!persisted.supports_exact_stream_filter());
     }
 
     #[test]

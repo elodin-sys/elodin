@@ -1,10 +1,10 @@
 use bevy::asset::Asset;
 use bevy::log::warn_once;
-use bevy::prelude::{InRef, Res, ResMut};
+use bevy::prelude::{Children, InRef, Res, ResMut};
 use bevy::reflect::TypePath;
 use bevy::{
     asset::{AssetId, Assets, Handle},
-    ecs::system::{Commands, Query},
+    ecs::system::{Commands, Query, SystemParam},
     prelude::Resource,
 };
 use bevy_render::render_resource::{Buffer, BufferDescriptor, BufferSlice, BufferUsages};
@@ -35,11 +35,13 @@ use std::{collections::BTreeMap, fmt::Debug, ops::Range};
 
 use crate::object_3d::Object3DState;
 use crate::sensor_camera::SensorCameraConfigs;
+use crate::ui::SelectedObject;
 use crate::ui::inspector::viewport::Viewport;
 use crate::ui::monitor::MonitorData;
 use crate::ui::plot::gpu::INDEX_BUFFER_LEN;
 use crate::ui::plot::state::GraphState;
 use crate::ui::schematic::EqlExt;
+use crate::ui::tiles::WindowState;
 use crate::{EqlContext, SelectedTimeRange};
 use hamann_chen_line::{select_polyline3_indices, select_time_value_indices};
 
@@ -1603,6 +1605,7 @@ fn enabled_fetch_component_ids(
     point_trails: &Query<&PointTrails>,
     object_3ds: &Query<&Object3DState>,
     monitors: &Query<&MonitorData>,
+    gauge_bindings: &Query<&crate::ui::gauges::EqlBinding>,
     viewports: &Query<&Viewport>,
     vector_arrows: &Query<&VectorArrow3d>,
     eql_ctx: &EqlContext,
@@ -1613,6 +1616,9 @@ fn enabled_fetch_component_ids(
         if !monitor.component_name.trim().is_empty() {
             ids.insert(ComponentId::new(&monitor.component_name));
         }
+    }
+    for binding in gauge_bindings.iter() {
+        collect_eql_component_ids(&binding.eql, eql_ctx, &mut ids);
     }
     for viewport in viewports.iter() {
         collect_eql_component_ids(&viewport.pos.eql, eql_ctx, &mut ids);
@@ -1655,6 +1661,33 @@ pub(crate) fn viewport_adapter_component_ids(
     ids
 }
 
+/// Components of the entities open in each window's inspector, which reads
+/// their `ComponentValue`s directly rather than through the SeriesStore.
+#[derive(SystemParam)]
+pub struct InspectedComponents<'w, 's> {
+    windows: Query<'w, 's, &'static WindowState>,
+    children: Query<'w, 's, &'static Children>,
+    component_ids: Query<'w, 's, &'static ComponentId>,
+}
+
+impl InspectedComponents<'_, '_> {
+    fn component_ids(&self) -> HashSet<ComponentId> {
+        self.windows
+            .iter()
+            .filter_map(|window| match &window.ui_state.selected_object {
+                SelectedObject::Entity(pair) => Some(pair.bevy),
+                _ => None,
+            })
+            .flat_map(|root| {
+                self.children
+                    .iter_descendants(root)
+                    .chain(std::iter::once(root))
+            })
+            .filter_map(|entity| self.component_ids.get(entity).ok().copied())
+            .collect()
+    }
+}
+
 /// `{entity}.world_pos` for each configured sensor camera parent entity.
 pub(crate) fn sensor_camera_world_pos_ids(configs: &SensorCameraConfigs) -> HashSet<ComponentId> {
     configs
@@ -1673,12 +1706,14 @@ pub fn update_series_fetch_priority(
     point_trails: Query<&PointTrails>,
     object_3ds: Query<&Object3DState>,
     monitors: Query<&MonitorData>,
+    gauge_bindings: Query<&crate::ui::gauges::EqlBinding>,
     viewports: Query<&Viewport>,
     vector_arrows: Query<&VectorArrow3d>,
     eql_ctx: Res<EqlContext>,
-    path_reg: Res<ComponentPathRegistry>,
-    adapters: Res<ComponentAdapters>,
+    // Grouped to stay within Bevy's 16-parameter system limit.
+    (path_reg, adapters): (Res<ComponentPathRegistry>, Res<ComponentAdapters>),
     sensor_cameras: Res<SensorCameraConfigs>,
+    inspected: InspectedComponents,
     mut priority: ResMut<SeriesFetchPriority>,
     mut cache: ResMut<TelemetryCache>,
     mut backfill: ResMut<BackfillState>,
@@ -1688,6 +1723,7 @@ pub fn update_series_fetch_priority(
     let adapter_leaves: HashSet<ComponentId> = adapters.keys().copied().collect();
     let mut extras = viewport_adapter_component_ids(&path_reg, &adapter_leaves);
     extras.extend(sensor_camera_world_pos_ids(&sensor_cameras));
+    extras.extend(inspected.component_ids());
     let next = build_series_store_allowlist(
         enabled_fetch_component_ids(
             &graph_states,
@@ -1695,6 +1731,7 @@ pub fn update_series_fetch_priority(
             &point_trails,
             &object_3ds,
             &monitors,
+            &gauge_bindings,
             &viewports,
             &vector_arrows,
             &eql_ctx,
@@ -3584,20 +3621,20 @@ mod tests {
     }
 
     #[test]
-    fn series_store_allowlist_unions_plots_and_adapters() {
+    fn series_store_allowlist_unions_consumers_and_extras() {
         let plot = ComponentId(10);
-        let adapter = ComponentId(20);
-        let ids = build_series_store_allowlist([plot].into_iter().collect(), [adapter]);
+        let extra = ComponentId(20);
+        let ids = build_series_store_allowlist([plot].into_iter().collect(), [extra]);
         assert!(ids.contains(&plot));
-        assert!(ids.contains(&adapter));
+        assert!(ids.contains(&extra));
         assert_eq!(ids.len(), 2);
     }
 
     #[test]
-    fn series_store_allowlist_adapters_alone_still_subscribe() {
-        let adapter = ComponentId(7);
-        let ids = build_series_store_allowlist(HashSet::new(), [adapter]);
-        assert_eq!(ids, [adapter].into_iter().collect());
+    fn series_store_allowlist_extras_alone_still_subscribe() {
+        let extra = ComponentId(7);
+        let ids = build_series_store_allowlist(HashSet::new(), [extra]);
+        assert_eq!(ids, [extra].into_iter().collect());
     }
 
     #[test]
@@ -3623,6 +3660,79 @@ mod tests {
             &mut ids,
         );
         assert_eq!(ids, [ComponentId::new(name)].into_iter().collect());
+    }
+
+    #[test]
+    fn gauge_eql_component_is_allowlisted() {
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
+
+        let name = "quad.world_pos";
+        let component = Arc::new(eql::Component::new(
+            name.to_string(),
+            ComponentId::new(name),
+            Schema::new(PrimType::F64, vec![7_u64]).expect("valid schema"),
+        ));
+        let eql_ctx = EqlContext(eql::Context::from_leaves(
+            [component],
+            Timestamp(0),
+            Timestamp(1),
+        ));
+        let binding = crate::ui::gauges::EqlBinding::new(name.into());
+        let mut ids = HashSet::new();
+        collect_eql_component_ids(&binding.eql, &eql_ctx, &mut ids);
+        assert_eq!(ids, [ComponentId::new(name)].into_iter().collect());
+    }
+
+    #[test]
+    fn inspected_entity_components_are_allowlisted() {
+        use bevy::ecs::system::RunSystemOnce;
+        use bevy::prelude::{ChildOf, World};
+
+        let mut world = World::new();
+        let parent_id = ComponentId::new("ball");
+        let pos_id = ComponentId::new("ball.world_pos");
+        let vel_id = ComponentId::new("ball.world_vel");
+        let parent = world.spawn(parent_id).id();
+        world.spawn((pos_id, ChildOf(parent)));
+        world.spawn((vel_id, ChildOf(parent)));
+        let collect = |world: &mut World| {
+            world
+                .run_system_once(|inspected: InspectedComponents| inspected.component_ids())
+                .expect("system runs")
+        };
+
+        let other_id = ComponentId::new("cube");
+        let other = world.spawn(other_id).id();
+        let window_state = |selected_object| WindowState {
+            descriptor: Default::default(),
+            graph_entities: Vec::new(),
+            tile_state: Default::default(),
+            ui_state: crate::ui::WindowUiState {
+                selected_object,
+                ..Default::default()
+            },
+        };
+
+        world.spawn(window_state(SelectedObject::None));
+        assert!(collect(&mut world).is_empty());
+
+        world.spawn(window_state(SelectedObject::Entity(
+            crate::ui::EntityPair {
+                bevy: parent,
+                impeller: parent_id,
+            },
+        )));
+        world.spawn(window_state(SelectedObject::Entity(
+            crate::ui::EntityPair {
+                bevy: other,
+                impeller: other_id,
+            },
+        )));
+        assert_eq!(
+            collect(&mut world),
+            [parent_id, pos_id, vel_id, other_id].into_iter().collect()
+        );
     }
 
     #[test]

@@ -524,6 +524,7 @@ impl WorldBuilder {
         ev100 = None,
         bloom = None,
         environment = None,
+        frustums_face_alpha = impeller_wkt::default_frustums_face_alpha(),
     ))]
     #[allow(clippy::too_many_arguments)]
     fn sensor_camera(
@@ -554,6 +555,7 @@ impl WorldBuilder {
         ev100: Option<f32>,
         bloom: Option<&Bound<'_, PyAny>>,
         environment: Option<&Bound<'_, PyAny>>,
+        frustums_face_alpha: f32,
     ) -> Result<(), crate::error::Error> {
         if name.chars().any(|c| c.is_whitespace()) {
             return Err(crate::error::Error::PyO3(
@@ -702,6 +704,13 @@ impl WorldBuilder {
                 ),
             ));
         }
+        if !frustums_face_alpha.is_finite() || !(0.0..=1.0).contains(&frustums_face_alpha) {
+            return Err(crate::error::Error::PyO3(
+                pyo3::exceptions::PyValueError::new_err(
+                    "sensor_camera frustums_face_alpha must be finite and between 0 and 1",
+                ),
+            ));
+        }
         if !(fps > 0.0 && fps.is_finite()) {
             return Err(crate::error::Error::PyO3(
                 pyo3::exceptions::PyValueError::new_err(format!(
@@ -777,6 +786,7 @@ impl WorldBuilder {
                     impeller_wkt::default_viewport_frustums_color(),
                     "frustums_color",
                 )?,
+                frustums_face_alpha,
                 projection_color: color_from_vec(
                     projection_color,
                     impeller_wkt::default_viewport_projection_color(),
