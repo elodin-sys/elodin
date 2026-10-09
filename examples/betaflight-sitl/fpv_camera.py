@@ -17,8 +17,11 @@ LATENCY_US = 33_000
 MOUNT = [0.08, 0.0, 0.02]
 NEAR = 0.1
 FAR = 100.0
-# Vertical FoV for fx = fy = 320 at 640×360 (≈58.72°, hFOV 90°).
-FOV_DEG = 2.0 * math.degrees(math.atan((HEIGHT / 2.0) / 320.0))
+# Square pixels. Vertical FoV is chosen so fx = fy = FOCAL_PX (≈58.72°, hFOV 90°).
+FOCAL_PX = 320.0
+FOV_DEG = 2.0 * math.degrees(math.atan((HEIGHT / 2.0) / FOCAL_PX))
+# Positive tilt pitches the optical axis up, matching sensor_camera pitch.
+TILT_DEG = 0.0
 PERIOD_US = int(round(1_000_000.0 / FPS))
 FRAME_BYTES = WIDTH * HEIGHT * 4
 MIN_FPS = 15.0
