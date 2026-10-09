@@ -202,8 +202,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.19.2" selected>
-                        v0.19.2
+                    <option value="v0.20.0" selected>
+                        v0.20.0
                     </option>
                 </select>
             </span>
@@ -437,6 +437,11 @@
                 </li>
                 
                 <li>
+                    <a href="/reference/command-palette/#windows">Windows</a>
+                    
+                </li>
+                
+                <li>
                     <a href="/reference/command-palette/#viewport">Viewport</a>
                     
                 </li>
@@ -501,6 +506,16 @@ optionally enter dimensions and color.</li>
 <li><code>Hierarchy</code> and <code>Inspector</code> are built-in sidebars; they are always present and do not appear in
 the command palette.</li>
 </ul>
+<h2 id="windows">Windows</h2>
+<ul>
+<li><code>Arrange Windows</code>: reapply the automatic layout independently on each physical display.
+The primary window occupies the bottom two thirds when it shares a display with secondary
+windows; secondary windows share the top third. Displays with only secondary windows use
+the full available area. Configured display assignments are preserved. A display containing
+any explicitly configured window rectangle is left unchanged.</li>
+</ul>
+<p>This uses the same layout as automatic window creation and can restore automatically placed
+windows after moving or resizing them manually.</p>
 <h2 id="viewport">Viewport</h2>
 <ul>
 <li><code>Toggle Wireframe</code>: enable/disable global wireframe.</li>
