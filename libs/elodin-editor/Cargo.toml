@@ -55,6 +55,8 @@ big_space.workspace = true
 big_space.optional = true
 bevy_editor_cam.workspace = true
 bevy_framepace.workspace = true
+# 3D text for ViewCube labels
+bevy_fontmesh = "0.6"
 
 # rand
 fastrand.version = "2"
@@ -187,8 +189,6 @@ impeller-bevy.default-features = false
 cranelift-mlir.path = "../cranelift-mlir"
 sha2 = "0.10"
 
-# 3D text for ViewCube labels
-bevy_fontmesh = "0.6"
 nvml-wrapper = "0.12.1"
 
 # macos

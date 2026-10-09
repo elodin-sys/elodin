@@ -19,7 +19,6 @@ pub use theme::ViewCubeColors;
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
-#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 use bevy_fontmesh::prelude::*;
 
 #[derive(Resource)]
@@ -58,10 +57,9 @@ impl Plugin for ViewCubePlugin {
             .init_resource::<CurrentColorMode>()
             .add_message::<ViewCubeEvent>()
             .add_plugins(spawn::plugin)
-            .add_plugins(picking::plugin);
-        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
-        app.add_plugins(FontMeshPlugin::<StandardMaterial>::default());
-        app.add_systems(Update, interactions::setup_cube_elements)
+            .add_plugins(picking::plugin)
+            .add_plugins(FontMeshPlugin::<StandardMaterial>::default())
+            .add_systems(Update, interactions::setup_cube_elements)
             .add_systems(Update, interactions::repeat_held_arrow)
             .add_systems(Update, update_theme_on_mode_change)
             .add_observer(interactions::on_cube_hover_start)
