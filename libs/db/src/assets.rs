@@ -5,7 +5,7 @@
 //! consumers of the DB Asset Server. This replaces the selective, type-aware copy
 //! that previously lived in `nox-py`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
@@ -280,6 +280,7 @@ fn rewrite_stored_schematics(dir: &Path, source_root: &Path) -> io::Result<()> {
         assets_dir: dir,
         search_dirs: &search_dirs,
         file_keys: HashMap::new(),
+        reserved_inline_keys: HashSet::new(),
     };
     for key in keys {
         if !key.ends_with(".kdl") {
@@ -365,8 +366,27 @@ pub fn ingest_window_schematics(
         assets_dir,
         search_dirs,
         file_keys: HashMap::new(),
+        reserved_inline_keys: HashSet::new(),
     };
     ingest.rewrite_content(content, None)
+}
+
+/// Written by the Python SDK as the active schematic after ingest; inline windows must not take it.
+const ACTIVE_SCHEMATIC_ASSET_KEY: &str = "schematics/main.kdl";
+
+fn inline_window_stem(title: &str) -> String {
+    let mut stem = String::new();
+    let mut prev_hyphen = true;
+    for ch in title.chars() {
+        if ch.is_ascii_alphanumeric() {
+            stem.push(ch.to_ascii_lowercase());
+            prev_hyphen = false;
+        } else if !prev_hyphen {
+            stem.push('-');
+            prev_hyphen = true;
+        }
+    }
+    stem.trim_matches('-').to_string()
 }
 
 struct WindowIngest<'a> {
@@ -376,6 +396,8 @@ struct WindowIngest<'a> {
     /// a key is recorded *before* the file's own references are followed, so
     /// mutually referencing windows terminate with each other's key.
     file_keys: HashMap<PathBuf, String>,
+    /// Reserved before following nested references, which may use the same stem.
+    reserved_inline_keys: HashSet<String>,
 }
 
 impl WindowIngest<'_> {
@@ -391,15 +413,69 @@ impl WindowIngest<'_> {
         let Ok(mut root) = impeller_kdl::parse_schematic(content) else {
             return Ok(None);
         };
+        let inline_changed = self.materialize_inline_windows(&mut root, base_dir)?;
         let map = self.ingest_referenced_windows(&root, base_dir)?;
-        if map.is_empty() {
+        if !inline_changed && map.is_empty() {
             return Ok(None);
         }
-        impeller_kdl::rewrite_asset_paths(&mut root, |path| {
-            map.get(path).map(|key| format!("db:{key}"))
-        });
+        if !map.is_empty() {
+            impeller_kdl::rewrite_asset_paths(&mut root, |path| {
+                map.get(path).map(|key| format!("db:{key}"))
+            });
+        }
         let serialized = impeller_kdl::serialize_schematic(&root);
         Ok((serialized != content).then_some(serialized))
+    }
+
+    /// Write inline window layouts into `schematics/` and point `path` at them.
+    fn materialize_inline_windows(
+        &mut self,
+        schematic: &mut impeller_wkt::Schematic,
+        base_dir: Option<&Path>,
+    ) -> io::Result<bool> {
+        let mut changed = false;
+        let mut index = 0usize;
+        for elem in &mut schematic.elems {
+            let impeller_wkt::SchematicElem::Window(window) = elem else {
+                continue;
+            };
+            if window.path.is_some() {
+                continue;
+            }
+            let Some(content) = window.content.clone() else {
+                continue;
+            };
+            if content.elems.is_empty() {
+                continue;
+            }
+            index += 1;
+            let stem = window
+                .title
+                .as_deref()
+                .map(inline_window_stem)
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| format!("window-{index}"));
+            let key = self.assign_inline_window_key(stem.as_str());
+            let mut stored = content;
+            self.materialize_inline_windows(&mut stored, base_dir)?;
+            let nested = self.ingest_referenced_windows(&stored, base_dir)?;
+            if !nested.is_empty() {
+                impeller_kdl::rewrite_asset_paths(&mut stored, |path| {
+                    nested.get(path).map(|key| format!("db:{key}"))
+                });
+            }
+            let bytes = impeller_kdl::serialize_schematic(&stored);
+            write_uploaded_asset(self.assets_dir, &key, bytes.as_bytes())?;
+            tracing::info!(
+                key = %key,
+                title = ?window.title,
+                "materialized inline window sub-schematic into db assets"
+            );
+            window.path = Some(format!("db:{key}"));
+            window.content = None;
+            changed = true;
+        }
+        Ok(changed)
     }
 
     /// Resolve, ingest and key every local window reference of `schematic`
@@ -463,15 +539,9 @@ impl WindowIngest<'_> {
         // save fallback): it still becomes fetchable over HTTP, it just cannot
         // be scanned for further references.
         if let Ok(content) = std::str::from_utf8(&bytes)
-            && let Ok(mut schematic) = impeller_kdl::parse_schematic(content)
+            && let Some(rewritten) = self.rewrite_content(content, canonical.parent())?
         {
-            let map = self.ingest_referenced_windows(&schematic, canonical.parent())?;
-            if !map.is_empty() {
-                impeller_kdl::rewrite_asset_paths(&mut schematic, |path| {
-                    map.get(path).map(|key| format!("db:{key}"))
-                });
-                bytes = impeller_kdl::serialize_schematic(&schematic).into_bytes();
-            }
+            bytes = rewritten.into_bytes();
         }
 
         write_uploaded_asset(self.assets_dir, &key, &bytes)?;
@@ -481,6 +551,30 @@ impl WindowIngest<'_> {
             "ingested window sub-schematic into db assets"
         );
         Ok(key)
+    }
+
+    /// Like [`Self::assign_key`], but never assigns [`ACTIVE_SCHEMATIC_ASSET_KEY`].
+    fn assign_inline_window_key(&mut self, stem: &str) -> String {
+        let mut n = 1usize;
+        loop {
+            let key = if n == 1 {
+                format!("schematics/{stem}.kdl")
+            } else {
+                format!("schematics/{stem}-{n}.kdl")
+            };
+            if key == ACTIVE_SCHEMATIC_ASSET_KEY {
+                n += 1;
+                continue;
+            }
+            let claimed = self.reserved_inline_keys.contains(&key)
+                || self.file_keys.values().any(|existing| *existing == key)
+                || self.assets_dir.join(&key).exists();
+            if !claimed {
+                self.reserved_inline_keys.insert(key.clone());
+                return key;
+            }
+            n += 1;
+        }
     }
 
     /// First free `schematics/<stem>.kdl` key, suffixing `-2`, `-3`, … when the
@@ -498,7 +592,8 @@ impl WindowIngest<'_> {
             } else {
                 format!("schematics/{stem}-{n}.kdl")
             };
-            let claimed = self.file_keys.values().any(|existing| *existing == key)
+            let claimed = self.reserved_inline_keys.contains(&key)
+                || self.file_keys.values().any(|existing| *existing == key)
                 || self.assets_dir.join(&key).exists();
             if !claimed {
                 return key;
@@ -1084,6 +1179,129 @@ mod tests {
         );
         let stored = std::fs::read_to_string(assets.join("schematics/motor-panel.kdl")).unwrap();
         assert!(stored.contains("drone.motor_input"));
+    }
+
+    #[test]
+    fn window_ingest_materializes_inline_layout() {
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("db/assets");
+        std::fs::create_dir_all(&assets).unwrap();
+
+        let content = r#"window title="Motor Panel" {
+    tabs {
+        graph "drone.motor_input"
+    }
+}
+"#;
+        let rewritten = ingest_window_schematics(&assets, content, &[])
+            .unwrap()
+            .expect("inline window should be materialized");
+
+        assert!(
+            rewritten.contains("path=\"db:schematics/motor-panel.kdl\""),
+            "inline window should become a db: path, got:\n{rewritten}"
+        );
+        assert!(
+            !rewritten.contains("graph \"drone.motor_input\""),
+            "inline layout should not remain in the root schematic, got:\n{rewritten}"
+        );
+        let stored = std::fs::read_to_string(assets.join("schematics/motor-panel.kdl")).unwrap();
+        assert!(stored.contains("drone.motor_input"));
+    }
+
+    #[test]
+    fn inline_nested_windows_resolve_relative_to_parent_file() {
+        for through_file in [false, true] {
+            let dir = tempdir().unwrap();
+            let assets = dir.path().join("db/assets");
+            std::fs::create_dir_all(&assets).unwrap();
+            let panels = dir.path().join("panels");
+            write(&panels.join("child.kdl"), b"graph \"sibling.value\"\n");
+            let content = r#"window title="Outer" {
+    window title="Inner" {
+        window path="child.kdl"
+    }
+}
+"#;
+            if through_file {
+                write(&panels.join("parent.kdl"), content.as_bytes());
+                ingest_window_schematics(
+                    &assets,
+                    "window path=\"panels/parent.kdl\"\n",
+                    &[dir.path().to_path_buf()],
+                )
+                .unwrap()
+                .unwrap();
+            } else {
+                let mut ingest = WindowIngest {
+                    assets_dir: &assets,
+                    search_dirs: &[],
+                    file_keys: HashMap::new(),
+                    reserved_inline_keys: HashSet::new(),
+                };
+                ingest
+                    .rewrite_content(content, Some(&panels))
+                    .unwrap()
+                    .unwrap();
+            }
+            let outer = std::fs::read_to_string(assets.join("schematics/outer.kdl")).unwrap();
+            let inner = std::fs::read_to_string(assets.join("schematics/inner.kdl")).unwrap();
+            let child = std::fs::read_to_string(assets.join("schematics/child.kdl")).unwrap();
+            assert!(outer.contains("db:schematics/inner.kdl"));
+            assert!(inner.contains("db:schematics/child.kdl"));
+            assert!(child.contains("sibling.value"));
+        }
+    }
+
+    #[test]
+    fn window_ingest_reserves_inline_key_before_nested_file() {
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("db/assets");
+        std::fs::create_dir_all(&assets).unwrap();
+        write(&dir.path().join("panel.kdl"), b"graph \"nested.value\"\n");
+        let content = r#"window title="Panel" {
+    graph "inline.value"
+    window path="panel.kdl"
+}
+"#;
+        let rewritten = ingest_window_schematics(&assets, content, &[dir.path().to_path_buf()])
+            .unwrap()
+            .unwrap();
+        assert!(rewritten.contains("db:schematics/panel.kdl"));
+        let inline = std::fs::read_to_string(assets.join("schematics/panel.kdl")).unwrap();
+        let nested = std::fs::read_to_string(assets.join("schematics/panel-2.kdl")).unwrap();
+        assert!(inline.contains("inline.value"));
+        assert!(inline.contains("db:schematics/panel-2.kdl"));
+        assert!(nested.contains("nested.value"));
+        assert!(!nested.contains("inline.value"));
+    }
+
+    #[test]
+    fn inline_window_title_main_skips_active_schematic_key() {
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("db/assets");
+        std::fs::create_dir_all(&assets).unwrap();
+
+        let content = r#"window title="Main" {
+    tabs {
+        graph "panel.value"
+    }
+}
+"#;
+        let rewritten = ingest_window_schematics(&assets, content, &[])
+            .unwrap()
+            .expect("inline window should be materialized");
+
+        assert!(
+            rewritten.contains("path=\"db:schematics/main-2.kdl\""),
+            "title Main must not claim schematics/main.kdl, got:\n{rewritten}"
+        );
+        assert!(
+            !assets.join(ACTIVE_SCHEMATIC_ASSET_KEY).exists(),
+            "active schematic key must stay free for the root layout"
+        );
+        let stored = std::fs::read_to_string(assets.join("schematics/main-2.kdl")).unwrap();
+        assert!(stored.contains("panel.value"));
     }
 
     #[test]

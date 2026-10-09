@@ -242,7 +242,7 @@ fn user_source_label(
     Some(label.display().to_string())
 }
 
-fn push_elem(schematic: &mut Schematic, obj: &Bound<'_, PyAny>) -> PyResult<()> {
+pub(crate) fn push_elem(schematic: &mut Schematic, obj: &Bound<'_, PyAny>) -> PyResult<()> {
     if let Ok(panel) = obj.extract::<PyRef<'_, PyPanel>>() {
         schematic
             .elems

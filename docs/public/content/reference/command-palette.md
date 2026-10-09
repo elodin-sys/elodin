@@ -40,6 +40,17 @@ order = 8
 - `Hierarchy` and `Inspector` are built-in sidebars; they are always present and do not appear in
   the command palette.
 
+## Windows
+
+- `Arrange Windows`: reapply the automatic layout independently on each physical display.
+  The primary window occupies the bottom two thirds when it shares a display with secondary
+  windows; secondary windows share the top third. Displays with only secondary windows use
+  the full available area. Configured display assignments are preserved. A display containing
+  any explicitly configured window rectangle is left unchanged.
+
+This uses the same layout as automatic window creation and can restore automatically placed
+windows after moving or resizing them manually.
+
 ## Viewport
 
 - `Toggle Wireframe`: enable/disable global wireframe.

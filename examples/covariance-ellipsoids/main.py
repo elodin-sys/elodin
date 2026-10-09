@@ -3,7 +3,6 @@
 
 import math
 import typing as ty
-from pathlib import Path
 
 import elodin as el
 import jax
@@ -92,8 +91,9 @@ def world() -> el.World:
         name="covariance",
     )
 
-    schematic_path = Path(__file__).with_name("covariance-ellipsoids.kdl")
-    world.schematic(schematic_path.read_text(), "covariance-ellipsoids.kdl")
+    from schematic import build as build_schematic
+
+    world.schematic(build_schematic(), "covariance-ellipsoids.kdl")
     return world
 
 

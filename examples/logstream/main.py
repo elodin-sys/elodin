@@ -22,6 +22,8 @@ import elodin as el
 import jax
 from jax import numpy as jnp
 
+from schematic import build as build_schematic
+
 SIM_TIME_STEP = 1.0 / 120.0
 BALL_RADIUS = 0.3
 BOUNDARY = 4.0
@@ -136,8 +138,7 @@ log_client = el.s10.PyRecipe.process(
 )
 world.recipe(log_client)
 
-SCHEMATIC_PATH = Path(__file__).with_name("schematic.kdl")
-world.schematic(SCHEMATIC_PATH.read_text())
+world.schematic(build_schematic(), "logstream.kdl")
 
 print("Log Streaming Example")
 print("=====================")

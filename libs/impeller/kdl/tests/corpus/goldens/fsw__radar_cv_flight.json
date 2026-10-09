@@ -883,6 +883,7 @@
     },
     {
       "Window": {
+        "content": null,
         "path": null,
         "screen": 0,
         "screen_rect": {

@@ -494,9 +494,9 @@ def create_world() -> tuple[el.World, el.EntityId]:
         name="crazyflie",
     )
 
-    schematic = Path(__file__).with_name("crazyflie-edu.kdl").read_text()
+    from schematic import build as build_schematic
 
-    w.schematic(schematic, "crazyflie-edu.kdl")
+    w.schematic(build_schematic(), "crazyflie-edu.kdl")
 
     return w, drone
 
