@@ -202,8 +202,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.19.2" selected>
-                        v0.19.2
+                    <option value="v0.20.0" selected>
+                        v0.20.0
                     </option>
                 </select>
             </span>
@@ -882,7 +882,7 @@ and running the simulation. The <code>World</code> object also provides helper m
 </ul>
 </li>
 <li>
-<p><code>sensor_camera(entity, name, width=None, height=None, fov=None, near=0.01, far=1000.0, pos_offset=[0,0,0], rot_offset=[0,0,0], format="rgba", effect="normal", effect_params={}, camera_model=None, lens_hfov=None, create_frustum=False, show_ellipsoids=False, frustums_color=None, projection_color=None, frustums_thickness=0.006, frustums_up_marker="none", frustums_up_marker_overlay=True, fps=None, cinematic=False, ev100=None, bloom=None, environment=None)</code> -&gt; None</p>
+<p><code>sensor_camera(entity, name, width=None, height=None, fov=None, near=0.01, far=1000.0, pos_offset=[0,0,0], rot_offset=[0,0,0], format="rgba", effect="normal", effect_params={}, camera_model=None, lens_hfov=None, create_frustum=False, show_ellipsoids=False, frustums_color=None, projection_color=None, frustums_thickness=0.006, frustums_up_marker="none", frustums_up_marker_overlay=True, fps=None, cinematic=False, ev100=None, bloom=None, environment=None, frustums_face_alpha=0.17647059)</code> -&gt; None</p>
 <p>Register a virtual sensor camera on an entity. The headless GPU render-server emits one frame per camera every <code>1 / fps</code> µs of simulation time and pushes the bytes back to the database. The simulation reads frames asynchronously with <code>ctx.read_msg("entity.name", timestamp=...)</code>.</p>
 <ul>
 <li><code>entity</code> : <a href="/reference/python-api/#class-elodin-entityid">elodin.EntityId</a>, the entity the camera is attached to.</li>
@@ -899,12 +899,16 @@ and running the simulation. The <code>World</code> object also provides helper m
 <li><code>effect_params</code> : <code>dict</code>, effect-specific nested parameters. LWIR supports <code>palette</code>, <code>agc</code>, <code>dde</code>, <code>mtf_blur_px</code>, detector noise, scene temperatures, atmospheric transmission, and <code>sky_offset_dn</code> (cosmetic sky black level). Auto AGC adapts from the scene temperature statistics with sky masked out and freezes on sky-only views.</li>
 <li><code>camera_model</code> : <code>string | None</code>, calibrated camera preset. <code>"boson640p"</code> supplies 640×512, 60 Hz, the Boson+ detector defaults, and an 18° horizontal lens.</li>
 <li><code>lens_hfov</code> : <code>float | None</code>, physical horizontal field of view in degrees. Converted to vertical <code>fov</code> using the resolved image aspect ratio. Mutually exclusive with <code>fov</code>.</li>
+<li><code>create_frustum</code> : <code>bool</code>, draw this camera's 3D frustum in schematic viewports that enable <code>show_frustums</code>. Defaults to <code>False</code>.</li>
+<li><code>frustums_color</code> : three- or four-element normalized RGB(A) list for the frustum edges.</li>
+<li><code>projection_color</code> : three- or four-element normalized RGB(A) list for the separate 2D far-plane projection overlay.</li>
 <li><code>show_ellipsoids</code> : <code>bool</code>, render ellipsoid debug objects in this sensor camera. Defaults to <code>False</code>.</li>
 <li><code>fps</code> : <code>float | None</code>, target rendering rate in frames per second of sim time. The renderer treats this as a target — if the GPU cannot sustain it (e.g., several high-resolution cameras), frames are spaced further apart in sim time but the simulation never blocks. Defaults to the camera-model rate, or <code>30.0</code> without a model.</li>
 <li><code>cinematic</code> : <code>bool</code>, same meaning as KDL <code>viewport cinematic=#true</code>. When true, the sibling render-server loads the cinematic Earth stack for this camera. Defaults to <code>False</code>.</li>
 <li><code>ev100</code> : <code>float | None</code>, camera exposure. With <code>cinematic=True</code> the default is <code>13.5</code>. Requires <code>cinematic=True</code>.</li>
 <li><code>bloom</code> : <code>dict | None</code>, viewport bloom settings (<code>preset</code>, <code>intensity</code>, <code>threshold</code>, <code>threshold_softness</code>). <code>None</code> with <code>cinematic=True</code> uses the cinematic preset. Requires <code>cinematic=True</code>.</li>
 <li><code>environment</code> : <code>dict | None</code>, schematic <code>environment { }</code> (<code>sun</code>, <code>ambient_scale</code>, <code>sky_color</code>, <code>atmosphere</code>, <code>earth</code>). <code>earth</code> may be <code>True</code> for the house look. Omitted with <code>cinematic=True</code> implies Earth, a 100 klx sun, and ambient <code>0.05</code>. Requires <code>cinematic=True</code>.</li>
+<li><code>frustums_face_alpha</code> : <code>float</code>, opacity of the filled 3D frustum volume from <code>0.0</code> to <code>1.0</code>, independent of edge and 2D-projection alpha. Defaults to the historical <code>45/255</code> (<code>0.17647059</code>).</li>
 </ul>
 <p>At most one cinematic environment owner is allowed: a KDL <code>viewport cinematic=#true</code> <strong>or</strong> <code>sensor_camera(cinematic=True)</code>, never both, never two of either. Mixing them raises <code>ValueError</code> before the GPU starts.</p>
 <p>The camera transform follows the entity as a rigid body: as the entity moves and rotates, the camera mount position and orientation rotate with it in body frame.</p>
