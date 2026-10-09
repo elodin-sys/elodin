@@ -48,10 +48,12 @@ use bevy_render::{
     extract_component::ExtractComponent,
     sync_world::{MainEntity, SyncToRenderWorld, TemporaryRenderEntity},
 };
+#[cfg(not(target_family = "wasm"))]
 use binding_types::storage_buffer_read_only_sized;
 use impeller::types::{ComponentId, Timestamp};
 use impeller_bevy::TelemetryCache;
 use impeller_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated, Line3d};
+#[cfg(not(target_family = "wasm"))]
 use std::num::NonZeroU64;
 use zerocopy::IntoBytes;
 
@@ -78,100 +80,112 @@ impl Plugin for Plot3dGpuPlugin {
                 update_uniform_model.after(TransformSystems::Propagate),
             );
 
-        #[cfg(not(target_family = "wasm"))]
-        {
-            load_internal_asset!(app, LINE_SHADER_HANDLE, "./line.wgsl", Shader::from_wgsl);
-            let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
-                return;
-            };
+        load_internal_asset!(app, LINE_SHADER_HANDLE, "./line.wgsl", Shader::from_wgsl);
+        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+            return;
+        };
 
-            render_app
-                .add_render_command::<Transparent3d, DrawLineData>()
-                .init_resource::<SpecializedRenderPipelines<LinePipeline>>()
-                .configure_sets(
-                    Render,
-                    PlotSystem::QueueLine
-                        .in_set(RenderSystems::Queue)
-                        .ambiguous_with(bevy::pbr::queue_material_meshes),
-                )
-                .add_systems(ExtractSchedule, extract_lines)
-                .add_systems(
-                    Render,
-                    prepare_uniform_bind_group.in_set(RenderSystems::PrepareBindGroups),
-                )
-                .add_systems(
-                    Render,
-                    queue_line.in_set(PlotSystem::QueueLine), //.after(prepare_gpu_line),
-                );
-        }
+        render_app
+            .add_render_command::<Transparent3d, DrawLineData>()
+            .init_resource::<SpecializedRenderPipelines<LinePipeline>>()
+            .configure_sets(
+                Render,
+                PlotSystem::QueueLine
+                    .in_set(RenderSystems::Queue)
+                    .ambiguous_with(bevy::pbr::queue_material_meshes),
+            )
+            .add_systems(ExtractSchedule, extract_lines)
+            .add_systems(
+                Render,
+                prepare_uniform_bind_group.in_set(RenderSystems::PrepareBindGroups),
+            )
+            .add_systems(
+                Render,
+                queue_line.in_set(PlotSystem::QueueLine), //.after(prepare_gpu_line),
+            );
     }
 
     fn finish(&self, app: &mut bevy::prelude::App) {
-        #[cfg(target_family = "wasm")]
-        {
-            let _ = app;
-        }
-        #[cfg(not(target_family = "wasm"))]
-        {
-            let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
-                return;
-            };
+        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+            return;
+        };
 
+        // End the `RenderDevice` borrow before `insert_resource`.
+        // WebGL2 has no storage buffers, so wasm only builds the uniform layout.
+        let layouts = {
             let render_device = render_app.world().resource::<RenderDevice>();
             let single = BindGroupLayoutEntries::single(
                 ShaderStages::VERTEX,
                 uniform_buffer::<LineUniform>(true),
             );
             let uniform_descriptor = BindGroupLayoutDescriptor::new("LineUniform Layout", &single);
-
-            let layout_entries = BindGroupLayoutEntries::sequential(
-                ShaderStages::VERTEX,
-                (
-                    storage_buffer_read_only_sized(false, None),
-                    storage_buffer_read_only_sized(false, None),
-                    storage_buffer_read_only_sized(false, None),
-                ),
-            );
-            let values_descriptor =
-                BindGroupLayoutDescriptor::new("LineValues layout", &layout_entries);
-            let values_layout =
-                render_device.create_bind_group_layout("LineValues layout", &layout_entries);
-
-            let index_layout_entries = BindGroupLayoutEntries::sequential(
-                ShaderStages::VERTEX,
-                (
-                    storage_buffer_read_only_sized(false, None),
-                    storage_buffer_read_only_sized(false, None),
-                    storage_buffer_read_only_sized(false, None),
-                ),
-            );
-            let index_descriptor =
-                BindGroupLayoutDescriptor::new("LineIndex layout", &index_layout_entries);
-            let index_layout =
-                render_device.create_bind_group_layout("LineIndex layout", &index_layout_entries);
-
             let line_layout = render_device.create_bind_group_layout("LineUniform Layout", &single);
 
-            render_app.insert_resource(UniformLayout {
-                layout: line_layout,
-                descriptor: uniform_descriptor,
-            });
+            #[cfg(not(target_family = "wasm"))]
+            let storage = {
+                let layout_entries = BindGroupLayoutEntries::sequential(
+                    ShaderStages::VERTEX,
+                    (
+                        storage_buffer_read_only_sized(false, None),
+                        storage_buffer_read_only_sized(false, None),
+                        storage_buffer_read_only_sized(false, None),
+                    ),
+                );
+                let values_descriptor =
+                    BindGroupLayoutDescriptor::new("LineValues layout", &layout_entries);
+                let values_layout =
+                    render_device.create_bind_group_layout("LineValues layout", &layout_entries);
 
+                let index_layout_entries = BindGroupLayoutEntries::sequential(
+                    ShaderStages::VERTEX,
+                    (
+                        storage_buffer_read_only_sized(false, None),
+                        storage_buffer_read_only_sized(false, None),
+                        storage_buffer_read_only_sized(false, None),
+                    ),
+                );
+                let index_descriptor =
+                    BindGroupLayoutDescriptor::new("LineIndex layout", &index_layout_entries);
+                let index_layout = render_device
+                    .create_bind_group_layout("LineIndex layout", &index_layout_entries);
+                (
+                    values_layout,
+                    values_descriptor,
+                    index_layout,
+                    index_descriptor,
+                )
+            };
+
+            (
+                line_layout,
+                uniform_descriptor,
+                #[cfg(not(target_family = "wasm"))]
+                storage,
+            )
+        };
+
+        render_app.insert_resource(UniformLayout {
+            layout: layouts.0,
+            descriptor: layouts.1,
+        });
+
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let (values_layout, values_descriptor, index_layout, index_descriptor) = layouts.2;
             render_app.insert_resource(LineValuesLayout {
                 layout: values_layout,
                 descriptor: values_descriptor,
             });
-
             render_app.insert_resource(LineIndexLayout {
                 layout: index_layout,
                 descriptor: index_descriptor,
             });
-
-            render_app.add_systems(
-                bevy::render::RenderStartup,
-                init_line_pipeline_3d.after(bevy::pbr::MeshPipelineSystems),
-            );
         }
+
+        render_app.add_systems(
+            bevy::render::RenderStartup,
+            init_line_pipeline_3d.after(bevy::pbr::MeshPipelineSystems),
+        );
     }
 }
 
@@ -311,12 +325,14 @@ impl LineUniform {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[derive(Resource)]
 pub(super) struct LineValuesLayout {
     layout: BindGroupLayout,
     descriptor: BindGroupLayoutDescriptor,
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[derive(Resource)]
 pub(super) struct LineIndexLayout {
     layout: BindGroupLayout,
@@ -355,7 +371,9 @@ fn prepare_uniform_bind_group(
 pub struct LinePipeline {
     mesh_pipeline: MeshPipeline,
     uniform_layout: BindGroupLayoutDescriptor,
+    #[cfg(not(target_family = "wasm"))]
     index_layout: BindGroupLayoutDescriptor,
+    #[cfg(not(target_family = "wasm"))]
     values_layout: BindGroupLayoutDescriptor,
 }
 
@@ -366,13 +384,15 @@ fn init_line_pipeline_3d(
     mut commands: Commands,
     mesh_pipeline: Res<MeshPipeline>,
     uniform_layout: Res<UniformLayout>,
-    index_layout: Res<LineIndexLayout>,
-    values_layout: Res<LineValuesLayout>,
+    #[cfg(not(target_family = "wasm"))] index_layout: Res<LineIndexLayout>,
+    #[cfg(not(target_family = "wasm"))] values_layout: Res<LineValuesLayout>,
 ) {
     commands.insert_resource(LinePipeline {
         mesh_pipeline: mesh_pipeline.clone(),
         uniform_layout: uniform_layout.descriptor.clone(),
+        #[cfg(not(target_family = "wasm"))]
         index_layout: index_layout.descriptor.clone(),
+        #[cfg(not(target_family = "wasm"))]
         values_layout: values_layout.descriptor.clone(),
     });
 }
@@ -395,6 +415,8 @@ impl SpecializedRenderPipeline for LinePipeline {
         let shader_defs = vec![
             #[cfg(target_arch = "wasm32")]
             "SIXTEEN_BYTE_ALIGNMENT".into(),
+            #[cfg(target_family = "wasm")]
+            "LINE_VERTEX_ATTRIBUTES".into(),
         ];
 
         let view_layout = self
@@ -406,7 +428,9 @@ impl SpecializedRenderPipeline for LinePipeline {
         let layout = vec![
             view_layout,
             self.uniform_layout.clone(),
+            #[cfg(not(target_family = "wasm"))]
             self.values_layout.clone(),
+            #[cfg(not(target_family = "wasm"))]
             self.index_layout.clone(),
         ];
 
@@ -451,7 +475,17 @@ impl SpecializedRenderPipeline for LinePipeline {
 }
 
 fn line_vertex_buffer_layouts() -> Vec<VertexBufferLayout> {
-    vec![]
+    #[cfg(target_family = "wasm")]
+    {
+        vec![VertexBufferLayout::from_vertex_formats(
+            VertexStepMode::Instance,
+            [VertexFormat::Float32x3, VertexFormat::Float32x3],
+        )]
+    }
+    #[cfg(not(target_family = "wasm"))]
+    {
+        vec![]
+    }
 }
 
 #[derive(Component, Clone)]
@@ -461,15 +495,25 @@ pub struct LineConfig {
 
 #[derive(Clone, Component)]
 pub struct GpuLine {
+    #[cfg(not(target_family = "wasm"))]
     values_bind_group: BindGroup,
+    #[cfg(not(target_family = "wasm"))]
     index_bind_group: BindGroup,
     /// Dense line-local XYZ value buffers (NaN at index 0, samples at 1..n),
     /// stored relative to the line's first sample (entity world pose).
+    #[cfg(not(target_family = "wasm"))]
     #[allow(dead_code)]
     value_buffers: [Buffer; 3],
     /// Strip indices into `value_buffers` (leading/trailing NaN sentinels).
+    #[cfg(not(target_family = "wasm"))]
     #[allow(dead_code)]
     index_buffers: [Buffer; 3],
+    /// Instance buffer of segment endpoints (`point_a`, `point_b` as `vec3`).
+    /// WebGL2 has no storage buffers, so the strip is expanded on the CPU.
+    #[cfg(target_family = "wasm")]
+    segment_buffer: Buffer,
+    /// Native: index-buffer length (instances are `count - 1`).
+    /// Wasm: number of segment instances.
     count: u32,
     /// Last range + LineTree `content_gen`s + frame/anchor hash written into
     /// the GPU buffers. Placement comes from the entity GlobalTransform.
@@ -530,10 +574,18 @@ impl<P: PhaseItem> RenderCommand<P> for DrawLine {
         let Some(gpu_line) = handle else {
             return RenderCommandResult::Failure("no gpu line");
         };
-        pass.set_bind_group(2, &gpu_line.values_bind_group, &[]);
-        pass.set_bind_group(3, &gpu_line.index_bind_group, &[]);
-        let instances = gpu_line.count.saturating_sub(1);
-        pass.draw(0..6, 0..instances);
+        #[cfg(not(target_family = "wasm"))]
+        {
+            pass.set_bind_group(2, &gpu_line.values_bind_group, &[]);
+            pass.set_bind_group(3, &gpu_line.index_bind_group, &[]);
+            let instances = gpu_line.count.saturating_sub(1);
+            pass.draw(0..6, 0..instances);
+        }
+        #[cfg(target_family = "wasm")]
+        {
+            pass.set_vertex_buffer(0, gpu_line.segment_buffer.slice(..));
+            pass.draw(0..6, 0..gpu_line.count);
+        }
         RenderCommandResult::Success
     }
 }
@@ -697,6 +749,33 @@ fn anchor_local_strips(
     (values, indices, residual_too_large)
 }
 
+/// Packed `point_a.xyz, point_b.xyz` instances, skipping strip sentinels.
+///
+/// Index 0 is the NaN slot that separates strips. WebGL2 cannot look that up
+/// from a storage buffer, so those breaks are dropped before upload.
+#[cfg(any(target_family = "wasm", test))]
+fn segment_endpoint_floats(values: &[Vec<f32>; 3], indices: &[u32]) -> Vec<f32> {
+    let n = values[0].len().min(values[1].len()).min(values[2].len());
+    let mut segments = Vec::new();
+    for pair in indices.windows(2) {
+        let [ia, ib] = [pair[0], pair[1]];
+        if ia == 0 || ib == 0 {
+            continue;
+        }
+        let (ia, ib) = (ia as usize, ib as usize);
+        if ia >= n || ib >= n {
+            continue;
+        }
+        for axis in 0..3 {
+            segments.push(values[axis][ia]);
+        }
+        for axis in 0..3 {
+            segments.push(values[axis][ib]);
+        }
+    }
+    segments
+}
+
 /// Upload [`anchor_local_strips`] and bind it for [`DrawLine`]. The flag
 /// reports an anchor residual large enough for visible f32 ULP.
 pub(super) fn build_gpu_line(
@@ -704,8 +783,8 @@ pub(super) fn build_gpu_line(
     strip_ends: &[usize],
     anchor: DVec3,
     render_device: &RenderDevice,
-    values_layout: &LineValuesLayout,
-    index_layout: &LineIndexLayout,
+    #[cfg(not(target_family = "wasm"))] values_layout: &LineValuesLayout,
+    #[cfg(not(target_family = "wasm"))] index_layout: &LineIndexLayout,
 ) -> Option<(GpuLine, bool)> {
     let [xs, ys, zs] = values;
     if xs.len().min(ys.len()).min(zs.len()) < 2 {
@@ -713,76 +792,101 @@ pub(super) fn build_gpu_line(
     }
     let ([x_local, y_local, z_local], indices, residual_too_large) =
         anchor_local_strips(xs, ys, zs, strip_ends, anchor);
-    let count = indices.len() as u32;
-    if count < 2 {
+    if indices.len() < 2 {
         return None;
     }
 
-    let value_size = NonZeroU64::new((x_local.len() * size_of::<f32>()) as u64)?;
-    let value_buffers = [x_local, y_local, z_local].map(|data| {
-        render_device.create_buffer_with_data(&BufferInitDescriptor {
-            label: Some("line_3d anchor-local values"),
-            contents: data.as_bytes(),
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-        })
-    });
+    #[cfg(target_family = "wasm")]
+    {
+        let segments = segment_endpoint_floats(&[x_local, y_local, z_local], &indices);
+        let count = (segments.len() / 6) as u32;
+        if count == 0 {
+            return None;
+        }
+        let segment_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
+            label: Some("line_3d segments"),
+            contents: segments.as_bytes(),
+            usage: BufferUsages::VERTEX,
+        });
+        return Some((
+            GpuLine {
+                segment_buffer,
+                count,
+                last_index_key: None,
+            },
+            residual_too_large,
+        ));
+    }
 
-    let index_size = NonZeroU64::new((indices.len() * size_of::<u32>()) as u64)?;
-    let index_buffers = ['x', 'y', 'z'].map(|_| {
-        render_device.create_buffer_with_data(&BufferInitDescriptor {
-            label: Some("line_3d anchor-local indices"),
-            contents: indices.as_bytes(),
-            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-        })
-    });
+    #[cfg(not(target_family = "wasm"))]
+    {
+        let count = indices.len() as u32;
+        let value_size = NonZeroU64::new((x_local.len() * size_of::<f32>()) as u64)?;
+        let value_buffers = [x_local, y_local, z_local].map(|data| {
+            render_device.create_buffer_with_data(&BufferInitDescriptor {
+                label: Some("line_3d anchor-local values"),
+                contents: data.as_bytes(),
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            })
+        });
 
-    let value_entries = [0, 1, 2].map(|i| BindGroupEntry {
-        binding: i as u32,
-        resource: BindingResource::Buffer(BufferBinding {
-            buffer: &value_buffers[i],
-            offset: 0,
-            size: Some(value_size),
-        }),
-    });
-    let values_bind_group = render_device.create_bind_group(
-        "line_3d anchor-local values",
-        &values_layout.layout,
-        &value_entries,
-    );
+        let index_size = NonZeroU64::new((indices.len() * size_of::<u32>()) as u64)?;
+        let index_buffers = ['x', 'y', 'z'].map(|_| {
+            render_device.create_buffer_with_data(&BufferInitDescriptor {
+                label: Some("line_3d anchor-local indices"),
+                contents: indices.as_bytes(),
+                usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+            })
+        });
 
-    let index_entries = [0, 1, 2].map(|i| BindGroupEntry {
-        binding: i as u32,
-        resource: BindingResource::Buffer(BufferBinding {
-            buffer: &index_buffers[i],
-            offset: 0,
-            size: Some(index_size),
-        }),
-    });
-    let index_bind_group = render_device.create_bind_group(
-        "line_3d anchor-local indexes",
-        &index_layout.layout,
-        &index_entries,
-    );
+        let value_entries = [0, 1, 2].map(|i| BindGroupEntry {
+            binding: i as u32,
+            resource: BindingResource::Buffer(BufferBinding {
+                buffer: &value_buffers[i],
+                offset: 0,
+                size: Some(value_size),
+            }),
+        });
+        let values_bind_group = render_device.create_bind_group(
+            "line_3d anchor-local values",
+            &values_layout.layout,
+            &value_entries,
+        );
 
-    Some((
-        GpuLine {
-            values_bind_group,
-            index_bind_group,
-            value_buffers,
-            index_buffers,
-            count,
-            last_index_key: None,
-        },
-        residual_too_large,
-    ))
+        let index_entries = [0, 1, 2].map(|i| BindGroupEntry {
+            binding: i as u32,
+            resource: BindingResource::Buffer(BufferBinding {
+                buffer: &index_buffers[i],
+                offset: 0,
+                size: Some(index_size),
+            }),
+        });
+        let index_bind_group = render_device.create_bind_group(
+            "line_3d anchor-local indexes",
+            &index_layout.layout,
+            &index_entries,
+        );
+
+        Some((
+            GpuLine {
+                values_bind_group,
+                index_bind_group,
+                value_buffers,
+                index_buffers,
+                count,
+                last_index_key: None,
+            },
+            residual_too_large,
+        ))
+    }
 }
 
 fn extract_lines(
     mut main_world: ResMut<MainWorld>,
     mut commands: Commands,
     render_device: Res<RenderDevice>,
-    values_layout: Res<LineValuesLayout>,
-    index_layout: Res<LineIndexLayout>,
+    #[cfg(not(target_family = "wasm"))] values_layout: Res<LineValuesLayout>,
+    #[cfg(not(target_family = "wasm"))] index_layout: Res<LineIndexLayout>,
 ) {
     main_world.resource_scope(|world, mut cached_state: Mut<CachedSystemState>| {
         let (
@@ -951,7 +1055,9 @@ fn extract_lines(
                     &[xs.len()],
                     line_anchor,
                     &render_device,
+                    #[cfg(not(target_family = "wasm"))]
                     &values_layout,
+                    #[cfg(not(target_family = "wasm"))]
                     &index_layout,
                 )?;
                 if residual_too_large {
@@ -1320,6 +1426,20 @@ mod tests {
         assert!(values.iter().all(|axis| axis[0].is_nan()));
         assert_eq!(values[0][1..], [0.0, 1.0, 9.0, 10.0, 11.0]);
         assert_eq!(indices, [0, 1, 2, 0, 3, 4, 5, 0]);
+    }
+
+    #[test]
+    fn segment_floats_skip_strip_sentinels() {
+        let xs = [1.0, 2.0, 10.0, 11.0, 12.0];
+        let (values, indices, _) = anchor_local_strips(&xs, &xs, &xs, &[2, 5], DVec3::splat(1.0));
+        let segments = segment_endpoint_floats(&values, &indices);
+        assert_eq!(
+            segments,
+            vec![
+                0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 9.0, 9.0, 9.0, 10.0, 10.0, 10.0, 10.0, 10.0, 10.0,
+                11.0, 11.0, 11.0,
+            ]
+        );
     }
 
     #[test]

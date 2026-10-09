@@ -19,7 +19,13 @@ struct LineUniform {
 @group(1) @binding(0)
 var<uniform> line_uniform: LineUniform;
 
-
+#ifdef LINE_VERTEX_ATTRIBUTES
+struct Vertex {
+    @builtin(vertex_index) index: u32,
+    @location(0) point_a: vec3<f32>,
+    @location(1) point_b: vec3<f32>,
+};
+#else
 @group(2) @binding(0) var<storage> x_values: array<f32>;
 @group(2) @binding(1) var<storage> y_values: array<f32>;
 @group(2) @binding(2) var<storage> z_values: array<f32>;
@@ -32,6 +38,7 @@ struct Vertex {
     @builtin(vertex_index) index: u32,
     @builtin(instance_index) instance_index : u32,
 };
+#endif
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
@@ -50,6 +57,10 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     );
     let position = positions[vertex.index];
 
+#ifdef LINE_VERTEX_ATTRIBUTES
+    let point_a = vertex.point_a;
+    let point_b = vertex.point_b;
+#else
     let index_x_a = index_x_buffer[vertex.instance_index];
     let index_y_a = index_y_buffer[vertex.instance_index];
     let index_z_a = index_z_buffer[vertex.instance_index];
@@ -63,6 +74,7 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     // Let's not assume ENU here.
     let point_a = vec3(x_values[index_x_a], y_values[index_y_a], z_values[index_z_a]);
     let point_b = vec3(x_values[index_x_b], y_values[index_y_b], z_values[index_z_b]);
+#endif
 
     // algorithm based on https://wwwtyro.net/2019/11/18/instanced-lines.html
     var clip0 = view.clip_from_world * line_uniform.model * vec4(point_a, 1.0);

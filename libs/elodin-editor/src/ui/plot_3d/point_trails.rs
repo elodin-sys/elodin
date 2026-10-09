@@ -24,9 +24,9 @@ use impeller_bevy::TelemetryCache;
 use impeller_wkt::{ComponentValue, CurrentTimestamp, PointTrails, PointTrailsHeadShape};
 use nox::ArrayBuf;
 
-use super::gpu::{
-    GpuLine, LineConfig, LineIndexLayout, LineUniform, LineValuesLayout, build_gpu_line,
-};
+use super::gpu::{GpuLine, LineConfig, LineUniform, build_gpu_line};
+#[cfg(not(target_family = "wasm"))]
+use super::gpu::{LineIndexLayout, LineValuesLayout};
 use crate::{
     BevyExt, SelectedTimeRange,
     ui::{
@@ -446,8 +446,8 @@ fn extract_point_trails(
     mut commands: Commands,
     mut cache: ResMut<PointTrailsGpuCache>,
     render_device: Res<RenderDevice>,
-    values_layout: Res<LineValuesLayout>,
-    index_layout: Res<LineIndexLayout>,
+    #[cfg(not(target_family = "wasm"))] values_layout: Res<LineValuesLayout>,
+    #[cfg(not(target_family = "wasm"))] index_layout: Res<LineIndexLayout>,
 ) {
     main_world.resource_scope(|world, mut state: Mut<PointTrailsExtractState>| {
         let query = state.0.params(world);
@@ -467,7 +467,9 @@ fn extract_point_trails(
                             &group.strip_ends,
                             strips.anchor,
                             &render_device,
+                            #[cfg(not(target_family = "wasm"))]
                             &values_layout,
+                            #[cfg(not(target_family = "wasm"))]
                             &index_layout,
                         ) else {
                             cache.0.remove(&key);
