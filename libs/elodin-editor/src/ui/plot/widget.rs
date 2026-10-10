@@ -118,21 +118,38 @@ impl WidgetSystem for PlotWidget<'_, '_> {
         };
 
         let telemetry = telemetry_mode.0;
-        let bounds = sync_bounds(
+        let mut bounds = sync_bounds(
             &mut graph_state,
             selected_time_range.0.clone(),
             earliest_timestamp.0,
             ui.max_rect(),
             get_inner_rect(ui.max_rect(), telemetry),
         );
+        // The stored y window can settle on a 1-unit band that contains none of
+        // the samples (fin axis at −29 while the series is −20..0). The stroke
+        // is then clipped off the plot. Re-fit from the samples the GPU draws.
+        #[cfg(target_family = "wasm")]
+        if graph_state.auto_y_range
+            && let Some((min_y, max_y)) = wasm_sample_y_bounds(&graph_state, &lines, &line_query)
+        {
+            graph_state.y_range = min_y..max_y;
+            bounds.min_y = min_y;
+            bounds.max_y = max_y;
+        }
 
         let line_visible_range = bounds.timestamp_range(earliest_timestamp.0);
         graph_state.visible_range = LineVisibleRange(line_visible_range.clone());
         graph_state.widget_width = ui.max_rect().width() as f64;
 
+        // Wasm uploads timeseries x in seconds (`WASM_TIMESERIES_X_SCALE`).
+        // The camera has to match or the stroke sits far outside the clip rect.
+        #[cfg(target_family = "wasm")]
+        let projection = bounds.as_projection_x_scaled(super::gpu::WASM_TIMESERIES_X_SCALE);
+        #[cfg(not(target_family = "wasm"))]
+        let projection = bounds.as_projection();
         commands
             .entity(id)
-            .try_insert(Projection::Orthographic(bounds.as_projection()));
+            .try_insert(Projection::Orthographic(projection));
 
         let plot = TimeseriesPlot::from_bounds(
             ui.max_rect(),
@@ -1527,6 +1544,41 @@ pub fn draw_tick_mark(
     );
 }
 
+/// Padded y span of the samples `visible_plot_strips` will upload.
+#[cfg(target_family = "wasm")]
+fn wasm_sample_y_bounds(
+    graph_state: &GraphState,
+    lines: &Assets<Line>,
+    handles: &Query<&LineHandle>,
+) -> Option<(f64, f64)> {
+    let full = Timestamp(i64::MIN)..Timestamp(i64::MAX);
+    let mut ymin = f32::INFINITY;
+    let mut ymax = f32::NEG_INFINITY;
+    for (entity, _) in graph_state.enabled_lines.values() {
+        let Ok(LineHandle::Timeseries(handle)) = handles.get(*entity) else {
+            continue;
+        };
+        let Some(line) = lines.get(handle) else {
+            continue;
+        };
+        for strip in line
+            .data
+            .visible_plot_strips(full.clone(), Timestamp(0), false)
+        {
+            for (_, y) in strip {
+                if y.is_finite() {
+                    ymin = ymin.min(y);
+                    ymax = ymax.max(y);
+                }
+            }
+        }
+    }
+    if !ymin.is_finite() || !ymax.is_finite() {
+        return None;
+    }
+    Some(calculate_padded_y_bounds(ymin as f64, ymax as f64))
+}
+
 pub fn sync_bounds(
     graph_state: &mut GraphState,
     selected_range: Range<Timestamp>,
@@ -2503,21 +2555,32 @@ impl PlotBounds {
     }
 
     pub fn as_projection(&self) -> OrthographicProjection {
-        let viewport_origin =
-            DVec2::new(-self.min_x / self.width(), -self.min_y / self.height()).as_vec2();
+        self.as_projection_x_scaled(1.0)
+    }
+
+    /// Orthographic projection with plot-x multiplied by `x_scale`.
+    ///
+    /// Y is unchanged. Wasm timeseries passes [`super::gpu::WASM_TIMESERIES_X_SCALE`]
+    /// so the camera is in seconds, matching the vertex buffer.
+    pub fn as_projection_x_scaled(&self, x_scale: f64) -> OrthographicProjection {
+        let min_x = self.min_x * x_scale;
+        let max_x = self.max_x * x_scale;
+        let width = max_x - min_x;
+        let height = self.height();
+        let viewport_origin = DVec2::new(-min_x / width, -self.min_y / height).as_vec2();
         OrthographicProjection {
             near: 0.0,
             far: 1000.0,
             viewport_origin,
             scaling_mode: ScalingMode::Fixed {
-                width: self.width() as f32,
-                height: self.height() as f32,
+                width: width as f32,
+                height: height as f32,
             },
             scale: 1.0,
             area: Rect::new(
-                self.min_x as f32,
+                min_x as f32,
                 self.min_y as f32,
-                self.max_x as f32,
+                max_x as f32,
                 self.max_y as f32,
             ),
         }
