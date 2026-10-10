@@ -15,6 +15,14 @@ struct LineUniform {
 
 @group(1) @binding(0) var<uniform> line_uniform : LineUniform;
 
+#ifdef LINE_VERTEX_ATTRIBUTES
+struct VertexInput {
+    @builtin(vertex_index) vertex_index : u32,
+    @location(0) point_a : vec2<f32>,
+    @location(1) point_b : vec2<f32>,
+    @location(2) hold : f32,
+};
+#else
 @group(2) @binding(0) var<storage> x_values: array<f32>;
 @group(2) @binding(1) var<storage> y_values: array<f32>;
 @group(2) @binding(2) var<storage> index_buffer: array<u32>;
@@ -25,6 +33,7 @@ struct VertexInput {
   @builtin(vertex_index) vertex_index : u32,
   @builtin(instance_index) instance_index : u32,
 };
+#endif
 
 struct VertexOutput {
   @builtin(position) clip_position : vec4<f32>, @location(0) color : vec4<f32>,
@@ -36,13 +45,41 @@ struct VertexOutput {
   // This implementation has diverged heavily - In particular we are using
   // triangle line strip vertices and many extraneous math operations were
   // removed
+#ifdef LINE_VERTEX_ATTRIBUTES
+  // Two triangles. Instanced triangle strips do not rasterize on ANGLE WebGL2.
+  var positions = array<vec2<f32>, 6>(
+    vec2(-1.0, 0.),
+    vec2(-1.0, 1.),
+    vec2(1.0, 0.),
+    vec2(1.0, 0.),
+    vec2(-1.0, 1.),
+    vec2(1.0, 1.),
+  );
+#else
   var positions = array<vec2<f32>, 4>(vec2(-1.0, 0.), // bottom-left
                                       vec2(-1.0, 1.), // top-left
                                       vec2(1.0, 0.),  // bottom-right
                                       vec2(1.0, 1.)); // top-right
+#endif
   let position = positions[vertex.vertex_index];
   let resolution = view.viewport.zw;
   let width = line_uniform.line_width / resolution;
+#ifdef LINE_VERTEX_ATTRIBUTES
+  // Already clip space. The CPU applies the orthographic map; multiplying a
+  // seconds-or-microseconds x by `clip_from_view` here does not rasterize on
+  // ANGLE WebGL2 even when the same multiply works for small query-plot x.
+  var clip_a = vertex.point_a;
+  var clip_b = vertex.point_b;
+  // ANGLE drops a triangle when any vertex is far outside the clip volume,
+  // instead of clipping it. A zero-order step from an out-of-range sample
+  // (clip y of tens) would take the in-range end with it.
+  clip_a = clamp(clip_a, vec2(-1.0), vec2(1.0));
+  clip_b = clamp(clip_b, vec2(-1.0), vec2(1.0));
+  if vertex.hold > 0.5 {
+    clip_a.x = max(clip_a.x, -1.0);
+    clip_b = vec2(1.0, clip_a.y);
+  }
+#else
   let zoh = line_uniform.zoh > 0.5;
   let pair_index = select(vertex.instance_index, vertex.instance_index / 2u, zoh);
   let index_a = index_buffer[pair_index];
@@ -75,6 +112,7 @@ struct VertexOutput {
     clip_a.x = max(clip_a.x, -1.0);
     clip_b = vec2(1.0, clip_a.y);
   }
+#endif
   if all(clip_a == clip_b) {
     return VertexOutput(vec4(2.0, 2.0, 0.0, 1.0), vec4(0.0));
   }
