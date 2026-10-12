@@ -2702,7 +2702,6 @@ pub fn apply_glb_material_overrides(
     }
 }
 
-#[cfg(not(target_family = "wasm"))]
 #[allow(
     clippy::too_many_arguments,
     clippy::type_complexity,
