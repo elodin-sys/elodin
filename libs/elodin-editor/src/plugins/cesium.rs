@@ -1,4 +1,4 @@
-//! Experimental Cesium Native streaming. Opt-in at build time and runtime.
+//! Experimental Cesium Native streaming. Built into the Editor; activated by runtime source configuration.
 use std::collections::{HashMap, HashSet};
 
 use bevy::{

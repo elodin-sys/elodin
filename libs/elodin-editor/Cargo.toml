@@ -9,14 +9,13 @@ publish = false
 [features]
 default = ["big_space"]
 cargo-clippy = []
-cesium = ["big_space", "dep:cesium-native-bridge", "cesium-native-bridge/native"]
 big_space = ["dep:big_space", "bevy_geo_frames/big_space"]
 inspector = ["dep:bevy-inspector-egui", "bevy_geo_frames/inspector"]
 debug = ["big_space", "big_space/debug"]
 tracy = ["bevy/trace_tracy", "bevy/debug"]
 
 [dependencies]
-cesium-native-bridge = { path = "../cesium-native-bridge", optional = true }
+cesium-native-bridge = { path = "../cesium-native-bridge" }
 # math
 hamann-chen-line = { path = "../hamann-chen-line" }
 nox.path = "../nox"

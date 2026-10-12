@@ -4,7 +4,7 @@ set -euo pipefail
 
 root="${CESIUM_BUILD_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/elodin/cesium-0.65.0}"
 source_dir="$root/source"
-install_dir="$root/install"
+install_dir="${CESIUM_NATIVE_DIR:-$root/install}"
 vcpkg_commit=56bb2411609227288b70117ead2c47585ba07713
 export EZVCPKG_BASEDIR="$root/vcpkg"
 mkdir -p "$root"

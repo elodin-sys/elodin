@@ -11,10 +11,8 @@ From the repository root:
 ```sh
 export ELODIN_SHELL_ID=cesium
 nix develop
-bash scripts/build_cesium_native.sh
-export CESIUM_NATIVE_DIR="$HOME/.cache/elodin/cesium-0.65.0/install"
 just install py
-just install cesium
+just install editor
 
 export CESIUM_DEMO=agi
 export CESIUM_TILESET_URL=https://pelican-public.s3.amazonaws.com/3dtiles/agi-hq/tileset.json
@@ -64,12 +62,21 @@ Keep tokens in your local environment, never in Python, KDL or committed files.
 files do not contain their own attribution. Cesium's supplied credits are also
 forwarded to the overlay.
 
+## Standard build, runtime activation
+
+The `cesium` Cargo feature only isolated the first prototype. Cesium is now
+included in the standard Editor build and starts streaming only when a source
+is configured. `just install editor` prepares the native SDK if missing.
+Before direct Cargo commands (including CI), run `just prepare-cesium`, or set
+`CESIUM_NATIVE_DIR` to an existing installation. Cross-platform builds remain
+unvalidated; the SDK is not yet packaged as a Nix derivation.
+
 ## Scope of this first integration
 
 - Native streaming, multi-camera tile selection, CPU decoding and tile eviction.
 - ECEF placement through Elodin's geographic frames and floating origin.
 - Triangle meshes, base-color textures and material colors.
-- Optional `cesium` Cargo feature; ordinary builds need no C++ Cesium installation.
+- Standard Editor dependency, activated by runtime source configuration.
 
 Raster imagery overlays, the material features beyond base color, GPU instancing,
 point clouds and collision meshes are not implemented yet. Cesium World Terrain
@@ -82,13 +89,13 @@ before distributing an integration for providers requiring logo attribution.
 
 Validated locally on macOS ARM64: release Editor build, Clippy with warnings
 denied, local textured/georeferenced glTF test, public Swiss streaming test,
-and the AGI sample in two Editor viewports. Cesium ion with a user token and
+and the AGI sample in multiple Editor viewports. Cesium ion with a user token and
 Linux/Windows builds have not been validated.
 
 ```sh
-CESIUM_NATIVE_DIR="$CESIUM_NATIVE_DIR" cargo test -p cesium-native-bridge --features native
-CESIUM_NATIVE_DIR="$CESIUM_NATIVE_DIR" cargo run -p cesium-native-bridge \
-    --features native --example stream
+just prepare-cesium
+cargo test -p cesium-native-bridge
+cargo run -p cesium-native-bridge --example stream
 ```
 
 This bounded streaming test requires at least one visible tile and checks mesh

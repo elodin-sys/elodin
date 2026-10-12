@@ -1,10 +1,12 @@
 fn main() {
     println!("cargo:rerun-if-env-changed=CESIUM_NATIVE_DIR");
-    #[cfg(feature = "native")]
     {
-        let root = std::path::PathBuf::from(std::env::var_os("CESIUM_NATIVE_DIR").expect(
-            "cesium requires CESIUM_NATIVE_DIR pointing to a Cesium Native 0.65 installation",
-        ));
+        let root = native_install();
+        assert!(
+            root.join("include/Cesium3DTilesSelection/Tileset.h")
+                .is_file(),
+            "Cesium Native is required by the Editor. Run `just prepare-cesium` inside nix develop, or set CESIUM_NATIVE_DIR to an existing 0.65 installation."
+        );
         cxx_build::bridge("src/lib.rs")
             .file("src/bridge.cpp")
             .include("include")
@@ -42,4 +44,28 @@ fn main() {
             println!("cargo:rustc-link-lib=resolv");
         }
     }
+}
+
+fn native_install() -> std::path::PathBuf {
+    use std::{env, path::PathBuf};
+    for key in ["CESIUM_BUILD_ROOT", "XDG_CACHE_HOME", "HOME"] {
+        println!("cargo:rerun-if-env-changed={key}");
+    }
+    if let Some(path) = env::var_os("CESIUM_NATIVE_DIR") {
+        return PathBuf::from(path);
+    }
+    let root = env::var_os("CESIUM_BUILD_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            let cache = env::var_os("XDG_CACHE_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| {
+                    PathBuf::from(
+                        env::var_os("HOME").expect("Set CESIUM_NATIVE_DIR when HOME is unset"),
+                    )
+                    .join(".cache")
+                });
+            cache.join("elodin/cesium-0.65.0")
+        });
+    root.join("install")
 }

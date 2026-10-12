@@ -1,4 +1,3 @@
-#[cfg(feature = "native")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use cesium_native_bridge::ffi;
     let url = std::env::args().nth(1).unwrap_or_else(|| {
@@ -50,10 +49,4 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
     Err("No visible mesh within 60 seconds".into())
-}
-
-#[cfg(not(feature = "native"))]
-fn main() {
-    eprintln!("Enable --features native and set CESIUM_NATIVE_DIR");
-    std::process::exit(1);
 }

@@ -9,7 +9,6 @@ authors = ["sascha@elodin.systems", "akhil@elodin.systems", "van@elodin.systems"
 [features]
 default = ["big_space"]
 cargo-clippy = []
-cesium = ["elodin-editor/cesium"]
 big_space = ["elodin-editor/big_space"]
 inspector = ["elodin-editor/inspector"]
 debug = ["elodin-editor/debug"]

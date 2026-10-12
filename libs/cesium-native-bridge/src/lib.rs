@@ -1,10 +1,8 @@
 //! Narrow, owned-data boundary to Cesium Native. No native pointers escape.
 //! The session stays on its creating thread; Cesium owns its worker pool.
 
-#[cfg(feature = "native")]
 pub type SessionHandle = cxx::UniquePtr<ffi::Session>;
 
-#[cfg(feature = "native")]
 #[cxx::bridge(namespace = "elodin_cesium")]
 pub mod ffi {
     #[derive(Clone, Copy)]

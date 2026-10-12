@@ -1,5 +1,3 @@
-#![cfg(feature = "native")]
-
 use cesium_native_bridge::ffi;
 use std::time::{Duration, Instant};
 

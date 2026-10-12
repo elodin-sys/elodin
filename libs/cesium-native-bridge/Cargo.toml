@@ -4,12 +4,8 @@ version.workspace = true
 edition.workspace = true
 publish = false
 
-[features]
-default = []
-native = ["dep:cxx", "dep:cxx-build"]
-
 [dependencies]
-cxx = { version = "1", optional = true }
+cxx = "1"
 
 [build-dependencies]
-cxx-build = { version = "1", optional = true }
+cxx-build = "1"
