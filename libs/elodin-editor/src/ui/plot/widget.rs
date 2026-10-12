@@ -1929,7 +1929,6 @@ pub fn sync_derived_graphs(
     }
 }
 
-#[cfg(not(target_family = "wasm"))]
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub fn sync_kernel_graphs(
     mut graph_states: Query<(Entity, &mut GraphState)>,
@@ -2071,9 +2070,6 @@ pub fn sync_kernel_graphs(
         }
     }
 }
-
-#[cfg(target_family = "wasm")]
-pub fn sync_kernel_graphs() {}
 
 /// New locks adopt X from current leader but don't become leader yet.
 #[allow(clippy::type_complexity)]
