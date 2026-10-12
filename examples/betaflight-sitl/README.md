@@ -308,6 +308,21 @@ runs passed at 0.074574/0.073668/0.073832 m RMS; a separate camera-enabled
 truth run passed at 0.071955 m RMS with 1350 renderer frames at 29.98 simulated
 FPS. Scripted C0 and both C/D audits also passed with `RACE_CAMERA=1`.
 
+Requalified **2026-10-12 on main `729022c7`**, with a freshly built
+`0.20.1-alpha.0` runtime and `0.20.1a0` Python SDK: 180 pure tests and
+5 controller tests passed. Three consecutive unchanged-code camera-off truth
+runs passed at **0.073873 / 0.075235 / 0.074413 m RMS**, each over exactly
+10 s; independent DB reconstruction agreed within 0.0000005 m. All retained
+armed/ANGLE/lockstep/motor evidence, no crossing/fault, and the expected
+incomplete race result. Default C0, scripted-single, C positive referee and D
+physical audits also passed. Offscreen truth+camera passed independently at
+0.075011 m RMS with 1350 frames and 29.98 simulated FPS; camera-enabled
+scripted C0 and C/D audits passed as well. Video export and ingested
+schematic/phase/RC telemetry were verified, but no new editor visual review or
+manual hardware qualification was performed. See the current-main evidence
+under Package E in [RACING_PLAN.md](RACING_PLAN.md); the original qualifications
+above remain historical evidence.
+
 #### Package C referee qualification
 
 The expensive live positive-path check is opt-in and separate from the pure
