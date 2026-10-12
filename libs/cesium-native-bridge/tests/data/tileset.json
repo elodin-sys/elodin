@@ -1,0 +1,47 @@
+{
+  "asset": {
+    "version": "1.1"
+  },
+  "geometricError": 0,
+  "root": {
+    "boundingVolume": {
+      "box": [
+        5,
+        -5,
+        0,
+        10,
+        0,
+        0,
+        0,
+        10,
+        0,
+        0,
+        0,
+        1
+      ]
+    },
+    "transform": [
+      0,
+      1,
+      0,
+      0,
+      0,
+      0,
+      1,
+      0,
+      1,
+      0,
+      0,
+      0,
+      6378137,
+      0,
+      0,
+      1
+    ],
+    "geometricError": 0,
+    "refine": "REPLACE",
+    "content": {
+      "uri": "triangle.gltf"
+    }
+  }
+}

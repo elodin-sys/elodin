@@ -139,6 +139,10 @@ install target="all":
     editor)
       just _install-bin elodin "$ELODIN_SHELL_BIN"
       ;;
+    cesium)
+      cargo build --release -p elodin --features cesium
+      install -m 755 target/release/elodin "$ELODIN_SHELL_BIN/"
+      ;;
     db)
       just _install-bin elodin-db "$ELODIN_SHELL_BIN"
       ;;
@@ -164,6 +168,6 @@ install target="all":
       just install db
       ;;
     *)
-      echo "usage: just install [py|editor|db|tracy|all]" >&2
+      echo "usage: just install [py|editor|cesium|db|tracy|all]" >&2
       exit 1;;
   esac

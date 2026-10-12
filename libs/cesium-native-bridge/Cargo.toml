@@ -1,0 +1,15 @@
+[package]
+name = "cesium-native-bridge"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[features]
+default = []
+native = ["dep:cxx", "dep:cxx-build"]
+
+[dependencies]
+cxx = { version = "1", optional = true }
+
+[build-dependencies]
+cxx-build = { version = "1", optional = true }

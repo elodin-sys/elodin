@@ -1921,7 +1921,9 @@ impl ViewportPane {
             viewport.bloom.as_ref(),
             viewport.cinematic,
         ));
-        camera.insert(PrimarySkybox);
+        if viewport.effects {
+            camera.insert(PrimarySkybox);
+        }
         camera.insert(EnvironmentMapLight {
             diffuse_map: asset_server.load("embedded://elodin_editor/assets/diffuse.ktx2"),
             specular_map: asset_server.load("embedded://elodin_editor/assets/specular.ktx2"),

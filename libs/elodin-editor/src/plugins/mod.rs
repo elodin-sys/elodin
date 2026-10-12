@@ -1,5 +1,7 @@
 mod asset_cache;
 pub(crate) mod camera_anchor;
+#[cfg(feature = "cesium")]
+pub mod cesium;
 #[cfg(not(target_family = "wasm"))]
 pub mod cinematic_earth;
 #[cfg(not(target_family = "wasm"))]
