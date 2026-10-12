@@ -240,7 +240,9 @@ class StandoffHoldReferee:
             position[1] - self.target_enu[1],
             position[2] - self.target_enu[2],
         )
-        if not all(math.isfinite(value) for value in error) or not math.isfinite(_dot(error, error)):
+        if not all(math.isfinite(value) for value in error) or not math.isfinite(
+            _dot(error, error)
+        ):
             self._reset_candidate("invalid_truth")
             return
         if self._samples:
@@ -254,9 +256,10 @@ class StandoffHoldReferee:
         if self._samples:
             previous = self._samples[-1]
             delta_t = sim_time - previous.sim_time
-            cumulative = previous.cumulative_squared_error_integral + delta_t * (
-                previous.squared_error + _dot(error, error)
-            ) * 0.5
+            cumulative = (
+                previous.cumulative_squared_error_integral
+                + delta_t * (previous.squared_error + _dot(error, error)) * 0.5
+            )
             if not math.isfinite(cumulative):
                 self._reset_candidate("invalid_truth")
                 return
@@ -294,9 +297,7 @@ class StandoffHoldReferee:
                 second.squared_error - first.squared_error
             )
             start_integral = first.cumulative_squared_error_integral + (
-                (start_time - first.sim_time)
-                * (first.squared_error + boundary_squared)
-                * 0.5
+                (start_time - first.sim_time) * (first.squared_error + boundary_squared) * 0.5
             )
         squared_error_integral = end.cumulative_squared_error_integral - start_integral
         rms = math.sqrt(max(0.0, squared_error_integral / self.duration_s))
@@ -317,8 +318,11 @@ class StandoffHoldReferee:
 
         window = self._passed_window or self._best_window
         reason = (
-            "gate_crossing" if self._gate_crossed else
-            "guidance_fault" if self._guidance_fault else self._reason
+            "gate_crossing"
+            if self._gate_crossed
+            else "guidance_fault"
+            if self._guidance_fault
+            else self._reason
         )
         return HoldQualification(
             target_enu=self.target_enu,

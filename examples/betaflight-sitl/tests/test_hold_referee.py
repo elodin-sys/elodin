@@ -228,7 +228,9 @@ def test_guidance_fault_permanently_fails_even_after_qualified_window() -> None:
     grader.observe_truth(TARGET, 0.0, ELIGIBLE)
     grader.observe_truth(TARGET, 1.0, ELIGIBLE)
     assert grader.result().passed
-    grader.observe_truth(TARGET, 1.1, HoldEligibility(False, True, True, True, True), phase_fault=True)
+    grader.observe_truth(
+        TARGET, 1.1, HoldEligibility(False, True, True, True, True), phase_fault=True
+    )
     grader.observe_truth(TARGET, 2.1, ELIGIBLE)
     assert grader.result().status == "FAIL"
     assert grader.result().reason == "guidance_fault"

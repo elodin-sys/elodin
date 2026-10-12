@@ -700,9 +700,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
                 armed=command_sent.arm >= RC_ARMED,
                 angle_mode=command_sent.mode >= RC_ANGLE,
                 lockstep_response=s.lockstep_response,
-                motor_response=(
-                    s.motor_response and float(np.max(s.motors)) > MIN_MOTOR_RESPONSE
-                ),
+                motor_response=(s.motor_response and float(np.max(s.motors)) > MIN_MOTOR_RESPONSE),
             ),
             gate_crossed=gate_event is not None,
             phase_fault=command_source.phase is GuidancePhase.FAULT,

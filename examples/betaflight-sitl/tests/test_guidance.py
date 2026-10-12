@@ -183,8 +183,12 @@ def test_attitude_throttle_and_rc_outputs_are_saturated() -> None:
     assert 0.10 <= command.throttle <= 0.32
     assert abs(command.yaw) <= 0.15
     assert semantic_to_rc(command).as_array().tolist()[0:4] == pytest.approx(
-        [1500 + round(command.roll * 500), 1500 + round(command.pitch * 500),
-         1000 + round(command.throttle * 1000), 1500 - round(command.yaw * 500)]
+        [
+            1500 + round(command.roll * 500),
+            1500 + round(command.pitch * 500),
+            1000 + round(command.throttle * 1000),
+            1500 - round(command.yaw * 500),
+        ]
     )
 
 
