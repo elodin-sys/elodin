@@ -31,7 +31,7 @@ pub struct LoginArgs {
     /// Use the device authorization flow (print a URL + code) for headless/SSH shells.
     #[arg(long)]
     pub device: bool,
-    /// Print the authorization URL instead of opening a browser.
+    /// Print the authorization URL instead of opening a browser (also with --device).
     #[arg(long)]
     pub no_browser: bool,
 }

@@ -22,7 +22,7 @@ pub async fn run(ctx: &AuthCtx, args: &LoginArgs) -> miette::Result<()> {
 pub async fn sign_in(ctx: &AuthCtx, args: &LoginArgs, prompt: Option<&str>) -> miette::Result<()> {
     let oidc = ctx.discover().await.wrap_err("OIDC discovery failed")?;
     let creds = if args.device {
-        device_flow(ctx, &oidc).await?
+        device_flow(ctx, &oidc, args.no_browser).await?
     } else {
         browser_flow(ctx, &oidc, args, prompt).await?
     };
@@ -200,7 +200,11 @@ struct DeviceError {
     error: String,
 }
 
-async fn device_flow(ctx: &AuthCtx, oidc: &OidcConfig) -> miette::Result<Credentials> {
+async fn device_flow(
+    ctx: &AuthCtx,
+    oidc: &OidcConfig,
+    no_browser: bool,
+) -> miette::Result<Credentials> {
     let endpoint = oidc
         .device_authorization_endpoint
         .clone()
@@ -232,7 +236,7 @@ async fn device_flow(ctx: &AuthCtx, oidc: &OidcConfig) -> miette::Result<Credent
         "To log in, open:\n  {}\nand enter the code:  {}",
         device.verification_uri, device.user_code
     );
-    if let Some(complete) = &device.verification_uri_complete {
+    if !no_browser && let Some(complete) = &device.verification_uri_complete {
         let _ = opener::open(complete);
     }
     println!("Waiting for authorization...");
