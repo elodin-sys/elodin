@@ -147,6 +147,10 @@ impl PlotDataComponent {
             };
             let new_value = new_value.as_f32();
             let mut line = assets.get_mut(line.id()).expect("missing line asset");
+            let projection = line
+                .data
+                .store_projection
+                .filter(|p| p.content_gen == line.data.content_gen);
             // Only accept data at timestamps beyond all existing data for this
             // line. Live FixedRate snapshots can repeat the playhead timestamp;
             // skipping already-covered times keeps the tip monotonic.
@@ -165,6 +169,12 @@ impl PlotDataComponent {
             if !accepted {
                 let new_chunk = Chunk::from_initial_value(timestamp, earliest_timestamp, new_value);
                 line.data.insert(new_chunk);
+            }
+            if let Some(mut projection) = projection {
+                // Live appends preserve the verified prefix. The next store sync
+                // still checks new samples between that prefix and this live tip.
+                projection.content_gen = line.data.content_gen;
+                line.data.store_projection = Some(projection);
             }
             // Archive mirrors exactly the sequence accepted by the view. Monotonicity of raw is
             // enforced by `push_raw` itself, so re-ingestion of historical timestamps (already
@@ -1406,16 +1416,20 @@ fn apply_plot_sync_plan(
                 max_points,
             );
         }
-        PlotSyncPlan::Keep => {
-            tree.evict_chunks_outside(padded_sync_keep_range(sync_range));
-        }
-        PlotSyncPlan::Extend { suffix, .. } => {
-            if let Some(range) = suffix {
+        PlotSyncPlan::Keep | PlotSyncPlan::Extend { .. } => {
+            // A projected window may extend beyond the last available sample.
+            // Include new appends inside that window, even when the camera stays put.
+            let start = tree
+                .latest_sample_timestamp()
+                .map_or(sync_range.start, |last| {
+                    Timestamp(last.0.saturating_add(1)).max(sync_range.start)
+                });
+            if start < sync_range.end {
                 append_series_element_to_line(
                     series_store,
                     component_id,
                     element_index,
-                    &range,
+                    &(start..sync_range.end),
                     earliest,
                     tree,
                 );
@@ -1424,10 +1438,25 @@ fn apply_plot_sync_plan(
         }
     }
     tree.set_projected_range(sync_range.clone());
+    tree.store_projection = series_store
+        .append_epoch(&component_id)
+        .filter(|_| max_points.is_none())
+        .map(|append_epoch| PlotStoreProjection {
+            component_id,
+            element_index,
+            append_epoch,
+            content_gen: tree.content_gen,
+            checked_end: series_store
+                .series(&component_id)
+                .and_then(|series| series.last_key_value())
+                .map_or(sync_range.start, |(&last, _)| {
+                    Timestamp(last.0.saturating_add(1)).min(sync_range.end)
+                }),
+        });
 }
 
-/// True when every in-store sample inside the tree's already-covered span is
-/// also in the tree.
+/// True when the projected history can be reused, with new tip samples appended
+/// separately. An unchanged append epoch avoids a walk over the entire history.
 ///
 /// Compared only on `stored ∩ need`, so a newly exposed suffix still goes
 /// through `Extend` instead of a full rebuild. Samples the store later
@@ -1443,8 +1472,26 @@ fn plot_line_matches_store_interior(
     let Some(stored) = tree.projected_span() else {
         return true;
     };
-    let start = stored.start.max(need.start);
-    let end = stored.end.min(need.end);
+    let mut start = stored.start.max(need.start);
+    // Missing samples beyond the actual tip can be appended without rebuilding.
+    let end = stored.end.min(need.end).min(
+        tree.latest_sample_timestamp()
+            .map_or(start, |last| Timestamp(last.0.saturating_add(1))),
+    );
+    // Cache samples are immutable. While the epoch and tree contents match,
+    // only the tip can have grown: do not walk the already-verified history.
+    if let Some(projection) = tree.store_projection {
+        if series_store.append_epoch(&component_id) != Some(projection.append_epoch)
+            || projection.component_id != component_id
+            || projection.element_index != element_index
+        {
+            // Also refresh a predecessor that arrived before the visible range.
+            return false;
+        }
+        if projection.content_gen == tree.content_gen {
+            start = start.max(projection.checked_end);
+        }
+    }
     if end.0 <= start.0 {
         return true;
     }
@@ -2423,9 +2470,19 @@ impl<D: Clone + BoundOrd> ChunkSummary<D> {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct PlotStoreProjection {
+    component_id: ComponentId,
+    element_index: usize,
+    append_epoch: u64,
+    content_gen: u64,
+    checked_end: Timestamp,
+}
+
 pub struct LineTree<D: Clone + BoundOrd> {
     tree: NoditMap<i64, nodit::Interval<i64>, Chunk<D>>,
     projected_range: Option<Range<Timestamp>>,
+    store_projection: Option<PlotStoreProjection>,
     data_buffer_shard_alloc: Option<BufferShardAlloc>,
     timestamp_buffer_shard_alloc: Option<BufferShardAlloc>,
     /// Append-only archive of raw `(timestamp, value)` samples ingested live.
@@ -2457,6 +2514,7 @@ impl<D: Clone + BoundOrd> Default for LineTree<D> {
         Self {
             tree: Default::default(),
             projected_range: None,
+            store_projection: None,
             data_buffer_shard_alloc: None,
             timestamp_buffer_shard_alloc: None,
             raw_timestamps: Vec::new(),
@@ -3211,6 +3269,7 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     pub fn clear(&mut self) {
         self.content_gen = self.content_gen.wrapping_add(1);
         self.projected_range = None;
+        self.store_projection = None;
         let full = nodit::interval::ii(i64::MIN, i64::MAX);
         for (_range, chunk) in self.tree.remove_overlapping(full) {
             if let Some(alloc) = &mut self.data_buffer_shard_alloc
@@ -4586,6 +4645,107 @@ mod tests {
         );
         // Zero-order hold on slow: 10 until t=4, then 20.
         assert_eq!(evaluated.values, vec![vec![10.0, 11.0, 12.0, 13.0, 24.0]]);
+    }
+
+    #[test]
+    fn plot_sync_appends_inside_a_fixed_window_without_replacing_existing_chunks() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.fixed.live");
+        insert_f64(&mut cache, id, 0, 0.0);
+        let need = Timestamp(0)..Timestamp(10_000);
+        let mut tree = LineTree::<f32>::default();
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        let original = tree.last().unwrap().data.gpu_dirty.clone();
+
+        for timestamp in 1..100 {
+            insert_f64(&mut cache, id, timestamp, timestamp as f64);
+            apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        }
+        assert_eq!(tree.total_points(), 100);
+        assert!(Arc::ptr_eq(&original, &tree.last().unwrap().data.gpu_dirty));
+        assert_eq!(tree.get_nearest(Timestamp(99)).map(|(_, v)| *v), Some(99.0));
+    }
+
+    #[test]
+    fn plot_sync_fills_new_gaps_behind_live_snapshots() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.live.gap");
+        insert_f64(&mut cache, id, 0, 0.0);
+        let need = Timestamp(0)..Timestamp(100);
+        let mut graph_data = CollectedGraphData::default();
+        graph_data
+            .components
+            .insert(id, PlotDataComponent::new("live", vec![]));
+        let mut lines = Assets::<Line>::default();
+        let handle = graph_data.ensure_line_handle(id, 0, &mut lines).unwrap();
+        apply_plot_sync_plan(
+            &cache,
+            id,
+            0,
+            &need,
+            Timestamp(0),
+            None,
+            false,
+            &mut lines.get_mut(&handle).unwrap().data,
+        );
+
+        // A live snapshot jumps to 30 while the cache receives every sample in order.
+        let value = ComponentValue::F64(nox::array![30.0f64].to_dyn());
+        graph_data.components.get_mut(&id).unwrap().push_value(
+            value.as_view(),
+            &mut lines,
+            Timestamp(30),
+            Timestamp(0),
+            false,
+        );
+        for timestamp in [10, 20, 30] {
+            insert_f64(&mut cache, id, timestamp, timestamp as f64);
+        }
+        let original = {
+            let tree = &mut lines.get_mut(&handle).unwrap().data;
+            assert_eq!(tree.store_projection.unwrap().content_gen, tree.content_gen);
+            assert!(!plot_line_matches_store_interior(
+                &cache, id, 0, &need, tree
+            ));
+            apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, tree);
+            assert_eq!(tree.total_points(), 4);
+            tree.last().unwrap().data.gpu_dirty.clone()
+        };
+        let value = ComponentValue::F64(nox::array![40.0f64].to_dyn());
+        graph_data.components.get_mut(&id).unwrap().push_value(
+            value.as_view(),
+            &mut lines,
+            Timestamp(40),
+            Timestamp(0),
+            false,
+        );
+        insert_f64(&mut cache, id, 40, 40.0);
+        let tree = &mut lines.get_mut(&handle).unwrap().data;
+        assert!(plot_line_matches_store_interior(&cache, id, 0, &need, tree));
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, tree);
+        assert_eq!(tree.total_points(), 5);
+        assert!(Arc::ptr_eq(&original, &tree.last().unwrap().data.gpu_dirty));
+    }
+
+    #[test]
+    fn plot_sync_refreshes_backfilled_predecessors_and_recreated_series() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.predecessor.backfill");
+        insert_f64(&mut cache, id, 0, 0.0);
+        insert_f64(&mut cache, id, 100, 100.0);
+        let need = Timestamp(50)..Timestamp(101);
+        let mut tree = LineTree::<f32>::default();
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+
+        insert_f64(&mut cache, id, 40, 40.0);
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.first_timestamp(), Some(Timestamp(40)));
+
+        cache.remove_series(&id);
+        insert_f64(&mut cache, id, 100, -100.0);
+        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        assert_eq!(tree.total_points(), 1);
+        assert_eq!(tree.first_sample(), Some(-100.0));
     }
 
     #[test]

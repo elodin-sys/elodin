@@ -131,6 +131,8 @@ pub struct TelemetryCache {
     components: HashMap<ComponentId, BTreeMap<Timestamp, ComponentValue>>,
     /// Merged half-open coverage intervals `[start, end)` per component (micros).
     coverage: HashMap<ComponentId, Vec<(i64, i64)>>,
+    /// Changes only when an insertion is not an append, or a series is recreated.
+    append_epochs: HashMap<ComponentId, u64>,
     generation: u64,
 }
 
@@ -151,18 +153,32 @@ impl TelemetryCache {
         self.generation
     }
 
+    /// Equal epochs guarantee that an existing series has only grown at its tip.
+    /// Duplicate timestamps keep their original value and do not change the epoch.
+    pub fn append_epoch(&self, component_id: &ComponentId) -> Option<u64> {
+        self.append_epochs.get(component_id).copied()
+    }
+
     pub fn total_sample_count(&self) -> u64 {
         self.components.values().map(|s| s.len() as u64).sum()
     }
 
     pub fn insert(&mut self, component_id: ComponentId, ts: Timestamp, value: ComponentValue) {
         let series = self.components.entry(component_id).or_default();
+        let is_append = series.last_key_value().is_none_or(|(&last, _)| ts > last);
         // Keep the first value seen for a timestamp. In mixed backfill+live
         // streaming, the same timestamp can be replayed; replacing it can make
         // rendered poses jump between two states for the same tick.
         if let std::collections::btree_map::Entry::Vacant(entry) = series.entry(ts) {
             entry.insert(value);
             self.generation = self.generation.wrapping_add(1);
+            let epoch = self
+                .append_epochs
+                .entry(component_id)
+                .or_insert(self.generation);
+            if !is_append {
+                *epoch = self.generation;
+            }
         }
     }
 
@@ -212,6 +228,7 @@ impl TelemetryCache {
 
     /// Drop all samples and coverage for a component (unsubscribe / reclaim RAM).
     pub fn remove_series(&mut self, component_id: &ComponentId) {
+        self.append_epochs.remove(component_id);
         let removed_components = self.components.remove(component_id).is_some();
         let removed_coverage = self.coverage.remove(component_id).is_some();
         if removed_components || removed_coverage {
@@ -2494,6 +2511,31 @@ mod series_store_allowlist_tests {
             cache.next_sample_after(&id, Timestamp(3000)),
             Some(Timestamp(4000))
         );
+    }
+
+    #[test]
+    fn append_epoch_tracks_backfill_and_recreation_but_not_duplicates() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId(42);
+        assert_eq!(cache.append_epoch(&id), None);
+        sample(&mut cache, id, 10);
+        let original = cache.append_epoch(&id);
+        sample(&mut cache, id, 30);
+        sample(&mut cache, id, 10);
+        sample(&mut cache, ComponentId(43), 0);
+        cache.mark_covered(id, Timestamp(10), Timestamp(31));
+        assert_eq!(cache.append_epoch(&id), original);
+
+        sample(&mut cache, id, 20);
+        let backfilled = cache.append_epoch(&id);
+        assert_ne!(backfilled, original);
+        sample(&mut cache, id, 40);
+        assert_eq!(cache.append_epoch(&id), backfilled);
+
+        cache.remove_series(&id);
+        assert_eq!(cache.append_epoch(&id), None);
+        sample(&mut cache, id, 40);
+        assert_ne!(cache.append_epoch(&id), backfilled);
     }
 
     #[test]
