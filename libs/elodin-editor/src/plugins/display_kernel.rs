@@ -3,7 +3,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
@@ -19,7 +19,6 @@ use crate::object_3d::{local_assets_root, resolve_db_asset_url};
 use crate::plugins::kdl_document::InitialKdlPath;
 use crate::ui::plot::data::EvaluatedSeries;
 
-const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 const RETRY_BACKOFF_CAP: Duration = Duration::from_secs(30);
 
 pub struct DisplayKernelPlugin;
@@ -141,7 +140,7 @@ fn spawn_load(
     binding: DisplayKernelBinding,
     fetch: KernelFetchCtx,
 ) -> Task<Result<CompiledDisplayKernel, LoadError>> {
-    IoTaskPool::get().spawn(async move { load_compiled(&binding, &fetch) })
+    IoTaskPool::get().spawn(async move { load_compiled(&binding, &fetch).await })
 }
 
 fn retry_backoff(attempts: u32) -> Duration {
@@ -346,11 +345,11 @@ pub fn kernel_fetch_ctx(
     }
 }
 
-fn load_compiled(
+async fn load_compiled(
     binding: &DisplayKernelBinding,
     fetch: &KernelFetchCtx,
 ) -> Result<CompiledDisplayKernel, LoadError> {
-    let bytes = fetch_kernel_bytes(binding, fetch)?;
+    let bytes = fetch_kernel_bytes(binding, fetch).await?;
     let artifact = DisplayKernelArtifact::parse(&bytes).map_err(LoadError::permanent)?;
     let (scalar_in, scalar_out, batched_in, batched_out) =
         verify_artifact(&artifact, binding).map_err(LoadError::permanent)?;
@@ -397,7 +396,7 @@ fn verify_artifact(
     Ok((scalar_in, scalar_out, batched_in, batched_out))
 }
 
-fn fetch_kernel_bytes(
+async fn fetch_kernel_bytes(
     binding: &DisplayKernelBinding,
     fetch: &KernelFetchCtx,
 ) -> Result<Vec<u8>, LoadError> {
@@ -407,6 +406,7 @@ fn fetch_kernel_bytes(
         .next()
         .unwrap_or(&binding.hash)
         .to_string();
+    #[cfg(not(target_family = "wasm"))]
     if let Some(dir) = &fetch.kdl_dir {
         let local = dir.join("kernels").join(&hash);
         if local.is_file() {
@@ -421,6 +421,7 @@ fn fetch_kernel_bytes(
     } else {
         DisplayKernelBinding::asset_key(&hash)
     };
+    #[cfg(not(target_family = "wasm"))]
     if let Some(root) = &fetch.local_root {
         let rel = key.strip_prefix("db:").unwrap_or(&key);
         let path = root.join(rel);
@@ -436,15 +437,9 @@ fn fetch_kernel_bytes(
     } else {
         resolve_db_asset_url(&format!("db:{key}"), fetch.connection_addr)
     };
-    let client = reqwest::blocking::Client::builder()
-        .timeout(FETCH_TIMEOUT)
-        .build()
-        .map_err(|err| LoadError::fetch(err.to_string()))?;
-    client
-        .get(&url)
-        .send()
-        .and_then(|resp| resp.error_for_status()?.bytes().map(|b| b.to_vec()))
-        .map_err(|err| LoadError::fetch(format!("fetch {url}: {err}")))
+    crate::plugins::http_client::get_bytes(&url)
+        .await
+        .map_err(LoadError::fetch)
 }
 
 fn pack_component_value(value: &ComponentValue, dtype: &str) -> Result<Vec<u8>, String> {
