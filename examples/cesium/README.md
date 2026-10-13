@@ -67,8 +67,8 @@ forwarded to the overlay.
 The `cesium` Cargo feature only isolated the first prototype. Cesium is now
 included in the standard Editor build and starts streaming only when a source
 is configured. `just install editor` prepares the native SDK if missing.
-Before direct Cargo commands (including CI), run `just prepare-cesium`, or set
-`CESIUM_NATIVE_DIR` to an existing installation. Cross-platform builds remain
+Before direct Cargo commands, set `CESIUM_NATIVE_DIR` to the installation
+prepared by `just prepare-cesium` (normally `~/.cache/elodin/cesium-0.65.0/install`). Cross-platform builds remain
 unvalidated; the SDK is not yet packaged as a Nix derivation.
 
 ## Scope of this first integration
@@ -94,8 +94,8 @@ Linux/Windows builds have not been validated.
 
 ```sh
 just prepare-cesium
-cargo test -p cesium-native-bridge
-cargo run -p cesium-native-bridge --example stream
+export CESIUM_NATIVE_DIR="$HOME/.cache/elodin/cesium-0.65.0/install"
+# Run bridge/plugin tests in the bevy-cesium repository: just test
 ```
 
 This bounded streaming test requires at least one visible tile and checks mesh
@@ -103,8 +103,19 @@ array lengths and index bounds. It does not replace visual validation in the Edi
 
 The bridge uses Cesium Native **0.65.0**, pinned to commit
 `1bca8021711294cc83a5a032599ac72d9b3166c9`, and the maintained CXX binding generator.
-The sole `unsafe extern` boundary is in `libs/cesium-native-bridge`; no native
+The sole `unsafe extern` boundary is in `bevy-cesium/crates/cesium-native-bridge`; no native
 pointers escape to the Editor and sessions are kept on the creating thread.
 
 Upstream integration guide:
 https://cesium.com/learn/cesium-native/ref-doc/rendering-3d-tiles.html
+
+## Reusable Bevy integration
+
+The Editor consumes [bevy-cesium](https://github.com/elodin-sys/bevy-cesium), pinned
+to a Git commit in its Cargo manifest. No sibling checkout is required. That
+repository owns the Cesium Native bridge, SDK build script and reusable plugin,
+with a standalone Bevy viewer and tests.
+
+Elodin supplies ECEF camera views, attaches tile transforms to its floating-origin
+system, and displays attribution. `just install editor` prepares the SDK using
+the build script from the pinned dependency and reuses the native SDK cache.

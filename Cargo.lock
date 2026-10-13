@@ -1242,6 +1242,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy-cesium"
+version = "0.1.0"
+source = "git+https://github.com/elodin-sys/bevy-cesium?rev=fefc8fede7c62edb4fa6b3ba6a3e6333f8e7332a#fefc8fede7c62edb4fa6b3ba6a3e6333f8e7332a"
+dependencies = [
+ "bevy",
+ "cesium-native-bridge",
+]
+
+[[package]]
 name = "bevy-inspector-egui"
 version = "0.37.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3514,7 +3523,8 @@ dependencies = [
 
 [[package]]
 name = "cesium-native-bridge"
-version = "0.20.1-alpha.0"
+version = "0.1.0"
+source = "git+https://github.com/elodin-sys/bevy-cesium?rev=fefc8fede7c62edb4fa6b3ba6a3e6333f8e7332a#fefc8fede7c62edb4fa6b3ba6a3e6333f8e7332a"
 dependencies = [
  "cxx",
  "cxx-build",
@@ -5758,6 +5768,7 @@ dependencies = [
  "arc-swap",
  "arrow",
  "bevy",
+ "bevy-cesium",
  "bevy-inspector-egui",
  "bevy_ai_skybox",
  "bevy_color",
@@ -5774,7 +5785,6 @@ dependencies = [
  "bevy_world_mesh",
  "big_space",
  "bitvec",
- "cesium-native-bridge",
  "const-fnv1a-hash",
  "cranelift-mlir",
  "crossbeam-channel",

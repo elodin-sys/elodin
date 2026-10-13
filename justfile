@@ -1,6 +1,8 @@
 #! /usr/bin/env nix
 #! nix develop --command just --justfile
 
+export CESIUM_NATIVE_DIR := env_var_or_default("CESIUM_NATIVE_DIR", env_var_or_default("CESIUM_BUILD_ROOT", env_var_or_default("XDG_CACHE_HOME", env_var("HOME") + "/.cache") + "/elodin/cesium-0.65.0") + "/install")
+
 # Use `DRY_RUN=1` to do a dry run of any command.
 #
 # ```sh

@@ -1,89 +1,108 @@
-//! Experimental Cesium Native streaming. Built into the Editor; activated by runtime source configuration.
-use std::collections::{HashMap, HashSet};
-
-use bevy::{
-    asset::RenderAssetUsages,
-    math::DMat4,
-    mesh::{Indices, PrimitiveTopology},
-    prelude::*,
-    render::render_resource::{Extent3d, TextureDimension, TextureFormat},
-};
-use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
-use cesium_native_bridge::ffi;
-
+//! Editor adapter for the independently maintained bevy-cesium plugin.
 use crate::{
     MainCamera,
     spatial::{BigSpaceRootEntity, FloatingOriginSettings, GridCell},
 };
+use bevy::{math::DMat4, prelude::*};
+use bevy_cesium::{
+    CesiumCredits, CesiumPlugin as StreamingPlugin, CesiumPrimitive, CesiumSet, CesiumSource,
+    CesiumStatus, CesiumView, CesiumViews,
+};
+use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 
 pub struct CesiumPlugin;
+#[derive(Resource)]
+struct SourceLabel(String);
 
-struct NativeSession {
-    session: cesium_native_bridge::SessionHandle,
-    tiles: HashMap<u64, Vec<Entity>>,
+fn camera_position_ecef(
+    ecef_from_bevy: DMat4,
+    grid: &FloatingOriginSettings,
+    cell: &GridCell,
+    transform: &Transform,
+) -> bevy::math::DVec3 {
+    ecef_from_bevy.transform_point3(grid.grid_position_double(cell, transform))
 }
 
-#[derive(Resource, Default)]
-struct Credits {
-    html: Vec<String>,
-    source: String,
-    load_failed: bool,
-}
+#[cfg(test)]
+mod coordinate_tests {
+    use super::*;
+    use bevy::math::DVec3;
+    use bevy_geo_frames::{GeoOrigin, Present};
 
-impl Plugin for CesiumPlugin {
-    fn build(&self, app: &mut App) {
-        let result = if let Ok(asset) = std::env::var("CESIUM_ION_ASSET_ID") {
-            let Ok(asset) = asset.parse::<i64>() else {
-                error!("CESIUM_ION_ASSET_ID must be a positive integer");
-                return;
-            };
-            let Ok(token) = std::env::var("CESIUM_ION_TOKEN") else {
-                error!("Set CESIUM_ION_TOKEN to load a Cesium ion asset");
-                return;
-            };
-            if asset <= 0 || token.is_empty() {
-                error!("Invalid Cesium ion configuration");
-                return;
+    #[test]
+    fn cesium_camera_matches_ecef_across_grid_cells_and_earth_scale() {
+        let origin =
+            GeoOrigin::new_from_degrees(40.03879587543084, -75.59670696255716, 297.25783960334957);
+        let grid = FloatingOriginSettings::new(2000.0, 100.0);
+        for presentation in [Present::Plane, Present::Sphere] {
+            let geo = GeoContext::from(origin.clone()).with_present(presentation);
+            let bevy_from_ecef = GeoFrame::bevy_M_(&GeoFrame::ECEF, &geo);
+            let ecef_from_enu = GeoFrame::ECEF._M_(&GeoFrame::ENU, &geo);
+            for local in [
+                DVec3::new(25.0, -80.0, 70.0),
+                DVec3::new(12345.678, -54321.987, 200000.123),
+                DVec3::new(10000000.123, -20000000.456, 30000000.789),
+            ] {
+                let expected = ecef_from_enu.transform_point3(local);
+                let (cell, translation) =
+                    grid.translation_to_grid(bevy_from_ecef.transform_point3(expected));
+                let actual = camera_position_ecef(
+                    bevy_from_ecef.inverse(),
+                    &grid,
+                    &cell,
+                    &Transform::from_translation(translation),
+                );
+                assert!(
+                    (actual - expected).length() < 0.001,
+                    "ECEF camera reconstruction error: {} m",
+                    (actual - expected).length()
+                );
             }
-            ffi::open_ion(asset, &token)
-        } else if let Ok(url) = std::env::var("CESIUM_TILESET_URL") {
-            ffi::open_url(&url)
-        } else {
-            return;
-        };
-        match result {
-            Ok(session) => {
-                app.insert_non_send(NativeSession {
-                    session,
-                    tiles: HashMap::new(),
-                })
-                .insert_resource(Credits {
-                    source: std::env::var("CESIUM_CREDIT").unwrap_or_default(),
-                    ..default()
-                })
-                .add_systems(Update, stream)
-                .add_systems(Update, show_credits.after(crate::ui::render_layout));
-            }
-            Err(_) => error!("Could not initialize Cesium Native"),
         }
     }
 }
 
-#[allow(clippy::too_many_arguments, clippy::type_complexity)]
-fn stream(
-    mut commands: Commands,
-    mut native: NonSendMut<NativeSession>,
+impl Plugin for CesiumPlugin {
+    fn build(&self, app: &mut App) {
+        let source = if let Ok(asset) = std::env::var("CESIUM_ION_ASSET_ID") {
+            let Ok(asset_id) = asset.parse::<i64>() else {
+                error!("CESIUM_ION_ASSET_ID must be a positive integer");
+                return;
+            };
+            let Ok(access_token) = std::env::var("CESIUM_ION_TOKEN") else {
+                error!("Set CESIUM_ION_TOKEN to load a Cesium ion asset");
+                return;
+            };
+            if asset_id <= 0 || access_token.is_empty() {
+                error!("Invalid Cesium ion configuration");
+                return;
+            }
+            CesiumSource::Ion {
+                asset_id,
+                access_token,
+            }
+        } else if let Ok(url) = std::env::var("CESIUM_TILESET_URL") {
+            CesiumSource::Url(url)
+        } else {
+            return;
+        };
+        app.add_plugins(StreamingPlugin::new(source).with_external_coordinates())
+            .insert_resource(SourceLabel(
+                std::env::var("CESIUM_CREDIT").unwrap_or_default(),
+            ))
+            .add_systems(Update, collect_views.in_set(CesiumSet::Views))
+            .add_systems(Update, place_tiles.in_set(CesiumSet::Placement))
+            .add_systems(Update, show_credits.after(crate::ui::render_layout));
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn collect_views(
     geo: Res<GeoContext>,
     grid: Res<FloatingOriginSettings>,
-    root: Res<BigSpaceRootEntity>,
-    time: Res<Time>,
     cameras: Query<(&Camera, &Projection, &Transform, Option<&ChildOf>), With<MainCamera>>,
     parents: Query<(&Transform, &GridCell), Without<MainCamera>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut images: ResMut<Assets<Image>>,
-    mut visibility: Query<&mut Visibility>,
-    mut credits: ResMut<Credits>,
+    mut output: ResMut<CesiumViews>,
 ) {
     let ecef_from_bevy = GeoFrame::bevy_M_(&GeoFrame::ECEF, &geo).inverse();
     let views: Vec<_> = cameras
@@ -103,9 +122,8 @@ fn stream(
                 .and_then(|p| parents.get(p.parent()).ok())
                 .map(|(t, c)| (t.mul_transform(*transform), *c))
                 .unwrap_or((*transform, GridCell::default()));
-            let position = grid.grid_position_double(&cell, &transform);
-            Some(ffi::View {
-                position: ecef_from_bevy.transform_point3(position).to_array(),
+            Some(CesiumView {
+                position: camera_position_ecef(ecef_from_bevy, &grid, &cell, &transform).to_array(),
                 direction: ecef_from_bevy
                     .transform_vector3(transform.forward().as_dvec3())
                     .normalize()
@@ -123,108 +141,31 @@ fn stream(
             })
         })
         .collect();
-    let Ok(frame) = native.session.pin_mut().update(&views, time.delta_secs()) else {
-        // Native diagnostics can contain signed URLs: do not print exceptions.
-        error!("Cesium tile update failed");
-        return;
-    };
-    credits.html = frame.credits;
-    credits.load_failed = frame.load_failed;
-    for tile in frame.loaded {
-        let mut entities = Vec::new();
-        for p in tile.primitives {
-            let matrix = DMat4::from_cols_array(&p.transform);
-            let (scale, rotation, translation) = matrix.to_scale_rotation_translation();
-            let positions = p.positions.as_chunks::<3>().0.to_vec();
-            let normals = p.normals.as_chunks::<3>().0.to_vec();
-            let uvs = p.uvs.as_chunks::<2>().0.to_vec();
-            let mesh = Mesh::new(
-                PrimitiveTopology::TriangleList,
-                RenderAssetUsages::default(),
-            )
-            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-            .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
-            .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
-            .with_inserted_indices(Indices::U32(p.indices));
-            let texture = if p.width > 0 && p.height > 0 {
-                Some(images.add(Image::new(
-                    Extent3d {
-                        width: p.width,
-                        height: p.height,
-                        depth_or_array_layers: 1,
-                    },
-                    TextureDimension::D2,
-                    p.pixels,
-                    TextureFormat::Rgba8UnormSrgb,
-                    RenderAssetUsages::default(),
-                )))
-            } else {
-                None
-            };
-            let material = StandardMaterial {
-                base_color: Color::linear_rgba(
-                    p.base_color[0],
-                    p.base_color[1],
-                    p.base_color[2],
-                    p.base_color[3],
-                ),
-                base_color_texture: texture,
-                double_sided: p.double_sided,
-                cull_mode: if p.double_sided {
-                    None
-                } else {
-                    Some(bevy::render::render_resource::Face::Back)
-                },
-                perceptual_roughness: 1.0,
-                ..default()
-            };
-            let entity = commands
-                .spawn((
-                    Name::new("Cesium tile"),
-                    Mesh3d(meshes.add(mesh)),
-                    MeshMaterial3d(materials.add(material)),
-                    Transform::from_scale(scale.as_vec3()),
-                    GeoPosition(GeoFrame::ECEF, translation),
-                    GeoRotation::absolute(GeoFrame::ECEF, rotation),
-                    GridCell::default(),
-                    ChildOf(root.0),
-                    Visibility::Hidden,
-                ))
-                .id();
-            entities.push(entity);
-        }
-        native.tiles.insert(tile.id, entities);
-    }
-    // A tile can finish loading and be evicted in the same update.
-    for id in frame.removed {
-        if let Some(entities) = native.tiles.remove(&id) {
-            for entity in entities {
-                commands.entity(entity).despawn();
-            }
-        }
-    }
-    let visible: HashSet<_> = frame.visible.into_iter().collect();
-    for (id, entities) in &native.tiles {
-        let desired = if visible.contains(id) {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-        for entity in entities {
-            if let Ok(mut current) = visibility.get_mut(*entity) {
-                if *current != desired {
-                    *current = desired;
-                }
-            } else {
-                commands.entity(*entity).insert(desired);
-            }
-        }
+    output.0 = views;
+}
+
+fn place_tiles(
+    mut commands: Commands,
+    root: Res<BigSpaceRootEntity>,
+    tiles: Query<(Entity, &CesiumPrimitive), Added<CesiumPrimitive>>,
+) {
+    for (entity, tile) in &tiles {
+        let (scale, rotation, translation) = tile.ecef_from_mesh.to_scale_rotation_translation();
+        commands.entity(entity).insert((
+            Transform::from_scale(scale.as_vec3()),
+            GeoPosition(GeoFrame::ECEF, translation),
+            GeoRotation::absolute(GeoFrame::ECEF, rotation),
+            GridCell::default(),
+            ChildOf(root.0),
+        ));
     }
 }
 
 fn show_credits(
     mut contexts: Query<(&crate::ui::tiles::WindowId, &mut bevy_egui::EguiContext)>,
-    credits: Res<Credits>,
+    credits: Res<CesiumCredits>,
+    status: Res<CesiumStatus>,
+    label: Res<SourceLabel>,
 ) {
     // The Editor draws each window in Update, using its own EguiContext.
     for (window, mut context) in &mut contexts {
@@ -237,12 +178,12 @@ fn show_credits(
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.hyperlink_to("Cesium", "https://cesium.com/");
-                        if !credits.source.is_empty() {
+                        if !label.0.is_empty() {
                             ui.add_space(6.0);
-                            ui.label(&credits.source);
+                            ui.label(&label.0);
                         }
                     });
-                    if credits.load_failed {
+                    if status.load_failed {
                         ui.colored_label(
                             egui::Color32::LIGHT_RED,
                             "Tileset unavailable. Check URL, asset access and token.",
