@@ -64,6 +64,8 @@ enum Commands {
     ListComponents(ListComponentsArgs),
     #[command(about = "Export database contents to parquet, arrow-ipc, or csv files")]
     Export(ExportArgs),
+    #[command(about = "Write a database as a sparse-aware .tar.zst archive")]
+    Archive(ArchiveArgs),
     #[cfg(feature = "video-export")]
     #[command(
         name = "export-videos",
@@ -321,6 +323,11 @@ struct ExportArgs {
     include_private: bool,
     #[clap(
         long,
+        help = "Also write the export's catalog (tables, columns, signals) as JSON to this file"
+    )]
+    manifest: Option<PathBuf>,
+    #[clap(
+        long,
         help = "MCAP-only: attach every file under {db}/assets/ instead of only schematic-referenced assets"
     )]
     all_assets: bool,
@@ -335,6 +342,14 @@ struct ExportArgs {
         help = "MCAP-only: max GLB embed size in MiB; larger models are attached but not base64-inlined"
     )]
     max_embed_mb: u64,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+struct ArchiveArgs {
+    #[clap(help = "Path to the database directory")]
+    path: PathBuf,
+    #[clap(long, short, help = "Output archive path (use - for stdout)")]
+    output: PathBuf,
 }
 
 #[cfg(feature = "video-export")]
@@ -769,6 +784,7 @@ async fn main() -> miette::Result<()> {
             mono_ns,
             mono_us,
             include_private,
+            manifest,
             all_assets,
             epoch_offset_us,
             max_embed_mb,
@@ -814,8 +830,17 @@ async fn main() -> miette::Result<()> {
                 join,
                 time_format,
                 include_private,
+                manifest,
             };
             elodin_db::export::run(path, output, format, options).into_diagnostic()
+        }
+        Commands::Archive(ArchiveArgs { path, output }) => {
+            if output.as_os_str() == "-" {
+                elodin_db::archive::write(&path, std::io::stdout().lock()).into_diagnostic()
+            } else {
+                let file = std::fs::File::create(&output).into_diagnostic()?;
+                elodin_db::archive::write(&path, std::io::BufWriter::new(file)).into_diagnostic()
+            }
         }
         #[cfg(feature = "video-export")]
         Commands::ExportVideos(args) => {

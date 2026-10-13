@@ -23,7 +23,7 @@ default = ["axum", "grpc", "parquet", "video-export", "mcap-export"]
 axum = [
     "dep:axum",
     "dep:axum-streams",
-    "dep:serde_json",
+
     "dep:tokio",
     "dep:impeller-kdl",
     "dep:reqwest",
@@ -44,8 +44,8 @@ grpc = [
     "tokio/sync",
 ]
 parquet = ["dep:parquet"]
-video-export = ["dep:muxide", "dep:scuffle-h264", "dep:openh264", "dep:serde_json"]
-mcap-export = ["dep:mcap", "dep:base64", "dep:serde_json", "dep:impeller-kdl"]
+video-export = ["dep:muxide", "dep:scuffle-h264", "dep:openh264"]
+mcap-export = ["dep:mcap", "dep:base64", "dep:impeller-kdl"]
 tracy = ["dep:tracing-tracy"]
 
 [dependencies]
@@ -100,6 +100,10 @@ fuzzy-matcher = "0.3.7"
 glob = "0.3"
 signal-hook = "0.3"
 
+# archive
+tar = "0.4.46"
+zstd = "0.13"
+
 # query (EQL → SQL, table output)
 eql.path = "eql"
 tabled = "0.17.0"
@@ -129,7 +133,6 @@ axum-streams.version = "0.20"
 axum-streams.features = ["json"]
 axum-streams.optional = true
 serde_json.version = "1"
-serde_json.optional = true
 tokio.version = "1"
 tokio.features = ["rt-multi-thread", "time"]
 tokio.optional = true
@@ -183,6 +186,10 @@ path = "tests_query/eql_cast_query.rs"
 [[test]]
 name = "prim_types_fixture_goldie"
 path = "tests_query/prim_types_fixture_goldie.rs"
+
+[[test]]
+name = "catalog_fixture"
+path = "tests_query/catalog_fixture.rs"
 
 [[test]]
 name = "csv_export_goldie"

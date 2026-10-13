@@ -1,0 +1,31 @@
+[package]
+name = "elodin-mcp"
+license = "MIT OR Apache-2.0"
+version.workspace = true
+repository.workspace = true
+edition = "2024"
+publish = false
+description = "Code Mode MCP host for Elodin recordings"
+
+[dependencies]
+anyhow = "1"
+bytes = "1"
+chrono = "0.4"
+elodin-db = { path = "../db", default-features = false, features = ["grpc"] }
+fastrand = "2"
+futures = "0.3"
+hex = "0.4"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "json", "stream"] }
+rmcp = { version = "3.5.1", features = ["server", "macros", "schemars", "transport-io"] }
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+strsim = "0.11"
+tar = "0.4.46"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "sync", "time"] }
+zstd = "0.13"
+
+[dev-dependencies]
+rmcp = { version = "3.5.1", features = ["client", "transport-child-process"] }
+tempfile = "3"

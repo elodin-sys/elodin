@@ -1,13 +1,19 @@
 use clap::{Parser, Subcommand};
-use tracing_subscriber::{EnvFilter, fmt::time::ChronoLocal, prelude::*};
+use tracing_subscriber::{
+    EnvFilter,
+    fmt::{time::ChronoLocal, writer::BoxMakeWriter},
+    prelude::*,
+};
 mod auth;
 mod db;
 mod editor;
+mod mcp;
 #[cfg(not(target_os = "windows"))]
 mod monte_carlo;
 mod schematic;
 #[cfg(not(target_os = "windows"))]
 mod ui;
+mod upload;
 
 #[derive(Parser, Clone)]
 #[command(
@@ -69,6 +75,11 @@ enum Commands {
     Ui(ui::Args),
     /// Convert and inspect schematic source
     Schematic(schematic::Args),
+    /// Code Mode MCP for agents: search recordings and run analysis scripts; with no
+    /// subcommand, serve MCP over stdio
+    Mcp(mcp::Args),
+    /// Upload a recording to an Elodin Cloud project
+    Upload(upload::Args),
 }
 
 impl Cli {
@@ -109,7 +120,13 @@ impl Cli {
             })
             .unwrap_or_else(|_| EnvFilter::new("info"));
 
+        // stdout carries MCP framing and command output, so these log to stderr.
+        let writer = match &self.command {
+            Some(Commands::Mcp(_) | Commands::Upload(_)) => BoxMakeWriter::new(std::io::stderr),
+            _ => BoxMakeWriter::new(std::io::stdout),
+        };
         let fmt_layer = tracing_subscriber::fmt::layer()
+            .with_writer(writer)
             .with_target(false)
             .with_timer(ChronoLocal::new("%Y-%m-%d %H:%M:%S%.3f".to_string()));
 
@@ -150,6 +167,8 @@ impl Cli {
             #[cfg(not(target_os = "windows"))]
             Some(Commands::Ui(args)) => self.clone().ui(args.clone()),
             Some(Commands::Schematic(args)) => self.clone().schematic(args.clone()),
+            Some(Commands::Mcp(args)) => self.clone().mcp(args.clone(), rt),
+            Some(Commands::Upload(args)) => self.clone().upload(args.clone(), rt),
             None => self.clone().editor(editor::Args::default(), rt),
         }
     }

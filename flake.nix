@@ -91,6 +91,8 @@
         packages = with pkgs.elodin; {
           inherit elodin-cli elodin-db elodin-db-protos elodinsink rtsp-streamer;
           elodin-py = elodin-py.py;
+          # The CLI wrapper's Python with the elodin package: the hosted worker's environment.
+          elodin-python = elodin-py.python.withPackages (_: [elodin-py.py]);
           elodin = elodin-cli;
           default = elodin-cli;
         };

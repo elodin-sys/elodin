@@ -17,11 +17,13 @@ use impeller::types::PrimType;
 use pyo3::prelude::*;
 
 mod client;
+mod recording;
 mod server;
 mod stream;
 mod writer;
 
 pub use client::{Client, ComponentInfo};
+pub use recording::Recording;
 pub use server::Server;
 pub use stream::{MsgStreamSub, StreamSub};
 pub use writer::TableWriter;
@@ -103,6 +105,7 @@ pub fn register(parent_module: &Bound<'_, PyModule>) -> PyResult<()> {
     child.add_class::<Client>()?;
     child.add_class::<TableWriter>()?;
     child.add_class::<ComponentInfo>()?;
+    child.add_class::<Recording>()?;
     child.add_class::<StreamSub>()?;
     child.add_class::<MsgStreamSub>()?;
     child.add_function(wrap_pyfunction!(sql_table_name, &child)?)?;

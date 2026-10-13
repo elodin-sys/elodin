@@ -1,0 +1,281 @@
+{
+  "version": 1,
+  "join": true,
+  "pattern": null,
+  "tables": [
+    {
+      "name": "baro",
+      "rows": 3000,
+      "columns": [
+        "pressure"
+      ]
+    },
+    {
+      "name": "empty",
+      "rows": 0,
+      "columns": [
+        "signal"
+      ]
+    },
+    {
+      "name": "gps",
+      "rows": 900,
+      "columns": [
+        "alt",
+        "count"
+      ]
+    },
+    {
+      "name": "imu",
+      "rows": 6001,
+      "columns": [
+        "accel",
+        "temp"
+      ]
+    }
+  ],
+  "signals": [
+    {
+      "name": "baro.pressure",
+      "table": "baro",
+      "column": "pressure",
+      "dtype": "f64",
+      "shape": [],
+      "elements": [],
+      "rows": 3000,
+      "first_us": 1000000,
+      "last_us": 60980000,
+      "timestamp_source": false,
+      "metadata": {
+        "unit": "kPa"
+      }
+    },
+    {
+      "name": "empty.signal",
+      "table": "empty",
+      "column": "signal",
+      "dtype": "f64",
+      "shape": [],
+      "elements": [],
+      "rows": 0,
+      "first_us": null,
+      "last_us": null,
+      "timestamp_source": false,
+      "metadata": {}
+    },
+    {
+      "name": "gps.alt",
+      "table": "gps",
+      "column": "alt",
+      "dtype": "f64",
+      "shape": [],
+      "elements": [],
+      "rows": 601,
+      "first_us": 1000000,
+      "last_us": 60900000,
+      "timestamp_source": false,
+      "metadata": {
+        "unit": "m"
+      }
+    },
+    {
+      "name": "gps.count",
+      "table": "gps",
+      "column": "count",
+      "dtype": "u32",
+      "shape": [],
+      "elements": [],
+      "rows": 300,
+      "first_us": 1050000,
+      "last_us": 60850000,
+      "timestamp_source": false,
+      "metadata": {}
+    },
+    {
+      "name": "imu.accel",
+      "table": "imu",
+      "column": "accel",
+      "dtype": "f64",
+      "shape": [
+        3
+      ],
+      "elements": [
+        "x",
+        "y",
+        "z"
+      ],
+      "rows": 6001,
+      "first_us": 1000000,
+      "last_us": 60990000,
+      "timestamp_source": false,
+      "metadata": {}
+    },
+    {
+      "name": "imu.temp",
+      "table": "imu",
+      "column": "temp",
+      "dtype": "f64",
+      "shape": [],
+      "elements": [],
+      "rows": 6001,
+      "first_us": 1000000,
+      "last_us": 60990000,
+      "timestamp_source": false,
+      "metadata": {
+        "unit": "degC"
+      }
+    }
+  ]
+}
+{
+  "version": 1,
+  "join": false,
+  "pattern": null,
+  "tables": [
+    {
+      "name": "baro.pressure",
+      "rows": 3000,
+      "columns": [
+        "baro.pressure"
+      ]
+    },
+    {
+      "name": "empty.signal",
+      "rows": 0,
+      "columns": [
+        "empty.signal"
+      ]
+    },
+    {
+      "name": "gps.alt",
+      "rows": 601,
+      "columns": [
+        "gps.alt"
+      ]
+    },
+    {
+      "name": "gps.count",
+      "rows": 300,
+      "columns": [
+        "gps.count"
+      ]
+    },
+    {
+      "name": "imu.accel",
+      "rows": 6001,
+      "columns": [
+        "imu.accel"
+      ]
+    },
+    {
+      "name": "imu.temp",
+      "rows": 6001,
+      "columns": [
+        "imu.temp"
+      ]
+    }
+  ],
+  "signals": [
+    {
+      "name": "baro.pressure",
+      "table": "baro.pressure",
+      "column": "baro.pressure",
+      "dtype": "f64",
+      "shape": [],
+      "elements": [],
+      "rows": 3000,
+      "first_us": 1000000,
+      "last_us": 60980000,
+      "timestamp_source": false,
+      "metadata": {
+        "unit": "kPa"
+      }
+    },
+    {
+      "name": "empty.signal",
+      "table": "empty.signal",
+      "column": "empty.signal",
+      "dtype": "f64",
+      "shape": [],
+      "elements": [],
+      "rows": 0,
+      "first_us": null,
+      "last_us": null,
+      "timestamp_source": false,
+      "metadata": {}
+    },
+    {
+      "name": "gps.alt",
+      "table": "gps.alt",
+      "column": "gps.alt",
+      "dtype": "f64",
+      "shape": [],
+      "elements": [],
+      "rows": 601,
+      "first_us": 1000000,
+      "last_us": 60900000,
+      "timestamp_source": false,
+      "metadata": {
+        "unit": "m"
+      }
+    },
+    {
+      "name": "gps.count",
+      "table": "gps.count",
+      "column": "gps.count",
+      "dtype": "u32",
+      "shape": [],
+      "elements": [],
+      "rows": 300,
+      "first_us": 1050000,
+      "last_us": 60850000,
+      "timestamp_source": false,
+      "metadata": {}
+    },
+    {
+      "name": "imu.accel",
+      "table": "imu.accel",
+      "column": "imu.accel",
+      "dtype": "f64",
+      "shape": [
+        3
+      ],
+      "elements": [
+        "x",
+        "y",
+        "z"
+      ],
+      "rows": 6001,
+      "first_us": 1000000,
+      "last_us": 60990000,
+      "timestamp_source": false,
+      "metadata": {}
+    },
+    {
+      "name": "imu.temp",
+      "table": "imu.temp",
+      "column": "imu.temp",
+      "dtype": "f64",
+      "shape": [],
+      "elements": [],
+      "rows": 6001,
+      "first_us": 1000000,
+      "last_us": 60990000,
+      "timestamp_source": false,
+      "metadata": {
+        "unit": "degC"
+      }
+    }
+  ]
+}
+=== imu ===
+seq,time_us,accel,temp
+998,10980000,[12.25, -9.8125, 62.375],29.5
+999,10990000,[12.375, -9.8125, 62.4375],29.75
+1000,11000000,[0.0, -9.8125, 62.5],30.0
+1001,11000000,[0.0, -8.8125, 62.5625],30.0
+1002,11010000,[0.125, -9.8125, 62.5625],30.25
+1003,11020000,[0.25, -9.8125, 62.625],30.5
+=== gps ===
+seq,time_us,alt,count
+150,11000000,500.0,null

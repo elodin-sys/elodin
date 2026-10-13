@@ -56,6 +56,7 @@ pub const TX_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 const RESPONSE_PACKET_CAPACITY: usize = 8 * 1024 * 1024;
 
 pub mod append_log;
+pub mod archive;
 mod arrow;
 pub use arrow::sanitize_sql_table_name;
 pub use eql::sql_table_name;
@@ -66,6 +67,7 @@ pub mod assets_http;
 #[cfg(feature = "axum")]
 pub mod axum;
 pub mod cancellation;
+pub mod catalog;
 pub(crate) mod coalescing_sink;
 pub mod compact;
 pub mod drop;
@@ -76,6 +78,7 @@ pub mod export_mcap;
 #[cfg(feature = "video-export")]
 pub mod export_videos;
 pub mod fix_timestamps;
+pub mod fixture;
 pub mod follow;
 mod follow_stream;
 #[cfg(feature = "grpc")]

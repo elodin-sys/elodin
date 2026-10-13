@@ -280,6 +280,7 @@ fn run_export_full(
             join,
             time_format,
             include_private,
+            manifest: None,
         },
     )
     .expect("export::run");

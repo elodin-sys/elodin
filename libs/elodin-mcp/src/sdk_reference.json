@@ -1,0 +1,92 @@
+[
+  {
+    "name": "el.runs",
+    "signature": "el.runs()",
+    "summary": "Runs in scope: name, id, source_id, tables, signals, first_us, last_us, tags.",
+    "example": "runs = el.runs()\nresult = {\"runs\": [r[\"name\"] for r in runs]}"
+  },
+  {
+    "name": "el.signals",
+    "signature": "el.signals(query=None, run=None)",
+    "summary": "Signal cards matching query (name, dtype, shape, table, column, per-run rows and time range).",
+    "example": "cards = el.signals(\"accel\")\nresult = {\"signals\": [c[\"name\"] for c in cards]}"
+  },
+  {
+    "name": "el.tables",
+    "signature": "el.tables(query=None, run=None)",
+    "summary": "Joined export tables matching query, with their columns and per-run rows.",
+    "example": "result = {\"tables\": [t[\"name\"] for t in el.tables()]}"
+  },
+  {
+    "name": "el.signal",
+    "signature": "el.signal(name, run=None)",
+    "summary": "One signal as a Table with columns time_us (int64, recorder clock microseconds) and value. run may be omitted when one run is in scope.",
+    "example": "df = el.signal(\"imu.temp\").to_polars()\nresult = {\"rows\": df.height, \"max\": df[\"value\"].max()}"
+  },
+  {
+    "name": "el.table",
+    "signature": "el.table(name, run=None)",
+    "summary": "A joined table as a Table with time_us and one column per member; a member is null on rows where it has no sample.",
+    "example": "df = el.table(\"imu\").select(\"temp\").to_polars()\nresult = {\"columns\": df.columns}"
+  },
+  {
+    "name": "Table.window",
+    "signature": "Table.window(start_us=None, end_us=None)",
+    "summary": "Rows with start_us <= time_us < end_us.",
+    "example": "t = el.signal(\"imu.temp\")\nresult = {\"rows\": t.window(start_us=1_000_000, end_us=2_000_000).count()}"
+  },
+  {
+    "name": "Table.select",
+    "signature": "Table.select(*columns)",
+    "summary": "Keep only these member columns (time_us is always kept).",
+    "example": "df = el.table(\"gps\").select(\"alt\").to_polars()\nresult = {\"columns\": df.columns}"
+  },
+  {
+    "name": "Table.count",
+    "signature": "Table.count()",
+    "summary": "Row count without materializing the data.",
+    "example": "result = {\"rows\": el.signal(\"imu.accel\").count()}"
+  },
+  {
+    "name": "Table.to_arrow",
+    "signature": "Table.to_arrow(max_rows=None)",
+    "summary": "Materialize as a pyarrow.Table; vectors are FixedSizeList. Raises ResultBudgetError beyond max_rows (default 5,000,000).",
+    "example": "tbl = el.signal(\"imu.accel\").to_arrow()\nresult = {\"type\": str(tbl.schema.field(\"value\").type)}"
+  },
+  {
+    "name": "Table.to_polars",
+    "signature": "Table.to_polars(max_rows=None, flatten=False)",
+    "summary": "Materialize as a polars.DataFrame; vectors are Array columns, or one column per element with flatten=True (value_x, value_y, ...).",
+    "example": "df = el.signal(\"imu.accel\").to_polars(flatten=True)\nresult = {\"columns\": df.columns}"
+  },
+  {
+    "name": "el.artifacts.save_table",
+    "signature": "el.artifacts.save_table(df, name)",
+    "summary": "Save a polars/pyarrow table as <name>.parquet; returns {name, path, bytes, sha256}.",
+    "example": "df = el.signal(\"imu.temp\").to_polars()\nresult = {\"table\": el.artifacts.save_table(df.head(10), \"temps\")[\"name\"]}"
+  },
+  {
+    "name": "el.artifacts.save_figure",
+    "signature": "el.artifacts.save_figure(fig, name)",
+    "summary": "Save a matplotlib figure as <name>.png.",
+    "example": "import matplotlib.pyplot as plt\ndf = el.signal(\"imu.temp\").to_polars()\nfig, ax = plt.subplots()\nax.plot(df[\"time_us\"], df[\"value\"])\nresult = {\"figure\": el.artifacts.save_figure(fig, \"temp\")[\"name\"]}"
+  },
+  {
+    "name": "el.artifacts.save_json",
+    "signature": "el.artifacts.save_json(obj, name) / el.artifacts.save_html(text, name)",
+    "summary": "Save JSON or HTML as <name>.json or <name>.html.",
+    "example": "result = {\"saved\": el.artifacts.save_json({\"ok\": True}, \"check\")[\"name\"]}"
+  },
+  {
+    "name": "ctx.parameters",
+    "signature": "ctx.parameters",
+    "summary": "The execution's parameters dict (from --param/--params or the execute tool's parameters).",
+    "example": "name = ctx.parameters.get(\"signal\", \"imu.temp\")\nresult = {\"rows\": el.signal(name).count()}"
+  },
+  {
+    "name": "ctx.preview",
+    "signature": "ctx.preview(df, n=20)",
+    "summary": "At most n (cap 100) rows of a table as a list of dicts, small enough for result.",
+    "example": "result = {\"head\": ctx.preview(el.signal(\"imu.temp\").to_polars(), n=3)}"
+  }
+]

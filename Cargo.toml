@@ -51,6 +51,7 @@ members = [
     "fsw/gstreamer",
     "fsw/msp-osd",
     "libs/db/eql",
+    "libs/elodin-mcp",
     "libs/impeller/kdl",
     "libs/db/examples/rust_client",
     "examples/rc-jet/controller",

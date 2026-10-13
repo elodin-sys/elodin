@@ -43,6 +43,8 @@ tracing-tracy = { version = "0.11", optional = true }
 elodin-editor.path = "../../libs/elodin-editor"
 elodin-editor.default-features = false
 elodin-db = { path = "../../libs/db", default-features = false, features = ["grpc"] }
+elodin-mcp.path = "../../libs/elodin-mcp"
+anyhow = "1"
 impeller-bevy.path = "../../libs/impeller/bevy"
 impeller-kdl.path = "../../libs/impeller/kdl"
 

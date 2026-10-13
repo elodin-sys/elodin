@@ -218,3 +218,23 @@ impl Cli {
         rt.block_on(projects::run(&ctx, &args))
     }
 }
+
+impl Cli {
+    /// An Elodin Cloud client for this issuer's session, refreshing the token as needed.
+    pub(crate) fn cloud(&self) -> miette::Result<elodin_mcp::cloud::Cloud> {
+        let ctx = std::sync::Arc::new(self.auth_ctx()?);
+        let creds = tokens::Credentials::load(&ctx.creds_path, &ctx.issuer)?.ok_or_else(|| {
+            miette::miette!("not logged in to {}; run `elodin login`", ctx.issuer)
+        })?;
+        let token: elodin_mcp::cloud::TokenFn = std::sync::Arc::new(move || {
+            let ctx = ctx.clone();
+            Box::pin(async move {
+                tokens::ensure_valid(&ctx)
+                    .await
+                    .map(|c| c.access_token)
+                    .map_err(|e| anyhow::anyhow!("{e}"))
+            })
+        });
+        Ok(elodin_mcp::cloud::Cloud::new(&creds.api_url, token))
+    }
+}

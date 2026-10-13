@@ -29,6 +29,7 @@ use tracing::{info_span, trace_span};
 
 use crate::cancellation::check_cancelled;
 use crate::{Component, DB, Error, component_creation_index};
+use impeller_wkt::ComponentMetadata;
 
 /// Export format for the CLI command.
 /// This is separate from the internal ArchiveFormat to exclude "native".
@@ -350,27 +351,121 @@ fn convert_lists_to_strings(batch: &RecordBatch, fast_floats: bool) -> RecordBat
 /// One component's worth of work collected under the DB read guard. Cheap to clone.
 struct ComponentTask {
     component: Component,
+    metadata: ComponentMetadata,
     column_name: String,
     element_names: String,
     creation_index: Option<u64>,
 }
 
 /// One member of a group passed to [`build_group_record_batch`].
-struct GroupMember {
-    component: Component,
+pub(crate) struct GroupMember {
+    pub(crate) component: Component,
+    pub(crate) metadata: ComponentMetadata,
     /// The "short" column name that appears in the output (everything after the last `.`
     /// of the original component name when `--join` is on, otherwise the full name).
-    short_name: String,
-    element_names: String,
+    pub(crate) short_name: String,
+    pub(crate) element_names: String,
     creation_index: Option<u64>,
     created_at: SystemTime,
 }
 
 /// A unit of export work: one or more components that should land in the same output file.
-struct ExportGroup {
+pub(crate) struct ExportGroup {
     /// Output filename stem (sanitized later by [`write_record_batch`]).
-    output_name: String,
-    members: Vec<GroupMember>,
+    pub(crate) output_name: String,
+    pub(crate) members: Vec<GroupMember>,
+}
+
+/// The export layout: which components land in which output file, in which order.
+pub(crate) struct ExportPlan {
+    pub(crate) groups: Vec<ExportGroup>,
+    /// Lowercased names of components skipped for being private.
+    pub(crate) private: Vec<String>,
+    /// Components skipped before grouping (no metadata, private, or pattern mismatch).
+    pub(crate) skipped: usize,
+}
+
+/// Plan the export of `db` exactly as [`run`] would lay it out.
+pub(crate) fn plan(
+    db: &DB,
+    join: bool,
+    pattern: Option<&str>,
+    include_private: bool,
+) -> Result<ExportPlan, Error> {
+    let glob_pattern = pattern.map(Pattern::new).transpose().map_err(|e| {
+        Error::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("Invalid glob pattern: {}", e),
+        ))
+    })?;
+    let (tasks, private, skipped) = db.with_state(|state| {
+        let mut work = Vec::with_capacity(state.components.len());
+        let mut private = Vec::new();
+        let mut skipped = 0usize;
+        for component in state.components.values() {
+            let Some(component_metadata) = state.component_metadata.get(&component.component_id)
+            else {
+                skipped += 1;
+                continue;
+            };
+            let column_name = component_metadata.name.to_lowercase();
+            // Authored from Python via `el.Component(metadata={"private": "true"})`.
+            if !include_private && component_metadata.is_private() {
+                private.push(column_name);
+                skipped += 1;
+                continue;
+            }
+            if let Some(ref pattern) = glob_pattern
+                && !pattern.matches(&column_name)
+            {
+                skipped += 1;
+                continue;
+            }
+            work.push(ComponentTask {
+                component: component.clone(),
+                metadata: component_metadata.clone(),
+                element_names: component_metadata.element_names().to_lowercase(),
+                creation_index: component_creation_index(component_metadata),
+                column_name,
+            });
+        }
+        (work, private, skipped)
+    });
+    let db_path = &db.path;
+    // With join, group by the prefix before the last '.'; otherwise one group per component.
+    let groups = if join {
+        group_components_by_prefix(tasks, db_path)
+    } else {
+        tasks
+            .into_iter()
+            .map(|task| ExportGroup {
+                output_name: task.column_name.clone(),
+                members: vec![GroupMember {
+                    created_at: component_created_at(db_path, task.component.component_id),
+                    component: task.component,
+                    metadata: task.metadata,
+                    creation_index: task.creation_index,
+                    short_name: task.column_name,
+                    element_names: task.element_names,
+                }],
+            })
+            .collect()
+    };
+    let mut private = private;
+    private.sort();
+    Ok(ExportPlan {
+        groups,
+        private,
+        skipped,
+    })
+}
+
+/// The rows [`run`] exports for `group`, with the time column as `time_us`.
+pub(crate) fn group_batch(group: &ExportGroup) -> RecordBatch {
+    rewrite_time_column(
+        build_group_record_batch(group, false),
+        TimeFormat::MonoMicroseconds,
+    )
 }
 
 /// Group components by the prefix before the last `.` in their name. Single-member groups
@@ -388,6 +483,7 @@ fn group_components_by_prefix(tasks: Vec<ComponentTask>, db_path: &Path) -> Vec<
         let created_at = component_created_at(db_path, task.component.component_id);
         by_prefix.entry(prefix).or_default().push(GroupMember {
             component: task.component,
+            metadata: task.metadata,
             short_name: short,
             element_names: task.element_names,
             creation_index: task.creation_index,
@@ -752,6 +848,8 @@ pub struct ExportOptions {
     /// Include components whose metadata contains `"private": "true"`. Off by default —
     /// such components are skipped during export.
     pub include_private: bool,
+    /// Also write the export's [`crate::catalog::Catalog`] as JSON to this path.
+    pub manifest: Option<PathBuf>,
 }
 
 /// Export database contents to files.
@@ -778,6 +876,7 @@ pub fn run(
         join,
         time_format,
         include_private,
+        manifest,
     } = options;
 
     // Validate database path
@@ -789,18 +888,6 @@ pub fn run(
     if !db_state_path.exists() {
         return Err(Error::MissingDbState(db_state_path));
     }
-
-    // Parse pattern if provided
-    let glob_pattern = pattern
-        .as_ref()
-        .map(|p| Pattern::new(p))
-        .transpose()
-        .map_err(|e| {
-            Error::Io(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                format!("Invalid glob pattern: {}", e),
-            ))
-        })?;
 
     println!("Opening database: {}", db_path.display());
     let db = DB::open(db_path.clone())?;
@@ -831,67 +918,16 @@ pub fn run(
     use rayon::prelude::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    // First pass under the read guard: snapshot per-component metadata. Component clones
-    // are cheap (Arc-backed TimeSeries). Doing the heavy work outside the read guard lets
-    // multiple threads proceed in parallel.
-    let (per_component, pre_skipped): (Vec<ComponentTask>, usize) = db.with_state(|state| {
-        let total_components = state.components.len();
-        println!("Found {} components", total_components);
-
-        let mut work = Vec::with_capacity(total_components);
-        let mut pre_skipped = 0usize;
-        for component in state.components.values() {
-            let Some(component_metadata) = state.component_metadata.get(&component.component_id)
-            else {
-                pre_skipped += 1;
-                continue;
-            };
-            let column_name = component_metadata.name.to_lowercase();
-            // Skip components flagged `private: true` in their metadata unless the user
-            // explicitly opted in. Authored from Python via
-            // `el.Component(metadata={"private": "true"})`.
-            if !include_private && component_metadata.is_private() {
-                println!("  Skipping {} (private)", column_name);
-                pre_skipped += 1;
-                continue;
-            }
-            if let Some(ref pattern) = glob_pattern
-                && !pattern.matches(&column_name)
-            {
-                pre_skipped += 1;
-                continue;
-            }
-            let element_names = component_metadata.element_names().to_lowercase();
-            let creation_index = component_creation_index(component_metadata);
-            work.push(ComponentTask {
-                component: component.clone(),
-                column_name,
-                element_names,
-                creation_index,
-            });
-        }
-        (work, pre_skipped)
-    });
-
-    // If --join is set, group by the prefix before the last '.'; otherwise each component
-    // becomes its own one-member group (i.e. existing per-component behaviour).
-    let groups: Vec<ExportGroup> = if join {
-        group_components_by_prefix(per_component, &db_path)
-    } else {
-        per_component
-            .into_iter()
-            .map(|task| ExportGroup {
-                output_name: task.column_name.clone(),
-                members: vec![GroupMember {
-                    created_at: component_created_at(&db_path, task.component.component_id),
-                    component: task.component,
-                    creation_index: task.creation_index,
-                    short_name: task.column_name,
-                    element_names: task.element_names,
-                }],
-            })
-            .collect()
-    };
+    let export_plan = plan(&db, join, pattern.as_deref(), include_private)?;
+    let groups = &export_plan.groups;
+    let pre_skipped = export_plan.skipped;
+    println!(
+        "Found {} components",
+        db.with_state(|state| state.components.len())
+    );
+    for name in &export_plan.private {
+        println!("  Skipping {} (private)", name);
+    }
 
     let exported_count = AtomicUsize::new(0);
     let skipped_count = AtomicUsize::new(pre_skipped);
@@ -941,6 +977,12 @@ pub fn run(
         "Export complete: {} components exported, {} skipped",
         exported_count, skipped_count
     );
+
+    if let Some(manifest) = manifest {
+        let catalog = crate::catalog::from_plan(&export_plan, join, pattern);
+        std::fs::write(&manifest, catalog.to_json())?;
+        println!("Wrote manifest: {}", manifest.display());
+    }
 
     // Flush stdout to ensure all output is visible
     std::io::stdout().flush()?;
