@@ -1,19 +1,14 @@
 //! Applies the schematic's sun, atmosphere, ambient light, and sky color.
 
+use bevy::camera::ClearColorConfig;
 use bevy::camera::visibility::RenderLayers;
-use bevy::camera::{ClearColorConfig, Exposure};
-use bevy::core_pipeline::Skybox;
 use bevy::ecs::query::Or;
 use bevy::light::atmosphere::ScatteringMedium;
 use bevy::light::{NotShadowCaster, SunDisk};
 use bevy::math::DVec3;
 use bevy::pbr::{AtmosphereMode, AtmosphereSettings, ExtractedAtmosphere, GpuAtmosphereSettings};
 // EnvironmentMapLight comes in via the prelude (bevy_light).
-use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
-use bevy::render::render_resource::{
-    Extent3d, TextureDimension, TextureFormat, TextureViewDescriptor, TextureViewDimension,
-};
 use bevy::render::sync_world::RenderEntity;
 use bevy::render::{Extract, ExtractSchedule, RenderApp};
 use bevy_geo_frames::solar::sun_direction_ecef;
@@ -50,89 +45,6 @@ pub(crate) struct SchematicAtmosphere(AtmosphereConfig);
 /// Earth-mode `sky color` dome for regular viewports.
 #[derive(Component)]
 pub(crate) struct SchematicSkyDome(impeller_wkt::Color);
-
-#[derive(Component)]
-struct FlatSky(Handle<Image>);
-
-#[derive(Resource, Default)]
-struct FlatSkyImage(Option<(impeller_wkt::Color, Handle<Image>)>);
-
-type FlatSkyCameras<'w, 's> = Query<
-    'w,
-    's,
-    (
-        Entity,
-        Option<&'static Skybox>,
-        Option<&'static FlatSky>,
-        Option<&'static Exposure>,
-        Has<bevy_ai_skybox::PrimarySkybox>,
-    ),
-    (With<MainCamera>, With<Camera3d>),
->;
-
-/// Draw the flat sky within each 3D viewport, never into the shared target clear.
-fn sync_flat_sky(
-    mut commands: Commands,
-    environment: Res<SceneEnvironment>,
-    mut cached: ResMut<FlatSkyImage>,
-    mut images: ResMut<Assets<Image>>,
-    cameras: FlatSkyCameras,
-) {
-    let color = environment
-        .0
-        .as_ref()
-        .filter(|env| env.earth.is_none())
-        .and_then(|env| env.sky_color);
-    if cached.0.as_ref().map(|(color, _)| *color) != color {
-        cached.0 = color.map(|color| {
-            let pixel = [color.r, color.g, color.b, color.a]
-                .map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
-            let mut image = Image::new_fill(
-                Extent3d {
-                    width: 1,
-                    height: 1,
-                    depth_or_array_layers: 6,
-                },
-                TextureDimension::D2,
-                &pixel,
-                TextureFormat::Rgba8UnormSrgb,
-                RenderAssetUsages::default(),
-            );
-            image.texture_view_descriptor = Some(TextureViewDescriptor {
-                dimension: Some(TextureViewDimension::Cube),
-                ..default()
-            });
-            (color, images.add(image))
-        });
-    }
-    for (entity, skybox, owned, exposure, enabled) in &cameras {
-        let owns_current =
-            owned.is_some_and(|owned| skybox.and_then(|s| s.image.as_ref()) == Some(&owned.0));
-        if let Some((_, image)) = &cached.0
-            && enabled
-        {
-            // Explicit textured skyboxes take precedence over the schematic color.
-            if skybox.is_none() || owns_current {
-                let brightness = 1.0 / exposure.copied().unwrap_or_default().exposure();
-                if skybox
-                    .is_some_and(|s| s.image.as_ref() == Some(image) && s.brightness == brightness)
-                {
-                    continue;
-                }
-                commands.entity(entity).insert((
-                    Skybox {
-                        image: Some(image.clone()),
-                        brightness,
-                        ..default()
-                    },
-                    FlatSky(image.clone()),
-                ));
-            }
-        } else if owns_current {
-            commands.entity(entity).remove::<(Skybox, FlatSky)>();
-        }
-    }
-}
 
 /// Just inside the cinematic atmosphere shell (outer radius 6,471 km).
 const SKY_DOME_RADIUS_M: f32 = 6.46e6;
@@ -172,7 +84,6 @@ pub struct SceneEnvironmentPlugin;
 impl Plugin for SceneEnvironmentPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SceneEnvironment>()
-            .init_resource::<FlatSkyImage>()
             .init_resource::<SpaceVisibility>()
             .add_systems(
                 Update,
@@ -180,7 +91,6 @@ impl Plugin for SceneEnvironmentPlugin {
                     sync_sun,
                     sync_atmosphere,
                     sync_sky_dome,
-                    sync_flat_sky,
                     sync_camera_environment,
                     sync_cinematic_shadow_casters,
                 ),
@@ -517,10 +427,9 @@ fn clear_color_matches(current: &ClearColorConfig, desired: &ClearColorConfig) -
 
 /// Clear colors for the (cinematic, regular) cameras. Earth mode owns the
 /// cinematic sky (atmosphere + Milky Way over black space) and renders `sky
-/// color` as the regular-viewport dome. Flat skies use a per-camera cubemap.
-/// Neither may color the shared render target behind graphs and gauges.
+/// color` as the regular-viewport dome, so both cameras keep fixed clears.
 fn clear_colors(
-    _sky_color: Option<impeller_wkt::Color>,
+    sky_color: Option<impeller_wkt::Color>,
     earth: bool,
 ) -> (ClearColorConfig, ClearColorConfig) {
     if earth {
@@ -529,7 +438,10 @@ fn clear_colors(
             ClearColorConfig::Default,
         )
     } else {
-        (ClearColorConfig::Default, ClearColorConfig::Default)
+        let sky = sky_color
+            .map(|c| ClearColorConfig::Custom(Color::srgba(c.r, c.g, c.b, c.a)))
+            .unwrap_or(ClearColorConfig::Default);
+        (sky, sky)
     }
 }
 
@@ -852,13 +764,14 @@ mod tests {
     }
 
     #[test]
-    fn sky_colors_never_clear_the_shared_graph_background() {
+    fn earth_mode_keeps_fixed_clears_and_flat_mode_honors_sky_color() {
         let blue = impeller_wkt::Color {
             r: 0.3,
             g: 0.6,
             b: 0.9,
             a: 1.0,
         };
+        let blue_clear = ClearColorConfig::Custom(Color::srgba(0.3, 0.6, 0.9, 1.0));
 
         // Earth mode: sky color goes to the dome, not the clears.
         let (cinematic, regular) = clear_colors(Some(blue), true);
@@ -869,64 +782,8 @@ mod tests {
         assert!(clear_color_matches(&regular, &ClearColorConfig::Default));
 
         let (cinematic, regular) = clear_colors(Some(blue), false);
-        assert!(clear_color_matches(&cinematic, &ClearColorConfig::Default));
-        assert!(clear_color_matches(&regular, &ClearColorConfig::Default));
-    }
-
-    #[test]
-    fn flat_sky_is_scoped_to_enabled_3d_views_and_removed_with_environment() {
-        let mut app = App::new();
-        app.init_resource::<Assets<Image>>()
-            .init_resource::<FlatSkyImage>()
-            .insert_resource(SceneEnvironment(Some(EnvironmentConfig {
-                sky_color: Some(impeller_wkt::Color::rgb(0.3, 0.6, 0.9)),
-                ..default()
-            })))
-            .add_systems(Update, sync_flat_sky);
-        let flight = app
-            .world_mut()
-            .spawn((
-                MainCamera,
-                Camera3d::default(),
-                bevy_ai_skybox::PrimarySkybox,
-            ))
-            .id();
-        let map = app
-            .world_mut()
-            .spawn((MainCamera, Camera3d::default()))
-            .id();
-        let graph = app.world_mut().spawn((MainCamera, Camera2d)).id();
-        let custom_image = app
-            .world_mut()
-            .resource_mut::<Assets<Image>>()
-            .add(Image::default());
-        let custom = app
-            .world_mut()
-            .spawn((
-                MainCamera,
-                Camera3d::default(),
-                bevy_ai_skybox::PrimarySkybox,
-                Skybox {
-                    image: Some(custom_image.clone()),
-                    ..default()
-                },
-            ))
-            .id();
-        app.update();
-        assert!(app.world().get::<Skybox>(flight).is_some());
-        assert!(app.world().get::<Skybox>(map).is_none());
-        assert!(app.world().get::<Skybox>(graph).is_none());
-        assert_eq!(
-            app.world().get::<Skybox>(custom).unwrap().image.as_ref(),
-            Some(&custom_image)
-        );
-        app.world_mut().resource_mut::<SceneEnvironment>().0 = None;
-        app.update();
-        assert!(app.world().get::<Skybox>(flight).is_none());
-        assert_eq!(
-            app.world().get::<Skybox>(custom).unwrap().image.as_ref(),
-            Some(&custom_image)
-        );
+        assert!(clear_color_matches(&cinematic, &blue_clear));
+        assert!(clear_color_matches(&regular, &blue_clear));
     }
 
     #[test]
