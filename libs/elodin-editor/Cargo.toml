@@ -138,11 +138,28 @@ js-sys = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = [
+  "CodecState",
+  "DomException",
+  "EncodedVideoChunk",
+  "EncodedVideoChunkInit",
+  "EncodedVideoChunkType",
+  "HardwareAcceleration",
   "Headers",
+  "ImageData",
+  "OffscreenCanvas",
+  "OffscreenCanvasRenderingContext2d",
+  "PlaneLayout",
   "Request",
   "RequestInit",
   "RequestMode",
   "Response",
+  "VideoDecoder",
+  "VideoDecoderConfig",
+  "VideoDecoderInit",
+  "VideoDecoderSupport",
+  "VideoFrame",
+  "VideoFrameCopyToOptions",
+  "VideoPixelFormat",
   "Window",
 ] }
 

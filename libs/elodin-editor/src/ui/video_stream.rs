@@ -180,6 +180,66 @@ fn is_keyframe(nal_data: &[u8]) -> bool {
     false
 }
 
+/// `avc1.PPCCLL` from the Annex B SPS (NAL type 7). WebCodecs wants this codec
+/// string and accepts Annex B when `description` is omitted.
+#[cfg(any(test, target_family = "wasm"))]
+fn avc1_codec_string(annex_b: &[u8]) -> Option<String> {
+    let sps = nal_unit(annex_b, 7)?;
+    if sps.len() < 4 {
+        return None;
+    }
+    Some(format!("avc1.{:02X}{:02X}{:02X}", sps[1], sps[2], sps[3]))
+}
+
+#[cfg(any(test, target_family = "wasm"))]
+fn nal_unit(data: &[u8], nal_type: u8) -> Option<&[u8]> {
+    let mut i = 0;
+    while i + 3 < data.len() {
+        let header = if i + 4 <= data.len()
+            && data[i] == 0
+            && data[i + 1] == 0
+            && data[i + 2] == 0
+            && data[i + 3] == 1
+        {
+            i + 4
+        } else if data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 1 {
+            i + 3
+        } else {
+            i += 1;
+            continue;
+        };
+        if header >= data.len() {
+            return None;
+        }
+        let next = next_start_code(data, header + 1).unwrap_or(data.len());
+        if data[header] & 0x1F == nal_type {
+            return Some(&data[header..next]);
+        }
+        i = next;
+    }
+    None
+}
+
+#[cfg(any(test, target_family = "wasm"))]
+fn next_start_code(data: &[u8], from: usize) -> Option<usize> {
+    let mut i = from;
+    while i + 3 < data.len() {
+        if i + 4 <= data.len()
+            && data[i] == 0
+            && data[i + 1] == 0
+            && data[i + 2] == 0
+            && data[i + 3] == 1
+        {
+            return Some(i);
+        }
+        if data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 1 {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
 // ---------------------------------------------------------------------------
 // StreamState — simplified to 3 variants
 // ---------------------------------------------------------------------------
@@ -463,27 +523,29 @@ pub enum DecoderOutput {
     SeekComplete(u64),
 }
 
+#[cfg(target_family = "wasm")]
+#[path = "video_stream_wasm.rs"]
+mod wasm_decoder;
+
 #[derive(Component)]
 pub struct VideoDecoderHandle {
-    tx: flume::Sender<DecoderInput>,
     rx: flume::Receiver<DecoderOutput>,
     width: Arc<AtomicUsize>,
-    /// Shared with the decoder thread so it can skip stale seek batches.
+    /// Shared with the decoder so it can skip stale seek batches.
     latest_seek_generation: Arc<AtomicU64>,
-    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+    #[cfg(not(target_family = "wasm"))]
+    tx: flume::Sender<DecoderInput>,
+    #[cfg(not(target_family = "wasm"))]
     _handle: std::thread::JoinHandle<()>,
-    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
-    _handle: (),
+    #[cfg(target_family = "wasm")]
+    decoder_id: u64,
 }
 
 // ---------------------------------------------------------------------------
 // Decoder implementations (platform-specific)
 // ---------------------------------------------------------------------------
 
-#[cfg(all(
-    not(target_os = "macos"),
-    not(all(feature = "wasm-cut", target_family = "wasm"))
-))]
+#[cfg(all(not(target_os = "macos"), not(target_family = "wasm")))]
 fn decode_one_frame(
     decoder: &mut openh264::decoder::Decoder,
     packet: &[u8],
@@ -511,10 +573,7 @@ fn decode_one_frame(
     }
 }
 
-#[cfg(all(
-    not(target_os = "macos"),
-    not(all(feature = "wasm-cut", target_family = "wasm"))
-))]
+#[cfg(all(not(target_os = "macos"), not(target_family = "wasm")))]
 fn decode_video(
     _frame_width: Arc<AtomicUsize>,
     packet_rx: flume::Receiver<DecoderInput>,
@@ -670,6 +729,7 @@ fn decode_video(
 // VideoDecoderHandle
 // ---------------------------------------------------------------------------
 
+#[cfg(not(target_family = "wasm"))]
 impl Default for VideoDecoderHandle {
     fn default() -> Self {
         let (packet_tx, packet_rx) = flume::bounded::<DecoderInput>(32);
@@ -678,14 +738,8 @@ impl Default for VideoDecoderHandle {
         let frame_width = width.clone();
         let latest_gen = Arc::new(AtomicU64::new(0));
         let decoder_gen = latest_gen.clone();
-        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
         let _handle =
             std::thread::spawn(move || decode_video(frame_width, packet_rx, image_tx, decoder_gen));
-        #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
-        let _handle = {
-            let _ = (frame_width, packet_rx, image_tx, decoder_gen);
-            ()
-        };
         VideoDecoderHandle {
             tx: packet_tx,
             rx: image_rx,
@@ -696,25 +750,66 @@ impl Default for VideoDecoderHandle {
     }
 }
 
+#[cfg(target_family = "wasm")]
+impl Default for VideoDecoderHandle {
+    fn default() -> Self {
+        // Unbounded so a seek's frames and its SeekComplete are not dropped
+        // before the UI drains the receiver.
+        let (image_tx, image_rx) = flume::unbounded();
+        let width = Arc::new(AtomicUsize::new(0));
+        let latest_gen = Arc::new(AtomicU64::new(0));
+        let decoder_id = wasm_decoder::spawn(image_tx, latest_gen.clone()).unwrap_or(0);
+        VideoDecoderHandle {
+            rx: image_rx,
+            width,
+            latest_seek_generation: latest_gen,
+            decoder_id,
+        }
+    }
+}
+
+#[cfg(target_family = "wasm")]
+impl Drop for VideoDecoderHandle {
+    fn drop(&mut self) {
+        wasm_decoder::remove(self.decoder_id);
+    }
+}
+
 impl VideoDecoderHandle {
     /// Send a single raw H.264 frame for sequential decode (warm decoder).
     /// Returns `true` if the frame was successfully enqueued.
+    #[cfg(not(target_family = "wasm"))]
     pub fn process_frame(&self, timestamp: Timestamp, frame_data: &[u8]) -> bool {
         self.tx
             .try_send(DecoderInput::Frame(frame_data.to_vec(), timestamp))
             .is_ok()
     }
 
+    /// A delta before the first key is rejected. Returns `false` so the caller retries.
+    #[cfg(target_family = "wasm")]
+    pub fn process_frame(&self, timestamp: Timestamp, frame_data: &[u8]) -> bool {
+        wasm_decoder::process_frame(self.decoder_id, timestamp, frame_data)
+    }
+
     /// Send a batch of raw frames for seek-decode (resets the decoder).
     /// Returns `true` if the batch was successfully enqueued.
     /// Also publishes `generation` to the shared atomic so the decoder
     /// thread can skip any older (stale) batches still in the queue.
+    #[cfg(not(target_family = "wasm"))]
     pub fn send_seek_batch(&self, frames: Vec<(Timestamp, Vec<u8>)>, generation: u64) -> bool {
         self.latest_seek_generation
             .store(generation, atomic::Ordering::Relaxed);
         self.tx
             .try_send(DecoderInput::SeekBatch { frames, generation })
             .is_ok()
+    }
+
+    /// Reset the WebCodecs decoder, decode `frames` in order, then flush.
+    #[cfg(target_family = "wasm")]
+    pub fn send_seek_batch(&self, frames: Vec<(Timestamp, Vec<u8>)>, generation: u64) -> bool {
+        self.latest_seek_generation
+            .store(generation, atomic::Ordering::Relaxed);
+        wasm_decoder::send_seek_batch(self.decoder_id, frames, generation)
     }
 
     /// Drain decoded frames from the decoder thread into the cache.
@@ -1396,6 +1491,17 @@ mod tests {
         let gray = backfill_frame_limit(Some((640, 512, RawPixelFormat::Gray8)), false);
         let rgba = backfill_frame_limit(Some((640, 512, RawPixelFormat::Rgba8)), false);
         assert_eq!(gray, rgba * 4);
+    }
+
+    #[test]
+    fn avc1_codec_string_reads_sps() {
+        let annex_b = [
+            0, 0, 0, 1, 0x68, 0xCE, 0x06, 0xE2, // PPS
+            0, 0, 0, 1, 0x67, 0x42, 0xC0, 0x1E, 0xD9, // SPS
+            0, 0, 1, 0x65, 0x88, // IDR
+        ];
+        assert_eq!(avc1_codec_string(&annex_b).as_deref(), Some("avc1.42C01E"));
+        assert!(avc1_codec_string(&[0, 0, 0, 1, 0x65, 0x88]).is_none());
     }
 
     #[test]
