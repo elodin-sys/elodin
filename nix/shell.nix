@@ -59,6 +59,18 @@ with pkgs; let
         grpc
         pythonBase
         clang
+        # Native Cesium/vcpkg build tools, also used by direct Cargo CI jobs.
+        ninja
+        vcpkg-tool
+        curl
+        zip
+        unzip
+        autoconf
+        automake
+        libtool
+        perl
+        bison
+        nasm
         maturin
         bzip2
         libclang

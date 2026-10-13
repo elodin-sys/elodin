@@ -55,5 +55,24 @@ jobs:
         run: |
           choco install cmake --yes
           choco install protoc --yes
+      - name: Locate the pinned Cesium build script
+        shell: pwsh
+        run: |
+          $metadata = cargo metadata --locked --format-version 1 | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "cargo metadata failed" }
+          $plugin = $metadata.packages | Where-Object { $_.name -eq "bevy-cesium" }
+          "BEVY_CESIUM_DIR=$(Split-Path $plugin.manifest_path)" >> $env:GITHUB_ENV
+          "CESIUM_BUILD_ROOT=${{ runner.temp }}/cesium" >> $env:GITHUB_ENV
+          "CESIUM_NATIVE_DIR=${{ runner.temp }}/cesium/install" >> $env:GITHUB_ENV
+      - name: Cache Cesium Native SDK
+        id: cesium-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/cesium/install
+          key: cesium-native-msvc-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+      - name: Build Cesium Native SDK
+        if: steps.cesium-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: '& "$env:BEVY_CESIUM_DIR/scripts/build_cesium_native.ps1"'
       - name: cargo check
         run: cargo check --locked --package elodin

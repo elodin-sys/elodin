@@ -30,6 +30,47 @@ mod coordinate_tests {
     use bevy_geo_frames::{GeoOrigin, Present};
 
     #[test]
+    fn new_tile_is_placed_before_its_first_visible_frame() {
+        let origin = GeoOrigin::new_from_degrees(40.0, -75.0, 300.0);
+        let geo = GeoContext::from(origin).with_present(Present::Sphere);
+        let ecef_from_mesh = GeoFrame::ECEF._M_(&GeoFrame::ENU, &geo)
+            * DMat4::from_translation(DVec3::new(12000.0, -8000.0, 70.0));
+        let expected = GeoFrame::bevy_M_(&GeoFrame::ECEF, &geo) * ecef_from_mesh;
+        let mut app = App::new();
+        let root = app.world_mut().spawn_empty().id();
+        app.insert_resource(geo)
+            .insert_resource(FloatingOriginSettings::new(2000.0, 100.0))
+            .insert_resource(BigSpaceRootEntity(root))
+            .add_systems(Update, place_tiles);
+        let tile = app
+            .world_mut()
+            .spawn((
+                CesiumPrimitive { ecef_from_mesh },
+                Transform::IDENTITY,
+                Visibility::Visible,
+            ))
+            .id();
+        // No PreUpdate geographic systems: the adapter must initialize the pose.
+        app.update();
+        let transform = app.world().get::<Transform>(tile).unwrap();
+        let cell = app.world().get::<GridCell>(tile).unwrap();
+        let grid = app.world().resource::<FloatingOriginSettings>();
+        assert!(
+            (grid.grid_position_double(cell, transform) - expected.w_axis.truncate()).length()
+                < 0.001
+        );
+        let (_, expected_rotation, _) = expected.to_scale_rotation_translation();
+        assert!(
+            transform
+                .rotation
+                .as_dquat()
+                .angle_between(expected_rotation)
+                < 1e-5
+        );
+        assert_eq!(app.world().get::<ChildOf>(tile).unwrap().parent(), root);
+    }
+
+    #[test]
     fn cesium_camera_matches_ecef_across_grid_cells_and_earth_scale() {
         let origin =
             GeoOrigin::new_from_degrees(40.03879587543084, -75.59670696255716, 297.25783960334957);
@@ -133,15 +174,26 @@ fn collect_views(
 fn place_tiles(
     mut commands: Commands,
     root: Res<BigSpaceRootEntity>,
+    geo: Res<GeoContext>,
+    grid: Res<FloatingOriginSettings>,
     tiles: Query<(Entity, &CesiumPrimitive), Added<CesiumPrimitive>>,
 ) {
     for (entity, tile) in &tiles {
         let (scale, rotation, translation) = tile.ecef_from_mesh.to_scale_rotation_translation();
+        // Streaming happens after PreUpdate's geographic synchronization. Set
+        // the local pose now so the first visible frame is already georeferenced.
+        let local = GeoFrame::bevy_M_(&GeoFrame::ECEF, &geo) * tile.ecef_from_mesh;
+        let (_, local_rotation, local_position) = local.to_scale_rotation_translation();
+        let (cell, local_translation) = grid.translation_to_grid(local_position);
         commands.entity(entity).insert((
-            Transform::from_scale(scale.as_vec3()),
+            Transform {
+                translation: local_translation,
+                rotation: local_rotation.as_quat(),
+                scale: scale.as_vec3(),
+            },
             GeoPosition(GeoFrame::ECEF, translation),
             GeoRotation::absolute(GeoFrame::ECEF, rotation),
-            GridCell::default(),
+            cell,
             ChildOf(root.0),
         ));
     }
