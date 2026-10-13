@@ -1244,7 +1244,7 @@ dependencies = [
 [[package]]
 name = "bevy-cesium"
 version = "0.1.0"
-source = "git+https://github.com/elodin-sys/bevy-cesium?rev=fefc8fede7c62edb4fa6b3ba6a3e6333f8e7332a#fefc8fede7c62edb4fa6b3ba6a3e6333f8e7332a"
+source = "git+https://github.com/elodin-sys/bevy-cesium?rev=65f771db83204547f01295ee1549c7e34237d849#65f771db83204547f01295ee1549c7e34237d849"
 dependencies = [
  "bevy",
  "cesium-native-bridge",
@@ -3524,7 +3524,7 @@ dependencies = [
 [[package]]
 name = "cesium-native-bridge"
 version = "0.1.0"
-source = "git+https://github.com/elodin-sys/bevy-cesium?rev=fefc8fede7c62edb4fa6b3ba6a3e6333f8e7332a#fefc8fede7c62edb4fa6b3ba6a3e6333f8e7332a"
+source = "git+https://github.com/elodin-sys/bevy-cesium?rev=65f771db83204547f01295ee1549c7e34237d849#65f771db83204547f01295ee1549c7e34237d849"
 dependencies = [
  "cxx",
  "cxx-build",

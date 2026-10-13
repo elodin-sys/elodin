@@ -64,27 +64,13 @@ mod coordinate_tests {
 
 impl Plugin for CesiumPlugin {
     fn build(&self, app: &mut App) {
-        let source = if let Ok(asset) = std::env::var("CESIUM_ION_ASSET_ID") {
-            let Ok(asset_id) = asset.parse::<i64>() else {
-                error!("CESIUM_ION_ASSET_ID must be a positive integer");
-                return;
-            };
-            let Ok(access_token) = std::env::var("CESIUM_ION_TOKEN") else {
-                error!("Set CESIUM_ION_TOKEN to load a Cesium ion asset");
-                return;
-            };
-            if asset_id <= 0 || access_token.is_empty() {
-                error!("Invalid Cesium ion configuration");
+        let source = match CesiumSource::from_env() {
+            Ok(Some(source)) => source,
+            Ok(None) => return,
+            Err(error) => {
+                error!("{error}");
                 return;
             }
-            CesiumSource::Ion {
-                asset_id,
-                access_token,
-            }
-        } else if let Ok(url) = std::env::var("CESIUM_TILESET_URL") {
-            CesiumSource::Url(url)
-        } else {
-            return;
         };
         app.add_plugins(StreamingPlugin::new(source).with_external_coordinates())
             .insert_resource(SourceLabel(

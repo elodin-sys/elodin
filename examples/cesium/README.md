@@ -74,13 +74,13 @@ run `just prepare-cesium` and set `CESIUM_NATIVE_DIR` to its installation direct
 (normally `~/.cache/elodin/cesium-0.65.0/install`). Nix packaging and cross-platform
 build validation remain outstanding.
 
-Supported: multi-camera streaming, tile eviction, triangle meshes and base-color
-textures. Raster imagery overlays, full glTF materials, GPU instancing, point
+Supported: multi-camera streaming, tile eviction, triangle meshes, base-color
+textures, metallic/roughness and emissive factors, alpha modes and double-sided surfaces. Raster imagery overlays, full glTF materials, GPU instancing, point
 clouds and collision meshes are not implemented. Cesium World Terrain with a
 separate imagery layer is not a supported configuration. The credits UI still
 needs complete HTML/logo handling for providers requiring it.
 
-The standalone plugin has seven passing tests, including a
+The standalone plugin has eleven passing tests, including a
 [headless ECEF integration test](https://github.com/elodin-sys/bevy-cesium/blob/main/tests/ecef_end_to_end.rs)
 covering two cameras, origin shifts and mesh placement. These are not GPU image
 regression tests. Editor visual checks have been performed on Apple Silicon macOS;
