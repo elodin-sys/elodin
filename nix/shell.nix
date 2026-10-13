@@ -59,18 +59,6 @@ with pkgs; let
         grpc
         pythonBase
         clang
-        # Native Cesium/vcpkg build tools, also used by direct Cargo CI jobs.
-        ninja
-        vcpkg-tool
-        curl
-        zip
-        unzip
-        autoconf
-        automake
-        libtool
-        perl
-        bison
-        nasm
         maturin
         bzip2
         libclang
@@ -158,6 +146,8 @@ with pkgs; let
     };
 
     LLDB_DEBUGSERVER_PATH = lib.optionalString pkgs.stdenv.isDarwin "/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/Resources/debugserver";
+
+    CESIUM_NATIVE_DIR = pkgs.callPackage ./pkgs/cesium-native.nix {};
 
     UV_PYTHON = "${pythonBase}/bin/python3";
 

@@ -133,10 +133,6 @@ prepare-cesium:
     bash scripts/build_cesium_native.sh >&2
   fi
 
-# Supply the same native SDK to direct Cargo commands (including CI).
-with-cesium +command: prepare-cesium
-  {{command}}
-
 install target="all":
   #!/usr/bin/env sh
   set -e

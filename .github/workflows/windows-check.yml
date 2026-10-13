@@ -58,7 +58,7 @@ jobs:
       - name: Locate the pinned Cesium build script
         shell: pwsh
         run: |
-          $metadata = cargo metadata --locked --format-version 1 | ConvertFrom-Json
+          $metadata = cargo metadata --locked --format-version 1 | ConvertFrom-Json -AsHashtable
           if ($LASTEXITCODE -ne 0) { throw "cargo metadata failed" }
           $plugin = $metadata.packages | Where-Object { $_.name -eq "bevy-cesium" }
           "BEVY_CESIUM_DIR=$(Split-Path $plugin.manifest_path)" >> $env:GITHUB_ENV

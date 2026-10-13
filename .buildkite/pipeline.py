@@ -42,12 +42,12 @@ test_steps = [
             nix_step(
                 emoji=":crab:",
                 label="clippy",
-                command="just with-cesium cargo clippy -- -Dwarnings && cd fsw/sensor-fw && cargo clippy -- -Dwarnings",
+                command="cargo clippy -- -Dwarnings && cd fsw/sensor-fw && cargo clippy -- -Dwarnings",
             ),
             nix_step(
                 emoji=":crab:",
                 label="cargo test",
-                command="just with-cesium cargo test --release --workspace --exclude elodin-db --exclude elodin-db-tests -- -Z unstable-options --format json --report-time | buildkite-test-collector && cargo test --release -p elodin-db --lib -- --test-threads=1 -Z unstable-options --format json --report-time | buildkite-test-collector && cargo test --release -p elodin-db-tests -- --test-threads=1 -Z unstable-options --format json --report-time | buildkite-test-collector",
+                command="cargo test --release --workspace --exclude elodin-db --exclude elodin-db-tests -- -Z unstable-options --format json --report-time | buildkite-test-collector && cargo test --release -p elodin-db --lib -- --test-threads=1 -Z unstable-options --format json --report-time | buildkite-test-collector && cargo test --release -p elodin-db-tests -- --test-threads=1 -Z unstable-options --format json --report-time | buildkite-test-collector",
                 env={
                     "RUSTC_BOOTSTRAP": "1",
                     "BUILDKITE_ANALYTICS_TOKEN": "R6hH2MNhtMdbfQWhDd9cvZfo",
@@ -173,7 +173,7 @@ test_steps = [
     nix_step(
         emoji=":gear:",
         label="headless s10 lifecycle",
-        command="just with-cesium cargo build --release -p elodin && scripts/ci/test-headless-s10-exit.sh",
+        command="cargo build --release -p elodin && scripts/ci/test-headless-s10-exit.sh",
     ),
     group(
         name=":racehorse: performance",
