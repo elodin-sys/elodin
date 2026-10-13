@@ -390,9 +390,17 @@ impl LogLevel {
     }
 }
 
-#[stellarator::main]
-async fn main() -> miette::Result<()> {
+fn main() -> miette::Result<()> {
     let args = Cli::parse();
+    // Export and archive never touch the io_uring executor, which container seccomp profiles
+    // block (Elodin Cloud's ingest Job runs export under RuntimeDefault).
+    if matches!(args.command, Commands::Export(_) | Commands::Archive(_)) {
+        return futures_lite::future::block_on(run(args));
+    }
+    stellarator::run(move || run(args))
+}
+
+async fn run(args: Cli) -> miette::Result<()> {
     let log_level = match &args.command {
         Commands::Run(args) => args.log_level,
         _ => LogLevel::Info,

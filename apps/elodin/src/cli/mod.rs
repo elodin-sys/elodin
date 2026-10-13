@@ -112,12 +112,13 @@ impl Cli {
             return Err(miette::miette!("re-exec failed: {err}"));
         }
 
+        // Agent and upload commands report through their output; keep the database's opening chatter out.
+        let default_filter = match &self.command {
+            Some(Commands::Mcp(_) | Commands::Upload(_)) => "warn",
+            _ => "s10=info,elodin=info,elodin_db=info,impeller=info,impeller::bevy=error,error",
+        };
         let filter = EnvFilter::try_from_default_env()
-            .or_else(|_| {
-                EnvFilter::try_new(
-                    "s10=info,elodin=info,elodin_db=info,impeller=info,impeller::bevy=error,error",
-                )
-            })
+            .or_else(|_| EnvFilter::try_new(default_filter))
             .unwrap_or_else(|_| EnvFilter::new("info"));
 
         // stdout carries MCP framing and command output, so these log to stderr.
