@@ -82,13 +82,15 @@ def world():
                 ui.hsplit(
                     ui.viewport(
                         name="Chase",
-                        pos="drone.flight_pose.translate(-4,0,1.5)",
+                        active=True,
+                        pos="drone.flight_pose.translate(-2.8,0,2.2)",
                         look_at="drone.world_pos",
                         up="(0,0,1)",
                         frame="ENU",
                         show_grid=False,
-                        show_view_cube=False,
-                        fov=50.0,
+                        show_view_cube=True,
+                        view_cube_frame="ENU",
+                        fov=45.0,
                     ),
                     ui.viewport(
                         name="Onboard / Ground",
@@ -103,7 +105,7 @@ def world():
                     ),
                     ui.viewport(
                         name="Follow",
-                        pos="drone.flight_pose.translate(-7,-5,5)",
+                        pos="drone.flight_pose.translate(-3.2,-2.4,3.5)",
                         look_at="drone.world_pos",
                         up="(0,0,1)",
                         frame="ENU",
@@ -111,7 +113,7 @@ def world():
                         show_view_cube=False,
                         fov=55.0,
                     ),
-                    share=0.57,
+                    share=0.65,
                 ),
                 ui.hsplit(
                     ui.viewport(
@@ -154,12 +156,12 @@ def world():
                         refresh_interval_ms=1000.0,
                         share=0.25,
                     ),
-                    share=0.43,
+                    share=0.35,
                 ),
             ),
             ui.object_3d(
                 "drone.flight_pose",
-                mesh=ui.glb("talon-quad-v2.glb"),
+                mesh=ui.glb("talon-quad-cesium.glb"),
                 frame="ENU",
                 icon=ui.icon(
                     builtin="flight",
@@ -180,7 +182,6 @@ def world():
             environment=ui.environment(
                 sun=ui.sun(azimuth=135.0, elevation=45.0, illuminance=12000.0, shadows=True),
                 ambient=0.3,
-                sky=ui.color(135, 175, 210, 255),
             ),
         ),
         "cesium.kdl",
