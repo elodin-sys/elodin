@@ -209,27 +209,30 @@ pub fn rank(query: &str, name: &str) -> Option<u8> {
     let q = query.trim().to_lowercase();
     let n = name.to_lowercase();
     if q.is_empty() {
-        return Some(5);
+        return Some(6);
     }
     if n == q {
         return Some(0);
     }
     let last = n.rsplit('.').next().unwrap_or(&n);
-    if n.starts_with(&q) || last.starts_with(&q) {
+    if last == q {
         return Some(1);
     }
-    if n.contains(&q) {
+    if n.starts_with(&q) || last.starts_with(&q) {
         return Some(2);
+    }
+    if n.contains(&q) {
+        return Some(3);
     }
     let tokens: Vec<&str> = q
         .split(|c: char| !c.is_ascii_alphanumeric())
         .filter(|t| !t.is_empty())
         .collect();
     if !tokens.is_empty() && tokens.iter().all(|t| n.contains(t)) {
-        return Some(3);
+        return Some(4);
     }
     let fuzzy = strsim::jaro_winkler(&q, &n).max(strsim::jaro_winkler(&q, last));
-    (fuzzy >= 0.85).then_some(4)
+    (fuzzy >= 0.85).then_some(5)
 }
 
 fn similarity(query: &str, name: &str) -> i64 {
@@ -455,9 +458,10 @@ mod tests {
     fn ranks() {
         assert_eq!(rank("imu.accel", "IMU.ACCEL"), Some(0));
         assert_eq!(rank("accel", "imu.accel"), Some(1));
-        assert_eq!(rank("mu.acc", "imu.accel"), Some(2));
-        assert_eq!(rank("accel imu", "imu.accel"), Some(3));
-        assert_eq!(rank("imu.acel", "imu.accel"), Some(4));
+        assert_eq!(rank("acc", "imu.accel"), Some(2));
+        assert_eq!(rank("mu.acc", "imu.accel"), Some(3));
+        assert_eq!(rank("accel imu", "imu.accel"), Some(4));
+        assert_eq!(rank("imu.acel", "imu.accel"), Some(5));
         assert_eq!(rank("pressure", "imu.accel"), None);
     }
 
