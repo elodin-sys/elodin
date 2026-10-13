@@ -1526,3 +1526,33 @@ viewport pos="aircraft.world_pos.translate(1, 0, 0.5).translate_world(0, 0, 10)"
 [elodin.db.MessageStream]: #class-elodin-db-componentstream-elodin-db-messagestream
 [elodin.db.ComponentInfo]: #class-elodin-db-componentinfo
 [elodin.db.sql_table_name]: #function-elodin-db-sql-table-name
+
+## Recording Analysis (`elodin.analysis`)
+
+`elodin.analysis` reads recordings the way `elodin-db export --join --mono-us` lays them out, and saves analysis outputs. `elodin mcp execute` binds it as `el`, with `ctx` for parameters, against local databases or an Elodin Cloud project; the same script returns the same rows in both places. From a notebook, call `el.open_local(path, ...)` first.
+
+```python
+from elodin import analysis as el
+
+el.open_local("./flight")
+accel = el.signal("mfimumessage.accel").window(start_us=2_465_807_523, end_us=2_470_000_000)
+df = accel.to_polars(flatten=True)   # time_us, value_x, value_y, value_z
+```
+
+| Call | Returns |
+| --- | --- |
+| `el.runs()` | Runs in scope: name, id, source_id, tables, signals, first_us, last_us, tags |
+| `el.signals(query=None, run=None)`, `el.tables(query=None, run=None)` | Matching signal and table cards |
+| `el.signal(name, run=None)` | A `Table` with `time_us` and `value` |
+| `el.table(name, run=None)` | A `Table` with `time_us` and one column per member, null where a member has no sample |
+| `Table.window(start_us=None, end_us=None)`, `Table.select(*columns)` | A narrower `Table` |
+| `Table.count()`, `Table.to_arrow(max_rows=None)`, `Table.to_polars(max_rows=None, flatten=False)` | Row count or materialized data |
+| `el.artifacts.save_table/save_figure/save_json/save_html(obj, name)` | `{name, bytes, sha256}` of a file in the execution directory |
+| `ctx.parameters`, `ctx.preview(df, n=20)` | Parameters, and at most 100 rows as dicts |
+
+- Names match case-insensitively (export lowercases them); private components don't exist.
+- `time_us` is int64 microseconds on the recorder clock, not wall time.
+- `run=` may be omitted only when one run is in scope (`AmbiguousRun` otherwise).
+- Vectors are `fixed_size_list` in Arrow and `Array` in Polars.
+- Reads over `max_rows` (default 5,000,000) raise `ResultBudgetError` with the row count; unknown names raise `UnknownSignal` with suggestions.
+- Tables follow today's `--join`: rows keep export order and `time_us` can repeat.

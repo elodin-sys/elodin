@@ -21,6 +21,8 @@ This document contains the help content for the Elodin command-line programs.
 * [`elodin`↴](#elodin)
 * [`elodin editor`↴](#elodin-editor)
 * [`elodin run`↴](#elodin-run)
+* [`elodin mcp`↴](#elodin-mcp)
+* [`elodin upload`↴](#elodin-upload)
 * [`elodin-db`↴](#elodin-db)
 * [`elodin-db run`↴](#elodin-db-run)
 * [`elodin-db lua`↴](#elodin-db-lua)
@@ -35,6 +37,7 @@ This document contains the help content for the Elodin command-line programs.
 * [`elodin-db info`↴](#elodin-db-info)
 * [`elodin-db query`↴](#elodin-db-query)
 * [`elodin-db export`↴](#elodin-db-export)
+* [`elodin-db archive`↴](#elodin-db-archive)
 * [`elodin-db export-videos`↴](#elodin-db-export-videos)
 
 ---
@@ -345,6 +348,83 @@ python examples/drone/main.py bench --ticks 1000 --profile
 ```
 
 ---
+
+## `elodin mcp`
+
+Code Mode MCP for agents: two tools, `search` and `execute`, over local recordings (`--db`) or an Elodin Cloud project (`--project`). With no subcommand, `elodin mcp` serves MCP over stdio for an IDE agent; `search` and `execute` run the same tools from a shell.
+
+**Usage:** `elodin mcp [--db [NAME=]PATH]... | [--project NAME] [COMMAND]`
+
+* `--db <[NAME=]PATH>` — A local database directory (repeatable). Runs are named after the directory unless renamed with `NAME=`.
+* `--project <NAME>` — An Elodin Cloud project (log in first with `elodin login`). `execute` then runs as a hosted job next to the data.
+* `--artifacts <DIR>` — Server only: where execution directories go. Default: `./elodin-artifacts`.
+
+Local execution runs the script as you, in a Python subprocess with the `elodin` package, with only a wall timeout and output caps.
+
+### `elodin mcp search [EXPR]`
+
+Search runs, tables, signals, and the SDK reference; without `EXPR`, print an overview. `EXPR` is one of `runs()`, `tables(query, run=)`, `signals(query, run=)`, `describe(name)`, `sdk(query)`, or plain text. Results are metadata only and capped at 16 KiB. Options: `--json`, `--limit N`.
+
+```sh
+elodin mcp search --db ./flight
+elodin mcp search 'signals("accel")' --db ./flight --db sim=./sitl
+```
+
+### `elodin mcp execute SCRIPT`
+
+Run a Python script with `el` (the `elodin.analysis` SDK) and `ctx` pre-bound. The script assigns a small JSON-serializable dict to `result`; `print()` output and saved artifacts go to the execution directory (`code.py`, `parameters.json`, `envelope.json`, artifacts), which reproduces the run with `--params <dir>/parameters.json`. Exits 0 when the script completed, 1 when it failed or timed out, and 2 for usage or authentication errors.
+
+* `--param KEY=VALUE` — A script parameter (repeatable); `VALUE` is parsed as JSON when valid.
+* `--params FILE.json` — Parameters from a JSON object.
+* `--out DIR` — The execution directory. Default: `./elodin-artifacts/<execution_id>/`.
+* `--timeout SECONDS` — Default: 600 locally, 300 hosted.
+* `--max-rows N` — Largest read allowed (default 5,000,000); larger reads raise `ResultBudgetError`.
+* `--json` — Print the envelope as compact JSON.
+
+```python
+# summary.py
+df = el.signal(ctx.parameters["signal"]).to_polars()
+result = {"samples": df.height, "max": df["value"].max(), "table": el.artifacts.save_table(df, "data")}
+```
+
+```sh
+elodin mcp execute summary.py --db ./flight --param signal=barmessage.pressure
+elodin mcp execute summary.py --project my_project --param signal=barmessage.pressure --param run=flight
+```
+
+### Cursor
+
+```json
+{
+  "mcpServers": {
+    "elodin-flight": {"command": "elodin", "args": ["mcp", "--db", "/abs/path/flight"]},
+    "elodin-project": {"command": "elodin", "args": ["mcp", "--project", "my_project"]}
+  }
+}
+```
+
+Set `ELODIN_API_URL` and `ELODIN_ISSUER` in a server's `env` to use another Elodin Cloud environment.
+
+## `elodin upload`
+
+Upload a recording to an Elodin Cloud project. The database directory streams as a sparse-aware `.tar.zst` in parts (the archive is the record), then Elodin Cloud exports it to Parquet (`--join` by default) for search and hosted analysis. Rerunning an interrupted upload resumes it; an existing run name is refused. Private components are never exported.
+
+**Usage:** `elodin upload [OPTIONS] --project <NAME> <PATH>`
+
+* `<PATH>` — A database directory, or a `.tar.zst` holding exactly that directory.
+* `--project <NAME>` — The project.
+* `--name <RUN>` — Run name. Default: the directory's name.
+* `--tag KEY=VALUE` — A run tag (repeatable).
+* `--no-join` — Export one table per component.
+* `--pattern <GLOB>` — Export only matching components.
+* `--no-wait` — Return once uploaded instead of waiting for ingest.
+* `--json` — Print the run as JSON.
+
+```sh
+elodin upload ./flight --project my_project
+```
+
+
 
 ## `elodin-db`
 
@@ -917,6 +997,8 @@ The export runs in parallel across components and is dramatically faster than th
 
 * `--include-private` — Include components whose metadata has `private: true`. Off by default — those components are skipped (see [Private Components](#private-components) below).
 
+* `--manifest <FILE>` — Also write the export's catalog as JSON: each table's rows and columns, and each signal's table, column, dtype, shape, element names, row count, and time range. `elodin mcp` and Elodin Cloud search use the same catalog.
+
 * `--all-assets` — MCAP-only: attach every file under `{db}/assets/` instead of only schematic-referenced assets.
 
 * `--epoch-offset-us <i64>` — MCAP-only: add this offset (µs) to every sample timestamp before writing MCAP `log_time`/`publish_time`. When omitted and the earliest sample is pre-1970 (negative Unix µs), the exporter auto-rebases so earliest becomes `t=0` and records the shift in metadata key `elodin.time_offset_us`. The same auto-rebase runs if a requested offset would leave any sample pre-epoch (MCAP `log_time` is unsigned and cannot store absolute 1969-era times) — so `--epoch-offset-us 0` on Apollo-style data still preserves playback ordering rather than collapsing every sample to `t=0`.
@@ -1051,6 +1133,17 @@ elodin-db export ./my-database -o ./export --format csv --join --flatten --mono-
 elodin-db export ./my-database -o ./export --format csv --include-private
 ```
 
+
+## `elodin-db archive`
+
+Write a database directory as a `.tar.zst` that stores only committed data. Each component's files are 8 GiB sparse mmaps; the archive records their committed bytes as GNU sparse entries, so it is small, extracts to the original layout with GNU tar, bsdtar, or the `tar` crate, and is deterministic (the same database always yields the same bytes).
+
+**Usage:** `elodin-db archive --output <OUTPUT> <PATH>`
+
+* `<PATH>` — Path to the database directory
+* `-o`, `--output <OUTPUT>` — Output archive, or `-` for stdout
+
+With GNU tar instead, pass `-S` (`tar -S --zstd -cf db.tar.zst ./db`); without it GNU tar reads every zero.
 
 ## `elodin-db export-videos`
 

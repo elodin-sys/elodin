@@ -99,7 +99,9 @@ elodin-db run [::]:2241 ./ground-station --follows 192.168.1.10:2240
 
 **Video** -- H.264 video streams (e.g. from GStreamer via `elodinsink`) are stored as timestamped message logs and displayed in the Elodin Editor. Recorded video can be exported to MP4 with `elodin-db export-videos`.
 
-**Export** -- Export component data to Parquet, Arrow IPC, or CSV without a running server: `elodin-db export ./db -o ./out`. Glob filtering and vector flattening are supported.
+**Export** -- Export component data to Parquet, Arrow IPC, or CSV without a running server: `elodin-db export ./db -o ./out`. Glob filtering and vector flattening are supported, and `--manifest` writes the export's catalog as JSON.
+
+**Archive** -- `elodin-db archive ./db -o db.tar.zst` writes a small, deterministic archive of only the committed data; component files are 8 GiB sparse mmaps, so tools that aren't sparse-aware read every zero. `elodin upload` sends the same archive to Elodin Cloud.
 
 **Trim** -- Remove data from the beginning or end of a recording without a running server:
 

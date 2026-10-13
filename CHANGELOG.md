@@ -1,6 +1,10 @@
 # Changelog
 
 ## unreleased
+- **(feat)** Add `elodin mcp`, a Code Mode MCP server and CLI (`search`, `execute`) for agents analyzing recordings, against local databases (`--db`) or an Elodin Cloud project (`--project`), with the `elodin.analysis` SDK.
+- **(feat)** Add `elodin upload` to send a recording to an Elodin Cloud project, resuming interrupted uploads.
+- **(feat)** Add `elodin-db archive` for small, deterministic, sparse-aware `.tar.zst` archives, and `elodin-db export --manifest` to write the export's catalog.
+- **(fix)** Run `elodin-db export` and `archive` without io_uring, so they work under container seccomp profiles.
 - **(feat)** Add the `point_trails` schematic node: batched trails and cube/sphere heads for every point in one flat `3 × N` component, with status colors and an optional path-length cap.
 - **(feat)** Record component samples only when their bytes change by default; use `record_every_tick="true"` to opt into dense telemetry.
 - **(fix)** Stop stellarator's kqueue reactor (macOS and other non-Linux hosts) from busy-spinning once its 1024-entry event buffer fills, which kept every stellarator thread in an Elodin process at 100 % CPU and delayed 1 kHz loops by milliseconds. The reactor also no longer keeps every completed op registered, which made each event slower over a process's lifetime, and a waiting reader no longer drops a waiting writer's registration on the same socket, a stall the busy-spin had hidden.
