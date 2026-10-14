@@ -129,6 +129,7 @@ prepare-cesium:
   set -euo pipefail
   root="${CESIUM_BUILD_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/elodin/cesium-0.65.0}"
   install_dir="${CESIUM_NATIVE_DIR:-$root/install}"
+  # Both the dependency's Nix package and standalone builder write this stamp.
   if [[ ! -f "$install_dir/.cesium-native-revision" || ! -f "$install_dir/lib/libCesium3DTilesSelection.a" || ! -f "$install_dir/include/Cesium3DTilesSelection/Tileset.h" ]]; then
     bash scripts/build_cesium_native.sh >&2
   fi

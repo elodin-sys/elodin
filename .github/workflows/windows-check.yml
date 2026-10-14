@@ -62,17 +62,25 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "cargo metadata failed" }
           $plugin = $metadata.packages | Where-Object { $_.name -eq "bevy-cesium" }
           "BEVY_CESIUM_DIR=$(Split-Path $plugin.manifest_path)" >> $env:GITHUB_ENV
+          $sdkScript = Join-Path (Split-Path $plugin.manifest_path) "scripts/build_cesium_native.ps1"
+          "CESIUM_SDK_CACHE_KEY=cesium-native-msvc-${{ runner.os }}-$((Get-FileHash $sdkScript -Algorithm SHA256).Hash)" >> $env:GITHUB_ENV
           "CESIUM_BUILD_ROOT=${{ runner.temp }}/cesium" >> $env:GITHUB_ENV
           "CESIUM_NATIVE_DIR=${{ runner.temp }}/cesium/install" >> $env:GITHUB_ENV
-      - name: Cache Cesium Native SDK
+      - name: Restore Cesium Native SDK
         id: cesium-cache
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: ${{ runner.temp }}/cesium/install
-          key: cesium-native-msvc-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
+          key: ${{ env.CESIUM_SDK_CACHE_KEY }}
       - name: Build Cesium Native SDK
         if: steps.cesium-cache.outputs.cache-hit != 'true'
         shell: pwsh
         run: '& "$env:BEVY_CESIUM_DIR/scripts/build_cesium_native.ps1"'
+      - name: Save Cesium Native SDK
+        if: steps.cesium-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/cesium/install
+          key: ${{ env.CESIUM_SDK_CACHE_KEY }}
       - name: cargo check
         run: cargo check --locked --package elodin
