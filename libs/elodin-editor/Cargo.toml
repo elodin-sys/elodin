@@ -15,7 +15,7 @@ debug = ["big_space", "big_space/debug"]
 tracy = ["bevy/trace_tracy", "bevy/debug"]
 
 [dependencies]
-bevy-cesium = { git = "https://github.com/elodin-sys/bevy-cesium", rev = "bc0c5e92180cfd18674330395a5673c7e2aab562" }
+bevy-cesium = { git = "https://github.com/elodin-sys/bevy-cesium", rev = "2e138dfe80512714b4948b42ee8016eff1579f3f" }
 # math
 hamann-chen-line = { path = "../hamann-chen-line" }
 nox.path = "../nox"
