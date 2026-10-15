@@ -19,6 +19,8 @@ This document contains the help content for the Elodin command-line programs.
 **Command Overview:**
 
 * [`elodin`↴](#elodin)
+* [`elodin login`↴](#elodin-login)
+* [`elodin upload`↴](#elodin-upload)
 * [`elodin editor`↴](#elodin-editor)
 * [`elodin run`↴](#elodin-run)
 * [`elodin-db`↴](#elodin-db)
@@ -48,6 +50,8 @@ This document contains the help content for the Elodin command-line programs.
 * `editor` — Launch the Elodin editor (default)
 * `run` — Run an Elodin simulation in headless mode
 * `monte-carlo` — Run Monte Carlo campaigns
+* `login` — Log in to Elodin Cloud through your browser
+* `upload` — Upload a stopped, compacted TelemetryDB directory
 
 ###### **Options**
 
@@ -56,6 +60,48 @@ This document contains the help content for the Elodin command-line programs.
   Default value: `https://app.elodin.systems`
 
 
+
+## `elodin login`
+
+**Usage:** `elodin login [--device] [--no-browser]`
+
+Browser login uses authorization code + PKCE and a temporary loopback callback.
+For SSH/headless terminals, `--device` prints a verification URL and code.
+`--no-browser` prevents opening a browser in either flow. Sessions are stored per
+issuer with private file permissions; authenticated commands refresh expired tokens.
+
+`ELODIN_ISSUER` / `--issuer` and `ELODIN_API_URL` / `--api-url` select an environment
+before login. The session retains its API endpoint. `ELODIN_CONFIG_DIR` /
+`--config-dir` overrides the platform credential directory. Use `elodin whoami`
+to inspect your identity and `elodin logout` to end that issuer's session.
+
+## `elodin upload`
+
+**Usage:** `elodin upload <DB_PATH> [--project <NAME_OR_UUID>] [--json] [--timeout <SECONDS>]`
+
+Only TelemetryDB directories containing `db_state` are supported. Stop the writer
+and compact the database with `elodin-db compact <DB_PATH>` first; keep it stopped
+until upload finishes. The command does not modify the source database or infer
+simulation/flight provenance from its contents. Symlinks, special files, and
+nonportable paths are rejected.
+
+```bash
+elodin login
+elodin projects create demo
+elodin upload dbs/ball
+elodin upload dbs/ball --project demo --json
+```
+
+One available project is selected automatically; multiple projects prompt for a
+destination. In scripts, specify `--project` or `ELODIN_PROJECT`. Files stream
+with a manifest of sizes and SHA-256 digests. Success means the server has published
+the run, not merely accepted the upload. `--json` prints the final ticket/run status
+to stdout, with progress on stderr. Publication failures return a nonzero exit code.
+
+`--timeout` bounds the publication wait (default 300 seconds), not transmission.
+On timeout the accepted upload may still publish; the error includes its ticket
+and status URL. Each invocation starts a new upload intent; chunk resumption and
+automatic transmission retries are not supported.
 
 ## `elodin editor`
 

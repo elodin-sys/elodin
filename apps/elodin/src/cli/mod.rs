@@ -35,6 +35,9 @@ pub struct Cli {
         global = true
     )]
     api_url: String,
+    /// Directory for Elodin Cloud credentials (defaults to the platform config directory).
+    #[arg(long, env = "ELODIN_CONFIG_DIR", global = true)]
+    config_dir: Option<std::path::PathBuf>,
     #[command(subcommand)]
     command: Option<Commands>,
     #[arg(long, hide = true)]
@@ -53,6 +56,8 @@ enum Commands {
     Whoami(auth::WhoamiArgs),
     /// Create and list Elodin Cloud projects
     Projects(auth::ProjectsArgs),
+    /// Upload a stopped, compacted TelemetryDB directory to Elodin Cloud
+    Upload(auth::UploadArgs),
     /// Launch the Elodin editor (default)
     Editor(editor::Args),
     /// Run an Elodin simulation in headless mode
@@ -140,6 +145,7 @@ impl Cli {
             Some(Commands::Logout) => self.clone().logout(rt),
             Some(Commands::Whoami(args)) => self.clone().whoami(args.clone(), rt),
             Some(Commands::Projects(args)) => self.clone().projects(args.clone(), rt),
+            Some(Commands::Upload(args)) => self.clone().upload(args.clone(), rt),
             Some(Commands::Editor(args)) => self.clone().editor(args.clone(), rt),
             #[cfg(not(target_os = "windows"))]
             Some(Commands::Run(args)) => self.clone().run_headless(args.clone(), rt),
