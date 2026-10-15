@@ -640,12 +640,7 @@ impl Plugin for EditorPlugin {
             })
             .add_plugins(impeller_bevy::ImpellerPlugin);
         #[cfg(target_family = "wasm")]
-        {
-            let addr = self
-                .connection_addr
-                .unwrap_or_else(|| "127.0.0.1:2240".parse().expect("default Impeller address"));
-            app.add_plugins(impeller_bevy::WsImpellerPlugin::new(Some(addr)));
-        }
+        app.add_plugins(impeller_bevy::WsImpellerPlugin::new(self.connection_addr));
         app.add_plugins(FrustumPlugin)
             .add_plugins(FrustumIntersectionPlugin)
             .add_plugins(GizmoPlugin);
@@ -832,7 +827,6 @@ impl Plugin for EditorPlugin {
         #[cfg(feature = "debug")]
         app.add_plugins(spatial::debug::FloatingOriginDebugPlugin::default());
 
-        #[cfg(not(target_family = "wasm"))]
         app.add_plugins(crate::ui::startup_window::StartupPlugin);
 
         #[cfg(target_os = "macos")]

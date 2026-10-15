@@ -6,30 +6,33 @@ use web_sys::UrlSearchParams;
 fn main() {
     console_error_panic_hook::set_once();
     web_sys::console::log_1(&"elodin-web: main()".into());
-    let db_addr = db_addr_from_query();
-    web_sys::console::log_1(&format!("elodin-web: db={db_addr}").into());
+    let mut plugin = EditorPlugin::default();
+    if let Some(db_addr) = db_addr_from_query() {
+        web_sys::console::log_1(&format!("elodin-web: db={db_addr}").into());
+        plugin = plugin.with_connection_addr(db_addr);
+    } else {
+        web_sys::console::log_1(&"elodin-web: no db query param".into());
+    }
     App::new()
-        .add_plugins(EditorPlugin::default().with_connection_addr(db_addr))
+        .add_plugins(plugin)
         .add_systems(Startup, log_startup)
         .add_systems(Update, log_first_update)
         .run();
 }
 
-fn db_addr_from_query() -> SocketAddr {
-    let default: SocketAddr = "127.0.0.1:2240".parse().expect("default db addr");
-    let Some(window) = web_sys::window() else {
-        return default;
-    };
-    let Ok(search) = window.location().search() else {
-        return default;
-    };
-    let Ok(params) = UrlSearchParams::new_with_str(&search) else {
-        return default;
-    };
-    params
-        .get("db")
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(default)
+/// `?db=host:port` connects immediately. Anything else shows the startup screen.
+fn db_addr_from_query() -> Option<SocketAddr> {
+    let window = web_sys::window()?;
+    let search = window.location().search().ok()?;
+    let params = UrlSearchParams::new_with_str(&search).ok()?;
+    let value = params.get("db")?;
+    match value.parse() {
+        Ok(addr) => Some(addr),
+        Err(err) => {
+            web_sys::console::warn_1(&format!("elodin-web: ignoring db={value:?}: {err}").into());
+            None
+        }
+    }
 }
 
 fn log_startup() {
