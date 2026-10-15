@@ -1,4 +1,4 @@
-//! Manifest-first streaming upload of a stopped TelemetryDB, followed by publication polling.
+//! Read-only compacted streaming upload of a stopped TelemetryDB, followed by publication polling.
 
 use std::collections::HashSet;
 use std::io::{IsTerminal, Read};
@@ -78,20 +78,22 @@ pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
     for entry in &manifest.files {
         let path = args.db_path.join(&entry.path);
         // Open only the current part when polled, not thousands of files at once.
-        let stream = futures_util::stream::try_unfold((path, None), |(path, file)| async move {
-            let mut file = match file {
-                Some(file) => file,
-                None => tokio::fs::File::open(&path).await?,
-            };
-            let mut chunk = vec![0u8; 64 * 1024];
-            let n = file.read(&mut chunk).await?;
-            if n == 0 {
-                Ok::<_, std::io::Error>(None)
-            } else {
-                chunk.truncate(n);
-                Ok(Some((chunk, (path, Some(file)))))
-            }
-        });
+        let size_bytes = entry.size_bytes;
+        let stream =
+            futures_util::stream::try_unfold((path, None), move |(path, file)| async move {
+                let mut file = match file {
+                    Some(file) => file,
+                    None => tokio::fs::File::open(&path).await?.take(size_bytes),
+                };
+                let mut chunk = vec![0u8; 64 * 1024];
+                let n = file.read(&mut chunk).await?;
+                if n == 0 {
+                    Ok::<_, std::io::Error>(None)
+                } else {
+                    chunk.truncate(n);
+                    Ok(Some((chunk, (path, Some(file)))))
+                }
+            });
         form = form.part(
             entry.part.clone(),
             Part::stream_with_length(reqwest::Body::wrap_stream(stream), entry.size_bytes)
@@ -261,7 +263,11 @@ fn manifest(root: &Path) -> miette::Result<Manifest> {
                 "nonportable or colliding upload path: {path}"
             ));
         }
-        let mut file = std::fs::File::open(root.join(&path)).into_diagnostic()?;
+        let disk_path = root.join(&path);
+        let compacted_len = elodin_db::compact::compacted_file_len(&disk_path).into_diagnostic()?;
+        let mut file = std::fs::File::open(&disk_path)
+            .into_diagnostic()?
+            .take(compacted_len);
         let mut digest = Digest::new(&SHA256);
         let mut size_bytes = 0u64;
         let mut buf = [0u8; 64 * 1024];
@@ -274,6 +280,11 @@ fn manifest(root: &Path) -> miette::Result<Manifest> {
             size_bytes = size_bytes
                 .checked_add(n as u64)
                 .ok_or_else(|| miette::miette!("file size overflow"))?;
+        }
+        if size_bytes != compacted_len {
+            return Err(miette::miette!(
+                "upload source changed while hashing: {path}"
+            ));
         }
         let sha256 = digest
             .finish()
@@ -355,6 +366,37 @@ fn portable_path(path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn manifest_compacts_sparse_logs_without_changing_source() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("db_state"), b"state").unwrap();
+        let path = dir.path().join("data");
+        let mut bytes = Vec::from(27u64.to_le_bytes());
+        bytes.extend_from_slice(&[0; 16]);
+        bytes.extend_from_slice(b"abc");
+        let mut file = std::fs::File::create(&path).unwrap();
+        file.write_all(&bytes).unwrap();
+        file.set_len(8 * 1024 * 1024 * 1024).unwrap();
+        let manifest = manifest(dir.path()).unwrap();
+        let entry = manifest
+            .files
+            .iter()
+            .find(|file| file.path == "data")
+            .unwrap();
+        assert_eq!(entry.size_bytes, bytes.len() as u64);
+        let expected: String = ring::digest::digest(&SHA256, &bytes)
+            .as_ref()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        assert_eq!(entry.sha256, expected);
+        assert_eq!(
+            std::fs::metadata(path).unwrap().len(),
+            8 * 1024 * 1024 * 1024
+        );
+    }
 
     #[test]
     fn manifest_is_sorted_and_hashes_exact_bytes() {
@@ -478,7 +520,16 @@ mod tests {
         let root = dir.path().join("db");
         std::fs::create_dir(&root).unwrap();
         std::fs::write(root.join("db_state"), b"abc").unwrap();
-        std::fs::write(root.join("data"), vec![b'x'; 131_079]).unwrap();
+        let mut data = Vec::from(131_079u64.to_le_bytes());
+        data.extend_from_slice(&[0; 16]);
+        data.resize(131_079, b'x');
+        std::fs::write(root.join("data"), data).unwrap();
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(root.join("data"))
+            .unwrap()
+            .set_len(8 * 1024 * 1024 * 1024)
+            .unwrap();
         let ctx = AuthCtx {
             client: reqwest::Client::new(),
             issuer: url.clone(),
@@ -497,13 +548,17 @@ mod tests {
         let result = run(
             &ctx,
             &UploadArgs {
-                db_path: root,
+                db_path: root.clone(),
                 project: None,
                 json: true,
                 timeout: 1,
             },
         )
         .await;
+        assert_eq!(
+            std::fs::metadata(root.join("data")).unwrap().len(),
+            8 * 1024 * 1024 * 1024
+        );
         (result, server.await.unwrap())
     }
 
@@ -519,7 +574,11 @@ mod tests {
             upload.find("name=\"manifest\"").unwrap() < upload.find("name=\"file_0\"").unwrap()
         );
         assert!(upload.contains("\"size_bytes\":131079"));
-        assert!(upload.contains(&"x".repeat(131_079)));
+        assert!(upload.contains(&"x".repeat(131_079 - 24)));
+        assert!(
+            requests[1].len() < 140_000,
+            "sparse preallocation was uploaded"
+        );
         assert!(
             upload.contains("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
         );

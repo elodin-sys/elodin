@@ -51,7 +51,7 @@ This document contains the help content for the Elodin command-line programs.
 * `run` — Run an Elodin simulation in headless mode
 * `monte-carlo` — Run Monte Carlo campaigns
 * `login` — Log in to Elodin Cloud through your browser
-* `upload` — Upload a stopped, compacted TelemetryDB directory
+* `upload` — Upload a stopped TelemetryDB directory, compacting transmitted logs
 
 ###### **Options**
 
@@ -80,8 +80,8 @@ to inspect your identity and `elodin logout` to end that issuer's session.
 **Usage:** `elodin upload <DB_PATH> [--project <NAME_OR_UUID>] [--json] [--timeout <SECONDS>]`
 
 Only TelemetryDB directories containing `db_state` are supported. Stop the writer
-and compact the database with `elodin-db compact <DB_PATH>` first; keep it stopped
-until upload finishes. The command does not modify the source database or infer
+and keep it stopped until upload finishes. The command automatically sends only
+committed log bytes, excluding sparse preallocation. It does not modify the source database or infer
 simulation/flight provenance from its contents. Symlinks, special files, and
 nonportable paths are rejected.
 

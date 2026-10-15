@@ -53,7 +53,7 @@ pub struct SignupArgs {
 
 #[derive(Args, Clone)]
 pub struct UploadArgs {
-    /// Stopped, compacted TelemetryDB directory containing db_state.
+    /// Stopped TelemetryDB directory containing db_state; compacted on upload without modifying it.
     pub db_path: PathBuf,
     /// Destination project UUID or name; optional when exactly one project is available.
     #[arg(long, env = "ELODIN_PROJECT")]

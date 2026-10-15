@@ -56,7 +56,7 @@ enum Commands {
     Whoami(auth::WhoamiArgs),
     /// Create and list Elodin Cloud projects
     Projects(auth::ProjectsArgs),
-    /// Upload a stopped, compacted TelemetryDB directory to Elodin Cloud
+    /// Upload a stopped TelemetryDB directory, compacting the transmitted logs
     Upload(auth::UploadArgs),
     /// Launch the Elodin editor (default)
     Editor(editor::Args),
