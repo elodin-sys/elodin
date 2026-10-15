@@ -913,7 +913,8 @@ The export runs in parallel across components and is dramatically faster than th
 
   Possible values: `parquet`, `arrow-ipc`, `csv`, `mcap` (alias: `foxglove`)
 
-* `--flatten` — Flatten vector columns to separate columns (e.g., `vel_ned` becomes `vel_ned.x`, `vel_ned.y`, `vel_ned.z`)
+* `--flatten` — Flatten vector columns to separate columns (e.g., `vel_ned` becomes `vel_ned_x`, `vel_ned_y`, `vel_ned_z`)
+* `--preserve-case` — Preserve the original case of component and element names in exported filenames and columns (Parquet, Arrow IPC, and CSV). By default, names are lowercased. Use this with `--flatten` to keep case-sensitive element names such as `CL` and `Cl` distinct. Underscore separators are unchanged; `--pattern` matches the preserved names when this flag is set.
 
 * `--pattern <PATTERN>` — Filter components by glob pattern (e.g., `NavNED.*`, `*.velocity`)
 
@@ -1038,6 +1039,9 @@ elodin-db export ./my-database -o ./export
 
 # Export to CSV with flattened vectors
 elodin-db export ./my-database -o ./export --format csv --flatten
+
+# Keep case-sensitive names such as aero_coefs_CL and aero_coefs_Cl distinct
+elodin-db export ./my-database -o ./export --format csv --flatten --preserve-case
 
 # Export to Arrow IPC format
 elodin-db export ./my-database -o ./export --format arrow-ipc

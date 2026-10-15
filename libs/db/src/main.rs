@@ -290,6 +290,11 @@ struct ExportArgs {
         help = "Flatten vector columns to separate columns (e.g., vel_ned -> vel_ned_x, vel_ned_y, vel_ned_z)"
     )]
     flatten: bool,
+    #[clap(
+        long,
+        help = "Preserve the original case of component and element names in exported filenames and columns (parquet, arrow-ipc, csv)"
+    )]
+    preserve_case: bool,
     #[clap(long, help = "Filter components by glob pattern (e.g., 'NavNED.*')")]
     pattern: Option<String>,
     #[clap(
@@ -763,6 +768,7 @@ async fn main() -> miette::Result<()> {
             output,
             format,
             flatten,
+            preserve_case,
             pattern,
             csv_fast_floats,
             join,
@@ -777,9 +783,9 @@ async fn main() -> miette::Result<()> {
             elodin_db::cancellation::install_signal_handlers();
 
             if matches!(format, elodin_db::export::ExportFormat::Mcap) {
-                if flatten || join || csv_fast_floats || mono_ns || mono_us {
+                if flatten || preserve_case || join || csv_fast_floats || mono_ns || mono_us {
                     return Err(miette::miette!(
-                        "--flatten, --join, --csv-fast-floats, --mono-ns, and --mono-us do not apply to --format mcap"
+                        "--flatten, --preserve-case, --join, --csv-fast-floats, --mono-ns, and --mono-us do not apply to --format mcap"
                     ));
                 }
                 #[cfg(feature = "mcap-export")]
@@ -809,6 +815,7 @@ async fn main() -> miette::Result<()> {
 
             let options = elodin_db::export::ExportOptions {
                 flatten,
+                preserve_case,
                 pattern,
                 csv_fast_floats,
                 join,
@@ -1069,6 +1076,26 @@ void send_log(SocketT& sock, const std::string_view log_name, LogLevel level, co
         id0 = set_msg_meta_id[0],
         id1 = set_msg_meta_id[1],
     ))
+}
+
+#[cfg(test)]
+mod export_tests {
+    use super::*;
+
+    #[test]
+    fn preserve_case_is_opt_in() {
+        for preserve_case in [false, true] {
+            let mut args = vec!["elodin-db", "export", "db", "--output", "out"];
+            if preserve_case {
+                args.push("--preserve-case");
+            }
+            let cli = Cli::try_parse_from(args).unwrap();
+            let Commands::Export(args) = cli.command else {
+                panic!("expected export command");
+            };
+            assert_eq!(args.preserve_case, preserve_case);
+        }
+    }
 }
 
 #[cfg(all(test, feature = "grpc"))]

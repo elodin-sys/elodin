@@ -737,6 +737,8 @@ pub enum TimeFormat {
 pub struct ExportOptions {
     /// Flatten FixedSizeList columns into one column per element (per-message-field layout).
     pub flatten: bool,
+    /// Preserve the original case of component and element names instead of lowercasing.
+    pub preserve_case: bool,
     /// Glob pattern over component names; non-matching components are skipped.
     pub pattern: Option<String>,
     /// CSV-only: use `ryu` for f32/f64 instead of `std::fmt::Display`. Faster but produces
@@ -773,6 +775,7 @@ pub fn run(
 ) -> Result<(), Error> {
     let ExportOptions {
         flatten,
+        preserve_case,
         pattern,
         csv_fast_floats,
         join,
@@ -846,7 +849,11 @@ pub fn run(
                 pre_skipped += 1;
                 continue;
             };
-            let column_name = component_metadata.name.to_lowercase();
+            let column_name = if preserve_case {
+                component_metadata.name.clone()
+            } else {
+                component_metadata.name.to_lowercase()
+            };
             // Skip components flagged `private: true` in their metadata unless the user
             // explicitly opted in. Authored from Python via
             // `el.Component(metadata={"private": "true"})`.
@@ -861,7 +868,11 @@ pub fn run(
                 pre_skipped += 1;
                 continue;
             }
-            let element_names = component_metadata.element_names().to_lowercase();
+            let element_names = if preserve_case {
+                component_metadata.element_names().to_string()
+            } else {
+                component_metadata.element_names().to_lowercase()
+            };
             let creation_index = component_creation_index(component_metadata);
             work.push(ComponentTask {
                 component: component.clone(),

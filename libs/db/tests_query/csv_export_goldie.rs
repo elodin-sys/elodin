@@ -280,6 +280,7 @@ fn run_export_full(
             join,
             time_format,
             include_private,
+            ..Default::default()
         },
     )
     .expect("export::run");
@@ -486,6 +487,136 @@ fn build_private_fixture(path: PathBuf) -> DB {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn export_preserve_case() {
+        use elodin_db::export::{ExportFormat, ExportOptions};
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().to_path_buf();
+        let db = DB::create(path.clone()).unwrap();
+        let cid = ComponentId::new("Jet.Aero");
+        db.with_state_mut(|s| {
+            s.set_component_metadata(
+                ComponentMetadata {
+                    component_id: cid,
+                    name: "Jet.Aero".to_string(),
+                    metadata: HashMap::from([("element_names".to_string(), "CL,Cl".to_string())]),
+                },
+                &path,
+            )
+            .unwrap();
+            s.insert_component(cid, ComponentSchema::new(PrimType::F64, &[2]), &path)
+                .unwrap();
+            s.get_component(cid)
+                .unwrap()
+                .time_series
+                .push_buf(Timestamp(TS_BASE), [1.0_f64, 2.0].as_bytes())
+                .unwrap();
+        });
+        db.flush_all().unwrap();
+
+        for (format, ext) in [
+            (ExportFormat::Csv, "csv"),
+            (ExportFormat::ArrowIpc, "arrow"),
+            #[cfg(feature = "parquet")]
+            (ExportFormat::Parquet, "parquet"),
+        ] {
+            for preserve_case in [false, true] {
+                for flatten in [false, true] {
+                    for join in [false, true] {
+                        let out = tempfile::tempdir().unwrap();
+                        elodin_db::export::run(
+                            path.clone(),
+                            out.path().to_path_buf(),
+                            format,
+                            ExportOptions {
+                                preserve_case,
+                                flatten,
+                                join,
+                                pattern: Some(
+                                    if preserve_case { "Jet.*" } else { "jet.*" }.to_string(),
+                                ),
+                                ..Default::default()
+                            },
+                        )
+                        .unwrap();
+                        let component = if preserve_case {
+                            "Jet.Aero"
+                        } else {
+                            "jet.aero"
+                        };
+                        let filename = if join {
+                            if preserve_case { "Jet" } else { "jet" }
+                        } else {
+                            component
+                        };
+                        let file = out.path().join(format!("{filename}.{ext}"));
+                        let names: Vec<String> = match format {
+                            ExportFormat::Csv => std::fs::read_to_string(file)
+                                .unwrap()
+                                .lines()
+                                .next()
+                                .unwrap()
+                                .split(',')
+                                .map(str::to_string)
+                                .collect(),
+                            ExportFormat::ArrowIpc => {
+                                let reader = arrow::ipc::reader::FileReader::try_new(
+                                    std::fs::File::open(file).unwrap(),
+                                    None,
+                                )
+                                .unwrap();
+                                reader
+                                    .schema()
+                                    .fields()
+                                    .iter()
+                                    .map(|f| f.name().clone())
+                                    .collect()
+                            }
+                            #[cfg(feature = "parquet")]
+                            ExportFormat::Parquet => {
+                                let reader = parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder::try_new(
+                                    std::fs::File::open(file).unwrap(),
+                                )
+                                .unwrap();
+                                reader
+                                    .schema()
+                                    .fields()
+                                    .iter()
+                                    .map(|f| f.name().clone())
+                                    .collect()
+                            }
+                            _ => unreachable!(),
+                        };
+                        let column = if join {
+                            if preserve_case { "Aero" } else { "aero" }
+                        } else {
+                            component
+                        };
+                        let expected = if flatten {
+                            let suffixes = if preserve_case {
+                                ["CL", "Cl"]
+                            } else {
+                                ["cl", "cl"]
+                            };
+                            vec![
+                                "time".to_string(),
+                                format!("{column}_{}", suffixes[0]),
+                                format!("{column}_{}", suffixes[1]),
+                            ]
+                        } else {
+                            vec!["time".to_string(), column.to_string()]
+                        };
+                        assert_eq!(
+                            names, expected,
+                            "{format:?}, preserve_case={preserve_case}, flatten={flatten}, join={join}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn csv_export_default_no_flatten() {
