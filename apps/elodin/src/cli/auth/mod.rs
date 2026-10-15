@@ -19,6 +19,7 @@ mod logout;
 mod projects;
 mod signup;
 mod tokens;
+mod upload;
 mod whoami;
 
 /// Public OIDC client id for the CLI (matches the Keycloak realm import).
@@ -48,6 +49,21 @@ pub struct SignupArgs {
     /// Print the registration URL instead of opening a browser.
     #[arg(long)]
     pub no_browser: bool,
+}
+
+#[derive(Args, Clone)]
+pub struct UploadArgs {
+    /// Stopped, compacted TelemetryDB directory containing db_state.
+    pub db_path: PathBuf,
+    /// Destination project UUID or name; optional when exactly one project is available.
+    #[arg(long, env = "ELODIN_PROJECT")]
+    pub project: Option<String>,
+    /// Print the final published upload status as JSON.
+    #[arg(long)]
+    pub json: bool,
+    /// Maximum seconds to wait for publication after acceptance.
+    #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..))]
+    pub timeout: u64,
 }
 
 #[derive(Args, Clone)]
@@ -175,11 +191,14 @@ pub(crate) fn urlencode(s: &str) -> String {
 
 impl Cli {
     fn auth_ctx(&self) -> miette::Result<AuthCtx> {
-        let dirs = self.dirs().into_diagnostic()?;
-        std::fs::create_dir_all(dirs.config_dir())
+        let config_dir = match &self.config_dir {
+            Some(path) => path.clone(),
+            None => self.dirs().into_diagnostic()?.config_dir().to_path_buf(),
+        };
+        std::fs::create_dir_all(&config_dir)
             .into_diagnostic()
             .wrap_err("failed to create config directory")?;
-        let creds_path = dirs.config_dir().join("credentials.json");
+        let creds_path = config_dir.join("credentials.json");
         let client = reqwest::Client::builder()
             .user_agent(concat!("elodin-cli/", env!("CARGO_PKG_VERSION")))
             .build()
@@ -216,5 +235,10 @@ impl Cli {
     pub fn projects(self, args: ProjectsArgs, rt: Runtime) -> miette::Result<()> {
         let ctx = self.auth_ctx()?;
         rt.block_on(projects::run(&ctx, &args))
+    }
+
+    pub fn upload(self, args: UploadArgs, rt: Runtime) -> miette::Result<()> {
+        let ctx = self.auth_ctx()?;
+        rt.block_on(upload::run(&ctx, &args))
     }
 }

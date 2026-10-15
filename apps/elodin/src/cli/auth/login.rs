@@ -107,20 +107,18 @@ async fn wait_for_callback(listener: TcpListener) -> miette::Result<(String, Str
             .and_then(|line| line.split_whitespace().nth(1))
             .unwrap_or("");
 
-        if !target.starts_with("/callback") {
+        let target = reqwest::Url::parse(&format!("http://127.0.0.1{target}")).into_diagnostic()?;
+        if target.path() != "/callback" {
             respond(&mut stream, "Not found").await;
             continue;
         }
 
-        let query = target.split_once('?').map(|(_, q)| q).unwrap_or("");
         let (mut code, mut state, mut error) = (None, None, None);
-        for pair in query.split('&').filter(|p| !p.is_empty()) {
-            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-            let value = urldecode(value);
-            match key {
-                "code" => code = Some(value),
-                "state" => state = Some(value),
-                "error" => error = Some(value),
+        for (key, value) in target.query_pairs() {
+            match key.as_ref() {
+                "code" => code = Some(value.into_owned()),
+                "state" => state = Some(value.into_owned()),
+                "error" => error = Some(value.into_owned()),
                 _ => {}
             }
         }
@@ -285,31 +283,47 @@ async fn device_flow(
     }
 }
 
-fn urldecode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'%' if i + 3 <= bytes.len() => match u8::from_str_radix(&s[i + 1..i + 3], 16) {
-                Ok(byte) => {
-                    out.push(byte);
-                    i += 3;
-                }
-                Err(_) => {
-                    out.push(bytes[i]);
-                    i += 1;
-                }
-            },
-            b'+' => {
-                out.push(b' ');
-                i += 1;
-            }
-            other => {
-                out.push(other);
-                i += 1;
-            }
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn callback_decodes_code_and_state_and_ignores_other_paths() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let task = tokio::spawn(wait_for_callback(listener));
+        let client = reqwest::Client::new();
+        client
+            .get(format!(
+                "http://{addr}/callback-other?code=wrong&state=wrong"
+            ))
+            .send()
+            .await
+            .unwrap();
+        client
+            .get(format!("http://{addr}/callback?code=a%2Bb&state=c%20d"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(task.await.unwrap().unwrap(), ("a+b".into(), "c d".into()));
     }
-    String::from_utf8_lossy(&out).into_owned()
+
+    #[tokio::test]
+    async fn callback_reports_provider_error() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let task = tokio::spawn(wait_for_callback(listener));
+        reqwest::Client::new()
+            .get(format!("http://{addr}/callback?error=access_denied"))
+            .send()
+            .await
+            .unwrap();
+        assert!(
+            task.await
+                .unwrap()
+                .unwrap_err()
+                .to_string()
+                .contains("access_denied")
+        );
+    }
 }
