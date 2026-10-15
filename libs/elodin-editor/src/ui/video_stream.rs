@@ -106,8 +106,12 @@ impl Default for VideoStream {
 const FRAMES_BEFORE_CONNECT: u32 = 5;
 
 /// Maximum number of decoded RGBA frames to keep in the LRU cache.
-/// At 640×512 RGBA each frame is ~1.3 MB, so 300 frames ≈ 390 MB.
+/// At 640×512 RGBA each frame is ~1.3 MB. Native keeps 300 (~390 MB).
+/// Wasm keeps 60 (~78 MB); a larger cache forces `memory.grow` copies.
+#[cfg(not(target_family = "wasm"))]
 const MAX_CACHED_FRAMES: usize = 300;
+#[cfg(target_family = "wasm")]
+const MAX_CACHED_FRAMES: usize = 60;
 
 /// If no raw frame exists within this many microseconds of `CurrentTimestamp`,
 /// show the "No video at this time" overlay.  500 ms.
@@ -123,6 +127,15 @@ const LIVE_HOLD_THRESHOLD_US: i64 = 2_000_000;
 /// the decoder is "close but not sequential" (e.g. OBS at 30fps with
 /// wide frame spacing).  2 seconds.
 const DECODER_NEAR_THRESHOLD_US: i64 = 2_000_000;
+
+/// Raw frames enqueued per UI frame on the sequential path. A UI running
+/// below the stream rate must feed several frames per tick or it drifts
+/// into the seek path.
+const MAX_SEQUENTIAL_PER_TICK: usize = 8;
+
+/// Re-issue an in-flight seek to the same keyframe after this long. Covers a
+/// decoder that never emits the batch's last frame.
+const SEEK_TIMEOUT_SECS: f32 = 1.0;
 
 /// Maximum number of raw H.264 frames to keep in the cache.
 /// At ~25 KB/frame (OBS 1080p), 50 000 frames ≈ 1.2 GB, covering ~28 min
@@ -294,6 +307,8 @@ pub struct VideoFrameCache {
     seeking: bool,
     /// Generation counter for `SeekBatch` coalescing.
     seek_generation: u64,
+    /// Keyframe the in-flight seek started from, and when it was sent.
+    seek_target: Option<(Timestamp, Instant)>,
     /// Wall-clock time of the last frame received from the live-tail
     /// `TimestampedMsgStream`.  Used to detect DB disconnection and trigger
     /// recovery.  `None` until the first live frame arrives.
@@ -332,6 +347,7 @@ impl Default for VideoFrameCache {
             last_decoded_ts: None,
             seeking: false,
             seek_generation: 0,
+            seek_target: None,
             last_stream_activity: None,
             backfill_frontier: Timestamp(i64::MIN),
             backfill_in_flight: false,
@@ -804,7 +820,8 @@ impl VideoDecoderHandle {
             .is_ok()
     }
 
-    /// Reset the WebCodecs decoder, decode `frames` in order, then flush.
+    /// Decode `frames` in order on the warm WebCodecs decoder; completion
+    /// arrives with the batch's last frame.
     #[cfg(target_family = "wasm")]
     pub fn send_seek_batch(&self, frames: Vec<(Timestamp, Vec<u8>)>, generation: u64) -> bool {
         self.latest_seek_generation
@@ -1130,11 +1147,18 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                     let has_raw = cache.has_video_at(current_ts);
 
                     if is_sequential && !cache.seeking {
-                        if let Some((ts, data)) =
-                            cache.next_raw_frame_after(cache.last_decoded_ts.unwrap())
-                            && ts.0 <= current_ts.0 + DECODER_NEAR_THRESHOLD_US
-                            && decoder.process_frame(ts, data)
-                        {
+                        for _ in 0..MAX_SEQUENTIAL_PER_TICK {
+                            let Some(last) = cache.last_decoded_ts else {
+                                break;
+                            };
+                            let Some((ts, data)) = cache.next_raw_frame_after(last) else {
+                                break;
+                            };
+                            if ts.0 > current_ts.0 + DECODER_NEAR_THRESHOLD_US
+                                || !decoder.process_frame(ts, data)
+                            {
+                                break;
+                            }
                             cache.last_decoded_ts = Some(ts);
                         }
                     } else if !decoder_near && has_raw {
@@ -1153,11 +1177,21 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                                 (current_ts, current_ts)
                             };
 
-                        let frames = cache.get_raw_sequence(seek_start, seek_end);
-                        if !frames.is_empty() {
-                            cache.seek_generation += 1;
-                            if decoder.send_seek_batch(frames, cache.seek_generation) {
-                                cache.seeking = true;
+                        // An in-flight seek from the same keyframe is still
+                        // decoding; re-sending would reset it before any
+                        // frame comes out.
+                        let in_flight = cache.seeking
+                            && cache.seek_target.is_some_and(|(kf, sent)| {
+                                kf == seek_start && sent.elapsed().as_secs_f32() < SEEK_TIMEOUT_SECS
+                            });
+                        if !in_flight {
+                            let frames = cache.get_raw_sequence(seek_start, seek_end);
+                            if !frames.is_empty() {
+                                cache.seek_generation += 1;
+                                if decoder.send_seek_batch(frames, cache.seek_generation) {
+                                    cache.seeking = true;
+                                    cache.seek_target = Some((seek_start, Instant::now()));
+                                }
                             }
                         }
                     }

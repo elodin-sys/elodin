@@ -3,8 +3,9 @@
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::Image;
@@ -21,16 +22,23 @@ thread_local! {
     static DECODERS: RefCell<HashMap<u64, WasmH264Decoder>> = RefCell::new(HashMap::new());
 }
 
+/// Seek batch whose last frame has not come out of the decoder yet.
+#[derive(Clone, Copy)]
+struct PendingSeek {
+    generation: u64,
+    last_ts: i64,
+}
+
 struct WasmH264Decoder {
     decoder: web_sys::VideoDecoder,
+    /// Kept to rebuild the decoder after an error closes it.
+    init: web_sys::VideoDecoderInit,
     _output: Closure<dyn FnMut(web_sys::VideoFrame)>,
     _error: Closure<dyn FnMut(JsValue)>,
     configured: bool,
     image_tx: flume::Sender<DecoderOutput>,
     latest_generation: Arc<AtomicU64>,
-    /// RGBA copies still in flight. Seek completion waits so frames land
-    /// before `SeekComplete`.
-    copies_inflight: Arc<AtomicUsize>,
+    pending_seek: Rc<Cell<Option<PendingSeek>>>,
 }
 
 pub(super) fn spawn(
@@ -38,16 +46,53 @@ pub(super) fn spawn(
     latest_generation: Arc<AtomicU64>,
 ) -> Option<u64> {
     let logged_error = Arc::new(AtomicBool::new(false));
-    let copies_inflight = Arc::new(AtomicUsize::new(0));
+    let pending_seek = Rc::new(Cell::new(None::<PendingSeek>));
     let output_tx = image_tx.clone();
-    let output_inflight = copies_inflight.clone();
+    let output_pending = pending_seek.clone();
+    let output_latest = latest_generation.clone();
+    let output_gate = Rc::new(RefCell::new(CopyGate::default()));
     let output = Closure::wrap(Box::new(move |frame: web_sys::VideoFrame| {
-        let tx = output_tx.clone();
-        let inflight = output_inflight.clone();
-        inflight.fetch_add(1, Ordering::Relaxed);
-        spawn_local(async move {
-            deliver_frame(frame, tx, inflight).await;
-        });
+        let ts = frame.timestamp().round() as i64;
+        let completes = match output_pending.get() {
+            Some(pending) if ts >= pending.last_ts => {
+                output_pending.set(None);
+                Some(pending.generation)
+            }
+            _ => None,
+        };
+        // One `copyTo` at a time. A newer frame replaces any frame still
+        // waiting, so a 60 fps stream does not queue a 1.3 MB copy each.
+        let job = {
+            let mut gate = output_gate.borrow_mut();
+            if gate.inflight {
+                Err(gate.pending.replace((frame, completes)))
+            } else {
+                gate.inflight = true;
+                Ok((frame, completes))
+            }
+        };
+        match job {
+            Ok((frame, completes)) => {
+                let tx = output_tx.clone();
+                let latest = output_latest.clone();
+                let gate = output_gate.clone();
+                spawn_local(async move {
+                    copy_until_idle(frame, completes, tx, latest, gate).await;
+                });
+            }
+            Err(replaced) => {
+                if let Some((old, old_completes)) = replaced {
+                    old.close();
+                    if old_completes.is_some()
+                        && let Some((_, pending_completes)) =
+                            output_gate.borrow_mut().pending.as_mut()
+                        && pending_completes.is_none()
+                    {
+                        *pending_completes = old_completes;
+                    }
+                }
+            }
+        }
     }) as Box<dyn FnMut(web_sys::VideoFrame)>);
     let error = Closure::wrap(Box::new(move |err: JsValue| {
         if logged_error.swap(true, Ordering::Relaxed) {
@@ -76,12 +121,13 @@ pub(super) fn spawn(
             id,
             WasmH264Decoder {
                 decoder,
+                init,
                 _output: output,
                 _error: error,
                 configured: false,
                 image_tx,
                 latest_generation,
-                copies_inflight,
+                pending_seek,
             },
         );
     });
@@ -121,8 +167,24 @@ impl Drop for WasmH264Decoder {
 }
 
 impl WasmH264Decoder {
+    /// An error closes the decoder for good; rebuild it so the tile recovers
+    /// at the next keyframe.
+    fn ensure_open(&mut self) -> bool {
+        if self.decoder.state() != web_sys::CodecState::Closed {
+            return true;
+        }
+        match web_sys::VideoDecoder::new(&self.init) {
+            Ok(decoder) => {
+                self.decoder = decoder;
+                self.configured = false;
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
     fn decode_packet(&mut self, timestamp: Timestamp, packet: &[u8]) -> bool {
-        if self.decoder.state() == web_sys::CodecState::Closed {
+        if !self.ensure_open() {
             return false;
         }
         let key = is_keyframe(packet);
@@ -163,6 +225,9 @@ impl WasmH264Decoder {
         self.decoder.decode(&chunk).is_ok()
     }
 
+    /// Feed a seek batch to the warm decoder. H.264 accepts a new keyframe
+    /// mid-stream, so no `reset`/`configure`/`flush` round trip is needed;
+    /// `SeekComplete` is sent once the batch's last frame is delivered.
     fn seek(&mut self, frames: Vec<(Timestamp, Vec<u8>)>, generation: u64) -> bool {
         if self.latest_generation.load(Ordering::Relaxed) != generation {
             let _ = self
@@ -170,10 +235,10 @@ impl WasmH264Decoder {
                 .try_send(DecoderOutput::SeekComplete(generation));
             return true;
         }
-        if self.decoder.reset().is_err() {
+        let Some(last_ts) = frames.last().map(|(ts, _)| ts.0) else {
             return false;
-        }
-        self.configured = false;
+        };
+        self.pending_seek.set(None);
         for (timestamp, packet) in &frames {
             if self.latest_generation.load(Ordering::Relaxed) != generation {
                 break;
@@ -188,63 +253,52 @@ impl WasmH264Decoder {
                 .try_send(DecoderOutput::SeekComplete(generation));
             return true;
         }
-        let promise = self.decoder.flush();
-        let tx = self.image_tx.clone();
-        let latest = self.latest_generation.clone();
-        let inflight = self.copies_inflight.clone();
-        spawn_local(async move {
-            let _ = JsFuture::from(promise).await;
-            // `copyTo` finishes after `flush` resolves. Wait until those RGBA
-            // buffers are queued so `SeekComplete` cannot overtake them.
-            let mut spins = 0;
-            while latest.load(Ordering::Relaxed) == generation
-                && inflight.load(Ordering::Relaxed) > 0
-                && spins < 2000
-            {
-                yield_to_browser().await;
-                spins += 1;
-            }
-            if latest.load(Ordering::Relaxed) == generation {
-                let _ = tx.try_send(DecoderOutput::SeekComplete(generation));
-            }
-        });
+        self.pending_seek.set(Some(PendingSeek {
+            generation,
+            last_ts,
+        }));
         true
     }
 }
 
-async fn yield_to_browser() {
-    let promise = js_sys::Promise::new(&mut |resolve, _reject| {
-        let scheduled = web_sys::window()
-            .and_then(|window| {
-                window
-                    .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, 0)
-                    .ok()
-            })
-            .is_some();
-        if !scheduled {
-            let _ = resolve.call0(&JsValue::UNDEFINED);
-        }
-    });
-    let _ = JsFuture::from(promise).await;
+/// At most one RGBA copy in flight, plus the newest frame waiting for it.
+#[derive(Default)]
+struct CopyGate {
+    inflight: bool,
+    pending: Option<(web_sys::VideoFrame, Option<u64>)>,
 }
 
-async fn deliver_frame(
-    frame: web_sys::VideoFrame,
+async fn copy_until_idle(
+    mut frame: web_sys::VideoFrame,
+    mut completes: Option<u64>,
     tx: flume::Sender<DecoderOutput>,
-    inflight: Arc<AtomicUsize>,
+    latest_generation: Arc<AtomicU64>,
+    gate: Rc<RefCell<CopyGate>>,
 ) {
-    struct InflightGuard(Arc<AtomicUsize>);
-    impl Drop for InflightGuard {
-        fn drop(&mut self) {
-            self.0.fetch_sub(1, Ordering::Relaxed);
+    loop {
+        let timestamp = Timestamp(frame.timestamp().round() as i64);
+        let image = copy_frame_rgba(&frame).await;
+        frame.close();
+        if let Some(image) = image {
+            let _ = tx.try_send(DecoderOutput::Frame(Box::new(image), timestamp));
         }
-    }
-    let _guard = InflightGuard(inflight);
-    let timestamp = Timestamp(frame.timestamp().round() as i64);
-    let image = copy_frame_rgba(&frame).await;
-    frame.close();
-    if let Some(image) = image {
-        let _ = tx.try_send(DecoderOutput::Frame(Box::new(image), timestamp));
+        // After the frame so `SeekComplete` cannot overtake it.
+        if let Some(generation) = completes
+            && latest_generation.load(Ordering::Relaxed) == generation
+        {
+            let _ = tx.try_send(DecoderOutput::SeekComplete(generation));
+        }
+        let mut gate = gate.borrow_mut();
+        match gate.pending.take() {
+            Some((next, next_completes)) => {
+                frame = next;
+                completes = next_completes;
+            }
+            None => {
+                gate.inflight = false;
+                break;
+            }
+        }
     }
 }
 
