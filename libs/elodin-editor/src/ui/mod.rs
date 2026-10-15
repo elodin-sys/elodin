@@ -118,7 +118,6 @@ pub mod status_bar;
 #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 pub mod skybox_status;
 
-#[cfg(not(target_family = "wasm"))]
 pub mod startup_window;
 
 #[derive(Resource, Default)]
@@ -578,6 +577,9 @@ pub fn render_layout(
             .map(|(id, window_id)| (id, *window_id)),
     );
     for (id, window_id) in windows.drain(..) {
+        if window_id.is_primary() && world.contains_resource::<startup_window::StartupActive>() {
+            continue;
+        }
         if window_id.is_primary() {
             world.add_root_widget_to::<MainLayout>(id, "main_layout", ());
 
