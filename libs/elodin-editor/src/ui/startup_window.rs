@@ -43,6 +43,14 @@ pub struct StartupWindow;
 #[derive(Resource)]
 pub struct StartupActive;
 
+/// Initial `?db=` attempt. While this exists the editor chrome stays hidden and
+/// a connecting or failure dialog is shown instead.
+#[derive(Resource, Clone)]
+pub struct UrlConnect {
+    addr: String,
+    failed: bool,
+}
+
 #[derive(Resource)]
 struct MainWindowRevealDelay {
     frames_remaining: u8,
@@ -59,8 +67,11 @@ fn queue_main_window_reveal(commands: &mut Commands) {
 fn create_startup_window(
     mut commands: Commands,
     status: Res<ThreadConnectionStatus>,
+    connection_addr: Option<Res<ConnectionAddr>>,
     primary: Query<&Window, With<PrimaryWindow>>,
 ) {
+    #[cfg(not(target_family = "wasm"))]
+    let _ = connection_addr;
     #[cfg(not(target_family = "wasm"))]
     commands.insert_resource(recent_files());
     #[cfg(target_family = "wasm")]
@@ -101,6 +112,15 @@ fn create_startup_window(
     } else if primary.single().is_ok() {
         queue_main_window_reveal(&mut commands);
     }
+    #[cfg(target_family = "wasm")]
+    if status.status() == ConnectionStatus::Connecting
+        && let Some(addr) = connection_addr.as_ref()
+    {
+        commands.insert_resource(UrlConnect {
+            addr: addr.0.to_string(),
+            failed: false,
+        });
+    }
 }
 
 fn reveal_main_window(
@@ -131,11 +151,116 @@ pub fn add_layouts(world: &mut World) {
     }
 }
 
+#[cfg(target_family = "wasm")]
+fn url_connect_feedback(world: &mut World) {
+    if world.contains_resource::<StartupActive>() {
+        return;
+    }
+    let Some(mut prompt) = world.get_resource::<UrlConnect>().cloned() else {
+        return;
+    };
+    match world
+        .get_resource::<ThreadConnectionStatus>()
+        .map(|status| status.status())
+    {
+        Some(ConnectionStatus::Success) => {
+            world.remove_resource::<UrlConnect>();
+            return;
+        }
+        Some(ConnectionStatus::Error) if !prompt.failed => {
+            impeller_bevy::suspend_ws_reconnect(world);
+            prompt.failed = true;
+            world.insert_resource(prompt.clone());
+        }
+        _ => {}
+    }
+
+    world.egui_context_scope::<_, With<PrimaryWindow>>(|world, ctx| {
+        if !prompt.failed {
+            ctx.request_repaint();
+        }
+        let dismissed = egui::Modal::new(egui::Id::new("url_connect"))
+            .frame(connect_dialog_frame())
+            .backdrop_color(get_scheme().bg_secondary.opacity(0.85))
+            .show(&ctx, |ui| {
+                if prompt.failed {
+                    ui.add(
+                        egui::Label::new(RichText::new("Couldn't connect").size(18.))
+                            .selectable(false),
+                    );
+                    ui.add_space(8.);
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(format!("No database is reachable at {}.", prompt.addr))
+                                .color(colors::REDDISH_DEFAULT)
+                                .size(12.),
+                        )
+                        .selectable(false),
+                    );
+                    ui.add_space(24.);
+                    ui.add(EButton::green("OK").width(280.)).clicked()
+                } else {
+                    ui.add(
+                        egui::Label::new(RichText::new("Connecting").size(18.)).selectable(false),
+                    );
+                    ui.add_space(8.);
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(format!("Trying to reach {}.", prompt.addr))
+                                .color(get_scheme().text_tertiary)
+                                .size(12.),
+                        )
+                        .selectable(false),
+                    );
+                    ui.add_space(24.);
+                    ui.add(EButton::gray("CANCEL").width(280.)).clicked()
+                }
+            });
+        if dismissed.inner {
+            return_to_connection_screen(world, &prompt.addr);
+        }
+    });
+}
+
+#[cfg(target_family = "wasm")]
+fn return_to_connection_screen(world: &mut World, addr: &str) {
+    impeller_bevy::suspend_ws_reconnect(world);
+    if let Some(status) = world.get_resource::<ThreadConnectionStatus>() {
+        status.set_status(ConnectionStatus::NoConnection);
+    }
+    if let Some(mut recent) = world.get_resource_mut::<RecentItems>()
+        && let Ok(now) = Epoch::now()
+    {
+        recent.push(now, RecentItem::Addr(addr.to_string()));
+    }
+    world.remove_resource::<UrlConnect>();
+    world.insert_resource(StartupActive);
+}
+
+#[cfg(target_family = "wasm")]
+fn connect_dialog_frame() -> egui::Frame {
+    egui::Frame {
+        fill: get_scheme().bg_primary,
+        stroke: egui::Stroke::NONE,
+        inner_margin: egui::Margin::same(24),
+        outer_margin: egui::Margin::symmetric(0, 0),
+        corner_radius: CornerRadius::same(8),
+        shadow: egui::Shadow {
+            color: get_scheme().bg_secondary.opacity(0.2),
+            spread: 3,
+            blur: 32,
+            offset: [0, 5],
+        },
+    }
+}
+
 pub struct StartupPlugin;
 
 impl Plugin for StartupPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, create_startup_window);
+        #[cfg(target_family = "wasm")]
+        app.add_systems(Update, url_connect_feedback.before(add_layouts));
         app.add_systems(Update, (add_layouts, reveal_main_window));
     }
 }
@@ -320,6 +445,18 @@ impl StartupLayout<'_, '_> {
         };
     }
 
+    fn default_connect_addr(&self) -> String {
+        #[cfg(target_family = "wasm")]
+        if let Some(RecentItem::Addr(addr)) = self.recent_files.recent_files.values().next_back() {
+            return addr.clone();
+        }
+        if cfg!(target_family = "wasm") || cfg!(target_os = "windows") {
+            "127.0.0.1:2240".to_string()
+        } else {
+            "[::]:2240".to_string()
+        }
+    }
+
     fn left_pane(
         &mut self,
         ui: &mut egui::Ui,
@@ -379,12 +516,7 @@ impl StartupLayout<'_, '_> {
                 .clicked()
             {
                 *self.modal_state = ModalState::ConnectToIp {
-                    addr: if cfg!(target_family = "wasm") || cfg!(target_os = "windows") {
-                        "127.0.0.1:2240"
-                    } else {
-                        "[::]:2240"
-                    }
-                    .to_string(),
+                    addr: self.default_connect_addr(),
                     error: None,
                     connecting: false,
                 }

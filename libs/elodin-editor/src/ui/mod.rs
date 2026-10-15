@@ -577,7 +577,10 @@ pub fn render_layout(
             .map(|(id, window_id)| (id, *window_id)),
     );
     for (id, window_id) in windows.drain(..) {
-        if window_id.is_primary() && world.contains_resource::<startup_window::StartupActive>() {
+        if window_id.is_primary()
+            && (world.contains_resource::<startup_window::StartupActive>()
+                || world.contains_resource::<startup_window::UrlConnect>())
+        {
             continue;
         }
         if window_id.is_primary() {

@@ -117,6 +117,27 @@ fn queue_ws_connect(mut events: MessageReader<WsConnect>, mut pending: ResMut<Pe
     }
 }
 
+/// Stop the reconnect loop and drop the current sockets.
+///
+/// Used when an initial `?db=` attempt fails and the editor is handing control
+/// back to the connection screen.
+pub fn suspend_ws_reconnect(world: &mut World) {
+    if let Some(mut io) = world.get_resource_mut::<WsIo>() {
+        io.addr = None;
+        io.retry_at = None;
+        io.generation.fetch_add(1, Ordering::SeqCst);
+    }
+    let Some(sockets) = world.remove_non_send::<WsSockets>() else {
+        return;
+    };
+    if let Some(ws) = sockets.main {
+        let _ = ws.close();
+    }
+    if let Some(ws) = sockets.msg {
+        let _ = ws.close();
+    }
+}
+
 fn apply_ws_connect(world: &mut World) {
     let Some(addr) = world
         .get_resource_mut::<PendingWsConnect>()
