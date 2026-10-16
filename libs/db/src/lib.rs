@@ -1024,7 +1024,7 @@ impl DB {
                     "processing field"
                 );
 
-                let component_schema = ComponentSchema::new(ty, shape);
+                let component_schema = ComponentSchema::new(ty, shape.as_slice());
                 state.insert_component_with_timestamp_source_flag(
                     component_id,
                     component_schema,
