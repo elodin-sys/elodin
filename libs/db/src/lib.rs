@@ -241,6 +241,9 @@ pub(crate) fn copy_dir_native(src: &Path, dst: &Path) -> Result<(), Error> {
 
 pub struct DB {
     pub vtable_gen: AtomicCell<u64>,
+    /// Bumped on every `SetComponentMetadata`, so real-time streams re-send a
+    /// component's metadata that changed after they first announced it.
+    pub metadata_gen: AtomicCell<u64>,
     state: RwLock<State>,
     pub recording_cell: PlayingCell,
 
@@ -385,6 +388,7 @@ impl DB {
             recording_cell: PlayingCell::new(true),
             path,
             vtable_gen: AtomicCell::new(0),
+            metadata_gen: AtomicCell::new(0),
             default_stream_time_step,
             last_updated: AtomicCell::new(Timestamp(i64::MIN)),
             earliest_timestamp: AtomicCell::new(now),
@@ -834,6 +838,7 @@ impl DB {
             state: RwLock::new(state),
             path,
             vtable_gen: AtomicCell::new(0),
+            metadata_gen: AtomicCell::new(0),
             recording_cell: PlayingCell::new(db_state.recording),
             default_stream_time_step: AtomicU64::new(
                 db_state.default_stream_time_step.as_nanos() as u64
@@ -2271,6 +2276,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
         Packet::Msg(m) if m.id == SetComponentMetadata::ID => {
             let SetComponentMetadata(metadata) = m.parse::<SetComponentMetadata>()?;
             db.with_state_mut(|state| state.set_component_metadata(metadata, &db.path))?;
+            db.metadata_gen.fetch_add(1, atomic::Ordering::SeqCst);
         }
         Packet::Msg(m) if m.id == GetComponentMetadata::ID => {
             let GetComponentMetadata { component_id } = m.parse::<GetComponentMetadata>()?;
@@ -3282,15 +3288,40 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
     filter: Arc<RealTimeStreamFilter>,
 ) -> Result<(), Error> {
     let mut current_vtable_gen = u64::MAX;
+    let mut current_metadata_gen = u64::MAX;
     let mut current_filter_gen = u64::MAX;
     let mut table = LenPacket::table([0; 2], 2048 - 16);
     let mut all_components = HashMap::new();
+    let mut sent_metadata: HashMap<ComponentId, ComponentMetadata> = HashMap::new();
     let mut stream_components = HashMap::new();
     let mut last_sent = None;
 
     loop {
         let vtable_gen = db.vtable_gen.latest();
         let filter_gen = filter.generation();
+        let metadata_gen = db.metadata_gen.latest();
+        // A writer may register a table before naming its components; the
+        // DB names them by ID until their metadata arrives.
+        if metadata_gen != current_metadata_gen {
+            let changed: Vec<ComponentMetadata> = db.with_state(|state| {
+                sent_metadata
+                    .iter()
+                    .filter_map(|(id, sent)| {
+                        let current = state.get_component_metadata(*id)?;
+                        (current != sent).then(|| current.clone())
+                    })
+                    .collect()
+            });
+            for metadata in changed {
+                send_with_timeout(
+                    &sink,
+                    metadata.clone().into_len_packet().with_request_id(req_id),
+                )
+                .await?;
+                sent_metadata.insert(metadata.component_id, metadata);
+            }
+            current_metadata_gen = metadata_gen;
+        }
         if vtable_gen != current_vtable_gen {
             let new_components: Vec<(Component, Option<ComponentMetadata>, Schema<Vec<u64>>)> = db
                 .with_state(|state| {
@@ -3310,8 +3341,12 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
 
             for (component, metadata, schema) in new_components {
                 if let Some(metadata) = metadata {
-                    send_with_timeout(&sink, metadata.into_len_packet().with_request_id(req_id))
-                        .await?;
+                    send_with_timeout(
+                        &sink,
+                        metadata.clone().into_len_packet().with_request_id(req_id),
+                    )
+                    .await?;
+                    sent_metadata.insert(component.component_id, metadata);
                 }
 
                 let start_ts = *component.index_extra();

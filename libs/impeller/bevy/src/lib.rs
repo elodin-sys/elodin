@@ -975,6 +975,15 @@ fn sink_inner(
                 // Create the full path hierarchy so the component appears in UI
                 // under DbComponentsRoot (not just an orphaned leaf entity).
                 let path = ComponentPath::from_name(&metadata.name);
+                // A component first announced under its ID-only placeholder name
+                // is renamed; drop the placeholder's entity.
+                if let Some(old) = world_sink.path_reg.0.get(&metadata.component_id)
+                    && old.id != path.id
+                    && let Some(entity) = world_sink.entity_map.0.remove(&old.id)
+                {
+                    world_sink.metadata_reg.0.remove(&old.id);
+                    world_sink.commands.entity(entity).despawn();
+                }
                 ensure_component_path_hierarchy(
                     &mut world_sink.entity_map,
                     &mut world_sink.metadata_reg,

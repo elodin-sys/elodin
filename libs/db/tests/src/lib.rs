@@ -496,6 +496,72 @@ mod tests {
     }
 
     #[test]
+    async fn test_batched_stream_sends_metadata_that_arrives_after_the_table() {
+        let (addr, _db) = setup_test_db().await.unwrap();
+        let mut reader = Client::connect(addr).await.unwrap();
+        let mut stream = reader
+            .stream(&Stream {
+                behavior: StreamBehavior::RealTimeBatched,
+                id: 43,
+            })
+            .await
+            .unwrap();
+
+        // The table first, as `init_world` sends it; the DB names the component by ID.
+        let component_id = ComponentId::new("late.named");
+        let mut writer = Client::connect(addr).await.unwrap();
+        let vtable_id = [23, 0];
+        writer
+            .send(&VTableMsg {
+                id: vtable_id,
+                vtable: vtable([raw_field(
+                    0,
+                    8,
+                    timestamp(
+                        raw_table(8, 8),
+                        schema(PrimType::F64, &[], component(component_id)),
+                    ),
+                )]),
+            })
+            .await
+            .0
+            .unwrap();
+        let send_sample = |ts: i64| {
+            let mut pkt = LenPacket::table(vtable_id, 16);
+            pkt.extend_from_slice(&1.0f64.to_le_bytes());
+            pkt.extend_aligned(&[ts]);
+            pkt
+        };
+        writer.send(send_sample(1)).await.0.unwrap();
+        sleep(Duration::from_millis(100)).await;
+        writer
+            .send(&SetComponentMetadata::new(component_id, "late.named"))
+            .await
+            .0
+            .unwrap();
+        writer.send(send_sample(2)).await.0.unwrap();
+
+        let named = futures_lite::future::race(
+            async {
+                loop {
+                    if let StreamReply::ComponentMetadata(metadata) = stream.next().await.unwrap()
+                        && metadata.component_id == component_id
+                        && metadata.name == "late.named"
+                    {
+                        break true;
+                    }
+                }
+            },
+            async {
+                sleep(Duration::from_secs(5)).await;
+                false
+            },
+        )
+        .await;
+        assert!(named, "the stream never sent the component's name");
+    }
+
+    #[test]
     async fn test_batched_stream_filter_survives_reconnect() {
         let (addr, _db) = setup_test_db().await.unwrap();
         let mut writer = Client::connect(addr).await.unwrap();
