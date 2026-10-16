@@ -155,6 +155,19 @@ impl WidgetSystem for InspectorSensorCamera<'_, '_> {
                     config.frustums_color = impeller_wkt::Color::from_color32(frustums_color);
 
                     ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("FACE OPACITY").color(scheme.text_secondary));
+                        ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                            ui.add(
+                                egui::DragValue::new(&mut config.frustums_face_alpha)
+                                    .speed(0.01)
+                                    .range(0.0..=1.0)
+                                    .fixed_decimals(3),
+                            );
+                        });
+                    });
+
+                    ui.add_space(8.0);
                     let mut projection_color = config.projection_color.into_color32();
                     ui.horizontal(|ui| {
                         ui.label(

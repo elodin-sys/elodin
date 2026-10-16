@@ -2934,6 +2934,7 @@
     },
     {
       "Window": {
+        "content": null,
         "path": null,
         "screen": null,
         "screen_rect": null,

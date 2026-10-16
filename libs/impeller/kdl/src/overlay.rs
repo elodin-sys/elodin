@@ -410,6 +410,7 @@ mod tests {
                 width: 100,
                 height: 80,
             }),
+            ..WindowSchematic::default()
         }));
         let overlay = extract_overlay(&schematic);
         assert_eq!(overlay.windows.len(), 1);

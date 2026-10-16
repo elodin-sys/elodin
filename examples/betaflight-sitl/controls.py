@@ -9,7 +9,7 @@ from __future__ import annotations
 import enum
 import math
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -44,9 +44,77 @@ def guidance_mode_from_env(environ: Mapping[str, str] = os.environ) -> GuidanceM
     except ValueError as exc:
         choices = ", ".join(mode.value for mode in GuidanceMode)
         raise ValueError(f"unknown RACE_GUIDANCE={value!r}; expected one of: {choices}") from exc
-    if mode in (GuidanceMode.TRUTH, GuidanceMode.VISION):
-        raise ValueError(f"RACE_GUIDANCE={value!r} is reserved but not implemented yet")
+    if mode is GuidanceMode.VISION:
+        raise ValueError("RACE_GUIDANCE='vision' is reserved but not implemented yet")
     return mode
+
+
+def _finite_tuple(values: Sequence[float], length: int, name: str) -> tuple[float, ...]:
+    try:
+        result = tuple(float(value) for value in values)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must contain {length} finite values") from exc
+    if len(result) != length or not all(math.isfinite(value) for value in result):
+        raise ValueError(f"{name} must contain {length} finite values")
+    return result
+
+
+@dataclass(frozen=True, slots=True)
+class TruthState:
+    """Immutable ENU/FLU vehicle truth copied across the truth-only seam."""
+
+    position_enu: tuple[float, float, float]
+    velocity_enu: tuple[float, float, float]
+    orientation_xyzw: tuple[float, float, float, float]
+
+    def __post_init__(self) -> None:
+        position = _finite_tuple(self.position_enu, 3, "position_enu")
+        velocity = _finite_tuple(self.velocity_enu, 3, "velocity_enu")
+        orientation = _finite_tuple(self.orientation_xyzw, 4, "orientation_xyzw")
+        norm = math.hypot(*orientation)
+        if not math.isfinite(norm) or norm <= 1.0e-12:
+            raise ValueError("orientation_xyzw must be a finite, non-zero quaternion")
+        object.__setattr__(self, "position_enu", position)
+        object.__setattr__(self, "velocity_enu", velocity)
+        object.__setattr__(self, "orientation_xyzw", tuple(value / norm for value in orientation))
+
+
+@dataclass(frozen=True, slots=True)
+class GatePose:
+    """Immutable truth gate geometry copied from the selected course."""
+
+    index: int
+    center_enu: tuple[float, float, float]
+    yaw_rad: float
+    inner_size_m: float
+
+    def __post_init__(self) -> None:
+        if isinstance(self.index, bool) or not isinstance(self.index, int) or self.index < 0:
+            raise ValueError("gate index must be a non-negative integer")
+        center = _finite_tuple(self.center_enu, 3, "center_enu")
+        yaw = float(self.yaw_rad)
+        size = float(self.inner_size_m)
+        if not math.isfinite(yaw):
+            raise ValueError("yaw_rad must be finite")
+        if not math.isfinite(size) or size <= 0.0:
+            raise ValueError("inner_size_m must be positive and finite")
+        object.__setattr__(self, "center_enu", center)
+        object.__setattr__(self, "yaw_rad", yaw)
+        object.__setattr__(self, "inner_size_m", size)
+
+    @property
+    def normal_enu(self) -> tuple[float, float, float]:
+        return (math.cos(self.yaw_rad), math.sin(self.yaw_rad), 0.0)
+
+    def world_to_local(self, position: Sequence[float]) -> tuple[float, float, float]:
+        if len(position) != 3:
+            raise ValueError("position must contain exactly three coordinates")
+        dx = float(position[0]) - self.center_enu[0]
+        dy = float(position[1]) - self.center_enu[1]
+        dz = float(position[2]) - self.center_enu[2]
+        cosine = math.cos(self.yaw_rad)
+        sine = math.sin(self.yaw_rad)
+        return (cosine * dx + sine * dy, -sine * dx + cosine * dy, dz)
 
 
 def _clamp_int(value: float, low: int = RC_MIN, high: int = RC_MAX) -> int:
@@ -176,10 +244,19 @@ class GuidanceUpdate:
 
 @dataclass(frozen=True, slots=True)
 class TruthGuidanceUpdate(GuidanceUpdate):
-    """Guidance update extension reserved for truth-guided modes."""
+    """Truth-only extension; concrete truth values never exist on the base type."""
 
-    truth_state: object | None = None
-    gate_poses: tuple[object, ...] = field(default_factory=tuple)
+    truth_state: TruthState | None = field(kw_only=True)
+    gate_poses: tuple[GatePose, ...] = field(kw_only=True)
+
+    def __post_init__(self) -> None:
+        super(TruthGuidanceUpdate, self).__post_init__()
+        if self.truth_state is not None and not isinstance(self.truth_state, TruthState):
+            raise TypeError("truth_state must be a TruthState or None")
+        gate_poses = tuple(self.gate_poses)
+        if not all(isinstance(gate, GatePose) for gate in gate_poses):
+            raise TypeError("gate_poses must contain only GatePose values")
+        object.__setattr__(self, "gate_poses", gate_poses)
 
 
 class GuidanceSource(Protocol):

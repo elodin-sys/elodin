@@ -1,5 +1,7 @@
 """Tests for the Betaflight SITL editor schematic variants."""
 
+import pytest
+
 from course import course_from_name
 from schematic import build_schematic
 
@@ -18,6 +20,8 @@ def test_default_schematic_keeps_chase_camera_and_sensor_graphs() -> None:
     assert "look_at=drone.world_pos" in schematic
     assert "name=Accelerometer" in schematic
     assert "name=Gyroscope" in schematic
+    assert "drone.guidance_mode" in schematic
+    assert "drone.rc_command" in schematic
     assert "object_3d gate_" not in schematic
     assert "last_gate_passed" not in schematic
     assert "show_frustums" not in schematic
@@ -31,6 +35,8 @@ def test_course_schematic_frames_gate_without_changing_sensor_graphs() -> None:
     assert "name=Accelerometer" in schematic
     assert "name=Gyroscope" in schematic
     assert schematic.count("object_3d gate_0_") == 4
+    assert "drone.guidance_mode" in schematic
+    assert "drone.rc_command" in schematic
 
 
 def test_audit_schematic_uses_oblique_camera_and_referee_graphs() -> None:
@@ -42,6 +48,8 @@ def test_audit_schematic_uses_oblique_camera_and_referee_graphs() -> None:
     assert 'name="Referee: Gate Pass Times"' in schematic
     assert "name=Accelerometer" not in schematic
     assert "name=Gyroscope" not in schematic
+    assert "drone.guidance_mode" in schematic
+    assert "drone.rc_command" in schematic
     assert schematic.count("object_3d gate_0_") == 4
 
 
@@ -71,3 +79,30 @@ def test_camera_and_course_schematic_combine() -> None:
     assert "sensor_visible=#false" in schematic
     assert schematic.count("sensor_visible=#false") == 1
     assert 'pos="(0,0,0,1, 4,-2,3)"' in schematic
+
+
+@pytest.mark.parametrize(
+    ("camera_enabled", "audit_enabled", "course_name"),
+    [
+        (False, False, "none"),
+        (True, False, "none"),
+        (False, False, "single"),
+        (True, False, "single"),
+        (False, True, "single"),
+        (True, True, "single"),
+    ],
+)
+def test_b_fpv_and_e_guidance_graphs_coexist_without_duplicates(
+    camera_enabled: bool, audit_enabled: bool, course_name: str
+) -> None:
+    schematic = _kdl(course_name, audit_enabled=audit_enabled, camera_enabled=camera_enabled)
+    for graph in ("drone.guidance_mode", "drone.rc_command", "drone.motor_command"):
+        assert schematic.count(graph) == 1
+    assert schematic.count("sensor_view drone.fpv") == int(camera_enabled)
+    assert schematic.count("sensor_visible=#false") == int(camera_enabled)
+    assert schematic.count("plane ") == int(camera_enabled)
+    assert schematic.count("object_3d gate_0_") == (4 if course_name == "single" else 0)
+    assert schematic.count("drone.last_gate_passed") == int(audit_enabled)
+    assert schematic.count("drone.gate_pass_times") == int(audit_enabled)
+    assert schematic.count("drone.accel") == int(not audit_enabled)
+    assert schematic.count("drone.gyro") == int(not audit_enabled)

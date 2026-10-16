@@ -20,14 +20,27 @@ use crate::ui::{
 
 use super::placement::collect_sorted_screens;
 
+#[derive(Default)]
+pub struct WindowSyncState {
+    existing_map: HashMap<WindowId, Entity>,
+    arranged_windows: Vec<Entity>,
+    automatic_rects: HashMap<Entity, impeller_wkt::WindowRect>,
+}
+
 pub fn sync_windows(
     mut commands: Commands,
     mut windows_state: Query<(Entity, &WindowId, &mut WindowState, Option<&mut Window>)>,
     mut cameras: Query<(&mut Camera, &mut RenderTarget)>,
     children: Query<&Children>,
-    mut existing_map: Local<HashMap<WindowId, Entity>>,
+    mut sync_state: Local<WindowSyncState>,
+    mut arrange_request: ResMut<super::arrange::ArrangeWindowsRequest>,
     _non_send_marker: NonSendMarker,
 ) {
+    let WindowSyncState {
+        existing_map,
+        arranged_windows,
+        automatic_rects,
+    } = &mut *sync_state;
     let screens_any = WINIT_WINDOWS.with_borrow(|winit_windows| {
         winit_windows
             .windows
@@ -38,6 +51,67 @@ pub fn sync_windows(
     if screens_any.is_none() {
         warn!("No screen info available; windows will use default sizing/position");
     }
+
+    // Monitor handles live on the main thread; schematic loading may run on a worker.
+    let mut ids: Vec<_> = windows_state
+        .iter()
+        .map(|(entity, _, _, _)| entity)
+        .collect();
+    ids.sort();
+    if screens_any.is_some() && should_arrange_windows(arranged_windows, &ids, arrange_request.0) {
+        let mut main_entry = None;
+        let mut secondary = Vec::new();
+        for (entity, marker, state, _) in windows_state.iter() {
+            let mut descriptor = state.descriptor.clone();
+            if descriptor.screen_rect.as_ref() == automatic_rects.get(&entity) {
+                descriptor.screen_rect = None;
+            }
+            if marker.is_primary() {
+                main_entry = Some((entity, descriptor));
+            } else {
+                secondary.push((entity, descriptor));
+            }
+        }
+        secondary.sort_by_key(|(entity, _)| windows_state.get(*entity).unwrap().1.0);
+        if let Some((primary, descriptor)) = main_entry {
+            let mut main = Some(descriptor);
+            let mut descriptors: Vec<_> = secondary.iter().map(|(_, d)| d.clone()).collect();
+            if super::arrange::arrange_windows(primary, &mut main, &mut descriptors) {
+                let placements = std::iter::once((primary, main.unwrap()))
+                    .chain(secondary.iter().map(|(entity, _)| *entity).zip(descriptors));
+                for (entity, descriptor) in placements {
+                    // Cleared automatic rectangles remain absent when their display
+                    // is skipped because another window has an explicit placement.
+                    // Keep the original state (and native window) in that case.
+                    if descriptor.screen_rect.is_none() {
+                        continue;
+                    }
+                    if let Ok((_, _, mut state, _)) = windows_state.get_mut(entity)
+                        && (state.descriptor.screen != descriptor.screen
+                            || state.descriptor.screen_rect != descriptor.screen_rect
+                            || (arrange_request.0 && automatic_rects.contains_key(&entity)))
+                    {
+                        state.descriptor = descriptor;
+                        commands.entity(entity).insert(super::arrange::AutoArranged);
+                        if let Some(rect) = state.descriptor.screen_rect {
+                            automatic_rects.insert(entity, rect);
+                            commands.write_message(WindowRelayout::Rect {
+                                window: entity,
+                                rect,
+                            });
+                        }
+                    }
+                }
+                *arranged_windows = ids.clone();
+                arrange_request.0 = false;
+                automatic_rects.retain(|entity, _| arranged_windows.contains(entity));
+            }
+        }
+    }
+
+    // Forget closed windows without triggering a layout of the survivors.
+    arranged_windows.retain(|entity| ids.contains(entity));
+    automatic_rects.retain(|entity, _| ids.contains(entity));
 
     for (entity, marker, mut state, window_maybe) in &mut windows_state {
         let PaneRenderTargets {
@@ -325,4 +399,37 @@ pub fn compute_window_title(state: &WindowState) -> String {
         })
         .filter(|title| !title.is_empty())
         .unwrap_or_else(|| "Panel".to_string())
+}
+
+// Opening windows can initialize their layout; closing them must not move survivors.
+fn should_arrange_windows(previous: &[Entity], current: &[Entity], requested: bool) -> bool {
+    requested || current.iter().any(|entity| !previous.contains(entity))
+}
+
+#[cfg(test)]
+mod arrangement_trigger_tests {
+    use super::should_arrange_windows;
+    use bevy::prelude::World;
+
+    #[test]
+    fn closing_windows_preserves_layout_until_explicit_arrangement() {
+        let mut world = World::new();
+        let main = world.spawn_empty().id();
+        let first = world.spawn_empty().id();
+        let second = world.spawn_empty().id();
+        assert!(should_arrange_windows(&[], &[main, first, second], false));
+        assert!(!should_arrange_windows(
+            &[main, first, second],
+            &[main, first, second],
+            false
+        ));
+        assert!(!should_arrange_windows(
+            &[main, first, second],
+            &[main, second],
+            false
+        ));
+        assert!(!should_arrange_windows(&[main, second], &[main], false));
+        assert!(should_arrange_windows(&[main], &[main], true));
+        assert!(should_arrange_windows(&[main], &[main, first], false));
+    }
 }

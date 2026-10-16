@@ -1,0 +1,814 @@
+{
+  "body": null,
+  "elems": [
+    {
+      "WorldMesh": {
+        "frame": "ENU",
+        "lod_count": null,
+        "node_id": 0,
+        "region": "mojave_rc_field",
+        "translate": [
+          0.0,
+          0.0,
+          528.0
+        ],
+        "visible": true
+      }
+    },
+    {
+      "Panel": {
+        "Tabs": [
+          {
+            "HSplit": {
+              "active": false,
+              "name": "Main View",
+              "panels": [
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": null,
+                    "panels": [
+                      {
+                        "HorizonGauge": {
+                          "eql": "bdx.world_pos",
+                          "name": "ADI",
+                          "node_id": 0,
+                          "reference": null,
+                          "source": null
+                        }
+                      },
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [],
+                          "eql": "bdx.alpha",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Angle of Attack (rad)",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      },
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [],
+                          "eql": "bdx.aero_valid",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Aero Validity Flag",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ],
+                    "shares": {
+                      "0": 3.0
+                    }
+                  }
+                },
+                {
+                  "Viewport": {
+                    "active": true,
+                    "aspect": null,
+                    "bloom": null,
+                    "cinematic": false,
+                    "create_frustum": false,
+                    "effects": true,
+                    "ev100": null,
+                    "far": null,
+                    "fov": 45.0,
+                    "frame": null,
+                    "frustums_color": {
+                      "a": 1.0,
+                      "b": 0.0,
+                      "g": 1.0,
+                      "r": 1.0
+                    },
+                    "frustums_thickness": 0.006000000052154064,
+                    "frustums_up_marker": "none",
+                    "frustums_up_marker_overlay": false,
+                    "hdr": false,
+                    "local_arrows": [],
+                    "look_at": "bdx.world_pos.translate_world(-0.087, 2.067, 5.976)",
+                    "name": "Chase",
+                    "near": 1.0,
+                    "node_id": 0,
+                    "pos": "bdx.world_pos.translate_world(-3.128, -11.885, -10.827)",
+                    "projection_color": {
+                      "a": 1.0,
+                      "b": 1.0,
+                      "g": 1.0,
+                      "r": 1.0
+                    },
+                    "show_arrows": true,
+                    "show_frustums": false,
+                    "show_grid": false,
+                    "show_view_cube": true,
+                    "smoothing": 0.0,
+                    "up": "(-0.381, -0.721, 0.578)",
+                    "view_cube_frame": null
+                  }
+                },
+                {
+                  "VSplit": {
+                    "active": false,
+                    "name": null,
+                    "panels": [
+                      {
+                        "Viewport": {
+                          "active": false,
+                          "aspect": null,
+                          "bloom": null,
+                          "cinematic": false,
+                          "create_frustum": false,
+                          "effects": true,
+                          "ev100": null,
+                          "far": null,
+                          "fov": 45.0,
+                          "frame": null,
+                          "frustums_color": {
+                            "a": 1.0,
+                            "b": 0.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "frustums_thickness": 0.006000000052154064,
+                          "frustums_up_marker": "none",
+                          "frustums_up_marker_overlay": false,
+                          "hdr": false,
+                          "local_arrows": [],
+                          "look_at": "bdx.world_pos",
+                          "name": "TGTViewport",
+                          "near": null,
+                          "node_id": 0,
+                          "pos": "target.world_pos.translate_world(1.078, -0.099, 0.931)",
+                          "projection_color": {
+                            "a": 1.0,
+                            "b": 1.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "show_arrows": true,
+                          "show_frustums": false,
+                          "show_grid": false,
+                          "show_view_cube": true,
+                          "smoothing": 0.0,
+                          "up": null,
+                          "view_cube_frame": null
+                        }
+                      },
+                      {
+                        "Viewport": {
+                          "active": false,
+                          "aspect": null,
+                          "bloom": null,
+                          "cinematic": false,
+                          "create_frustum": false,
+                          "effects": true,
+                          "ev100": null,
+                          "far": null,
+                          "fov": 45.0,
+                          "frame": null,
+                          "frustums_color": {
+                            "a": 1.0,
+                            "b": 0.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "frustums_thickness": 0.006000000052154064,
+                          "frustums_up_marker": "none",
+                          "frustums_up_marker_overlay": false,
+                          "hdr": false,
+                          "local_arrows": [],
+                          "look_at": "bdx.world_pos.translate(2,0,0.1)",
+                          "name": "FPVViewport",
+                          "near": null,
+                          "node_id": 0,
+                          "pos": "bdx.world_pos.translate(1,0,0.1)",
+                          "projection_color": {
+                            "a": 1.0,
+                            "b": 1.0,
+                            "g": 1.0,
+                            "r": 1.0
+                          },
+                          "show_arrows": true,
+                          "show_frustums": false,
+                          "show_grid": false,
+                          "show_view_cube": true,
+                          "smoothing": 0.0,
+                          "up": "bdx.world_pos.direction(0,0,1)",
+                          "view_cube_frame": null
+                        }
+                      },
+                      {
+                        "SensorView": {
+                          "msg_name": "bdx.fpv_cam",
+                          "name": "FPV (sensor_camera)"
+                        }
+                      },
+                      {
+                        "SensorView": {
+                          "msg_name": "bdx.ir_cam",
+                          "name": "LWIR (Boson+ 640)"
+                        }
+                      }
+                    ],
+                    "shares": {}
+                  }
+                }
+              ],
+              "shares": {
+                "0": 0.4000000059604645,
+                "2": 0.4000000059604645
+              }
+            }
+          },
+          {
+            "VSplit": {
+              "active": false,
+              "name": "Flight Data",
+              "panels": [
+                {
+                  "HSplit": {
+                    "active": false,
+                    "name": null,
+                    "panels": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [],
+                          "eql": "bdx.velocity_body",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Body Velocity (m/s)",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      },
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [],
+                          "eql": "bdx.geodetic.alt_m",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Geodetic Altitude (m)",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ],
+                    "shares": {}
+                  }
+                },
+                {
+                  "HSplit": {
+                    "active": false,
+                    "name": null,
+                    "panels": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [],
+                          "eql": "bdx.control_surfaces",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Control Surfaces (rad)",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      },
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [],
+                          "eql": "bdx.dynamic_pressure, bdx.mach",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Dynamic Pressure / Mach",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ],
+                    "shares": {}
+                  }
+                }
+              ],
+              "shares": {}
+            }
+          },
+          {
+            "VSplit": {
+              "active": false,
+              "name": "Propulsion",
+              "panels": [
+                {
+                  "HSplit": {
+                    "active": false,
+                    "name": null,
+                    "panels": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [],
+                          "eql": "bdx.thrust",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Thrust (N)",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      },
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [],
+                          "eql": "bdx.spool_speed",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Effective Throttle (spool)",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ],
+                    "shares": {}
+                  }
+                },
+                {
+                  "HSplit": {
+                    "active": false,
+                    "name": null,
+                    "panels": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [],
+                          "eql": "bdx.fuel_mass",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Fuel Mass (kg)",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      },
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [],
+                          "eql": "bdx.fuel_flow",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Fuel Flow (kg/s)",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ],
+                    "shares": {}
+                  }
+                }
+              ],
+              "shares": {}
+            }
+          },
+          {
+            "VSplit": {
+              "active": false,
+              "name": "Control Input",
+              "panels": [
+                {
+                  "Graph": {
+                    "auto_y_range": true,
+                    "colors": [],
+                    "eql": "bdx.control_commands",
+                    "graph_type": "Line",
+                    "locked": false,
+                    "name": "Control Commands (rad/normalized)",
+                    "node_id": 0,
+                    "y_range": {
+                      "end": 1.0,
+                      "start": 0.0
+                    }
+                  }
+                },
+                {
+                  "Graph": {
+                    "auto_y_range": true,
+                    "colors": [],
+                    "eql": "bdx.control_surfaces",
+                    "graph_type": "Line",
+                    "locked": false,
+                    "name": "Control Surfaces (rad)",
+                    "node_id": 0,
+                    "y_range": {
+                      "end": 1.0,
+                      "start": 0.0
+                    }
+                  }
+                }
+              ],
+              "shares": {}
+            }
+          },
+          {
+            "VSplit": {
+              "active": false,
+              "name": "Aerodynamics",
+              "panels": [
+                {
+                  "HSplit": {
+                    "active": false,
+                    "name": null,
+                    "panels": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [],
+                          "eql": "bdx.alpha",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Angle of Attack (rad)",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      },
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [],
+                          "eql": "bdx.beta",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Sideslip (rad)",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ],
+                    "shares": {}
+                  }
+                },
+                {
+                  "HSplit": {
+                    "active": false,
+                    "name": null,
+                    "panels": [
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [],
+                          "eql": "bdx.aero_coefs.CL, bdx.aero_coefs.CD",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "CL, CD",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      },
+                      {
+                        "Graph": {
+                          "auto_y_range": true,
+                          "colors": [],
+                          "eql": "bdx.aero_coefs.Cm",
+                          "graph_type": "Line",
+                          "locked": false,
+                          "name": "Pitch Moment Cm",
+                          "node_id": 0,
+                          "y_range": {
+                            "end": 1.0,
+                            "start": 0.0
+                          }
+                        }
+                      }
+                    ],
+                    "shares": {}
+                  }
+                }
+              ],
+              "shares": {}
+            }
+          },
+          {
+            "HSplit": {
+              "active": false,
+              "name": "Navigation",
+              "panels": [
+                {
+                  "Viewport": {
+                    "active": false,
+                    "aspect": null,
+                    "bloom": null,
+                    "cinematic": false,
+                    "create_frustum": false,
+                    "effects": true,
+                    "ev100": null,
+                    "far": null,
+                    "fov": 60.0,
+                    "frame": null,
+                    "frustums_color": {
+                      "a": 1.0,
+                      "b": 0.0,
+                      "g": 1.0,
+                      "r": 1.0
+                    },
+                    "frustums_thickness": 0.006000000052154064,
+                    "frustums_up_marker": "none",
+                    "frustums_up_marker_overlay": false,
+                    "hdr": false,
+                    "local_arrows": [],
+                    "look_at": "bdx.world_pos",
+                    "name": "Top-Down View",
+                    "near": null,
+                    "node_id": 0,
+                    "pos": "bdx.world_pos.translate_world(-57.076, -108.214, 86.787)",
+                    "projection_color": {
+                      "a": 1.0,
+                      "b": 1.0,
+                      "g": 1.0,
+                      "r": 1.0
+                    },
+                    "show_arrows": true,
+                    "show_frustums": false,
+                    "show_grid": false,
+                    "show_view_cube": true,
+                    "smoothing": 0.0,
+                    "up": "(0.270, 0.512, 0.816)",
+                    "view_cube_frame": null
+                  }
+                },
+                {
+                  "QueryPlot": {
+                    "auto_refresh": true,
+                    "color": {
+                      "a": 1.0,
+                      "b": 1.0,
+                      "g": 1.0,
+                      "r": 0.0
+                    },
+                    "name": "Ground Track (ENU)",
+                    "node_id": 0,
+                    "plot_mode": "XY",
+                    "query": "SELECT bdx_pos_enu.bdx_pos_enu[1], bdx_pos_enu.bdx_pos_enu[2] FROM bdx_pos_enu",
+                    "query_type": "SQL",
+                    "refresh_interval": {
+                      "nanos": 500000000,
+                      "secs": 0
+                    },
+                    "x_label": "East (m)",
+                    "y_label": "North (m)"
+                  }
+                }
+              ],
+              "shares": {}
+            }
+          }
+        ]
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "bdx.world_pos",
+        "frame": null,
+        "frame_orientation": null,
+        "icon": {
+          "color": {
+            "a": 1.0,
+            "b": 0.3137255012989044,
+            "g": 0.686274528503418,
+            "r": 0.2980392277240753
+          },
+          "size": 32.0,
+          "source": {
+            "Builtin": "flight_takeoff"
+          },
+          "visibility_range": {
+            "fade_distance": 50.0,
+            "max": 3.4028234663852886e+38,
+            "min": 50.0
+          }
+        },
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "bdx.glb",
+            "rotate": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": 1.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "absolute",
+        "sensor_visible": true,
+        "thrusters": []
+      }
+    },
+    {
+      "Object3d": {
+        "eql": "target.world_pos",
+        "frame": null,
+        "frame_orientation": null,
+        "icon": {
+          "color": {
+            "a": 1.0,
+            "b": 0.21176470816135406,
+            "g": 0.26274511218070984,
+            "r": 0.95686274766922
+          },
+          "size": 32.0,
+          "source": {
+            "Builtin": "adjust"
+          },
+          "visibility_range": {
+            "fade_distance": 50.0,
+            "max": 3.4028234663852886e+38,
+            "min": 50.0
+          }
+        },
+        "mesh": {
+          "Glb": {
+            "animations": [],
+            "emissivity": 0.0,
+            "glow": 0.0,
+            "glow_color": null,
+            "path": "edu-450-v2-drone.glb",
+            "rotate": [
+              90.0,
+              0.0,
+              0.0
+            ],
+            "scale": 10.0,
+            "translate": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        "mesh_visibility_range": null,
+        "node_id": 0,
+        "orientation": "absolute",
+        "sensor_visible": true,
+        "thrusters": []
+      }
+    },
+    {
+      "VectorArrow": {
+        "body_frame": true,
+        "color": {
+          "a": 0.5882353186607361,
+          "b": 0.0,
+          "g": 0.0,
+          "r": 1.0
+        },
+        "frame": null,
+        "label_position": "None",
+        "name": "Forward (X)",
+        "node_id": 0,
+        "normalize": false,
+        "origin": "bdx.world_pos",
+        "scale": 1.0,
+        "show_name": true,
+        "thickness": 0.10000000149011612,
+        "vector": "(1, 0, 0)"
+      }
+    },
+    {
+      "VectorArrow": {
+        "body_frame": true,
+        "color": {
+          "a": 0.5882353186607361,
+          "b": 0.0,
+          "g": 1.0,
+          "r": 0.0
+        },
+        "frame": null,
+        "label_position": "None",
+        "name": "Left (Y)",
+        "node_id": 0,
+        "normalize": false,
+        "origin": "bdx.world_pos",
+        "scale": 1.0,
+        "show_name": true,
+        "thickness": 0.10000000149011612,
+        "vector": "(0, 1, 0)"
+      }
+    },
+    {
+      "VectorArrow": {
+        "body_frame": true,
+        "color": {
+          "a": 0.5882353186607361,
+          "b": 1.0,
+          "g": 0.0,
+          "r": 0.0
+        },
+        "frame": null,
+        "label_position": "None",
+        "name": "Up (Z)",
+        "node_id": 0,
+        "normalize": false,
+        "origin": "bdx.world_pos",
+        "scale": 1.0,
+        "show_name": true,
+        "thickness": 0.10000000149011612,
+        "vector": "(0, 0, 1)"
+      }
+    },
+    {
+      "Line3d": {
+        "color": {
+          "a": 1.0,
+          "b": 0.019999999552965164,
+          "g": 0.7699999809265137,
+          "r": 1.0
+        },
+        "eql": "bdx.world_pos",
+        "frame": null,
+        "future_color": null,
+        "line_width": 3.0,
+        "node_id": 0,
+        "perspective": false
+      }
+    }
+  ],
+  "environment": null,
+  "frame": "ECEF",
+  "origin": {
+    "altitude": 589.274,
+    "latitude": 35.350664,
+    "longitude": -117.809027
+  },
+  "skybox": null,
+  "telemetry_mode": true,
+  "theme": null,
+  "timeline": {
+    "follow_latest": true,
+    "future_color": {
+      "a": 1.0,
+      "b": 1.0,
+      "g": 1.0,
+      "r": 1.0
+    },
+    "played_color": {
+      "a": 1.0,
+      "b": 0.20000000298023224,
+      "g": 0.8999999761581421,
+      "r": 1.0
+    },
+    "range": "last_30s"
+  }
+}

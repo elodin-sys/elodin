@@ -112,6 +112,263 @@ pub mod run;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+#[cfg(not(target_family = "wasm"))]
+mod stream_filter {
+    use std::collections::HashSet;
+
+    use bevy::prelude::*;
+    use impeller::types::{ComponentId, IntoLenPacket};
+    use impeller_bevy::{
+        ComponentFilteredStream, ConnectionStatus, CurrentStreamId, PacketTx, SeriesFetchPriority,
+        ThreadConnectionStatus,
+    };
+    use impeller_wkt::SetStreamFilter;
+
+    use crate::sensor_camera::SensorCameraConfigs;
+
+    /// How often a component-filtered real-time stream should emit.
+    #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub(crate) enum StreamFilterRate {
+        /// Preserve every live sample for interactive plots and playback.
+        #[default]
+        FullResolution,
+        /// Limit the headless render-server stream to its fastest camera.
+        CameraMaxFps,
+    }
+
+    impl StreamFilterRate {
+        fn frequency(self, configs: Option<&SensorCameraConfigs>) -> Option<u64> {
+            match self {
+                Self::FullResolution => None,
+                Self::CameraMaxFps => Some(
+                    configs
+                        .into_iter()
+                        .flat_map(|configs| configs.0.iter())
+                        .map(|config| config.fps.ceil().max(1.0) as u64)
+                        .max()
+                        .unwrap_or(60),
+                ),
+            }
+        }
+
+        fn client_name(self) -> &'static str {
+            match self {
+                Self::FullResolution => "editor",
+                Self::CameraMaxFps => "render server",
+            }
+        }
+    }
+
+    /// Identifies one negotiated live stream: `(connection, stream_id)`.
+    type StreamKey = (u64, u64);
+
+    #[derive(Default)]
+    pub(crate) struct SentStreamFilter {
+        stream: Option<StreamKey>,
+        component_ids: HashSet<ComponentId>,
+        frequency: Option<u64>,
+    }
+
+    impl SentStreamFilter {
+        fn disconnect(&mut self) {
+            self.stream = None;
+        }
+
+        fn needs_update(
+            &self,
+            stream: StreamKey,
+            component_ids: &HashSet<ComponentId>,
+            frequency: Option<u64>,
+        ) -> bool {
+            self.stream != Some(stream)
+                || self.component_ids != *component_ids
+                || self.frequency != frequency
+        }
+
+        fn record(
+            &mut self,
+            stream: StreamKey,
+            component_ids: &HashSet<ComponentId>,
+            frequency: Option<u64>,
+        ) {
+            self.stream = Some(stream);
+            self.component_ids.clone_from(component_ids);
+            self.frequency = frequency;
+        }
+    }
+
+    fn stream_filter_message(
+        stream_id: u64,
+        component_ids: &HashSet<ComponentId>,
+        frequency: Option<u64>,
+    ) -> SetStreamFilter {
+        let mut component_ids: Vec<_> = component_ids.iter().copied().collect();
+        component_ids.sort_unstable_by_key(|id| id.0);
+        SetStreamFilter {
+            id: stream_id,
+            component_ids,
+            frequency,
+        }
+    }
+
+    /// Keep the DB-side `RealTimeBatched` component allowlist synchronized
+    /// with the consumers registered by the active schematic.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn sync_stream_filter(
+        priority: Res<SeriesFetchPriority>,
+        filtered_stream: Option<Res<ComponentFilteredStream>>,
+        stream_id: Option<Res<CurrentStreamId>>,
+        packet_tx: Option<Res<PacketTx>>,
+        connection: Option<Res<ThreadConnectionStatus>>,
+        configs: Option<Res<SensorCameraConfigs>>,
+        rate: Res<StreamFilterRate>,
+        mut sent: Local<SentStreamFilter>,
+    ) {
+        let (Some(filtered_stream), Some(stream_id), Some(packet_tx), Some(connection)) =
+            (filtered_stream, stream_id, packet_tx, connection)
+        else {
+            sent.disconnect();
+            return;
+        };
+        // Older DBs ignore an empty filter or persist the message as telemetry.
+        if filtered_stream.supported != Some(true)
+            || connection.status() != ConnectionStatus::Success
+        {
+            sent.disconnect();
+            return;
+        }
+
+        let stream = (filtered_stream.connection, stream_id.0);
+        let frequency = rate.frequency(configs.as_deref());
+        if !sent.needs_update(stream, &priority.high, frequency) {
+            return;
+        }
+
+        packet_tx.send_required(
+            stream_filter_message(stream_id.0, &priority.high, frequency).into_len_packet(),
+            "live stream filter update",
+        );
+        tracing::info!(
+            client = rate.client_name(),
+            components = priority.high.len(),
+            frequency = frequency
+                .map(|hz| format!("{hz} Hz"))
+                .unwrap_or_else(|| "full resolution".to_string()),
+            "live stream filter updated"
+        );
+        sent.record(stream, &priority.high, frequency);
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn full_resolution_policy_has_no_frequency_limit() {
+            assert_eq!(
+                StreamFilterRate::FullResolution.frequency(Some(&SensorCameraConfigs::default())),
+                None
+            );
+        }
+
+        #[test]
+        fn camera_policy_uses_the_fastest_camera() {
+            use impeller_wkt::SensorCameraConfig;
+
+            let configs = SensorCameraConfigs(vec![
+                SensorCameraConfig {
+                    fps: 5.0,
+                    ..Default::default()
+                },
+                SensorCameraConfig {
+                    fps: 29.1,
+                    ..Default::default()
+                },
+            ]);
+            assert_eq!(
+                StreamFilterRate::CameraMaxFps.frequency(Some(&configs)),
+                Some(30)
+            );
+        }
+
+        #[test]
+        fn sent_state_tracks_empty_changes_and_reconnects() {
+            let a = ComponentId::new("a");
+            let empty = HashSet::new();
+            let one = [a].into_iter().collect();
+            let mut sent = SentStreamFilter::default();
+
+            assert!(sent.needs_update((1, 7), &empty, None));
+            sent.record((1, 7), &empty, None);
+            assert!(!sent.needs_update((1, 7), &empty, None));
+            assert!(sent.needs_update((1, 7), &one, None));
+
+            sent.record((1, 7), &one, None);
+            assert!(sent.needs_update((1, 7), &empty, None));
+            sent.record((1, 7), &empty, None);
+            sent.disconnect();
+            assert!(sent.needs_update((1, 7), &empty, None));
+            sent.record((1, 7), &empty, None);
+            assert!(sent.needs_update((1, 8), &empty, None));
+            assert!(sent.needs_update((2, 7), &empty, None));
+        }
+
+        #[test]
+        fn interactive_message_is_component_only_and_full_resolution() {
+            let ids = [ComponentId::new("b"), ComponentId::new("a")]
+                .into_iter()
+                .collect();
+            let message = stream_filter_message(9, &ids, None);
+            assert_eq!(message.id, 9);
+            assert_eq!(message.frequency, None);
+            assert_eq!(message.component_ids.len(), 2);
+            assert!(message.component_ids.contains(&ComponentId::new("a")));
+            assert!(message.component_ids.contains(&ComponentId::new("b")));
+        }
+
+        #[test]
+        fn empty_message_subscribes_to_no_components() {
+            let message = stream_filter_message(9, &HashSet::new(), None);
+            assert!(message.component_ids.is_empty());
+        }
+
+        fn run_sync(
+            supported: Option<bool>,
+            status: ConnectionStatus,
+        ) -> Vec<impeller::types::LenPacket> {
+            let (packet_tx, _packet_rx, outgoing_rx, _incoming_tx) = impeller_bevy::channels();
+            let mut app = App::new();
+            app.insert_resource(SeriesFetchPriority {
+                high: [ComponentId::new("a")].into_iter().collect(),
+            })
+            .insert_resource(ComponentFilteredStream {
+                connection: 1,
+                supported,
+            })
+            .insert_resource(CurrentStreamId(9))
+            .insert_resource(packet_tx)
+            .insert_resource(ThreadConnectionStatus::new(status))
+            .insert_resource(StreamFilterRate::FullResolution)
+            .add_systems(Update, sync_stream_filter);
+            app.update();
+            std::iter::from_fn(|| outgoing_rx.try_recv().ok().flatten()).collect()
+        }
+
+        #[test]
+        fn filter_is_sent_only_to_supporting_dbs() {
+            let sent = run_sync(Some(true), ConnectionStatus::Success);
+            assert_eq!(sent.len(), 1);
+            assert_eq!(
+                sent[0].as_packet().header.id,
+                <SetStreamFilter as impeller::types::Msg>::ID
+            );
+            assert!(run_sync(Some(false), ConnectionStatus::Success).is_empty());
+            assert!(run_sync(None, ConnectionStatus::Success).is_empty());
+            assert!(run_sync(Some(true), ConnectionStatus::Connecting).is_empty());
+        }
+    }
+}
+
 pub(crate) fn skybox_asset_plugin() -> bevy_ai_skybox::prelude::SkyboxAssetPlugin {
     let assets_dir = plugins::env_asset_source::resolve_assets_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("assets"));
@@ -504,6 +761,14 @@ impl Plugin for EditorPlugin {
             )
             .add_systems(Update, sensor_camera::patch_sensor_view_dims)
             .add_systems(Update, throttle_for_sensor_cameras);
+
+        #[cfg(not(target_family = "wasm"))]
+        app.insert_resource(stream_filter::StreamFilterRate::FullResolution)
+            .add_systems(
+                Update,
+                stream_filter::sync_stream_filter
+                    .after(crate::ui::plot::update_series_fetch_priority),
+            );
 
         app.add_systems(PreUpdate, warn_missing_geo.before(PositionSync));
         #[cfg(feature = "big_space")]

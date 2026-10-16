@@ -183,7 +183,7 @@
 - **Line compression** — Hamann–Chen curvature-based downsampling of graph lines and 3D trails (`CurveCompressSettings`: thresholds, target points, keep-recent fraction); GPU index-buffer cap handling for `plot_3d`.
 
 ### 16.5 Playback, Timeline & Recording
-- **Timeline** — Scrub, pause, step (hold-to-multi-step), rewind; decoupled from simulation; live auto-follow (`follow_latest`) with Jump-to-Latest; replay-speed display; playback speed presets (default 1x, per-sim `default_playback_speed`).
+- **Timeline** — Scrub, pause, step (hold-to-multi-step), rewind; decoupled from simulation; live auto-follow (`follow_latest`) with Jump-to-Latest; replay-speed display; playback speed presets (default 1x, per-sim `default_playback_speed`); status-bar **TIME** field (monotonic seconds vs UTC, editable seek, **µs** clipboard copy for merge alignment).
 - **Navigation** — Goto Tick (pauses), Fix Current Time Range, Set Time Range (`+5m`, `-10s`, `=ISO8601`).
 - **Recording** — Toggle Recording start/stop on the connected DB; time-travel warning names the edited component.
 

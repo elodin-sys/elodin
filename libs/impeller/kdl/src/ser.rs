@@ -683,6 +683,43 @@ fn serialize_viewport(viewport: &Viewport) -> KdlNode {
     node
 }
 
+fn append_window_content_nodes(children: &mut KdlDocument, content: &Schematic) {
+    if let Some(frame) = content.frame {
+        children
+            .nodes_mut()
+            .push(serialize_coordinate(&CoordinateConfig {
+                frame,
+                origin: content.origin,
+                body: content.body,
+            }));
+    }
+    if let Some(theme) = content.theme.as_ref() {
+        children.nodes_mut().push(serialize_theme(theme));
+    }
+    if let Some(timeline) = content.timeline.as_ref() {
+        let node = serialize_timeline(timeline);
+        if !node.entries().is_empty() {
+            children.nodes_mut().push(node);
+        }
+    }
+    if content.telemetry_mode {
+        let mut node = KdlNode::new("telemetry_mode");
+        node.entries_mut().push(KdlEntry::new(true));
+        children.nodes_mut().push(node);
+    }
+    if let Some(skybox) = content.skybox.as_ref() {
+        children.nodes_mut().push(serialize_skybox(skybox));
+    }
+    if let Some(environment) = content.environment.as_ref() {
+        children
+            .nodes_mut()
+            .push(serialize_environment(environment));
+    }
+    for elem in &content.elems {
+        children.nodes_mut().push(serialize_schematic_elem(elem));
+    }
+}
+
 fn serialize_window(window: &WindowSchematic) -> KdlNode {
     let mut node = KdlNode::new("window");
     if let Some(path) = &window.path {
@@ -700,23 +737,27 @@ fn serialize_window(window: &WindowSchematic) -> KdlNode {
             .push(KdlEntry::new_prop("screen", i128::from(idx)));
     }
 
-    if let Some(rect) = window.screen_rect {
-        let mut rect_node = KdlNode::new("rect");
-        rect_node
-            .entries_mut()
-            .push(KdlEntry::new(i128::from(rect.x)));
-        rect_node
-            .entries_mut()
-            .push(KdlEntry::new(i128::from(rect.y)));
-        rect_node
-            .entries_mut()
-            .push(KdlEntry::new(i128::from(rect.width)));
-        rect_node
-            .entries_mut()
-            .push(KdlEntry::new(i128::from(rect.height)));
-
+    if window.screen_rect.is_some() || window.content.is_some() {
         let mut children = node.children().cloned().unwrap_or_else(KdlDocument::new);
-        children.nodes_mut().push(rect_node);
+        if let Some(rect) = window.screen_rect {
+            let mut rect_node = KdlNode::new("rect");
+            rect_node
+                .entries_mut()
+                .push(KdlEntry::new(i128::from(rect.x)));
+            rect_node
+                .entries_mut()
+                .push(KdlEntry::new(i128::from(rect.y)));
+            rect_node
+                .entries_mut()
+                .push(KdlEntry::new(i128::from(rect.width)));
+            rect_node
+                .entries_mut()
+                .push(KdlEntry::new(i128::from(rect.height)));
+            children.nodes_mut().push(rect_node);
+        }
+        if let Some(content) = &window.content {
+            append_window_content_nodes(&mut children, content);
+        }
         node.set_children(children);
     }
 

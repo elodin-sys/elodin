@@ -231,6 +231,7 @@ class WorldBuilder:
         ev100: Optional[float] = None,
         bloom: Optional[dict[str, object]] = None,
         environment: Optional[dict[str, object]] = None,
+        frustums_face_alpha: float = 45.0 / 255.0,
     ) -> None:
         """Register a virtual sensor camera on an entity.
 

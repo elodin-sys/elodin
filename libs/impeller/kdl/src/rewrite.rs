@@ -170,6 +170,11 @@ where
             {
                 *path = new_path;
             }
+            if let Some(content) = &mut window.content {
+                for elem in &mut content.elems {
+                    rewrite_elem(elem, map);
+                }
+            }
         }
         _ => {}
     }
@@ -288,8 +293,17 @@ fn collect_elem_db_asset_names(elem: &SchematicElem, names: &mut Vec<String>) {
             {
                 names.push(name);
             }
+            if let Some(content) = &window.content {
+                collect_schematic_db_asset_names(content, names);
+            }
         }
         _ => {}
+    }
+}
+
+fn collect_schematic_db_asset_names(schematic: &Schematic, names: &mut Vec<String>) {
+    for elem in &schematic.elems {
+        collect_elem_db_asset_names(elem, names);
     }
 }
 
@@ -339,8 +353,17 @@ fn collect_elem_paths(elem: &SchematicElem, paths: &mut Vec<String>) {
             {
                 paths.push(path.clone());
             }
+            if let Some(content) = &window.content {
+                collect_schematic_paths(content, paths);
+            }
         }
         _ => {}
+    }
+}
+
+fn collect_schematic_paths(schematic: &Schematic, paths: &mut Vec<String>) {
+    for elem in &schematic.elems {
+        collect_elem_paths(elem, paths);
     }
 }
 
@@ -1019,6 +1042,7 @@ mod tests {
                 path: Some("schematics/window-detail.kdl".into()),
                 screen: None,
                 screen_rect: None,
+                ..WindowSchematic::default()
             })],
             ..Default::default()
         };

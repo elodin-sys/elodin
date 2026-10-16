@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use crate::object_3d::create_object_3d_entity;
@@ -42,15 +42,12 @@ use bevy_ai_skybox::prelude::{
 use bevy_geo_frames::GeoContext;
 use bevy_geo_frames::GeoFramePlugin;
 use bevy_mat3_material::Mat3Material;
-use impeller::types::{ComponentId, LenPacket, Timestamp, msg_id};
-use impeller_bevy::{
-    ConnectionAddr, ConnectionStatus, CurrentStreamId, MsgPacketTx, PacketTx, SeriesFetchPriority,
-    ThreadConnectionStatus,
-};
+use impeller::types::{LenPacket, Timestamp, msg_id};
+use impeller_bevy::{ConnectionAddr, MsgPacketTx, PacketTx};
 use impeller_kdl::FromKdl;
 use impeller_wkt::{
     CurrentTimestamp, DbConfig, DumpMetadata, LastUpdated, MsgMetadata, SchematicElem,
-    SetMsgMetadata, SetStreamFilter, opaque_bytes_msg_schema,
+    SetMsgMetadata, opaque_bytes_msg_schema,
 };
 
 const SENSOR_CAMERA_CONFIG_WARMUP_CYCLES: usize = 600;
@@ -185,6 +182,7 @@ impl Plugin for HeadlessEditorPlugin {
         .init_resource::<crate::SyncedObject3d>()
         .init_resource::<HeadlessSchematicSkybox>()
         .init_resource::<HeadlessSkyboxRenderGate>()
+        .insert_resource(crate::stream_filter::StreamFilterRate::CameraMaxFps)
         .init_resource::<crate::skybox_db_assets::DbSkyboxAssetMirror>()
         .init_resource::<crate::skybox_db_assets::DbSkyboxSyncInFlight>()
         // Same SeriesStore subscription path as the interactive editor: empty
@@ -193,7 +191,8 @@ impl Plugin for HeadlessEditorPlugin {
         .add_systems(Update, crate::ui::plot::update_series_fetch_priority)
         .add_systems(
             Update,
-            sync_headless_stream_filter.after(crate::ui::plot::update_series_fetch_priority),
+            crate::stream_filter::sync_stream_filter
+                .after(crate::ui::plot::update_series_fetch_priority),
         )
         .add_systems(
             Update,
@@ -218,59 +217,6 @@ impl Plugin for HeadlessEditorPlugin {
                 .init_resource::<SensorCameraRenderMetrics>();
         }
     }
-}
-
-#[derive(Default)]
-struct SentStreamFilter {
-    component_ids: HashSet<ComponentId>,
-    frequency: Option<u64>,
-    connected: bool,
-}
-
-fn sync_headless_stream_filter(
-    priority: Res<SeriesFetchPriority>,
-    stream_id: Res<CurrentStreamId>,
-    packet_tx: Res<PacketTx>,
-    connection: Res<ThreadConnectionStatus>,
-    configs: Res<SensorCameraConfigs>,
-    mut sent: Local<SentStreamFilter>,
-) {
-    let connected = connection.status() == ConnectionStatus::Success;
-    if !connected {
-        sent.connected = false;
-        return;
-    }
-    let frequency = Some(
-        configs
-            .0
-            .iter()
-            .map(|config| config.fps.ceil().max(1.0) as u64)
-            .max()
-            .unwrap_or(60),
-    );
-    // Empty high-priority set means "schematic not ready yet", not "subscribe
-    // to nothing". Sending [] would drop every pose until cameras appear.
-    if priority.high.is_empty() {
-        sent.connected = true;
-        sent.component_ids.clear();
-        sent.frequency = frequency;
-        return;
-    }
-    if sent.connected && sent.component_ids == priority.high && sent.frequency == frequency {
-        return;
-    }
-    packet_tx.send_msg(SetStreamFilter {
-        id: stream_id.0,
-        component_ids: priority.high.iter().copied().collect(),
-        frequency,
-    });
-    tracing::info!(
-        components = priority.high.len(),
-        "render server stream filter updated"
-    );
-    sent.component_ids.clone_from(&priority.high);
-    sent.frequency = frequency;
-    sent.connected = true;
 }
 
 // ---------------------------------------------------------------------------

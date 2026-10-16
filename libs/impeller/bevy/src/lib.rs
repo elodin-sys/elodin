@@ -26,8 +26,8 @@ use impeller_bbq::{AsyncArcQueueRx, RxExt};
 use impeller_wkt::{
     ComponentMetadata, CurrentTimestamp, DbConfig, DumpMetadata, DumpMetadataResp, DumpSchema,
     DumpSchemaResp, EarliestTimestamp, ErrorResponse, GetDbSettings, GetEarliestTimestamp,
-    GetTimeSeries, IsRecording, LastUpdated, Stream, StreamBehavior, StreamId, StreamTimestamp,
-    SubscribeLastUpdated, VTableMsg, WorldPos,
+    GetTimeSeries, IsRecording, LastUpdated, NewConnection, Stream, StreamBehavior, StreamId,
+    StreamTimestamp, SubscribeLastUpdated, VTableMsg, WorldPos,
 };
 use serde::de::DeserializeOwned;
 use std::{
@@ -76,6 +76,15 @@ impl PacketTx {
     pub fn send_msg(&self, msg: impl Msg) {
         let pkt = msg.into_len_packet();
         let _ = self.0.try_send(Some(pkt));
+    }
+
+    /// Queue a packet whose loss would leave the client silently
+    /// out of sync with the DB; panics naming `operation` if it cannot be queued.
+    pub fn send_required(&self, pkt: LenPacket, operation: &str) {
+        if let Err(err) = self.0.try_send(Some(pkt)) {
+            let reason = if err.is_full() { "full" } else { "closed" };
+            panic!("{operation} failed: outgoing packet queue is {reason}");
+        }
     }
 }
 
@@ -952,6 +961,7 @@ fn sink_inner(
                 bevy::log::error!(?err, "packet handler error");
             }
         }
+        track_component_filter_support(world, &pkt)?;
         let mut world_sink = world_sink_state
             .get_mut(world)
             .expect("WorldSink params invalid");
@@ -1971,6 +1981,44 @@ pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPa
     .into_iter()
 }
 
+/// Per-connection `SetStreamFilter` support for component-filtered clients.
+/// Present only when the client opts into component filtering.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ComponentFilteredStream {
+    /// Bumped on every `NewConnection`.
+    pub connection: u64,
+    /// `None` until this connection's `DbConfig` arrives.
+    pub supported: Option<bool>,
+}
+
+fn track_component_filter_support(
+    world: &mut World,
+    pkt: &OwnedPacket<PacketGrantR>,
+) -> Result<(), impeller::error::Error> {
+    let OwnedPacket::Msg(m) = pkt else {
+        return Ok(());
+    };
+    let Some(mut state) = world.get_resource_mut::<ComponentFilteredStream>() else {
+        return Ok(());
+    };
+    if m.id == NewConnection::ID {
+        state.connection += 1;
+        state.supported = None;
+        return Ok(());
+    }
+    if m.id != DbConfig::ID || state.supported.is_some() {
+        return Ok(());
+    }
+    let supported = m.parse::<DbConfig>()?.supports_exact_stream_filter();
+    state.supported = Some(supported);
+    if !supported {
+        bevy::log::warn!(
+            "DB does not support component-filtered streams; streaming all components"
+        );
+    }
+    Ok(())
+}
+
 /// Initial packets for the msg TCP connection. Returns empty; main connection
 /// handles DumpMetadata, Stream, and subscriptions.
 pub fn msg_connection_packets(_stream_id: StreamId) -> impl Iterator<Item = LenPacket> {
@@ -2233,6 +2281,29 @@ mod series_store_allowlist_tests {
     use super::*;
     use impeller::types::PrimType;
     use std::collections::HashSet;
+
+    #[test]
+    #[should_panic(expected = "live stream filter update failed: outgoing packet queue is full")]
+    fn required_send_panics_when_queue_is_full() {
+        let (tx, _rx) = thingbuf::mpsc::channel::<Option<LenPacket>>(1);
+        let tx = PacketTx(tx);
+        tx.send_required(GetDbSettings.into_len_packet(), "live stream filter update");
+        tx.send_required(GetDbSettings.into_len_packet(), "live stream filter update");
+    }
+
+    #[test]
+    #[should_panic(expected = "live stream filter update failed: outgoing packet queue is closed")]
+    fn required_send_panics_when_queue_is_closed() {
+        let (tx, rx) = thingbuf::mpsc::channel::<Option<LenPacket>>(1);
+        drop(rx);
+        PacketTx(tx).send_required(GetDbSettings.into_len_packet(), "live stream filter update");
+    }
+
+    #[test]
+    fn default_connection_opens_stream_without_a_filter() {
+        let packets: Vec<_> = new_connection_packets(42).collect();
+        assert_eq!(packets[0].as_packet().header.id, Stream::ID);
+    }
 
     #[test]
     fn backfill_candidates_only_allowlisted_with_schema() {

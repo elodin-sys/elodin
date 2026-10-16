@@ -341,6 +341,7 @@ pub struct WindowDescriptor {
     pub screen: Option<usize>,
     pub mode: Option<String>,
     pub screen_rect: Option<WindowRect>,
+    pub inline_content: Option<impeller_wkt::Schematic>,
 }
 
 impl WindowDescriptor {
@@ -638,6 +639,7 @@ pub fn create_secondary_window(title: Option<String>) -> (WindowState, WindowId)
         screen: None,
         mode: None,
         screen_rect: None,
+        inline_content: None,
     };
     let tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
     (

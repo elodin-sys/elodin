@@ -32,22 +32,36 @@ import jax.numpy as jnp
 import numpy as np
 
 from audit import AuditGuidance, AxisAudit
-from baseline import C0Result, evaluate_c0
+from baseline import C0Result, MIN_MOTOR_RESPONSE, evaluate_c0
 from config import DEFAULT_CONFIG
 from controls import (
     DelayedRcCommand,
     GuidanceMode,
     GuidanceUpdate,
+    GatePose,
+    RC_ANGLE,
+    RC_ARMED,
+    TruthGuidanceUpdate,
+    TruthState,
     ManualGuidance,
     RcCommand,
     ScriptedGuidance,
     SemanticControl,
-    guidance_mode_from_env,
     semantic_to_rc,
 )
-from course import course_from_env
+from race_options import race_options_from_env
+from exit_status import scenario_exit_code
 from schematic import build_schematic
 from referee import Referee, world_position_from_transform
+from guidance import GuidancePhase, TruthGuidance, TruthGuidanceConfig
+from hold_referee import (
+    E_HOLD_RMS_LIMIT_M,
+    E_HOLD_WINDOW_S,
+    E_STANDOFF_DISTANCE_M,
+    HoldEligibility,
+    HoldQualification,
+    StandoffHoldReferee,
+)
 from referee_audit import (
     RefereeAuditCollector,
     RefereeAuditResult,
@@ -80,10 +94,15 @@ from comms import (
 
 # --- Configuration ---
 config = DEFAULT_CONFIG
+truth_guidance_config = TruthGuidanceConfig()
 
 try:
-    guidance_mode = guidance_mode_from_env()
-    race_course = course_from_env()
+    race_options = race_options_from_env()
+    guidance_mode = race_options.guidance
+    race_course = race_options.course
+    CAMERA_ENABLED = race_options.camera_enabled
+    if guidance_mode is GuidanceMode.TRUTH:
+        config.simulation_time = truth_guidance_config.simulation_duration_s
 except ValueError as exc:
     print(f"ERROR: {exc}", file=sys.stderr)
     sys.exit(2)
@@ -121,17 +140,14 @@ if referee_audit_requested:
     config.simulation_time = simulation_time
 config.set_as_global()
 
-_race_camera = os.environ.get("RACE_CAMERA", "0")
-if _race_camera not in ("0", "1"):
-    print(f"ERROR: RACE_CAMERA must be '0' or '1', got {_race_camera!r}", file=sys.stderr)
-    sys.exit(2)
-CAMERA_ENABLED = _race_camera == "1"
-
 if guidance_mode is GuidanceMode.SCRIPTED:
     command_source = ScriptedGuidance()
     initial_control = SemanticControl(angle_mode=False)
 elif audit_requested:
     command_source = AuditGuidance()
+    initial_control = SemanticControl.safe()
+elif guidance_mode is GuidanceMode.TRUTH:
+    command_source = TruthGuidance(truth_guidance_config)
     initial_control = SemanticControl.safe()
 else:
     command_source = ManualGuidance()
@@ -194,6 +210,19 @@ drone = world.spawn(
 # Gate bars are kinematic scene entities with WorldPos only. They deliberately
 # have no Body/Inertia/Force components and never enter rigid-body integration.
 gate_entities = spawn_course(world, race_course)
+truth_gate_poses = (
+    tuple(
+        GatePose(
+            index=int(gate.index),
+            center_enu=tuple(float(value) for value in gate.center),
+            yaw_rad=float(gate.yaw),
+            inner_size_m=float(gate.inner_size),
+        )
+        for gate in race_course.gates
+    )
+    if guidance_mode is GuidanceMode.TRUTH
+    else ()
+)
 
 # Opt-in FPV camera. Registering a sensor_camera starts the render server.
 if CAMERA_ENABLED:
@@ -317,6 +346,9 @@ class SITLState:
     phase: str = "boot"
     max_motor: float = 0.0
     lockstep_steps: int = 0
+    lockstep_response: bool = False
+    motor_response: bool = False
+    guidance_phase_code: int = 0
     max_altitude: float = float(config.initial_position[2])
 
     def __post_init__(self):
@@ -347,6 +379,19 @@ race_result_emitted = [False]
 race_result_line_count = [0]
 referee_audit_result: list[RefereeAuditResult | None] = [None]
 referee_audit_result_emitted = [False]
+truth_hold_referee = (
+    StandoffHoldReferee(
+        race_course.gates[0],
+        standoff_distance_m=E_STANDOFF_DISTANCE_M,
+        duration_s=E_HOLD_WINDOW_S,
+        threshold_m=E_HOLD_RMS_LIMIT_M,
+        max_sample_gap_s=config.dt * 1.5,
+    )
+    if guidance_mode is GuidanceMode.TRUTH
+    else None
+)
+truth_hold_result: list[HoldQualification | None] = [None]
+truth_hold_result_emitted = [False]
 referee_audit_collector = (
     RefereeAuditCollector(tuple(float(value) for value in config.initial_position))
     if referee_audit_requested
@@ -383,6 +428,11 @@ def emit_final_results() -> None:
         if not result.passed:
             print(f"Referee audit failed checks: {','.join(result.failed_checks)}")
         referee_audit_result_emitted[0] = True
+    if truth_hold_referee is not None and not truth_hold_result_emitted[0]:
+        result = truth_hold_referee.result()
+        truth_hold_result[0] = result
+        print(result.format())
+        truth_hold_result_emitted[0] = True
 
 
 # Pre-allocated buffers to avoid allocation in hot loop
@@ -468,6 +518,8 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
     magnetometer = s.magnetometer
     manual_values = s.manual_values
     current_truth_position = None
+    world_pos = None
+    world_vel = None
     barometer_fresh = tick % _barometer_tick_interval == 0
     magnetometer_fresh = tick % _magnetometer_tick_interval == 0
     manual_input_poll = isinstance(command_source, ManualGuidance) and (
@@ -524,7 +576,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
             timestamp=t,
             copy=False,
         )
-    except RuntimeError as e:
+    except (RuntimeError, TypeError, ValueError, IndexError) as e:
         if tick > 5:
             print(f"[SITL] Warning: Could not read sensor data: {e}")
         buf.timestamp = t
@@ -539,13 +591,20 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
     fdm = buf.build_fdm()
     _rc_packet.timestamp = t
 
+    s.lockstep_response = False
+    s.motor_response = False
     try:
         # Synchronous lockstep: send FDM+RC, wait for motor response.
         # Motor order is native Betaflight Quad-X: BR(0), FR(1), BL(2), FL(3).
         steps_before = b.step_count
         s.motors = b.step(fdm, _rc_packet)
-        if b.step_count > steps_before:
+        s.lockstep_response = b.step_count > steps_before
+        if s.lockstep_response:
             s.lockstep_steps += 1
+            motor_values = np.asarray(s.motors)
+            s.motor_response = bool(
+                motor_values.shape == (4,) and np.all(np.isfinite(motor_values))
+            )
         s.max_motor = max(s.max_motor, float(np.max(s.motors)))
         ctx.write_component("drone.motor_command", s.motors)
         if axis_audit is not None:
@@ -564,30 +623,54 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         frame_fresh = sample.fresh
 
     progress = referee.progress()
-    update = GuidanceUpdate(
-        sim_time=t,
-        tick=tick,
-        gyro=gyro,
-        accel=accel,
-        barometer=barometer,
-        barometer_fresh=barometer_fresh and sensor_read_succeeded,
-        magnetometer=magnetometer,
-        magnetometer_fresh=magnetometer_fresh and sensor_read_succeeded,
-        frame=frame,
-        frame_sample_time=frame_sample_time,
-        frame_fresh=frame_fresh,
-        last_gate_passed=progress.last_gate_passed,
-        next_gate_index=progress.next_gate_index,
-        gate_count=progress.gate_count,
-        gate_inner_size=progress.gate_inner_size,
-    )
-    if isinstance(command_source, (ScriptedGuidance, AuditGuidance)):
-        next_control = command_source.update(update)
-        s.phase = command_source.phase
+    update_values = {
+        "sim_time": t,
+        "tick": tick,
+        "gyro": gyro,
+        "accel": accel,
+        "barometer": barometer,
+        "barometer_fresh": barometer_fresh and sensor_read_succeeded,
+        "magnetometer": magnetometer,
+        "magnetometer_fresh": magnetometer_fresh and sensor_read_succeeded,
+        "frame": frame,
+        "frame_sample_time": frame_sample_time,
+        "frame_fresh": frame_fresh,
+        "last_gate_passed": progress.last_gate_passed,
+        "next_gate_index": progress.next_gate_index,
+        "gate_count": progress.gate_count,
+        "gate_inner_size": progress.gate_inner_size,
+    }
+    if guidance_mode is GuidanceMode.TRUTH:
+        truth_state = None
+        if sensor_read_succeeded and world_pos is not None and world_vel is not None:
+            try:
+                truth_state = TruthState(
+                    position_enu=tuple(float(value) for value in world_pos[4:7]),
+                    velocity_enu=tuple(float(value) for value in world_vel[3:6]),
+                    orientation_xyzw=tuple(float(value) for value in world_pos[:4]),
+                )
+            except (TypeError, ValueError, IndexError):
+                truth_state = None
+        truth_update = TruthGuidanceUpdate(
+            **update_values,
+            truth_state=truth_state,
+            gate_poses=truth_gate_poses,
+        )
+        next_control = command_source.update(truth_update)
+        s.phase = command_source.phase.name.lower()
+        phase_code = command_source.phase_code
+        if phase_code != s.guidance_phase_code:
+            ctx.write_component("drone.guidance_mode", np.array([phase_code], dtype=np.int64))
+            s.guidance_phase_code = phase_code
     else:
-        command_source.accept_input(manual_values, time.monotonic())
-        next_control = command_source.update(update)
-        s.phase = "manual" if command_source.fresh else "failsafe"
+        update = GuidanceUpdate(**update_values)
+        if isinstance(command_source, (ScriptedGuidance, AuditGuidance)):
+            next_control = command_source.update(update)
+            s.phase = command_source.phase
+        else:
+            command_source.accept_input(manual_values, time.monotonic())
+            next_control = command_source.update(update)
+            s.phase = "manual" if command_source.fresh else "failsafe"
 
     # Most guidance ticks select the same command (manual input arrives at
     # about 100 Hz). Preserve the one-tick latch while avoiding an 8 kHz stream
@@ -595,6 +678,8 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
     if next_control != s.selected_control:
         s.selected_control = next_control
         s.rc_latch.retain_for_next_tick(semantic_to_rc(next_control))
+    # This is the command retained for the next lockstep exchange; hold grading
+    # below deliberately uses ``command_sent`` (the command actually exchanged).
     next_command = s.rc_latch.command_for_exchange()
     if next_command != s.rc_telemetry:
         ctx.write_component("drone.rc_command", next_command.as_array())
@@ -603,6 +688,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
     # Referee scoring is the final post-step stage. It always consumes truth,
     # independent of guidance mode, while guidance sees only the public progress
     # snapshot constructed above (therefore a pass becomes visible next tick).
+    gate_event = None
     if race_course.gates and current_truth_position is not None:
         gate_event = referee.observe_truth(current_truth_position, t)
         if referee_audit_collector is not None:
@@ -616,6 +702,21 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
                     ),
                 }
             )
+
+    if truth_hold_referee is not None:
+        truth_hold_referee.observe_truth(
+            current_truth_position,
+            t,
+            HoldEligibility(
+                phase_hold=command_source.phase is GuidancePhase.HOLD,
+                armed=command_sent.arm >= RC_ARMED,
+                angle_mode=command_sent.mode >= RC_ANGLE,
+                lockstep_response=s.lockstep_response,
+                motor_response=(s.motor_response and float(np.max(s.motors)) > MIN_MOTOR_RESPONSE),
+            ),
+            gate_crossed=gate_event is not None,
+            phase_fault=command_source.phase is GuidancePhase.FAULT,
+        )
 
     # Print status every second
     if t - last_print[0] >= 1.0:
@@ -780,11 +881,13 @@ print(f"Wrote database to: {db_filename}")
 if not bridge[0]:
     print("\nNo simulation ticks executed.")
     print("Usage: python3 examples/betaflight-sitl/main.py run")
-elif c0_result[0] is not None and not c0_result[0].passed:
-    sys.exit(1)
-elif referee_audit_result[0] is not None and not referee_audit_result[0].passed:
-    sys.exit(referee_audit_result[0].exit_code)
-elif axis_audit is not None and not axis_audit.passed:
-    sys.exit(1)
-elif fpv_report[0] is not None and not fpv_report[0].accepted:
-    sys.exit(1)
+else:
+    exit_code = scenario_exit_code(
+        hold_exit_code=truth_hold_result[0].exit_code if truth_hold_result[0] else None,
+        c0_passed=c0_result[0].passed if c0_result[0] else None,
+        referee_exit_code=referee_audit_result[0].exit_code if referee_audit_result[0] else None,
+        axis_passed=axis_audit.passed if axis_audit is not None else None,
+        camera_accepted=fpv_report[0].accepted if fpv_report[0] is not None else None,
+    )
+    if exit_code:
+        sys.exit(exit_code)

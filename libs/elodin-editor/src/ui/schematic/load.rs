@@ -40,7 +40,7 @@ use crate::{
         render_layer_alloc::RenderLayerAllocator,
     },
     ui::{
-        DEFAULT_SECONDARY_RECT, HdrEnabled,
+        HdrEnabled,
         colors::{self, EColor},
         data_overview::DataOverviewPane,
         modal::ModalDialog,
@@ -356,11 +356,28 @@ fn read_window_schematic_kdl(
     response.text().map_err(|err| format!("{url}: {err}"))
 }
 
+fn window_has_inline_content(window: &WindowSchematic) -> bool {
+    window
+        .content
+        .as_ref()
+        .is_some_and(|content| !content.elems.is_empty())
+}
+
 fn resolve_window_descriptor(
     window: &WindowSchematic,
     base_dir: Option<&Path>,
     theme_mode: Option<&str>,
 ) -> Option<WindowDescriptor> {
+    if window.path.is_none() && window_has_inline_content(window) {
+        return Some(WindowDescriptor {
+            path: None,
+            title: window.title.clone(),
+            screen: window.screen.map(|idx| idx as usize),
+            mode: theme_mode.map(|m| m.to_string()),
+            screen_rect: window.screen_rect,
+            inline_content: window.content.clone(),
+        });
+    }
     let path_str = window.path.as_ref()?;
     // Keep `db:`/HTTP references verbatim; only local paths are anchored to the
     // schematic's directory. The remote ones are fetched over HTTP at spawn time.
@@ -383,7 +400,8 @@ fn resolve_window_descriptor(
         title: window.title.clone(),
         screen: window.screen.map(|idx| idx as usize),
         mode: theme_mode.map(|m| m.to_string()),
-        screen_rect: window.screen_rect.or(Some(DEFAULT_SECONDARY_RECT)),
+        screen_rect: window.screen_rect,
+        inline_content: None,
     })
 }
 
@@ -644,6 +662,17 @@ impl LoadSchematicParams<'_, '_> {
 
         let mut loaded_windows = window_assets.unwrap_or(&[]).iter();
         for descriptor in descriptors.windows {
+            if let Some(inline) = descriptor.inline_content.clone() {
+                self.spawn_window(
+                    &inline,
+                    descriptor,
+                    theme_mode.as_deref(),
+                    &theme_selection.scheme,
+                    None,
+                );
+                continue;
+            }
+
             if let Some(window) = loaded_windows.next()
                 && let Some(root) = self
                     .document_assets

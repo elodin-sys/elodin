@@ -738,6 +738,7 @@ mod db_save_tests {
                     path: Some("detail.kdl".into()),
                     screen: None,
                     screen_rect: None,
+                    ..WindowSchematic::default()
                 }),
             ],
             ..Default::default()
@@ -783,6 +784,7 @@ mod db_save_tests {
                 path: Some("detail.kdl".into()),
                 screen: None,
                 screen_rect: None,
+                ..WindowSchematic::default()
             })],
             ..Default::default()
         };
@@ -832,6 +834,7 @@ mod db_save_tests {
                 path: Some("windows/detail.kdl".into()),
                 screen: None,
                 screen_rect: None,
+                ..WindowSchematic::default()
             })],
             ..Default::default()
         };
@@ -886,6 +889,7 @@ mod db_save_tests {
                 path: Some("detail.kdl".into()),
                 screen: None,
                 screen_rect: None,
+                ..WindowSchematic::default()
             })],
             ..Default::default()
         };

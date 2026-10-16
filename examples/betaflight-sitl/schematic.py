@@ -40,6 +40,8 @@ def build_schematic(
             ui.graph("drone.motor_command", name="Motor Commands (from Betaflight)"),
             ui.graph("drone.motor_thrust", name="Motor Thrust"),
             accel_graph,
+            ui.graph("drone.guidance_mode", name="Guidance Phase (numeric code)"),
+            ui.graph("drone.rc_command", name="RC Command (AETR/AUX PWM)"),
         ]
     )
     right_panels = [
