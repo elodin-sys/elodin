@@ -3297,6 +3297,12 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
     let mut last_sent = None;
 
     loop {
+        // Created before reading the generations: a `Wait` sees every `wake_all`
+        // from creation, so changes made while this pass sends still wake it.
+        let changed = futures_lite::future::race(
+            db.last_updated.wait_queue.wait(),
+            futures_lite::future::race(filter.changed.wait(), db.metadata_gen.wait_queue.wait()),
+        );
         let vtable_gen = db.vtable_gen.latest();
         let filter_gen = filter.generation();
         let metadata_gen = db.metadata_gen.latest();
@@ -3399,16 +3405,7 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
             table = send_with_timeout(&sink, table.with_request_id(req_id)).await?;
             last_sent = Some(timestamp);
         }
-        futures_lite::future::race(
-            db.last_updated.wait(),
-            futures_lite::future::race(
-                async {
-                    let _ = filter.changed.wait().await;
-                },
-                db.metadata_gen.wait(),
-            ),
-        )
-        .await;
+        let _ = changed.await;
     }
 }
 
