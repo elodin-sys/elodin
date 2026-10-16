@@ -188,6 +188,8 @@ Prefer Bevy's native window screenshot path over OS screen capture. It captures 
 | Activate | `ELODIN_SCREENSHOT=/abs/path/out.png` |
 | Delay before capture | `ELODIN_SCREENSHOT_DELAY` (seconds; default **8**; use **12–20** for heavy examples) |
 | Exit after write | `ELODIN_SCREENSHOT_EXIT=1` (required for bounded runs) |
+| Sim time | `ELODIN_SCREENSHOT_TIME` (seconds after the recording's first sample; holds the playhead there, paused; the delay is then settle time) |
+| Tab | `ELODIN_SCREENSHOT_TAB` (a named split's title; warns at capture when no tab has it) |
 
 The plugin queues `Screenshot::primary_window()`, waits until the PNG is non-empty on disk (async GPU readback), then sends `AppExit::Success` when exit is requested. Do **not** kill the process on a timer alone — that tears down the render thread mid-readback and yields a missing/empty PNG.
 

@@ -45,7 +45,7 @@ use crate::{
         data_overview::DataOverviewPane,
         modal::ModalDialog,
         monitor::MonitorPane,
-        plot::{DerivedGraph, GraphBundle, KernelGraph},
+        plot::{DerivedGraph, GraphBundle, GraphState, KernelGraph},
         query_plot::QueryPlotData,
         schematic::{CurrentSchematic, EqlExt},
         tiles::{
@@ -1044,6 +1044,12 @@ impl LoadSchematicParams<'_, '_> {
                 {
                     let mut e = self.commands.entity(entity);
                     e.insert(SchematicSpawned);
+                    if let Some(vr) = &mesh_vr {
+                        e.insert(crate::object_3d::MeshVisibilityRange {
+                            min: vr.min,
+                            max: vr.max,
+                        });
+                    }
                     #[cfg(feature = "big_space")]
                     crate::spatial::parent_under_big_space(&mut e, self.big_space_root.as_deref());
                 }
@@ -1052,7 +1058,6 @@ impl LoadSchematicParams<'_, '_> {
                         &mut self.commands,
                         entity,
                         icon,
-                        mesh_vr.as_ref(),
                         &mut self.materials,
                         &mut self.meshes,
                         &mut self.images,
@@ -1217,7 +1222,7 @@ impl LoadSchematicParams<'_, '_> {
                 let tile_id = tile_state.insert_tile(
                     Tile::Container(Container::Linear(linear)),
                     parent_id,
-                    false,
+                    split.active,
                 );
                 if let (Some(tile_id), Some(name)) = (tile_id, split.name.clone()) {
                     tile_state.container_titles.insert(tile_id, name);
@@ -1334,11 +1339,18 @@ impl LoadSchematicParams<'_, '_> {
                     let pane = GraphPane::new(graph_id, graph_label);
                     return tile_state.insert_tile(Tile::Pane(Pane::Graph(pane)), parent_id, false);
                 }
-                let eql = self
-                    .eql
-                    .0
-                    .parse_str(&graph.eql)
-                    .inspect_err(|err| {
+                let eql = match self.eql.0.parse_str(&graph.eql) {
+                    Ok(eql) => Some(eql),
+                    Err(eql::Error::ComponentNotFound(component)) => {
+                        info!(
+                            eql = %graph.eql,
+                            name = ?graph.name,
+                            %component,
+                            "graph waiting for its component"
+                        );
+                        None
+                    }
+                    Err(err) => {
                         let (ctx, path) = match context {
                             PanelContext::Main => ("main".to_string(), None),
                             PanelContext::Window(target_id) => {
@@ -1370,42 +1382,17 @@ impl LoadSchematicParams<'_, '_> {
                                 "error parsing graph eql"
                             );
                         }
-                    })
-                    .ok()?;
-                let requires_evaluation = eql.requires_plot_evaluation();
-                let uses_derived_plot = requires_evaluation && eql::eval::supports(&eql);
-                let uses_query_plot = requires_evaluation && !uses_derived_plot;
-
-                let mut components_tree: BTreeMap<ComponentPath, Vec<(bool, Color32)>> =
-                    BTreeMap::new();
-                if !requires_evaluation {
-                    let mut component_vec = eql.to_graph_components();
-                    component_vec.sort();
-                    for (j, (component, i)) in component_vec.iter().enumerate() {
-                        let line_color = graph
-                            .colors
-                            .get(j)
-                            .copied()
-                            .map(EColor::into_color32)
-                            .unwrap_or_else(|| colors::get_color_by_index_all(j));
-                        if let Some(elements) = components_tree.get_mut(component) {
-                            elements[*i] = (true, line_color);
-                        } else {
-                            let Some(schema) = self.schema_reg.0.get(&component.id) else {
-                                continue;
-                            };
-                            let len: usize = schema.shape().iter().copied().product();
-                            let mut elements: Vec<(bool, Color32)> =
-                                (0..len).map(|_| (false, line_color)).collect();
-                            elements[*i] = (true, line_color);
-                            components_tree.insert(component.clone(), elements);
-                        }
+                        return None;
                     }
-                }
+                };
+                let pending = eql.is_none();
+                let contents = eql
+                    .map(|eql| graph_contents(graph, &graph_label, eql, &self.schema_reg))
+                    .unwrap_or_default();
 
                 let mut bundle = GraphBundle::new(
                     &mut self.render_layer_alloc,
-                    components_tree,
+                    contents.components,
                     graph_label.clone(),
                 );
                 bundle.graph_state.locked = force_graph_lock || graph.locked;
@@ -1415,61 +1402,14 @@ impl LoadSchematicParams<'_, '_> {
                 bundle.graph_state.auto_y_range = graph.auto_y_range;
                 bundle.graph_state.y_range = graph.y_range.clone();
                 bundle.graph_state.graph_type = graph.graph_type;
-                if uses_derived_plot {
-                    let mut dependencies: Vec<_> = eql
-                        .to_graph_components()
-                        .into_iter()
-                        .map(|(path, _)| path.id)
-                        .collect();
-                    dependencies.sort();
-                    dependencies.dedup();
-                    bundle.graph_state.derived = Some(DerivedGraph {
-                        source: graph.eql.clone(),
-                        expr: eql.clone(),
-                        dependencies,
-                        lines: Vec::new(),
-                        colors: graph
-                            .colors
-                            .iter()
-                            .copied()
-                            .map(EColor::into_color32)
-                            .collect(),
-                        path: ComponentPath::from_name(&format!("derived.{graph_label}")),
-                        last_generation: u64::MAX,
-                        last_range: None,
-                    });
-                }
+                bundle.graph_state.derived = contents.derived;
 
                 let mut entity_cmds = self.commands.spawn(bundle);
-                if uses_query_plot {
-                    let series_colors: Vec<_> = graph
-                        .colors
-                        .iter()
-                        .copied()
-                        .map(EColor::into_color32)
-                        .collect();
-                    let default_color = series_colors
-                        .first()
-                        .copied()
-                        .unwrap_or_else(|| colors::get_scheme().highlight);
-                    entity_cmds.insert(QueryPlotData {
-                        data: impeller_wkt::QueryPlot {
-                            name: graph_label.clone(),
-                            query: graph.eql.clone(),
-                            refresh_interval: std::time::Duration::from_millis(500),
-                            auto_refresh: true,
-                            color: impeller_wkt::Color::from_color32(default_color),
-                            query_type: impeller_wkt::QueryType::EQL,
-                            plot_mode: impeller_wkt::PlotMode::TimeSeries,
-                            x_label: None,
-                            y_label: None,
-                            node_id: Default::default(),
-                        },
-                        auto_color: series_colors.is_empty(),
-                        series_colors,
-                        last_refresh: None,
-                        ..Default::default()
-                    });
+                if let Some(query_plot) = contents.query_plot {
+                    entity_cmds.insert(query_plot);
+                }
+                if pending {
+                    entity_cmds.insert(PendingGraphEql(graph.clone()));
                 }
                 let graph_id = entity_cmds.id();
                 if matches!(context, PanelContext::Window(_)) {
@@ -1948,6 +1888,140 @@ pub fn retry_pending_object_3d_spawns(mut params: LoadSchematicParams) {
     };
     for object_3d in objects {
         params.spawn_object_3d(object_3d);
+    }
+}
+
+/// A graph whose EQL names a component the DB has not registered yet. The pane
+/// keeps its place in the layout and fills in once the component appears.
+#[derive(Component)]
+pub struct PendingGraphEql(pub Graph);
+
+/// What a graph's parsed EQL plots: component lines, a derived series, or an
+/// EQL query plot.
+#[derive(Default)]
+struct GraphContents {
+    components: BTreeMap<ComponentPath, Vec<(bool, Color32)>>,
+    derived: Option<DerivedGraph>,
+    query_plot: Option<QueryPlotData>,
+}
+
+fn graph_contents(
+    graph: &Graph,
+    graph_label: &str,
+    eql: eql::Expr,
+    schema_reg: &ComponentSchemaRegistry,
+) -> GraphContents {
+    let requires_evaluation = eql.requires_plot_evaluation();
+    let uses_derived_plot = requires_evaluation && eql::eval::supports(&eql);
+    let mut contents = GraphContents::default();
+    if !requires_evaluation {
+        let mut component_vec = eql.to_graph_components();
+        component_vec.sort();
+        for (j, (component, i)) in component_vec.iter().enumerate() {
+            let line_color = graph
+                .colors
+                .get(j)
+                .copied()
+                .map(EColor::into_color32)
+                .unwrap_or_else(|| colors::get_color_by_index_all(j));
+            if let Some(elements) = contents.components.get_mut(component) {
+                elements[*i] = (true, line_color);
+            } else {
+                let Some(schema) = schema_reg.0.get(&component.id) else {
+                    continue;
+                };
+                let len: usize = schema.shape().iter().copied().product();
+                let mut elements: Vec<(bool, Color32)> =
+                    (0..len).map(|_| (false, line_color)).collect();
+                elements[*i] = (true, line_color);
+                contents.components.insert(component.clone(), elements);
+            }
+        }
+    } else if uses_derived_plot {
+        let mut dependencies: Vec<_> = eql
+            .to_graph_components()
+            .into_iter()
+            .map(|(path, _)| path.id)
+            .collect();
+        dependencies.sort();
+        dependencies.dedup();
+        contents.derived = Some(DerivedGraph {
+            source: graph.eql.clone(),
+            expr: eql,
+            dependencies,
+            lines: Vec::new(),
+            colors: graph
+                .colors
+                .iter()
+                .copied()
+                .map(EColor::into_color32)
+                .collect(),
+            path: ComponentPath::from_name(&format!("derived.{graph_label}")),
+            last_generation: u64::MAX,
+            last_range: None,
+        });
+    } else {
+        let series_colors: Vec<_> = graph
+            .colors
+            .iter()
+            .copied()
+            .map(EColor::into_color32)
+            .collect();
+        let default_color = series_colors
+            .first()
+            .copied()
+            .unwrap_or_else(|| colors::get_scheme().highlight);
+        contents.query_plot = Some(QueryPlotData {
+            data: impeller_wkt::QueryPlot {
+                name: graph_label.to_string(),
+                query: graph.eql.clone(),
+                refresh_interval: std::time::Duration::from_millis(500),
+                auto_refresh: true,
+                color: impeller_wkt::Color::from_color32(default_color),
+                query_type: impeller_wkt::QueryType::EQL,
+                plot_mode: impeller_wkt::PlotMode::TimeSeries,
+                x_label: None,
+                y_label: None,
+                node_id: Default::default(),
+            },
+            auto_color: series_colors.is_empty(),
+            series_colors,
+            last_refresh: None,
+            ..Default::default()
+        });
+    }
+    contents
+}
+
+/// Fill each pending graph once every component its EQL names is registered.
+pub fn retry_pending_graphs(
+    mut commands: Commands,
+    eql: Res<EqlContext>,
+    schema_reg: Res<ComponentSchemaRegistry>,
+    mut graphs: Query<(Entity, &PendingGraphEql, &mut GraphState)>,
+) {
+    if !eql.is_changed() {
+        return;
+    }
+    for (entity, pending, mut graph_state) in &mut graphs {
+        let expr = match eql.0.parse_str(&pending.0.eql) {
+            Ok(expr) => expr,
+            Err(eql::Error::ComponentNotFound(_)) => continue,
+            Err(err) => {
+                warn!(?err, eql = %pending.0.eql, name = ?pending.0.name, "error parsing graph eql");
+                commands.entity(entity).remove::<PendingGraphEql>();
+                continue;
+            }
+        };
+        let label = graph_state.label.clone();
+        let contents = graph_contents(&pending.0, &label, expr, &schema_reg);
+        graph_state.components = contents.components;
+        graph_state.derived = contents.derived;
+        let mut entity_cmds = commands.entity(entity);
+        if let Some(query_plot) = contents.query_plot {
+            entity_cmds.insert(query_plot);
+        }
+        entity_cmds.remove::<PendingGraphEql>();
     }
 }
 
@@ -2841,6 +2915,75 @@ mod tests {
 
         let mut query = app.world_mut().query::<&crate::ui::plot::GraphState>();
         assert_eq!(query.iter(app.world()).count(), 0);
+    }
+
+    #[test_case(r#"hsplit name="Second" { viewport name="Two" active=#true }"# ; "nested viewport")]
+    #[test_case(r#"hsplit name="Second" active=#true { viewport name="Two" }"# ; "split")]
+    fn active_selects_the_tab_that_holds_it(second_tab: &str) {
+        let mut app = test_app();
+        let kdl = format!(
+            "tabs {{\n    hsplit name=\"First\" {{ viewport name=\"One\" }}\n    {second_tab}\n}}"
+        );
+        load_schematic(&mut app, &Schematic::from_kdl(&kdl).expect("schematic"));
+
+        let tile_state = primary_window_state(&mut app).tile_state;
+        let active: Vec<_> = tile_state
+            .tree
+            .active_tiles()
+            .into_iter()
+            .filter_map(|id| tile_state.container_titles.get(&id).cloned())
+            .collect();
+        assert_eq!(active, ["Second"]);
+    }
+
+    #[test_case("sample.value", false ; "component")]
+    #[test_case("sample.value.sqrt()", true ; "formula")]
+    fn graph_waits_for_a_component_that_registers_later(eql: &str, derived: bool) {
+        let mut app = test_app();
+        let kdl = format!(r#"graph "{eql}" name="Late""#);
+        load_schematic(&mut app, &Schematic::from_kdl(&kdl).expect("schematic"));
+
+        let mut pending = app
+            .world_mut()
+            .query::<(&crate::ui::plot::GraphState, &super::PendingGraphEql)>();
+        let (state, _) = pending.single(app.world()).expect("a pending graph pane");
+        assert!(state.components.is_empty() && state.derived.is_none());
+        let saved = save_schematic(&mut app);
+        let saved_eql = saved.elems.iter().find_map(|elem| match elem {
+            impeller_wkt::SchematicElem::Panel(impeller_wkt::Panel::Graph(graph)) => {
+                Some(graph.eql.clone())
+            }
+            _ => None,
+        });
+        assert_eq!(
+            saved_eql.as_deref(),
+            Some(eql),
+            "saving keeps the pending graph"
+        );
+
+        install_scalar_eql_component(&mut app);
+        app.world_mut()
+            .resource_mut::<impeller_bevy::ComponentSchemaRegistry>()
+            .0
+            .insert(
+                impeller::types::ComponentId::new("sample.value"),
+                impeller::schema::Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new())
+                    .expect("schema"),
+            );
+        app.world_mut()
+            .run_system_cached(super::retry_pending_graphs)
+            .expect("retry pending graphs");
+
+        let mut pending = app.world_mut().query::<&super::PendingGraphEql>();
+        assert_eq!(pending.iter(app.world()).count(), 0);
+        let mut graphs = app.world_mut().query::<&crate::ui::plot::GraphState>();
+        let state = graphs.single(app.world()).expect("the graph");
+        if derived {
+            assert!(state.derived.is_some());
+        } else {
+            let lines = &state.components[&impeller_bevy::ComponentPath::from_name("sample.value")];
+            assert!(lines.iter().any(|(enabled, _)| *enabled));
+        }
     }
 
     #[test]

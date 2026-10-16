@@ -444,6 +444,8 @@ impl Plugin for EmbeddedAssetPlugin {
         embedded_asset!(app, "assets/icons/entity.png");
         // Font for ViewCube labels
         embedded_asset!(app, "assets/fonts/Roboto-Bold.ttf");
+        // Font for vector-arrow labels, the UI's own
+        embedded_lfs_asset!(app, "assets/fonts/IBMPlexMono-Medium_ss04.ttf");
         // Axes Cube 3D model
         embedded_lfs_asset!(app, "assets/axes-cube.glb");
         #[cfg(not(target_family = "wasm"))]
@@ -694,7 +696,11 @@ impl Plugin for EditorPlugin {
             )
             .add_systems(
                 Update,
-                (ui::gauges::compile_gauge_exprs, retry_viewport_eql_compile)
+                (
+                    ui::gauges::compile_gauge_exprs,
+                    retry_viewport_eql_compile,
+                    ui::schematic::retry_pending_graphs,
+                )
                     .after(update_eql_context),
             )
             .add_systems(Startup, spawn_ui_cam)
