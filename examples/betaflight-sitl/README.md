@@ -210,6 +210,39 @@ held frame is still supplied, with `frame_fresh=False`. The exported video can
 be one frame ahead of `total_frames`, because the render server may write one
 more frame while it shuts down after the final tick.
 
+### Vision geometry
+
+Package G proves the camera and detection geometry without reading rendered
+pixels. The camera frame is OpenCV: +Z forward, +X image-right, +Y image-down.
+Body axes stay FLU. Image-right maps to body −Y, image-down to body −Z, and the
+optical axis to body +X. Positive `TILT_DEG` pitches that axis up (nose-up).
+Positive `sensor_camera` pitch is nose-down, a right-handed turn about body +Y,
+so `sensor_rot_offset` registers the tilt as a negative pitch. Inner-opening
+corners are ordered top-left, top-right, bottom-right, bottom-left. In the gate
+frame those points are `(0, +h, +h)`, `(0, −h, +h)`, `(0, −h, −h)`,
+`(0, +h, −h)` with `h = 1.25` m.
+
+`order_corners` labels unordered pixels. For image midline roll within ±35°
+that labelling matches the gate frame unless `corner_order_ambiguous` is set.
+The flag means the best and second-best labellings are within 10°, so the
+rotation about the gate normal is unknown. Center, bearing, range, and the
+crossing normal stay valid. `candidate_from_ordered_corners` is the path for
+corners that are already TL, TR, BR, BL; it does not reorder.
+
+Noise-free projection followed by planar PnP recovers bearing within 0.25° and
+translation within `1e-6·range + 1e-6` m. A half-pixel quantizer is allowed a
+depth error of `Z²/(f·S)` metres (`f = 320`, `S = 2.5`), twice the first-order
+single-corner estimate because all four corners quantize together.
+
+```bash
+python3 -m pytest examples/betaflight-sitl/tests -q
+python3 examples/betaflight-sitl/synthetic_vision.py
+```
+
+The fixture command prints the canonical centered, translated, yawed, and ranged
+poses as JSON. `synthetic_vision.py` is for tests and offline fixtures.
+Production vision code does not import it.
+
 ### Race Course and Referee
 
 Course selection is independent of the command source:
