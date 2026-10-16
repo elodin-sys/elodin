@@ -345,7 +345,8 @@ mod stream_filter {
             supported: Option<bool>,
             status: ConnectionStatus,
         ) -> Vec<impeller::types::LenPacket> {
-            let (packet_tx, _packet_rx, outgoing_rx, _incoming_tx) = impeller_bevy::channels();
+            let (packet_tx, _packet_rx, outgoing_rx, _incoming_tx) =
+                impeller_bevy::channels::channels();
             let mut app = App::new();
             app.insert_resource(SeriesFetchPriority {
                 high: [ComponentId::new("a")].into_iter().collect(),

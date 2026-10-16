@@ -2329,6 +2329,7 @@ mod tests {
     #[test]
     fn read_window_schematic_kdl_reads_local_file() {
         use super::read_window_schematic_kdl;
+        use bevy::tasks::futures_lite::future;
         let dir = std::env::temp_dir().join(format!(
             "elodin-window-kdl-{}",
             std::time::SystemTime::now()
