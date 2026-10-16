@@ -1,15 +1,22 @@
 use bevy::prelude::*;
 use elodin_editor::EditorPlugin;
-use std::net::SocketAddr;
 use web_sys::UrlSearchParams;
 
 fn main() {
     console_error_panic_hook::set_once();
     web_sys::console::log_1(&"elodin-web: main()".into());
     let mut plugin = EditorPlugin::default();
-    if let Some(db_addr) = db_addr_from_query() {
-        web_sys::console::log_1(&format!("elodin-web: db={db_addr}").into());
-        plugin = plugin.with_connection_addr(db_addr);
+    if let Some(db) = db_query_value() {
+        plugin = match plugin.with_connection_str(&db) {
+            Ok(next) => {
+                web_sys::console::log_1(&format!("elodin-web: db={db}").into());
+                next
+            }
+            Err((plugin, err)) => {
+                web_sys::console::warn_1(&format!("elodin-web: ignoring db={db:?}: {err}").into());
+                plugin
+            }
+        };
     } else {
         web_sys::console::log_1(&"elodin-web: no db query param".into());
     }
@@ -20,19 +27,12 @@ fn main() {
         .run();
 }
 
-/// `?db=host:port` connects immediately. Anything else shows the startup screen.
-fn db_addr_from_query() -> Option<SocketAddr> {
+/// `?db=host:port` connects immediately. `host` may be an IP or a DNS name.
+fn db_query_value() -> Option<String> {
     let window = web_sys::window()?;
     let search = window.location().search().ok()?;
     let params = UrlSearchParams::new_with_str(&search).ok()?;
-    let value = params.get("db")?;
-    match value.parse() {
-        Ok(addr) => Some(addr),
-        Err(err) => {
-            web_sys::console::warn_1(&format!("elodin-web: ignoring db={value:?}: {err}").into());
-            None
-        }
-    }
+    params.get("db")
 }
 
 fn log_startup() {

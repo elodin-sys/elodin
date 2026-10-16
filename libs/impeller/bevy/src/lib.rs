@@ -46,8 +46,8 @@ pub use impeller_wkt::{ComponentPart, ComponentPath};
 
 pub mod channels;
 pub use channels::{
-    ConnectionAddr, ConnectionStatus, MsgPacketRx, MsgPacketTx, PacketRx, PacketTx, QUEUE_LEN,
-    ThreadConnectionStatus,
+    ConnectionAddr, ConnectionStatus, DbEndpoint, MsgPacketRx, MsgPacketTx, PacketRx, PacketTx,
+    QUEUE_LEN, ThreadConnectionStatus,
 };
 
 #[cfg(feature = "tcp")]

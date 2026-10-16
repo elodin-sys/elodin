@@ -70,10 +70,22 @@ pub fn assets_http_base(connection_addr: SocketAddr) -> String {
 
 /// Resolves schematic asset paths (`db:…`) to the embedded HTTP assets URL.
 pub fn resolve_db_asset_url(path: &str, connection_addr: Option<SocketAddr>) -> String {
+    resolve_db_endpoint(
+        path,
+        connection_addr
+            .map(impeller_bevy::DbEndpoint::from_socket)
+            .as_ref(),
+    )
+}
+
+pub fn resolve_db_endpoint(path: &str, endpoint: Option<&impeller_bevy::DbEndpoint>) -> String {
     if let Some(name) = path.strip_prefix("db:") {
         let name = name.trim_start_matches('/');
-        let conn = connection_addr.unwrap_or_else(|| "127.0.0.1:2240".parse().expect("valid addr"));
-        format!("{}/{}", assets_http_base(conn), name)
+        let base = match endpoint {
+            Some(endpoint) => endpoint.http_base(),
+            None => assets_http_base("127.0.0.1:2240".parse().expect("valid addr")),
+        };
+        format!("{base}/{name}")
     } else {
         path.to_string()
     }
@@ -85,7 +97,7 @@ pub fn resolve_db_asset_url(path: &str, connection_addr: Option<SocketAddr>) -> 
 /// hot-reloads — from disk rather than the DB.
 pub fn resolve_db_asset_url_prefer_local(
     path: &str,
-    connection_addr: Option<SocketAddr>,
+    endpoint: Option<&impeller_bevy::DbEndpoint>,
     local_root: Option<&std::path::Path>,
 ) -> String {
     if let Some(root) = local_root
@@ -101,7 +113,7 @@ pub fn resolve_db_asset_url_prefer_local(
             return key.to_string();
         }
     }
-    resolve_db_asset_url(path, connection_addr)
+    resolve_db_endpoint(path, endpoint)
 }
 
 /// Local assets root override for `db:` keys: set when the session was opened
@@ -1981,7 +1993,7 @@ pub fn create_object_3d_entity(
     mat3_material_assets: &mut Assets<Mat3Material>,
     assets: &AssetServer,
     geo_context: &GeoContext,
-    connection_addr: Option<SocketAddr>,
+    connection_addr: Option<&impeller_bevy::DbEndpoint>,
     local_root: Option<&std::path::Path>,
 ) -> Result<Entity, CompileError> {
     // Compile only the field-selected driver. Failed Cholesky/covariance compiles leave the
@@ -2110,7 +2122,7 @@ pub fn spawn_billboard_icon(
     image_assets: &mut ResMut<Assets<Image>>,
     asset_server: &Res<AssetServer>,
     icon_cache: &mut ResMut<IconTextureCache>,
-    connection_addr: Option<SocketAddr>,
+    connection_addr: Option<&impeller_bevy::DbEndpoint>,
     local_root: Option<&std::path::Path>,
 ) {
     let texture_handle: Handle<Image> = match &icon.source {
@@ -2167,7 +2179,7 @@ pub fn spawn_mesh(
     mesh_assets: &mut Assets<Mesh>,
     mat3_material_assets: &mut Assets<Mat3Material>,
     assets: &AssetServer,
-    connection_addr: Option<SocketAddr>,
+    connection_addr: Option<&impeller_bevy::DbEndpoint>,
     local_root: Option<&std::path::Path>,
 ) {
     match mesh {
@@ -4149,12 +4161,12 @@ mod db_asset_url_tests {
         ));
         std::fs::create_dir_all(root.join("textures")).unwrap();
         std::fs::write(root.join("textures/soft_circle.png"), b"png").unwrap();
-        let conn: SocketAddr = "10.0.0.5:2240".parse().unwrap();
+        let conn = impeller_bevy::DbEndpoint::from_socket("10.0.0.5:2240".parse().unwrap());
 
         assert_eq!(
             super::resolve_db_asset_url_prefer_local(
                 "db:textures/soft_circle.png",
-                Some(conn),
+                Some(&conn),
                 Some(&root)
             ),
             "textures/soft_circle.png"
@@ -4163,26 +4175,35 @@ mod db_asset_url_tests {
         assert_eq!(
             super::resolve_db_asset_url_prefer_local(
                 "db:textures/missing.png",
-                Some(conn),
+                Some(&conn),
                 Some(&root)
             ),
             "http://10.0.0.5:2241/textures/missing.png"
         );
         // Bare (non-db:) paths pass through untouched.
         assert_eq!(
-            super::resolve_db_asset_url_prefer_local("models/x.glb", Some(conn), Some(&root)),
+            super::resolve_db_asset_url_prefer_local("models/x.glb", Some(&conn), Some(&root)),
             "models/x.glb"
         );
         // No local root (no --kdl): DB URL as before.
         assert_eq!(
             super::resolve_db_asset_url_prefer_local(
                 "db:textures/soft_circle.png",
-                Some(conn),
+                Some(&conn),
                 None
             ),
             "http://10.0.0.5:2241/textures/soft_circle.png"
         );
 
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn resolve_db_endpoint_keeps_dns_host() {
+        let endpoint = impeller_bevy::DbEndpoint::parse("db.local:2240").unwrap();
+        assert_eq!(
+            super::resolve_db_endpoint("db:rocket.glb", Some(&endpoint)),
+            "http://db.local:2241/rocket.glb"
+        );
     }
 }

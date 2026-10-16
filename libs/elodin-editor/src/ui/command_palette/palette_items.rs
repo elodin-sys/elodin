@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, net::SocketAddr, str::FromStr};
+use std::{collections::BTreeMap, str::FromStr};
 
 use crate::plugins::kdl_document::{
     ACTIVE_SCHEMATIC_KEY, CurrentDocument, DocumentCommandFailed, InitialKdlPath,
@@ -153,7 +153,7 @@ pub(crate) struct SchematicIndexCache {
     loaded_once: bool,
     /// Connection the cached listing came from, so reconnecting or switching to
     /// a different DB re-lists instead of showing a previous session's assets.
-    addr: Option<SocketAddr>,
+    addr: Option<impeller_bevy::DbEndpoint>,
     task: Option<Task<Result<Vec<String>, String>>>,
 }
 
@@ -1106,11 +1106,11 @@ fn connect_database() -> PaletteItem {
                 "",
                 |In(addr): In<String>, mut connect: MessageWriter<WsConnect>| {
                     let trimmed = addr.trim();
-                    let parsed = if trimmed.is_empty() {
-                        "127.0.0.1:2240".parse()
+                    let parsed = impeller_bevy::DbEndpoint::parse(if trimmed.is_empty() {
+                        "127.0.0.1:2240"
                     } else {
-                        trimmed.parse()
-                    };
+                        trimmed
+                    });
                     match parsed {
                         Ok(addr) => {
                             connect.write(WsConnect(addr));
@@ -1261,7 +1261,7 @@ fn queue_save_layout_now(
         });
         return;
     }
-    let Some(addr) = connection_addr.as_ref().map(|c| c.0) else {
+    let Some(addr) = connection_addr.as_ref().map(|c| c.endpoint().clone()) else {
         failed.write(DocumentCommandFailed {
             title: "Failed to Save Layout".to_string(),
             message: "Not connected to a database.".to_string(),
@@ -1278,7 +1278,7 @@ fn queue_save_layout_now(
     let split_count = overlay.splits.len();
     let window_count = overlay.windows.len();
     let bytes = impeller_kdl::serialize_overlay(&overlay).into_bytes();
-    let url = crate::object_3d::resolve_db_asset_url(&format!("db:{overlay_key}"), Some(addr));
+    let url = crate::object_3d::resolve_db_endpoint(&format!("db:{overlay_key}"), Some(&addr));
     // Local copy is for inspection only and may be removed later. The DB
     // asset (`PUT` to `{url}`) is what watch/replay consume.
     match write_overlay_to_cwd(&overlay_key, &bytes) {
@@ -1451,7 +1451,7 @@ fn queue_save_schematic_db_now(
         return;
     }
 
-    let Some(addr) = connection_addr.as_ref().map(|c| c.0) else {
+    let Some(addr) = connection_addr.as_ref().map(|c| c.endpoint().clone()) else {
         failed.write(DocumentCommandFailed {
             title: "Failed to Save Schematic".to_string(),
             message: "Not connected to a database.".to_string(),
@@ -1635,7 +1635,7 @@ fn refresh_schematic_index(
         return;
     }
 
-    let Some(addr) = connection_addr.as_ref().map(|c| c.0) else {
+    let Some(addr) = connection_addr.as_ref().map(|c| c.endpoint().clone()) else {
         // Disconnected: drop the listing so a later connection re-lists and we
         // never offer assets from a previous session.
         if cache.loaded_once || !cache.keys.is_empty() || cache.error.is_some() {
@@ -1644,12 +1644,12 @@ fn refresh_schematic_index(
         return;
     };
     let config_changed = config.as_ref().is_some_and(|c| c.is_changed());
-    let connection_changed =
-        cache.addr != Some(addr) || connection_addr.as_ref().is_some_and(|c| c.is_changed());
+    let connection_changed = cache.addr.as_ref() != Some(&addr)
+        || connection_addr.as_ref().is_some_and(|c| c.is_changed());
     if cache.loaded_once && !config_changed && !connection_changed {
         return;
     }
-    cache.addr = Some(addr);
+    cache.addr = Some(addr.clone());
     cache.task =
         Some(IoTaskPool::get().spawn(async move { fetch_schematic_index(Some(addr)).await }));
 }
@@ -2150,7 +2150,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                 let (r, g, b) =
                     parse_color(color_str, &eql_ctx.0, &entity_map, component_value_maps)
                         .unwrap_or((0.8, 0.8, 0.8));
-                let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
+                let connection_addr = connection_addr.as_ref().map(|addr| addr.endpoint());
 
                 let mesh_source = impeller_wkt::Object3DMesh::Mesh {
                     mesh: mesh.clone(),
@@ -2252,7 +2252,7 @@ pub fn create_3d_object() -> PaletteItem {
                                                   initial_kdl: Option<Res<crate::plugins::kdl_document::InitialKdlPath>>
                                                 | {
                                                 let obj = impeller_wkt::Object3DMesh::glb(gltf_path.trim());
-                                                let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
+                                                let connection_addr = connection_addr.as_ref().map(|addr| addr.endpoint());
                                                 let local_root = crate::object_3d::local_assets_root(initial_kdl.as_deref());
 
                                                 let _ = crate::object_3d::create_object_3d_entity(

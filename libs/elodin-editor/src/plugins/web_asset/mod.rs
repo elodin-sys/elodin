@@ -41,7 +41,7 @@ fn sync_db_assets_endpoint(
         return;
     }
     if let Ok(mut current) = endpoint.0.write() {
-        *current = assets_http_addr(connection.0);
+        *current = assets_http_addr(connection.socket);
     }
 }
 

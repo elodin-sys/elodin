@@ -349,7 +349,7 @@ fn load_headless_scene(
         {
             return;
         }
-        let Some(addr) = connection_addr.as_ref().map(|addr| addr.0) else {
+        let Some(addr) = connection_addr.as_ref().map(|addr| addr.endpoint().clone()) else {
             return;
         };
         pending.fetch_target = Some((key.clone(), revision));
@@ -388,7 +388,7 @@ fn load_headless_scene(
     if let Some(previous) = pending.loaded.take() {
         despawn_headless_scene(&mut commands, &previous);
     }
-    let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
+    let connection_addr = connection_addr.as_ref().map(|addr| addr.endpoint());
     schematic_skybox.0 = Some(schematic.skybox.as_ref().map(|skybox| skybox.name.clone()));
     let fallback_frame = schematic.frame;
     coordinate.0 = schematic.frame;
@@ -669,7 +669,7 @@ fn sync_headless_skybox(params: SyncHeadlessSkyboxParams) {
 
     if let (Some(connection_addr), Some(name)) = (connection_addr.as_deref(), &desired) {
         if crate::skybox_db_assets::db_skybox_mirror_pending(
-            connection_addr.0,
+            connection_addr.socket,
             name,
             &mirror,
             &in_flight,
@@ -677,7 +677,7 @@ fn sync_headless_skybox(params: SyncHeadlessSkyboxParams) {
             render_gate.applied = false;
             return;
         }
-        if crate::skybox_db_assets::db_skybox_mirror_synced(connection_addr.0, name, &mirror) {
+        if crate::skybox_db_assets::db_skybox_mirror_synced(connection_addr.socket, name, &mirror) {
             render_gate.applied = false;
             if cache.active.as_deref() == Some(name.as_str()) {
                 skybox_writer.write(SetActiveSkybox::ByName(name.clone()));

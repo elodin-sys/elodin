@@ -117,7 +117,7 @@ fn create_startup_window(
         && let Some(addr) = connection_addr.as_ref()
     {
         commands.insert_resource(UrlConnect {
-            addr: addr.0.to_string(),
+            addr: addr.endpoint().authority(),
             failed: false,
         });
     }
@@ -355,7 +355,7 @@ impl StartupLayout<'_, '_> {
             reconnect,
             true,
         );
-        self.commands.insert_resource(ConnectionAddr(addr));
+        self.commands.insert_resource(ConnectionAddr::new(addr));
         self.commands
             .insert_resource(impeller_bevy::ComponentFilteredStream::default());
         *self.current_stream_id = CurrentStreamId(stream_id);
@@ -367,8 +367,8 @@ impl StartupLayout<'_, '_> {
     }
 
     #[cfg(target_family = "wasm")]
-    fn connect(&mut self, addr: SocketAddr, _reconnect: bool) {
-        self.ws_connect.write(impeller_bevy::WsConnect(addr));
+    fn connect(&mut self, endpoint: impeller_bevy::DbEndpoint, _reconnect: bool) {
+        self.ws_connect.write(impeller_bevy::WsConnect(endpoint));
     }
 
     fn switch_to_main(&mut self) {
@@ -410,6 +410,35 @@ impl StartupLayout<'_, '_> {
     }
 
     fn start_connect(&mut self, addr: String) {
+        #[cfg(target_family = "wasm")]
+        {
+            let endpoint = match impeller_bevy::DbEndpoint::parse(&addr) {
+                Ok(endpoint) => endpoint,
+                Err(err) => {
+                    *self.modal_state = ModalState::ConnectToIp {
+                        addr,
+                        error: Some(ConnectError::SocketParse(Arc::new(std::io::Error::new(
+                            std::io::ErrorKind::InvalidInput,
+                            err,
+                        )))),
+                        connecting: false,
+                    };
+                    return;
+                }
+            };
+            self.recent_files.push(
+                hifitime::Epoch::now().unwrap(),
+                RecentItem::Addr(addr.clone()),
+            );
+            self.connect(endpoint, false);
+            *self.modal_state = ModalState::ConnectToIp {
+                addr,
+                error: None,
+                connecting: true,
+            };
+            return;
+        }
+        #[cfg(not(target_family = "wasm"))]
         let socket_addr = match addr.to_socket_addrs().map(|mut x| x.next()) {
             Ok(Some(addr)) => addr,
             Ok(None) => {
@@ -430,19 +459,21 @@ impl StartupLayout<'_, '_> {
                 return;
             }
         };
-        self.recent_files.push(
-            hifitime::Epoch::now().unwrap(),
-            RecentItem::Addr(addr.clone()),
-        );
         #[cfg(not(target_family = "wasm"))]
-        save_recent_files(&self.recent_files);
+        {
+            self.recent_files.push(
+                hifitime::Epoch::now().unwrap(),
+                RecentItem::Addr(addr.clone()),
+            );
+            save_recent_files(&self.recent_files);
 
-        self.connect(socket_addr, false);
-        *self.modal_state = ModalState::ConnectToIp {
-            addr,
-            error: None,
-            connecting: true,
-        };
+            self.connect(socket_addr, false);
+            *self.modal_state = ModalState::ConnectToIp {
+                addr,
+                error: None,
+                connecting: true,
+            };
+        }
     }
 
     fn default_connect_addr(&self) -> String {
