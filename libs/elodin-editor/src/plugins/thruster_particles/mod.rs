@@ -149,7 +149,7 @@ impl FileImageAssets {
         &mut self,
         db_path: &str,
         asset_server: &AssetServer,
-        connection_addr: Option<std::net::SocketAddr>,
+        connection_addr: Option<&impeller_bevy::DbEndpoint>,
         local_root: Option<&std::path::Path>,
     ) -> Handle<Image> {
         if let Some(handle) = self.handles.get(db_path) {
@@ -597,7 +597,7 @@ fn ensure_kdl_thrusters(
     initial_kdl: Option<Res<InitialKdlPath>>,
     eql: Res<EqlContext>,
 ) {
-    let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
+    let connection_addr = connection_addr.as_ref().map(|addr| addr.endpoint().clone());
     let local_root = local_assets_root(initial_kdl.as_deref());
     for (object, state) in &objects {
         if state.data.thrusters.is_empty() {
@@ -635,7 +635,7 @@ fn ensure_kdl_thrusters(
                     // rebuilds clone the same strong handle instead of unloading.
                     let url = resolve_db_asset_url_prefer_local(
                         effect,
-                        connection_addr,
+                        connection_addr.as_ref(),
                         local_root.as_deref(),
                     );
                     jet.pending_effect = Some(file_effects.get_or_load(url, &asset_server));
@@ -742,7 +742,7 @@ fn slot_image(
     assets: &ThrusterEffectAssets,
     file_images: &mut FileImageAssets,
     asset_server: &AssetServer,
-    connection_addr: Option<std::net::SocketAddr>,
+    connection_addr: Option<&impeller_bevy::DbEndpoint>,
     local_root: Option<&std::path::Path>,
 ) -> Handle<Image> {
     match slot {
@@ -842,7 +842,7 @@ fn bind_file_effect_assets(
     connection_addr: Option<Res<ConnectionAddr>>,
     initial_kdl: Option<Res<InitialKdlPath>>,
 ) {
-    let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
+    let connection_addr = connection_addr.as_ref().map(|addr| addr.endpoint().clone());
     let local_root = local_assets_root(initial_kdl.as_deref());
     for (entity, mut jet, owner) in &mut jets {
         let Some(handle) = jet.pending_effect.clone() else {
@@ -874,7 +874,7 @@ fn bind_file_effect_assets(
                     &assets,
                     &mut file_images,
                     &asset_server,
-                    connection_addr,
+                    connection_addr.as_ref(),
                     local_root.as_deref(),
                 )
             })

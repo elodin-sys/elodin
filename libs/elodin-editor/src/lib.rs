@@ -5,7 +5,7 @@
 )]
 
 #[cfg(target_family = "wasm")]
-use std::net::SocketAddr;
+use impeller_bevy::DbEndpoint;
 use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
 use crate::plugins::{editor_cam_input, editor_cam_touch};
@@ -486,7 +486,7 @@ pub(crate) fn register_ibl_embedded_assets(app: &mut App) {
 pub struct EditorPlugin {
     window_resolution: WindowResolution,
     #[cfg(target_family = "wasm")]
-    connection_addr: Option<SocketAddr>,
+    connection: Option<DbEndpoint>,
 }
 
 /// The positions of camera of object_3d are sync'd in `PreUpdate`.
@@ -498,13 +498,29 @@ impl EditorPlugin {
         Self {
             window_resolution: WindowResolution::new(width as u32, height as u32),
             #[cfg(target_family = "wasm")]
-            connection_addr: None,
+            connection: None,
         }
     }
 
     #[cfg(target_family = "wasm")]
-    pub fn with_connection_addr(mut self, addr: SocketAddr) -> Self {
-        self.connection_addr = Some(addr);
+    pub fn with_connection_addr(mut self, addr: std::net::SocketAddr) -> Self {
+        self.connection = Some(DbEndpoint::from_socket(addr));
+        self
+    }
+
+    /// `host:port`, where `host` may be an IP literal or a DNS name.
+    /// On failure the plugin is returned unchanged.
+    #[cfg(target_family = "wasm")]
+    pub fn with_connection_str(self, addr: &str) -> Result<Self, (Self, String)> {
+        match DbEndpoint::parse(addr) {
+            Ok(endpoint) => Ok(self.with_db_endpoint(endpoint)),
+            Err(err) => Err((self, err)),
+        }
+    }
+
+    #[cfg(target_family = "wasm")]
+    pub fn with_db_endpoint(mut self, endpoint: DbEndpoint) -> Self {
+        self.connection = Some(endpoint);
         self
     }
 }
@@ -641,7 +657,9 @@ impl Plugin for EditorPlugin {
             })
             .add_plugins(impeller_bevy::ImpellerPlugin);
         #[cfg(target_family = "wasm")]
-        app.add_plugins(impeller_bevy::WsImpellerPlugin::new(self.connection_addr));
+        app.add_plugins(impeller_bevy::WsImpellerPlugin::new(
+            self.connection.clone(),
+        ));
         app.add_plugins(FrustumPlugin)
             .add_plugins(FrustumIntersectionPlugin)
             .add_plugins(GizmoPlugin);
@@ -1684,7 +1702,7 @@ pub fn sync_object_3d(
     connection_addr: Option<Res<impeller_bevy::ConnectionAddr>>,
     initial_kdl: Option<Res<plugins::kdl_document::InitialKdlPath>>,
 ) {
-    let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
+    let connection_addr = connection_addr.as_ref().map(|addr| addr.endpoint().clone());
     let local_root = object_3d::local_assets_root(initial_kdl.as_deref());
     for (entity, id) in &query {
         if synced_object_3d.0.contains_key(&entity) {
@@ -1744,7 +1762,7 @@ pub fn sync_object_3d(
             &mut mat3_material_assets,
             &assets,
             &geo_context,
-            connection_addr,
+            connection_addr.as_ref(),
             local_root.as_deref(),
         ) {
             synced_object_3d.0.insert(entity, object_entity);
@@ -1984,7 +2002,7 @@ pub(crate) fn sync_series_store_session_from_db_config(
     if !config.is_changed() {
         return;
     }
-    let addr = series.connection_addr.as_ref().map(|a| a.0);
+    let addr = series.connection_addr.as_ref().map(|a| a.socket);
     let start_ts = config.time_start_timestamp_micros();
     // start_ts not confirmed yet for this connection — adopt without wiping soft-preserved store.
     if series.session.start_ts.is_none() {
@@ -2047,7 +2065,7 @@ fn clear_state_new_connection(
         &mut series.visible_prefetch,
     );
 
-    let addr = series.connection_addr.as_ref().map(|a| a.0);
+    let addr = series.connection_addr.as_ref().map(|a| a.socket);
     let soft = series_store_soft_reconnect(&series.session, addr);
     apply_series_store_on_reconnect(
         soft,
@@ -2111,7 +2129,7 @@ fn reset_timestamps_on_new_connection(
         OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
         _ => return,
     }
-    let addr = connection_addr.as_ref().map(|a| a.0);
+    let addr = connection_addr.as_ref().map(|a| a.socket);
     let soft = series_store_soft_reconnect(&session, addr);
     apply_timestamp_bounds_reset_on_reconnect(soft, &mut earliest, &mut latest, &mut current);
 }
@@ -3244,7 +3262,7 @@ mod tests {
             .init_resource::<plugins::kdl_document::LastSyncedActiveKey>()
             .init_resource::<plugins::kdl_document::LastSyncedAssetsRevision>()
             .insert_resource(CurrentTimestamp(Timestamp(9_000)))
-            .insert_resource(ConnectionAddr(addr))
+            .insert_resource(ConnectionAddr::new(addr))
             .add_systems(bevy::app::Update, sync_series_store_session_from_db_config);
         app
     }

@@ -1,6 +1,9 @@
 use crate::{
     CurrentStreamId,
-    channels::{ConnectionAddr, ConnectionStatus, ThreadConnectionStatus, channels, msg_channels},
+    channels::{
+        ConnectionAddr, ConnectionStatus, DbEndpoint, ThreadConnectionStatus, channels,
+        msg_channels,
+    },
     msg_sink, new_connection_packets, sink,
 };
 use bevy::prelude::*;
@@ -8,12 +11,9 @@ use impeller::types::{LenPacket, Msg, PacketTy};
 use impeller_bbq::{AsyncArcQueueTx, PacketGrantW};
 use impeller_wkt::{NewConnection, StreamId};
 use js_sys::Uint8Array;
-use std::{
-    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
 };
 use thingbuf::mpsc;
 use wasm_bindgen::{JsCast, JsValue, prelude::Closure};
@@ -22,17 +22,17 @@ use web_time::{Duration, Instant};
 
 const RECONNECT_DELAY: Duration = Duration::from_millis(250);
 
-/// Rebuild the two Impeller WebSockets against `addr`.
-#[derive(Message, Clone, Copy, Debug)]
-pub struct WsConnect(pub SocketAddr);
+/// Rebuild the two Impeller WebSockets against `endpoint`.
+#[derive(Message, Clone, Debug)]
+pub struct WsConnect(pub DbEndpoint);
 
 pub struct WsImpellerPlugin {
-    addr: Option<SocketAddr>,
+    endpoint: Option<DbEndpoint>,
 }
 
 impl WsImpellerPlugin {
-    pub fn new(addr: Option<SocketAddr>) -> Self {
-        Self { addr }
+    pub fn new(endpoint: Option<DbEndpoint>) -> Self {
+        Self { endpoint }
     }
 }
 
@@ -48,24 +48,24 @@ impl Plugin for WsImpellerPlugin {
                     .chain()
                     .after(apply_ws_connect),
             );
-        install_connection(app.world_mut(), self.addr, true);
+        install_connection(app.world_mut(), self.endpoint.clone(), true);
     }
 }
 
 #[derive(Resource, Default)]
-struct PendingWsConnect(Option<SocketAddr>);
+struct PendingWsConnect(Option<DbEndpoint>);
 
-fn install_connection(world: &mut World, addr: Option<SocketAddr>, initial: bool) {
+fn install_connection(world: &mut World, endpoint: Option<DbEndpoint>, initial: bool) {
     let (packet_tx, packet_rx, outgoing_packet_rx, incoming_packet_tx) = channels();
     let (msg_tx, msg_rx, msg_outgoing_rx, msg_incoming_tx) = msg_channels();
     let stream_id = fastrand::u64(..);
-    let status = ThreadConnectionStatus::new(if addr.is_some() {
+    let status = ThreadConnectionStatus::new(if endpoint.is_some() {
         ConnectionStatus::Connecting
     } else {
         ConnectionStatus::NoConnection
     });
-    if let Some(addr) = addr {
-        world.insert_resource(ConnectionAddr(addr));
+    if let Some(endpoint) = endpoint.clone() {
+        world.insert_resource(ConnectionAddr::from_endpoint(endpoint));
     } else if initial {
         world.remove_resource::<ConnectionAddr>();
     }
@@ -76,8 +76,9 @@ fn install_connection(world: &mut World, addr: Option<SocketAddr>, initial: bool
     world.insert_resource(CurrentStreamId(stream_id));
     world.insert_resource(status.clone());
     world.insert_resource(PendingWsConnect(None));
+    let open = endpoint.is_some();
     world.insert_resource(WsIo {
-        addr,
+        endpoint,
         stream_id,
         generation: Arc::new(AtomicU64::new(0)),
         main_outgoing: outgoing_packet_rx,
@@ -88,14 +89,14 @@ fn install_connection(world: &mut World, addr: Option<SocketAddr>, initial: bool
         status,
     });
     world.remove_non_send::<WsSockets>();
-    if addr.is_some() {
+    if open {
         open_sockets(world);
     }
 }
 
 #[derive(Resource)]
 struct WsIo {
-    addr: Option<SocketAddr>,
+    endpoint: Option<DbEndpoint>,
     stream_id: StreamId,
     generation: Arc<AtomicU64>,
     main_outgoing: mpsc::Receiver<Option<LenPacket>>,
@@ -107,13 +108,36 @@ struct WsIo {
 }
 
 struct WsSockets {
-    main: Option<WebSocket>,
-    msg: Option<WebSocket>,
+    main: Option<LiveSocket>,
+    msg: Option<LiveSocket>,
+}
+
+struct LiveSocket {
+    ws: WebSocket,
+    // Held so the JS callbacks stay alive until Drop clears them.
+    #[allow(dead_code)]
+    on_open: Closure<dyn FnMut()>,
+    #[allow(dead_code)]
+    on_message: Closure<dyn FnMut(MessageEvent)>,
+    #[allow(dead_code)]
+    on_error: Closure<dyn FnMut(JsValue)>,
+    #[allow(dead_code)]
+    on_close: Closure<dyn FnMut(JsValue)>,
+}
+
+impl Drop for LiveSocket {
+    fn drop(&mut self) {
+        self.ws.set_onopen(None);
+        self.ws.set_onmessage(None);
+        self.ws.set_onerror(None);
+        self.ws.set_onclose(None);
+        let _ = self.ws.close();
+    }
 }
 
 fn queue_ws_connect(mut events: MessageReader<WsConnect>, mut pending: ResMut<PendingWsConnect>) {
     if let Some(event) = events.read().last() {
-        pending.0 = Some(event.0);
+        pending.0 = Some(event.0.clone());
     }
 }
 
@@ -123,19 +147,11 @@ fn queue_ws_connect(mut events: MessageReader<WsConnect>, mut pending: ResMut<Pe
 /// back to the connection screen.
 pub fn suspend_ws_reconnect(world: &mut World) {
     if let Some(mut io) = world.get_resource_mut::<WsIo>() {
-        io.addr = None;
+        io.endpoint = None;
         io.retry_at = None;
         io.generation.fetch_add(1, Ordering::SeqCst);
     }
-    let Some(sockets) = world.remove_non_send::<WsSockets>() else {
-        return;
-    };
-    if let Some(ws) = sockets.main {
-        let _ = ws.close();
-    }
-    if let Some(ws) = sockets.msg {
-        let _ = ws.close();
-    }
+    world.remove_non_send::<WsSockets>();
 }
 
 fn apply_ws_connect(world: &mut World) {
@@ -149,7 +165,10 @@ fn apply_ws_connect(world: &mut World) {
 }
 
 fn ws_reconnect(world: &mut World) {
-    let Some(addr) = world.get_resource::<WsIo>().and_then(|io| io.addr) else {
+    let Some(endpoint) = world
+        .get_resource::<WsIo>()
+        .and_then(|io| io.endpoint.clone())
+    else {
         return;
     };
     let needs_open = match world.get_non_send::<WsSockets>() {
@@ -158,11 +177,11 @@ fn ws_reconnect(world: &mut World) {
             sockets
                 .main
                 .as_ref()
-                .is_none_or(|ws| !is_active(ws.ready_state()))
+                .is_none_or(|sock| !is_active(sock.ws.ready_state()))
                 || sockets
                     .msg
                     .as_ref()
-                    .is_none_or(|ws| !is_active(ws.ready_state()))
+                    .is_none_or(|sock| !is_active(sock.ws.ready_state()))
         }
     };
     if !needs_open {
@@ -176,7 +195,7 @@ fn ws_reconnect(world: &mut World) {
         let Some(mut io) = world.get_resource_mut::<WsIo>() else {
             return;
         };
-        if io.addr != Some(addr) {
+        if io.endpoint.as_ref() != Some(&endpoint) {
             return;
         }
         match io.retry_at {
@@ -198,7 +217,10 @@ fn ws_flush(world: &mut World) {
         let Some(sockets) = world.get_non_send::<WsSockets>() else {
             return;
         };
-        (sockets.main.clone(), sockets.msg.clone())
+        (
+            sockets.main.as_ref().map(|sock| sock.ws.clone()),
+            sockets.msg.as_ref().map(|sock| sock.ws.clone()),
+        )
     };
     let Some(mut io) = world.get_resource_mut::<WsIo>() else {
         return;
@@ -232,16 +254,16 @@ fn is_active(ready_state: u16) -> bool {
 }
 
 fn open_sockets(world: &mut World) {
-    let (addr, stream_id, incoming_main, incoming_msg, generation, my_gen, status) = {
+    let (endpoint, stream_id, incoming_main, incoming_msg, generation, my_gen, status) = {
         let Some(io) = world.get_resource::<WsIo>() else {
             return;
         };
-        let Some(addr) = io.addr else {
+        let Some(endpoint) = io.endpoint.clone() else {
             return;
         };
         let my_gen = io.generation.fetch_add(1, Ordering::SeqCst) + 1;
         (
-            addr,
+            endpoint,
             io.stream_id,
             io.incoming_main.clone(),
             io.incoming_msg.clone(),
@@ -256,7 +278,7 @@ fn open_sockets(world: &mut World) {
         io.retry_at = None;
     }
 
-    let (main_url, msg_url) = ws_urls(addr);
+    let (main_url, msg_url) = endpoint.ws_urls();
     let main = open_socket(
         &main_url,
         incoming_main,
@@ -292,7 +314,7 @@ fn open_socket(
     status: Option<ThreadConnectionStatus>,
     hello: Vec<LenPacket>,
     inject_new_connection: bool,
-) -> Option<WebSocket> {
+) -> Option<LiveSocket> {
     let ws = match WebSocket::new(url) {
         Ok(ws) => ws,
         Err(err) => {
@@ -324,7 +346,6 @@ fn open_socket(
         }
     }) as Box<dyn FnMut()>);
     ws.set_onopen(Some(on_open.as_ref().unchecked_ref()));
-    on_open.forget();
 
     let incoming_msg = incoming;
     let generation_msg = generation.clone();
@@ -344,7 +365,6 @@ fn open_socket(
         push_incoming(&incoming_msg, LenPacket { inner: bytes });
     }) as Box<dyn FnMut(_)>);
     ws.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
-    on_message.forget();
 
     let status_err = status.clone();
     let generation_err = generation.clone();
@@ -357,7 +377,6 @@ fn open_socket(
         }
     }) as Box<dyn FnMut(_)>);
     ws.set_onerror(Some(on_error.as_ref().unchecked_ref()));
-    on_error.forget();
 
     let generation_close = generation;
     let on_close = Closure::wrap(Box::new(move |_e: JsValue| {
@@ -369,9 +388,14 @@ fn open_socket(
         }
     }) as Box<dyn FnMut(_)>);
     ws.set_onclose(Some(on_close.as_ref().unchecked_ref()));
-    on_close.forget();
 
-    Some(ws)
+    Some(LiveSocket {
+        ws,
+        on_open,
+        on_message,
+        on_error,
+        on_close,
+    })
 }
 
 fn push_incoming(incoming: &AsyncArcQueueTx, pkt: LenPacket) {
@@ -381,21 +405,4 @@ fn push_incoming(incoming: &AsyncArcQueueTx, pkt: LenPacket) {
         return;
     };
     PacketGrantW::new(grant).commit_len_pkt(pkt);
-}
-
-fn ws_urls(tcp: SocketAddr) -> (String, String) {
-    let ip = match tcp.ip() {
-        IpAddr::V4(v4) if v4.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
-        IpAddr::V6(v6) if v6.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
-        other => other,
-    };
-    let port = tcp.port().saturating_add(impeller::ASSETS_HTTP_PORT_OFFSET);
-    let host = match ip {
-        IpAddr::V4(v4) => format!("{v4}:{port}"),
-        IpAddr::V6(v6) => format!("[{v6}]:{port}"),
-    };
-    (
-        format!("ws://{host}/impeller"),
-        format!("ws://{host}/impeller/msg"),
-    )
 }

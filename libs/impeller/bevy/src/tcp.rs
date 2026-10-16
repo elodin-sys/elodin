@@ -36,7 +36,7 @@ impl Plugin for TcpImpellerPlugin {
         let (msg_tx, msg_rx, msg_outgoing_rx, msg_incoming_tx) = crate::channels::msg_channels();
         let stream_id = fastrand::u64(..);
         let status = if let Some(addr) = self.addr {
-            app.insert_resource(ConnectionAddr(addr));
+            app.insert_resource(ConnectionAddr::new(addr));
             spawn_msg_tcp_connect(addr, msg_outgoing_rx, msg_incoming_tx);
             spawn_tcp_connect(
                 addr,

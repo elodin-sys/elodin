@@ -1,7 +1,6 @@
 //! Fetch, verify, compile, and invoke content-addressed display kernels.
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use web_time::{Duration, Instant};
 
@@ -15,7 +14,7 @@ use impeller_wkt::{
 };
 use sha2::{Digest, Sha256};
 
-use crate::object_3d::{local_assets_root, resolve_db_asset_url};
+use crate::object_3d::{local_assets_root, resolve_db_endpoint};
 use crate::plugins::kdl_document::InitialKdlPath;
 use crate::ui::plot::data::EvaluatedSeries;
 
@@ -84,7 +83,7 @@ pub struct CompiledDisplayKernel {
 
 #[derive(Clone, Default)]
 pub struct KernelFetchCtx {
-    pub connection_addr: Option<SocketAddr>,
+    pub connection_addr: Option<impeller_bevy::DbEndpoint>,
     pub local_root: Option<PathBuf>,
     pub kdl_dir: Option<PathBuf>,
 }
@@ -337,7 +336,7 @@ pub fn kernel_fetch_ctx(
     initial_kdl: Option<Res<InitialKdlPath>>,
 ) -> KernelFetchCtx {
     KernelFetchCtx {
-        connection_addr: connection_addr.map(|a| a.0),
+        connection_addr: connection_addr.map(|a| a.endpoint().clone()),
         local_root: local_assets_root(initial_kdl.as_deref()),
         kdl_dir: initial_kdl
             .and_then(|path| path.0.clone())
@@ -433,9 +432,9 @@ async fn fetch_kernel_bytes(
     let url = if key.starts_with("http://") || key.starts_with("https://") {
         key
     } else if key.starts_with("db:") {
-        resolve_db_asset_url(&key, fetch.connection_addr)
+        resolve_db_endpoint(&key, fetch.connection_addr.as_ref())
     } else {
-        resolve_db_asset_url(&format!("db:{key}"), fetch.connection_addr)
+        resolve_db_endpoint(&format!("db:{key}"), fetch.connection_addr.as_ref())
     };
     crate::plugins::http_client::get_bytes(&url)
         .await

@@ -761,10 +761,13 @@ fn apply_localhost_cors(res: &mut Response, origin: &HeaderValue) {
 
 async fn localhost_cors(req: Request<axum::body::Body>, next: Next) -> Response {
     let origin = req.headers().get(header::ORIGIN).cloned();
-    let origin_ok = origin
-        .as_ref()
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(is_localhost_origin);
+    let origin_str = origin.as_ref().and_then(|v| v.to_str().ok());
+    // Browsers do not enforce CORS on WebSocket upgrades. A page that sends
+    // Origin must be localhost; missing Origin is a non-browser client.
+    if origin.is_some() && !origin_str.is_some_and(is_localhost_origin) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let origin_ok = origin_str.is_some();
 
     if req.method() == Method::OPTIONS {
         let mut res = StatusCode::NO_CONTENT.into_response();
@@ -1137,6 +1140,51 @@ mod tests {
             .unwrap();
         let echoed = ws.next().await.unwrap().unwrap();
         assert_eq!(echoed.into_data(), pkt);
+    }
+
+    #[tokio::test]
+    async fn impeller_websocket_rejects_non_localhost_origin() {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+        let dir = tempdir().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let http_addr = listener.local_addr().unwrap();
+        let state = Arc::new(AssetsState {
+            assets_dir: dir.path().join("assets"),
+            writable: false,
+            db: None,
+            impeller_addr: "127.0.0.1:1".parse().unwrap(),
+        });
+        tokio::spawn(async move {
+            axum::serve(listener, assets_router(state)).await.unwrap();
+        });
+
+        let mut request = format!("ws://{http_addr}/impeller")
+            .into_client_request()
+            .unwrap();
+        request
+            .headers_mut()
+            .insert("Origin", "http://evil.example".parse().unwrap());
+        let err = tokio_tungstenite::connect_async(request)
+            .await
+            .expect_err("remote origin must not open the impeller proxy");
+        let message = err.to_string();
+        assert!(
+            message.contains("403") || message.contains("Forbidden"),
+            "{message}"
+        );
+
+        let mut allowed = format!("ws://{http_addr}/impeller")
+            .into_client_request()
+            .unwrap();
+        allowed
+            .headers_mut()
+            .insert("Origin", "http://127.0.0.1:8080".parse().unwrap());
+        // Handshake can succeed even when the upstream impeller port is closed;
+        // the proxy connects lazily after the upgrade.
+        tokio_tungstenite::connect_async(allowed)
+            .await
+            .expect("localhost origin may open the impeller proxy");
     }
 
     #[tokio::test]
