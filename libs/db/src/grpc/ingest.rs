@@ -1181,7 +1181,10 @@ fn hex(bytes: &[u8]) -> String {
 }
 
 fn internal_status(error: DbError) -> Status {
-    Status::internal(format!("database ingest failed: {error}"))
+    match error {
+        DbError::DuplicateElementName { .. } => super::common::db_error(error),
+        _ => Status::internal(format!("database ingest failed: {error}")),
+    }
 }
 
 #[cfg(test)]
@@ -1669,6 +1672,20 @@ mod tests {
         });
         assert!(metadata.is_timestamp_source());
         assert_eq!(metadata.element_names(), "TIME");
+    }
+
+    #[test]
+    fn handshake_rejects_case_insensitive_duplicate_labels() {
+        let (_dir, db) = test_db();
+        let service = IngestServiceImpl::new(db);
+        let mut schema = packed_schema();
+        schema.messages[0].components[1].element_names = vec!["CL".into(), "Cl".into()];
+        let error = service
+            .open_session(open("client", b"instance", schema))
+            .err()
+            .unwrap();
+        assert_eq!(error.code(), tonic::Code::InvalidArgument);
+        assert!(error.message().contains("duplicate element name"));
     }
 
     #[test]
