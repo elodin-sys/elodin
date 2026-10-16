@@ -76,7 +76,8 @@ inherits = "release"
 opt-level = "z"
 lto = "fat"
 codegen-units = 1
-strip = "debuginfo"
+# "symbols" drops the wasm name section; "debuginfo" leaves it (~40 MB).
+strip = "symbols"
 
 [profile.macos-release]
 inherits = "release"

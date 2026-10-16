@@ -714,7 +714,7 @@ type MainCameraViewportQueryItem = (
     &'static RenderTarget,
 );
 
-fn set_camera_viewport(
+pub(crate) fn set_camera_viewport(
     window: Query<(Entity, &Window), With<PrimaryWindow>>,
     mut main_camera_query: Query<MainCameraViewportQueryItem, With<MainCamera>>,
     mut entries: Local<Vec<(Entity, bool)>>,
