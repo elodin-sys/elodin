@@ -73,7 +73,11 @@ R_FLU_FROM_OPENCV = np.array(
 
 @dataclass(frozen=True, slots=True)
 class CameraMount:
-    """The one camera-to-body transform. Positive tilt pitches the optical axis up."""
+    """The one camera-to-body transform. Positive tilt pitches the optical axis up.
+
+    That is nose-up. ``sensor_camera`` pitch is nose-down, so registration uses
+    ``sensor_rot_offset`` rather than passing ``tilt_deg`` through unchanged.
+    """
 
     position_body: np.ndarray
     tilt_deg: float
@@ -123,15 +127,23 @@ class GatePose:
     range_m: float
 
 
+_ORDER_AMBIGUITY_DEG = 10.0
+
+
 @dataclass(frozen=True, slots=True)
 class GateCandidate:
-    """One Section 7.7 detection. Corners are TL, TR, BR, BL in pixels."""
+    """One Section 7.7 detection. Corners are TL, TR, BR, BL in pixels.
+
+    ``corner_order_ambiguous`` means the square's in-plane rotation is not
+    identified. Center, bearing, range, and the crossing normal stay valid.
+    """
 
     sample_time: float
     corners_px: np.ndarray
     confidence: float
     pose: GatePose | None
     reprojection_error_px: float | None
+    corner_order_ambiguous: bool
 
     def __post_init__(self) -> None:
         corners = np.asarray(self.corners_px, dtype=np.float64)
@@ -146,8 +158,25 @@ class GateCandidate:
         object.__setattr__(self, "corners_px", corners)
 
 
-def order_corners(points: np.ndarray) -> np.ndarray:
-    """Return TL, TR, BR, BL. Valid for image roll within ±45°."""
+def _midline_roll_deg(corners: np.ndarray) -> float:
+    """Angle of the left-edge midpoint to the right-edge midpoint, in degrees."""
+
+    right = (corners[1] + corners[2]) * 0.5
+    left = (corners[0] + corners[3]) * 0.5
+    edge = right - left
+    return math.degrees(math.atan2(float(edge[1]), float(edge[0])))
+
+
+def order_corners(points: np.ndarray) -> tuple[np.ndarray, bool]:
+    """Return TL, TR, BR, BL and whether that labelling is ambiguous.
+
+    The cyclic order comes from the angle around the centroid. The start corner
+    is the labelling whose midline is closest to image +x. For image midline
+    roll within ±35°, that labelling matches the gate frame unless the returned
+    flag is set. The flag is set when the best and second-best midlines are
+    within 10°. Square symmetry makes the in-plane rotation unknown in that
+    case; center, bearing, range, and the crossing normal do not depend on it.
+    """
 
     pts = np.asarray(points, dtype=np.float64)
     if pts.shape != (4, 2) or not np.all(np.isfinite(pts)):
@@ -155,13 +184,13 @@ def order_corners(points: np.ndarray) -> np.ndarray:
     center = pts.mean(axis=0)
     delta = pts - center
     angles = np.arctan2(delta[:, 1], delta[:, 0])
-    order = np.argsort(angles)
-    ordered = pts[order]
-    ordered_angles = angles[order]
-    target = -3.0 * math.pi / 4.0
-    delta_angle = np.angle(np.exp(1j * (ordered_angles - target)))
-    shift = int(np.argmin(np.abs(delta_angle)))
-    return np.roll(ordered, -shift, axis=0)
+    cyclic = pts[np.argsort(angles)]
+    labelled = [np.roll(cyclic, -shift, axis=0) for shift in range(4)]
+    rolls = [abs(_midline_roll_deg(candidate)) for candidate in labelled]
+    best = int(np.argmin(rolls))
+    ordered_rolls = sorted(rolls)
+    ambiguous = ordered_rolls[1] - ordered_rolls[0] < _ORDER_AMBIGUITY_DEG
+    return labelled[best], ambiguous
 
 
 def gate_object_corners(inner_size: float) -> np.ndarray:
@@ -321,7 +350,8 @@ def solve_square_pnp(
     """Planar PnP for the public square opening.
 
     Returns ``(R_cam_gate, t_cam, reprojection_rms)`` or ``None`` when the gate
-    is behind the camera, the opening faces the camera, or the fit is poor.
+    is behind the camera, the camera is on the departure side of the gate, or
+    the fit is poor.
     Corners must already be ordered TL, TR, BR, BL.
     """
 
@@ -368,6 +398,34 @@ def _body_pose(
     )
 
 
+def candidate_from_ordered_corners(
+    sample_time: float,
+    corners_px: np.ndarray,
+    confidence: float,
+    inner_size: float,
+    intrinsics: CameraIntrinsics,
+    mount: CameraMount,
+) -> GateCandidate:
+    """Solve planar PnP for corners that are already TL, TR, BR, BL.
+
+    This path does not reorder. ``corner_order_ambiguous`` is false because the
+    caller, not the image heuristic, supplied the correspondence.
+    """
+
+    solved = solve_square_pnp(corners_px, inner_size, intrinsics)
+    if solved is None:
+        return GateCandidate(sample_time, corners_px, confidence, None, None, False)
+    rotation, translation, rms = solved
+    return GateCandidate(
+        sample_time,
+        corners_px,
+        confidence,
+        _body_pose(rotation, translation, mount),
+        rms,
+        False,
+    )
+
+
 def candidate_from_corners(
     sample_time: float,
     corners_px: np.ndarray,
@@ -376,12 +434,12 @@ def candidate_from_corners(
     intrinsics: CameraIntrinsics,
     mount: CameraMount,
 ) -> GateCandidate:
-    """Order corners, solve planar PnP, and express the pose in body FLU."""
+    """Order unordered corners, solve planar PnP, and express the pose in body FLU."""
 
-    ordered = order_corners(corners_px)
+    ordered, ambiguous = order_corners(corners_px)
     solved = solve_square_pnp(ordered, inner_size, intrinsics)
     if solved is None:
-        return GateCandidate(sample_time, ordered, confidence, None, None)
+        return GateCandidate(sample_time, ordered, confidence, None, None, ambiguous)
     rotation, translation, rms = solved
     return GateCandidate(
         sample_time,
@@ -389,4 +447,5 @@ def candidate_from_corners(
         confidence,
         _body_pose(rotation, translation, mount),
         rms,
+        ambiguous,
     )

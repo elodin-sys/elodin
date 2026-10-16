@@ -20,6 +20,9 @@ from vision import (
     FPV_MOUNT,
     CameraIntrinsics,
     CameraMount,
+    candidate_from_corners,
+    candidate_from_ordered_corners,
+    order_corners,
     solve_square_pnp,
 )
 
@@ -260,3 +263,89 @@ def test_dropout_extremes_and_rate() -> None:
     assert all(sample is None for sample in dropped)
     rate = sum(sample is None for sample in mixed) / len(mixed)
     assert rate == pytest.approx(0.3, abs=0.08)
+
+
+def _image_midline_deg(corners: np.ndarray) -> float:
+    right = (corners[1] + corners[2]) * 0.5
+    left = (corners[0] + corners[3]) * 0.5
+    edge = right - left
+    return math.degrees(math.atan2(float(edge[1]), float(edge[0])))
+
+
+def _quat_ypr(yaw: float, pitch: float, roll: float) -> list[float]:
+    cy, sy = math.cos(yaw / 2.0), math.sin(yaw / 2.0)
+    cp, sp = math.cos(pitch / 2.0), math.sin(pitch / 2.0)
+    cr, sr = math.cos(roll / 2.0), math.sin(roll / 2.0)
+    return [
+        sr * cp * cy - cr * sp * sy,
+        cr * sp * cy + sr * cp * sy,
+        cr * cp * sy - sr * sp * cy,
+        cr * cp * cy + sr * sp * sy,
+    ]
+
+
+def test_ordered_corners_are_not_silently_relabelled() -> None:
+    gate = course_from_name("single").gates[0]
+    pose = _level_pose((0.0, 0.0, _centered_height(gate)))
+    corners = project_gate_corners(gate, pose)
+    assert corners is not None
+    cycled = np.roll(corners, -1, axis=0)
+
+    trusted = candidate_from_ordered_corners(
+        0.0, corners, 1.0, gate.inner_size, FPV_INTRINSICS, FPV_MOUNT
+    )
+    wrong = candidate_from_ordered_corners(
+        0.0, cycled, 1.0, gate.inner_size, FPV_INTRINSICS, FPV_MOUNT
+    )
+
+    assert not trusted.corner_order_ambiguous
+    assert trusted.corners_px == pytest.approx(corners)
+    assert not np.allclose(wrong.corners_px, corners)
+
+
+def test_midline_order_holds_or_is_flagged_through_35_degrees() -> None:
+    rng = np.random.default_rng(23)
+    checked = 0
+    for _ in range(3000):
+        gate = Gate(
+            index=0,
+            center=(0.0, 0.0, 2.0),
+            yaw=float(rng.uniform(-1.2, 1.2)),
+            inner_size=_INNER,
+        )
+        distance = float(rng.uniform(4.0, 25.0))
+        heading = gate.yaw + float(rng.uniform(-0.7, 0.7))
+        elevation = float(rng.uniform(-0.3, 0.3))
+        position = np.array(gate.center) - distance * np.array(
+            [
+                math.cos(heading) * math.cos(elevation),
+                math.sin(heading) * math.cos(elevation),
+                math.sin(elevation),
+            ]
+        )
+        pose = [
+            *_quat_ypr(
+                heading + float(rng.uniform(-0.3, 0.3)),
+                float(rng.uniform(-0.4, 0.4)),
+                math.radians(float(rng.uniform(-50.0, 50.0))),
+            ),
+            *position,
+        ]
+        corners = project_gate_corners(gate, pose)
+        if corners is None or abs(_image_midline_deg(corners)) > 35.0:
+            continue
+        checked += 1
+        shuffled = corners[rng.permutation(4)]
+        ordered, ambiguous = order_corners(shuffled)
+        detected = candidate_from_corners(
+            0.0, shuffled, 1.0, gate.inner_size, FPV_INTRINSICS, FPV_MOUNT
+        )
+        if np.allclose(ordered, corners):
+            assert not ambiguous or detected.corner_order_ambiguous
+            continue
+        assert ambiguous
+        assert detected.corner_order_ambiguous
+        assert detected.pose is not None
+        truth = _gate_center_body(gate, np.asarray(pose, dtype=np.float64))
+        assert detected.pose.bearing_body == pytest.approx(truth / np.linalg.norm(truth), abs=1e-6)
+    assert checked > 500

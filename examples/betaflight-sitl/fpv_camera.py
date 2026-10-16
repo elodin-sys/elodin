@@ -20,8 +20,21 @@ FAR = 100.0
 # Square pixels. Vertical FoV is chosen so fx = fy = FOCAL_PX (≈58.72°, hFOV 90°).
 FOCAL_PX = 320.0
 FOV_DEG = 2.0 * math.degrees(math.atan((HEIGHT / 2.0) / FOCAL_PX))
-# Positive tilt pitches the optical axis up, matching sensor_camera pitch.
+# Positive TILT_DEG pitches the optical axis up (nose-up). Positive sensor_camera
+# pitch is the opposite: a right-handed turn about body +Y, so nose-down.
 TILT_DEG = 0.0
+
+
+def sensor_rot_offset(tilt_deg: float = TILT_DEG) -> list[float]:
+    """Body [roll, pitch, yaw] in degrees for ``sensor_camera``.
+
+    Renderer pitch is nose-down, so a nose-up ``tilt_deg`` is registered as a
+    negative pitch.
+    """
+
+    return [0.0, -tilt_deg, 0.0]
+
+
 PERIOD_US = int(round(1_000_000.0 / FPS))
 FRAME_BYTES = WIDTH * HEIGHT * 4
 MIN_FPS = 15.0

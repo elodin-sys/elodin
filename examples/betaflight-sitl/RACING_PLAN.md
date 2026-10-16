@@ -509,6 +509,10 @@ Each candidate contains:
 - nominal frame sample timestamp (the latency-adjusted DB query time);
 - four inner-opening corners ordered top-left, top-right, bottom-right,
   bottom-left in pixel coordinates;
+- `corner_order_ambiguous`, set when the two best square labellings are within
+  10°. For image midline roll within ±35° the labelling matches the gate frame
+  unless this flag is set. The rotation about the gate normal is then unknown;
+  center, bearing, range, and the crossing normal remain valid;
 - confidence in `[0, 1]`;
 - gate-relative pose from PnP when valid;
 - reprojection error or equivalent quality measure.
@@ -1089,16 +1093,25 @@ Tests fail on wrong corner order, intrinsics, tilt sign, or camera/body transfor
 command.
 
 **Verified 2026-10-05 on `pkg-g-vision-contracts` from `origin/main` (`d6354da1`);
-re-verified 2026-10-07 after syncing to `origin/main` (`3bc1d991`):**
+re-verified 2026-10-16 after merging `origin/main` (`c9ae81ad`) and the PR #891
+review fixes:**
 
-- `python3 -m pytest examples/betaflight-sitl/tests -q` → 143 passed.
-  `ruff format --check`, `ruff check`, and `typos -c typos.toml` passed.
+- `python3 -m pytest examples/betaflight-sitl/tests -q` → 222 passed.
+  `ruff format`, `ruff check`, and `typos` passed.
 - `K` is `fx = fy = 320`, `cx = 320`, `cy = 180`, derived from `FOCAL_PX` and
   the 640×360 vertical FoV. Horizontal FoV is 90°.
 - `R_flu_from_opencv` columns are camera X → body `(0, -1, 0)`, camera Y →
   body `(0, 0, -1)`, camera Z → body `(1, 0, 0)`.
-  `R_body_cam = Ry(-tilt) @ R_flu_from_opencv`. Positive tilt pitches the
-  optical axis up, the same sign as renderer pitch.
+  `R_body_cam = Ry(-tilt) @ R_flu_from_opencv`. Positive `TILT_DEG` pitches the
+  optical axis up (nose-up). Positive renderer pitch is nose-down, so
+  `sensor_rot_offset` passes `[0, -TILT_DEG, 0]`.
+- Corner order uses the midline closest to image +x. The guarantee is image
+  midline roll within ±35°, unless `corner_order_ambiguous` is set because the
+  two best labellings are within 10°. Center, bearing, range, and the crossing
+  normal stay valid when the flag is set.
+- Left for Package H: a 0.2 px quad can solve as a gate about 4 km away at 0 px
+  RMS; `_rotation_vector` fails safe within about 1e-6° of 180°; `sample_time`
+  is not checked for finiteness; `bearing_body` is measured from the body origin.
 - Inner corners are TL, TR, BR, BL. Gate-frame object points, with
   `h = inner_size / 2`, are `(0, +h, +h)`, `(0, -h, +h)`, `(0, -h, -h)`,
   `(0, +h, -h)`.
@@ -1311,7 +1324,7 @@ branch for later resumption.
 | D | Complete | Command seam, one-tick ordering, AUX2 ANGLE configuration, s10 manual controller, 250 ms heartbeat failsafe, DB telemetry, and simulation-time physical sign audit are implemented. The combined automated qualification passed with roll 1.006, pitch 1.011, yaw 1.479 rad/s and accepted max motor 0.391; 5 controller tests also pass. On 2026-09-28, the operator tested and signed off on both keyboard and gamepad paths, including arm, takeoff, throttle/roll/pitch/yaw response, landing, and disarm. |
 | E | Complete | Opt-in truth-only single-gate standoff controller and independent 10 s hold grader. Three consecutive original 2026-09-29 runs exited 0 with RMS 0.075521/0.074801/0.074188 m (offline 0.075520758/0.074803460/0.074187954 m), no crossing or fault, and expected incomplete 0/1 race results; 138 pure tests on the original E branch, 5 controller tests, and default/scripted-single C0 regressions passed. The merged 2026-10-02 verification passed 180 pure tests, 5 controller tests, three further truth runs and opt-in B+E camera coexistence (details above). Requalified unchanged on 2026-10-12 atop main `729022c7` with a newly built runtime/SDK, three camera-off passes (0.073873/0.075235/0.074413 m RMS), independent DB agreement, C0/C/D regressions, and all four camera combinations (details above). |
 | F | Ready | E is qualified; three-gate course, COMMIT/pass sequencing, and safe finish remain to be implemented. |
-| G | Complete | `vision.py` owns intrinsics, corner order, the camera-to-body helper, and NumPy planar PnP. `synthetic_vision.py` is the only truth-projection path. 143 pure tests pass, including centered, translated, yawed, and ranged round trips. |
+| G | Complete | `vision.py` owns intrinsics, corner order, the camera-to-body helper, and NumPy planar PnP. Positive tilt is nose-up and is registered as negative renderer pitch. `corner_order_ambiguous` flags labellings within 10°. `synthetic_vision.py` is the only truth-projection path. 222 pure tests pass, including centered, translated, yawed, and ranged round trips. |
 | H | Ready | B, C, and G are complete; the offline detector remains to be implemented. |
 | I | Ready | G is complete, so the tracker can proceed in parallel with H. |
 | J | Blocked by H, I | E is complete; no detector, tracker, or vision guidance yet. |
@@ -1338,7 +1351,8 @@ recoverable MPEG-TS fallback, are maintained in `README.md`.
 | Date | Decision | Reason and affected packages |
 |---|---|---|
 | 2026-10-05 | Port the Betaflight SITL schematic to `elodin.ui` builders. | The KDL string builder was the last example still emitting a schematic by hand. The parsed model matches the previous layout. Affects the editor surface used by B and later packages. |
-| 2026-10-05 | Positive camera tilt pitches the optical axis up, matching `sensor_camera` pitch. Package G solves planar PnP in NumPy and leaves OpenCV to Package H. | The renderer documents positive pitch as nose-up. A NumPy solver keeps the geometry tests on the existing CI environment. Affects G and H. |
+| 2026-10-16 | Positive `TILT_DEG` stays nose-up and is registered as negative `sensor_camera` pitch. `GateCandidate.corner_order_ambiguous` is set when the two best labellings are within 10°, and the corner-order guarantee is image midline roll within ±35°. | PR #891 review. `coords.md` and §7.1 define positive pitch as nose-down, so the 2026-10-05 nose-up renderer claim was wrong. Square symmetry makes in-plane corner identity ambiguous near 45° of image roll. Affects G and H. |
+| 2026-10-05 | Positive camera tilt pitches the optical axis up. Package G solves planar PnP in NumPy and leaves OpenCV to Package H. | Superseded in part on 2026-10-16: positive renderer pitch is nose-down, not the same sign as `TILT_DEG`. The NumPy solver decision stands. Affects G and H. |
 | 2026-10-01 | Hide the frustum by default and set the 10× drone mesh to `sensor_visible=#false` when the FPV camera is on. The mount contract stays `[0.08, 0.0, 0.02]` m, body +X, tilt 0. | The frustum filled the chase view, and the camera sat inside the display mesh. Hiding the mesh from the sensor camera shows the world ahead without changing the camera-to-body geometry Package G tests. Affects B and later G, H, and J. |
 | 2026-09-26 | Keep FPV sampling in `fpv_camera.py`. `frame_fresh` means a new `read_msg_at` timestamp, and shutdown FPS uses only timestamps inside the post-warmup window. | Held frames were marked fresh, and the cursor sweep was not an exact frame count. The schematic injects only the FPV fragments. Affects B and later G, H, and J. |
 | 2026-09-03 | Run headless recipes once while retaining watched recipes in the editor. | Package A exposed that a failed simulation child was logged and then waited for source reload, so `elodin run` could not return nonzero. The approved shared fixes (`301ae367`, `#837`; lifecycle follow-up `36ee3431`, `#838`) make headless execution one-shot without changing interactive editor recovery, centralize recipe execution dispatch in s10, and add an end-to-end lifecycle CI check. This enables failure contracts in A, F, K, and L. |

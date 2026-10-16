@@ -79,8 +79,8 @@ from fpv_camera import (
     MOUNT,
     MSG,
     NEAR,
-    TILT_DEG,
     WIDTH,
+    sensor_rot_offset,
     FpvCamera,
 )
 from sim import Drone, create_physics_system
@@ -235,7 +235,7 @@ if CAMERA_ENABLED:
         near=NEAR,
         far=FAR,
         pos_offset=MOUNT,
-        rot_offset=[0.0, TILT_DEG, 0.0],
+        rot_offset=sensor_rot_offset(),
         format="rgba",
         fps=FPS,
     )

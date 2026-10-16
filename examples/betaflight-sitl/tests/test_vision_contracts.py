@@ -76,10 +76,12 @@ def test_positive_tilt_pitches_the_optical_axis_up() -> None:
 
 def test_order_corners_is_stable_for_permutations_and_limited_roll() -> None:
     corners = np.array([[100.0, 40.0], [400.0, 50.0], [390.0, 280.0], [110.0, 270.0]])
-    ordered = order_corners(corners)
+    ordered, ambiguous = order_corners(corners)
+    assert not ambiguous
 
     for permutation in itertools.permutations(range(4)):
-        assert order_corners(corners[list(permutation)]) == pytest.approx(ordered)
+        recovered, _flag = order_corners(corners[list(permutation)])
+        assert recovered == pytest.approx(ordered)
 
     center = ordered.mean(axis=0)
     rolled = []
@@ -87,20 +89,42 @@ def test_order_corners_is_stable_for_permutations_and_limited_roll() -> None:
     rotation = np.array([[math.cos(angle), -math.sin(angle)], [math.sin(angle), math.cos(angle)]])
     for corner in ordered:
         rolled.append(center + rotation @ (corner - center))
-    recovered = order_corners(np.asarray(rolled))
+    recovered, _flag = order_corners(np.asarray(rolled))
     unrolled = []
     for corner in recovered:
         unrolled.append(center + rotation.T @ (corner - center))
     assert np.asarray(unrolled) == pytest.approx(ordered, abs=1e-9)
 
 
+# Reviewer fixture. The top edge is about −44°, inside the old ±45° claim.
+_PERSPECTIVE_QUAD = np.array(
+    [
+        [467.5981, 139.7371],
+        [495.3146, 112.7539],
+        [533.4484, 147.0313],
+        [500.1575, 170.8499],
+    ]
+)
+
+
+def test_perspective_quad_keeps_gate_order_and_flags_ambiguity() -> None:
+    ordered, ambiguous = order_corners(_PERSPECTIVE_QUAD)
+
+    assert ordered == pytest.approx(_PERSPECTIVE_QUAD)
+    assert ambiguous
+    shuffled = _PERSPECTIVE_QUAD[[2, 0, 3, 1]]
+    reshuffled, reshuffled_flag = order_corners(shuffled)
+    assert reshuffled == pytest.approx(_PERSPECTIVE_QUAD)
+    assert reshuffled_flag
+
+
 def test_candidate_validation_rejects_bad_corners_and_confidence() -> None:
     corners = np.zeros((4, 2))
-    GateCandidate(0.0, corners, 0.0, None, None)
-    GateCandidate(0.0, corners, 1.0, None, 0.0)
+    GateCandidate(0.0, corners, 0.0, None, None, False)
+    GateCandidate(0.0, corners, 1.0, None, 0.0, False)
     with pytest.raises(ValueError, match="corners"):
-        GateCandidate(0.0, np.zeros((3, 2)), 1.0, None, None)
+        GateCandidate(0.0, np.zeros((3, 2)), 1.0, None, None, False)
     with pytest.raises(ValueError, match="confidence"):
-        GateCandidate(0.0, corners, 1.1, None, None)
+        GateCandidate(0.0, corners, 1.1, None, None, False)
     with pytest.raises(ValueError, match="reprojection"):
-        GateCandidate(0.0, corners, 1.0, None, -0.1)
+        GateCandidate(0.0, corners, 1.0, None, -0.1, False)

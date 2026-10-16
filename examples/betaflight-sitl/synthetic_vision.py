@@ -19,7 +19,7 @@ from vision import (
     CameraIntrinsics,
     CameraMount,
     GateCandidate,
-    candidate_from_corners,
+    candidate_from_ordered_corners,
     gate_object_corners,
 )
 
@@ -112,7 +112,7 @@ def synthetic_sequence(
         if noise.pixel_sigma > 0.0:
             corners = corners + rng.normal(0.0, noise.pixel_sigma, corners.shape)
         samples.append(
-            candidate_from_corners(
+            candidate_from_ordered_corners(
                 float(sample_time),
                 corners,
                 confidence,
@@ -145,7 +145,7 @@ def fixture_records(gate: Gate) -> list[dict[str, object]]:
         corners = project_gate_corners(gate, pose)
         if corners is None:
             raise RuntimeError(f"canonical fixture {name} is not fully visible")
-        candidate = candidate_from_corners(
+        candidate = candidate_from_ordered_corners(
             0.0, corners, 1.0, gate.inner_size, FPV_INTRINSICS, FPV_MOUNT
         )
         if candidate.pose is None:
