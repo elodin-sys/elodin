@@ -526,20 +526,17 @@ mod tests {
             .await
             .0
             .unwrap();
-        let send_sample = |ts: i64| {
-            let mut pkt = LenPacket::table(vtable_id, 16);
-            pkt.extend_from_slice(&1.0f64.to_le_bytes());
-            pkt.extend_aligned(&[ts]);
-            pkt
-        };
-        writer.send(send_sample(1)).await.0.unwrap();
+        let mut sample = LenPacket::table(vtable_id, 16);
+        sample.extend_from_slice(&1.0f64.to_le_bytes());
+        sample.extend_aligned(&[1i64]);
+        writer.send(sample).await.0.unwrap();
         sleep(Duration::from_millis(100)).await;
+        // No sample follows: the name alone must reach the stream.
         writer
             .send(&SetComponentMetadata::new(component_id, "late.named"))
             .await
             .0
             .unwrap();
-        writer.send(send_sample(2)).await.0.unwrap();
 
         let named = futures_lite::future::race(
             async {

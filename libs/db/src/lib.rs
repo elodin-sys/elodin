@@ -3399,9 +3399,15 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
             table = send_with_timeout(&sink, table.with_request_id(req_id)).await?;
             last_sent = Some(timestamp);
         }
-        futures_lite::future::race(db.last_updated.wait(), async {
-            let _ = filter.changed.wait().await;
-        })
+        futures_lite::future::race(
+            db.last_updated.wait(),
+            futures_lite::future::race(
+                async {
+                    let _ = filter.changed.wait().await;
+                },
+                db.metadata_gen.wait(),
+            ),
+        )
         .await;
     }
 }
