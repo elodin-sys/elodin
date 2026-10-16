@@ -21,9 +21,11 @@ use impeller_wkt::{
 use miette::{Diagnostic, miette};
 use std::{
     collections::{BTreeMap, HashMap},
+    future::Future,
     path::{Path, PathBuf},
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 #[cfg(not(target_os = "macos"))]
 use crate::tiles::WindowRelayout;
@@ -268,7 +270,9 @@ pub struct LoadSchematicParams<'w, 's> {
     pub document_assets: Res<'w, Assets<SchematicDocumentAsset>>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
     pub materials: ResMut<'w, Assets<StandardMaterial>>,
-    pub world_mesh_materials: ResMut<'w, Assets<bevy_world_mesh::prelude::WorldMeshMaterial>>,
+    /// Optional: absent on wasm (world-mesh plugin is native-only).
+    pub world_mesh_materials:
+        Option<ResMut<'w, Assets<bevy_world_mesh::prelude::WorldMeshMaterial>>>,
     pub mat3_materials: ResMut<'w, Assets<Mat3Material>>,
     pub images: ResMut<'w, Assets<Image>>,
     pub icon_cache: ResMut<'w, IconTextureCache>,
@@ -333,27 +337,19 @@ fn is_remote_asset_path(path: &str) -> bool {
 fn read_window_schematic_kdl(
     path: &Path,
     connection_addr: Option<std::net::SocketAddr>,
-) -> Result<String, String> {
-    let path_str = path
-        .to_str()
-        .ok_or_else(|| "non-utf8 window path".to_string())?;
-    if !is_remote_asset_path(path_str) {
-        return std::fs::read_to_string(path).map_err(|err| err.to_string());
-    }
+) -> impl Future<Output = Result<String, String>> {
+    let path = path.to_path_buf();
+    async move {
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| "non-utf8 window path".to_string())?;
+        if !is_remote_asset_path(path_str) {
+            return std::fs::read_to_string(&path).map_err(|err| err.to_string());
+        }
 
-    let url = crate::object_3d::resolve_db_asset_url(path_str, connection_addr);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .map_err(|err| format!("{url}: {err}"))?;
-    let response = client
-        .get(&url)
-        .send()
-        .map_err(|err| format!("{url}: {err}"))?;
-    if !response.status().is_success() {
-        return Err(format!("{url}: HTTP {}", response.status()));
+        let url = crate::object_3d::resolve_db_asset_url(path_str, connection_addr);
+        crate::plugins::http_client::get_text(&url).await
     }
-    response.text().map_err(|err| format!("{url}: {err}"))
 }
 
 fn window_has_inline_content(window: &WindowSchematic) -> bool {
@@ -699,7 +695,7 @@ impl LoadSchematicParams<'_, '_> {
                     // `apply_pending_window_schematics` once the fetch lands.
                     let fetch_path = path.clone();
                     let task = IoTaskPool::get().spawn(async move {
-                        read_window_schematic_kdl(&fetch_path, connection_addr)
+                        read_window_schematic_kdl(&fetch_path, connection_addr).await
                     });
                     self.pending_windows.loads.push(PendingWindowLoad {
                         descriptor,
@@ -712,7 +708,7 @@ impl LoadSchematicParams<'_, '_> {
                     });
                     continue;
                 }
-                match read_window_schematic_kdl(&path, connection_addr) {
+                match std::fs::read_to_string(&path) {
                     Ok(kdl) => match impeller_wkt::Schematic::from_kdl(&kdl) {
                         Ok(window_schematic) => {
                             self.spawn_window(
@@ -773,10 +769,9 @@ impl LoadSchematicParams<'_, '_> {
                 }
                 let fetch_path = load.path.clone();
                 load.retry_at = None;
-                load.task =
-                    Some(IoTaskPool::get().spawn(async move {
-                        read_window_schematic_kdl(&fetch_path, connection_addr)
-                    }));
+                load.task = Some(IoTaskPool::get().spawn(async move {
+                    read_window_schematic_kdl(&fetch_path, connection_addr).await
+                }));
             }
             let task = load.task.as_mut().expect("window fetch task just spawned");
             let Some(result) = future::block_on(future::poll_once(task)) else {
@@ -1152,11 +1147,15 @@ impl LoadSchematicParams<'_, '_> {
     }
 
     pub fn spawn_world_mesh(&mut self, world_mesh: impeller_wkt::WorldMesh) {
+        let Some(world_mesh_materials) = self.world_mesh_materials.as_mut() else {
+            warn!("skipping world_mesh: WorldMeshMaterial assets are unavailable");
+            return;
+        };
         let entity = crate::plugins::world_mesh::spawn_world_mesh_terrain(
             &mut self.commands,
             &mut self.meshes,
             &mut self.materials,
-            &mut self.world_mesh_materials,
+            world_mesh_materials,
             &world_mesh,
         );
         let mut e = self.commands.entity(entity);
@@ -1389,12 +1388,15 @@ impl LoadSchematicParams<'_, '_> {
                             .map(EColor::into_color32)
                             .unwrap_or_else(|| colors::get_color_by_index_all(j));
                         if let Some(elements) = components_tree.get_mut(component) {
+                            if *i >= elements.len() {
+                                elements.resize(*i + 1, (false, line_color));
+                            }
                             elements[*i] = (true, line_color);
                         } else {
                             let Some(schema) = self.schema_reg.0.get(&component.id) else {
                                 continue;
                             };
-                            let len: usize = schema.shape().iter().copied().product();
+                            let len = schema.element_count().max(*i + 1);
                             let mut elements: Vec<(bool, Color32)> =
                                 (0..len).map(|_| (false, line_color)).collect();
                             elements[*i] = (true, line_color);
@@ -2219,6 +2221,7 @@ mod tests {
     #[test]
     fn read_window_schematic_kdl_reads_local_file() {
         use super::read_window_schematic_kdl;
+        use bevy::tasks::futures_lite::future;
         let dir = std::env::temp_dir().join(format!(
             "elodin-window-kdl-{}",
             std::time::SystemTime::now()
@@ -2230,7 +2233,8 @@ mod tests {
         let path = dir.join("window.kdl");
         std::fs::write(&path, "viewport name=\"W\"\n").unwrap();
 
-        let kdl = read_window_schematic_kdl(&path, None).expect("read local window kdl");
+        let kdl = future::block_on(read_window_schematic_kdl(&path, None))
+            .expect("read local window kdl");
         assert!(kdl.contains("viewport"));
         let _ = std::fs::remove_dir_all(&dir);
     }

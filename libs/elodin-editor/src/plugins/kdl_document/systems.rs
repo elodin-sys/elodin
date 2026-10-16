@@ -1,11 +1,13 @@
 use bevy::asset::{AssetEvent, AssetLoadFailedEvent};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 use bevy_ai_skybox::prelude::{SetActiveSkybox, SkyboxCache};
 use impeller_wkt::{DbConfig, SkyboxConfig};
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use super::commands::*;
 use super::messages::*;
@@ -122,7 +124,7 @@ fn should_surface_fetch_failure(attempts: u32) -> bool {
 /// recorded counts as changed — the reload path (with its own retries) then
 /// re-establishes ground truth rather than this gate silently keeping a stale
 /// document.
-fn gated_windows_changed(
+async fn gated_windows_changed(
     key: &str,
     root_kdl: &str,
     snapshot: &StoredSchematicSnapshot,
@@ -142,7 +144,7 @@ fn gated_windows_changed(
         let Some(window_key) = window.path.as_deref().and_then(|p| p.strip_prefix("db:")) else {
             continue;
         };
-        let Ok(content) = fetch_active_schematic_kdl(window_key, addr) else {
+        let Ok(content) = fetch_active_schematic_kdl(window_key, addr).await else {
             return true;
         };
         if !snapshot.window_matches(window_key, &content) {
@@ -169,15 +171,19 @@ fn spawn_active_fetch(
     fetch.retry = None;
     fetch.refetch_pending = None;
     fetch.task = Some(IoTaskPool::get().spawn(async move {
-        let result = fetch_active_schematic_kdl(&key, addr).map(|content| {
-            let windows_changed = snapshot
-                .as_ref()
-                .is_some_and(|snapshot| gated_windows_changed(&key, &content, snapshot, addr));
-            FetchedActiveSchematic {
-                content,
-                windows_changed,
+        let result = match fetch_active_schematic_kdl(&key, addr).await {
+            Ok(content) => {
+                let windows_changed = match snapshot.as_ref() {
+                    Some(snapshot) => gated_windows_changed(&key, &content, snapshot, addr).await,
+                    None => false,
+                };
+                Ok(FetchedActiveSchematic {
+                    content,
+                    windows_changed,
+                })
             }
-        });
+            Err(err) => Err(err),
+        };
         ActiveSchematicFetched { request, result }
     }));
 }
@@ -477,6 +483,7 @@ pub(super) fn emit_document_reloads(
     }
 }
 
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 pub(super) fn activate_document_skybox(
     mut loaded: MessageReader<DocumentLoaded>,
     mut reloaded: MessageReader<DocumentReloaded>,
@@ -517,6 +524,7 @@ pub(super) fn activate_document_skybox(
     }
 }
 
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 fn activate_skybox_config(
     skybox: Option<&SkyboxConfig>,
     skyboxes: &mut MessageWriter<SetActiveSkybox>,

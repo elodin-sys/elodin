@@ -9,8 +9,10 @@ use egui::{Color32, CornerRadius, RichText, Stroke, load::SizedTexture};
 use hifitime::Epoch;
 use impeller_bevy::{
     ConnectionAddr, ConnectionStatus, CurrentStreamId, MsgPacketRx, MsgPacketTx, PacketRx,
-    PacketTx, ThreadConnectionStatus, spawn_msg_tcp_connect, spawn_tcp_connect,
+    PacketTx, ThreadConnectionStatus,
 };
+#[cfg(not(target_family = "wasm"))]
+use impeller_bevy::{spawn_msg_tcp_connect, spawn_tcp_connect};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::{
@@ -20,7 +22,9 @@ use std::{
     sync::Arc,
 };
 
-use crate::{VERSION, create_egui_context, dirs, ui::base_window};
+use crate::{VERSION, create_egui_context};
+#[cfg(not(target_family = "wasm"))]
+use crate::{dirs, ui::base_window};
 
 use super::{
     button::EButton,
@@ -33,6 +37,19 @@ use crate::ui::widgets::SystemStateExt;
 
 #[derive(Component)]
 pub struct StartupWindow;
+
+/// Wasm draws the startup screen on the primary canvas. A second window is not
+/// visible there: `Window::visible` is a no-op, and page CSS stretches every canvas.
+#[derive(Resource)]
+pub struct StartupActive;
+
+/// Initial `?db=` attempt. While this exists the editor chrome stays hidden and
+/// a connecting or failure dialog is shown instead.
+#[derive(Resource, Clone)]
+pub struct UrlConnect {
+    addr: String,
+    failed: bool,
+}
 
 #[derive(Resource)]
 struct MainWindowRevealDelay {
@@ -50,39 +67,59 @@ fn queue_main_window_reveal(commands: &mut Commands) {
 fn create_startup_window(
     mut commands: Commands,
     status: Res<ThreadConnectionStatus>,
+    connection_addr: Option<Res<ConnectionAddr>>,
     primary: Query<&Window, With<PrimaryWindow>>,
 ) {
+    #[cfg(not(target_family = "wasm"))]
+    let _ = connection_addr;
+    #[cfg(not(target_family = "wasm"))]
     commands.insert_resource(recent_files());
+    #[cfg(target_family = "wasm")]
+    commands.insert_resource(RecentItems::default());
     if status.status() == ConnectionStatus::NoConnection {
-        let egui_context = create_egui_context();
+        #[cfg(target_family = "wasm")]
+        commands.insert_resource(StartupActive);
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let egui_context = create_egui_context();
 
-        let mut window = commands.spawn((
-            Window {
-                title: "Elodin".to_owned(),
-                resolution: WindowResolution::new(730, 470),
-                resize_constraints: WindowResizeConstraints {
-                    min_width: 730.0,
-                    min_height: 470.0,
-                    max_width: 730.0,
-                    max_height: 470.0,
+            let mut window = commands.spawn((
+                Window {
+                    title: "Elodin".to_owned(),
+                    resolution: WindowResolution::new(730, 470),
+                    resize_constraints: WindowResizeConstraints {
+                        min_width: 730.0,
+                        min_height: 470.0,
+                        max_width: 730.0,
+                        max_height: 470.0,
+                    },
+                    enabled_buttons: EnabledButtons {
+                        minimize: false,
+                        maximize: false,
+                        close: true,
+                    },
+                    ..base_window()
                 },
-                enabled_buttons: EnabledButtons {
-                    minimize: false,
-                    maximize: false,
-                    close: true,
-                },
-                ..base_window()
-            },
-            StartupWindow,
-            egui_context,
-            Camera2d,
-        ));
+                StartupWindow,
+                egui_context,
+                Camera2d,
+            ));
 
-        let camera = Camera::default();
+            let camera = Camera::default();
 
-        window.insert((camera, RenderTarget::Window(WindowRef::Entity(window.id()))));
+            window.insert((camera, RenderTarget::Window(WindowRef::Entity(window.id()))));
+        }
     } else if primary.single().is_ok() {
         queue_main_window_reveal(&mut commands);
+    }
+    #[cfg(target_family = "wasm")]
+    if status.status() == ConnectionStatus::Connecting
+        && let Some(addr) = connection_addr.as_ref()
+    {
+        commands.insert_resource(UrlConnect {
+            addr: addr.0.to_string(),
+            failed: false,
+        });
     }
 }
 
@@ -106,7 +143,115 @@ fn reveal_main_window(
 }
 
 pub fn add_layouts(world: &mut World) {
+    #[cfg(not(target_family = "wasm"))]
     world.add_root_widget_with::<StartupLayout, With<StartupWindow>>("startup_layout", ());
+    #[cfg(target_family = "wasm")]
+    if world.contains_resource::<StartupActive>() {
+        world.add_root_widget::<StartupLayout>("startup_layout");
+    }
+}
+
+#[cfg(target_family = "wasm")]
+fn url_connect_feedback(world: &mut World) {
+    if world.contains_resource::<StartupActive>() {
+        return;
+    }
+    let Some(mut prompt) = world.get_resource::<UrlConnect>().cloned() else {
+        return;
+    };
+    match world
+        .get_resource::<ThreadConnectionStatus>()
+        .map(|status| status.status())
+    {
+        Some(ConnectionStatus::Success) => {
+            world.remove_resource::<UrlConnect>();
+            return;
+        }
+        Some(ConnectionStatus::Error) if !prompt.failed => {
+            impeller_bevy::suspend_ws_reconnect(world);
+            prompt.failed = true;
+            world.insert_resource(prompt.clone());
+        }
+        _ => {}
+    }
+
+    world.egui_context_scope::<_, With<PrimaryWindow>>(|world, ctx| {
+        if !prompt.failed {
+            ctx.request_repaint();
+        }
+        let dismissed = egui::Modal::new(egui::Id::new("url_connect"))
+            .frame(connect_dialog_frame())
+            .backdrop_color(get_scheme().bg_secondary.opacity(0.85))
+            .show(&ctx, |ui| {
+                if prompt.failed {
+                    ui.add(
+                        egui::Label::new(RichText::new("Couldn't connect").size(18.))
+                            .selectable(false),
+                    );
+                    ui.add_space(8.);
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(format!("No database is reachable at {}.", prompt.addr))
+                                .color(colors::REDDISH_DEFAULT)
+                                .size(12.),
+                        )
+                        .selectable(false),
+                    );
+                    ui.add_space(24.);
+                    ui.add(EButton::green("OK").width(280.)).clicked()
+                } else {
+                    ui.add(
+                        egui::Label::new(RichText::new("Connecting").size(18.)).selectable(false),
+                    );
+                    ui.add_space(8.);
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(format!("Trying to reach {}.", prompt.addr))
+                                .color(get_scheme().text_tertiary)
+                                .size(12.),
+                        )
+                        .selectable(false),
+                    );
+                    ui.add_space(24.);
+                    ui.add(EButton::gray("CANCEL").width(280.)).clicked()
+                }
+            });
+        if dismissed.inner {
+            return_to_connection_screen(world, &prompt.addr);
+        }
+    });
+}
+
+#[cfg(target_family = "wasm")]
+fn return_to_connection_screen(world: &mut World, addr: &str) {
+    impeller_bevy::suspend_ws_reconnect(world);
+    if let Some(status) = world.get_resource::<ThreadConnectionStatus>() {
+        status.set_status(ConnectionStatus::NoConnection);
+    }
+    if let Some(mut recent) = world.get_resource_mut::<RecentItems>()
+        && let Ok(now) = Epoch::now()
+    {
+        recent.push(now, RecentItem::Addr(addr.to_string()));
+    }
+    world.remove_resource::<UrlConnect>();
+    world.insert_resource(StartupActive);
+}
+
+#[cfg(target_family = "wasm")]
+fn connect_dialog_frame() -> egui::Frame {
+    egui::Frame {
+        fill: get_scheme().bg_primary,
+        stroke: egui::Stroke::NONE,
+        inner_margin: egui::Margin::same(24),
+        outer_margin: egui::Margin::symmetric(0, 0),
+        corner_radius: CornerRadius::same(8),
+        shadow: egui::Shadow {
+            color: get_scheme().bg_secondary.opacity(0.2),
+            spread: 3,
+            blur: 32,
+            offset: [0, 5],
+        },
+    }
 }
 
 pub struct StartupPlugin;
@@ -114,6 +259,8 @@ pub struct StartupPlugin;
 impl Plugin for StartupPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, create_startup_window);
+        #[cfg(target_family = "wasm")]
+        app.add_systems(Update, url_connect_feedback.before(add_layouts));
         app.add_systems(Update, (add_layouts, reveal_main_window));
     }
 }
@@ -132,6 +279,8 @@ pub struct StartupLayout<'w, 's> {
     status: ResMut<'w, ThreadConnectionStatus>,
     recent_files: ResMut<'w, RecentItems>,
     commands: Commands<'w, 's>,
+    #[cfg(target_family = "wasm")]
+    ws_connect: MessageWriter<'w, impeller_bevy::WsConnect>,
 }
 
 #[derive(Resource, Serialize, Deserialize, Default)]
@@ -162,7 +311,7 @@ pub enum ModalState {
     ConnectToIp {
         addr: String,
         error: Option<ConnectError>,
-        connecting: Option<ThreadConnectionStatus>,
+        connecting: bool,
     },
 }
 
@@ -190,10 +339,12 @@ impl std::fmt::Display for ConnectError {
 }
 
 impl StartupLayout<'_, '_> {
-    fn connect(&mut self, addr: SocketAddr, reconnect: bool) -> ThreadConnectionStatus {
+    #[cfg(not(target_family = "wasm"))]
+    fn connect(&mut self, addr: SocketAddr, reconnect: bool) {
         let (packet_tx, packet_rx, outgoing_packet_rx, incoming_packet_tx) =
-            impeller_bevy::channels();
-        let (msg_tx, msg_rx, msg_outgoing_rx, msg_incoming_tx) = impeller_bevy::msg_channels();
+            impeller_bevy::channels::channels();
+        let (msg_tx, msg_rx, msg_outgoing_rx, msg_incoming_tx) =
+            impeller_bevy::channels::msg_channels();
         let stream_id = fastrand::u64(..);
         spawn_msg_tcp_connect(addr, msg_outgoing_rx, msg_incoming_tx);
         let status = spawn_tcp_connect(
@@ -212,18 +363,28 @@ impl StartupLayout<'_, '_> {
         *self.packet_rx = packet_rx;
         *self.msg_packet_tx = msg_tx;
         *self.msg_packet_rx = msg_rx;
-        *self.status = status.clone();
-        status
+        *self.status = status;
+    }
+
+    #[cfg(target_family = "wasm")]
+    fn connect(&mut self, addr: SocketAddr, _reconnect: bool) {
+        self.ws_connect.write(impeller_bevy::WsConnect(addr));
     }
 
     fn switch_to_main(&mut self) {
-        let e = self.window.single_mut();
-        self.commands
-            .entity(e.expect("Window entity should exist"))
-            .despawn();
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let e = self.window.single_mut();
+            self.commands
+                .entity(e.expect("Window entity should exist"))
+                .despawn();
+        }
+        #[cfg(target_family = "wasm")]
+        self.commands.remove_resource::<StartupActive>();
         queue_main_window_reveal(&mut self.commands);
     }
 
+    #[cfg(not(target_family = "wasm"))]
     fn open_file(&mut self, file: PathBuf) {
         self.recent_files.push(
             hifitime::Epoch::now().unwrap(),
@@ -255,7 +416,7 @@ impl StartupLayout<'_, '_> {
                 *self.modal_state = ModalState::ConnectToIp {
                     addr,
                     error: Some(ConnectError::ResolutionFailed),
-                    connecting: None,
+                    connecting: false,
                 };
                 return;
             }
@@ -264,7 +425,7 @@ impl StartupLayout<'_, '_> {
                 *self.modal_state = ModalState::ConnectToIp {
                     addr,
                     error: Some(ConnectError::SocketParse(Arc::new(err))),
-                    connecting: None,
+                    connecting: false,
                 };
                 return;
             }
@@ -273,14 +434,114 @@ impl StartupLayout<'_, '_> {
             hifitime::Epoch::now().unwrap(),
             RecentItem::Addr(addr.clone()),
         );
+        #[cfg(not(target_family = "wasm"))]
         save_recent_files(&self.recent_files);
 
-        let status = self.connect(socket_addr, false);
+        self.connect(socket_addr, false);
         *self.modal_state = ModalState::ConnectToIp {
             addr,
             error: None,
-            connecting: Some(status),
+            connecting: true,
         };
+    }
+
+    fn default_connect_addr(&self) -> String {
+        #[cfg(target_family = "wasm")]
+        if let Some(RecentItem::Addr(addr)) = self.recent_files.recent_files.values().next_back() {
+            return addr.clone();
+        }
+        if cfg!(target_family = "wasm") || cfg!(target_os = "windows") {
+            "127.0.0.1:2240".to_string()
+        } else {
+            "[::]:2240".to_string()
+        }
+    }
+
+    fn left_pane(
+        &mut self,
+        ui: &mut egui::Ui,
+        logo_full: egui::TextureId,
+        #[allow(unused_variables)] folder: egui::TextureId,
+        icon_ip_addr: egui::TextureId,
+    ) {
+        let avail = ui.available_size();
+        let column = if cfg!(target_family = "wasm") {
+            egui::vec2(avail.x.min(408.0), avail.y.min(470.0))
+        } else {
+            egui::vec2(408.0, 470.0)
+        };
+        ui.allocate_ui_with_layout(column, egui::Layout::top_down(egui::Align::Center), |ui| {
+            ui.painter().rect_filled(
+                ui.max_rect(),
+                egui::CornerRadius::ZERO,
+                get_scheme().bg_primary,
+            );
+            ui.add_space(87.);
+            ui.add(
+                egui::Image::new(SizedTexture::new(logo_full, egui::vec2(113., 24.)))
+                    .tint(get_scheme().text_primary),
+            );
+            ui.add_space(10.0);
+            ui.label(
+                RichText::new(format!("VERSION {}", VERSION)).color(get_scheme().text_secondary),
+            );
+            #[cfg(target_family = "wasm")]
+            {
+                ui.add_space(24.0);
+                ui.label(
+                    RichText::new("Open with ?db=host:port, or connect below.")
+                        .color(get_scheme().text_secondary)
+                        .size(12.),
+                );
+                ui.add_space(28.0);
+            }
+            #[cfg(not(target_family = "wasm"))]
+            ui.add_space(75.0);
+            #[cfg(not(any(target_os = "windows", target_family = "wasm")))]
+            {
+                if ui
+                    .add(startup_button("Open Existing Project", folder))
+                    .clicked()
+                    && let Some(file) = rfd::FileDialog::new()
+                        .add_filter("python", &["py"])
+                        .add_filter("s10", &["toml"])
+                        .pick_file()
+                {
+                    self.open_file(file);
+                }
+                ui.add_space(10.0);
+            }
+            if ui
+                .add(startup_button("Connect to IP Address", icon_ip_addr))
+                .clicked()
+            {
+                *self.modal_state = ModalState::ConnectToIp {
+                    addr: self.default_connect_addr(),
+                    error: None,
+                    connecting: false,
+                }
+            }
+        });
+    }
+
+    fn recent_pane(&mut self, ui: &mut egui::Ui, arrow: egui::TextureId) {
+        egui::ScrollArea::vertical().show(ui, |ui| {
+            for item in self.recent_files.recent_files.clone().into_values().rev() {
+                if ui.add(recent_item_button(item.clone(), arrow)).clicked() {
+                    match item {
+                        #[cfg(not(target_family = "wasm"))]
+                        RecentItem::File(path) => {
+                            self.open_file(path.clone());
+                        }
+                        #[cfg(target_family = "wasm")]
+                        RecentItem::File(_) => {}
+                        RecentItem::Addr(addr) => {
+                            self.start_connect(addr);
+                        }
+                    }
+                }
+            }
+        });
     }
 }
 
@@ -309,86 +570,79 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
             .contexts
             .add_image(EguiTextureHandle::Weak(state.images.icon_ip_addr.id()));
 
-        super::utils::show_central_panel(
-            egui::CentralPanel::default().frame(egui::Frame::NONE),
-            ctx,
-            |ui| {
-                ui.allocate_ui_with_layout(
-                    egui::vec2(408.0, 470.0),
-                    egui::Layout::top_down(egui::Align::Center),
-                    |ui| {
+        #[cfg(not(target_family = "wasm"))]
+        {
+            super::utils::show_central_panel(
+                egui::CentralPanel::default().frame(egui::Frame::NONE),
+                ctx,
+                |ui| state.left_pane(ui, logo_full, folder, icon_ip_addr),
+            );
+            super::utils::show_panel(
+                egui::Panel::right("right")
+                    .exact_size(322.0)
+                    .frame(egui::Frame::NONE.fill(get_scheme().bg_secondary))
+                    .resizable(false),
+                ctx,
+                |ui| state.recent_pane(ui, arrow),
+            );
+        }
+        #[cfg(target_family = "wasm")]
+        {
+            super::utils::show_central_panel(
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE.fill(get_scheme().bg_secondary)),
+                ctx,
+                |ui| {
+                    let avail = ui.available_rect_before_wrap();
+                    let show_recent = avail.width() >= 762.0;
+                    let size = if show_recent {
+                        egui::vec2(730.0, 470.0)
+                    } else {
+                        egui::vec2(
+                            440.0_f32.min(avail.width() - 24.0).max(280.0),
+                            470.0_f32.min(avail.height() - 24.0).max(320.0),
+                        )
+                    };
+                    let card = egui::Rect::from_center_size(avail.center(), size);
+                    ui.painter().rect_filled(
+                        card,
+                        egui::CornerRadius::same(8),
+                        get_scheme().bg_primary,
+                    );
+                    ui.painter().rect_stroke(
+                        card,
+                        egui::CornerRadius::same(8),
+                        egui::Stroke::new(1.0_f32, get_scheme().text_tertiary),
+                        egui::StrokeKind::Inside,
+                    );
+                    let (left, right) = if show_recent {
+                        let right = egui::Rect::from_min_max(
+                            egui::pos2(card.max.x - 322.0, card.min.y),
+                            card.max,
+                        );
                         ui.painter().rect_filled(
-                            ui.max_rect(),
+                            right,
                             egui::CornerRadius::ZERO,
-                            get_scheme().bg_primary,
+                            get_scheme().bg_secondary,
                         );
-                        ui.add_space(87.);
-                        ui.add(
-                            egui::Image::new(SizedTexture::new(logo_full, egui::vec2(113., 24.)))
-                                .tint(get_scheme().text_primary),
-                        );
-                        ui.add_space(10.0);
-                        ui.label(
-                            RichText::new(format!("VERSION {}", VERSION))
-                                .color(get_scheme().text_secondary),
-                        );
-                        ui.add_space(75.0);
-                        if !cfg!(target_os = "windows") {
-                            if ui
-                                .add(startup_button("Open Existing Project", folder))
-                                .clicked()
-                                && let Some(file) = rfd::FileDialog::new()
-                                    .add_filter("python", &["py"])
-                                    .add_filter("s10", &["toml"])
-                                    .pick_file()
-                            {
-                                state.open_file(file);
-                            }
-                            ui.add_space(10.0);
-                        }
-                        if ui
-                            .add(startup_button("Connect to IP Address", icon_ip_addr))
-                            .clicked()
-                        {
-                            *state.modal_state = ModalState::ConnectToIp {
-                                addr: if cfg!(target_os = "windows") {
-                                    "127.0.0.1:2240"
-                                } else {
-                                    "[::]:2240"
-                                }
-                                .to_string(),
-                                error: None,
-                                connecting: None,
-                            }
-                        }
-                    },
-                )
-            },
-        );
-
-        super::utils::show_panel(
-            egui::Panel::right("right")
-                .exact_size(322.0)
-                .frame(egui::Frame::NONE.fill(get_scheme().bg_secondary))
-                .resizable(false),
-            ctx,
-            |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for item in state.recent_files.recent_files.clone().into_values().rev() {
-                        if ui.add(recent_item_button(item.clone(), arrow)).clicked() {
-                            match item {
-                                RecentItem::File(path) => {
-                                    state.open_file(path.clone());
-                                }
-                                RecentItem::Addr(addr) => {
-                                    state.start_connect(addr);
-                                }
-                            }
-                        }
+                        (
+                            egui::Rect::from_min_max(card.min, egui::pos2(right.min.x, card.max.y)),
+                            Some(right),
+                        )
+                    } else {
+                        (card, None)
+                    };
+                    if let Some(right) = right {
+                        ui.scope_builder(egui::UiBuilder::new().max_rect(right), |ui| {
+                            state.recent_pane(ui, arrow);
+                        });
                     }
-                });
-            },
-        );
+                    ui.scope_builder(egui::UiBuilder::new().max_rect(left), |ui| {
+                        state.left_pane(ui, logo_full, folder, icon_ip_addr);
+                    });
+                },
+            );
+        }
         match state.modal_state.clone() {
             ModalState::None => {}
             ModalState::ConnectToIp {
@@ -480,10 +734,10 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                         *state.modal_state = ModalState::ConnectToIp {
                             addr: addr.clone(),
                             error,
-                            connecting: None,
+                            connecting: false,
                         };
-                        if let Some(ref status) = connecting {
-                            match status.status() {
+                        if connecting {
+                            match state.status.status() {
                                 ConnectionStatus::NoConnection | ConnectionStatus::Connecting => {
                                     ui.add(
                                         egui::Label::new(
@@ -493,10 +747,11 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                                         )
                                         .selectable(false),
                                     );
+                                    ui.ctx().request_repaint();
                                     *state.modal_state = ModalState::ConnectToIp {
                                         addr: addr.clone(),
                                         error: None,
-                                        connecting,
+                                        connecting: true,
                                     };
                                 }
                                 ConnectionStatus::Success => {
@@ -506,7 +761,7 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                                     *state.modal_state = ModalState::ConnectToIp {
                                         addr: addr.clone(),
                                         error: Some(ConnectError::Connection),
-                                        connecting: None,
+                                        connecting: false,
                                     };
                                 }
                             }
@@ -631,6 +886,7 @@ fn recent_item_button(
 
                         let dir = path.parent().unwrap_or_else(|| &path);
                         let mut path_display = format!("{}", dir.display());
+                        #[cfg(not(target_family = "wasm"))]
                         if let Some(dirs) = directories::UserDirs::new()
                             && let Some(home_dir) = dirs.home_dir().to_str()
                         {
@@ -688,6 +944,7 @@ fn recent_item_button(
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn recent_files() -> RecentItems {
     let recent_file_path = dirs().data_dir().join("recent_items.postcard");
     let Ok(contents) = std::fs::read(recent_file_path) else {
@@ -696,6 +953,7 @@ fn recent_files() -> RecentItems {
     postcard::from_bytes(&contents).unwrap_or_default()
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn save_recent_files(paths: &RecentItems) {
     let dirs = dirs();
     let data_dir = dirs.data_dir();

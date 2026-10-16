@@ -3,13 +3,12 @@ use std::{collections::BTreeMap, net::SocketAddr, str::FromStr};
 use crate::plugins::kdl_document::{
     ACTIVE_SCHEMATIC_KEY, CurrentDocument, DocumentCommandFailed, InitialKdlPath,
     LastActiveSchematicContent, LastSyncedActiveKey, LastSyncedAssetsRevision,
-    PendingActiveSchematic, SchematicDocumentAsset, fetch_schematic_index, plan_db_save,
-    schematic_name_from_key, schematic_save_key_from_name, upload_db_save_plan,
+    PendingActiveSchematic, SchematicDocumentAsset, active_write_key, fetch_schematic_index,
+    plan_db_save, schematic_name_from_key, schematic_save_key_from_name, upload_db_save_plan,
     upload_overlay_bytes,
 };
-use crate::skybox_generation::{
-    LocallyPushedSkyboxActive, SkyboxDocumentSyncMut, active_write_key,
-};
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+use crate::skybox_generation::{LocallyPushedSkyboxActive, SkyboxDocumentSyncMut};
 use bevy::{
     app::Update,
     asset::{AssetServer, Assets},
@@ -26,6 +25,7 @@ use bevy::{
     tasks::{IoTaskPool, Task, futures_lite::future},
     window::PrimaryWindow,
 };
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 use bevy_ai_skybox::prelude::{
     GenerateSkybox, SetActiveSkybox, SkyboxCache, SkyboxGenerationSettings, SkyboxGenerationUi,
     SkyboxResolution, SkyboxStyle,
@@ -35,6 +35,8 @@ use bevy_geo_frames::GeoContext;
 use egui_tiles::{Tile, TileId};
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller::types::Timestamp;
+#[cfg(target_family = "wasm")]
+use impeller_bevy::WsConnect;
 use impeller_bevy::{
     ComponentMetadataRegistry, ComponentPathRegistry, ConnectionAddr, EntityMap, PacketTx,
 };
@@ -1093,6 +1095,37 @@ fn set_time_range_behavior() -> PaletteItem {
     })
 }
 
+#[cfg(target_family = "wasm")]
+fn connect_database() -> PaletteItem {
+    PaletteItem::new(
+        "Connect to Database...",
+        SIMULATION_LABEL,
+        |_: In<String>| {
+            PalettePage::new(vec![PaletteItem::new(
+                LabelSource::placeholder("127.0.0.1:2240"),
+                "",
+                |In(addr): In<String>, mut connect: MessageWriter<WsConnect>| {
+                    let trimmed = addr.trim();
+                    let parsed = if trimmed.is_empty() {
+                        "127.0.0.1:2240".parse()
+                    } else {
+                        trimmed.parse()
+                    };
+                    match parsed {
+                        Ok(addr) => {
+                            connect.write(WsConnect(addr));
+                            PaletteEvent::Exit
+                        }
+                        Err(err) => PaletteEvent::Error(format!("Invalid address: {err}")),
+                    }
+                },
+            )])
+            .prompt("Database address (host:port)")
+            .into_event()
+        },
+    )
+}
+
 fn goto_tick() -> PaletteItem {
     PaletteItem::new("Goto Tick...", TIME_LABEL, |_: In<String>| {
         PalettePage::new(vec![
@@ -1277,7 +1310,8 @@ fn queue_save_layout_now(
         bytes.len()
     );
     in_flight.task = Some(
-        IoTaskPool::get().spawn(async move { upload_overlay_bytes(&overlay_key, bytes, addr) }),
+        IoTaskPool::get()
+            .spawn(async move { upload_overlay_bytes(&overlay_key, bytes, addr).await }),
     );
 }
 
@@ -1387,7 +1421,9 @@ fn save_schematic_name_prompt() -> PaletteItem {
 fn queue_save_schematic_db_now(
     schematic: Res<CurrentSchematic>,
     window_schematics: Res<CurrentWindowSchematics>,
-    skybox_cache: Option<Res<SkyboxCache>>,
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))] skybox_cache: Option<
+        Res<SkyboxCache>,
+    >,
     connection_addr: Option<Res<ConnectionAddr>>,
     config: Res<DbConfig>,
     mut pending_key: ResMut<PendingSchematicSaveKey>,
@@ -1423,7 +1459,10 @@ fn queue_save_schematic_db_now(
         return;
     };
 
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
     let root = root_schematic_for_save(&schematic, skybox_cache.as_deref());
+    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+    let root = schematic.0.clone();
     let windows = window_document_saves(&window_schematics);
     // A rejected plan (e.g. "Save As" name colliding with a window's key) keeps
     // the pending name so a retry re-prompts with the same target.
@@ -1454,7 +1493,7 @@ fn queue_save_schematic_db_now(
     // only after every `PUT` is acknowledged, so the pointer never claims a save
     // that did not land.
     save_in_flight.task =
-        Some(IoTaskPool::get().spawn(async move { upload_db_save_plan(&plan, Some(addr)) }));
+        Some(IoTaskPool::get().spawn(async move { upload_db_save_plan(&plan, Some(addr)).await }));
 }
 
 /// Applies the outcome of an in-flight DB-native save: on success, record the
@@ -1468,7 +1507,9 @@ fn poll_schematic_save(
     mut last_synced: ResMut<LastSyncedActiveKey>,
     mut last_synced_revision: Option<ResMut<LastSyncedAssetsRevision>>,
     mut last_content: Option<ResMut<LastActiveSchematicContent>>,
-    mut locally_pushed: ResMut<crate::skybox_generation::LocallyPushedSkyboxActive>,
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))] mut locally_pushed: ResMut<
+        crate::skybox_generation::LocallyPushedSkyboxActive,
+    >,
     mut initial_kdl: ResMut<InitialKdlPath>,
     mut failed: MessageWriter<DocumentCommandFailed>,
 ) {
@@ -1537,6 +1578,7 @@ fn poll_schematic_save(
                 // locally pushed so the DB skybox mirror treats it as our own
                 // change (authoritative until the config echo lands) rather than
                 // external drift to re-assert the previous skybox.
+                #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
                 locally_pushed.mark(saved_skybox.as_deref());
                 tx.send_msg(SetDbConfig {
                     metadata: [
@@ -1608,10 +1650,25 @@ fn refresh_schematic_index(
         return;
     }
     cache.addr = Some(addr);
-    cache.task = Some(IoTaskPool::get().spawn(async move { fetch_schematic_index(Some(addr)) }));
+    cache.task =
+        Some(IoTaskPool::get().spawn(async move { fetch_schematic_index(Some(addr)).await }));
 }
 
 pub fn clear_schematic() -> PaletteItem {
+    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+    {
+        return PaletteItem::new(
+            "Clear Schematic",
+            SCHEMATIC_LABEL,
+            |_: In<String>, mut params: LoadSchematicParams| {
+                params.clear_initial_kdl_pin();
+                params.current_document.clear();
+                params.load_schematic(&impeller_wkt::Schematic::default(), None, None);
+                PaletteEvent::Exit
+            },
+        );
+    }
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
     PaletteItem::new(
         "Clear Schematic",
         SCHEMATIC_LABEL,
@@ -1732,6 +1789,7 @@ fn open_schematic_item(key: String) -> PaletteItem {
     )
 }
 
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 fn root_schematic_for_save(
     schematic: &CurrentSchematic,
     skybox_cache: Option<&SkyboxCache>,
@@ -1824,6 +1882,7 @@ pub fn set_color_scheme_mode() -> PaletteItem {
     })
 }
 
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 fn clear_skybox() -> PaletteItem {
     PaletteItem::new(
         "Clear Skybox",
@@ -1864,6 +1923,7 @@ fn clear_skybox() -> PaletteItem {
     )
 }
 
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 fn activate_skybox_item(label: String, name: String) -> PaletteItem {
     PaletteItem::new(
         label,
@@ -1899,6 +1959,7 @@ fn activate_skybox_item(label: String, name: String) -> PaletteItem {
     )
 }
 
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 fn revert_previous_skybox_item(name: String) -> PaletteItem {
     PaletteItem::new(
         format!("Revert to {name}"),
@@ -1911,6 +1972,13 @@ fn revert_previous_skybox_item(name: String) -> PaletteItem {
 }
 
 fn skybox_menu() -> PaletteItem {
+    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+    {
+        return PaletteItem::new("Skybox...", SKYBOX_LABEL, |_: In<String>| {
+            PaletteEvent::Error("Skybox is not available in the wasm build".into())
+        });
+    }
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
     PaletteItem::new(
         "Skybox...",
         SKYBOX_LABEL,
@@ -1953,6 +2021,7 @@ fn skybox_menu() -> PaletteItem {
     )
 }
 
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 fn generate_skybox_from_prompt() -> PaletteItem {
     PaletteItem::new(
         LabelSource::placeholder("Describe a new skybox..."),
@@ -1976,6 +2045,7 @@ fn generate_skybox_from_prompt() -> PaletteItem {
     .default()
 }
 
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 fn skybox_style_items(prompt: String) -> Vec<PaletteItem> {
     [
         ("M3 Photoreal (default)", SkyboxStyle::M3Photoreal),
@@ -1995,6 +2065,7 @@ fn skybox_style_items(prompt: String) -> Vec<PaletteItem> {
     .collect()
 }
 
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 fn skybox_resolution_items(prompt: String, style: SkyboxStyle) -> Vec<PaletteItem> {
     // Default (4K) first so confirming with Enter without moving the selection
     // picks the documented default, matching the style page convention.
@@ -2434,6 +2505,8 @@ impl Default for PalettePage {
             ),
             #[cfg(not(target_family = "wasm"))]
             dump_gpu_allocations_item(),
+            #[cfg(target_family = "wasm")]
+            connect_database(),
             reset_cameras(),
             PaletteItem::new(
                 "Toggle Recording",
@@ -2484,11 +2557,13 @@ impl Default for PalettePage {
             set_color_scheme_mode(),
             set_color_scheme(),
             PaletteItem::new("Documentation", HELP_LABEL, |_: In<String>| {
+                #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
                 let _ = opener::open("https://docs.elodin.systems");
                 PaletteEvent::Exit
             })
             .icon(PaletteIcon::Link),
             PaletteItem::new("Release Notes", HELP_LABEL, |_: In<String>| {
+                #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
                 let _ = opener::open("https://docs.elodin.systems/updates/changelog");
                 PaletteEvent::Exit
             })

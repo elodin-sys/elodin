@@ -13,7 +13,7 @@ use impeller_bevy::{
 use impeller_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated, SimulationTimeStep};
 use std::convert::TryFrom;
 use std::time::Duration;
-use std::time::Instant;
+use web_time::Instant;
 
 use crate::{
     TimeRangeBehavior,
