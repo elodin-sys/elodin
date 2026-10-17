@@ -619,6 +619,7 @@
             "g": 0.686274528503418,
             "r": 0.2980392277240753
           },
+          "fill": true,
           "size": 32.0,
           "source": {
             "Builtin": "flight_takeoff"
@@ -668,6 +669,7 @@
             "g": 0.26274511218070984,
             "r": 0.95686274766922
           },
+          "fill": true,
           "size": 32.0,
           "source": {
             "Builtin": "adjust"

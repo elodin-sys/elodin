@@ -2058,6 +2058,7 @@ fn parse_object_3d_icon(node: &KdlNode, src: &str) -> Result<Object3DIcon, KdlSc
         color,
         size,
         visibility_range,
+        fill: bool_prop(node, "fill").unwrap_or(true),
     })
 }
 
@@ -3789,6 +3790,32 @@ object_3d frame="NED" orientation=absolute "ball.world_pos" {
         } else {
             panic!("Expected object_3d");
         }
+    }
+
+    #[test]
+    fn test_roundtrip_object_3d_icon_fill() {
+        let original = r#"
+object_3d "ball.world_pos" {
+    sphere radius=0.2
+    icon builtin="radio_button_unchecked" fill=#false
+}
+object_3d "ball.world_pos" {
+    sphere radius=0.2
+    icon builtin="circle"
+}
+"#;
+        let parsed = parse_schematic(original).unwrap();
+        let serialized = crate::ser::serialize_schematic(&parsed);
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let fills: Vec<_> = reparsed
+            .elems
+            .iter()
+            .map(|elem| match elem {
+                SchematicElem::Object3d(obj) => obj.icon.as_ref().expect("icon").fill,
+                _ => panic!("Expected object_3d"),
+            })
+            .collect();
+        assert_eq!(fills, [false, true]);
     }
 
     #[test]
