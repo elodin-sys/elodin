@@ -140,6 +140,15 @@ fn render_no_sample_at_playhead(ui: &mut egui::Ui, metadata: &ComponentMetadata)
     });
 }
 
+/// A card's label: the element's name, else its index (none for a scalar).
+fn element_label(element_name: Option<&str>, dim_i: &[usize]) -> String {
+    match element_name {
+        Some(name) => name.to_string(),
+        None if dim_i.is_empty() => String::new(),
+        None => format!("{dim_i:?}"),
+    }
+}
+
 fn render_component_value_cards(
     ui: &mut egui::Ui,
     metadata: &ComponentMetadata,
@@ -156,9 +165,7 @@ fn render_component_value_cards(
         .indexed_iter_mut()
         .zip(element_names)
         .map(|((dim_i, value), element_name)| {
-            let label = element_name
-                .map(|name| name.to_string())
-                .unwrap_or_else(|| format!("{dim_i:?}"));
+            let label = element_label(element_name, dim_i);
 
             let value = match value {
                 impeller_bevy::ElementValueMut::U8(v) => v.to_string(),
@@ -228,4 +235,16 @@ pub fn render_value_cards(ui: &mut egui::Ui, cards: &[(String, String)]) {
             });
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::element_label;
+
+    #[test]
+    fn a_scalar_has_no_index_label() {
+        assert_eq!(element_label(None, &[]), "");
+        assert_eq!(element_label(None, &[2]), "[2]");
+        assert_eq!(element_label(Some("x"), &[0]), "x");
+    }
 }

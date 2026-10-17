@@ -668,6 +668,7 @@ fn icon_expr(icon: &Object3DIcon) -> PyExpr {
             "visibility",
             icon.visibility_range.as_ref().map(vis_range_expr),
         )
+        .kw_opt("fill", (!icon.fill).then(|| py_bool(false)))
 }
 
 fn vis_range_expr(range: &VisRange) -> PyExpr {

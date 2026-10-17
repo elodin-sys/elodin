@@ -1449,6 +1449,10 @@ viewport pos="rocket.world_pos.ecef_to_ned().translate(-2, 0, 0).ned_to_ecef()"
 query_plot query="rocket.world_pos.ecef_to_ned()"
 ```
 
+### Math Formulas
+
+`sqrt()`, `abs()`, `sign()`, `degrees()`, `arccos()`, `clip(min, max)`, `atan2(x)`, and `norm()` evaluate in viewport, object_3d, and vector_arrow EQL as they do in graphs, e.g. `rocket.world_pos.translate(0, 0, rocket.drag.norm())`. Integer components promote to floats in arithmetic and indexing.
+
 ### Chaining Formulas
 
 All rotation and translation formulas can be chained together to create complex camera behaviors:

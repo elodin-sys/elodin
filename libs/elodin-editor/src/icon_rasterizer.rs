@@ -5,8 +5,8 @@ use std::collections::HashMap;
 
 #[derive(Resource, Default)]
 pub struct IconTextureCache {
-    cache: HashMap<(String, u32), Handle<Image>>,
-    codepoint_cache: HashMap<(char, u32), Handle<Image>>,
+    cache: HashMap<(String, u32, bool), Handle<Image>>,
+    codepoint_cache: HashMap<(char, u32, bool), Handle<Image>>,
 }
 
 impl IconTextureCache {
@@ -14,9 +14,10 @@ impl IconTextureCache {
         &mut self,
         icon_name: &str,
         px_size: u32,
+        fill: bool,
         images: &mut Assets<Image>,
     ) -> Handle<Image> {
-        let key = (icon_name.to_string(), px_size);
+        let key = (icon_name.to_string(), px_size, fill);
         if let Some(handle) = self.cache.get(&key) {
             return handle.clone();
         }
@@ -26,12 +27,12 @@ impl IconTextureCache {
                 "Unknown built-in icon '{}', using fallback circle",
                 icon_name
             );
-            let handle = self.get_or_insert_codepoint('\u{ef4a}', px_size, images);
+            let handle = self.get_or_insert_codepoint('\u{ef4a}', px_size, fill, images);
             self.cache.insert(key, handle.clone());
             return handle;
         };
 
-        let handle = self.get_or_insert_codepoint(codepoint, px_size, images);
+        let handle = self.get_or_insert_codepoint(codepoint, px_size, fill, images);
         self.cache.insert(key, handle.clone());
         handle
     }
@@ -40,27 +41,34 @@ impl IconTextureCache {
         &mut self,
         codepoint: char,
         px_size: u32,
+        fill: bool,
         images: &mut Assets<Image>,
     ) -> Handle<Image> {
-        let key = (codepoint, px_size);
+        let key = (codepoint, px_size, fill);
         if let Some(handle) = self.codepoint_cache.get(&key) {
             return handle.clone();
         }
-        let image = rasterize_material_icon(codepoint, px_size);
+        let image = rasterize_material_icon(codepoint, px_size, fill);
         let handle = images.add(image);
         self.codepoint_cache.insert(key, handle.clone());
         handle
     }
 }
 
-/// Same filled Material Symbols variant that `egui_material_icons` renders in
-/// the UI (its `FONT_DATA` became private in 0.6, so we vendor the TTF).
-const MATERIAL_ICONS_FONT_DATA: &[u8] =
+/// The filled and outline Material Symbols variants `egui_material_icons`
+/// renders in the UI (its font data became private in 0.6, so we vendor the TTFs).
+const MATERIAL_ICONS_FILLED_FONT_DATA: &[u8] =
     include_bytes!("assets/fonts/MaterialSymbolsRounded_Filled-Regular.ttf");
+const MATERIAL_ICONS_OUTLINE_FONT_DATA: &[u8] =
+    include_bytes!("assets/fonts/MaterialSymbolsRounded-Regular.ttf");
 
-pub fn rasterize_material_icon(codepoint: char, px_size: u32) -> Image {
-    let font = FontRef::try_from_slice(MATERIAL_ICONS_FONT_DATA)
-        .expect("Material Icons font data should be valid");
+pub fn rasterize_material_icon(codepoint: char, px_size: u32, fill: bool) -> Image {
+    let data = if fill {
+        MATERIAL_ICONS_FILLED_FONT_DATA
+    } else {
+        MATERIAL_ICONS_OUTLINE_FONT_DATA
+    };
+    let font = FontRef::try_from_slice(data).expect("Material Icons font data should be valid");
 
     let glyph_id = font.glyph_id(codepoint);
     if glyph_id == GlyphId(0) {
@@ -171,4 +179,29 @@ fn generate_fallback_icon(px_size: u32) -> Image {
         TextureFormat::Rgba8UnormSrgb,
         default(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::rasterize_material_icon;
+
+    fn center_alpha(name: &str, fill: bool) -> u8 {
+        let codepoint = impeller_wkt::builtin_icon_char(name).expect(name);
+        let image = rasterize_material_icon(codepoint, 64, fill);
+        let size = image.width();
+        let data = image.data.as_ref().expect("pixels");
+        data[((size / 2 * size + size / 2) * 4 + 3) as usize]
+    }
+
+    #[test]
+    fn unfilled_outline_icons_are_hollow() {
+        assert!(center_alpha("radio_button_unchecked", true) > 200);
+        for name in [
+            "radio_button_unchecked",
+            "check_box_outline_blank",
+            "crop_square",
+        ] {
+            assert!(center_alpha(name, false) < 20, "{name}");
+        }
+    }
 }

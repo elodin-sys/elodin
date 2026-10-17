@@ -133,6 +133,7 @@ mod stream_filter {
         #[default]
         FullResolution,
         /// Limit the headless render-server stream to its fastest camera.
+        #[cfg_attr(not(target_family = "unix"), allow(dead_code))]
         CameraMaxFps,
     }
 
@@ -444,6 +445,8 @@ impl Plugin for EmbeddedAssetPlugin {
         embedded_asset!(app, "assets/icons/entity.png");
         // Font for ViewCube labels
         embedded_asset!(app, "assets/fonts/Roboto-Bold.ttf");
+        // Font for vector-arrow labels, the UI's own
+        embedded_lfs_asset!(app, "assets/fonts/IBMPlexMono-Medium_ss04.ttf");
         // Axes Cube 3D model
         embedded_lfs_asset!(app, "assets/axes-cube.glb");
         #[cfg(not(target_family = "wasm"))]
@@ -694,7 +697,11 @@ impl Plugin for EditorPlugin {
             )
             .add_systems(
                 Update,
-                (ui::gauges::compile_gauge_exprs, retry_viewport_eql_compile)
+                (
+                    ui::gauges::compile_gauge_exprs,
+                    retry_viewport_eql_compile,
+                    ui::schematic::retry_pending_graphs,
+                )
                     .after(update_eql_context),
             )
             .add_systems(Startup, spawn_ui_cam)
@@ -1768,7 +1775,7 @@ fn hard_clear_series_store(
     plot_sync: &mut crate::ui::plot::data::PlotSyncState,
     visible_prefetch: &mut crate::ui::plot::data::VisiblePrefetchState,
 ) {
-    *telemetry_cache = impeller_bevy::TelemetryCache::default();
+    telemetry_cache.reset();
     *backfill_state = impeller_bevy::BackfillState::default();
     *series_load = impeller_bevy::SeriesStoreLoadState::default();
     *plot_sync = crate::ui::plot::data::PlotSyncState::default();
@@ -2843,6 +2850,8 @@ pub fn set_eql_context_range(fetch_range: Res<FetchTimeRange>, mut eql: ResMut<E
     {
         return;
     }
+    // Change detection tracks components; the range moves with every live frame.
+    let eql = eql.bypass_change_detection();
     eql.0.earliest_timestamp = fetch_range.0.start;
     eql.0.last_timestamp = fetch_range.0.end;
 }

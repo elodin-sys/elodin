@@ -1204,6 +1204,10 @@ fn serialize_object_3d_icon(icon: &Object3DIcon) -> KdlNode {
             .push(KdlEntry::new_prop("size", icon.size as f64));
     }
 
+    if !icon.fill {
+        node.entries_mut().push(KdlEntry::new_prop("fill", false));
+    }
+
     if let Some(vr) = &icon.visibility_range {
         serialize_visibility_range_to_node(&mut node, vr);
     }

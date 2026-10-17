@@ -186,7 +186,7 @@ viewport hdr=#true {
   - `plane`: `width`/`depth` (default `size` if set, else 10.0); optional `size` shorthand; `color` (default white). Horizontal ground rectangle in Bevy axes (XZ, normal +Y).
   - `ellipsoid`: `color` (default white), `show_grid` (default `#false`). Renders in regular viewports only — the cinematic viewport hides ellipsoids (like sensor cameras without `show_ellipsoids`).
     - Physical measure
-      - `scale`: runtime EQL string that must evaluate to at least 3 values in meters. It can be a literal tuple, a vector component, indexed component values, scalar-vector math, or values from multiple components.
+      - `scale`: runtime EQL string that must evaluate to at least 3 values in meters. It can be a literal tuple, a vector component, indexed component values, scalar-vector math, or values from multiple components. The values are extents along the object's x, y, z: with `orientation=absolute`, the schematic frame's axes (ENU: east, north, up).
         - Examples:
           ```kdl
           ellipsoid scale="(1, 1, 1)"
@@ -221,13 +221,14 @@ viewport hdr=#true {
   Non-GLB mesh nodes support an optional `emissivity=<value>` property (0.0–1.0) to make the material glow (e.g., `sphere radius=0.2 emissivity=0.25 { color yellow }`).
 
   Mesh nodes and `icon` nodes both support an optional `visibility_range` child node that controls at what camera distances the element is rendered:
-  - `visibility_range`: child node with `min` (default 0) and `max` (default infinity) properties. The element is visible when the camera distance is between `min` and `max`. Both mesh and icon are visible at all distances by default; `visibility_range` is purely opt-in.
+  - `visibility_range`: child node with `min` (default 0) and `max` (default infinity) properties. The element is visible when the camera distance is between `min` and `max`, judged for each viewport camera, with or without an icon. Both mesh and icon are visible at all distances by default; `visibility_range` is purely opt-in.
   - `fade_distance` (icon only, default 0): world-unit distance over which the icon fades in at the `min` boundary and fades out at the `max` boundary. For example, `min=50 fade_distance=50` means the icon starts appearing at distance 50 (alpha=0) and reaches full opacity at distance 100. Mesh nodes use hard visibility cutoffs at their `min`/`max` boundaries.
   - Ranges can overlap (both mesh and icon visible simultaneously) or have gaps.
 - `icon` child (optional): Displays a fixed-size billboard icon at the object's position. Each viewport camera independently evaluates whether to show the icon based on its own distance. The icon always faces the camera and maintains a constant screen pixel size.
   - Source (exactly one required):
-    - `builtin`: name of a [Material Icons](https://fonts.google.com/icons?icon.set=Material+Icons) glyph (snake_case). Supported names include: `satellite_alt`, `satellite`, `rocket_launch`, `rocket`, `flight`, `flight_takeoff`, `public`, `language`, `circle`, `fiber_manual_record`, `star`, `star_outline`, `location_on`, `place`, `adjust`, `gps_fixed`, `my_location`, `explore`, `navigation`, `near_me`, `diamond`, `hexagon`, `change_history`, `lens`, `panorama_fish_eye`, `radio_button_unchecked`, `brightness_1`, `flare`, `wb_sunny`, `bolt`.
+    - `builtin`: name of a [Material Icons](https://fonts.google.com/icons?icon.set=Material+Icons) glyph (snake_case). Supported names include: `satellite_alt`, `satellite`, `rocket_launch`, `rocket`, `flight`, `flight_takeoff`, `public`, `language`, `circle`, `fiber_manual_record`, `star`, `star_outline`, `location_on`, `place`, `adjust`, `gps_fixed`, `my_location`, `explore`, `navigation`, `near_me`, `diamond`, `hexagon`, `change_history`, `lens`, `panorama_fish_eye`, `radio_button_unchecked`, `check_box_outline_blank`, `crop_square`, `brightness_1`, `flare`, `wb_sunny`, `bolt`.
     - `path`: path to a custom PNG image file (loaded from the assets folder). Persisted into the DB like GLB paths when recording; `builtin` icons are not copied.
+  - `fill` (default `#true`): `builtin` icons draw the filled Material Symbols style; `fill=#false` draws the outline style, e.g. a hollow ring for `radio_button_unchecked`.
   - `color` child node: tint color for the icon using the standard `color r g b [a]` format or named colors (default white). See Colors in the glossary above.
   - `visibility_range` child node: `min`, `max`, and `fade_distance` in world units (see above).
   - `size`: desired screen pixel size of the icon (default 32).
@@ -521,6 +522,7 @@ animate = "animate"
 icon = "icon"
      (builtin=string | path=string)
      [size=float]
+     [fill=bool]
      { [visibility_range] [color] }
 
 thruster = "thruster"

@@ -791,8 +791,9 @@ impl TileState {
 
         container.add_child(tile_id);
 
-        if active && let Container::Tabs(tabs) = container {
-            tabs.set_active(tile_id);
+        if active {
+            // Selects the tile in every Tabs container above it, not only its parent.
+            self.tree.make_active(|id, _| id == tile_id);
         }
 
         Some(tile_id)
@@ -1783,6 +1784,11 @@ impl ViewportPane {
             crate::object_3d::EqlCompileCtx::new(geo_context).with_frame(viewport.frame);
         let compile = |eql: &str, label: &str| match eql_ctx.parse_str(eql) {
             Ok(expr) => crate::object_3d::compile_eql_expr_with_ctx(expr, &compile_ctx).ok(),
+            // `retry_viewport_eql_compile` compiles it once the component registers.
+            Err(eql::Error::ComponentNotFound(component)) => {
+                bevy::log::info!("viewport {label} expression '{eql}' waiting for {component}");
+                None
+            }
             Err(e) => {
                 bevy::log::error!("Failed to parse viewport {label} expression '{eql}': {e}");
                 None

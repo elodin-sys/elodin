@@ -131,9 +131,28 @@ pub struct TelemetryCache {
     components: HashMap<ComponentId, BTreeMap<Timestamp, ComponentValue>>,
     /// Merged half-open coverage intervals `[start, end)` per component (micros).
     coverage: HashMap<ComponentId, Vec<(i64, i64)>>,
-    /// Changes only when an insertion is not an append, or a series is recreated.
-    append_epochs: HashMap<ComponentId, u64>,
+    /// Per component, bumped by every change a live consumer appending at the
+    /// tip has not seen: backfill, live samples older than the newest, removal.
+    revisions: HashMap<ComponentId, SeriesRevisions>,
+    /// Bumped by [`Self::reset`], so revisions taken before it never match.
+    epoch: u64,
     generation: u64,
+}
+
+/// A component's series state as of a [`TelemetryCache::revision`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SeriesRevision {
+    epoch: u64,
+    revision: u64,
+}
+
+/// Recent revisions keep the oldest timestamp they changed.
+const SERIES_REVISION_LOG_LEN: usize = 256;
+
+#[derive(Default)]
+struct SeriesRevisions {
+    current: u64,
+    changes: VecDeque<(u64, Timestamp)>,
 }
 
 /// Alias used by the telemetry-cache / SeriesStore work.
@@ -149,37 +168,107 @@ pub struct SeriesStoreLoadState {
 }
 
 impl TelemetryCache {
-    pub fn generation(&self) -> u64 {
-        self.generation
+    /// Drops every sample and series.
+    pub fn reset(&mut self) {
+        *self = Self {
+            epoch: self.epoch + 1,
+            ..Default::default()
+        };
     }
 
-    /// Equal epochs guarantee that an existing series has only grown at its tip.
-    /// Duplicate timestamps keep their original value and do not change the epoch.
-    pub fn append_epoch(&self, component_id: &ComponentId) -> Option<u64> {
-        self.append_epochs.get(component_id).copied()
+    pub fn generation(&self) -> u64 {
+        self.generation
     }
 
     pub fn total_sample_count(&self) -> u64 {
         self.components.values().map(|s| s.len() as u64).sum()
     }
 
+    /// A historical (backfill) sample: it changes the component's revision.
     pub fn insert(&mut self, component_id: ComponentId, ts: Timestamp, value: ComponentValue) {
+        if self.insert_value(component_id, ts, value) {
+            self.bump_revision(component_id, ts);
+        }
+    }
+
+    /// A live sample: only one older than the series' newest changes the revision.
+    pub fn insert_live(&mut self, component_id: ComponentId, ts: Timestamp, value: ComponentValue) {
+        let behind_tip = self
+            .components
+            .get(&component_id)
+            .and_then(|series| series.last_key_value())
+            .is_some_and(|(&newest, _)| ts < newest);
+        if self.insert_value(component_id, ts, value) && behind_tip {
+            self.bump_revision(component_id, ts);
+        }
+    }
+
+    fn insert_value(
+        &mut self,
+        component_id: ComponentId,
+        ts: Timestamp,
+        value: ComponentValue,
+    ) -> bool {
         let series = self.components.entry(component_id).or_default();
-        let is_append = series.last_key_value().is_none_or(|(&last, _)| ts > last);
         // Keep the first value seen for a timestamp. In mixed backfill+live
         // streaming, the same timestamp can be replayed; replacing it can make
         // rendered poses jump between two states for the same tick.
         if let std::collections::btree_map::Entry::Vacant(entry) = series.entry(ts) {
             entry.insert(value);
             self.generation = self.generation.wrapping_add(1);
-            let epoch = self
-                .append_epochs
-                .entry(component_id)
-                .or_insert(self.generation);
-            if !is_append {
-                *epoch = self.generation;
-            }
+            true
+        } else {
+            false
         }
+    }
+
+    fn bump_revision(&mut self, component_id: ComponentId, from: Timestamp) {
+        let revisions = self.revisions.entry(component_id).or_default();
+        revisions.current += 1;
+        revisions.changes.push_back((revisions.current, from));
+        if revisions.changes.len() > SERIES_REVISION_LOG_LEN {
+            revisions.changes.pop_front();
+        }
+    }
+
+    /// Unchanged while the component's series has only grown at its tip by
+    /// [`Self::insert_live`].
+    pub fn revision(&self, component_id: &ComponentId) -> SeriesRevision {
+        SeriesRevision {
+            epoch: self.epoch,
+            revision: self.revisions.get(component_id).map_or(0, |r| r.current),
+        }
+    }
+
+    /// The oldest timestamp changed since `since`; `None` when unchanged,
+    /// `Timestamp(i64::MIN)` when that is no longer known (a reset, a trimmed
+    /// log, a removed series).
+    pub fn changed_since(
+        &self,
+        component_id: &ComponentId,
+        since: SeriesRevision,
+    ) -> Option<Timestamp> {
+        let now = self.revision(component_id);
+        if now == since {
+            return None;
+        }
+        if since.epoch != self.epoch || since.revision > now.revision {
+            return Some(Timestamp(i64::MIN));
+        }
+        let revisions = self.revisions.get(component_id)?;
+        let logged_from = revisions
+            .changes
+            .front()
+            .map_or(u64::MAX, |(revision, _)| *revision);
+        if logged_from > since.revision + 1 {
+            return Some(Timestamp(i64::MIN));
+        }
+        revisions
+            .changes
+            .iter()
+            .filter(|(revision, _)| *revision > since.revision)
+            .map(|(_, from)| *from)
+            .min()
     }
 
     pub fn get_at_or_before(
@@ -228,11 +317,11 @@ impl TelemetryCache {
 
     /// Drop all samples and coverage for a component (unsubscribe / reclaim RAM).
     pub fn remove_series(&mut self, component_id: &ComponentId) {
-        self.append_epochs.remove(component_id);
         let removed_components = self.components.remove(component_id).is_some();
         let removed_coverage = self.coverage.remove(component_id).is_some();
         if removed_components || removed_coverage {
             self.generation = self.generation.wrapping_add(1);
+            self.bump_revision(*component_id, Timestamp(i64::MIN));
         }
     }
 
@@ -262,11 +351,20 @@ impl TelemetryCache {
         component_id: &ComponentId,
         range: &std::ops::Range<Timestamp>,
     ) -> bool {
+        self.first_uncovered(component_id, range).is_none()
+    }
+
+    /// The start of the first gap in recorded coverage inside `range`.
+    pub fn first_uncovered(
+        &self,
+        component_id: &ComponentId,
+        range: &std::ops::Range<Timestamp>,
+    ) -> Option<Timestamp> {
         if range.end.0 <= range.start.0 {
-            return true;
+            return None;
         }
         let Some(intervals) = self.coverage.get(component_id) else {
-            return false;
+            return Some(range.start);
         };
         let mut cursor = range.start.0;
         let end = range.end.0;
@@ -275,14 +373,14 @@ impl TelemetryCache {
                 continue;
             }
             if a > cursor {
-                return false;
+                return Some(Timestamp(cursor));
             }
             cursor = cursor.max(b);
             if cursor >= end {
-                return true;
+                return None;
             }
         }
-        cursor >= end
+        (cursor < end).then_some(Timestamp(cursor))
     }
 
     /// Sample count in `[range.start, range.end)`.
@@ -423,6 +521,9 @@ struct TableCacheAndWorldSink<'a, 'w, 's> {
     /// When `None`, treat as empty allowlist (cache nothing). When `Some`, only
     /// push samples whose id is in the set.
     allowlist: Option<&'a std::collections::HashSet<ComponentId>>,
+    /// Each cached component's newest sample, queued or stored: the live
+    /// stream resends it with every table until the component updates.
+    tips: &'a mut HashMap<ComponentId, Timestamp>,
     world: &'a mut WorldSink<'w, 's>,
 }
 
@@ -438,7 +539,7 @@ impl Decomponentize for TableCacheAndWorldSink<'_, '_, '_> {
             let allowed = self
                 .allowlist
                 .is_some_and(|set| set.contains(&component_id));
-            if allowed {
+            if allowed && self.tips.insert(component_id, ts) != Some(ts) {
                 let value = ComponentValue::from_view(view);
                 self.pending_cache.push((component_id, ts, value));
             }
@@ -908,12 +1009,20 @@ fn sink_inner(
     let allowlist = world
         .get_resource::<SeriesFetchPriority>()
         .map(|p| p.high.clone());
+    let mut tips: HashMap<ComponentId, Timestamp> =
+        match (&allowlist, world.get_resource::<TelemetryCache>()) {
+            (Some(allowlist), Some(cache)) => allowlist
+                .iter()
+                .filter_map(|id| Some((*id, *cache.series(id)?.last_key_value()?.0)))
+                .collect(),
+            _ => HashMap::new(),
+        };
     loop {
         if !pending_cache_entries.is_empty()
             && let Some(mut cache) = world.get_resource_mut::<TelemetryCache>()
         {
             for (cid, ts, val) in pending_cache_entries.drain(..) {
-                cache.insert(cid, ts, val);
+                cache.insert_live(cid, ts, val);
             }
         }
         if count > 2048 || (count >= 16 && std::time::Instant::now() > sink_deadline) {
@@ -992,6 +1101,15 @@ fn sink_inner(
                 // Create the full path hierarchy so the component appears in UI
                 // under DbComponentsRoot (not just an orphaned leaf entity).
                 let path = ComponentPath::from_name(&metadata.name);
+                // Replace an ID-only placeholder: its leaf hashes the placeholder name,
+                // not the component's ID, so `apply_cached_data` never gave it a value.
+                if let Some(old) = world_sink.path_reg.0.get(&metadata.component_id)
+                    && old.id != path.id
+                    && let Some(entity) = world_sink.entity_map.0.remove(&old.id)
+                {
+                    world_sink.metadata_reg.0.remove(&old.id);
+                    world_sink.commands.entity(entity).despawn();
+                }
                 ensure_component_path_hierarchy(
                     &mut world_sink.entity_map,
                     &mut world_sink.metadata_reg,
@@ -1047,6 +1165,7 @@ fn sink_inner(
                 let mut combined = TableCacheAndWorldSink {
                     pending_cache: &mut pending_cache_entries,
                     allowlist: allowlist.as_ref(),
+                    tips: &mut tips,
                     world: &mut world_sink,
                 };
                 let _ = table.sink(vtable_registry, &mut combined)?;
@@ -1071,7 +1190,7 @@ fn sink_inner(
         && let Some(mut cache) = world.get_resource_mut::<TelemetryCache>()
     {
         for (cid, ts, val) in pending_cache_entries.drain(..) {
-            cache.insert(cid, ts, val);
+            cache.insert_live(cid, ts, val);
         }
     }
     Ok(())
@@ -1376,9 +1495,18 @@ impl Decomponentize for WorldSink<'_, '_> {
         _view: ComponentView<'_>,
         _timestamp: Option<Timestamp>,
     ) -> Result<(), Infallible> {
-        let Some(path) = self.path_reg.get(&component_id).cloned() else {
+        let Some(path) = self.path_reg.get(&component_id) else {
             return Ok(());
         };
+        // The leaf's entity is created with its parents.
+        if path
+            .path
+            .last()
+            .is_some_and(|leaf| self.entity_map.contains_key(&leaf.id))
+        {
+            return Ok(());
+        }
+        let path = path.clone();
 
         ensure_component_path_hierarchy(
             &mut self.entity_map,
@@ -2511,31 +2639,6 @@ mod series_store_allowlist_tests {
             cache.next_sample_after(&id, Timestamp(3000)),
             Some(Timestamp(4000))
         );
-    }
-
-    #[test]
-    fn append_epoch_tracks_backfill_and_recreation_but_not_duplicates() {
-        let mut cache = TelemetryCache::default();
-        let id = ComponentId(42);
-        assert_eq!(cache.append_epoch(&id), None);
-        sample(&mut cache, id, 10);
-        let original = cache.append_epoch(&id);
-        sample(&mut cache, id, 30);
-        sample(&mut cache, id, 10);
-        sample(&mut cache, ComponentId(43), 0);
-        cache.mark_covered(id, Timestamp(10), Timestamp(31));
-        assert_eq!(cache.append_epoch(&id), original);
-
-        sample(&mut cache, id, 20);
-        let backfilled = cache.append_epoch(&id);
-        assert_ne!(backfilled, original);
-        sample(&mut cache, id, 40);
-        assert_eq!(cache.append_epoch(&id), backfilled);
-
-        cache.remove_series(&id);
-        assert_eq!(cache.append_epoch(&id), None);
-        sample(&mut cache, id, 40);
-        assert_ne!(cache.append_epoch(&id), backfilled);
     }
 
     #[test]
