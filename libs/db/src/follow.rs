@@ -235,7 +235,7 @@ async fn apply_source_snapshot(
         .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
 
     for metadata in &metadata_resp.component_metadata {
-        db.with_state_mut(|s| s.set_component_metadata(metadata.clone(), &db.path))?;
+        db.set_component_metadata(metadata.clone())?;
     }
 
     for msg_meta in &metadata_resp.msg_metadata {
@@ -371,7 +371,7 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
             Packet::Msg(m) if m.id == ComponentMetadata::ID => {
                 let metadata: ComponentMetadata = m.parse()?;
                 let cid = metadata.component_id;
-                db.with_state_mut(|s| s.set_component_metadata(metadata, &db.path))?;
+                db.set_component_metadata(metadata)?;
                 db.followed_components.write().unwrap().insert(cid);
                 db.has_followed_components
                     .store(true, std::sync::atomic::Ordering::Release);

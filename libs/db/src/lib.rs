@@ -241,7 +241,7 @@ pub(crate) fn copy_dir_native(src: &Path, dst: &Path) -> Result<(), Error> {
 
 pub struct DB {
     pub vtable_gen: AtomicCell<u64>,
-    /// Bumped on every `SetComponentMetadata`, so real-time streams re-send a
+    /// Bumped on every metadata change, so real-time streams re-send a
     /// component's metadata that changed after they first announced it.
     pub metadata_gen: AtomicCell<u64>,
     state: RwLock<State>,
@@ -412,6 +412,13 @@ impl DB {
     pub fn with_state_mut<O, F: FnOnce(&mut State) -> O>(&self, f: F) -> O {
         let mut state = self.state.write().unwrap();
         f(&mut state)
+    }
+
+    /// Sets a component's metadata and wakes real-time streams to re-send it.
+    pub fn set_component_metadata(&self, metadata: ComponentMetadata) -> Result<(), Error> {
+        self.with_state_mut(|state| state.set_component_metadata(metadata, &self.path))?;
+        self.metadata_gen.fetch_add(1, atomic::Ordering::SeqCst);
+        Ok(())
     }
 
     fn db_config(&self) -> DbConfig {
@@ -2275,8 +2282,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
         }
         Packet::Msg(m) if m.id == SetComponentMetadata::ID => {
             let SetComponentMetadata(metadata) = m.parse::<SetComponentMetadata>()?;
-            db.with_state_mut(|state| state.set_component_metadata(metadata, &db.path))?;
-            db.metadata_gen.fetch_add(1, atomic::Ordering::SeqCst);
+            db.set_component_metadata(metadata)?;
         }
         Packet::Msg(m) if m.id == GetComponentMetadata::ID => {
             let GetComponentMetadata { component_id } = m.parse::<GetComponentMetadata>()?;
