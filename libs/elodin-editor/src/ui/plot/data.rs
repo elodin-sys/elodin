@@ -1408,16 +1408,20 @@ fn apply_plot_sync_plan(
                 max_points,
             );
         }
-        PlotSyncPlan::Keep => {
-            tree.evict_chunks_outside(padded_sync_keep_range(sync_range));
-        }
-        PlotSyncPlan::Extend { suffix, .. } => {
-            if let Some(range) = suffix {
+        PlotSyncPlan::Keep | PlotSyncPlan::Extend { .. } => {
+            // A projected window may extend beyond the last available sample.
+            // Include new appends inside that window, even when the camera stays put.
+            let start = tree
+                .latest_sample_timestamp()
+                .map_or(sync_range.start, |last| {
+                    Timestamp(last.0.saturating_add(1)).max(sync_range.start)
+                });
+            if start < sync_range.end {
                 append_series_element_to_line(
                     series_store,
                     component_id,
                     element_index,
-                    &range,
+                    &(start..sync_range.end),
                     earliest,
                     tree,
                 );
@@ -1428,8 +1432,8 @@ fn apply_plot_sync_plan(
     tree.set_projected_range(sync_range.clone());
 }
 
-/// True when every in-store sample inside the tree's already-covered span is
-/// also in the tree.
+/// True when the projected history can be reused, with new tip samples appended
+/// separately.
 ///
 /// Compared only on `stored ∩ need`, so a newly exposed suffix still goes
 /// through `Extend` instead of a full rebuild. Samples the store later
@@ -1446,7 +1450,11 @@ fn plot_line_matches_store_interior(
         return true;
     };
     let start = stored.start.max(need.start);
-    let end = stored.end.min(need.end);
+    // Missing samples beyond the actual tip can be appended without rebuilding.
+    let end = stored.end.min(need.end).min(
+        tree.latest_sample_timestamp()
+            .map_or(start, |last| Timestamp(last.0.saturating_add(1))),
+    );
     if end.0 <= start.0 {
         return true;
     }
@@ -1454,6 +1462,15 @@ fn plot_line_matches_store_interior(
     let Some(series) = series_store.series(&component_id) else {
         return !tree.has_samples();
     };
+    // The sample held into the window can load after the window itself (a hold anchor).
+    let held = series
+        .range(..=start)
+        .rev()
+        .find(|(_, value)| value.get(element_index).is_some())
+        .map(|(&timestamp, _)| timestamp);
+    if held != tree.last_timestamp_strictly_before(Timestamp(start.0.saturating_add(1))) {
+        return false;
+    }
     series
         .range(inspect)
         .filter(|(_, value)| value.get(element_index).is_some())
@@ -4712,6 +4729,47 @@ mod tests {
     }
 
     #[test]
+    fn plot_sync_appends_inside_a_fixed_window_without_replacing_existing_chunks() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.fixed.live");
+        insert_f64(&mut cache, id, 0, 0.0);
+        let need = Timestamp(0)..Timestamp(10_000);
+        let mut tree = LineTree::<f32>::default();
+        sync_line(&cache, id, &need, &mut tree, &mut HashMap::new());
+        let original = tree.last().unwrap().data.gpu_dirty.clone();
+
+        for timestamp in 1..100 {
+            insert_f64(&mut cache, id, timestamp, timestamp as f64);
+            sync_line(&cache, id, &need, &mut tree, &mut HashMap::new());
+        }
+        assert_eq!(tree.total_points(), 100);
+        assert!(Arc::ptr_eq(&original, &tree.last().unwrap().data.gpu_dirty));
+        assert_eq!(tree.get_nearest(Timestamp(99)).map(|(_, v)| *v), Some(99.0));
+    }
+
+    #[test]
+    fn plot_sync_refreshes_backfilled_predecessors_and_recreated_series() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.predecessor.backfill");
+        insert_f64(&mut cache, id, 0, 0.0);
+        insert_f64(&mut cache, id, 100, 100.0);
+        let need = Timestamp(50)..Timestamp(101);
+        let mut tree = LineTree::<f32>::default();
+        let mut verified = HashMap::new();
+        sync_line(&cache, id, &need, &mut tree, &mut verified);
+
+        insert_f64(&mut cache, id, 40, 40.0);
+        sync_line(&cache, id, &need, &mut tree, &mut verified);
+        assert_eq!(tree.first_timestamp(), Some(Timestamp(40)));
+
+        cache.remove_series(&id);
+        insert_f64(&mut cache, id, 100, -100.0);
+        sync_line(&cache, id, &need, &mut tree, &mut verified);
+        assert_eq!(tree.total_points(), 1);
+        assert_eq!(tree.first_sample(), Some(-100.0));
+    }
+
+    #[test]
     fn apply_plot_sync_plan_rebuilds_holes_inside_a_covered_span() {
         // Partial first project: only the endpoints. The exclusive span already
         // covers the window, so endpoint-only planning would Keep forever.
@@ -4765,6 +4823,7 @@ mod tests {
 
         // Live tip samples reach the line through `pkt_handler`, not this sync.
         live(&mut cache, 10_000, 10.0);
+        tree.append_time_value_pairs(Timestamp(0), &[Timestamp(10_000)], &[10.0]);
         let content = tree.content_gen();
         sync_line(&cache, id, &need, &mut tree, &mut verified);
         assert_eq!(tree.content_gen(), content);

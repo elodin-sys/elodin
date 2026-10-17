@@ -13,6 +13,7 @@
 - **(fix)** Log a 3D object's pose evaluation error once instead of hiding it silently, and drop the `[]` label on scalar component monitors.
 - **(fix)** Raise `TypeError` when a display kernel is passed to an EQL-only `elodin.ui` field instead of writing its repr into the schematic.
 - **(fix)** Live playback keeps pace with the simulation; the editor no longer falls behind as a recording grows.
+- **(fix)** Plots no longer redraw their whole line for each page of a loading recording, or leave a gap at the window's left edge when the sample before it loads late.
 
 ## v0.20
 
