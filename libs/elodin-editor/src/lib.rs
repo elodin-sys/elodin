@@ -2849,6 +2849,8 @@ pub fn set_eql_context_range(fetch_range: Res<FetchTimeRange>, mut eql: ResMut<E
     {
         return;
     }
+    // Change detection tracks components; the range moves with every live frame.
+    let eql = eql.bypass_change_detection();
     eql.0.earliest_timestamp = fetch_range.0.start;
     eql.0.last_timestamp = fetch_range.0.end;
 }
