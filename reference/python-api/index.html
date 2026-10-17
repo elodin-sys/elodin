@@ -813,6 +813,11 @@
                         </li>
                         
                         <li>
+                            <a href="/reference/python-api/#math-formulas">Math Formulas</a>
+                            
+                        </li>
+                        
+                        <li>
                             <a href="/reference/python-api/#chaining-formulas">Chaining Formulas</a>
                             
                         </li>
@@ -2163,7 +2168,9 @@ It must evaluate to at least 3 values in meters. The expression can be a literal
 <span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">         look_at</span><span>=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">rocket.world_pos</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span>
 <span class="giallo-l"></span>
 <span class="giallo-l"><span># </span><span style="color: light-dark(#2AA198, #2AA198);">Plot</span><span style="color: light-dark(#2AA198, #2AA198);"> NED</span><span style="color: light-dark(#2AA198, #2AA198);"> northing</span><span style="color: light-dark(#2AA198, #2AA198);"> from</span><span style="color: light-dark(#2AA198, #2AA198);"> an</span><span style="color: light-dark(#2AA198, #2AA198);"> ECEF</span><span style="color: light-dark(#2AA198, #2AA198);"> world_pos</span><span style="color: light-dark(#2AA198, #2AA198);"> (query_plot)</span></span>
-<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">query_plot</span><span style="color: light-dark(#93A1A1, #93A1A1);"> query</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">rocket.world_pos.ecef_to_ned()</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span></code></pre><h3 id="chaining-formulas">Chaining Formulas</h3>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">query_plot</span><span style="color: light-dark(#93A1A1, #93A1A1);"> query</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">rocket.world_pos.ecef_to_ned()</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span></code></pre><h3 id="math-formulas">Math Formulas</h3>
+<p><code>sqrt()</code>, <code>abs()</code>, <code>sign()</code>, <code>degrees()</code>, <code>arccos()</code>, <code>clip(min, max)</code>, <code>atan2(x)</code>, and <code>norm()</code> evaluate in viewport, object_3d, and vector_arrow EQL as they do in graphs, e.g. <code>rocket.world_pos.translate(0, 0, rocket.drag.norm())</code>. Integer components promote to floats in arithmetic and indexing.</p>
+<h3 id="chaining-formulas">Chaining Formulas</h3>
 <p>All rotation and translation formulas can be chained together to create complex camera behaviors:</p>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="kdl"><span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">//</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Rotate 90° right, then move 2m left in new orientation, then offset up 5m in world space</span></span>
 <span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">viewport</span><span style="color: light-dark(#93A1A1, #93A1A1);"> pos</span><span style="color: light-dark(#93A1A1, #93A1A1);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">jet.world_pos.rotate_z(-90).translate_y(-2.0).translate_world_z(5.0)</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span>
