@@ -133,6 +133,7 @@ mod stream_filter {
         #[default]
         FullResolution,
         /// Limit the headless render-server stream to its fastest camera.
+        #[cfg_attr(not(target_family = "unix"), allow(dead_code))]
         CameraMaxFps,
     }
 
@@ -1774,7 +1775,7 @@ fn hard_clear_series_store(
     plot_sync: &mut crate::ui::plot::data::PlotSyncState,
     visible_prefetch: &mut crate::ui::plot::data::VisiblePrefetchState,
 ) {
-    *telemetry_cache = impeller_bevy::TelemetryCache::default();
+    telemetry_cache.reset();
     *backfill_state = impeller_bevy::BackfillState::default();
     *series_load = impeller_bevy::SeriesStoreLoadState::default();
     *plot_sync = crate::ui::plot::data::PlotSyncState::default();

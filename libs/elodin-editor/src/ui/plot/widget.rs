@@ -1956,7 +1956,9 @@ pub fn sync_derived_graphs(
             if append_evaluated(&derived.lines, &evaluated, &range, earliest.0, &mut lines) {
                 derived.last_generation = generation;
                 derived.last_range = Some(range_key);
-                cursors.extend(cursor.map(|cursor| (graph_entity, cursor)));
+                if let Some(cursor) = cursor {
+                    cursors.insert(graph_entity, cursor);
+                }
             } else {
                 cursors.remove(&graph_entity);
             }
@@ -2154,7 +2156,9 @@ pub fn sync_kernel_graphs(
             if append_evaluated(&kernel.lines, &evaluated, &range, earliest.0, &mut lines) {
                 kernel.last_generation = generation;
                 kernel.last_range = Some(range_key);
-                cursors.extend(cursor.map(|cursor| (graph_entity, cursor)));
+                if let Some(cursor) = cursor {
+                    cursors.insert(graph_entity, cursor);
+                }
             } else {
                 cursors.remove(&graph_entity);
             }

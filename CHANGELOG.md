@@ -12,6 +12,7 @@
 - **(fix)** Draw "±" and other Latin-1 characters in vector-arrow labels.
 - **(fix)** Log a 3D object's pose evaluation error once instead of hiding it silently, and drop the `[]` label on scalar component monitors.
 - **(fix)** Raise `TypeError` when a display kernel is passed to an EQL-only `elodin.ui` field instead of writing its repr into the schematic.
+- **(fix)** Live playback keeps pace with the simulation; the editor no longer falls behind as a recording grows.
 
 ## v0.20
 

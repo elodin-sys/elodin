@@ -1381,18 +1381,20 @@ fn apply_plot_sync_plan(
         .get(&key)
         .map(|verified| series_store.changed_since(&component_id, *verified));
     verified_revisions.insert(key, series_store.revision(&component_id));
+    let in_sync = match changed_from {
+        Some(None) => true,
+        Some(Some(from)) => tree.truncate_from(from),
+        None => false,
+    };
     let rebuild = force_full
-        || match changed_from {
-            Some(None) => false,
-            Some(Some(from)) if tree.truncate_from(from) => false,
-            _ => !plot_line_matches_store_interior(
+        || (!in_sync
+            && !plot_line_matches_store_interior(
                 series_store,
                 component_id,
                 element_index,
                 sync_range,
                 tree,
-            ),
-        };
+            ));
     match plot_sync_plan(tree.projected_span(), sync_range, rebuild) {
         PlotSyncPlan::FullRebuild => {
             tree.clear();
@@ -3895,12 +3897,8 @@ mod tests {
         };
 
         let mut ids = HashSet::new();
-        collect_object_3d_mesh_component_ids(
-            &mesh,
-            &eql_ctx,
-            &mut EqlComponentIds::default(),
-            &mut ids,
-        );
+        let mut eql_ids = EqlComponentIds::default();
+        collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut eql_ids, &mut ids);
 
         assert_eq!(
             ids,
@@ -3915,12 +3913,7 @@ mod tests {
             *error_covariance_cholesky = None;
         }
         ids.clear();
-        collect_object_3d_mesh_component_ids(
-            &mesh,
-            &eql_ctx,
-            &mut EqlComponentIds::default(),
-            &mut ids,
-        );
+        collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut eql_ids, &mut ids);
         assert_eq!(
             ids,
             [ComponentId::new("shape.covariance")].into_iter().collect()
@@ -3933,12 +3926,7 @@ mod tests {
             *error_covariance = None;
         }
         ids.clear();
-        collect_object_3d_mesh_component_ids(
-            &mesh,
-            &eql_ctx,
-            &mut EqlComponentIds::default(),
-            &mut ids,
-        );
+        collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut eql_ids, &mut ids);
         assert_eq!(ids, [ComponentId::new("shape.scale")].into_iter().collect());
     }
 
@@ -3987,12 +3975,8 @@ mod tests {
         };
 
         let mut ids = HashSet::new();
-        collect_object_3d_mesh_component_ids(
-            &mesh,
-            &eql_ctx,
-            &mut EqlComponentIds::default(),
-            &mut ids,
-        );
+        let mut eql_ids = EqlComponentIds::default();
+        collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut eql_ids, &mut ids);
         assert!(
             ids.contains(&ComponentId::new("CANOPENMOTORMESSAGE3.ACTUAL_POSITION")),
             "missing motor position, ids={ids:?}"
@@ -4096,6 +4080,26 @@ mod tests {
             id,
             Timestamp(ts),
             ComponentValue::F64(nox::array![value].to_dyn()),
+        );
+    }
+
+    fn sync_line(
+        cache: &TelemetryCache,
+        id: ComponentId,
+        need: &Range<Timestamp>,
+        tree: &mut LineTree<f32>,
+        verified: &mut HashMap<(ComponentId, usize), SeriesRevision>,
+    ) {
+        apply_plot_sync_plan(
+            cache,
+            id,
+            0,
+            need,
+            Timestamp(0),
+            None,
+            false,
+            tree,
+            verified,
         );
     }
 
@@ -4717,17 +4721,7 @@ mod tests {
         insert_f64(&mut cache, id, 15_000_000, 15.0);
         let need = Timestamp(0)..Timestamp(15_000_001);
         let mut tree = LineTree::<f32>::default();
-        apply_plot_sync_plan(
-            &cache,
-            id,
-            0,
-            &need,
-            Timestamp(0),
-            None,
-            false,
-            &mut tree,
-            &mut HashMap::new(),
-        );
+        sync_line(&cache, id, &need, &mut tree, &mut HashMap::new());
         assert_eq!(tree.total_points(), 2);
         assert_eq!(
             plot_sync_plan(tree.projected_span(), &need, false),
@@ -4741,17 +4735,7 @@ mod tests {
         assert!(!plot_line_matches_store_interior(
             &cache, id, 0, &need, &tree
         ));
-        apply_plot_sync_plan(
-            &cache,
-            id,
-            0,
-            &need,
-            Timestamp(0),
-            None,
-            false,
-            &mut tree,
-            &mut HashMap::new(),
-        );
+        sync_line(&cache, id, &need, &mut tree, &mut HashMap::new());
         assert_eq!(tree.total_points(), 3);
         assert_eq!(
             tree.get_nearest(Timestamp(7_500_000)).map(|(ts, _)| ts),
@@ -4776,48 +4760,18 @@ mod tests {
         let need = Timestamp(0)..Timestamp(20_000);
         let mut tree = LineTree::<f32>::default();
         let mut verified = HashMap::new();
-        apply_plot_sync_plan(
-            &cache,
-            id,
-            0,
-            &need,
-            Timestamp(0),
-            None,
-            false,
-            &mut tree,
-            &mut verified,
-        );
+        sync_line(&cache, id, &need, &mut tree, &mut verified);
         assert_eq!(tree.total_points(), 10);
 
         // Live tip samples reach the line through `pkt_handler`, not this sync.
         live(&mut cache, 10_000, 10.0);
         let content = tree.content_gen();
-        apply_plot_sync_plan(
-            &cache,
-            id,
-            0,
-            &need,
-            Timestamp(0),
-            None,
-            false,
-            &mut tree,
-            &mut verified,
-        );
+        sync_line(&cache, id, &need, &mut tree, &mut verified);
         assert_eq!(tree.content_gen(), content);
 
         // A sample behind the tip changes the revision: the scan finds it and rebuilds.
         live(&mut cache, 5_500, 5.5);
-        apply_plot_sync_plan(
-            &cache,
-            id,
-            0,
-            &need,
-            Timestamp(0),
-            None,
-            false,
-            &mut tree,
-            &mut verified,
-        );
+        sync_line(&cache, id, &need, &mut tree, &mut verified);
         assert_eq!(tree.total_points(), 12);
         assert_eq!(
             tree.get_nearest(Timestamp(5_500)).map(|(ts, _)| ts),
@@ -4858,32 +4812,12 @@ mod tests {
         let need = Timestamp(0)..Timestamp(n * 10);
         let mut tree = LineTree::<f32>::default();
         let mut verified = HashMap::new();
-        apply_plot_sync_plan(
-            &cache,
-            id,
-            0,
-            &need,
-            Timestamp(0),
-            None,
-            false,
-            &mut tree,
-            &mut verified,
-        );
+        sync_line(&cache, id, &need, &mut tree, &mut verified);
         assert_eq!(tree.total_points(), n as usize);
 
         let late = Timestamp((n - 5) * 10 + 5);
         insert_f64(&mut cache, id, late.0, -1.0);
-        apply_plot_sync_plan(
-            &cache,
-            id,
-            0,
-            &need,
-            Timestamp(0),
-            None,
-            false,
-            &mut tree,
-            &mut verified,
-        );
+        sync_line(&cache, id, &need, &mut tree, &mut verified);
         assert_eq!(tree.total_points(), n as usize + 1);
         assert_eq!(tree.get_nearest(late), Some((late, &-1.0)));
         assert!(plot_line_matches_store_interior(
@@ -4903,31 +4837,11 @@ mod tests {
         }
         let need = Timestamp(0)..Timestamp(15_000_000);
         let mut tree = LineTree::<f32>::default();
-        apply_plot_sync_plan(
-            &cache,
-            id,
-            0,
-            &need,
-            Timestamp(0),
-            None,
-            false,
-            &mut tree,
-            &mut HashMap::new(),
-        );
+        sync_line(&cache, id, &need, &mut tree, &mut HashMap::new());
         assert_eq!(tree.total_points(), 20);
 
         insert_f64(&mut cache, id, 7_000_000, 50.0);
-        apply_plot_sync_plan(
-            &cache,
-            id,
-            0,
-            &need,
-            Timestamp(0),
-            None,
-            false,
-            &mut tree,
-            &mut HashMap::new(),
-        );
+        sync_line(&cache, id, &need, &mut tree, &mut HashMap::new());
         assert_eq!(tree.total_points(), 21);
         assert!(tree.get_nearest(Timestamp(7_000_000)).is_some());
     }
@@ -4941,17 +4855,7 @@ mod tests {
         }
         let first = Timestamp(0)..Timestamp(15_000_001);
         let mut tree = LineTree::<f32>::default();
-        apply_plot_sync_plan(
-            &cache,
-            id,
-            0,
-            &first,
-            Timestamp(0),
-            None,
-            false,
-            &mut tree,
-            &mut HashMap::new(),
-        );
+        sync_line(&cache, id, &first, &mut tree, &mut HashMap::new());
         assert_eq!(tree.total_points(), 16);
         assert_eq!(tree.first_timestamp(), Some(Timestamp(0)));
 
@@ -4967,17 +4871,7 @@ mod tests {
         assert!(plot_line_matches_store_interior(
             &cache, id, 0, &slid, &tree
         ));
-        apply_plot_sync_plan(
-            &cache,
-            id,
-            0,
-            &slid,
-            Timestamp(0),
-            None,
-            false,
-            &mut tree,
-            &mut HashMap::new(),
-        );
+        sync_line(&cache, id, &slid, &mut tree, &mut HashMap::new());
         assert_eq!(tree.first_timestamp(), Some(Timestamp(0)));
         assert_eq!(tree.latest_sample_timestamp(), Some(Timestamp(15_100_000)));
         assert_eq!(tree.total_points(), 17);
@@ -4993,17 +4887,7 @@ mod tests {
         for step in 0..=100 {
             let offset = step * REQUEST_KEY_QUANTUM_MICROS;
             let range = Timestamp(offset)..Timestamp(10_000_000 + offset);
-            apply_plot_sync_plan(
-                &cache,
-                id,
-                0,
-                &range,
-                Timestamp(0),
-                None,
-                false,
-                &mut tree,
-                &mut HashMap::new(),
-            );
+            sync_line(&cache, id, &range, &mut tree, &mut HashMap::new());
             assert_eq!(tree.total_points(), 1);
             assert_eq!(tree.first_timestamp(), Some(Timestamp(0)));
         }
@@ -5039,17 +4923,7 @@ mod tests {
             plot_sync_plan(tree.stored_exclusive_span(), &need, false),
             PlotSyncPlan::Keep
         );
-        apply_plot_sync_plan(
-            &cache,
-            id,
-            0,
-            &need,
-            Timestamp(0),
-            None,
-            false,
-            &mut tree,
-            &mut HashMap::new(),
-        );
+        sync_line(&cache, id, &need, &mut tree, &mut HashMap::new());
         assert_eq!(tree.first_timestamp(), Some(Timestamp(10_000_000)));
         assert_eq!(tree.latest_sample_timestamp(), Some(Timestamp(16_000_000)));
         assert_eq!(tree.total_points(), 2);
@@ -5078,17 +4952,7 @@ mod tests {
         assert!(!plot_line_matches_store_interior(
             &cache, id, 0, &need, &tree
         ));
-        apply_plot_sync_plan(
-            &cache,
-            id,
-            0,
-            &need,
-            Timestamp(0),
-            None,
-            false,
-            &mut tree,
-            &mut HashMap::new(),
-        );
+        sync_line(&cache, id, &need, &mut tree, &mut HashMap::new());
         assert_eq!(tree.total_points(), 0);
     }
 

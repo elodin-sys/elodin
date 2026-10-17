@@ -126,7 +126,7 @@ pub enum DbMessage {
 /// Populated by allowlisted backfill + live table stream for **subscribed**
 /// components only ([`SeriesFetchPriority`]). Unsubscribed IDs are not stored.
 /// Plots project visible windows from this store into GPU LineTrees.
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct TelemetryCache {
     components: HashMap<ComponentId, BTreeMap<Timestamp, ComponentValue>>,
     /// Merged half-open coverage intervals `[start, end)` per component (micros).
@@ -134,22 +134,9 @@ pub struct TelemetryCache {
     /// Per component, bumped by every change a live consumer appending at the
     /// tip has not seen: backfill, live samples older than the newest, removal.
     revisions: HashMap<ComponentId, SeriesRevisions>,
-    /// Distinguishes this cache's revisions from a replaced one's.
+    /// Bumped by [`Self::reset`], so revisions taken before it never match.
     epoch: u64,
     generation: u64,
-}
-
-impl Default for TelemetryCache {
-    fn default() -> Self {
-        static EPOCHS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        Self {
-            components: HashMap::new(),
-            coverage: HashMap::new(),
-            revisions: HashMap::new(),
-            epoch: EPOCHS.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            generation: 0,
-        }
-    }
 }
 
 /// A component's series state as of a [`TelemetryCache::revision`].
@@ -181,6 +168,14 @@ pub struct SeriesStoreLoadState {
 }
 
 impl TelemetryCache {
+    /// Drops every sample and series.
+    pub fn reset(&mut self) {
+        *self = Self {
+            epoch: self.epoch + 1,
+            ..Default::default()
+        };
+    }
+
     pub fn generation(&self) -> u64 {
         self.generation
     }
@@ -246,8 +241,8 @@ impl TelemetryCache {
     }
 
     /// The oldest timestamp changed since `since`; `None` when unchanged,
-    /// `Timestamp(i64::MIN)` when that is no longer known (another cache, a
-    /// trimmed log, a removed series).
+    /// `Timestamp(i64::MIN)` when that is no longer known (a reset, a trimmed
+    /// log, a removed series).
     pub fn changed_since(
         &self,
         component_id: &ComponentId,
@@ -1106,8 +1101,8 @@ fn sink_inner(
                 // Create the full path hierarchy so the component appears in UI
                 // under DbComponentsRoot (not just an orphaned leaf entity).
                 let path = ComponentPath::from_name(&metadata.name);
-                // Drop the entity of an ID-only placeholder name once the real name
-                // arrives; values are keyed by the real ID, so it never holds any.
+                // Replace an ID-only placeholder: its leaf hashes the placeholder name,
+                // not the component's ID, so `apply_cached_data` never gave it a value.
                 if let Some(old) = world_sink.path_reg.0.get(&metadata.component_id)
                     && old.id != path.id
                     && let Some(entity) = world_sink.entity_map.0.remove(&old.id)
