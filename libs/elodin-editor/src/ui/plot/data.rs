@@ -1408,16 +1408,20 @@ fn apply_plot_sync_plan(
                 max_points,
             );
         }
-        PlotSyncPlan::Keep => {
-            tree.evict_chunks_outside(padded_sync_keep_range(sync_range));
-        }
-        PlotSyncPlan::Extend { suffix, .. } => {
-            if let Some(range) = suffix {
+        PlotSyncPlan::Keep | PlotSyncPlan::Extend { .. } => {
+            // A projected window may extend beyond the last available sample.
+            // Include new appends inside that window, even when the camera stays put.
+            let start = tree
+                .latest_sample_timestamp()
+                .map_or(sync_range.start, |last| {
+                    Timestamp(last.0.saturating_add(1)).max(sync_range.start)
+                });
+            if start < sync_range.end {
                 append_series_element_to_line(
                     series_store,
                     component_id,
                     element_index,
-                    &range,
+                    &(start..sync_range.end),
                     earliest,
                     tree,
                 );
@@ -1428,8 +1432,8 @@ fn apply_plot_sync_plan(
     tree.set_projected_range(sync_range.clone());
 }
 
-/// True when every in-store sample inside the tree's already-covered span is
-/// also in the tree.
+/// True when the projected history can be reused, with new tip samples appended
+/// separately.
 ///
 /// Compared only on `stored ∩ need`, so a newly exposed suffix still goes
 /// through `Extend` instead of a full rebuild. Samples the store later
@@ -1446,7 +1450,11 @@ fn plot_line_matches_store_interior(
         return true;
     };
     let start = stored.start.max(need.start);
-    let end = stored.end.min(need.end);
+    // Missing samples beyond the actual tip can be appended without rebuilding.
+    let end = stored.end.min(need.end).min(
+        tree.latest_sample_timestamp()
+            .map_or(start, |last| Timestamp(last.0.saturating_add(1))),
+    );
     if end.0 <= start.0 {
         return true;
     }
@@ -1454,6 +1462,15 @@ fn plot_line_matches_store_interior(
     let Some(series) = series_store.series(&component_id) else {
         return !tree.has_samples();
     };
+    // The sample held into the window can load after the window itself (a hold anchor).
+    let held = series
+        .range(..=start)
+        .rev()
+        .find(|(_, value)| value.get(element_index).is_some())
+        .map(|(&timestamp, _)| timestamp);
+    if held != tree.last_timestamp_strictly_before(Timestamp(start.0.saturating_add(1))) {
+        return false;
+    }
     series
         .range(inspect)
         .filter(|(_, value)| value.get(element_index).is_some())
@@ -1889,28 +1906,10 @@ fn append_series_element_to_line(
     earliest: Timestamp,
     line: &mut LineTree<f32>,
 ) -> usize {
-    let mut total = 0usize;
-    for (timestamp, new_value) in
-        element_samples_with_predecessor(cache, component_id, element_index, range)
-    {
-        let mut accepted = false;
-        if let Some(last) = line.last() {
-            if timestamp <= last.summary.end_timestamp {
-                continue;
-            }
-            if last.timestamps.len() < CHUNK_LEN {
-                line.update_last(|c| {
-                    c.push(timestamp, earliest, new_value);
-                });
-                accepted = true;
-            }
-        }
-        if !accepted {
-            line.insert(Chunk::from_initial_value(timestamp, earliest, new_value));
-        }
-        total += 1;
-    }
-    total
+    line.append_samples(
+        earliest,
+        element_samples_with_predecessor(cache, component_id, element_index, range),
+    )
 }
 
 /// Fraction of `a`'s duration that overlaps `b` (0.0–1.0).
@@ -3020,21 +3019,39 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         })
     }
 
+    /// Writes the strip for `line_visible_range`, keeping in the buffer the
+    /// strips `prev` wrote for unchanged leading chunks: a live line only
+    /// changes at its tail.
     pub fn write_to_index_buffer(
         &self,
         index_buffer: &Buffer,
         render_queue: &RenderQueue,
         line_visible_range: Range<Timestamp>,
         terminal_hold: bool,
-    ) -> Option<u32> {
+        prev: Option<&IndexLayout>,
+    ) -> Option<IndexLayout> {
         let step = self.fitted_index_step(line_visible_range.clone(), terminal_hold);
-        self.write_to_index_buffer_with_step_mode(
-            index_buffer,
-            render_queue,
-            line_visible_range,
+        let chunks: Vec<IndexChunk> = self.draw_index_chunk_iter(line_visible_range).collect();
+        let kept = prev.map_or(0, |prev| prev.kept(&chunks, step, terminal_hold));
+        if let Some(prev) = prev
+            && kept == chunks.len()
+            && kept == prev.strips.len()
+        {
+            return Some(prev.clone());
+        }
+        let mut layout = IndexLayout {
             step,
             terminal_hold,
-        )
+            strips: prev.map_or_else(Vec::new, |prev| prev.strips.clone()),
+            count: 0,
+        };
+        let (offset, indices) = layout.extend(&chunks, kept);
+        if let Some(size) = NonZeroU64::new(indices.len() as u64 * 4) {
+            render_queue
+                .write_buffer_with(index_buffer, u64::from(offset) * 4, size)?
+                .copy_from_slice(indices.as_bytes());
+        }
+        Some(layout)
     }
 
     /// Stride for `range` that [`Self::write_to_index_buffer_with_step`] is
@@ -3090,6 +3107,17 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
                     len,
                 })
             });
+        // At step 1 each chunk's strip is its samples between two separators.
+        if step <= 1 {
+            let mut drawn = false;
+            let samples: usize = chunks
+                .map(|chunk| {
+                    drawn = true;
+                    chunk.len + 2
+                })
+                .sum();
+            return (samples + usize::from(terminal_hold && drawn) * 2) as u32;
+        }
         let _ = for_each_strip_index(chunks, step, terminal_hold, |_| {
             n = n.saturating_add(1);
             ControlFlow::Continue(())
@@ -3222,6 +3250,18 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         step: usize,
     ) -> Vec<Timestamp> {
         let mut out = Vec::new();
+        // Step 1 strips every visible sample in order: copy each chunk's slice.
+        if step <= 1 {
+            for chunk in self.range_iter(line_visible_range.clone()) {
+                if let Some((start, end)) =
+                    chunk_visible_offsets(&chunk.timestamps, &line_visible_range)
+                {
+                    let end = end.min(chunk.data.cpu().len());
+                    out.extend_from_slice(&chunk.timestamps[start.min(end)..end]);
+                }
+            }
+            return out;
+        }
         self.for_each_strip_sample(line_visible_range, step, |chunk, i| {
             // Guard on `data` so a value-less index is skipped in both
             // collectors and the two stay aligned.
@@ -3437,29 +3477,41 @@ impl LineTree<f32> {
     }
 
     /// Append samples after the newest; those at or before it are skipped.
-    pub fn append_time_value_pairs(
+    /// Returns how many were appended.
+    pub fn append_samples(
         &mut self,
         earliest: Timestamp,
-        timestamps: &[Timestamp],
-        values: &[f32],
-    ) {
-        for (&timestamp, &value) in timestamps.iter().zip(values) {
-            let mut accepted = false;
-            if let Some(last) = self.last() {
-                if timestamp <= last.summary.end_timestamp {
-                    continue;
+        samples: impl IntoIterator<Item = (Timestamp, f32)>,
+    ) -> usize {
+        let mut newest = self.latest_sample_timestamp();
+        // Out of the tree while it grows: the tree is keyed by each chunk's span.
+        let mut tail: Option<Chunk<f32>> = None;
+        let mut appended = 0;
+        for (timestamp, value) in samples {
+            if newest.is_some_and(|newest| timestamp <= newest) {
+                continue;
+            }
+            newest = Some(timestamp);
+            if tail.is_none() {
+                tail = self.tree.last_entry().map(|last| last.remove_entry().1);
+            }
+            match &mut tail {
+                Some(chunk) if chunk.timestamps.len() < CHUNK_LEN => {
+                    chunk.push(timestamp, earliest, value);
                 }
-                if last.timestamps.len() < CHUNK_LEN {
-                    self.update_last(|chunk| {
-                        chunk.push(timestamp, earliest, value);
-                    });
-                    accepted = true;
+                _ => {
+                    let new = Chunk::from_initial_value(timestamp, earliest, value);
+                    if let Some(full) = tail.replace(new) {
+                        self.insert(full);
+                    }
                 }
             }
-            if !accepted {
-                self.insert(Chunk::from_initial_value(timestamp, earliest, value));
-            }
+            appended += 1;
         }
+        if let Some(chunk) = tail {
+            self.insert(chunk);
+        }
+        appended
     }
 
     /// Hamann–Chen in `(t, y)`; optional [`CurveCompressSettings::keep_recent_fraction`] leaves a
@@ -4712,6 +4764,47 @@ mod tests {
     }
 
     #[test]
+    fn plot_sync_appends_inside_a_fixed_window_without_replacing_existing_chunks() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.fixed.live");
+        insert_f64(&mut cache, id, 0, 0.0);
+        let need = Timestamp(0)..Timestamp(10_000);
+        let mut tree = LineTree::<f32>::default();
+        sync_line(&cache, id, &need, &mut tree, &mut HashMap::new());
+        let original = tree.last().unwrap().data.gpu_dirty.clone();
+
+        for timestamp in 1..100 {
+            insert_f64(&mut cache, id, timestamp, timestamp as f64);
+            sync_line(&cache, id, &need, &mut tree, &mut HashMap::new());
+        }
+        assert_eq!(tree.total_points(), 100);
+        assert!(Arc::ptr_eq(&original, &tree.last().unwrap().data.gpu_dirty));
+        assert_eq!(tree.get_nearest(Timestamp(99)).map(|(_, v)| *v), Some(99.0));
+    }
+
+    #[test]
+    fn plot_sync_refreshes_backfilled_predecessors_and_recreated_series() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.predecessor.backfill");
+        insert_f64(&mut cache, id, 0, 0.0);
+        insert_f64(&mut cache, id, 100, 100.0);
+        let need = Timestamp(50)..Timestamp(101);
+        let mut tree = LineTree::<f32>::default();
+        let mut verified = HashMap::new();
+        sync_line(&cache, id, &need, &mut tree, &mut verified);
+
+        insert_f64(&mut cache, id, 40, 40.0);
+        sync_line(&cache, id, &need, &mut tree, &mut verified);
+        assert_eq!(tree.first_timestamp(), Some(Timestamp(40)));
+
+        cache.remove_series(&id);
+        insert_f64(&mut cache, id, 100, -100.0);
+        sync_line(&cache, id, &need, &mut tree, &mut verified);
+        assert_eq!(tree.total_points(), 1);
+        assert_eq!(tree.first_sample(), Some(-100.0));
+    }
+
+    #[test]
     fn apply_plot_sync_plan_rebuilds_holes_inside_a_covered_span() {
         // Partial first project: only the endpoints. The exclusive span already
         // covers the window, so endpoint-only planning would Keep forever.
@@ -4765,6 +4858,7 @@ mod tests {
 
         // Live tip samples reach the line through `pkt_handler`, not this sync.
         live(&mut cache, 10_000, 10.0);
+        tree.append_samples(Timestamp(0), [(Timestamp(10_000), 10.0)]);
         let content = tree.content_gen();
         sync_line(&cache, id, &need, &mut tree, &mut verified);
         assert_eq!(tree.content_gen(), content);
@@ -5426,6 +5520,43 @@ mod tests {
         tree.insert(chunk);
         let c = tree.count_strip_index_u32s(Timestamp(0)..Timestamp(10), 1);
         assert_eq!(c, 12, "leading separator + 10 indices + trailing separator");
+    }
+
+    #[test]
+    fn index_layout_rewrites_only_the_changed_tail() {
+        let chunk = |start: u32, len: usize| IndexChunk {
+            range: start..start + len as u32,
+            len,
+        };
+        let full = |chunks: &[IndexChunk], step: usize, hold: bool| {
+            let mut indices = Vec::new();
+            let _ = for_each_strip_index(chunks.iter().cloned(), step, hold, |index| {
+                indices.push(index);
+                ControlFlow::Continue(())
+            });
+            indices
+        };
+        for (step, hold) in [(1, false), (3, true)] {
+            let before = [chunk(0, 10), chunk(100, 7)];
+            let mut layout = IndexLayout {
+                step,
+                terminal_hold: hold,
+                ..Default::default()
+            };
+            let (_, mut buffer) = layout.extend(&before, 0);
+            assert_eq!(buffer, full(&before, step, hold));
+
+            // The tail chunk grew and a new one started; the first strip stays.
+            let after = [chunk(0, 10), chunk(100, 12), chunk(200, 4)];
+            assert_eq!(layout.kept(&after, step + 1, hold), 0);
+            let kept = layout.kept(&after, step, hold);
+            assert_eq!(kept, 1);
+            let (offset, tail) = layout.extend(&after, kept);
+            buffer.truncate(offset as usize);
+            buffer.extend(tail);
+            assert_eq!(buffer, full(&after, step, hold));
+            assert_eq!(layout.count() as usize, buffer.len());
+        }
     }
 
     #[test]
@@ -6097,6 +6228,65 @@ fn try_append_u32(view: wgpu::WriteOnly<'_, [u8]>, val: u32) -> Option<wgpu::Wri
 pub struct IndexChunk {
     range: Range<u32>,
     len: usize,
+}
+
+/// Where each drawn chunk's strip sits in a line's index buffer.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct IndexLayout {
+    step: usize,
+    terminal_hold: bool,
+    /// Per chunk: its first GPU index, visible length, and where its strip ends.
+    strips: Vec<(u32, usize, u32)>,
+    count: u32,
+}
+
+impl IndexLayout {
+    pub fn count(&self) -> u32 {
+        self.count
+    }
+
+    /// Leading strips that still match `chunks`: a strip depends only on its
+    /// chunk's GPU range and the step.
+    fn kept(&self, chunks: &[IndexChunk], step: usize, terminal_hold: bool) -> usize {
+        if self.step != step || self.terminal_hold != terminal_hold {
+            return 0;
+        }
+        self.strips
+            .iter()
+            .zip(chunks)
+            .take_while(|&(&(start, len, _), chunk)| start == chunk.range.start && len == chunk.len)
+            .count()
+    }
+
+    /// Replaces the strips after the first `kept` with those of `chunks[kept..]`
+    /// and the terminal hold, returning where the new indices start and the
+    /// indices themselves.
+    fn extend(&mut self, chunks: &[IndexChunk], kept: usize) -> (u32, Vec<u32>) {
+        self.strips.truncate(kept);
+        let offset = self.strips.last().map_or(0, |&(_, _, end)| end);
+        let mut indices = Vec::new();
+        for chunk in &chunks[kept..] {
+            let _ = for_each_strip_index([chunk.clone()], self.step, false, |index| {
+                indices.push(index);
+                ControlFlow::Continue(())
+            });
+            let end = offset + indices.len() as u32;
+            self.strips.push((chunk.range.start, chunk.len, end));
+        }
+        // As in `for_each_strip_index`: the last sample drawn, twice.
+        if self.terminal_hold
+            && let Some(last) = chunks.iter().rev().find(|chunk| chunk.len > 0)
+        {
+            let end = last.range.start + last.len as u32 - 1;
+            indices.extend([end, end]);
+        }
+        indices.truncate(INDEX_BUFFER_LEN.saturating_sub(offset as usize));
+        let count = offset + indices.len() as u32;
+        self.count = count;
+        // A strip cut off at the buffer's end is rewritten next time.
+        self.strips.retain(|&(_, _, end)| end <= count);
+        (offset, indices)
+    }
 }
 
 impl IndexChunk {
