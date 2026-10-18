@@ -3019,21 +3019,39 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         })
     }
 
+    /// Writes the strip for `line_visible_range`, keeping in the buffer the
+    /// strips `prev` wrote for unchanged leading chunks: a live line only
+    /// changes at its tail.
     pub fn write_to_index_buffer(
         &self,
         index_buffer: &Buffer,
         render_queue: &RenderQueue,
         line_visible_range: Range<Timestamp>,
         terminal_hold: bool,
-    ) -> Option<u32> {
+        prev: Option<&IndexLayout>,
+    ) -> Option<IndexLayout> {
         let step = self.fitted_index_step(line_visible_range.clone(), terminal_hold);
-        self.write_to_index_buffer_with_step_mode(
-            index_buffer,
-            render_queue,
-            line_visible_range,
+        let chunks: Vec<IndexChunk> = self.draw_index_chunk_iter(line_visible_range).collect();
+        let kept = prev.map_or(0, |prev| prev.kept(&chunks, step, terminal_hold));
+        if let Some(prev) = prev
+            && kept == chunks.len()
+            && kept == prev.strips.len()
+        {
+            return Some(prev.clone());
+        }
+        let mut layout = IndexLayout {
             step,
             terminal_hold,
-        )
+            strips: prev.map_or_else(Vec::new, |prev| prev.strips.clone()),
+            count: 0,
+        };
+        let (offset, indices) = layout.extend(&chunks, kept);
+        if let Some(size) = NonZeroU64::new(indices.len() as u64 * 4) {
+            render_queue
+                .write_buffer_with(index_buffer, u64::from(offset) * 4, size)?
+                .copy_from_slice(indices.as_bytes());
+        }
+        Some(layout)
     }
 
     /// Stride for `range` that [`Self::write_to_index_buffer_with_step`] is
@@ -3089,6 +3107,17 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
                     len,
                 })
             });
+        // At step 1 each chunk's strip is its samples between two separators.
+        if step <= 1 {
+            let mut drawn = false;
+            let samples: usize = chunks
+                .map(|chunk| {
+                    drawn = true;
+                    chunk.len + 2
+                })
+                .sum();
+            return (samples + usize::from(terminal_hold && drawn) * 2) as u32;
+        }
         let _ = for_each_strip_index(chunks, step, terminal_hold, |_| {
             n = n.saturating_add(1);
             ControlFlow::Continue(())
@@ -3221,6 +3250,18 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         step: usize,
     ) -> Vec<Timestamp> {
         let mut out = Vec::new();
+        // Step 1 strips every visible sample in order: copy each chunk's slice.
+        if step <= 1 {
+            for chunk in self.range_iter(line_visible_range.clone()) {
+                if let Some((start, end)) =
+                    chunk_visible_offsets(&chunk.timestamps, &line_visible_range)
+                {
+                    let end = end.min(chunk.data.cpu().len());
+                    out.extend_from_slice(&chunk.timestamps[start.min(end)..end]);
+                }
+            }
+            return out;
+        }
         self.for_each_strip_sample(line_visible_range, step, |chunk, i| {
             // Guard on `data` so a value-less index is skipped in both
             // collectors and the two stay aligned.
@@ -5482,6 +5523,43 @@ mod tests {
     }
 
     #[test]
+    fn index_layout_rewrites_only_the_changed_tail() {
+        let chunk = |start: u32, len: usize| IndexChunk {
+            range: start..start + len as u32,
+            len,
+        };
+        let full = |chunks: &[IndexChunk], step: usize, hold: bool| {
+            let mut indices = Vec::new();
+            let _ = for_each_strip_index(chunks.iter().cloned(), step, hold, |index| {
+                indices.push(index);
+                ControlFlow::Continue(())
+            });
+            indices
+        };
+        for (step, hold) in [(1, false), (3, true)] {
+            let before = [chunk(0, 10), chunk(100, 7)];
+            let mut layout = IndexLayout {
+                step,
+                terminal_hold: hold,
+                ..Default::default()
+            };
+            let (_, mut buffer) = layout.extend(&before, 0);
+            assert_eq!(buffer, full(&before, step, hold));
+
+            // The tail chunk grew and a new one started; the first strip stays.
+            let after = [chunk(0, 10), chunk(100, 12), chunk(200, 4)];
+            assert_eq!(layout.kept(&after, step + 1, hold), 0);
+            let kept = layout.kept(&after, step, hold);
+            assert_eq!(kept, 1);
+            let (offset, tail) = layout.extend(&after, kept);
+            buffer.truncate(offset as usize);
+            buffer.extend(tail);
+            assert_eq!(buffer, full(&after, step, hold));
+            assert_eq!(layout.count() as usize, buffer.len());
+        }
+    }
+
+    #[test]
     fn strip_separator_never_aliases_data_index_zero() {
         let mut indices = Vec::new();
         let result = for_each_strip_index(
@@ -6150,6 +6228,65 @@ fn try_append_u32(view: wgpu::WriteOnly<'_, [u8]>, val: u32) -> Option<wgpu::Wri
 pub struct IndexChunk {
     range: Range<u32>,
     len: usize,
+}
+
+/// Where each drawn chunk's strip sits in a line's index buffer.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct IndexLayout {
+    step: usize,
+    terminal_hold: bool,
+    /// Per chunk: its first GPU index, visible length, and where its strip ends.
+    strips: Vec<(u32, usize, u32)>,
+    count: u32,
+}
+
+impl IndexLayout {
+    pub fn count(&self) -> u32 {
+        self.count
+    }
+
+    /// Leading strips that still match `chunks`: a strip depends only on its
+    /// chunk's GPU range and the step.
+    fn kept(&self, chunks: &[IndexChunk], step: usize, terminal_hold: bool) -> usize {
+        if self.step != step || self.terminal_hold != terminal_hold {
+            return 0;
+        }
+        self.strips
+            .iter()
+            .zip(chunks)
+            .take_while(|&(&(start, len, _), chunk)| start == chunk.range.start && len == chunk.len)
+            .count()
+    }
+
+    /// Replaces the strips after the first `kept` with those of `chunks[kept..]`
+    /// and the terminal hold, returning where the new indices start and the
+    /// indices themselves.
+    fn extend(&mut self, chunks: &[IndexChunk], kept: usize) -> (u32, Vec<u32>) {
+        self.strips.truncate(kept);
+        let offset = self.strips.last().map_or(0, |&(_, _, end)| end);
+        let mut indices = Vec::new();
+        for chunk in &chunks[kept..] {
+            let _ = for_each_strip_index([chunk.clone()], self.step, false, |index| {
+                indices.push(index);
+                ControlFlow::Continue(())
+            });
+            let end = offset + indices.len() as u32;
+            self.strips.push((chunk.range.start, chunk.len, end));
+        }
+        // As in `for_each_strip_index`: the last sample drawn, twice.
+        if self.terminal_hold
+            && let Some(last) = chunks.iter().rev().find(|chunk| chunk.len > 0)
+        {
+            let end = last.range.start + last.len as u32 - 1;
+            indices.extend([end, end]);
+        }
+        indices.truncate(INDEX_BUFFER_LEN.saturating_sub(offset as usize));
+        let count = offset + indices.len() as u32;
+        self.count = count;
+        // A strip cut off at the buffer's end is rewritten next time.
+        self.strips.retain(|&(_, _, end)| end <= count);
+        (offset, indices)
+    }
 }
 
 impl IndexChunk {

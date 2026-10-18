@@ -235,19 +235,25 @@ fn axis_strip_values_f64(
         .map_or((&[][..], &[][..]), |prev| {
             (&prev.timestamps[..], &prev.values[..])
         });
-    let mut j = 0;
-    timestamps
+    // A trail that only grew starts with the previous strip.
+    let same = timestamps
         .iter()
-        .map(|&ts| {
-            while prev_timestamps.get(j).is_some_and(|&t| t < ts) {
-                j += 1;
-            }
-            match prev_timestamps.get(j) {
-                Some(&t) if t == ts => Some(prev_values[j]),
-                _ => cached_axis_f64(cache, source, ts),
-            }
-        })
-        .collect()
+        .zip(prev_timestamps)
+        .take_while(|(ts, prev)| ts == prev)
+        .count();
+    let mut values = Vec::with_capacity(timestamps.len());
+    values.extend_from_slice(&prev_values[..same]);
+    let mut j = same;
+    for &ts in &timestamps[same..] {
+        while prev_timestamps.get(j).is_some_and(|&t| t < ts) {
+            j += 1;
+        }
+        values.push(match prev_timestamps.get(j) {
+            Some(&t) if t == ts => prev_values[j],
+            _ => cached_axis_f64(cache, source, ts)?,
+        });
+    }
+    Some(values)
 }
 
 /// Default opacity applied to the future (not-yet-played) trail segment when a
@@ -1323,6 +1329,11 @@ mod tests {
             axis_strip_values_f64(&cache, sources[0], window, Some(&prev)).expect("reused");
         assert!(reused[..32].iter().all(|&v| v == -1.0));
         assert_eq!(reused[32..], fresh[32..]);
+        // A trail that only grew keeps its whole previous strip.
+        let grown =
+            axis_strip_values_f64(&cache, sources[0], &timestamps, Some(&prev)).expect("grown");
+        assert!(grown[..40].iter().all(|&v| v == -1.0));
+        assert_eq!(grown[40..], fresh[32..]);
 
         let other_axis = StripValues {
             source: Some(sources[1]),
