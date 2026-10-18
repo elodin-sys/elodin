@@ -14,6 +14,7 @@
 - **(fix)** Raise `TypeError` when a display kernel is passed to an EQL-only `elodin.ui` field instead of writing its repr into the schematic.
 - **(fix)** Live playback keeps pace with the simulation; the editor no longer falls behind as a recording grows.
 - **(fix)** Plots no longer redraw their whole line for each page of a loading recording, or leave a gap at the window's left edge when the sample before it loads late.
+- **(fix)** Keep pace with faster-than-real-time simulations: live `line_3d` trails no longer re-read their whole history every frame.
 
 ## v0.20
 

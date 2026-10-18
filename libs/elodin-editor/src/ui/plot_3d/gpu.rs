@@ -53,6 +53,7 @@ use impeller::types::{ComponentId, Timestamp};
 use impeller_bevy::TelemetryCache;
 use impeller_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated, Line3d};
 use std::num::NonZeroU64;
+use std::sync::Arc;
 use zerocopy::IntoBytes;
 
 const LINE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("bfffa3c4-9401-4b6e-b3ab-3564180352f1");
@@ -178,7 +179,7 @@ pub struct LineHandles(pub [Handle<Line>; 3]);
 
 /// One axis of a `line_3d`: which component element feeds it, and the affine
 /// transform its EQL expression applies.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LineAxisSource {
     pub component_id: ComponentId,
     pub element: usize,
@@ -207,8 +208,19 @@ fn cached_axis_f64(cache: &TelemetryCache, source: LineAxisSource, ts: Timestamp
     Some(source.affine.apply(value.get(source.element)?.as_f64()))
 }
 
+/// One axis's full-precision strip as last uploaded.
+#[derive(Default)]
+struct StripValues {
+    source: Option<LineAxisSource>,
+    timestamps: Vec<Timestamp>,
+    values: Vec<f64>,
+}
+
 /// Full-precision strip values for one axis, index-aligned with
 /// [`crate::ui::plot::data::LineTree::collect_strip_values`].
+///
+/// Reuses the values `prev` read from the same source: cached samples never
+/// change, and a live trail is rebuilt every frame for its few new samples.
 ///
 /// Returns `None` when any sample is missing from the cache so the caller can
 /// fall back to the f32 LineTree rather than render a partial trail.
@@ -216,10 +228,25 @@ fn axis_strip_values_f64(
     cache: &TelemetryCache,
     source: LineAxisSource,
     timestamps: &[Timestamp],
+    prev: Option<&StripValues>,
 ) -> Option<Vec<f64>> {
+    let (prev_timestamps, prev_values) = prev
+        .filter(|prev| prev.source == Some(source))
+        .map_or((&[][..], &[][..]), |prev| {
+            (&prev.timestamps[..], &prev.values[..])
+        });
+    let mut j = 0;
     timestamps
         .iter()
-        .map(|&ts| cached_axis_f64(cache, source, ts))
+        .map(|&ts| {
+            while prev_timestamps.get(j).is_some_and(|&t| t < ts) {
+                j += 1;
+            }
+            match prev_timestamps.get(j) {
+                Some(&t) if t == ts => Some(prev_values[j]),
+                _ => cached_axis_f64(cache, source, ts),
+            }
+        })
         .collect()
 }
 
@@ -465,6 +492,8 @@ pub struct GpuLine {
     /// the GPU buffers. Placement comes from the entity GlobalTransform.
     #[allow(clippy::type_complexity)]
     last_index_key: Option<(i64, i64, u64, u64, u64, u64)>,
+    /// Full-precision values behind `value_buffers`, for the next rebuild to reuse.
+    strip_values: [Arc<StripValues>; 3],
 }
 
 /// Per-entity cache of played/future GPU index state so TemporaryRenderEntity
@@ -762,6 +791,7 @@ pub(super) fn build_gpu_line(
             index_buffers,
             count,
             last_index_key: None,
+            strip_values: Default::default(),
         },
         residual_too_large,
     ))
@@ -912,33 +942,40 @@ fn extract_lines(
                 // Prefer the f64 cache so the anchor subtraction happens before
                 // any f32 cast; fall back to the LineTree's own f32 samples when
                 // the sources or cached values are unavailable.
-                let axis_values = |axis: usize| -> Vec<f64> {
+                let axis_values = |axis: usize| -> StripValues {
                     let Some(line) = line_assets.get(&line_handles.0[axis]) else {
-                        return Vec::new();
+                        return StripValues::default();
                     };
                     let source = line_sources.map(|s| s.0[axis]);
                     if let Some(source) = source {
                         let timestamps = line.data.collect_strip_timestamps(range.clone(), step);
+                        let prev = cached.map(|cached| &*cached.strip_values[axis]);
                         if let Some(values) =
-                            axis_strip_values_f64(&telemetry_cache, source, &timestamps)
+                            axis_strip_values_f64(&telemetry_cache, source, &timestamps, prev)
                         {
-                            return values;
+                            return StripValues {
+                                source: Some(source),
+                                timestamps,
+                                values,
+                            };
                         }
                     }
                     let affine = source.map(|s| s.affine).unwrap_or_default();
-                    line.data
-                        .collect_strip_values(range.clone(), step)
-                        .into_iter()
-                        .map(|v| affine.apply(f64::from(v)))
-                        .collect()
+                    StripValues {
+                        values: line
+                            .data
+                            .collect_strip_values(range.clone(), step)
+                            .into_iter()
+                            .map(|v| affine.apply(f64::from(v)))
+                            .collect(),
+                        ..Default::default()
+                    }
                 };
-                let xs = axis_values(0);
-                let ys = axis_values(1);
-                let zs = axis_values(2);
+                let [xs, ys, zs] = [0, 1, 2].map(axis_values);
 
                 let (mut gpu_line, residual_too_large) = build_gpu_line(
-                    [&xs, &ys, &zs],
-                    &[xs.len()],
+                    [&xs.values, &ys.values, &zs.values],
+                    &[xs.values.len()],
                     line_anchor,
                     &render_device,
                     &values_layout,
@@ -951,6 +988,7 @@ fn extract_lines(
                     );
                 }
                 gpu_line.last_index_key = Some(index_key);
+                gpu_line.strip_values = [xs, ys, zs].map(Arc::new);
                 Some(gpu_line)
             };
 
@@ -1202,9 +1240,9 @@ mod tests {
         sources: &[LineAxisSource; 3],
         timestamps: &[Timestamp],
     ) -> Vec<Vec3> {
-        let xs = axis_strip_values_f64(cache, sources[0], timestamps).expect("x");
-        let ys = axis_strip_values_f64(cache, sources[1], timestamps).expect("y");
-        let zs = axis_strip_values_f64(cache, sources[2], timestamps).expect("z");
+        let xs = axis_strip_values_f64(cache, sources[0], timestamps, None).expect("x");
+        let ys = axis_strip_values_f64(cache, sources[1], timestamps, None).expect("y");
+        let zs = axis_strip_values_f64(cache, sources[2], timestamps, None).expect("z");
         assert_eq!(xs.len(), timestamps.len());
         let anchor = DVec3::new(xs[0], ys[0], zs[0]);
         xs.into_iter()
@@ -1270,6 +1308,32 @@ mod tests {
     }
 
     #[test]
+    fn strip_values_reuse_the_previous_strip_of_the_same_source() {
+        let samples = ecef_ramp(64);
+        let (cache, timestamps, sources) = ecef_cache(&samples);
+        let window = &timestamps[8..];
+        let fresh = axis_strip_values_f64(&cache, sources[0], window, None).expect("fresh");
+        // A trail that slid forward 8 samples and grew past the previous strip.
+        let prev = StripValues {
+            source: Some(sources[0]),
+            timestamps: timestamps[..40].to_vec(),
+            values: vec![-1.0; 40],
+        };
+        let reused =
+            axis_strip_values_f64(&cache, sources[0], window, Some(&prev)).expect("reused");
+        assert!(reused[..32].iter().all(|&v| v == -1.0));
+        assert_eq!(reused[32..], fresh[32..]);
+
+        let other_axis = StripValues {
+            source: Some(sources[1]),
+            ..prev
+        };
+        let ignored =
+            axis_strip_values_f64(&cache, sources[0], window, Some(&other_axis)).expect("other");
+        assert_eq!(ignored, fresh);
+    }
+
+    #[test]
     fn f32_samples_staircase_the_ecef_trail() {
         // Contrast: the same ECEF ramp, but cast to f32 before the subtraction
         // — what the LineTree path does. Most steps collapse to zero and the
@@ -1279,9 +1343,9 @@ mod tests {
         let samples = ecef_ramp(64);
         let (cache, timestamps, sources) = ecef_cache(&samples);
         // Full-fidelity strip from the cache, then the old cast.
-        let xs = axis_strip_values_f64(&cache, sources[0], &timestamps).expect("x");
-        let ys = axis_strip_values_f64(&cache, sources[1], &timestamps).expect("y");
-        let zs = axis_strip_values_f64(&cache, sources[2], &timestamps).expect("z");
+        let xs = axis_strip_values_f64(&cache, sources[0], &timestamps, None).expect("x");
+        let ys = axis_strip_values_f64(&cache, sources[1], &timestamps, None).expect("y");
+        let zs = axis_strip_values_f64(&cache, sources[2], &timestamps, None).expect("z");
         let quantized: Vec<DVec3> = xs
             .into_iter()
             .zip(ys)
