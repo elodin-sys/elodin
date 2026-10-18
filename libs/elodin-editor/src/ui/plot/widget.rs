@@ -1867,8 +1867,14 @@ fn append_evaluated(
     }
     for (handle, values) in line_handles.iter().zip(&evaluated.values) {
         if let Some(mut line) = lines.get_mut(handle) {
-            line.data
-                .append_time_value_pairs(earliest, &evaluated.timestamps, values);
+            line.data.append_samples(
+                earliest,
+                evaluated
+                    .timestamps
+                    .iter()
+                    .copied()
+                    .zip(values.iter().copied()),
+            );
             line.data
                 .evict_chunks_outside(crate::ui::plot::data::padded_sync_keep_range(range));
         }
