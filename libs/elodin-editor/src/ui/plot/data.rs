@@ -1906,28 +1906,10 @@ fn append_series_element_to_line(
     earliest: Timestamp,
     line: &mut LineTree<f32>,
 ) -> usize {
-    let mut total = 0usize;
-    for (timestamp, new_value) in
-        element_samples_with_predecessor(cache, component_id, element_index, range)
-    {
-        let mut accepted = false;
-        if let Some(last) = line.last() {
-            if timestamp <= last.summary.end_timestamp {
-                continue;
-            }
-            if last.timestamps.len() < CHUNK_LEN {
-                line.update_last(|c| {
-                    c.push(timestamp, earliest, new_value);
-                });
-                accepted = true;
-            }
-        }
-        if !accepted {
-            line.insert(Chunk::from_initial_value(timestamp, earliest, new_value));
-        }
-        total += 1;
-    }
-    total
+    line.append_samples(
+        earliest,
+        element_samples_with_predecessor(cache, component_id, element_index, range),
+    )
 }
 
 /// Fraction of `a`'s duration that overlaps `b` (0.0–1.0).
@@ -3454,29 +3436,41 @@ impl LineTree<f32> {
     }
 
     /// Append samples after the newest; those at or before it are skipped.
-    pub fn append_time_value_pairs(
+    /// Returns how many were appended.
+    pub fn append_samples(
         &mut self,
         earliest: Timestamp,
-        timestamps: &[Timestamp],
-        values: &[f32],
-    ) {
-        for (&timestamp, &value) in timestamps.iter().zip(values) {
-            let mut accepted = false;
-            if let Some(last) = self.last() {
-                if timestamp <= last.summary.end_timestamp {
-                    continue;
+        samples: impl IntoIterator<Item = (Timestamp, f32)>,
+    ) -> usize {
+        let mut newest = self.latest_sample_timestamp();
+        // Out of the tree while it grows: the tree is keyed by each chunk's span.
+        let mut tail: Option<Chunk<f32>> = None;
+        let mut appended = 0;
+        for (timestamp, value) in samples {
+            if newest.is_some_and(|newest| timestamp <= newest) {
+                continue;
+            }
+            newest = Some(timestamp);
+            if tail.is_none() {
+                tail = self.tree.last_entry().map(|last| last.remove_entry().1);
+            }
+            match &mut tail {
+                Some(chunk) if chunk.timestamps.len() < CHUNK_LEN => {
+                    chunk.push(timestamp, earliest, value);
                 }
-                if last.timestamps.len() < CHUNK_LEN {
-                    self.update_last(|chunk| {
-                        chunk.push(timestamp, earliest, value);
-                    });
-                    accepted = true;
+                _ => {
+                    let new = Chunk::from_initial_value(timestamp, earliest, value);
+                    if let Some(full) = tail.replace(new) {
+                        self.insert(full);
+                    }
                 }
             }
-            if !accepted {
-                self.insert(Chunk::from_initial_value(timestamp, earliest, value));
-            }
+            appended += 1;
         }
+        if let Some(chunk) = tail {
+            self.insert(chunk);
+        }
+        appended
     }
 
     /// Hamann–Chen in `(t, y)`; optional [`CurveCompressSettings::keep_recent_fraction`] leaves a
@@ -4823,7 +4817,7 @@ mod tests {
 
         // Live tip samples reach the line through `pkt_handler`, not this sync.
         live(&mut cache, 10_000, 10.0);
-        tree.append_time_value_pairs(Timestamp(0), &[Timestamp(10_000)], &[10.0]);
+        tree.append_samples(Timestamp(0), [(Timestamp(10_000), 10.0)]);
         let content = tree.content_gen();
         sync_line(&cache, id, &need, &mut tree, &mut verified);
         assert_eq!(tree.content_gen(), content);
