@@ -511,7 +511,10 @@ impl EditorPlugin {
     /// `host:port`, where `host` may be an IP literal or a DNS name.
     /// On failure the plugin is returned unchanged.
     #[cfg(target_family = "wasm")]
-    pub fn with_connection_str(self, addr: &str) -> Result<Self, (Self, String)> {
+    pub fn with_connection_str(
+        self,
+        addr: &str,
+    ) -> Result<Self, (Self, impeller_bevy::address::ParseError)> {
         match DbEndpoint::parse(addr) {
             Ok(endpoint) => Ok(self.with_db_endpoint(endpoint)),
             Err(err) => Err((self, err)),

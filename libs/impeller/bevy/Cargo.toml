@@ -37,6 +37,7 @@ impeller-stellar.optional = true
 futures-lite = "2.5.0"
 
 # helpers
+address = "0.24"
 smallvec.version = "1.11.2"
 compact_str = "0.9"
 tracing = "0.1"

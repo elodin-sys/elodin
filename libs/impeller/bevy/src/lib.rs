@@ -44,6 +44,7 @@ pub use impeller_wkt::ComponentValue;
 pub use impeller_wkt::ElementValueMut;
 pub use impeller_wkt::{ComponentPart, ComponentPath};
 
+pub use address;
 pub mod channels;
 pub use channels::{
     ConnectionAddr, ConnectionStatus, DbEndpoint, MsgPacketRx, MsgPacketTx, PacketRx, PacketTx,

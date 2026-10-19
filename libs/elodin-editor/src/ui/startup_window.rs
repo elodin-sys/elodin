@@ -117,7 +117,7 @@ fn create_startup_window(
         && let Some(addr) = connection_addr.as_ref()
     {
         commands.insert_resource(UrlConnect {
-            addr: addr.endpoint().authority(),
+            addr: addr.endpoint().authority().to_string(),
             failed: false,
         });
     }
