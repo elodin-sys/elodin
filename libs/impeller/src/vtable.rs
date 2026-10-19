@@ -501,10 +501,7 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
                 shape,
                 ty,
                 timestamp,
-            } = match res {
-                Ok(field) => field,
-                Err(err) => return Err(err),
-            };
+            } = res?;
             let offset = field.offset.to_index();
             let data = table
                 .get(offset..offset + field.len as usize)

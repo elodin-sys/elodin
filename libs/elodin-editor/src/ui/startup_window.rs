@@ -46,6 +46,7 @@ pub struct StartupActive;
 /// Initial `?db=` attempt. While this exists the editor chrome stays hidden and
 /// a connecting or failure dialog is shown instead.
 #[derive(Resource, Clone)]
+#[cfg_attr(not(target_family = "wasm"), allow(dead_code))]
 pub struct UrlConnect {
     addr: String,
     failed: bool,
