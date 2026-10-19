@@ -1442,7 +1442,7 @@ A plain `graph` plots raw component elements straight from the database and cann
 coordinate frame="ECEF" lat=28.5 lon=-80.6
 
 # Local NED chase offset while the sim pose is ECEF
-viewport pos="rocket.world_pos.ecef_to_ned().translate(-2, 0, 0).ned_to_ecef()"
+viewport pos="rocket.world_pos.ecef_to_ned().translate(-2, 0, 0, true).ned_to_ecef()"
          look_at="rocket.world_pos"
 
 # Plot NED northing from an ECEF world_pos (query_plot)
