@@ -110,9 +110,9 @@ def build() -> ui.Schematic:
                         effects=True,
                         hdr=False,
                         cinematic=False,
-                        pos="bdx.world_pos.translate(1,0,0.1)",
-                        look_at="bdx.world_pos.translate(2,0,0.1)",
-                        up="bdx.world_pos.direction(0,0,1)",
+                        pos="bdx.world_pos.translate(1,0,0.1,true)",
+                        look_at="bdx.world_pos.translate(2,0,0.1,true)",
+                        up="bdx.world_pos.direction(0,0,1,true)",
                         smoothing=0.0,
                     ),
                     ui.sensor_view(
