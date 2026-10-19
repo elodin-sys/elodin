@@ -705,27 +705,38 @@ fn compare(
 ) -> Result<Tensor, String> {
     let a = lookup_ref(env, lhs)?;
     let b = lookup_ref(env, rhs)?;
+    if a.ty.element_type != b.ty.element_type {
+        return Err("compare operands have different element types".into());
+    }
+    if result_ty.element_type != ElementType::I1 {
+        return Err("compare result must be i1".into());
+    }
+    let a_map = broadcast_map(&result_ty.shape, &a.ty.shape)?;
+    let b_map = broadcast_map(&result_ty.shape, &b.ty.shape)?;
     let mut out = Tensor::alloc(result_ty.clone());
     let n = result_ty.num_elements();
+    if out.bytes.len() != n {
+        return Err("compare result must be i1".into());
+    }
     match a.ty.element_type {
         ElementType::F64 | ElementType::F32 => {
             for i in 0..n {
-                let x = read_f64(&a.bytes, a.ty.element_type, i);
-                let y = read_f64(&b.bytes, b.ty.element_type, i);
+                let x = read_f64(&a.bytes, a.ty.element_type, mapped_index(a, &a_map, i)?);
+                let y = read_f64(&b.bytes, b.ty.element_type, mapped_index(b, &b_map, i)?);
                 out.bytes[i] = u8::from(cmp_f64(x, y, direction, compare_type));
             }
         }
         ElementType::I64 | ElementType::I32 | ElementType::UI64 | ElementType::UI32 => {
             for i in 0..n {
-                let x = read_int(&a.bytes, a.ty.element_type, i);
-                let y = read_int(&b.bytes, b.ty.element_type, i);
+                let x = read_int(&a.bytes, a.ty.element_type, mapped_index(a, &a_map, i)?);
+                let y = read_int(&b.bytes, b.ty.element_type, mapped_index(b, &b_map, i)?);
                 out.bytes[i] = u8::from(cmp_i64(x, y, direction));
             }
         }
         ElementType::I1 => {
             for i in 0..n {
-                let x = i64::from(a.bytes[i] != 0);
-                let y = i64::from(b.bytes[i] != 0);
+                let x = i64::from(a.bytes[mapped_index(a, &a_map, i)?] != 0);
+                let y = i64::from(b.bytes[mapped_index(b, &b_map, i)?] != 0);
                 out.bytes[i] = u8::from(cmp_i64(x, y, direction));
             }
         }
@@ -816,6 +827,21 @@ fn shape_strides(shape: &[i64]) -> Vec<usize> {
     out
 }
 
+fn mapped_index(tensor: &Tensor, map: &BroadcastMap, flat: usize) -> Result<usize, String> {
+    let index = map.index(flat);
+    let size = tensor.elem_size();
+    let off = index
+        .checked_mul(size)
+        .ok_or_else(|| "operand index is out of range".to_string())?;
+    let end = off
+        .checked_add(size)
+        .ok_or_else(|| "operand index is out of range".to_string())?;
+    if end > tensor.bytes.len() {
+        return Err("operand index is out of range".into());
+    }
+    Ok(index)
+}
+
 impl BroadcastMap {
     fn index(&self, flat_dst: usize) -> usize {
         if self.dst_rank == 0 || self.src_rank == 0 {
@@ -849,18 +875,27 @@ fn clamp(
     let src = lookup_ref(env, operand)?;
     let lo = lookup_ref(env, min)?;
     let hi = lookup_ref(env, max)?;
+    if result_ty.element_type != ElementType::F64
+        || src.ty.element_type != ElementType::F64
+        || lo.ty.element_type != ElementType::F64
+        || hi.ty.element_type != ElementType::F64
+    {
+        return Err("clamp is only implemented for f64".into());
+    }
+    let src_map = broadcast_map(&result_ty.shape, &src.ty.shape)?;
+    let lo_map = broadcast_map(&result_ty.shape, &lo.ty.shape)?;
+    let hi_map = broadcast_map(&result_ty.shape, &hi.ty.shape)?;
     let mut out = Tensor::alloc(result_ty.clone());
-    match result_ty.element_type {
-        ElementType::F64 => {
-            let n = result_ty.num_elements();
-            for i in 0..n {
-                let v = read_f64(&src.bytes, ElementType::F64, i);
-                let lo = read_f64(&lo.bytes, ElementType::F64, i);
-                let hi = read_f64(&hi.bytes, ElementType::F64, i);
-                write_f64(&mut out.bytes, ElementType::F64, i, v.clamp(lo, hi));
-            }
-        }
-        _ => return Err("clamp is only implemented for f64".into()),
+    let n = result_ty.num_elements();
+    for i in 0..n {
+        let v = read_f64(
+            &src.bytes,
+            ElementType::F64,
+            mapped_index(src, &src_map, i)?,
+        );
+        let lo_v = read_f64(&lo.bytes, ElementType::F64, mapped_index(lo, &lo_map, i)?);
+        let hi_v = read_f64(&hi.bytes, ElementType::F64, mapped_index(hi, &hi_map, i)?);
+        write_f64(&mut out.bytes, ElementType::F64, i, v.clamp(lo_v, hi_v));
     }
     Ok(out)
 }
@@ -1665,6 +1700,173 @@ mod tests {
         )
         .unwrap();
         assert_eq!(read_f64s(&out), vec![1.5, 1.5, 1.5]);
+    }
+
+    #[test]
+    fn clamp_broadcasts_scalar_bounds() {
+        let mut env = HashMap::new();
+        env.insert(ValueId(0), f64s(&[3], &[-5.0, 0.5, 3.0]));
+        env.insert(ValueId(1), f64s(&[], &[-1.0]));
+        env.insert(ValueId(2), f64s(&[], &[1.0]));
+        let out = clamp(
+            &env,
+            ValueId(0),
+            ValueId(1),
+            ValueId(2),
+            &ty(&[3], ElementType::F64),
+        )
+        .unwrap();
+        assert_eq!(read_f64s(&out), vec![-1.0, 0.5, 1.0]);
+    }
+
+    #[test]
+    fn clamp_broadcasts_unit_axes() {
+        let mut env = HashMap::new();
+        env.insert(ValueId(0), f64s(&[2, 2], &[0.0, 2.0, -3.0, 0.5]));
+        env.insert(ValueId(1), f64s(&[2, 1], &[-1.0, -0.5]));
+        env.insert(ValueId(2), f64s(&[1, 2], &[1.0, 1.5]));
+        let out = clamp(
+            &env,
+            ValueId(0),
+            ValueId(1),
+            ValueId(2),
+            &ty(&[2, 2], ElementType::F64),
+        )
+        .unwrap();
+        assert_eq!(read_f64s(&out), vec![0.0, 1.5, -0.5, 0.5]);
+    }
+
+    #[test]
+    fn clamp_short_operand_is_an_error() {
+        let mut env = HashMap::new();
+        env.insert(
+            ValueId(0),
+            Tensor {
+                ty: ty(&[2], ElementType::F64),
+                bytes: 1.0_f64.to_le_bytes().to_vec(),
+            },
+        );
+        env.insert(ValueId(1), f64s(&[], &[-1.0]));
+        env.insert(ValueId(2), f64s(&[], &[1.0]));
+        let err = clamp(
+            &env,
+            ValueId(0),
+            ValueId(1),
+            ValueId(2),
+            &ty(&[2], ElementType::F64),
+        )
+        .unwrap_err();
+        assert!(err.contains("out of range"));
+    }
+
+    #[test]
+    fn clamp_rejects_unbroadcastable_bounds() {
+        let mut env = HashMap::new();
+        env.insert(ValueId(0), f64s(&[3], &[-5.0, 0.5, 3.0]));
+        env.insert(ValueId(1), f64s(&[2], &[-1.0, 0.0]));
+        env.insert(ValueId(2), f64s(&[], &[1.0]));
+        let err = clamp(
+            &env,
+            ValueId(0),
+            ValueId(1),
+            ValueId(2),
+            &ty(&[3], ElementType::F64),
+        )
+        .unwrap_err();
+        assert!(err.contains("broadcast"));
+    }
+
+    #[test]
+    fn compare_broadcasts_scalar_operand() {
+        let mut env = HashMap::new();
+        env.insert(ValueId(0), f64s(&[3], &[-1.0, 0.0, 2.0]));
+        env.insert(ValueId(1), f64s(&[], &[0.0]));
+        let out = compare(
+            &env,
+            ValueId(0),
+            ValueId(1),
+            &ty(&[3], ElementType::I1),
+            CompareDirection::Gt,
+            CompareType::Float,
+        )
+        .unwrap();
+        assert_eq!(out.bytes, vec![0, 0, 1]);
+    }
+
+    #[test]
+    fn compare_broadcasts_integer_and_predicate_scalars() {
+        let mut env = HashMap::new();
+        env.insert(
+            ValueId(0),
+            Tensor {
+                ty: ty(&[2], ElementType::I64),
+                bytes: {
+                    let mut bytes = Vec::new();
+                    bytes.extend_from_slice(&1_i64.to_le_bytes());
+                    bytes.extend_from_slice(&4_i64.to_le_bytes());
+                    bytes
+                },
+            },
+        );
+        env.insert(
+            ValueId(1),
+            Tensor {
+                ty: ty(&[], ElementType::I64),
+                bytes: 2_i64.to_le_bytes().to_vec(),
+            },
+        );
+        let ints = compare(
+            &env,
+            ValueId(0),
+            ValueId(1),
+            &ty(&[2], ElementType::I1),
+            CompareDirection::Lt,
+            CompareType::Signed,
+        )
+        .unwrap();
+        assert_eq!(ints.bytes, vec![1, 0]);
+
+        env.insert(
+            ValueId(2),
+            Tensor {
+                ty: ty(&[2], ElementType::I1),
+                bytes: vec![1, 0],
+            },
+        );
+        env.insert(
+            ValueId(3),
+            Tensor {
+                ty: ty(&[], ElementType::I1),
+                bytes: vec![1],
+            },
+        );
+        let preds = compare(
+            &env,
+            ValueId(2),
+            ValueId(3),
+            &ty(&[2], ElementType::I1),
+            CompareDirection::Eq,
+            CompareType::Signed,
+        )
+        .unwrap();
+        assert_eq!(preds.bytes, vec![1, 0]);
+    }
+
+    #[test]
+    fn compare_rejects_unbroadcastable_operand() {
+        let mut env = HashMap::new();
+        env.insert(ValueId(0), f64s(&[3], &[-1.0, 0.0, 2.0]));
+        env.insert(ValueId(1), f64s(&[2], &[0.0, 1.0]));
+        let err = compare(
+            &env,
+            ValueId(0),
+            ValueId(1),
+            &ty(&[3], ElementType::I1),
+            CompareDirection::Gt,
+            CompareType::Float,
+        )
+        .unwrap_err();
+        assert!(err.contains("broadcast"));
     }
 
     #[test]
