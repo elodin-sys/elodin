@@ -12,12 +12,11 @@ use std::{
     },
 };
 
-/// Size of the BBQ queue for incoming packets.
-#[cfg(target_family = "wasm")]
-pub const QUEUE_LEN: usize = 2 * 1024 * 1024;
-/// Size of the BBQ queue for incoming packets.
-/// Increased from 64MB to 256MB to handle large Arrow IPC responses from SQL queries.
-#[cfg(not(target_family = "wasm"))]
+/// Incoming BBQ queue capacity.
+///
+/// Raised from 64 MiB to 256 MiB so a large Arrow IPC SQL reply fits alongside
+/// other in-flight packets. WASM uses the same size: a 2 MiB queue makes
+/// `push_incoming` drop those frames while the socket still looks connected.
 pub const QUEUE_LEN: usize = 256 * 1024 * 1024;
 
 #[derive(Resource)]
@@ -298,7 +297,7 @@ pub fn msg_channels() -> (
 
 #[cfg(test)]
 mod tests {
-    use super::DbEndpoint;
+    use super::{DbEndpoint, QUEUE_LEN};
 
     #[test]
     fn parse_accepts_ip_and_dns_names() {
@@ -319,6 +318,24 @@ mod tests {
         assert!(DbEndpoint::parse("not a host:2240").is_err());
         assert!(DbEndpoint::parse("localhost").is_err());
         assert!(DbEndpoint::parse("").is_err());
+    }
+
+    #[test]
+    fn incoming_queue_holds_large_arrow_ipc_frames() {
+        // Websocket proxy body cap (`MAX_IMPELLER_PACKET_BYTES`) plus the u32
+        // length prefix, the 16-byte alignment reserve in `push_incoming`, and
+        // the framed `usize` header. The queue is larger than one max frame so
+        // a SQL reply still fits when other packets are in flight.
+        const MAX_WS_BODY: usize = 64 * 1024 * 1024;
+        let one_frame = 4 + MAX_WS_BODY + 16 + size_of::<usize>();
+        assert!(
+            QUEUE_LEN >= 256 * 1024 * 1024,
+            "incoming queue {QUEUE_LEN} is below the 256 MiB Arrow IPC sizing"
+        );
+        assert!(
+            QUEUE_LEN > one_frame,
+            "incoming queue {QUEUE_LEN} cannot hold a {one_frame}-byte Arrow IPC frame"
+        );
     }
 
     #[test]
