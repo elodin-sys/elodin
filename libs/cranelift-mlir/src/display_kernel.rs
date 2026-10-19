@@ -227,6 +227,45 @@ module @module {
     }
 
     #[test]
+    fn interpreter_clamps_with_scalar_bounds() {
+        let mlir = r#"
+module @module {
+  func.func @main(%arg0: tensor<3xf64>) -> tensor<3xf64> {
+    %lo = stablehlo.constant dense<-1.0> : tensor<f64>
+    %hi = stablehlo.constant dense<1.0> : tensor<f64>
+    %0 = stablehlo.clamp %lo, %arg0, %hi : (tensor<f64>, tensor<3xf64>, tensor<f64>) -> tensor<3xf64>
+    return %0 : tensor<3xf64>
+  }
+}
+"#;
+        let input = f64_bytes(&[-5.0, 0.5, 3.0]);
+        let out = eval_fixture(mlir, &[24], &[24], &input);
+        assert_eq!(read_f64s(&out), vec![-1.0, 0.5, 1.0]);
+        #[cfg(feature = "jit")]
+        assert_interp_matches_jit(mlir, &[24], &[24], &input);
+    }
+
+    #[test]
+    fn interpreter_compares_against_scalar() {
+        let mlir = r#"
+module @module {
+  func.func @main(%arg0: tensor<3xf64>) -> tensor<3xi1> {
+    %c = stablehlo.constant dense<0.0> : tensor<f64>
+    %0 = stablehlo.compare GT, %arg0, %c, FLOAT : (tensor<3xf64>, tensor<f64>) -> tensor<3xi1>
+    return %0 : tensor<3xi1>
+  }
+}
+"#;
+        let input = f64_bytes(&[-1.0, 0.0, 2.0]);
+        let interp = invoke_bytes(
+            DisplayKernelExec::compile_interp(mlir, &[24], &[3]).unwrap(),
+            &[&input],
+            &[3],
+        );
+        assert_eq!(interp[0], vec![0, 0, 1]);
+    }
+
+    #[test]
     fn rejects_buffer_size_mismatch() {
         let mut exec = DisplayKernelExec::compile(sqrt_mlir(), &[8], &[8]).unwrap();
         let input = [0u8; 4];
