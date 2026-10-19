@@ -726,21 +726,122 @@ async fn index_response(assets_dir: PathBuf, prefix: Option<String>) -> Response
 /// Upper bound on a proxied Impeller packet body (the `u32` length prefix).
 const MAX_IMPELLER_PACKET_BYTES: usize = 64 * 1024 * 1024;
 
-/// Browser origins allowed to call this server from JS (Trunk on localhost).
-/// A public `0.0.0.0` bind plus `Access-Control-Allow-Origin: *` would expose
-/// unauthenticated Impeller; v1 stays localhost-oriented, same as open TCP.
-fn is_localhost_origin(origin: &str) -> bool {
-    let Some(rest) = origin.strip_prefix("http://") else {
-        return false;
-    };
-    if let Some(after) = rest.strip_prefix("[::1]") {
-        return after.is_empty() || after.starts_with(':');
-    }
-    let host = rest.split(':').next().unwrap_or(rest);
-    host == "127.0.0.1" || host.eq_ignore_ascii_case("localhost")
+/// Extra browser origins from `ELODIN_DB_ALLOWED_ORIGINS`.
+///
+/// A missing `Origin` is a non-browser client and is always allowed. A browser
+/// origin is allowed when its host is localhost, matches the request `Host`
+/// header, or is listed here. `*` allows every origin. Browsers do not enforce
+/// CORS on WebSocket upgrades, so a present-but-denied origin is rejected.
+#[derive(Clone, Debug, Default)]
+struct OriginPolicy {
+    allowed: Vec<String>,
+    any: bool,
 }
 
-fn apply_localhost_cors(res: &mut Response, origin: &HeaderValue) {
+impl OriginPolicy {
+    fn from_env() -> Self {
+        match std::env::var("ELODIN_DB_ALLOWED_ORIGINS") {
+            Ok(value) => Self::parse(&value),
+            Err(_) => Self::default(),
+        }
+    }
+
+    fn new(origins: impl IntoIterator<Item = impl AsRef<str>>) -> Self {
+        let mut policy = Self::default();
+        for origin in origins {
+            policy.push(origin.as_ref());
+        }
+        policy
+    }
+
+    fn parse(value: &str) -> Self {
+        Self::new(value.split(','))
+    }
+
+    fn push(&mut self, origin: &str) {
+        let origin = origin.trim();
+        if origin.is_empty() {
+            return;
+        }
+        if origin == "*" {
+            self.any = true;
+            return;
+        }
+        self.allowed.push(normalize_origin(origin));
+    }
+}
+
+/// Host of an origin (`scheme://host[:port]`), without brackets or port.
+fn origin_host(origin: &str) -> Option<&str> {
+    let rest = origin.trim().split_once("://")?.1;
+    let rest = rest.trim_end_matches('/');
+    let host = authority_host(rest);
+    if host.is_empty() { None } else { Some(host) }
+}
+
+/// Host of a `Host` header or URI authority, without brackets or port.
+fn authority_host(authority: &str) -> &str {
+    if let Some(rest) = authority.strip_prefix('[')
+        && let Some(end) = rest.find(']')
+    {
+        return &rest[..end];
+    }
+    authority
+        .split_once(':')
+        .map(|(host, _)| host)
+        .unwrap_or(authority)
+}
+
+fn is_localhost_origin(origin: &str) -> bool {
+    matches!(
+        origin_host(origin),
+        Some(host)
+            if host == "127.0.0.1"
+                || host == "::1"
+                || host.eq_ignore_ascii_case("localhost")
+    )
+}
+
+fn normalize_origin(origin: &str) -> String {
+    origin.trim().trim_end_matches('/').to_ascii_lowercase()
+}
+
+fn origin_allowed(policy: &OriginPolicy, origin: &str, request_host: Option<&str>) -> bool {
+    if policy.any || is_localhost_origin(origin) {
+        return true;
+    }
+    if let (Some(origin_host), Some(request_host)) = (origin_host(origin), request_host)
+        && origin_host.eq_ignore_ascii_case(request_host)
+    {
+        return true;
+    }
+    let normalized = normalize_origin(origin);
+    policy.allowed.iter().any(|allowed| allowed == &normalized)
+}
+
+/// Host the client used to reach this server. `X-Forwarded-Host` is ignored:
+/// the browser sets `Host` to the address it connected to, which is what
+/// same-host origins are compared against.
+fn host_header_host(req: &Request<axum::body::Body>) -> Option<String> {
+    let raw = req
+        .headers()
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned)
+        .or_else(|| {
+            req.uri()
+                .authority()
+                .map(|authority| authority.as_str().to_owned())
+        })?;
+    let host = authority_host(&raw);
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_owned())
+    }
+}
+
+fn apply_cors(res: &mut Response, origin: &HeaderValue) {
     res.headers_mut()
         .insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin.clone());
     res.headers_mut()
@@ -759,27 +860,36 @@ fn apply_localhost_cors(res: &mut Response, origin: &HeaderValue) {
     );
 }
 
-async fn localhost_cors(req: Request<axum::body::Body>, next: Next) -> Response {
+async fn origin_guard(
+    State(policy): State<OriginPolicy>,
+    req: Request<axum::body::Body>,
+    next: Next,
+) -> Response {
     let origin = req.headers().get(header::ORIGIN).cloned();
-    let origin_str = origin.as_ref().and_then(|v| v.to_str().ok());
-    // Browsers do not enforce CORS on WebSocket upgrades. A page that sends
-    // Origin must be localhost; missing Origin is a non-browser client.
-    if origin.is_some() && !origin_str.is_some_and(is_localhost_origin) {
+    let origin_str = origin.as_ref().and_then(|value| value.to_str().ok());
+    let request_host = host_header_host(&req);
+    let origin_ok =
+        origin_str.is_some_and(|origin| origin_allowed(&policy, origin, request_host.as_deref()));
+    if origin.is_some() && !origin_ok {
+        tracing::debug!(
+            origin = origin_str.unwrap_or("<invalid>"),
+            host = request_host.as_deref().unwrap_or("<none>"),
+            "rejecting browser origin"
+        );
         return StatusCode::FORBIDDEN.into_response();
     }
-    let origin_ok = origin_str.is_some();
 
     if req.method() == Method::OPTIONS {
         let mut res = StatusCode::NO_CONTENT.into_response();
         if origin_ok && let Some(origin) = origin.as_ref() {
-            apply_localhost_cors(&mut res, origin);
+            apply_cors(&mut res, origin);
         }
         return res;
     }
 
     let mut res = next.run(req).await;
     if origin_ok && let Some(origin) = origin.as_ref() {
-        apply_localhost_cors(&mut res, origin);
+        apply_cors(&mut res, origin);
     }
     res
 }
@@ -856,12 +966,16 @@ async fn proxy_impeller_ws(ws: WebSocket, addr: SocketAddr) {
 }
 
 fn assets_router(state: Arc<AssetsState>) -> Router {
+    assets_router_with_origins(state, OriginPolicy::from_env())
+}
+
+fn assets_router_with_origins(state: Arc<AssetsState>, origins: OriginPolicy) -> Router {
     Router::new()
         .route("/impeller", get(ws_impeller))
         .route("/impeller/msg", get(ws_impeller))
         .route("/{*path}", get(get_asset).put(put_asset))
         .layer(DefaultBodyLimit::max(MAX_ASSET_UPLOAD_BYTES))
-        .layer(middleware::from_fn(localhost_cors))
+        .layer(middleware::from_fn_with_state(origins, origin_guard))
         .with_state(state)
 }
 
@@ -1096,8 +1210,37 @@ mod tests {
         assert!(is_localhost_origin("http://localhost:8080"));
         assert!(is_localhost_origin("http://[::1]:8080"));
         assert!(is_localhost_origin("http://127.0.0.1"));
+        assert!(is_localhost_origin("https://127.0.0.1:8080"));
         assert!(!is_localhost_origin("http://example.com"));
-        assert!(!is_localhost_origin("https://127.0.0.1:8080"));
+        assert!(!is_localhost_origin("null"));
+    }
+
+    #[test]
+    fn origin_allowed_covers_localhost_same_host_and_list() {
+        let policy = OriginPolicy::new(["https://ops.example.com/"]);
+        assert!(origin_allowed(
+            &policy,
+            "https://127.0.0.1:8080",
+            Some("db.internal")
+        ));
+        assert!(origin_allowed(&policy, "http://labpc:8080", Some("labpc")));
+        assert!(origin_allowed(
+            &policy,
+            "http://[fd00::1]:8080",
+            Some("fd00::1")
+        ));
+        assert!(origin_allowed(
+            &policy,
+            "https://OPS.example.com",
+            Some("other")
+        ));
+        assert!(!origin_allowed(&policy, "http://other:3000", Some("labpc")));
+        assert!(!origin_allowed(&policy, "null", Some("labpc")));
+
+        let any = OriginPolicy::parse("*");
+        assert!(origin_allowed(&any, "http://evil.example", None));
+        let listed = OriginPolicy::parse("https://ops.example.com, *");
+        assert!(listed.any);
     }
 
     #[tokio::test]
@@ -1156,7 +1299,12 @@ mod tests {
             impeller_addr: "127.0.0.1:1".parse().unwrap(),
         });
         tokio::spawn(async move {
-            axum::serve(listener, assets_router(state)).await.unwrap();
+            axum::serve(
+                listener,
+                assets_router_with_origins(state, OriginPolicy::default()),
+            )
+            .await
+            .unwrap();
         });
 
         let mut request = format!("ws://{http_addr}/impeller")
@@ -1185,6 +1333,96 @@ mod tests {
         tokio_tungstenite::connect_async(allowed)
             .await
             .expect("localhost origin may open the impeller proxy");
+    }
+
+    async fn ws_upgrade_status(addr: SocketAddr, host: &str, origin: &str) -> u16 {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let request = format!(
+            "GET /impeller HTTP/1.1\r\n\
+             Host: {host}\r\n\
+             Origin: {origin}\r\n\
+             Upgrade: websocket\r\n\
+             Connection: Upgrade\r\n\
+             Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+             Sec-WebSocket-Version: 13\r\n\
+             \r\n"
+        );
+        stream.write_all(request.as_bytes()).await.unwrap();
+        let mut buf = [0u8; 64];
+        let n = stream.read(&mut buf).await.unwrap();
+        let status = std::str::from_utf8(&buf[..n])
+            .unwrap()
+            .split_whitespace()
+            .nth(1)
+            .unwrap();
+        status.parse().unwrap()
+    }
+
+    fn impeller_proxy_state(dir: &std::path::Path) -> Arc<AssetsState> {
+        Arc::new(AssetsState {
+            assets_dir: dir.join("assets"),
+            writable: false,
+            db: None,
+            impeller_addr: "127.0.0.1:1".parse().unwrap(),
+        })
+    }
+
+    #[tokio::test]
+    async fn impeller_websocket_allows_same_host_origin() {
+        let dir = tempdir().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let http_addr = listener.local_addr().unwrap();
+        let state = impeller_proxy_state(dir.path());
+        tokio::spawn(async move {
+            axum::serve(
+                listener,
+                assets_router_with_origins(state, OriginPolicy::default()),
+            )
+            .await
+            .unwrap();
+        });
+
+        assert_eq!(
+            ws_upgrade_status(http_addr, "labpc:2241", "http://labpc:3000").await,
+            StatusCode::SWITCHING_PROTOCOLS.as_u16()
+        );
+        assert_eq!(
+            ws_upgrade_status(http_addr, "[fd00::1]:2241", "http://[fd00::1]:8080").await,
+            StatusCode::SWITCHING_PROTOCOLS.as_u16()
+        );
+        assert_eq!(
+            ws_upgrade_status(http_addr, "labpc:2241", "http://other:3000").await,
+            StatusCode::FORBIDDEN.as_u16()
+        );
+    }
+
+    #[tokio::test]
+    async fn impeller_websocket_allows_listed_origin() {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+        let dir = tempdir().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let http_addr = listener.local_addr().unwrap();
+        let state = impeller_proxy_state(dir.path());
+        tokio::spawn(async move {
+            axum::serve(
+                listener,
+                assets_router_with_origins(state, OriginPolicy::new(["https://ops.example.com"])),
+            )
+            .await
+            .unwrap();
+        });
+
+        let mut request = format!("ws://{http_addr}/impeller")
+            .into_client_request()
+            .unwrap();
+        request
+            .headers_mut()
+            .insert(header::ORIGIN, "https://ops.example.com".parse().unwrap());
+        tokio_tungstenite::connect_async(request)
+            .await
+            .expect("listed origin may open the impeller proxy");
     }
 
     #[tokio::test]
