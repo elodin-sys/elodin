@@ -100,6 +100,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "address"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4d0f6b180f4be67a4e96fab97344a7c5b1fe932d5d3a2052b3bc85f042dba7ae"
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8096,6 +8102,7 @@ dependencies = [
 name = "impeller-bevy"
 version = "0.20.1-alpha.0"
 dependencies = [
+ "address",
  "bbqueue",
  "bevy",
  "compact_str",
