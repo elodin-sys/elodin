@@ -1396,39 +1396,7 @@ impl LoadSchematicParams<'_, '_> {
                                 "error parsing graph eql"
                             );
                         }
-                    })
-                    .ok()?;
-                let requires_evaluation = eql.requires_plot_evaluation();
-                let uses_derived_plot = requires_evaluation && eql::eval::supports(&eql);
-                let uses_query_plot = requires_evaluation && !uses_derived_plot;
-
-                let mut components_tree: BTreeMap<ComponentPath, Vec<(bool, Color32)>> =
-                    BTreeMap::new();
-                if !requires_evaluation {
-                    let mut component_vec = eql.to_graph_components();
-                    component_vec.sort();
-                    for (j, (component, i)) in component_vec.iter().enumerate() {
-                        let line_color = graph
-                            .colors
-                            .get(j)
-                            .copied()
-                            .map(EColor::into_color32)
-                            .unwrap_or_else(|| colors::get_color_by_index_all(j));
-                        if let Some(elements) = components_tree.get_mut(component) {
-                            if *i >= elements.len() {
-                                elements.resize(*i + 1, (false, line_color));
-                            }
-                            elements[*i] = (true, line_color);
-                        } else {
-                            let Some(schema) = self.schema_reg.0.get(&component.id) else {
-                                continue;
-                            };
-                            let len = schema.element_count().max(*i + 1);
-                            let mut elements: Vec<(bool, Color32)> =
-                                (0..len).map(|_| (false, line_color)).collect();
-                            elements[*i] = (true, line_color);
-                            components_tree.insert(component.clone(), elements);
-                        }
+                        return None;
                     }
                 };
                 let pending = eql.is_none();

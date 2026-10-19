@@ -13,7 +13,9 @@ use bevy::ecs::system::{Commands, Query, Res, ResMut, SystemState};
 use bevy::ecs::world::DeferredWorld;
 #[cfg(not(target_family = "wasm"))]
 use bevy::log::warn_once;
-use bevy::math::{FloatOrd, Rect, Vec4};
+#[cfg(target_family = "wasm")]
+use bevy::math::Rect;
+use bevy::math::{FloatOrd, Vec4};
 use bevy::prelude::Deref;
 use bevy::render::extract_component::{ComponentUniforms, DynamicUniformIndex};
 use bevy::render::render_phase::{
@@ -1663,6 +1665,7 @@ fn extract_plot_lines_wasm(
                             last_clip_range: Some((range_key.2, range_key.3)),
                             content_gen,
                             clip_key,
+                            index_layout: None,
                         })
                     }
                 };

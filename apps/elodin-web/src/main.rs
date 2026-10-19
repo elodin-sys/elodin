@@ -7,16 +7,7 @@ fn main() {
     web_sys::console::log_1(&"elodin-web: main()".into());
     let mut plugin = EditorPlugin::default();
     if let Some(db) = db_query_value() {
-        plugin = match plugin.with_connection_str(&db) {
-            Ok(next) => {
-                web_sys::console::log_1(&format!("elodin-web: db={db}").into());
-                next
-            }
-            Err((plugin, err)) => {
-                web_sys::console::warn_1(&format!("elodin-web: ignoring db={db:?}: {err}").into());
-                plugin
-            }
-        };
+        plugin = apply_db_query(plugin, &db);
     } else {
         web_sys::console::log_1(&"elodin-web: no db query param".into());
     }
@@ -25,6 +16,27 @@ fn main() {
         .add_systems(Startup, log_startup)
         .add_systems(Update, log_first_update)
         .run();
+}
+
+#[cfg(target_family = "wasm")]
+fn apply_db_query(plugin: EditorPlugin, db: &str) -> EditorPlugin {
+    match plugin.with_connection_str(db) {
+        Ok(next) => {
+            web_sys::console::log_1(&format!("elodin-web: db={db}").into());
+            next
+        }
+        Err((plugin, err)) => {
+            web_sys::console::warn_1(&format!("elodin-web: ignoring db={db:?}: {err}").into());
+            plugin
+        }
+    }
+}
+
+/// Host `cargo clippy` typechecks this bin. The connection API is wasm-only.
+#[cfg(not(target_family = "wasm"))]
+fn apply_db_query(plugin: EditorPlugin, db: &str) -> EditorPlugin {
+    let _ = db;
+    plugin
 }
 
 /// `?db=host:port` connects immediately. `host` may be an IP or a DNS name.

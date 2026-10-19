@@ -32,7 +32,7 @@ use impeller_bevy::{
     TelemetryCache,
 };
 use impeller_wkt::{CurrentTimestamp, EarliestTimestamp, IsRecording};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use std::{
     fmt::Debug,
     ops::{Range, RangeInclusive},
@@ -119,7 +119,7 @@ impl WidgetSystem for PlotWidget<'_, '_> {
         };
 
         let telemetry = telemetry_mode.0;
-        let mut bounds = sync_bounds(
+        let bounds = sync_bounds(
             &mut graph_state,
             selected_time_range.0.clone(),
             earliest_timestamp.0,
@@ -129,6 +129,8 @@ impl WidgetSystem for PlotWidget<'_, '_> {
         // The stored y window can settle on a 1-unit band that contains none of
         // the samples (fin axis at −29 while the series is −20..0). The stroke
         // is then clipped off the plot. Re-fit from the samples the GPU draws.
+        #[cfg(target_family = "wasm")]
+        let mut bounds = bounds;
         #[cfg(target_family = "wasm")]
         if graph_state.auto_y_range
             && let Some((min_y, max_y)) = wasm_sample_y_bounds(&graph_state, &lines, &line_query)

@@ -848,6 +848,7 @@ pub(super) fn build_gpu_line(
                 segment_buffer,
                 count,
                 last_index_key: None,
+                strip_values: Default::default(),
             },
             residual_too_large,
         ));
@@ -910,6 +911,7 @@ pub(super) fn build_gpu_line(
                 index_buffers,
                 count,
                 last_index_key: None,
+                strip_values: Default::default(),
             },
             residual_too_large,
         ))
