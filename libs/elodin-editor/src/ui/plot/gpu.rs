@@ -52,6 +52,7 @@ use impeller_wkt::GraphType;
 use std::collections::HashSet;
 use std::num::NonZeroU64;
 use std::ops::Range;
+use std::sync::Arc;
 
 #[cfg(not(target_family = "wasm"))]
 use crate::plugins::hw_stats::HardwareStats;
@@ -59,7 +60,7 @@ use crate::ui::ViewportRect;
 use crate::ui::plot::{CHUNK_COUNT, Line, XYLine};
 
 use super::data::{
-    PLOT_GPU_NEW_VALUE_BUFFERS_PER_FRAME, PLOT_VALUE_SHARD_CLASSES, value_buffer_bytes,
+    IndexLayout, PLOT_GPU_NEW_VALUE_BUFFERS_PER_FRAME, PLOT_VALUE_SHARD_CLASSES, value_buffer_bytes,
 };
 use super::{
     BufferShardAlloc, CollectedGraphData, PlotGpuAllocationPause, PlotGpuBufferPool,
@@ -374,15 +375,16 @@ impl LineMut<'_> {
         line_visible_range: Range<Timestamp>,
         pixel_width: usize,
         zoh: bool,
-    ) -> Option<u32> {
+        prev: Option<&IndexLayout>,
+    ) -> Option<(u32, Option<IndexLayout>)> {
         match self {
-            LineMut::Timeseries(line) => {
-                line.data
-                    .write_to_index_buffer(index_buffer, render_queue, line_visible_range, zoh)
-            }
-            LineMut::XY(xy_line) => {
-                xy_line.write_to_index_buffer(index_buffer, render_queue, pixel_width)
-            }
+            LineMut::Timeseries(line) => line
+                .data
+                .write_to_index_buffer(index_buffer, render_queue, line_visible_range, zoh, prev)
+                .map(|layout| (layout.count(), Some(layout))),
+            LineMut::XY(xy_line) => xy_line
+                .write_to_index_buffer(index_buffer, render_queue, pixel_width)
+                .map(|count| (count, None)),
         }
     }
 
@@ -660,6 +662,9 @@ pub struct GpuLine {
     /// Identity of the x/y value buffers the bind group references; the bind
     /// group must be rebuilt if the underlying `BufferShardAlloc` changes.
     value_buffer_ids: (BufferId, BufferId),
+    /// Where `index_buffer` holds each chunk's strip, so the next write keeps
+    /// the unchanged ones. `None` for XY lines, which rewrite in full.
+    index_layout: Option<Arc<IndexLayout>>,
 }
 
 /// Main-world cache of the per-line GPU resources, written back by
@@ -1152,7 +1157,7 @@ fn extract_lines(
                     let (ca, cb) = g.last_clip_range?;
                     Some((sa, sb, ca, cb, g.content_gen, g.zoh))
                 });
-                let count = if prev_key
+                let written = if prev_key
                     == Some((
                         range_key.0,
                         range_key.1,
@@ -1161,7 +1166,7 @@ fn extract_lines(
                         content_gen,
                         zoh,
                     )) {
-                    Some(cached.map(|g| g.count).unwrap_or(0))
+                    cached.map(|g| (g.count, g.index_layout.clone()))
                 } else {
                     line.write_to_index_buffer(
                         &index_buffer,
@@ -1169,9 +1174,11 @@ fn extract_lines(
                         data_range,
                         width.0,
                         zoh,
+                        cached.and_then(|g| g.index_layout.as_deref()),
                     )
+                    .map(|(count, layout)| (count, layout.map(Arc::new)))
                 };
-                let Some(count) = count else {
+                let Some((count, index_layout)) = written else {
                     if cached.is_none() {
                         plot_gpu_pool.release_index(index_buffer);
                     }
@@ -1187,6 +1194,7 @@ fn extract_lines(
                     last_clip_range: Some((range_key.2, range_key.3)),
                     content_gen,
                     value_buffer_ids,
+                    index_layout,
                 };
 
                 // Persist for the next frame's extract.

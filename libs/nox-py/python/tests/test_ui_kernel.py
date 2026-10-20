@@ -253,6 +253,22 @@ def test_graph_builder_accepts_kernel_expr():
     assert "drone.nav.speed" in kdl
 
 
+def test_eql_only_fields_reject_a_kernel():
+    schema = _schema()
+
+    @ui.kernel
+    def twice(position):
+        return position * 2.0
+
+    kernel = twice(schema["drone.nav.position"])
+    with pytest.raises(TypeError, match="display kernel"):
+        ui.ellipsoid(scale=kernel)
+    with pytest.raises(TypeError, match="display kernel"):
+        ui.vector_arrow(kernel)
+    with pytest.raises(TypeError, match="display kernel"):
+        ui.viewport(pos=kernel)
+
+
 def test_write_emits_kernel_sidecar(tmp_path):
     schema = _schema()
 

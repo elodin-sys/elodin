@@ -103,7 +103,7 @@ impl AdminService for AdminServiceImpl {
         };
         let component_id = value.component_id;
         self.db
-            .with_state_mut(|state| state.set_component_metadata(value, &self.db.path))
+            .set_component_metadata(value)
             .map_err(common::db_error)?;
         let metadata = self
             .db

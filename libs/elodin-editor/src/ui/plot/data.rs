@@ -1,6 +1,6 @@
 use bevy::asset::Asset;
 use bevy::log::warn_once;
-use bevy::prelude::{Children, InRef, Res, ResMut};
+use bevy::prelude::{Children, DetectChanges, InRef, Local, Res, ResMut};
 use bevy::reflect::TypePath;
 use bevy::{
     asset::{AssetId, Assets, Handle},
@@ -12,11 +12,12 @@ use bevy_render::renderer::{RenderDevice, RenderQueue};
 use impeller::types::{ComponentId, ComponentView, OwnedPacket, PacketId, Timestamp};
 use impeller_bevy::{
     BackfillState, CommandsExt, ComponentAdapters, ComponentPathRegistry, ComponentSchemaRegistry,
-    PacketGrantR, PacketHandlerInput, PacketHandlers, SeriesFetchPriority, TelemetryCache,
+    PacketGrantR, PacketHandlerInput, PacketHandlers, SeriesFetchPriority, SeriesRevision,
+    TelemetryCache,
 };
 use impeller_wkt::{
-    ComponentValue, CurrentTimestamp, EarliestTimestamp, GetTimeSeries, GetTimeSeriesPredecessor,
-    Line3d, PointTrails, VectorArrow3d,
+    ComponentValue, EarliestTimestamp, GetTimeSeries, GetTimeSeriesPredecessor, Line3d,
+    PointTrails, VectorArrow3d,
 };
 use itertools::{Itertools, MinMaxResult};
 use nodit::NoditMap;
@@ -385,16 +386,11 @@ pub fn pkt_handler(
     PacketHandlerInput { packet, registry }: PacketHandlerInput,
     mut collected_graph_data: ResMut<CollectedGraphData>,
     mut lines: ResMut<Assets<Line>>,
-    tick: Res<CurrentTimestamp>,
     earliest_timestamp: Res<EarliestTimestamp>,
     curve_compress: Res<CurveCompressSettings>,
     selected_range: Res<SelectedTimeRange>,
 ) {
-    let mut tick = *tick;
     if let OwnedPacket::Table(table) = packet {
-        if let Err(err) = table.sink(registry, &mut tick) {
-            warn_once!(?err, "tick sink failed");
-        }
         if let Err(err) = table.sink(
             registry,
             &mut |component_id, view: ComponentView<'_>, timestamp: Option<Timestamp>| {
@@ -632,22 +628,28 @@ pub fn queue_timestamp_read(
     mut prefetch: ResMut<VisiblePrefetchState>,
     schema_reg: Res<ComponentSchemaRegistry>,
     mut commands: Commands,
+    mut eql_ids: Local<EqlComponentIds>,
 ) {
     let sync_range = visible_sync_range(&selected_range, &behavior);
     let Some((range_key, sync_range)) = sync_range else {
         return;
     };
+    eql_ids.sync(&eql_ctx);
+    let fetch_ids = plot_fetch_component_ids(
+        &graph_states,
+        &line_3ds,
+        &point_trails,
+        &object_3ds,
+        &eql_ctx,
+        &mut eql_ids,
+    );
 
     // Fill the visible window ASAP for enabled plots while full begin→end
     // backfill continues in the background.
     prefetch_visible_window(
         &sync_range,
         range_key,
-        &graph_states,
-        &line_3ds,
-        &point_trails,
-        &object_3ds,
-        &eql_ctx,
+        &fetch_ids,
         &series_store,
         &schema_reg,
         &mut prefetch,
@@ -660,11 +662,7 @@ pub fn queue_timestamp_read(
         &mut graph_data,
         &mut lines,
         earliest_timestamp.0,
-        &graph_states,
-        &line_3ds,
-        &point_trails,
-        &object_3ds,
-        &eql_ctx,
+        &fetch_ids,
         &series_store,
         &mut sync_state,
     );
@@ -966,24 +964,17 @@ fn prefetch_hold_anchor(
     true
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Prefetch only plot/3D consumers (`fetch_ids`); monitors/viewport/arrows are
+/// allowlisted in `update_series_fetch_priority` and filled by live + begin→end backfill.
 fn prefetch_visible_window(
     sync_range: &Range<Timestamp>,
     range_key: (i64, i64),
-    graph_states: &Query<&GraphState>,
-    line_3ds: &Query<&Line3d>,
-    point_trails: &Query<&PointTrails>,
-    object_3ds: &Query<&Object3DState>,
-    eql_ctx: &EqlContext,
+    fetch_ids: &HashSet<ComponentId>,
     series_store: &TelemetryCache,
     schema_reg: &ComponentSchemaRegistry,
     prefetch: &mut VisiblePrefetchState,
     commands: &mut Commands,
 ) {
-    // Prefetch only plot/3D consumers; monitors/viewport/arrows are allowlisted
-    // in `update_series_fetch_priority` and filled by live + begin→end backfill.
-    let fetch_ids =
-        plot_fetch_component_ids(graph_states, line_3ds, point_trails, object_3ds, eql_ctx);
     prefetch
         .requests
         .retain(|key, _| fetch_ids.contains(&key.component_id()));
@@ -1001,7 +992,7 @@ fn prefetch_visible_window(
             end: range_key.1,
         });
     }
-    for component_id in fetch_ids {
+    for component_id in fetch_ids.iter().copied() {
         if !prefetch.has_capacity() {
             break;
         }
@@ -1023,10 +1014,11 @@ fn prefetch_visible_window(
             start: range_key.0,
             end: range_key.1,
         };
-        if series_store.is_covered(&component_id, sync_range) {
+        // Only the gap: a trailing window's new quantum would otherwise refetch it all.
+        let Some(gap_start) = series_store.first_uncovered(&component_id, sync_range) else {
             prefetch.requests.remove(&key);
             continue;
-        }
+        };
         let Some(attempt) = prefetch.begin(key) else {
             continue;
         };
@@ -1034,7 +1026,7 @@ fn prefetch_visible_window(
             key,
             attempt,
             component_id,
-            sync_range.start,
+            gap_start,
             sync_range.end,
             commands,
         );
@@ -1219,18 +1211,12 @@ pub fn sync_plot_lines_from_series_store(
     graph_data: &mut CollectedGraphData,
     lines: &mut Assets<Line>,
     earliest: Timestamp,
-    graph_states: &Query<&GraphState>,
-    line_3ds: &Query<&Line3d>,
-    point_trails: &Query<&PointTrails>,
-    object_3ds: &Query<&Object3DState>,
-    eql_ctx: &EqlContext,
+    fetch_ids: &HashSet<ComponentId>,
     series_store: &TelemetryCache,
     sync_state: &mut PlotSyncState,
 ) {
-    let fetch_ids =
-        plot_fetch_component_ids(graph_states, line_3ds, point_trails, object_3ds, eql_ctx);
     let range_changed = sync_state.last_range != Some(range_key);
-    let enabled_changed = sync_state.last_enabled != fetch_ids;
+    let enabled_changed = sync_state.last_enabled != *fetch_ids;
     let layout_generation = graph_data.line_layout_generation();
     let layout_changed = sync_state.last_layout_generation != layout_generation;
     let gen_changed = series_store.generation() != sync_state.last_generation;
@@ -1242,7 +1228,7 @@ pub fn sync_plot_lines_from_series_store(
     if !(range_changed || enabled_changed || layout_changed || (gen_changed && due)) {
         return;
     }
-    let new_layout = refresh_line_layout(sync_state, graph_data, &fetch_ids, enabled_changed);
+    let new_layout = refresh_line_layout(sync_state, graph_data, fetch_ids, enabled_changed);
     sync_state.last_range = Some(range_key);
     sync_state.last_generation = series_store.generation();
     sync_state.last_enabled = fetch_ids.clone();
@@ -1290,6 +1276,7 @@ pub fn sync_plot_lines_from_series_store(
                 max_points,
                 force_full,
                 &mut line.data,
+                &mut sync_state.verified_revisions,
             );
             line.last_queried = Some(Instant::now());
         }
@@ -1384,15 +1371,30 @@ fn apply_plot_sync_plan(
     max_points: Option<usize>,
     force_full: bool,
     tree: &mut LineTree<f32>,
+    verified_revisions: &mut HashMap<(ComponentId, usize), SeriesRevision>,
 ) {
+    // Live samples reach the line as they arrive (`pkt_handler`); only a
+    // revision change can leave the store holding samples the line lacks,
+    // and only from the oldest timestamp it changed.
+    let key = (component_id, element_index);
+    let changed_from = verified_revisions
+        .get(&key)
+        .map(|verified| series_store.changed_since(&component_id, *verified));
+    verified_revisions.insert(key, series_store.revision(&component_id));
+    let in_sync = match changed_from {
+        Some(None) => true,
+        Some(Some(from)) => tree.truncate_from(from),
+        None => false,
+    };
     let rebuild = force_full
-        || !plot_line_matches_store_interior(
-            series_store,
-            component_id,
-            element_index,
-            sync_range,
-            tree,
-        );
+        || (!in_sync
+            && !plot_line_matches_store_interior(
+                series_store,
+                component_id,
+                element_index,
+                sync_range,
+                tree,
+            ));
     match plot_sync_plan(tree.projected_span(), sync_range, rebuild) {
         PlotSyncPlan::FullRebuild => {
             tree.clear();
@@ -1406,16 +1408,20 @@ fn apply_plot_sync_plan(
                 max_points,
             );
         }
-        PlotSyncPlan::Keep => {
-            tree.evict_chunks_outside(padded_sync_keep_range(sync_range));
-        }
-        PlotSyncPlan::Extend { suffix, .. } => {
-            if let Some(range) = suffix {
+        PlotSyncPlan::Keep | PlotSyncPlan::Extend { .. } => {
+            // A projected window may extend beyond the last available sample.
+            // Include new appends inside that window, even when the camera stays put.
+            let start = tree
+                .latest_sample_timestamp()
+                .map_or(sync_range.start, |last| {
+                    Timestamp(last.0.saturating_add(1)).max(sync_range.start)
+                });
+            if start < sync_range.end {
                 append_series_element_to_line(
                     series_store,
                     component_id,
                     element_index,
-                    &range,
+                    &(start..sync_range.end),
                     earliest,
                     tree,
                 );
@@ -1426,8 +1432,8 @@ fn apply_plot_sync_plan(
     tree.set_projected_range(sync_range.clone());
 }
 
-/// True when every in-store sample inside the tree's already-covered span is
-/// also in the tree.
+/// True when the projected history can be reused, with new tip samples appended
+/// separately.
 ///
 /// Compared only on `stored ∩ need`, so a newly exposed suffix still goes
 /// through `Extend` instead of a full rebuild. Samples the store later
@@ -1444,7 +1450,11 @@ fn plot_line_matches_store_interior(
         return true;
     };
     let start = stored.start.max(need.start);
-    let end = stored.end.min(need.end);
+    // Missing samples beyond the actual tip can be appended without rebuilding.
+    let end = stored.end.min(need.end).min(
+        tree.latest_sample_timestamp()
+            .map_or(start, |last| Timestamp(last.0.saturating_add(1))),
+    );
     if end.0 <= start.0 {
         return true;
     }
@@ -1452,6 +1462,15 @@ fn plot_line_matches_store_interior(
     let Some(series) = series_store.series(&component_id) else {
         return !tree.has_samples();
     };
+    // The sample held into the window can load after the window itself (a hold anchor).
+    let held = series
+        .range(..=start)
+        .rev()
+        .find(|(_, value)| value.get(element_index).is_some())
+        .map(|(&timestamp, _)| timestamp);
+    if held != tree.last_timestamp_strictly_before(Timestamp(start.0.saturating_add(1))) {
+        return false;
+    }
     series
         .range(inspect)
         .filter(|(_, value)| value.get(element_index).is_some())
@@ -1461,7 +1480,7 @@ fn plot_line_matches_store_interior(
         })
 }
 
-fn padded_sync_keep_range(sync_range: &Range<Timestamp>) -> Range<Timestamp> {
+pub(crate) fn padded_sync_keep_range(sync_range: &Range<Timestamp>) -> Range<Timestamp> {
     let pad = REQUEST_KEY_QUANTUM_MICROS.saturating_mul(4);
     Timestamp(sync_range.start.0.saturating_sub(pad))
         ..Timestamp(sync_range.end.0.saturating_add(pad))
@@ -1476,6 +1495,8 @@ pub struct PlotSyncState {
     last_layout_generation: u64,
     last_layout: HashSet<(ComponentId, usize)>,
     last_rebuild: Option<Instant>,
+    /// The store revision each line last matched; live appends keep it.
+    verified_revisions: HashMap<(ComponentId, usize), SeriesRevision>,
 }
 
 /// Request-key quantum (100 ms) — used when quantizing trailing sync windows.
@@ -1501,27 +1522,52 @@ fn collect_kernel_component_ids(
     }
 }
 
-fn collect_eql_component_ids(eql: &str, eql_ctx: &EqlContext, out: &mut HashSet<ComponentId>) {
-    if eql.trim().is_empty() {
-        return;
+/// EQL text → the component IDs it reads, parsed once per `EqlContext`.
+#[derive(Default)]
+pub struct EqlComponentIds(HashMap<String, Vec<ComponentId>>);
+
+impl EqlComponentIds {
+    /// A parse depends on the context's components: drop results when it changes.
+    pub fn sync(&mut self, eql_ctx: &Res<EqlContext>) {
+        if eql_ctx.is_changed() {
+            self.0.clear();
+        }
     }
-    let Ok(parsed) = eql_ctx.0.parse_str(eql) else {
-        return;
-    };
-    for (c, _) in parsed.to_graph_components() {
-        out.insert(c.id);
+
+    fn collect(&mut self, eql: &str, eql_ctx: &EqlContext, out: &mut HashSet<ComponentId>) {
+        if eql.trim().is_empty() {
+            return;
+        }
+        if let Some(ids) = self.0.get(eql) {
+            out.extend(ids.iter().copied());
+            return;
+        }
+        let ids: Vec<ComponentId> = eql_ctx
+            .0
+            .parse_str(eql)
+            .map(|parsed| {
+                parsed
+                    .to_graph_components()
+                    .into_iter()
+                    .map(|(c, _)| c.id)
+                    .collect()
+            })
+            .unwrap_or_default();
+        out.extend(ids.iter().copied());
+        self.0.insert(eql.to_owned(), ids);
     }
 }
 
 fn collect_object_3d_mesh_component_ids(
     mesh: &impeller_wkt::Object3DMesh,
     eql_ctx: &EqlContext,
+    eql_ids: &mut EqlComponentIds,
     out: &mut HashSet<ComponentId>,
 ) {
     match mesh {
         impeller_wkt::Object3DMesh::Glb { animations, .. } => {
             for anim in animations {
-                collect_eql_component_ids(&anim.eql_expr, eql_ctx, out);
+                eql_ids.collect(&anim.eql_expr, eql_ctx, out);
             }
         }
         impeller_wkt::Object3DMesh::Ellipsoid {
@@ -1538,11 +1584,11 @@ fn collect_object_3d_mesh_component_ids(
             {
                 collect_kernel_component_ids(kernel, out);
             } else if let Some(cholesky) = error_covariance_cholesky {
-                collect_eql_component_ids(cholesky, eql_ctx, out);
+                eql_ids.collect(cholesky, eql_ctx, out);
             } else if let Some(covariance) = error_covariance {
-                collect_eql_component_ids(covariance, eql_ctx, out);
+                eql_ids.collect(covariance, eql_ctx, out);
             } else {
-                collect_eql_component_ids(scale, eql_ctx, out);
+                eql_ids.collect(scale, eql_ctx, out);
             }
         }
         impeller_wkt::Object3DMesh::Mesh { .. } => {}
@@ -1564,6 +1610,7 @@ fn plot_fetch_component_ids(
     point_trails: &Query<&PointTrails>,
     object_3ds: &Query<&Object3DState>,
     eql_ctx: &EqlContext,
+    eql_ids: &mut EqlComponentIds,
 ) -> HashSet<ComponentId> {
     let mut ids = HashSet::new();
     for gs in graph_states.iter() {
@@ -1578,19 +1625,19 @@ fn plot_fetch_component_ids(
         }
     }
     for line in line_3ds.iter() {
-        collect_eql_component_ids(&line.eql, eql_ctx, &mut ids);
+        eql_ids.collect(&line.eql, eql_ctx, &mut ids);
     }
     ids.extend(point_trails.iter().flat_map(point_trails_component_ids));
     for obj in object_3ds.iter() {
         if let Some(kernel) = &obj.data.kernel {
             collect_kernel_component_ids(kernel, &mut ids);
         } else {
-            collect_eql_component_ids(&obj.data.eql, eql_ctx, &mut ids);
+            eql_ids.collect(&obj.data.eql, eql_ctx, &mut ids);
         }
-        collect_object_3d_mesh_component_ids(&obj.data.mesh, eql_ctx, &mut ids);
+        collect_object_3d_mesh_component_ids(&obj.data.mesh, eql_ctx, eql_ids, &mut ids);
         // Thruster particle intensity EQL (plume / cold_gas / motor smoke).
         for thruster in &obj.data.thrusters {
-            collect_eql_component_ids(&thruster.intensity, eql_ctx, &mut ids);
+            eql_ids.collect(&thruster.intensity, eql_ctx, &mut ids);
         }
     }
     ids
@@ -1609,26 +1656,33 @@ fn enabled_fetch_component_ids(
     viewports: &Query<&Viewport>,
     vector_arrows: &Query<&VectorArrow3d>,
     eql_ctx: &EqlContext,
+    eql_ids: &mut EqlComponentIds,
 ) -> HashSet<ComponentId> {
-    let mut ids =
-        plot_fetch_component_ids(graph_states, line_3ds, point_trails, object_3ds, eql_ctx);
+    let mut ids = plot_fetch_component_ids(
+        graph_states,
+        line_3ds,
+        point_trails,
+        object_3ds,
+        eql_ctx,
+        eql_ids,
+    );
     for monitor in monitors.iter() {
         if !monitor.component_name.trim().is_empty() {
             ids.insert(ComponentId::new(&monitor.component_name));
         }
     }
     for binding in gauge_bindings.iter() {
-        collect_eql_component_ids(&binding.eql, eql_ctx, &mut ids);
+        eql_ids.collect(&binding.eql, eql_ctx, &mut ids);
     }
     for viewport in viewports.iter() {
-        collect_eql_component_ids(&viewport.pos.eql, eql_ctx, &mut ids);
-        collect_eql_component_ids(&viewport.look_at.eql, eql_ctx, &mut ids);
-        collect_eql_component_ids(&viewport.up.eql, eql_ctx, &mut ids);
+        eql_ids.collect(&viewport.pos.eql, eql_ctx, &mut ids);
+        eql_ids.collect(&viewport.look_at.eql, eql_ctx, &mut ids);
+        eql_ids.collect(&viewport.up.eql, eql_ctx, &mut ids);
     }
     for arrow in vector_arrows.iter() {
-        collect_eql_component_ids(&arrow.vector, eql_ctx, &mut ids);
+        eql_ids.collect(&arrow.vector, eql_ctx, &mut ids);
         if let Some(origin) = &arrow.origin {
-            collect_eql_component_ids(origin, eql_ctx, &mut ids);
+            eql_ids.collect(origin, eql_ctx, &mut ids);
         }
     }
     ids
@@ -1711,7 +1765,11 @@ pub fn update_series_fetch_priority(
     vector_arrows: Query<&VectorArrow3d>,
     eql_ctx: Res<EqlContext>,
     // Grouped to stay within Bevy's 16-parameter system limit.
-    (path_reg, adapters): (Res<ComponentPathRegistry>, Res<ComponentAdapters>),
+    (path_reg, adapters, mut eql_ids): (
+        Res<ComponentPathRegistry>,
+        Res<ComponentAdapters>,
+        Local<EqlComponentIds>,
+    ),
     sensor_cameras: Res<SensorCameraConfigs>,
     inspected: InspectedComponents,
     mut priority: ResMut<SeriesFetchPriority>,
@@ -1720,6 +1778,7 @@ pub fn update_series_fetch_priority(
     // Present in the interactive editor; absent in headless render-server.
     mut prefetch: Option<ResMut<VisiblePrefetchState>>,
 ) {
+    eql_ids.sync(&eql_ctx);
     let adapter_leaves: HashSet<ComponentId> = adapters.keys().copied().collect();
     let mut extras = viewport_adapter_component_ids(&path_reg, &adapter_leaves);
     extras.extend(sensor_camera_world_pos_ids(&sensor_cameras));
@@ -1735,6 +1794,7 @@ pub fn update_series_fetch_priority(
             &viewports,
             &vector_arrows,
             &eql_ctx,
+            &mut eql_ids,
         ),
         extras,
     );
@@ -1846,28 +1906,10 @@ fn append_series_element_to_line(
     earliest: Timestamp,
     line: &mut LineTree<f32>,
 ) -> usize {
-    let mut total = 0usize;
-    for (timestamp, new_value) in
-        element_samples_with_predecessor(cache, component_id, element_index, range)
-    {
-        let mut accepted = false;
-        if let Some(last) = line.last() {
-            if timestamp <= last.summary.end_timestamp {
-                continue;
-            }
-            if last.timestamps.len() < CHUNK_LEN {
-                line.update_last(|c| {
-                    c.push(timestamp, earliest, new_value);
-                });
-                accepted = true;
-            }
-        }
-        if !accepted {
-            line.insert(Chunk::from_initial_value(timestamp, earliest, new_value));
-        }
-        total += 1;
-    }
-    total
+    line.append_samples(
+        earliest,
+        element_samples_with_predecessor(cache, component_id, element_index, range),
+    )
 }
 
 /// Fraction of `a`'s duration that overlaps `b` (0.0–1.0).
@@ -2679,14 +2721,18 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
 
         let step = total.div_ceil(MAX_PERCENTILE_SAMPLES).max(1);
         let mut values: Vec<D> = Vec::with_capacity(total.div_ceil(step));
-        let mut i = 0usize;
+        // Every `step`-th sample across the slices, indexed rather than scanned.
+        let mut next = 0usize;
+        let mut base = 0usize;
         for slice in slices {
-            for &v in slice {
-                if i.is_multiple_of(step) && value_is_finite(&v) {
+            while next < base + slice.len() {
+                let v = slice[next - base];
+                if value_is_finite(&v) {
                     values.push(v);
                 }
-                i += 1;
+                next += step;
             }
+            base += slice.len();
         }
 
         if values.is_empty() {
@@ -2973,21 +3019,39 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         })
     }
 
+    /// Writes the strip for `line_visible_range`, keeping in the buffer the
+    /// strips `prev` wrote for unchanged leading chunks: a live line only
+    /// changes at its tail.
     pub fn write_to_index_buffer(
         &self,
         index_buffer: &Buffer,
         render_queue: &RenderQueue,
         line_visible_range: Range<Timestamp>,
         terminal_hold: bool,
-    ) -> Option<u32> {
+        prev: Option<&IndexLayout>,
+    ) -> Option<IndexLayout> {
         let step = self.fitted_index_step(line_visible_range.clone(), terminal_hold);
-        self.write_to_index_buffer_with_step_mode(
-            index_buffer,
-            render_queue,
-            line_visible_range,
+        let chunks: Vec<IndexChunk> = self.draw_index_chunk_iter(line_visible_range).collect();
+        let kept = prev.map_or(0, |prev| prev.kept(&chunks, step, terminal_hold));
+        if let Some(prev) = prev
+            && kept == chunks.len()
+            && kept == prev.strips.len()
+        {
+            return Some(prev.clone());
+        }
+        let mut layout = IndexLayout {
             step,
             terminal_hold,
-        )
+            strips: prev.map_or_else(Vec::new, |prev| prev.strips.clone()),
+            count: 0,
+        };
+        let (offset, indices) = layout.extend(&chunks, kept);
+        if let Some(size) = NonZeroU64::new(indices.len() as u64 * 4) {
+            render_queue
+                .write_buffer_with(index_buffer, u64::from(offset) * 4, size)?
+                .copy_from_slice(indices.as_bytes());
+        }
+        Some(layout)
     }
 
     /// Stride for `range` that [`Self::write_to_index_buffer_with_step`] is
@@ -3043,6 +3107,17 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
                     len,
                 })
             });
+        // At step 1 each chunk's strip is its samples between two separators.
+        if step <= 1 {
+            let mut drawn = false;
+            let samples: usize = chunks
+                .map(|chunk| {
+                    drawn = true;
+                    chunk.len + 2
+                })
+                .sum();
+            return (samples + usize::from(terminal_hold && drawn) * 2) as u32;
+        }
         let _ = for_each_strip_index(chunks, step, terminal_hold, |_| {
             n = n.saturating_add(1);
             ControlFlow::Continue(())
@@ -3175,6 +3250,18 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         step: usize,
     ) -> Vec<Timestamp> {
         let mut out = Vec::new();
+        // Step 1 strips every visible sample in order: copy each chunk's slice.
+        if step <= 1 {
+            for chunk in self.range_iter(line_visible_range.clone()) {
+                if let Some((start, end)) =
+                    chunk_visible_offsets(&chunk.timestamps, &line_visible_range)
+                {
+                    let end = end.min(chunk.data.cpu().len());
+                    out.extend_from_slice(&chunk.timestamps[start.min(end)..end]);
+                }
+            }
+            return out;
+        }
         self.for_each_strip_sample(line_visible_range, step, |chunk, i| {
             // Guard on `data` so a value-less index is skipped in both
             // collectors and the two stay aligned.
@@ -3360,6 +3447,71 @@ impl LineTree<f32> {
                 &mut self.timestamp_buffer_shard_alloc,
             );
         }
+    }
+
+    /// Drop every chunk holding samples at or after `from`; the projected range
+    /// then ends where the kept samples do, so an extend re-appends the rest.
+    /// False when nothing before `from` remains.
+    pub fn truncate_from(&mut self, from: Timestamp) -> bool {
+        let kept_end = self
+            .tree
+            .iter()
+            .map(|(_, chunk)| chunk.summary.end_timestamp)
+            .take_while(|&end| end < from)
+            .last();
+        let Some(kept_end) = kept_end else {
+            return false;
+        };
+        for (_, mut chunk) in self.tree.remove_overlapping(ii(kept_end.0 + 1, i64::MAX)) {
+            release_line_chunk_gpu(
+                &mut chunk,
+                &mut self.data_buffer_shard_alloc,
+                &mut self.timestamp_buffer_shard_alloc,
+            );
+            self.content_gen = self.content_gen.wrapping_add(1);
+        }
+        if let Some(range) = &mut self.projected_range {
+            range.end = Timestamp(kept_end.0 + 1).min(range.end);
+        }
+        true
+    }
+
+    /// Append samples after the newest; those at or before it are skipped.
+    /// Returns how many were appended.
+    pub fn append_samples(
+        &mut self,
+        earliest: Timestamp,
+        samples: impl IntoIterator<Item = (Timestamp, f32)>,
+    ) -> usize {
+        let mut newest = self.latest_sample_timestamp();
+        // Out of the tree while it grows: the tree is keyed by each chunk's span.
+        let mut tail: Option<Chunk<f32>> = None;
+        let mut appended = 0;
+        for (timestamp, value) in samples {
+            if newest.is_some_and(|newest| timestamp <= newest) {
+                continue;
+            }
+            newest = Some(timestamp);
+            if tail.is_none() {
+                tail = self.tree.last_entry().map(|last| last.remove_entry().1);
+            }
+            match &mut tail {
+                Some(chunk) if chunk.timestamps.len() < CHUNK_LEN => {
+                    chunk.push(timestamp, earliest, value);
+                }
+                _ => {
+                    let new = Chunk::from_initial_value(timestamp, earliest, value);
+                    if let Some(full) = tail.replace(new) {
+                        self.insert(full);
+                    }
+                }
+            }
+            appended += 1;
+        }
+        if let Some(chunk) = tail {
+            self.insert(chunk);
+        }
+        appended
     }
 
     /// Hamann–Chen in `(t, y)`; optional [`CurveCompressSettings::keep_recent_fraction`] leaves a
@@ -3654,7 +3806,7 @@ mod tests {
             Timestamp(1),
         ));
         let mut ids = HashSet::new();
-        collect_eql_component_ids(
+        EqlComponentIds::default().collect(
             "(effector.cube_pos_ecef[0],effector.cube_pos_ecef[650],effector.cube_pos_ecef[1300])",
             &eql_ctx,
             &mut ids,
@@ -3680,7 +3832,7 @@ mod tests {
         ));
         let binding = crate::ui::gauges::EqlBinding::new(name.into());
         let mut ids = HashSet::new();
-        collect_eql_component_ids(&binding.eql, &eql_ctx, &mut ids);
+        EqlComponentIds::default().collect(&binding.eql, &eql_ctx, &mut ids);
         assert_eq!(ids, [ComponentId::new(name)].into_iter().collect());
     }
 
@@ -3797,7 +3949,8 @@ mod tests {
         };
 
         let mut ids = HashSet::new();
-        collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut ids);
+        let mut eql_ids = EqlComponentIds::default();
+        collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut eql_ids, &mut ids);
 
         assert_eq!(
             ids,
@@ -3812,7 +3965,7 @@ mod tests {
             *error_covariance_cholesky = None;
         }
         ids.clear();
-        collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut ids);
+        collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut eql_ids, &mut ids);
         assert_eq!(
             ids,
             [ComponentId::new("shape.covariance")].into_iter().collect()
@@ -3825,7 +3978,7 @@ mod tests {
             *error_covariance = None;
         }
         ids.clear();
-        collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut ids);
+        collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut eql_ids, &mut ids);
         assert_eq!(ids, [ComponentId::new("shape.scale")].into_iter().collect());
     }
 
@@ -3874,7 +4027,8 @@ mod tests {
         };
 
         let mut ids = HashSet::new();
-        collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut ids);
+        let mut eql_ids = EqlComponentIds::default();
+        collect_object_3d_mesh_component_ids(&mesh, &eql_ctx, &mut eql_ids, &mut ids);
         assert!(
             ids.contains(&ComponentId::new("CANOPENMOTORMESSAGE3.ACTUAL_POSITION")),
             "missing motor position, ids={ids:?}"
@@ -3981,6 +4135,26 @@ mod tests {
         );
     }
 
+    fn sync_line(
+        cache: &TelemetryCache,
+        id: ComponentId,
+        need: &Range<Timestamp>,
+        tree: &mut LineTree<f32>,
+        verified: &mut HashMap<(ComponentId, usize), SeriesRevision>,
+    ) {
+        apply_plot_sync_plan(
+            cache,
+            id,
+            0,
+            need,
+            Timestamp(0),
+            None,
+            false,
+            tree,
+            verified,
+        );
+    }
+
     #[test]
     fn line_layout_generation_targets_only_new_handles() {
         let id = ComponentId::new("test.layout");
@@ -4015,6 +4189,7 @@ mod tests {
                 None,
                 true,
                 &mut lines.get_mut(handle).unwrap().data,
+                &mut HashMap::new(),
             );
         }
         assert_eq!(lines.get(&first).unwrap().data.content_gen(), 0);
@@ -4589,6 +4764,47 @@ mod tests {
     }
 
     #[test]
+    fn plot_sync_appends_inside_a_fixed_window_without_replacing_existing_chunks() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.fixed.live");
+        insert_f64(&mut cache, id, 0, 0.0);
+        let need = Timestamp(0)..Timestamp(10_000);
+        let mut tree = LineTree::<f32>::default();
+        sync_line(&cache, id, &need, &mut tree, &mut HashMap::new());
+        let original = tree.last().unwrap().data.gpu_dirty.clone();
+
+        for timestamp in 1..100 {
+            insert_f64(&mut cache, id, timestamp, timestamp as f64);
+            sync_line(&cache, id, &need, &mut tree, &mut HashMap::new());
+        }
+        assert_eq!(tree.total_points(), 100);
+        assert!(Arc::ptr_eq(&original, &tree.last().unwrap().data.gpu_dirty));
+        assert_eq!(tree.get_nearest(Timestamp(99)).map(|(_, v)| *v), Some(99.0));
+    }
+
+    #[test]
+    fn plot_sync_refreshes_backfilled_predecessors_and_recreated_series() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.predecessor.backfill");
+        insert_f64(&mut cache, id, 0, 0.0);
+        insert_f64(&mut cache, id, 100, 100.0);
+        let need = Timestamp(50)..Timestamp(101);
+        let mut tree = LineTree::<f32>::default();
+        let mut verified = HashMap::new();
+        sync_line(&cache, id, &need, &mut tree, &mut verified);
+
+        insert_f64(&mut cache, id, 40, 40.0);
+        sync_line(&cache, id, &need, &mut tree, &mut verified);
+        assert_eq!(tree.first_timestamp(), Some(Timestamp(40)));
+
+        cache.remove_series(&id);
+        insert_f64(&mut cache, id, 100, -100.0);
+        sync_line(&cache, id, &need, &mut tree, &mut verified);
+        assert_eq!(tree.total_points(), 1);
+        assert_eq!(tree.first_sample(), Some(-100.0));
+    }
+
+    #[test]
     fn apply_plot_sync_plan_rebuilds_holes_inside_a_covered_span() {
         // Partial first project: only the endpoints. The exclusive span already
         // covers the window, so endpoint-only planning would Keep forever.
@@ -4598,7 +4814,7 @@ mod tests {
         insert_f64(&mut cache, id, 15_000_000, 15.0);
         let need = Timestamp(0)..Timestamp(15_000_001);
         let mut tree = LineTree::<f32>::default();
-        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        sync_line(&cache, id, &need, &mut tree, &mut HashMap::new());
         assert_eq!(tree.total_points(), 2);
         assert_eq!(
             plot_sync_plan(tree.projected_span(), &need, false),
@@ -4612,12 +4828,95 @@ mod tests {
         assert!(!plot_line_matches_store_interior(
             &cache, id, 0, &need, &tree
         ));
-        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        sync_line(&cache, id, &need, &mut tree, &mut HashMap::new());
         assert_eq!(tree.total_points(), 3);
         assert_eq!(
             tree.get_nearest(Timestamp(7_500_000)).map(|(ts, _)| ts),
             Some(Timestamp(7_500_000))
         );
+    }
+
+    #[test]
+    fn apply_plot_sync_plan_scans_a_verified_line_only_after_the_store_revision_changes() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.revision");
+        let live = |cache: &mut TelemetryCache, ts: i64, value: f64| {
+            cache.insert_live(
+                id,
+                Timestamp(ts),
+                ComponentValue::F64(nox::array![value].to_dyn()),
+            )
+        };
+        for i in 0..10 {
+            live(&mut cache, i * 1_000, i as f64);
+        }
+        let need = Timestamp(0)..Timestamp(20_000);
+        let mut tree = LineTree::<f32>::default();
+        let mut verified = HashMap::new();
+        sync_line(&cache, id, &need, &mut tree, &mut verified);
+        assert_eq!(tree.total_points(), 10);
+
+        // Live tip samples reach the line through `pkt_handler`, not this sync.
+        live(&mut cache, 10_000, 10.0);
+        tree.append_samples(Timestamp(0), [(Timestamp(10_000), 10.0)]);
+        let content = tree.content_gen();
+        sync_line(&cache, id, &need, &mut tree, &mut verified);
+        assert_eq!(tree.content_gen(), content);
+
+        // A sample behind the tip changes the revision: the scan finds it and rebuilds.
+        live(&mut cache, 5_500, 5.5);
+        sync_line(&cache, id, &need, &mut tree, &mut verified);
+        assert_eq!(tree.total_points(), 12);
+        assert_eq!(
+            tree.get_nearest(Timestamp(5_500)).map(|(ts, _)| ts),
+            Some(Timestamp(5_500))
+        );
+    }
+
+    #[test]
+    fn line_tree_truncate_from_keeps_the_chunks_before_the_change() {
+        let n = 3 * CHUNK_LEN as i64;
+        let timestamps: Vec<Timestamp> = (0..n).map(|i| Timestamp(i * 10)).collect();
+        let values: Vec<f32> = (0..n).map(|i| i as f32).collect();
+        let mut tree = LineTree::<f32>::default();
+        tree.rebuild_from_time_value_pairs(Timestamp(0), &timestamps, &values);
+        tree.set_projected_range(Timestamp(0)..Timestamp(n * 10));
+
+        assert!(!tree.truncate_from(Timestamp(5)));
+        assert_eq!(tree.total_points(), n as usize);
+
+        let last_kept = Timestamp((2 * CHUNK_LEN as i64 - 1) * 10);
+        assert!(tree.truncate_from(Timestamp(last_kept.0 + 15)));
+        assert_eq!(tree.total_points(), 2 * CHUNK_LEN);
+        assert_eq!(tree.latest_sample_timestamp(), Some(last_kept));
+        assert_eq!(
+            tree.projected_span(),
+            Some(Timestamp(0)..Timestamp(last_kept.0 + 1))
+        );
+    }
+
+    #[test]
+    fn apply_plot_sync_plan_repairs_a_verified_line_from_the_changed_sample() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId::new("test.repair");
+        let n = 3 * CHUNK_LEN as i64;
+        for i in 0..n {
+            insert_f64(&mut cache, id, i * 10, i as f64);
+        }
+        let need = Timestamp(0)..Timestamp(n * 10);
+        let mut tree = LineTree::<f32>::default();
+        let mut verified = HashMap::new();
+        sync_line(&cache, id, &need, &mut tree, &mut verified);
+        assert_eq!(tree.total_points(), n as usize);
+
+        let late = Timestamp((n - 5) * 10 + 5);
+        insert_f64(&mut cache, id, late.0, -1.0);
+        sync_line(&cache, id, &need, &mut tree, &mut verified);
+        assert_eq!(tree.total_points(), n as usize + 1);
+        assert_eq!(tree.get_nearest(late), Some((late, &-1.0)));
+        assert!(plot_line_matches_store_interior(
+            &cache, id, 0, &need, &tree
+        ));
     }
 
     #[test]
@@ -4632,11 +4931,11 @@ mod tests {
         }
         let need = Timestamp(0)..Timestamp(15_000_000);
         let mut tree = LineTree::<f32>::default();
-        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        sync_line(&cache, id, &need, &mut tree, &mut HashMap::new());
         assert_eq!(tree.total_points(), 20);
 
         insert_f64(&mut cache, id, 7_000_000, 50.0);
-        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        sync_line(&cache, id, &need, &mut tree, &mut HashMap::new());
         assert_eq!(tree.total_points(), 21);
         assert!(tree.get_nearest(Timestamp(7_000_000)).is_some());
     }
@@ -4650,7 +4949,7 @@ mod tests {
         }
         let first = Timestamp(0)..Timestamp(15_000_001);
         let mut tree = LineTree::<f32>::default();
-        apply_plot_sync_plan(&cache, id, 0, &first, Timestamp(0), None, false, &mut tree);
+        sync_line(&cache, id, &first, &mut tree, &mut HashMap::new());
         assert_eq!(tree.total_points(), 16);
         assert_eq!(tree.first_timestamp(), Some(Timestamp(0)));
 
@@ -4666,7 +4965,7 @@ mod tests {
         assert!(plot_line_matches_store_interior(
             &cache, id, 0, &slid, &tree
         ));
-        apply_plot_sync_plan(&cache, id, 0, &slid, Timestamp(0), None, false, &mut tree);
+        sync_line(&cache, id, &slid, &mut tree, &mut HashMap::new());
         assert_eq!(tree.first_timestamp(), Some(Timestamp(0)));
         assert_eq!(tree.latest_sample_timestamp(), Some(Timestamp(15_100_000)));
         assert_eq!(tree.total_points(), 17);
@@ -4682,7 +4981,7 @@ mod tests {
         for step in 0..=100 {
             let offset = step * REQUEST_KEY_QUANTUM_MICROS;
             let range = Timestamp(offset)..Timestamp(10_000_000 + offset);
-            apply_plot_sync_plan(&cache, id, 0, &range, Timestamp(0), None, false, &mut tree);
+            sync_line(&cache, id, &range, &mut tree, &mut HashMap::new());
             assert_eq!(tree.total_points(), 1);
             assert_eq!(tree.first_timestamp(), Some(Timestamp(0)));
         }
@@ -4718,7 +5017,7 @@ mod tests {
             plot_sync_plan(tree.stored_exclusive_span(), &need, false),
             PlotSyncPlan::Keep
         );
-        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        sync_line(&cache, id, &need, &mut tree, &mut HashMap::new());
         assert_eq!(tree.first_timestamp(), Some(Timestamp(10_000_000)));
         assert_eq!(tree.latest_sample_timestamp(), Some(Timestamp(16_000_000)));
         assert_eq!(tree.total_points(), 2);
@@ -4747,7 +5046,7 @@ mod tests {
         assert!(!plot_line_matches_store_interior(
             &cache, id, 0, &need, &tree
         ));
-        apply_plot_sync_plan(&cache, id, 0, &need, Timestamp(0), None, false, &mut tree);
+        sync_line(&cache, id, &need, &mut tree, &mut HashMap::new());
         assert_eq!(tree.total_points(), 0);
     }
 
@@ -5221,6 +5520,43 @@ mod tests {
         tree.insert(chunk);
         let c = tree.count_strip_index_u32s(Timestamp(0)..Timestamp(10), 1);
         assert_eq!(c, 12, "leading separator + 10 indices + trailing separator");
+    }
+
+    #[test]
+    fn index_layout_rewrites_only_the_changed_tail() {
+        let chunk = |start: u32, len: usize| IndexChunk {
+            range: start..start + len as u32,
+            len,
+        };
+        let full = |chunks: &[IndexChunk], step: usize, hold: bool| {
+            let mut indices = Vec::new();
+            let _ = for_each_strip_index(chunks.iter().cloned(), step, hold, |index| {
+                indices.push(index);
+                ControlFlow::Continue(())
+            });
+            indices
+        };
+        for (step, hold) in [(1, false), (3, true)] {
+            let before = [chunk(0, 10), chunk(100, 7)];
+            let mut layout = IndexLayout {
+                step,
+                terminal_hold: hold,
+                ..Default::default()
+            };
+            let (_, mut buffer) = layout.extend(&before, 0);
+            assert_eq!(buffer, full(&before, step, hold));
+
+            // The tail chunk grew and a new one started; the first strip stays.
+            let after = [chunk(0, 10), chunk(100, 12), chunk(200, 4)];
+            assert_eq!(layout.kept(&after, step + 1, hold), 0);
+            let kept = layout.kept(&after, step, hold);
+            assert_eq!(kept, 1);
+            let (offset, tail) = layout.extend(&after, kept);
+            buffer.truncate(offset as usize);
+            buffer.extend(tail);
+            assert_eq!(buffer, full(&after, step, hold));
+            assert_eq!(layout.count() as usize, buffer.len());
+        }
     }
 
     #[test]
@@ -5892,6 +6228,65 @@ fn try_append_u32(view: wgpu::WriteOnly<'_, [u8]>, val: u32) -> Option<wgpu::Wri
 pub struct IndexChunk {
     range: Range<u32>,
     len: usize,
+}
+
+/// Where each drawn chunk's strip sits in a line's index buffer.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct IndexLayout {
+    step: usize,
+    terminal_hold: bool,
+    /// Per chunk: its first GPU index, visible length, and where its strip ends.
+    strips: Vec<(u32, usize, u32)>,
+    count: u32,
+}
+
+impl IndexLayout {
+    pub fn count(&self) -> u32 {
+        self.count
+    }
+
+    /// Leading strips that still match `chunks`: a strip depends only on its
+    /// chunk's GPU range and the step.
+    fn kept(&self, chunks: &[IndexChunk], step: usize, terminal_hold: bool) -> usize {
+        if self.step != step || self.terminal_hold != terminal_hold {
+            return 0;
+        }
+        self.strips
+            .iter()
+            .zip(chunks)
+            .take_while(|&(&(start, len, _), chunk)| start == chunk.range.start && len == chunk.len)
+            .count()
+    }
+
+    /// Replaces the strips after the first `kept` with those of `chunks[kept..]`
+    /// and the terminal hold, returning where the new indices start and the
+    /// indices themselves.
+    fn extend(&mut self, chunks: &[IndexChunk], kept: usize) -> (u32, Vec<u32>) {
+        self.strips.truncate(kept);
+        let offset = self.strips.last().map_or(0, |&(_, _, end)| end);
+        let mut indices = Vec::new();
+        for chunk in &chunks[kept..] {
+            let _ = for_each_strip_index([chunk.clone()], self.step, false, |index| {
+                indices.push(index);
+                ControlFlow::Continue(())
+            });
+            let end = offset + indices.len() as u32;
+            self.strips.push((chunk.range.start, chunk.len, end));
+        }
+        // As in `for_each_strip_index`: the last sample drawn, twice.
+        if self.terminal_hold
+            && let Some(last) = chunks.iter().rev().find(|chunk| chunk.len > 0)
+        {
+            let end = last.range.start + last.len as u32 - 1;
+            indices.extend([end, end]);
+        }
+        indices.truncate(INDEX_BUFFER_LEN.saturating_sub(offset as usize));
+        let count = offset + indices.len() as u32;
+        self.count = count;
+        // A strip cut off at the buffer's end is rewritten next time.
+        self.strips.retain(|&(_, _, end)| end <= count);
+        (offset, indices)
+    }
 }
 
 impl IndexChunk {

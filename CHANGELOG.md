@@ -1,6 +1,20 @@
 # Changelog
 
 ## unreleased
+- **(breaking)** An `object_3d` ellipsoid with `orientation=absolute` applies `scale` along the frame's x, y, z; it previously swapped y and z.
+- **(feat)** Add `fill=#false` (`ui.icon(fill=False)`) for outline built-in icons, and the `check_box_outline_blank` and `crop_square` icons.
+- **(feat)** Evaluate `sqrt`, `abs`, `sign`, `degrees`, `arccos`, `clip`, `atan2`, and `norm` in viewport and 3D-object EQL, and index integer components there.
+- **(feat)** Add `ELODIN_SCREENSHOT_TIME` and `ELODIN_SCREENSHOT_TAB` to capture a chosen moment and tab.
+- **(fix)** Keep graphs whose components register after the schematic loads; they fill in once the components appear instead of disappearing.
+- **(fix)** Send a component's metadata on real-time streams when it arrives after the component's first table, so live editors learn components that writers register mid-run.
+- **(fix)** Open the tab that holds an `active` split or viewport.
+- **(fix)** Apply a mesh's `visibility_range` without an icon.
+- **(fix)** Draw "±" and other Latin-1 characters in vector-arrow labels.
+- **(fix)** Log a 3D object's pose evaluation error once instead of hiding it silently, and drop the `[]` label on scalar component monitors.
+- **(fix)** Raise `TypeError` when a display kernel is passed to an EQL-only `elodin.ui` field instead of writing its repr into the schematic.
+- **(fix)** Live playback keeps pace with the simulation; the editor no longer falls behind as a recording grows.
+- **(fix)** Plots no longer redraw their whole line for each page of a loading recording, or leave a gap at the window's left edge when the sample before it loads late.
+- **(fix)** Keep pace with faster-than-real-time simulations: live `line_3d` trails no longer re-read their whole history every frame.
 
 ## v0.20
 

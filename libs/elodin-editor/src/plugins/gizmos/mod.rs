@@ -779,9 +779,17 @@ fn update_arrow_label_ui(
     mut labels: Query<(Entity, &ArrowLabelUI, &mut Node, &mut Text, &mut TextColor)>,
     primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
     ui_cameras: Query<(Entity, &RenderTarget), With<ArrowLabelUiCamera>>,
+    asset_server: Res<AssetServer>,
+    mut label_font: Local<Option<Handle<Font>>>,
     // Key: (arrow_entity, camera_entity) -> label_entity
     mut label_map: Local<HashMap<(Entity, Entity), Entity>>,
 ) {
+    // The UI's font: Bevy's default covers ASCII only (no "±" or "°").
+    let label_font = label_font
+        .get_or_insert_with(|| {
+            asset_server.load("embedded://elodin_editor/assets/fonts/IBMPlexMono-Medium_ss04.ttf")
+        })
+        .clone();
     let Some(primary_entity) = primary_window.iter().next() else {
         return;
     };
@@ -948,6 +956,7 @@ fn update_arrow_label_ui(
                             },
                             Text::new(label_text.clone()),
                             TextFont {
+                                font: label_font.clone().into(),
                                 font_size: bevy::text::FontSize::Px(14.0),
                                 ..default()
                             },
