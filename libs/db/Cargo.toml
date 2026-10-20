@@ -48,6 +48,9 @@ parquet = ["dep:parquet"]
 video-export = ["dep:muxide", "dep:scuffle-h264", "dep:openh264", "dep:serde_json"]
 mcap-export = ["dep:mcap", "dep:base64", "dep:serde_json", "dep:impeller-kdl"]
 tracy = ["dep:tracing-tracy", "dep:tracy-client-sys"]
+# Reject browser origins that are not localhost, same-host, or listed in
+# ELODIN_DB_ALLOWED_ORIGINS. Off by default: the asset server then ignores Origin.
+verify-cors = []
 
 [dependencies]
 # ser-de

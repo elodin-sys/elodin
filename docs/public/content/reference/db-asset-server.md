@@ -61,7 +61,9 @@ Do not run a follower Impeller server on `N+1`; that port is reserved for the DB
 
 ### Browser origins
 
-The asset server is what a browser talks to, including the `/impeller` WebSocket proxy. A client that sends no `Origin` (the native editor, follower sync, `curl`) is allowed. A browser `Origin` is allowed when any of these hold:
+Origin verification is compiled in only with the `verify-cors` Cargo feature, which is off by default. Without it the asset server does not inspect `Origin` and emits no CORS headers.
+
+With `verify-cors` enabled, the asset server is what a browser talks to, including the `/impeller` WebSocket proxy. A client that sends no `Origin` (the native editor, follower sync, `curl`) is allowed. A browser `Origin` is allowed when any of these hold:
 
 - its host is `localhost`, `127.0.0.1`, or `::1`, on any scheme and port
 - its host matches the request `Host` header, which is the name the browser used to reach the DB
