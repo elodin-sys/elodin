@@ -207,11 +207,17 @@ pub struct Object3DIconState {
     pub icon_max_distance: f32,
     pub icon_fade_distance: f32,
     pub icon_base_alpha: f32,
-    pub mesh_min_distance: f32,
-    pub mesh_max_distance: f32,
     pub screen_size_px: f32,
     pub billboard_material: Handle<StandardMaterial>,
     pub billboard_mesh: Handle<Mesh>,
+}
+
+/// An `object_3d` mesh's `visibility_range`: each viewport draws the mesh only
+/// from cameras within these distances, with or without an icon.
+#[derive(Component)]
+pub struct MeshVisibilityRange {
+    pub min: f32,
+    pub max: f32,
 }
 
 #[derive(Component)]
@@ -881,9 +887,46 @@ fn compile_formula(
             })
         }
 
+        // Scalar and elementwise math shares the graph evaluator's functions.
+        _ if eql::eval::supports(&Expr::Formula(
+            formula.clone(),
+            Box::new(inner_expr.clone()),
+        )) =>
+        {
+            compile_sample_formula(Expr::Formula(formula, Box::new(inner_expr)))
+        }
+
         _ => {
             return Err(ComponentError::EditorNotSupported(n).into());
         }
+    })
+}
+
+/// Evaluates `expr` with the graph evaluator on the current component values.
+fn compile_sample_formula(expr: Expr) -> CompiledExpr {
+    use eql::eval::{EvalError, EvalValue};
+    CompiledExpr::closure(move |entity_map, component_values| {
+        let value = eql::eval::evaluate(&expr, &|part| {
+            let missing = || EvalError::MissingComponent(part.name.clone());
+            let entity = entity_map.get(&part.id).ok_or_else(missing)?;
+            let value = component_values.get(*entity).map_err(|_| missing())?;
+            let data = component_buf_as_f64_vec(value).map_err(|_| missing())?;
+            Ok(if value.shape().is_empty() && data.len() == 1 {
+                EvalValue::Scalar(data[0])
+            } else {
+                EvalValue::Vector(data)
+            })
+        })
+        .map_err(|err| match err {
+            EvalError::MissingComponent(name) => ComponentError::NoComponent(name),
+            err => ComponentError::Message(err.to_string().into()),
+        })?;
+        Ok(match value {
+            EvalValue::Scalar(v) => ComponentValue::F64(nox::array!(v).to_dyn()),
+            EvalValue::Vector(values) => {
+                ComponentValue::F64(Array::from_shape_vec(smallvec![values.len()], values).unwrap())
+            }
+        })
     })
 }
 
@@ -1009,7 +1052,14 @@ pub fn compile_eql_expr_with_ctx(
                             })
                         }
                     }
-                    _ => Err(ComponentError::RequireNumericArray),
+                    other => {
+                        let data = component_buf_as_f64_vec(&other)?;
+                        let value = *data.get(index).ok_or(ComponentError::OutOfBounds {
+                            index,
+                            length: data.len(),
+                        })?;
+                        Ok(ComponentValue::F64(nox::array!(value).to_dyn()))
+                    }
                 }
             })
         }
@@ -1028,11 +1078,7 @@ pub fn compile_eql_expr_with_ctx(
                         ComponentValue::F64(array) => {
                             values.extend_from_slice(array.buf.as_buf());
                         }
-                        ComponentValue::F32(array) => {
-                            let f32_data = array.buf.as_buf();
-                            values.extend(f32_data.iter().map(|&x| x as f64));
-                        }
-                        _ => return Err(ComponentError::RequireNumericTuple),
+                        other => values.extend(component_buf_as_f64_vec(&other)?),
                     }
                 }
                 let tuple_array = Array::from_shape_vec(smallvec![values.len()], values).unwrap();
@@ -1246,18 +1292,29 @@ pub fn update_object_3d_system(
     geo_context: Res<GeoContext>,
     coordinate: Res<Coordinate>,
     eql_ctx: Res<EqlContext>,
+    mut logged_pose_errors: Local<HashSet<Entity>>,
 ) {
     let eql_ctx_changed = eql_ctx.is_changed();
     for (entity, mut object_3d, mut pos, ellipse, has_received, children_maybe) in
         objects_query.iter_mut()
     {
-        if let Some(compiled_expr) = &object_3d.compiled_expr
-            && let Ok(component_value) = compiled_expr.execute(&entity_map, &component_value_maps)
-            && let Some(world_pos) = component_value.as_world_pos()
-        {
-            *pos = world_pos;
-            if !has_received {
-                commands.entity(entity).insert(WorldPosReceived);
+        if let Some(compiled_expr) = &object_3d.compiled_expr {
+            match compiled_expr.execute(&entity_map, &component_value_maps) {
+                Ok(component_value) => {
+                    if let Some(world_pos) = component_value.as_world_pos() {
+                        *pos = world_pos;
+                        if !has_received {
+                            commands.entity(entity).insert(WorldPosReceived);
+                        }
+                    }
+                }
+                // No data yet: the object appears once its components arrive.
+                Err(ComponentError::NoComponent(_) | ComponentError::NoComponentValue(_)) => {}
+                Err(err) => {
+                    if logged_pose_errors.insert(entity) {
+                        warn!(?entity, ?err, "object_3d pose failed to evaluate");
+                    }
+                }
             }
         }
 
@@ -1362,8 +1419,10 @@ pub fn update_object_3d_system(
             EllipsoidShapeMode::Scale => {
                 match evaluate_scale(&object_3d, &entity_map, &component_value_maps) {
                     Ok(scale) => {
-                        let scale_enu = scale.max(Vec3::splat(f32::EPSILON));
-                        let scale = enu_scale_to_bevy(scale_enu);
+                        let scale = ellipsoid_scale_to_bevy(
+                            scale.max(Vec3::splat(f32::EPSILON)),
+                            object_3d.data.orientation,
+                        );
                         if let Some(child) = mesh_child {
                             if let Ok(mut child_transform) = transforms.get_mut(child) {
                                 child_transform.scale = scale;
@@ -1796,11 +1855,15 @@ fn component_value_to_6floats(value: &ComponentValue) -> Result<[f32; 6], Compon
     }
 }
 
-/// Converts ellipsoid scale from ENU (East, North, Up) to Bevy (East, Up, South).
-/// The scale EQL expression is in ENU; Bevy applies scale along its axes.
+/// The mesh-child scale for an ellipsoid's `scale` (x, y, z). A relative mesh
+/// keeps Bevy's Y-up axes, so ENU (East, North, Up) maps to (East, Up, South);
+/// an absolute mesh already sits in the frame's axes.
 #[inline]
-fn enu_scale_to_bevy(enu: Vec3) -> Vec3 {
-    Vec3::new(enu.x, enu.z, enu.y)
+fn ellipsoid_scale_to_bevy(scale: Vec3, orientation: RotationKind) -> Vec3 {
+    match orientation {
+        RotationKind::Relative => Vec3::new(scale.x, scale.z, scale.y),
+        RotationKind::Absolute => scale,
+    }
 }
 
 fn resolve_covariance_frame(object: &Object3D, coordinate: &Coordinate) -> GeoFrame {
@@ -2042,7 +2105,6 @@ pub fn spawn_billboard_icon(
     commands: &mut Commands,
     parent: Entity,
     icon: &impeller_wkt::Object3DIcon,
-    mesh_visibility_range: Option<&impeller_wkt::VisRange>,
     material_assets: &mut ResMut<Assets<StandardMaterial>>,
     mesh_assets: &mut ResMut<Assets<Mesh>>,
     image_assets: &mut ResMut<Assets<Image>>,
@@ -2058,7 +2120,7 @@ pub fn spawn_billboard_icon(
         }
         Object3DIconSource::Builtin(name) => {
             let raster_size = (icon.size * 2.0).max(64.0) as u32;
-            icon_cache.get_or_insert(name, raster_size, image_assets)
+            icon_cache.get_or_insert(name, raster_size, icon.fill, image_assets)
         }
     };
 
@@ -2081,18 +2143,12 @@ pub fn spawn_billboard_icon(
     let icon_max = icon_vr.map(|vr| vr.max).unwrap_or(f32::MAX);
     let icon_fade = icon_vr.map(|vr| vr.fade_distance).unwrap_or(0.0);
 
-    let mesh_vr = mesh_visibility_range;
-    let mesh_min = mesh_vr.map(|vr| vr.min).unwrap_or(0.0);
-    let mesh_max = mesh_vr.map(|vr| vr.max).unwrap_or(f32::MAX);
-
     commands.entity(parent).insert(Object3DIconState {
         billboards: HashMap::new(),
         icon_min_distance: icon_min,
         icon_max_distance: icon_max,
         icon_fade_distance: icon_fade,
         icon_base_alpha: icon.color.a,
-        mesh_min_distance: mesh_min,
-        mesh_max_distance: mesh_max,
         screen_size_px: icon.size,
         billboard_material: material,
         billboard_mesh: quad,
@@ -2356,7 +2412,18 @@ fn add_camera_mesh_layers(
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn update_object_3d_billboard_system(
     mut commands: Commands,
-    mut objects: Query<(Entity, &mut Object3DIconState, &GlobalTransform), With<WorldPosReceived>>,
+    mut objects: Query<
+        (
+            Entity,
+            Option<&mut Object3DIconState>,
+            Option<&MeshVisibilityRange>,
+            &GlobalTransform,
+        ),
+        (
+            With<WorldPosReceived>,
+            Or<(With<Object3DIconState>, With<MeshVisibilityRange>)>,
+        ),
+    >,
     cameras: Query<
         (
             Entity,
@@ -2378,21 +2445,12 @@ pub fn update_object_3d_billboard_system(
     mesh_child_markers: Query<(), With<Object3DMeshChild>>,
     mesh3d_query: Query<(), With<Mesh3d>>,
 ) {
-    for (parent_entity, mut icon_state, obj_gt) in objects.iter_mut() {
+    for (parent_entity, mut icon_state, mesh_range, obj_gt) in objects.iter_mut() {
         let obj_pos = obj_gt.translation();
         let parent_rotation = obj_gt.to_scale_rotation_translation().1;
         let mut mesh_layers = RenderLayers::none();
         let mut seen_cameras: HashSet<Entity> = HashSet::new();
-
-        let icon_min = icon_state.icon_min_distance;
-        let icon_max = icon_state.icon_max_distance;
-        let icon_fade = icon_state.icon_fade_distance;
-        let base_alpha = icon_state.icon_base_alpha;
-        let mesh_min = icon_state.mesh_min_distance;
-        let mesh_max = icon_state.mesh_max_distance;
-        let screen_px = icon_state.screen_size_px;
-        let bb_mesh_handle = icon_state.billboard_mesh.clone();
-        let bb_mat_source = icon_state.billboard_material.clone();
+        let (mesh_min, mesh_max) = mesh_range.map_or((0.0, f32::MAX), |r| (r.min, r.max));
 
         for (cam_entity, camera, cam_gt, projection, render_layer_lease, is_cinematic) in
             cameras.iter()
@@ -2409,11 +2467,22 @@ pub fn update_object_3d_billboard_system(
 
             seen_cameras.insert(cam_entity);
             let distance = (obj_pos - cam_gt.translation()).length();
-            let shows_billboard = distance >= icon_min && distance <= icon_max;
             let shows_mesh = distance >= mesh_min && distance <= mesh_max;
 
             mesh_layers =
                 add_camera_mesh_layers(mesh_layers, &render_layers, shows_mesh, is_cinematic);
+
+            let Some(icon_state) = icon_state.as_deref_mut() else {
+                continue;
+            };
+            let icon_min = icon_state.icon_min_distance;
+            let icon_max = icon_state.icon_max_distance;
+            let icon_fade = icon_state.icon_fade_distance;
+            let base_alpha = icon_state.icon_base_alpha;
+            let screen_px = icon_state.screen_size_px;
+            let bb_mesh_handle = icon_state.billboard_mesh.clone();
+            let bb_mat_source = icon_state.billboard_material.clone();
+            let shows_billboard = distance >= icon_min && distance <= icon_max;
 
             if shows_billboard {
                 let cam_rotation = cam_gt.to_scale_rotation_translation().1;
@@ -2486,18 +2555,23 @@ pub fn update_object_3d_billboard_system(
             }
         }
 
-        icon_state.billboards.retain(|cam_entity, bb_entity| {
-            if seen_cameras.contains(cam_entity) {
-                true
-            } else {
-                commands.entity(*bb_entity).despawn();
-                false
-            }
-        });
+        if let Some(icon_state) = icon_state.as_deref_mut() {
+            icon_state.billboards.retain(|cam_entity, bb_entity| {
+                if seen_cameras.contains(cam_entity) {
+                    true
+                } else {
+                    commands.entity(*bb_entity).despawn();
+                    false
+                }
+            });
+        }
 
         if let Ok(children) = children_query.get(parent_entity) {
             for child in children.iter() {
-                if icon_state.billboards.values().any(|bb| *bb == child) {
+                if icon_state
+                    .as_ref()
+                    .is_some_and(|s| s.billboards.values().any(|bb| *bb == child))
+                {
                     continue;
                 }
                 if mesh_child_markers.get(child).is_ok() {
@@ -2913,6 +2987,97 @@ mod billboard_render_layer_tests {
 }
 
 #[cfg(test)]
+mod mesh_visibility_range_tests {
+    use bevy::camera::visibility::RenderLayers;
+    use bevy::camera::{ComputedCameraValues, RenderTargetInfo};
+    use bevy::prelude::*;
+
+    use super::{
+        MeshVisibilityRange, Object3DMeshChild, WorldPosReceived, update_object_3d_billboard_system,
+    };
+    use crate::MainCamera;
+    use crate::plugins::render_layer_alloc::RenderLayerAllocator;
+    use crate::ui::tiles::ViewportConfig;
+
+    /// The mesh child's layers of an icon-less object with a 0..10 m range,
+    /// seen by one viewport camera `distance` away, and that viewport's layers.
+    fn mesh_layers_from(distance: f32) -> (RenderLayers, RenderLayers) {
+        let mut world = World::new();
+        world.init_resource::<Assets<StandardMaterial>>();
+        let lease = RenderLayerAllocator::default()
+            .alloc()
+            .expect("a free layer");
+        let viewport = impeller_wkt::Viewport::default();
+        world.spawn((
+            Camera {
+                computed: ComputedCameraValues {
+                    target_info: Some(RenderTargetInfo {
+                        physical_size: UVec2::new(640, 480),
+                        scale_factor: 1.0,
+                    }),
+                    ..default()
+                },
+                ..default()
+            },
+            GlobalTransform::from_translation(Vec3::new(0.0, 0.0, distance)),
+            Projection::default(),
+            lease.clone(),
+            MainCamera,
+            ViewportConfig {
+                aspect: None,
+                configured_near: None,
+                configured_far: None,
+                show_arrows: false,
+                create_frustum: false,
+                show_frustums: false,
+                show_coverage_in_viewport: false,
+                show_projection_2d: false,
+                frustums_color: viewport.frustums_color,
+                projection_color: viewport.projection_color,
+                frustums_thickness: viewport.frustums_thickness,
+                frustums_up_marker: viewport.frustums_up_marker,
+                frustums_up_marker_overlay: false,
+                cinematic: false,
+                bloom: None,
+            },
+        ));
+        let object = world
+            .spawn((
+                MeshVisibilityRange {
+                    min: 0.0,
+                    max: 10.0,
+                },
+                WorldPosReceived,
+                GlobalTransform::IDENTITY,
+            ))
+            .id();
+        let mesh = world
+            .spawn((
+                Object3DMeshChild,
+                Mesh3d(Handle::default()),
+                ChildOf(object),
+            ))
+            .id();
+        world
+            .run_system_cached(update_object_3d_billboard_system)
+            .expect("run the per-camera visibility system");
+        let layers = world
+            .get::<RenderLayers>(mesh)
+            .cloned()
+            .expect("mesh layers");
+        (layers, lease.render_layers())
+    }
+
+    #[test]
+    fn a_mesh_without_an_icon_draws_only_within_its_visibility_range() {
+        let (near, viewport) = mesh_layers_from(5.0);
+        assert_eq!(near, viewport);
+        let (far, _) = mesh_layers_from(100.0);
+        assert_eq!(far, RenderLayers::none());
+    }
+}
+
+#[cfg(test)]
 mod joint_eql_cast_tests {
     use std::collections::HashMap;
     use std::sync::Arc;
@@ -2966,6 +3131,88 @@ mod joint_eql_cast_tests {
         assert!((buf[1] - 20.0).abs() < 1e-6, "y = 42000/1000 - 22");
         assert!((buf[2] - 0.0).abs() < 1e-9);
     }
+
+    #[test]
+    fn graph_math_formulas_evaluate_in_3d_expressions() {
+        let vector = Arc::new(eql::Component::new(
+            "sample.vector".to_string(),
+            ComponentId::new("sample.vector"),
+            Schema::new(PrimType::F64, [3usize]).unwrap(),
+        ));
+        let scalar = Arc::new(eql::Component::new(
+            "sample.scalar".to_string(),
+            ComponentId::new("sample.scalar"),
+            Schema::new(PrimType::F32, Vec::<usize>::new()).unwrap(),
+        ));
+        let (vector_id, scalar_id) = (vector.id, scalar.id);
+        let ctx = eql::Context::from_leaves([vector, scalar], Timestamp(0), Timestamp(1000));
+
+        let mut world = World::new();
+        let v =
+            Array::<f64, nox::Dyn>::from_shape_vec(smallvec::smallvec![3], vec![3.0, 4.0, 12.0])
+                .unwrap();
+        let s = Array::<f32, nox::Dyn>::from_shape_vec(smallvec::smallvec![], vec![-2.0]).unwrap();
+        let entity_map = EntityMap(HashMap::from([
+            (vector_id, world.spawn(ComponentValue::F64(v)).id()),
+            (scalar_id, world.spawn(ComponentValue::F32(s)).id()),
+        ]));
+        let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
+            SystemState::new(&mut world);
+        let (q,) = system_state.params(&world);
+
+        for (eql, expected) in [
+            ("sample.vector.norm()", 13.0),
+            ("sample.vector[0].sqrt()", 3f64.sqrt()),
+            ("sample.scalar.abs()", 2.0),
+            ("sample.scalar.sign()", -1.0),
+            ("sample.scalar.clip(0.0, 1.0)", 0.0),
+            ("sample.vector[1].atan2(sample.vector[0])", 4f64.atan2(3.0)),
+            ("(1.0 + sample.scalar.abs()) * 2.0", 6.0),
+        ] {
+            let compiled = compile_eql_expr(ctx.parse_str(eql).expect(eql)).expect(eql);
+            let out = compiled.execute(&entity_map, &q).expect(eql);
+            let ComponentValue::F64(arr) = &out else {
+                panic!("{eql}: expected F64, got {out:?}");
+            };
+            assert!(
+                (arr.buf.as_buf()[0] - expected).abs() < 1e-9,
+                "{eql}: {out:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn integer_elements_index_and_mix_with_floats() {
+        let component = Arc::new(eql::Component::new(
+            "rda3.counts".to_string(),
+            ComponentId::new("rda3.counts"),
+            Schema::new(PrimType::U32, [4usize]).unwrap(),
+        ));
+        let component_id = component.id;
+        let ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+        let compiled = compile_eql_expr(
+            ctx.parse_str("(rda3.counts[3], -0.1 / (rda3.counts[3] + 0.000001))")
+                .expect("parse"),
+        )
+        .expect("compile");
+
+        let mut world = World::new();
+        let arr = Array::<u32, nox::Dyn>::from_shape_vec(smallvec::smallvec![4], vec![0, 0, 0, 1])
+            .expect("u32 telemetry buffer");
+        let entity = world.spawn(ComponentValue::U32(arr)).id();
+        let entity_map = EntityMap(HashMap::from([(component_id, entity)]));
+        let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
+            SystemState::new(&mut world);
+        let (q,) = system_state.params(&world);
+        let out = compiled.execute(&entity_map, &q).expect("evaluate");
+
+        let ComponentValue::F64(arr) = &out else {
+            panic!("expected an F64 tuple, got {out:?}");
+        };
+        let buf = arr.buf.as_buf();
+        assert_eq!(buf[0], 1.0);
+        assert!((buf[1] + 0.1).abs() < 1e-6);
+    }
 }
 
 #[cfg(test)]
@@ -3014,6 +3261,20 @@ mod ellipsoid_scale_eql_tests {
         assert!(
             delta.max_element() < 1e-5,
             "expected {expected:?}, got {actual:?}"
+        );
+    }
+
+    #[test]
+    fn absolute_scale_keeps_its_axes_and_relative_maps_enu_to_y_up() {
+        use bevy_geo_frames::RotationKind;
+        let scale = Vec3::new(1.0, 10.0, 2.0);
+        assert_eq!(
+            super::ellipsoid_scale_to_bevy(scale, RotationKind::Absolute),
+            scale
+        );
+        assert_eq!(
+            super::ellipsoid_scale_to_bevy(scale, RotationKind::Relative),
+            Vec3::new(1.0, 2.0, 10.0)
         );
     }
 

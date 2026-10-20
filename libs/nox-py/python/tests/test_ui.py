@@ -103,9 +103,10 @@ def test_extended_typed_builders_roundtrip():
             frame_orientation="NED",
             orientation="absolute",
             icon=ui.icon(
-                builtin="rocket_launch",
+                builtin="radio_button_unchecked",
                 color=ui.color(76, 175, 80),
                 visibility=visibility,
+                fill=False,
             ),
             thrusters=[
                 ui.thruster(
@@ -130,6 +131,7 @@ def test_extended_typed_builders_roundtrip():
             earth=ui.earth(),
         ),
     )
+    assert "fill=#false" in built.emit_kdl()
     assert ui.from_kdl(built.emit_kdl()) == built
 
 

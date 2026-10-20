@@ -168,7 +168,7 @@ viewport hdr=#true {
 - Positional `eql`: required. Evaluated to a `world_pos`-like value to place the mesh.
 - `frame`: optional; `ENU`, `NED`, or `ECEF`. Specifies the coordinate frame for interpreting position. Inherits from global `coordinate` if omitted.
 - `frame_orientation`: optional; `ENU`, `NED`, or `ECEF`. Coordinate frame used for orientation (`GeoRotation`). Falls back to `frame`, then the global default, when omitted.
-- `orientation`: optional; `relative` (default) or `absolute`. `relative` re-expresses the attitude as a rotation operator in Bevy (`bevy_R * att * bevy_R⁻¹`); identity attitude leaves the mesh in its authored Bevy / glTF axes (Y-up). `absolute` composes with the frame→Bevy basis (`bevy_R * att`); identity attitude aligns mesh local axes with the schematic frame (ENU: +X east, +Y north, +Z up). Use `absolute` for frame-aligned geometry (compasses, ECEF vehicles). Body-frame EQL offsets (`.translate`, `.translate_x`/`.translate_y`/`.translate_z`, `.direction`) default to the **absolute** sense so a chase camera lands on the rendered axis of a default-relative mesh. Pass a trailing `true` — e.g. `.translate(-2, 0, 0, true)` or `.direction(0, 0, 1, true)` — for the **relative** sense (`att · offset`). `false` equals the default. In ENU the two coincide; cameras chasing `orientation=absolute` objects in ECEF/NED should pass `true`. The pose's frame comes from the compile site (`viewport` / `vector_arrow` / `object_3d` `frame=`).
+- `orientation`: optional; `relative` (default) or `absolute`. `relative` re-expresses the attitude as a rotation operator in Bevy (`bevy_R * att * bevy_R⁻¹`); identity attitude leaves the mesh in its authored Bevy / glTF axes (Y-up). `absolute` composes with the frame→Bevy basis (`bevy_R * att`); identity attitude aligns mesh local axes with the schematic frame (ENU: +X east, +Y north, +Z up). Use `absolute` for frame-aligned geometry (compasses, ECEF vehicles). Body-frame EQL offsets (`.translate`, `.translate_x`/`.translate_y`/`.translate_z`, `.direction`) default to the **relative** sense so a chase camera lands on the rendered axis of a default-relative mesh. Pass a trailing `true` — e.g. `.translate(-2, 0, 0, true)` or `.direction(0, 0, 1, true)` — for the **absolute** sense (`att · offset`). `false` equals the default. In ENU the two coincide; cameras chasing `orientation=absolute` objects in ECEF/NED should pass `true`. The pose's frame comes from the compile site (`viewport` / `vector_arrow` / `object_3d` `frame=`).
 - `sensor_visible`: optional boolean, default `#true`. Set `#false` for editor-only overlays or estimated-state meshes that must not appear in headless sensor-camera imagery.
 - Mesh child (required, exactly one):
   - `glb`: `path` (required), `scale` (default 1.0), `translate` `(x,y,z)` (default 0s), `rotate` `(deg_x,deg_y,deg_z)` in degrees (default 0s). On DB record, local paths are stored as `db:…` and served over HTTP on replay; see [DB Asset Server](/reference/db-asset-server). Material overrides (both open-ended strengths, default 0.0 = use the GLB's own materials):
@@ -186,7 +186,7 @@ viewport hdr=#true {
   - `plane`: `width`/`depth` (default `size` if set, else 10.0); optional `size` shorthand; `color` (default white). Horizontal ground rectangle in Bevy axes (XZ, normal +Y).
   - `ellipsoid`: `color` (default white), `show_grid` (default `#false`). Renders in regular viewports only — the cinematic viewport hides ellipsoids (like sensor cameras without `show_ellipsoids`).
     - Physical measure
-      - `scale`: runtime EQL string that must evaluate to at least 3 values in meters. It can be a literal tuple, a vector component, indexed component values, scalar-vector math, or values from multiple components.
+      - `scale`: runtime EQL string that must evaluate to at least 3 values in meters. It can be a literal tuple, a vector component, indexed component values, scalar-vector math, or values from multiple components. The values are extents along the object's x, y, z: with `orientation=absolute`, the schematic frame's axes (ENU: east, north, up).
         - Examples:
           ```kdl
           ellipsoid scale="(1, 1, 1)"
@@ -221,13 +221,14 @@ viewport hdr=#true {
   Non-GLB mesh nodes support an optional `emissivity=<value>` property (0.0–1.0) to make the material glow (e.g., `sphere radius=0.2 emissivity=0.25 { color yellow }`).
 
   Mesh nodes and `icon` nodes both support an optional `visibility_range` child node that controls at what camera distances the element is rendered:
-  - `visibility_range`: child node with `min` (default 0) and `max` (default infinity) properties. The element is visible when the camera distance is between `min` and `max`. Both mesh and icon are visible at all distances by default; `visibility_range` is purely opt-in.
+  - `visibility_range`: child node with `min` (default 0) and `max` (default infinity) properties. The element is visible when the camera distance is between `min` and `max`, judged for each viewport camera, with or without an icon. Both mesh and icon are visible at all distances by default; `visibility_range` is purely opt-in.
   - `fade_distance` (icon only, default 0): world-unit distance over which the icon fades in at the `min` boundary and fades out at the `max` boundary. For example, `min=50 fade_distance=50` means the icon starts appearing at distance 50 (alpha=0) and reaches full opacity at distance 100. Mesh nodes use hard visibility cutoffs at their `min`/`max` boundaries.
   - Ranges can overlap (both mesh and icon visible simultaneously) or have gaps.
 - `icon` child (optional): Displays a fixed-size billboard icon at the object's position. Each viewport camera independently evaluates whether to show the icon based on its own distance. The icon always faces the camera and maintains a constant screen pixel size.
   - Source (exactly one required):
-    - `builtin`: name of a [Material Icons](https://fonts.google.com/icons?icon.set=Material+Icons) glyph (snake_case). Supported names include: `satellite_alt`, `satellite`, `rocket_launch`, `rocket`, `flight`, `flight_takeoff`, `public`, `language`, `circle`, `fiber_manual_record`, `star`, `star_outline`, `location_on`, `place`, `adjust`, `gps_fixed`, `my_location`, `explore`, `navigation`, `near_me`, `diamond`, `hexagon`, `change_history`, `lens`, `panorama_fish_eye`, `radio_button_unchecked`, `brightness_1`, `flare`, `wb_sunny`, `bolt`.
+    - `builtin`: name of a [Material Icons](https://fonts.google.com/icons?icon.set=Material+Icons) glyph (snake_case). Supported names include: `satellite_alt`, `satellite`, `rocket_launch`, `rocket`, `flight`, `flight_takeoff`, `public`, `language`, `circle`, `fiber_manual_record`, `star`, `star_outline`, `location_on`, `place`, `adjust`, `gps_fixed`, `my_location`, `explore`, `navigation`, `near_me`, `diamond`, `hexagon`, `change_history`, `lens`, `panorama_fish_eye`, `radio_button_unchecked`, `check_box_outline_blank`, `crop_square`, `brightness_1`, `flare`, `wb_sunny`, `bolt`.
     - `path`: path to a custom PNG image file (loaded from the assets folder). Persisted into the DB like GLB paths when recording; `builtin` icons are not copied.
+  - `fill` (default `#true`): `builtin` icons draw the filled Material Symbols style; `fill=#false` draws the outline style, e.g. a hollow ring for `radio_button_unchecked`.
   - `color` child node: tint color for the icon using the standard `color r g b [a]` format or named colors (default white). See Colors in the glossary above.
   - `visibility_range` child node: `min`, `max`, and `fade_distance` in world units (see above).
   - `size`: desired screen pixel size of the icon (default 32).
@@ -521,6 +522,7 @@ animate = "animate"
 icon = "icon"
      (builtin=string | path=string)
      [size=float]
+     [fill=bool]
      { [visibility_range] [color] }
 
 thruster = "thruster"

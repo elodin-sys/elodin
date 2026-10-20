@@ -1643,6 +1643,10 @@ pub struct Object3DIcon {
     pub size: f32,
     #[serde(default)]
     pub visibility_range: Option<VisRange>,
+    /// Built-in icons draw from the filled Material Symbols; `false` draws
+    /// the outline style (a ring for `radio_button_unchecked`).
+    #[serde(default = "default_true")]
+    pub fill: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -1789,6 +1793,8 @@ pub fn builtin_icon_char(name: &str) -> Option<char> {
         "lens" => 0xe3fa,
         "panorama_fish_eye" => 0xe40c,
         "radio_button_unchecked" => 0xe836,
+        "check_box_outline_blank" => 0xe835,
+        "crop_square" => 0xe3c6,
         "brightness_1" => 0xe3a6,
         "flare" => 0xef4e,
         "wb_sunny" => 0xe430,

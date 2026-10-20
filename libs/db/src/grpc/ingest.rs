@@ -213,6 +213,7 @@ impl IngestServiceImpl {
             return Ok(OpenOutcome::Rejected(reject));
         }
         self.db.vtable_gen.fetch_add(1, Ordering::SeqCst);
+        self.db.metadata_gen.fetch_add(1, Ordering::SeqCst);
 
         // Skip the config write on reconnects with an unchanged fingerprint
         // so WatchDb subscribers do not see handshake noise.
