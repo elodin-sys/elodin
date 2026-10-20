@@ -222,12 +222,13 @@ corners are ordered top-left, top-right, bottom-right, bottom-left. In the gate
 frame those points are `(0, +h, +h)`, `(0, −h, +h)`, `(0, −h, −h)`,
 `(0, +h, −h)` with `h = 1.25` m.
 
-`order_corners` labels unordered pixels. For image midline roll within ±35°
-that labelling matches the gate frame unless `corner_order_ambiguous` is set.
-The flag means the best and second-best labellings are within 10°, so the
-rotation about the gate normal is unknown. Center, bearing, range, and the
-crossing normal stay valid. `candidate_from_ordered_corners` is the path for
-corners that are already TL, TR, BR, BL; it does not reorder.
+`order_corners` labels corners with a midline heuristic. `corner_order_ambiguous`
+is a heuristic warning, set when the two best labellings are within 10°. An unset
+flag does not guarantee the gate-frame orientation: perspective can still mislabel
+corners. Gate position, bearing, range, and the crossing normal are unaffected by
+a cyclic relabelling. The in-plane gate orientation is not reliable.
+`candidate_from_ordered_corners` is the path for corners that are already TL, TR,
+BR, BL; it does not reorder.
 
 Noise-free projection followed by planar PnP recovers bearing within 0.25° and
 translation within `1e-6·range + 1e-6` m. A half-pixel quantizer is allowed a

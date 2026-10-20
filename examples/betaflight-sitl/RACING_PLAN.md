@@ -509,10 +509,11 @@ Each candidate contains:
 - nominal frame sample timestamp (the latency-adjusted DB query time);
 - four inner-opening corners ordered top-left, top-right, bottom-right,
   bottom-left in pixel coordinates;
-- `corner_order_ambiguous`, set when the two best square labellings are within
-  10°. For image midline roll within ±35° the labelling matches the gate frame
-  unless this flag is set. The rotation about the gate normal is then unknown;
-  center, bearing, range, and the crossing normal remain valid;
+- `corner_order_ambiguous`, a heuristic warning set when the two best square
+  labellings are within 10°. An unset flag does not guarantee the gate-frame
+  orientation: perspective can still mislabel corners. Gate position, bearing,
+  range, and the crossing normal are unaffected by a cyclic relabelling. The
+  in-plane gate orientation is not reliable;
 - confidence in `[0, 1]`;
 - gate-relative pose from PnP when valid;
 - reprojection error or equivalent quality measure.
@@ -1094,7 +1095,7 @@ command.
 
 **Verified 2026-10-05 on `pkg-g-vision-contracts` from `origin/main` (`d6354da1`);
 re-verified 2026-10-16 after merging `origin/main` (`c9ae81ad`) and the PR #891
-review fixes:**
+review fixes; corner-order wording rechecked 2026-10-21:**
 
 - `python3 -m pytest examples/betaflight-sitl/tests -q` → 222 passed.
   `ruff format`, `ruff check`, and `typos` passed.
@@ -1105,10 +1106,12 @@ review fixes:**
   `R_body_cam = Ry(-tilt) @ R_flu_from_opencv`. Positive `TILT_DEG` pitches the
   optical axis up (nose-up). Positive renderer pitch is nose-down, so
   `sensor_rot_offset` passes `[0, -TILT_DEG, 0]`.
-- Corner order uses the midline closest to image +x. The guarantee is image
-  midline roll within ±35°, unless `corner_order_ambiguous` is set because the
-  two best labellings are within 10°. Center, bearing, range, and the crossing
-  normal stay valid when the flag is set.
+- `order_corners` labels corners with a midline heuristic.
+  `corner_order_ambiguous` is a heuristic warning, set when the two best
+  labellings are within 10°. An unset flag does not guarantee the gate-frame
+  orientation: perspective can still mislabel corners. Gate position, bearing,
+  range, and the crossing normal are unaffected by a cyclic relabelling. The
+  in-plane gate orientation is not reliable.
 - Left for Package H: a 0.2 px quad can solve as a gate about 4 km away at 0 px
   RMS; `_rotation_vector` fails safe within about 1e-6° of 180°; `sample_time`
   is not checked for finiteness; `bearing_body` is measured from the body origin.
@@ -1130,6 +1133,15 @@ review fixes:**
   → `[FPV] total_frames=450 window_frames=389 observed_fps=29.92 status=PASS`,
   `[RACE] course=single gates_passed=0/1 status=INCOMPLETE`, C0 `PASS`,
   exit 0 (DB `betaflight_db039`). The scripted climb does not steer at the gate.
+- Rendered tilt check, 2026-10-21: same command, video frame 60 at 2.0 s.
+  `drone.world_pos` is identity at `(0, 0, 0)`. The gate is `(10, 0, 1.8)`,
+  yaw 0, 2.5 m opening. The camera mount is `[0.08, 0, 0.02]`. Tilt 0 reuses
+  `betaflight_db047`. Tilt +10° is `betaflight_db048`; `TILT_DEG` was restored
+  to 0 afterward.
+- Measured inner corners against `project_gate_corners`: the gate-center v
+  moves from 123.5 px to 181.0 px, 57.5 px down. Predicted centers are 122.6 px
+  and 179.9 px, 57.3 px down. Worst corner error is 1.7 px at tilt 0 and 2.7 px
+  at +10°, on the compressed bottom corners.
 
 ### [ ] H — Classical detector, offline
 
@@ -1351,7 +1363,7 @@ recoverable MPEG-TS fallback, are maintained in `README.md`.
 | Date | Decision | Reason and affected packages |
 |---|---|---|
 | 2026-10-05 | Port the Betaflight SITL schematic to `elodin.ui` builders. | The KDL string builder was the last example still emitting a schematic by hand. The parsed model matches the previous layout. Affects the editor surface used by B and later packages. |
-| 2026-10-16 | Positive `TILT_DEG` stays nose-up and is registered as negative `sensor_camera` pitch. `GateCandidate.corner_order_ambiguous` is set when the two best labellings are within 10°, and the corner-order guarantee is image midline roll within ±35°. | PR #891 review. `coords.md` and §7.1 define positive pitch as nose-down, so the 2026-10-05 nose-up renderer claim was wrong. Square symmetry makes in-plane corner identity ambiguous near 45° of image roll. Affects G and H. |
+| 2026-10-16 | Positive `TILT_DEG` stays nose-up and is registered as negative `sensor_camera` pitch. `order_corners` labels corners with a midline heuristic. `corner_order_ambiguous` is a heuristic warning, set when the two best labellings are within 10°. An unset flag does not guarantee the gate-frame orientation: perspective can still mislabel corners. Gate position, bearing, range, and the crossing normal are unaffected by a cyclic relabelling. The in-plane gate orientation is not reliable. | PR #891 review. `coords.md` and §7.1 define positive pitch as nose-down, so the 2026-10-05 nose-up renderer claim was wrong. The ±35° corner-order guarantee did not hold under perspective. Affects G and H. |
 | 2026-10-05 | Positive camera tilt pitches the optical axis up. Package G solves planar PnP in NumPy and leaves OpenCV to Package H. | Superseded in part on 2026-10-16: positive renderer pitch is nose-down, not the same sign as `TILT_DEG`. The NumPy solver decision stands. Affects G and H. |
 | 2026-10-01 | Hide the frustum by default and set the 10× drone mesh to `sensor_visible=#false` when the FPV camera is on. The mount contract stays `[0.08, 0.0, 0.02]` m, body +X, tilt 0. | The frustum filled the chase view, and the camera sat inside the display mesh. Hiding the mesh from the sensor camera shows the world ahead without changing the camera-to-body geometry Package G tests. Affects B and later G, H, and J. |
 | 2026-09-26 | Keep FPV sampling in `fpv_camera.py`. `frame_fresh` means a new `read_msg_at` timestamp, and shutdown FPS uses only timestamps inside the post-warmup window. | Held frames were marked fresh, and the cursor sweep was not an exact frame count. The schematic injects only the FPV fragments. Affects B and later G, H, and J. |

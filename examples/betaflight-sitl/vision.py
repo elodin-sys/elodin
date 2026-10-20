@@ -134,8 +134,11 @@ _ORDER_AMBIGUITY_DEG = 10.0
 class GateCandidate:
     """One Section 7.7 detection. Corners are TL, TR, BR, BL in pixels.
 
-    ``corner_order_ambiguous`` means the square's in-plane rotation is not
-    identified. Center, bearing, range, and the crossing normal stay valid.
+    ``corner_order_ambiguous`` is a heuristic warning, set when the two best
+    labellings are within 10°. An unset flag does not guarantee the gate-frame
+    orientation: perspective can still mislabel corners. Gate position, bearing,
+    range, and the crossing normal are unaffected by a cyclic relabelling. The
+    in-plane gate orientation is not reliable.
     """
 
     sample_time: float
@@ -171,11 +174,12 @@ def order_corners(points: np.ndarray) -> tuple[np.ndarray, bool]:
     """Return TL, TR, BR, BL and whether that labelling is ambiguous.
 
     The cyclic order comes from the angle around the centroid. The start corner
-    is the labelling whose midline is closest to image +x. For image midline
-    roll within ±35°, that labelling matches the gate frame unless the returned
-    flag is set. The flag is set when the best and second-best midlines are
-    within 10°. Square symmetry makes the in-plane rotation unknown in that
-    case; center, bearing, range, and the crossing normal do not depend on it.
+    is the labelling whose midline is closest to image +x.
+    ``corner_order_ambiguous`` is a heuristic warning, set when the two best
+    labellings are within 10°. An unset flag does not guarantee the gate-frame
+    orientation: perspective can still mislabel corners. Gate position, bearing,
+    range, and the crossing normal are unaffected by a cyclic relabelling. The
+    in-plane gate orientation is not reliable.
     """
 
     pts = np.asarray(points, dtype=np.float64)

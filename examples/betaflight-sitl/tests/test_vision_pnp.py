@@ -22,7 +22,6 @@ from vision import (
     CameraMount,
     candidate_from_corners,
     candidate_from_ordered_corners,
-    order_corners,
     solve_square_pnp,
 )
 
@@ -265,13 +264,6 @@ def test_dropout_extremes_and_rate() -> None:
     assert rate == pytest.approx(0.3, abs=0.08)
 
 
-def _image_midline_deg(corners: np.ndarray) -> float:
-    right = (corners[1] + corners[2]) * 0.5
-    left = (corners[0] + corners[3]) * 0.5
-    edge = right - left
-    return math.degrees(math.atan2(float(edge[1]), float(edge[0])))
-
-
 def _quat_ypr(yaw: float, pitch: float, roll: float) -> list[float]:
     cy, sy = math.cos(yaw / 2.0), math.sin(yaw / 2.0)
     cp, sp = math.cos(pitch / 2.0), math.sin(pitch / 2.0)
@@ -303,7 +295,7 @@ def test_ordered_corners_are_not_silently_relabelled() -> None:
     assert not np.allclose(wrong.corners_px, corners)
 
 
-def test_midline_order_holds_or_is_flagged_through_35_degrees() -> None:
+def test_relabelling_keeps_gate_position_and_bearing() -> None:
     rng = np.random.default_rng(23)
     checked = 0
     for _ in range(3000):
@@ -332,20 +324,22 @@ def test_midline_order_holds_or_is_flagged_through_35_degrees() -> None:
             *position,
         ]
         corners = project_gate_corners(gate, pose)
-        if corners is None or abs(_image_midline_deg(corners)) > 35.0:
+        if corners is None:
             continue
         checked += 1
         shuffled = corners[rng.permutation(4)]
-        ordered, ambiguous = order_corners(shuffled)
         detected = candidate_from_corners(
             0.0, shuffled, 1.0, gate.inner_size, FPV_INTRINSICS, FPV_MOUNT
         )
-        if np.allclose(ordered, corners):
-            assert not ambiguous or detected.corner_order_ambiguous
-            continue
-        assert ambiguous
-        assert detected.corner_order_ambiguous
         assert detected.pose is not None
+        assert any(
+            np.allclose(detected.corners_px, np.roll(corners, -shift, axis=0)) for shift in range(4)
+        )
         truth = _gate_center_body(gate, np.asarray(pose, dtype=np.float64))
-        assert detected.pose.bearing_body == pytest.approx(truth / np.linalg.norm(truth), abs=1e-6)
+        truth_range = float(np.linalg.norm(truth))
+        bearing = detected.pose.bearing_body
+        truth_bearing = truth / truth_range
+        cosine = float(np.clip(bearing @ truth_bearing, -1.0, 1.0))
+        assert math.degrees(math.acos(cosine)) <= _BEARING_TOL_DEG
+        assert detected.pose.position_body == pytest.approx(truth, abs=1e-6 * truth_range + 1e-6)
     assert checked > 500
