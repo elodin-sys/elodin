@@ -3,7 +3,10 @@ use axum::Router;
 use axum::body::Bytes;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{DefaultBodyLimit, Path as AxumPath, State};
-use axum::http::{HeaderMap, HeaderValue, Method, Request, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+#[cfg(feature = "verify-cors")]
+use axum::http::{Method, Request};
+#[cfg(feature = "verify-cors")]
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -732,12 +735,14 @@ const MAX_IMPELLER_PACKET_BYTES: usize = 64 * 1024 * 1024;
 /// origin is allowed when its host is localhost, matches the request `Host`
 /// header, or is listed here. `*` allows every origin. Browsers do not enforce
 /// CORS on WebSocket upgrades, so a present-but-denied origin is rejected.
+#[cfg(feature = "verify-cors")]
 #[derive(Clone, Debug, Default)]
 struct OriginPolicy {
     allowed: Vec<String>,
     any: bool,
 }
 
+#[cfg(feature = "verify-cors")]
 impl OriginPolicy {
     fn from_env() -> Self {
         match std::env::var("ELODIN_DB_ALLOWED_ORIGINS") {
@@ -772,6 +777,7 @@ impl OriginPolicy {
 }
 
 /// Host of an origin (`scheme://host[:port]`), without brackets or port.
+#[cfg(feature = "verify-cors")]
 fn origin_host(origin: &str) -> Option<&str> {
     let rest = origin.trim().split_once("://")?.1;
     let rest = rest.trim_end_matches('/');
@@ -780,6 +786,7 @@ fn origin_host(origin: &str) -> Option<&str> {
 }
 
 /// Host of a `Host` header or URI authority, without brackets or port.
+#[cfg(feature = "verify-cors")]
 fn authority_host(authority: &str) -> &str {
     if let Some(rest) = authority.strip_prefix('[')
         && let Some(end) = rest.find(']')
@@ -792,6 +799,7 @@ fn authority_host(authority: &str) -> &str {
         .unwrap_or(authority)
 }
 
+#[cfg(feature = "verify-cors")]
 fn is_localhost_origin(origin: &str) -> bool {
     matches!(
         origin_host(origin),
@@ -802,10 +810,12 @@ fn is_localhost_origin(origin: &str) -> bool {
     )
 }
 
+#[cfg(feature = "verify-cors")]
 fn normalize_origin(origin: &str) -> String {
     origin.trim().trim_end_matches('/').to_ascii_lowercase()
 }
 
+#[cfg(feature = "verify-cors")]
 fn origin_allowed(policy: &OriginPolicy, origin: &str, request_host: Option<&str>) -> bool {
     if policy.any || is_localhost_origin(origin) {
         return true;
@@ -822,6 +832,7 @@ fn origin_allowed(policy: &OriginPolicy, origin: &str, request_host: Option<&str
 /// Host the client used to reach this server. `X-Forwarded-Host` is ignored:
 /// the browser sets `Host` to the address it connected to, which is what
 /// same-host origins are compared against.
+#[cfg(feature = "verify-cors")]
 fn host_header_host(req: &Request<axum::body::Body>) -> Option<String> {
     let raw = req
         .headers()
@@ -841,6 +852,7 @@ fn host_header_host(req: &Request<axum::body::Body>) -> Option<String> {
     }
 }
 
+#[cfg(feature = "verify-cors")]
 fn apply_cors(res: &mut Response, origin: &HeaderValue) {
     res.headers_mut()
         .insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin.clone());
@@ -860,6 +872,7 @@ fn apply_cors(res: &mut Response, origin: &HeaderValue) {
     );
 }
 
+#[cfg(feature = "verify-cors")]
 async fn origin_guard(
     State(policy): State<OriginPolicy>,
     req: Request<axum::body::Body>,
@@ -965,18 +978,29 @@ async fn proxy_impeller_ws(ws: WebSocket, addr: SocketAddr) {
     }
 }
 
+#[cfg(feature = "verify-cors")]
 fn assets_router(state: Arc<AssetsState>) -> Router {
     assets_router_with_origins(state, OriginPolicy::from_env())
 }
 
+#[cfg(not(feature = "verify-cors"))]
+fn assets_router(state: Arc<AssetsState>) -> Router {
+    base_assets_router().with_state(state)
+}
+
+#[cfg(feature = "verify-cors")]
 fn assets_router_with_origins(state: Arc<AssetsState>, origins: OriginPolicy) -> Router {
+    base_assets_router()
+        .layer(middleware::from_fn_with_state(origins, origin_guard))
+        .with_state(state)
+}
+
+fn base_assets_router() -> Router<Arc<AssetsState>> {
     Router::new()
         .route("/impeller", get(ws_impeller))
         .route("/impeller/msg", get(ws_impeller))
         .route("/{*path}", get(get_asset).put(put_asset))
         .layer(DefaultBodyLimit::max(MAX_ASSET_UPLOAD_BYTES))
-        .layer(middleware::from_fn_with_state(origins, origin_guard))
-        .with_state(state)
 }
 
 async fn serve_assets_with_listener(
@@ -1189,21 +1213,25 @@ mod tests {
             .unwrap();
         assert_eq!(not_modified.status(), StatusCode::NOT_MODIFIED);
 
-        let cors = client
-            .get(format!("http://{assets_addr}/rocket.glb"))
-            .header(header::ORIGIN, "http://127.0.0.1:8080")
-            .send()
-            .await
-            .unwrap();
-        assert_eq!(cors.status(), StatusCode::OK);
-        assert_eq!(
-            cors.headers()
-                .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
-                .and_then(|v| v.to_str().ok()),
-            Some("http://127.0.0.1:8080")
-        );
+        #[cfg(feature = "verify-cors")]
+        {
+            let cors = client
+                .get(format!("http://{assets_addr}/rocket.glb"))
+                .header(header::ORIGIN, "http://127.0.0.1:8080")
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(cors.status(), StatusCode::OK);
+            assert_eq!(
+                cors.headers()
+                    .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+                    .and_then(|v| v.to_str().ok()),
+                Some("http://127.0.0.1:8080")
+            );
+        }
     }
 
+    #[cfg(feature = "verify-cors")]
     #[test]
     fn localhost_origin_matches_trunk_ports() {
         assert!(is_localhost_origin("http://127.0.0.1:8080"));
@@ -1215,6 +1243,7 @@ mod tests {
         assert!(!is_localhost_origin("null"));
     }
 
+    #[cfg(feature = "verify-cors")]
     #[test]
     fn origin_allowed_covers_localhost_same_host_and_list() {
         let policy = OriginPolicy::new(["https://ops.example.com/"]);
@@ -1285,6 +1314,7 @@ mod tests {
         assert_eq!(echoed.into_data(), pkt);
     }
 
+    #[cfg(feature = "verify-cors")]
     #[tokio::test]
     async fn impeller_websocket_rejects_non_localhost_origin() {
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -1335,6 +1365,7 @@ mod tests {
             .expect("localhost origin may open the impeller proxy");
     }
 
+    #[cfg(feature = "verify-cors")]
     async fn ws_upgrade_status(addr: SocketAddr, host: &str, origin: &str) -> u16 {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
@@ -1359,6 +1390,7 @@ mod tests {
         status.parse().unwrap()
     }
 
+    #[cfg(feature = "verify-cors")]
     fn impeller_proxy_state(dir: &std::path::Path) -> Arc<AssetsState> {
         Arc::new(AssetsState {
             assets_dir: dir.join("assets"),
@@ -1368,6 +1400,7 @@ mod tests {
         })
     }
 
+    #[cfg(feature = "verify-cors")]
     #[tokio::test]
     async fn impeller_websocket_allows_same_host_origin() {
         let dir = tempdir().unwrap();
@@ -1397,6 +1430,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "verify-cors")]
     #[tokio::test]
     async fn impeller_websocket_allows_listed_origin() {
         use tokio_tungstenite::tungstenite::client::IntoClientRequest;
