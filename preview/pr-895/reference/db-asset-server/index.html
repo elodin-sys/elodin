@@ -606,14 +606,14 @@
 </ul>
 <p>Do not run a follower Impeller server on <code>N+1</code>; that port is reserved for the DB Asset Server on the source.</p>
 <h3 id="browser-origins">Browser origins</h3>
-<p>Origin verification is compiled in only with the <code>verify-cors</code> Cargo feature, which is off by default. Without it the asset server does not inspect <code>Origin</code> and emits no CORS headers.</p>
-<p>With <code>verify-cors</code> enabled, the asset server is what a browser talks to, including the <code>/impeller</code> WebSocket proxy. A client that sends no <code>Origin</code> (the native editor, follower sync, <code>curl</code>) is allowed. A browser <code>Origin</code> is allowed when any of these hold:</p>
+<p>The asset server is what a browser talks to, including the <code>/impeller</code> WebSocket proxy. It always answers allowed browser origins with <code>Access-Control-Allow-Origin</code>. A client that sends no <code>Origin</code> (the native editor, follower sync, <code>curl</code>) is allowed.</p>
+<p>Without the <code>verify-cors</code> Cargo feature (the default), every browser origin is allowed, the same as <code>*</code>. With <code>verify-cors</code> enabled, a browser <code>Origin</code> is allowed when any of these hold:</p>
 <ul>
 <li>its host is <code>localhost</code>, <code>127.0.0.1</code>, or <code>::1</code>, on any scheme and port</li>
 <li>its host matches the request <code>Host</code> header, which is the name the browser used to reach the DB</li>
 <li>it is listed in <code>ELODIN_DB_ALLOWED_ORIGINS</code> (comma-separated origins such as <code>https://ops.example.com</code>, or <code>*</code> for every origin)</li>
 </ul>
-<p>Any other <code>Origin</code> is rejected with 403. When an origin is allowed, the response reflects it in <code>Access-Control-Allow-Origin</code>.</p>
+<p>With <code>verify-cors</code> enabled, any other <code>Origin</code> is rejected with 403. When an origin is allowed, the response reflects it in <code>Access-Control-Allow-Origin</code>.</p>
 <h3 id="the-db-scheme">The <code>db:</code> scheme</h3>
 <p>At record time, a local schematic path such as <code>models/jet.glb</code> is stored as <code>db:models/jet.glb</code>. The file lands at <code>{db}/assets/models/jet.glb</code>.</p>
 <p>Paths are <strong>not</strong> rewritten when they are already:</p>
