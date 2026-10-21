@@ -66,9 +66,7 @@ def gravity(pos: el.WorldPos, inertia: el.Inertia, jupiter: JupiterPosition) -> 
     r = pos.linear()
     acceleration = -sun_gm * r / jnp.linalg.norm(r) ** 3
     to_jupiter = jupiter - r
-    acceleration += jupiter_gm * (
-        to_jupiter / jnp.linalg.norm(to_jupiter) ** 3 - jupiter / jnp.linalg.norm(jupiter) ** 3
-    )
+    acceleration += jupiter_gm * to_jupiter / jnp.linalg.norm(to_jupiter) ** 3
     return el.SpatialForce(linear=inertia.mass() * acceleration)
 
 
