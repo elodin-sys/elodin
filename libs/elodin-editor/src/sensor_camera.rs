@@ -1810,6 +1810,37 @@ mod tests {
     }
 
     #[test]
+    fn positive_pitch_offset_turns_camera_toward_body_down() {
+        let context = GeoContext::default();
+        let mut config = camera_config([0.0, 0.0, 0.0]);
+        config.rot_offset = [0.0, 10.0, 0.0];
+        let pose = sensor_camera_pose(
+            &config,
+            world_pos(DVec3::ZERO, bevy::math::DQuat::IDENTITY),
+            GeoFrame::ENU,
+            &context,
+        )
+        .expect("valid sensor camera pose");
+
+        let pitch = 10.0_f64.to_radians();
+        let forward_enu = DVec3::new(pitch.cos(), 0.0, -pitch.sin());
+        let up_enu = DVec3::new(pitch.sin(), 0.0, pitch.cos());
+        let to_bevy = |vector: DVec3| DVec3::new(vector.x, vector.z, -vector.y);
+        let forward = to_bevy(forward_enu);
+        let expected_rotation = Transform::from_translation(pose.translation.as_vec3())
+            .looking_at(
+                (pose.translation + forward).as_vec3(),
+                to_bevy(up_enu).as_vec3(),
+            )
+            .rotation;
+        assert!(
+            pose.rotation.dot(expected_rotation).abs() > 1.0 - 1e-6,
+            "got {:?}, expected {expected_rotation:?}",
+            pose.rotation
+        );
+    }
+
+    #[test]
     fn ecef_sensor_camera_uses_schematic_origin_rebase() {
         let context =
             GeoContext::from(GeoOrigin::new_from_degrees(35.350664, -117.809027, 589.274));
