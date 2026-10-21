@@ -170,6 +170,11 @@ fn apply_fallback_frame_to_panel(
             if v.frame.is_none() {
                 v.frame = fallback_frame;
             }
+            for arrow in &mut v.local_arrows {
+                if arrow.frame.is_none() {
+                    arrow.frame = fallback_frame;
+                }
+            }
             Panel::Viewport(v)
         }
         // Gauges keep `source: None` so they continue to track the schematic
@@ -2378,6 +2383,63 @@ mod tests {
         assert_eq!(line.frame, Some(GeoFrame::ECEF));
         assert_eq!(geo_pos.0, GeoFrame::ECEF);
         assert_eq!(geo_rot.0, GeoFrame::ECEF);
+    }
+
+    #[test_case("", "", None; "default frame")]
+    #[test_case("coordinate frame=ECEF", "", Some(GeoFrame::ECEF); "ecef")]
+    #[test_case("coordinate frame=NED", "", Some(GeoFrame::NED); "ned")]
+    #[test_case("coordinate frame=ECEF", "frame=ENU", Some(GeoFrame::ECEF); "camera frame override")]
+    fn viewport_arrows_inherit_the_schematic_frame(
+        coordinate: &str,
+        viewport_frame: &str,
+        expected_frame: Option<GeoFrame>,
+    ) {
+        use crate::vector_arrow::ViewportArrow;
+        use impeller_wkt::VectorArrow3d;
+
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(&format!(
+            r#"
+            {coordinate}
+            vector_arrow "(0,1,0)" name="global"
+            tabs {{
+                hsplit {{
+                    vsplit {{
+                        viewport {viewport_frame} {{
+                            vector_arrow "(0,1,0)" name="inherited"
+                            vector_arrow "(0,0,1)" name="explicit" frame=ENU
+                        }}
+                    }}
+                }}
+            }}
+            "#,
+        ))
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app
+            .world_mut()
+            .query::<(&VectorArrow3d, Option<&ViewportArrow>)>();
+        let arrows: Vec<_> = query.iter(app.world()).collect();
+        assert_eq!(arrows.len(), 3);
+        for (arrow, viewport) in arrows {
+            match arrow.name.as_deref().expect("named arrow") {
+                "global" => {
+                    assert_eq!(arrow.frame, expected_frame);
+                    assert!(viewport.is_none());
+                }
+                "inherited" => {
+                    assert_eq!(arrow.frame, expected_frame);
+                    assert!(viewport.is_some());
+                }
+                "explicit" => {
+                    assert_eq!(arrow.frame, Some(GeoFrame::ENU));
+                    assert!(viewport.is_some());
+                }
+                name => panic!("unexpected arrow {name}"),
+            }
+        }
     }
 
     #[test]
