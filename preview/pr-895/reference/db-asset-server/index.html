@@ -606,7 +606,8 @@
 </ul>
 <p>Do not run a follower Impeller server on <code>N+1</code>; that port is reserved for the DB Asset Server on the source.</p>
 <h3 id="browser-origins">Browser origins</h3>
-<p>The asset server is what a browser talks to, including the <code>/impeller</code> WebSocket proxy. A client that sends no <code>Origin</code> (the native editor, follower sync, <code>curl</code>) is allowed. A browser <code>Origin</code> is allowed when any of these hold:</p>
+<p>Origin verification is compiled in only with the <code>verify-cors</code> Cargo feature, which is off by default. Without it the asset server does not inspect <code>Origin</code> and emits no CORS headers.</p>
+<p>With <code>verify-cors</code> enabled, the asset server is what a browser talks to, including the <code>/impeller</code> WebSocket proxy. A client that sends no <code>Origin</code> (the native editor, follower sync, <code>curl</code>) is allowed. A browser <code>Origin</code> is allowed when any of these hold:</p>
 <ul>
 <li>its host is <code>localhost</code>, <code>127.0.0.1</code>, or <code>::1</code>, on any scheme and port</li>
 <li>its host matches the request <code>Host</code> header, which is the name the browser used to reach the DB</li>
