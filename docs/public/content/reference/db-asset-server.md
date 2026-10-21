@@ -61,15 +61,15 @@ Do not run a follower Impeller server on `N+1`; that port is reserved for the DB
 
 ### Browser origins
 
-Origin verification is compiled in only with the `verify-cors` Cargo feature, which is off by default. Without it the asset server does not inspect `Origin` and emits no CORS headers.
+The asset server is what a browser talks to, including the `/impeller` WebSocket proxy. It always answers allowed browser origins with `Access-Control-Allow-Origin`. A client that sends no `Origin` (the native editor, follower sync, `curl`) is allowed.
 
-With `verify-cors` enabled, the asset server is what a browser talks to, including the `/impeller` WebSocket proxy. A client that sends no `Origin` (the native editor, follower sync, `curl`) is allowed. A browser `Origin` is allowed when any of these hold:
+Without the `verify-cors` Cargo feature (the default), every browser origin is allowed, the same as `*`. With `verify-cors` enabled, a browser `Origin` is allowed when any of these hold:
 
 - its host is `localhost`, `127.0.0.1`, or `::1`, on any scheme and port
 - its host matches the request `Host` header, which is the name the browser used to reach the DB
 - it is listed in `ELODIN_DB_ALLOWED_ORIGINS` (comma-separated origins such as `https://ops.example.com`, or `*` for every origin)
 
-Any other `Origin` is rejected with 403. When an origin is allowed, the response reflects it in `Access-Control-Allow-Origin`.
+With `verify-cors` enabled, any other `Origin` is rejected with 403. When an origin is allowed, the response reflects it in `Access-Control-Allow-Origin`.
 
 ### The `db:` scheme
 
