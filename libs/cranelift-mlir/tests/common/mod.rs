@@ -85,7 +85,7 @@ fn run_mlir_with(
                 compare_output(index, *elem, jit, interp);
             }
         }
-        Err(err) if is_unsupported_interp(&err) => {
+        Err(err) if err.is_unsupported() => {
             if interp_strict() {
                 panic!(
                     "interpreter does not implement an op under ELODIN_CRANELIFT_INTERP_STRICT: {err}"
@@ -104,12 +104,6 @@ fn interp_strict() -> bool {
         .ok()
         .as_deref()
         == Some("1")
-}
-
-fn is_unsupported_interp(err: &str) -> bool {
-    err.contains("unsupported custom_call target")
-        || err.contains("does not implement")
-        || err.contains("not implemented")
 }
 
 fn compare_output(index: usize, elem: ElementType, jit: &[u8], interp: &[u8]) {

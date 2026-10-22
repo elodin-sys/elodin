@@ -40,6 +40,7 @@ rayon = { version = "1.11", optional = true }
 # which nixpkgs tracy-capture cannot read.
 tracy-client = { version = "=0.18.4", optional = true }
 blake3 = "1.8.5"
+thiserror = "2.0"
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 memmap2 = "0.9.10"
