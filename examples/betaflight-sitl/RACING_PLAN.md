@@ -1562,7 +1562,8 @@ Starting parameters (tuning values, not acceptance criteria):
 hidden world gate poses.
 
 **Acceptance:** Deterministic synthetic tests demonstrate convergence from the
-pad, NIS and NEES within χ² bounds, bounded response to alternating depth
+pad, normalized innovation squared (NIS) and normalized estimation error
+squared within χ² bounds, bounded response to alternating depth
 errors, outlier rejection, stale-state behavior, a drift bound over a 2.5 s
 coast, reset after a rejection streak and no reset at close range, unbiased
 delayed frames with capture times (and measurable bias without them), a target
