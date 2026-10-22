@@ -9355,61 +9355,106 @@ fn lower_dot_general(
         return vec![builder.ins().fmul(l[0], r[0])];
     }
 
-    if l_ty.rank() == 1 && r_ty.rank() == 1 {
+    let unbatched = dims.lhs_batch.is_empty() && dims.rhs_batch.is_empty();
+    if unbatched
+        && l_ty.rank() == 1
+        && r_ty.rank() == 1
+        && dims.lhs_contracting == [0]
+        && dims.rhs_contracting == [0]
+        && l.len() == r.len()
+        && l.len() == l_ty.shape[0] as usize
+    {
         let zero = builder.ins().f64const(0.0);
         let mut acc = zero;
-        for i in 0..l.len().min(r.len()) {
+        for i in 0..l.len() {
             let prod = builder.ins().fmul(l[i], r[i]);
             acc = builder.ins().fadd(acc, prod);
         }
         return vec![acc];
     }
 
-    if l_ty.rank() == 1 && r_ty.rank() == 2 {
+    if unbatched
+        && l_ty.rank() == 1
+        && r_ty.rank() == 2
+        && dims.lhs_contracting == [0]
+        && (dims.rhs_contracting == [0] || dims.rhs_contracting == [1])
+    {
         let rhs_contract_dim = dims.rhs_contracting[0] as usize;
         let k = l_ty.shape[0] as usize;
         let rhs_rows = r_ty.shape[0] as usize;
         let rhs_cols = r_ty.shape[1] as usize;
+        let contracted = if rhs_contract_dim == 1 {
+            rhs_cols
+        } else {
+            rhs_rows
+        };
         let out_size = if rhs_contract_dim == 1 {
             rhs_rows
         } else {
             rhs_cols
         };
-        let mut out = Vec::new();
-        for i in 0..out_size {
-            let zero = builder.ins().f64const(0.0);
-            let mut acc = zero;
-            for j in 0..k {
-                let lv = l[j];
-                let rv = if rhs_contract_dim == 1 {
-                    r[i * rhs_cols + j]
-                } else {
-                    r[j * rhs_cols + i]
-                };
-                let prod = builder.ins().fmul(lv, rv);
-                acc = builder.ins().fadd(acc, prod);
+        if contracted == k && l.len() >= k && r.len() >= rhs_rows * rhs_cols {
+            let mut out = Vec::new();
+            for i in 0..out_size {
+                let zero = builder.ins().f64const(0.0);
+                let mut acc = zero;
+                for j in 0..k {
+                    let lv = l[j];
+                    let rv = if rhs_contract_dim == 1 {
+                        r[i * rhs_cols + j]
+                    } else {
+                        r[j * rhs_cols + i]
+                    };
+                    let prod = builder.ins().fmul(lv, rv);
+                    acc = builder.ins().fadd(acc, prod);
+                }
+                out.push(acc);
             }
-            out.push(acc);
+            return out;
         }
-        return out;
     }
 
-    if l_ty.rank() == 2 && r_ty.rank() == 1 {
+    if unbatched
+        && l_ty.rank() == 2
+        && r_ty.rank() == 1
+        && dims.rhs_contracting == [0]
+        && (dims.lhs_contracting == [0] || dims.lhs_contracting == [1])
+    {
         let rows = l_ty.shape[0] as usize;
         let cols = l_ty.shape[1] as usize;
-        let mut out = Vec::new();
-        for row in 0..rows {
-            let zero = builder.ins().f64const(0.0);
-            let mut acc = zero;
-            for col in 0..cols {
-                let lv = l[row * cols + col];
-                let rv = r[col];
-                let prod = builder.ins().fmul(lv, rv);
-                acc = builder.ins().fadd(acc, prod);
+        let k = r_ty.shape[0] as usize;
+        if l.len() >= rows * cols && r.len() >= k {
+            if dims.lhs_contracting == [1] && cols == k {
+                let mut out = Vec::new();
+                for row in 0..rows {
+                    let zero = builder.ins().f64const(0.0);
+                    let mut acc = zero;
+                    for col in 0..cols {
+                        let lv = l[row * cols + col];
+                        let rv = r[col];
+                        let prod = builder.ins().fmul(lv, rv);
+                        acc = builder.ins().fadd(acc, prod);
+                    }
+                    out.push(acc);
+                }
+                return out;
             }
-            out.push(acc);
+            if dims.lhs_contracting == [0] && rows == k {
+                let mut out = Vec::new();
+                for col in 0..cols {
+                    let zero = builder.ins().f64const(0.0);
+                    let mut acc = zero;
+                    for row in 0..rows {
+                        let lv = l[row * cols + col];
+                        let rv = r[row];
+                        let prod = builder.ins().fmul(lv, rv);
+                        acc = builder.ins().fadd(acc, prod);
+                    }
+                    out.push(acc);
+                }
+                return out;
+            }
         }
-        return out;
     }
 
     if l_ty.rank() == 2 && r_ty.rank() == 2 {
