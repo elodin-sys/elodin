@@ -282,12 +282,19 @@ module @module {
         vals.iter().flat_map(|v| v.to_le_bytes()).collect()
     }
 
-    fn read_f64s(buf: &[u8]) -> Vec<f64> {
-        buf.as_chunks::<8>()
-            .0
-            .iter()
-            .map(|c| f64::from_le_bytes(*c))
-            .collect()
+    fn read_f64s(buf: &[u8]) -> std::borrow::Cow<'_, [f64]> {
+        if cfg!(target_endian = "little")
+            && let Ok(vals) = bytemuck::try_cast_slice(buf)
+        {
+            return std::borrow::Cow::Borrowed(vals);
+        }
+        std::borrow::Cow::Owned(
+            buf.as_chunks::<8>()
+                .0
+                .iter()
+                .map(|c| f64::from_le_bytes(*c))
+                .collect(),
+        )
     }
 
     fn invoke_bytes(
@@ -305,7 +312,7 @@ module @module {
         let a = read_f64s(lhs);
         let b = read_f64s(rhs);
         assert_eq!(a.len(), b.len());
-        for (x, y) in a.iter().zip(&b) {
+        for (x, y) in a.iter().zip(b.iter()) {
             if x.is_nan() && y.is_nan() {
                 continue;
             }
