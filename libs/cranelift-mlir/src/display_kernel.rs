@@ -278,8 +278,13 @@ module @module {
         [4.0, 1.0, 0.0, 3.0, 0.5, 2.0]
     }
 
-    fn f64_bytes(vals: &[f64]) -> Vec<u8> {
-        vals.iter().flat_map(|v| v.to_le_bytes()).collect()
+    fn f64_bytes(vals: &[f64]) -> std::borrow::Cow<'_, [u8]> {
+        if cfg!(target_endian = "little")
+            && let Ok(bytes) = bytemuck::try_cast_slice(vals)
+        {
+            return std::borrow::Cow::Borrowed(bytes);
+        }
+        std::borrow::Cow::Owned(vals.iter().flat_map(|v| v.to_le_bytes()).collect())
     }
 
     fn read_f64s(buf: &[u8]) -> std::borrow::Cow<'_, [f64]> {
@@ -295,6 +300,76 @@ module @module {
                 .map(|c| f64::from_le_bytes(*c))
                 .collect(),
         )
+    }
+
+    fn sample_f64s() -> Vec<f64> {
+        vec![
+            0.0,
+            -0.0,
+            1.5,
+            -2.25,
+            f64::MIN,
+            f64::MAX,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::from_bits(0x7ff8_0000_0000_0001),
+        ]
+    }
+
+    fn assert_le_bytes(bytes: &[u8], vals: &[f64]) {
+        assert_eq!(bytes.len(), vals.len() * 8);
+        for (i, value) in vals.iter().enumerate() {
+            assert_eq!(
+                &bytes[i * 8..i * 8 + 8],
+                &value.to_le_bytes(),
+                "element {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn f64_bytes_preserves_little_endian_bits() {
+        let vals = sample_f64s();
+        let bytes = f64_bytes(&vals);
+        assert_le_bytes(&bytes, &vals);
+        let back = read_f64s(&bytes);
+        assert_eq!(back.len(), vals.len());
+        for (i, (got, expected)) in back.iter().zip(&vals).enumerate() {
+            assert_eq!(
+                got.to_bits(),
+                expected.to_bits(),
+                "element {i}: {got} vs {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn f64_bytes_borrows_on_little_endian() {
+        let vals = sample_f64s();
+        let bytes = f64_bytes(&vals);
+        assert_le_bytes(&bytes, &vals);
+        if cfg!(target_endian = "little") {
+            let std::borrow::Cow::Borrowed(slice) = &bytes else {
+                panic!("little-endian f64 slice should borrow");
+            };
+            assert_eq!(slice.as_ptr(), vals.as_ptr().cast());
+        } else {
+            assert!(
+                matches!(bytes, std::borrow::Cow::Owned(_)),
+                "big-endian must copy into little-endian bytes"
+            );
+        }
+    }
+
+    #[test]
+    fn f64_bytes_empty_slice() {
+        let bytes = f64_bytes(&[]);
+        assert!(bytes.is_empty());
+        if cfg!(target_endian = "little") {
+            assert!(matches!(bytes, std::borrow::Cow::Borrowed(_)));
+        } else {
+            assert!(matches!(bytes, std::borrow::Cow::Owned(_)));
+        }
     }
 
     fn invoke_bytes(
@@ -392,10 +467,11 @@ module @module {
         ));
         let in_sizes = nbytes(&fixture.inputs, None);
         let out_sizes = nbytes(&fixture.outputs, None);
-        let input = f64_bytes(&packed_cov());
+        let cov = packed_cov();
+        let input = f64_bytes(&cov);
         let out = eval_fixture(&fixture.scalar_mlir, &in_sizes, &out_sizes, &input);
         let got = read_f64s(&out);
-        let expect = expected_stats(&packed_cov());
+        let expect = expected_stats(&cov);
         assert_eq!(got.len(), 2);
         assert!((got[0] - expect[0]).abs() < 1e-12);
         assert!((got[1] - expect[1]).abs() < 1e-12);
@@ -408,10 +484,11 @@ module @module {
         ));
         let in_sizes = nbytes(&fixture.inputs, None);
         let out_sizes = nbytes(&fixture.outputs, None);
-        let input = f64_bytes(&packed_cov());
+        let cov = packed_cov();
+        let input = f64_bytes(&cov);
         let out = eval_fixture(&fixture.scalar_mlir, &in_sizes, &out_sizes, &input);
         let got = read_f64s(&out);
-        let expect = expected_chol(&packed_cov());
+        let expect = expected_chol(&cov);
         assert_eq!(got.len(), 9);
         for (x, y) in got.iter().zip(&expect) {
             assert!((x - y).abs() < 1e-12, "{x} vs {y}");
