@@ -1148,20 +1148,48 @@ fn dot_values(
     if l_ty.is_scalar() && r_ty.is_scalar() {
         return Ok(vec![at(l, 0) * at(r, 0)]);
     }
-    if l_ty.rank() == 1 && r_ty.rank() == 1 {
-        let n = l_ty.num_elements().min(r_ty.num_elements());
+    // One in-range contracting axis. Empty or out-of-range dims fall through
+    // to the not-implemented error instead of guessing a layout.
+    let contract = |axes: &[i64], rank: usize| -> Option<usize> {
+        match axes {
+            [d] if *d >= 0 && (*d as usize) < rank => Some(*d as usize),
+            _ => None,
+        }
+    };
+    let unbatched = dims.lhs_batch.is_empty() && dims.rhs_batch.is_empty();
+    if unbatched
+        && l_ty.rank() == 1
+        && r_ty.rank() == 1
+        && contract(&dims.lhs_contracting, 1) == Some(0)
+        && contract(&dims.rhs_contracting, 1) == Some(0)
+    {
+        let n = l_ty.shape[0] as usize;
+        if r_ty.shape[0] as usize != n {
+            return Err(InterpError::DotContractingSize);
+        }
         let mut acc = 0.0;
         for i in 0..n {
             acc += at(l, i) * at(r, i);
         }
         return Ok(vec![acc]);
     }
-    if l_ty.rank() == 1 && r_ty.rank() == 2 {
-        let rhs_contract_dim = dims.rhs_contracting.first().copied().unwrap_or(1) as usize;
+    if unbatched
+        && l_ty.rank() == 1
+        && r_ty.rank() == 2
+        && contract(&dims.lhs_contracting, 1) == Some(0)
+        && let Some(rhs_contract_dim) = contract(&dims.rhs_contracting, 2)
+    {
         let k = l_ty.shape[0] as usize;
         let rows = r_ty.shape[0] as usize;
         let cols = r_ty.shape[1] as usize;
-        let out_size = if rhs_contract_dim == 1 { rows } else { cols };
+        let (contracted, out_size) = if rhs_contract_dim == 1 {
+            (cols, rows)
+        } else {
+            (rows, cols)
+        };
+        if contracted != k {
+            return Err(InterpError::DotContractingSize);
+        }
         let mut out = Vec::with_capacity(out_size);
         for i in 0..out_size {
             let mut acc = 0.0;
@@ -1177,14 +1205,39 @@ fn dot_values(
         }
         return Ok(out);
     }
-    if l_ty.rank() == 2 && r_ty.rank() == 1 {
+    if unbatched
+        && l_ty.rank() == 2
+        && r_ty.rank() == 1
+        && let (Some(lhs_contract_dim), Some(0)) = (
+            contract(&dims.lhs_contracting, 2),
+            contract(&dims.rhs_contracting, 1),
+        )
+    {
         let rows = l_ty.shape[0] as usize;
         let cols = l_ty.shape[1] as usize;
-        let mut out = Vec::with_capacity(rows);
-        for row in 0..rows {
+        let k = r_ty.shape[0] as usize;
+        if lhs_contract_dim == 1 {
+            if cols != k {
+                return Err(InterpError::DotContractingSize);
+            }
+            let mut out = Vec::with_capacity(rows);
+            for row in 0..rows {
+                let mut acc = 0.0;
+                for col in 0..cols {
+                    acc += at(l, row * cols + col) * at(r, col);
+                }
+                out.push(acc);
+            }
+            return Ok(out);
+        }
+        if rows != k {
+            return Err(InterpError::DotContractingSize);
+        }
+        let mut out = Vec::with_capacity(cols);
+        for col in 0..cols {
             let mut acc = 0.0;
-            for col in 0..cols {
-                acc += at(l, row * cols + col) * at(r, col);
+            for row in 0..rows {
+                acc += at(l, row * cols + col) * at(r, row);
             }
             out.push(acc);
         }
