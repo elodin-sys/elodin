@@ -357,7 +357,7 @@ pub extern "C" fn tensor_pow_f64(dst: *mut f64, a: *const f64, b: *const f64, n:
     while i + 2 <= n {
         let va = wide::f64x2::new([a[i], a[i + 1]]);
         let vb = wide::f64x2::new([b[i], b[i + 1]]);
-        let r = va.pow_f64x2(vb).to_array();
+        let r = va.powf_simd(vb).to_array();
         dst[i] = r[0];
         dst[i + 1] = r[1];
         i += 2;
