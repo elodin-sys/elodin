@@ -3056,6 +3056,46 @@ module @module {
 }
 
 #[test]
+fn test_dot_general_1d_x_2d_contract_rows() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<2xf64>, %arg1: tensor<2x3xf64>) -> tensor<3xf64> {
+    %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [0] x [0], precision = [DEFAULT, DEFAULT] : (tensor<2xf64>, tensor<2x3xf64>) -> tensor<3xf64>
+    return %0 : tensor<3xf64>
+  }
+}
+"#;
+    // lhs = [10, 20]
+    // rhs = [[4, 5, 6],
+    //        [7, 8, 9]]
+    // result = [10*4+20*7, 10*5+20*8, 10*6+20*9]
+    let lhs = f64_buf(&[10.0, 20.0]);
+    let rhs = f64_buf(&[4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
+    let out = run_mlir(mlir, &[&lhs, &rhs], &[24]);
+    assert_f64s_close(&read_f64s(&out[0]), &[180.0, 210.0, 240.0]);
+}
+
+#[test]
+fn test_dot_general_2d_x_1d_contract_rows() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<2x3xf64>, %arg1: tensor<2xf64>) -> tensor<3xf64> {
+    %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [0] x [0], precision = [DEFAULT, DEFAULT] : (tensor<2x3xf64>, tensor<2xf64>) -> tensor<3xf64>
+    return %0 : tensor<3xf64>
+  }
+}
+"#;
+    // lhs = [[1, 2, 3],
+    //        [4, 5, 6]]
+    // rhs = [10, 20]
+    // result = [1*10+4*20, 2*10+5*20, 3*10+6*20]
+    let lhs = f64_buf(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+    let rhs = f64_buf(&[10.0, 20.0]);
+    let out = run_mlir(mlir, &[&lhs, &rhs], &[24]);
+    assert_f64s_close(&read_f64s(&out[0]), &[90.0, 120.0, 150.0]);
+}
+
+#[test]
 fn test_iota_2d_dim0() {
     let mlir = r#"
 module @module {
