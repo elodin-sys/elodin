@@ -283,8 +283,10 @@ module @module {
     }
 
     fn read_f64s(buf: &[u8]) -> Vec<f64> {
-        buf.chunks_exact(8)
-            .map(|c| f64::from_le_bytes(c.try_into().unwrap()))
+        buf.as_chunks::<8>()
+            .0
+            .iter()
+            .map(|c| f64::from_le_bytes(*c))
             .collect()
     }
 
@@ -356,7 +358,7 @@ module @module {
                     "bool" => 1,
                     _ => 8,
                 };
-                let elems = t.shape.iter().fold(1i64, |acc, d| acc * d).max(1) as usize;
+                let elems = t.shape.iter().product::<i64>().max(1) as usize;
                 let rows = batch.map(|n| n as usize).unwrap_or(1);
                 rows * elems * width
             })

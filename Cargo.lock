@@ -4310,6 +4310,7 @@ name = "cranelift-mlir"
 version = "0.20.1-alpha.0"
 dependencies = [
  "blake3",
+ "bytemuck",
  "cranelift-codegen",
  "cranelift-frontend",
  "cranelift-jit",

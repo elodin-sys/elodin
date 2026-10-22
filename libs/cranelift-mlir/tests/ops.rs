@@ -22,8 +22,10 @@ module @module {
     let out = run_mlir(mlir, &[&a], &[32, 8, 4]);
     let lu = read_f64s(&out[0]);
     let pivots: Vec<i32> = out[1]
-        .chunks_exact(4)
-        .map(|c| i32::from_le_bytes(c.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| i32::from_le_bytes(*c))
         .collect();
     let info: i32 = i32::from_le_bytes(out[2][..4].try_into().unwrap());
     eprintln!("LU: {:?}", lu);
@@ -1038,7 +1040,7 @@ module @module {
     let out = run_mlir(mlir, &[&in0], &[48]);
     // Expected: [[1,4],[2,5],[3,6]]
     let result = read_f64s(&out[0]);
-    assert_eq!(result, &[1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+    assert_eq!(&*result, &[1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
 }
 
 #[test]
@@ -1087,7 +1089,7 @@ module @module {
     let in0 = f64_buf(&[10.0, 20.0, 30.0, 40.0, 50.0]);
     let idx = i64_buf(&[2]);
     let out = run_mlir(mlir, &[&in0, &idx], &[16]);
-    assert_eq!(read_f64s(&out[0]), &[30.0, 40.0]);
+    assert_eq!(&*read_f64s(&out[0]), &[30.0, 40.0]);
 }
 
 #[test]
@@ -1253,7 +1255,7 @@ module @module {
     let update = f64_buf(&[99.0, 100.0]);
     let idx = i64_buf(&[1]);
     let out = run_mlir(mlir, &[&base, &update, &idx], &[40]);
-    assert_eq!(read_f64s(&out[0]), &[1.0, 99.0, 100.0, 4.0, 5.0]);
+    assert_eq!(&*read_f64s(&out[0]), &[1.0, 99.0, 100.0, 4.0, 5.0]);
 }
 
 // ---- Gather (row-select) ----
@@ -1277,7 +1279,7 @@ module @module {
     let out = run_mlir(mlir, &[&operand, &indices], &[64]);
     let result = read_f64s(&out[0]);
     // Expected: row 2 = [9,10,11,12], row 0 = [1,2,3,4]
-    assert_eq!(result, &[9.0, 10.0, 11.0, 12.0, 1.0, 2.0, 3.0, 4.0]);
+    assert_eq!(&*result, &[9.0, 10.0, 11.0, 12.0, 1.0, 2.0, 3.0, 4.0]);
 }
 
 // ---- Batched dot product ----
@@ -1568,8 +1570,10 @@ module @module {
     let input = 10i64.to_le_bytes().to_vec();
     let out = run_mlir(mlir, &[&input], &[8, 8]);
     let seed: Vec<u32> = out[0]
-        .chunks_exact(4)
-        .map(|c| u32::from_le_bytes(c.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| u32::from_le_bytes(*c))
         .collect();
     let sum = i64::from_le_bytes(out[1].as_slice().try_into().unwrap());
     assert_eq!(
@@ -2121,8 +2125,10 @@ module @module {
     let in0 = i32_buf(&[10, 20, 30]);
     let out = run_mlir_mem(mlir, &[&in0], &[12]);
     let result: Vec<i32> = out[0]
-        .chunks_exact(4)
-        .map(|c| i32::from_le_bytes(c.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| i32::from_le_bytes(*c))
         .collect();
     assert_eq!(result, vec![10, 20, 30]);
 }
@@ -2259,8 +2265,10 @@ module @module {
         .collect();
     let out = run_mlir_mem(mlir, &[&lo, &hi], &[16]);
     let result: Vec<u32> = out[0]
-        .chunks_exact(4)
-        .map(|c| u32::from_le_bytes(c.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| u32::from_le_bytes(*c))
         .collect();
     assert_eq!(result, vec![60, 65, 85, 110]);
 }
@@ -3309,8 +3317,10 @@ module @module {
     let indices = i32_buf(&[1, 3]);
     let out = run_mlir_mem(mlir, &[&data, &indices], &[24]);
     let result: Vec<i32> = out[0]
-        .chunks_exact(4)
-        .map(|c| i32::from_le_bytes(c.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| i32::from_le_bytes(*c))
         .collect();
     assert_eq!(result, vec![40, 50, 60, 100, 110, 120]);
 }
@@ -3333,8 +3343,10 @@ module @module {
     let updates = i32_buf(&[99, 88]);
     let out = run_mlir_mem(mlir, &[&data, &indices, &updates], &[20]);
     let result: Vec<i32> = out[0]
-        .chunks_exact(4)
-        .map(|c| i32::from_le_bytes(c.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| i32::from_le_bytes(*c))
         .collect();
     assert_eq!(result, vec![99, 2, 3, 4, 88]);
 }
@@ -3572,8 +3584,10 @@ module @module {
 "#;
     let out = run_mlir_mem(mlir, &[&i32_buf(&[10, 20, 30, 40, 50])], &[12]);
     let r: Vec<i32> = out[0]
-        .chunks_exact(4)
-        .map(|c| i32::from_le_bytes(c.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| i32::from_le_bytes(*c))
         .collect();
     assert_eq!(r, vec![20, 30, 40]);
 }
@@ -3590,8 +3604,10 @@ module @module {
 "#;
     let out = run_mlir_mem(mlir, &[&i32_buf(&[1, 2, 3, 4, 5, 6])], &[24]);
     let r: Vec<i32> = out[0]
-        .chunks_exact(4)
-        .map(|c| i32::from_le_bytes(c.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| i32::from_le_bytes(*c))
         .collect();
     assert_eq!(r, vec![1, 4, 2, 5, 3, 6]);
 }
@@ -4425,7 +4441,7 @@ module @module {
     let out = run_mlir_mem(mlir, &[&min_val, &max_val], &[32]);
     let vals = read_f64s(&out[0]);
     assert_eq!(vals.len(), 4);
-    for v in &vals {
+    for v in vals.iter() {
         assert!(*v >= 0.0 && *v <= 1.0, "rng value {v} out of [0,1]");
     }
 }
