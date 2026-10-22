@@ -11,6 +11,202 @@ use crate::ir::{
     ReduceOp, ScalarValue, TensorType, ValueId,
 };
 use crate::tensor_rt;
+use thiserror::Error;
+
+/// Failure from the display-kernel interpreter.
+#[derive(Debug, Error)]
+pub enum InterpError {
+    #[error("tensor is {actual} bytes, expected {expected}")]
+    TensorSize { actual: usize, expected: usize },
+
+    #[error("compiled module is missing a callable main entrypoint")]
+    MissingMain,
+
+    #[error("expected {expected} inputs, got {actual}")]
+    InputCount { expected: usize, actual: usize },
+
+    #[error("expected {expected} outputs, got {actual}")]
+    OutputCount { expected: usize, actual: usize },
+
+    #[error("kernel returned {actual} values, expected {expected}")]
+    ReturnCount { actual: usize, expected: usize },
+
+    #[error("output is {actual} bytes, expected {expected}")]
+    OutputByteSize { actual: usize, expected: usize },
+
+    #[error("instruction produced {actual} values, expected {expected}")]
+    ProducedCount { actual: usize, expected: usize },
+
+    #[error("value {id:?} has type {actual}, expected {expected}")]
+    ValueType {
+        id: ValueId,
+        actual: TensorType,
+        expected: TensorType,
+    },
+
+    #[error("instruction has no result type")]
+    MissingResultType,
+
+    #[error("unsupported custom_call target: {0}")]
+    UnsupportedCustomCall(String),
+
+    #[error("display kernel interpreter does not implement {0:?}")]
+    UnimplementedInstruction(Box<Instruction>),
+
+    #[error("unknown callee {0}")]
+    UnknownCallee(String),
+
+    #[error("call {callee} expected {expected} args, got {actual}")]
+    CallArity {
+        callee: String,
+        expected: usize,
+        actual: usize,
+    },
+
+    #[error("call {callee} arg type {actual} does not match {expected}")]
+    CallArgType {
+        callee: String,
+        actual: TensorType,
+        expected: TensorType,
+    },
+
+    #[error("while loop arity mismatch")]
+    WhileArityMismatch,
+
+    #[error("while condition returned no value")]
+    WhileConditionEmpty,
+
+    #[error("while body arity mismatch")]
+    WhileBodyArityMismatch,
+
+    #[error("case has no branches")]
+    CaseEmpty,
+
+    #[error("case branch arity mismatch")]
+    CaseArityMismatch,
+
+    #[error("binary operands must already be broadcast to the result shape")]
+    BinaryNotBroadcast,
+
+    #[error("integer bitwise op on float")]
+    BitwiseOnFloat,
+
+    #[error("unsupported i1 binary op")]
+    UnsupportedI1Binary,
+
+    #[error("erfinv is not implemented in the display kernel interpreter")]
+    ErfInvNotImplemented,
+
+    #[error("unary {op} is not implemented for {element_type:?}")]
+    UnaryNotImplemented {
+        op: &'static str,
+        element_type: ElementType,
+    },
+
+    #[error("compare operands have different element types")]
+    CompareElementTypes,
+
+    #[error("compare result must be i1")]
+    CompareResultNotI1,
+
+    #[error("select operand element type does not match the result")]
+    SelectElementType,
+
+    #[error("select operand is smaller than the result")]
+    SelectOperandTooSmall,
+
+    #[error("select predicate is out of range")]
+    SelectPredicateOutOfRange,
+
+    #[error("operand rank exceeds the result")]
+    BroadcastRank,
+
+    #[error("cannot broadcast dimension {dim} onto {dst_dim}")]
+    BroadcastDimension { dim: i64, dst_dim: i64 },
+
+    #[error("operand index is out of range")]
+    OperandIndexOutOfRange,
+
+    #[error("clamp is only implemented for f64")]
+    ClampNotF64,
+
+    #[error("reshape changed the number of bytes")]
+    ReshapeByteSize,
+
+    #[error("concatenate has no operands")]
+    ConcatEmpty,
+
+    #[error("concatenate operand types disagree")]
+    ConcatTypeMismatch,
+
+    #[error("dot_general batch shapes do not match")]
+    DotBatchShape,
+
+    #[error("dot_general contracting size does not match")]
+    DotContractingSize,
+
+    #[error("dot_general batch/contracting dims are not implemented in the interpreter")]
+    DotDimsNotImplemented,
+
+    #[error("multi-dimension reduce is not implemented")]
+    ReduceMultiDim,
+
+    #[error("reduce is only implemented on the last axis")]
+    ReduceNotLastAxis,
+
+    #[error("reduce {op:?} is not implemented for {element_type:?}")]
+    ReduceNotImplemented {
+        op: ReduceOp,
+        element_type: ElementType,
+    },
+
+    #[error("bitcast convert changed the number of bytes")]
+    BitcastByteSize,
+
+    #[error("iota is only implemented for i64, i32, ui32, and f64")]
+    IotaElementType,
+
+    #[error("interior padding is not implemented")]
+    InteriorPadding,
+
+    #[error("splat constant has {actual} elements but the result has {expected}")]
+    SplatTooLarge { actual: usize, expected: usize },
+
+    #[error("dense array is larger than its result type")]
+    DenseArrayTooLarge,
+
+    #[error("external constant type/size mismatch")]
+    ExternalConstantMismatch,
+
+    #[error("unknown value {0:?}")]
+    UnknownValue(ValueId),
+
+    #[error("expected {expected:?}, got {actual:?}")]
+    ExpectedElementType {
+        expected: ElementType,
+        actual: ElementType,
+    },
+
+    #[error("empty predicate")]
+    EmptyPredicate,
+}
+
+impl InterpError {
+    /// True when the JIT may still execute the op and the interpreter should be skipped.
+    pub fn is_unsupported(&self) -> bool {
+        matches!(
+            self,
+            Self::UnsupportedCustomCall(_)
+                | Self::UnimplementedInstruction(_)
+                | Self::ErfInvNotImplemented
+                | Self::UnaryNotImplemented { .. }
+                | Self::DotDimsNotImplemented
+                | Self::ReduceMultiDim
+                | Self::ReduceNotImplemented { .. }
+                | Self::InteriorPadding
+        )
+    }
+}
 
 #[derive(Clone, Debug)]
 struct Tensor {
@@ -27,13 +223,12 @@ impl Tensor {
         }
     }
 
-    fn from_bytes(ty: TensorType, bytes: Vec<u8>) -> Result<Self, String> {
+    fn from_bytes(ty: TensorType, bytes: Vec<u8>) -> Result<Self, InterpError> {
         if bytes.len() != ty.byte_size() {
-            return Err(format!(
-                "tensor is {} bytes, expected {}",
-                bytes.len(),
-                ty.byte_size()
-            ));
+            return Err(InterpError::TensorSize {
+                actual: bytes.len(),
+                expected: ty.byte_size(),
+            });
         }
         Ok(Self { ty, bytes })
     }
@@ -51,23 +246,19 @@ pub fn interpret_main(
     module: &Module,
     inputs: &[&[u8]],
     outputs: &mut [&mut [u8]],
-) -> Result<(), String> {
-    let func = module
-        .main_func()
-        .ok_or_else(|| "compiled module is missing a callable main entrypoint".to_string())?;
+) -> Result<(), InterpError> {
+    let func = module.main_func().ok_or(InterpError::MissingMain)?;
     if inputs.len() != func.params.len() {
-        return Err(format!(
-            "expected {} inputs, got {}",
-            func.params.len(),
-            inputs.len()
-        ));
+        return Err(InterpError::InputCount {
+            expected: func.params.len(),
+            actual: inputs.len(),
+        });
     }
     if outputs.len() != func.result_types.len() {
-        return Err(format!(
-            "expected {} outputs, got {}",
-            func.result_types.len(),
-            outputs.len()
-        ));
+        return Err(InterpError::OutputCount {
+            expected: func.result_types.len(),
+            actual: outputs.len(),
+        });
     }
     let mut env: HashMap<ValueId, Tensor> = HashMap::new();
     for ((id, ty), buf) in func.params.iter().zip(inputs) {
@@ -75,19 +266,17 @@ pub fn interpret_main(
     }
     let returned = eval_body(module, &func.body, &mut env)?;
     if returned.len() != outputs.len() {
-        return Err(format!(
-            "kernel returned {} values, expected {}",
-            returned.len(),
-            outputs.len()
-        ));
+        return Err(InterpError::ReturnCount {
+            actual: returned.len(),
+            expected: outputs.len(),
+        });
     }
     for (dst, src) in outputs.iter_mut().zip(returned) {
         if dst.len() != src.bytes.len() {
-            return Err(format!(
-                "output is {} bytes, expected {}",
-                dst.len(),
-                src.bytes.len()
-            ));
+            return Err(InterpError::OutputByteSize {
+                actual: dst.len(),
+                expected: src.bytes.len(),
+            });
         }
         dst.copy_from_slice(&src.bytes);
     }
@@ -98,7 +287,7 @@ fn eval_body(
     module: &Module,
     body: &[InstrResult],
     env: &mut HashMap<ValueId, Tensor>,
-) -> Result<Vec<Tensor>, String> {
+) -> Result<Vec<Tensor>, InterpError> {
     let mut last = Vec::new();
     for ir in body {
         match &ir.instr {
@@ -112,11 +301,10 @@ fn eval_body(
             _ => {
                 let produced = eval_instr(module, &ir.instr, &ir.values, env)?;
                 if produced.len() != ir.values.len() {
-                    return Err(format!(
-                        "instruction produced {} values, expected {}",
-                        produced.len(),
-                        ir.values.len()
-                    ));
+                    return Err(InterpError::ProducedCount {
+                        actual: produced.len(),
+                        expected: ir.values.len(),
+                    });
                 }
                 for ((id, ty), tensor) in ir.values.iter().zip(produced) {
                     // Some `chlo.*` and multiline `dot_general` printers
@@ -127,10 +315,11 @@ fn eval_body(
                         && tensor.ty.element_type == ty.element_type
                         && tensor.elem_count() > ty.num_elements();
                     if tensor.ty != *ty && !shape_from_operand {
-                        return Err(format!(
-                            "value {id:?} has type {}, expected {ty}",
-                            tensor.ty
-                        ));
+                        return Err(InterpError::ValueType {
+                            id: *id,
+                            actual: tensor.ty.clone(),
+                            expected: ty.clone(),
+                        });
                     }
                     env.insert(*id, tensor);
                 }
@@ -149,11 +338,11 @@ fn eval_instr(
     instr: &Instruction,
     results: &[(ValueId, TensorType)],
     env: &mut HashMap<ValueId, Tensor>,
-) -> Result<Vec<Tensor>, String> {
+) -> Result<Vec<Tensor>, InterpError> {
     let result_ty = results
         .first()
         .map(|(_, ty)| ty.clone())
-        .ok_or_else(|| "instruction has no result type".to_string())?;
+        .ok_or(InterpError::MissingResultType)?;
     let out = match instr {
         Instruction::Constant { value } => materialize_constant(value, &result_ty)?,
         Instruction::Add { lhs, rhs } => binary(env, *lhs, *rhs, &result_ty, BinOp::Add)?,
@@ -295,12 +484,12 @@ fn eval_instr(
             return eval_case(module, *index, branches, results, env);
         }
         Instruction::CustomCall { call_target, .. } => {
-            return Err(format!("unsupported custom_call target: {call_target}"));
+            return Err(InterpError::UnsupportedCustomCall(call_target.clone()));
         }
         other => {
-            return Err(format!(
-                "display kernel interpreter does not implement {other:?}"
-            ));
+            return Err(InterpError::UnimplementedInstruction(Box::new(
+                other.clone(),
+            )));
         }
     };
     Ok(vec![out])
@@ -311,25 +500,26 @@ fn call(
     callee: &str,
     args: &[ValueId],
     env: &mut HashMap<ValueId, Tensor>,
-) -> Result<Vec<Tensor>, String> {
+) -> Result<Vec<Tensor>, InterpError> {
     let func = module
         .get_func(callee)
-        .ok_or_else(|| format!("unknown callee {callee}"))?;
+        .ok_or_else(|| InterpError::UnknownCallee(callee.to_string()))?;
     if args.len() != func.params.len() {
-        return Err(format!(
-            "call {callee} expected {} args, got {}",
-            func.params.len(),
-            args.len()
-        ));
+        return Err(InterpError::CallArity {
+            callee: callee.to_string(),
+            expected: func.params.len(),
+            actual: args.len(),
+        });
     }
     let mut nested = HashMap::new();
     for ((id, ty), arg) in func.params.iter().zip(args) {
         let tensor = lookup(env, *arg)?;
         if tensor.ty != *ty {
-            return Err(format!(
-                "call {callee} arg type {} does not match {ty}",
-                tensor.ty
-            ));
+            return Err(InterpError::CallArgType {
+                callee: callee.to_string(),
+                actual: tensor.ty.clone(),
+                expected: ty.clone(),
+            });
         }
         nested.insert(*id, tensor);
     }
@@ -344,9 +534,9 @@ fn eval_while(
     iter_arg_ids: &[ValueId],
     results: &[(ValueId, TensorType)],
     env: &mut HashMap<ValueId, Tensor>,
-) -> Result<Vec<Tensor>, String> {
+) -> Result<Vec<Tensor>, InterpError> {
     if init_values.len() != iter_arg_ids.len() || iter_arg_ids.len() != results.len() {
-        return Err("while loop arity mismatch".into());
+        return Err(InterpError::WhileArityMismatch);
     }
     let mut state: Vec<Tensor> = init_values
         .iter()
@@ -358,9 +548,7 @@ fn eval_while(
             cond_env.insert(*id, value.clone());
         }
         let cond = eval_body(module, cond_body, &mut cond_env)?;
-        let pred = cond
-            .first()
-            .ok_or_else(|| "while condition returned no value".to_string())?;
+        let pred = cond.first().ok_or(InterpError::WhileConditionEmpty)?;
         if !is_true(pred)? {
             break;
         }
@@ -370,7 +558,7 @@ fn eval_while(
         }
         state = eval_body(module, loop_body, &mut body_env)?;
         if state.len() != results.len() {
-            return Err("while body arity mismatch".into());
+            return Err(InterpError::WhileBodyArityMismatch);
         }
     }
     Ok(state)
@@ -382,9 +570,9 @@ fn eval_case(
     branches: &[Vec<InstrResult>],
     results: &[(ValueId, TensorType)],
     env: &mut HashMap<ValueId, Tensor>,
-) -> Result<Vec<Tensor>, String> {
+) -> Result<Vec<Tensor>, InterpError> {
     if branches.is_empty() {
-        return Err("case has no branches".into());
+        return Err(InterpError::CaseEmpty);
     }
     let idx = lookup(env, index)?;
     let mut which = scalar_as_i64(&idx).unwrap_or(0);
@@ -394,7 +582,7 @@ fn eval_case(
     let mut nested = env.clone();
     let out = eval_body(module, &branches[which as usize], &mut nested)?;
     if out.len() != results.len() {
-        return Err("case branch arity mismatch".into());
+        return Err(InterpError::CaseArityMismatch);
     }
     Ok(out)
 }
@@ -448,17 +636,50 @@ enum UnOp {
     Not,
 }
 
+impl UnOp {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Neg => "Neg",
+            Self::Abs => "Abs",
+            Self::Sqrt => "Sqrt",
+            Self::Rsqrt => "Rsqrt",
+            Self::Floor => "Floor",
+            Self::Ceil => "Ceil",
+            Self::RoundNearestEven => "RoundNearestEven",
+            Self::Sign => "Sign",
+            Self::Sin => "Sin",
+            Self::Cos => "Cos",
+            Self::Tan => "Tan",
+            Self::Tanh => "Tanh",
+            Self::Sinh => "Sinh",
+            Self::Cosh => "Cosh",
+            Self::Asin => "Asin",
+            Self::Acos => "Acos",
+            Self::Atan => "Atan",
+            Self::Exp => "Exp",
+            Self::Log => "Log",
+            Self::Log1p => "Log1p",
+            Self::Expm1 => "Expm1",
+            Self::Cbrt => "Cbrt",
+            Self::ErfInv => "ErfInv",
+            Self::Erfc => "Erfc",
+            Self::IsFinite => "IsFinite",
+            Self::Not => "Not",
+        }
+    }
+}
+
 fn binary(
     env: &HashMap<ValueId, Tensor>,
     lhs: ValueId,
     rhs: ValueId,
     result_ty: &TensorType,
     op: BinOp,
-) -> Result<Tensor, String> {
+) -> Result<Tensor, InterpError> {
     let a = lookup_ref(env, lhs)?;
     let b = lookup_ref(env, rhs)?;
     if a.elem_count() != result_ty.num_elements() || b.elem_count() != result_ty.num_elements() {
-        return Err("binary operands must already be broadcast to the result shape".into());
+        return Err(InterpError::BinaryNotBroadcast);
     }
     let mut out = Tensor::alloc(result_ty.clone());
     match result_ty.element_type {
@@ -467,7 +688,7 @@ fn binary(
                 op,
                 BinOp::Xor | BinOp::Or | BinOp::And | BinOp::Shl | BinOp::ShrL | BinOp::ShrA
             ) {
-                return Err("integer bitwise op on float".into());
+                return Err(InterpError::BitwiseOnFloat);
             }
             if result_ty.element_type == ElementType::F64 {
                 zip_f64(&a.bytes, &b.bytes, &mut out.bytes, |x, y| match op {
@@ -653,7 +874,7 @@ fn binary(
                     BinOp::Xor => x ^ y,
                     BinOp::Max => x || y,
                     BinOp::Min => x && y,
-                    _ => return Err("unsupported i1 binary op".into()),
+                    _ => return Err(InterpError::UnsupportedI1Binary),
                 });
             }
         }
@@ -666,7 +887,7 @@ fn unary(
     operand: ValueId,
     result_ty: &TensorType,
     op: UnOp,
-) -> Result<Tensor, String> {
+) -> Result<Tensor, InterpError> {
     let src = lookup_ref(env, operand)?;
     // `chlo.*` text sometimes annotates the op as `tensor<f64> -> tensor<f64>`
     // while the operand (and the function result) is a vector. The JIT follows
@@ -704,13 +925,13 @@ fn unary(
         }
         (_, ElementType::F64, ElementType::F64) => {
             if matches!(op, UnOp::ErfInv) {
-                return Err("erfinv is not implemented in the display kernel interpreter".into());
+                return Err(InterpError::ErfInvNotImplemented);
             }
             zip_unary_f64(&src.bytes, &mut out.bytes, |a| float_unary(op, a));
         }
         (_, ElementType::F32, ElementType::F32) => {
             if matches!(op, UnOp::ErfInv) {
-                return Err("erfinv is not implemented in the display kernel interpreter".into());
+                return Err(InterpError::ErfInvNotImplemented);
             }
             zip_unary_f32(&src.bytes, &mut out.bytes, |a| {
                 float_unary(op, a as f64) as f32
@@ -729,10 +950,10 @@ fn unary(
             zip_unary_i32(&src.bytes, &mut out.bytes, |x| x.wrapping_abs());
         }
         _ => {
-            return Err(format!(
-                "unary {op:?} is not implemented for {:?}",
-                result_ty.element_type
-            ));
+            return Err(InterpError::UnaryNotImplemented {
+                op: op.label(),
+                element_type: result_ty.element_type,
+            });
         }
     }
     Ok(out)
@@ -780,21 +1001,21 @@ fn compare(
     result_ty: &TensorType,
     direction: CompareDirection,
     compare_type: CompareType,
-) -> Result<Tensor, String> {
+) -> Result<Tensor, InterpError> {
     let a = lookup_ref(env, lhs)?;
     let b = lookup_ref(env, rhs)?;
     if a.ty.element_type != b.ty.element_type {
-        return Err("compare operands have different element types".into());
+        return Err(InterpError::CompareElementTypes);
     }
     if result_ty.element_type != ElementType::I1 {
-        return Err("compare result must be i1".into());
+        return Err(InterpError::CompareResultNotI1);
     }
     let a_map = broadcast_map(&result_ty.shape, &a.ty.shape)?;
     let b_map = broadcast_map(&result_ty.shape, &b.ty.shape)?;
     let mut out = Tensor::alloc(result_ty.clone());
     let n = result_ty.num_elements();
     if out.bytes.len() != n {
-        return Err("compare result must be i1".into());
+        return Err(InterpError::CompareResultNotI1);
     }
     match a.ty.element_type {
         ElementType::F64 | ElementType::F32 => {
@@ -828,12 +1049,12 @@ fn select(
     on_true: ValueId,
     on_false: ValueId,
     result_ty: &TensorType,
-) -> Result<Tensor, String> {
+) -> Result<Tensor, InterpError> {
     let pred = lookup_ref(env, cond)?;
     let t = lookup_ref(env, on_true)?;
     let f = lookup_ref(env, on_false)?;
     if t.ty.element_type != result_ty.element_type || f.ty.element_type != result_ty.element_type {
-        return Err("select operand element type does not match the result".into());
+        return Err(InterpError::SelectElementType);
     }
     let pred_map = broadcast_map(&result_ty.shape, &pred.ty.shape)?;
     let true_map = broadcast_map(&result_ty.shape, &t.ty.shape)?;
@@ -850,18 +1071,18 @@ fn select(
         let dst_off = i * elem;
         let end = src_off + elem;
         if end > src.bytes.len() {
-            return Err("select operand is smaller than the result".into());
+            return Err(InterpError::SelectOperandTooSmall);
         }
         out.bytes[dst_off..dst_off + elem].copy_from_slice(&src.bytes[src_off..end]);
     }
     Ok(out)
 }
 
-fn predicate_true(pred: &Tensor, index: usize) -> Result<bool, String> {
+fn predicate_true(pred: &Tensor, index: usize) -> Result<bool, InterpError> {
     let elem = pred.elem_size();
     let off = index * elem;
     if off + elem > pred.bytes.len() {
-        return Err("select predicate is out of range".into());
+        return Err(InterpError::SelectPredicateOutOfRange);
     }
     Ok(pred.bytes[off..off + elem].iter().any(|byte| *byte != 0))
 }
@@ -875,15 +1096,15 @@ struct BroadcastMap {
     dst_shape: Vec<i64>,
 }
 
-fn broadcast_map(dst_shape: &[i64], src_shape: &[i64]) -> Result<BroadcastMap, String> {
+fn broadcast_map(dst_shape: &[i64], src_shape: &[i64]) -> Result<BroadcastMap, InterpError> {
     if src_shape.len() > dst_shape.len() {
-        return Err("operand rank exceeds the result".into());
+        return Err(InterpError::BroadcastRank);
     }
     let offset = dst_shape.len() - src_shape.len();
     for (i, &dim) in src_shape.iter().enumerate() {
         let dst_dim = dst_shape[offset + i];
         if dim != dst_dim && dim != 1 {
-            return Err(format!("cannot broadcast dimension {dim} onto {dst_dim}"));
+            return Err(InterpError::BroadcastDimension { dim, dst_dim });
         }
     }
     Ok(BroadcastMap {
@@ -905,17 +1126,17 @@ fn shape_strides(shape: &[i64]) -> Vec<usize> {
     out
 }
 
-fn mapped_index(tensor: &Tensor, map: &BroadcastMap, flat: usize) -> Result<usize, String> {
+fn mapped_index(tensor: &Tensor, map: &BroadcastMap, flat: usize) -> Result<usize, InterpError> {
     let index = map.index(flat);
     let size = tensor.elem_size();
     let off = index
         .checked_mul(size)
-        .ok_or_else(|| "operand index is out of range".to_string())?;
+        .ok_or(InterpError::OperandIndexOutOfRange)?;
     let end = off
         .checked_add(size)
-        .ok_or_else(|| "operand index is out of range".to_string())?;
+        .ok_or(InterpError::OperandIndexOutOfRange)?;
     if end > tensor.bytes.len() {
-        return Err("operand index is out of range".into());
+        return Err(InterpError::OperandIndexOutOfRange);
     }
     Ok(index)
 }
@@ -949,7 +1170,7 @@ fn clamp(
     min: ValueId,
     max: ValueId,
     result_ty: &TensorType,
-) -> Result<Tensor, String> {
+) -> Result<Tensor, InterpError> {
     let src = lookup_ref(env, operand)?;
     let lo = lookup_ref(env, min)?;
     let hi = lookup_ref(env, max)?;
@@ -958,7 +1179,7 @@ fn clamp(
         || lo.ty.element_type != ElementType::F64
         || hi.ty.element_type != ElementType::F64
     {
-        return Err("clamp is only implemented for f64".into());
+        return Err(InterpError::ClampNotF64);
     }
     let src_map = broadcast_map(&result_ty.shape, &src.ty.shape)?;
     let lo_map = broadcast_map(&result_ty.shape, &lo.ty.shape)?;
@@ -982,10 +1203,10 @@ fn reshape(
     env: &HashMap<ValueId, Tensor>,
     operand: ValueId,
     result_ty: &TensorType,
-) -> Result<Tensor, String> {
+) -> Result<Tensor, InterpError> {
     let src = lookup(env, operand)?;
     if src.bytes.len() != result_ty.byte_size() {
-        return Err("reshape changed the number of bytes".into());
+        return Err(InterpError::ReshapeByteSize);
     }
     Ok(Tensor {
         ty: result_ty.clone(),
@@ -998,7 +1219,7 @@ fn broadcast(
     operand: ValueId,
     broadcast_dims: &[i64],
     result_ty: &TensorType,
-) -> Result<Tensor, String> {
+) -> Result<Tensor, InterpError> {
     let src = lookup_ref(env, operand)?;
     let mut out = Tensor::alloc(result_ty.clone());
     let dst_shape = result_ty.shape.clone();
@@ -1024,7 +1245,7 @@ fn slice(
     starts: &[i64],
     limits: &[i64],
     result_ty: &TensorType,
-) -> Result<Tensor, String> {
+) -> Result<Tensor, InterpError> {
     let src = lookup_ref(env, operand)?;
     let mut out = Tensor::alloc(result_ty.clone());
     let shape = src.ty.shape.clone();
@@ -1047,9 +1268,9 @@ fn concatenate(
     operands: &[ValueId],
     dimension: i64,
     result_ty: &TensorType,
-) -> Result<Tensor, String> {
+) -> Result<Tensor, InterpError> {
     if operands.is_empty() {
-        return Err("concatenate has no operands".into());
+        return Err(InterpError::ConcatEmpty);
     }
     let mut acc = lookup(env, operands[0])?;
     for id in &operands[1..] {
@@ -1075,9 +1296,9 @@ fn concatenate(
     Ok(acc)
 }
 
-fn concat_ty(a: &TensorType, b: &TensorType, dim: i64) -> Result<TensorType, String> {
+fn concat_ty(a: &TensorType, b: &TensorType, dim: i64) -> Result<TensorType, InterpError> {
     if a.rank() != b.rank() || a.element_type != b.element_type {
-        return Err("concatenate operand types disagree".into());
+        return Err(InterpError::ConcatTypeMismatch);
     }
     let d = dim as usize;
     let mut shape = a.shape.clone();
@@ -1094,7 +1315,7 @@ fn dot_general(
     rhs: ValueId,
     dims: &crate::ir::DotDims,
     result_ty: &TensorType,
-) -> Result<Tensor, String> {
+) -> Result<Tensor, InterpError> {
     let a = lookup_ref(env, lhs)?;
     let b = lookup_ref(env, rhs)?;
     expect_ty(a, ElementType::F64)?;
@@ -1127,13 +1348,13 @@ fn dot_values(
     r_ty: &TensorType,
     r: &[u8],
     dims: &crate::ir::DotDims,
-) -> Result<Vec<f64>, String> {
+) -> Result<Vec<f64>, InterpError> {
     let at = |bytes: &[u8], i: usize| read_f64(bytes, ElementType::F64, i);
     if dims.lhs_batch == [0] && dims.rhs_batch == [0] && l_ty.rank() == 2 && r_ty.rank() == 2 {
         let batch = l_ty.shape[0] as usize;
         let k = l_ty.shape[1] as usize;
         if r_ty.shape[0] as usize != batch || r_ty.shape[1] as usize != k {
-            return Err("dot_general batch shapes do not match".into());
+            return Err(InterpError::DotBatchShape);
         }
         let mut out = Vec::with_capacity(batch);
         for b in 0..batch {
@@ -1254,7 +1475,7 @@ fn dot_values(
         let k = l_ty.shape[1] as usize;
         let n_cols = r_ty.shape[1] as usize;
         if r_ty.shape[0] as usize != k {
-            return Err("dot_general contracting size does not match".into());
+            return Err(InterpError::DotContractingSize);
         }
         let mut out = vec![0.0; m * n_cols];
         for row in 0..m {
@@ -1268,7 +1489,7 @@ fn dot_values(
         }
         return Ok(out);
     }
-    Err("dot_general batch/contracting dims are not implemented in the interpreter".into())
+    Err(InterpError::DotDimsNotImplemented)
 }
 
 fn reduce(
@@ -1278,15 +1499,15 @@ fn reduce(
     op: ReduceOp,
     dimensions: &[i64],
     result_ty: &TensorType,
-) -> Result<Tensor, String> {
+) -> Result<Tensor, InterpError> {
     let src = lookup_ref(env, operand)?;
     let init_tensor = lookup_ref(env, init)?;
     if dimensions.len() != 1 {
-        return Err("multi-dimension reduce is not implemented".into());
+        return Err(InterpError::ReduceMultiDim);
     }
     let dim = dimensions[0] as usize;
     if dim + 1 != src.ty.rank() {
-        return Err("reduce is only implemented on the last axis".into());
+        return Err(InterpError::ReduceNotLastAxis);
     }
     let inner = src.ty.shape[dim] as usize;
     let outer = src.elem_count() / inner.max(1);
@@ -1342,10 +1563,10 @@ fn reduce(
                 i64::from(acc != 0 || v != 0)
             }))
         }
-        _ => Err(format!(
-            "reduce {op:?} is not implemented for {:?}",
-            src.ty.element_type
-        )),
+        _ => Err(InterpError::ReduceNotImplemented {
+            op,
+            element_type: src.ty.element_type,
+        }),
     }
 }
 
@@ -1375,7 +1596,7 @@ fn convert(
     env: &HashMap<ValueId, Tensor>,
     operand: ValueId,
     result_ty: &TensorType,
-) -> Result<Tensor, String> {
+) -> Result<Tensor, InterpError> {
     let src = lookup_ref(env, operand)?;
     let mut out = Tensor::alloc(result_ty.clone());
     let n = result_ty.num_elements();
@@ -1390,10 +1611,10 @@ fn bitcast(
     env: &HashMap<ValueId, Tensor>,
     operand: ValueId,
     result_ty: &TensorType,
-) -> Result<Tensor, String> {
+) -> Result<Tensor, InterpError> {
     let src = lookup(env, operand)?;
     if src.bytes.len() != result_ty.byte_size() {
-        return Err("bitcast convert changed the number of bytes".into());
+        return Err(InterpError::BitcastByteSize);
     }
     Ok(Tensor {
         ty: result_ty.clone(),
@@ -1401,7 +1622,7 @@ fn bitcast(
     })
 }
 
-fn iota(dimension: i64, result_ty: &TensorType) -> Result<Tensor, String> {
+fn iota(dimension: i64, result_ty: &TensorType) -> Result<Tensor, InterpError> {
     let mut out = Tensor::alloc(result_ty.clone());
     match result_ty.element_type {
         ElementType::I64 => tensor_rt::tensor_iota_nd_i64(
@@ -1431,7 +1652,7 @@ fn iota(dimension: i64, result_ty: &TensorType) -> Result<Tensor, String> {
                 write_int(&mut out.bytes, result_ty.element_type, i, coord);
             }
         }
-        _ => return Err("iota is only implemented for i64, i32, ui32, and f64".into()),
+        _ => return Err(InterpError::IotaElementType),
     }
     Ok(out)
 }
@@ -1441,7 +1662,7 @@ fn transpose(
     operand: ValueId,
     permutation: &[i64],
     result_ty: &TensorType,
-) -> Result<Tensor, String> {
+) -> Result<Tensor, InterpError> {
     let src = lookup_ref(env, operand)?;
     let mut out = Tensor::alloc(result_ty.clone());
     tensor_rt::tensor_transpose_nd_generic(
@@ -1461,7 +1682,7 @@ fn reverse(
     operand: ValueId,
     dimensions: &[i64],
     result_ty: &TensorType,
-) -> Result<Tensor, String> {
+) -> Result<Tensor, InterpError> {
     let src = lookup_ref(env, operand)?;
     expect_ty(src, ElementType::F64)?;
     let mut out = Tensor::alloc(result_ty.clone());
@@ -1484,9 +1705,9 @@ fn pad(
     low: &[i64],
     interior: &[i64],
     result_ty: &TensorType,
-) -> Result<Tensor, String> {
+) -> Result<Tensor, InterpError> {
     if interior.iter().any(|&v| v != 0) {
-        return Err("interior padding is not implemented".into());
+        return Err(InterpError::InteriorPadding);
     }
     let src = lookup_ref(env, operand)?;
     expect_ty(src, ElementType::F64)?;
@@ -1513,7 +1734,7 @@ fn dynamic_slice(
     start_indices: &[ValueId],
     slice_sizes: &[i64],
     result_ty: &TensorType,
-) -> Result<Tensor, String> {
+) -> Result<Tensor, InterpError> {
     let src = lookup_ref(env, operand)?;
     let mut starts = Vec::with_capacity(start_indices.len());
     for id in start_indices {
@@ -1540,7 +1761,7 @@ fn dynamic_update_slice(
     update: ValueId,
     start_indices: &[ValueId],
     result_ty: &TensorType,
-) -> Result<Tensor, String> {
+) -> Result<Tensor, InterpError> {
     let src = lookup_ref(env, operand)?;
     let upd = lookup_ref(env, update)?;
     let mut starts = Vec::with_capacity(start_indices.len());
@@ -1570,7 +1791,7 @@ fn gather(
     dims: &crate::ir::GatherDims,
     slice_sizes: &[i64],
     result_ty: &TensorType,
-) -> Result<Tensor, String> {
+) -> Result<Tensor, InterpError> {
     let src = lookup_ref(env, operand)?;
     let idx = lookup_ref(env, indices)?;
     let src_rank = src.ty.rank();
@@ -1656,7 +1877,7 @@ fn gather(
     Ok(out)
 }
 
-fn materialize_constant(value: &ConstantValue, ty: &TensorType) -> Result<Tensor, String> {
+fn materialize_constant(value: &ConstantValue, ty: &TensorType) -> Result<Tensor, InterpError> {
     let mut out = Tensor::alloc(ty.clone());
     match value {
         ConstantValue::DenseScalar(scalar) => {
@@ -1665,10 +1886,10 @@ fn materialize_constant(value: &ConstantValue, ty: &TensorType) -> Result<Tensor
         ConstantValue::DenseSplat(scalar, splat_ty) => {
             let n = ty.num_elements();
             if splat_ty.num_elements() > n {
-                return Err(format!(
-                    "splat constant has {} elements but the result has {n}",
-                    splat_ty.num_elements()
-                ));
+                return Err(InterpError::SplatTooLarge {
+                    actual: splat_ty.num_elements(),
+                    expected: n,
+                });
             }
             for i in 0..n {
                 write_scalar(&mut out.bytes, ty.element_type, i, scalar)?;
@@ -1676,7 +1897,7 @@ fn materialize_constant(value: &ConstantValue, ty: &TensorType) -> Result<Tensor
         }
         ConstantValue::DenseArray(values) => {
             if values.len() > ty.num_elements() {
-                return Err("dense array is larger than its result type".into());
+                return Err(InterpError::DenseArrayTooLarge);
             }
             for (i, scalar) in values.iter().enumerate() {
                 write_scalar(&mut out.bytes, ty.element_type, i, scalar)?;
@@ -1688,7 +1909,7 @@ fn materialize_constant(value: &ConstantValue, ty: &TensorType) -> Result<Tensor
             data,
         } => {
             if *elem_type != ty.element_type || *byte_len != out.bytes.len() {
-                return Err("external constant type/size mismatch".into());
+                return Err(InterpError::ExternalConstantMismatch);
             }
             out.bytes.copy_from_slice(data.as_bytes());
         }
@@ -1696,27 +1917,28 @@ fn materialize_constant(value: &ConstantValue, ty: &TensorType) -> Result<Tensor
     Ok(out)
 }
 
-fn lookup(env: &HashMap<ValueId, Tensor>, id: ValueId) -> Result<Tensor, String> {
-    env.get(&id)
-        .cloned()
-        .ok_or_else(|| format!("unknown value {id:?}"))
+fn lookup(env: &HashMap<ValueId, Tensor>, id: ValueId) -> Result<Tensor, InterpError> {
+    env.get(&id).cloned().ok_or(InterpError::UnknownValue(id))
 }
 
-fn lookup_ref(env: &HashMap<ValueId, Tensor>, id: ValueId) -> Result<&Tensor, String> {
-    env.get(&id).ok_or_else(|| format!("unknown value {id:?}"))
+fn lookup_ref(env: &HashMap<ValueId, Tensor>, id: ValueId) -> Result<&Tensor, InterpError> {
+    env.get(&id).ok_or(InterpError::UnknownValue(id))
 }
 
-fn expect_ty(tensor: &Tensor, ty: ElementType) -> Result<(), String> {
+fn expect_ty(tensor: &Tensor, ty: ElementType) -> Result<(), InterpError> {
     if tensor.ty.element_type == ty {
         Ok(())
     } else {
-        Err(format!("expected {ty:?}, got {:?}", tensor.ty.element_type))
+        Err(InterpError::ExpectedElementType {
+            expected: ty,
+            actual: tensor.ty.element_type,
+        })
     }
 }
 
-fn is_true(tensor: &Tensor) -> Result<bool, String> {
+fn is_true(tensor: &Tensor) -> Result<bool, InterpError> {
     if tensor.bytes.is_empty() {
-        return Err("empty predicate".into());
+        return Err(InterpError::EmptyPredicate);
     }
     Ok(match tensor.ty.element_type {
         ElementType::I1 => tensor.bytes[0] != 0,
@@ -1725,7 +1947,7 @@ fn is_true(tensor: &Tensor) -> Result<bool, String> {
     })
 }
 
-fn scalar_as_i64(tensor: &Tensor) -> Result<i64, String> {
+fn scalar_as_i64(tensor: &Tensor) -> Result<i64, InterpError> {
     Ok(read_int(&tensor.bytes, tensor.ty.element_type, 0))
 }
 
@@ -1766,7 +1988,7 @@ fn write_scalar(
     ty: ElementType,
     index: usize,
     scalar: &ScalarValue,
-) -> Result<(), String> {
+) -> Result<(), InterpError> {
     write_f64(bytes, ty, index, scalar.as_f64());
     if matches!(ty, ElementType::I1) {
         bytes[index] = u8::from(scalar.as_i64() != 0);
@@ -2035,7 +2257,7 @@ mod tests {
             &ty(&[4], ElementType::F64),
         )
         .unwrap_err();
-        assert!(err.contains("splat"));
+        assert!(matches!(err, InterpError::SplatTooLarge { .. }));
     }
 
     #[test]
@@ -2102,7 +2324,7 @@ mod tests {
             &ty(&[2], ElementType::F64),
         )
         .unwrap_err();
-        assert!(err.contains("out of range"));
+        assert!(matches!(err, InterpError::OperandIndexOutOfRange));
     }
 
     #[test]
@@ -2119,7 +2341,7 @@ mod tests {
             &ty(&[3], ElementType::F64),
         )
         .unwrap_err();
-        assert!(err.contains("broadcast"));
+        assert!(matches!(err, InterpError::BroadcastDimension { .. }));
     }
 
     #[test]
@@ -2212,7 +2434,7 @@ mod tests {
             CompareType::Float,
         )
         .unwrap_err();
-        assert!(err.contains("broadcast"));
+        assert!(matches!(err, InterpError::BroadcastDimension { .. }));
     }
 
     #[test]
@@ -2280,5 +2502,126 @@ mod tests {
         )
         .unwrap();
         assert_eq!(read_f64s(&out), vec![6.0, 15.0]);
+    }
+
+    fn dot_dims(lhs: &[i64], rhs: &[i64]) -> DotDims {
+        DotDims {
+            lhs_contracting: lhs.to_vec(),
+            rhs_contracting: rhs.to_vec(),
+            lhs_batch: vec![],
+            rhs_batch: vec![],
+        }
+    }
+
+    #[test]
+    fn vector_dot_rejects_unequal_lengths() {
+        let mut env = HashMap::new();
+        env.insert(ValueId(1), f64s(&[2], &[1.0, 2.0]));
+        env.insert(ValueId(2), f64s(&[3], &[4.0, 5.0, 6.0]));
+        let err = dot_general(
+            &env,
+            ValueId(1),
+            ValueId(2),
+            &dot_dims(&[0], &[0]),
+            &ty(&[], ElementType::F64),
+        )
+        .unwrap_err();
+        assert!(matches!(err, InterpError::DotContractingSize), "{err}");
+    }
+
+    #[test]
+    fn vector_dot_without_contracting_dims_is_not_implemented() {
+        let mut env = HashMap::new();
+        env.insert(ValueId(1), f64s(&[2], &[1.0, 2.0]));
+        env.insert(ValueId(2), f64s(&[2], &[3.0, 4.0]));
+        let err = dot_general(
+            &env,
+            ValueId(1),
+            ValueId(2),
+            &dot_dims(&[], &[]),
+            &ty(&[2, 2], ElementType::F64),
+        )
+        .unwrap_err();
+        assert!(matches!(err, InterpError::DotDimsNotImplemented), "{err}");
+    }
+
+    #[test]
+    fn matrix_vector_contracts_the_named_lhs_dimension() {
+        let mut env = HashMap::new();
+        env.insert(ValueId(1), f64s(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]));
+        env.insert(ValueId(2), f64s(&[2], &[10.0, 20.0]));
+        let out = dot_general(
+            &env,
+            ValueId(1),
+            ValueId(2),
+            &dot_dims(&[0], &[0]),
+            &ty(&[3], ElementType::F64),
+        )
+        .unwrap();
+        assert_eq!(read_f64s(&out), vec![90.0, 120.0, 150.0]);
+    }
+
+    #[test]
+    fn matrix_vector_rejects_mismatched_contract_extent() {
+        let mut env = HashMap::new();
+        env.insert(ValueId(1), f64s(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]));
+        env.insert(ValueId(2), f64s(&[2], &[10.0, 20.0]));
+        let err = dot_general(
+            &env,
+            ValueId(1),
+            ValueId(2),
+            &dot_dims(&[1], &[0]),
+            &ty(&[2], ElementType::F64),
+        )
+        .unwrap_err();
+        assert!(matches!(err, InterpError::DotContractingSize), "{err}");
+    }
+
+    #[test]
+    fn vector_matrix_contracts_the_named_rhs_dimension() {
+        let mut env = HashMap::new();
+        env.insert(ValueId(1), f64s(&[2], &[10.0, 20.0]));
+        env.insert(ValueId(2), f64s(&[2, 3], &[4.0, 5.0, 6.0, 7.0, 8.0, 9.0]));
+        let out = dot_general(
+            &env,
+            ValueId(1),
+            ValueId(2),
+            &dot_dims(&[0], &[0]),
+            &ty(&[3], ElementType::F64),
+        )
+        .unwrap();
+        assert_eq!(read_f64s(&out), vec![180.0, 210.0, 240.0]);
+    }
+
+    #[test]
+    fn vector_matrix_rejects_an_empty_contracting_dim() {
+        let mut env = HashMap::new();
+        env.insert(ValueId(1), f64s(&[2], &[1.0, 2.0]));
+        env.insert(ValueId(2), f64s(&[2, 3], &[4.0, 5.0, 6.0, 7.0, 8.0, 9.0]));
+        let err = dot_general(
+            &env,
+            ValueId(1),
+            ValueId(2),
+            &dot_dims(&[0], &[]),
+            &ty(&[2], ElementType::F64),
+        )
+        .unwrap_err();
+        assert!(matches!(err, InterpError::DotDimsNotImplemented), "{err}");
+    }
+
+    #[test]
+    fn vector_matrix_rejects_mismatched_contract_extent() {
+        let mut env = HashMap::new();
+        env.insert(ValueId(1), f64s(&[4], &[1.0, 2.0, 3.0, 4.0]));
+        env.insert(ValueId(2), f64s(&[2, 3], &[4.0, 5.0, 6.0, 7.0, 8.0, 9.0]));
+        let err = dot_general(
+            &env,
+            ValueId(1),
+            ValueId(2),
+            &dot_dims(&[0], &[1]),
+            &ty(&[2], ElementType::F64),
+        )
+        .unwrap_err();
+        assert!(matches!(err, InterpError::DotContractingSize), "{err}");
     }
 }
