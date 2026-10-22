@@ -1,3 +1,6 @@
+mod common;
+
+use common::read_f64s;
 use cranelift_mlir::parser::parse_module;
 
 #[test]
@@ -81,11 +84,7 @@ fn run_cube_sat_single_tick() {
     unsafe { tick_fn(input_ptrs.as_ptr(), output_ptrs.as_mut_ptr()) };
 
     // Output 0: tensor<2x6xf64> (updated wrench)
-    let wrench_bytes = &output_bufs[0];
-    let wrench: Vec<f64> = wrench_bytes
-        .chunks(8)
-        .map(|c| f64::from_le_bytes(c.try_into().unwrap()))
-        .collect();
+    let wrench = read_f64s(&output_bufs[0]);
     eprintln!("wrench output: {:?}", wrench);
 
     // The gravity force components are in the linear part of the wrench
