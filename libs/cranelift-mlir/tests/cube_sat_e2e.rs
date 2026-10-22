@@ -86,7 +86,7 @@ fn run_cube_sat_single_tick() {
         .chunks(8)
         .map(|c| f64::from_le_bytes(c.try_into().unwrap()))
         .collect();
-    eprintln!("wrench output: {:?}", &wrench);
+    eprintln!("wrench output: {:?}", wrench);
 
     // The gravity force components are in the linear part of the wrench
     // wrench = [torque_x, torque_y, torque_z, force_x, force_y, force_z, ...]

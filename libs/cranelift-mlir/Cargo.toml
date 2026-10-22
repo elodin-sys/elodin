@@ -43,3 +43,6 @@ blake3 = "1.8.5"
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 memmap2 = "0.9.10"
+
+[dev-dependencies]
+bytemuck = "1.21"

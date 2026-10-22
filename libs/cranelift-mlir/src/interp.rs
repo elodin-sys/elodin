@@ -119,7 +119,14 @@ fn eval_body(
                     ));
                 }
                 for ((id, ty), tensor) in ir.values.iter().zip(produced) {
-                    if tensor.ty != *ty {
+                    // Some `chlo.*` and multiline `dot_general` printers
+                    // record a scalar result type while the operand (and the
+                    // function result) carry the real shape. The JIT follows
+                    // the operand, so accept that wider tensor.
+                    let shape_from_operand = ty.is_scalar()
+                        && tensor.ty.element_type == ty.element_type
+                        && tensor.elem_count() > ty.num_elements();
+                    if tensor.ty != *ty && !shape_from_operand {
                         return Err(format!(
                             "value {id:?} has type {}, expected {ty}",
                             tensor.ty
@@ -513,9 +520,27 @@ fn binary(
             BinOp::Xor => x ^ y,
             BinOp::Or => x | y,
             BinOp::And => x & y,
-            BinOp::Shl => x.wrapping_shl((y as u64).min(63) as u32),
-            BinOp::ShrL => ((x as u64).wrapping_shr((y as u64).min(63) as u32)) as i64,
-            BinOp::ShrA => x.wrapping_shr((y as u64).min(63) as u32),
+            BinOp::Shl => {
+                if y >= 64 {
+                    0
+                } else {
+                    x.wrapping_shl((y as u64).min(63) as u32)
+                }
+            }
+            BinOp::ShrL => {
+                if y >= 64 {
+                    0
+                } else {
+                    ((x as u64).wrapping_shr((y as u64).min(63) as u32)) as i64
+                }
+            }
+            BinOp::ShrA => {
+                if y >= 64 {
+                    x >> 63
+                } else {
+                    x.wrapping_shr((y as u64).min(63) as u32)
+                }
+            }
             BinOp::Atan2 | BinOp::Pow => x,
         }),
         ElementType::I32 => zip_i32(&a.bytes, &b.bytes, &mut out.bytes, |x, y| match op {
@@ -541,9 +566,27 @@ fn binary(
             BinOp::Xor => x ^ y,
             BinOp::Or => x | y,
             BinOp::And => x & y,
-            BinOp::Shl => x.wrapping_shl((y as u32).min(31)),
-            BinOp::ShrL => ((x as u32).wrapping_shr((y as u32).min(31))) as i32,
-            BinOp::ShrA => x.wrapping_shr((y as u32).min(31)),
+            BinOp::Shl => {
+                if y >= 32 {
+                    0
+                } else {
+                    x.wrapping_shl((y as u32).min(31))
+                }
+            }
+            BinOp::ShrL => {
+                if y >= 32 {
+                    0
+                } else {
+                    ((x as u32).wrapping_shr((y as u32).min(31))) as i32
+                }
+            }
+            BinOp::ShrA => {
+                if y >= 32 {
+                    x >> 31
+                } else {
+                    x.wrapping_shr((y as u32).min(31))
+                }
+            }
             BinOp::Atan2 | BinOp::Pow => x,
         }),
         ElementType::UI64 => zip_u64(&a.bytes, &b.bytes, &mut out.bytes, |x, y| match op {
@@ -557,8 +600,20 @@ fn binary(
             BinOp::Xor => x ^ y,
             BinOp::Or => x | y,
             BinOp::And => x & y,
-            BinOp::Shl => x.wrapping_shl(y.min(63) as u32),
-            BinOp::ShrL | BinOp::ShrA => x.wrapping_shr(y.min(63) as u32),
+            BinOp::Shl => {
+                if y >= 64 {
+                    0
+                } else {
+                    x.wrapping_shl(y as u32)
+                }
+            }
+            BinOp::ShrL | BinOp::ShrA => {
+                if y >= 64 {
+                    0
+                } else {
+                    x.wrapping_shr(y as u32)
+                }
+            }
             BinOp::Atan2 | BinOp::Pow => x,
         }),
         ElementType::UI32 => zip_u32(&a.bytes, &b.bytes, &mut out.bytes, |x, y| match op {
@@ -572,8 +627,20 @@ fn binary(
             BinOp::Xor => x ^ y,
             BinOp::Or => x | y,
             BinOp::And => x & y,
-            BinOp::Shl => x.wrapping_shl(y.min(31)),
-            BinOp::ShrL | BinOp::ShrA => x.wrapping_shr(y.min(31)),
+            BinOp::Shl => {
+                if y >= 32 {
+                    0
+                } else {
+                    x.wrapping_shl(y)
+                }
+            }
+            BinOp::ShrL | BinOp::ShrA => {
+                if y >= 32 {
+                    0
+                } else {
+                    x.wrapping_shr(y)
+                }
+            }
             BinOp::Atan2 | BinOp::Pow => x,
         }),
         ElementType::I1 => {
@@ -601,8 +668,19 @@ fn unary(
     op: UnOp,
 ) -> Result<Tensor, String> {
     let src = lookup_ref(env, operand)?;
-    let mut out = Tensor::alloc(result_ty.clone());
-    match (op, result_ty.element_type, src.ty.element_type) {
+    // `chlo.*` text sometimes annotates the op as `tensor<f64> -> tensor<f64>`
+    // while the operand (and the function result) is a vector. The JIT follows
+    // the operand shape; do the same when the declared result is a scalar.
+    let eval_ty = if result_ty.is_scalar()
+        && !src.ty.is_scalar()
+        && src.ty.element_type == result_ty.element_type
+    {
+        src.ty.clone()
+    } else {
+        result_ty.clone()
+    };
+    let mut out = Tensor::alloc(eval_ty.clone());
+    match (op, eval_ty.element_type, src.ty.element_type) {
         (UnOp::IsFinite, ElementType::I1, ElementType::F64) => {
             for i in 0..out.bytes.len() {
                 out.bytes[i] = u8::from(read_f64(&src.bytes, ElementType::F64, i).is_finite());
@@ -1021,57 +1099,123 @@ fn dot_general(
     let b = lookup_ref(env, rhs)?;
     expect_ty(a, ElementType::F64)?;
     expect_ty(b, ElementType::F64)?;
-    if dims.lhs_batch.is_empty()
+    let vals = dot_values(&a.ty, &a.bytes, &b.ty, &b.bytes, dims)?;
+    // A multiline `stablehlo.dot_general` can leave the result type as a
+    // scalar when the real shape is on the following line. Keep the declared
+    // type when it already has the right number of elements.
+    let out_ty =
+        if result_ty.element_type == ElementType::F64 && result_ty.num_elements() == vals.len() {
+            result_ty.clone()
+        } else if vals.len() == 1 {
+            TensorType::scalar(ElementType::F64)
+        } else {
+            TensorType {
+                shape: vec![vals.len() as i64],
+                element_type: ElementType::F64,
+            }
+        };
+    let mut out = Tensor::alloc(out_ty);
+    for (i, v) in vals.iter().enumerate() {
+        write_f64(&mut out.bytes, ElementType::F64, i, *v);
+    }
+    Ok(out)
+}
+
+fn dot_values(
+    l_ty: &TensorType,
+    l: &[u8],
+    r_ty: &TensorType,
+    r: &[u8],
+    dims: &crate::ir::DotDims,
+) -> Result<Vec<f64>, String> {
+    let at = |bytes: &[u8], i: usize| read_f64(bytes, ElementType::F64, i);
+    if dims.lhs_batch == [0] && dims.rhs_batch == [0] && l_ty.rank() == 2 && r_ty.rank() == 2 {
+        let batch = l_ty.shape[0] as usize;
+        let k = l_ty.shape[1] as usize;
+        if r_ty.shape[0] as usize != batch || r_ty.shape[1] as usize != k {
+            return Err("dot_general batch shapes do not match".into());
+        }
+        let mut out = Vec::with_capacity(batch);
+        for b in 0..batch {
+            let mut acc = 0.0;
+            for i in 0..k {
+                acc += at(l, b * k + i) * at(r, b * k + i);
+            }
+            out.push(acc);
+        }
+        return Ok(out);
+    }
+    if l_ty.is_scalar() && r_ty.is_scalar() {
+        return Ok(vec![at(l, 0) * at(r, 0)]);
+    }
+    if l_ty.rank() == 1 && r_ty.rank() == 1 {
+        let n = l_ty.num_elements().min(r_ty.num_elements());
+        let mut acc = 0.0;
+        for i in 0..n {
+            acc += at(l, i) * at(r, i);
+        }
+        return Ok(vec![acc]);
+    }
+    if l_ty.rank() == 1 && r_ty.rank() == 2 {
+        let rhs_contract_dim = dims.rhs_contracting.first().copied().unwrap_or(1) as usize;
+        let k = l_ty.shape[0] as usize;
+        let rows = r_ty.shape[0] as usize;
+        let cols = r_ty.shape[1] as usize;
+        let out_size = if rhs_contract_dim == 1 { rows } else { cols };
+        let mut out = Vec::with_capacity(out_size);
+        for i in 0..out_size {
+            let mut acc = 0.0;
+            for j in 0..k {
+                let rv = if rhs_contract_dim == 1 {
+                    at(r, i * cols + j)
+                } else {
+                    at(r, j * cols + i)
+                };
+                acc += at(l, j) * rv;
+            }
+            out.push(acc);
+        }
+        return Ok(out);
+    }
+    if l_ty.rank() == 2 && r_ty.rank() == 1 {
+        let rows = l_ty.shape[0] as usize;
+        let cols = l_ty.shape[1] as usize;
+        let mut out = Vec::with_capacity(rows);
+        for row in 0..rows {
+            let mut acc = 0.0;
+            for col in 0..cols {
+                acc += at(l, row * cols + col) * at(r, col);
+            }
+            out.push(acc);
+        }
+        return Ok(out);
+    }
+    if l_ty.rank() == 2
+        && r_ty.rank() == 2
+        && dims.lhs_batch.is_empty()
         && dims.rhs_batch.is_empty()
-        && dims.lhs_contracting == [a.ty.rank() as i64 - 1]
-        && dims.rhs_contracting == [0]
-        && a.ty.rank() <= 2
-        && b.ty.rank() <= 2
+        && (dims.lhs_contracting.is_empty() || dims.lhs_contracting == [1])
+        && (dims.rhs_contracting.is_empty() || dims.rhs_contracting == [0])
     {
-        let (m, k_lhs) = matmul_mk(&a.ty);
-        let (k_rhs, n) = matmul_kn(&b.ty);
-        if k_lhs != k_rhs {
-            return Err(format!(
-                "dot_general contracting size {k_lhs} does not match {k_rhs}"
-            ));
+        let m = l_ty.shape[0] as usize;
+        let k = l_ty.shape[1] as usize;
+        let n_cols = r_ty.shape[1] as usize;
+        if r_ty.shape[0] as usize != k {
+            return Err("dot_general contracting size does not match".into());
         }
-        if a.elem_count() != m * k_lhs || b.elem_count() != k_rhs * n {
-            return Err("dot_general operand size does not match the matmul shape".into());
+        let mut out = vec![0.0; m * n_cols];
+        for row in 0..m {
+            for col in 0..n_cols {
+                let mut acc = 0.0;
+                for i in 0..k {
+                    acc += at(l, row * k + i) * at(r, i * n_cols + col);
+                }
+                out[row * n_cols + col] = acc;
+            }
         }
-        if result_ty.element_type != ElementType::F64 || result_ty.num_elements() != m * n {
-            return Err("dot_general result shape does not match the matmul".into());
-        }
-        let k = k_lhs;
-        let mut out = Tensor::alloc(result_ty.clone());
-        tensor_rt::tensor_matmul_f64(
-            out.bytes.as_mut_ptr().cast(),
-            a.bytes.as_ptr().cast(),
-            b.bytes.as_ptr().cast(),
-            m,
-            k,
-            n,
-        );
         return Ok(out);
     }
     Err("dot_general batch/contracting dims are not implemented in the interpreter".into())
-}
-
-/// `(rows, contracting)` for a left matmul operand whose contracting dim is last.
-fn matmul_mk(ty: &TensorType) -> (usize, usize) {
-    match ty.rank() {
-        0 => (1, 1),
-        1 => (1, ty.shape[0] as usize),
-        _ => (ty.shape[0] as usize, ty.shape[1] as usize),
-    }
-}
-
-/// `(contracting, cols)` for a right matmul operand whose contracting dim is 0.
-fn matmul_kn(ty: &TensorType) -> (usize, usize) {
-    match ty.rank() {
-        0 => (1, 1),
-        1 => (ty.shape[0] as usize, 1),
-        _ => (ty.shape[0] as usize, ty.shape[1] as usize),
-    }
 }
 
 fn reduce(
@@ -1083,8 +1227,7 @@ fn reduce(
     result_ty: &TensorType,
 ) -> Result<Tensor, String> {
     let src = lookup_ref(env, operand)?;
-    let init = lookup_ref(env, init)?;
-    expect_ty(src, ElementType::F64)?;
+    let init_tensor = lookup_ref(env, init)?;
     if dimensions.len() != 1 {
         return Err("multi-dimension reduce is not implemented".into());
     }
@@ -1094,19 +1237,85 @@ fn reduce(
     }
     let inner = src.ty.shape[dim] as usize;
     let outer = src.elem_count() / inner.max(1);
-    let mut out = Tensor::alloc(result_ty.clone());
-    let src_ptr = src.bytes.as_ptr().cast();
-    let dst_ptr = out.bytes.as_mut_ptr().cast();
-    match op {
-        ReduceOp::Add => tensor_rt::tensor_reduce_sum_f64(dst_ptr, src_ptr, outer, inner),
-        ReduceOp::Maximum => tensor_rt::tensor_reduce_max_f64(dst_ptr, src_ptr, outer, inner),
-        ReduceOp::Minimum => tensor_rt::tensor_reduce_min_f64(dst_ptr, src_ptr, outer, inner),
-        ReduceOp::And | ReduceOp::Or => {
-            let _ = init;
-            return Err("boolean reduce is not implemented".into());
+    match (op, src.ty.element_type) {
+        (ReduceOp::Add, ElementType::F64) => {
+            let mut out = Tensor::alloc(result_ty.clone());
+            tensor_rt::tensor_reduce_sum_f64(
+                out.bytes.as_mut_ptr().cast(),
+                src.bytes.as_ptr().cast(),
+                outer,
+                inner,
+            );
+            Ok(out)
         }
+        (ReduceOp::Maximum, ElementType::F64) => {
+            let mut out = Tensor::alloc(result_ty.clone());
+            tensor_rt::tensor_reduce_max_f64(
+                out.bytes.as_mut_ptr().cast(),
+                src.bytes.as_ptr().cast(),
+                outer,
+                inner,
+            );
+            Ok(out)
+        }
+        (ReduceOp::Minimum, ElementType::F64) => {
+            let mut out = Tensor::alloc(result_ty.clone());
+            tensor_rt::tensor_reduce_min_f64(
+                out.bytes.as_mut_ptr().cast(),
+                src.bytes.as_ptr().cast(),
+                outer,
+                inner,
+            );
+            Ok(out)
+        }
+        (
+            ReduceOp::Add,
+            ElementType::I64 | ElementType::I32 | ElementType::UI64 | ElementType::UI32,
+        ) => {
+            let init = read_int(&init_tensor.bytes, init_tensor.ty.element_type, 0);
+            Ok(reduce_last_axis_int(src, init, result_ty, |acc, v| {
+                acc.wrapping_add(v)
+            }))
+        }
+        (ReduceOp::And, ElementType::I1) => {
+            let init = read_int(&init_tensor.bytes, init_tensor.ty.element_type, 0);
+            Ok(reduce_last_axis_int(src, init, result_ty, |acc, v| {
+                i64::from(acc != 0 && v != 0)
+            }))
+        }
+        (ReduceOp::Or, ElementType::I1) => {
+            let init = read_int(&init_tensor.bytes, init_tensor.ty.element_type, 0);
+            Ok(reduce_last_axis_int(src, init, result_ty, |acc, v| {
+                i64::from(acc != 0 || v != 0)
+            }))
+        }
+        _ => Err(format!(
+            "reduce {op:?} is not implemented for {:?}",
+            src.ty.element_type
+        )),
     }
-    Ok(out)
+}
+
+fn reduce_last_axis_int(
+    src: &Tensor,
+    init: i64,
+    result_ty: &TensorType,
+    op: impl Fn(i64, i64) -> i64,
+) -> Tensor {
+    let inner = src.ty.shape.last().copied().unwrap_or(1).max(1) as usize;
+    let outer = src.elem_count() / inner;
+    let mut out = Tensor::alloc(result_ty.clone());
+    for group in 0..outer {
+        let mut acc = init;
+        for i in 0..inner {
+            acc = op(
+                acc,
+                read_int(&src.bytes, src.ty.element_type, group * inner + i),
+            );
+        }
+        write_int(&mut out.bytes, result_ty.element_type, group, acc);
+    }
+    out
 }
 
 fn convert(
@@ -1156,7 +1365,20 @@ fn iota(dimension: i64, result_ty: &TensorType) -> Result<Tensor, String> {
             result_ty.rank(),
             dimension as usize,
         ),
-        _ => return Err("iota is only implemented for i64 and f64".into()),
+        ElementType::I32 | ElementType::UI32 => {
+            let strides = shape_strides(&result_ty.shape);
+            let dim = dimension as usize;
+            let n = out.elem_count();
+            for i in 0..n {
+                let coord = if result_ty.shape.is_empty() {
+                    0
+                } else {
+                    (i / strides[dim]) as i64 % result_ty.shape[dim]
+                };
+                write_int(&mut out.bytes, result_ty.element_type, i, coord);
+            }
+        }
+        _ => return Err("iota is only implemented for i64, i32, ui32, and f64".into()),
     }
     Ok(out)
 }
@@ -1298,30 +1520,86 @@ fn gather(
 ) -> Result<Tensor, String> {
     let src = lookup_ref(env, operand)?;
     let idx = lookup_ref(env, indices)?;
+    let src_rank = src.ty.rank();
+    let idx_rank = idx.ty.rank();
     let index_vector_dim = dims.index_vector_dim.max(0) as usize;
-    let n_index_dims = if idx.ty.rank() == 0 {
-        1
-    } else if index_vector_dim < idx.ty.rank() {
+    let n_index = if index_vector_dim < idx_rank {
         idx.ty.shape[index_vector_dim] as usize
     } else {
         1
     };
-    let n_batch = idx.elem_count() / n_index_dims.max(1);
+    let batch_idx_dims: Vec<usize> = (0..idx_rank).filter(|&d| d != index_vector_dim).collect();
+    let offset_dims: Vec<usize> = dims.offset_dims.iter().map(|&d| d as usize).collect();
+    let collapsed: Vec<usize> = dims
+        .collapsed_slice_dims
+        .iter()
+        .map(|&d| d as usize)
+        .collect();
+    let slice_dims_kept: Vec<usize> = (0..src_rank).filter(|d| !collapsed.contains(d)).collect();
+    let out_strides = shape_strides(&result_ty.shape);
+    let src_strides = shape_strides(&src.ty.shape);
+    let idx_strides = shape_strides(&idx.ty.shape);
+    let elem = src.elem_size();
     let mut out = Tensor::alloc(result_ty.clone());
-    tensor_rt::tensor_gather_nd_generic(
-        out.bytes.as_mut_ptr(),
-        src.bytes.as_ptr(),
-        src.elem_count(),
-        idx.bytes.as_ptr().cast(),
-        n_batch,
-        n_index_dims,
-        src.ty.shape.as_ptr(),
-        src.ty.rank(),
-        dims.start_index_map.as_ptr(),
-        slice_sizes.as_ptr(),
-        out.elem_count(),
-        src.elem_size(),
-    );
+    let n_out = result_ty.num_elements();
+    let out_rank = result_ty.rank();
+    for flat in 0..n_out {
+        let mut coords = vec![0usize; out_rank];
+        let mut rem = flat;
+        for (d, coord) in coords.iter_mut().enumerate() {
+            *coord = rem / out_strides[d];
+            rem %= out_strides[d];
+        }
+        let mut idx_coords = vec![0usize; idx_rank];
+        let mut batch_i = 0;
+        for (d, &coord) in coords.iter().enumerate() {
+            if offset_dims.contains(&d) {
+                continue;
+            }
+            if batch_i < batch_idx_dims.len() {
+                idx_coords[batch_idx_dims[batch_i]] = coord;
+                batch_i += 1;
+            }
+        }
+        let mut start = vec![0i64; src_rank];
+        for j in 0..n_index {
+            if index_vector_dim < idx_rank {
+                idx_coords[index_vector_dim] = j;
+            }
+            let flat_idx = if idx_rank == 0 {
+                0
+            } else {
+                idx_coords
+                    .iter()
+                    .enumerate()
+                    .map(|(d, &c)| c * idx_strides[d])
+                    .sum()
+            };
+            let raw = read_int(&idx.bytes, idx.ty.element_type, flat_idx);
+            let dim = dims.start_index_map.get(j).copied().unwrap_or(0) as usize;
+            if dim < src_rank {
+                let slice = slice_sizes.get(dim).copied().unwrap_or(1);
+                let max_start = (src.ty.shape[dim] - slice).max(0);
+                start[dim] = raw.clamp(0, max_start);
+            }
+        }
+        let mut op_coord = start;
+        for (k, &op_dim) in slice_dims_kept.iter().enumerate() {
+            let off = offset_dims.get(k).map(|&d| coords[d] as i64).unwrap_or(0);
+            op_coord[op_dim] += off;
+        }
+        let src_flat = if src_rank == 0 {
+            0
+        } else {
+            (0..src_rank)
+                .map(|d| op_coord[d].max(0) as usize * src_strides[d])
+                .sum::<usize>()
+                .min(src.elem_count().saturating_sub(1))
+        };
+        let db = flat * elem;
+        let sb = src_flat * elem;
+        out.bytes[db..db + elem].copy_from_slice(&src.bytes[sb..sb + elem]);
+    }
     Ok(out)
 }
 
@@ -1441,6 +1719,21 @@ fn write_scalar(
         bytes[index] = u8::from(scalar.as_i64() != 0);
     }
     Ok(())
+}
+
+fn write_int(bytes: &mut [u8], ty: ElementType, index: usize, value: i64) {
+    match ty {
+        ElementType::I64 | ElementType::UI64 => {
+            let off = index * 8;
+            bytes[off..off + 8].copy_from_slice(&value.to_le_bytes());
+        }
+        ElementType::I32 | ElementType::UI32 => {
+            let off = index * 4;
+            bytes[off..off + 4].copy_from_slice(&(value as i32).to_le_bytes());
+        }
+        ElementType::I1 => bytes[index] = u8::from(value != 0),
+        ElementType::F64 | ElementType::F32 => write_f64(bytes, ty, index, value as f64),
+    }
 }
 
 fn write_f64(bytes: &mut [u8], ty: ElementType, index: usize, value: f64) {

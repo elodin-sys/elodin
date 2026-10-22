@@ -755,14 +755,24 @@ XLA without any other configuration.
 | `test_threefry*`, `test_sret_large`, `test_closed_call`, `test_uniform_pipeline`, `test_dynamic_ops_3body`, `test_gather_3body`, `test_while_dyn_slice` | Targeted coverage of specific lowering patterns |
 
 Shared helpers live in `tests/common/mod.rs` (`run_mlir`, `run_mlir_mem`, buffer
-and assertion helpers) so new test files plug in without duplication.
+and assertion helpers) so new test files plug in without duplication. Both
+helpers parse once, execute the StableHLO interpreter (`src/interp.rs`) and the
+Cranelift JIT, and assert the outputs match before returning the JIT bytes to
+the golden assertions. Integer results are compared byte-for-byte; `f64` within
+`1e-12 * (1 + max(|a|, |b|))` and `f32` within `1e-6` on the same scale (NaN
+matches NaN). Ops the interpreter does not implement (LAPACK `custom_call`,
+scatter, sort, and the other variants whose error says "does not implement" or
+"not implemented") log `[interp skipped]` and continue as JIT-only golden tests. Set
+`ELODIN_CRANELIFT_INTERP_STRICT=1` to turn those skips into failures. E2E
+binaries that call `compile_module` directly stay JIT-only.
 
 ### Testing philosophy
 
 - **Every supported op** has golden-value tests comparing JIT output against
-  hand-computed expected values.
+  hand-computed expected values, and against the interpreter for ops it
+  implements.
 - **Both ABI paths** are exercised: functions ending in `_mem` route through the
-  pointer-ABI path.
+  pointer-ABI path. The interpreter is checked against both.
 - **E2E tests** parse, compile, and execute each example's full MLIR so parser
   and lowering regressions surface before they reach customer sims.
 - **Regression suite** (`scripts/ci/regress.sh --all`) runs every example
