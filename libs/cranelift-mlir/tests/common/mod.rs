@@ -210,6 +210,10 @@ pub fn u32_buf(vals: &[u32]) -> Vec<u8> {
     vals.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
 
+pub fn u64_buf(vals: &[u64]) -> Vec<u8> {
+    vals.iter().flat_map(|v| v.to_le_bytes()).collect()
+}
+
 pub fn read_f64s(buf: &[u8]) -> Cow<'_, [f64]> {
     // Buffers are little-endian. A native cast is only valid on little-endian
     // hosts, and only when the allocation happens to be f64-aligned.

@@ -1026,17 +1026,28 @@ fn compare(
             }
         }
         ElementType::I64 | ElementType::I32 | ElementType::UI64 | ElementType::UI32 => {
+            let unsigned = compare_type == CompareType::Unsigned
+                || matches!(a.ty.element_type, ElementType::UI64 | ElementType::UI32);
             for i in 0..n {
-                let x = read_int(&a.bytes, a.ty.element_type, mapped_index(a, &a_map, i)?);
-                let y = read_int(&b.bytes, b.ty.element_type, mapped_index(b, &b_map, i)?);
-                out.bytes[i] = u8::from(cmp_i64(x, y, direction));
+                let pred = if unsigned {
+                    let x =
+                        read_int(&a.bytes, a.ty.element_type, mapped_index(a, &a_map, i)?) as u64;
+                    let y =
+                        read_int(&b.bytes, b.ty.element_type, mapped_index(b, &b_map, i)?) as u64;
+                    cmp_ord(x, y, direction)
+                } else {
+                    let x = read_int(&a.bytes, a.ty.element_type, mapped_index(a, &a_map, i)?);
+                    let y = read_int(&b.bytes, b.ty.element_type, mapped_index(b, &b_map, i)?);
+                    cmp_ord(x, y, direction)
+                };
+                out.bytes[i] = u8::from(pred);
             }
         }
         ElementType::I1 => {
             for i in 0..n {
                 let x = i64::from(a.bytes[mapped_index(a, &a_map, i)?] != 0);
                 let y = i64::from(b.bytes[mapped_index(b, &b_map, i)?] != 0);
-                out.bytes[i] = u8::from(cmp_i64(x, y, direction));
+                out.bytes[i] = u8::from(cmp_ord(x, y, direction));
             }
         }
     }
@@ -1592,6 +1603,21 @@ fn reduce_last_axis_int(
     out
 }
 
+fn is_integral(ty: ElementType) -> bool {
+    matches!(
+        ty,
+        ElementType::I1
+            | ElementType::I32
+            | ElementType::I64
+            | ElementType::UI32
+            | ElementType::UI64
+    )
+}
+
+fn is_real(ty: ElementType) -> bool {
+    matches!(ty, ElementType::F64 | ElementType::F32)
+}
+
 fn convert(
     env: &HashMap<ValueId, Tensor>,
     operand: ValueId,
@@ -1600,9 +1626,38 @@ fn convert(
     let src = lookup_ref(env, operand)?;
     let mut out = Tensor::alloc(result_ty.clone());
     let n = result_ty.num_elements();
+    let src_ty = src.ty.element_type;
+    let dst_ty = result_ty.element_type;
     for i in 0..n {
-        let v = read_f64(&src.bytes, src.ty.element_type, i);
-        write_f64(&mut out.bytes, result_ty.element_type, i, v);
+        match (src_ty, dst_ty) {
+            (ElementType::UI64, ElementType::F64 | ElementType::F32) => {
+                let v = read_int(&src.bytes, src_ty, i) as u64 as f64;
+                write_f64(&mut out.bytes, dst_ty, i, v);
+            }
+            (src_ty, dst_ty) if is_integral(src_ty) && is_integral(dst_ty) => {
+                write_int(&mut out.bytes, dst_ty, i, read_int(&src.bytes, src_ty, i));
+            }
+            (src_ty, dst_ty) if is_integral(src_ty) && is_real(dst_ty) => {
+                let v = read_int(&src.bytes, src_ty, i) as f64;
+                write_f64(&mut out.bytes, dst_ty, i, v);
+            }
+            (src_ty, dst_ty) if is_real(src_ty) && is_integral(dst_ty) => {
+                let v = read_f64(&src.bytes, src_ty, i);
+                let bits = match dst_ty {
+                    ElementType::I1 => i64::from(v != 0.0),
+                    ElementType::UI64 => (v as u64) as i64,
+                    ElementType::UI32 => i64::from(v as u32),
+                    ElementType::I32 => i64::from(v as i32),
+                    ElementType::I64 => v as i64,
+                    ElementType::F64 | ElementType::F32 => unreachable!("dst is integral"),
+                };
+                write_int(&mut out.bytes, dst_ty, i, bits);
+            }
+            _ => {
+                let v = read_f64(&src.bytes, src_ty, i);
+                write_f64(&mut out.bytes, dst_ty, i, v);
+            }
+        }
     }
     Ok(out)
 }
@@ -1972,7 +2027,7 @@ fn cmp_f64(a: f64, b: f64, direction: CompareDirection, compare_type: CompareTyp
     }
 }
 
-fn cmp_i64(a: i64, b: i64, direction: CompareDirection) -> bool {
+fn cmp_ord<T: PartialOrd>(a: T, b: T, direction: CompareDirection) -> bool {
     match direction {
         CompareDirection::Eq => a == b,
         CompareDirection::Ne => a != b,
@@ -1989,9 +2044,10 @@ fn write_scalar(
     index: usize,
     scalar: &ScalarValue,
 ) -> Result<(), InterpError> {
-    write_f64(bytes, ty, index, scalar.as_f64());
-    if matches!(ty, ElementType::I1) {
-        bytes[index] = u8::from(scalar.as_i64() != 0);
+    if is_integral(ty) {
+        write_int(bytes, ty, index, scalar.as_i64());
+    } else {
+        write_f64(bytes, ty, index, scalar.as_f64());
     }
     Ok(())
 }
@@ -2051,7 +2107,8 @@ fn read_f64(bytes: &[u8], ty: ElementType, index: usize) -> f64 {
             let off = index * 4;
             f32::from_le_bytes(bytes[off..off + 4].try_into().unwrap()) as f64
         }
-        ElementType::I64 | ElementType::UI64 | ElementType::I32 | ElementType::UI32 => {
+        ElementType::UI64 => read_int(bytes, ty, index) as u64 as f64,
+        ElementType::I64 | ElementType::I32 | ElementType::UI32 => {
             read_int(bytes, ty, index) as f64
         }
         ElementType::I1 => {
@@ -2623,5 +2680,95 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, InterpError::DotContractingSize), "{err}");
+    }
+
+    fn ints(element_type: ElementType, shape: &[i64], words: &[i64]) -> Tensor {
+        let mut bytes = Vec::new();
+        for &word in words {
+            match element_type {
+                ElementType::I64 | ElementType::UI64 => {
+                    bytes.extend_from_slice(&word.to_le_bytes())
+                }
+                ElementType::I32 | ElementType::UI32 => {
+                    bytes.extend_from_slice(&(word as i32).to_le_bytes());
+                }
+                ElementType::I1 => bytes.push(u8::from(word != 0)),
+                ElementType::F64 | ElementType::F32 => panic!("ints() is for integer tensors"),
+            }
+        }
+        Tensor {
+            ty: ty(shape, element_type),
+            bytes,
+        }
+    }
+
+    #[test]
+    fn convert_i64_to_ui64_is_exact_above_2_53() {
+        let mut env = HashMap::new();
+        let value = 9_007_199_254_740_993_i64;
+        env.insert(ValueId(0), ints(ElementType::I64, &[1], &[value]));
+        let out = convert(&env, ValueId(0), &ty(&[1], ElementType::UI64)).unwrap();
+        let bits = u64::from_le_bytes(out.bytes[..8].try_into().unwrap());
+        assert_eq!(bits, value as u64);
+    }
+
+    #[test]
+    fn convert_ui64_to_f64_is_unsigned() {
+        let mut env = HashMap::new();
+        env.insert(
+            ValueId(0),
+            ints(ElementType::UI64, &[1], &[u64::MAX as i64]),
+        );
+        let out = convert(&env, ValueId(0), &ty(&[1], ElementType::F64)).unwrap();
+        let value = f64::from_le_bytes(out.bytes[..8].try_into().unwrap());
+        assert_eq!(value, u64::MAX as f64);
+    }
+
+    #[test]
+    fn compare_ui64_above_i64_max_is_unsigned() {
+        let mut env = HashMap::new();
+        env.insert(
+            ValueId(0),
+            ints(ElementType::UI64, &[1], &[u64::MAX as i64]),
+        );
+        env.insert(ValueId(1), ints(ElementType::UI64, &[1], &[1]));
+        let out = compare(
+            &env,
+            ValueId(0),
+            ValueId(1),
+            &ty(&[1], ElementType::I1),
+            CompareDirection::Gt,
+            CompareType::Unsigned,
+        )
+        .unwrap();
+        assert_eq!(out.bytes, vec![1]);
+
+        env.insert(
+            ValueId(2),
+            ints(ElementType::UI32, &[1], &[i64::from(u32::MAX)]),
+        );
+        env.insert(ValueId(3), ints(ElementType::UI32, &[1], &[1]));
+        let out = compare(
+            &env,
+            ValueId(2),
+            ValueId(3),
+            &ty(&[1], ElementType::I1),
+            CompareDirection::Gt,
+            CompareType::Signed,
+        )
+        .unwrap();
+        assert_eq!(out.bytes, vec![1]);
+    }
+
+    #[test]
+    fn integer_constant_above_2_53_is_exact() {
+        let value = (1_i64 << 53) + 1;
+        let out = materialize_constant(
+            &ConstantValue::DenseScalar(ScalarValue::I64(value)),
+            &ty(&[1], ElementType::I64),
+        )
+        .unwrap();
+        let bits = i64::from_le_bytes(out.bytes[..8].try_into().unwrap());
+        assert_eq!(bits, value);
     }
 }
