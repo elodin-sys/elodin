@@ -1024,7 +1024,7 @@ impl DB {
                     "processing field"
                 );
 
-                let component_schema = ComponentSchema::new(ty, shape);
+                let component_schema = ComponentSchema::new(ty, shape.as_slice());
                 state.insert_component_with_timestamp_source_flag(
                     component_id,
                     component_schema,
@@ -3376,7 +3376,7 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
         let stream_changed = vtable_gen != current_vtable_gen || filter_gen != current_filter_gen;
         if stream_changed {
             let component_filter = filter.component_ids();
-            stream_components = match &component_filter {
+            let next_components = match &component_filter {
                 Some(filter) => all_components
                     .iter()
                     .filter(|(component_id, _)| filter.contains(*component_id))
@@ -3384,10 +3384,18 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
                     .collect(),
                 None => all_components.clone(),
             };
-            let vtable_msg = DBVisitor.vtable(&stream_components)?;
-            let id: PacketId = fastrand::u16(..).to_le_bytes();
-            table = LenPacket::table(id, 2048 - 16);
-            {
+            // Sinking the first sample bumps `vtable_gen` without changing
+            // columns. Republishing that vtable races with a filter update.
+            let layout_changed = next_components.len() != stream_components.len()
+                || next_components.iter().any(|(id, component)| {
+                    stream_components
+                        .get(id)
+                        .is_none_or(|existing: &Component| existing.schema != component.schema)
+                });
+            if layout_changed || filter_gen != current_filter_gen {
+                let vtable_msg = DBVisitor.vtable(&next_components)?;
+                let id: PacketId = fastrand::u16(..).to_le_bytes();
+                table = LenPacket::table(id, 2048 - 16);
                 let pkt = VTableMsg {
                     id,
                     vtable: vtable_msg,
@@ -3395,6 +3403,7 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
                 .into_len_packet();
                 send_with_timeout(&sink, pkt.with_request_id(req_id)).await?;
             }
+            stream_components = next_components;
             current_vtable_gen = vtable_gen;
             current_filter_gen = filter_gen;
         }

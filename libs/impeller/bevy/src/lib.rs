@@ -22,7 +22,6 @@ use impeller::{
     schema::Schema,
     types::{ComponentId, ComponentView, LenPacket, Msg, Timestamp},
 };
-use impeller_bbq::{AsyncArcQueueRx, RxExt};
 use impeller_wkt::{
     ComponentMetadata, CurrentTimestamp, DbConfig, DumpMetadata, DumpMetadataResp, DumpSchema,
     DumpSchemaResp, EarliestTimestamp, ErrorResponse, GetDbSettings, GetEarliestTimestamp,
@@ -35,84 +34,32 @@ use std::{
     convert::Infallible,
     marker::PhantomData,
     ops::Bound,
-    time::{Duration, Instant},
+    time::Duration,
 };
 use stellarator_buf::Slice;
+use web_time::Instant;
 
 pub use impeller_bbq::PacketGrantR;
 pub use impeller_wkt::ComponentValue;
 pub use impeller_wkt::ElementValueMut;
 pub use impeller_wkt::{ComponentPart, ComponentPath};
 
+pub use address;
+pub mod channels;
+pub use channels::{
+    ConnectionAddr, ConnectionStatus, DbEndpoint, MsgPacketRx, MsgPacketTx, PacketRx, PacketTx,
+    QUEUE_LEN, ThreadConnectionStatus,
+};
+
 #[cfg(feature = "tcp")]
 mod tcp;
 #[cfg(feature = "tcp")]
 pub use tcp::*;
 
-/// Size of the BBQ queue for incoming packets.
-/// Increased from 64MB to 256MB to handle large Arrow IPC responses from SQL queries.
-pub const QUEUE_LEN: usize = 256 * 1024 * 1024;
-
-#[derive(Resource)]
-pub struct PacketRx(AsyncArcQueueRx);
-
-impl From<AsyncArcQueueRx> for PacketRx {
-    fn from(rx: AsyncArcQueueRx) -> Self {
-        Self(rx)
-    }
-}
-
-impl PacketRx {
-    #[inline]
-    pub fn try_recv_pkt(&mut self) -> Option<OwnedPacket<PacketGrantR>> {
-        self.0.try_recv_pkt()
-    }
-}
-
-#[derive(Resource)]
-pub struct PacketTx(pub thingbuf::mpsc::Sender<Option<LenPacket>>);
-
-impl PacketTx {
-    pub fn send_msg(&self, msg: impl Msg) {
-        let pkt = msg.into_len_packet();
-        let _ = self.0.try_send(Some(pkt));
-    }
-
-    /// Queue a packet whose loss would leave the client silently
-    /// out of sync with the DB; panics naming `operation` if it cannot be queued.
-    pub fn send_required(&self, pkt: LenPacket, operation: &str) {
-        if let Err(err) = self.0.try_send(Some(pkt)) {
-            let reason = if err.is_full() { "full" } else { "closed" };
-            panic!("{operation} failed: outgoing packet queue is {reason}");
-        }
-    }
-}
-
-#[derive(Resource)]
-pub struct MsgPacketRx(AsyncArcQueueRx);
-
-impl From<AsyncArcQueueRx> for MsgPacketRx {
-    fn from(rx: AsyncArcQueueRx) -> Self {
-        Self(rx)
-    }
-}
-
-impl MsgPacketRx {
-    #[inline]
-    pub fn try_recv_pkt(&mut self) -> Option<OwnedPacket<PacketGrantR>> {
-        self.0.try_recv_pkt()
-    }
-}
-
-#[derive(Resource, Clone)]
-pub struct MsgPacketTx(pub thingbuf::mpsc::Sender<Option<LenPacket>>);
-
-impl MsgPacketTx {
-    pub fn send_msg(&self, msg: impl Msg) {
-        let pkt = msg.into_len_packet();
-        let _ = self.0.try_send(Some(pkt));
-    }
-}
+#[cfg(target_family = "wasm")]
+mod ws;
+#[cfg(target_family = "wasm")]
+pub use ws::*;
 
 #[derive(Debug, Message)]
 pub enum DbMessage {
@@ -1004,7 +951,7 @@ fn sink_inner(
     world_sink_state: &mut SystemState<WorldSink>,
 ) -> Result<(), impeller::error::Error> {
     let mut count = 0;
-    let sink_deadline = std::time::Instant::now() + std::time::Duration::from_millis(8);
+    let sink_deadline = Instant::now() + Duration::from_millis(8);
     let mut pending_cache_entries: Vec<(ComponentId, Timestamp, ComponentValue)> = Vec::new();
     let allowlist = world
         .get_resource::<SeriesFetchPriority>()
@@ -1025,7 +972,7 @@ fn sink_inner(
                 cache.insert_live(cid, ts, val);
             }
         }
-        if count > 2048 || (count >= 16 && std::time::Instant::now() > sink_deadline) {
+        if count > 2048 || (count >= 16 && Instant::now() > sink_deadline) {
             break;
         }
         let Some(pkt) = packet_rx.try_recv_pkt() else {
@@ -1243,10 +1190,10 @@ pub struct MsgSinkState<'w> {
 }
 
 pub fn msg_sink(world: &mut World, msg_sink_state: &mut SystemState<MsgSinkState>) {
-    let sink_deadline = std::time::Instant::now() + std::time::Duration::from_millis(8);
+    let sink_deadline = Instant::now() + Duration::from_millis(8);
     let mut count = 0;
     loop {
-        if count > 2048 || (count >= 16 && std::time::Instant::now() > sink_deadline) {
+        if count > 2048 || (count >= 16 && Instant::now() > sink_deadline) {
             return;
         }
         let pkt = {
@@ -1736,6 +1683,18 @@ impl Plugin for ImpellerPlugin {
             .init_resource::<SeriesStoreLoadState>()
             .init_resource::<SeriesFetchPriority>()
             .init_resource::<SimTimeStepFetch>();
+        #[cfg(all(not(feature = "tcp"), not(target_family = "wasm")))]
+        {
+            let (packet_tx, packet_rx, _outgoing, _incoming) = channels::channels();
+            let (msg_tx, msg_rx, _msg_outgoing, _msg_incoming) = channels::msg_channels();
+            app.insert_resource(packet_tx)
+                .insert_resource(packet_rx)
+                .insert_resource(msg_tx)
+                .insert_resource(msg_rx)
+                .insert_resource(CurrentStreamId::rand())
+                .insert_resource(ThreadConnectionStatus::new(ConnectionStatus::NoConnection))
+                .add_systems(bevy::prelude::PreUpdate, (sink, msg_sink));
+        }
     }
 }
 

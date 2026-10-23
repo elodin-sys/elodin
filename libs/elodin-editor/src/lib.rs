@@ -1,5 +1,11 @@
 #![recursion_limit = "256"]
+#![cfg_attr(
+    all(feature = "wasm-cut", target_family = "wasm"),
+    allow(dead_code, unused_imports, unused_variables, unused_mut)
+)]
 
+#[cfg(target_family = "wasm")]
+use impeller_bevy::DbEndpoint;
 use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
 use crate::plugins::{editor_cam_input, editor_cam_touch};
@@ -10,9 +16,7 @@ use bevy::{
     DefaultPlugins,
     asset::{UnapprovedPathMode, embedded_asset},
     camera::RenderTarget,
-    diagnostic::{
-        DiagnosticsPlugin, FrameTimeDiagnosticsPlugin, SystemInformationDiagnosticsPlugin,
-    },
+    diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
     ecs::observer::Observer,
     ecs::system::{NonSendMarker, SystemParam},
     light::DirectionalLightShadowMap,
@@ -95,7 +99,9 @@ pub mod rim_glow_material;
 pub mod sensor_camera;
 #[cfg(all(not(target_family = "wasm"), target_family = "unix"))]
 mod sensor_h264;
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 mod skybox_db_assets;
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 mod skybox_generation;
 #[cfg(feature = "big_space")]
 pub(crate) mod spatial;
@@ -104,6 +110,8 @@ pub(crate) mod spatial;
 pub(crate) mod spatial;
 pub mod ui;
 pub mod vector_arrow;
+#[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+mod wasm_cut;
 
 #[cfg(all(not(target_family = "wasm"), target_family = "unix"))]
 pub mod headless;
@@ -337,7 +345,8 @@ mod stream_filter {
             supported: Option<bool>,
             status: ConnectionStatus,
         ) -> Vec<impeller::types::LenPacket> {
-            let (packet_tx, _packet_rx, outgoing_rx, _incoming_tx) = impeller_bevy::channels();
+            let (packet_tx, _packet_rx, outgoing_rx, _incoming_tx) =
+                impeller_bevy::channels::channels();
             let mut app = App::new();
             app.insert_resource(SeriesFetchPriority {
                 high: [ComponentId::new("a")].into_iter().collect(),
@@ -370,6 +379,7 @@ mod stream_filter {
     }
 }
 
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 pub(crate) fn skybox_asset_plugin() -> bevy_ai_skybox::prelude::SkyboxAssetPlugin {
     let assets_dir = plugins::env_asset_source::resolve_assets_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("assets"));
@@ -388,6 +398,7 @@ pub(crate) fn skybox_asset_plugin() -> bevy_ai_skybox::prelude::SkyboxAssetPlugi
     }
 }
 
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 pub(crate) fn skybox_generation_plugin() -> bevy_ai_skybox::prelude::BlockadeSkyboxPlugin {
     bevy_ai_skybox::prelude::BlockadeSkyboxPlugin {
         default_resolution: bevy_ai_skybox::prelude::SkyboxResolution::EightK,
@@ -474,6 +485,8 @@ pub(crate) fn register_ibl_embedded_assets(app: &mut App) {
 #[derive(Default)]
 pub struct EditorPlugin {
     window_resolution: WindowResolution,
+    #[cfg(target_family = "wasm")]
+    connection: Option<DbEndpoint>,
 }
 
 /// The positions of camera of object_3d are sync'd in `PreUpdate`.
@@ -484,7 +497,34 @@ impl EditorPlugin {
     pub fn new(width: f32, height: f32) -> Self {
         Self {
             window_resolution: WindowResolution::new(width as u32, height as u32),
+            #[cfg(target_family = "wasm")]
+            connection: None,
         }
+    }
+
+    #[cfg(target_family = "wasm")]
+    pub fn with_connection_addr(mut self, addr: std::net::SocketAddr) -> Self {
+        self.connection = Some(DbEndpoint::from_socket(addr));
+        self
+    }
+
+    /// `host:port`, where `host` may be an IP literal or a DNS name.
+    /// On failure the plugin is returned unchanged.
+    #[cfg(target_family = "wasm")]
+    pub fn with_connection_str(
+        self,
+        addr: &str,
+    ) -> Result<Self, (Self, impeller_bevy::address::ParseError)> {
+        match DbEndpoint::parse(addr) {
+            Ok(endpoint) => Ok(self.with_db_endpoint(endpoint)),
+            Err(err) => Err((self, err)),
+        }
+    }
+
+    #[cfg(target_family = "wasm")]
+    pub fn with_db_endpoint(mut self, endpoint: DbEndpoint) -> Self {
+        self.connection = Some(endpoint);
+        self
     }
 }
 
@@ -525,8 +565,8 @@ impl Plugin for EditorPlugin {
             .add_plugins(plugins::WebAssetPlugin)
             .add_plugins(plugins::env_asset_source::plugin)
             .add_plugins(plugins::kdl_asset_source::plugin)
-            .add_plugins(
-                DefaultPlugins
+            .add_plugins({
+                let plugins = DefaultPlugins
                     .set(RenderPlugin {
                         render_creation: editor_wgpu_settings().into(),
                         ..default()
@@ -536,6 +576,7 @@ impl Plugin for EditorPlugin {
                             title: "Elodin".into(),
                             present_mode: ui::window::present_mode_from_env(),
                             canvas: Some("#editor".to_string()),
+                            fit_canvas_to_parent: cfg!(target_family = "wasm"),
                             resolution: self.window_resolution.clone(),
                             resize_constraints: WindowResizeConstraints {
                                 min_width: 400.,
@@ -545,13 +586,20 @@ impl Plugin for EditorPlugin {
                             composite_alpha_mode,
                             prevent_default_event_handling: true,
                             decorations: true,
-                            visible: cfg!(target_os = "linux"),
+                            visible: cfg!(target_os = "linux") || cfg!(target_family = "wasm"),
                             ..default()
                         }),
                         ..default()
                     })
                     .set(AssetPlugin {
-                        watch_for_changes_override: Some(true),
+                        watch_for_changes_override: if cfg!(all(
+                            feature = "wasm-cut",
+                            target_family = "wasm"
+                        )) {
+                            None
+                        } else {
+                            Some(true)
+                        },
                         unapproved_path_mode: UnapprovedPathMode::Allow,
                         // NOTE: `Processed` interferes with WebAssetPlugin.
                         // mode: AssetMode::Processed,
@@ -559,23 +607,29 @@ impl Plugin for EditorPlugin {
                     })
                     .disable::<TransformPlugin>()
                     .disable::<DiagnosticsPlugin>()
-                    .disable::<LogPlugin>()
                     // Pulled into DefaultPlugins by the `bevy_dev_tools`
                     // cargo feature (needed for the native infinite grid);
                     // keep 0.18 behavior — no F1 render-debug keybind.
-                    .disable::<bevy::dev_tools::render_debug::RenderDebugOverlayPlugin>()
-                    .build(),
-            )
+                    .disable::<bevy::dev_tools::render_debug::RenderDebugOverlayPlugin>();
+                // Native editor installs its own tracing subscriber. Wasm has none
+                // unless LogPlugin stays enabled, so panics were the only console signal.
+                #[cfg(not(target_family = "wasm"))]
+                let plugins = plugins.disable::<LogPlugin>();
+                plugins.build()
+            })
             .add_plugins(plugins::gpu_info::GpuInfoPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::hw_stats::HardwareStatsPlugin);
-        #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::display_kernel::DisplayKernelPlugin);
-        app.add_plugins(plugins::kdl_document::plugin)
-            .add_plugins(skybox_asset_plugin())
-            .add_plugins(skybox_generation_plugin())
-            .init_resource::<skybox_db_assets::DbSkyboxAssetMirror>()
-            .init_resource::<skybox_db_assets::DbSkyboxSyncInFlight>()
+        app.add_plugins(plugins::kdl_document::plugin);
+        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+        {
+            app.add_plugins(skybox_asset_plugin())
+                .add_plugins(skybox_generation_plugin())
+                .init_resource::<skybox_db_assets::DbSkyboxAssetMirror>()
+                .init_resource::<skybox_db_assets::DbSkyboxSyncInFlight>();
+        }
+        app
             // Note: we added this because bevy 0.17.3 changed its behavior
             // which broke bevy_editor_cam. See here:
             // https://github.com/aevyrie/bevy_editor_cam/issues/61
@@ -604,8 +658,12 @@ impl Plugin for EditorPlugin {
             .add_plugins(ViewCubePlugin {
                 config: ViewCubeConfig::editor_mode(),
             })
-            .add_plugins(impeller_bevy::ImpellerPlugin)
-            .add_plugins(FrustumPlugin)
+            .add_plugins(impeller_bevy::ImpellerPlugin);
+        #[cfg(target_family = "wasm")]
+        app.add_plugins(impeller_bevy::WsImpellerPlugin::new(
+            self.connection.clone(),
+        ));
+        app.add_plugins(FrustumPlugin)
             .add_plugins(FrustumIntersectionPlugin)
             .add_plugins(GizmoPlugin);
         #[cfg(not(target_family = "wasm"))]
@@ -621,9 +679,10 @@ impl Plugin for EditorPlugin {
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::fps_log::EnvFpsLogPlugin);
         app.add_plugins(ui::UiPlugin)
-            .add_plugins(FrameTimeDiagnosticsPlugin::default())
-            .add_plugins(SystemInformationDiagnosticsPlugin)
-            .add_plugins(WireframePlugin::default())
+            .add_plugins(FrameTimeDiagnosticsPlugin::default());
+        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+        app.add_plugins(bevy::diagnostic::SystemInformationDiagnosticsPlugin);
+        app.add_plugins(WireframePlugin::default())
             .add_plugins(editor_cam_touch::EditorCamTouchPlugin)
             .add_plugins(crate::ui::plot::PlotPlugin)
             .add_plugins(crate::plugins::LogicalKeyPlugin)
@@ -658,7 +717,6 @@ impl Plugin for EditorPlugin {
                     // Keep Object3D WorldPos in lock-step with cached component values
                     // before transforms are synchronized for rendering.
                     object_3d::update_object_3d_system,
-                    #[cfg(not(target_family = "wasm"))]
                     object_3d::update_object_3d_kernels,
                     sync_object_3d,
                     set_viewport_pos,
@@ -705,31 +763,34 @@ impl Plugin for EditorPlugin {
                     .after(update_eql_context),
             )
             .add_systems(Startup, spawn_ui_cam)
-            .add_systems(Update, ui::video_stream::connect_streams)
-            .init_resource::<skybox_generation::LocallyPushedSkyboxActive>()
-            .add_systems(
-                Update,
-                skybox_generation::sync_generated_skybox_to_schematic,
-            )
-            .add_systems(Update, skybox_generation::on_document_loaded)
-            .add_systems(Update, skybox_generation::record_reloaded_schematic_key)
-            .add_systems(Update, skybox_generation::push_skybox_active_on_pending)
-            .add_systems(Update, skybox_generation::decay_skybox_status_message)
-            .add_systems(
-                Update,
-                ui::video_stream::invalidate_sensor_frames_on_db_skybox_change,
-            )
-            .add_systems(Update, ui::log_stream::connect_streams)
+            .add_systems(Update, ui::video_stream::connect_streams);
+        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+        {
+            app.init_resource::<skybox_generation::LocallyPushedSkyboxActive>()
+                .add_systems(
+                    Update,
+                    skybox_generation::sync_generated_skybox_to_schematic,
+                )
+                .add_systems(Update, skybox_generation::on_document_loaded)
+                .add_systems(Update, skybox_generation::record_reloaded_schematic_key)
+                .add_systems(Update, skybox_generation::push_skybox_active_on_pending)
+                .add_systems(Update, skybox_generation::decay_skybox_status_message)
+                .add_systems(
+                    Update,
+                    ui::video_stream::invalidate_sensor_frames_on_db_skybox_change,
+                )
+                .init_resource::<skybox_db_assets::DbSkyboxUploaded>()
+                .add_systems(
+                    PostUpdate,
+                    skybox_db_assets::sync_db_skybox_assets_from_config,
+                )
+                .add_systems(
+                    PostUpdate,
+                    skybox_db_assets::upload_active_skybox_assets_to_db,
+                );
+        }
+        app.add_systems(Update, ui::log_stream::connect_streams)
             .add_systems(PostUpdate, ui::video_stream::set_visibility)
-            .init_resource::<skybox_db_assets::DbSkyboxUploaded>()
-            .add_systems(
-                PostUpdate,
-                skybox_db_assets::sync_db_skybox_assets_from_config,
-            )
-            .add_systems(
-                PostUpdate,
-                skybox_db_assets::upload_active_skybox_assets_to_db,
-            )
             .add_systems(PostUpdate, set_clear_color)
             .insert_resource(WireframeConfig {
                 global: false,
@@ -747,27 +808,28 @@ impl Plugin for EditorPlugin {
             .init_resource::<ui::data_overview::ComponentTimeRanges>()
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(rim_glow_material::RimGlowMaterialPlugin)
-            .add_plugins(object_3d::Object3DPlugin)
-            .add_plugins(plugins::world_mesh::EditorWorldMeshPlugin)
-            .add_plugins(GeoFramePlugin {
-                apply_transforms: false,
-                ..default()
-            })
-            .init_resource::<sensor_camera::SensorCameraConfigs>()
-            .init_resource::<sensor_camera::SensorCamerasSpawned>()
-            .init_resource::<sensor_camera::SensorCameraFrustumSourcesSpawned>()
-            .add_systems(PreUpdate, sensor_camera::load_sensor_configs_from_db)
-            .add_systems(
-                PreUpdate,
-                sensor_camera::spawn_sensor_camera_frustum_sources
-                    .run_if(sensor_camera::should_spawn_sensor_camera_frustum_sources),
-            )
-            .add_systems(
-                PreUpdate,
-                sensor_camera::update_sensor_camera_frustum_source_transforms.after(PositionSync),
-            )
-            .add_systems(Update, sensor_camera::patch_sensor_view_dims)
-            .add_systems(Update, throttle_for_sensor_cameras);
+            .add_plugins(object_3d::Object3DPlugin);
+        #[cfg(not(target_family = "wasm"))]
+        app.add_plugins(plugins::world_mesh::EditorWorldMeshPlugin);
+        app.add_plugins(GeoFramePlugin {
+            apply_transforms: false,
+            ..default()
+        })
+        .init_resource::<sensor_camera::SensorCameraConfigs>()
+        .init_resource::<sensor_camera::SensorCamerasSpawned>()
+        .init_resource::<sensor_camera::SensorCameraFrustumSourcesSpawned>()
+        .add_systems(PreUpdate, sensor_camera::load_sensor_configs_from_db)
+        .add_systems(
+            PreUpdate,
+            sensor_camera::spawn_sensor_camera_frustum_sources
+                .run_if(sensor_camera::should_spawn_sensor_camera_frustum_sources),
+        )
+        .add_systems(
+            PreUpdate,
+            sensor_camera::update_sensor_camera_frustum_source_transforms.after(PositionSync),
+        )
+        .add_systems(Update, sensor_camera::patch_sensor_view_dims)
+        .add_systems(Update, throttle_for_sensor_cameras);
 
         #[cfg(not(target_family = "wasm"))]
         app.insert_resource(stream_filter::StreamFilterRate::FullResolution)
@@ -787,7 +849,6 @@ impl Plugin for EditorPlugin {
         #[cfg(feature = "debug")]
         app.add_plugins(spatial::debug::FloatingOriginDebugPlugin::default());
 
-        #[cfg(not(target_family = "wasm"))]
         app.add_plugins(crate::ui::startup_window::StartupPlugin);
 
         #[cfg(target_os = "macos")]
@@ -802,13 +863,12 @@ impl Plugin for EditorPlugin {
 
         // For adding features incompatible with wasm:
         register_ibl_embedded_assets(app);
-        if cfg!(not(target_arch = "wasm32")) {
-            // Bevy allocates this Depth32Float texture even before a shadow-casting
-            // directional light exists. At 8192 this costs 256 MiB per array layer
-            // (1 GiB for the default four sun cascades), which can exceed the graphics
-            // memory budget on lower-memory GPUs and invalidate the render device.
-            app.insert_resource(DirectionalLightShadowMap { size: 2048 });
-        }
+        // Bevy allocates this Depth32Float texture even before a shadow-casting
+        // directional light exists. At 8192 this costs 256 MiB per array layer
+        // (1 GiB for the default four sun cascades), which can exceed the graphics
+        // memory budget on lower-memory GPUs and invalidate the render device.
+        // Applies on WASM too so the browser does not keep Bevy's 8192 default.
+        app.insert_resource(DirectionalLightShadowMap { size: 2048 });
         app.configure_sets(
             PreUpdate,
             PositionSync.before(bevy_editor_cam::SyncCameraPosition),
@@ -1645,7 +1705,7 @@ pub fn sync_object_3d(
     connection_addr: Option<Res<impeller_bevy::ConnectionAddr>>,
     initial_kdl: Option<Res<plugins::kdl_document::InitialKdlPath>>,
 ) {
-    let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
+    let connection_addr = connection_addr.as_ref().map(|addr| addr.endpoint().clone());
     let local_root = object_3d::local_assets_root(initial_kdl.as_deref());
     for (entity, id) in &query {
         if synced_object_3d.0.contains_key(&entity) {
@@ -1705,7 +1765,7 @@ pub fn sync_object_3d(
             &mut mat3_material_assets,
             &assets,
             &geo_context,
-            connection_addr,
+            connection_addr.as_ref(),
             local_root.as_deref(),
         ) {
             synced_object_3d.0.insert(entity, object_entity);
@@ -1945,7 +2005,7 @@ pub(crate) fn sync_series_store_session_from_db_config(
     if !config.is_changed() {
         return;
     }
-    let addr = series.connection_addr.as_ref().map(|a| a.0);
+    let addr = series.connection_addr.as_ref().map(|a| a.socket);
     let start_ts = config.time_start_timestamp_micros();
     // start_ts not confirmed yet for this connection — adopt without wiping soft-preserved store.
     if series.session.start_ts.is_none() {
@@ -2008,7 +2068,7 @@ fn clear_state_new_connection(
         &mut series.visible_prefetch,
     );
 
-    let addr = series.connection_addr.as_ref().map(|a| a.0);
+    let addr = series.connection_addr.as_ref().map(|a| a.socket);
     let soft = series_store_soft_reconnect(&series.session, addr);
     apply_series_store_on_reconnect(
         soft,
@@ -2072,7 +2132,7 @@ fn reset_timestamps_on_new_connection(
         OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
         _ => return,
     }
-    let addr = connection_addr.as_ref().map(|a| a.0);
+    let addr = connection_addr.as_ref().map(|a| a.socket);
     let soft = series_store_soft_reconnect(&session, addr);
     apply_timestamp_bounds_reset_on_reconnect(soft, &mut earliest, &mut latest, &mut current);
 }
@@ -2856,6 +2916,7 @@ pub fn set_eql_context_range(fetch_range: Res<FetchTimeRange>, mut eql: ResMut<E
     eql.0.last_timestamp = fetch_range.0.end;
 }
 
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 pub fn dirs() -> directories::ProjectDirs {
     directories::ProjectDirs::from("systems", "elodin", "editor").unwrap()
 }
@@ -3204,7 +3265,7 @@ mod tests {
             .init_resource::<plugins::kdl_document::LastSyncedActiveKey>()
             .init_resource::<plugins::kdl_document::LastSyncedAssetsRevision>()
             .insert_resource(CurrentTimestamp(Timestamp(9_000)))
-            .insert_resource(ConnectionAddr(addr))
+            .insert_resource(ConnectionAddr::new(addr))
             .add_systems(bevy::app::Update, sync_series_store_session_from_db_config);
         app
     }

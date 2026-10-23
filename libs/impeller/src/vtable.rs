@@ -232,12 +232,26 @@ pub enum RealizedOp<'a> {
 
 /// A field realized from a VTable, containing entity and component IDs,
 /// shape, type, component view, and timestamp information
-pub struct RealizedField<'a> {
+pub struct RealizedField {
     pub component_id: ComponentId,
-    pub shape: &'a [usize],
+    /// Owned because `dim` is stored as `u64` and `usize` is 32-bit on wasm.
+    /// Aliasing those bytes would split each dimension into `[dim, 0]`.
+    pub shape: heapless::Vec<usize, 8>,
     pub ty: PrimType,
-    pub view: Option<ComponentView<'a>>,
     pub timestamp: Option<Timestamp>,
+}
+
+/// `u64` dimensions as `usize`, one element per dimension.
+///
+/// A byte alias is valid only where `usize` is 64-bit. On wasm32 each `u64`
+/// splits into two `usize`s, and a shape of `[9]` becomes `[9, 0]`.
+fn shape_from_dims(dims: &[u64]) -> Result<heapless::Vec<usize, 8>, Error> {
+    let mut shape = heapless::Vec::new();
+    for &dim in dims {
+        let dim = usize::try_from(dim).map_err(|_| Error::OffsetOverflow)?;
+        shape.push(dim).map_err(|_| Error::OffsetOverflow)?;
+    }
+    Ok(shape)
 }
 
 impl<'a> RealizedOp<'a> {
@@ -385,7 +399,7 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
     pub fn realize_fields<'a>(
         &'a self,
         table: Option<&'a [u8]>,
-    ) -> impl Iterator<Item = Result<RealizedField<'a>, Error>> + 'a {
+    ) -> impl Iterator<Item = Result<RealizedField, Error>> + 'a {
         self.fields.iter().map(move |field| {
             let mut realized_op = self.realize(field.arg, table)?;
             let mut timestamp: Option<RealizedTimestamp> = None;
@@ -396,34 +410,9 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
                         let RealizedComponent { component_id } = *component;
 
                         let schema = schema.as_ref().ok_or(Error::SchemaNotFound)?;
-                        // NOTE(sphw): bogan version of zerocopy::transmute_ref
-                        // In the future this will need to also support 32 bit systems
-                        // remove when https://github.com/google/zerocopy/pull/2428 is merged and released
-                        let shape: &[usize] = <[usize]>::ref_from_bytes(schema.dim.as_bytes())?;
-                        let view = if let Some(table) = table {
-                            let offset = field.offset.to_index();
-                            let data = table
-                                .get(offset..offset + field.len as usize)
-                                .ok_or(Error::BufferUnderflow)?;
-                            let view = ComponentView::try_from_bytes_shape(data, shape, schema.ty)
-                                .map_err(|err| match err {
-                                    // Attach diagnostic context so a decode failure names the
-                                    // offending component instead of a bare "invalid component data".
-                                    Error::InvalidComponentData => Error::InvalidComponentValue {
-                                        component_id,
-                                        prim_type: schema.ty,
-                                        elems: shape.iter().product(),
-                                        buf_len: data.len(),
-                                    },
-                                    other => other,
-                                })?;
-                            Some(view)
-                        } else {
-                            None
-                        };
+                        let shape = shape_from_dims(schema.dim)?;
                         return Ok(RealizedField {
                             component_id,
-                            view,
                             timestamp: timestamp.and_then(|t| t.timestamp),
                             shape,
                             ty: schema.ty,
@@ -501,21 +490,35 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
         table: &[u8],
         sink: &mut D,
     ) -> Result<Result<(), D::Error>, Error> {
-        for res in self.realize_fields(Some(table)) {
+        for (field, res) in self
+            .fields
+            .as_slice()
+            .iter()
+            .zip(self.realize_fields(Some(table)))
+        {
             let RealizedField {
                 component_id,
-                view,
+                shape,
+                ty,
                 timestamp,
-                ..
-            } = match res {
-                Ok(field) => field,
-                Err(err @ (Error::InvalidComponentValue { .. } | Error::InvalidComponentData)) => {
-                    warn_skipped(&err);
+            } = res?;
+            let offset = field.offset.to_index();
+            let data = table
+                .get(offset..offset + field.len as usize)
+                .ok_or(Error::BufferUnderflow)?;
+            let view = match ComponentView::try_from_bytes_shape(data, &shape, ty) {
+                Ok(view) => view,
+                Err(Error::InvalidComponentData) => {
+                    warn_skipped(&Error::InvalidComponentValue {
+                        component_id,
+                        prim_type: ty,
+                        elems: shape.iter().product(),
+                        buf_len: data.len(),
+                    });
                     continue;
                 }
                 Err(err) => return Err(err),
             };
-            let Some(view) = view else { continue };
             if let Err(err) = sink.apply_value(component_id, view, timestamp) {
                 return Ok(Err(err));
             }
@@ -934,6 +937,35 @@ mod tests {
         let bar = sink.f64_components.get(&ComponentId::new("bar")).unwrap();
         assert_eq!(bar.buf.as_buf(), &[5.0]);
         assert_eq!(sink.timestamp, Some(foo.timestamp));
+    }
+
+    #[test]
+    fn vector_dim_stays_a_single_axis() {
+        use super::builder::*;
+
+        // One u64 dimension must stay one usize. Aliasing the bytes on wasm32
+        // would read `[9, 0]` and decode an empty buffer.
+        assert_eq!(super::shape_from_dims(&[9]).unwrap().as_slice(), &[9]);
+
+        #[derive(IntoBytes, Immutable)]
+        struct Trail {
+            positions: [f64; 9],
+        }
+
+        let v = vtable([field!(
+            Trail::positions,
+            schema(PrimType::F64, &[9], component("trail_positions")),
+        )]);
+        let trail = Trail {
+            positions: [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0],
+        };
+        let mut sink = TestSink::default();
+        v.apply(trail.as_bytes(), &mut sink).unwrap().unwrap();
+        let values = sink
+            .f64_components
+            .get(&ComponentId::new("trail_positions"))
+            .unwrap();
+        assert_eq!(values.buf.as_buf(), &trail.positions);
     }
 
     #[test]

@@ -31,8 +31,9 @@ use std::num::NonZeroU64;
 use std::ops::{ControlFlow, RangeInclusive};
 use std::sync::Arc;
 use std::sync::atomic::{self, AtomicBool};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use std::{collections::BTreeMap, fmt::Debug, ops::Range};
+use web_time::Instant;
 
 use crate::object_3d::Object3DState;
 use crate::sensor_camera::SensorCameraConfigs;
@@ -2200,6 +2201,29 @@ impl XYLine {
         Some(written_u32s)
     }
 
+    /// Decimated `(x, y)` samples in one strip. WebGL2 uploads these as vertex
+    /// attributes instead of indexing storage buffers.
+    pub fn visible_plot_points(&self, pixel_width: usize) -> Vec<(f32, f32)> {
+        let desired_index_len = INDEX_BUFFER_LEN.min(pixel_width.max(1) * 4);
+        let total_points: usize = self.x_values.iter().map(|c| c.cpu().len()).sum();
+        if total_points == 0 {
+            return Vec::new();
+        }
+        let step = total_points.div_ceil(desired_index_len.max(1)).max(1);
+        let mut points = Vec::new();
+        let mut absolute = 0usize;
+        for (xs, ys) in self.x_values.iter().zip(self.y_values.iter()) {
+            let n = xs.cpu().len().min(ys.cpu().len());
+            for i in 0..n {
+                if absolute.is_multiple_of(step) || absolute + 1 == total_points {
+                    points.push((xs.cpu()[i], ys.cpu()[i]));
+                }
+                absolute += 1;
+            }
+        }
+        points
+    }
+
     pub fn plot_bounds(&self) -> PlotBounds {
         let (min_x, max_x) = match self.x_values.iter().flat_map(|c| c.cpu()).minmax() {
             MinMaxResult::NoElements => (0.0, 1.0),
@@ -2486,7 +2510,7 @@ pub struct LineTree<D: Clone + BoundOrd> {
     /// Archive length at the end of the last HC pass, for throttling decisions.
     last_hc_archive_len: usize,
     /// Wall-clock instant of the last HC pass, for time-based throttling.
-    last_hc_instant: Option<std::time::Instant>,
+    last_hc_instant: Option<Instant>,
     /// Bumped on any view-content mutation ([`Self::insert`] — including live
     /// appends via [`Self::update_last`] — [`Self::clear`], and view rebuild)
     /// so GPU index caches invalidate when LineTree contents change without a
@@ -2645,7 +2669,7 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     /// Record that an HC pass has just run (updates throttle bookkeeping).
     pub fn mark_compressed(&mut self) {
         self.last_hc_archive_len = self.raw_len();
-        self.last_hc_instant = Some(std::time::Instant::now());
+        self.last_hc_instant = Some(Instant::now());
     }
 
     /// Approximate memory cost of the raw archive in bytes (timestamps + values).
@@ -3273,7 +3297,68 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         });
         out
     }
+}
 
+impl LineTree<f32> {
+    /// Visible samples as per-chunk strips of plot-space `(x, y)`.
+    ///
+    /// `x` is the relative timestamp stored for the GPU. Chunks stay separate
+    /// so a line does not bridge a gap between them.
+    pub fn visible_plot_strips(
+        &self,
+        range: Range<Timestamp>,
+        earliest: Timestamp,
+        terminal_hold: bool,
+    ) -> Vec<Vec<(f32, f32)>> {
+        let step = self.fitted_index_step(range.clone(), terminal_hold).max(1);
+        let mut strips = Vec::new();
+        for chunk in self.range_iter(range.clone()) {
+            let Some((start_offset, end_offset)) = chunk_visible_offsets(&chunk.timestamps, &range)
+            else {
+                continue;
+            };
+            let vis_len = end_offset.saturating_sub(start_offset);
+            if vis_len == 0 {
+                continue;
+            }
+            let times = chunk.timestamps.as_slice();
+            let values = chunk.data.cpu();
+            let index_chunk = IndexChunk {
+                range: 0..u32::MAX,
+                len: vis_len,
+            };
+            let end = index_chunk.clone().into_index_iter().last();
+            let mut index_iter = index_chunk.into_index_iter();
+            let mut strip = Vec::new();
+            let mut push = |index: u32| {
+                let i = start_offset + index as usize;
+                if let (Some(&ts), Some(&v)) = (times.get(i), values.get(i)) {
+                    strip.push(((ts.0 - earliest.0) as f32, v));
+                }
+            };
+            let mut last_written = None;
+            if let Some(index) = index_iter.next() {
+                push(index);
+                last_written = Some(index);
+            }
+            for index in index_iter.step_by(step) {
+                push(index);
+                last_written = Some(index);
+            }
+            if let Some(end) = end
+                && last_written != Some(end)
+            {
+                push(end);
+            }
+            if !strip.is_empty() {
+                strips.push(strip);
+            }
+        }
+        strips
+    }
+}
+
+impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     pub fn garbage_collect(&mut self, line_visible_range: Range<Timestamp>) {
         let first_half =
             nodit::interval::ii(i64::MIN, line_visible_range.start.0.saturating_sub(1));
