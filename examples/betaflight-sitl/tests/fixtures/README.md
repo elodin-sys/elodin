@@ -1,62 +1,84 @@
-# Package E controller golden traces
+# Lean E1 characterization baseline
 
-These fixed fixtures were captured from the **original** Package E controller,
-not from the extracted controller. Normal tests replay them and never generate
-expected output. Floating-point outputs are hexadecimal strings, including signed
-zero, so comparisons are exact (no tolerance).
+The maintained E1 golden test is a small characterization baseline for the
+shared mission controller, not an eternal contract for every numerical output.
+Normal pytest runs of this module are fully offline: they use deterministic
+inputs with the current `controls.py` / `guidance.py` and existing Python,
+NumPy, and pytest dependencies. They do not run git commands, read history,
+invoke Elodin or Betaflight, use a GPU, or generate expected values.
 
-Baseline: `806b07721797a15e92b1614c0a206516c036f2e3`.
-Original `guidance.py` SHA256:
-`6783e94e03cd715c5cfdc66a3ca2d09c17fe79be6c1f41c41696af4a729d3b69`.
-Original `controls.py` SHA256:
-`1bf2504d66ed8666755c648f8c936d81931ff23d4f8ffcbfdefa054cc2b9948f`.
+`test_guidance_golden.py` covers exactly eight representative cases and 78
+updates: `full_mission_and_hold_timeout` (15), `braking_yaw_saturation` (11),
+`yawed_active_latching_braking_crossing` (5),
+`full_attitude_and_missing_truth` (7), `missing_truth_armed` (8),
+`gyro_nan_x_armed` (8), `nonmonotonic_True` (7), and
+`velocity_and_launch_xy_dwell_interruptions` (17). Their configurations and
+inputs are the selected original fixture cases; ordinary behavior remains
+covered by `test_guidance.py` and `test_mission_controller.py`.
 
-| Fixture | Cases / samples | SHA256 |
-| --- | --- | --- |
-| `guidance_package_e.json` | 34 / 229 | `95f9257340cd5f0fa3a7a436403018c9e55fa340297d97c5a7de3f630af92bb3` |
-| `guidance_package_e_supplement.json` | 5 / 39 | `53fe85c570bb477d1889536fc08256179092acb3fe6ea7e0241e90420c8f348f` |
+For each case, the expected SHA-256 is derived from that case's original
+expected output rows—not from current controller output—using this canonical
+serialization:
 
-The initial fixture covers all normal phase transitions, FAULT from each active
-phase, all ten fault reasons, before/after-arm invalid time/truth/gyro feedback,
-first-reason/target persistence, gate latching despite progress, yaw wrapping,
-throttle/yaw/acceleration saturation, stopping-distance and safety-slab braking,
-and position/altitude dwell interruptions. Its `yawed_gate_latching_and_crossing`
-case crosses early at 5.0 s; it is intentionally retained unchanged as a rotated
-**fault** trace, not claimed as healthy yawed flight.
+```python
+json.dumps(
+    rows,
+    sort_keys=True,
+    separators=(",", ":"),
+    ensure_ascii=True,
+    allow_nan=False,
+).encode("utf-8")
+```
 
-The supplement, requested by independent pre-extraction review, covers healthy
-yawed arming/TAKEOFF and braking at 5.8 s before crossing at 5.9 s (with explicit
-phase/reason/braking assertions), full non-pure-yaw scalar-last quaternion
-normalization/heading and subsequent missing-truth fallback, independently binding
-custom tilt and stick caps, and velocity/launch-XY dwell interruptions. The
-stationary 8.25 s HOVER sample distinguishes the 8.0 s velocity reset from a
-controller that silently omits the HOVER velocity gate. It was
-captured in an isolated original-source tree after extraction had started; no
-new-controller output was used as expected output. Existing fixture bytes were
-regenerated identically and left unchanged.
+Each row retains the old snapshot fields: phase, phase code, failure reason,
+braking state, target, and command. Floating-point values remain `float.hex()`
+strings, including signed zero. A mismatch reports the scenario, expected and
+actual digest, and current output rows. No full trace is stored elsewhere in
+the current tree.
 
-## Reproduce without touching the extracted controller
+## Historical full fixtures
 
-Run from the repository root, using Python with numpy and pytest. Use a **new**
-scratch directory under `$HOME` (not an existing checkout or the working source):
+The original full expected records remain in git history at commit
+`163c052956a15f8d720a93f2e7059f1c52b8ce71`. The initial E1 exact-equivalence
+proof, 39 scenarios / 268 updates, 300-test result, and three truth-hold RMS
+results are historical acceptance evidence from that commit; this lean follow-up
+is not a new live qualification and does not change E1's original acceptance.
+
+To inspect an old full record, use `git show` against that commit (and optionally
+filter one named case with `jq`):
 
 ```bash
+git show 163c052956a15f8d720a93f2e7059f1c52b8ce71:examples/betaflight-sitl/tests/fixtures/guidance_package_e.json \
+  | jq '.cases[] | select(.name == "full_mission_and_hold_timeout")'
+git show 163c052956a15f8d720a93f2e7059f1c52b8ce71:examples/betaflight-sitl/tests/fixtures/guidance_package_e_supplement.json \
+  | jq '.cases[] | select(.name == "yawed_active_latching_braking_crossing")'
+```
+
+The large fixtures and supplemental test module were removed from the current
+tree, not rewritten into another trace format.
+
+## Safe original-source digest reproduction
+
+The optional `--capture` mode prints a compact digest map only. It requires the
+original `guidance.py` and `controls.py` byte-for-byte hashes from baseline
+`806b07721797a15e92b1614c0a206516c036f2e3`; otherwise it refuses to capture.
+It never edits `EXPECTED_DIGESTS` or writes a fixture. Reproduce in a new
+isolated directory under `$HOME`, not in the working checkout:
+
+```bash
+# From the repository root, use Python with NumPy and pytest installed.
 base=$(mktemp -d "$HOME/bf-e1-original.XXXXXX")
 git archive 806b07721797a15e92b1614c0a206516c036f2e3 \
   examples/betaflight-sitl/controls.py \
   examples/betaflight-sitl/guidance.py | tar -x -C "$base"
 mkdir -p "$base/examples/betaflight-sitl/tests"
-cp examples/betaflight-sitl/tests/test_guidance_golden*.py \
+cp examples/betaflight-sitl/tests/test_guidance_golden.py \
   "$base/examples/betaflight-sitl/tests/"
-python "$base/examples/betaflight-sitl/tests/test_guidance_golden.py" --capture
-python "$base/examples/betaflight-sitl/tests/test_guidance_golden_supplement.py" --capture
-cmp "$base/examples/betaflight-sitl/tests/fixtures/guidance_package_e.json" \
-  examples/betaflight-sitl/tests/fixtures/guidance_package_e.json
-cmp "$base/examples/betaflight-sitl/tests/fixtures/guidance_package_e_supplement.json" \
-  examples/betaflight-sitl/tests/fixtures/guidance_package_e_supplement.json
-python -m pytest "$base/examples/betaflight-sitl/tests" -q
+python3 "$base/examples/betaflight-sitl/tests/test_guidance_golden.py" --capture
 ```
 
-Both generators refuse a controller whose hash differs from the original. Never
-update the stored digests/expected outputs to accommodate changed controller
-behavior. Capture uses no RNG, Elodin, Betaflight, renderer, GPU, or live plant.
+Compare the printed map to the checked-in map. A future deliberate controller
+change may retire or update a relevant characterization through a reviewed
+change that explains why; do not blindly rewrite digests just to make a failing
+test pass. The initial full equivalence proof remains in history independently
+of this ongoing maintenance baseline.

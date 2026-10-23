@@ -138,8 +138,9 @@ The example now additionally contains:
   controller, independent 10-second standoff hold grader, and phase/RC telemetry;
   and
 - Package E1's shared mission controller behind immutable navigation/target
-  inputs, with truth guidance reduced to a per-tick adapter and exact
-  original-controller golden replay.
+  inputs, with truth guidance reduced to a per-tick adapter. The initial E1
+  exact-equivalence qualification is preserved as historical evidence; the
+  maintained characterization is now a compact 8-case/78-update digest set.
 
 The camera is independently opt-in for scripted, manual, and truth guidance; it
 is observational in truth mode and never replaces copied truth state.
@@ -1257,9 +1258,11 @@ vision, COMMIT/gate passing, a multi-gate course, or new packages.
 
 ### [x] E1 — Mission controller extraction
 
-**Implementation status:** Complete. Exact original-controller traces,
-independent implementation review, and three consecutive unchanged-source
-headless hold qualifications passed on 2026-10-23.
+**Implementation status:** Complete. The initial exact original-controller
+replay, independent implementation review, and three consecutive unchanged-source
+headless hold qualifications passed on 2026-10-23. The historical qualification
+is preserved below; the active characterization baseline is the compact 8-case,
+78-update digest set described after it.
 
 **Objective:** Separate Package E's qualified control law and phase machine from
 truth types, so truth and vision guidance can share one controller, without
@@ -1316,23 +1319,22 @@ Time errors retain priority, valid updates in FAULT still refresh accepted
 feedback, and the first fault reason/target remains latched. No truth types or
 simulation I/O enter the mission controller.
 
-Before extraction, the original controller produced the fixed
-`tests/fixtures/guidance_package_e.json`; independent review requested additional
-original-source traces in `guidance_package_e_supplement.json`. Together they
-cover **39 scenarios / 268 updates**, all phase transitions and ten fault reasons,
-rotated control/braking, full quaternions, limits, dwell resets and fault feedback.
-The refactor matches phases, reasons and `SemanticControl` values **exactly**,
+At the original E1 acceptance, the original controller's full fixed fixtures
+were checked in as `tests/fixtures/guidance_package_e.json`; independent review
+requested additional original-source traces in
+`guidance_package_e_supplement.json`. Together they covered **39 scenarios /
+268 updates**, all phase transitions and ten fault reasons, rotated
+control/braking, full quaternions, limits, dwell resets and fault feedback. The
+refactor matched phases, reasons and `SemanticControl` values **exactly**,
 including signed zero; no floating-point tolerance exception was needed.
 
-Reproduction instructions, baseline source hashes and fixture digests are in
-`tests/fixtures/README.md`. From the repository root, use its isolated
-`git archive 806b07721797a15e92b1614c0a206516c036f2e3` procedure, then run both
-`python <baseline>/examples/betaflight-sitl/tests/test_guidance_golden.py --capture`
-and `python <baseline>/examples/betaflight-sitl/tests/test_guidance_golden_supplement.py --capture`.
-Both generators refuse changed controller or controls source. Independent
-regeneration reproduced both fixtures byte-for-byte; original-only replay passed
-41 tests. A separate deterministic differential probe compared 1,479 sequences /
-25,659 updates with exact agreement, including fault bookkeeping and targets.
+The full fixture files, their original capture scripts, source hashes and
+byte-for-byte reproduction instructions remain available in commit
+`163c052956a15f8d720a93f2e7059f1c52b8ce71`. These are historical acceptance
+evidence, not the current test paths. Historical independent regeneration
+reproduced both fixtures byte-for-byte; original-only replay passed 41 tests. A
+separate deterministic differential probe compared 1,479 sequences / 25,659
+updates with exact agreement, including fault bookkeeping and targets.
 
 Verification commands from the repository root, using the installed Elodin SDK
 and release runtime:
@@ -1370,6 +1372,40 @@ baseline truth run also passed (RMS 0.073516 m). Logs and review reports are und
 `/home/ubuntu/betaflight-e1`; all three final truth DBs are retained. Camera,
 EEPROM/GPS, vision guidance, retargeting, COMMIT and gate passing were not changed
 or newly qualified by E1. G1 remains incomplete.
+
+**Current maintained characterization (lean follow-up, 2026-10-23; no new
+qualification):** The current suite retains eight representative scenarios / 78
+updates, selected from the original expected rows in commit
+`163c052956a15f8d720a93f2e7059f1c52b8ce71`:
+
+| Scenario | Updates |
+|---|---:|
+| `full_mission_and_hold_timeout` | 15 |
+| `braking_yaw_saturation` | 11 |
+| `yawed_active_latching_braking_crossing` | 5 |
+| `full_attitude_and_missing_truth` | 7 |
+| `missing_truth_armed` | 8 |
+| `gyro_nan_x_armed` | 8 |
+| `nonmonotonic_True` | 7 |
+| `velocity_and_launch_xy_dwell_interruptions` | 17 |
+
+`tests/test_guidance_golden.py` hashes each scenario's original expected rows
+using canonical JSON (`sort_keys=True`, compact separators, ASCII escaping,
+`allow_nan=False`, UTF-8); snapshot fields retain phase/code/reason/braking,
+target and command, with floating-point values encoded by `float.hex()` including
+signed zero. No full traces are copied elsewhere in the current tree. Ordinary
+pytest is offline and does not inspect git history, Elodin, Betaflight, or GPU
+state. Its `--capture` mode refuses any `guidance.py` or `controls.py` whose SHA256
+differs from the original 806b0772 sources, prints digests only, and never edits
+the expected map. Safe isolated regeneration is documented in
+`tests/fixtures/README.md`.
+
+This approved follow-up reduces ongoing characterization size during active
+development; it does not revise E1's original exact-equivalence acceptance or
+claim a new live qualification. The full proof, 39/268 trace results, 300-test
+result, and three hold RMS results above remain historical evidence from the
+initial E1 acceptance. After this cleanup, the current full pure suite passes
+268 tests. Ordinary behavioral tests remain in place.
 
 
 ### [ ] F — Truth-guided straight course
@@ -1820,7 +1856,7 @@ branch for later resumption.
 | C | Complete | `none`/`single` startup selection, static four-bar orange rendering, ordered truth referee, Package D progress integration, fixed-width referee telemetry, exactly one final enabled-course result, and an opt-in positive live audit are implemented. The qualification suite passed 96 tests. The live audit used the unchanged vertical 2.5 m gate, reported one complete pass at 1.085149 s, and verified later-tick telemetry readback. Default C0 and ordinary incomplete `single` behavior were preserved. A 1280×720 H.264 recording and crossing frame were reviewed as qualification evidence; a PR should attach or upload those artifacts separately rather than rely on a host-local path. |
 | D | Complete | Command seam, one-tick ordering, AUX2 ANGLE configuration, s10 manual controller, 250 ms heartbeat failsafe, DB telemetry, and simulation-time physical sign audit are implemented. The combined automated qualification passed with roll 1.006, pitch 1.011, yaw 1.479 rad/s and accepted max motor 0.391; 5 controller tests also pass. On 2026-09-28, the operator tested and signed off on both keyboard and gamepad paths, including arm, takeoff, throttle/roll/pitch/yaw response, landing, and disarm. |
 | E | Complete | Opt-in truth-only single-gate standoff controller and independent 10 s hold grader. Three consecutive original 2026-09-29 runs exited 0 with RMS 0.075521/0.074801/0.074188 m (offline 0.075520758/0.074803460/0.074187954 m), no crossing or fault, and expected incomplete 0/1 race results; 138 pure tests on the original E branch, 5 controller tests, and default/scripted-single C0 regressions passed. The merged 2026-10-02 verification passed 180 pure tests, 5 controller tests, three further truth runs and opt-in B+E camera coexistence (details above). Requalified unchanged on 2026-10-12 atop main `729022c7` with a newly built runtime/SDK, three camera-off passes (0.073873/0.075235/0.074413 m RMS), independent DB agreement, C0/C/D regressions, and all four camera combinations (details above). |
-| E1 | Complete | Shared mission controller and immutable navigation/target inputs; thin per-tick truth adapter; 39 original-source golden scenarios / 268 updates exact, 300 pure tests, clean independent review, and three consecutive unchanged-source truth holds at 0.076142/0.077087/0.072773 m RMS on 2026-10-23. Details and reproducible fixture commands are recorded under E1. |
+| E1 | Complete | Shared mission controller and immutable navigation/target inputs; thin per-tick truth adapter. Initial acceptance at commit `163c0529`: 39 original-source scenarios / 268 updates exact, 300 pure tests, clean independent review, and three unchanged-source truth holds at 0.076142/0.077087/0.072773 m RMS (historical details under E1). Current maintained characterization: 8 selected cases / 78 updates, each guarded by a canonical SHA-256 digest derived from the original fixture rows; current full pure suite passes 268 tests. This follow-up is test maintenance, not a new qualification. |
 | F | Ready for implementation; qualification blocked by G1 | E1 is complete. Three-gate course, race profile, COMMIT/pass sequencing, and safe finish remain; qualification must wait for G1. |
 | G | Complete | `vision.py` owns intrinsics, corner order, the camera-to-body helper, and NumPy planar PnP. Positive tilt is nose-up and is registered as negative renderer pitch. `corner_order_ambiguous` flags labellings within 10°. `synthetic_vision.py` is the only truth-projection path. 222 pure tests pass, including centered, translated, yawed, and ranged round trips. |
 | G1 | Ready | B and G are complete; guidance still receives the query time in microseconds, and Betaflight's virtual GPS is enabled. |
@@ -1835,8 +1871,10 @@ branch for later resumption.
 Package E1 is complete. Begin Package G1; Package F implementation may proceed,
 but its qualification runs must wait for G1.
 
-- **E1, mission controller extraction:** qualified on 2026-10-23 with exact
-  original-controller golden replay and three passing E holds (details above).
+- **E1, mission controller extraction:** the initial 2026-10-23 qualification
+  preserved exact original-controller replay and three passing E holds (details
+  above). The current maintained baseline is the 8-case/78-update digest set;
+  the original 39/268 exact-equivalence evidence remains in commit `163c0529`.
   The shared controller is available to F and J.
 - **G1, sensor timing and truth-boundary fixes:** supply the camera capture
   time in simulation seconds, disable Betaflight's virtual GPS, and requalify
@@ -1854,6 +1892,7 @@ recoverable MPEG-TS fallback, are maintained in `README.md`.
 
 | Date | Decision | Reason and affected packages |
 |---|---|---|
+| 2026-10-23 | Keep E1's active original-controller characterization to eight representative cases / 78 updates, with digests derived from the original expected rows; retain the full 39-case / 268-update proof in commit `163c0529`. | The exact-equivalence acceptance was already performed and is preserved as historical evidence. This approved maintenance reduction avoids carrying exhaustive golden output during heavy development; behavioral tests and product acceptance remain unchanged. Affects only E1's ongoing characterization artifacts and reproduction instructions. |
 | 2026-10-22 | Add Packages E1 (mission controller extraction) and G1 (sensor timing and truth-boundary fixes) instead of folding these prerequisites into F. Keep the existing package letters. | The behavior-preserving refactor, the sensor and configuration fixes, and F's new race behavior are separate concerns; combining them would make a regression hard to attribute. G1 also gates H and I, not only F. Existing commits and PRs refer to packages by letter, so nothing is renumbered. Affects E1, G1, and F–K. |
 | 2026-10-22 | Package I is a gate-anchored navigator: a complementary attitude filter plus a 12-state linear Kalman filter in a gravity-aligned local frame, corrected by PnP at the frame capture time, the barometer, and zero velocity on the pad. It still publishes the body-FLU gate-relative estimate. Generic feature-based visual-inertial odometry and Betaflight GPS emulation are non-goals for the core course. | Chosen after a review of three independent research studies on 2026-10-21. The body-FLU tracker left attitude, gravity handling, and rotating-frame terms implicit, and degraded once the gate left view. The rendered scene is too sparse for feature tracking, and a GPS message discards attitude, covariance, and reset information while the pinned firmware's GPS paths have unit and parser defects. Affects §5, §7.7, §7.10, and I–K. |
 | 2026-10-22 | `GuidanceUpdate.frame_time`, the capture time in simulation seconds, replaces `frame_sample_time`; `GateCandidate.sample_time` follows. | `frame_sample_time` was the latency-adjusted query time in DB-timestamp microseconds, while `sim_time` is in seconds. The renderer stamps each frame with its pose time, so the selected message timestamp is the capture time. The 2026-09-26 freshness decision stands. Affects §7.2, §7.4, §7.7, G1, and H–K. |
