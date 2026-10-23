@@ -1,0 +1,1173 @@
+{
+  "baseline": "806b07721797a15e92b1614c0a206516c036f2e3",
+  "source_sha256": "6783e94e03cd715c5cfdc66a3ca2d09c17fe79be6c1f41c41696af4a729d3b69",
+  "cases": [
+    {
+      "name": "yawed_active_latching_braking_crossing",
+      "config": {},
+      "inputs": [
+        {
+          "time": 0.0,
+          "position": [
+            0.0,
+            -8.0,
+            0.1
+          ],
+          "gates": [
+            [
+              0,
+              [
+                4.0,
+                -3.0,
+                2.5
+              ],
+              1.5707963267948966,
+              2.5
+            ]
+          ]
+        },
+        {
+          "time": 5.0,
+          "position": [
+            0.0,
+            -8.0,
+            0.1
+          ],
+          "gates": [
+            [
+              1,
+              [
+                20.0,
+                0.0,
+                1.8
+              ],
+              0.0,
+              2.5
+            ]
+          ],
+          "next_gate_index": 1
+        },
+        {
+          "time": 5.6,
+          "position": [
+            0.0,
+            -8.0,
+            0.1
+          ],
+          "gates": []
+        },
+        {
+          "time": 5.8,
+          "position": [
+            3.0,
+            -3.1,
+            2.3
+          ],
+          "velocity": [
+            0.1,
+            0.5,
+            0.0
+          ],
+          "yaw": 1.3
+        },
+        {
+          "time": 5.9,
+          "position": [
+            4.0,
+            -2.9,
+            2.5
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "phase": "ARM",
+          "phase_code": 1,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.fffffffffffffp+1",
+            "-0x1.c000000000000p+2",
+            "0x1.4000000000000p+1"
+          ],
+          "command": {
+            "roll": "0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x0.0p+0",
+            "yaw": "0x0.0p+0",
+            "armed": false,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "ARM",
+          "phase_code": 1,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.fffffffffffffp+1",
+            "-0x1.c000000000000p+2",
+            "0x1.4000000000000p+1"
+          ],
+          "command": {
+            "roll": "0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x0.0p+0",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "TAKEOFF",
+          "phase_code": 2,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.fffffffffffffp+1",
+            "-0x1.c000000000000p+2",
+            "0x1.4000000000000p+1"
+          ],
+          "command": {
+            "roll": "-0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x1.0a3d70a3d70a4p-3",
+            "yaw": "-0x1.3333333333333p-3",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "TAKEOFF",
+          "phase_code": 2,
+          "failure_reason": null,
+          "braking_active": true,
+          "target": [
+            "0x1.fffffffffffffp+1",
+            "-0x1.c000000000000p+2",
+            "0x1.4000000000000p+1"
+          ],
+          "command": {
+            "roll": "-0x1.fb9848a63cbe3p-5",
+            "pitch": "-0x1.b8b270ff97c2bp-2",
+            "throttle": "0x1.999999999999ap-4",
+            "yaw": "-0x1.154ba1ddd812cp-3",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "FAULT",
+          "phase_code": 6,
+          "failure_reason": "gate_crossing",
+          "braking_active": true,
+          "target": [
+            "0x1.fffffffffffffp+1",
+            "-0x1.c000000000000p+2",
+            "0x1.4000000000000p+1"
+          ],
+          "command": {
+            "roll": "-0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x1.0a3d70a3d70a4p-3",
+            "yaw": "-0x1.3333333333333p-3",
+            "armed": true,
+            "angle_mode": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "full_attitude_and_missing_truth",
+      "config": {},
+      "inputs": [
+        {
+          "time": 0.0
+        },
+        {
+          "time": 5.0
+        },
+        {
+          "time": 5.6
+        },
+        {
+          "time": 5.7,
+          "position": [
+            0.2,
+            -0.3,
+            0.5
+          ],
+          "velocity": [
+            0.1,
+            -0.2,
+            0.3
+          ],
+          "quaternion": [
+            0.3,
+            -0.4,
+            0.7,
+            1.2
+          ],
+          "yaw_rate": -0.23
+        },
+        {
+          "time": 5.8,
+          "truth": false,
+          "yaw_rate": 0.31
+        },
+        {
+          "time": 5.9,
+          "quaternion": [
+            -0.1,
+            0.25,
+            -0.4,
+            0.8
+          ],
+          "yaw_rate": -0.17
+        },
+        {
+          "time": 6.0,
+          "truth": false,
+          "yaw_rate": 0.13
+        }
+      ],
+      "expected": [
+        {
+          "phase": "ARM",
+          "phase_code": 1,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x0.0p+0",
+            "yaw": "0x0.0p+0",
+            "armed": false,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "ARM",
+          "phase_code": 1,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x0.0p+0",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "TAKEOFF",
+          "phase_code": 2,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x1.0a3d70a3d70a4p-3",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "TAKEOFF",
+          "phase_code": 2,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x1.7700823f455fap-3",
+            "pitch": "0x1.92ff5d8c0aeddp-4",
+            "throttle": "0x1.999999999999ap-4",
+            "yaw": "0x1.3333333333333p-3",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "FAULT",
+          "phase_code": 6,
+          "failure_reason": "invalid_truth",
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x1.541eebc715bb2p-4",
+            "pitch": "0x1.a9393a5a41c6fp-5",
+            "throttle": "0x1.999999999999ap-4",
+            "yaw": "0x1.3333333333333p-3",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "FAULT",
+          "phase_code": 6,
+          "failure_reason": "invalid_truth",
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x1.e2c2bc57d711fp-9",
+            "pitch": "0x1.c45d39afa5e8ep-4",
+            "throttle": "0x1.47ae147ae147bp-3",
+            "yaw": "-0x1.3333333333333p-3",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "FAULT",
+          "phase_code": 6,
+          "failure_reason": "invalid_truth",
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x1.e2c2bc57d711fp-9",
+            "pitch": "0x1.c45d39afa5e8ep-4",
+            "throttle": "0x1.47ae147ae147bp-3",
+            "yaw": "-0x1.3333333333333p-3",
+            "armed": true,
+            "angle_mode": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "tilt_cap",
+      "config": {
+        "max_tilt_rad": 0.03
+      },
+      "inputs": [
+        {
+          "time": 0.0
+        },
+        {
+          "time": 5.0
+        },
+        {
+          "time": 5.6
+        },
+        {
+          "time": 5.7,
+          "position": [
+            -10.0,
+            -10.0,
+            0.1
+          ],
+          "velocity": [
+            -1.0,
+            -1.0,
+            0.0
+          ]
+        },
+        {
+          "time": 5.8,
+          "position": [
+            1.0,
+            1.0,
+            0.1
+          ],
+          "velocity": [
+            1.0,
+            1.0,
+            0.0
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "phase": "ARM",
+          "phase_code": 1,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x0.0p+0",
+            "yaw": "0x0.0p+0",
+            "armed": false,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "ARM",
+          "phase_code": 1,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x0.0p+0",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "TAKEOFF",
+          "phase_code": 2,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x1.0a3d70a3d70a4p-3",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "TAKEOFF",
+          "phase_code": 2,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x1.6006780cfaf97p-4",
+            "pitch": "0x1.6006780cfaf97p-4",
+            "throttle": "0x1.0d4fdf3b645a2p-3",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "TAKEOFF",
+          "phase_code": 2,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "0x1.6006780cfaf97p-4",
+            "pitch": "-0x1.6006780cfaf97p-4",
+            "throttle": "0x1.10624dd2f1aa0p-3",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "stick_cap",
+      "config": {
+        "max_horizontal_stick": 0.04
+      },
+      "inputs": [
+        {
+          "time": 0.0
+        },
+        {
+          "time": 5.0
+        },
+        {
+          "time": 5.6
+        },
+        {
+          "time": 5.7,
+          "position": [
+            -10.0,
+            -10.0,
+            0.1
+          ],
+          "velocity": [
+            -1.0,
+            -1.0,
+            0.0
+          ]
+        },
+        {
+          "time": 5.8,
+          "position": [
+            1.0,
+            1.0,
+            0.1
+          ],
+          "velocity": [
+            1.0,
+            1.0,
+            0.0
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "phase": "ARM",
+          "phase_code": 1,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x0.0p+0",
+            "yaw": "0x0.0p+0",
+            "armed": false,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "ARM",
+          "phase_code": 1,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x0.0p+0",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "TAKEOFF",
+          "phase_code": 2,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x1.0a3d70a3d70a4p-3",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "TAKEOFF",
+          "phase_code": 2,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x1.47ae147ae147bp-5",
+            "pitch": "0x1.47ae147ae147bp-5",
+            "throttle": "0x1.0d4fdf3b645a2p-3",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "TAKEOFF",
+          "phase_code": 2,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "0x1.47ae147ae147bp-5",
+            "pitch": "-0x1.47ae147ae147bp-5",
+            "throttle": "0x1.10624dd2f1aa0p-3",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        }
+      ]
+    },
+    {
+      "name": "velocity_and_launch_xy_dwell_interruptions",
+      "config": {},
+      "inputs": [
+        {
+          "time": 0.0
+        },
+        {
+          "time": 5.0
+        },
+        {
+          "time": 5.6
+        },
+        {
+          "time": 6.0,
+          "position": [
+            0,
+            0,
+            1.8
+          ],
+          "velocity": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "time": 6.4,
+          "position": [
+            0,
+            0,
+            1.8
+          ],
+          "velocity": [
+            0,
+            0,
+            0.21
+          ]
+        },
+        {
+          "time": 6.5,
+          "position": [
+            0,
+            0,
+            1.8
+          ],
+          "velocity": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "time": 6.9,
+          "position": [
+            0.21,
+            0,
+            1.8
+          ],
+          "velocity": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "time": 7.0,
+          "position": [
+            0,
+            0,
+            1.8
+          ],
+          "velocity": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "time": 7.5,
+          "position": [
+            0,
+            0,
+            1.8
+          ],
+          "velocity": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "time": 8.0,
+          "position": [
+            0,
+            0,
+            1.8
+          ],
+          "velocity": [
+            0.19,
+            0,
+            0
+          ]
+        },
+        {
+          "time": 8.1,
+          "position": [
+            0,
+            0,
+            1.8
+          ],
+          "velocity": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "time": 8.25,
+          "position": [
+            0,
+            0,
+            1.8
+          ],
+          "velocity": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "time": 8.85,
+          "position": [
+            0,
+            0,
+            1.8
+          ],
+          "velocity": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "time": 9.0,
+          "position": [
+            6,
+            0,
+            1.8
+          ],
+          "velocity": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "time": 9.9,
+          "position": [
+            6,
+            0,
+            1.8
+          ],
+          "velocity": [
+            0.21,
+            0,
+            0
+          ]
+        },
+        {
+          "time": 10.0,
+          "position": [
+            6,
+            0,
+            1.8
+          ],
+          "velocity": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "time": 11.0,
+          "position": [
+            6,
+            0,
+            1.8
+          ],
+          "velocity": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "expected": [
+        {
+          "phase": "ARM",
+          "phase_code": 1,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x0.0p+0",
+            "yaw": "0x0.0p+0",
+            "armed": false,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "ARM",
+          "phase_code": 1,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x0.0p+0",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "TAKEOFF",
+          "phase_code": 2,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x1.0a3d70a3d70a4p-3",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "TAKEOFF",
+          "phase_code": 2,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x1.999999999999ap-4",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "TAKEOFF",
+          "phase_code": 2,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x1.999999999999ap-4",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "TAKEOFF",
+          "phase_code": 2,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x1.999999999999ap-4",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "TAKEOFF",
+          "phase_code": 2,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x0.0p+0",
+            "pitch": "-0x1.07b49622e42bfp-4",
+            "throttle": "0x1.999999999999ap-4",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "TAKEOFF",
+          "phase_code": 2,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x1.999999999999ap-4",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "HOVER",
+          "phase_code": 3,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x1.0a3d70a3d70a4p-3",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "HOVER",
+          "phase_code": 3,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x0.0p+0",
+            "pitch": "-0x1.54ce25f92451cp-4",
+            "throttle": "0x1.0a3d70a3d70a4p-3",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "HOVER",
+          "phase_code": 3,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x1.0a3d70a3d70a4p-3",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "HOVER",
+          "phase_code": 3,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x1.0a3d70a3d70a4p-3",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "ACQUIRE",
+          "phase_code": 4,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x0.0p+0",
+            "pitch": "0x1.6511c2a4e514ep-2",
+            "throttle": "0x1.0a3d70a3d70a4p-3",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "ACQUIRE",
+          "phase_code": 4,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x1.0a3d70a3d70a4p-3",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "ACQUIRE",
+          "phase_code": 4,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x0.0p+0",
+            "pitch": "-0x1.78a7f2476c07dp-4",
+            "throttle": "0x1.0a3d70a3d70a4p-3",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "ACQUIRE",
+          "phase_code": 4,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x1.0a3d70a3d70a4p-3",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        },
+        {
+          "phase": "HOLD",
+          "phase_code": 5,
+          "failure_reason": null,
+          "braking_active": false,
+          "target": [
+            "0x1.8000000000000p+2",
+            "0x0.0p+0",
+            "0x1.ccccccccccccdp+0"
+          ],
+          "command": {
+            "roll": "-0x0.0p+0",
+            "pitch": "0x0.0p+0",
+            "throttle": "0x1.0a3d70a3d70a4p-3",
+            "yaw": "0x0.0p+0",
+            "armed": true,
+            "angle_mode": true
+          }
+        }
+      ]
+    }
+  ]
+}
