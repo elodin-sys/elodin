@@ -123,6 +123,8 @@ impl Plugin for HeadlessEditorPlugin {
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(crate::plugins::world_mesh::EditorWorldMeshPlugin)
             .add_plugins(crate::rim_glow_material::RimGlowMaterialPlugin);
+        #[cfg(feature = "big_space")]
+        app.add_plugins(crate::plugins::cesium::CesiumPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(crate::plugins::display_kernel::DisplayKernelPlugin);
         app.add_plugins(crate::plugins::scene_environment::SceneEnvironmentPlugin);
@@ -1049,6 +1051,8 @@ fn render_server_runner(mut app: App) -> AppExit {
     let mut encoders = HashMap::new();
     let mut rendered_frames = 0u64;
     let mut render_time = Duration::ZERO;
+    #[cfg(feature = "big_space")]
+    let mut terrain_warmup_ts = None;
 
     loop {
         if let Some(exit) = app.should_exit() {
@@ -1118,6 +1122,30 @@ fn render_server_runner(mut app: App) -> AppExit {
             })
             .map(|schedule| schedule.name.clone())
             .collect();
+
+        #[cfg(feature = "big_space")]
+        let mut render_ts = render_ts;
+        #[cfg(feature = "big_space")]
+        match crate::plugins::cesium::capture_ready(app.world()) {
+            Ok(true) => {
+                if let Some(warmed_ts) = terrain_warmup_ts.take() {
+                    render_ts = warmed_ts;
+                }
+            }
+            Ok(false) => {
+                // Warm one camera pose before following the moving simulation.
+                // Otherwise each update requests new terrain before the initial
+                // selection has finished downloading.
+                let warmup_ts = *terrain_warmup_ts.get_or_insert(render_ts);
+                render_without_emit(&mut app, warmup_ts, &due_names);
+                std::thread::sleep(Duration::from_millis(5));
+                continue;
+            }
+            Err(message) => {
+                tracing::error!("{message}");
+                return AppExit::error();
+            }
+        }
 
         match consume_skybox_emission_gate(&mut app) {
             SkyboxEmissionGate::Ready => {}

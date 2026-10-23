@@ -54,6 +54,7 @@
 
     doCheck = false;
 
+    CESIUM_NATIVE_DIR = pkgs.callPackage ./cesium-native.nix {};
     GIT_HASH = gitRev;
     LIBCLANG_PATH = "${pkgs.buildPackages.libclang.lib}/lib";
 

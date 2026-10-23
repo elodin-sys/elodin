@@ -36,7 +36,12 @@ pub struct EnvScreenshotPlugin;
 impl Plugin for EnvScreenshotPlugin {
     fn build(&self, app: &mut App) {
         if std::env::var("ELODIN_SCREENSHOT").is_ok() {
-            app.add_systems(Update, (stage_screenshot, capture_screenshot).chain());
+            app.add_systems(
+                Update,
+                (stage_screenshot, capture_screenshot)
+                    .chain()
+                    .after(bevy_cesium::CesiumSet::Publish),
+            );
         }
     }
 }
@@ -122,6 +127,8 @@ fn capture_screenshot(
     time: Res<Time>,
     mut state: Local<ScreenshotState>,
     mut exit: MessageWriter<AppExit>,
+    #[cfg(feature = "big_space")] terrain_capture: Option<Res<super::cesium::TerrainCapture>>,
+    #[cfg(feature = "big_space")] terrain_status: Option<Res<bevy_cesium::CesiumStatus>>,
     windows: Query<&WindowState, With<PrimaryWindow>>,
 ) {
     let Ok(out) = std::env::var("ELODIN_SCREENSHOT") else {
@@ -137,6 +144,19 @@ fn capture_screenshot(
                 .unwrap_or(8.0);
             if time.elapsed_secs() < delay {
                 return;
+            }
+            #[cfg(feature = "big_space")]
+            if let Some(capture) = terrain_capture {
+                match capture.ready(terrain_status.as_deref()) {
+                    Ok(true) => {}
+                    Ok(false) => return,
+                    Err(message) => {
+                        error!("{message}");
+                        *state = ScreenshotState::Done;
+                        exit.write(AppExit::error());
+                        return;
+                    }
+                }
             }
             if let Ok(tab) = std::env::var("ELODIN_SCREENSHOT_TAB")
                 && !windows

@@ -147,6 +147,8 @@ with pkgs; let
 
     LLDB_DEBUGSERVER_PATH = lib.optionalString pkgs.stdenv.isDarwin "/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/Resources/debugserver";
 
+    CESIUM_NATIVE_DIR = pkgs.callPackage ./pkgs/cesium-native.nix {};
+
     UV_PYTHON = "${pythonBase}/bin/python3";
 
     # Set up library paths for Linux graphics/audio
