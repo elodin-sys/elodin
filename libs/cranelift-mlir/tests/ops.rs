@@ -4503,6 +4503,31 @@ fn test_convert_i1_to_ui64() {
 }
 
 #[test]
+fn test_convert_i64_to_ui64_above_2_53() {
+    let mlir = r#"module @module {
+  func.func public @main(%arg0: tensor<i64>) -> tensor<ui64> {
+    %0 = stablehlo.convert %arg0 : (tensor<i64>) -> tensor<ui64>
+    return %0 : tensor<ui64>
+  }
+}"#;
+    let value = 9_007_199_254_740_993_i64;
+    let out = run_mlir(mlir, &[&i64_buf(&[value])], &[8]);
+    assert_eq!(read_u64s(&out[0]), vec![value as u64]);
+}
+
+#[test]
+fn test_compare_gt_ui64_unsigned() {
+    let mlir = r#"module @module {
+  func.func public @main(%arg0: tensor<ui64>, %arg1: tensor<ui64>) -> tensor<i1> {
+    %0 = stablehlo.compare GT, %arg0, %arg1, UNSIGNED : (tensor<ui64>, tensor<ui64>) -> tensor<i1>
+    return %0 : tensor<i1>
+  }
+}"#;
+    let out = run_mlir(mlir, &[&u64_buf(&[u64::MAX]), &u64_buf(&[1])], &[1]);
+    assert_eq!(out[0], vec![1]);
+}
+
+#[test]
 fn test_chlo_erf_inv_function_type_syntax() {
     let mlir = r#"module @module {
   func.func public @main(%arg0: tensor<3xf64>) -> tensor<3xf64> {
