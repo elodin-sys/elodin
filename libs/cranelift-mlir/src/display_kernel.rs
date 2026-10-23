@@ -1,8 +1,12 @@
 //! Safe typed executor for UI display kernels compiled from StableHLO.
 
+use std::borrow::Cow;
+
 use crate::const_fold;
+use crate::interp::InterpError;
 use crate::ir::Module;
 use crate::parser;
+use thiserror::Error;
 
 #[cfg(feature = "jit")]
 use crate::lower::{CompiledModule, compile_module};
@@ -19,6 +23,65 @@ enum KernelBackend {
         output_ptrs: Vec<*mut u8>,
     },
     Interp(Module),
+}
+
+/// A buffer mismatch or an interpreter failure while running a display kernel.
+#[derive(Debug, Error)]
+pub enum InvokeError {
+    #[error("expected {expected} inputs, got {actual}")]
+    InputCount { expected: usize, actual: usize },
+
+    #[error("expected {expected} outputs, got {actual}")]
+    OutputCount { expected: usize, actual: usize },
+
+    #[error("input {index} is {actual} bytes, expected {expected}")]
+    InputSize {
+        index: usize,
+        actual: usize,
+        expected: usize,
+    },
+
+    #[error("output {index} is {actual} bytes, expected {expected}")]
+    OutputSize {
+        index: usize,
+        actual: usize,
+        expected: usize,
+    },
+
+    #[error("f64 output is not 8-byte aligned")]
+    MisalignedF64,
+
+    #[error("f32 output is not 4-byte aligned")]
+    MisalignedF32,
+
+    #[error("unsupported display kernel output dtype {dtype}")]
+    UnsupportedOutputDtype { dtype: Cow<'static, str> },
+
+    #[error("batched kernel output is short")]
+    ShortBatchedOutput,
+
+    #[error("kernel output series count mismatch")]
+    OutputSeriesMismatch,
+
+    #[error(transparent)]
+    Interp(#[from] InterpError),
+}
+
+const KNOWN_OUTPUT_DTYPES: &[&str] = &[
+    "f64", "f32", "f16", "i64", "i32", "i16", "i8", "u64", "u32", "u16", "u8", "bool",
+];
+
+impl InvokeError {
+    /// Borrow a known dtype name. Unknown names are owned.
+    pub fn unsupported_output_dtype(dtype: &str) -> Self {
+        let dtype = KNOWN_OUTPUT_DTYPES
+            .iter()
+            .copied()
+            .find(|&known| known == dtype)
+            .map(Cow::Borrowed)
+            .unwrap_or_else(|| Cow::Owned(dtype.to_owned()));
+        Self::UnsupportedOutputDtype { dtype }
+    }
 }
 
 /// Compiled StableHLO module with a checked pointer ABI.
@@ -67,7 +130,11 @@ impl DisplayKernelExec {
         Ok(())
     }
 
-    pub fn invoke(&mut self, inputs: &[&[u8]], outputs: &mut [&mut [u8]]) -> Result<(), String> {
+    pub fn invoke(
+        &mut self,
+        inputs: &[&[u8]],
+        outputs: &mut [&mut [u8]],
+    ) -> Result<(), InvokeError> {
         check_buffers(&self.input_bytes, &self.output_bytes, inputs, outputs)?;
         match &mut self.backend {
             #[cfg(feature = "jit")]
@@ -88,7 +155,10 @@ impl DisplayKernelExec {
                 }
                 Ok(())
             }
-            KernelBackend::Interp(module) => crate::interp::interpret_main(module, inputs, outputs),
+            KernelBackend::Interp(module) => {
+                crate::interp::interpret_main(module, inputs, outputs)?;
+                Ok(())
+            }
         }
     }
 
@@ -159,35 +229,35 @@ fn check_buffers(
     output_bytes: &[usize],
     inputs: &[&[u8]],
     outputs: &mut [&mut [u8]],
-) -> Result<(), String> {
+) -> Result<(), InvokeError> {
     if inputs.len() != input_bytes.len() {
-        return Err(format!(
-            "expected {} inputs, got {}",
-            input_bytes.len(),
-            inputs.len()
-        ));
+        return Err(InvokeError::InputCount {
+            expected: input_bytes.len(),
+            actual: inputs.len(),
+        });
     }
     if outputs.len() != output_bytes.len() {
-        return Err(format!(
-            "expected {} outputs, got {}",
-            output_bytes.len(),
-            outputs.len()
-        ));
+        return Err(InvokeError::OutputCount {
+            expected: output_bytes.len(),
+            actual: outputs.len(),
+        });
     }
     for (index, (buf, expected)) in inputs.iter().zip(input_bytes).enumerate() {
         if buf.len() != *expected {
-            return Err(format!(
-                "input {index} is {} bytes, expected {expected}",
-                buf.len()
-            ));
+            return Err(InvokeError::InputSize {
+                index,
+                actual: buf.len(),
+                expected: *expected,
+            });
         }
     }
     for (index, (buf, expected)) in outputs.iter().zip(output_bytes).enumerate() {
         if buf.len() != *expected {
-            return Err(format!(
-                "output {index} is {} bytes, expected {expected}",
-                buf.len()
-            ));
+            return Err(InvokeError::OutputSize {
+                index,
+                actual: buf.len(),
+                expected: *expected,
+            });
         }
     }
     Ok(())
@@ -270,7 +340,32 @@ module @module {
         let mut exec = DisplayKernelExec::compile(sqrt_mlir(), &[8], &[8]).unwrap();
         let input = [0u8; 4];
         let mut output = [0u8; 8];
-        assert!(exec.invoke(&[&input], &mut [&mut output]).is_err());
+        let err = exec.invoke(&[&input], &mut [&mut output]).unwrap_err();
+        assert!(matches!(
+            err,
+            InvokeError::InputSize {
+                index: 0,
+                actual: 4,
+                expected: 8
+            }
+        ));
+    }
+
+    #[test]
+    fn unsupported_output_dtype_borrows_known_names() {
+        let InvokeError::UnsupportedOutputDtype { dtype } =
+            InvokeError::unsupported_output_dtype("i64")
+        else {
+            panic!("expected unsupported dtype");
+        };
+        assert!(matches!(dtype, Cow::Borrowed("i64")));
+
+        let InvokeError::UnsupportedOutputDtype { dtype } =
+            InvokeError::unsupported_output_dtype("q8")
+        else {
+            panic!("expected unsupported dtype");
+        };
+        assert!(matches!(dtype, Cow::Owned(text) if text == "q8"));
     }
 
     fn packed_cov() -> [f64; 6] {
