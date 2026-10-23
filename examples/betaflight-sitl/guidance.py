@@ -1,18 +1,18 @@
-"""Pure truth-guided standoff controller for the Betaflight SITL example.
+"""Pure mission controller and thin truth adapter for Betaflight SITL.
 
-The controller consumes only the immutable ``TruthGuidanceUpdate`` contract.
-All positions/velocities are ENU, vehicle attitude is scalar-last, and attitude
-sticks use the measured semantic pitch/roll signs from the Package D audit.
+Normal mission inputs are frame-neutral navigation and gate values. The truth
+adapter alone converts ENU/scalar-last truth and validates raw gyro samples.
+Attitude sticks retain the measured semantic signs from the Package D audit.
 """
 
 from __future__ import annotations
 
 import enum
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 
-from controls import GatePose, SemanticControl, TruthGuidanceUpdate, TruthState
+from controls import SemanticControl, TruthGuidanceUpdate
 
 Vec3 = tuple[float, float, float]
 
@@ -121,7 +121,8 @@ class TruthGuidanceConfig:
         for name in positive + nonnegative:
             raw_value = getattr(self, name)
             if isinstance(raw_value, bool):
-                raise ValueError(f"{name} must be a finite number")
+                # Preserve the qualified configuration's public exception type.
+                raise ValueError(f"{name} must be a finite number")  # noqa: TRY004
             value = float(raw_value)
             if not math.isfinite(value) or value < 0.0 or (name in positive and value <= 0.0):
                 polarity = "positive" if name in positive else "non-negative"
@@ -137,12 +138,97 @@ class TruthGuidanceConfig:
             raise ValueError("normalized stick limits must not exceed one")
 
 
+class TrackState(enum.IntEnum):
+    """Public gate tracking codes, shared with future navigation telemetry."""
+
+    TENTATIVE = 1
+    TRACKING = 2
+    COASTING = 3
+    LOST = 4
+
+
+def _finite_vector(values, name: str) -> Vec3:
+    try:
+        result = tuple(float(value) for value in values)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must contain three finite values") from exc
+    if len(result) != 3 or not all(math.isfinite(value) for value in result):
+        raise ValueError(f"{name} must contain three finite values")
+    return result
+
+
+def _finite_scalar(value, name: str) -> float:
+    try:
+        result = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be finite") from exc
+    if not math.isfinite(result):
+        raise ValueError(f"{name} must be finite")
+    return result
+
+
 @dataclass(frozen=True, slots=True)
-class _ControlState:
+class NavState:
+    """Body origin, velocity and heading in one gravity-aligned frame.
+
+    Position/velocity are metres and metres/second; yaw and body-z gyro rate
+    are radians and radians/second. Inputs are copied to immutable finite values.
+    """
+
     position: Vec3
     velocity: Vec3
     yaw: float
     yaw_rate: float
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "position", _finite_vector(self.position, "position"))
+        object.__setattr__(self, "velocity", _finite_vector(self.velocity, "velocity"))
+        object.__setattr__(self, "yaw", _finite_scalar(self.yaw, "yaw"))
+        object.__setattr__(self, "yaw_rate", _finite_scalar(self.yaw_rate, "yaw_rate"))
+
+
+@dataclass(frozen=True, slots=True)
+class GateTarget:
+    """Gate geometry in the navigation frame, plus observational track metadata.
+
+    E1 latches the first target and preserves E's hold behavior. Track and age
+    carry the Section 7.9 contract but do not yet change the phase machine.
+    """
+
+    index: int
+    center: Vec3
+    yaw: float
+    inner_size: float
+    track: TrackState
+    age: float
+
+    def __post_init__(self) -> None:
+        if isinstance(self.index, bool) or not isinstance(self.index, int) or self.index < 0:
+            raise ValueError("gate index must be a non-negative integer")
+        object.__setattr__(self, "center", _finite_vector(self.center, "center"))
+        object.__setattr__(self, "yaw", _finite_scalar(self.yaw, "yaw"))
+        size = _finite_scalar(self.inner_size, "inner_size")
+        age = _finite_scalar(self.age, "age")
+        if size <= 0.0:
+            raise ValueError("inner_size must be positive")
+        if age < 0.0:
+            raise ValueError("age must be non-negative")
+        if not isinstance(self.track, TrackState):
+            raise TypeError("track must be a TrackState")
+        object.__setattr__(self, "inner_size", size)
+        object.__setattr__(self, "age", age)
+
+    @property
+    def normal(self) -> Vec3:
+        return (math.cos(self.yaw), math.sin(self.yaw), 0.0)
+
+    def to_local(self, position: Vec3) -> Vec3:
+        dx = float(position[0]) - self.center[0]
+        dy = float(position[1]) - self.center[1]
+        dz = float(position[2]) - self.center[2]
+        cosine = math.cos(self.yaw)
+        sine = math.sin(self.yaw)
+        return (cosine * dx + sine * dy, -sine * dx + cosine * dy, dz)
 
 
 def _dot(a: Vec3, b: Vec3) -> float:
@@ -180,12 +266,12 @@ def _yaw_from_xyzw(quaternion: tuple[float, float, float, float]) -> float:
     return math.atan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
 
 
-class TruthGuidance:
-    """Deterministic ARM→TAKEOFF→HOVER→ACQUIRE→HOLD truth controller.
+class MissionController:
+    """Deterministic ARM→TAKEOFF→HOVER→ACQUIRE→HOLD mission controller.
 
-    The first gate pose is latched once and is never retargeted. Race progress
-    can therefore signal an unexpected pass, but can never advance this E
-    controller to a later gate or a commit phase.
+    Normal updates use only NavState, GateTarget, simulation time and public
+    race progress. The first target is latched; retargeting and track-dependent
+    behavior are deliberately not part of E1.
     """
 
     def __init__(self, config: TruthGuidanceConfig | None = None):
@@ -194,11 +280,11 @@ class TruthGuidance:
         self.phase_started_at: float | None = None
         self.failure_reason: str | None = None
         self.braking_active = False
-        self._gate: GatePose | None = None
+        self._gate: GateTarget | None = None
         self._target: Vec3 | None = None
         self._launch_position: Vec3 | None = None
         self._target_altitude: float | None = None
-        self._last_valid_state: TruthState | None = None
+        self._last_valid_state: NavState | None = None
         self._last_time: float | None = None
         self._dwell_since: float | None = None
         self._arm_requested_at: float | None = None
@@ -212,168 +298,197 @@ class TruthGuidance:
         return int(self.phase)
 
     @property
-    def target_enu(self) -> Vec3 | None:
+    def target(self) -> Vec3 | None:
         return self._target
 
-    def update(self, update: TruthGuidanceUpdate) -> SemanticControl:
-        """Advance from one immutable update and return bounded semantic RC intent."""
+    @property
+    def gate_target(self) -> GateTarget | None:
+        return self._gate
 
-        if not math.isfinite(update.sim_time) or update.sim_time < 0.0:
+    @property
+    def last_valid_nav(self) -> NavState | None:
+        """Last accepted normal feedback; rejected updates never replace it."""
+
+        return self._last_valid_state
+
+    def _accept_time(self, sim_time: float) -> bool:
+        if not math.isfinite(sim_time) or sim_time < 0.0:
             self._enter_fault("invalid_sim_time", self._last_time)
-            return self._fault_control(update)
-        if self._last_time is not None and update.sim_time < self._last_time:
+            return False
+        if self._last_time is not None and sim_time < self._last_time:
             self._enter_fault("nonmonotonic_sim_time", self._last_time)
-            return self._fault_control(update)
-        self._last_time = update.sim_time
+            return False
+        self._last_time = sim_time
+        return True
 
-        truth = update.truth_state
-        if truth is None or not self._valid_sensor_rate(update):
-            self._enter_fault("invalid_truth", update.sim_time)
-            return self._fault_control(update)
-        self._last_valid_state = truth
+    def reject_update(
+        self, sim_time: float, reason: str, feedback_nav: NavState | None
+    ) -> SemanticControl:
+        """Reject an adapter input without accepting a new last-valid snapshot.
+
+        Error ingress is separate from normal mission inputs. Optional generic
+        feedback may still control the fault hold. Time errors take priority;
+        the first fault reason/target remains latched. Adapters must not pass
+        raw truth, sensor arrays or I/O here.
+        """
+
+        if self._accept_time(sim_time):
+            self._enter_fault(reason, sim_time)
+        return self._fault_control(feedback_nav)
+
+    def update(
+        self,
+        sim_time: float,
+        nav: NavState | None,
+        gate: GateTarget | None,
+        *,
+        last_gate_passed: int = -1,
+        next_gate_index: int | None = None,
+        gate_count: int = 0,
+    ) -> SemanticControl:
+        """Advance one tick. E1 observes passes but never retargets to progress."""
+
+        if not self._accept_time(sim_time):
+            return self._fault_control(nav)
+        if nav is None:
+            self._enter_fault("invalid_truth", sim_time)  # Stable Package E reason.
+            return self._fault_control(nav)
+        self._last_valid_state = nav
         if self.phase_started_at is None:
-            self.phase_started_at = update.sim_time
+            self.phase_started_at = sim_time
         if self._gate is None:
-            if not update.gate_poses:
-                self._enter_fault("missing_gate", update.sim_time)
-                return self._fault_control(update)
-            self._gate = update.gate_poses[0]
+            if gate is None:
+                self._enter_fault("missing_gate", sim_time)
+                return self._fault_control(nav)
+            self._gate = gate
             self._target = self._standoff_target(self._gate, self.config.standoff_distance_m)
-            self._launch_position = truth.position_enu
-            self._target_altitude = self._gate.center_enu[2]
+            self._launch_position = nav.position
+            self._target_altitude = self._gate.center[2]
 
-        local_x = self._gate.world_to_local(truth.position_enu)[0]
+        local_x = self._gate.to_local(nav.position)[0]
         crossed = self._crossed_forward_plane(self._previous_gate_local_x, local_x)
         self._previous_gate_local_x = local_x
-        if crossed or update.last_gate_passed >= 0:
-            self._enter_fault("gate_crossing", update.sim_time)
+        if crossed or last_gate_passed >= 0:
+            self._enter_fault("gate_crossing", sim_time)
         if self.phase is GuidancePhase.FAULT:
-            return self._fault_control(update)
+            return self._fault_control(nav)
 
         if self.phase is GuidancePhase.ARM:
-            if update.sim_time < self.config.boot_grace_s:
+            if sim_time < self.config.boot_grace_s:
                 return SemanticControl.safe()
             self._arm_requested = True
             if self._arm_requested_at is None:
-                self._arm_requested_at = update.sim_time
+                self._arm_requested_at = sim_time
             # ARM sequencing is simulation-time deterministic. Actual exchanged
             # command/lockstep/motor evidence belongs only to the host grader.
-            if update.sim_time - self._arm_requested_at + 1.0e-12 >= self.config.arm_settle_s:
-                self._transition(GuidancePhase.TAKEOFF, update.sim_time)
-            elif update.sim_time - (self.phase_started_at or 0.0) >= self.config.arm_timeout_s:
+            if sim_time - self._arm_requested_at + 1.0e-12 >= self.config.arm_settle_s:
+                self._transition(GuidancePhase.TAKEOFF, sim_time)
+            elif sim_time - (self.phase_started_at or 0.0) >= self.config.arm_timeout_s:
                 self._arm_requested = False
-                self._enter_fault("arm_timeout", update.sim_time)
-                return self._fault_control(update)
+                self._enter_fault("arm_timeout", sim_time)
+                return self._fault_control(nav)
             else:
                 return SemanticControl(armed=True, angle_mode=True)
 
-        state = self._control_state(truth, update.gyro)
+        state = nav
         if self.phase is GuidancePhase.TAKEOFF:
-            elapsed = max(0.0, update.sim_time - (self.phase_started_at or update.sim_time))
+            elapsed = max(0.0, sim_time - (self.phase_started_at or sim_time))
             altitude_setpoint = min(
                 self._target_altitude,
                 self._launch_position[2] + self.config.takeoff_climb_rate_mps * elapsed,
             )
             launch_xy_error = math.hypot(
-                self._launch_position[0] - truth.position_enu[0],
-                self._launch_position[1] - truth.position_enu[1],
+                self._launch_position[0] - nav.position[0],
+                self._launch_position[1] - nav.position[1],
             )
             if (
-                abs(self._target_altitude - truth.position_enu[2])
+                abs(self._target_altitude - nav.position[2])
                 <= self.config.takeoff_position_tolerance_m
-                and abs(truth.velocity_enu[2]) <= self.config.takeoff_velocity_tolerance_mps
+                and abs(nav.velocity[2]) <= self.config.takeoff_velocity_tolerance_mps
                 and launch_xy_error <= self.config.takeoff_position_tolerance_m
             ):
-                if self._dwell(update.sim_time, self.config.takeoff_dwell_s):
-                    self._transition(GuidancePhase.HOVER, update.sim_time)
+                if self._dwell(sim_time, self.config.takeoff_dwell_s):
+                    self._transition(GuidancePhase.HOVER, sim_time)
             else:
                 self._dwell_since = None
             if self.phase is GuidancePhase.TAKEOFF and elapsed >= self.config.takeoff_timeout_s:
-                self._enter_fault("takeoff_timeout", update.sim_time)
+                self._enter_fault("takeoff_timeout", sim_time)
             if self.phase is GuidancePhase.TAKEOFF:
                 return self._position_control(
                     state,
                     self._launch_position,
                     altitude_setpoint,
-                    self._gate.yaw_rad,
+                    self._gate.yaw,
                 )
 
         if self.phase is GuidancePhase.HOVER:
             launch_xy_error = math.hypot(
-                self._launch_position[0] - truth.position_enu[0],
-                self._launch_position[1] - truth.position_enu[1],
+                self._launch_position[0] - nav.position[0],
+                self._launch_position[1] - nav.position[1],
             )
-            altitude_error = abs(self._target_altitude - truth.position_enu[2])
+            altitude_error = abs(self._target_altitude - nav.position[2])
             if (
                 launch_xy_error <= self.config.hover_position_tolerance_m
                 and altitude_error <= self.config.hover_position_tolerance_m
-                and _norm(truth.velocity_enu) <= self.config.hover_velocity_tolerance_mps
+                and _norm(nav.velocity) <= self.config.hover_velocity_tolerance_mps
             ):
-                if self._dwell(update.sim_time, self.config.hover_dwell_s):
-                    self._transition(GuidancePhase.ACQUIRE, update.sim_time)
+                if self._dwell(sim_time, self.config.hover_dwell_s):
+                    self._transition(GuidancePhase.ACQUIRE, sim_time)
             else:
                 self._dwell_since = None
-            elapsed = update.sim_time - (self.phase_started_at or update.sim_time)
+            elapsed = sim_time - (self.phase_started_at or sim_time)
             if self.phase is GuidancePhase.HOVER and elapsed >= self.config.hover_timeout_s:
-                self._enter_fault("hover_timeout", update.sim_time)
+                self._enter_fault("hover_timeout", sim_time)
             if self.phase is GuidancePhase.HOVER:
                 return self._position_control(
                     state,
                     self._launch_position,
                     self._target_altitude,
-                    self._gate.yaw_rad,
+                    self._gate.yaw,
                 )
 
         if self.phase is GuidancePhase.ACQUIRE:
-            target_error = _sub(self._target, truth.position_enu)
+            target_error = _sub(self._target, nav.position)
             if (
                 _norm(target_error) <= self.config.acquire_position_tolerance_m
-                and _norm(truth.velocity_enu) <= self.config.acquire_velocity_tolerance_mps
+                and _norm(nav.velocity) <= self.config.acquire_velocity_tolerance_mps
             ):
-                if self._dwell(update.sim_time, self.config.acquire_dwell_s):
-                    self._transition(GuidancePhase.HOLD, update.sim_time)
+                if self._dwell(sim_time, self.config.acquire_dwell_s):
+                    self._transition(GuidancePhase.HOLD, sim_time)
             else:
                 self._dwell_since = None
-            elapsed = update.sim_time - (self.phase_started_at or update.sim_time)
+            elapsed = sim_time - (self.phase_started_at or sim_time)
             if self.phase is GuidancePhase.ACQUIRE and elapsed >= self.config.acquire_timeout_s:
-                self._enter_fault("acquire_timeout", update.sim_time)
+                self._enter_fault("acquire_timeout", sim_time)
             if self.phase is GuidancePhase.ACQUIRE:
                 return self._position_control(
                     state,
                     self._target,
                     self._target_altitude,
-                    self._gate.yaw_rad,
+                    self._gate.yaw,
                 )
 
         if self.phase is GuidancePhase.HOLD:
-            elapsed = update.sim_time - (self.phase_started_at or update.sim_time)
+            elapsed = sim_time - (self.phase_started_at or sim_time)
             if elapsed >= self.config.hold_timeout_s:
-                self._enter_fault("hold_timeout", update.sim_time)
+                self._enter_fault("hold_timeout", sim_time)
             else:
                 return self._position_control(
                     state,
                     self._target,
                     self._target_altitude,
-                    self._gate.yaw_rad,
+                    self._gate.yaw,
                 )
 
-        return self._fault_control(update)
+        return self._fault_control(nav)
 
     @staticmethod
-    def _valid_sensor_rate(update: TruthGuidanceUpdate) -> bool:
-        gyro = update.gyro
-        return bool(
-            getattr(gyro, "shape", None) == (3,)
-            and all(math.isfinite(float(value)) for value in gyro)
-        )
-
-    @staticmethod
-    def _standoff_target(gate: GatePose, distance: float = 4.0) -> Vec3:
-        normal = gate.normal_enu
+    def _standoff_target(gate: GateTarget, distance: float = 4.0) -> Vec3:
+        normal = gate.normal
         return (
-            gate.center_enu[0] - distance * normal[0],
-            gate.center_enu[1] - distance * normal[1],
-            gate.center_enu[2],
+            gate.center[0] - distance * normal[0],
+            gate.center[1] - distance * normal[1],
+            gate.center[2],
         )
 
     @staticmethod
@@ -388,8 +503,8 @@ class TruthGuidance:
     def _enter_fault(self, reason: str, sim_time: float | None) -> None:
         if self.phase is not GuidancePhase.FAULT:
             if self._last_valid_state is not None:
-                self._fault_target = self._last_valid_state.position_enu
-                self._fault_altitude = self._last_valid_state.position_enu[2]
+                self._fault_target = self._last_valid_state.position
+                self._fault_altitude = self._last_valid_state.position[2]
             else:
                 self._fault_target = self._launch_position
                 self._fault_altitude = self._target_altitude
@@ -403,35 +518,22 @@ class TruthGuidance:
             self._dwell_since = sim_time
         return sim_time - self._dwell_since + 1.0e-12 >= duration
 
-    def _control_state(self, truth: TruthState, gyro) -> _ControlState:
-        yaw_rate = float(gyro[2])
-        if not math.isfinite(yaw_rate):
-            yaw_rate = 0.0
-        return _ControlState(
-            position=truth.position_enu,
-            velocity=truth.velocity_enu,
-            yaw=_yaw_from_xyzw(truth.orientation_xyzw),
-            yaw_rate=yaw_rate,
-        )
-
-    def _fault_control(self, update: TruthGuidanceUpdate) -> SemanticControl:
-        truth = update.truth_state or self._last_valid_state
-        if truth is None or not self._arm_requested:
+    def _fault_control(self, nav: NavState | None) -> SemanticControl:
+        state = nav or self._last_valid_state
+        if state is None or not self._arm_requested:
             return SemanticControl.safe()
         if self._gate is None or self._target is None or self._launch_position is None:
             return SemanticControl(armed=True, angle_mode=True)
-        gyro = update.gyro if self._valid_sensor_rate(update) else (0.0, 0.0, 0.0)
-        state = self._control_state(truth, gyro)
         return self._position_control(
             state,
             self._fault_target if self._fault_target is not None else self._target,
             self._fault_altitude if self._fault_altitude is not None else self._target_altitude,
-            self._gate.yaw_rad,
+            self._gate.yaw,
         )
 
     def _position_control(
         self,
-        state: _ControlState,
+        state: NavState,
         target: Vec3,
         altitude_setpoint: float,
         yaw_setpoint: float,
@@ -450,8 +552,8 @@ class TruthGuidance:
 
         gate = self._gate
         if gate is not None:
-            local_x = gate.world_to_local(state.position)[0]
-            forward_velocity = _dot(state.velocity, gate.normal_enu)
+            local_x = gate.to_local(state.position)[0]
+            forward_velocity = _dot(state.velocity, gate.normal)
             distance_to_plane = -local_x
             stopping_distance = (
                 max(0.0, forward_velocity) ** 2 / (2.0 * self.config.gate_brake_accel_mps2)
@@ -461,7 +563,7 @@ class TruthGuidance:
             if local_x >= -self.config.gate_safety_slab_m or (
                 local_x < 0.0 and distance_to_plane <= stopping_distance
             ):
-                forward_acceleration = _dot(acceleration, gate.normal_enu)
+                forward_acceleration = _dot(acceleration, gate.normal)
                 if forward_velocity > 0.05:
                     forward_acceleration = min(
                         forward_acceleration,
@@ -474,8 +576,8 @@ class TruthGuidance:
                     forward_acceleration = min(0.0, forward_acceleration)
                 acceleration = _add_scaled(
                     acceleration,
-                    gate.normal_enu,
-                    forward_acceleration - _dot(acceleration, gate.normal_enu),
+                    gate.normal,
+                    forward_acceleration - _dot(acceleration, gate.normal),
                 )
                 self.braking_active = True
 
@@ -521,9 +623,101 @@ class TruthGuidance:
         )
 
 
+class TruthGuidance:
+    """Per-tick truth/gyro adapter; all mission and control logic is shared.
+
+    The controller latches the converted gate_poses[0], irrespective of progress.
+    Rejected samples retain E's unusual but qualified feedback rule: use current
+    truth when present, otherwise the last accepted pose/velocity/yaw, always
+    with CURRENT valid gyro (or zero for any malformed gyro). NavState|None alone
+    cannot carry that current rate when truth is missing. reject_update supplies
+    generic feedback without accepting it as a new last-valid fault snapshot.
+    """
+
+    def __init__(self, config: TruthGuidanceConfig | None = None):
+        self.controller = MissionController(config)
+
+    @property
+    def config(self) -> TruthGuidanceConfig:
+        return self.controller.config
+
+    @property
+    def phase(self) -> GuidancePhase:
+        return self.controller.phase
+
+    @property
+    def phase_code(self) -> int:
+        return self.controller.phase_code
+
+    @property
+    def phase_started_at(self) -> float | None:
+        return self.controller.phase_started_at
+
+    @property
+    def failure_reason(self) -> str | None:
+        return self.controller.failure_reason
+
+    @property
+    def braking_active(self) -> bool:
+        return self.controller.braking_active
+
+    @property
+    def target_enu(self) -> Vec3 | None:
+        return self.controller.target
+
+    @staticmethod
+    def _valid_sensor_rate(update: TruthGuidanceUpdate) -> bool:
+        gyro = update.gyro
+        return bool(
+            getattr(gyro, "shape", None) == (3,)
+            and all(math.isfinite(float(value)) for value in gyro)
+        )
+
+    def update(self, update: TruthGuidanceUpdate) -> SemanticControl:
+        valid_rate = self._valid_sensor_rate(update)
+        yaw_rate = float(update.gyro[2]) if valid_rate else 0.0
+        truth = update.truth_state
+        if truth is not None:
+            nav = NavState(
+                truth.position_enu,
+                truth.velocity_enu,
+                _yaw_from_xyzw(truth.orientation_xyzw),
+                yaw_rate,
+            )
+        else:
+            previous = self.controller.last_valid_nav
+            nav = replace(previous, yaw_rate=yaw_rate) if previous is not None else None
+        if truth is None or not valid_rate:
+            return self.controller.reject_update(update.sim_time, "invalid_truth", nav)
+
+        gate = self.controller.gate_target
+        if gate is None and update.gate_poses:
+            first = update.gate_poses[0]
+            gate = GateTarget(
+                first.index,
+                first.center_enu,
+                first.yaw_rad,
+                first.inner_size_m,
+                TrackState.TRACKING,
+                0.0,
+            )
+        return self.controller.update(
+            update.sim_time,
+            nav,
+            gate,
+            last_gate_passed=update.last_gate_passed,
+            next_gate_index=update.next_gate_index,
+            gate_count=update.gate_count,
+        )
+
+
 __all__ = [
     "GUIDANCE_PHASE_NAMES",
+    "GateTarget",
     "GuidancePhase",
+    "MissionController",
+    "NavState",
+    "TrackState",
     "TruthGuidance",
     "TruthGuidanceConfig",
     "wrap_to_pi",
