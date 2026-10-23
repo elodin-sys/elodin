@@ -3,16 +3,49 @@
 Typed elodin.ui translation of bdx.kdl.
 """
 
-# The static terrain and optional atlas share the simulation's Mojave ECEF origin.
-# Cinematic Earth remains exclusive to the render-server FPV camera.
+# BDX RC jet ECEF scene over the Mojave RC field.
+#
+# Site (baked): pilot pad 35.350664 N, 117.809027 W, ellipsoid height
+# 589.274 m — also the mojave_rc_field region center, so ENU east/north
+# are zero. Physics uses that ellipsoid height; world_mesh +Z (below)
+# lifts the planar DEM onto that pad. Chase / TGT / top-down
+# ECEF offsets keep the same local-ENU geometry as the Death Valley
+# scene at heading 350°.
+#
+# Cinematic Earth lives on the RGB sensor.
+# The Boson-style LWIR camera
+# uses this terrain through a normal off-screen view plus its final sensor pass.
+# Planar TerrainModel: y=0 at region min (450 m), then Y -= 0.4*(max-min)
+# = 700 m. Pad DEM ≈ 621.5 m orthometric, so
+# tz = 700 - (621.5 - 450) ≈ 528 puts the mesh on the ENU origin
+# (physics ellipsoid 589.274 m). Align surfaces; do not add the ~32 m geoid.
+# ECEF pose: the gauge derives the local vertical from the
+# vehicle's own position (ellipsoid normal).
+# Package render mesh: already Elodin body (X forward, Y left, Z up, CG
+# origin). Absolute ECEF identity would map those axes onto ECEF, so do
+# not add a glTF Y-up lift — assets/bdx.glb is hash-checked by the tests.
+
+import os
 
 import elodin.ui as ui
-from terrain_schematic import terrain
 
 
 def build() -> ui.Schematic:
+    cesium_terrain = os.environ.get("ELODIN_RC_JET_TERRAIN") == "cesium"
+    terrain = (
+        []
+        if cesium_terrain
+        else [
+            ui.world_mesh(
+                "mojave_rc_field",
+                translate=(0.0, 0.0, 528.0),
+                frame="ENU",
+                visible=True,
+            )
+        ]
+    )
     return ui.schematic(
-        terrain(),
+        *terrain,
         ui.tabs(
             ui.hsplit(
                 ui.vsplit(
@@ -33,6 +66,7 @@ def build() -> ui.Schematic:
                 ),
                 ui.viewport(
                     name="Chase",
+                    ev100=12.0 if cesium_terrain else None,
                     fov=45.0,
                     near=1.0,
                     active=True,
@@ -55,6 +89,7 @@ def build() -> ui.Schematic:
                 ui.vsplit(
                     ui.viewport(
                         name="TGTViewport",
+                        ev100=12.0 if cesium_terrain else None,
                         fov=45.0,
                         active=False,
                         show_grid=False,
@@ -74,6 +109,7 @@ def build() -> ui.Schematic:
                     ),
                     ui.viewport(
                         name="FPVViewport",
+                        ev100=12.0 if cesium_terrain else None,
                         fov=45.0,
                         active=False,
                         show_grid=False,
@@ -187,6 +223,7 @@ def build() -> ui.Schematic:
             ui.hsplit(
                 ui.viewport(
                     name="Top-Down View",
+                    ev100=12.0 if cesium_terrain else None,
                     fov=60.0,
                     active=False,
                     show_grid=False,
@@ -343,6 +380,12 @@ def build() -> ui.Schematic:
             range="last_30s",
         ),
         telemetry_mode=True,
+        environment=ui.environment(
+            sun=ui.sun(azimuth=135.0, elevation=35.0, illuminance=20000.0, shadows=True),
+            ambient=0.25,
+        )
+        if cesium_terrain
+        else None,
     )
 
 

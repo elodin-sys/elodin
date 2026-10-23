@@ -87,8 +87,18 @@ def setup_world(
         ),
         name="target",
     )
-    world.thermal_tag(target, temperature_c=18.0, emissivity=0.92)
+    # Re-enable the zoomed IR sensor after its Cesium loading cost is addressed.
+    infrared_enabled = os.environ.get("ELODIN_RC_JET_TERRAIN") != "cesium"
+    add_sensor_cameras(world, jet, target, infrared_enabled=infrared_enabled)
 
+    world.schematic(build_schematic(), "bdx.kdl")
+    return world, jet, target
+
+
+def add_sensor_cameras(
+    world: el.World, jet: el.EntityId, target: el.EntityId, *, infrared_enabled: bool
+) -> None:
+    world.thermal_tag(target, temperature_c=18.0, emissivity=0.92)
     world.sensor_camera(
         entity=jet,
         name="fpv_cam",
@@ -96,6 +106,8 @@ def setup_world(
         height=480,
         fov=90.0,
         fps=30.0,
+        # Compress the live Cesium preview instead of storing gigabytes of raw frames.
+        format="h264" if os.environ.get("ELODIN_RC_JET_TERRAIN") == "cesium" else "rgba",
         near=0.1,
         # Far plane must cover the terrain and horizon at altitude. Frustum
         # visualization shares this far plane, so keep create_frustum off.
@@ -115,22 +127,20 @@ def setup_world(
             "earth": True,
         },
     )
-    world.sensor_camera(
-        entity=jet,
-        name="ir_cam",
-        camera_model="boson640p",
-        lens_hfov=18.0,
-        effect="lwir",
-        format="gray8",
-        near=0.1,
-        far=100_000.0,
-        pos_offset=[1.2, 0.0, 0.1],
-        rot_offset=[0.0, 0.0, 0.0],
-        create_frustum=False,
-    )
-
-    world.schematic(build_schematic(), "bdx.kdl")
-    return world, jet, target
+    if infrared_enabled:
+        world.sensor_camera(
+            entity=jet,
+            name="ir_cam",
+            camera_model="boson640p",
+            lens_hfov=18.0,
+            effect="lwir",
+            format="gray8",
+            near=0.1,
+            far=100_000.0,
+            pos_offset=[1.2, 0.0, 0.1],
+            rot_offset=[0.0, 0.0, 0.0],
+            create_frustum=False,
+        )
 
 
 def _run_max_ticks() -> int | None:
@@ -165,7 +175,7 @@ print(
     f"field elevation {SCENARIO.site.field_elevation_m:.0f} m"
 )
 print(
-    f"  altitude: {SCENARIO.altitude_m:.0f} m MSL, TAS {SCENARIO.tas_mps:.1f} m/s, "
+    f"  altitude: {SCENARIO.altitude_m:.0f} m above WGS84 ellipsoid, TAS {SCENARIO.tas_mps:.1f} m/s, "
     f"heading {SCENARIO.heading_deg:.0f} deg"
 )
 print(
@@ -209,7 +219,10 @@ else:
         ready=el.s10.Ready.delay(100),
         ready_timeout="120s",
     )
-world.recipe(controller)
+# Keep the scenario's trim commands for unattended captures. The interactive
+# controller reads global keyboard state, including typing in other applications.
+if os.environ.get("ELODIN_NON_INTERACTIVE") != "1":
+    world.recipe(controller)
 
 world.run(
     sim_system,
