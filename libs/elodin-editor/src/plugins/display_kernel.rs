@@ -6,7 +6,7 @@ use web_time::{Duration, Instant};
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use cranelift_mlir::display_kernel::DisplayKernelExec;
+use cranelift_mlir::display_kernel::{DisplayKernelExec, InvokeError};
 use impeller::types::{ComponentId, Timestamp};
 use impeller_bevy::{ConnectionAddr, EntityMap, TelemetryCache};
 use impeller_wkt::{
@@ -177,21 +177,20 @@ pub fn current_kernel_inputs(
 pub fn invoke_scalar(
     compiled: &mut CompiledDisplayKernel,
     inputs: &[Vec<u8>],
-) -> Result<Vec<Vec<u8>>, String> {
-    let expected = compiled.artifact.input_nbytes(false)?;
+) -> Result<Vec<Vec<u8>>, InvokeError> {
+    let expected = compiled.scalar.input_bytes();
     if inputs.len() != expected.len() {
-        return Err(format!(
-            "expected {} scalar inputs, got {}",
-            expected.len(),
-            inputs.len()
-        ));
+        return Err(InvokeError::InputCount {
+            expected: expected.len(),
+            actual: inputs.len(),
+        });
     }
     let input_refs: Vec<&[u8]> = inputs.iter().map(Vec::as_slice).collect();
     let mut outputs: Vec<Vec<u8>> = compiled
-        .artifact
-        .output_nbytes(false)?
-        .into_iter()
-        .map(|len| vec![0u8; len])
+        .scalar
+        .output_bytes()
+        .iter()
+        .map(|len| vec![0u8; *len])
         .collect();
     let mut output_refs: Vec<&mut [u8]> = outputs.iter_mut().map(Vec::as_mut_slice).collect();
     compiled.scalar.invoke(&input_refs, &mut output_refs)?;
@@ -205,7 +204,7 @@ pub fn evaluate_kernel_series(
     binding: &DisplayKernelBinding,
     range: std::ops::Range<Timestamp>,
     max_points: Option<usize>,
-) -> Result<EvaluatedSeries, String> {
+) -> Result<EvaluatedSeries, InvokeError> {
     let input_ids: Vec<ComponentId> = binding
         .inputs
         .iter()
@@ -224,9 +223,9 @@ pub fn evaluate_kernel_series(
         .unwrap_or(1)
         .max(1);
     let batch_size = compiled.artifact.batch_size as usize;
-    let input_sizes = compiled.artifact.input_nbytes(false)?;
-    let batched_in = compiled.artifact.input_nbytes(true)?;
-    let batched_out = compiled.artifact.output_nbytes(true)?;
+    let input_sizes = compiled.scalar.input_bytes().to_vec();
+    let batched_in = compiled.batched.input_bytes().to_vec();
+    let batched_out = compiled.batched.output_bytes().to_vec();
 
     let mut timestamps = Vec::new();
     let mut packed_inputs: Vec<Vec<Vec<u8>>> = vec![Vec::new(); compiled.artifact.inputs.len()];
@@ -305,12 +304,12 @@ pub fn evaluate_kernel_series(
     Ok(EvaluatedSeries { timestamps, values })
 }
 
-pub fn output_floats(bytes: &[u8], dtype: &str) -> Result<Vec<f64>, String> {
+pub fn output_floats(bytes: &[u8], dtype: &str) -> Result<Vec<f64>, InvokeError> {
     match dtype {
         "f64" => {
             let (chunks, rest) = bytes.as_chunks::<8>();
             if !rest.is_empty() {
-                return Err("f64 output is not 8-byte aligned".into());
+                return Err(InvokeError::MisalignedF64);
             }
             Ok(chunks
                 .iter()
@@ -320,14 +319,14 @@ pub fn output_floats(bytes: &[u8], dtype: &str) -> Result<Vec<f64>, String> {
         "f32" => {
             let (chunks, rest) = bytes.as_chunks::<4>();
             if !rest.is_empty() {
-                return Err("f32 output is not 4-byte aligned".into());
+                return Err(InvokeError::MisalignedF32);
             }
             Ok(chunks
                 .iter()
                 .map(|&chunk| f32::from_le_bytes(chunk) as f64)
                 .collect())
         }
-        other => Err(format!("unsupported display kernel output dtype {other}")),
+        other => Err(InvokeError::unsupported_output_dtype(other)),
     }
 }
 
@@ -529,10 +528,11 @@ fn unpack_batched_outputs(
     out_bufs: &[Vec<u8>],
     chunk_len: usize,
     values: &mut [Vec<f32>],
-) -> Result<(), String> {
+) -> Result<(), InvokeError> {
     let mut series = 0;
     for (index, tensor) in artifact.outputs.iter().enumerate() {
-        let width = impeller_wkt::dtype_width(&tensor.dtype)?;
+        let width = impeller_wkt::dtype_width(&tensor.dtype)
+            .map_err(|_| InvokeError::unsupported_output_dtype(&tensor.dtype))?;
         let elems = tensor
             .shape
             .iter()
@@ -545,10 +545,10 @@ fn unpack_batched_outputs(
             let sample = out_bufs
                 .get(index)
                 .and_then(|buf| buf.get(start..end))
-                .ok_or_else(|| "batched kernel output is short".to_string())?;
+                .ok_or(InvokeError::ShortBatchedOutput)?;
             let floats = output_floats(sample, &tensor.dtype)?;
             if series + floats.len() > values.len() {
-                return Err("kernel output series count mismatch".into());
+                return Err(InvokeError::OutputSeriesMismatch);
             }
             for (offset, value) in floats.iter().enumerate() {
                 values[series + offset].push(*value as f32);
