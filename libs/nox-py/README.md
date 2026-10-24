@@ -883,3 +883,12 @@ exec.history(["drone.world_pos", "drone.imu.accel", "drone.motors.0.rpm"])
 ## License
 
 See the repository's LICENSE file for details.
+
+## Terrain heights
+
+`el.terrain_heightmap(center_ecef, dimensions, spacing)` prepares a cached Cesium
+height grid before simulation. `terrain.sample(position_ecef)` returns WGS84
+ellipsoid height, an ECEF surface normal and a validity flag using JAX only.
+It does not choose a collision response. See the
+[Python API](../../docs/public/content/reference/python-api.md#terrain-heights)
+for units, offline replay and coverage limits.

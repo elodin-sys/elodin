@@ -25,9 +25,6 @@ export CESIUM_ION_ASSET_ID="${CESIUM_ION_ASSET_ID:-1}"
 export CESIUM_ION_IMAGERY_ASSET_ID="${CESIUM_ION_IMAGERY_ASSET_ID:-2}"
 export ELODIN_ASSETS="${ELODIN_ASSETS:-$PWD/assets}"
 export ELODIN_RC_JET_TERRAIN=cesium
-# Fly toward the valley; the original northwestern route enters the mountains.
-# Ground contact still uses the reference field elevation, not Cesium heights.
-export ELODIN_RC_JET_HEADING_DEG="${ELODIN_RC_JET_HEADING_DEG:-45}"
 export CESIUM_LOD_RETENTION_METERS="${CESIUM_LOD_RETENTION_METERS:-500}"
 export CESIUM_MAXIMUM_SCREEN_ERROR="${CESIUM_MAXIMUM_SCREEN_ERROR:-16}"
 unset CESIUM_TILESET_URL
