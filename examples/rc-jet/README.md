@@ -255,3 +255,10 @@ not flight-correlated, and describes itself accordingly.
 - `model/elodin_package/integration_guide.md` — the package's own contract
 - `ai-context/bdx/Elodin_RC_Jet_Improvement_Guide.md` — the campaign guide
 - [Elodin Documentation](https://docs.elodin.systems)
+
+### Cesium terrain contact
+
+The [Cesium launcher](../cesium/README.md#rc-jet) uses the shared
+`el.terrain_heightmap()` API to prepare fixed heights before flight. RC-jet keeps
+its spring-and-damper response in `ground.py`; downloads and caching belong to
+the SDK. Contact is approximate and does not cover the full airframe or camera.

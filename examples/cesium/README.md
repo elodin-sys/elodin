@@ -49,23 +49,34 @@ bash examples/cesium/run_rc_jet_terrain.sh
 The token file contains only the ion token and stays outside the repository.
 The launcher runs the original
 `examples/rc-jet/main.py`, preserving its controls, instruments and 3D views.
-It selects ion asset `1` for relief and asset `2` for aerial imagery. The
-flight model still uses its reference ground elevation.
+It selects ion asset `1` for relief and asset `2` for aerial imagery.
 
-The Cesium launcher starts toward the valley at a 45-degree heading. The original
-350-degree route enters mountains higher than the aircraft after a few minutes;
-the cameras then see the undersides and edges of terrain tiles. Override
-`ELODIN_RC_JET_HEADING_DEG` to choose another route. Terrain-aware ground contact
-is still separate work: the simulation does not stop an aircraft flying into a hill.
+RC-jet calls `el.terrain_heightmap()` with its starting ECEF position, a
+24 × 24 km area and 10 m spacing. The SDK prepares and caches heights before
+flight. The example contains no download or cache script. The original
+350-degree route uses these heights for ground contact.
+
+The lookup returns height, slope normal and a coverage flag using JAX operations.
+There are no network calls during physics steps. The grid file and its SHA-256
+are printed at startup. See the [terrain API](../../docs/public/content/reference/python-api.md#terrain-heights)
+for cache, offline loading and coverage options.
+
+**Why the aircraft bounces:** a spring-and-damper response pushes it out of the
+ground. A correction after integration prevents its reference point from passing
+through the estimated surface. The aircraft keeps moving after an impact;
+there is no damage model. At the grid boundary it holds its last valid pose
+(ground status 2), rather than inventing terrain beyond the prepared area.
+
+**Why the onboard camera can cross the ground:** heights are interpolated between
+grid points and can differ from the visible mesh. Contact protects the aircraft's
+reference point, not the whole airframe or its forward-mounted camera. The chase
+camera stays above the sampled terrain; full airframe and camera collisions
+remain future work. This heightmap is not a collision mesh.
 
 The color sensor camera stays enabled. The zoomed infrared camera is temporarily
 disabled in Cesium mode because it greatly increases initial loading time.
 Both video panels remain visible; the infrared panel shows "No video at this time".
-The next step is a shared `el.terrain_heightmap()` API for loading fixed heights
-before simulation and querying them with JAX. Ground contact will use that API
-in a separate change, keeping custom download and cache logic out of RC-jet.
-
-After the terrain API, make infrared usable: measure its costs, choose
+After the shared terrain API, make infrared usable: measure its costs, choose
 a sustainable frame rate and recording format, prevent it from delaying the color
 stream, and check heat contrast on terrain and a tagged target. Enable it only
 after both cameras work together during a long flight.

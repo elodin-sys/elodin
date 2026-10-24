@@ -623,3 +623,19 @@ fn show_credits(
             });
     }
 }
+/// Prepare simulation heights without opening a renderer or sampling its current LOD.
+pub fn sample_terrain_heights(
+    asset_id: i64,
+    token: &str,
+    longitude_latitude_degrees: &[[f64; 2]],
+    timeout: std::time::Duration,
+) -> Result<Vec<f64>, bevy_cesium::TerrainQueryError> {
+    let positions: Vec<_> = longitude_latitude_degrees
+        .iter()
+        .map(|p| bevy_cesium::CartographicPosition {
+            longitude_radians: p[0].to_radians(),
+            latitude_radians: p[1].to_radians(),
+        })
+        .collect();
+    bevy_cesium::TerrainSampler::from_ion(asset_id, token)?.sample_heights(&positions, timeout)
+}
