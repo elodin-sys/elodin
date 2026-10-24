@@ -55,5 +55,34 @@ jobs:
         run: |
           choco install cmake --yes
           choco install protoc --yes
+      - name: Locate the pinned Cesium build script
+        shell: pwsh
+        run: |
+          $metadata = cargo metadata --locked --format-version 1 | ConvertFrom-Json -AsHashtable
+          if ($LASTEXITCODE -ne 0) { throw "cargo metadata failed" }
+          $plugin = $metadata.packages | Where-Object { $_.name -eq "bevy-cesium" }
+          if ($plugin.source -notmatch '#([0-9a-f]{40})$') { throw "Expected a pinned Bevy-Cesium Git revision" }
+          $pluginRevision = $Matches[1]
+          "BEVY_CESIUM_DIR=$(Split-Path $plugin.manifest_path)" >> $env:GITHUB_ENV
+          $sdkScript = Join-Path (Split-Path $plugin.manifest_path) "scripts/build_cesium_native.ps1"
+          "CESIUM_SDK_CACHE_KEY=cesium-native-msvc-${{ runner.os }}-${pluginRevision}-$((Get-FileHash $sdkScript -Algorithm SHA256).Hash)" >> $env:GITHUB_ENV
+          "CESIUM_BUILD_ROOT=${{ runner.temp }}/cesium" >> $env:GITHUB_ENV
+          "CESIUM_NATIVE_DIR=${{ runner.temp }}/cesium/install" >> $env:GITHUB_ENV
+      - name: Restore Cesium Native SDK
+        id: cesium-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/cesium/install
+          key: ${{ env.CESIUM_SDK_CACHE_KEY }}
+      - name: Build Cesium Native SDK
+        if: steps.cesium-cache.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: '& "$env:BEVY_CESIUM_DIR/scripts/build_cesium_native.ps1"'
+      - name: Save Cesium Native SDK
+        if: steps.cesium-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/cesium/install
+          key: ${{ env.CESIUM_SDK_CACHE_KEY }}
       - name: cargo check
         run: cargo check --locked --package elodin
