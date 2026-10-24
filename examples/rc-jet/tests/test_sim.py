@@ -13,6 +13,7 @@ import pytest
 
 import bdx_model
 from class_d_fallbacks import FALLBACKS
+from ground import TerrainContact
 from scenario import (
     DEATH_VALLEY_FLOOR,
     MOJAVE_RC_FIELD,
@@ -29,7 +30,7 @@ MODEL = bdx_model.load()
 NUMERICS = Numerics()
 
 
-def build_exec(scenario: Scenario) -> el.Exec:
+def build_exec(scenario: Scenario, terrain=None) -> el.Exec:
     world = el.World()
     init = scenario.initial
     world.spawn(
@@ -52,10 +53,11 @@ def build_exec(scenario: Scenario) -> el.Exec:
                 ),
             ),
             make_jet(scenario),
+            *([TerrainContact()] if terrain is not None else []),
         ],
         name="bdx",
     )
-    system = build_system(MODEL, FALLBACKS, scenario, NUMERICS)
+    system = build_system(MODEL, FALLBACKS, scenario, NUMERICS, terrain)
     return world.build(system, simulation_rate=1.0 / NUMERICS.dt)
 
 

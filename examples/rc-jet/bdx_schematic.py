@@ -55,12 +55,12 @@ def build() -> ui.Schematic:
                         share=3.0,
                     ),
                     ui.graph(
-                        "bdx.alpha",
-                        name="Angle of Attack (rad)",
+                        "bdx.terrain_clearance_m" if cesium_terrain else "bdx.alpha",
+                        name="Ground clearance (m)" if cesium_terrain else "Angle of Attack (rad)",
                     ),
                     ui.graph(
-                        "bdx.aero_valid",
-                        name="Aero Validity Flag",
+                        "bdx.terrain_status" if cesium_terrain else "bdx.aero_valid",
+                        name="Ground status (0–2)" if cesium_terrain else "Aero Validity Flag",
                     ),
                     share=0.4,
                 ),
@@ -81,7 +81,9 @@ def build() -> ui.Schematic:
                     effects=True,
                     hdr=False,
                     cinematic=False,
-                    pos="bdx.world_pos.translate_world(-3.128, -11.885, -10.827)",
+                    pos="bdx.terrain_chase_pose"
+                    if cesium_terrain
+                    else "bdx.world_pos.translate_world(-3.128, -11.885, -10.827)",
                     look_at="bdx.world_pos.translate_world(-0.087, 2.067, 5.976)",
                     up="(-0.381, -0.721, 0.578)",
                     smoothing=0.0,

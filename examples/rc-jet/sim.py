@@ -27,7 +27,7 @@ from aero import (
 from bdx_model import BdxModel
 from class_d_fallbacks import ClassDFallbacks
 from frames import frame_accel, gravity_accel
-from ground import build_ground_contact
+from ground import build_ground_contact, build_terrain_constraint, remember_terrain_pose
 from propulsion import (
     FuelFlow,
     FuelMass,
@@ -98,7 +98,11 @@ def gravity_and_frame_forces(
 
 
 def build_system(
-    model: BdxModel, fallbacks: ClassDFallbacks, scenario: Scenario, numerics: Numerics
+    model: BdxModel,
+    fallbacks: ClassDFallbacks,
+    scenario: Scenario,
+    numerics: Numerics,
+    terrain: el.TerrainHeightmap | None = None,
 ) -> el.System:
     dt = numerics.dt
     site = scenario.site
@@ -122,6 +126,9 @@ def build_system(
         gravity_and_frame_forces
         | build_apply_thrust(model)
         | apply_aero_forces
-        | build_ground_contact(site.field_elevation_m)
+        | build_ground_contact(site.field_elevation_m, terrain)
     )
-    return non_effectors | el.six_dof(sys=effectors, integrator=el.Integrator.SemiImplicit)
+    physics = non_effectors | el.six_dof(sys=effectors, integrator=el.Integrator.SemiImplicit)
+    if terrain is not None:
+        return remember_terrain_pose | physics | build_terrain_constraint(terrain)
+    return physics

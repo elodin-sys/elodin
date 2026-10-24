@@ -27,6 +27,7 @@ import bdx_model
 from bdx_schematic import build as build_schematic
 from class_d_fallbacks import FALLBACKS
 from frames import enu_basis, level_attitude_ecef, quaternion_xyzw_from_matrix
+from ground import GEAR_HEIGHT_M, TerrainContact
 from scenario import Numerics, Scenario, load_scenario
 from sim import build_system, make_jet
 
@@ -39,7 +40,7 @@ class StaticMarker(el.Archetype):
 
 
 def setup_world(
-    scenario: Scenario, numerics: Numerics
+    scenario: Scenario, numerics: Numerics, terrain: el.TerrainHeightmap | None = None
 ) -> tuple[el.World, el.EntityId, el.EntityId]:
     world = el.World()
     init = scenario.initial
@@ -47,6 +48,12 @@ def setup_world(
     site = scenario.site
     lat = math.radians(site.lat_deg)
     lon = math.radians(site.lon_deg)
+    if terrain is not None:
+        height, _, covered = terrain.sample_geodetic(lat, lon)
+        if not bool(covered) or scenario.altitude_m < float(height) + GEAR_HEIGHT_M:
+            raise ValueError(
+                "Initial aircraft position must be above the prepared terrain and inside its coverage"
+            )
     basis = np.asarray(enu_basis(lat, lon))
     heading = math.radians(scenario.heading_deg)
     forward = math.sin(heading) * basis[0] + math.cos(heading) * basis[1]
@@ -71,6 +78,7 @@ def setup_world(
                 ),
             ),
             make_jet(scenario),
+            *([TerrainContact()] if terrain is not None else []),
         ],
         name="bdx",
     )
@@ -159,8 +167,20 @@ MODEL = bdx_model.load()
 NUMERICS = Numerics()
 SCENARIO = load_scenario(MODEL, FALLBACKS)
 
-world, jet, target = setup_world(SCENARIO, NUMERICS)
-sim_system = build_system(MODEL, FALLBACKS, SCENARIO, NUMERICS)
+TERRAIN = (
+    el.terrain_heightmap(
+        center_ecef=SCENARIO.initial.pos_ecef,
+        dimensions=(24_000, 24_000),
+        spacing=10,
+        asset_id=int(os.environ.get("CESIUM_ION_ASSET_ID", "1")),
+    )
+    if os.environ.get("ELODIN_RC_JET_TERRAIN") == "cesium"
+    else None
+)
+if TERRAIN is not None:
+    print(f"Terrain heights: {TERRAIN.path} (SHA-256 {TERRAIN.sha256})")
+world, jet, target = setup_world(SCENARIO, NUMERICS, TERRAIN)
+sim_system = build_system(MODEL, FALLBACKS, SCENARIO, NUMERICS, TERRAIN)
 
 print("BDX RC Jet Simulation")
 print("=====================")
