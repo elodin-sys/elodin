@@ -12,8 +12,8 @@ Typed elodin.ui translation of bdx.kdl.
 # ECEF offsets keep the same local-ENU geometry as the Death Valley
 # scene at heading 350°.
 #
-# Cinematic Earth lives on `world.sensor_camera(..., cinematic=True)`
-# (render-server FPV), not on these viewports. The Boson-style LWIR camera
+# Cinematic Earth lives on the RGB sensor.
+# The Boson-style LWIR camera
 # uses this terrain through a normal off-screen view plus its final sensor pass.
 # Planar TerrainModel: y=0 at region min (450 m), then Y -= 0.4*(max-min)
 # = 700 m. Pad DEM ≈ 621.5 m orthometric, so
@@ -25,17 +25,27 @@ Typed elodin.ui translation of bdx.kdl.
 # origin). Absolute ECEF identity would map those axes onto ECEF, so do
 # not add a glTF Y-up lift — assets/bdx.glb is hash-checked by the tests.
 
+import os
+
 import elodin.ui as ui
 
 
 def build() -> ui.Schematic:
+    cesium_terrain = os.environ.get("ELODIN_RC_JET_TERRAIN") == "cesium"
+    terrain = (
+        []
+        if cesium_terrain
+        else [
+            ui.world_mesh(
+                "mojave_rc_field",
+                translate=(0.0, 0.0, 528.0),
+                frame="ENU",
+                visible=True,
+            )
+        ]
+    )
     return ui.schematic(
-        ui.world_mesh(
-            "mojave_rc_field",
-            translate=(0.0, 0.0, 528.0),
-            frame="ENU",
-            visible=True,
-        ),
+        *terrain,
         ui.tabs(
             ui.hsplit(
                 ui.vsplit(
@@ -45,17 +55,18 @@ def build() -> ui.Schematic:
                         share=3.0,
                     ),
                     ui.graph(
-                        "bdx.alpha",
-                        name="Angle of Attack (rad)",
+                        "bdx.terrain_clearance_m" if cesium_terrain else "bdx.alpha",
+                        name="Ground clearance (m)" if cesium_terrain else "Angle of Attack (rad)",
                     ),
                     ui.graph(
-                        "bdx.aero_valid",
-                        name="Aero Validity Flag",
+                        "bdx.terrain_status" if cesium_terrain else "bdx.aero_valid",
+                        name="Ground status (0–2)" if cesium_terrain else "Aero Validity Flag",
                     ),
                     share=0.4,
                 ),
                 ui.viewport(
                     name="Chase",
+                    ev100=12.0 if cesium_terrain else None,
                     fov=45.0,
                     near=1.0,
                     active=True,
@@ -70,7 +81,9 @@ def build() -> ui.Schematic:
                     effects=True,
                     hdr=False,
                     cinematic=False,
-                    pos="bdx.world_pos.translate_world(-3.128, -11.885, -10.827)",
+                    pos="bdx.terrain_chase_pose"
+                    if cesium_terrain
+                    else "bdx.world_pos.translate_world(-3.128, -11.885, -10.827)",
                     look_at="bdx.world_pos.translate_world(-0.087, 2.067, 5.976)",
                     up="(-0.381, -0.721, 0.578)",
                     smoothing=0.0,
@@ -78,6 +91,7 @@ def build() -> ui.Schematic:
                 ui.vsplit(
                     ui.viewport(
                         name="TGTViewport",
+                        ev100=12.0 if cesium_terrain else None,
                         fov=45.0,
                         active=False,
                         show_grid=False,
@@ -97,6 +111,7 @@ def build() -> ui.Schematic:
                     ),
                     ui.viewport(
                         name="FPVViewport",
+                        ev100=12.0 if cesium_terrain else None,
                         fov=45.0,
                         active=False,
                         show_grid=False,
@@ -210,6 +225,7 @@ def build() -> ui.Schematic:
             ui.hsplit(
                 ui.viewport(
                     name="Top-Down View",
+                    ev100=12.0 if cesium_terrain else None,
                     fov=60.0,
                     active=False,
                     show_grid=False,
@@ -366,6 +382,12 @@ def build() -> ui.Schematic:
             range="last_30s",
         ),
         telemetry_mode=True,
+        environment=ui.environment(
+            sun=ui.sun(azimuth=135.0, elevation=35.0, illuminance=20000.0, shadows=True),
+            ambient=0.25,
+        )
+        if cesium_terrain
+        else None,
     )
 
 
