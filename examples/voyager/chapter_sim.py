@@ -79,7 +79,9 @@ def run(chapter: int) -> None:
 
     def pre_step(tick: int, ctx: el.StepContext) -> None:
         et = start_et + (tick + 0.5) * TIME_STEP
-        ctx.write_component("voyager1.jupiter_position", reference_state(et, "JUPITER BARYCENTER")[:3])
+        ctx.write_component(
+            "voyager1.jupiter_position", reference_state(et, "JUPITER BARYCENTER")[:3]
+        )
 
     def post_step(tick: int, ctx: el.StepContext) -> None:
         et = start_et + (tick + 1) * TIME_STEP
@@ -102,7 +104,10 @@ def run(chapter: int) -> None:
         datetime.fromisoformat(START).replace(tzinfo=timezone.utc).timestamp() * 1_000_000
     )
     world.run(
-        el.six_dof(sys=gravity if chapter == 1 else heliocentric_gravity, integrator=el.Integrator.Rk4),
+        el.six_dof(
+            sys=gravity if chapter == 1 else heliocentric_gravity,
+            integrator=el.Integrator.Rk4,
+        ),
         simulation_rate=1.0 / TIME_STEP,
         max_ticks=steps,
         start_timestamp=start_timestamp,
