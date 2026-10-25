@@ -952,3 +952,45 @@ def test_map_seq_decorator_multiple_inputs_outputs():
         }
     )
     assert_frame_equal(df.drop("time"), expected_df)
+
+
+def _rk4_oscillator_error(dt: float, explicit_time_step: bool) -> float:
+    """Integrate x'' = -x from x=1, v=0 for 4 s and return |x - cos(t)|.
+
+    The force depends on position, so a stage evaluated at the wrong point
+    shows up as lost convergence order (a constant-force test cannot see it).
+    """
+    w = el.World()
+    w.spawn(
+        el.Body(
+            world_pos=el.SpatialTransform(linear=np.array([1.0, 0.0, 0.0])),
+            world_vel=el.SpatialMotion(linear=np.array([0.0, 0.0, 0.0])),
+            inertia=el.SpatialInertia(1.0),
+        ),
+        "e1",
+    )
+
+    @el.map
+    def spring(pos: el.WorldPos, inertia: el.Inertia) -> el.Force:
+        return el.SpatialForce(linear=-inertia.mass() * pos.linear())
+
+    if explicit_time_step:
+        # time_step differs from the 120 Hz simulation rate on purpose
+        sys = el.six_dof(dt, spring, integrator=el.Integrator.Rk4)
+        exec = w.build(sys)
+    else:
+        sys = el.six_dof(sys=spring, integrator=el.Integrator.Rk4)
+        exec = w.build(sys, simulation_rate=1.0 / dt)
+    steps = round(4.0 / dt)
+    exec.run(steps)
+    x = exec.history("e1.world_pos")["e1.world_pos"][-1].to_numpy()[4]
+    return abs(float(x) - float(np.cos(steps * dt)))
+
+
+@pytest.mark.parametrize("explicit_time_step", [False, True])
+def test_six_dof_rk4_is_fourth_order(explicit_time_step):
+    coarse = _rk4_oscillator_error(0.1, explicit_time_step)
+    fine = _rk4_oscillator_error(0.05, explicit_time_step)
+    # halving dt should cut the global error ~16x for RK4 (~4x for 2nd order)
+    assert coarse / fine > 12.0, (coarse, fine)
+    assert coarse < 1e-4, coarse
