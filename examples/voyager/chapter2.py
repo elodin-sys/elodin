@@ -1,4 +1,5 @@
-"""Voyager Chapter 2.
+from chapter_sim import run
 
-Not implemented yet.
-"""
+
+if __name__ == "__main__":
+    run(2)
