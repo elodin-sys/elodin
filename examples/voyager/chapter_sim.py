@@ -43,21 +43,22 @@ def reference_state(et: float, target: str = "VOYAGER 1") -> np.ndarray:
 
 @el.map
 def chapter1_gravity(pos: el.WorldPos, inertia: el.Inertia, jupiter: JupiterPosition) -> el.Force:
-    r = pos.linear()
-    acceleration = -sun_gm * r / jnp.linalg.norm(r) ** 3
-    to_jupiter = jupiter - r
-    acceleration += jupiter_gm * to_jupiter / jnp.linalg.norm(to_jupiter) ** 3
-    return el.SpatialForce(linear=inertia.mass() * acceleration)
+    probe = pos.linear()
+    sun_pull = -sun_gm * probe / jnp.linalg.norm(probe) ** 3
+    to_jupiter = jupiter - probe
+    jupiter_pull = jupiter_gm * to_jupiter / jnp.linalg.norm(to_jupiter) ** 3
+    return el.SpatialForce(linear=inertia.mass() * (sun_pull + jupiter_pull))
 
 
 @el.map
 def chapter2_gravity(
     pos: el.WorldPos, inertia: el.Inertia, jupiter: JupiterPosition
 ) -> el.Force:
-    r = pos.linear()
-    acceleration = -sun_gm * r / jnp.linalg.norm(r) ** 3
-    acceleration += heliocentric_relative_acceleration(r, jupiter, jupiter_gm)
-    return el.SpatialForce(linear=inertia.mass() * acceleration)
+    probe = pos.linear()
+    sun_pull = -sun_gm * probe / jnp.linalg.norm(probe) ** 3
+    # chapter 2 also accounts for Jupiter pulling on the Sun
+    jupiter_pull = heliocentric_relative_acceleration(probe, jupiter, jupiter_gm)
+    return el.SpatialForce(linear=inertia.mass() * (sun_pull + jupiter_pull))
 
 
 def run(chapter: int) -> None:
@@ -77,6 +78,7 @@ def run(chapter: int) -> None:
     position_errors_km = []
 
     def pre_step(tick: int, ctx: el.StepContext) -> None:
+        # use Jupiter's position halfway through each step
         et = start_et + (tick + 0.5) * TIME_STEP
         ctx.write_component(
             "voyager1.jupiter_position", reference_state(et, "JUPITER BARYCENTER")[:3]
@@ -84,19 +86,20 @@ def run(chapter: int) -> None:
 
     def post_step(tick: int, ctx: el.StepContext) -> None:
         et = start_et + (tick + 1) * TIME_STEP
-        truth = reference_state(et)
-        position = np.asarray(ctx.read_component("voyager1.world_pos"))[4:7]
-        velocity = np.asarray(ctx.read_component("voyager1.world_vel"))[3:6]
-        position_error_km = np.linalg.norm(position - truth[:3]) / 1000.0
+        spice_state = reference_state(et)
+        sim_position = np.asarray(ctx.read_component("voyager1.world_pos"))[4:7]
+        sim_velocity = np.asarray(ctx.read_component("voyager1.world_vel"))[3:6]
+        position_error_km = np.linalg.norm(sim_position - spice_state[:3]) / 1000.0
         position_errors_km.append(position_error_km)
         if tick != steps - 1:
             return
-        velocity_error_mps = np.linalg.norm(velocity - truth[3:])
+        velocity_error_mps = np.linalg.norm(sim_velocity - spice_state[3:])
         print(f"Final position error: {position_error_km:.3f} km")
         print(f"Final velocity error: {velocity_error_mps:.6f} m/s")
         print(f"Mean position error: {np.mean(position_errors_km):.3f} km")
         print(f"Max position error: {max(position_errors_km):.3f} km")
 
+    gravity_system = chapter1_gravity if chapter == 1 else chapter2_gravity
     print(f"Voyager 1 chapter {chapter}: {START} to {END} ({steps} hourly steps)")
     print("Sun and Jupiter gravity only; other planets, SRP and thrust are omitted.")
     start_timestamp = int(
@@ -104,7 +107,7 @@ def run(chapter: int) -> None:
     )
     world.run(
         el.six_dof(
-            sys=chapter1_gravity if chapter == 1 else chapter2_gravity,
+            sys=gravity_system,
             integrator=el.Integrator.Rk4,
         ),
         simulation_rate=1.0 / TIME_STEP,
