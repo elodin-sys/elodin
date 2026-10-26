@@ -153,14 +153,21 @@ struct FileSession {
     part_bytes: u64,
     part_count: u32,
     completed_parts: Vec<u32>,
+    parts: Vec<PartUrl>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct PartUrl {
     number: u32,
     offset: u64,
     size_bytes: u64,
     url: String,
+}
+
+#[derive(Serialize)]
+struct PartReceipt {
+    number: u32,
+    etag: String,
 }
 
 pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
@@ -302,34 +309,15 @@ async fn transfer(
         .into_diagnostic()?;
     {
         let url = format!("{base}/v1/projects/{project}/run-uploads/{ticket}/archive");
-        let creds = tokens::ensure_valid(ctx).await?;
-        let session: FileSession = response(
-            ctx.client
-                .post(&url)
-                .bearer_auth(&creds.access_token)
-                .json(archive)
-                .timeout(Duration::from_secs(30))
-                .send()
-                .await
-                .into_diagnostic()?,
-        )
-        .await?;
+        let mut session = archive_session(ctx, &url, archive).await?;
+        let mut signed_at = std::time::Instant::now();
         if session.completed {
             return Ok(());
-        }
-        if session.part_bytes == 0
-            || session.part_bytes > 16 * 1024 * 1024
-            || u64::from(session.part_count) != archive.size_bytes.div_ceil(session.part_bytes)
-            || session
-                .completed_parts
-                .iter()
-                .any(|number| *number == 0 || *number > session.part_count)
-        {
-            return Err(miette::miette!("invalid upload part layout"));
         }
         let mut file = tokio::fs::File::open(archive_path)
             .await
             .into_diagnostic()?;
+        let mut receipts = Vec::new();
         for number in 1..=session.part_count {
             if session.completed_parts.contains(&number) {
                 continue;
@@ -344,20 +332,18 @@ async fn transfer(
                 .await
                 .into_diagnostic()
                 .wrap_err("upload source changed; keep the database stopped")?;
-            let part_url = format!("{url}/parts/{number}");
             let mut etag = None;
             for retry in 0..3 {
-                let creds = tokens::ensure_valid(ctx).await?;
-                let signed: PartUrl = response(
-                    ctx.client
-                        .post(&part_url)
-                        .bearer_auth(&creds.access_token)
-                        .timeout(Duration::from_secs(30))
-                        .send()
-                        .await
-                        .into_diagnostic()?,
-                )
-                .await?;
+                if retry > 0 || signed_at.elapsed() >= Duration::from_secs(600) {
+                    acknowledge_parts(ctx, &url, &mut receipts).await?;
+                    session = archive_session(ctx, &url, archive).await?;
+                    signed_at = std::time::Instant::now();
+                }
+                let signed = session
+                    .parts
+                    .iter()
+                    .find(|part| part.number == number)
+                    .ok_or_else(|| miette::miette!("missing storage upload link"))?;
                 let storage_url = reqwest::Url::parse(&signed.url).into_diagnostic()?;
                 if signed.number != number
                     || signed.offset != offset
@@ -387,18 +373,22 @@ async fn transfer(
                     }
                     _ if retry < 2 => tokio::time::sleep(Duration::from_secs(1 << retry)).await,
                     _ => {
+                        acknowledge_parts(ctx, &url, &mut receipts).await?;
                         return Err(miette::miette!(
                             "storage part upload failed; rerun the same command to resume"
                         ));
                     }
                 }
             }
-            let creds = tokens::ensure_valid(ctx).await?;
-            let resp = ctx.client.put(&part_url).bearer_auth(&creds.access_token)
-                .json(&serde_json::json!({"etag": etag.ok_or_else(|| miette::miette!("missing part receipt"))?}))
-                .timeout(Duration::from_secs(30)).send().await.into_diagnostic()?;
-            expect_no_content(resp).await?;
+            receipts.push(PartReceipt {
+                number,
+                etag: etag.ok_or_else(|| miette::miette!("missing part receipt"))?,
+            });
+            if receipts.len() == 8 {
+                acknowledge_parts(ctx, &url, &mut receipts).await?;
+            }
         }
+        acknowledge_parts(ctx, &url, &mut receipts).await?;
         let creds = tokens::ensure_valid(ctx).await?;
         let resp = ctx
             .client
@@ -410,6 +400,64 @@ async fn transfer(
             .into_diagnostic()?;
         expect_no_content(resp).await?;
     }
+    Ok(())
+}
+
+async fn archive_session(
+    ctx: &AuthCtx,
+    url: &str,
+    archive: &Archive,
+) -> miette::Result<FileSession> {
+    let creds = tokens::ensure_valid(ctx).await?;
+    let session: FileSession = response(
+        ctx.client
+            .post(url)
+            .bearer_auth(&creds.access_token)
+            .json(archive)
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await
+            .into_diagnostic()?,
+    )
+    .await?;
+    let mut numbers = std::collections::HashSet::new();
+    if session.part_bytes == 0
+        || session.part_bytes > 64 * 1024 * 1024
+        || u64::from(session.part_count) != archive.size_bytes.div_ceil(session.part_bytes)
+        || session
+            .completed_parts
+            .iter()
+            .any(|number| *number == 0 || *number > session.part_count || !numbers.insert(*number))
+        || session.parts.iter().any(|part| {
+            part.number == 0 || part.number > session.part_count || !numbers.insert(part.number)
+        })
+        || (!session.completed && numbers.len() != session.part_count as usize)
+    {
+        return Err(miette::miette!("invalid upload part layout"));
+    }
+    Ok(session)
+}
+
+async fn acknowledge_parts(
+    ctx: &AuthCtx,
+    url: &str,
+    receipts: &mut Vec<PartReceipt>,
+) -> miette::Result<()> {
+    if receipts.is_empty() {
+        return Ok(());
+    }
+    let creds = tokens::ensure_valid(ctx).await?;
+    let resp = ctx
+        .client
+        .put(format!("{url}/parts"))
+        .bearer_auth(&creds.access_token)
+        .json(&serde_json::json!({"parts": receipts}))
+        .timeout(Duration::from_secs(30))
+        .send()
+        .await
+        .into_diagnostic()?;
+    expect_no_content(resp).await?;
+    receipts.clear();
     Ok(())
 }
 
@@ -876,8 +924,7 @@ mod tests {
             ),
         ];
         replies.extend([
-                (200, serde_json::json!({"completed":false, "part_bytes":16*1024*1024, "part_count":1,"completed_parts":[]})),
-                 (200, serde_json::json!({"number":1,"offset":0,"size_bytes":0,"url":format!("{url}/storage/0")})),
+                 (200, serde_json::json!({"completed":false, "part_bytes":64*1024*1024, "part_count":1,"completed_parts":[],"parts":[{"number":1,"offset":0,"size_bytes":0,"url":format!("{url}/storage/0")}]})),
                 (200, serde_json::Value::Null),
                 (204, serde_json::Value::Null),
                 (204, serde_json::Value::Null),
@@ -912,8 +959,8 @@ mod tests {
                         }
                     }
                 }
-                if body.get("url").is_some() {
-                    let declaration = &requests[2];
+                if body.get("parts").is_some() {
+                    let declaration = &request;
                     let start = declaration
                         .windows(4)
                         .position(|bytes| bytes == b"\r\n\r\n")
@@ -921,7 +968,7 @@ mod tests {
                         + 4;
                     let declaration: serde_json::Value =
                         serde_json::from_slice(&declaration[start..]).unwrap();
-                    body["size_bytes"] = declaration["size_bytes"].clone();
+                    body["parts"][0]["size_bytes"] = declaration["size_bytes"].clone();
                 }
                 let body = if status == 204 {
                     String::new()
@@ -995,25 +1042,154 @@ mod tests {
         assert!(
             upload.contains("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
         );
-        let storage = String::from_utf8_lossy(&requests[4]);
+        let storage = String::from_utf8_lossy(&requests[3]);
         assert!(storage.starts_with("PUT /storage/0 "));
         assert!(!storage.contains("test-token"));
-        let start = requests[4]
+        let start = requests[3]
             .windows(4)
             .position(|bytes| bytes == b"\r\n\r\n")
             .unwrap()
             + 4;
-        let decoded = zstd::stream::decode_all(&requests[4][start..]).unwrap();
+        let decoded = zstd::stream::decode_all(&requests[3][start..]).unwrap();
         assert!(
             decoded
                 .windows(131_079 - 24)
                 .any(|bytes| bytes.iter().all(|b| *b == b'x'))
         );
         assert!(
-            requests[4].len() < 2000,
+            requests[3].len() < 2000,
             "sparse preallocation was uploaded"
         );
         assert!(String::from_utf8_lossy(requests.last().unwrap()).contains("/run-uploads/"));
+        let receipt = String::from_utf8_lossy(&requests[4]);
+        assert!(receipt.contains("/archive/parts HTTP"));
+        assert!(receipt.contains("\"parts\":[{\"etag\":\"\\\"test-etag\\\"\",\"number\":1}]"));
+    }
+
+    #[tokio::test]
+    async fn batches_receipts_resumes_and_refreshes_failed_links() {
+        use tokio::io::AsyncWriteExt;
+        for retry_link in [false, true] {
+            let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+                .await
+                .unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            let server_base = base.clone();
+            let server = tokio::spawn(async move {
+                let mut completed = vec![1_u32];
+                let mut batches = Vec::new();
+                let mut sessions = 0;
+                let mut failed = false;
+                loop {
+                    let (mut socket, _) = listener.accept().await.unwrap();
+                    let mut request = Vec::new();
+                    let start = loop {
+                        let mut buffer = [0; 8192];
+                        let n = socket.read(&mut buffer).await.unwrap();
+                        assert!(n > 0);
+                        request.extend_from_slice(&buffer[..n]);
+                        if let Some(start) =
+                            request.windows(4).position(|bytes| bytes == b"\r\n\r\n")
+                        {
+                            let headers = String::from_utf8_lossy(&request[..start]);
+                            let length = headers
+                                .lines()
+                                .find_map(|line| {
+                                    let (key, value) = line.split_once(':')?;
+                                    key.eq_ignore_ascii_case("content-length")
+                                        .then(|| value.trim().parse::<usize>().unwrap())
+                                })
+                                .unwrap_or(0);
+                            if request.len() >= start + 4 + length {
+                                break start + 4;
+                            }
+                        }
+                    };
+                    let headers = String::from_utf8_lossy(&request[..start]);
+                    let line = headers.lines().next().unwrap();
+                    let path = line.split_whitespace().nth(1).unwrap();
+                    let done = path.ends_with("/complete");
+                    let (status, body) = if path.ends_with("/archive") {
+                        assert!(headers.contains("authorization: Bearer test-token"));
+                        sessions += 1;
+                        let parts: Vec<_> = (1..=10_u32).filter(|number| !completed.contains(number)).map(|number| {
+                            serde_json::json!({"number":number,"offset":(number-1)*4,"size_bytes":4,"url":format!("{server_base}/storage/{number}")})
+                        }).collect();
+                        (200, serde_json::json!({"completed":false,"part_bytes":4,"part_count":10,"completed_parts":completed,"parts":parts}).to_string())
+                    } else if let Some(number) = path.strip_prefix("/storage/") {
+                        assert!(!headers.contains("test-token"));
+                        let number: u32 = number.parse().unwrap();
+                        assert_ne!(number, 1);
+                        assert_eq!(&request[start..], &[number as u8; 4]);
+                        if retry_link && number == 3 && !failed {
+                            failed = true;
+                            (403, String::new())
+                        } else {
+                            (200, String::new())
+                        }
+                    } else if path.ends_with("/parts") {
+                        assert!(headers.contains("authorization: Bearer test-token"));
+                        let body: serde_json::Value =
+                            serde_json::from_slice(&request[start..]).unwrap();
+                        let receipts = body["parts"].as_array().unwrap();
+                        assert!(!receipts.is_empty());
+                        batches.push(receipts.len());
+                        for receipt in receipts {
+                            assert_eq!(receipt["etag"], "\"test-etag\"");
+                            completed.push(receipt["number"].as_u64().unwrap() as u32);
+                        }
+                        (204, String::new())
+                    } else {
+                        assert!(done, "unexpected request {line}");
+                        assert_eq!(completed.len(), 10);
+                        (204, String::new())
+                    };
+                    socket.write_all(format!("HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nETag: \"test-etag\"\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+                    if done {
+                        return (batches, sessions);
+                    }
+                }
+            });
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("archive");
+            let bytes: Vec<u8> = (1..=10_u8).flat_map(|number| [number; 4]).collect();
+            std::fs::write(&path, bytes).unwrap();
+            let ctx = AuthCtx {
+                client: reqwest::Client::new(),
+                issuer: base.clone(),
+                api_url: base.clone(),
+                creds_path: dir.path().join("credentials.json"),
+            };
+            tokens::Credentials {
+                access_token: "test-token".into(),
+                refresh_token: None,
+                expires_at: tokens::now() + 1000,
+                issuer: base.clone(),
+                api_url: base.clone(),
+            }
+            .save(&ctx.creds_path)
+            .unwrap();
+            tokio::time::timeout(
+                Duration::from_secs(20),
+                transfer(
+                    &ctx,
+                    &base,
+                    uuid::Uuid::nil(),
+                    uuid::Uuid::nil(),
+                    &path,
+                    &Archive {
+                        size_bytes: 40,
+                        sha256: "a".repeat(64),
+                    },
+                ),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+            let (batches, sessions) = server.await.unwrap();
+            assert_eq!(batches, if retry_link { vec![1, 8] } else { vec![8, 1] });
+            assert_eq!(sessions, if retry_link { 2 } else { 1 });
+        }
     }
 
     #[tokio::test]
