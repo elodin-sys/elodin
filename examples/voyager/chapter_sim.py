@@ -42,7 +42,7 @@ def reference_state(et: float, target: str = "VOYAGER 1") -> np.ndarray:
 
 
 @el.map
-def gravity(pos: el.WorldPos, inertia: el.Inertia, jupiter: JupiterPosition) -> el.Force:
+def chapter1_gravity(pos: el.WorldPos, inertia: el.Inertia, jupiter: JupiterPosition) -> el.Force:
     r = pos.linear()
     acceleration = -sun_gm * r / jnp.linalg.norm(r) ** 3
     to_jupiter = jupiter - r
@@ -51,7 +51,7 @@ def gravity(pos: el.WorldPos, inertia: el.Inertia, jupiter: JupiterPosition) -> 
 
 
 @el.map
-def heliocentric_gravity(
+def chapter2_gravity(
     pos: el.WorldPos, inertia: el.Inertia, jupiter: JupiterPosition
 ) -> el.Force:
     r = pos.linear()
@@ -62,7 +62,6 @@ def heliocentric_gravity(
 
 def run(chapter: int) -> None:
     initial_state = reference_state(start_et)
-    reference_state(end_et)
     world = el.World()
     world.spawn(
         [
@@ -105,7 +104,7 @@ def run(chapter: int) -> None:
     )
     world.run(
         el.six_dof(
-            sys=gravity if chapter == 1 else heliocentric_gravity,
+            sys=chapter1_gravity if chapter == 1 else chapter2_gravity,
             integrator=el.Integrator.Rk4,
         ),
         simulation_rate=1.0 / TIME_STEP,
