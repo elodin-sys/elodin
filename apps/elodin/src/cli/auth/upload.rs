@@ -1,4 +1,4 @@
-//! Read-only compacted S3 part uploads of a stopped TelemetryDB, followed by publication polling.
+//! Resumable uncompressed tar uploads of a stopped TelemetryDB, followed by publication polling.
 
 use std::collections::HashSet;
 use std::io::{IsTerminal, Read};
@@ -25,6 +25,99 @@ struct UploadFile {
     path: String,
     size_bytes: u64,
     sha256: String,
+}
+
+#[derive(Serialize)]
+struct Archive {
+    size_bytes: u64,
+    sha256: String,
+}
+
+struct CheckedSource {
+    file: std::io::Take<std::fs::File>,
+    hash: Digest,
+    bytes: u64,
+}
+
+impl Read for CheckedSource {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.file.read(buffer)?;
+        self.hash.update(&buffer[..n]);
+        self.bytes += n as u64;
+        Ok(n)
+    }
+}
+
+fn archive(root: &Path, manifest: &Manifest) -> miette::Result<(tempfile::NamedTempFile, Archive)> {
+    let output = tempfile::NamedTempFile::new().into_diagnostic()?;
+    let mut builder = tar::Builder::new(output.reopen().into_diagnostic()?);
+    for entry in &manifest.files {
+        let path = root.join(&entry.path);
+        let file = std::fs::File::open(&path).into_diagnostic()?;
+        if elodin_db::compact::compacted_file_len(&path).into_diagnostic()? != entry.size_bytes {
+            return Err(miette::miette!(
+                "upload source changed; keep the database stopped"
+            ));
+        }
+        let mut source = CheckedSource {
+            file: file.take(entry.size_bytes),
+            hash: Digest::new(&SHA256),
+            bytes: 0,
+        };
+        let name = ring::digest::digest(&SHA256, entry.part.as_bytes())
+            .as_ref()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        let mut header = tar::Header::new_gnu();
+        header.set_size(entry.size_bytes);
+        header.set_mode(0o600);
+        header.set_uid(0);
+        header.set_gid(0);
+        header.set_mtime(0);
+        header.set_entry_type(tar::EntryType::Regular);
+        builder
+            .append_data(&mut header, name, &mut source)
+            .into_diagnostic()?;
+        if elodin_db::compact::compacted_file_len(&path).into_diagnostic()? != entry.size_bytes
+            || source.bytes != entry.size_bytes
+            || source
+                .hash
+                .finish()
+                .as_ref()
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
+                != entry.sha256
+        {
+            return Err(miette::miette!(
+                "upload source changed; keep the database stopped"
+            ));
+        }
+    }
+    builder
+        .into_inner()
+        .into_diagnostic()?
+        .sync_all()
+        .into_diagnostic()?;
+    let mut source = output.reopen().into_diagnostic()?;
+    let size_bytes = source.metadata().into_diagnostic()?.len();
+    let mut hash = Digest::new(&SHA256);
+    let mut buffer = [0; 65536];
+    loop {
+        let n = source.read(&mut buffer).into_diagnostic()?;
+        if n == 0 {
+            break;
+        }
+        hash.update(&buffer[..n]);
+    }
+    let sha256 = hash
+        .finish()
+        .as_ref()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    Ok((output, Archive { size_bytes, sha256 }))
 }
 
 #[derive(Deserialize)]
@@ -68,9 +161,13 @@ struct PartUrl {
 pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
     tokens::ensure_valid(ctx).await?;
     let root = args.db_path.clone();
-    let manifest = tokio::task::spawn_blocking(move || manifest(&root))
-        .await
-        .into_diagnostic()??;
+    let (manifest, archive_file, archive) = tokio::task::spawn_blocking(move || {
+        let manifest = manifest(&root)?;
+        let (file, archive) = archive(&root, &manifest)?;
+        Ok::<_, miette::Report>((manifest, file, archive))
+    })
+    .await
+    .into_diagnostic()??;
     let mut creds = tokens::ensure_valid(ctx).await?;
     let base = creds.api_url.trim_end_matches('/').to_owned();
     let projects: Projects = response(
@@ -107,7 +204,7 @@ pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
     }
     let ticket = accepted.ticket;
     if accepted.state == "uploading" {
-        transfer(ctx, &base, project, ticket, &args.db_path, &manifest).await?;
+        transfer(ctx, &base, project, ticket, archive_file.path(), &archive).await?;
         creds = tokens::ensure_valid(ctx).await?;
         accepted = response(
             ctx.client
@@ -125,6 +222,7 @@ pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
             return Err(miette::miette!("upload completion identity changed"));
         }
     }
+    drop(archive_file);
     eprintln!("Upload accepted: {ticket}. Waiting for publication...");
     let status_url = format!(
         "{}/v1/projects/{project}/run-uploads/{ticket}",
@@ -188,8 +286,8 @@ async fn transfer(
     base: &str,
     project: uuid::Uuid,
     ticket: uuid::Uuid,
-    root: &Path,
-    manifest: &Manifest,
+    archive_path: &Path,
+    archive: &Archive,
 ) -> miette::Result<()> {
     // Never attach the API bearer token or follow redirects on storage requests.
     let storage_client = reqwest::Client::builder()
@@ -197,16 +295,14 @@ async fn transfer(
         .timeout(Duration::from_secs(180))
         .build()
         .into_diagnostic()?;
-    for entry in &manifest.files {
-        let url = format!(
-            "{base}/v1/projects/{project}/run-uploads/{ticket}/files/{}",
-            entry.part
-        );
+    {
+        let url = format!("{base}/v1/projects/{project}/run-uploads/{ticket}/archive");
         let creds = tokens::ensure_valid(ctx).await?;
         let session: FileSession = response(
             ctx.client
                 .post(&url)
                 .bearer_auth(&creds.access_token)
+                .json(archive)
                 .timeout(Duration::from_secs(30))
                 .send()
                 .await
@@ -214,11 +310,11 @@ async fn transfer(
         )
         .await?;
         if session.completed {
-            continue;
+            return Ok(());
         }
         if session.part_bytes == 0
             || session.part_bytes > 16 * 1024 * 1024
-            || u64::from(session.part_count) != entry.size_bytes.div_ceil(session.part_bytes)
+            || u64::from(session.part_count) != archive.size_bytes.div_ceil(session.part_bytes)
             || session
                 .completed_parts
                 .iter()
@@ -226,7 +322,7 @@ async fn transfer(
         {
             return Err(miette::miette!("invalid upload part layout"));
         }
-        let mut file = tokio::fs::File::open(root.join(&entry.path))
+        let mut file = tokio::fs::File::open(archive_path)
             .await
             .into_diagnostic()?;
         for number in 1..=session.part_count {
@@ -234,7 +330,7 @@ async fn transfer(
                 continue;
             }
             let offset = u64::from(number - 1) * session.part_bytes;
-            let size = (entry.size_bytes - offset).min(session.part_bytes);
+            let size = (archive.size_bytes - offset).min(session.part_bytes);
             file.seek(std::io::SeekFrom::Start(offset))
                 .await
                 .into_diagnostic()?;
@@ -585,6 +681,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn archive_is_deterministic_uncompressed_and_detects_changed_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("db_state"), b"abc").unwrap();
+        std::fs::create_dir(dir.path().join("assets")).unwrap();
+        std::fs::write(dir.path().join("assets/empty"), b"").unwrap();
+        let manifest = manifest(dir.path()).unwrap();
+        let (first, declaration) = archive(dir.path(), &manifest).unwrap();
+        let (_, repeated) = archive(dir.path(), &manifest).unwrap();
+        assert_eq!(declaration.sha256, repeated.sha256);
+        assert_eq!(declaration.size_bytes, 2560);
+        let mut tar = tar::Archive::new(first.reopen().unwrap());
+        let members = tar
+            .entries()
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(members.len(), 2);
+        assert!(
+            members
+                .iter()
+                .all(|entry| entry.header().entry_type().is_file())
+        );
+        std::fs::write(dir.path().join("db_state"), b"bad").unwrap();
+        assert!(archive(dir.path(), &manifest).is_err());
+    }
+
+    #[test]
     fn saved_upload_keys_resume_and_restart_without_touching_the_recording() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("db");
@@ -746,15 +869,13 @@ mod tests {
                 serde_json::json!({"ticket": project, "project_id": project, "state": "uploading"}),
             ),
         ];
-        for (index, size) in [131_079, 3].into_iter().enumerate() {
-            replies.extend([
+        replies.extend([
                 (200, serde_json::json!({"completed":false, "part_bytes":16*1024*1024, "part_count":1,"completed_parts":[]})),
-                (200, serde_json::json!({"number":1,"offset":0,"size_bytes":size,"url":format!("{url}/storage/{index}")})),
+                (200, serde_json::json!({"number":1,"offset":0,"size_bytes":134_144,"url":format!("{url}/storage/0")})),
                 (200, serde_json::Value::Null),
                 (204, serde_json::Value::Null),
                 (204, serde_json::Value::Null),
             ]);
-        }
         replies.push((
             202,
             serde_json::json!({"ticket":project,"project_id":project,"state":"queued"}),
