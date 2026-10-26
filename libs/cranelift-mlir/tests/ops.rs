@@ -21,10 +21,7 @@ module @module {
     let a = f64_buf(&[4.0, 3.0, 6.0, 3.0]);
     let out = run_mlir(mlir, &[&a], &[32, 8, 4]);
     let lu = read_f64s(&out[0]);
-    let pivots: Vec<i32> = out[1]
-        .chunks_exact(4)
-        .map(|c| i32::from_le_bytes(c.try_into().unwrap()))
-        .collect();
+    let pivots = read_i32s(&out[1]);
     let info: i32 = i32::from_le_bytes(out[2][..4].try_into().unwrap());
     eprintln!("LU: {:?}", lu);
     eprintln!("pivots: {:?}", pivots);
@@ -1038,7 +1035,7 @@ module @module {
     let out = run_mlir(mlir, &[&in0], &[48]);
     // Expected: [[1,4],[2,5],[3,6]]
     let result = read_f64s(&out[0]);
-    assert_eq!(result, &[1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+    assert_eq!(&*result, &[1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
 }
 
 #[test]
@@ -1087,7 +1084,7 @@ module @module {
     let in0 = f64_buf(&[10.0, 20.0, 30.0, 40.0, 50.0]);
     let idx = i64_buf(&[2]);
     let out = run_mlir(mlir, &[&in0, &idx], &[16]);
-    assert_eq!(read_f64s(&out[0]), &[30.0, 40.0]);
+    assert_eq!(&*read_f64s(&out[0]), &[30.0, 40.0]);
 }
 
 #[test]
@@ -1253,7 +1250,7 @@ module @module {
     let update = f64_buf(&[99.0, 100.0]);
     let idx = i64_buf(&[1]);
     let out = run_mlir(mlir, &[&base, &update, &idx], &[40]);
-    assert_eq!(read_f64s(&out[0]), &[1.0, 99.0, 100.0, 4.0, 5.0]);
+    assert_eq!(&*read_f64s(&out[0]), &[1.0, 99.0, 100.0, 4.0, 5.0]);
 }
 
 // ---- Gather (row-select) ----
@@ -1277,7 +1274,7 @@ module @module {
     let out = run_mlir(mlir, &[&operand, &indices], &[64]);
     let result = read_f64s(&out[0]);
     // Expected: row 2 = [9,10,11,12], row 0 = [1,2,3,4]
-    assert_eq!(result, &[9.0, 10.0, 11.0, 12.0, 1.0, 2.0, 3.0, 4.0]);
+    assert_eq!(&*result, &[9.0, 10.0, 11.0, 12.0, 1.0, 2.0, 3.0, 4.0]);
 }
 
 // ---- Batched dot product ----
@@ -1567,10 +1564,7 @@ module @module {
 "#;
     let input = 10i64.to_le_bytes().to_vec();
     let out = run_mlir(mlir, &[&input], &[8, 8]);
-    let seed: Vec<u32> = out[0]
-        .chunks_exact(4)
-        .map(|c| u32::from_le_bytes(c.try_into().unwrap()))
-        .collect();
+    let seed = read_u32s(&out[0]);
     let sum = i64::from_le_bytes(out[1].as_slice().try_into().unwrap());
     assert_eq!(
         seed,
@@ -2120,10 +2114,7 @@ module @module {
 "#;
     let in0 = i32_buf(&[10, 20, 30]);
     let out = run_mlir_mem(mlir, &[&in0], &[12]);
-    let result: Vec<i32> = out[0]
-        .chunks_exact(4)
-        .map(|c| i32::from_le_bytes(c.try_into().unwrap()))
-        .collect();
+    let result = read_i32s(&out[0]);
     assert_eq!(result, vec![10, 20, 30]);
 }
 
@@ -2258,10 +2249,7 @@ module @module {
         .flat_map(|v| v.to_le_bytes())
         .collect();
     let out = run_mlir_mem(mlir, &[&lo, &hi], &[16]);
-    let result: Vec<u32> = out[0]
-        .chunks_exact(4)
-        .map(|c| u32::from_le_bytes(c.try_into().unwrap()))
-        .collect();
+    let result = read_u32s(&out[0]);
     assert_eq!(result, vec![60, 65, 85, 110]);
 }
 
@@ -3068,6 +3056,46 @@ module @module {
 }
 
 #[test]
+fn test_dot_general_1d_x_2d_contract_rows() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<2xf64>, %arg1: tensor<2x3xf64>) -> tensor<3xf64> {
+    %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [0] x [0], precision = [DEFAULT, DEFAULT] : (tensor<2xf64>, tensor<2x3xf64>) -> tensor<3xf64>
+    return %0 : tensor<3xf64>
+  }
+}
+"#;
+    // lhs = [10, 20]
+    // rhs = [[4, 5, 6],
+    //        [7, 8, 9]]
+    // result = [10*4+20*7, 10*5+20*8, 10*6+20*9]
+    let lhs = f64_buf(&[10.0, 20.0]);
+    let rhs = f64_buf(&[4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
+    let out = run_mlir(mlir, &[&lhs, &rhs], &[24]);
+    assert_f64s_close(&read_f64s(&out[0]), &[180.0, 210.0, 240.0]);
+}
+
+#[test]
+fn test_dot_general_2d_x_1d_contract_rows() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<2x3xf64>, %arg1: tensor<2xf64>) -> tensor<3xf64> {
+    %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [0] x [0], precision = [DEFAULT, DEFAULT] : (tensor<2x3xf64>, tensor<2xf64>) -> tensor<3xf64>
+    return %0 : tensor<3xf64>
+  }
+}
+"#;
+    // lhs = [[1, 2, 3],
+    //        [4, 5, 6]]
+    // rhs = [10, 20]
+    // result = [1*10+4*20, 2*10+5*20, 3*10+6*20]
+    let lhs = f64_buf(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+    let rhs = f64_buf(&[10.0, 20.0]);
+    let out = run_mlir(mlir, &[&lhs, &rhs], &[24]);
+    assert_f64s_close(&read_f64s(&out[0]), &[90.0, 120.0, 150.0]);
+}
+
+#[test]
 fn test_iota_2d_dim0() {
     let mlir = r#"
 module @module {
@@ -3078,10 +3106,7 @@ module @module {
 }
 "#;
     let out = run_mlir(mlir, &[], &[72]);
-    let result: Vec<i64> = out[0]
-        .chunks(8)
-        .map(|c| i64::from_le_bytes(c.try_into().unwrap()))
-        .collect();
+    let result = read_i64s(&out[0]);
     // dim=0: each element = row index
     // [[0,0,0], [1,1,1], [2,2,2]]
     assert_eq!(result, vec![0, 0, 0, 1, 1, 1, 2, 2, 2]);
@@ -3098,10 +3123,7 @@ module @module {
 }
 "#;
     let out = run_mlir(mlir, &[], &[72]);
-    let result: Vec<i64> = out[0]
-        .chunks(8)
-        .map(|c| i64::from_le_bytes(c.try_into().unwrap()))
-        .collect();
+    let result = read_i64s(&out[0]);
     // dim=1: each element = column index
     // [[0,1,2], [0,1,2], [0,1,2]]
     assert_eq!(result, vec![0, 1, 2, 0, 1, 2, 0, 1, 2]);
@@ -3308,10 +3330,7 @@ module @module {
     let data = i32_buf(&[10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]);
     let indices = i32_buf(&[1, 3]);
     let out = run_mlir_mem(mlir, &[&data, &indices], &[24]);
-    let result: Vec<i32> = out[0]
-        .chunks_exact(4)
-        .map(|c| i32::from_le_bytes(c.try_into().unwrap()))
-        .collect();
+    let result = read_i32s(&out[0]);
     assert_eq!(result, vec![40, 50, 60, 100, 110, 120]);
 }
 
@@ -3332,10 +3351,7 @@ module @module {
     let indices = i32_buf(&[0, 4]);
     let updates = i32_buf(&[99, 88]);
     let out = run_mlir_mem(mlir, &[&data, &indices, &updates], &[20]);
-    let result: Vec<i32> = out[0]
-        .chunks_exact(4)
-        .map(|c| i32::from_le_bytes(c.try_into().unwrap()))
-        .collect();
+    let result = read_i32s(&out[0]);
     assert_eq!(result, vec![99, 2, 3, 4, 88]);
 }
 
@@ -3571,10 +3587,7 @@ module @module {
 }
 "#;
     let out = run_mlir_mem(mlir, &[&i32_buf(&[10, 20, 30, 40, 50])], &[12]);
-    let r: Vec<i32> = out[0]
-        .chunks_exact(4)
-        .map(|c| i32::from_le_bytes(c.try_into().unwrap()))
-        .collect();
+    let r = read_i32s(&out[0]);
     assert_eq!(r, vec![20, 30, 40]);
 }
 
@@ -3589,10 +3602,7 @@ module @module {
 }
 "#;
     let out = run_mlir_mem(mlir, &[&i32_buf(&[1, 2, 3, 4, 5, 6])], &[24]);
-    let r: Vec<i32> = out[0]
-        .chunks_exact(4)
-        .map(|c| i32::from_le_bytes(c.try_into().unwrap()))
-        .collect();
+    let r = read_i32s(&out[0]);
     assert_eq!(r, vec![1, 4, 2, 5, 3, 6]);
 }
 
@@ -4425,7 +4435,7 @@ module @module {
     let out = run_mlir_mem(mlir, &[&min_val, &max_val], &[32]);
     let vals = read_f64s(&out[0]);
     assert_eq!(vals.len(), 4);
-    for v in &vals {
+    for v in vals.iter() {
         assert!(*v >= 0.0 && *v <= 1.0, "rng value {v} out of [0,1]");
     }
 }
@@ -4490,6 +4500,31 @@ fn test_convert_i1_to_ui64() {
     let out = run_mlir(mlir, &[&in0, &in1], &[8]);
     let result = read_i64s(&out[0]);
     assert_eq!(result, &[1i64]);
+}
+
+#[test]
+fn test_convert_i64_to_ui64_above_2_53() {
+    let mlir = r#"module @module {
+  func.func public @main(%arg0: tensor<i64>) -> tensor<ui64> {
+    %0 = stablehlo.convert %arg0 : (tensor<i64>) -> tensor<ui64>
+    return %0 : tensor<ui64>
+  }
+}"#;
+    let value = 9_007_199_254_740_993_i64;
+    let out = run_mlir(mlir, &[&i64_buf(&[value])], &[8]);
+    assert_eq!(read_u64s(&out[0]), vec![value as u64]);
+}
+
+#[test]
+fn test_compare_gt_ui64_unsigned() {
+    let mlir = r#"module @module {
+  func.func public @main(%arg0: tensor<ui64>, %arg1: tensor<ui64>) -> tensor<i1> {
+    %0 = stablehlo.compare GT, %arg0, %arg1, UNSIGNED : (tensor<ui64>, tensor<ui64>) -> tensor<i1>
+    return %0 : tensor<i1>
+  }
+}"#;
+    let out = run_mlir(mlir, &[&u64_buf(&[u64::MAX]), &u64_buf(&[1])], &[1]);
+    assert_eq!(out[0], vec![1]);
 }
 
 #[test]

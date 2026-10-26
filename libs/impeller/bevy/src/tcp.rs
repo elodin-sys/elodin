@@ -1,13 +1,9 @@
 use crate::*;
-use bbqueue::ArcBBQueue;
-use bbqueue::traits::storage::BoxedSlice;
 use bevy::app::{Plugin, PreUpdate};
-use impeller::types::{IntoLenPacket, LenPacket};
-use impeller_bbq::*;
+use impeller::types::LenPacket;
+use impeller_bbq::AsyncArcQueueTx;
 use impeller_stellar::queue::{StreamHandshake, tcp_connect};
-use impeller_wkt::{DbConfig, SetStreamFilter, Stream, StreamBehavior, StreamId};
-use std::sync::Arc;
-use std::sync::atomic::{self, AtomicU64};
+use impeller_wkt::{SetStreamFilter, StreamId};
 use std::{net::SocketAddr, time::Duration};
 use thingbuf::mpsc;
 
@@ -35,11 +31,12 @@ impl TcpImpellerPlugin {
 
 impl Plugin for TcpImpellerPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
-        let (packet_tx, packet_rx, outgoing_packet_rx, incoming_packet_tx) = channels();
-        let (msg_tx, msg_rx, msg_outgoing_rx, msg_incoming_tx) = msg_channels();
+        let (packet_tx, packet_rx, outgoing_packet_rx, incoming_packet_tx) =
+            crate::channels::channels();
+        let (msg_tx, msg_rx, msg_outgoing_rx, msg_incoming_tx) = crate::channels::msg_channels();
         let stream_id = fastrand::u64(..);
         let status = if let Some(addr) = self.addr {
-            app.insert_resource(ConnectionAddr(addr));
+            app.insert_resource(ConnectionAddr::new(addr));
             spawn_msg_tcp_connect(addr, msg_outgoing_rx, msg_incoming_tx);
             spawn_tcp_connect(
                 addr,
@@ -65,42 +62,6 @@ impl Plugin for TcpImpellerPlugin {
     }
 }
 
-pub fn channels() -> (
-    PacketTx,
-    PacketRx,
-    mpsc::Receiver<Option<LenPacket>>,
-    AsyncArcQueueTx,
-) {
-    let queue = ArcBBQueue::new_with_storage(BoxedSlice::new(QUEUE_LEN));
-    let incoming_packet_rx = queue.framed_consumer_with_header::<usize>();
-    let incoming_packet_tx = queue.framed_producer_with_header::<usize>();
-    let (outgoing_packet_tx, outgoing_packet_rx) = mpsc::channel::<Option<LenPacket>>(4096);
-    (
-        PacketTx(outgoing_packet_tx),
-        PacketRx(incoming_packet_rx),
-        outgoing_packet_rx,
-        incoming_packet_tx,
-    )
-}
-
-pub fn msg_channels() -> (
-    MsgPacketTx,
-    MsgPacketRx,
-    mpsc::Receiver<Option<LenPacket>>,
-    AsyncArcQueueTx,
-) {
-    let queue = ArcBBQueue::new_with_storage(BoxedSlice::new(QUEUE_LEN));
-    let incoming_packet_rx = queue.framed_consumer_with_header::<usize>();
-    let incoming_packet_tx = queue.framed_producer_with_header::<usize>();
-    let (outgoing_packet_tx, outgoing_packet_rx) = mpsc::channel::<Option<LenPacket>>(4096);
-    (
-        MsgPacketTx(outgoing_packet_tx),
-        MsgPacketRx(incoming_packet_rx),
-        outgoing_packet_rx,
-        incoming_packet_tx,
-    )
-}
-
 pub fn spawn_tcp_connect(
     addr: SocketAddr,
     mut outgoing_packet_rx: mpsc::Receiver<Option<LenPacket>>,
@@ -109,7 +70,7 @@ pub fn spawn_tcp_connect(
     mut reconnect: bool,
     component_filtered: bool,
 ) -> ThreadConnectionStatus {
-    let connection_status = ThreadConnectionStatus(Arc::new(AtomicU64::new(0)));
+    let connection_status = ThreadConnectionStatus::new(ConnectionStatus::NoConnection);
     let ret_connection_status = connection_status.clone();
     std::thread::spawn(move || {
         let res: Result<(), miette::Error> = stellarator::run(|| async move {
@@ -216,42 +177,6 @@ pub fn spawn_msg_tcp_connect(
         });
     });
 }
-
-#[repr(u64)]
-#[derive(Default, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ConnectionStatus {
-    #[default]
-    NoConnection = 0,
-    Success,
-    Connecting,
-    Error,
-}
-
-#[derive(Clone, Resource)]
-pub struct ThreadConnectionStatus(Arc<AtomicU64>);
-
-impl ThreadConnectionStatus {
-    pub fn new(status: ConnectionStatus) -> Self {
-        ThreadConnectionStatus(Arc::new(AtomicU64::new(status as u64)))
-    }
-
-    pub fn status(&self) -> ConnectionStatus {
-        match self.0.load(atomic::Ordering::SeqCst) {
-            0 => ConnectionStatus::NoConnection,
-            1 => ConnectionStatus::Success,
-            2 => ConnectionStatus::Connecting,
-            3 => ConnectionStatus::Error,
-            _ => ConnectionStatus::NoConnection,
-        }
-    }
-    pub fn set_status(&self, status: ConnectionStatus) {
-        self.0.store(status as u64, atomic::Ordering::SeqCst);
-    }
-}
-
-#[derive(Clone, Resource, Deref)]
-pub struct ConnectionAddr(pub SocketAddr);
-
 #[cfg(test)]
 mod tests {
     use super::*;
