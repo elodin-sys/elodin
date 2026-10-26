@@ -38,6 +38,7 @@ JupiterPosition = el.Annotated[
 
 def reference_state(et: float, target: str = "VOYAGER 1") -> np.ndarray:
     state, _ = spice.spkezr(target, et, "ECLIPJ2000", "NONE", "SUN")
+    # SPICE uses km and km/s, but Elodin uses m and m/s
     return np.asarray(state, dtype=np.float64) * 1000.0
 
 
@@ -78,7 +79,7 @@ def run(chapter: int) -> None:
     position_errors_km = []
 
     def pre_step(tick: int, ctx: el.StepContext) -> None:
-        # use Jupiter's position halfway through each step
+        # keep Jupiter at the midpoint for the whole RK4 step
         et = start_et + (tick + 0.5) * TIME_STEP
         ctx.write_component(
             "voyager1.jupiter_position", reference_state(et, "JUPITER BARYCENTER")[:3]
