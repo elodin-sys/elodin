@@ -84,7 +84,7 @@ pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
     .await?;
     let project = select_project(&projects.projects, args.project.as_deref())?;
     let url = format!("{base}/v1/projects/{project}/runs");
-    let idempotency = upload_key(ctx, &creds, project, &manifest, args.restart)?;
+    let (session_path, idempotency) = upload_key(ctx, &creds, project, &manifest, args.restart)?;
     eprintln!(
         "Uploading {} files to project {project}...",
         manifest.files.len()
@@ -93,7 +93,7 @@ pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
         .client
         .post(&url)
         .bearer_auth(&creds.access_token)
-        .header("Idempotency-Key", idempotency)
+        .header("Idempotency-Key", &idempotency)
         .json(&manifest)
         .timeout(Duration::from_secs(30))
         .send()
@@ -151,6 +151,7 @@ pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
                     let run = status
                         .run_id
                         .ok_or_else(|| miette::miette!("published upload omitted its run ID"))?;
+                    std::fs::remove_file(&session_path).into_diagnostic()?;
                     if args.json {
                         println!(
                             "{}",
@@ -325,7 +326,7 @@ fn upload_key(
     project: uuid::Uuid,
     manifest: &Manifest,
     restart: bool,
-) -> miette::Result<String> {
+) -> miette::Result<(PathBuf, String)> {
     use base64::Engine;
     use std::io::Write;
     #[derive(Deserialize, Serialize)]
@@ -367,7 +368,7 @@ fn upload_key(
                     .into_diagnostic()
                     .wrap_err("invalid saved upload session; use --restart")?;
                 if saved.created_at.saturating_add(86_300) > tokens::now() {
-                    return Ok(saved.key);
+                    return Ok((path, saved.key));
                 }
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -392,7 +393,7 @@ fn upload_key(
     file.sync_all().into_diagnostic()?;
     drop(file);
     std::fs::rename(&temporary, &path).into_diagnostic()?;
-    Ok(session.key)
+    Ok((path, session.key))
 }
 
 fn select_project(projects: &[Project], requested: Option<&str>) -> miette::Result<uuid::Uuid> {
@@ -620,6 +621,11 @@ mod tests {
             restarted
         );
         assert_eq!(std::fs::read(root.join("db_state")).unwrap(), b"abc");
+        std::fs::remove_file(&restarted.0).unwrap();
+        assert_ne!(
+            upload_key(&ctx, &creds, project, &manifest, false).unwrap(),
+            restarted
+        );
         assert_eq!(std::fs::read_dir(root).unwrap().count(), 1);
     }
 
