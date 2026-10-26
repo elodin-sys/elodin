@@ -1,4 +1,4 @@
-//! Resumable uncompressed tar uploads of a stopped TelemetryDB, followed by publication polling.
+//! Resumable zstd-compressed tar uploads of a stopped TelemetryDB, followed by publication polling.
 
 use std::collections::HashSet;
 use std::io::{IsTerminal, Read};
@@ -50,7 +50,10 @@ impl Read for CheckedSource {
 
 fn archive(root: &Path, manifest: &Manifest) -> miette::Result<(tempfile::NamedTempFile, Archive)> {
     let output = tempfile::NamedTempFile::new().into_diagnostic()?;
-    let mut builder = tar::Builder::new(output.reopen().into_diagnostic()?);
+    let mut encoder = zstd::stream::write::Encoder::new(output.reopen().into_diagnostic()?, 3)
+        .into_diagnostic()?;
+    encoder.include_checksum(true).into_diagnostic()?;
+    let mut builder = tar::Builder::new(encoder);
     for entry in &manifest.files {
         let path = root.join(&entry.path);
         let file = std::fs::File::open(&path).into_diagnostic()?;
@@ -97,6 +100,8 @@ fn archive(root: &Path, manifest: &Manifest) -> miette::Result<(tempfile::NamedT
     }
     builder
         .into_inner()
+        .into_diagnostic()?
+        .finish()
         .into_diagnostic()?
         .sync_all()
         .into_diagnostic()?;
@@ -681,7 +686,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn archive_is_deterministic_uncompressed_and_detects_changed_sources() {
+    fn archive_is_deterministic_compressed_and_detects_changed_sources() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("db_state"), b"abc").unwrap();
         std::fs::create_dir(dir.path().join("assets")).unwrap();
@@ -690,8 +695,9 @@ mod tests {
         let (first, declaration) = archive(dir.path(), &manifest).unwrap();
         let (_, repeated) = archive(dir.path(), &manifest).unwrap();
         assert_eq!(declaration.sha256, repeated.sha256);
-        assert_eq!(declaration.size_bytes, 2560);
-        let mut tar = tar::Archive::new(first.reopen().unwrap());
+        assert!(declaration.size_bytes < 2560);
+        let decoder = zstd::stream::read::Decoder::new(first.reopen().unwrap()).unwrap();
+        let mut tar = tar::Archive::new(decoder);
         let members = tar
             .entries()
             .unwrap()
@@ -871,7 +877,7 @@ mod tests {
         ];
         replies.extend([
                 (200, serde_json::json!({"completed":false, "part_bytes":16*1024*1024, "part_count":1,"completed_parts":[]})),
-                (200, serde_json::json!({"number":1,"offset":0,"size_bytes":134_144,"url":format!("{url}/storage/0")})),
+                 (200, serde_json::json!({"number":1,"offset":0,"size_bytes":0,"url":format!("{url}/storage/0")})),
                 (200, serde_json::Value::Null),
                 (204, serde_json::Value::Null),
                 (204, serde_json::Value::Null),
@@ -882,8 +888,8 @@ mod tests {
         ));
         replies.push((200, status));
         let server = tokio::spawn(async move {
-            let mut requests = Vec::new();
-            for (status, body) in replies {
+            let mut requests: Vec<Vec<u8>> = Vec::new();
+            for (status, mut body) in replies {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 let mut request = Vec::new();
                 loop {
@@ -905,6 +911,17 @@ mod tests {
                             break;
                         }
                     }
+                }
+                if body.get("url").is_some() {
+                    let declaration = &requests[2];
+                    let start = declaration
+                        .windows(4)
+                        .position(|bytes| bytes == b"\r\n\r\n")
+                        .unwrap()
+                        + 4;
+                    let declaration: serde_json::Value =
+                        serde_json::from_slice(&declaration[start..]).unwrap();
+                    body["size_bytes"] = declaration["size_bytes"].clone();
                 }
                 let body = if status == 204 {
                     String::new()
@@ -981,9 +998,19 @@ mod tests {
         let storage = String::from_utf8_lossy(&requests[4]);
         assert!(storage.starts_with("PUT /storage/0 "));
         assert!(!storage.contains("test-token"));
-        assert!(storage.contains(&"x".repeat(131_079 - 24)));
+        let start = requests[4]
+            .windows(4)
+            .position(|bytes| bytes == b"\r\n\r\n")
+            .unwrap()
+            + 4;
+        let decoded = zstd::stream::decode_all(&requests[4][start..]).unwrap();
         assert!(
-            requests[4].len() < 140_000,
+            decoded
+                .windows(131_079 - 24)
+                .any(|bytes| bytes.iter().all(|b| *b == b'x'))
+        );
+        assert!(
+            requests[4].len() < 2000,
             "sparse preallocation was uploaded"
         );
         assert!(String::from_utf8_lossy(requests.last().unwrap()).contains("/run-uploads/"));
