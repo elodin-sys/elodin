@@ -61,6 +61,9 @@ pub struct UploadArgs {
     /// Print the final published upload status as JSON.
     #[arg(long)]
     pub json: bool,
+    /// Start a new upload instead of resuming the saved session for this snapshot.
+    #[arg(long)]
+    pub restart: bool,
     /// Maximum seconds to wait for publication after acceptance.
     #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..))]
     pub timeout: u64,

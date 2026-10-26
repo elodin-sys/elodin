@@ -1,4 +1,4 @@
-//! Read-only compacted streaming upload of a stopped TelemetryDB, followed by publication polling.
+//! Read-only compacted S3 part uploads of a stopped TelemetryDB, followed by publication polling.
 
 use std::collections::HashSet;
 use std::io::{IsTerminal, Read};
@@ -6,10 +6,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use miette::{Context, IntoDiagnostic};
-use reqwest::multipart::{Form, Part};
 use ring::digest::{Context as Digest, SHA256};
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 
 use super::{AuthCtx, UploadArgs, random_token, tokens};
 
@@ -50,6 +49,22 @@ struct Status {
     details: serde_json::Map<String, serde_json::Value>,
 }
 
+#[derive(Deserialize)]
+struct FileSession {
+    completed: bool,
+    part_bytes: u64,
+    part_count: u32,
+    completed_parts: Vec<u32>,
+}
+
+#[derive(Deserialize)]
+struct PartUrl {
+    number: u32,
+    offset: u64,
+    size_bytes: u64,
+    url: String,
+}
+
 pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
     tokens::ensure_valid(ctx).await?;
     let root = args.db_path.clone();
@@ -57,7 +72,7 @@ pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
         .await
         .into_diagnostic()??;
     let mut creds = tokens::ensure_valid(ctx).await?;
-    let base = creds.api_url.trim_end_matches('/');
+    let base = creds.api_url.trim_end_matches('/').to_owned();
     let projects: Projects = response(
         ctx.client
             .get(format!("{base}/v1/projects"))
@@ -69,39 +84,7 @@ pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
     .await?;
     let project = select_project(&projects.projects, args.project.as_deref())?;
     let url = format!("{base}/v1/projects/{project}/runs");
-    let mut form = Form::new().part(
-        "manifest",
-        Part::text(serde_json::to_string(&manifest).into_diagnostic()?)
-            .mime_str("application/json")
-            .into_diagnostic()?,
-    );
-    for entry in &manifest.files {
-        let path = args.db_path.join(&entry.path);
-        // Open only the current part when polled, not thousands of files at once.
-        let size_bytes = entry.size_bytes;
-        let stream =
-            futures_util::stream::try_unfold((path, None), move |(path, file)| async move {
-                let mut file = match file {
-                    Some(file) => file,
-                    None => tokio::fs::File::open(&path).await?.take(size_bytes),
-                };
-                let mut chunk = vec![0u8; 64 * 1024];
-                let n = file.read(&mut chunk).await?;
-                if n == 0 {
-                    Ok::<_, std::io::Error>(None)
-                } else {
-                    chunk.truncate(n);
-                    Ok(Some((chunk, (path, Some(file)))))
-                }
-            });
-        form = form.part(
-            entry.part.clone(),
-            Part::stream_with_length(reqwest::Body::wrap_stream(stream), entry.size_bytes)
-                .file_name(entry.part.clone())
-                .mime_str("application/octet-stream")
-                .into_diagnostic()?,
-        );
-    }
+    let idempotency = upload_key(ctx, &creds, project, &manifest, args.restart)?;
     eprintln!(
         "Uploading {} files to project {project}...",
         manifest.files.len()
@@ -110,18 +93,38 @@ pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
         .client
         .post(&url)
         .bearer_auth(&creds.access_token)
-        .header("Idempotency-Key", random_token())
-        .multipart(form)
+        .header("Idempotency-Key", idempotency)
+        .json(&manifest)
+        .timeout(Duration::from_secs(30))
         .send()
         .await
         .into_diagnostic()
         .wrap_err("upload failed; keep the database stopped while uploading")?;
     let status_code = resp.status();
-    let accepted: Status = response(resp).await?;
+    let mut accepted: Status = response(resp).await?;
     if status_code != reqwest::StatusCode::ACCEPTED || accepted.project_id != project {
         return Err(miette::miette!("unexpected upload acceptance response"));
     }
     let ticket = accepted.ticket;
+    if accepted.state == "uploading" {
+        transfer(ctx, &base, project, ticket, &args.db_path, &manifest).await?;
+        creds = tokens::ensure_valid(ctx).await?;
+        accepted = response(
+            ctx.client
+                .post(format!(
+                    "{base}/v1/projects/{project}/run-uploads/{ticket}/complete"
+                ))
+                .bearer_auth(&creds.access_token)
+                .timeout(Duration::from_secs(30))
+                .send()
+                .await
+                .into_diagnostic()?,
+        )
+        .await?;
+        if accepted.ticket != ticket || accepted.project_id != project {
+            return Err(miette::miette!("upload completion identity changed"));
+        }
+    }
     eprintln!("Upload accepted: {ticket}. Waiting for publication...");
     let status_url = format!(
         "{}/v1/projects/{project}/run-uploads/{ticket}",
@@ -161,7 +164,7 @@ pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
                 "receiving" | "queued" | "running" | "retry_wait" => {}
                 _ => {
                     return Err(miette::miette!(
-                        "upload {ticket} did not publish: {} ({})",
+                        "upload {ticket} did not publish: {} ({}); use --restart to start a new upload",
                         status.state,
                         serde_json::to_string(&status.details).into_diagnostic()?
                     ));
@@ -177,6 +180,219 @@ pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
                 "timed out waiting for upload {ticket}; it may still publish. Status: {status_url}"
             )
         })?
+}
+
+async fn transfer(
+    ctx: &AuthCtx,
+    base: &str,
+    project: uuid::Uuid,
+    ticket: uuid::Uuid,
+    root: &Path,
+    manifest: &Manifest,
+) -> miette::Result<()> {
+    // Never attach the API bearer token or follow redirects on storage requests.
+    let storage_client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(180))
+        .build()
+        .into_diagnostic()?;
+    for entry in &manifest.files {
+        let url = format!(
+            "{base}/v1/projects/{project}/run-uploads/{ticket}/files/{}",
+            entry.part
+        );
+        let creds = tokens::ensure_valid(ctx).await?;
+        let session: FileSession = response(
+            ctx.client
+                .post(&url)
+                .bearer_auth(&creds.access_token)
+                .timeout(Duration::from_secs(30))
+                .send()
+                .await
+                .into_diagnostic()?,
+        )
+        .await?;
+        if session.completed {
+            continue;
+        }
+        if session.part_bytes == 0
+            || session.part_bytes > 16 * 1024 * 1024
+            || u64::from(session.part_count) != entry.size_bytes.div_ceil(session.part_bytes)
+            || session
+                .completed_parts
+                .iter()
+                .any(|number| *number == 0 || *number > session.part_count)
+        {
+            return Err(miette::miette!("invalid upload part layout"));
+        }
+        let mut file = tokio::fs::File::open(root.join(&entry.path))
+            .await
+            .into_diagnostic()?;
+        for number in 1..=session.part_count {
+            if session.completed_parts.contains(&number) {
+                continue;
+            }
+            let offset = u64::from(number - 1) * session.part_bytes;
+            let size = (entry.size_bytes - offset).min(session.part_bytes);
+            file.seek(std::io::SeekFrom::Start(offset))
+                .await
+                .into_diagnostic()?;
+            let mut bytes = vec![0; size as usize];
+            file.read_exact(&mut bytes)
+                .await
+                .into_diagnostic()
+                .wrap_err("upload source changed; keep the database stopped")?;
+            let part_url = format!("{url}/parts/{number}");
+            let mut etag = None;
+            for retry in 0..3 {
+                let creds = tokens::ensure_valid(ctx).await?;
+                let signed: PartUrl = response(
+                    ctx.client
+                        .post(&part_url)
+                        .bearer_auth(&creds.access_token)
+                        .timeout(Duration::from_secs(30))
+                        .send()
+                        .await
+                        .into_diagnostic()?,
+                )
+                .await?;
+                let storage_url = reqwest::Url::parse(&signed.url).into_diagnostic()?;
+                if signed.number != number
+                    || signed.offset != offset
+                    || signed.size_bytes != size
+                    || (storage_url.scheme() != "https"
+                        && !(base.starts_with("http://") && storage_url.scheme() == "http"))
+                    || !storage_url.username().is_empty()
+                    || storage_url.password().is_some()
+                {
+                    return Err(miette::miette!("invalid storage upload link"));
+                }
+                match storage_client
+                    .put(storage_url)
+                    .body(bytes.clone())
+                    .send()
+                    .await
+                {
+                    Ok(resp) if resp.status().is_success() => {
+                        etag = Some(
+                            resp.headers()
+                                .get("etag")
+                                .and_then(|v| v.to_str().ok())
+                                .ok_or_else(|| miette::miette!("storage omitted the part ETag"))?
+                                .to_owned(),
+                        );
+                        break;
+                    }
+                    _ if retry < 2 => tokio::time::sleep(Duration::from_secs(1 << retry)).await,
+                    _ => {
+                        return Err(miette::miette!(
+                            "storage part upload failed; rerun the same command to resume"
+                        ));
+                    }
+                }
+            }
+            let creds = tokens::ensure_valid(ctx).await?;
+            let resp = ctx.client.put(&part_url).bearer_auth(&creds.access_token)
+                .json(&serde_json::json!({"etag": etag.ok_or_else(|| miette::miette!("missing part receipt"))?}))
+                .timeout(Duration::from_secs(30)).send().await.into_diagnostic()?;
+            expect_no_content(resp).await?;
+        }
+        let creds = tokens::ensure_valid(ctx).await?;
+        let resp = ctx
+            .client
+            .post(format!("{url}/complete"))
+            .bearer_auth(&creds.access_token)
+            .timeout(Duration::from_secs(30))
+            .send()
+            .await
+            .into_diagnostic()?;
+        expect_no_content(resp).await?;
+    }
+    Ok(())
+}
+
+async fn expect_no_content(resp: reqwest::Response) -> miette::Result<()> {
+    if resp.status() == reqwest::StatusCode::NO_CONTENT {
+        return Ok(());
+    }
+    let _: serde_json::Value = response(resp).await?;
+    Err(miette::miette!("unexpected upload receipt response"))
+}
+
+fn upload_key(
+    ctx: &AuthCtx,
+    creds: &tokens::Credentials,
+    project: uuid::Uuid,
+    manifest: &Manifest,
+    restart: bool,
+) -> miette::Result<String> {
+    use base64::Engine;
+    use std::io::Write;
+    #[derive(Deserialize, Serialize)]
+    struct Session {
+        key: String,
+        created_at: u64,
+    }
+    // This claim separates local caches only. The API still performs authorization.
+    let subject = creds
+        .access_token
+        .split('.')
+        .nth(1)
+        .and_then(|part| {
+            base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(part)
+                .ok()
+        })
+        .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+        .and_then(|claims| {
+            claims
+                .get("sub")
+                .and_then(|sub| sub.as_str())
+                .map(str::to_owned)
+        });
+    let identity = serde_json::to_vec(&(&creds.issuer, &creds.api_url, subject, project, manifest))
+        .into_diagnostic()?;
+    let hash = ring::digest::digest(&SHA256, &identity)
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let directory = ctx.creds_path.with_file_name("upload-sessions");
+    std::fs::create_dir_all(&directory).into_diagnostic()?;
+    let path = directory.join(format!("{hash}.json"));
+    if !restart {
+        match std::fs::read(&path) {
+            Ok(bytes) => {
+                let saved: Session = serde_json::from_slice(&bytes)
+                    .into_diagnostic()
+                    .wrap_err("invalid saved upload session; use --restart")?;
+                if saved.created_at.saturating_add(86_300) > tokens::now() {
+                    return Ok(saved.key);
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error).into_diagnostic(),
+        }
+    }
+    let session = Session {
+        key: random_token(),
+        created_at: tokens::now(),
+    };
+    let temporary = path.with_extension(format!("{}.tmp", random_token()));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&temporary).into_diagnostic()?;
+    file.write_all(&serde_json::to_vec(&session).into_diagnostic()?)
+        .into_diagnostic()?;
+    file.sync_all().into_diagnostic()?;
+    drop(file);
+    std::fs::rename(&temporary, &path).into_diagnostic()?;
+    Ok(session.key)
 }
 
 fn select_project(projects: &[Project], requested: Option<&str>) -> miette::Result<uuid::Uuid> {
@@ -368,6 +584,46 @@ mod tests {
     use super::*;
 
     #[test]
+    fn saved_upload_keys_resume_and_restart_without_touching_the_recording() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("db");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("db_state"), b"abc").unwrap();
+        let manifest = manifest(&root).unwrap();
+        let ctx = AuthCtx {
+            client: reqwest::Client::new(),
+            issuer: "https://auth.example.com".into(),
+            api_url: "https://api.example.com".into(),
+            creds_path: dir.path().join("credentials.json"),
+        };
+        let creds = tokens::Credentials {
+            access_token: "test-token".into(),
+            refresh_token: None,
+            expires_at: tokens::now() + 1000,
+            issuer: ctx.issuer.clone(),
+            api_url: ctx.api_url.clone(),
+        };
+        let project = uuid::Uuid::nil();
+        let key = upload_key(&ctx, &creds, project, &manifest, false).unwrap();
+        assert_eq!(
+            upload_key(&ctx, &creds, project, &manifest, false).unwrap(),
+            key
+        );
+        let restarted = upload_key(&ctx, &creds, project, &manifest, true).unwrap();
+        assert_ne!(restarted, key);
+        assert_eq!(
+            upload_key(&ctx, &creds, project, &manifest, false).unwrap(),
+            restarted
+        );
+        assert_ne!(
+            upload_key(&ctx, &creds, uuid::Uuid::new_v4(), &manifest, false).unwrap(),
+            restarted
+        );
+        assert_eq!(std::fs::read(root.join("db_state")).unwrap(), b"abc");
+        assert_eq!(std::fs::read_dir(root).unwrap().count(), 1);
+    }
+
+    #[test]
     fn manifest_compacts_sparse_logs_without_changing_source() {
         use std::io::Write;
         let dir = tempfile::tempdir().unwrap();
@@ -474,17 +730,30 @@ mod tests {
         let url = format!("http://{}", listener.local_addr().unwrap());
         let project = uuid::Uuid::nil();
         let status = serde_json::json!({"ticket": project, "project_id": project, "state": state, "run_id": run_id});
-        let replies = [
+        let mut replies = vec![
             (
                 200,
                 serde_json::json!({"projects": [{"id": project, "name": "demo"}]}),
             ),
             (
                 202,
-                serde_json::json!({"ticket": project, "project_id": project, "state": "queued"}),
+                serde_json::json!({"ticket": project, "project_id": project, "state": "uploading"}),
             ),
-            (200, status),
         ];
+        for (index, size) in [131_079, 3].into_iter().enumerate() {
+            replies.extend([
+                (200, serde_json::json!({"completed":false, "part_bytes":16*1024*1024, "part_count":1,"completed_parts":[]})),
+                (200, serde_json::json!({"number":1,"offset":0,"size_bytes":size,"url":format!("{url}/storage/{index}")})),
+                (200, serde_json::Value::Null),
+                (204, serde_json::Value::Null),
+                (204, serde_json::Value::Null),
+            ]);
+        }
+        replies.push((
+            202,
+            serde_json::json!({"ticket":project,"project_id":project,"state":"queued"}),
+        ));
+        replies.push((200, status));
         let server = tokio::spawn(async move {
             let mut requests = Vec::new();
             for (status, body) in replies {
@@ -510,8 +779,12 @@ mod tests {
                         }
                     }
                 }
-                let body = body.to_string();
-                socket.write_all(format!("HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+                let body = if status == 204 {
+                    String::new()
+                } else {
+                    body.to_string()
+                };
+                socket.write_all(format!("HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nETag: \"test-etag\"\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
                 requests.push(request);
             }
             requests
@@ -551,6 +824,7 @@ mod tests {
                 db_path: root.clone(),
                 project: None,
                 json: true,
+                restart: false,
                 timeout: 1,
             },
         )
@@ -563,26 +837,29 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn streams_manifest_first_and_waits_for_publication() {
+    async fn uploads_only_compacted_bytes_to_storage_without_bearer_token() {
         let (result, requests) = mock_upload("succeeded", Some(uuid::Uuid::nil())).await;
         result.unwrap();
         let upload = String::from_utf8_lossy(&requests[1]);
         assert!(upload.starts_with("POST /v1/projects/00000000-0000-0000-0000-000000000000/runs "));
         assert!(upload.contains("authorization: Bearer test-token"));
         assert!(upload.contains("idempotency-key:"));
-        assert!(
-            upload.find("name=\"manifest\"").unwrap() < upload.find("name=\"file_0\"").unwrap()
-        );
+        assert!(upload.contains("content-type: application/json"));
         assert!(upload.contains("\"size_bytes\":131079"));
-        assert!(upload.contains(&"x".repeat(131_079 - 24)));
-        assert!(
-            requests[1].len() < 140_000,
-            "sparse preallocation was uploaded"
-        );
+        assert!(!upload.contains(&"x".repeat(100)));
+        assert!(requests[1].len() < 2000, "bulk data reached the API");
         assert!(
             upload.contains("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
         );
-        assert!(String::from_utf8_lossy(&requests[2]).contains("/run-uploads/"));
+        let storage = String::from_utf8_lossy(&requests[4]);
+        assert!(storage.starts_with("PUT /storage/0 "));
+        assert!(!storage.contains("test-token"));
+        assert!(storage.contains(&"x".repeat(131_079 - 24)));
+        assert!(
+            requests[4].len() < 140_000,
+            "sparse preallocation was uploaded"
+        );
+        assert!(String::from_utf8_lossy(requests.last().unwrap()).contains("/run-uploads/"));
     }
 
     #[tokio::test]
