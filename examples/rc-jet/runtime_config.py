@@ -1,0 +1,45 @@
+"""RC-jet presets, resolved at entry points and passed explicitly to builders."""
+
+import os
+from collections.abc import Mapping
+from dataclasses import dataclass
+from enum import Enum
+
+
+class TerrainMode(str, Enum):
+    PLANAR = "planar"
+    CESIUM = "cesium"
+
+
+@dataclass(frozen=True)
+class CameraSettings:
+    color_fps: float = 30.0
+    color_format: str = "rgba"
+    infrared_fps: float = 60.0
+    infrared_format: str = "gray8"
+
+
+RAW_CAMERAS = CameraSettings()
+PREVIEW_CAMERAS = CameraSettings(color_format="h264", infrared_fps=15.0, infrared_format="h264")
+
+
+@dataclass(frozen=True)
+class RuntimeConfig:
+    terrain: TerrainMode = TerrainMode.PLANAR
+    cameras: CameraSettings = RAW_CAMERAS
+
+
+def load_config(environ: Mapping[str, str] | None = None) -> RuntimeConfig:
+    """Keep the launcher presets; reject typos instead of silently using planar terrain."""
+    environ = os.environ if environ is None else environ
+    value = environ.get("ELODIN_RC_JET_TERRAIN", "planar")
+    try:
+        terrain = TerrainMode(value)
+    except ValueError:
+        raise ValueError(
+            f"ELODIN_RC_JET_TERRAIN must be 'planar' or 'cesium', got {value!r}"
+        ) from None
+    return RuntimeConfig(
+        terrain=terrain,
+        cameras=PREVIEW_CAMERAS if terrain is TerrainMode.CESIUM else RAW_CAMERAS,
+    )

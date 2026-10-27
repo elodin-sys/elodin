@@ -52,8 +52,27 @@ Keep the token file outside the repository. The launcher runs
 `examples/rc-jet/main.py` with its existing controls, instruments and views. It
 sets `ELODIN_RC_JET_TERRAIN=cesium` and defaults to ion asset `1` for terrain and
 asset `2` for aerial imagery. Without that mode, RC-jet uses its existing planar
-terrain setup. This environment-based selection is the current configuration,
-not a new general terrain interface.
+terrain setup.
+
+`runtime_config.load_config()` reads and validates this mode at the entry point:
+unset or `planar` selects the planar preset, and `cesium` selects the Cesium preset.
+Other values fail explicitly. The resulting immutable `RuntimeConfig` is passed
+to the world and schematic builders. The standalone schematic/watch entry point
+uses the same loader when called without a configuration.
+
+Camera recording settings are independent of the terrain selection. The presets
+retain today's raw versus H.264 defaults, but Python callers can replace them
+without changing the terrain, for example:
+
+```python
+from dataclasses import replace
+from runtime_config import PREVIEW_CAMERAS, load_config
+
+config = replace(load_config(), cameras=PREVIEW_CAMERAS)
+```
+
+This example-local configuration does not change Cesium's renderer environment
+variables or introduce a general terrain interface.
 
 ### Height preparation and contact
 
@@ -169,9 +188,9 @@ Rendering, infrared and the height API are reviewed together in
 [#914](https://github.com/elodin-sys/elodin/pull/914), which incorporates #915.
 The following are discussion points, not implemented changes:
 
-- Replace mode-switch environment variables with explicit configuration so
-  terrain rendering, physical contact and cameras can be enabled independently.
-  Keep credentials separate from that configuration.
+- Decide whether to replace the remaining launcher mode switch and separate
+  terrain rendering from physical contact. Camera recording settings are already
+  explicit and independent of the terrain field; credentials remain separate.
 - Reuse the existing source of truth for ECEF conversions and remove duplication
   introduced by this integration. This is not a general coordinate-system redesign.
 - Decouple the height API from the Cesium preparation path so another source can
