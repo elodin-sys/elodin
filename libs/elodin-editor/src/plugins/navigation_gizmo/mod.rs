@@ -23,7 +23,12 @@ pub struct NavigationGizmoPlugin;
 impl Plugin for NavigationGizmoPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<NavGizmoAnchorState>()
-            .add_systems(PostUpdate, set_camera_viewport)
+            .add_systems(
+                Update,
+                set_camera_viewport
+                    .after(crate::ui::set_camera_viewport)
+                    .before(crate::plugins::editor_cam_input::gated_camera_inputs),
+            )
             .add_systems(PostUpdate, sync_nav_camera)
             .add_plugins(MeshPickingPlugin);
     }

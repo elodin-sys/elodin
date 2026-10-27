@@ -6,9 +6,7 @@ use impeller_kdl::env::schematic_file;
 use impeller_kdl::{FromKdl, ToKdl};
 use impeller_wkt::{DbConfig, Schematic, SkyboxConfig};
 use std::collections::{HashMap, HashSet};
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use super::commands::*;
 use super::messages::*;
@@ -121,49 +119,29 @@ pub fn open_document_from_content(
 
 /// Fetch the active schematic's KDL from the DB Asset Server over HTTP. The
 /// request is bounded so an unreachable DB cannot hang the load.
-pub fn fetch_active_schematic_kdl(
+pub async fn fetch_active_schematic_kdl(
     key: &str,
-    connection_addr: Option<SocketAddr>,
+    endpoint: Option<impeller_bevy::DbEndpoint>,
 ) -> Result<String, String> {
-    let url = crate::object_3d::resolve_db_asset_url(&format!("db:{key}"), connection_addr);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .map_err(|err| format!("{url}: {err}"))?;
-    let response = client
-        .get(&url)
-        .send()
-        .map_err(|err| format!("{url}: {err}"))?;
-    if !response.status().is_success() {
-        return Err(format!("{url}: HTTP {}", response.status()));
-    }
-    response.text().map_err(|err| format!("{url}: {err}"))
+    let url = crate::object_3d::resolve_db_endpoint(&format!("db:{key}"), endpoint.as_ref());
+    crate::plugins::http_client::get_text(&url).await
 }
 
 /// List the schematic asset keys (`schematics/*.kdl`) the DB Asset Server holds,
 /// via its `GET /__index__/<prefix>` listing (RFD #724). Sorted for a stable
 /// picker; the request is bounded so an unreachable DB cannot hang the UI.
-pub(crate) fn fetch_schematic_index(
-    connection_addr: Option<SocketAddr>,
+pub(crate) async fn fetch_schematic_index(
+    endpoint: Option<impeller_bevy::DbEndpoint>,
 ) -> Result<Vec<String>, String> {
     #[derive(serde::Deserialize)]
     struct IndexEntry {
         key: String,
     }
 
-    let url = crate::object_3d::resolve_db_asset_url("db:__index__/schematics/", connection_addr);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .map_err(|err| format!("{url}: {err}"))?;
-    let response = client
-        .get(&url)
-        .send()
-        .map_err(|err| format!("{url}: {err}"))?;
-    if !response.status().is_success() {
-        return Err(format!("{url}: HTTP {}", response.status()));
-    }
-    let entries: Vec<IndexEntry> = response.json().map_err(|err| format!("{url}: {err}"))?;
+    let url = crate::object_3d::resolve_db_endpoint("db:__index__/schematics/", endpoint.as_ref());
+    let body = crate::plugins::http_client::get_text(&url).await?;
+    let entries: Vec<IndexEntry> =
+        serde_json::from_str(&body).map_err(|err| format!("{url}: {err}"))?;
     let mut keys: Vec<String> = entries
         .into_iter()
         .map(|entry| entry.key)
@@ -377,22 +355,17 @@ pub(crate) fn plan_db_save(
 /// Uploads a [`DbSavePlan`] to the DB Asset Server over HTTP `PUT`. Returns `Ok`
 /// only when every upload was accepted, so the caller may then point
 /// `schematic.active` at the uploaded schematic with no torn-write window.
-pub(crate) fn upload_db_save_plan(
+pub(crate) async fn upload_db_save_plan(
     plan: &DbSavePlan,
-    connection_addr: Option<SocketAddr>,
+    endpoint: Option<impeller_bevy::DbEndpoint>,
 ) -> Result<(), String> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|err| err.to_string())?;
-
     for (key, src) in &plan.local_assets {
         let path = local_asset_file(src);
         let bytes = std::fs::read(&path).map_err(|err| format!("{}: {err}", path.display()))?;
-        put_db_asset(&client, key, bytes, connection_addr)?;
+        put_db_asset(key, bytes, endpoint.clone()).await?;
     }
     for (key, bytes) in &plan.schematic_uploads {
-        put_db_asset(&client, key, bytes.clone(), connection_addr)?;
+        put_db_asset(key, bytes.clone(), endpoint.clone()).await?;
     }
     Ok(())
 }
@@ -413,39 +386,26 @@ fn local_asset_file(src: &str) -> PathBuf {
     }
 }
 
-pub(crate) fn upload_overlay_bytes(
+pub(crate) async fn upload_overlay_bytes(
     key: &str,
     bytes: Vec<u8>,
-    connection_addr: SocketAddr,
+    endpoint: impeller_bevy::DbEndpoint,
 ) -> Result<(), String> {
-    let url = crate::object_3d::resolve_db_asset_url(&format!("db:{key}"), Some(connection_addr));
+    let url = crate::object_3d::resolve_db_endpoint(&format!("db:{key}"), Some(&endpoint));
     let len = bytes.len();
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|err| err.to_string())?;
-    put_db_asset(&client, key, bytes, Some(connection_addr))?;
+    put_db_asset(key, bytes, Some(endpoint)).await?;
     bevy::log::info!(key, url = %url, bytes = len, "wrote layout overlay");
     eprintln!("[elodin] wrote layout overlay {key} → {url} ({len} bytes)");
     Ok(())
 }
 
-fn put_db_asset(
-    client: &reqwest::blocking::Client,
+async fn put_db_asset(
     key: &str,
     bytes: Vec<u8>,
-    connection_addr: Option<SocketAddr>,
+    endpoint: Option<impeller_bevy::DbEndpoint>,
 ) -> Result<(), String> {
-    let url = crate::object_3d::resolve_db_asset_url(&format!("db:{key}"), connection_addr);
-    let response = client
-        .put(&url)
-        .body(bytes)
-        .send()
-        .map_err(|err| format!("{url}: {err}"))?;
-    if !response.status().is_success() {
-        return Err(format!("{url}: HTTP {}", response.status()));
-    }
-    Ok(())
+    let url = crate::object_3d::resolve_db_endpoint(&format!("db:{key}"), endpoint.as_ref());
+    crate::plugins::http_client::put_bytes(&url, bytes).await
 }
 
 /// Feeds `InitialKdlPath` into `sync_document_from_config` as an explicit path

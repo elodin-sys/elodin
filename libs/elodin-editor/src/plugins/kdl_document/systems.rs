@@ -1,11 +1,12 @@
 use bevy::asset::{AssetEvent, AssetLoadFailedEvent};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 use bevy_ai_skybox::prelude::{SetActiveSkybox, SkyboxCache};
 use impeller_wkt::{DbConfig, SkyboxConfig};
-use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use super::commands::*;
 use super::messages::*;
@@ -122,11 +123,11 @@ fn should_surface_fetch_failure(attempts: u32) -> bool {
 /// recorded counts as changed — the reload path (with its own retries) then
 /// re-establishes ground truth rather than this gate silently keeping a stale
 /// document.
-fn gated_windows_changed(
+async fn gated_windows_changed(
     key: &str,
     root_kdl: &str,
     snapshot: &StoredSchematicSnapshot,
-    addr: Option<SocketAddr>,
+    addr: Option<impeller_bevy::DbEndpoint>,
 ) -> bool {
     use impeller_kdl::FromKdl;
     if !snapshot.root_matches(key, root_kdl) {
@@ -142,7 +143,7 @@ fn gated_windows_changed(
         let Some(window_key) = window.path.as_deref().and_then(|p| p.strip_prefix("db:")) else {
             continue;
         };
-        let Ok(content) = fetch_active_schematic_kdl(window_key, addr) else {
+        let Ok(content) = fetch_active_schematic_kdl(window_key, addr.clone()).await else {
             return true;
         };
         if !snapshot.window_matches(window_key, &content) {
@@ -159,9 +160,10 @@ fn spawn_active_fetch(
     fetch: &mut ActiveSchematicFetch,
     request: OpenDocumentFromActiveRequest,
     attempts: u32,
-    addr: Option<SocketAddr>,
+    addr: &Option<impeller_bevy::DbEndpoint>,
     last_content: &LastActiveSchematicContent,
 ) {
+    let addr = addr.clone();
     let key = request.key.clone();
     let snapshot = request.only_if_changed.then(|| last_content.snapshot());
     fetch.key = Some(request.key.clone());
@@ -169,15 +171,19 @@ fn spawn_active_fetch(
     fetch.retry = None;
     fetch.refetch_pending = None;
     fetch.task = Some(IoTaskPool::get().spawn(async move {
-        let result = fetch_active_schematic_kdl(&key, addr).map(|content| {
-            let windows_changed = snapshot
-                .as_ref()
-                .is_some_and(|snapshot| gated_windows_changed(&key, &content, snapshot, addr));
-            FetchedActiveSchematic {
-                content,
-                windows_changed,
+        let result = match fetch_active_schematic_kdl(&key, addr.clone()).await {
+            Ok(content) => {
+                let windows_changed = match snapshot.as_ref() {
+                    Some(snapshot) => gated_windows_changed(&key, &content, snapshot, addr).await,
+                    None => false,
+                };
+                Ok(FetchedActiveSchematic {
+                    content,
+                    windows_changed,
+                })
             }
-        });
+            Err(err) => Err(err),
+        };
         ActiveSchematicFetched { request, result }
     }));
 }
@@ -231,7 +237,7 @@ pub(super) fn handle_open_document_from_active_requests(
     mut loaded: MessageWriter<DocumentLoaded>,
     mut failed: MessageWriter<DocumentCommandFailed>,
 ) {
-    let addr = connection_addr.as_deref().map(|c| c.0);
+    let addr = connection_addr.as_deref().map(|c| c.endpoint().clone());
 
     // Latest request wins: a newer active schematic supersedes any in-flight
     // fetch so we never apply a stale load after the user switched schematics.
@@ -246,7 +252,7 @@ pub(super) fn handle_open_document_from_active_requests(
         if already_fetching {
             fetch.refetch_pending = Some(request);
         } else {
-            spawn_active_fetch(&mut fetch, request, 0, addr, &last_content);
+            spawn_active_fetch(&mut fetch, request, 0, &addr, &last_content);
         }
     }
 
@@ -264,7 +270,7 @@ pub(super) fn handle_open_document_from_active_requests(
         } else {
             let request = retry.request.clone();
             let attempts = retry.attempts;
-            spawn_active_fetch(&mut fetch, request, attempts, addr, &last_content);
+            spawn_active_fetch(&mut fetch, request, attempts, &addr, &last_content);
         }
     }
 
@@ -296,7 +302,7 @@ pub(super) fn handle_open_document_from_active_requests(
     // fetched may already be stale, so re-fetch fresh ones (attempt budget
     // reset) rather than applying this result.
     if let Some(newer) = refetch_pending {
-        spawn_active_fetch(&mut fetch, newer, 0, addr, &last_content);
+        spawn_active_fetch(&mut fetch, newer, 0, &addr, &last_content);
         return;
     }
 
@@ -477,6 +483,7 @@ pub(super) fn emit_document_reloads(
     }
 }
 
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 pub(super) fn activate_document_skybox(
     mut loaded: MessageReader<DocumentLoaded>,
     mut reloaded: MessageReader<DocumentReloaded>,
@@ -517,6 +524,7 @@ pub(super) fn activate_document_skybox(
     }
 }
 
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 fn activate_skybox_config(
     skybox: Option<&SkyboxConfig>,
     skyboxes: &mut MessageWriter<SetActiveSkybox>,
