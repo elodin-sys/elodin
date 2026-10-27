@@ -100,7 +100,11 @@ def fake_backend(monkeypatch):
         calls.append(request)
         # Match the last-bit rounding possible in native JSON float parsing.
         request = {**request, "bounds_degrees": np.nextafter(request["bounds_degrees"], 0).tolist()}
-        # Height grows with latitude; strip boundaries must remain continuous.
+        assert (
+            kwargs["timeout"]
+            == 600 * ((request["rows"] * request["columns"] + 999_999) // 1_000_000) + 60
+        )
+        # Height grows with latitude across the full grid.
         south, north = request["bounds_degrees"][1::2]
         heights = np.repeat(np.linspace(south, north, request["rows"]), request["columns"])
         Path(args[3]).write_text(
@@ -134,11 +138,11 @@ def test_cache_hit_offline_and_portable_grid(tmp_path, monkeypatch):
         el.terrain_heightmap(**{**args, "spacing": 20}, offline=True)
 
 
-def test_large_grid_strips_have_no_missing_or_repeated_rows(tmp_path, monkeypatch):
+def test_large_grid_uses_one_cli_request(tmp_path, monkeypatch):
     calls = fake_backend(monkeypatch)
     terrain = el.terrain_heightmap([6378137, 0, 0], (10000, 10000), 10, cache_dir=tmp_path)
-    assert len(calls) == 2
-    assert all(c["rows"] * c["columns"] <= 1_000_000 for c in calls)
+    assert len(calls) == 1
+    assert calls[0]["rows"] == calls[0]["columns"] == 1001
     expected = np.linspace(terrain.bounds[1], terrain.bounds[3], 1001)
     np.testing.assert_allclose(terrain.heights[:, 0], expected, atol=1e-12)
 
@@ -190,7 +194,7 @@ def test_wrong_cached_asset_is_rejected(tmp_path, monkeypatch):
         el.terrain_heightmap(**args, offline=True)
 
 
-def test_transient_backend_failure_retries_only_the_failed_query(tmp_path, monkeypatch):
+def test_transient_backend_failure_retries_preparation(tmp_path, monkeypatch):
     calls = fake_backend(monkeypatch)
     backend = subprocess.run
     attempts = []
@@ -206,3 +210,41 @@ def test_transient_backend_failure_retries_only_the_failed_query(tmp_path, monke
     terrain = el.terrain_heightmap([6378137, 0, 0], (100, 100), 10, cache_dir=tmp_path)
     assert len(attempts) == 2 and len(calls) == 1
     assert terrain.path.exists()
+
+
+@pytest.mark.parametrize(
+    "change", [{"asset_id": 2}, {"heights_m": []}, {"heights_m": [float("nan")] * 121}]
+)
+def test_invalid_output_is_not_published(tmp_path, monkeypatch, change):
+    from pathlib import Path
+
+    fake_backend(monkeypatch)
+    backend = subprocess.run
+
+    def invalid(args, **kwargs):
+        backend(args, **kwargs)
+        path = Path(args[3])
+        path.write_text(json.dumps({**json.loads(path.read_text()), **change}))
+
+    monkeypatch.setattr(subprocess, "run", invalid)
+    with pytest.raises(ValueError):
+        el.terrain_heightmap([6378137, 0, 0], (100, 100), 10, cache_dir=tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_concurrent_cache_publication_returns_the_winning_file(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    fake_backend(monkeypatch)
+
+    def publish_other(source, destination):
+        data = json.loads(Path(source).read_text())
+        data["heights_m"] = [42] * (data["rows"] * data["columns"])
+        Path(destination).write_text(json.dumps(data))
+        raise FileExistsError
+
+    monkeypatch.setattr("elodin.terrain.os.link", publish_other)
+    terrain = el.terrain_heightmap([6378137, 0, 0], (100, 100), 10, cache_dir=tmp_path)
+    assert np.all(terrain.heights == 42)
+    assert terrain.sha256 == el.TerrainHeightmap.load(terrain.path).sha256
+    assert list(tmp_path.iterdir()) == [terrain.path]

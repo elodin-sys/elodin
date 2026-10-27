@@ -182,6 +182,8 @@ def terrain_heightmap(
     automatically. ``offline=True`` requires a cache hit. For portable replay,
     retain ``result.path`` and load it with ``TerrainHeightmap.load(path)``.
     Network and disk access happen only here, never in ``sample``.
+    ``timeout`` applies to each native batch of up to one million positions.
+    A failed preparation is retried up to twice with a fresh native session.
     """
     center = np.asarray(center_ecef, dtype=np.float64)
     size = np.asarray(dimensions, dtype=np.float64)
@@ -199,7 +201,7 @@ def terrain_heightmap(
     if any(not math.isfinite(value) or value >= 25_000_000 for value in intervals):
         raise ValueError("Terrain grid is too large; reduce dimensions or increase spacing")
     columns, rows = (math.ceil(value) + 1 for value in intervals)
-    if rows * columns > 25_000_000 or columns > 500_000:
+    if rows * columns > 25_000_000:
         raise ValueError("Terrain grid is too large; reduce dimensions or increase spacing")
     latitude, longitude, _ = _ecef_to_geodetic(jnp.asarray(center))
     lat, lon = float(latitude), float(longitude)
@@ -233,87 +235,52 @@ def terrain_heightmap(
         with tempfile.TemporaryDirectory(dir=cache, prefix="prepare-") as temporary:
             input_path = Path(temporary) / "request.json"
             output_path = Path(temporary) / "heights.json"
-            heights = []
-            strip_rows = 1_000_000 // columns
-            for start in range(0, rows - 1, strip_rows - 1):
-                end = min(start + strip_rows - 1, rows - 1)
-                strip = {
-                    **request,
-                    "rows": end - start + 1,
-                    "bounds_degrees": [
-                        west,
-                        south + (north - south) * start / (rows - 1),
-                        east,
-                        south + (north - south) * end / (rows - 1),
-                    ],
-                }
-                input_path.write_text(json.dumps(strip))
-                for attempt in range(3):
-                    try:
-                        subprocess.run(
-                            [
-                                os.environ.get("ELODIN_EDITOR_BIN", "elodin"),
-                                "terrain-heights",
-                                str(input_path),
-                                str(output_path),
-                                "--timeout-seconds",
-                                str(timeout),
-                            ],
-                            check=True,
-                            timeout=timeout + 60,
-                            stdout=subprocess.DEVNULL,
-                        )
-                        break
-                    except FileNotFoundError as error:
-                        raise RuntimeError(
-                            "Terrain preparation needs the Elodin CLI with Cesium support"
-                        ) from error
-                    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
-                        if attempt == 2:
-                            raise
-                        output_path.unlink(missing_ok=True)
-                        time.sleep(attempt + 1)
-                data = json.loads(output_path.read_text())
-                _validate_request(data, strip)
-                TerrainHeightmap(data)
-                chunk = data["heights_m"]
-                heights.extend(chunk if start == 0 else chunk[columns:])
-                output_path.unlink()
-            output_path.write_text(
-                json.dumps(
-                    {
-                        "version": 1,
-                        "ellipsoid": "WGS84",
-                        **request,
-                        "heights_m": heights,
-                    }
-                )
-            )
-            TerrainHeightmap.load(output_path)
+            input_path.write_text(json.dumps(request))
+            batches = math.ceil(rows * columns / 1_000_000)
+            for attempt in range(3):
+                try:
+                    subprocess.run(
+                        [
+                            os.environ.get("ELODIN_EDITOR_BIN", "elodin"),
+                            "terrain-heights",
+                            str(input_path),
+                            str(output_path),
+                            "--timeout-seconds",
+                            str(timeout),
+                        ],
+                        check=True,
+                        timeout=timeout * batches + 60,
+                        stdout=subprocess.DEVNULL,
+                    )
+                    break
+                except FileNotFoundError as error:
+                    raise RuntimeError(
+                        "Terrain preparation needs the Elodin CLI with Cesium support"
+                    ) from error
+                except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                    if attempt == 2:
+                        raise
+                    output_path.unlink(missing_ok=True)
+                    time.sleep(attempt + 1)
+            result = _load_requested(output_path, request)
             # Publish a complete file atomically, without replacing another worker's cache.
             try:
                 os.link(output_path, path)
             except FileExistsError:
                 pass
+            else:
+                result.path = path.resolve()
+                return result
+    return _load_requested(path, request)
+
+
+def _load_requested(path, request):
     result = TerrainHeightmap.load(path)
-    _validate_request(
-        {
-            "asset_id": result.asset_id,
-            "bounds_degrees": result.bounds.tolist(),
-            "rows": result.heights.shape[0],
-            "columns": result.heights.shape[1],
-        },
-        request,
-    )
-    return result
-
-
-def _validate_request(data, request):
     # JSON float parsing in the native CLI may round the last binary digit.
-    bounds = np.asarray(data.get("bounds_degrees", []), dtype=np.float64)
     if (
-        bounds.shape != (4,)
-        or not np.allclose(bounds, request["bounds_degrees"], rtol=0, atol=1e-12)
-        or any(data.get(key) != request[key] for key in ("asset_id", "rows", "columns"))
+        not np.allclose(result.bounds, request["bounds_degrees"], rtol=0, atol=1e-12)
+        or result.asset_id != request["asset_id"]
+        or result.heights.shape != (request["rows"], request["columns"])
     ):
         raise ValueError("Terrain heights do not match the requested asset or coverage")
+    return result

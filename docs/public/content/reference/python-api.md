@@ -42,8 +42,9 @@ detailed heights, independently of camera detail. No renderer is opened.
 The SDK stores complete grids in `$XDG_CACHE_HOME/elodin/terrain-heights`
 (normally `~/.cache`). Use `cache_dir=` to choose another location and
 `offline=True` to forbid downloads. `timeout=` limits each native query in
-seconds (default 600). A failed query is retried up to twice; failed or incomplete
-grids are not cached.
+seconds (default 600, up to one million positions per batch). One CLI process
+reuses a native Cesium session across the grid's batches. A failed preparation
+is retried up to twice with a fresh session; failed or incomplete grids are not cached.
 
 The grid follows latitude and longitude lines; dimensions and spacing are
 measured at its center. Areas crossing a pole or the antimeridian are rejected.
