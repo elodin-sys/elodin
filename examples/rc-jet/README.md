@@ -79,9 +79,16 @@ camera.
 In Cesium mode, the infrared preview runs at 15 fps and uses H.264, retaining
 the same resolution, lens and thermal effect. The color preview runs at 30 fps.
 The wider color view loads terrain first; the infrared view then refines it
-without blocking both streams at startup. See the [Cesium launcher](../cesium/README.md#rc-jet).
+without blocking both streams at startup.
 
-Close-up terrain is the geo-anchored `mojave_rc_field` planar
+Cesium mode also uses `el.terrain_heightmap()` to prepare and cache a 24 × 24 km
+height grid at 10 m spacing through the Elodin CLI. During simulation, JAX reads
+that grid for ground contact without network or disk access. The contact model
+protects the aircraft's reference point; the grid can differ from the visible
+mesh and does not provide full airframe or camera collision detection. See the
+[Cesium README](../cesium/README.md#rc-jet) for setup, architecture and limitations.
+
+In the default planar mode, close-up terrain is the geo-anchored `mojave_rc_field`
 `world_mesh` (`frame="ENU"`).
 
 The package GLB is already Elodin body (X forward, Y left, Z up), so
@@ -96,7 +103,7 @@ To fetch and preprocess the terrain atlas (writes
 ./scripts/prepare_editor_terrain_region.sh mojave_rc_field
 ```
 
-Without the atlas the terrain falls back to a grid. Cinematic Earth for
+In planar mode, without the atlas the terrain falls back to a grid. Cinematic Earth for
 FPV is embedded in the render-server (not the editor). Physics uses the
 pad's ellipsoid height (589.274 m); the mesh is shifted so its DEM
 surface (621.5 m orthometric at the centre) meets that pad.
