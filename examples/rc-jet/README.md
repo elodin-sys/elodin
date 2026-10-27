@@ -80,6 +80,11 @@ The default terrain is `assets/mojave_rc_field.glb`, the curvature-baked
 static mesh used by Revere FSW at this same pad. It is committed with Git LFS,
 works in a fresh clone without preprocessing, and is anchored 2 m below the
 ECEF pad position.
+In Cesium mode, the infrared preview runs at 15 fps and uses H.264, retaining
+the same resolution, lens and thermal effect. The color preview runs at 30 fps.
+The wider color view loads terrain first; the infrared view then refines it
+without blocking both streams at startup. See the [Cesium launcher](../cesium/README.md#rc-jet).
+
 
 The package GLB is already Elodin body (X forward, Y left, Z up), so
 `bdx_schematic.py` declares it `orientation="absolute"` with no rotation — an absolute

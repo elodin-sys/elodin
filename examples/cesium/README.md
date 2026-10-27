@@ -58,27 +58,26 @@ the cameras then see the undersides and edges of terrain tiles. Override
 `ELODIN_RC_JET_HEADING_DEG` to choose another route. Terrain-aware ground contact
 is still separate work: the simulation does not stop an aircraft flying into a hill.
 
-The color sensor camera stays enabled. The zoomed infrared camera is temporarily
-disabled in Cesium mode because it greatly increases initial loading time.
-Both video panels remain visible; the infrared panel shows "No video at this time".
 The next step is a shared `el.terrain_heightmap()` API for loading fixed heights
 before simulation and querying them with JAX. Ground contact will use that API
 in a separate change, keeping custom download and cache logic out of RC-jet.
 
-After the terrain API, make infrared usable: measure its costs, choose
-a sustainable frame rate and recording format, prevent it from delaying the color
-stream, and check heat contrast on terrain and a tagged target. Enable it only
-after both cameras work together during a long flight.
-The 18° infrared view requests finer detail and shares the initial loading gate
-with the color camera. Its 640 × 512, 60 fps preset also adds thermal rendering,
-GPU-to-CPU copies and about 20 MB/s of raw grayscale recording. These costs need
-separate measurements; the terrain retention CPU benchmark does not cover them.
-Cesium imagery supplies no measured temperature: infrared terrain currently uses
-Elodin's lighting-based estimate. See the
-[investigation notes](https://github.com/elodin-sys/bevy-cesium#infrared-remains-disabled).
+Both sensor cameras are enabled. The color preview runs at 30 fps; the infrared
+preview retains the Boson-style 640 × 512 resolution, 18° horizontal lens and
+LWIR effect, with a 15 fps cadence. Both use H.264 to limit recording size.
+These are lossy video previews; use raw captures for pixel comparisons in CI.
+The planar-terrain mode retains its original 60 fps raw infrared configuration.
 
-The color preview uses H.264 compression to keep recording size small. This is
-a lossy video preview; use raw captures for future pixel comparisons in CI.
+At startup, co-located sensors with matching orientations load terrain through
+their widest view first. Once that view is ready, the zoomed view requests its
+extra detail without blocking either video stream. The first infrared images
+can therefore use coarser terrain while refinement continues. Fixed-reference
+captures still wait for their requested terrain detail.
+
+Cesium imagery supplies no measured temperature: infrared terrain uses Elodin's
+lighting-based estimate, while tagged objects use their configured temperature.
+Rendering cadence and online loading time depend on the machine and connection;
+this preview configuration does not claim the hardware preset's full 60 Hz.
 For an unattended flight, set `ELODIN_NON_INTERACTIVE=1` and, for example,
 `ELODIN_MAX_TICKS=90000` for five minutes. This keeps the initial trim commands
 and does not start the keyboard controller. Interactive keyboard input is global:
@@ -90,7 +89,7 @@ to compare settings. A zero margin disables detail retention.
 At startup, Elodin shows a loading message until the first terrain and images
 are ready. The simulation keeps running during loading. Online loading time
 depends on the connection; rendering data is not yet cached between runs.
-The color sensor loads its first pose before emitting images, then follows the
+The sensors load their first pose before emitting images, then follow the
 live simulation. On macOS, the Editor is limited to about 24 fps when sensor
 panels are present, leaving GPU capacity for the sensor renderer.
 
