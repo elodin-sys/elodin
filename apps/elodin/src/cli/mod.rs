@@ -5,6 +5,8 @@ mod editor;
 #[cfg(not(target_os = "windows"))]
 mod monte_carlo;
 mod schematic;
+#[cfg(feature = "big_space")]
+mod terrain;
 #[cfg(not(target_os = "windows"))]
 mod ui;
 
@@ -26,6 +28,9 @@ pub struct Cli {
 
 #[derive(Subcommand, Clone)]
 enum Commands {
+    /// Prepare Cesium terrain heights for simulation ground contact
+    #[cfg(feature = "big_space")]
+    TerrainHeights(terrain::Args),
     /// Launch the Elodin editor (default)
     Editor(editor::Args),
     /// Run an Elodin simulation in headless mode
@@ -108,6 +113,8 @@ impl Cli {
             .expect("tokio runtime failed to start");
 
         match &self.command {
+            #[cfg(feature = "big_space")]
+            Some(Commands::TerrainHeights(args)) => terrain::run(args.clone()),
             Some(Commands::Editor(args)) => self.clone().editor(args.clone(), rt),
             #[cfg(not(target_os = "windows"))]
             Some(Commands::Run(args)) => self.clone().run_headless(args.clone(), rt),

@@ -5678,6 +5678,7 @@ version = "0.20.1-alpha.0"
 dependencies = [
  "base64 0.22.1",
  "bevy",
+ "bevy-cesium",
  "chrono",
  "clap 4.6.7",
  "clap-markdown",

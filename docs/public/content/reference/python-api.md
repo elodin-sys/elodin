@@ -12,6 +12,53 @@ icon = ""
 order = 3
 +++
 
+## Terrain heights
+
+Prepare terrain once, before building the simulation:
+
+```python
+import elodin as el
+
+terrain = el.terrain_heightmap(
+    center_ecef=initial_position,  # WGS84 ECEF position, in meters
+    dimensions=(24_000, 24_000),   # east-west and north-south coverage, in meters
+    spacing=10,                  # sample spacing at the center, in meters
+    asset_id=1,                  # Cesium ion terrain asset
+)
+
+# Inside a simulation system: only JAX operations, no network or file access.
+height, normal, valid = terrain.sample(position_ecef)
+```
+
+`height` is meters above the WGS84 ellipsoid, not sea level. `normal` is an
+outward unit vector in ECEF coordinates. Check `valid`: outside the prepared
+area, the lookup returns clamped edge values with `valid=False`.
+Both `jax.jit(terrain.sample)` and `jax.vmap(terrain.sample)` are supported.
+`sample_geodetic(latitude, longitude)` accepts angles in radians.
+
+Preparation requires an installed Elodin CLI with Cesium support and
+`CESIUM_ION_TOKEN` on a cache miss. Elodin calls Bevy-Cesium to fetch the most
+detailed heights, independently of camera detail. No renderer is opened.
+The SDK stores complete grids in `$XDG_CACHE_HOME/elodin/terrain-heights`
+(normally `~/.cache`). Use `cache_dir=` to choose another location and
+`offline=True` to forbid downloads. `timeout=` limits each native query in
+seconds (default 600, up to one million positions per batch). One CLI process
+reuses a native Cesium session across the grid's batches. A failed preparation
+is retried up to twice with a fresh session; failed or incomplete grids are not cached.
+
+The grid follows latitude and longitude lines; dimensions and spacing are
+measured at its center. Areas crossing a pole or the antimeridian are rejected.
+The maximum grid size is 25 million samples. Finer spacing increases preparation
+time and memory; it does not make this a full collision mesh.
+
+Cached heights are not automatically refreshed. Keep `terrain.path` and record
+`terrain.sha256` for repeatable physics. `el.TerrainHeightmap.load(path)` loads
+that exact grid without a network connection. This stores heights only, not
+rendered meshes or imagery. New downloads can change if the source changes.
+
+This API supplies terrain data; the simulation chooses its contact response
+and what to do when coverage ends. RC-jet demonstrates spring-and-damper contact.
+
 ## World
 
 An Elodin simulation begins with a `World` object. The `World` object is the root of the simulation hierarchy and provides methods for composing
