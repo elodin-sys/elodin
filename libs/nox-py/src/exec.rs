@@ -103,6 +103,22 @@ use pyo3::types::PyDict;
 pub struct PyExec {
     pub exec: WorldExec,
     pub db: Box<elodin_db::DB>,
+    /// Timestamp of the next tick `run` commits. Advances in sim time and never re-reads the wall
+    /// clock, so chunked runs stay monotonic and match one long run.
+    pub next_timestamp: Timestamp,
+}
+
+impl PyExec {
+    /// `start` is the timestamp `init_db` recorded the initial state at; tick `n` is committed at
+    /// `start + n * sim_time_step`.
+    pub fn new(exec: WorldExec, db: elodin_db::DB, start: Timestamp) -> Self {
+        let next_timestamp = start + exec.world().sim_time_step().0;
+        Self {
+            exec,
+            db: Box::new(db),
+            next_timestamp,
+        }
+    }
 }
 
 #[pymethods]
@@ -126,7 +142,9 @@ impl PyExec {
             .with_style(
                 ProgressStyle::with_template("{bar:50} {pos:>6}/{len:6} remaining: {eta}").unwrap(),
             );
-        let mut timestamp = Timestamp::now();
+        // Batches are stamped in sim time, which can run ahead of the wall clock. Restarting from
+        // `Timestamp::now()` on every call would then go backwards and the db rejects the commit.
+        let mut timestamp = self.next_timestamp;
         let sim_step = self.exec.world().sim_time_step().0;
         let configured_batch = self.exec.world().ticks_per_telemetry() as usize;
         let mut remaining = ticks;
@@ -153,6 +171,7 @@ impl PyExec {
                 )
             })?;
             timestamp += Duration::from_secs_f64(sim_step.as_secs_f64() * this_batch as f64);
+            self.next_timestamp = timestamp;
             remaining -= this_batch;
 
             if let Some(func) = &is_canceled {
