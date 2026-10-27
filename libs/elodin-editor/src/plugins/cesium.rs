@@ -1,7 +1,7 @@
 //! Editor adapter for the independently maintained bevy-cesium plugin.
 use crate::{
     MainCamera,
-    sensor_camera::{SensorCamera, SensorCameraConfigs},
+    sensor_camera::{SensorCamera, SensorCameraConfig, SensorCameraConfigs},
     spatial::{BigSpaceRootEntity, FloatingOriginSettings, GridCell},
 };
 use bevy::{math::DMat4, prelude::*};
@@ -217,6 +217,63 @@ mod coordinate_tests {
         let first = views[0].position;
         app.update();
         assert_eq!(app.world().resource::<CesiumViews>().0[0].position, first);
+    }
+
+    #[test]
+    fn zoomed_sensor_refines_after_startup_without_blocking_the_wider_view() {
+        let config: SensorCameraConfig = serde_json::from_value(serde_json::json!({
+            "entity_name": "jet", "camera_name": "jet.color",
+            "width": 640, "height": 480, "fov_degrees": 90.0,
+            "near": 0.1, "far": 100_000.0, "pos_offset": [1.2, 0.0, 0.1]
+        }))
+        .unwrap();
+        let mut zoom = config.clone();
+        zoom.camera_name = "jet.ir".into();
+        zoom.fov_degrees = 14.4;
+        zoom.height = 512;
+        let configs = vec![config.clone(), zoom.clone()];
+        assert!(has_wider_sensor_view(&zoom, &configs));
+        assert!(!has_wider_sensor_view(&config, &configs));
+        assert!(!has_wider_sensor_view(&zoom, &[zoom.clone()]));
+        let mut other_pose = zoom.clone();
+        other_pose.rot_offset[1] = 30.0;
+        assert!(!has_wider_sensor_view(&other_pose, &configs));
+
+        let mut app = App::new();
+        app.insert_resource(GeoContext::from(GeoOrigin::new_from_degrees(
+            35.350664,
+            -117.809027,
+            589.274,
+        )))
+        .insert_resource(FloatingOriginSettings::new(2000.0, 100.0))
+        .insert_resource(SensorCameraConfigs(configs))
+        .insert_resource(TerrainStartup {
+            gate: TerrainCapture {
+                started: std::time::Instant::now(),
+                timeout: std::time::Duration::from_secs(120),
+            },
+            ready: false,
+            error: None,
+        })
+        .init_resource::<CesiumViews>()
+        .add_systems(Update, collect_views);
+        for config_index in 0..2 {
+            app.world_mut().spawn((
+                Camera {
+                    is_active: false,
+                    ..default()
+                },
+                Projection::Perspective(default()),
+                Transform::from_xyz(0., 100., 0.),
+                GridCell::default(),
+                SensorCamera { config_index },
+            ));
+        }
+        app.update();
+        assert_eq!(app.world().resource::<CesiumViews>().0.len(), 1);
+        app.world_mut().resource_mut::<TerrainStartup>().ready = true;
+        app.update();
+        assert_eq!(app.world().resource::<CesiumViews>().0.len(), 2);
     }
 
     #[test]
@@ -475,6 +532,7 @@ fn collect_views(
     geo: Res<GeoContext>,
     grid: Res<FloatingOriginSettings>,
     sensor_configs: Option<Res<SensorCameraConfigs>>,
+    startup: Option<Res<TerrainStartup>>,
     cameras: Query<
         (
             &Camera,
@@ -490,12 +548,23 @@ fn collect_views(
     mut output: ResMut<CesiumViews>,
 ) {
     let ecef_from_bevy = GeoFrame::bevy_M_(&GeoFrame::ECEF, &geo).inverse();
+    let warming_up = startup.is_some_and(|startup| !startup.ready);
     let views: Vec<_> = cameras
         .iter()
         .filter_map(|(camera, projection, transform, cell, parent, sensor)| {
             // Headless scheduling disables sensors between emissions. Their terrain
             // requirements must survive those gaps and include every sensor.
             if !camera.is_active && sensor.is_none() {
+                return None;
+            }
+            if warming_up
+                && let Some(configs) = sensor_configs.as_ref()
+                && let Some(config) = sensor.and_then(|sensor| configs.0.get(sensor.config_index))
+                && has_wider_sensor_view(config, &configs.0)
+            {
+                // Bootstrap co-located sensors from their wider view. Once it
+                // is ready, zoomed views refine the shared terrain without
+                // holding every video stream behind the initial loading gate.
                 return None;
             }
             let Projection::Perspective(p) = projection else {
@@ -538,6 +607,20 @@ fn collect_views(
         })
         .collect();
     output.0 = views;
+}
+
+fn has_wider_sensor_view(config: &SensorCameraConfig, configs: &[SensorCameraConfig]) -> bool {
+    let horizontal_scale = |c: &SensorCameraConfig| {
+        (f64::from(c.fov_degrees).to_radians() * 0.5).tan() * f64::from(c.width)
+            / f64::from(c.height.max(1))
+    };
+    configs.iter().any(|other| {
+        other.entity_name == config.entity_name
+            && other.pos_offset == config.pos_offset
+            && other.rot_offset == config.rot_offset
+            && other.fov_degrees > config.fov_degrees
+            && horizontal_scale(other) >= horizontal_scale(config)
+    })
 }
 
 fn place_tiles(

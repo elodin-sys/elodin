@@ -87,17 +87,14 @@ def setup_world(
         ),
         name="target",
     )
-    # Re-enable the zoomed IR sensor after its Cesium loading cost is addressed.
-    infrared_enabled = os.environ.get("ELODIN_RC_JET_TERRAIN") != "cesium"
-    add_sensor_cameras(world, jet, target, infrared_enabled=infrared_enabled)
+    add_sensor_cameras(world, jet, target)
 
     world.schematic(build_schematic(), "bdx.kdl")
     return world, jet, target
 
 
-def add_sensor_cameras(
-    world: el.World, jet: el.EntityId, target: el.EntityId, *, infrared_enabled: bool
-) -> None:
+def add_sensor_cameras(world: el.World, jet: el.EntityId, target: el.EntityId) -> None:
+    cesium_terrain = os.environ.get("ELODIN_RC_JET_TERRAIN") == "cesium"
     world.thermal_tag(target, temperature_c=18.0, emissivity=0.92)
     world.sensor_camera(
         entity=jet,
@@ -107,7 +104,7 @@ def add_sensor_cameras(
         fov=90.0,
         fps=30.0,
         # Compress the live Cesium preview instead of storing gigabytes of raw frames.
-        format="h264" if os.environ.get("ELODIN_RC_JET_TERRAIN") == "cesium" else "rgba",
+        format="h264" if cesium_terrain else "rgba",
         near=0.1,
         # Far plane must cover the terrain and horizon at altitude. Frustum
         # visualization shares this far plane, so keep create_frustum off.
@@ -127,20 +124,22 @@ def add_sensor_cameras(
             "earth": True,
         },
     )
-    if infrared_enabled:
-        world.sensor_camera(
-            entity=jet,
-            name="ir_cam",
-            camera_model="boson640p",
-            lens_hfov=18.0,
-            effect="lwir",
-            format="gray8",
-            near=0.1,
-            far=100_000.0,
-            pos_offset=[1.2, 0.0, 0.1],
-            rot_offset=[0.0, 0.0, 0.0],
-            create_frustum=False,
-        )
+    world.sensor_camera(
+        entity=jet,
+        name="ir_cam",
+        camera_model="boson640p",
+        lens_hfov=18.0,
+        effect="lwir",
+        # Live preview: retain the optics and thermal effect, but avoid the
+        # preset's 60 Hz raw recording alongside Cesium's color stream.
+        fps=15.0 if cesium_terrain else 60.0,
+        format="h264" if cesium_terrain else "gray8",
+        near=0.1,
+        far=100_000.0,
+        pos_offset=[1.2, 0.0, 0.1],
+        rot_offset=[0.0, 0.0, 0.0],
+        create_frustum=False,
+    )
 
 
 def _run_max_ticks() -> int | None:
