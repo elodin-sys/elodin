@@ -25,13 +25,15 @@ Typed elodin.ui translation of bdx.kdl.
 # origin). Absolute ECEF identity would map those axes onto ECEF, so do
 # not add a glTF Y-up lift — assets/bdx.glb is hash-checked by the tests.
 
-import os
-
 import elodin.ui as ui
 
+from runtime_config import RuntimeConfig, TerrainMode, load_config
 
-def build() -> ui.Schematic:
-    cesium_terrain = os.environ.get("ELODIN_RC_JET_TERRAIN") == "cesium"
+
+def build(config: RuntimeConfig | None = None) -> ui.Schematic:
+    # The standalone schematic/watch entry point must also support build().
+    config = load_config() if config is None else config
+    cesium_terrain = config.terrain is TerrainMode.CESIUM
     terrain = (
         []
         if cesium_terrain

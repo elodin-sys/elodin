@@ -28,6 +28,7 @@ from bdx_schematic import build as build_schematic
 from class_d_fallbacks import FALLBACKS
 from frames import enu_basis, level_attitude_ecef, quaternion_xyzw_from_matrix
 from ground import GEAR_HEIGHT_M, TerrainContact
+from runtime_config import CameraSettings, RuntimeConfig, TerrainMode, load_config
 from scenario import Numerics, Scenario, load_scenario
 from sim import build_system, make_jet
 
@@ -40,7 +41,11 @@ class StaticMarker(el.Archetype):
 
 
 def setup_world(
-    scenario: Scenario, numerics: Numerics, terrain: el.TerrainHeightmap | None = None
+    scenario: Scenario,
+    numerics: Numerics,
+    terrain: el.TerrainHeightmap | None = None,
+    *,
+    config: RuntimeConfig,
 ) -> tuple[el.World, el.EntityId, el.EntityId]:
     world = el.World()
     init = scenario.initial
@@ -95,14 +100,15 @@ def setup_world(
         ),
         name="target",
     )
-    add_sensor_cameras(world, jet, target)
+    add_sensor_cameras(world, jet, target, config.cameras)
 
-    world.schematic(build_schematic(), "bdx.kdl")
+    world.schematic(build_schematic(config), "bdx.kdl")
     return world, jet, target
 
 
-def add_sensor_cameras(world: el.World, jet: el.EntityId, target: el.EntityId) -> None:
-    cesium_terrain = os.environ.get("ELODIN_RC_JET_TERRAIN") == "cesium"
+def add_sensor_cameras(
+    world: el.World, jet: el.EntityId, target: el.EntityId, settings: CameraSettings
+) -> None:
     world.thermal_tag(target, temperature_c=18.0, emissivity=0.92)
     world.sensor_camera(
         entity=jet,
@@ -110,9 +116,8 @@ def add_sensor_cameras(world: el.World, jet: el.EntityId, target: el.EntityId) -
         width=640,
         height=480,
         fov=90.0,
-        fps=30.0,
-        # Compress the live Cesium preview instead of storing gigabytes of raw frames.
-        format="h264" if cesium_terrain else "rgba",
+        fps=settings.color_fps,
+        format=settings.color_format,
         near=0.1,
         # Far plane must cover the terrain and horizon at altitude. Frustum
         # visualization shares this far plane, so keep create_frustum off.
@@ -138,10 +143,8 @@ def add_sensor_cameras(world: el.World, jet: el.EntityId, target: el.EntityId) -
         camera_model="boson640p",
         lens_hfov=18.0,
         effect="lwir",
-        # Live preview: retain the optics and thermal effect, but avoid the
-        # preset's 60 Hz raw recording alongside Cesium's color stream.
-        fps=15.0 if cesium_terrain else 60.0,
-        format="h264" if cesium_terrain else "gray8",
+        fps=settings.infrared_fps,
+        format=settings.infrared_format,
         near=0.1,
         far=100_000.0,
         pos_offset=[1.2, 0.0, 0.1],
@@ -163,6 +166,7 @@ def _run_max_ticks() -> int | None:
     return None
 
 
+CONFIG = load_config()
 MODEL = bdx_model.load()
 NUMERICS = Numerics()
 SCENARIO = load_scenario(MODEL, FALLBACKS)
@@ -174,12 +178,12 @@ TERRAIN = (
         spacing=10,
         asset_id=int(os.environ.get("CESIUM_ION_ASSET_ID", "1")),
     )
-    if os.environ.get("ELODIN_RC_JET_TERRAIN") == "cesium"
+    if CONFIG.terrain is TerrainMode.CESIUM
     else None
 )
 if TERRAIN is not None:
     print(f"Terrain heights: {TERRAIN.path} (SHA-256 {TERRAIN.sha256})")
-world, jet, target = setup_world(SCENARIO, NUMERICS, TERRAIN)
+world, jet, target = setup_world(SCENARIO, NUMERICS, TERRAIN, config=CONFIG)
 sim_system = build_system(MODEL, FALLBACKS, SCENARIO, NUMERICS, TERRAIN)
 
 print("BDX RC Jet Simulation")
