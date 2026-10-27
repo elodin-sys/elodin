@@ -120,8 +120,9 @@ decisions:
 - **Streaming parser**: processes one instruction at a time, no AST allocation for the
   full module
 - **`ValueCtx` scoping**: each parsing context maps SSA names (`%0`, `%arg0`) to internal
-  `ValueId`s. While-loop and case blocks use `ctx.child()` to create child contexts that
-  inherit the parent's mappings (see [While Loop Scoping](#while-loop-scoping))
+  `ValueId`s. Region bodies (while, case, map, sort, ...) use `ctx.child()` to create child
+  contexts that inherit the parent's mappings and share its id counter, so `ValueId`s stay
+  unique per function (see [While Loop Scoping](#while-loop-scoping))
 - **`backend_config` extraction**: LAPACK custom calls carry parameters like
   `{uplo = 76 : ui8, diag = 85 : ui8}` which are parsed into a `HashMap<String, i64>`
 
