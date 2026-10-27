@@ -83,7 +83,14 @@ ECEF pad position.
 In Cesium mode, the infrared preview runs at 15 fps and uses H.264, retaining
 the same resolution, lens and thermal effect. The color preview runs at 30 fps.
 The wider color view loads terrain first; the infrared view then refines it
-without blocking both streams at startup. See the [Cesium launcher](../cesium/README.md#rc-jet).
+without blocking both streams at startup.
+
+Cesium mode also uses `el.terrain_heightmap()` to prepare and cache a 24 × 24 km
+height grid at 10 m spacing through the Elodin CLI. During simulation, JAX reads
+that grid for ground contact without network or disk access. The contact model
+protects the aircraft's reference point; the grid can differ from the visible
+mesh and does not provide full airframe or camera collision detection. See the
+[Cesium README](../cesium/README.md#rc-jet) for setup, architecture and limitations.
 
 
 The package GLB is already Elodin body (X forward, Y left, Z up), so
