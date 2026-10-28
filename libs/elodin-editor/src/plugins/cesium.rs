@@ -666,37 +666,37 @@ fn show_credits(
             .show(context.get_mut(), |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.hyperlink_to("Cesium", "https://cesium.com/");
                         if !label.0.is_empty() {
-                            ui.add_space(6.0);
-                            ui.label(&label.0);
+                            ui.small(&label.0);
                         }
+                        ui.menu_button("Sources", |ui| {
+                            ui.set_max_width(480.0);
+                            ui.hyperlink_to("Cesium", "https://cesium.com/");
+                            for credit in &credits.html {
+                                let mut inside_tag = false;
+                                let text: String = credit
+                                    .chars()
+                                    .filter(|&c| match c {
+                                        '<' => {
+                                            inside_tag = true;
+                                            false
+                                        }
+                                        '>' => {
+                                            inside_tag = false;
+                                            false
+                                        }
+                                        _ => !inside_tag,
+                                    })
+                                    .collect();
+                                ui.small(text.replace("&amp;", "&").replace("&nbsp;", " "));
+                            }
+                        });
                     });
                     if status.load_failed {
                         ui.colored_label(
                             egui::Color32::LIGHT_RED,
                             "Tileset unavailable. Check URL, asset access and token.",
                         );
-                    }
-                    // Keep tile-provider attribution visible in captures too.
-                    ui.set_max_width(480.0);
-                    for credit in &credits.html {
-                        let mut inside_tag = false;
-                        let text: String = credit
-                            .chars()
-                            .filter(|&c| match c {
-                                '<' => {
-                                    inside_tag = true;
-                                    false
-                                }
-                                '>' => {
-                                    inside_tag = false;
-                                    false
-                                }
-                                _ => !inside_tag,
-                            })
-                            .collect();
-                        ui.small(text.replace("&amp;", "&").replace("&nbsp;", " "));
                     }
                 });
             });

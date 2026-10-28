@@ -95,8 +95,9 @@ views. Neither setting is a cap on total process or GPU memory. Validate the
 color and infrared views together before claiming a frame rate. Do not run a
 standalone viewer alongside RC-jet when measuring.
 
-Keep the Google Maps and data-source attributions visible in screenshots and
-video. The current integration does not provide a persistent offline terrain
+Photo 3D keeps a compact Google Maps attribution next to the Sources menu;
+provider details are available in that menu. Preserve the required attributions
+in shared screenshots and video. The current integration does not provide a persistent offline terrain
 package or a frame-by-frame video export. For a promotional Google-tile video,
 keep the clip at most 30 seconds and include the required promotional notice;
 see the [provider's capture and attribution guidance](https://developers.google.com/maps/documentation/tile/policies).

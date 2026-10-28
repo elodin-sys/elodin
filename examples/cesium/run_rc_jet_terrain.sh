@@ -55,7 +55,7 @@ case "$photo3d" in
         # Photogrammetry already contains imagery; it is not the physics surface.
         export CESIUM_ION_ASSET_ID=2275207
         export ELODIN_RC_JET_HEIGHT_ASSET_ID="${ELODIN_RC_JET_HEIGHT_ASSET_ID:-1}"
-        export CESIUM_CREDIT="Google Maps — Photorealistic 3D Tiles"
+        export CESIUM_CREDIT="Google Maps"
         unset CESIUM_ION_IMAGERY_ASSET_ID
         ;;
     off)
