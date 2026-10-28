@@ -61,8 +61,9 @@ This compiles the Betaflight firmware for SITL mode. The binary will be at:
 ### First-Time Setup: Configure Arming and ANGLE Mode
 
 **IMPORTANT**: Before running the simulation, configure the ARM switch on AUX1
-and ANGLE mode on AUX2. This only needs to be done once; the config is saved to
-`eeprom.bin`.
+and ANGLE mode on AUX2, disable GPS, and keep `trust_mag = OFF`. Rerun the
+initialization script when upgrading from a pre-G1 EEPROM; the config is saved
+to `eeprom.bin` and applies to every guidance mode.
 
 Run the initialization script from the repository root:
 
@@ -100,12 +101,19 @@ and verifies the persisted settings. To do the same setup manually:
    # Process every available gyro/PID update
    set gyro_hardware_lpf = NORMAL
    set pid_process_denom = 1
+   set rc_smoothing = OFF
+
+   # No truth-derived GPS or magnetic heading aid inside Betaflight
+   feature -GPS
+   set trust_mag = OFF
    
    save
    ```
    
-   This configures ARM on AUX1 and processes every lockstep update. The actual
-   lockstep rate is set by `simulation_rate` (8kHz by default).
+   This configures ARM/ANGLE, processes every lockstep update, and removes
+   truth-derived heading aids. Run the initialization script to verify all
+   persisted settings. The actual lockstep rate is set by `simulation_rate`
+   (8kHz by default).
 
 4. **Exit screen**: Press `Ctrl+A` then `K` then `Y`
 
@@ -205,10 +213,29 @@ prints one shutdown line:
 [FPV] total_frames=... window_frames=... observed_fps=... status=PASS|FAIL reason=...
 ```
 
-`status=FAIL` exits 1. `frame_fresh` is true only for a newly rendered frame. A
-held frame is still supplied, with `frame_fresh=False`. The exported video can
-be one frame ahead of `total_frames`, because the render server may write one
-more frame while it shuts down after the final tick.
+`status=FAIL` exits 1. `GuidanceUpdate.frame_time` is selected image-message T
+converted by integer timestamp delta to simulation seconds on `sim_time`:
+**nominal image/render time, not verified exact pose/exposure time**.
+`GateCandidate.sample_time` carries the same value. A newly selected timestamp
+is fresh; held frames keep their time with `frame_fresh=False`. Missing/pre-first
+frames have frame/time `None`; copying is unchanged.
+
+Scene-time alignment is approximate: one reviewed capture showed body state
+about 22 ms earlier than message T, not a universal offset or sub-frame bound;
+phase/backlog can add delay. Sparse state's last-change T is not actual image
+time. See [RACING_PLAN.md §7.4](RACING_PLAN.md#74-camera) for the canonical
+limitation and revisit triggers; future fusion must not assume exact alignment.
+
+**G1 implementation is complete on `g1-clean`, reconstructed from GitHub
+`origin/main` `8742b411`; user diff approval and fresh qualification are pending.**
+No builds or tests have run on this clean source. Previous `pkg-g1` PASS results
+are historical only; see the G1 brief in [RACING_PLAN.md](RACING_PLAN.md).
+Strict alignment remains a historical FAIL, deferred/non-gating. No timing
+offset, renderer/query/stream fix, per-frame RPC or streaming-prototype promotion
+is included.
+
+The exported video can be one frame ahead of `total_frames`, because the render
+server may write one more frame while it shuts down after the final tick.
 
 ### Vision geometry
 
@@ -556,7 +583,8 @@ The simulation handles complex coordinate frame conversions:
 
 - **Elodin Physics**: ENU world frame with FLU (Forward-Left-Up) body frame
 - **Betaflight Sensors**: FRD (Forward-Right-Down) body frame
-- **Betaflight GPS**: ENU for position/velocity
+- **FDM position/velocity**: ENU metres and metres/second; GPS is disabled.
+  These are not valid longitude/latitude inputs for Betaflight's virtual GPS.
 
 ### Body Frame Conversion (FLU → FRD)
 
@@ -576,12 +604,19 @@ Betaflight's SITL (sitl.c) then maps these onto its internal axes:
 
 The attitude quaternion is sent in the Gazebo BetaflightPlugin convention
 (conjugated by Rx(π), i.e. qy/qz negated). SITL undoes the conjugation and rotates
-the world frame from ENU to NWU internally; the result drives the virtual
-magnetometer feed and the attitude estimator's heading reference.
+the world frame from ENU to NWU internally and synthesizes a virtual
+magnetometer. `init_eeprom.py` verifies `trust_mag = OFF` and GPS disabled, so
+neither this truth-derived field nor virtual GPS course-over-ground corrects
+Betaflight's heading estimate. The truth-altitude barometer remains unused;
+no altitude or position mode is configured.
 
-Note: 2026.6.1+ SITL runs the real Mahony attitude estimator fusing the virtual
-gyro/accel/mag feeds. (The legacy behavior of setting attitude directly from the
-FDM quaternion is still available by building with `-DSITL_ATTITUDE_DIRECT`.)
+Note: 2026.6.1+ SITL runs the real Mahony attitude estimator using the simulated
+gyro/accelerometer in this configuration. The legacy behavior of setting
+attitude directly from the FDM quaternion is available with
+`-DSITL_ATTITUDE_DIRECT`, which this example does not enable. Future vision
+results use the sensor-set label "camera, IMU, barometer, and magnetometer on
+the companion; referee pass events used for gate sequencing"; they are not
+sensor-only autonomy.
 
 ### Motor Mapping (Betaflight Quad-X, Native Order)
 
@@ -641,7 +676,7 @@ Pre-configured drone types:
 The simulation includes a realistic sensor noise model based on the proven drone example:
 - **Gyroscope**: Gaussian noise + bias drift (random walk)
 - **Accelerometer**: Gaussian noise
-- **Barometer**: Gaussian noise (~0.03m std dev)
+- **Barometer**: Gaussian noise (σ = 0.1 m; variance 0.01 m²)
 
 The gyro uses `1e-7 (rad/s)²` measurement covariance and `1e-8` bias-drift
 covariance. The measurement covariance corresponds to approximately
