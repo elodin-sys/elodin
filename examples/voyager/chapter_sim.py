@@ -7,8 +7,6 @@ import jax.numpy as jnp
 import numpy as np
 import spiceypy as spice
 
-from dynamics import heliocentric_relative_acceleration
-
 SPICE_DIR = Path(__file__).resolve().parent / "nasa_spice_data"
 START = "1979-02-22T00:00:00"
 END = "1979-02-28T00:00:00"
@@ -42,27 +40,7 @@ def reference_state(et: float, target: str = "VOYAGER 1") -> np.ndarray:
     return np.asarray(state, dtype=np.float64) * 1000.0
 
 
-@el.map
-def chapter1_gravity(pos: el.WorldPos, inertia: el.Inertia, jupiter: JupiterPosition) -> el.Force:
-    probe = pos.linear()
-    sun_pull = -sun_gm * probe / jnp.linalg.norm(probe) ** 3
-    to_jupiter = jupiter - probe
-    jupiter_pull = jupiter_gm * to_jupiter / jnp.linalg.norm(to_jupiter) ** 3
-    return el.SpatialForce(linear=inertia.mass() * (sun_pull + jupiter_pull))
-
-
-@el.map
-def chapter2_gravity(
-    pos: el.WorldPos, inertia: el.Inertia, jupiter: JupiterPosition
-) -> el.Force:
-    probe = pos.linear()
-    sun_pull = -sun_gm * probe / jnp.linalg.norm(probe) ** 3
-    # chapter 2 also accounts for Jupiter pulling on the Sun
-    jupiter_pull = heliocentric_relative_acceleration(probe, jupiter, jupiter_gm)
-    return el.SpatialForce(linear=inertia.mass() * (sun_pull + jupiter_pull))
-
-
-def run(chapter: int) -> None:
+def run(gravity, chapter: int) -> None:
     initial_state = reference_state(start_et)
     world = el.World()
     world.spawn(
@@ -100,7 +78,6 @@ def run(chapter: int) -> None:
         print(f"Mean position error: {np.mean(position_errors_km):.3f} km")
         print(f"Max position error: {max(position_errors_km):.3f} km")
 
-    gravity_system = chapter1_gravity if chapter == 1 else chapter2_gravity
     print(f"Voyager 1 chapter {chapter}: {START} to {END} ({steps} hourly steps)")
     print("Sun and Jupiter gravity only; other planets, SRP and thrust are omitted.")
     start_timestamp = int(
@@ -108,7 +85,7 @@ def run(chapter: int) -> None:
     )
     world.run(
         el.six_dof(
-            sys=gravity_system,
+            sys=gravity,
             integrator=el.Integrator.Rk4,
         ),
         simulation_rate=1.0 / TIME_STEP,
