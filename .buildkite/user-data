@@ -130,6 +130,8 @@ write_files:
       sed -i "s/xxx/$BUILDKITE_AGENT_TOKEN/g" /etc/buildkite-agent/buildkite-agent.cfg
       sed -i 's/# spawn=1/spawn=5/' /etc/buildkite-agent/buildkite-agent.cfg
       sed -i "s/# tags=\"key1=val2,key2=val2\"/tags=\"nix=true,os=nixos,arch=${AGENT_ARCH},queue=${AGENT_QUEUE}\"/" /etc/buildkite-agent/buildkite-agent.cfg
+      # Keep target/ between jobs so cargo builds incrementally (default -ffxdq wipes it)
+      echo 'git-clean-flags="-ffdqx -e target"' >> /etc/buildkite-agent/buildkite-agent.cfg
 
       # Systemd drop-in so the agent has Nix in PATH without sourcing profiles
       mkdir -p /etc/systemd/system/buildkite-agent.service.d

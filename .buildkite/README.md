@@ -1,6 +1,18 @@
 # Buildkite CI Setup
 
-This directory contains the configuration for Elodin's Buildkite CI infrastructure, designed for reproducible, ephemeral builds on AWS EC2. The CI system uses self-hosted agents with overlayroot (tmpfs root filesystem) to ensure a clean state on every reboot, preventing build artifacts and state from persisting between jobs. Agents automatically configure themselves based on instance architecture, joining either the `nixos-x86-aws` queue (for most CI tasks) or `nixos-arm-aws` queue (for ARM-specific builds like Aleph-OS). All build environments use Nix for reproducible dependencies, and the entire agent bootstrap process is fully automated via cloud-init—requiring only SSH deploy keys and a Buildkite agent token to be configured once in the user-data script.
+This directory contains the configuration for Elodin's Buildkite CI infrastructure, designed for reproducible builds on long-lived self-hosted AWS EC2 agents. Agents automatically configure themselves based on instance architecture, joining either the `nixos-x86-aws` queue (for most CI tasks) or `nixos-arm-aws` queue (for ARM-specific builds like Aleph-OS). All build environments use Nix for reproducible dependencies, and the entire agent bootstrap process is fully automated via cloud-init—requiring only SSH deploy keys and a Buildkite agent token to be configured once in the user-data script.
+
+## Cargo cache
+
+Agents run `git clean -ffdqx -e target`: other untracked files are removed, but `target/` (including `fsw/sensor-fw/target`) is kept so Cargo rebuilds incrementally. One cache per agent, at `/var/lib/buildkite-agent/builds/<agent>/elodin/elodin/target`.
+
+The flags come from `git-clean-flags` in `/etc/buildkite-agent/buildkite-agent.cfg`, set by [user-data](user-data). The agent overrides `BUILDKITE_GIT_CLEAN_FLAGS` from pipeline or build env. `BUILDKITE_CLEAN_CHECKOUT=true` on a build re-clones and drops the cache.
+
+A step is only warm on agents that have already run it. To warm one step on every x86 agent, start a build while the queue is idle:
+
+```bash
+bk build create -p elodin -b main -e CI_PREWARM="cargo test" -m "prewarm cargo test"
+```
 
 ## Quick Start
 
