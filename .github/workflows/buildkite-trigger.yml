@@ -1,0 +1,61 @@
+# Starts the required buildkite/elodin build for fork pull requests once the
+# Buildkite gate has been approved. Same-repo pull requests build from the
+# Buildkite webhook. Never check out or run fork code here: this has secrets.
+name: Buildkite Fork Trigger
+
+on:
+  workflow_run:
+    workflows: [Buildkite]
+    types: [completed]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  trigger:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name != github.repository
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BUILDKITE_API_TOKEN: ${{ secrets.BUILDKITE_API_TOKEN }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+      HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
+    steps:
+      - name: Create Buildkite build
+        run: |
+          set -euo pipefail
+          pr=$(gh api -X GET "repos/$GITHUB_REPOSITORY/pulls" \
+            -f state=open -f head="$HEAD_OWNER:$HEAD_BRANCH" \
+            --jq "map(select(.head.sha == \"$HEAD_SHA\")) | first // empty")
+          if [ -z "$pr" ]; then
+            echo "No open pull request at $HEAD_OWNER:$HEAD_BRANCH@$HEAD_SHA"
+            exit 0
+          fi
+          number=$(jq -r .number <<<"$pr")
+
+          body=$(jq -c --arg sha "$HEAD_SHA" --arg branch "$HEAD_OWNER:$HEAD_BRANCH" '{
+            commit: $sha,
+            branch: $branch,
+            message: "PR #\(.number): \(.title) (@\(.user.login))",
+            pull_request_id: .number,
+            pull_request_base_branch: .base.ref,
+            pull_request_repository: .head.repo.clone_url
+          }' <<<"$pr")
+
+          status=$(curl -sS -o response.json -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $BUILDKITE_API_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$body" \
+            https://api.buildkite.com/v2/organizations/elodin/pipelines/elodin/builds)
+
+          if [ "$status" != 201 ]; then
+            echo "Buildkite returned HTTP $status: $(cat response.json)"
+            gh pr comment "$number" --repo "$GITHUB_REPOSITORY" \
+              --body "Could not start the Buildkite build for $HEAD_SHA (HTTP $status): $(jq -r '.message // empty' response.json)"
+            exit 1
+          fi
+          echo "Started $(jq -r .web_url response.json)"
