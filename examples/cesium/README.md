@@ -50,9 +50,56 @@ bash examples/cesium/run_rc_jet_terrain.sh
 
 Keep the token file outside the repository. The launcher runs
 `examples/rc-jet/main.py` with its existing controls, instruments and views. It
-sets `ELODIN_RC_JET_TERRAIN=cesium` and defaults to ion asset `1` for terrain and
-asset `2` for aerial imagery. Without that mode, RC-jet uses its existing planar
-terrain setup.
+sets `ELODIN_RC_JET_TERRAIN=cesium`, defaults to Google Maps Photorealistic 3D
+Tiles at the existing Mojave site, and uses World Terrain (`1`) for physics
+heights. The original launch without the Cesium script retains planar terrain.
+
+### Launch options
+
+All three options use the existing Mojave location and initial 350-degree route:
+
+| Option | Command (inside the Nix shell) | Rendering and contact |
+| --- | --- | --- |
+| Historical terrain | `ELODIN_RC_JET_TERRAIN=planar elodin editor examples/rc-jet/main.py` | Existing local Mojave terrain; fixed-altitude ground contact. Unset `CESIUM_ION_ASSET_ID` and `CESIUM_ION_TOKEN` if inherited from another run. |
+| Cesium + heightmap | `bash examples/cesium/run_rc_jet_terrain.sh --photo3d off` | Streamed terrain and aerial imagery; physical contact from the prepared height grid. |
+| Cesium + heightmap + Photo 3D (default) | `bash examples/cesium/run_rc_jet_terrain.sh` | Streamed Google photogrammetry, including buildings where covered; the same height-grid physics. |
+
+Bevy-Cesium streams the visual tiles through Cesium Native and provides the
+sampler used by the Elodin CLI to prepare heights. The nox-py API caches that
+grid; JAX reads it during flight. Photo 3D changes the visual source only.
+
+### Photo 3D on / off
+
+```sh
+bash examples/cesium/run_rc_jet_terrain.sh --photo3d on
+bash examples/cesium/run_rc_jet_terrain.sh --photo3d off
+```
+
+On is the default: Google Maps Photorealistic 3D Tiles (ion asset `2275207`),
+without a separate imagery overlay. Off selects Cesium terrain (`1` by default)
+with aerial imagery (`2` by default). Enable that asset in your ion account and give the token access to it
+and the terrain asset used for heights. Coverage and detail vary by location.
+The switch is resolved once by the launcher; it is not a live UI toggle.
+
+Physics uses `RuntimeConfig.height_asset_id`, independently of the visual
+tileset. The launcher defaults to World Terrain (`1`) for Photo 3D and preserves
+the selected terrain asset in standard mode. Set
+`ELODIN_RC_JET_HEIGHT_ASSET_ID` explicitly to use another height source. Direct
+Python launches also default heights to World Terrain (`1`). Photogrammetry is
+visual geometry, not a collision mesh: buildings can intersect the aircraft.
+
+On a 16 GB M2, start with one Editor instance and the default 16 px screen error.
+Increasing `CESIUM_MAXIMUM_SCREEN_ERROR` to `24` or `32` reduces requested detail;
+setting `CESIUM_LOD_RETENTION_METERS=0` releases detail sooner outside the current
+views. Neither setting is a cap on total process or GPU memory. Validate the
+color and infrared views together before claiming a frame rate. Do not run a
+standalone viewer alongside RC-jet when measuring.
+
+Keep the Google Maps and data-source attributions visible in screenshots and
+video. The current integration does not provide a persistent offline terrain
+package or a frame-by-frame video export. For a promotional Google-tile video,
+keep the clip at most 30 seconds and include the required promotional notice;
+see the [provider's capture and attribution guidance](https://developers.google.com/maps/documentation/tile/policies).
 
 `runtime_config.load_config()` reads and validates this mode at the entry point:
 unset or `planar` selects the planar preset, and `cesium` selects the Cesium preset.
@@ -186,12 +233,10 @@ cover the actual flight and sensor requirements. See the
 
 Rendering, infrared and the height API are reviewed together in
 [#914](https://github.com/elodin-sys/elodin/pull/914), which incorporates #915.
-The following are discussion points, not implemented changes:
+Rendering source and physical height source are selected independently. Camera
+recording settings are explicit; credentials stay outside the repository. The
+height SDK and RC-jet reuse `elodin.geodesy` for shared ECEF conversions.
 
-- Decide whether to replace the remaining launcher mode switch and separate
-  terrain rendering from physical contact. Camera recording settings are already
-  explicit and independent of the terrain field; credentials remain separate.
-- Reuse the existing source of truth for ECEF conversions and remove duplication
-  introduced by this integration. This is not a general coordinate-system redesign.
-- Decouple the height API from the Cesium preparation path so another source can
-  supply heights without changing the simulation's lookup code.
+Remaining discussion: allowing other providers to prepare height grids without
+changing the simulation lookup, and validating performance and visual/physics
+agreement on longer flights.

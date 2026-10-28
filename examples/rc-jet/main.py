@@ -176,7 +176,7 @@ TERRAIN = (
         center_ecef=SCENARIO.initial.pos_ecef,
         dimensions=(24_000, 24_000),
         spacing=10,
-        asset_id=int(os.environ.get("CESIUM_ION_ASSET_ID", "1")),
+        asset_id=CONFIG.height_asset_id,
     )
     if CONFIG.terrain is TerrainMode.CESIUM
     else None

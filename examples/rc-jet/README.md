@@ -79,7 +79,11 @@ camera.
 In Cesium mode, the infrared preview runs at 15 fps and uses H.264, retaining
 the same resolution, lens and thermal effect. The color preview runs at 30 fps.
 The wider color view loads terrain first; the infrared view then refines it
-without blocking both streams at startup.
+without blocking both streams at startup. The Cesium launcher also accepts
+`--photo3d on` (the default) for Google Maps photogrammetry; `--photo3d off` keeps the standard
+terrain and aerial imagery. This only selects rendering: the physical height
+source remains explicit and independent. See the
+[Photo 3D setup](../cesium/README.md#photo-3d-on--off).
 
 Cesium mode also uses `el.terrain_heightmap()` to prepare and cache a 24 × 24 km
 height grid at 10 m spacing through the Elodin CLI. During simulation, JAX reads

@@ -27,6 +27,7 @@ PREVIEW_CAMERAS = CameraSettings(color_format="h264", infrared_fps=15.0, infrare
 class RuntimeConfig:
     terrain: TerrainMode = TerrainMode.PLANAR
     cameras: CameraSettings = RAW_CAMERAS
+    height_asset_id: int = 1
 
 
 def load_config(environ: Mapping[str, str] | None = None) -> RuntimeConfig:
@@ -39,7 +40,15 @@ def load_config(environ: Mapping[str, str] | None = None) -> RuntimeConfig:
         raise ValueError(
             f"ELODIN_RC_JET_TERRAIN must be 'planar' or 'cesium', got {value!r}"
         ) from None
+    height_asset = environ.get("ELODIN_RC_JET_HEIGHT_ASSET_ID", "1")
+    try:
+        height_asset_id = int(height_asset)
+        if height_asset_id <= 0:
+            raise ValueError
+    except ValueError:
+        raise ValueError("ELODIN_RC_JET_HEIGHT_ASSET_ID must be a positive integer") from None
     return RuntimeConfig(
         terrain=terrain,
         cameras=PREVIEW_CAMERAS if terrain is TerrainMode.CESIUM else RAW_CAMERAS,
+        height_asset_id=height_asset_id,
     )

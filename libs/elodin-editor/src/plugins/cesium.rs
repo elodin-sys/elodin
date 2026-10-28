@@ -449,10 +449,9 @@ impl Plugin for CesiumPlugin {
                 .after(update_startup)
                 .after(crate::ui::render_layout),
         );
+        app.add_systems(Update, show_credits.after(crate::ui::render_layout));
         if std::env::var("ELODIN_RC_JET_TERRAIN").as_deref() == Ok("cesium") {
             app.add_systems(Update, style_rc_jet_terrain.after(CesiumSet::Placement));
-        } else {
-            app.add_systems(Update, show_credits.after(crate::ui::render_layout));
         }
     }
 }
@@ -679,29 +678,26 @@ fn show_credits(
                             "Tileset unavailable. Check URL, asset access and token.",
                         );
                     }
-                    ui.menu_button("Data sources", |ui| {
-                        ui.set_max_width(360.0);
-                        for credit in &credits.html {
-                            // Native supplies HTML; this compact menu presents its
-                            // text without putting markup over the terrain views.
-                            let mut inside_tag = false;
-                            let text: String = credit
-                                .chars()
-                                .filter(|&c| match c {
-                                    '<' => {
-                                        inside_tag = true;
-                                        false
-                                    }
-                                    '>' => {
-                                        inside_tag = false;
-                                        false
-                                    }
-                                    _ => !inside_tag,
-                                })
-                                .collect();
-                            ui.label(text.replace("&amp;", "&").replace("&nbsp;", " "));
-                        }
-                    });
+                    // Keep tile-provider attribution visible in captures too.
+                    ui.set_max_width(480.0);
+                    for credit in &credits.html {
+                        let mut inside_tag = false;
+                        let text: String = credit
+                            .chars()
+                            .filter(|&c| match c {
+                                '<' => {
+                                    inside_tag = true;
+                                    false
+                                }
+                                '>' => {
+                                    inside_tag = false;
+                                    false
+                                }
+                                _ => !inside_tag,
+                            })
+                            .collect();
+                        ui.small(text.replace("&amp;", "&").replace("&nbsp;", " "));
+                    }
                 });
             });
     }
