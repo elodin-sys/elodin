@@ -16,6 +16,8 @@ import jax.numpy as jnp
 from jax import Array
 import numpy as np
 
+from .geodesy import WGS84_A_M, WGS84_E2, ecef_to_geodetic, enu_basis
+
 
 class TerrainSample(NamedTuple):
     """Ellipsoid height (meters), outward ECEF unit normal, and coverage validity."""
@@ -23,54 +25,6 @@ class TerrainSample(NamedTuple):
     height_m: Array
     normal_ecef: Array
     valid: Array
-
-
-WGS84_A_M = 6_378_137.0
-WGS84_F = 1.0 / 298.257223563
-WGS84_B_M = WGS84_A_M * (1.0 - WGS84_F)
-WGS84_E2 = WGS84_F * (2.0 - WGS84_F)
-WGS84_EP2 = WGS84_E2 / (1.0 - WGS84_E2)
-
-
-def _ecef_to_geodetic(r_ecef: jnp.ndarray) -> tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
-    """ECEF position to (lat_rad, lon_rad, ellipsoid height).
-
-    Bowring's method with a fixed iteration count (JIT-friendly).
-    """
-    x, y, z = r_ecef[0], r_ecef[1], r_ecef[2]
-    lon = jnp.arctan2(y, x)
-    p = jnp.hypot(x, y)
-    beta = jnp.arctan2(z, (1.0 - WGS84_F) * p)
-    lat = beta
-    for _ in range(4):
-        lat = jnp.arctan2(
-            z + WGS84_EP2 * WGS84_B_M * jnp.sin(beta) ** 3,
-            p - WGS84_E2 * WGS84_A_M * jnp.cos(beta) ** 3,
-        )
-        beta = jnp.arctan((1.0 - WGS84_F) * jnp.tan(lat))
-    sin_lat = jnp.sin(lat)
-    w = jnp.sqrt(1.0 - WGS84_E2 * sin_lat**2)
-    alt = p * jnp.cos(lat) + z * sin_lat - WGS84_A_M * w
-    return lat, lon, alt
-
-
-def _ned_basis(lat_rad, lon_rad) -> jnp.ndarray:
-    """Rows are the local NED unit vectors (north, east, down) in ECEF.
-
-    v_ned = R @ v_ecef; v_ecef = R.T @ v_ned.
-    """
-    sin_lat, cos_lat = jnp.sin(lat_rad), jnp.cos(lat_rad)
-    sin_lon, cos_lon = jnp.sin(lon_rad), jnp.cos(lon_rad)
-    north = jnp.array([-sin_lat * cos_lon, -sin_lat * sin_lon, cos_lat])
-    east = jnp.array([-sin_lon, cos_lon, 0.0])
-    down = jnp.array([-cos_lat * cos_lon, -cos_lat * sin_lon, -sin_lat])
-    return jnp.stack([north, east, down])
-
-
-def _enu_basis(lat_rad, lon_rad) -> jnp.ndarray:
-    """Rows are the local ENU unit vectors (east, north, up) in ECEF."""
-    ned = _ned_basis(lat_rad, lon_rad)
-    return jnp.stack([ned[1], ned[0], -ned[2]])
 
 
 class TerrainHeightmap:
@@ -133,7 +87,7 @@ class TerrainHeightmap:
         w = jnp.sqrt(1 - WGS84_E2 * jnp.sin(latitude) ** 2)
         east_scale = (WGS84_A_M / w + height) * jnp.cos(latitude)
         north_scale = WGS84_A_M * (1 - WGS84_E2) / w**3 + height
-        east, north, up = _enu_basis(latitude, longitude)
+        east, north, up = enu_basis(latitude, longitude)
         normal = up - east * dh_lon / east_scale - north * dh_lat / north_scale
         normal = normal / jnp.linalg.norm(normal)
         covered = (
@@ -154,7 +108,7 @@ class TerrainHeightmap:
         position = jnp.asarray(position_ecef)
         if position.shape != (3,):
             raise ValueError("Expected an ECEF position with shape (3,)")
-        latitude, longitude, _ = _ecef_to_geodetic(position)
+        latitude, longitude, _ = ecef_to_geodetic(position)
         result = self.sample_geodetic(latitude, longitude)
         valid = result.valid & jnp.all(jnp.isfinite(position)) & (jnp.linalg.norm(position) > 1)
         return TerrainSample(result.height_m, result.normal_ecef, valid)
@@ -203,7 +157,7 @@ def terrain_heightmap(
     columns, rows = (math.ceil(value) + 1 for value in intervals)
     if rows * columns > 25_000_000:
         raise ValueError("Terrain grid is too large; reduce dimensions or increase spacing")
-    latitude, longitude, _ = _ecef_to_geodetic(jnp.asarray(center))
+    latitude, longitude, _ = ecef_to_geodetic(jnp.asarray(center))
     lat, lon = float(latitude), float(longitude)
     w = math.sqrt(1 - WGS84_E2 * math.sin(lat) ** 2)
     north_scale = WGS84_A_M * (1 - WGS84_E2) / w**3
