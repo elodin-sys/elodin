@@ -1,0 +1,15 @@
+# Fork pull requests get no secrets, so this secret-free run is what
+# "Approve and run workflows" releases; buildkite-trigger.yml (on main) then
+# starts the Buildkite build.
+name: Buildkite
+
+on:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Approved for Buildkite"
