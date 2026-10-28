@@ -82,33 +82,37 @@ where
         let sim_dt = ComponentArray::<SimulationTimeStep>::param(&builder)?;
         let dt = self.dt.map(Scalar::from).unwrap_or_else(|| sim_dt.get(0).0);
 
-        let step = |dt_factor: f64, builder: &mut SystemBuilder| -> Result<Query<DU>, Error> {
-            let f = |dt: ComponentArray<SimulationTimeStep>,
-                     init_u: Query<U>,
-                     du: Query<DU>|
-             -> Query<U> {
-                let dt = &dt.get(0).0 * dt_factor;
-                init_u
-                    .clone()
-                    .join_query(du.clone())
-                    .map(|u, du| u + dt.clone() * du)
-                    .unwrap()
+        // Each stage evaluates the pipeline at `u0 + c * dt * k_prev`, where
+        // `k_prev` is the derivative captured from the previous stage.
+        //
+        // The derivative group can share components with the state (six_dof's
+        // DU contains WorldVel, which is also part of U), so it must not be
+        // re-read from the builder after `init_u` is restored: that would read
+        // the start-of-step velocity instead of the previous stage's.
+        let stage = |prev_k: Option<&Query<DU>>,
+                     dt_factor: f64,
+                     builder: &mut SystemBuilder|
+         -> Result<Query<DU>, Error> {
+            let u = match prev_k {
+                Some(k) => {
+                    let h = &dt * dt_factor;
+                    init_u
+                        .clone()
+                        .join_query(k.clone())
+                        .map(|u, du| u + h.clone() * du)
+                        .unwrap()
+                }
+                None => init_u.clone(),
             };
-            f.into_system()
-                .compile(world)?
-                .insert_into_builder(builder)?;
+            u.insert_into_builder(builder);
             compiled_pipe.clone().insert_into_builder(builder)?;
             Query::<DU>::param(builder)
         };
 
-        let k1 = step(0.0, &mut builder)?;
-        init_u.insert_into_builder(&mut builder);
-        let k2 = step(0.5, &mut builder)?;
-        init_u.insert_into_builder(&mut builder);
-        let k3 = step(0.5, &mut builder)?;
-        init_u.insert_into_builder(&mut builder);
-        let k4 = step(1.0, &mut builder)?;
-        init_u.insert_into_builder(&mut builder);
+        let k1 = stage(None, 0.0, &mut builder)?;
+        let k2 = stage(Some(&k1), 0.5, &mut builder)?;
+        let k3 = stage(Some(&k2), 0.5, &mut builder)?;
+        let k4 = stage(Some(&k3), 1.0, &mut builder)?;
 
         let u = init_u
             .join_query(k1)
