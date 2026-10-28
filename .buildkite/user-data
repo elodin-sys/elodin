@@ -49,10 +49,11 @@ write_files:
       set -eu
       set -f # disable globbing
       export IFS=" "
-      export AWS_CONFIG_FILE=/dev/null
-      export AWS_SHARED_CREDENTIALS_FILE=/dev/null
-      echo "Uploading paths to S3 cache: $OUT_PATHS"
-      exec /nix/var/nix/profiles/default/bin/nix copy --to "s3://elodin-nix-cache?region=us-west-2&secret-key=/etc/nix/cache-priv-key.pem" $OUT_PATHS
+      echo "Queueing upload to S3 cache: $OUT_PATHS"
+      # Nix holds the output lock until this hook exits, so upload in the background
+      exec /usr/bin/systemd-run --no-block --collect --quiet \
+        -E AWS_CONFIG_FILE=/dev/null -E AWS_SHARED_CREDENTIALS_FILE=/dev/null \
+        /nix/var/nix/profiles/default/bin/nix copy --to "s3://elodin-nix-cache?region=us-west-2&compression=zstd&secret-key=/etc/nix/cache-priv-key.pem" $OUT_PATHS
       UPLOADEOF
       '
 
