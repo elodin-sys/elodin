@@ -33,3 +33,20 @@ def test_explicit_config_is_independent_of_later_environment_changes(monkeypatch
     assert build(config).emit_kdl() == expected
     with pytest.raises(ValueError, match="ELODIN_RC_JET_TERRAIN must be"):
         build()
+
+
+@pytest.mark.parametrize("asset", ["", "0", "-1", "1.5", "wrong"])
+def test_invalid_height_source_is_rejected_before_world_creation(asset):
+    with pytest.raises(ValueError, match="HEIGHT_ASSET_ID must be a positive integer"):
+        load_config({"ELODIN_RC_JET_HEIGHT_ASSET_ID": asset})
+
+
+def test_rendering_asset_cannot_change_the_physics_height_source():
+    config = load_config(
+        {
+            "ELODIN_RC_JET_TERRAIN": "cesium",
+            "CESIUM_ION_ASSET_ID": "2275207",
+        }
+    )
+    assert config.height_asset_id == 1
+    assert load_config({"ELODIN_RC_JET_HEIGHT_ASSET_ID": "42"}).height_asset_id == 42
