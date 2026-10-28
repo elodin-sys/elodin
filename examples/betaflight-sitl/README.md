@@ -226,13 +226,24 @@ phase/backlog can add delay. Sparse state's last-change T is not actual image
 time. See [RACING_PLAN.md §7.4](RACING_PLAN.md#74-camera) for the canonical
 limitation and revisit triggers; future fusion must not assume exact alignment.
 
-**G1 implementation is complete on `g1-clean`, reconstructed from GitHub
-`origin/main` `8742b411`; user diff approval and fresh qualification are pending.**
-No builds or tests have run on this clean source. Previous `pkg-g1` PASS results
-are historical only; see the G1 brief in [RACING_PLAN.md](RACING_PLAN.md).
-Strict alignment remains a historical FAIL, deferred/non-gating. No timing
-offset, renderer/query/stream fix, per-frame RPC or streaming-prototype promotion
-is included.
+**G1 ordinary-operation qualification PASS (2026-10-28)** on `g1-clean`
+source `30d2c307`, based only on GitHub `origin/main` `8742b411`.
+Fresh matching private SDK/runtime/DB (`0.20.1-alpha.0+30d2c307`) and default
+`betaflight_SITL.elf` passed: **270 Python tests**, **754 editor tests**
+(3 ignored; one doctest ignored), **5 controller tests**, **17 s10 tests**,
+headless lifecycle CI, release build/fmt/clippy and eight serialized first-attempt
+live gates. Three consecutive camera-off truth holds measured online RMS
+**0.071927 / 0.071675 / 0.075766 m**; ordinary D+single+FPV passed at
+**720 frames, 29.95 simulated FPS** (721 raw frames including shutdown).
+Readonly pre/post EEPROM evidence confirms GPS off, `trust_mag = OFF` and
+unchanged settings/bytes. The first structured CLI dump was truncated; its full
+original raw response was recovered offline under independent review before
+science, not silently retried. Evidence and cleanup-guard limitations:
+`/home/ubuntu/betaflight-g1/clean-testing/qualification/report.md`.
+See the G1 brief in [RACING_PLAN.md](RACING_PLAN.md). Prior `pkg-g1` results
+remain historical only. Strict alignment remains a historical FAIL,
+deferred/non-gating; no timing offset, renderer/query/stream fix, per-frame RPC,
+vision/racing qualification or streaming-prototype promotion is included.
 
 The exported video can be one frame ahead of `total_frames`, because the render
 server may write one more frame while it shuts down after the final tick.

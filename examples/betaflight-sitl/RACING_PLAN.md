@@ -1,8 +1,8 @@
 # Vision-Guided Gate Racing Plan
 
 **Document status:** Authoritative living specification  
-**Last verified against repository:** 2026-10-28 (clean G1 source reconstruction; untested)
-**Current resume point:** E1 complete; G1 implementation complete on `g1-clean`, pending user diff approval and fresh qualification. F implementation ready; H/I and F qualification wait for G1.
+**Last verified against repository:** 2026-10-28 (clean G1 ordinary-operation qualification PASS)
+**Current resume point:** E1 and G1 complete; G1 qualified on `g1-clean`, ready for integration. F implementation ready; H/I and F qualification may proceed after G1 integration.
 
 ## 1. Purpose and authority
 
@@ -1530,11 +1530,12 @@ review fixes; corner-order wording rechecked 2026-10-21:**
   and 179.9 px, 57.3 px down. Worst corner error is 1.7 px at tilt 0 and 2.7 px
   at +10°, on the compressed bottom corners.
 
-### [ ] G1 — Sensor timing and truth-boundary fixes
+### [x] G1 — Sensor timing and truth-boundary fixes
 
-**Status (2026-10-28):** Implementation complete on `g1-clean`, reconstructed
-from GitHub `origin/main` `8742b411`; pending user diff approval and fresh
-qualification. No builds or tests have run on this clean source.
+**Status (2026-10-28):** Implementation and ordinary-operation qualification
+complete on `g1-clean` source `30d2c307`, based only on GitHub `origin/main`
+`8742b411`; ready for integration. Fresh matching artifacts qualify this source,
+not the prior agent-integrated trees.
 
 **Objective:** Supply nominal image/render time on the simulation clock and
 remove Betaflight's truth-derived aid. **Prerequisites:** B and G.
@@ -1554,17 +1555,39 @@ patch; historical evidence is retained under `/home/ubuntu/betaflight-g1/`.
 No timing offset, controller/gain change, renderer/query/stream fix, per-frame
 RPC, prototype promotion, or native/build/firmware change is included.
 
-**Qualification pending:** After user diff approval, rebuild matching private
-SDK/runtime/DB and default SITL firmware, then check pure/release tests,
-persisted EEPROM, default/single C0, C referee, D physical audit, three
-consecutive E truth holds and ordinary production FPV. Previous `pkg-g1`
-results, including `finish-closure/completion.md` and `origin-sync/`, are
-historical only, not qualification of `g1-clean`. Prior keyboard/gamepad sign-off
-stands; the automated D audit covers the configuration change. No vision-flight
-or racing qualification is claimed.
+**Qualification PASS:** Fresh private Python3.13.14/JAX0.10.0 CPU SDK,
+release runtime/DB (`0.20.1-alpha.0+30d2c307`) and default TARGET=SITL
+`betaflight_SITL.elf` passed required build/fmt/clippy, **270 Python tests**,
+**754 editor tests** (3 ignored; one doctest ignored), **5 controller tests**,
+**17 s10 tests** and actual headless lifecycle CI. Eight serialized unique
+first-attempt gates passed: default/single C0, C positive referee, D physical,
+three consecutive camera-off E holds and ordinary D+single+FPV. Online hold RMS
+was **0.071927 / 0.071675 / 0.075766 m** over continuous 10 s windows; additional,
+distinct DB-relative `[30,40]` windows measured **0.059985031 / 0.060709757
+/ 0.064263028 m**. FPV passed 720 total/659 window frames at 29.95 simulated FPS;
+721 raw RGBA frames include the known shutdown extra. All 18-file source bundles
+and frozen native/private/global artifacts were unchanged. Full pose telemetry
+includes initial duplicates and stationary/startup gaps; 125 µs continuity is
+claimed only for the measured hold windows, not globally.
 
-**Handoff:** Stop for user diff approval before any testing; qualify and integrate
-G1 before H/I and F qualification. E1 is complete and available to F/J.
+Readonly EEPROM checks confirmed GPS absent, `trust_mag = OFF`, all four PID
+profiles and unchanged settings/bytes. The first structured dump was truncated;
+its complete original raw response was recovered offline and the evidence-only
+framing amendment independently approved before science. No prelive firmware
+retry, initialization, save, retuning or scientific retry. Each actual plan-stage
+cleanup used a reviewed qualification-only no-kill PATH guard at zero existing
+SITL/free ports; upstream global process-name cleanup remains unchanged and is
+not qualified as safe on a shared host. Actual child/native SDK/GPU provenance,
+postreadonly verification, stopped sparse DB science and exact owned firmware
+build-patch reversal passed. Full commands, hashes, raw evidence, amendment and
+limitations: `/home/ubuntu/betaflight-g1/clean-testing/qualification/report.md`.
+Previous `pkg-g1`/`origin-sync/` results remain historical only. Prior operator
+keyboard/gamepad sign-off stands; no new vision-flight, racing, editor visual,
+browser or strict-alignment qualification is claimed.
+
+**Handoff:** Integrate the qualified G1-only diff before H/I and F qualification.
+E1 is complete and available to F/J; approximate alignment remains the accepted
+scope, not verified exact scene rewind.
 
 ### [ ] H — Classical detector, offline
 
@@ -1856,31 +1879,31 @@ branch for later resumption.
 | D | Complete | Command seam, one-tick ordering, AUX2 ANGLE configuration, s10 manual controller, 250 ms heartbeat failsafe, DB telemetry, and simulation-time physical sign audit are implemented. The combined automated qualification passed with roll 1.006, pitch 1.011, yaw 1.479 rad/s and accepted max motor 0.391; 5 controller tests also pass. On 2026-09-28, the operator tested and signed off on both keyboard and gamepad paths, including arm, takeoff, throttle/roll/pitch/yaw response, landing, and disarm. |
 | E | Complete | Opt-in truth-only single-gate standoff controller and independent 10 s hold grader. Three consecutive original 2026-09-29 runs exited 0 with RMS 0.075521/0.074801/0.074188 m (offline 0.075520758/0.074803460/0.074187954 m), no crossing or fault, and expected incomplete 0/1 race results; 138 pure tests on the original E branch, 5 controller tests, and default/scripted-single C0 regressions passed. The merged 2026-10-02 verification passed 180 pure tests, 5 controller tests, three further truth runs and opt-in B+E camera coexistence (details above). Requalified unchanged on 2026-10-12 atop main `729022c7` with a newly built runtime/SDK, three camera-off passes (0.073873/0.075235/0.074413 m RMS), independent DB agreement, C0/C/D regressions, and all four camera combinations (details above). |
 | E1 | Complete | Shared mission controller and immutable navigation/target inputs; thin per-tick truth adapter. Initial acceptance at commit `163c0529`: 39 original-source scenarios / 268 updates exact, 300 pure tests, clean independent review, and three unchanged-source truth holds at 0.076142/0.077087/0.072773 m RMS (historical details under E1). Current maintained characterization: 8 selected cases / 78 updates, each guarded by a canonical SHA-256 digest derived from the original fixture rows; current full pure suite passes 268 tests. This follow-up is test maintenance, not a new qualification. |
-| F | Ready for implementation; qualification blocked by G1 | E1 is complete. Three-gate course, race profile, COMMIT/pass sequencing, and safe finish remain; qualification must wait for G1. |
+| F | Ready for implementation; qualification waits for G1 integration | E1 is complete and G1 is qualified on `g1-clean`. Three-gate course, race profile, COMMIT/pass sequencing, and safe finish remain. |
 | G | Complete | `vision.py` owns intrinsics, corner order, the camera-to-body helper, and NumPy planar PnP. Positive tilt is nose-up and is registered as negative renderer pitch. `corner_order_ambiguous` flags labellings within 10°. `synthetic_vision.py` is the only truth-projection path. 222 pure tests pass, including centered, translated, yawed, and ranged round trips. |
-| G1 | Implementation complete; qualification pending | Clean `g1-clean` reconstruction from GitHub `8742b411`; awaiting user diff approval before builds/tests. Old-source PASS results are historical only; see G1 brief. |
-| H | Blocked by G1 qualification/integration | B, C, and G are complete; the offline detector and recorder remain. |
-| I | Blocked by G1 qualification/integration | G is complete; the navigator can proceed in parallel with H after G1. |
+| G1 | Complete; qualified, ready for integration | GitHub-only base `8742b411`, source `30d2c307`; fresh matching artifacts, 270 Python tests, 754 editor tests, 5 controller tests, 17 s10 tests and eight first-attempt ordinary live gates PASS. See G1 brief for evidence/guard/framing caveats; strict alignment historical FAIL/deferred/non-gating. |
+| H | Ready after G1 integration | B, C, G and G1 qualification complete; the offline detector and recorder remain. |
+| I | Ready after G1 integration | G and G1 qualification complete; the navigator can proceed in parallel with H. |
 | J | Blocked by H, I | E1's shared mission controller is complete; detector, navigator, and vision guidance remain. |
 | K | Blocked by F, J | No vision race |
 | L | Blocked by F/K | No race CI or final docs |
 
 ### Resume point
 
-Package E1 is complete. G1 implementation is complete on `g1-clean`, pending
-user diff approval and fresh qualification; no tests or builds have run on this
-clean source. Package F implementation may proceed, but its qualification runs
-and H/I must wait for G1 qualification/integration.
+Packages E1 and G1 are complete. G1 ordinary-operation qualification passed on
+`g1-clean` source `30d2c307`, ready for integration. Package F implementation may
+proceed; integrate G1 before F qualification and H/I work, retaining the accepted
+approximate-alignment contract.
 
 - **E1, mission controller extraction:** the initial 2026-10-23 qualification
   preserved exact original-controller replay and three passing E holds (details
   above). The current maintained baseline is the 8-case/78-update digest set;
   the original 39/268 exact-equivalence evidence remains in commit `163c0529`.
   The shared controller is available to F and J.
-- **G1, sensor timing and truth-boundary fixes:** review the clean diff before
-  rebuilding or testing. Qualification must use matching fresh GitHub-baseline
-  artifacts, GPS off and `trust_mag = OFF`; prior `pkg-g1` PASS results do not
-  qualify this reconstruction.
+- **G1, sensor timing and truth-boundary fixes:** integrate the qualified clean
+  GitHub-only diff; matching fresh artifacts, GPS off and `trust_mag = OFF`
+  passed ordinary regressions (G1 brief above). Prior `pkg-g1` results do not
+  substitute for this qualification; strict alignment stays deferred/non-gating.
 
 Passing a gate is not yet implemented.
 
