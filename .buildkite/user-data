@@ -142,6 +142,8 @@ write_files:
       Environment=PATH=/nix/var/nix/profiles/default/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
       # Disable eval cache to prevent SQLite contention between spawned agents
       Environment=NIX_CONFIG="eval-cache = false"
+      # io_uring tests (stellarator) hit ENOMEM under the default 8 MiB when jobs overlap
+      LimitMEMLOCK=infinity
       EOF
       '
 
