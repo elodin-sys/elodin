@@ -11,9 +11,7 @@
 //!         "cargo:rustc-env=GIT_HASH={}",
 //!         hash.unwrap_or_else(|| "unknown".to_string())
 //!     );
-//!     if let Some(git_head_path) = git_inspect::head_path() {
-//!         println!("cargo:rerun-if-changed={}", &git_head_path);
-//!     }
+//!     git_inspect::emit_rerun_directives();
 //! }
 //! ```
 
@@ -52,6 +50,16 @@ pub fn short_hash() -> Option<String> {
         hash.push_str(".dirty");
     }
     hash
+}
+
+/// Rerun on `GIT_HASH` changes; watch `.git/HEAD` only when the hash is not provided.
+pub fn emit_rerun_directives() {
+    println!("cargo:rerun-if-env-changed=GIT_HASH");
+    if std::env::var_os("GIT_HASH").is_none()
+        && let Some(head) = head_path()
+    {
+        println!("cargo:rerun-if-changed={head}");
+    }
 }
 
 /// Returns the git HEAD path if available.
