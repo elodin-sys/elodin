@@ -232,6 +232,15 @@ pipeline_steps = [
     *test_steps,
 ]
 
+# CI_PREWARM="cargo test": run only that step, one copy per x86 agent (needs an idle queue)
+if prewarm := os.getenv("CI_PREWARM"):
+    pipeline_steps = [
+        {**s, "parallelism": 8}
+        for g in test_steps
+        for s in g.get("steps", [g])
+        if s["label"].endswith(prewarm)
+    ]
+
 pipeline(
     steps=pipeline_steps,
     env={

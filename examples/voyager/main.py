@@ -9,14 +9,13 @@ import spiceypy as spice
 from jax import numpy as jnp
 from jax.numpy import linalg as la
 
-from dynamics import heliocentric_relative_acceleration, state_error
+from dynamics import state_error
 
 SIM_TIME_STEP = 3600.0
 SIMULATION_RATE_HZ = 1 / SIM_TIME_STEP
 DEFAULT_DB_PATH = "dbs/voyager"
 DB_PATH_ENV = "DB_PATH"
 MAX_TICKS_ENV = "MAX_TICKS"
-DYNAMICS_CHAPTER_ENV = "VOYAGER_DYNAMICS_CHAPTER"
 
 SPICE_DIR = Path(__file__).resolve().parent / "nasa_spice_data"
 SPICE_KERNELS = [
@@ -309,27 +308,6 @@ def gravity(
     )
 
 
-@el.system
-def heliocentric_gravity(
-    graph: el.GraphQuery[GravityEdge],
-    probe_query: el.Query[el.WorldPos, el.Inertia],
-    source_query: el.Query[el.WorldPos, GravitationalParameter],
-) -> el.Query[el.Force]:
-    def gravity_fn(force, probe_pos, probe_inertia, source_pos, source_gm):
-        acc = heliocentric_relative_acceleration(
-            probe_pos.linear(), source_pos.linear(), source_gm[0]
-        )
-        return el.Force(linear=force.force() + probe_inertia.mass() * acc)
-
-    return graph.edge_fold(
-        left_query=probe_query,
-        right_query=source_query,
-        return_type=el.Force,
-        init_value=el.Force(),
-        fold_fn=gravity_fn,
-    )
-
-
 for probe in PROBES:
     probe_id = body_entity_ids[probe["entity_name"]]
     for source_name in ["Sun", *[planet["entity_name"] for planet in PLANETS]]:
@@ -378,12 +356,7 @@ w.schematic(
 """.format(body_objects=body_objects)
 )
 
-dynamics_chapter = os.environ.get(DYNAMICS_CHAPTER_ENV, "1")
-if dynamics_chapter not in ("1", "2"):
-    raise ValueError(f"{DYNAMICS_CHAPTER_ENV} must be '1' or '2'")
-
-gravity_system = gravity if dynamics_chapter == "1" else heliocentric_gravity
-sys = el.six_dof(sys=gravity_system)
+sys = el.six_dof(sys=gravity)
 db_path = Path(os.environ.get(DB_PATH_ENV, DEFAULT_DB_PATH))
 max_ticks_env = os.environ.get(MAX_TICKS_ENV)
 max_ticks = int(max_ticks_env) if max_ticks_env is not None else None
