@@ -88,10 +88,7 @@ where
                           init_u: Query<U>,
                           du: Query<DU>|
                   -> Query<U> {
-                let dt = &step_dt
-                    .map(Scalar::from)
-                    .unwrap_or_else(|| sim_dt.get(0).0)
-                    * dt_factor;
+                let dt = &step_dt.map(Scalar::from).unwrap_or_else(|| sim_dt.get(0).0) * dt_factor;
                 init_u
                     .clone()
                     .join_query(du.clone())

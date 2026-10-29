@@ -775,10 +775,6 @@ mod tests {
         let force = SpatialForce::new(torque, tensor![9.0, -6.0, 3.0]);
         let motion = force / inertia;
         assert_relative_eq!(motion.angular(), alpha_expected, epsilon = 1e-12);
-        assert_relative_eq!(
-            motion.linear(),
-            tensor![3.0, -2.0, 1.0],
-            epsilon = 1e-12
-        );
+        assert_relative_eq!(motion.linear(), tensor![3.0, -2.0, 1.0], epsilon = 1e-12);
     }
 }

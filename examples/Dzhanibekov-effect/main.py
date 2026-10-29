@@ -1,11 +1,11 @@
-"""Dzhanibekov-effect example: 
+"""Dzhanibekov-effect example:
 
 The Dzhanibekov effect (also known as the tennis-racket effect or the
 intermediate axis theorem) states that rotation about an object's
 intermediate axis is unstable. That is, if we have principal axes
 x, y, and z, with moments Ix, Iy, and Iz such that Ix<Iy<Iz (which
 axes we call "x", "y", or "z" doesn't matter), rotations about body
-y will be unstable. This manifests in the body periodically 
+y will be unstable. This manifests in the body periodically
 rotating about the ZX plane by 180 degrees. The effect was famously
 "discovered" by Soviet cosmonaut Vladimir Dzhanibekov when he
 noticed the effect on a wing nut spun about its intermediate
@@ -58,9 +58,7 @@ DENSITY_KG_M3 = 1000.0
 # Spin about body Y: one revolution per 0.75 seconds, plus a small
 # perturbation on X and Z to seed the instability.
 SPIN_PERIOD_S = 0.75
-INITIAL_WORLD_OMEGA = jnp.array(
-    [0.08, 2.0 * jnp.pi / SPIN_PERIOD_S, 0.08], dtype=jnp.float64
-)
+INITIAL_WORLD_OMEGA = jnp.array([0.08, 2.0 * jnp.pi / SPIN_PERIOD_S, 0.08], dtype=jnp.float64)
 
 
 def _solid_cylinder_mass(radius_m: float, length_m: float) -> float:
@@ -144,27 +142,21 @@ SmallPos = ty.Annotated[
     ),
 ]
 
-_SMALL_ROT = el.Quaternion.from_axis_angle(
-    jnp.array([1.0, 0.0, 0.0]), -jnp.pi / 2.0
-)
+_SMALL_ROT = el.Quaternion.from_axis_angle(jnp.array([1.0, 0.0, 0.0]), -jnp.pi / 2.0)
 _LARGE_CENTER_BODY = jnp.array([0.0, _large_center_y, 0.0])
 _SMALL_CENTER_BODY = jnp.array([0.0, _small_center_y, 0.0])
 
 
 @el.dataclass
 class HandleDiagnostics(el.Archetype):
-    body_omega: BodyOmega = field(
-        default_factory=lambda: jnp.zeros(3, dtype=jnp.float64)
-    )
+    body_omega: BodyOmega = field(default_factory=lambda: jnp.zeros(3, dtype=jnp.float64))
     large_pos: LargePos = field(
         default_factory=lambda: el.SpatialTransform(
             angular=el.Quaternion.identity(), linear=_LARGE_CENTER_BODY
         )
     )
     small_pos: SmallPos = field(
-        default_factory=lambda: el.SpatialTransform(
-            angular=_SMALL_ROT, linear=_SMALL_CENTER_BODY
-        )
+        default_factory=lambda: el.SpatialTransform(angular=_SMALL_ROT, linear=_SMALL_CENTER_BODY)
     )
 
 
@@ -199,9 +191,7 @@ def build_world() -> tuple[el.World, el.System]:
                     linear=jnp.zeros(3),
                 ),
                 world_vel=el.SpatialMotion(angular=INITIAL_WORLD_OMEGA),
-                inertia=el.SpatialInertia(
-                    TOTAL_MASS_KG, inertia=INERTIA_DIAG_KG_M2
-                ),
+                inertia=el.SpatialInertia(TOTAL_MASS_KG, inertia=INERTIA_DIAG_KG_M2),
             ),
             HandleDiagnostics(body_omega=INITIAL_WORLD_OMEGA),
         ],
