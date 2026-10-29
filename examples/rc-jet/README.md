@@ -76,10 +76,13 @@ so its mask renders as the cold dark silhouette seen in the reference
 flight recording. `bdx.fpv_cam` remains the independent cinematic RGB
 camera.
 
-In Cesium mode, the infrared preview runs at 15 fps and uses H.264, retaining
-the same resolution, lens and thermal effect. The color preview runs at 30 fps.
-The wider color view loads terrain first; the infrared view then refines it
-without blocking both streams at startup. The Cesium launcher also accepts
+In Cesium mode, color previews use 480×360 and infrared previews use 480×384,
+both at a configured 24 fps with H.264. Aspect ratios, lens field of view and
+the thermal effect are preserved; these reduced-resolution previews are not
+full-resolution Boson reference captures. Color preview shadows and the two
+redundant scene viewports are disabled to leave more GPU time for the sensors.
+Aligned color and infrared previews share the wider view's terrain selection
+throughout the flight, trading independent IR detail for stable coverage. The Cesium launcher also accepts
 `--photo3d on` (the default) for Google Maps photogrammetry; `--photo3d off` keeps the standard
 terrain and aerial imagery. This only selects rendering: the physical height
 source remains explicit and independent. See the

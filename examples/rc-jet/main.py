@@ -113,8 +113,8 @@ def add_sensor_cameras(
     world.sensor_camera(
         entity=jet,
         name="fpv_cam",
-        width=640,
-        height=480,
+        width=settings.color_resolution[0],
+        height=settings.color_resolution[1],
         fov=90.0,
         fps=settings.color_fps,
         format=settings.color_format,
@@ -130,7 +130,7 @@ def add_sensor_cameras(
         environment={
             "sun": {
                 "illuminance": 100000.0,
-                "shadows": True,
+                "shadows": settings.color_shadows,
                 "direction": (-0.870, -0.488, -0.070),
             },
             "ambient_scale": 0.05,
@@ -141,6 +141,8 @@ def add_sensor_cameras(
         entity=jet,
         name="ir_cam",
         camera_model="boson640p",
+        width=settings.infrared_resolution[0],
+        height=settings.infrared_resolution[1],
         lens_hfov=18.0,
         effect="lwir",
         fps=settings.infrared_fps,

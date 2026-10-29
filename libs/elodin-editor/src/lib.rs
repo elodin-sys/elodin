@@ -826,7 +826,8 @@ impl Plugin for EditorPlugin {
 ///
 /// On macOS (unified memory) the headless render-server and editor compete
 /// for the same GPU, causing thermal throttling.  We apply aggressive
-/// throttling: ~24 fps, shadows off, minimal shadow map.
+/// throttling: ~24 fps, or ~30 fps for up to two reduced 24 Hz previews,
+/// shadows off, minimal shadow map.
 ///
 /// On Linux/Windows a discrete GPU is typical, so we apply a lighter
 /// policy: ~30 fps with reduced (but not disabled) shadows.
@@ -857,9 +858,18 @@ fn throttle_for_sensor_cameras(
     mut shadow_map: ResMut<DirectionalLightShadowMap>,
     mut dir_lights: Query<&mut DirectionalLight>,
     windows: Query<&crate::ui::tiles::WindowState>,
-    mut applied: Local<bool>,
+    mut applied: Local<Option<Duration>>,
 ) {
-    if *applied {
+    // Two reduced previews leave enough GPU time for a 30 Hz editor. Keep
+    // the conservative limit while configs load, or for larger/faster rigs.
+    let lightweight = !configs.0.is_empty()
+        && configs.0.len() <= 2
+        && configs
+            .0
+            .iter()
+            .all(|config| config.width <= 480 && config.height <= 384 && config.fps <= 24.0);
+    let interval = Duration::from_millis(if lightweight { 33 } else { 42 });
+    if *applied == Some(interval) {
         return;
     }
     let detected = !configs.0.is_empty()
@@ -868,15 +878,16 @@ fn throttle_for_sensor_cameras(
     if !detected {
         return;
     }
-    settings.limiter = bevy_framepace::Limiter::Manual(Duration::from_millis(42));
+    settings.limiter = bevy_framepace::Limiter::Manual(interval);
     shadow_map.size = 256;
     for mut light in dir_lights.iter_mut() {
         light.shadow_maps_enabled = false;
     }
     tracing::info!(
-        "Sensor cameras detected — editor throttled to ~24 fps, shadows off (macOS GPU sharing)"
+        frame_interval_ms = interval.as_millis(),
+        "Sensor cameras detected — editor frame budget set, shadows off (macOS GPU sharing)"
     );
-    *applied = true;
+    *applied = Some(interval);
 }
 
 #[cfg(not(target_os = "macos"))]

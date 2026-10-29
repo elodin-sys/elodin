@@ -13,6 +13,9 @@ class TerrainMode(str, Enum):
 
 @dataclass(frozen=True)
 class CameraSettings:
+    color_resolution: tuple[int, int] = (640, 480)
+    infrared_resolution: tuple[int, int] = (640, 512)
+    color_shadows: bool = True
     color_fps: float = 30.0
     color_format: str = "rgba"
     infrared_fps: float = 60.0
@@ -20,7 +23,16 @@ class CameraSettings:
 
 
 RAW_CAMERAS = CameraSettings()
-PREVIEW_CAMERAS = CameraSettings(color_format="h264", infrared_fps=15.0, infrared_format="h264")
+# Keep both previews on the same cadence and reduce pixel work on shared GPUs.
+PREVIEW_CAMERAS = CameraSettings(
+    color_resolution=(480, 360),
+    infrared_resolution=(480, 384),
+    color_shadows=False,
+    color_fps=24.0,
+    color_format="h264",
+    infrared_fps=24.0,
+    infrared_format="h264",
+)
 
 
 @dataclass(frozen=True)

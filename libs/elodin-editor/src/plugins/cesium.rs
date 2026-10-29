@@ -1,19 +1,18 @@
 //! Editor adapter for the independently maintained bevy-cesium plugin.
+mod map_overlay;
 use crate::{
     MainCamera,
     sensor_camera::{SensorCamera, SensorCameraConfig, SensorCameraConfigs},
     spatial::{BigSpaceRootEntity, FloatingOriginSettings, GridCell},
 };
-use bevy::{math::DMat4, prelude::*};
+use bevy::{math::DMat4, picking::Pickable, prelude::*};
 use bevy_cesium::{
-    CesiumCredits, CesiumDetailViews, CesiumPlugin as StreamingPlugin, CesiumPrimitive,
-    CesiumSelectionMode, CesiumSet, CesiumSource, CesiumStatus, CesiumView, CesiumViews,
+    CesiumDetailViews, CesiumPlugin as StreamingPlugin, CesiumPrimitive, CesiumSelectionMode,
+    CesiumSet, CesiumSource, CesiumStatus, CesiumView, CesiumViews,
 };
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 
 pub struct CesiumPlugin;
-#[derive(Resource)]
-struct SourceLabel(String);
 
 fn env_positive(name: &str, default: f64, allow_zero: bool) -> f64 {
     let Ok(value) = std::env::var(name) else {
@@ -220,7 +219,7 @@ mod coordinate_tests {
     }
 
     #[test]
-    fn zoomed_sensor_refines_after_startup_without_blocking_the_wider_view() {
+    fn aligned_zoomed_sensor_shares_coverage_before_and_after_startup() {
         let config: SensorCameraConfig = serde_json::from_value(serde_json::json!({
             "entity_name": "jet", "camera_name": "jet.color",
             "width": 640, "height": 480, "fov_degrees": 90.0,
@@ -272,6 +271,9 @@ mod coordinate_tests {
         app.update();
         assert_eq!(app.world().resource::<CesiumViews>().0.len(), 1);
         app.world_mut().resource_mut::<TerrainStartup>().ready = true;
+        app.update();
+        assert_eq!(app.world().resource::<CesiumViews>().0.len(), 1);
+        app.world_mut().resource_mut::<SensorCameraConfigs>().0[1].rot_offset[1] = 30.0;
         app.update();
         assert_eq!(app.world().resource::<CesiumViews>().0.len(), 2);
     }
@@ -338,6 +340,7 @@ mod coordinate_tests {
                 < 1e-5
         );
         assert_eq!(app.world().get::<ChildOf>(tile).unwrap().parent(), root);
+        assert!(app.world().get::<Pickable>(tile).is_some());
     }
 
     #[test]
@@ -425,9 +428,6 @@ impl Plugin for CesiumPlugin {
                 .with_lod_retention_margin(margin)
                 .with_maximum_screen_error(screen_error),
         )
-        .insert_resource(SourceLabel(
-            std::env::var("CESIUM_CREDIT").unwrap_or_default(),
-        ))
         .insert_resource(TerrainStartup {
             gate: TerrainCapture {
                 started: std::time::Instant::now(),
@@ -449,7 +449,8 @@ impl Plugin for CesiumPlugin {
                 .after(update_startup)
                 .after(crate::ui::render_layout),
         );
-        app.add_systems(Update, show_credits.after(crate::ui::render_layout));
+        app.add_plugins(map_overlay::MapOverlayPlugin);
+        app.add_systems(Update, log_streaming_status.after(CesiumSet::Publish));
         if std::env::var("ELODIN_RC_JET_TERRAIN").as_deref() == Ok("cesium") {
             app.add_systems(Update, style_rc_jet_terrain.after(CesiumSet::Placement));
         }
@@ -531,7 +532,6 @@ fn collect_views(
     geo: Res<GeoContext>,
     grid: Res<FloatingOriginSettings>,
     sensor_configs: Option<Res<SensorCameraConfigs>>,
-    startup: Option<Res<TerrainStartup>>,
     cameras: Query<
         (
             &Camera,
@@ -547,7 +547,6 @@ fn collect_views(
     mut output: ResMut<CesiumViews>,
 ) {
     let ecef_from_bevy = GeoFrame::bevy_M_(&GeoFrame::ECEF, &geo).inverse();
-    let warming_up = startup.is_some_and(|startup| !startup.ready);
     let views: Vec<_> = cameras
         .iter()
         .filter_map(|(camera, projection, transform, cell, parent, sensor)| {
@@ -556,14 +555,15 @@ fn collect_views(
             if !camera.is_active && sensor.is_none() {
                 return None;
             }
-            if warming_up
-                && let Some(configs) = sensor_configs.as_ref()
+            if let Some(configs) = sensor_configs.as_ref()
                 && let Some(config) = sensor.and_then(|sensor| configs.0.get(sensor.config_index))
                 && has_wider_sensor_view(config, &configs.0)
             {
-                // Bootstrap co-located sensors from their wider view. Once it
-                // is ready, zoomed views refine the shared terrain without
-                // holding every video stream behind the initial loading gate.
+                // Co-located, aligned sensors share the wider view's terrain.
+                // Independent zoom refinement continuously changes the GPU-ready
+                // selection during flight and can strand both streams on old tiles.
+                // This trades zoomed terrain detail for stable preview coverage;
+                // cameras at different poses still contribute their own views.
                 return None;
             }
             let Projection::Perspective(p) = projection else {
@@ -617,6 +617,8 @@ fn has_wider_sensor_view(config: &SensorCameraConfig, configs: &[SensorCameraCon
         other.entity_name == config.entity_name
             && other.pos_offset == config.pos_offset
             && other.rot_offset == config.rot_offset
+            && other.near <= config.near
+            && other.far >= config.far
             && other.fov_degrees > config.fov_degrees
             && horizontal_scale(other) >= horizontal_scale(config)
     })
@@ -646,59 +648,26 @@ fn place_tiles(
             GeoRotation::absolute(GeoFrame::ECEF, rotation),
             cell,
             ChildOf(root.0),
+            // Mesh picking is opt-in in the editor. Without this marker, zoom
+            // falls back to the aircraft anchor instead of the ground hit.
+            Pickable::default(),
         ));
     }
 }
 
-fn show_credits(
-    mut contexts: Query<(&crate::ui::tiles::WindowId, &mut bevy_egui::EguiContext)>,
-    credits: Res<CesiumCredits>,
-    status: Res<CesiumStatus>,
-    label: Res<SourceLabel>,
-) {
-    // The Editor draws each window in Update, using its own EguiContext.
-    for (window, mut context) in &mut contexts {
-        egui::Area::new(egui::Id::new("cesium_credits"))
-            .anchor(
-                egui::Align2::RIGHT_BOTTOM,
-                egui::vec2(-12.0, if window.is_primary() { -112.0 } else { -12.0 }),
-            )
-            .show(context.get_mut(), |ui| {
-                egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        if !label.0.is_empty() {
-                            ui.small(&label.0);
-                        }
-                        ui.menu_button("Sources", |ui| {
-                            ui.set_max_width(480.0);
-                            ui.hyperlink_to("Cesium", "https://cesium.com/");
-                            for credit in &credits.html {
-                                let mut inside_tag = false;
-                                let text: String = credit
-                                    .chars()
-                                    .filter(|&c| match c {
-                                        '<' => {
-                                            inside_tag = true;
-                                            false
-                                        }
-                                        '>' => {
-                                            inside_tag = false;
-                                            false
-                                        }
-                                        _ => !inside_tag,
-                                    })
-                                    .collect();
-                                ui.small(text.replace("&amp;", "&").replace("&nbsp;", " "));
-                            }
-                        });
-                    });
-                    if status.load_failed {
-                        ui.colored_label(
-                            egui::Color32::LIGHT_RED,
-                            "Tileset unavailable. Check URL, asset access and token.",
-                        );
-                    }
-                });
-            });
+fn log_streaming_status(status: Res<CesiumStatus>, time: Res<Time>, mut last: Local<f64>) {
+    let now = time.elapsed_secs_f64();
+    if now - *last < 10.0 {
+        return;
     }
+    *last = now;
+    debug!(
+        visible = status.visible_tiles,
+        resident = status.resident_tiles,
+        preparing = status.pending_render_tiles,
+        pending = status.pending,
+        complete = status.selection_complete,
+        failed = status.load_failed,
+        "Cesium streaming status"
+    );
 }
