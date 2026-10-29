@@ -220,30 +220,11 @@ converted by integer timestamp delta to simulation seconds on `sim_time`:
 is fresh; held frames keep their time with `frame_fresh=False`. Missing/pre-first
 frames have frame/time `None`; copying is unchanged.
 
-Scene-time alignment is approximate: one reviewed capture showed body state
-about 22 ms earlier than message T, not a universal offset or sub-frame bound;
-phase/backlog can add delay. Sparse state's last-change T is not actual image
-time. See [RACING_PLAN.md §7.4](RACING_PLAN.md#74-camera) for the canonical
-limitation and revisit triggers; future fusion must not assume exact alignment.
-
-**G1 ordinary-operation qualification PASS (2026-10-28)** on `g1-clean`
-source `30d2c307`, based only on GitHub `origin/main` `8742b411`.
-Fresh matching private SDK/runtime/DB (`0.20.1-alpha.0+30d2c307`) and default
-`betaflight_SITL.elf` passed: **270 Python tests**, **754 editor tests**
-(3 ignored; one doctest ignored), **5 controller tests**, **17 s10 tests**,
-headless lifecycle CI, release build/fmt/clippy and eight serialized first-attempt
-live gates. Three consecutive camera-off truth holds measured online RMS
-**0.071927 / 0.071675 / 0.075766 m**; ordinary D+single+FPV passed at
-**720 frames, 29.95 simulated FPS** (721 raw frames including shutdown).
-Readonly pre/post EEPROM evidence confirms GPS off, `trust_mag = OFF` and
-unchanged settings/bytes. The first structured CLI dump was truncated; its full
-original raw response was recovered offline under independent review before
-science, not silently retried. Evidence and cleanup-guard limitations:
-`/home/ubuntu/betaflight-g1/clean-testing/qualification/report.md`.
-See the G1 brief in [RACING_PLAN.md](RACING_PLAN.md). Prior `pkg-g1` results
-remain historical only. Strict alignment remains a historical FAIL,
-deferred/non-gating; no timing offset, renderer/query/stream fix, per-frame RPC,
-vision/racing qualification or streaming-prototype promotion is included.
+Scene-time alignment is approximate; renderer cache phase and backlog can add
+variable delay. There is no guaranteed sub-frame bound or fixed offset to apply.
+Sparse state's last-change T is not actual image time. See
+[RACING_PLAN.md §7.4](RACING_PLAN.md#74-camera) for the timing contract and revisit
+criteria; future fusion must not assume exact alignment.
 
 The exported video can be one frame ahead of `total_frames`, because the render
 server may write one more frame while it shuts down after the final tick.
@@ -369,31 +350,8 @@ response, no forward crossing and no guidance fault. `FAIL` (for example no
 qualified window, fault, or crossing) exits nonzero in headless mode. An E hold
 PASS still accompanies one **expected** incomplete `[RACE]` result with
 `course=single`, `gates_passed=0/1`, and `status=INCOMPLETE`; incomplete race
-status does not fail Package E. Three consecutive qualified headless runs
-measured online RMS `0.075521`, `0.074801`, and `0.074188` m (independent DB
-RMS `0.075520758`, `0.074803460`, and `0.074187954` m), each over exactly
-10 s.
-The qualification command, windows, regression checks, and operating envelope
-are recorded in [RACING_PLAN.md](RACING_PLAN.md). In the 2026-10-02
-latest-main reconciliation, three additional consecutive camera-off truth
-runs passed at 0.074574/0.073668/0.073832 m RMS; a separate camera-enabled
-truth run passed at 0.071955 m RMS with 1350 renderer frames at 29.98 simulated
-FPS. Scripted C0 and both C/D audits also passed with `RACE_CAMERA=1`.
-
-Requalified **2026-10-12 on main `729022c7`**, with a freshly built
-`0.20.1-alpha.0` runtime and `0.20.1a0` Python SDK: 180 pure tests and
-5 controller tests passed. Three consecutive unchanged-code camera-off truth
-runs passed at **0.073873 / 0.075235 / 0.074413 m RMS**, each over exactly
-10 s; independent DB reconstruction agreed within 0.0000005 m. All retained
-armed/ANGLE/lockstep/motor evidence, no crossing/fault, and the expected
-incomplete race result. Default C0, scripted-single, C positive referee and D
-physical audits also passed. Offscreen truth+camera passed independently at
-0.075011 m RMS with 1350 frames and 29.98 simulated FPS; camera-enabled
-scripted C0 and C/D audits passed as well. Video export and ingested
-schematic/phase/RC telemetry were verified, but no new editor visual review or
-manual hardware qualification was performed. See the current-main evidence
-under Package E in [RACING_PLAN.md](RACING_PLAN.md); the original qualifications
-above remain historical evidence.
+status does not fail Package E. See [RACING_PLAN.md](RACING_PLAN.md) for the
+controller design, operating envelope, and acceptance criteria.
 
 #### Package C referee qualification
 
@@ -418,18 +376,15 @@ the scripted source leaves its safe boot phase, so no steering or motor command
 causes the pass. Ordinary six-DOF gravity and drag carry the drone through the
 unchanged vertical 2.5 m gate, then leave it visible beyond the plane.
 
-On the verified fixture, the interpolated pass time is `1.085149 s`, the sampled
-crossing height is approximately `1.7958 m`, and final X is `11.7776 m` (the
-qualification accepts the deliberate `0.9–1.3 s` simulation-time interval and
-requires at least X=10.5 m departure). The simulation portion takes about 3.0
-wall seconds after bridge startup. The audit reads referee telemetry on a later
+The audit requires a crossing in the `0.9–1.3 s` simulation-time interval and
+at least X=10.5 m departure. It reads referee telemetry on a later
 callback tick and requires exactly one gate-0 event, `last_gate_passed == 0`,
 matching pass time, untouched `-1.0` slots, and a complete `1/1` `RaceResult`.
 Success emits exactly one line of each contract and exits zero:
 
 ```text
-[RACE] course=single gates_passed=1/1 lap_time=1.085149 status=COMPLETE pass_times=[1.085149]
-[C-REFEREE-AUDIT] gate=0 passes=1 telemetry=true result=COMPLETE pass_time=1.085149 status=PASS
+[RACE] course=single gates_passed=1/1 lap_time=... status=COMPLETE pass_times=[...]
+[C-REFEREE-AUDIT] gate=0 passes=1 telemetry=true result=COMPLETE pass_time=... status=PASS
 ```
 
 A convenient visual record starts capture as soon as Gamescope publishes its
@@ -502,10 +457,10 @@ A successful run prints one machine-readable C0 result in addition to the human
 diagnostics:
 
 ```text
-[C0] lockstep_steps=119995 motor_response=true max_motor=0.574 takeoff_delta_m=56.836 status=PASS
+[C0] lockstep_steps=... motor_response=... max_motor=... takeoff_delta_m=... status=PASS|FAIL
 ```
 
-The measured values may vary slightly by host. C0 requires at least one
+C0 requires at least one
 successful simulation-loop lockstep response, motor output greater than 0.06,
 and a peak altitude at least 0.1 m above the configured initial altitude. If any
 criterion is unmet, the result reports `status=FAIL` and the command exits
