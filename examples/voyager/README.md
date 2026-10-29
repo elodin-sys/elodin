@@ -103,6 +103,16 @@ and stays fixed through the RK4 stages. This keeps things simple, but
 the overall propagation isn't fourth-order accurate, even though
 Voyager itself is integrated with RK4.
 
-Chapter 2 (`python examples/voyager/chapter_2.py run`) subtracts each
-planet's acceleration of the Sun. Same kernels, masses, RK4, and
-timestep. It does not reproduce the gravity assists.
+## Chapter 2
+
+`chapter2.py` uses the same dates and SPICE data as Chapter 1.
+It also accounts for Jupiter pulling on the Sun.
+
+From `examples/voyager`:
+
+```bash
+python chapter2.py run
+```
+
+Jupiter's position is still fixed through each RK4 step, so the overall
+propagation isn't fourth-order accurate.
