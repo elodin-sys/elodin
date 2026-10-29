@@ -9,6 +9,8 @@ use bevy::render::render_resource::TextureDimension;
 use bevy::ui::Display;
 use bevy::ui::Node;
 use bevy::ui::widget::ImageNode;
+#[cfg(target_family = "wasm")]
+use bevy::prelude::{With, Without};
 use bevy::{
     ecs::system::SystemParam,
     prelude::{Commands, Component, Entity, Local, Query, Res, ResMut, World},
@@ -123,6 +125,15 @@ const LIVE_HOLD_THRESHOLD_US: i64 = 2_000_000;
 /// the decoder is "close but not sequential" (e.g. OBS at 30fps with
 /// wide frame spacing).  2 seconds.
 const DECODER_NEAR_THRESHOLD_US: i64 = 2_000_000;
+
+/// Raw frames fed to the wasm decoder per UI frame. A UI running below the
+/// stream rate must feed several frames per tick or it falls into a seek.
+#[cfg(target_family = "wasm")]
+const MAX_SEQUENTIAL_PER_TICK: usize = 8;
+
+/// Re-issue an in-flight wasm seek to the same keyframe after this long.
+#[cfg(target_family = "wasm")]
+const SEEK_TIMEOUT_SECS: f32 = 1.0;
 
 /// Maximum number of raw H.264 frames to keep in the cache.
 /// At ~25 KB/frame (OBS 1080p), 50 000 frames ≈ 1.2 GB, covering ~28 min
@@ -259,6 +270,12 @@ pub struct VideoFrameCache {
     last_displayed_ts: Option<Timestamp>,
     /// When false, raw frames are RGBA (sensor camera); skip H.264 keyframe scan.
     pub is_h264: bool,
+    /// Playhead seen on the previous wasm UI frame. A still playhead means paused.
+    #[cfg(target_family = "wasm")]
+    last_playhead: Option<Timestamp>,
+    /// Keyframe the in-flight wasm seek started from, and when it was sent.
+    #[cfg(target_family = "wasm")]
+    seek_target: Option<(Timestamp, Instant)>,
 }
 
 impl Default for VideoFrameCache {
@@ -279,6 +296,10 @@ impl Default for VideoFrameCache {
             backfill_started_at: None,
             last_displayed_ts: None,
             is_h264: true,
+            #[cfg(target_family = "wasm")]
+            last_playhead: None,
+            #[cfg(target_family = "wasm")]
+            seek_target: None,
         }
     }
 }
@@ -465,15 +486,14 @@ pub enum DecoderOutput {
 
 #[derive(Component)]
 pub struct VideoDecoderHandle {
+    #[cfg(not(target_family = "wasm"))]
     tx: flume::Sender<DecoderInput>,
     rx: flume::Receiver<DecoderOutput>,
     width: Arc<AtomicUsize>,
     /// Shared with the decoder thread so it can skip stale seek batches.
     latest_seek_generation: Arc<AtomicU64>,
-    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+    #[cfg(not(target_family = "wasm"))]
     _handle: std::thread::JoinHandle<()>,
-    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
-    _handle: (),
 }
 
 // ---------------------------------------------------------------------------
@@ -482,7 +502,7 @@ pub struct VideoDecoderHandle {
 
 #[cfg(all(
     not(target_os = "macos"),
-    not(all(feature = "wasm-cut", target_family = "wasm"))
+    not(target_family = "wasm")
 ))]
 fn decode_one_frame(
     decoder: &mut openh264::decoder::Decoder,
@@ -513,7 +533,7 @@ fn decode_one_frame(
 
 #[cfg(all(
     not(target_os = "macos"),
-    not(all(feature = "wasm-cut", target_family = "wasm"))
+    not(target_family = "wasm")
 ))]
 fn decode_video(
     _frame_width: Arc<AtomicUsize>,
@@ -670,6 +690,7 @@ fn decode_video(
 // VideoDecoderHandle
 // ---------------------------------------------------------------------------
 
+#[cfg(not(target_family = "wasm"))]
 impl Default for VideoDecoderHandle {
     fn default() -> Self {
         let (packet_tx, packet_rx) = flume::bounded::<DecoderInput>(32);
@@ -678,14 +699,8 @@ impl Default for VideoDecoderHandle {
         let frame_width = width.clone();
         let latest_gen = Arc::new(AtomicU64::new(0));
         let decoder_gen = latest_gen.clone();
-        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
         let _handle =
             std::thread::spawn(move || decode_video(frame_width, packet_rx, image_tx, decoder_gen));
-        #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
-        let _handle = {
-            let _ = (frame_width, packet_rx, image_tx, decoder_gen);
-            ()
-        };
         VideoDecoderHandle {
             tx: packet_tx,
             rx: image_rx,
@@ -696,25 +711,51 @@ impl Default for VideoDecoderHandle {
     }
 }
 
+#[cfg(target_family = "wasm")]
+impl Default for VideoDecoderHandle {
+    fn default() -> Self {
+        let (_, rx) = flume::bounded::<DecoderOutput>(1);
+        VideoDecoderHandle {
+            rx,
+            width: Arc::new(AtomicUsize::new(0)),
+            latest_seek_generation: Arc::new(AtomicU64::new(0)),
+        }
+    }
+}
+
 impl VideoDecoderHandle {
     /// Send a single raw H.264 frame for sequential decode (warm decoder).
     /// Returns `true` if the frame was successfully enqueued.
+    #[cfg(not(target_family = "wasm"))]
     pub fn process_frame(&self, timestamp: Timestamp, frame_data: &[u8]) -> bool {
         self.tx
             .try_send(DecoderInput::Frame(frame_data.to_vec(), timestamp))
             .is_ok()
     }
 
+    /// Wasm playback feeds `webcodecs_video::bevy::VideoStream` directly.
+    #[cfg(target_family = "wasm")]
+    pub fn process_frame(&self, _timestamp: Timestamp, _frame_data: &[u8]) -> bool {
+        false
+    }
+
     /// Send a batch of raw frames for seek-decode (resets the decoder).
     /// Returns `true` if the batch was successfully enqueued.
     /// Also publishes `generation` to the shared atomic so the decoder
     /// thread can skip any older (stale) batches still in the queue.
+    #[cfg(not(target_family = "wasm"))]
     pub fn send_seek_batch(&self, frames: Vec<(Timestamp, Vec<u8>)>, generation: u64) -> bool {
         self.latest_seek_generation
             .store(generation, atomic::Ordering::Relaxed);
         self.tx
             .try_send(DecoderInput::SeekBatch { frames, generation })
             .is_ok()
+    }
+
+    /// Wasm playback feeds `webcodecs_video::bevy::VideoStream` directly.
+    #[cfg(target_family = "wasm")]
+    pub fn send_seek_batch(&self, _frames: Vec<(Timestamp, Vec<u8>)>, _generation: u64) -> bool {
+        false
     }
 
     /// Drain decoded frames from the decoder thread into the cache.
@@ -754,6 +795,8 @@ pub struct WidgetQuery {
     cache: &'static mut VideoFrameCache,
     ui_node: &'static mut Node,
     image_node: &'static mut ImageNode,
+    #[cfg(target_family = "wasm")]
+    wc: Option<&'static mut webcodecs_video::bevy::VideoStream>,
 }
 
 #[derive(SystemParam)]
@@ -881,6 +924,7 @@ fn send_backfill_request(
 
 /// Upload a decoded frame to the GPU, reusing the existing texture when
 /// the resolution has not changed.
+#[cfg(not(target_family = "wasm"))]
 fn upload_frame(
     frame: Image,
     image_node: &mut bevy::prelude::Mut<'_, ImageNode>,
@@ -921,6 +965,131 @@ fn copy_raw_frame_to_rgba(src: &[u8], dst: &mut [u8], format: RawPixelFormat) ->
     }
 }
 
+/// Insert the library decoder beside a video tile. Spawn sites stay shared
+/// with native; this runs once per entity on wasm.
+#[cfg(target_family = "wasm")]
+pub fn attach_webcodecs(
+    mut commands: Commands,
+    query: Query<
+        Entity,
+        (
+            With<VideoDecoderHandle>,
+            Without<webcodecs_video::bevy::VideoStream>,
+        ),
+    >,
+) {
+    for entity in &query {
+        commands
+            .entity(entity)
+            .insert(webcodecs_video::bevy::VideoStream::new());
+    }
+}
+
+/// Feed the wasm decoder from the raw Annex-B cache and keep the playhead in sync.
+#[cfg(target_family = "wasm")]
+fn drive_webcodecs(
+    current_ts: Timestamp,
+    cache: &mut VideoFrameCache,
+    wc: &mut webcodecs_video::bevy::VideoStream,
+) {
+    wc.set_time(current_ts.0);
+    // A moving playhead is playback. A still one is a paused scrub, which
+    // must flush the decoder so the frame under the playhead paints.
+    wc.set_playing(cache.last_playhead.is_some_and(|last| last != current_ts));
+    cache.last_playhead = Some(current_ts);
+
+    let was_seeking = cache.seeking;
+    cache.seeking = wc.is_seeking();
+    if was_seeking && !cache.seeking {
+        if let Some(pts) = wc.last_presented {
+            cache.last_decoded_ts = Some(Timestamp(pts));
+        }
+        cache.seek_target = None;
+    }
+
+    let decoder_near = cache
+        .last_decoded_ts
+        .is_some_and(|last| (current_ts.0 - last.0).abs() < DECODER_NEAR_THRESHOLD_US);
+    let is_sequential = cache.last_decoded_ts.is_some_and(|last| {
+        current_ts.0 >= last.0 && (current_ts.0 - last.0) < DECODER_NEAR_THRESHOLD_US
+    });
+    let has_raw = cache.has_video_at(current_ts);
+
+    let mut fed = false;
+    if is_sequential && !cache.seeking && !wc.needs_keyframe() {
+        for _ in 0..MAX_SEQUENTIAL_PER_TICK {
+            let Some(last) = cache.last_decoded_ts else {
+                break;
+            };
+            let Some((ts, data)) = cache.next_raw_frame_after(last) else {
+                break;
+            };
+            if ts.0 > current_ts.0 + DECODER_NEAR_THRESHOLD_US {
+                break;
+            }
+            let data = data.to_vec();
+            if !wc.push(ts.0, &data) {
+                break;
+            }
+            cache.last_decoded_ts = Some(ts);
+            fed = true;
+        }
+    }
+
+    // The native path can step backward inside `decoder_near` from its RGBA
+    // cache. Wasm only has the texture, so a playhead that is not the frame
+    // on screen seeks. Skip that seek when the texture is already there, or a
+    // paused flush (`needs_keyframe`) would re-decode the same GOP forever.
+    let at_playhead = wc
+        .last_presented
+        .is_some_and(|pts| (current_ts.0 - pts).abs() <= NO_DATA_THRESHOLD_US);
+    let wants_seek = has_raw
+        && !fed
+        && !at_playhead
+        && (wc.needs_keyframe() || !is_sequential || !decoder_near);
+    if !wants_seek {
+        return;
+    }
+
+    let (seek_start, seek_end) = if let Some(kf) = cache.nearest_keyframe_before(current_ts) {
+        (kf, current_ts)
+    } else if let Some(kf) = cache.first_keyframe_after(current_ts) {
+        let end = cache
+            .raw_frames
+            .range(kf..)
+            .nth(1)
+            .map(|(t, _)| *t)
+            .unwrap_or(kf);
+        (kf, end)
+    } else {
+        (current_ts, current_ts)
+    };
+
+    let in_flight = cache.seeking
+        && cache.seek_target.is_some_and(|(start, sent)| {
+            start == seek_start && sent.elapsed().as_secs_f32() < SEEK_TIMEOUT_SECS
+        });
+    if in_flight {
+        return;
+    }
+
+    let mut frames = cache.get_raw_sequence(seek_start, seek_end);
+    if let Some((ts, data)) = cache.next_raw_frame_after(seek_end) {
+        frames.push((ts, data.to_vec()));
+    }
+    if frames.is_empty() {
+        return;
+    }
+    let samples = frames
+        .into_iter()
+        .map(|(ts, data)| (ts.0, data))
+        .collect();
+    wc.seek_through(samples, seek_end.0);
+    cache.seeking = true;
+    cache.last_decoded_ts = Some(seek_end);
+    cache.seek_target = Some((seek_start, Instant::now()));
+}
+
 // ---------------------------------------------------------------------------
 // Widget implementation — cache-first playback
 // ---------------------------------------------------------------------------
@@ -943,6 +1112,8 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
             mut cache,
             mut image_node,
             mut ui_node,
+            #[cfg(target_family = "wasm")]
+            mut wc,
         }) = state.query.get_mut(entity)
         else {
             return;
@@ -1001,69 +1172,78 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                         }
                     }
                 } else {
-                    // H.264 decoded video: existing decode pipeline.
-                    let seek_done = decoder.drain_into_cache(&mut cache);
-                    if seek_done {
-                        cache.seeking = false;
-                    }
-
-                    if let Some((ts, img)) = cache.decoded_at_or_before(current_ts)
-                        && ((current_ts.0 - ts.0).abs() <= NO_DATA_THRESHOLD_US
-                            || (current_ts.0 >= ts.0
-                                && current_ts.0 - ts.0 <= LIVE_HOLD_THRESHOLD_US))
+                    #[cfg(not(target_family = "wasm"))]
                     {
-                        stream.current_frame = Some(img.clone());
-                    } else if let Some((ts, img)) = cache.decoded_at_or_after(current_ts)
-                        && (ts.0 - current_ts.0).abs() <= NO_DATA_THRESHOLD_US
-                    {
-                        stream.current_frame = Some(img.clone());
-                    }
-
-                    let decoder_near = if let Some(last) = cache.last_decoded_ts {
-                        (current_ts.0 - last.0).abs() < DECODER_NEAR_THRESHOLD_US
-                    } else {
-                        false
-                    };
-
-                    let is_sequential = if let Some(last) = cache.last_decoded_ts {
-                        current_ts.0 >= last.0
-                            && (current_ts.0 - last.0) < DECODER_NEAR_THRESHOLD_US
-                    } else {
-                        false
-                    };
-
-                    let has_raw = cache.has_video_at(current_ts);
-
-                    if is_sequential && !cache.seeking {
-                        if let Some((ts, data)) =
-                            cache.next_raw_frame_after(cache.last_decoded_ts.unwrap())
-                            && ts.0 <= current_ts.0 + DECODER_NEAR_THRESHOLD_US
-                            && decoder.process_frame(ts, data)
-                        {
-                            cache.last_decoded_ts = Some(ts);
+                        // H.264 decoded video: existing decode pipeline.
+                        let seek_done = decoder.drain_into_cache(&mut cache);
+                        if seek_done {
+                            cache.seeking = false;
                         }
-                    } else if !decoder_near && has_raw {
-                        let (seek_start, seek_end) =
-                            if let Some(kf) = cache.nearest_keyframe_before(current_ts) {
-                                (kf, current_ts)
-                            } else if let Some(kf) = cache.first_keyframe_after(current_ts) {
-                                let end = cache
-                                    .raw_frames
-                                    .range(kf..)
-                                    .nth(1)
-                                    .map(|(t, _)| *t)
-                                    .unwrap_or(kf);
-                                (kf, end)
-                            } else {
-                                (current_ts, current_ts)
-                            };
 
-                        let frames = cache.get_raw_sequence(seek_start, seek_end);
-                        if !frames.is_empty() {
-                            cache.seek_generation += 1;
-                            if decoder.send_seek_batch(frames, cache.seek_generation) {
-                                cache.seeking = true;
+                        if let Some((ts, img)) = cache.decoded_at_or_before(current_ts)
+                            && ((current_ts.0 - ts.0).abs() <= NO_DATA_THRESHOLD_US
+                                || (current_ts.0 >= ts.0
+                                    && current_ts.0 - ts.0 <= LIVE_HOLD_THRESHOLD_US))
+                        {
+                            stream.current_frame = Some(img.clone());
+                        } else if let Some((ts, img)) = cache.decoded_at_or_after(current_ts)
+                            && (ts.0 - current_ts.0).abs() <= NO_DATA_THRESHOLD_US
+                        {
+                            stream.current_frame = Some(img.clone());
+                        }
+
+                        let decoder_near = if let Some(last) = cache.last_decoded_ts {
+                            (current_ts.0 - last.0).abs() < DECODER_NEAR_THRESHOLD_US
+                        } else {
+                            false
+                        };
+
+                        let is_sequential = if let Some(last) = cache.last_decoded_ts {
+                            current_ts.0 >= last.0
+                                && (current_ts.0 - last.0) < DECODER_NEAR_THRESHOLD_US
+                        } else {
+                            false
+                        };
+
+                        let has_raw = cache.has_video_at(current_ts);
+
+                        if is_sequential && !cache.seeking {
+                            if let Some((ts, data)) =
+                                cache.next_raw_frame_after(cache.last_decoded_ts.unwrap())
+                                && ts.0 <= current_ts.0 + DECODER_NEAR_THRESHOLD_US
+                                && decoder.process_frame(ts, data)
+                            {
+                                cache.last_decoded_ts = Some(ts);
                             }
+                        } else if !decoder_near && has_raw {
+                            let (seek_start, seek_end) =
+                                if let Some(kf) = cache.nearest_keyframe_before(current_ts) {
+                                    (kf, current_ts)
+                                } else if let Some(kf) = cache.first_keyframe_after(current_ts) {
+                                    let end = cache
+                                        .raw_frames
+                                        .range(kf..)
+                                        .nth(1)
+                                        .map(|(t, _)| *t)
+                                        .unwrap_or(kf);
+                                    (kf, end)
+                                } else {
+                                    (current_ts, current_ts)
+                                };
+
+                            let frames = cache.get_raw_sequence(seek_start, seek_end);
+                            if !frames.is_empty() {
+                                cache.seek_generation += 1;
+                                if decoder.send_seek_batch(frames, cache.seek_generation) {
+                                    cache.seeking = true;
+                                }
+                            }
+                        }
+                    }
+                    #[cfg(target_family = "wasm")]
+                    {
+                        if let Some(wc) = wc.as_deref_mut() {
+                            drive_webcodecs(current_ts, &mut cache, wc);
                         }
                     }
                 }
@@ -1128,12 +1308,28 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                     .width
                     .store(width as usize, atomic::Ordering::Relaxed);
 
-                // Upload the current frame to the GPU.
+                // Native copies a decoded RGBA image into the tile. Wasm points the
+                // tile at the decoder's persistent GPU texture.
+                #[cfg(not(target_family = "wasm"))]
                 if let Some(frame) = stream.current_frame.take() {
                     if stream.size == Vec2::ZERO {
                         stream.size = Vec2::new(frame.width() as f32, frame.height() as f32);
                     }
                     upload_frame(frame, &mut image_node, &mut state.images);
+                }
+                #[cfg(target_family = "wasm")]
+                if stream.raw_dims.is_none()
+                    && let Some(wc) = wc.as_ref()
+                    && let Some(handle) = wc.image.as_ref()
+                {
+                    if stream.size == Vec2::ZERO
+                        && let Some((w, h)) = wc.size
+                    {
+                        stream.size = Vec2::new(w as f32, h as f32);
+                    }
+                    if image_node.image != *handle {
+                        image_node.image = handle.clone();
+                    }
                 }
 
                 // "No video at this time" overlay when there is no raw data
@@ -1328,10 +1524,10 @@ pub(crate) fn invalidate_sensor_frames_if_loaded_skybox_differs(
 
 pub(crate) fn invalidate_sensor_frames_on_db_skybox_change(
     config: Res<impeller_wkt::DbConfig>,
-    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))] skybox_ui: Option<
+    #[cfg(not(target_family = "wasm"))] skybox_ui: Option<
         Res<bevy_ai_skybox::prelude::SkyboxGenerationUi>,
     >,
-    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))] mut locally_pushed: ResMut<
+    #[cfg(not(target_family = "wasm"))] mut locally_pushed: ResMut<
         crate::skybox_generation::LocallyPushedSkyboxActive,
     >,
     mut last_active: Local<Option<String>>,
@@ -1341,7 +1537,7 @@ pub(crate) fn invalidate_sensor_frames_on_db_skybox_change(
     if *last_active == active {
         return;
     }
-    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+    #[cfg(not(target_family = "wasm"))]
     {
         if locally_pushed.consume_matching(active.as_deref()) {
             *last_active = active;

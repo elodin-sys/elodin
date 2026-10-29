@@ -5852,6 +5852,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "web-time",
+ "webcodecs-video",
  "wgpu",
  "winapi",
  "winit",
@@ -15956,6 +15957,19 @@ dependencies = [
  "objc2-foundation 0.3.2",
  "url",
  "web-sys",
+]
+
+[[package]]
+name = "webcodecs-video"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "js-sys",
+ "thiserror 2.0.21",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "wgpu",
 ]
 
 [[package]]
