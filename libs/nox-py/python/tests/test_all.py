@@ -1112,3 +1112,142 @@ def test_six_dof_intermediate_axis_instability_and_rotated_inertia_invariance():
     assert omega_y_start > 4.0
     assert omega_y_end < -4.0
 
+
+def test_spatial_inertia_rejects_bad_types_and_shapes():
+    # Non-float / non-0D-array mass types
+    for bad_mass in (True, False, 1, "1.0", [1.0], (1.0,)):
+        with pytest.raises(TypeError, match="mass"):
+            el.SpatialInertia(bad_mass)
+
+    # Non-float64 array dtypes for mass
+    for bad_dtype in (np.float32, np.int64, np.bool_):
+        with pytest.raises(TypeError, match="mass"):
+            el.SpatialInertia(np.array(1.0, dtype=bad_dtype))
+
+    # Non-0D array shapes for mass
+    for bad_shape in ((1,), (3,), (1, 1)):
+        with pytest.raises(ValueError, match="mass must be a 0-D scalar"):
+            el.SpatialInertia(np.ones(bad_shape))
+
+    # Non-array types for inertia and inertia_off_diag
+    for bad_seq in ([1.0, 2.0, 3.0], (1.0, 2.0, 3.0), 1.0, "123"):
+        with pytest.raises(TypeError, match="inertia must be a 1-D float64 array"):
+            el.SpatialInertia(1.0, inertia=bad_seq)
+        with pytest.raises(TypeError, match="inertia_off_diag must be a 1-D float64 array"):
+            el.SpatialInertia(1.0, inertia_off_diag=bad_seq)
+
+    # Non-float64 array dtypes for inertia and inertia_off_diag
+    for bad_dtype in (np.float32, np.int64):
+        with pytest.raises(TypeError, match="inertia must have dtype float64"):
+            el.SpatialInertia(1.0, inertia=np.array([2.0, 2.0, 2.0], dtype=bad_dtype))
+        with pytest.raises(TypeError, match="inertia_off_diag must have dtype float64"):
+            el.SpatialInertia(1.0, inertia_off_diag=np.zeros(3, dtype=bad_dtype))
+
+    # Wrong shapes (0-D, wrong-length 1-D, 2-D matrix) for inertia and inertia_off_diag
+    for bad_arr in (np.array(1.0), np.ones(2), np.ones(4), np.eye(3), np.ones((3, 1))):
+        with pytest.raises(ValueError, match="inertia must be a 1-D vector of shape \\(3,\\)"):
+            el.SpatialInertia(1.0, inertia=bad_arr)
+        with pytest.raises(
+            ValueError, match="inertia_off_diag must be a 1-D vector of shape \\(3,\\)"
+        ):
+            el.SpatialInertia(1.0, inertia_off_diag=bad_arr)
+
+    # from_array shape and dtype checks
+    with pytest.raises(TypeError, match="from_array"):
+        el.SpatialInertia.from_array([1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0])
+    with pytest.raises(TypeError, match="from_array requires dtype float64"):
+        el.SpatialInertia.from_array(np.ones(7, dtype=np.float32))
+    for bad_shape in ((), (3,), (6,), (8,), (7, 1)):
+        with pytest.raises(ValueError, match="from_array requires shape \\(7,\\)"):
+            el.SpatialInertia.from_array(np.ones(bad_shape))
+
+
+def test_spatial_inertia_rejects_unphysical_mass_and_inertia():
+    # Non-positive or non-finite mass
+    for bad_mass in (0.0, -1.0, float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(ValueError, match="mass must be finite and > 0"):
+            el.SpatialInertia(bad_mass)
+        with pytest.raises(ValueError, match="mass must be finite and > 0"):
+            el.SpatialInertia(np.array(bad_mass, dtype=np.float64))
+        with pytest.raises(ValueError, match="mass must be finite and > 0"):
+            el.SpatialInertia.from_array(
+                np.array([1.0, 1.0, 1.0, 0.0, 0.0, 0.0, bad_mass], dtype=np.float64)
+            )
+
+    # Non-finite inertia entries
+    for non_finite in (np.nan, np.inf, -np.inf):
+        with pytest.raises(ValueError, match="finite"):
+            el.SpatialInertia(1.0, inertia=np.array([1.0, non_finite, 1.0]))
+        with pytest.raises(ValueError, match="finite"):
+            el.SpatialInertia(1.0, inertia_off_diag=np.array([non_finite, 0.0, 0.0]))
+
+    # Non-positive-definite inertia tensors:
+    # 1. Zero or negative diagonal moment
+    with pytest.raises(ValueError, match="positive-definite"):
+        el.SpatialInertia(1.0, inertia=np.array([0.0, 1.0, 1.0]))
+    with pytest.raises(ValueError, match="positive-definite"):
+        el.SpatialInertia(1.0, inertia=np.array([1.0, -0.5, 1.0]))
+
+    # 2. Semidefinite (singular) tensor via off-diagonal (Ixx*Iyy - Ixy^2 == 0)
+    with pytest.raises(ValueError, match="positive-definite"):
+        el.SpatialInertia(
+            1.0,
+            inertia=np.array([2.0, 2.0, 2.0]),
+            inertia_off_diag=np.array([2.0, 0.0, 0.0]),
+        )
+
+    # 3. Indefinite tensor with positive diagonal and positive 2x2 minors but det(I) < 0
+    with pytest.raises(ValueError, match="positive-definite"):
+        el.SpatialInertia(
+            1.0,
+            inertia=np.array([1.0, 1.0, 1.0]),
+            inertia_off_diag=np.array([0.8, 0.8, -0.8]),
+        )
+
+    # Triangle inequality violations:
+    # 1. Diagonal principal moments violate l1 + l2 >= l3
+    for bad_diag in (
+        np.array([1.0, 1.0, 2.5]),
+        np.array([3.5, 1.0, 2.0]),
+        np.array([1.5, 4.0, 2.0]),
+    ):
+        with pytest.raises(ValueError, match="triangle inequality"):
+            el.SpatialInertia(1.0, inertia=bad_diag)
+
+    # 2. Positive-definite tensor whose diagonal satisfies 2 + 2 >= 3, but off-diagonal
+    # coupling shifts eigenvalues to [0.4, 3.0, 3.6] which violates 0.4 + 3.0 >= 3.6
+    with pytest.raises(ValueError, match="triangle inequality"):
+        el.SpatialInertia(
+            1.0,
+            inertia=np.array([2.0, 2.0, 3.0]),
+            inertia_off_diag=np.array([1.6, 0.0, 0.0]),
+        )
+    with pytest.raises(ValueError, match="triangle inequality"):
+        el.SpatialInertia.from_array(np.array([2.0, 2.0, 3.0, 1.6, 0.0, 0.0, 1.0]))
+
+
+def test_spatial_inertia_tracer_validation_in_map():
+    @el.map
+    def valid_update(x: X, inertia: el.Inertia) -> el.Inertia:
+        mass = inertia.mass() + x
+        diag = inertia.inertia_diag() + np.array([0.1, 0.1, 0.1])
+        return el.SpatialInertia(mass, inertia=diag)
+
+    w = el.World()
+    w.spawn([el.Body(inertia=el.SpatialInertia(2.0)), el.C(X, np.array(0.5))], "e1")
+    exec = w.build(valid_update)
+    exec.run()
+    df = exec.history("e1.inertia")
+    assert np.allclose(df["e1.inertia"][-1].to_numpy(), np.array([2.1, 2.1, 2.1, 0.0, 0.0, 0.0, 2.5]))
+
+    # Passing a (3, 3) matrix tracer inside @el.map is rejected at build/trace time
+    @el.map
+    def bad_matrix_update(inertia: el.Inertia) -> el.Inertia:
+        return el.SpatialInertia(inertia.mass(), inertia=inertia.inertia_matrix())
+
+    w_bad = el.World()
+    w_bad.spawn(el.Body(inertia=el.SpatialInertia(2.0)), "e1")
+    with pytest.raises(ValueError, match="inertia must be a 1-D vector of shape \\(3,\\)"):
+        w_bad.build(bad_matrix_update)
+
+
