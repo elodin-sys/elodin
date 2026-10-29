@@ -1126,14 +1126,14 @@ def test_spatial_inertia_rejects_bad_types_and_shapes():
 
     # Non-0D array shapes for mass
     for bad_shape in ((1,), (3,), (1, 1)):
-        with pytest.raises(ValueError, match="mass must be a 0-D scalar"):
+        with pytest.raises(ValueError, match="mass must have shape \\[\\]"):
             el.SpatialInertia(np.ones(bad_shape))
 
     # Non-array types for inertia and inertia_off_diag
     for bad_seq in ([1.0, 2.0, 3.0], (1.0, 2.0, 3.0), 1.0, "123"):
-        with pytest.raises(TypeError, match="inertia must be a 1-D float64 array"):
+        with pytest.raises(TypeError, match="inertia must be a float64 array"):
             el.SpatialInertia(1.0, inertia=bad_seq)
-        with pytest.raises(TypeError, match="inertia_off_diag must be a 1-D float64 array"):
+        with pytest.raises(TypeError, match="inertia_off_diag must be a float64 array"):
             el.SpatialInertia(1.0, inertia_off_diag=bad_seq)
 
     # Non-float64 array dtypes for inertia and inertia_off_diag
@@ -1145,20 +1145,18 @@ def test_spatial_inertia_rejects_bad_types_and_shapes():
 
     # Wrong shapes (0-D, wrong-length 1-D, 2-D matrix) for inertia and inertia_off_diag
     for bad_arr in (np.array(1.0), np.ones(2), np.ones(4), np.eye(3), np.ones((3, 1))):
-        with pytest.raises(ValueError, match="inertia must be a 1-D vector of shape \\(3,\\)"):
+        with pytest.raises(ValueError, match="inertia must have shape \\[3\\]"):
             el.SpatialInertia(1.0, inertia=bad_arr)
-        with pytest.raises(
-            ValueError, match="inertia_off_diag must be a 1-D vector of shape \\(3,\\)"
-        ):
+        with pytest.raises(ValueError, match="inertia_off_diag must have shape \\[3\\]"):
             el.SpatialInertia(1.0, inertia_off_diag=bad_arr)
 
     # from_array shape and dtype checks
     with pytest.raises(TypeError, match="from_array"):
         el.SpatialInertia.from_array([1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0])
-    with pytest.raises(TypeError, match="from_array requires dtype float64"):
+    with pytest.raises(TypeError, match="from_array must have dtype float64"):
         el.SpatialInertia.from_array(np.ones(7, dtype=np.float32))
     for bad_shape in ((), (3,), (6,), (8,), (7, 1)):
-        with pytest.raises(ValueError, match="from_array requires shape \\(7,\\)"):
+        with pytest.raises(ValueError, match="from_array must have shape \\[7\\]"):
             el.SpatialInertia.from_array(np.ones(bad_shape))
 
 
@@ -1247,7 +1245,49 @@ def test_spatial_inertia_tracer_validation_in_map():
 
     w_bad = el.World()
     w_bad.spawn(el.Body(inertia=el.SpatialInertia(2.0)), "e1")
-    with pytest.raises(ValueError, match="inertia must be a 1-D vector of shape \\(3,\\)"):
+    with pytest.raises(ValueError, match="inertia must have shape \\[3\\]"):
         w_bad.build(bad_matrix_update)
+
+
+def test_six_dof_rejects_invalid_time_step_and_rk4_uses_explicit_dt():
+    for bad_dt in (0.0, -0.01, float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(ValueError, match="six_dof time_step must be finite and > 0"):
+            el.six_dof(bad_dt)
+
+    # Verify that explicit `el.six_dof(dt)` uses `dt` in all RK4 intermediate stages
+    # even when `simulation_rate` differs from `1.0 / dt`.
+    dt = 0.01
+    omega_0 = np.array([20.0, 1.0, 0.0])
+    inertia_diag = np.array([0.05, 5.0, 5.0])
+
+    w1 = el.World()
+    w1.spawn(
+        el.Body(
+            world_pos=el.SpatialTransform(linear=np.zeros(3)),
+            world_vel=el.SpatialMotion(angular=omega_0),
+            inertia=el.SpatialInertia(10.0, inertia=inertia_diag),
+        ),
+        "top",
+    )
+    exec1 = w1.build(el.six_dof(dt), simulation_rate=1.0 / dt)
+    exec1.run(10)
+
+    w2 = el.World()
+    w2.spawn(
+        el.Body(
+            world_pos=el.SpatialTransform(linear=np.zeros(3)),
+            world_vel=el.SpatialMotion(angular=omega_0),
+            inertia=el.SpatialInertia(10.0, inertia=inertia_diag),
+        ),
+        "top",
+    )
+    # Default simulation_rate is 120.0 Hz (1/120 != 0.01)
+    exec2 = w2.build(el.six_dof(dt))
+    exec2.run(10)
+
+    vel1 = exec1.history("top.world_vel")["top.world_vel"].to_numpy()
+    vel2 = exec2.history("top.world_vel")["top.world_vel"].to_numpy()
+    assert np.allclose(vel1, vel2, atol=1e-12, rtol=1e-12)
+
 
 
