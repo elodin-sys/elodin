@@ -1732,7 +1732,9 @@ impl ViewportPane {
         viewport: &Viewport,
         name: PaneName,
     ) -> Self {
-        let mut main_camera_layers = RenderLayers::default().with(GIZMO_RENDER_LAYER);
+        let mut main_camera_layers = RenderLayers::default()
+            .with(GIZMO_RENDER_LAYER)
+            .with(crate::plugins::render_layer_alloc::SCENE_LINE_RENDER_LAYER);
         if viewport.effects {
             main_camera_layers = main_camera_layers.with(THRUSTER_PARTICLES_RENDER_LAYER);
         }

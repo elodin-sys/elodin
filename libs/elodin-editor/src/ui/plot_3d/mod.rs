@@ -166,7 +166,9 @@ pub fn sync_line_plot_3d(
                 },
                 trail,
                 LineConfig {
-                    render_layers: RenderLayers::layer(crate::plugins::gizmos::GIZMO_RENDER_LAYER),
+                    render_layers: RenderLayers::layer(
+                        crate::plugins::render_layer_alloc::SCENE_LINE_RENDER_LAYER,
+                    ),
                 },
                 Transform::default(),
                 GlobalTransform::default(),

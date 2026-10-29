@@ -8,6 +8,7 @@ uses ellipsoid heights from the same grid as RC-jet physics.
 import argparse
 import json
 import math
+import re
 from pathlib import Path
 import sys
 
@@ -18,7 +19,7 @@ import numpy as np
 import elodin as el
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "rc-jet"))
-from frames import geodetic_to_ecef
+from frames import ellipsoid_up, geodetic_to_ecef
 
 jax.config.update("jax_enable_x64", True)
 
@@ -40,6 +41,65 @@ def clip_segment(a, b, bounds):
     return ((a[0] + lo * dx, a[1] + lo * dy), (a[0] + hi * dx, a[1] + hi * dy))
 
 
+def building_outline_height(tags):
+    """Preview extrusion only; preserve absent/unknown OSM heights as absent."""
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*(m|ft)?\s*", tags.get("height", ""))
+    if match:
+        height = float(match[1]) * (0.3048 if match[2] == "ft" else 1.0)
+        if 0.5 <= height <= 200:
+            return height, "osm_height"
+    try:
+        height = float(tags.get("building:levels", "")) * 3.0
+        if 0.5 <= height <= 200:
+            return height, "osm_levels_3m"
+    except ValueError:
+        pass
+    return 4.0, "illustrative_default"
+
+
+def is_water(tags):
+    return (
+        "waterway" in tags or tags.get("natural") == "water" or tags.get("landuse") == "reservoir"
+    )
+
+
+def geometries(element):
+    if element["type"] == "way":
+        return [element.get("geometry", [])]
+    return [
+        member["geometry"]
+        for member in element.get("members", [])
+        if member["type"] == "way"
+        and member.get("role", "") in ("outer", "inner", "")
+        and len(member.get("geometry", [])) >= 2
+    ]
+
+
+def clipped_parts(geometries, bounds):
+    parts = []
+    for geometry in geometries:
+        # Keep separate relation members separate, including inner shorelines.
+        member_parts = []
+        for a, b in zip(geometry, geometry[1:]):
+            clipped = clip_segment((a["lon"], a["lat"]), (b["lon"], b["lat"]), bounds)
+            if clipped is None:
+                continue
+            a, b = clipped
+            # Approximate length is for tessellation only, never geodesy.
+            length = 111320 * math.hypot((b[0] - a[0]) * math.cos(math.radians(a[1])), b[1] - a[1])
+            count = max(1, math.ceil(length / 60))
+            part = [
+                (a[0] + (b[0] - a[0]) * i / count, a[1] + (b[1] - a[1]) * i / count)
+                for i in range(count + 1)
+            ]
+            if member_parts and math.dist(member_parts[-1][-1], part[0]) < 1e-9:
+                member_parts[-1].extend(part[1:])
+            else:
+                member_parts.append(part)
+        parts.extend(member_parts)
+    return parts
+
+
 def prepare(source, terrain, detail_terrain=None):
     features = []
     positions = []
@@ -56,49 +116,82 @@ def prepare(source, terrain, detail_terrain=None):
         "access",
         "bridge",
         "tunnel",
+        "building",
+        "building:levels",
+        "height",
+        "waterway",
+        "water",
+        "landuse",
+        "intermittent",
+        "seasonal",
+        "tidal",
+        "width",
     )
+    water_members = {
+        member["ref"]
+        for element in source["elements"]
+        if element["type"] == "relation" and is_water(element.get("tags", {}))
+        for member in element.get("members", [])
+        if member["type"] == "way"
+        and member.get("role", "") in ("outer", "inner", "")
+        and len(member.get("geometry", [])) >= 2
+    }
     for element in source["elements"]:
         tags = element.get("tags", {})
+        if element["type"] == "node":
+            kind = "peak" if tags.get("natural") == "peak" else "place"
+            parts = [[(element["lon"], element["lat"])]]
+        elif element["type"] in ("way", "relation"):
+            if "building" in tags:
+                kind = "building"
+            elif "highway" in tags:
+                kind = "road"
+            elif is_water(tags):
+                kind = "water"
+            else:
+                continue
+            if element["type"] == "relation" and kind != "water":
+                continue
+            if element["type"] == "way" and kind == "water" and element["id"] in water_members:
+                continue
+            parts = clipped_parts(geometries(element), terrain.bounds)
+        else:
+            continue
+        if not parts:
+            continue
+        fallback = (
+            tags.get("waterway", tags.get("water", "Water"))
+            if kind == "water"
+            else ("Building" if kind == "building" else tags.get("highway", "Place"))
+        )
         feature = {
             "osm_id": element["id"],
             "osm_type": element["type"],
-            "name": tags.get("name")
-            or tags.get("ref")
-            or tags.get("highway", "Place").replace("_", " ").title(),
+            "kind": kind,
+            "name": tags.get("name") or tags.get("ref") or fallback.replace("_", " ").title(),
             "tags": {key: tags[key] for key in tags_to_keep if key in tags},
+            "parts": [],
         }
-        if element["type"] == "node":
-            feature["kind"] = "peak" if tags.get("natural") == "peak" else "place"
-            parts = [[(element["lon"], element["lat"])]]
-        elif element["type"] == "way" and "highway" in tags:
-            feature["kind"] = "road"
-            parts = []
-            geometry = element.get("geometry", [])
-            for a, b in zip(geometry, geometry[1:]):
-                clipped = clip_segment((a["lon"], a["lat"]), (b["lon"], b["lat"]), terrain.bounds)
-                if clipped is None:
-                    continue
-                a, b = clipped
-                # Approximate metric length is only used for tessellation, never geodesy.
-                length = 111320 * math.hypot(
-                    (b[0] - a[0]) * math.cos(math.radians(a[1])), b[1] - a[1]
-                )
-                count = max(1, math.ceil(length / 60))
-                part = [
-                    (a[0] + (b[0] - a[0]) * i / count, a[1] + (b[1] - a[1]) * i / count)
-                    for i in range(count + 1)
-                ]
-                if parts and math.dist(parts[-1][-1], part[0]) < 1e-9:
-                    parts[-1].extend(part[1:])
-                else:
-                    parts.append(part)
-        else:
-            continue
-        feature["parts"] = [
-            [len(positions) + sum(map(len, parts[:i])), len(part)] for i, part in enumerate(parts)
-        ]
-        positions.extend(point for part in parts for point in part)
+        if kind == "building":
+            feature["outline_height_m"], feature["outline_height_source"] = building_outline_height(
+                tags
+            )
+        for part in parts:
+            feature["parts"].append([len(positions), len(part)])
+            positions.extend(part)
         features.append(feature)
+    result = {
+        "version": 1,
+        "attribution": "© OpenStreetMap contributors",
+        "copyright_url": "https://www.openstreetmap.org/copyright",
+        "osm_timestamp": source["osm3s"]["timestamp_osm_base"],
+        "bounds_degrees": terrain.bounds.tolist(),
+        "heightmap_sha256": terrain.sha256,
+        "detail_heightmap_sha256": detail_terrain.sha256 if detail_terrain is not None else None,
+        "features": features,
+    }
+    if not positions:
+        return result
     points = np.asarray(positions)
     lon, lat = np.radians(points[:, 0]), np.radians(points[:, 1])
     heights, _, covered = jax.vmap(terrain.sample_geodetic)(jnp.asarray(lat), jnp.asarray(lon))
@@ -113,25 +206,25 @@ def prepare(source, terrain, detail_terrain=None):
             lift
             for feature in features
             for _, count in feature["parts"]
-            for lift in [3.0 if feature["kind"] == "road" else 15.0] * count
+            for lift in [3.0 if feature["kind"] in ("road", "building", "water") else 15.0] * count
         ]
     )
     # Use RC-jet's existing forward conversion, not a new formula.
     ecef = np.asarray(geodetic_to_ecef(jnp.asarray(lat), jnp.asarray(lon), heights + lifts)).T
+    up = np.asarray(jax.vmap(ellipsoid_up)(jnp.asarray(lat), jnp.asarray(lon)))
     for feature in features:
-        feature["parts"] = [
-            ecef[start : start + count].round(3).tolist() for start, count in feature["parts"]
-        ]
-    return {
-        "version": 1,
-        "attribution": "© OpenStreetMap contributors",
-        "copyright_url": "https://www.openstreetmap.org/copyright",
-        "osm_timestamp": source["osm3s"]["timestamp_osm_base"],
-        "bounds_degrees": terrain.bounds.tolist(),
-        "heightmap_sha256": terrain.sha256,
-        "detail_heightmap_sha256": detail_terrain.sha256 if detail_terrain is not None else None,
-        "features": features,
-    }
+        parts = []
+        for start, count in feature["parts"]:
+            base = ecef[start : start + count]
+            parts.append(base.round(3).tolist())
+            if feature["kind"] == "building":
+                roof = base + up[start : start + count] * feature["outline_height_m"]
+                parts.append(roof.round(3).tolist())
+                parts.extend(
+                    np.stack((a, b)).round(3).tolist() for a, b in zip(base[:-1], roof[:-1])
+                )
+        feature["parts"] = parts
+    return result
 
 
 def main():

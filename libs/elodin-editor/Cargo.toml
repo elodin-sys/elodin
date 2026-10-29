@@ -26,6 +26,7 @@ ab_glyph = "0.2"
 
 # bevy
 bevy = { workspace = true, features = [
+  "bevy_gizmos_render",
   "file_watcher",
   "bevy_audio",
   "vorbis",

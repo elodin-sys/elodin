@@ -5,7 +5,9 @@ use crate::{
     sensor_camera::{SensorCamera, SensorCameraConfig, SensorCameraConfigs},
     spatial::{BigSpaceRootEntity, FloatingOriginSettings, GridCell},
 };
-use bevy::{math::DMat4, picking::Pickable, prelude::*};
+use bevy::{
+    math::DMat4, picking::Pickable, prelude::*, render::render_asset::RenderAssetBytesPerFrame,
+};
 use bevy_cesium::{
     CesiumDetailViews, CesiumPlugin as StreamingPlugin, CesiumPrimitive, CesiumSelectionMode,
     CesiumSet, CesiumSource, CesiumStatus, CesiumView, CesiumViews,
@@ -396,6 +398,15 @@ impl Plugin for CesiumPlugin {
                 return;
             }
         };
+        // Share Bevy's existing upload budget across meshes and images. A burst
+        // of streamed tiles should not monopolize the sensor/render frame.
+        // The limit is soft (one large asset may exceed it). Respect a budget
+        // already chosen by the host, and leave non-Cesium sessions unchanged.
+        app.init_resource::<RenderAssetBytesPerFrame>();
+        app.world_mut()
+            .resource_mut::<RenderAssetBytesPerFrame>()
+            .max_bytes
+            .get_or_insert(8 * 1024 * 1024);
         let margin = env_positive("CESIUM_LOD_RETENTION_METERS", 500.0, true);
         let screen_error = env_positive("CESIUM_MAXIMUM_SCREEN_ERROR", 16.0, false);
         if let Ok(path) = std::env::var("ELODIN_CESIUM_CAPTURE_VIEWS") {
