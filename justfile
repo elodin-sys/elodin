@@ -1,6 +1,8 @@
 #! /usr/bin/env nix
 #! nix develop --command just --justfile
 
+export CESIUM_NATIVE_DIR := env_var_or_default("CESIUM_NATIVE_DIR", env_var_or_default("CESIUM_BUILD_ROOT", env_var_or_default("XDG_CACHE_HOME", env_var("HOME") + "/.cache") + "/elodin/cesium-0.65.0") + "/install")
+
 # Use `DRY_RUN=1` to do a dry run of any command.
 #
 # ```sh
@@ -95,6 +97,7 @@ build-windows-gnu:
 
 [private]
 _install-bin crate dest:
+  {{ if crate == "elodin" { "just prepare-cesium" } else { "true" } }}
   cargo build --release -p {{crate}}
   mkdir -p "{{dest}}"
   install -m 755 "target/release/{{crate}}" "{{dest}}/"
@@ -119,6 +122,11 @@ _install-py extra_maturin_args="":
   PATH="$VIRTUAL_ENV/bin:$PATH"
   uvx maturin@1.12.6 develop --uv --release --manifest-path=libs/nox-py/Cargo.toml {{extra_maturin_args}}
   echo "Venv ready at $VIRTUAL_ENV (active in the nix shell; no source needed)."
+
+# Cesium is a standard Editor dependency. Build the pinned native SDK once.
+prepare-cesium:
+  # The pinned builder checks the SDK revision as well as its installed files.
+  bash scripts/build_cesium_native.sh
 
 install target="all":
   #!/usr/bin/env sh
@@ -154,6 +162,7 @@ install target="all":
         exit 1
       fi
       just _install-py "-F tracy"
+      just prepare-cesium
       cargo build --release -p elodin -p elodin-db --features tracy
       install -m 755 target/release/elodin "$ELODIN_SHELL_BIN/"
       install -m 755 target/release/elodin-db "$ELODIN_SHELL_BIN/"

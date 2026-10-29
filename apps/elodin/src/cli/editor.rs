@@ -22,6 +22,13 @@ fn default_sim_addr() -> SocketAddr {
     SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 2240)
 }
 
+fn app_exit_result(exit: AppExit) -> miette::Result<()> {
+    match exit {
+        AppExit::Success => Ok(()),
+        AppExit::Error(code) => Err(miette!("Renderer exited with error code {code}")),
+    }
+}
+
 #[derive(clap::Args, Clone)]
 #[command(
     after_help = "Environment:\n  BLOCKADE_API_KEY    Optional. Enables Skybox AI generation from the command palette. Get one from https://skybox.blockadelabs.com/api and keep it out of source control."
@@ -482,7 +489,7 @@ impl Cli {
             }
             None => None,
         };
-        app.run();
+        let exit = app.run();
         if let Some(path) = generated_kdl {
             let _ = std::fs::remove_file(path);
         }
@@ -495,6 +502,7 @@ impl Cli {
             Some(server) => server.join(),
             None => Ok(()),
         };
+        app_exit_result(exit)?;
         sim_result?;
         db_result
     }
@@ -543,8 +551,7 @@ impl Cli {
         app.add_plugins(
             impeller_bevy::TcpImpellerPlugin::new(Some(args.addr)).with_component_filtering(),
         );
-        app.run();
-        Ok(())
+        app_exit_result(app.run())
     }
 
     pub fn editor_app(&self) -> miette::Result<App> {

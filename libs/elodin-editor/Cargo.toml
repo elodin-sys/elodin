@@ -18,6 +18,7 @@ tracy = ["bevy/trace_tracy", "bevy/debug"]
 wasm-cut = []
 
 [dependencies]
+bevy-cesium.workspace = true
 # math
 hamann-chen-line = { path = "../hamann-chen-line" }
 nox.path = "../nox"

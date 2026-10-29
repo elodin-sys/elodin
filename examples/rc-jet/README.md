@@ -76,7 +76,26 @@ so its mask renders as the cold dark silhouette seen in the reference
 flight recording. `bdx.fpv_cam` remains the independent cinematic RGB
 camera.
 
-Close-up terrain is the geo-anchored `mojave_rc_field` planar
+In Cesium mode, color previews use 480×360 and infrared previews use 480×384,
+both at a configured 24 fps with H.264. Aspect ratios, lens field of view and
+the thermal effect are preserved; these reduced-resolution previews are not
+full-resolution Boson reference captures. Color preview shadows and the two
+redundant scene viewports are disabled to leave more GPU time for the sensors.
+Aligned color and infrared previews share the wider view's terrain selection
+throughout the flight, trading independent IR detail for stable coverage. The Cesium launcher also accepts
+`--photo3d on` (the default) for Google Maps photogrammetry; `--photo3d off` keeps the standard
+terrain and aerial imagery. This only selects rendering: the physical height
+source remains explicit and independent. See the
+[Photo 3D setup](../cesium/README.md#photo-3d-on--off).
+
+Cesium mode also uses `el.terrain_heightmap()` to prepare and cache a 24 × 24 km
+height grid at 10 m spacing through the Elodin CLI. During simulation, JAX reads
+that grid for ground contact without network or disk access. The contact model
+protects the aircraft's reference point; the grid can differ from the visible
+mesh and does not provide full airframe or camera collision detection. See the
+[Cesium README](../cesium/README.md#rc-jet) for setup, architecture and limitations.
+
+In the default planar mode, close-up terrain is the geo-anchored `mojave_rc_field`
 `world_mesh` (`frame="ENU"`).
 
 The package GLB is already Elodin body (X forward, Y left, Z up), so
@@ -91,7 +110,7 @@ To fetch and preprocess the terrain atlas (writes
 ./scripts/prepare_editor_terrain_region.sh mojave_rc_field
 ```
 
-Without the atlas the terrain falls back to a grid. Cinematic Earth for
+In planar mode, without the atlas the terrain falls back to a grid. Cinematic Earth for
 FPV is embedded in the render-server (not the editor). Physics uses the
 pad's ellipsoid height (589.274 m); the mesh is shifted so its DEM
 surface (621.5 m orthometric at the centre) meets that pad.
@@ -255,3 +274,10 @@ not flight-correlated, and describes itself accordingly.
 - `model/elodin_package/integration_guide.md` — the package's own contract
 - `ai-context/bdx/Elodin_RC_Jet_Improvement_Guide.md` — the campaign guide
 - [Elodin Documentation](https://docs.elodin.systems)
+
+### Cesium terrain contact
+
+The [Cesium launcher](../cesium/README.md#rc-jet) uses the shared
+`el.terrain_heightmap()` API to prepare fixed heights before flight. RC-jet keeps
+its spring-and-damper response in `ground.py`; downloads and caching belong to
+the SDK. Contact is approximate and does not cover the full airframe or camera.

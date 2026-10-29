@@ -12,8 +12,8 @@ Typed elodin.ui translation of bdx.kdl.
 # ECEF offsets keep the same local-ENU geometry as the Death Valley
 # scene at heading 350°.
 #
-# Cinematic Earth lives on `world.sensor_camera(..., cinematic=True)`
-# (render-server FPV), not on these viewports. The Boson-style LWIR camera
+# Cinematic Earth lives on the RGB sensor.
+# The Boson-style LWIR camera
 # uses this terrain through a normal off-screen view plus its final sensor pass.
 # Planar TerrainModel: y=0 at region min (450 m), then Y -= 0.4*(max-min)
 # = 700 m. Pad DEM ≈ 621.5 m orthometric, so
@@ -27,15 +27,27 @@ Typed elodin.ui translation of bdx.kdl.
 
 import elodin.ui as ui
 
+from runtime_config import RuntimeConfig, TerrainMode, load_config
 
-def build() -> ui.Schematic:
+
+def build(config: RuntimeConfig | None = None) -> ui.Schematic:
+    # The standalone schematic/watch entry point must also support build().
+    config = load_config() if config is None else config
+    cesium_terrain = config.terrain is TerrainMode.CESIUM
+    terrain = (
+        []
+        if cesium_terrain
+        else [
+            ui.world_mesh(
+                "mojave_rc_field",
+                translate=(0.0, 0.0, 528.0),
+                frame="ENU",
+                visible=True,
+            )
+        ]
+    )
     return ui.schematic(
-        ui.world_mesh(
-            "mojave_rc_field",
-            translate=(0.0, 0.0, 528.0),
-            frame="ENU",
-            visible=True,
-        ),
+        *terrain,
         ui.tabs(
             ui.hsplit(
                 ui.vsplit(
@@ -45,22 +57,23 @@ def build() -> ui.Schematic:
                         share=3.0,
                     ),
                     ui.graph(
-                        "bdx.alpha",
-                        name="Angle of Attack (rad)",
+                        "bdx.terrain_clearance_m" if cesium_terrain else "bdx.alpha",
+                        name="Ground clearance (m)" if cesium_terrain else "Angle of Attack (rad)",
                     ),
                     ui.graph(
-                        "bdx.aero_valid",
-                        name="Aero Validity Flag",
+                        "bdx.terrain_status" if cesium_terrain else "bdx.aero_valid",
+                        name="Ground status (0–2)" if cesium_terrain else "Aero Validity Flag",
                     ),
                     share=0.4,
                 ),
                 ui.viewport(
                     name="Chase",
+                    ev100=12.0 if cesium_terrain else None,
                     fov=45.0,
                     near=1.0,
                     active=True,
                     show_grid=False,
-                    show_arrows=True,
+                    show_arrows=not cesium_terrain,
                     create_frustum=False,
                     show_frustums=False,
                     frustums_color="yellow",
@@ -70,50 +83,62 @@ def build() -> ui.Schematic:
                     effects=True,
                     hdr=False,
                     cinematic=False,
-                    pos="bdx.world_pos.translate_world(-3.128, -11.885, -10.827)",
+                    pos="bdx.terrain_chase_pose"
+                    if cesium_terrain
+                    else "bdx.world_pos.translate_world(-3.128, -11.885, -10.827)",
                     look_at="bdx.world_pos.translate_world(-0.087, 2.067, 5.976)",
                     up="(-0.381, -0.721, 0.578)",
                     smoothing=0.0,
                 ),
                 ui.vsplit(
-                    ui.viewport(
-                        name="TGTViewport",
-                        fov=45.0,
-                        active=False,
-                        show_grid=False,
-                        show_arrows=True,
-                        create_frustum=False,
-                        show_frustums=False,
-                        frustums_color="yellow",
-                        projection_color="white",
-                        frustums_thickness=0.006,
-                        show_view_cube=True,
-                        effects=True,
-                        hdr=False,
-                        cinematic=False,
-                        pos="target.world_pos.translate_world(1.078, -0.099, 0.931)",
-                        look_at="bdx.world_pos",
-                        smoothing=0.0,
-                    ),
-                    ui.viewport(
-                        name="FPVViewport",
-                        fov=45.0,
-                        active=False,
-                        show_grid=False,
-                        show_arrows=True,
-                        create_frustum=False,
-                        show_frustums=False,
-                        frustums_color="yellow",
-                        projection_color="white",
-                        frustums_thickness=0.006,
-                        show_view_cube=True,
-                        effects=True,
-                        hdr=False,
-                        cinematic=False,
-                        pos="bdx.world_pos.translate(1,0,0.1,true)",
-                        look_at="bdx.world_pos.translate(2,0,0.1,true)",
-                        up="bdx.world_pos.direction(0,0,1,true)",
-                        smoothing=0.0,
+                    # Cesium already renders the two sensor views below.
+                    # Extra scene cameras also request tiles and consume GPU time.
+                    *(
+                        []
+                        if cesium_terrain
+                        else [
+                            ui.viewport(
+                                name="TGTViewport",
+                                ev100=12.0 if cesium_terrain else None,
+                                fov=45.0,
+                                active=False,
+                                show_grid=False,
+                                show_arrows=True,
+                                create_frustum=False,
+                                show_frustums=False,
+                                frustums_color="yellow",
+                                projection_color="white",
+                                frustums_thickness=0.006,
+                                show_view_cube=True,
+                                effects=True,
+                                hdr=False,
+                                cinematic=False,
+                                pos="target.world_pos.translate_world(1.078, -0.099, 0.931)",
+                                look_at="bdx.world_pos",
+                                smoothing=0.0,
+                            ),
+                            ui.viewport(
+                                name="FPVViewport",
+                                ev100=12.0 if cesium_terrain else None,
+                                fov=45.0,
+                                active=False,
+                                show_grid=False,
+                                show_arrows=True,
+                                create_frustum=False,
+                                show_frustums=False,
+                                frustums_color="yellow",
+                                projection_color="white",
+                                frustums_thickness=0.006,
+                                show_view_cube=True,
+                                effects=True,
+                                hdr=False,
+                                cinematic=False,
+                                pos="bdx.world_pos.translate(1,0,0.1,true)",
+                                look_at="bdx.world_pos.translate(2,0,0.1,true)",
+                                up="bdx.world_pos.direction(0,0,1,true)",
+                                smoothing=0.0,
+                            ),
+                        ]
                     ),
                     ui.sensor_view(
                         "bdx.fpv_cam",
@@ -210,6 +235,7 @@ def build() -> ui.Schematic:
             ui.hsplit(
                 ui.viewport(
                     name="Top-Down View",
+                    ev100=12.0 if cesium_terrain else None,
                     fov=60.0,
                     active=False,
                     show_grid=False,
@@ -347,11 +373,17 @@ def build() -> ui.Schematic:
             thickness=0.1,
             label_position=None,
         ),
-        ui.line_3d(
-            "bdx.world_pos",
-            line_width=3.0,
-            color="yolk",
-            perspective=False,
+        *(
+            []
+            if cesium_terrain
+            else [
+                ui.line_3d(
+                    "bdx.world_pos",
+                    line_width=3.0,
+                    color="yolk",
+                    perspective=False,
+                )
+            ]
         ),
         coordinate=ui.coordinate(
             frame="ECEF",
@@ -366,6 +398,12 @@ def build() -> ui.Schematic:
             range="last_30s",
         ),
         telemetry_mode=True,
+        environment=ui.environment(
+            sun=ui.sun(azimuth=135.0, elevation=35.0, illuminance=20000.0, shadows=True),
+            ambient=0.25,
+        )
+        if cesium_terrain
+        else None,
     )
 
 

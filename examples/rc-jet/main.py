@@ -27,6 +27,8 @@ import bdx_model
 from bdx_schematic import build as build_schematic
 from class_d_fallbacks import FALLBACKS
 from frames import enu_basis, level_attitude_ecef, quaternion_xyzw_from_matrix
+from ground import GEAR_HEIGHT_M, TerrainContact
+from runtime_config import CameraSettings, RuntimeConfig, TerrainMode, load_config
 from scenario import Numerics, Scenario, load_scenario
 from sim import build_system, make_jet
 
@@ -39,7 +41,11 @@ class StaticMarker(el.Archetype):
 
 
 def setup_world(
-    scenario: Scenario, numerics: Numerics
+    scenario: Scenario,
+    numerics: Numerics,
+    terrain: el.TerrainHeightmap | None = None,
+    *,
+    config: RuntimeConfig,
 ) -> tuple[el.World, el.EntityId, el.EntityId]:
     world = el.World()
     init = scenario.initial
@@ -47,6 +53,12 @@ def setup_world(
     site = scenario.site
     lat = math.radians(site.lat_deg)
     lon = math.radians(site.lon_deg)
+    if terrain is not None:
+        height, _, covered = terrain.sample_geodetic(lat, lon)
+        if not bool(covered) or scenario.altitude_m < float(height) + GEAR_HEIGHT_M:
+            raise ValueError(
+                "Initial aircraft position must be above the prepared terrain and inside its coverage"
+            )
     basis = np.asarray(enu_basis(lat, lon))
     heading = math.radians(scenario.heading_deg)
     forward = math.sin(heading) * basis[0] + math.cos(heading) * basis[1]
@@ -71,6 +83,7 @@ def setup_world(
                 ),
             ),
             make_jet(scenario),
+            *([TerrainContact()] if terrain is not None else []),
         ],
         name="bdx",
     )
@@ -87,15 +100,24 @@ def setup_world(
         ),
         name="target",
     )
-    world.thermal_tag(target, temperature_c=18.0, emissivity=0.92)
+    add_sensor_cameras(world, jet, target, config.cameras)
 
+    world.schematic(build_schematic(config), "bdx.kdl")
+    return world, jet, target
+
+
+def add_sensor_cameras(
+    world: el.World, jet: el.EntityId, target: el.EntityId, settings: CameraSettings
+) -> None:
+    world.thermal_tag(target, temperature_c=18.0, emissivity=0.92)
     world.sensor_camera(
         entity=jet,
         name="fpv_cam",
-        width=640,
-        height=480,
+        width=settings.color_resolution[0],
+        height=settings.color_resolution[1],
         fov=90.0,
-        fps=30.0,
+        fps=settings.color_fps,
+        format=settings.color_format,
         near=0.1,
         # Far plane must cover the terrain and horizon at altitude. Frustum
         # visualization shares this far plane, so keep create_frustum off.
@@ -108,7 +130,7 @@ def setup_world(
         environment={
             "sun": {
                 "illuminance": 100000.0,
-                "shadows": True,
+                "shadows": settings.color_shadows,
                 "direction": (-0.870, -0.488, -0.070),
             },
             "ambient_scale": 0.05,
@@ -119,18 +141,18 @@ def setup_world(
         entity=jet,
         name="ir_cam",
         camera_model="boson640p",
+        width=settings.infrared_resolution[0],
+        height=settings.infrared_resolution[1],
         lens_hfov=18.0,
         effect="lwir",
-        format="gray8",
+        fps=settings.infrared_fps,
+        format=settings.infrared_format,
         near=0.1,
         far=100_000.0,
         pos_offset=[1.2, 0.0, 0.1],
         rot_offset=[0.0, 0.0, 0.0],
         create_frustum=False,
     )
-
-    world.schematic(build_schematic(), "bdx.kdl")
-    return world, jet, target
 
 
 def _run_max_ticks() -> int | None:
@@ -146,12 +168,25 @@ def _run_max_ticks() -> int | None:
     return None
 
 
+CONFIG = load_config()
 MODEL = bdx_model.load()
 NUMERICS = Numerics()
 SCENARIO = load_scenario(MODEL, FALLBACKS)
 
-world, jet, target = setup_world(SCENARIO, NUMERICS)
-sim_system = build_system(MODEL, FALLBACKS, SCENARIO, NUMERICS)
+TERRAIN = (
+    el.terrain_heightmap(
+        center_ecef=SCENARIO.initial.pos_ecef,
+        dimensions=(24_000, 24_000),
+        spacing=10,
+        asset_id=CONFIG.height_asset_id,
+    )
+    if CONFIG.terrain is TerrainMode.CESIUM
+    else None
+)
+if TERRAIN is not None:
+    print(f"Terrain heights: {TERRAIN.path} (SHA-256 {TERRAIN.sha256})")
+world, jet, target = setup_world(SCENARIO, NUMERICS, TERRAIN, config=CONFIG)
+sim_system = build_system(MODEL, FALLBACKS, SCENARIO, NUMERICS, TERRAIN)
 
 print("BDX RC Jet Simulation")
 print("=====================")
@@ -165,7 +200,7 @@ print(
     f"field elevation {SCENARIO.site.field_elevation_m:.0f} m"
 )
 print(
-    f"  altitude: {SCENARIO.altitude_m:.0f} m MSL, TAS {SCENARIO.tas_mps:.1f} m/s, "
+    f"  altitude: {SCENARIO.altitude_m:.0f} m above WGS84 ellipsoid, TAS {SCENARIO.tas_mps:.1f} m/s, "
     f"heading {SCENARIO.heading_deg:.0f} deg"
 )
 print(
@@ -209,7 +244,10 @@ else:
         ready=el.s10.Ready.delay(100),
         ready_timeout="120s",
     )
-world.recipe(controller)
+# Keep the scenario's trim commands for unattended captures. The interactive
+# controller reads global keyboard state, including typing in other applications.
+if os.environ.get("ELODIN_NON_INTERACTIVE") != "1":
+    world.recipe(controller)
 
 world.run(
     sim_system,
