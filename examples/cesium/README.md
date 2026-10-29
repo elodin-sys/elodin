@@ -174,6 +174,15 @@ The launcher uses no detail-retention margin and 48 px screen error. Override
 `CESIUM_LOD_RETENTION_METERS` or `CESIUM_MAXIMUM_SCREEN_ERROR` to compare settings;
 a zero margin disables retention.
 
+For Cesium sessions, the Editor uses Bevy's shared soft GPU upload limit of
+8 MiB per frame, unless the host has already set a limit. An individual asset
+can exceed that budget. Pending tiles stay hidden until GPU-ready; the previous
+complete terrain selection stays visible while replacements prepare.
+Bevy-Cesium also applies soft native loading/unloading budgets (2 ms / 1 ms),
+reuses its readiness buffer, and releases CPU texture pixels after extraction.
+CPU meshes remain available for terrain picking and overlay occlusion. These
+budgets spread work across frames; they do not reduce LOD or accelerate downloads.
+
 For an unattended five-minute flight, set `ELODIN_NON_INTERACTIVE=1` and
 `ELODIN_MAX_TICKS=90000`. This keeps the initial trim commands and disables the
 keyboard controller. Interactive keyboard input is global: typing in another
@@ -247,9 +256,12 @@ agreement on longer flights.
 
 ### Offline map overlay demonstration
 
-The RC-jet launcher enables an offline OSM overlay: named summits with their
-published elevations, named places, and beige roads/tracks with metadata on
-hover. The Map menu toggles each layer. Sensor images remain independent.
+The RC-jet launcher loads an offline OSM overlay, hidden by default.
+The translucent `Overlay off/on` button toggles named summits with their published
+elevations, named places, soft pink roads/tracks and building outlines, and light
+blue water outlines, with metadata on hover. All layers share this switch;
+OpenStreetMap attribution is available on hover over the button. Sensor images
+remain independent. Exploration and recentering keep their separate controls.
 
 `data/mojave-overpass.json` is the original Overpass response and
 `data/mojave.overpassql` is the exact query. The active prepared overlay uses the original
@@ -280,13 +292,32 @@ heights; missing OSM elevations are not invented. Roads are tessellated at
 approximately 60 m intervals and clipped to the context grid. Existing
 RC-jet geodesy performs the ECEF conversion.
 
-Beige roads use one depth-tested 3D mesh, visible in Editor viewports only.
+Roads and building outlines use separate depth-tested gizmo groups, visible
+only in Editor viewports. Their soft pink lines stay 2.2 px and 2.0 px wide
+respectively, rather than thinning to one pixel at distance.
 Labels and hover cards are terrain-occlusion tested; up to 12 labels are
 tested per viewport per frame to bound CPU cost. Labels are clipped and
 decluttered. This is a visualization prototype, not a navigation map; road
 placement inherits the sampled grid's accuracy.
 
-Right-drag detaches the demonstration viewport from the moving aircraft,
-so orbiting uses a stable terrain reference. **Follow aircraft** or the cube's reset button restores
-the live chase view. The demo hides the yellow flight trail and body
-axis labels. Set `ELODIN_CESIUM_OVERLAY_FILE=''` to disable the map overlay.
+The default camera follows RC-jet while preserving normal Editor navigation:
+left-drag pans, right-drag orbits, and zoom uses the point under the pointer
+(aircraft or terrain). **Explore terrain** releases the moving camera reference.
+**Recenter RC-jet** is always available to restore the chase view; the cube's
+reset button also restores following after exploration.
+The yellow flight trail uses the timeline's last 30 seconds on a scene-only
+render layer, excluded from cube and navigation-gizmo cameras. Body axis labels
+stay hidden. Set `ELODIN_CESIUM_OVERLAY_FILE=''` to disable the map overlay.
+
+Building wire outlines use OSM `height` when available, otherwise
+`building:levels × 3 m`; missing heights use an explicitly illustrative 4 m
+extrusion. This value is separate from the original OSM tags, is shown in
+hover metadata, and is not used by physics or sensor images.
+
+The **Water** layer draws light blue (2.2 px) lake/pond/reservoir shorelines and
+river/stream/canal/drain/ditch lines from OSM. Waterbody multipolygons retain
+outer and inner shorelines, without filling islands or drawing across holes.
+They share the terrain-depth-tested overlay and hover metadata; `intermittent`
+and `seasonal` tags are preserved, especially relevant in the Mojave desert.
+These are map outlines, not a depiction of current water coverage. OSM remains
+hidden by default, including water; sensor imagery and physics are unaffected.

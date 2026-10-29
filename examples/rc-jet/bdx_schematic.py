@@ -86,7 +86,9 @@ def build(config: RuntimeConfig | None = None) -> ui.Schematic:
                     pos="bdx.terrain_chase_pose"
                     if cesium_terrain
                     else "bdx.world_pos.translate_world(-3.128, -11.885, -10.827)",
-                    look_at="bdx.world_pos.translate_world(-0.087, 2.067, 5.976)",
+                    look_at="bdx.world_pos"
+                    if cesium_terrain
+                    else "bdx.world_pos.translate_world(-0.087, 2.067, 5.976)",
                     up="(-0.381, -0.721, 0.578)",
                     smoothing=0.0,
                 ),
@@ -373,17 +375,11 @@ def build(config: RuntimeConfig | None = None) -> ui.Schematic:
             thickness=0.1,
             label_position=None,
         ),
-        *(
-            []
-            if cesium_terrain
-            else [
-                ui.line_3d(
-                    "bdx.world_pos",
-                    line_width=3.0,
-                    color="yolk",
-                    perspective=False,
-                )
-            ]
+        ui.line_3d(
+            "bdx.world_pos",
+            line_width=3.0,
+            color="yolk",
+            perspective=False,
         ),
         coordinate=ui.coordinate(
             frame="ECEF",
