@@ -952,3 +952,33 @@ def test_map_seq_decorator_multiple_inputs_outputs():
         }
     )
     assert_frame_equal(df.drop("time"), expected_df)
+
+
+def test_spatial_inertia_off_diag_and_matrix():
+    inertia_default = el.SpatialInertia(2.5, np.array([1.0, 2.0, 3.0]))
+    assert np.allclose(inertia_default.mass(), 2.5)
+    assert np.allclose(inertia_default.inertia_diag(), np.array([1.0, 2.0, 3.0]))
+    assert np.allclose(inertia_default.inertia_off_diag(), np.zeros(3))
+    assert np.allclose(inertia_default.asarray(), np.array([1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 2.5]))
+    assert np.allclose(inertia_default.inertia_matrix(), np.diag(np.array([1.0, 2.0, 3.0])))
+
+    inertia_full = el.SpatialInertia(
+        4.0,
+        inertia=np.array([5.0, 6.0, 7.0]),
+        inertia_off_diag=np.array([-0.2, 0.3, -0.4]),
+    )
+    assert np.allclose(inertia_full.inertia_diag(), np.array([5.0, 6.0, 7.0]))
+    assert np.allclose(inertia_full.inertia_off_diag(), np.array([-0.2, 0.3, -0.4]))
+    assert np.allclose(
+        inertia_full.asarray(),
+        np.array([5.0, 6.0, 7.0, -0.2, 0.3, -0.4, 4.0]),
+    )
+    expected_mat = np.array(
+        [
+            [5.0, -0.2, 0.3],
+            [-0.2, 6.0, -0.4],
+            [0.3, -0.4, 7.0],
+        ]
+    )
+    assert np.allclose(inertia_full.inertia_matrix(), expected_mat)
+

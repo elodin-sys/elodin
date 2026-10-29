@@ -392,16 +392,24 @@ impl From<nox::SpatialInertia<f64>> for SpatialInertia {
 #[pymethods]
 impl SpatialInertia {
     #[new]
-    #[pyo3(signature = (mass, inertia=None))]
-    fn new(mass: PyObject, inertia: Option<PyObject>) -> Self {
+    #[pyo3(signature = (mass, inertia=None, inertia_off_diag=None))]
+    fn new(
+        mass: PyObject,
+        inertia: Option<PyObject>,
+        inertia_off_diag: Option<PyObject>,
+    ) -> Self {
         let mass = Scalar::<f64>::from_inner(Noxpr::jax(mass));
-        let momentum = Vector::<f64, 3>::zeros();
+        let inertia_off_diag = if let Some(off_diag) = inertia_off_diag {
+            Vector::<f64, 3>::from_inner(Noxpr::jax(off_diag))
+        } else {
+            Vector::<f64, 3>::zeros()
+        };
         let inertia = if let Some(inertia) = inertia {
             Vector::<f64, 3>::from_inner(Noxpr::jax(inertia))
         } else {
             Vector::<f64, 3>::ones() * mass.clone()
         };
-        nox::SpatialInertia::new(inertia, momentum, mass).into()
+        nox::SpatialInertia::new(inertia, inertia_off_diag, mass).into()
     }
 
     fn flatten(&self) -> Result<((PyObject,), Option<()>), Error> {
@@ -431,6 +439,14 @@ impl SpatialInertia {
 
     fn inertia_diag(&self) -> Result<PyObject, Error> {
         Ok(self.inner.inertia_diag().into_inner().to_jax()?)
+    }
+
+    fn inertia_off_diag(&self) -> Result<PyObject, Error> {
+        Ok(self.inner.inertia_off_diag().into_inner().to_jax()?)
+    }
+
+    fn inertia_matrix(&self) -> Result<PyObject, Error> {
+        Ok(self.inner.inertia_matrix().into_inner().to_jax()?)
     }
 
     fn asarray(&self) -> Result<PyObject, Error> {
