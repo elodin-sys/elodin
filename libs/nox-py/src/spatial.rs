@@ -378,72 +378,92 @@ impl Quaternion {
     }
 }
 
-fn validate_f64_array(
-    py: Python<'_>,
-    obj: &Bound<'_, PyAny>,
-    expected_shape: &[usize],
-    label: &str,
-) -> PyResult<bool> {
-    if !obj.hasattr("shape")? || !obj.hasattr("dtype")? {
-        return Err(pyo3::exceptions::PyTypeError::new_err(format!(
-            "{label} must be a float64 array of shape {expected_shape:?}, got {}",
-            obj.get_type().name()?
-        )));
-    }
-    let shape: Vec<usize> = obj.getattr("shape")?.extract()?;
-    if shape.as_slice() != expected_shape {
+fn check_shape(shape: &[usize], expected_shape: &[usize], label: &str) -> PyResult<()> {
+    if shape != expected_shape {
         return Err(pyo3::exceptions::PyValueError::new_err(format!(
             "{label} must have shape {expected_shape:?}, got shape {shape:?}"
         )));
     }
-    let dtype_name: String = obj.getattr("dtype")?.getattr("name")?.extract()?;
-    if dtype_name != "float64" {
-        return Err(pyo3::exceptions::PyTypeError::new_err(format!(
-            "{label} must have dtype float64, got {dtype_name}"
-        )));
-    }
-    let tracer_ty = py.import("jax.core")?.getattr("Tracer")?;
-    Ok(!obj.is_instance(&tracer_ty)?)
+    Ok(())
 }
 
-fn validate_mass_arg(py: Python<'_>, obj: &Bound<'_, PyAny>) -> PyResult<Option<f64>> {
-    let m = if obj.is_instance_of::<pyo3::types::PyFloat>() {
-        obj.extract::<f64>()?
-    } else if obj.hasattr("shape")? && !obj.is_instance_of::<pyo3::types::PyBool>() {
-        if !validate_f64_array(py, obj, &[], "SpatialInertia mass")? {
-            return Ok(None);
+/// Converts `obj` to a float64 array of `expected_shape`. Returns the array to store and, for
+/// concrete inputs, its flattened values (`None` for a JAX tracer).
+fn coerce_f64_array(
+    py: Python<'_>,
+    obj: &Bound<'_, PyAny>,
+    expected_shape: &[usize],
+    label: &str,
+) -> PyResult<(PyObject, Option<Vec<f64>>)> {
+    let tracer_ty = py.import("jax.core")?.getattr("Tracer")?;
+    if obj.is_instance(&tracer_ty)? {
+        let shape: Vec<usize> = obj.getattr("shape")?.extract()?;
+        check_shape(&shape, expected_shape, label)?;
+        let dtype_name: String = obj.getattr("dtype")?.getattr("name")?.extract()?;
+        if dtype_name != "float64" {
+            return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+                "{label} must have dtype float64 inside a system, got {dtype_name}; cast it with .astype(jnp.float64)"
+            )));
         }
-        obj.extract::<f64>()?
-    } else {
+        return Ok((obj.clone().unbind(), None));
+    }
+
+    let np = py.import("numpy")?;
+    let type_name = obj.get_type().name()?;
+    let Ok(arr) = np.call_method1("asarray", (obj,)) else {
         return Err(pyo3::exceptions::PyTypeError::new_err(format!(
-            "SpatialInertia mass must be a float or 0-D float64 array, got {}",
-            obj.get_type().name()?
+            "{label} must be a real number or array of real numbers, got {type_name}"
         )));
     };
+    let dtype = arr.getattr("dtype")?;
+    let kind: String = dtype.getattr("kind")?.extract()?;
+    if !matches!(kind.as_str(), "i" | "u" | "f") {
+        let dtype_name: String = dtype.getattr("name")?.extract()?;
+        return Err(pyo3::exceptions::PyTypeError::new_err(format!(
+            "{label} must be a real number or array of real numbers, got {type_name} with dtype {dtype_name}"
+        )));
+    }
+    let shape: Vec<usize> = arr.getattr("shape")?.extract()?;
+    check_shape(&shape, expected_shape, label)?;
+    let arr = arr.call_method1("astype", (np.getattr("float64")?,))?;
+    let vals: Vec<f64> = arr
+        .call_method0("ravel")?
+        .call_method0("tolist")?
+        .extract()?;
+    Ok((arr.unbind(), Some(vals)))
+}
+
+fn validate_mass_arg(py: Python<'_>, obj: &Bound<'_, PyAny>) -> PyResult<(PyObject, Option<f64>)> {
+    let (mass, vals) = coerce_f64_array(py, obj, &[], "SpatialInertia mass")?;
+    let Some(vals) = vals else {
+        return Ok((mass, None));
+    };
+    let m = vals[0];
     if !m.is_finite() || m <= 0.0 {
         return Err(pyo3::exceptions::PyValueError::new_err(format!(
             "SpatialInertia mass must be finite and > 0, got {m}"
         )));
     }
-    Ok(Some(m))
+    Ok((mass, Some(m)))
 }
 
 fn validate_inertia_vec3_arg(
     py: Python<'_>,
     obj: &Bound<'_, PyAny>,
     name: &str,
-) -> PyResult<Option<[f64; 3]>> {
+) -> PyResult<(PyObject, Option<[f64; 3]>)> {
     let label = format!("SpatialInertia {name}");
-    if !validate_f64_array(py, obj, &[3], &label)? {
-        return Ok(None);
-    }
-    let vals: [f64; 3] = obj.extract()?;
+    let (arr, vals) = coerce_f64_array(py, obj, &[3], &label)?;
+    let Some(vals) = vals else {
+        return Ok((arr, None));
+    };
+    let vals = [vals[0], vals[1], vals[2]];
     if !vals.iter().all(|v| v.is_finite()) {
         return Err(pyo3::exceptions::PyValueError::new_err(format!(
             "{label} must contain finite values, got {vals:?}"
         )));
     }
-    Ok(Some(vals))
+    Ok((arr, Some(vals)))
 }
 
 fn symmetric_3x3_eigenvalues(diag: [f64; 3], off_diag: [f64; 3]) -> [f64; 3] {
@@ -463,8 +483,7 @@ fn symmetric_3x3_eigenvalues(diag: [f64; 3], off_diag: [f64; 3]) -> [f64; 3] {
         return [q, q, q];
     }
 
-    let det_b = b_xx * (b_yy * b_zz - iyz * iyz)
-        - ixy * (ixy * b_zz - ixz * iyz)
+    let det_b = b_xx * (b_yy * b_zz - iyz * iyz) - ixy * (ixy * b_zz - ixz * iyz)
         + ixz * (ixy * iyz - b_yy * ixz);
     let phi = (det_b / (2.0 * p * p * p)).clamp(-1.0, 1.0).acos() / 3.0;
 
@@ -523,16 +542,21 @@ impl SpatialInertia {
         inertia: Option<PyObject>,
         inertia_off_diag: Option<PyObject>,
     ) -> PyResult<Self> {
-        let mass_val = validate_mass_arg(py, mass.bind(py))?;
-        let diag_val = match &inertia {
-            Some(inertia_obj) => validate_inertia_vec3_arg(py, inertia_obj.bind(py), "inertia")?,
-            None => mass_val.map(|m| [m, m, m]),
-        };
-        let off_diag_val = match &inertia_off_diag {
-            Some(off_diag_obj) => {
-                validate_inertia_vec3_arg(py, off_diag_obj.bind(py), "inertia_off_diag")?
+        let (mass, mass_val) = validate_mass_arg(py, mass.bind(py))?;
+        let (inertia, diag_val) = match inertia {
+            Some(inertia_obj) => {
+                let (arr, vals) = validate_inertia_vec3_arg(py, inertia_obj.bind(py), "inertia")?;
+                (Some(arr), vals)
             }
-            None => Some([0.0, 0.0, 0.0]),
+            None => (None, mass_val.map(|m| [m, m, m])),
+        };
+        let (inertia_off_diag, off_diag_val) = match inertia_off_diag {
+            Some(off_diag_obj) => {
+                let (arr, vals) =
+                    validate_inertia_vec3_arg(py, off_diag_obj.bind(py), "inertia_off_diag")?;
+                (Some(arr), vals)
+            }
+            None => (None, Some([0.0, 0.0, 0.0])),
         };
         if let (Some(diag), Some(off_diag)) = (diag_val, off_diag_val) {
             validate_inertia_tensor(diag, off_diag)?;
@@ -570,9 +594,8 @@ impl SpatialInertia {
 
     #[staticmethod]
     fn from_array(py: Python<'_>, jax: PyObject) -> PyResult<Self> {
-        let obj = jax.bind(py);
-        if validate_f64_array(py, obj, &[7], "SpatialInertia.from_array")? {
-            let vals: [f64; 7] = obj.extract()?;
+        let (jax, vals) = coerce_f64_array(py, jax.bind(py), &[7], "SpatialInertia.from_array")?;
+        if let Some(vals) = vals {
             let mass = vals[6];
             if !mass.is_finite() || mass <= 0.0 {
                 return Err(pyo3::exceptions::PyValueError::new_err(format!(

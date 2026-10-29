@@ -1113,51 +1113,105 @@ def test_six_dof_intermediate_axis_instability_and_rotated_inertia_invariance():
     assert omega_y_end < -4.0
 
 
+def test_spatial_inertia_coerces_real_number_inputs_to_float64():
+    import numpy
+
+    expected = np.array([2.0, 3.0, 4.0, 0.0, 0.0, 0.0, 2.0])
+    masses = (
+        2,
+        2.0,
+        numpy.int64(2),
+        numpy.float32(2.0),
+        np.array(2, dtype=np.int32),
+        np.array(2.0, dtype=np.float32),
+    )
+    inertias = (
+        [2, 3, 4],
+        (2.0, 3.0, 4.0),
+        numpy.array([2, 3, 4]),
+        np.array([2, 3, 4], dtype=np.int64),
+        np.array([2.0, 3.0, 4.0], dtype=np.float32),
+    )
+    for mass in masses:
+        for inertia in inertias:
+            si = el.SpatialInertia(mass, inertia=inertia, inertia_off_diag=[0, 0, 0])
+            assert si.asarray().dtype == np.float64
+            assert np.allclose(si.asarray(), expected)
+
+    # Default diagonal from an int mass
+    assert np.allclose(el.SpatialInertia(3).inertia_diag(), np.array([3.0, 3.0, 3.0]))
+    assert el.SpatialInertia(3).asarray().dtype == np.float64
+
+    # from_array accepts sequences and non-float64 real dtypes
+    for arr in ([2, 3, 4, 0, 0, 0, 2], np.array(expected, dtype=np.float32)):
+        si = el.SpatialInertia.from_array(arr)
+        assert si.asarray().dtype == np.float64
+        assert np.allclose(si.asarray(), expected)
+
+    # Coerced inputs flow through the ECS and six_dof
+    w = el.World()
+    w.spawn(
+        el.Body(
+            world_vel=el.SpatialMotion(angular=np.array([0.1, 2.0, 0.1])),
+            inertia=el.SpatialInertia(2, inertia=[2, 3, 4]),
+        ),
+        "b",
+    )
+    exec = w.build(el.six_dof(0.01))
+    exec.run(5)
+    df = exec.history(["b.inertia", "b.world_vel"])
+    assert np.allclose(df["b.inertia"][-1].to_numpy(), expected)
+    assert np.all(np.isfinite(df["b.world_vel"].to_numpy()))
+
+
 def test_spatial_inertia_rejects_bad_types_and_shapes():
-    # Non-float / non-0D-array mass types
-    for bad_mass in (True, False, 1, "1.0", [1.0], (1.0,)):
-        with pytest.raises(TypeError, match="mass"):
+    # Bools, strings, None, and complex values are not real numbers
+    for bad_mass in (True, False, np.array(True), "1.0", None, 1j):
+        with pytest.raises(TypeError, match="mass must be a real number"):
             el.SpatialInertia(bad_mass)
 
-    # Non-float64 array dtypes for mass
-    for bad_dtype in (np.float32, np.int64, np.bool_):
-        with pytest.raises(TypeError, match="mass"):
-            el.SpatialInertia(np.array(1.0, dtype=bad_dtype))
-
-    # Non-0D array shapes for mass
-    for bad_shape in ((1,), (3,), (1, 1)):
+    # Non-0D shapes for mass
+    for bad_mass in ([1.0], (1.0,), np.ones(1), np.ones(3), np.ones((1, 1))):
         with pytest.raises(ValueError, match="mass must have shape \\[\\]"):
-            el.SpatialInertia(np.ones(bad_shape))
+            el.SpatialInertia(bad_mass)
 
-    # Non-array types for inertia and inertia_off_diag
-    for bad_seq in ([1.0, 2.0, 3.0], (1.0, 2.0, 3.0), 1.0, "123"):
-        with pytest.raises(TypeError, match="inertia must be a float64 array"):
+    # Non-real or ragged inputs for inertia and inertia_off_diag
+    for bad_seq in ("123", [True, False, True], [[1.0, 2.0], [3.0]], None):
+        with pytest.raises(TypeError, match="inertia must be a real number"):
             el.SpatialInertia(1.0, inertia=bad_seq)
-        with pytest.raises(TypeError, match="inertia_off_diag must be a float64 array"):
+        with pytest.raises(TypeError, match="inertia_off_diag must be a real number"):
             el.SpatialInertia(1.0, inertia_off_diag=bad_seq)
 
-    # Non-float64 array dtypes for inertia and inertia_off_diag
-    for bad_dtype in (np.float32, np.int64):
-        with pytest.raises(TypeError, match="inertia must have dtype float64"):
-            el.SpatialInertia(1.0, inertia=np.array([2.0, 2.0, 2.0], dtype=bad_dtype))
-        with pytest.raises(TypeError, match="inertia_off_diag must have dtype float64"):
-            el.SpatialInertia(1.0, inertia_off_diag=np.zeros(3, dtype=bad_dtype))
-
     # Wrong shapes (0-D, wrong-length 1-D, 2-D matrix) for inertia and inertia_off_diag
-    for bad_arr in (np.array(1.0), np.ones(2), np.ones(4), np.eye(3), np.ones((3, 1))):
+    for bad_arr in (
+        1.0,
+        np.array(1.0),
+        np.ones(2),
+        [1.0, 2.0, 3.0, 4.0],
+        np.eye(3),
+        np.ones((3, 1)),
+    ):
         with pytest.raises(ValueError, match="inertia must have shape \\[3\\]"):
             el.SpatialInertia(1.0, inertia=bad_arr)
         with pytest.raises(ValueError, match="inertia_off_diag must have shape \\[3\\]"):
             el.SpatialInertia(1.0, inertia_off_diag=bad_arr)
 
-    # from_array shape and dtype checks
-    with pytest.raises(TypeError, match="from_array"):
-        el.SpatialInertia.from_array([1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0])
-    with pytest.raises(TypeError, match="from_array must have dtype float64"):
-        el.SpatialInertia.from_array(np.ones(7, dtype=np.float32))
+    # from_array type and shape checks
+    with pytest.raises(TypeError, match="from_array must be a real number"):
+        el.SpatialInertia.from_array(np.ones(7, dtype=np.bool_))
     for bad_shape in ((), (3,), (6,), (8,), (7, 1)):
         with pytest.raises(ValueError, match="from_array must have shape \\[7\\]"):
             el.SpatialInertia.from_array(np.ones(bad_shape))
+
+    # Traced values inside a system must already be float64
+    @el.map
+    def float32_update(inertia: el.Inertia) -> el.Inertia:
+        return el.SpatialInertia(inertia.mass().astype(np.float32))
+
+    w = el.World()
+    w.spawn(el.Body(), "e1")
+    with pytest.raises(Exception, match="dtype float64 inside a system"):
+        w.build(float32_update)
 
 
 def test_spatial_inertia_rejects_unphysical_mass_and_inertia():
@@ -1236,7 +1290,9 @@ def test_spatial_inertia_tracer_validation_in_map():
     exec = w.build(valid_update)
     exec.run()
     df = exec.history("e1.inertia")
-    assert np.allclose(df["e1.inertia"][-1].to_numpy(), np.array([2.1, 2.1, 2.1, 0.0, 0.0, 0.0, 2.5]))
+    assert np.allclose(
+        df["e1.inertia"][-1].to_numpy(), np.array([2.1, 2.1, 2.1, 0.0, 0.0, 0.0, 2.5])
+    )
 
     # Passing a (3, 3) matrix tracer inside @el.map is rejected at build/trace time
     @el.map
@@ -1247,6 +1303,25 @@ def test_spatial_inertia_tracer_validation_in_map():
     w_bad.spawn(el.Body(inertia=el.SpatialInertia(2.0)), "e1")
     with pytest.raises(ValueError, match="inertia must have shape \\[3\\]"):
         w_bad.build(bad_matrix_update)
+
+
+def test_spatial_inertia_traced_mass_with_concrete_jax_inertia_in_map():
+    # A concrete jnp array closed over by a system mixes with a traced mass (e.g. a fuel-burn update)
+    diag = np.array([2.0, 3.0, 4.0])
+    off_diag = np.array([0.1, -0.2, 0.3])
+
+    @el.map
+    def fuel_update(x: X, _inertia: el.Inertia) -> el.Inertia:
+        return el.SpatialInertia(2.0 + x, inertia=diag, inertia_off_diag=off_diag)
+
+    w = el.World()
+    w.spawn([el.Body(), el.C(X, np.array(0.5))], "e1")
+    exec = w.build(fuel_update)
+    exec.run()
+    df = exec.history("e1.inertia")
+    assert np.allclose(
+        df["e1.inertia"][-1].to_numpy(), np.array([2.0, 3.0, 4.0, 0.1, -0.2, 0.3, 2.5])
+    )
 
 
 def test_six_dof_rejects_invalid_time_step_and_rk4_uses_explicit_dt():
@@ -1288,6 +1363,3 @@ def test_six_dof_rejects_invalid_time_step_and_rk4_uses_explicit_dt():
     vel1 = exec1.history("top.world_vel")["top.world_vel"].to_numpy()
     vel2 = exec2.history("top.world_vel")["top.world_vel"].to_numpy()
     assert np.allclose(vel1, vel2, atol=1e-12, rtol=1e-12)
-
-
-
