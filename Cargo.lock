@@ -15961,9 +15961,11 @@ dependencies = [
 
 [[package]]
 name = "webcodecs-video"
-version = "0.1.0"
+version = "0.20.1-alpha.0"
 dependencies = [
  "bevy",
+ "bevy_egui",
+ "egui",
  "js-sys",
  "thiserror 2.0.21",
  "wasm-bindgen",
