@@ -954,6 +954,11 @@ def test_map_seq_decorator_multiple_inputs_outputs():
     assert_frame_equal(df.drop("time"), expected_df)
 
 
+def _world_to_body(q_xyzw, v):
+    """Rotate a world-frame vector into the body frame via el.Quaternion."""
+    return el.Quaternion(q_xyzw).inverse() @ v
+
+
 def test_spatial_inertia_off_diag_and_matrix():
     inertia_default = el.SpatialInertia(2.5, np.array([1.0, 2.0, 3.0]))
     assert np.allclose(inertia_default.mass(), 2.5)
@@ -981,4 +986,129 @@ def test_spatial_inertia_off_diag_and_matrix():
         ]
     )
     assert np.allclose(inertia_full.inertia_matrix(), expected_mat)
+
+
+def test_six_dof_euler_axisymmetric_precession_and_conservation():
+    """Torque-free axisymmetric top precesses at Omega_p = ((It - Ix) / It) * p0."""
+    ix = 0.05
+    it = 5.0
+    p0 = 20.0
+    q0 = 1.0
+    r0 = 0.0
+    dt = 0.001
+    steps = 1000
+
+    w = el.World()
+    w.spawn(
+        el.Body(
+            world_pos=el.SpatialTransform(linear=np.zeros(3)),
+            world_vel=el.SpatialMotion(angular=np.array([p0, q0, r0])),
+            inertia=el.SpatialInertia(10.0, inertia=np.array([ix, it, it])),
+        ),
+        "top",
+    )
+    exec = w.build(el.six_dof(dt), simulation_rate=1.0 / dt)
+    exec.run(steps)
+
+    df = exec.history(["top.world_pos", "top.world_vel"])
+    pos_hist = df["top.world_pos"].to_numpy()
+    vel_hist = df["top.world_vel"].to_numpy()
+
+    i_body = np.diag(np.array([ix, it, it]))
+    omega_p = ((it - ix) / it) * p0
+
+    l0_world = i_body @ np.array([p0, q0, r0])
+    ke0 = 0.5 * float(np.array([p0, q0, r0]) @ l0_world)
+
+    for step_idx in (250, 500, 1000):
+        t = step_idx * dt
+        q_xyzw = pos_hist[step_idx, :4]
+        omega_world = vel_hist[step_idx, :3]
+        omega_body = _world_to_body(q_xyzw, omega_world)
+
+        expected_omega_body = np.array(
+            [
+                p0,
+                q0 * float(np.cos(omega_p * t)),
+                -q0 * float(np.sin(omega_p * t)),
+            ]
+        )
+        assert np.allclose(omega_body, expected_omega_body, atol=2e-3, rtol=2e-3)
+
+        l_world = el.Quaternion(q_xyzw) @ (i_body @ omega_body)
+        ke = 0.5 * float(omega_body @ (i_body @ omega_body))
+        assert np.isclose(np.linalg.norm(l_world), np.linalg.norm(l0_world), rtol=1e-5)
+        assert np.allclose(l_world, l0_world, atol=6e-3, rtol=3e-3)
+        assert np.isclose(ke, ke0, rtol=1e-5)
+
+
+def test_six_dof_intermediate_axis_instability_and_rotated_inertia_invariance():
+    """Dzhanibekov flip matches between diagonal principal axes and dense rotated inertia."""
+    i_diag = np.array([1.0, 2.0, 3.0])
+    i_prin = np.diag(i_diag)
+
+    # Rotate body 2's coordinate frame relative to body 1 by R0:
+    # body 1 has q1(0) = I and diagonal inertia I_prin;
+    # body 2 has q2(0) = q_0^{-1} and dense inertia I_rot = R0 @ I_prin @ R0.T.
+    # Both represent the exact same physical rigid body in the world frame.
+    axis = np.array([1.0, 2.0, -1.0])
+    axis = axis / np.linalg.norm(axis)
+    angle = 0.6
+    q_r0 = el.Quaternion.from_axis_angle(axis, angle)
+    # Rotation matrix R0 with columns q_r0 @ e_i, built from quaternion-vector products.
+    r0 = np.column_stack([q_r0 @ e for e in np.eye(3)])
+    i_rot = r0 @ i_prin @ r0.T
+    i_rot_diag = np.array([i_rot[0, 0], i_rot[1, 1], i_rot[2, 2]])
+    i_rot_off_diag = np.array([i_rot[0, 1], i_rot[0, 2], i_rot[1, 2]])
+
+    # Spin near intermediate axis (axis 2) with small perturbation to trigger flip
+    omega_world_0 = np.array([0.05, 5.0, 0.05])
+    dt = 0.002
+    steps = 1800  # 3.6 seconds -> covers a full 180-deg flip of the intermediate axis
+
+    w = el.World()
+    w.spawn(
+        el.Body(
+            world_pos=el.SpatialTransform(angular=el.Quaternion.identity(), linear=np.zeros(3)),
+            world_vel=el.SpatialMotion(angular=omega_world_0),
+            inertia=el.SpatialInertia(1.0, inertia=i_diag),
+        ),
+        "principal",
+    )
+    w.spawn(
+        el.Body(
+            world_pos=el.SpatialTransform(angular=q_r0.inverse(), linear=np.zeros(3)),
+            world_vel=el.SpatialMotion(angular=omega_world_0),
+            inertia=el.SpatialInertia(
+                1.0,
+                inertia=i_rot_diag,
+                inertia_off_diag=i_rot_off_diag,
+            ),
+        ),
+        "rotated",
+    )
+
+    exec = w.build(el.six_dof(dt), simulation_rate=1.0 / dt)
+    exec.run(steps)
+
+    df = exec.history(
+        [
+            "principal.world_pos",
+            "principal.world_vel",
+            "rotated.world_pos",
+            "rotated.world_vel",
+        ]
+    )
+    vel_prin = df["principal.world_vel"].to_numpy()[:, :3]
+    vel_rot = df["rotated.world_vel"].to_numpy()[:, :3]
+    pos_prin = df["principal.world_pos"].to_numpy()[:, :4]
+
+    # World angular velocity trajectories must be identical for the two frames
+    assert np.allclose(vel_prin, vel_rot, atol=1e-6, rtol=1e-6)
+
+    # Confirm the intermediate-axis (body Y) actually flips sign in the principal body frame
+    omega_y_start = float(_world_to_body(pos_prin[0], vel_prin[0])[1])
+    omega_y_end = float(_world_to_body(pos_prin[-1], vel_prin[-1])[1])
+    assert omega_y_start > 4.0
+    assert omega_y_end < -4.0
 

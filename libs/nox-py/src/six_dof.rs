@@ -134,11 +134,20 @@ pub struct Force<R: OwnedRepr = Op>(pub SpatialForce<f64, R>);
 #[derive(Clone, Component, ReprMonad)]
 pub struct Inertia<R: OwnedRepr = Op>(pub SpatialInertia<f64, R>);
 
-fn calc_accel(q: Query<(Force, Inertia, WorldPos)>) -> Query<WorldAccel> {
-    q.map(|force: Force, inertia: Inertia, pos: WorldPos| {
+fn calc_accel(q: Query<(Force, Inertia, WorldPos, WorldVel)>) -> Query<WorldAccel> {
+    q.map(|force: Force, inertia: Inertia, pos: WorldPos, vel: WorldVel| {
         let q = pos.0.angular();
-        let body_frame_force = q.inverse() * force.0;
-        let body_frame_accel = body_frame_force / inertia.0;
+        let q_inv = q.inverse();
+        let omega_body = &q_inv * vel.0.angular();
+        let body_frame_force = q_inv * force.0;
+
+        let angular_momentum_body = inertia.0.apply_inertia(&omega_body);
+        let gyro_torque_body = omega_body.cross(&angular_momentum_body);
+        let net_torque_body = body_frame_force.torque() - gyro_torque_body;
+        let ang_accel_body = inertia.0.solve_inertia(&net_torque_body);
+
+        let lin_accel_body = body_frame_force.force() / inertia.0.mass();
+        let body_frame_accel = SpatialMotion::new(ang_accel_body, lin_accel_body);
         let world_frame_accel = q * body_frame_accel;
         WorldAccel(world_frame_accel)
     })
