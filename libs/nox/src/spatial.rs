@@ -2,8 +2,8 @@
 //! Uses Featherstone’s spatial vector algebra notation for rigid-body dynamics as it is a compact way of representing the state of a rigid body with six degrees of freedom.
 //! You can read a short into [here](https://homes.cs.washington.edu/~todorov/courses/amath533/FeatherstoneSlides.pdf) or in [Rigid Body Dynamics Algorithms (Featherstone - 2008)](https://link.springer.com/book/10.1007/978-1-4899-7560-7).
 use crate::{
-    ArrayRepr, Const, DefaultRepr, Field, MRP, OwnedRepr, Quaternion, RealField, ReprMonad, Scalar,
-    Tensor, TensorItem, Vector,
+    ArrayRepr, Const, DefaultRepr, Field, MRP, Matrix, Matrix3, OwnedRepr, Quaternion, RealField,
+    ReprMonad, Scalar, Tensor, TensorItem, Vector,
 };
 use core::ops::Div;
 use core::ops::{Add, Mul};
@@ -255,8 +255,14 @@ impl<T: RealField, R: OwnedRepr> Add for SpatialForce<T, R> {
     }
 }
 
-/// A spatial inertia is a 7D vector that represents the mass, moment of inertia, and momentum of a rigid body in 3D space.
-/// The inertia matrix is assumed to be symmetric and represented in its diagonalized form.
+/// A spatial inertia is a 7D vector that represents the symmetric 3x3 moment of inertia tensor and mass of a rigid body in 3D space.
+/// The layout is `[Ixx, Iyy, Izz, Ixy, Ixz, Iyz, mass]`.
+///
+/// Sign convention: slots `3..6` store the signed off-diagonal entries of the
+/// inertia tensor matrix itself, i.e. `I_xy` in
+/// `[[Ixx, Ixy, Ixz], [Ixy, Iyy, Iyz], [Ixz, Iyz, Izz]]`, where
+/// `I_xy = -∫ x*y dm`. If source data (e.g. a CAD workbook) gives products of
+/// inertia `P_xy = +∫ x*y dm`, negate them before storing: `I_xy = -P_xy`.
 pub struct SpatialInertia<T: TensorItem, R: OwnedRepr = DefaultRepr> {
     pub inner: Vector<T, 7, R>,
 }
@@ -311,20 +317,20 @@ where
 }
 
 impl<T: TensorItem + RealField, R: OwnedRepr> SpatialInertia<T, R> {
-    /// Constructs a new spatial inertia, in diagonalized form, from inertia, momentum, and mass components.
+    /// Constructs a new spatial inertia from diagonal inertia `[Ixx, Iyy, Izz]`, off-diagonal inertia `[Ixy, Ixz, Iyz]`, and scalar mass.
     pub fn new(
         inertia: impl Into<Vector<T, 3, R>>,
-        momentum: impl Into<Vector<T, 3, R>>,
+        inertia_off_diag: impl Into<Vector<T, 3, R>>,
         mass: impl Into<Scalar<T, R>>,
     ) -> Self {
         let inertia = inertia.into();
-        let momentum = momentum.into();
+        let inertia_off_diag = inertia_off_diag.into();
         let mass = mass.into().broadcast::<Const<1>>();
-        let inner = inertia.concat(momentum).concat(mass);
+        let inner = inertia.concat(inertia_off_diag).concat(mass);
         SpatialInertia { inner }
     }
 
-    /// Constructs spatial inertia from a mass, assuming momentum is 0 and the inertia is the same value as the mass along all axes.
+    /// Constructs spatial inertia from a mass, assuming off-diagonal inertia is 0 and the diagonal inertia equals the mass along all axes.
     pub fn from_mass(mass: impl Into<Scalar<T, R>>) -> Self {
         let mass = mass.into();
         SpatialInertia::new(
@@ -334,19 +340,69 @@ impl<T: TensorItem + RealField, R: OwnedRepr> SpatialInertia<T, R> {
         )
     }
 
-    /// Returns the diagonal inertia as a diagonalized vector.
+    /// Returns the diagonal inertia `[Ixx, Iyy, Izz]` as a 3-vector.
     pub fn inertia_diag(&self) -> Vector<T, 3, R> {
         self.inner.fixed_slice(&[0])
     }
 
-    /// Returns the momentum as a vector.
-    pub fn momentum(&self) -> Vector<T, 3, R> {
+    /// Returns the off-diagonal inertia tensor entries `[Ixy, Ixz, Iyz]` as a 3-vector.
+    /// These are the signed matrix entries (`I_xy = -∫ x*y dm`), not products of inertia.
+    pub fn inertia_off_diag(&self) -> Vector<T, 3, R> {
         self.inner.fixed_slice(&[3])
+    }
+
+    /// Reconstructs the symmetric 3x3 inertia tensor from `inertia_diag` and `inertia_off_diag`.
+    pub fn inertia_matrix(&self) -> Matrix3<T, R> {
+        let [ixx, iyy, izz] = self.inertia_diag().parts();
+        let [ixy, ixz, iyz] = self.inertia_off_diag().parts();
+        Matrix::from_scalars([
+            ixx,
+            ixy.clone(),
+            ixz.clone(),
+            ixy,
+            iyy,
+            iyz.clone(),
+            ixz,
+            iyz,
+            izz,
+        ])
+    }
+
+    /// Multiplies the 3x3 inertia tensor by an angular velocity vector (`I * omega`).
+    pub fn apply_inertia(&self, omega: &Vector<T, 3, R>) -> Vector<T, 3, R> {
+        let [ixx, iyy, izz] = self.inertia_diag().parts();
+        let [ixy, ixz, iyz] = self.inertia_off_diag().parts();
+        let [wx, wy, wz] = omega.parts();
+        let hx = ixx * &wx + &ixy * &wy + &ixz * &wz;
+        let hy = ixy * &wx + iyy * &wy + &iyz * &wz;
+        let hz = ixz * wx + iyz * wy + izz * wz;
+        Vector::from_arr([hx, hy, hz])
+    }
+
+    /// Solves `I * alpha = torque` for angular acceleration `alpha` using the symmetric 3x3 cofactor inverse.
+    pub fn solve_inertia(&self, torque: &Vector<T, 3, R>) -> Vector<T, 3, R> {
+        let [ixx, iyy, izz] = self.inertia_diag().parts();
+        let [ixy, ixz, iyz] = self.inertia_off_diag().parts();
+        let [tx, ty, tz] = torque.parts();
+
+        let c_xx = &iyy * &izz - &iyz * &iyz;
+        let c_xy = &ixz * &iyz - &ixy * &izz;
+        let c_xz = &ixy * &iyz - &ixz * &iyy;
+        let c_yy = &ixx * &izz - &ixz * &ixz;
+        let c_yz = &ixy * &ixz - &ixx * &iyz;
+        let c_zz = &ixx * &iyy - &ixy * &ixy;
+
+        let det = &ixx * &c_xx + &ixy * &c_xy + &ixz * &c_xz;
+
+        let ax = (&c_xx * &tx + &c_xy * &ty + &c_xz * &tz) / &det;
+        let ay = (&c_xy * &tx + &c_yy * &ty + &c_yz * &tz) / &det;
+        let az = (c_xz * tx + c_yz * ty + c_zz * tz) / det;
+        Vector::from_arr([ax, ay, az])
     }
 
     /// Returns the mass as a scalar.
     pub fn mass(&self) -> Scalar<T, R> {
-        self.inner.fixed_slice::<Const<1>>(&[6]).reshape()
+        self.inner.get(6)
     }
 }
 
@@ -355,7 +411,7 @@ impl<T: TensorItem + RealField, R: OwnedRepr> Div<SpatialInertia<T, R>> for Spat
 
     fn div(self, rhs: SpatialInertia<T, R>) -> Self::Output {
         let accel = self.force() / rhs.mass();
-        let ang_accel = self.torque() / rhs.inertia_diag();
+        let ang_accel = rhs.solve_inertia(&self.torque());
         SpatialMotion::new(ang_accel, accel)
     }
 }
@@ -364,9 +420,8 @@ impl<T: TensorItem + RealField, R: OwnedRepr> Mul<SpatialMotion<T, R>> for Spati
     type Output = SpatialForce<T, R>;
 
     fn mul(self, rhs: SpatialMotion<T, R>) -> Self::Output {
-        let force: Vector<T, 3, R> =
-            self.mass() * rhs.linear() - self.momentum().cross(&rhs.angular());
-        let torque = self.inertia_diag() * rhs.angular() + self.momentum().cross(&rhs.linear());
+        let force: Vector<T, 3, R> = self.mass() * rhs.linear();
+        let torque = self.apply_inertia(&rhs.angular());
         SpatialForce::new(torque, force)
     }
 }
@@ -673,5 +728,57 @@ mod tests {
             ], // rotation of 0.25 around axis angle
             epsilon = 1e-5
         )
+    }
+
+    #[test]
+    fn test_spatial_inertia_diagonal_solve_matches_elementwise() {
+        let diag = tensor![2.0, 4.0, 5.0];
+        let off_diag = tensor![0.0, 0.0, 0.0];
+        let inertia: SpatialInertia<f64, ArrayRepr> = SpatialInertia::new(diag, off_diag, 10.0);
+        let torque = tensor![6.0, -8.0, 15.0];
+
+        assert_eq!(inertia.inertia_diag(), diag);
+        assert_eq!(inertia.inertia_off_diag(), off_diag);
+        assert_eq!(
+            inertia.inertia_matrix(),
+            tensor![[2.0, 0.0, 0.0], [0.0, 4.0, 0.0], [0.0, 0.0, 5.0]]
+        );
+        assert_relative_eq!(
+            inertia.apply_inertia(&tensor![1.0, 2.0, 3.0]),
+            tensor![2.0, 8.0, 15.0],
+            epsilon = 1e-12
+        );
+        assert_relative_eq!(
+            inertia.solve_inertia(&torque),
+            torque / diag,
+            epsilon = 1e-12
+        );
+    }
+
+    #[test]
+    fn test_spatial_inertia_dense_symmetric_solve() {
+        let diag = tensor![4.0, 5.0, 6.0];
+        let off_diag = tensor![-0.5, 0.25, -0.75];
+        let inertia: SpatialInertia<f64, ArrayRepr> = SpatialInertia::new(diag, off_diag, 3.0);
+
+        let i_mat = inertia.inertia_matrix();
+        assert_eq!(
+            i_mat,
+            tensor![[4.0, -0.5, 0.25], [-0.5, 5.0, -0.75], [0.25, -0.75, 6.0]]
+        );
+
+        let alpha_expected = tensor![1.2, -0.8, 2.5];
+        let torque = inertia.apply_inertia(&alpha_expected);
+        let alpha_solved = inertia.solve_inertia(&torque);
+        assert_relative_eq!(alpha_solved, alpha_expected, epsilon = 1e-12);
+
+        let force = SpatialForce::new(torque, tensor![9.0, -6.0, 3.0]);
+        let motion = force / inertia;
+        assert_relative_eq!(motion.angular(), alpha_expected, epsilon = 1e-12);
+        assert_relative_eq!(
+            motion.linear(),
+            tensor![3.0, -2.0, 1.0],
+            epsilon = 1e-12
+        );
     }
 }
