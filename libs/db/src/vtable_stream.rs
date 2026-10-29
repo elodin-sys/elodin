@@ -22,14 +22,15 @@ use stellarator::{
 };
 use tracing::{trace, warn};
 
-use crate::{Component, DB, Error, FixedRateStreamState, send_with_timeout};
+use crate::{Component, ConnectionTasks, DB, Error, FixedRateStreamState, send_with_timeout};
 
-pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
+pub(crate) async fn handle_vtable_stream<A: AsyncWrite + 'static>(
     id: [u8; 2],
     vtable: VTable,
     db: Arc<DB>,
     tx: Arc<Mutex<PacketSink<A>>>,
     req_id: RequestId,
+    tasks: ConnectionTasks,
 ) -> Result<(), Error> {
     trace!("spawning vtable stream");
     let table_len = vtable
@@ -99,7 +100,8 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
                         .ok_or(Error::ComponentNotFound(component_id))?
                         .clone();
 
-                    let state = db.get_or_insert_fixed_rate_state(stream_id, behavior);
+                    let state = db.fixed_rate_state(stream_id, behavior);
+                    tasks.drive_ticks(state.clone());
                     let initial_tick = state.current_timestamp();
                     plan.insert(
                         0,
@@ -168,8 +170,11 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
     }
     let mut plan_guards = Vec::with_capacity(field_plans.len());
     for (plan, shard, timestamp, prim_type) in field_plans {
-        plan_guards
-            .push(stellarator::spawn(handle_plan(plan, shard, timestamp, prim_type)).drop_guard());
+        plan_guards.push(
+            tasks
+                .spawn(handle_plan(plan, shard, timestamp, prim_type))
+                .drop_guard(),
+        );
     }
     loop {
         table.wait_ready().await;

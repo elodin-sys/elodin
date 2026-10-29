@@ -17,6 +17,27 @@ Install the elodin-db from the [releases](https://github.com/elodin-sys/elodin/r
 elodin-db run [::]:2240 $HOME/.local/share/elodin/db --config examples/db-config.lua --log-level warn
 ```
 
+### Embed an Impeller connection in Rust
+
+`serve_connection(io, db, cancel)` serves an existing `Arc<DB>` through caller-provided I/O.
+Impeller is the telemetry protocol that Elodin uses.
+The I/O type implements `stellarator::io::AsyncRead` and `AsyncWrite`.
+This function starts no TCP, UDP, or HTTP listener.
+
+Poll the connection future on a Stellarator executor.
+To stop one connection, call `cancel.cancel()` on its `stellarator::util::CancelToken`.
+Then await the connection future to wait for cleanup.
+Cancellation returns `Error::Cancelled`.
+Other connection errors return to the caller, including EOF when the peer disconnects.
+
+Completion means that internal subscriptions, stream tasks, and query workers release their transport and DB references.
+A shared playback clock continues while another connection uses it.
+Dropping the future requests cancellation but does not wait for cleanup.
+Await completion before removing the database directory.
+
+The integration tests in `tests/embedded_connection.rs` show a memory transport adapter and protocol requests against a real DB.
+The existing `handle_conn` TCP entry point uses the same connection API.
+
 ### gRPC API for foreign clients
 
 ```sh

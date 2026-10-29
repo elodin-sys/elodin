@@ -40,9 +40,8 @@ use stellarator::{
     buf::Slice,
     io::{AsyncRead, AsyncWrite, OwnedReader, OwnedWriter, SplitExt},
     net::{TcpListener, TcpStream, UdpSocket},
-    struc_con::Joinable,
     sync::{Mutex, WaitQueue},
-    util::AtomicCell,
+    util::{AtomicCell, CancelToken},
 };
 use time_series::TimeSeries;
 use tracing::{debug, info, trace, warn};
@@ -50,6 +49,8 @@ use vtable_stream::handle_vtable_stream;
 use zerocopy::IntoBytes;
 
 pub use error::Error;
+mod connection;
+use connection::ConnectionTasks;
 
 pub(crate) const COMPONENT_CREATION_INDEX_METADATA_KEY: &str = "_creation_index";
 pub const TX_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -1188,8 +1189,24 @@ impl DB {
         stream_id: StreamId,
         behavior: FixedRateBehavior,
     ) -> Arc<FixedRateStreamState> {
+        let stream_state = self.fixed_rate_state(stream_id, behavior);
+        if !stream_state
+            .driver_spawned
+            .swap(true, atomic::Ordering::SeqCst)
+        {
+            let driver_state = stream_state.clone();
+            stellarator::struc_con::stellar(move || run_tick_driver(driver_state));
+        }
+        stream_state
+    }
+
+    fn fixed_rate_state(
+        &self,
+        stream_id: StreamId,
+        behavior: FixedRateBehavior,
+    ) -> Arc<FixedRateStreamState> {
         let mut state = self.state.write().expect("poisoned lock");
-        let stream_state = state
+        state
             .streams
             .entry(stream_id)
             .or_insert_with(|| {
@@ -1204,16 +1221,7 @@ impl DB {
                     behavior.frequency,
                 ))
             })
-            .clone();
-        // Spawn a dedicated tick driver if one hasn't been spawned yet
-        if !stream_state
-            .driver_spawned
-            .swap(true, atomic::Ordering::SeqCst)
-        {
-            let driver_state = stream_state.clone();
-            stellarator::struc_con::stellar(move || run_tick_driver(driver_state));
-        }
-        stream_state
+            .clone()
     }
 }
 
@@ -1869,11 +1877,7 @@ impl Server {
 
     pub async fn handle_udp(addr: SocketAddr, db: Arc<DB>) -> Result<(), Error> {
         let socket = UdpSocket::bind(addr)?;
-        let (rx, tx) = socket.split();
-        let rx = PacketStream::new(rx).with_max_len(MAX_PACKET_LEN);
-        let tx = Arc::new(Mutex::new(PacketSink::new(tx)));
-        handle_conn_inner(tx, rx, db).await?;
-        Ok(())
+        serve_connection(socket, db, CancelToken::new()).await
     }
 }
 
@@ -1884,10 +1888,7 @@ impl Server {
 const MAX_PACKET_LEN: usize = 256 * 1024 * 1024;
 
 pub async fn handle_conn(stream: TcpStream, db: Arc<DB>) {
-    let (rx, tx) = stream.split();
-    let rx = PacketStream::new(rx).with_max_len(MAX_PACKET_LEN);
-    let tx = Arc::new(Mutex::new(PacketSink::new(tx)));
-    match handle_conn_inner(tx, rx, db).await {
+    match serve_connection(stream, db, CancelToken::new()).await {
         Ok(_) => {}
         Err(err) if err.is_stream_closed() => {}
         Err(err) => {
@@ -1896,10 +1897,47 @@ pub async fn handle_conn(stream: TcpStream, db: Arc<DB>) {
     }
 }
 
+/// Serve Impeller on caller-provided I/O and an existing database.
+///
+/// This function binds no listeners. Poll it on a Stellarator executor.
+/// The transport must implement Stellarator's buffer-owning I/O traits.
+///
+/// To stop the connection, cancel `cancel` and await this function.
+/// Cancellation returns [`Error::Cancelled`]. Transport and framing errors also
+/// return to the caller, including EOF when the peer closes the transport.
+/// On return, all connection tasks release their I/O and DB references.
+/// Shared tick drivers continue while another connection needs them.
+///
+/// Dropping this future requests cancellation but does not wait for cleanup.
+/// Await completion before deleting the database or its storage directory.
+pub async fn serve_connection<A>(stream: A, db: Arc<DB>, cancel: CancelToken) -> Result<(), Error>
+where
+    A: AsyncRead + AsyncWrite + Send + Sync + 'static,
+{
+    let tasks = ConnectionTasks::new();
+    let _cancel_on_drop = tasks.cancel_guard();
+    let result = futures_lite::future::or(
+        async {
+            cancel.wait().await;
+            Err(Error::Cancelled)
+        },
+        async {
+            let (rx, tx) = stream.split();
+            let rx = PacketStream::new(rx).with_max_len(MAX_PACKET_LEN);
+            let tx = Arc::new(Mutex::new(PacketSink::new(tx)));
+            handle_conn_inner(tx, rx, db, &tasks).await
+        },
+    )
+    .await;
+    tasks.finish().await;
+    result
+}
+
 async fn handle_conn_inner<A: AsyncRead + AsyncWrite + Send + Sync + 'static>(
     mut tx: Arc<Mutex<PacketSink<OwnedWriter<A>>>>,
     mut rx: PacketStream<OwnedReader<A>>,
     db: Arc<DB>,
+    tasks: &ConnectionTasks,
 ) -> Result<(), Error> {
     let _conn_span = tracing::info_span!("handle_conn").entered();
     let mut buf = vec![0u8; 8 * 1024 * 1024];
@@ -1916,7 +1954,7 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + Send + Sync + 'static>(
             pkt: Some(resp_pkt),
             silent,
         };
-        let result = handle_packet(&pkt, &db, &mut pkt_tx, silent).await;
+        let result = handle_packet(&pkt, &db, &mut pkt_tx, silent, tasks).await;
         buf = pkt.into_buf().into_inner();
         match result {
             Ok(PacketAction::Continue) => {}
@@ -2132,6 +2170,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
     db: &Arc<DB>,
     tx: &mut PacketTx<A>,
     silent: bool,
+    tasks: &ConnectionTasks,
 ) -> Result<PacketAction, Error> {
     let _pkt_span = tracing::info_span!("handle_packet").entered();
     trace!(?pkt, "handling pkt");
@@ -2166,13 +2205,13 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                         "missing socket ip",
                     ))
                 })?;
-            handle_unicast_stream(addr, udp_broadcast.stream, db);
+            handle_unicast_stream(addr, udp_broadcast.stream, db, tasks.clone());
         }
         Packet::Msg(m) if m.id == Stream::ID => {
             let stream = m.parse::<Stream>()?;
             let tx = tx.tx.clone();
             let db = db.clone();
-            handle_stream(tx, stream, db, m.req_id);
+            handle_stream(tx, stream, db, m.req_id, tasks.clone());
         }
         Packet::Msg(m) if m.id == SetStreamFilter::ID => {
             let filter = m.parse::<SetStreamFilter>()?;
@@ -2335,7 +2374,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
         Packet::Msg(m) if m.id == SubscribeLastUpdated::ID => {
             let mut tx = tx.clone();
             let db = db.clone();
-            stellarator::spawn(async move {
+            tasks.spawn(async move {
                 let mut last_config_gen = db.db_config_gen.latest();
                 loop {
                     let last_updated = db.last_updated.latest();
@@ -2450,7 +2489,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             let SQLQuery(query) = m.parse::<SQLQuery>()?;
             let db = db.clone();
             let (tokio_tx, rx) = thingbuf::mpsc::channel::<Vec<u8>>(4);
-            let res = stellarator::struc_con::tokio(move |_| async move {
+            let res = tasks.query(move || async move {
                 let mut ctx = db.as_session_context()?;
                 db.insert_views(&mut ctx).await?;
                 let df = ctx.sql(&query).await?;
@@ -2463,18 +2502,19 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                         ::arrow::ipc::writer::StreamWriter::try_new(&mut buf, batch.schema_ref())?;
                     writer.write(&batch)?;
                     writer.finish()?;
-                    let _ = tokio_tx.send(buf).await;
+                    if tokio_tx.send(buf).await.is_err() {
+                        break;
+                    }
                 }
                 Ok::<_, Error>(())
-            })
-            .join();
+            });
             while let Some(batch) = rx.recv().await {
                 tx.send_msg(&ArrowIPC {
                     batch: Some(Cow::Owned(batch)),
                 })
                 .await?;
             }
-            res.await??;
+            res.await?.ok_or(Error::Cancelled)??;
             tx.send_msg(&ArrowIPC { batch: None }).await?;
         }
         Packet::Msg(m) if m.id == SparklineQuery::ID => {
@@ -2714,18 +2754,18 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             let msg_log =
                 db.with_state_mut(|s| s.get_or_insert_msg_log(msg_id, &db.path).cloned())?;
             let req_id = m.req_id;
-            stellarator::spawn(handle_msg_stream(msg_id, req_id, msg_log, tx.tx.clone()));
+            tasks.spawn(handle_msg_stream(msg_id, req_id, msg_log, tx.tx.clone()));
         }
         Packet::Msg(m) if m.id == FixedRateMsgStream::ID => {
             let FixedRateMsgStream { msg_id, fixed_rate } = m.parse::<FixedRateMsgStream>()?;
             let msg_log =
                 db.with_state_mut(|s| s.get_or_insert_msg_log(msg_id, &db.path).cloned())?;
-            let stream_state =
-                db.get_or_insert_fixed_rate_state(fixed_rate.stream_id, fixed_rate.behavior);
+            let stream_state = db.fixed_rate_state(fixed_rate.stream_id, fixed_rate.behavior);
+            tasks.drive_ticks(stream_state.clone());
             {
                 let req_id = m.req_id;
                 let tx = tx.tx.clone();
-                stellarator::struc_con::stellar(move || {
+                tasks.stellar(move || {
                     handle_fixed_rate_msg_stream(msg_id, req_id, msg_log, tx, stream_state)
                 });
             }
@@ -2769,12 +2809,13 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             let vtable = db
                 .with_state(|state| state.vtable_registry.get(&id).cloned())
                 .ok_or(Error::InvalidMsgId)?;
-            stellarator::spawn(handle_vtable_stream(
+            tasks.spawn(handle_vtable_stream(
                 id,
                 vtable,
                 db.clone(),
                 tx.tx.clone(),
                 m.req_id,
+                tasks.clone(),
             ));
         }
         Packet::Msg(m) if m.id == UdpVTableStream::ID => {
@@ -2797,13 +2838,32 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                     .clone();
                 let db = db.clone();
                 let req_id = m.req_id;
-                stellarator::struc_con::stellar(move || async move {
+                let children = tasks.clone();
+                struct UdpStreamGuard {
+                    db: Arc<DB>,
+                    addr: SocketAddr,
+                    id: PacketId,
+                }
+                impl Drop for UdpStreamGuard {
+                    fn drop(&mut self) {
+                        self.db.with_state_mut(|state| {
+                            state.udp_vtable_streams.remove(&(self.addr, self.id));
+                        });
+                    }
+                }
+                let stream_guard = UdpStreamGuard {
+                    db: db.clone(),
+                    addr,
+                    id,
+                };
+                tasks.stellar(move || async move {
+                    let _stream_guard = stream_guard;
                     info!("VTable streaming to udp://{}", addr);
                     let mut socket = UdpSocket::ephemeral()?;
                     socket.connect(addr);
                     let (_, tx) = socket.split();
                     let tx = Arc::new(Mutex::new(PacketSink::new(tx)));
-                    handle_vtable_stream(id, vtable, db, tx, req_id).await
+                    handle_vtable_stream(id, vtable, db, tx, req_id, children).await
                 });
                 state.udp_vtable_streams.insert((addr, id));
                 Ok::<_, Error>(())
@@ -2821,7 +2881,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             let msg_log =
                 db.with_state_mut(|s| s.get_or_insert_msg_log(stream.msg_id, &db.path).cloned())?;
             let req_id = m.req_id;
-            stellarator::spawn(handle_timestamped_msg_stream(
+            tasks.spawn(handle_timestamped_msg_stream(
                 stream.msg_id,
                 req_id,
                 msg_log,
@@ -2943,6 +3003,7 @@ pub struct FixedRateStreamState {
     playing_cell: PlayingCell,
     tick_notify: WaitQueue,
     driver_spawned: AtomicBool,
+    driver_notify: WaitQueue,
 }
 
 impl FixedRateStreamState {
@@ -2961,6 +3022,7 @@ impl FixedRateStreamState {
             frequency: AtomicU64::new(frequency),
             tick_notify: WaitQueue::new(),
             driver_spawned: AtomicBool::new(false),
+            driver_notify: WaitQueue::new(),
         }
     }
 
@@ -3081,14 +3143,15 @@ async fn run_tick_driver(state: Arc<FixedRateStreamState>) {
     }
 }
 
-fn handle_unicast_stream(addr: SocketAddr, stream: Stream, db: Arc<DB>) {
-    stellarator::struc_con::stellar(move || async move {
+fn handle_unicast_stream(addr: SocketAddr, stream: Stream, db: Arc<DB>, tasks: ConnectionTasks) {
+    let children = tasks.clone();
+    tasks.stellar(move || async move {
         info!("UDP unicasting to {}", addr);
         let mut socket = UdpSocket::ephemeral()?;
         socket.connect(addr);
         let (_, tx) = socket.split();
         let tx = Arc::new(Mutex::new(PacketSink::new(tx)));
-        handle_stream(tx.clone(), stream.clone(), db.clone(), 0)
+        handle_stream(tx.clone(), stream.clone(), db.clone(), 0, children)
             .await
             .unwrap();
         Ok::<_, Error>(())
@@ -3100,17 +3163,21 @@ fn handle_stream<A: AsyncWrite + 'static>(
     stream: Stream,
     db: Arc<DB>,
     req_id: RequestId,
+    tasks: ConnectionTasks,
 ) -> stellarator::JoinHandle<()> {
     match stream.behavior {
-        StreamBehavior::RealTime => stellarator::spawn(async move {
-            match handle_real_time_stream(tx, req_id, db).await {
-                Ok(_) => {}
-                Err(err) if err.is_stream_closed() => {}
-                Err(err) => {
-                    warn!(?err, "error streaming data");
+        StreamBehavior::RealTime => {
+            let children = tasks.clone();
+            tasks.spawn(async move {
+                match handle_real_time_stream(tx, req_id, db, children).await {
+                    Ok(_) => {}
+                    Err(err) if err.is_stream_closed() => {}
+                    Err(err) => {
+                        warn!(?err, "error streaming data");
+                    }
                 }
-            }
-        }),
+            })
+        }
         StreamBehavior::FixedRate(fixed_rate) => {
             let state = Arc::new(FixedRateStreamState::new(
                 stream.id,
@@ -3124,12 +3191,8 @@ fn handle_stream<A: AsyncWrite + 'static>(
             ));
             debug!(stream.id = ?stream.id, "inserting stream");
             db.with_state_mut(|s| s.streams.insert(stream.id, state.clone()));
-            // Spawn a dedicated tick driver for this stream state
-            if !state.driver_spawned.swap(true, atomic::Ordering::SeqCst) {
-                let driver_state = state.clone();
-                stellarator::struc_con::stellar(move || run_tick_driver(driver_state));
-            }
-            stellarator::spawn(async move {
+            tasks.drive_ticks(state.clone());
+            tasks.spawn(async move {
                 match handle_fixed_stream(tx, req_id, state, db).await {
                     Ok(_) => {}
                     Err(err) if err.is_stream_closed() => {}
@@ -3152,17 +3215,33 @@ fn handle_stream<A: AsyncWrite + 'static>(
                     .real_time_stream_filters
                     .insert(stream_id, filter.clone());
             });
-            stellarator::spawn(async move {
+            struct FilterGuard {
+                db: Arc<DB>,
+                stream_id: StreamId,
+                filter: Arc<RealTimeStreamFilter>,
+            }
+            impl Drop for FilterGuard {
+                fn drop(&mut self) {
+                    self.db.with_state_mut(|state| {
+                        if state
+                            .real_time_stream_filters
+                            .get(&self.stream_id)
+                            .is_some_and(|current| Arc::ptr_eq(current, &self.filter))
+                        {
+                            state.real_time_stream_filters.remove(&self.stream_id);
+                        }
+                    });
+                }
+            }
+            let filter_guard = FilterGuard {
+                db: db.clone(),
+                stream_id,
+                filter: filter.clone(),
+            };
+            tasks.spawn(async move {
+                let _filter_guard = filter_guard;
                 let result =
                     handle_real_time_stream_batched(tx, req_id, db.clone(), filter.clone()).await;
-                db.with_state_mut(
-                    |state| match state.real_time_stream_filters.get(&stream_id) {
-                        Some(current) if Arc::ptr_eq(current, &filter) => {
-                            state.real_time_stream_filters.remove(&stream_id);
-                        }
-                        _ => {}
-                    },
-                );
                 match result {
                     Ok(_) => {}
                     Err(err) if err.is_stream_closed() => {}
@@ -3179,6 +3258,7 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
     sink: Arc<Mutex<PacketSink<A>>>,
     req_id: RequestId,
     db: Arc<DB>,
+    tasks: ConnectionTasks,
 ) -> Result<(), Error> {
     let mut visited_ids = HashSet::new();
     loop {
@@ -3220,7 +3300,7 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
             // Spawn the data handler for this component
             let sink_clone = sink.clone();
             let component_clone = component.clone();
-            stellarator::spawn(handle_real_time_component(
+            tasks.spawn(handle_real_time_component(
                 sink_clone,
                 component_clone,
                 req_id,

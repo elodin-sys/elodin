@@ -294,13 +294,13 @@ impl StateCell {
             // requeue it, but decrement the ref count for the waker that was
             // used for this wakeup.
             if test_dbg!(state.get(State::COMPLETED)) || test_dbg!(state.get(State::WOKEN)) {
-                let new_state = state.drop_ref();
-                *state = new_state;
-                return if new_state.ref_count() == 0 {
-                    OrDrop::Drop
-                } else {
-                    OrDrop::Action(ScheduleAction::None)
-                };
+                // The caller handles the final decrement through drop_ref.
+                // Leave that reference intact so it is released exactly once.
+                if state.ref_count() == 1 {
+                    return OrDrop::Drop;
+                }
+                *state = state.drop_ref();
+                return OrDrop::Action(ScheduleAction::None);
             }
 
             // Otherwise, transition to the notified state and enqueue the task.
