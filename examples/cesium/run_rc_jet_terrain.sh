@@ -55,7 +55,6 @@ case "$photo3d" in
         # Photogrammetry already contains imagery; it is not the physics surface.
         export CESIUM_ION_ASSET_ID=2275207
         export ELODIN_RC_JET_HEIGHT_ASSET_ID="${ELODIN_RC_JET_HEIGHT_ASSET_ID:-1}"
-        export CESIUM_CREDIT="Google Maps"
         unset CESIUM_ION_IMAGERY_ASSET_ID
         ;;
     off)
@@ -66,7 +65,9 @@ case "$photo3d" in
 esac
 export ELODIN_ASSETS="${ELODIN_ASSETS:-$PWD/assets}"
 export ELODIN_RC_JET_TERRAIN=cesium
-export CESIUM_LOD_RETENTION_METERS="${CESIUM_LOD_RETENTION_METERS:-500}"
-export CESIUM_MAXIMUM_SCREEN_ERROR="${CESIUM_MAXIMUM_SCREEN_ERROR:-16}"
+# Favor steady flight over distant tile detail on a shared laptop GPU.
+export CESIUM_LOD_RETENTION_METERS="${CESIUM_LOD_RETENTION_METERS:-0}"
+export CESIUM_MAXIMUM_SCREEN_ERROR="${CESIUM_MAXIMUM_SCREEN_ERROR:-48}"
+export ELODIN_CESIUM_OVERLAY_FILE="${ELODIN_CESIUM_OVERLAY_FILE-$PWD/examples/cesium/data/mojave-overlay.json}"
 unset CESIUM_TILESET_URL
 exec "${ELODIN_EDITOR_BIN:-elodin}" editor examples/rc-jet/main.py "${editor_args[@]}"

@@ -88,19 +88,15 @@ the selected terrain asset in standard mode. Set
 Python launches also default heights to World Terrain (`1`). Photogrammetry is
 visual geometry, not a collision mesh: buildings can intersect the aircraft.
 
-On a 16 GB M2, start with one Editor instance and the default 16 px screen error.
-Increasing `CESIUM_MAXIMUM_SCREEN_ERROR` to `24` or `32` reduces requested detail;
-setting `CESIUM_LOD_RETENTION_METERS=0` releases detail sooner outside the current
-views. Neither setting is a cap on total process or GPU memory. Validate the
+On a 16 GB M2, use one Editor instance. The launcher defaults to 48 px screen
+error and no detail-retention margin, requesting coarser tiles and releasing
+detail sooner outside the current views. For sharper terrain, override
+`CESIUM_MAXIMUM_SCREEN_ERROR=16` (at a higher rendering and streaming cost).
+Neither setting is a cap on total process or GPU memory. Validate the
 color and infrared views together before claiming a frame rate. Do not run a
 standalone viewer alongside RC-jet when measuring.
 
-Photo 3D keeps a compact Google Maps attribution next to the Sources menu;
-provider details are available in that menu. Preserve the required attributions
-in shared screenshots and video. The current integration does not provide a persistent offline terrain
-package or a frame-by-frame video export. For a promotional Google-tile video,
-keep the clip at most 30 seconds and include the required promotional notice;
-see the [provider's capture and attribution guidance](https://developers.google.com/maps/documentation/tile/policies).
+
 
 `runtime_config.load_config()` reads and validates this mode at the entry point:
 unset or `planar` selects the planar preset, and `cesium` selects the Cesium preset.
@@ -142,18 +138,23 @@ camera stays above the sampled ground. The heightmap is not a collision mesh.
 
 | Preview | Resolution | Configured cadence | Recording |
 | --- | --- | --- | --- |
-| Color | 640 × 480 | 30 fps | H.264 |
-| Infrared | 640 × 512, 18° horizontal field of view | 15 fps | H.264 |
+| Color | 480 × 360 | 24 fps | H.264 |
+| Infrared | 480 × 384, 18° horizontal field of view | 24 fps | H.264 |
 
-Both panels are enabled. Infrared retains the Boson-style optics and LWIR effect;
-the planar mode retains its original 60 fps raw infrared configuration. H.264
-previews are lossy; use raw captures for pixel comparisons.
+Both panels are enabled and share the same configured cadence. Reduced preview
+resolution cuts requested sensor pixels per second by about 39% compared with
+640×480 at 30 fps plus 640×512 at 15 fps. Color shadows are disabled, and the
+Cesium layout omits the redundant target and FPV scene viewports. Infrared
+retains the Boson-style field of view and LWIR effect; planar mode retains its
+original full-resolution cameras and 60 fps raw infrared configuration.
+H.264 previews are lossy; use full-resolution raw captures for pixel comparisons.
 
-Co-located sensors with matching orientations load terrain through the wider
-view first. Once it is ready, the zoomed view requests additional detail without
-blocking either video stream. Initial IR images can therefore use coarser terrain
-while refinement continues. Fixed-reference captures still wait for their
-requested terrain detail.
+Co-located, aligned sensors share the wider view's terrain selection throughout
+the flight. This deliberately sacrifices independent zoom refinement: repeated
+requests for finer IR tiles could keep the shared renderer on an old published
+selection until terrain disappeared from view. Sensors at different positions,
+orientations or clipping ranges still contribute their own terrain requirements.
+
 
 Cesium imagery contains no measured temperatures. Terrain infrared uses Elodin's
 lighting-based estimate; tagged objects use their configured temperatures.
@@ -165,10 +166,11 @@ and loading times depend on the machine and connection.
 The Editor displays a loading message until its initial terrain is ready. The
 simulation continues during that load. Sensor cameras load their first pose
 before emitting images, then follow the live simulation. On macOS, the Editor
-is limited to about 24 fps when sensor panels are present to leave GPU capacity
-for the sensor renderer.
+is limited to about 30 fps with up to two reduced previews (at most 480×384
+and 24 fps each), or about 24 fps for heavier sensor configurations. This leaves
+GPU capacity for the sensor renderer; it does not guarantee those frame rates.
 
-The launcher uses a 500 m detail-retention margin and 16 px screen error. Override
+The launcher uses no detail-retention margin and 48 px screen error. Override
 `CESIUM_LOD_RETENTION_METERS` or `CESIUM_MAXIMUM_SCREEN_ERROR` to compare settings;
 a zero margin disables retention.
 
@@ -241,3 +243,50 @@ height SDK and RC-jet reuse `elodin.geodesy` for shared ECEF conversions.
 Remaining discussion: allowing other providers to prepare height grids without
 changing the simulation lookup, and validating performance and visual/physics
 agreement on longer flights.
+
+
+### Offline map overlay demonstration
+
+The RC-jet launcher enables an offline OSM overlay: named summits with their
+published elevations, named places, and beige roads/tracks with metadata on
+hover. The Map menu toggles each layer. Sensor images remain independent.
+
+`data/mojave-overpass.json` is the original Overpass response and
+`data/mojave.overpassql` is the exact query. The active prepared overlay uses the original
+24 × 24 km flight area. `data/mojave-context-overpass.json` and its query
+retain a wider, approximately 100 × 100 km context for later preparation.
+Preparing the enlarged terrain grid currently times out; it is not enabled
+in the rendered demo. The simulation's physics grid is unchanged.
+
+`data/mojave-overlay.json` contains prepared ECEF geometry. The active overlay uses the existing 10 m flight-site grid; an optional
+context grid can be combined with it when available.
+Runtime rendering performs no Overpass requests or height sampling.
+All data is © OpenStreetMap contributors, ODbL 1.0; source IDs, tags, data
+timestamp and heightmap SHA-256 hashes are preserved. See
+https://www.openstreetmap.org/copyright.
+
+Rebuild inside `nix develop`:
+
+```sh
+uv run examples/cesium/export_map_overlay.py \
+  --source examples/cesium/data/mojave-overpass.json \
+  --heightmap /path/to/context-heightmap.json \
+  --detail-heightmap /path/to/flight-heightmap.json \
+  --output examples/cesium/data/mojave-overlay.json
+```
+
+OSM `ele` is metres above mean sea level. Placement uses WGS84 ellipsoid
+heights; missing OSM elevations are not invented. Roads are tessellated at
+approximately 60 m intervals and clipped to the context grid. Existing
+RC-jet geodesy performs the ECEF conversion.
+
+Beige roads use one depth-tested 3D mesh, visible in Editor viewports only.
+Labels and hover cards are terrain-occlusion tested; up to 12 labels are
+tested per viewport per frame to bound CPU cost. Labels are clipped and
+decluttered. This is a visualization prototype, not a navigation map; road
+placement inherits the sampled grid's accuracy.
+
+Right-drag detaches the demonstration viewport from the moving aircraft,
+so orbiting uses a stable terrain reference. **Follow aircraft** or the cube's reset button restores
+the live chase view. The demo hides the yellow flight trail and body
+axis labels. Set `ELODIN_CESIUM_OVERLAY_FILE=''` to disable the map overlay.
