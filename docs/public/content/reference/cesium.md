@@ -12,39 +12,37 @@ icon = ""
 order = 4
 +++
 
-You have a Cesium ion account and a place in mind. You want your aircraft to fly
-over that part of the desert, with the surrounding terrain visible in Elodin.
-Start with the RC-jet example, then use the same steps for your own simulation.
+You have a Cesium ion account and a latitude/longitude in mind. Start by flying
+RC-jet at Mojave, then move the simulation to your chosen site.
 
-The desktop example runs the simulation and streams its surroundings. The
-current browser demo replays a recorded flight while streaming the scenery;
-publishing a different flight or location still requires developer setup.
+The desktop example runs Python/JAX while streaming the scenery. The linked
+WASM demo is a separate browser prototype: it replays a prepared recording and
+streams the terrain. Publishing another flight there still requires a rebuild.
 
 ![RC-jet in the WASM editor: streamed desert terrain, aircraft, color camera and telemetry.](../../assets/cesium-rc-jet-wasm.jpg)
 
-*A recorded RC-jet flight in the browser, with scenery streamed as needed.*
+*The browser demo: a recorded flight, live terrain streaming and an optional OSM overlay.*
 
 ## 1. Choose your scenery
 
-In [Cesium ion](https://ion.cesium.com/), enable the assets you want to use:
+In [Cesium ion](https://ion.cesium.com/), enable the assets used by your selected mode:
 
-| What you want to see | Assets used by the RC-jet launcher |
+| Scenery | RC-jet launcher defaults |
 | --- | --- |
-| Terrain with aerial imagery | Cesium World Terrain (`1`) and imagery (`2`) |
+| Terrain and aerial imagery | World Terrain (`1`) and imagery (`2`) |
 | Photo 3D, including buildings where covered | Google Photorealistic 3D Tiles (`2275207`) |
 
-Photo 3D is the launcher's default. Coverage and detail vary by location. For
-ground contact, the example also needs World Terrain (`1`), even when Photo 3D
-supplies the visible scenery.
+Photo 3D is the default. It supplies the visuals; the example also uses World
+Terrain (`1`) for physical ground heights. Coverage and detail vary by location.
 
-Create an ion token with read access to those assets. Save its value in
-`$HOME/.config/elodin/cesium-ion-token.txt`, outside the repository. For a public browser deployment, create a separate
-read-only token restricted to the required assets and your site's browser origin.
-A browser token is visible to visitors; do not use a personal administrative token.
+Create a read-only ion token for the required assets. Save its value in
+`$HOME/.config/elodin/cesium-ion-token.txt`; create the directory if needed.
+For a public browser build, use a separate token restricted to its assets and
+deployment origin. That token will be visible to visitors.
 
 ## 2. Try a flight at Mojave
 
-From the Elodin repository root, build the Python SDK and desktop editor:
+From the Elodin repository root:
 
 ```bash
 export ELODIN_SHELL_ID=cesium
@@ -53,24 +51,23 @@ just install py
 just install editor
 ```
 
-Inside that shell, point the launcher at your token file:
+Inside that shell, launch RC-jet with your token file:
 
 ```bash
 export CESIUM_ION_TOKEN_FILE="$HOME/.config/elodin/cesium-ion-token.txt"
 bash examples/cesium/run_rc_jet_terrain.sh
 ```
 
-The example starts at **35.350664° N, 117.809027° W**. Bevy-Cesium selects,
-downloads and renders terrain tiles for the editor and its sensor views as the
-flight progresses.
+The flight starts at **35.350664° N, 117.809027° W**. Bevy-Cesium streams and
+renders the surroundings for the editor and its sensor cameras.
 
-To use terrain and aerial imagery instead of Photo 3D:
+For terrain and aerial imagery instead of Photo 3D:
 
 ```bash
 bash examples/cesium/run_rc_jet_terrain.sh --photo3d off
 ```
 
-The original local terrain is still available without streaming:
+For the original local Mojave terrain, without streaming:
 
 ```bash
 unset CESIUM_ION_ASSET_ID CESIUM_ION_TOKEN
@@ -79,71 +76,67 @@ ELODIN_RC_JET_TERRAIN=planar elodin editor examples/rc-jet/main.py
 
 ## 3. Put the flight at your coordinates
 
-Choose a latitude, longitude and reference altitude. Keep that same site in
-the simulation's initial conditions, the heightmap request and the editor's
-geographic configuration.
+The current RC-jet example needs two matching settings:
 
-For the current RC-jet example:
+- In `examples/rc-jet/scenario.py`, update `MOJAVE_RC_FIELD` with your latitude,
+  longitude and field elevation. The scenario derives its initial ECEF pose
+  from this site.
+- In `examples/rc-jet/bdx_schematic.py`, update `ui.coordinate(...)` to the same
+  site. Latitude and longitude are degrees; altitude is meters above the
+  WGS84 ellipsoid.
 
-- Set the demo site's latitude, longitude and field elevation in
-  `examples/rc-jet/scenario.py` (`MOJAVE_RC_FIELD`). The scenario derives its
-  initial ECEF position and attitude from that site.
-- Set the matching `ui.coordinate(...)` values in
-  `examples/rc-jet/bdx_schematic.py`. Its `lat` and `lon` values are degrees;
-  `alt` is meters above the WGS84 ellipsoid.
-- Disable the bundled Mojave-specific OSM overlay when using another location:
-  `export ELODIN_CESIUM_OVERLAY_FILE=''`.
-- Run the Cesium launcher again. It prepares a height grid around the new
-  initial position before starting the simulation.
+Disable the bundled Mojave-specific OSM data at another location:
 
-There is currently no latitude/longitude switch in the RC-jet launcher. Changing
-the editor's origin alone does **not** move the simulation or relocate a recorded
-flight. For your own model, use the existing
-[coordinate-system primitives](@/reference/coords.md) to keep the simulation and
-the displayed terrain in the same frame.
+```bash
+export ELODIN_CESIUM_OVERLAY_FILE=''
+```
+
+Run the Cesium launcher again. It prepares heights around the new initial position.
+
+There is no latitude/longitude launcher switch yet. Changing only the editor's
+origin does not relocate the simulation or an existing recording. For your own
+model, use the existing [coordinate-system primitives](@/reference/coords.md)
+to keep initial conditions, height queries and the displayed scene compatible.
 
 ## 4. Give the physics a ground surface
 
-The streamed scene and the physical ground are separate. Elodin's
-`el.terrain_heightmap()` API asks Bevy-Cesium to prepare and cache heights before
-the run. During simulation, JAX samples that fixed grid without network access.
+`el.terrain_heightmap()` prepares and caches heights through Bevy-Cesium before
+the simulation starts. JAX samples that fixed grid during the run, without
+network access.
 
-- Set the grid's center and extent to cover the planned flight.
-- Choose an initial altitude above the sampled ground. Heights use the WGS84
-  ellipsoid, not mean sea level.
-- Check the lookup's `valid` result when the aircraft approaches the edge.
-- Implement ground contact in your model. Visible Photo 3D buildings do not
-  automatically become collision geometry.
+- Cover the planned flight with the grid and check the lookup's `valid` result.
+- Start above the sampled ground. Heights are relative to the WGS84 ellipsoid,
+  not mean sea level.
+- Implement contact in your model. Photo 3D buildings are visible geometry;
+  they do not automatically provide collisions.
 
-See [Terrain heights](@/reference/python-api.md#terrain-heights) for the API,
-units, cache behavior and an example you can adapt.
+See [Terrain heights](@/reference/python-api.md#terrain-heights) for an API
+example, units and cache options. Cached heights do not make the visual scenery
+available offline.
 
-## 5. View the flight in a browser
+## 5. View the browser demo
 
-[Open the RC-jet WASM demo](https://medialoco.github.io/rc-jet-wasm/).
-The browser runs the Elodin editor, including its timeline, graphs and camera
-controls. The flight is recorded; the terrain and Photo 3D tiles stream as needed.
-The Overlay button shows or hides the experimental OpenStreetMap layer.
+[Open RC-jet in the WASM editor](https://medialoco.github.io/rc-jet-wasm/).
+Use the timeline to replay the flight, move the viewport, and toggle the
+experimental OpenStreetMap layer with Overlay.
 
-The demo uses Bevy-Cesium's renderer with an experimental Rust streaming backend
-adapted for WASM. The desktop integration uses Cesium Native. The browser demo
-has a color camera; its infrared view has not been ported.
+- **Flight data:** selected telemetry exported from a local Elodin DB is embedded
+  in the WASM bundle and loaded into browser memory. The original DB is not
+  hosted by the demo.
+- **Hosting:** GitHub Pages serves the static application. There is no database
+  server behind this demo.
+- **Scenery:** tiles stream on demand through an adaptation of Bevy-Cesium's
+  renderer with an experimental Rust browser backend. Desktop uses Cesium Native.
+- **Cameras:** the browser demo has a color view; infrared has not been ported.
 
-To publish your own location and flight today:
-
-- Run your Python/JAX simulation outside the browser and keep its
-  [recording](@/reference/replays.md).
-- Have the recording, geographic configuration and assets integrated into a
-  browser build, with a dedicated ion token for its deployment origin.
-- Rebuild and publish that application. The current RC-jet demo embeds a prepared
-  recording; it does not yet have a general recording upload or location picker.
+Your own flight needs a new [recording](@/reference/replays.md), an export of its
+telemetry, matching geographic settings and assets, and a rebuilt browser
+application. The demo has no general DB upload or location picker yet.
 
 ## If the first view is slow or blurry
 
-- Allow the initial terrain to load. Turning toward a new area requests more tiles.
-- For the desktop example, try `--photo3d off` for a lighter scene, or increase
-  `CESIUM_MAXIMUM_SCREEN_ERROR` to request less detail (the launcher defaults to `48`).
-- If loading fails, check that the token can read every selected asset. For a
-  browser token, also check the allowed origin.
-- A cached physics heightmap does not cache the visual terrain or imagery.
-  Streaming the scenery still requires network access.
+- Allow terrain to load; turning toward a new area requests more tiles.
+- On desktop, try `--photo3d off`, or increase `CESIUM_MAXIMUM_SCREEN_ERROR`
+  to request less detail (the launcher defaults to `48`).
+- If loading fails, check token access to every selected asset and, for a
+  browser token, the allowed origin.
