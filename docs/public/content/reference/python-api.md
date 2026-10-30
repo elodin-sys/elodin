@@ -14,6 +14,9 @@ order = 3
 
 ## Terrain heights
 
+For the full setup, start with [Cesium terrain](@/reference/cesium.md): ion assets,
+tokens, geographic placement and the desktop and browser workflows.
+
 Prepare terrain once, before building the simulation:
 
 ```python

@@ -13,9 +13,17 @@ order = 1
 +++
 
 
+## Simulate at a real location
+
+Have a Cesium ion account and a latitude/longitude in mind?
+[Cesium terrain](@/reference/cesium.md) walks through choosing scenery,
+placing a simulation, preparing ground heights and viewing a recorded flight
+in the WASM editor.
+
+
 ## Simulation Architecture
 
-An Elodin simulation consists of Entities are spawned with a list of archetypes rather than individual components.
+An Elodin simulation is built from entities and systems. Entities hold component data; systems update it over time.
 
 ### Systems
 Systems are reusable functions that operate on a set of components. Composing different systems allows for the creation of custom physics engines. Some examples of systems include gravity, aerodynamics, collision detection.
