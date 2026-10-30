@@ -13,8 +13,14 @@ miette = ["dep:miette"]
 futures = ["dep:futures"]
 tokio = ["dep:tokio"]
 serial = []
+# Use readiness polling where the container runtime blocks io_uring.
+poll = ["dep:polling", "dep:blocking", "dep:smallvec"]
 
 [dependencies]
+polling = { version = "3.7", optional = true }
+blocking = { version = "1.3", optional = true }
+smallvec = { version = "1.11.2", features = ["const_generics", "union"], optional = true }
+
 # async
 maitake.path = "maitake"
 pin-project = "1.1.6"
