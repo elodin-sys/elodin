@@ -70,7 +70,7 @@ bash examples/cesium/run_rc_jet_terrain.sh --photo3d off
 For the original local Mojave terrain, without streaming:
 
 ```bash
-unset CESIUM_ION_ASSET_ID CESIUM_ION_TOKEN
+unset CESIUM_ION_ASSET_ID CESIUM_ION_TOKEN CESIUM_TILESET_URL
 ELODIN_RC_JET_TERRAIN=planar elodin editor examples/rc-jet/main.py
 ```
 

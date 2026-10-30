@@ -4,6 +4,9 @@ These examples connect Elodin to [Bevy-Cesium](https://github.com/elodin-sys/bev
 for streamed terrain and imagery. RC-jet also uses the shared nox-py height API
 for ground contact and produces color and infrared camera previews.
 
+For the user walkthrough, start with [Cesium terrain](../../docs/public/content/reference/cesium.md):
+ion setup, choosing coordinates, ground heights and the current browser demo.
+
 ## Architecture
 
 There are two paths through the integration:
@@ -60,7 +63,7 @@ All three options use the existing Mojave location and initial 350-degree route:
 
 | Option | Command (inside the Nix shell) | Rendering and contact |
 | --- | --- | --- |
-| Historical terrain | `ELODIN_RC_JET_TERRAIN=planar elodin editor examples/rc-jet/main.py` | Existing local Mojave terrain; fixed-altitude ground contact. Unset `CESIUM_ION_ASSET_ID` and `CESIUM_ION_TOKEN` if inherited from another run. |
+| Historical terrain | `ELODIN_RC_JET_TERRAIN=planar elodin editor examples/rc-jet/main.py` | Existing local Mojave terrain; fixed-altitude ground contact. Unset `CESIUM_ION_ASSET_ID`, `CESIUM_ION_TOKEN` and `CESIUM_TILESET_URL` if inherited from another run. |
 | Cesium + heightmap | `bash examples/cesium/run_rc_jet_terrain.sh --photo3d off` | Streamed terrain and aerial imagery; physical contact from the prepared height grid. |
 | Cesium + heightmap + Photo 3D (default) | `bash examples/cesium/run_rc_jet_terrain.sh` | Streamed Google photogrammetry, including buildings where covered; the same height-grid physics. |
 
