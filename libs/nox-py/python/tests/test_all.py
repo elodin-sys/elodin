@@ -1363,3 +1363,27 @@ def test_six_dof_rejects_invalid_time_step_and_rk4_uses_explicit_dt():
     vel1 = exec1.history("top.world_vel")["top.world_vel"].to_numpy()
     vel2 = exec2.history("top.world_vel")["top.world_vel"].to_numpy()
     assert np.allclose(vel1, vel2, atol=1e-12, rtol=1e-12)
+
+
+def test_exec_run_in_chunks():
+    """Repeated `exec.run(n)` calls continue the sim clock instead of restarting at wall time."""
+
+    def drifting_body():
+        w = el.World()
+        w.spawn(el.Body(world_vel=el.SpatialMotion(linear=np.array([1.0, 0.0, 0.0]))), "e1")
+        return w.build(el.six_dof(1.0 / 120.0))
+
+    chunked = drifting_body()
+    for _ in range(4):
+        chunked.run(30, show_progress=False)  # used to raise "db time travel" on the second call
+    whole = drifting_body()
+    whole.run(120, show_progress=False)
+
+    a = chunked.history("e1.world_pos")
+    b = whole.history("e1.world_pos")
+    assert a.height == b.height == 121
+    assert_frame_equal(a.drop("time"), b.drop("time"))
+
+    # Rows are one sim step apart from the initial state on, including across chunk boundaries.
+    step_us = a["time"].diff().dt.total_microseconds().to_numpy()[1:]
+    assert (abs(step_us - 1e6 / 120.0) <= 1.0).all()
