@@ -1004,6 +1004,106 @@ fn place_on_grid(
     transform.translation = local_translation;
 }
 
+const WORLD_POS_STALE_US: i64 = 1_000_000;
+
+#[derive(Default)]
+struct WorldPosLog {
+    missing_since: Vec<Option<Instant>>,
+    last_emit: Vec<Option<Instant>>,
+}
+
+struct CachedWorldPos {
+    len: usize,
+    newest: Option<impeller::types::Timestamp>,
+    sample_ts: Option<impeller::types::Timestamp>,
+    world_pos: Option<impeller_wkt::WorldPos>,
+}
+
+fn cached_world_pos(
+    cache: &impeller_bevy::TelemetryCache,
+    id: &ComponentId,
+    ts: impeller::types::Timestamp,
+) -> CachedWorldPos {
+    let Some(series) = cache.series(id) else {
+        return CachedWorldPos {
+            len: 0,
+            newest: None,
+            sample_ts: None,
+            world_pos: None,
+        };
+    };
+    let newest = series.last_key_value().map(|(timestamp, _)| *timestamp);
+    let (sample_ts, world_pos) = match series.range(..=ts).next_back() {
+        Some((timestamp, value)) => (Some(*timestamp), value.as_world_pos()),
+        None => (None, None),
+    };
+    CachedWorldPos {
+        len: series.len(),
+        newest,
+        sample_ts,
+        world_pos,
+    }
+}
+
+fn log_world_pos(
+    log: &mut WorldPosLog,
+    index: usize,
+    camera: &str,
+    render_ts: i64,
+    cached: &CachedWorldPos,
+) {
+    if log.missing_since.len() <= index {
+        log.missing_since.resize(index + 1, None);
+        log.last_emit.resize(index + 1, None);
+    }
+    let now = Instant::now();
+    let stale = match cached.sample_ts {
+        None => {
+            let since = *log.missing_since[index].get_or_insert(now);
+            now.duration_since(since) >= Duration::from_secs(1)
+        }
+        Some(sample_ts) => {
+            log.missing_since[index] = None;
+            render_ts.saturating_sub(sample_ts.0) >= WORLD_POS_STALE_US
+        }
+    };
+    let due =
+        log.last_emit[index].is_none_or(|at| now.duration_since(at) >= Duration::from_secs(1));
+    if !due {
+        return;
+    }
+    log.last_emit[index] = Some(now);
+    let sample_age_ms = cached
+        .sample_ts
+        .map(|timestamp| render_ts.saturating_sub(timestamp.0) / 1_000);
+    let newest_age_ms = cached
+        .newest
+        .map(|timestamp| render_ts.saturating_sub(timestamp.0) / 1_000);
+    let quat = cached.world_pos.map(|world_pos| {
+        let [x, y, z, w] = world_pos.att.parts().map(nox::Tensor::into_buf);
+        (x, y, z, w)
+    });
+    if stale {
+        tracing::warn!(
+            camera,
+            series_len = cached.len,
+            sample_age_ms,
+            newest_age_ms,
+            ?quat,
+            "sensor camera world_pos is missing or more than 1s behind the render time"
+        );
+    } else {
+        tracing::debug!(
+            camera,
+            series_len = cached.len,
+            sample_age_ms,
+            newest_age_ms,
+            ?quat,
+            "sensor camera world_pos"
+        );
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn update_sensor_camera_transforms(
     configs: Res<SensorCameraConfigs>,
@@ -1015,10 +1115,14 @@ fn update_sensor_camera_transforms(
     )>,
     #[cfg(feature = "big_space")] mut cells: Query<&mut crate::spatial::GridCell>,
     #[cfg(feature = "big_space")] settings: Res<crate::spatial::FloatingOriginSettings>,
+    #[cfg(feature = "big_space")] parents: Query<&ChildOf>,
+    #[cfg(feature = "big_space")] grids: Query<&crate::spatial::Grid>,
+    #[cfg(feature = "big_space")] mut globals: Query<&mut GlobalTransform>,
     cache: Res<impeller_bevy::TelemetryCache>,
     current_ts: Res<impeller_wkt::CurrentTimestamp>,
     coordinate: Res<crate::Coordinate>,
     geo_context: Res<GeoContext>,
+    mut pose_log: Local<WorldPosLog>,
 ) {
     let ts = current_ts.0;
     let frame = coordinate.0.unwrap_or_default();
@@ -1026,8 +1130,19 @@ fn update_sensor_camera_transforms(
         let Some(config) = configs.0.get(sensor_cam.config_index) else {
             continue;
         };
-
-        let Some(pose) = sensor_camera_transform(config, &cache, ts, frame, &geo_context) else {
+        let world_pos_id = ComponentId::new(&format!("{}.world_pos", config.entity_name));
+        let cached = cached_world_pos(&cache, &world_pos_id, ts);
+        log_world_pos(
+            &mut pose_log,
+            sensor_cam.config_index,
+            &config.camera_name,
+            ts.0,
+            &cached,
+        );
+        let Some(world_pos) = cached.world_pos else {
+            continue;
+        };
+        let Some(pose) = sensor_camera_pose(config, world_pos, frame, &geo_context) else {
             continue;
         };
         transform.rotation = pose.rotation;
@@ -1036,6 +1151,16 @@ fn update_sensor_camera_transforms(
         #[cfg(feature = "big_space")]
         if let Ok(mut cell) = cells.get_mut(_entity) {
             place_on_grid(&settings, &mut cell, &mut transform, pose.translation);
+        }
+        #[cfg(feature = "big_space")]
+        if let Ok(parent) = parents.get(_entity)
+            && let Ok(grid) = grids.get(parent.parent())
+            && let Ok(cell) = cells.get(_entity)
+            && let Ok(mut global) = globals.get_mut(_entity)
+        {
+            // big_space skips a clean grid, which leaves this camera on the
+            // pose it had when the first sample arrived.
+            *global = grid.global_transform(cell, &transform);
         }
         #[cfg(not(feature = "big_space"))]
         {

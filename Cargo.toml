@@ -190,7 +190,7 @@ bevy_hanabi = { git = "https://github.com/elodin-sys/bevy_hanabi", rev = "485c0a
 # Web: "RefCell already borrowed" when pointer events re-enter send_events.
 # Local 0.30.13 backport (../winit-v030, branch fix/web-send-events-refcell).
 # Drop once that fix is released.
-winit = { path = "../winit-v030" }
+# winit = { path = "../winit-v030" }
 
 # bevy_editor_cam's bevy-0.19 branch depends on bevy_framepace from this
 # personal git branch; redirect it to the official v0.22.0 tag so the whole

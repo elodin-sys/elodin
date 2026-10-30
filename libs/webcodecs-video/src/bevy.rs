@@ -564,10 +564,7 @@ fn upload_external(queue: Res<RenderQueue>, gpu_images: Res<RenderAssets<GpuImag
             if let Some(previous) = slot.submitted.replace(frame) {
                 previous.close();
             }
-            if matches!(
-                slot.note,
-                Some(Error::NoVideoTexture | Error::NoGpuImage)
-            ) {
+            if matches!(slot.note, Some(Error::NoVideoTexture | Error::NoGpuImage)) {
                 slot.note = None;
             }
             note_upload(slot, ms);

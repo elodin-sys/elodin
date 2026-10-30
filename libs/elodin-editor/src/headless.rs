@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use crate::object_3d::create_object_3d_entity;
@@ -42,12 +42,12 @@ use bevy_ai_skybox::prelude::{
 use bevy_geo_frames::GeoContext;
 use bevy_geo_frames::GeoFramePlugin;
 use bevy_mat3_material::Mat3Material;
-use impeller::types::{LenPacket, Timestamp, msg_id};
-use impeller_bevy::{ConnectionAddr, MsgPacketTx, PacketTx};
+use impeller::types::{ComponentId, LenPacket, PacketId, Timestamp, msg_id};
+use impeller_bevy::{CommandsExt, ConnectionAddr, MsgPacketTx, PacketTx};
 use impeller_kdl::FromKdl;
 use impeller_wkt::{
-    CurrentTimestamp, DbConfig, DumpMetadata, LastUpdated, MsgMetadata, SchematicElem,
-    SetMsgMetadata, opaque_bytes_msg_schema,
+    CurrentTimestamp, DbConfig, DumpMetadata, GetTimeSeriesPredecessor, LastUpdated, MsgMetadata,
+    SchematicElem, SetMsgMetadata, opaque_bytes_msg_schema,
 };
 
 const SENSOR_CAMERA_CONFIG_WARMUP_CYCLES: usize = 600;
@@ -198,6 +198,10 @@ impl Plugin for HeadlessEditorPlugin {
             Update,
             impeller_bevy::backfill_cache.after(crate::ui::plot::update_series_fetch_priority),
         )
+        .add_systems(
+            Update,
+            refresh_sensor_world_pos.after(impeller_bevy::backfill_cache),
+        )
         .add_systems(Update, crate::update_eql_context)
         .add_systems(Update, poll_headless_db_config)
         .add_systems(
@@ -261,6 +265,86 @@ fn disable_lwir_shadows(
     }
     for mut light in &mut lights {
         light.shadow_maps_enabled = false;
+    }
+}
+
+/// Backfill stops on the first short page, and the live table can keep
+/// resending that same sample. Ask for the newest pose so a camera is not
+/// stuck on the attitude from startup.
+fn refresh_sensor_world_pos(
+    configs: Res<SensorCameraConfigs>,
+    last_updated: Res<LastUpdated>,
+    mut commands: Commands,
+    mut requested: Local<HashSet<ComponentId>>,
+    mut last_sent: Local<Option<Instant>>,
+) {
+    if last_updated.0.0 == i64::MIN || configs.0.is_empty() {
+        return;
+    }
+    if last_sent.is_some_and(|sent| sent.elapsed() < Duration::from_millis(50)) {
+        return;
+    }
+    *last_sent = Some(Instant::now());
+    requested.clear();
+    for config in &configs.0 {
+        let component_id = ComponentId::new(&format!("{}.world_pos", config.entity_name));
+        if !requested.insert(component_id) {
+            continue;
+        }
+        let timestamp = last_updated.0;
+        commands.send_msg_req_reply_raw::<_, GetTimeSeriesPredecessor, _>(
+            GetTimeSeriesPredecessor {
+                id: PacketId::default(),
+                timestamp,
+                component_id,
+            },
+            move |pkt: InRef<impeller::types::OwnedPacket<impeller_bevy::PacketGrantR>>,
+                  mut cache: ResMut<impeller_bevy::TelemetryCache>,
+                  schema_reg: Res<impeller_bevy::ComponentSchemaRegistry>| {
+                insert_world_pos_reply(&pkt, &mut cache, &schema_reg, component_id);
+                true
+            },
+        );
+    }
+}
+
+fn insert_world_pos_reply(
+    pkt: &impeller::types::OwnedPacket<impeller_bevy::PacketGrantR>,
+    cache: &mut impeller_bevy::TelemetryCache,
+    schema_reg: &impeller_bevy::ComponentSchemaRegistry,
+    component_id: ComponentId,
+) {
+    let impeller::types::OwnedPacket::TimeSeries(series) = pkt else {
+        return;
+    };
+    let Ok(timestamps) = series.timestamps() else {
+        return;
+    };
+    let Ok(data) = series.data() else {
+        return;
+    };
+    let Some(schema) = schema_reg.0.get(&component_id) else {
+        return;
+    };
+    let elem_size = schema.size();
+    for (i, &timestamp) in timestamps.iter().enumerate() {
+        let offset = i * elem_size;
+        if offset + elem_size > data.len() {
+            break;
+        }
+        let bytes = &data[offset..offset + elem_size];
+        let Ok(view) = impeller::types::ComponentView::try_from_bytes_shape(
+            bytes,
+            schema.shape(),
+            schema.prim_type(),
+        ) else {
+            continue;
+        };
+        cache.insert(
+            component_id,
+            timestamp,
+            impeller_bevy::ComponentValue::from_view(view),
+        );
     }
 }
 
