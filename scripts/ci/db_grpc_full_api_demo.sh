@@ -206,7 +206,7 @@ else
     cargo build --release -p rc-jet-controller
     controller_bin="${root}/target/release/rc-jet-controller"
   fi
-  start_sim "${ELODIN_GRPC_DEMO_TICKS:-36000}"
+  start_sim "${ELODIN_GRPC_DEMO_TICKS:-90000}"
   wait_for_sim_ready
   PYTHONPATH="${generated}" python3 libs/db/examples/grpc_full_api_demo.py \
     --live --target "127.0.0.1:${grpc_port}"

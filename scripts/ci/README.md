@@ -9,7 +9,8 @@ For each example (`ball`, `drone`, `rocket`, `three-body`, `cube-sat`), CI runs:
 1. benchmark run (`bench --ticks 100`, profiling enabled by default)
 2. DB export (`elodin-db export --format csv --flatten`)
 3. telemetry comparison (`compare_baseline_csv.py`)
-4. profile metric comparison (`compare_profile_metrics.py`)
+4. performance A/B against the base commit (`compare_profile_metrics.py`, see
+   [Performance A/B](#performance-ab))
 
 The comparison is tolerance-based for numeric values and ignores columns named
 `time` to avoid wall-clock timestamp noise.
@@ -18,10 +19,10 @@ The comparison is tolerance-based for numeric values and ignores columns named
 
 - `regress.sh` - end-to-end runner used by Buildkite
 - `compare_baseline_csv.py` - tolerance-based CSV comparator
-- `compare_profile_metrics.py` - tolerance-based profile metric comparator
+- `compare_profile_metrics.py` - compares median profile metrics of candidate vs base runs
 - `extract_profile_metrics.py` - run-log parser for profile metrics
 - `baseline/tolerances.json` - default and per-example tolerances
-- `baseline/<example>/...` or `baseline/<example>-csv/...` - known-good CSV exports plus `profile-metrics.json`
+- `baseline/<example>/...` or `baseline/<example>-csv/...` - known-good CSV exports
 
 ## Local usage
 
@@ -55,8 +56,8 @@ nix develop .#run --command bash -lc "bash ./scripts/ci/regress.sh --all --updat
 ## Baseline layout
 
 The runner looks for per-example baseline directories under `scripts/ci/baseline`.
-`--all` scans subdirectories that contain `profile-metrics.json`, normalizes
-compatibility names such as `ball-csv` back to `ball`, and runs
+`--all` scans its subdirectories, normalizes compatibility names such as
+`ball-csv` back to `ball`, and runs
 `examples/<example>/main.py`.
 
 Preferred naming is one directory per example:
@@ -86,8 +87,39 @@ nix develop .#run --command bash -lc "bash ./scripts/ci/regress.sh --all --updat
 ```
 
 `--update` rewrites the baseline for that example after exporting fresh flattened
-CSV output and capturing `profile-metrics.json`. If no per-example baseline
-directory exists yet, it creates one under `scripts/ci/baseline/<example>`.
+CSV output. If no per-example baseline directory exists yet, it creates one under
+`scripts/ci/baseline/<example>`. Performance has no checked-in baseline.
+
+## Performance A/B
+
+From the wall time of each complete batch of ticks, the bench prints:
+
+- `warm-up`: the first batch (lazy JIT compilation, first allocations), excluded
+  from every other statistic.
+- `tick time`: mean batch wall time over the remaining batches, and their median
+  (over the last 1024 batches).
+- `real_time_factor`: simulated time per batch over the mean batch wall time
+  (steady-state throughput).
+- `real_time_factor_median`: the same over the median batch wall time. It ignores
+  preemption spikes and is the number CI compares.
+
+Absolute numbers swing by tens of percent with load on the shared CI host, so
+`regress.sh` compares against the base commit's `elodin-py` in the same job:
+
+1. The base is `REGRESSION_BASE` if set, else `git merge-base HEAD origin/main`,
+   or `HEAD^` when `HEAD` is already on `main`.
+2. Its wheel comes from the binary cache only
+   (`nix build --max-jobs 0 "git+file://$PWD?rev=<base>&allRefs=1#elodin-py"`); CI
+   built and pushed it when it tested that commit. This relies on `elodin-py`'s
+   source being identical in a checkout and a `?rev=` export (no LFS files or
+   submodule contents, see `nix/pkgs/src.nix`).
+3. Per example, candidate and base runs alternate `REGRESSION_RUNS` times
+   (default 5). Base runs put the base wheel first on `PYTHONPATH`.
+4. `compare_profile_metrics.py` compares the median of each side.
+
+The A/B is skipped with a `WARN` line, while the CSV comparison still runs, when
+the base commit cannot be resolved or its wheel is not in the cache (for example,
+its CI build has not finished). `--update` never runs it.
 
 ## Tolerance config
 
@@ -101,13 +133,15 @@ directory exists yet, it creates one under `scripts/ci/baseline/<example>`.
 
 For telemetry CSVs, precedence is file override -> example override -> default.
 
-For profile metrics:
+For profile metrics, each side is the median over its runs:
 
-- `build_time_ms` fails only when the candidate is slower than baseline beyond
+- `build_time_ms` fails only when the candidate is slower than the base beyond
   tolerance.
-- `real_time_factor` fails only when the candidate drops below baseline beyond
-  tolerance.
-- `ticks` must match exactly between baseline and candidate.
+- `real_time_factor_median` fails only when the candidate drops below the base
+  beyond tolerance.
+- A metric missing from a base run is skipped with a `WARN`; missing from a
+  candidate run fails.
+- `ticks` must match across all runs.
 
 ## Failure triage
 
@@ -116,7 +150,7 @@ When CI fails, the comparator reports:
 - missing/extra CSV files
 - header/row shape mismatches
 - first row+column value exceeding tolerance with abs/rel diff and limits
-- profile metric regressions with baseline value, candidate value, and allowed slack
+- profile metric regressions with base median, candidate median, and allowed slack
 
 Use that output to decide whether to:
 

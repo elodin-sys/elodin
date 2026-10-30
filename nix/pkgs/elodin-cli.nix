@@ -2,7 +2,6 @@
   pkgs,
   rustToolchain,
   lib,
-  gitRev ? "unknown",
   elodinPy,
   python,
   pythonPackages,
@@ -16,7 +15,7 @@
   # Derive version from Cargo.toml workspace configuration
   cargoToml = builtins.fromTOML (builtins.readFile ../../Cargo.toml);
   version = cargoToml.workspace.package.version;
-  src = pkgs.nix-gitignore.gitignoreSource [] ../..;
+  src = common.src;
   pythonPath = pythonPackages.makePythonPath [elodinPy];
   pythonMajorMinor = lib.versions.majorMinor python.version;
 
@@ -53,7 +52,6 @@
 
     doCheck = false;
 
-    GIT_HASH = gitRev;
     LIBCLANG_PATH = "${pkgs.buildPackages.libclang.lib}/lib";
 
     # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
