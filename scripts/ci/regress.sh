@@ -408,7 +408,7 @@ if [[ "${update_baseline}" != "1" ]]; then
   if ! base_rev="$(resolve_base_rev)"; then
     echo "WARN: could not resolve a base commit; skipping perf A/B"
   elif base_py="$(nix build --no-link --print-out-paths --max-jobs 0 --builders '' \
-    "git+file://${PWD}?rev=${base_rev}&allRefs=1#elodin-py")"; then
+    "git+file://${PWD}?rev=${base_rev}&allRefs=1#elodin-py" 2>/dev/null)"; then
     base_site="$(echo "${base_py}"/lib/python3.*/site-packages)"
     echo "==> perf A/B against base ${base_rev:0:7} (${base_py})"
   else

@@ -142,8 +142,6 @@ test_steps = [
                 command="scripts/ci/db_grpc_full_api_demo.sh",
                 env={
                     "ELODIN_RC_JET_CONTROLLER_BIN": "target/release/rc-jet-controller",
-                    # 300 s at 300 Hz; must outlive the demo's 240 s LIVE_BUDGET_S.
-                    "ELODIN_GRPC_DEMO_TICKS": "90000",
                 },
             ),
         ],
