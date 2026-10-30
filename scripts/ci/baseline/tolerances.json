@@ -10,9 +10,9 @@
         "abs_tol": 2000.0,
         "rel_tol": 0.25
       },
-      "real_time_factor": {
-        "abs_tol": 25.0,
-        "rel_tol": 0.25
+      "real_time_factor_median": {
+        "abs_tol": 0.0,
+        "rel_tol": 0.2
       }
     },
     "examples": {}

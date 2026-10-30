@@ -29,7 +29,7 @@
 - **Python CI checks** — `ruff format --check` and `ruff check --fix`.
 - **Nix formatting** — `alejandra` (check mode `alejandra --check .`).
 - **Buildkite CI infrastructure** — Self-hosted EC2 agents (overlayroot tmpfs, deploy keys) on `nixos-x86-aws` and `nixos-arm-aws` queues; post-build hook signs and uploads store paths to the S3 Nix cache.
-- **Simulation regression gate** — `scripts/ci/regress.sh [--all|--update]` benchmarks baselined examples (ball, drone, rocket, three-body, cube-sat), exports DB telemetry to CSV, and compares against baselines via `compare_baseline_csv.py` (tolerance-based, ignores time column) and `compare_profile_metrics.py` (build_time_ms, real_time_factor, ticks) with per-example `baseline/tolerances.json`.
+- **Simulation regression gate** — `scripts/ci/regress.sh [--all|--update]` benchmarks baselined examples (ball, drone, rocket, three-body, cube-sat), exports DB telemetry to CSV, and compares against baselines via `compare_baseline_csv.py` (tolerance-based, ignores time column) and `compare_profile_metrics.py` (build_time_ms, real_time_factor_median, ticks; median of interleaved runs vs the base commit's cached elodin-py) with per-example `baseline/tolerances.json`.
 - **Apollo Monte Carlo CI** — Buildkite step running `scripts/test-apollo-monte-carlo.sh`: truncated-tick, fixed-sample campaign that validates MC infrastructure (not landing quality).
 - **nox-py test suite** — `pytest libs/nox-py/tests/` unit/integration tests.
 - **cranelift-mlir test suite** — 220+ unit tests, per-op golden tests (scalar + pointer ABI), full-example e2e MLIR tests, checkpoint verifier, and external customer-MLIR compile validation.

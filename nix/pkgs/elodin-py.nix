@@ -13,7 +13,10 @@
   pname = noxPyCargoToml.package.name;
   version = workspaceCargoToml.workspace.package.version;
 
-  src = common.src;
+  src = import ./src.nix {
+    inherit lib;
+    editorAssets = false;
+  };
 
   arch = with pkgs;
     if stdenv.isDarwin

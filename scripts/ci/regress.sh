@@ -75,14 +75,14 @@ resolve_baseline_dir() {
 }
 
 discover_all_examples() {
-  local metrics_path
+  local baseline_path
   local baseline_name
   local example_name
   local -a discovered=()
 
   shopt -s nullglob
-  for metrics_path in "${baseline_root}"/*/profile-metrics.json; do
-    baseline_name="$(basename "$(dirname "${metrics_path}")")"
+  for baseline_path in "${baseline_root}"/*/; do
+    baseline_name="$(basename "${baseline_path}")"
     example_name="$(normalize_example_name "${baseline_name}")"
 
     if [[ -n "${example_name}" ]] && ! array_contains "${example_name}" "${discovered[@]}"; then
@@ -107,13 +107,15 @@ run_example() (
   local scratch_dir=""
   local db_path=""
   local export_dir=""
-  local metrics_path=""
   local run_log=""
   local discovered_db_path=""
   local csv_status=0
   local perf_status=0
+  local i
   local -a bench_args=(bench --ticks "${ticks}" --profile --detail)
   local -a compare_args=()
+  local -a candidate_metrics=()
+  local -a base_metrics=()
 
   if [[ ! -f "${example_entrypoint}" ]]; then
     echo "FAIL: example entrypoint not found: ${example_entrypoint}"
@@ -138,17 +140,30 @@ run_example() (
 
   db_path="${scratch_dir}/db"
   export_dir="${scratch_dir}/csv"
-  metrics_path="${scratch_dir}/profile-metrics.json"
   mkdir -p "${db_path}" "${export_dir}"
 
-  echo "==> [${example_name}] running benchmark (${example_entrypoint})"
-  run_log="${scratch_dir}/run.log"
-  ELODIN_DB_PATH="${db_path}" "${python_bin}" "${example_entrypoint}" "${bench_args[@]}" 2>&1 | tee "${run_log}"
+  extract_metrics() {
+    "${python_bin}" scripts/ci/extract_profile_metrics.py \
+      --run-log "$1.log" \
+      --ticks "${ticks}" \
+      --output "$1.json"
+  }
 
-  "${python_bin}" scripts/ci/extract_profile_metrics.py \
-    --run-log "${run_log}" \
-    --ticks "${ticks}" \
-    --output "${metrics_path}"
+  # Usage: bench_run <scratch path prefix> [VAR=value...]
+  bench_run() {
+    local prefix="$1"
+    shift
+    mkdir -p "${prefix}.db"
+    env ELODIN_DB_PATH="${prefix}.db" "$@" "${python_bin}" "${example_entrypoint}" "${bench_args[@]}" \
+      > "${prefix}.log" 2>&1 || tail -n 20 "${prefix}.log"
+    extract_metrics "${prefix}"
+  }
+
+  echo "==> [${example_name}] running benchmark (${example_entrypoint})"
+  run_log="${scratch_dir}/candidate-1.log"
+  ELODIN_DB_PATH="${db_path}" "${python_bin}" "${example_entrypoint}" "${bench_args[@]}" 2>&1 | tee "${run_log}"
+  extract_metrics "${scratch_dir}/candidate-1"
+  candidate_metrics+=("${scratch_dir}/candidate-1.json")
 
   # If the runtime reports a different db path in logs, discover and use it.
   if [[ ! -f "${db_path}/db_state" ]]; then
@@ -189,7 +204,6 @@ PY
     mkdir -p "${baseline_dir}"
     cp -r "${export_dir}/." "${baseline_dir}/"
     "${python_bin}" scripts/ci/windows_paths.py sanitize-dir "${baseline_dir}"
-    cp "${metrics_path}" "${baseline_dir}/profile-metrics.json"
     return 0
   fi
 
@@ -210,14 +224,27 @@ PY
     csv_status=$?
   fi
 
-  if "${python_bin}" scripts/ci/compare_profile_metrics.py \
-    --example "${example_name}" \
-    --baseline "${baseline_dir}/profile-metrics.json" \
-    --candidate "${metrics_path}" \
-    --tolerances "${tolerances_file}"; then
-    :
-  else
-    perf_status=$?
+  if [[ -n "${base_site}" ]]; then
+    echo "==> [${example_name}] perf A/B: ${runs} interleaved run(s) each of candidate and base"
+    # Interleaved so slow phases of the shared host hit both sides alike.
+    for ((i = 1; i <= runs; i++)); do
+      if [[ "${i}" -gt 1 ]]; then
+        bench_run "${scratch_dir}/candidate-${i}"
+        candidate_metrics+=("${scratch_dir}/candidate-${i}.json")
+      fi
+      bench_run "${scratch_dir}/base-${i}" PYTHONPATH="${base_site}${PYTHONPATH:+:${PYTHONPATH}}"
+      base_metrics+=("${scratch_dir}/base-${i}.json")
+    done
+
+    if "${python_bin}" scripts/ci/compare_profile_metrics.py \
+      --example "${example_name}" \
+      --baseline "${base_metrics[@]}" \
+      --candidate "${candidate_metrics[@]}" \
+      --tolerances "${tolerances_file}"; then
+      :
+    else
+      perf_status=$?
+    fi
   fi
 
   if [[ "${csv_status}" -ne 0 || "${perf_status}" -ne 0 ]]; then
@@ -293,7 +320,7 @@ _print_rtf_summary() {
     return
   fi
   echo
-  echo "=== Performance Summary (real_time_factor) ==="
+  echo "=== Performance Summary (real_time_factor_median vs base ${base_rev:0:7}) ==="
   local line name baseline candidate pct sign
   for line in "${lines[@]}"; do
     # Format: RTF_DELTA: <name> <baseline> <candidate> <pct>
@@ -305,7 +332,7 @@ _print_rtf_summary() {
     if [[ "${pct}" != -* ]]; then
       sign="+"
     fi
-    printf "  %-14s %6.1fx  (baseline %6.1fx, %s%s%%)\n" \
+    printf "  %-14s %6.1fx  (base %6.1fx, %s%s%%)\n" \
       "${name}:" "${candidate}" "${baseline}" "${sign}" "${pct}"
   done
 }
@@ -344,6 +371,7 @@ done
 baseline_root="${BASELINE_ROOT:-scripts/ci/baseline}"
 tolerances_file="${TOLERANCES_FILE:-${baseline_root}/tolerances.json}"
 ticks="${REGRESSION_TICKS:-100}"
+runs="${REGRESSION_RUNS:-3}"
 python_bin="${PYTHON:-python3}"
 
 if [[ ! -d "${baseline_root}" ]]; then
@@ -357,6 +385,35 @@ fi
 if ! command -v "${python_bin}" >/dev/null 2>&1; then
   echo "FAIL: python interpreter not found: ${python_bin}"
   exit 1
+fi
+
+resolve_base_rev() {
+  local base
+  if [[ -n "${REGRESSION_BASE:-}" ]]; then
+    git rev-parse --verify "${REGRESSION_BASE}^{commit}"
+    return
+  fi
+  base="$(git merge-base HEAD origin/main)" || return 1
+  if [[ "${base}" == "$(git rev-parse HEAD)" ]]; then
+    git rev-parse HEAD^
+  else
+    printf "%s\n" "${base}"
+  fi
+}
+
+base_rev=""
+base_site=""
+# Cache-only: the base commit's own CI run built and pushed its wheel; never rebuild it here.
+if [[ "${update_baseline}" != "1" ]]; then
+  if ! base_rev="$(resolve_base_rev)"; then
+    echo "WARN: could not resolve a base commit; skipping perf A/B"
+  elif base_py="$(nix build --no-link --print-out-paths --max-jobs 0 --builders '' \
+    "git+file://${PWD}?rev=${base_rev}&allRefs=1#elodin-py")"; then
+    base_site="$(echo "${base_py}"/lib/python3.*/site-packages)"
+    echo "==> perf A/B against base ${base_rev:0:7} (${base_py})"
+  else
+    echo "WARN: base ${base_rev:0:7} elodin-py not in cache; skipping perf A/B"
+  fi
 fi
 
 if [[ "${run_all}" == "1" ]]; then

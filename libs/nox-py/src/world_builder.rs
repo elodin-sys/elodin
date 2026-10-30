@@ -1171,11 +1171,19 @@ impl WorldBuilder {
                     let profile = exec.profile();
                     let tpt = profile.get("ticks_per_telemetry").copied().unwrap_or(1.0) as u64;
                     println!(
-                        "= tick time:          {:.3} ms (batch of {} ticks)",
-                        profile["tick"], tpt
+                        "= tick time:          {:.3} ms (median {:.3} ms, batch of {} ticks)",
+                        profile["tick"], profile["tick_median"], tpt
+                    );
+                    println!(
+                        "warm-up:              {:.3} ms (first batch)",
+                        profile["warmup"]
                     );
                     println!("build time:           {:.3} ms", profile["build"]);
                     println!("real_time_factor:     {:.3}", profile["real_time_factor"]);
+                    println!(
+                        "real_time_factor_median: {:.3}",
+                        profile["real_time_factor_median"]
+                    );
                     if enable_detail {
                         println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
                         println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
@@ -1700,8 +1708,12 @@ impl WorldBuilder {
                     let tpt = profile.get("ticks_per_telemetry").copied().unwrap_or(1.0) as u64;
                     println!("\n[Runtime Metrics]");
                     println!(
-                        "tick time:            {:.3} ms (batch of {} ticks)",
-                        profile["tick"], tpt
+                        "tick time:            {:.3} ms (median {:.3} ms, batch of {} ticks)",
+                        profile["tick"], profile["tick_median"], tpt
+                    );
+                    println!(
+                        "warm-up:              {:.3} ms (first batch)",
+                        profile["warmup"]
                     );
                     println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
                     println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
@@ -1714,6 +1726,10 @@ impl WorldBuilder {
                     println!("d2h_download time:    {:.3} ms", profile["d2h_download"]);
                     println!("build time:           {:.3} ms", profile["build"]);
                     println!("real_time_factor:     {:.3}", profile["real_time_factor"]);
+                    println!(
+                        "real_time_factor_median: {:.3}",
+                        profile["real_time_factor_median"]
+                    );
 
                     Ok(None)
                 }
