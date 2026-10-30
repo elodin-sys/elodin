@@ -1,8 +1,10 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fmt,
     time::{Duration, Instant},
 };
+
+const MEDIAN_WINDOW: usize = 1024;
 
 #[derive(Default, Clone, Copy, Debug)]
 pub struct TickTimings {
@@ -32,12 +34,20 @@ impl Profiler {
             + self.add_to_history.mean()
     }
 
+    pub fn tick_median(&self) -> f64 {
+        self.copy_to_client.median()
+            + self.execute_buffers.median()
+            + self.copy_to_host.median()
+            + self.add_to_history.median()
+    }
+
     pub fn profile(
         &self,
         time_step: Duration,
         ticks_per_telemetry: u64,
     ) -> HashMap<&'static str, f64> {
         let tick_mean = self.tick_mean();
+        let tick_median = self.tick_median();
         let sim_time_step_ms = time_step.as_secs_f64() * 1000.0;
         let batch_sim_time_ms = sim_time_step_ms * ticks_per_telemetry.max(1) as f64;
         let profile = [
@@ -50,9 +60,11 @@ impl Profiler {
             ("d2h_download", self.d2h_download.mean()),
             ("add_to_history", self.add_to_history.mean()),
             ("tick", tick_mean),
+            ("tick_median", tick_median),
             ("time_step", sim_time_step_ms),
             ("ticks_per_telemetry", ticks_per_telemetry as f64),
-            ("real_time_factor", batch_sim_time_ms / tick_mean),
+            // Median so one preempted tick cannot dominate a short run's RTF.
+            ("real_time_factor", batch_sim_time_ms / tick_median),
         ];
         profile.into_iter().collect()
     }
@@ -62,13 +74,12 @@ impl Profiler {
 pub struct RollingMean {
     sum: Duration,
     count: u32,
+    recent: VecDeque<Duration>,
 }
 
 impl RollingMean {
     pub fn observe(&mut self, start: &mut Instant) {
-        let sample = start.elapsed();
-        self.sum += sample;
-        self.count += 1;
+        self.observe_duration(start.elapsed());
         *start = Instant::now();
     }
 
@@ -76,9 +87,21 @@ impl RollingMean {
         self.mean_duration().as_secs_f64() * 1000.0
     }
 
+    pub fn median(&self) -> f64 {
+        let mut sorted = Vec::from(self.recent.clone());
+        sorted.sort_unstable();
+        sorted
+            .get(sorted.len() / 2)
+            .map_or(0.0, |d| d.as_secs_f64() * 1000.0)
+    }
+
     pub fn observe_duration(&mut self, sample: Duration) {
         self.sum += sample;
         self.count += 1;
+        if self.recent.len() == MEDIAN_WINDOW {
+            self.recent.pop_front();
+        }
+        self.recent.push_back(sample);
     }
 
     pub fn mean_duration(&self) -> Duration {

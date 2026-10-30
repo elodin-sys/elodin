@@ -1160,13 +1160,14 @@ mod tests {
     #[test]
     fn spawn_assets_http_reports_bind_conflict() {
         let dir = tempdir().unwrap();
-        let tcp: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let listener = std::net::TcpListener::bind(tcp).unwrap();
-        let bound = listener.local_addr().unwrap();
-        let assets_addr = assets_http_addr(bound);
-        let _conflict = std::net::TcpListener::bind(assets_addr).unwrap();
+        let conflict = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let assets_addr = conflict.local_addr().unwrap();
+        let tcp = SocketAddr::new(
+            assets_addr.ip(),
+            assets_addr.port() - ASSETS_HTTP_PORT_OFFSET,
+        );
 
-        let err = spawn_assets_http(dir.path(), bound, true, None).unwrap_err();
+        let err = spawn_assets_http(dir.path(), tcp, true, None).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::AddrInUse);
     }
 
@@ -1175,14 +1176,16 @@ mod tests {
         let dir = tempdir().unwrap();
         let assets = dir.path().join("assets");
         write_asset_file(&assets, "rocket.glb", b"spawned-payload").unwrap();
-        let tcp: SocketAddr = "127.0.0.1:0".parse().unwrap();
-        let listener = std::net::TcpListener::bind(tcp).unwrap();
-        let bound = listener.local_addr().unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let assets_addr = listener.local_addr().unwrap();
         drop(listener);
+        let tcp = SocketAddr::new(
+            assets_addr.ip(),
+            assets_addr.port() - ASSETS_HTTP_PORT_OFFSET,
+        );
 
-        spawn_assets_http(dir.path(), bound, true, None).unwrap();
+        spawn_assets_http(dir.path(), tcp, true, None).unwrap();
 
-        let assets_addr = assets_http_addr(bound);
         let client = reqwest::Client::new();
         let response = client
             .get(format!("http://{assets_addr}/rocket.glb"))

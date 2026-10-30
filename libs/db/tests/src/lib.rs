@@ -15,6 +15,7 @@ mod tests {
     use postcard_schema::{Schema, schema::owned::OwnedNamedType};
     use std::{
         collections::{BTreeMap, BTreeSet},
+        io::Read,
         net::SocketAddr,
         path::Path,
         sync::Arc,
@@ -2264,15 +2265,23 @@ mod tests {
     /// skipped.  The `extra` field IS included because the follower now
     /// sets it to match the source's value during backfill.
     fn read_append_log_committed(path: &Path) -> Vec<u8> {
-        let data = std::fs::read(path).unwrap_or_default();
-        if data.len() < 16 {
+        let Ok(mut file) = std::fs::File::open(path) else {
+            return vec![];
+        };
+        let file_len = file.metadata().map_or(0, |m| m.len());
+        let mut header = [0u8; 16];
+        if file.read_exact(&mut header).is_err() {
             return vec![];
         }
-        let committed_len = u64::from_ne_bytes(data[0..8].try_into().unwrap()) as usize;
-        if committed_len <= 16 || committed_len > data.len() {
+        let committed_len = u64::from_ne_bytes(header[0..8].try_into().unwrap());
+        if committed_len <= 16 || committed_len > file_len {
             return vec![];
         }
-        data[16..committed_len].to_vec()
+        let mut data = Vec::new();
+        file.take(committed_len - 16)
+            .read_to_end(&mut data)
+            .unwrap();
+        data
     }
 
     /// Compare the data-bearing files in two DB directories.

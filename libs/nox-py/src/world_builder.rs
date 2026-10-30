@@ -206,7 +206,7 @@ impl WorldBuilder {
                 "nice",
                 vec![
                     "-n".to_string(),
-                    "19".to_string(),
+                    std::env::var("ELODIN_RENDER_SERVER_NICE").unwrap_or_else(|_| "19".to_string()),
                     "elodin".to_string(),
                     "render-server".to_string(),
                     "--addr".to_string(),

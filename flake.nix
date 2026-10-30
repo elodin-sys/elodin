@@ -32,7 +32,7 @@
   }: let
     rustToolchain = p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
 
-    elodinOverlay = gitRev: final: prev: {
+    elodinOverlay = final: prev: {
       tracy = (prev.tracy.override {withWayland = false;}).overrideAttrs (oldAttrs: {
         buildInputs =
           (oldAttrs.buildInputs or [])
@@ -40,25 +40,25 @@
       });
       elodin = rec {
         elodin-py = final.callPackage ./nix/pkgs/elodin-py.nix {
-          inherit rustToolchain gitRev;
+          inherit rustToolchain;
           python = final.python313;
           pythonPackages = final.python313Packages;
         };
         elodin-cli = final.callPackage ./nix/pkgs/elodin-cli.nix {
-          inherit rustToolchain gitRev;
+          inherit rustToolchain;
           elodinPy = elodin-py.py;
           python = elodin-py.python;
           pythonPackages = elodin-py.pythonPackages;
         };
         elodin-cli-tracy = final.callPackage ./nix/pkgs/elodin-cli.nix {
-          inherit rustToolchain gitRev;
+          inherit rustToolchain;
           elodinPy = elodin-py.py;
           python = elodin-py.python;
           pythonPackages = elodin-py.pythonPackages;
           enableTracy = true;
         };
         elodin-db = final.callPackage ./aleph/pkgs/elodin-db.nix {
-          inherit rustToolchain gitRev;
+          inherit rustToolchain;
         };
         elodin-db-protos = final.callPackage ./nix/pkgs/elodin-db-protos.nix {};
         elodinsink = final.callPackage ./nix/pkgs/elodinsink.nix {inherit rustToolchain;};
@@ -68,19 +68,16 @@
   in
     # overlays are system-agnostic ⇒ define them at top level
     {
-      overlays.default = elodinOverlay "unknown";
+      overlays.default = elodinOverlay;
     }
     // flake-utils.lib.eachDefaultSystem (
       system: let
-        gitRev =
-          nixpkgs.lib.substring 0 7
-          (self.shortRev or self.dirtyShortRev or self.rev or self.dirtyRev or "unknown");
         pkgs = import nixpkgs {
           inherit system;
           config.allowUnfree = true;
           overlays = [
             rust-overlay.overlays.default
-            (elodinOverlay gitRev)
+            elodinOverlay
           ];
         };
 

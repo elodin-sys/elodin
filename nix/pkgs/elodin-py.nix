@@ -2,7 +2,6 @@
   pkgs,
   lib,
   rustToolchain,
-  gitRev ? "unknown",
   python,
   pythonPackages,
   ...
@@ -14,7 +13,7 @@
   pname = noxPyCargoToml.package.name;
   version = workspaceCargoToml.workspace.package.version;
 
-  src = pkgs.nix-gitignore.gitignoreSource [] ../..;
+  src = common.src;
 
   arch = with pkgs;
     if stdenv.isDarwin
@@ -77,8 +76,6 @@
     OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include/";
 
     NIX_LDFLAGS = lib.optionalString pkgs.stdenv.isDarwin "-lc++ -headerpad_max_install_names";
-
-    GIT_HASH = gitRev;
 
     doCheck = false;
 
