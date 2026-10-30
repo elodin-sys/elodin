@@ -1683,16 +1683,10 @@ impl WorldBuilder {
                         simulation_source_entrypoint.as_deref().map(Path::new),
                     )
                     .map_err(Error::DB)?;
-                    crate::impeller_server::init_db(
-                        &db,
-                        compiled_exec.world_mut(),
-                        impeller::types::Timestamp::now(),
-                    )?;
+                    let start = impeller::types::Timestamp::now();
+                    crate::impeller_server::init_db(&db, compiled_exec.world_mut(), start)?;
 
-                    let mut exec_with_db = PyExec {
-                        exec: compiled_exec,
-                        db: Box::new(db),
-                    };
+                    let mut exec_with_db = PyExec::new(compiled_exec, db, start);
                     exec_with_db.exec.profiler_mut().detailed_timing = true;
                     exec_with_db.run(py, ticks, true, None)?;
                     let profile = exec_with_db.profile();
@@ -1776,11 +1770,9 @@ impl WorldBuilder {
         // `$ELODIN_ASSETS` / cwd like before.
         crate::impeller_server::prime_schematic_assets(&db, exec.world_mut(), None)
             .map_err(Error::DB)?;
-        crate::impeller_server::init_db(&db, exec.world_mut(), Timestamp::now())?;
-        Ok(PyExec {
-            exec,
-            db: Box::new(db),
-        })
+        let start = Timestamp::now();
+        crate::impeller_server::init_db(&db, exec.world_mut(), start)?;
+        Ok(PyExec::new(exec, db, start))
     }
 
     #[allow(clippy::too_many_arguments)]

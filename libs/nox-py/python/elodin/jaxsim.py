@@ -130,8 +130,8 @@ class JaxSim:
         for steps in range(max_steps):
             # Auto-increment tick if enabled
             if self._tick_index is not None:
-                # SimulationTick is always F64, just increment it
-                self.state[self._tick_index] = self.state[self._tick_index] + 1.0
+                # Keep the tick's integer dtype; adding 1.0 would promote it to f64 and retrace py_sim
+                self.state[self._tick_index] = self.state[self._tick_index] + 1
                 self._tick_steps += 1
 
             # Call the simulation function
@@ -165,6 +165,9 @@ class JaxSim:
 
                 for c_p, d_p, name in self.map:
                     if name == component_name:
+                        # A component held by a single entity has no entity axis.
+                        if len(component_entity_map) == 1:
+                            return self.state[d_p]
                         return self.state[d_p][entity_index]
 
     def set_state(self, component_name, entity_name, value):
@@ -201,13 +204,21 @@ class JaxSim:
                     entity_index = component_entity_map.index(entity_id)
                 except ValueError:
                     raise Exception(f"Entity {entity_name} not found in component {component_name}")
+                value = np.asarray(value)
                 for c_p, d_p, name in self.map:
                     if name == component_name:
-                        if self.state[d_p][entity_index].shape == value.shape:
-                            self.state[d_p].at[entity_index].set(value)
+                        # A component held by a single entity has no entity axis.
+                        single = len(component_entity_map) == 1
+                        current = self.state[d_p] if single else self.state[d_p][entity_index]
+                        if current.shape == value.shape:
+                            # JAX arrays are immutable: store the updated array, don't discard it.
+                            if single:
+                                self.state[d_p] = value.astype(current.dtype)
+                            else:
+                                self.state[d_p] = self.state[d_p].at[entity_index].set(value)
                         else:
                             raise Exception(
-                                f"Value shape: {value.shape} does not match component: {component_name}, entity: {entity_name} state shape: {self.state[d_p][entity_index].shape}"
+                                f"Value shape: {value.shape} does not match component: {component_name}, entity: {entity_name} state shape: {current.shape}"
                             )
 
     def print_dictionary(self):
@@ -218,12 +229,8 @@ class JaxSim:
             entity_names_shapes = []
             for name, id in self.entity_dict.items():
                 if id in entity_ids:
-                    # Find the corresponding state shape
-                    for c_p, d_p, comp_name in self.map:
-                        if comp_name == component_name:
-                            entity_index = self.component_entity_dict[component_name].index(id)
-                            shape = self.state[d_p][entity_index].shape
-                            entity_names_shapes.append(f"{name} (shape: {shape})")
+                    shape = np.shape(self.get_state(component_name, name))
+                    entity_names_shapes.append(f"{name} (shape: {shape})")
             print(f"{component_name}: {', '.join(entity_names_shapes)}")
 
     def get_tick_count(self):

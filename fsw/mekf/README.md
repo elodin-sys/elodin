@@ -245,6 +245,8 @@ Subscribes to the `imu` vtable (accel, gyro, mag) at ~770 Hz.
 - **gyro**: converted from dps to rad/s, used directly as angular velocity
 - **accel**: normalized, used as gravity reference vector `[0, 0, 1]` (FRD: down = +Z)
 - **mag**: soft-iron calibrated via configurable `mag_cal.a` (3x3 matrix) and `mag_cal.b` (3-vector offset), then transformed with `[-1, 1, -1]` axis flip, then normalized
+- A zero mag (sent by sensor-fw when the BMM350 is missing) or a zero accel is left out of the update, so the filter keeps running on the remaining vector and the gyro
+- A non-finite gyro sample is replaced with the bias estimate, so that step propagates a zero corrected rate (the attitude holds, the covariance still grows); if the filter state itself becomes non-finite, it resets to identity attitude with zero bias
 
 ### Output Component (`aleph`)
 
@@ -254,7 +256,7 @@ Subscribes to the `imu` vtable (accel, gyro, mag) at ~770 Hz.
 | `b_hat` | [f64; 3] | Gyro bias estimate (rad/s) |
 | `gyro_est` | [f64; 3] | Bias-corrected angular velocity (rad/s) |
 | `world_pos` | SpatialTransform | Rotation as a spatial transform for visualization |
-| `mag_cal` | [f64; 3] | Calibrated+normalized magnetometer vector |
+| `mag_cal` | [f64; 3] | Calibrated+normalized magnetometer vector (zero when the mag is missing) |
 
 Rate: ~770 Hz (one output per IMU input).
 
