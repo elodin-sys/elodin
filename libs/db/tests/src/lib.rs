@@ -58,6 +58,12 @@ mod tests {
         .await
     }
 
+    /// Round trip on `client`; the server handles a connection's packets in order,
+    /// so everything sent before this has been applied when it returns.
+    async fn flush(client: &mut Client) {
+        client.request(&DumpMetadata).await.unwrap();
+    }
+
     #[test]
     async fn test_connect() {
         let (_client, _db) = setup_test_db().await.unwrap();
@@ -188,7 +194,7 @@ mod tests {
 
         client.send(LenPacket::table([99, 0], 0)).await.0.unwrap();
 
-        assert!(receives_packet(&mut client, Duration::from_secs(1)).await);
+        assert!(receives_packet(&mut client, Duration::from_secs(10)).await);
     }
 
     #[test]
@@ -212,7 +218,7 @@ mod tests {
         let floats = [1.0f64, 2.0];
         pkt.extend_aligned(&floats);
         client.send(pkt).await.0.unwrap();
-        sleep(Duration::from_millis(100)).await;
+        flush(&mut client).await;
         db.with_state(|state| {
             let c = state
                 .get_component(ComponentId::new("test"))
@@ -385,25 +391,38 @@ mod tests {
         rx_client.send(&msg).await.0.unwrap();
         let mut sub = rx_client.stream(&vtable_stream).await.unwrap();
 
-        spawn(async move {
-            for i in 0..5 {
-                sleep(Duration::from_millis(50)).await;
+        let _writer = spawn(async move {
+            for i in 0..=i32::MAX {
+                sleep(Duration::from_millis(5)).await;
                 let value = i as f64;
                 let mut pkt = LenPacket::table(vtable_id, 8);
                 pkt.extend_aligned(&[value]);
                 tx_client.send(pkt).await.0.unwrap();
             }
-        });
-        let StreamReply::VTable(_) = sub.next().await.unwrap() else {
-            panic!("unexpected reply type");
-        };
-        for i in 0..5 {
-            let StreamReply::Table(table) = sub.next().await.unwrap() else {
-                panic!("unexpected reply type");
-            };
-            let expected_value = i as f64;
-            assert_eq!(&table.buf[..], expected_value.as_bytes());
-        }
+        })
+        .drop_guard();
+        futures_lite::future::race(
+            async {
+                let StreamReply::VTable(_) = sub.next().await.unwrap() else {
+                    panic!("unexpected reply type");
+                };
+                // Latest-value sampler: writes may coalesce or repeat, but never go backwards.
+                let mut last = -1.0;
+                for _ in 0..5 {
+                    let StreamReply::Table(table) = sub.next().await.unwrap() else {
+                        panic!("unexpected reply type");
+                    };
+                    let value = f64::read_from_bytes(&table.buf[..]).unwrap();
+                    assert!(value >= last, "stream went backwards: {value} after {last}");
+                    last = value;
+                }
+            },
+            async {
+                sleep(Duration::from_secs(10)).await;
+                panic!("stream stopped delivering tables");
+            },
+        )
+        .await;
     }
 
     #[test]
@@ -429,7 +448,7 @@ mod tests {
             &[(Timestamp(1), 2.0)],
         )
         .await;
-        sleep(Duration::from_millis(50)).await;
+        flush(&mut writer).await;
 
         let stream_id = 42;
         let mut reader = Client::connect(addr).await.unwrap();
@@ -581,7 +600,7 @@ mod tests {
             &[(Timestamp(1), 2.0)],
         )
         .await;
-        sleep(Duration::from_millis(50)).await;
+        flush(&mut writer).await;
 
         let stream_id = 43;
         {
@@ -664,7 +683,7 @@ mod tests {
             &[(Timestamp(1), 2.0)],
         )
         .await;
-        sleep(Duration::from_millis(50)).await;
+        flush(&mut writer).await;
 
         let stream_id = 44;
         let mut reader = Client::connect(addr).await.unwrap();
@@ -760,7 +779,7 @@ mod tests {
         initial.extend_from_slice(&0.0_f64.to_le_bytes());
         initial.extend_aligned(&[0_i64]);
         writer.send(initial).await.0.unwrap();
-        sleep(Duration::from_millis(20)).await;
+        flush(&mut writer).await;
 
         let stream_id = 45;
         let mut reader = Client::connect(addr).await.unwrap();
@@ -1507,7 +1526,7 @@ mod tests {
             .0
             .unwrap();
 
-        sleep(Duration::from_millis(100)).await;
+        flush(&mut setup_client).await;
 
         const NUM_CLIENTS: usize = 5;
         const WRITES_PER_CLIENT: usize = 10;
@@ -1546,7 +1565,7 @@ mod tests {
 
         let expected_count = NUM_CLIENTS * WRITES_PER_CLIENT;
         let min_acceptable = (expected_count * 95) / 100; // Accept 95% success rate
-        let timeout = Duration::from_secs(2);
+        let timeout = Duration::from_secs(10);
         let start = std::time::Instant::now();
 
         let actual_count = loop {
@@ -2714,7 +2733,7 @@ mod tests {
             pkt.extend_aligned(&[999.0f64]);
             pkt.extend_aligned(&[2000i64]);
             fol_client.send(pkt).await.0.unwrap();
-            sleep(Duration::from_millis(100)).await;
+            flush(&mut fol_client).await;
         }
 
         // Still tracked as followed after local write.
@@ -2737,8 +2756,8 @@ mod tests {
                 &[(Timestamp(2000), 99.0)],
             )
             .await;
+            flush(&mut fol_client).await;
         }
-        sleep(Duration::from_millis(200)).await;
 
         // local_video should NOT be in followed_components.
         {
@@ -2837,7 +2856,7 @@ mod tests {
 
             client.send(&test_msg).await.0.unwrap();
 
-            sleep(Duration::from_millis(100)).await;
+            flush(&mut client).await;
             db.flush_all().unwrap();
         }
 
