@@ -351,6 +351,28 @@ pub(crate) fn component_creation_index(metadata: &ComponentMetadata) -> Option<u
         .and_then(|value| value.parse().ok())
 }
 
+/// Reject case-insensitive duplicate explicit labels without changing their spelling.
+/// Empty label slots retain the existing positional fallback behavior.
+pub fn validate_component_metadata(metadata: &ComponentMetadata) -> Result<(), Error> {
+    if let Some(labels) = metadata.metadata.get("element_names") {
+        let mut seen = HashMap::new();
+        for (index, label) in labels.split(',').enumerate() {
+            let label = label.trim().to_lowercase();
+            if !label.is_empty()
+                && let Some(first) = seen.insert(label.clone(), index)
+            {
+                return Err(Error::DuplicateElementName {
+                    component: metadata.name.clone(),
+                    name: label,
+                    first,
+                    second: index,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
 fn next_component_creation_index_from_metadata(
     component_metadata: &HashMap<ComponentId, ComponentMetadata>,
 ) -> u64 {
@@ -690,6 +712,7 @@ impl DB {
             let metadata_path = path.join("metadata");
             if metadata_path.exists() {
                 let metadata = ComponentMetadata::read(metadata_path)?;
+                validate_component_metadata(&metadata)?;
                 trace!("Read component metadata for {}", metadata.name);
                 component_metadata.insert(component_id, metadata);
             }
@@ -1412,6 +1435,7 @@ impl State {
         mut metadata: ComponentMetadata,
         db_path: &Path,
     ) -> Result<(), Error> {
+        validate_component_metadata(&metadata)?;
         let component_metadata_path = db_path.join(metadata.component_id.to_string());
         std::fs::create_dir_all(&component_metadata_path)?;
         let component_metadata_path = component_metadata_path.join("metadata");
@@ -3704,6 +3728,152 @@ impl AtomicTimestampExt for AtomicCell<Timestamp> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    mod element_names {
+        use super::*;
+
+        // Run explicitly with --ignored --nocapture; no filesystem or telemetry overhead.
+        #[test]
+        #[ignore]
+        fn element_name_validation_benchmark() {
+            let candidate = metadata(1, "Jet.Aero", "CL,CD,CY,Roll,Cm,Cn");
+            let start = Instant::now();
+            for _ in 0..200_000 {
+                validate_component_metadata(std::hint::black_box(&candidate)).unwrap();
+            }
+            eprintln!(
+                "{:.0} ns/six-label metadata validation",
+                start.elapsed().as_nanos() as f64 / 200_000.0
+            );
+        }
+
+        fn metadata(id: u64, name: &str, labels: &str) -> ComponentMetadata {
+            ComponentMetadata {
+                component_id: ComponentId(id),
+                name: name.to_string(),
+                metadata: [("element_names".to_string(), labels.to_string())].into(),
+            }
+        }
+
+        #[test]
+        fn preserves_user_spelling_and_allows_replay() {
+            let dir = tempfile::tempdir().unwrap();
+            let mut state = State::default();
+            state
+                .set_component_metadata(metadata(1, "Jet.Aero", " CL, CD, Cy "), dir.path())
+                .unwrap();
+            let stored = state.get_component_metadata(ComponentId(1)).unwrap();
+            assert_eq!(stored.name, "Jet.Aero");
+            assert_eq!(stored.element_names(), " CL, CD, Cy ");
+            assert_eq!(
+                ComponentMetadata::read(dir.path().join("1/metadata")).unwrap(),
+                *stored
+            );
+            // Identical replay and case-only edits of unique labels are allowed.
+            state
+                .set_component_metadata(metadata(1, "Jet.Aero", " CL, CD, Cy "), dir.path())
+                .unwrap();
+            state
+                .set_component_metadata(metadata(1, "Jet.Aero", "cl,CD,Cy"), dir.path())
+                .unwrap();
+            assert_eq!(
+                state
+                    .get_component_metadata(ComponentId(1))
+                    .unwrap()
+                    .element_names(),
+                "cl,CD,Cy"
+            );
+        }
+
+        #[test]
+        fn labels_are_scoped_to_each_component() {
+            let dir = tempfile::tempdir().unwrap();
+            let mut state = State::default();
+            state
+                .set_component_metadata(metadata(1, "Jet.Aero", "x"), dir.path())
+                .unwrap();
+            state
+                .set_component_metadata(metadata(2, "JET.AERO", "X"), dir.path())
+                .unwrap();
+            assert_eq!(state.component_metadata.len(), 2);
+        }
+
+        #[test]
+        fn rejects_duplicate_labels_before_mutation() {
+            let dir = tempfile::tempdir().unwrap();
+            let mut state = State::default();
+            let original = metadata(1, "aero", "x,y");
+            state
+                .set_component_metadata(original.clone(), dir.path())
+                .unwrap();
+            for labels in ["CL,CD,CY,Cl,Cm,Cn", "cl,cl", "x, X", "Ω,ω"] {
+                assert!(matches!(
+                    state.set_component_metadata(metadata(1, "renamed", labels), dir.path()),
+                    Err(Error::DuplicateElementName { .. })
+                ));
+                assert_eq!(
+                    state.get_component_metadata(ComponentId(1)),
+                    Some(&original)
+                );
+                assert_eq!(
+                    ComponentMetadata::read(dir.path().join("1/metadata")).unwrap(),
+                    original
+                );
+            }
+            // Empty slots keep positional defaults, and different components may share labels.
+            state
+                .set_component_metadata(metadata(2, "other", "X,,Y,"), dir.path())
+                .unwrap();
+            assert_eq!(
+                state
+                    .get_component_metadata(ComponentId(2))
+                    .unwrap()
+                    .element_names(),
+                "X,,Y,"
+            );
+            assert!(matches!(
+                state.set_component_metadata(metadata(3, "new", "CL,Cl"), dir.path()),
+                Err(Error::DuplicateElementName { .. })
+            ));
+            assert!(!dir.path().join("3").exists());
+        }
+
+        #[test]
+        fn reopen_preserves_user_spelling() {
+            let dir = tempfile::tempdir().unwrap();
+            let db = DB::create(dir.path().join("db")).unwrap();
+            // Simulate a valid legacy metadata-only record, written outside State.
+            let record = metadata(1, "Legacy.Name", "X,Y");
+            std::fs::create_dir(db.path.join("1")).unwrap();
+            record.write(db.path.join("1/metadata")).unwrap();
+            let path = db.path.clone();
+            drop(db);
+            let db = DB::open(path).unwrap();
+            db.with_state(|state| {
+                assert_eq!(state.get_component_metadata(ComponentId(1)), Some(&record));
+            });
+            // Opening does not rewrite legacy files.
+            assert_eq!(
+                ComponentMetadata::read(db.path.join("1/metadata")).unwrap(),
+                record
+            );
+        }
+
+        #[test]
+        fn reopen_rejects_legacy_collisions() {
+            let dir = tempfile::tempdir().unwrap();
+            let db = DB::create(dir.path().join("db")).unwrap();
+            let path = db.path.join("1");
+            std::fs::create_dir(&path).unwrap();
+            metadata(1, "aero", "CL,Cl")
+                .write(path.join("metadata"))
+                .unwrap();
+            assert!(matches!(
+                DB::open(db.path.clone()),
+                Err(Error::DuplicateElementName { .. })
+            ));
+        }
+    }
 
     #[test]
     fn stream_interval_matches_microsecond_timestamps() {
