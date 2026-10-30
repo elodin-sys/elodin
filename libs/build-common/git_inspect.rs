@@ -52,10 +52,10 @@ pub fn short_hash() -> Option<String> {
     hash
 }
 
-/// Rerun on `GIT_HASH` changes; watch `.git/HEAD` only when the hash is not provided.
+/// Rerun on `GIT_HASH` changes; watch `.git/HEAD` only when it is unset or empty.
 pub fn emit_rerun_directives() {
     println!("cargo:rerun-if-env-changed=GIT_HASH");
-    if std::env::var_os("GIT_HASH").is_none()
+    if std::env::var("GIT_HASH").unwrap_or_default().is_empty()
         && let Some(head) = head_path()
     {
         println!("cargo:rerun-if-changed={head}");
