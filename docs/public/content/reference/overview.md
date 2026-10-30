@@ -17,8 +17,8 @@ order = 1
 
 Have a Cesium ion account and a latitude/longitude in mind?
 [Cesium terrain](@/reference/cesium.md) walks through choosing scenery,
-placing a simulation, preparing ground heights and viewing a recorded flight
-in the WASM editor.
+running RC-jet and placing it at your coordinates. It also explains what the
+separate WASM demo supports today and where its recording lives.
 
 
 ## Simulation Architecture
