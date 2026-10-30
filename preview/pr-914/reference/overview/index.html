@@ -333,6 +333,14 @@
             <li>
                 <a
                     class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-914/reference/cesium/"
+                    >Cesium terrain</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
                     href="https://docs.elodin.systems/preview/pr-914/reference/elodin-cli/"
                     >Elodin CLI</a
                 >
@@ -424,6 +432,11 @@
             <ul>
                 
                 <li>
+                    <a href="https://docs.elodin.systems/preview/pr-914/reference/overview/#simulate-at-a-real-location">Simulate at a real location</a>
+                    
+                </li>
+                
+                <li>
                     <a href="https://docs.elodin.systems/preview/pr-914/reference/overview/#simulation-architecture">Simulation Architecture</a>
                     
                     <ul>
@@ -459,8 +472,13 @@
  
               <main class="docs-content col-lg-11 col-xxl-10">
                   <h1>Overview</h1>
-                   <h2 id="simulation-architecture">Simulation Architecture</h2>
-<p>An Elodin simulation consists of Entities are spawned with a list of archetypes rather than individual components.</p>
+                   <h2 id="simulate-at-a-real-location">Simulate at a real location</h2>
+<p>Have a Cesium ion account and a latitude/longitude in mind?
+<a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/">Cesium terrain</a> walks through choosing scenery,
+placing a simulation, preparing ground heights and viewing a recorded flight
+in the WASM editor.</p>
+<h2 id="simulation-architecture">Simulation Architecture</h2>
+<p>An Elodin simulation is built from entities and systems. Entities hold component data; systems update it over time.</p>
 <h3 id="systems">Systems</h3>
 <p>Systems are reusable functions that operate on a set of components. Composing different systems allows for the creation of custom physics engines. Some examples of systems include gravity, aerodynamics, collision detection.</p>
 <h3 id="world">World</h3>

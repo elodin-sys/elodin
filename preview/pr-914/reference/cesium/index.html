@@ -1,0 +1,637 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    
+<link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css" media="print" onload="this.media='all'; this.onload = null">
+<noscript><link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css"></noscript>
+
+    
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-914/fonts/spacegrotesk.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-914/fonts/ibm-plex-sans-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-914/fonts/ibm-plex-sans-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-914/fonts/ibm-plex-sans-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-914/fonts/ibm-plex-sans-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-914/fonts/ibm-plex-sans-700.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-914/fonts/ibm-plex-mono-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-914/fonts/ibm-plex-mono-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-914/fonts/ibm-plex-mono-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-914/fonts/ibm-plex-mono-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-914/fonts/ibm-plex-mono-700.woff2" type="font/woff2" crossorigin>
+
+    
+<link rel="stylesheet" href="https://docs.elodin.systems/preview/pr-914/main.css">
+
+    
+  <meta name="theme-color" content="#fff">
+  <link rel="apple-touch-icon" sizes="180x180" href="https://docs.elodin.systems/preview/pr-914/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="https://docs.elodin.systems/preview/pr-914/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="https://docs.elodin.systems/preview/pr-914/favicon-16x16.png">
+  
+    <link rel="manifest" href="https://docs.elodin.systems/preview/pr-914/site.webmanifest" crossorigin>
+  
+
+
+  
+  
+    
+  
+
+  
+  
+    
+    
+  
+
+  
+    
+  
+  
+  
+  
+    
+  
+
+  
+
+
+  <meta name="robots" content="index, follow">
+  <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+  <meta name="bingbot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+
+
+	
+
+
+	
+
+<title>Cesium terrain | Elodin</title>
+<meta name="description" content="Place an Elodin simulation at a real location and stream its surroundings.">
+<link rel="canonical" href="https://docs.elodin.systems/preview/pr-914/reference/cesium/">
+
+
+  <meta name="twitter:card" content="summary_large_image">
+  
+    <meta name="twitter:image" content="https://docs.elodin.systems/preview/pr-914/logo.png">
+  
+  <meta name="twitter:title" content="Cesium terrain">
+  <meta name="twitter:description" content="Place an Elodin simulation at a real location and stream its surroundings.">
+  <meta name="twitter:site" content="@elodinsystems">
+  <meta name="twitter:creator" content="@elodinsystems">
+
+  <meta property="og:title" content="Cesium terrain">
+  <meta property="og:description" content="Place an Elodin simulation at a real location and stream its surroundings.">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://docs.elodin.systems/preview/pr-914/reference/cesium/">
+
+  
+    <meta property="og:image" content="https://docs.elodin.systems/preview/pr-914/logo.png">
+  
+
+  <meta property="og:updated_time" content="">
+  <meta property="og:site_name" content="Cesium terrain">
+
+  
+
+  
+
+  
+  <meta property="og:locale" content="en_US">
+
+
+
+
+
+  
+
+
+
+
+
+<script type="application/ld+json">
+  {
+    "@context": "http://schema.org",
+    "@type": "BreadcrumbList",
+    
+      
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          {
+            "@type": "ListItem",
+            "position":  1 ,
+            "name": "Home",
+            "item": "https://docs.elodin.systems/preview/pr-914/"
+          },
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  2 ,
+            "name": "Reference",
+            "item": "https://docs.elodin.systems/preview/pr-914/reference/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  3 ,
+            "name": "Cesium",
+            "item": "https://docs.elodin.systems/preview/pr-914/reference/cesium/"
+          },
+        
+      
+    
+  }
+</script>
+
+
+
+
+</head>
+
+<body class="docs single">
+  
+    
+    
+    
+  
+  
+    
+<header class="navbar fixed-top navbar-expand-md navbar-light">
+    <div class="container">
+        <div class="col-2" style="display: flex; gap: 20px">
+            <a
+                href="https://elodin.systems"
+                class="nav-link-icon"
+                target="_blank"
+                rel="noopener noreferrer"
+                ><svg
+                    width="20"
+                    height="25"
+                    viewBox="0 0 20 25"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                >
+                    <path
+                        d="M10 0H15C17.7615 0 20 2.23858 20 5V20.0001C20 22.7615 17.7615 25.0001 15 25.0001H5C2.23853 25.0001 0 22.7615 0 20V5C0 2.23858 2.23853 1.90735e-06 5 1.90735e-06V5V20.0001H15V5L5 5C5 2.23858 7.23853 0 10 0Z"
+                        fill="currentColor"
+                    />
+                </svg>
+            </a>
+            <span>
+                <select name="version" class="version-select" disabled>
+                    <option value="v0.20.0" selected>
+                        v0.20.0
+                    </option>
+                </select>
+            </span>
+        </div>
+
+        <div
+            class="col-2 d-none d-lg-block"
+            style="margin-left: 56px"
+        >
+            <form style="width: 264px">
+                <input
+                    id="userinput"
+                    class="form-control is-search"
+                    type="search"
+                    placeholder="Search"
+                    aria-label="Search"
+                    autocomplete="off"
+                />
+                <div id="suggestions" class="shadow bg-white rounded"></div>
+            </form>
+        </div>
+        <div class="col-2 d-none d-md-block"></div>
+        <div class="col-2" style="margin-left: 35px">
+            <ul class="navbar-nav main-nav me-auto">
+                      
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-914/home/quickstart"
+                        >HOME</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item reference active"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-914/reference/overview"
+                        >Reference</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-914/releases/changelog"
+                        >Releases</a
+                    >
+                </li>
+                  
+            </ul>
+        </div>
+        <div class="col-1"></div>
+        <div
+            class="col-2 d-none d-xl-block"
+            style="margin-right: 63px"
+        >
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://github.com/elodin-sys/elodin">
+                        <i class="bx bxl-github"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://discord.gg/2XymNRBjfA">
+                        <i class="bx bxl-discord-alt"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a id="mode-1" class="nav-link nav-link-icon toggle-dark">
+                        <i class='bx bxs-sun'></i>
+                    </a>
+                    <a id="mode-2" class="nav-link nav-link-icon toggle-light">
+                        <i class='bx bxs-moon'></i>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</header>
+
+  
+  <div class="wrap container tom-blue" role="document">
+      <div class="content">
+          <div class="row flex-xxl-nowrap justify-content-center">
+              
+<div class="col-lg-5 col-xl-4 docs-sidebar d-none d-lg-block">
+    <nav class="docs-links" aria-label="Main navigation">
+          
+        <h3>Reference</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-914/reference/overview/"
+                    >Overview</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-914/reference/coords/"
+                    >Coordinate Systems</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-914/reference/db-asset-server/"
+                    >DB Asset Server</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-914/reference/python-api/"
+                    >Python API</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link active"
+                    href="https://docs.elodin.systems/preview/pr-914/reference/cesium/"
+                    >Cesium terrain</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-914/reference/elodin-cli/"
+                    >Elodin CLI</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-914/reference/grpc-client/"
+                    >gRPC API</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-914/reference/replays/"
+                    >Replays</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-914/reference/s10/"
+                    >Process Orchestration (s10)</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-914/reference/schematic/"
+                    >Schematic KDL</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-914/reference/color-schemes/"
+                    >Color Schemes</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-914/reference/command-palette/"
+                    >Command Palette</a
+                >
+            </li>
+            
+        </ul>
+          
+         
+        <h3>Migration Guides</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-914/reference/migration/to-0-15/"
+                    >v0.14 to v0.15</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-914/reference/migration/kdl-to-python/"
+                    >Migrate KDL schematics to Python</a
+                >
+            </li>
+            
+        </ul>
+          
+    </nav>
+</div>
+
+               
+<nav
+    class="docs-toc d-none d-xxl-block col-xl-3"
+    aria-label="Secondary navigation"
+>
+    <div class="page-links">
+        <h3>On this page</h3>
+        <nav id="TableOfContents">
+            <ul>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#1-choose-your-scenery">1. Choose your scenery</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#2-try-a-flight-at-mojave">2. Try a flight at Mojave</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#3-put-the-flight-at-your-coordinates">3. Put the flight at your coordinates</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#4-give-the-physics-a-ground-surface">4. Give the physics a ground surface</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#5-view-the-flight-in-a-browser">5. View the flight in a browser</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#if-the-first-view-is-slow-or-blurry">If the first view is slow or blurry</a>
+                    
+                </li>
+                
+            </ul>
+        </nav>
+    </div>
+</nav>
+ 
+              <main class="docs-content col-lg-11 col-xxl-10">
+                  <h1>Cesium terrain</h1>
+                   <p>You have a Cesium ion account and a place in mind. You want your aircraft to fly
+over that part of the desert, with the surrounding terrain visible in Elodin.
+Start with the RC-jet example, then use the same steps for your own simulation.</p>
+<p>The desktop example runs the simulation and streams its surroundings. The
+current browser demo replays a recorded flight while streaming the scenery;
+publishing a different flight or location still requires developer setup.</p>
+<p><img src="../../assets/cesium-rc-jet-wasm.jpg" alt="RC-jet in the WASM editor: streamed desert terrain, aircraft, color camera and telemetry." /></p>
+<p><em>A recorded RC-jet flight in the browser, with scenery streamed as needed.</em></p>
+<h2 id="1-choose-your-scenery">1. Choose your scenery</h2>
+<p>In <a rel="external" href="https://ion.cesium.com/">Cesium ion</a>, enable the assets you want to use:</p>
+<table><thead><tr><th>What you want to see</th><th>Assets used by the RC-jet launcher</th></tr></thead><tbody>
+<tr><td>Terrain with aerial imagery</td><td>Cesium World Terrain (<code>1</code>) and imagery (<code>2</code>)</td></tr>
+<tr><td>Photo 3D, including buildings where covered</td><td>Google Photorealistic 3D Tiles (<code>2275207</code>)</td></tr>
+</tbody></table>
+<p>Photo 3D is the launcher's default. Coverage and detail vary by location. For
+ground contact, the example also needs World Terrain (<code>1</code>), even when Photo 3D
+supplies the visible scenery.</p>
+<p>Create an ion token with read access to those assets. Save its value in
+<code>$HOME/.config/elodin/cesium-ion-token.txt</code>, outside the repository. For a public browser deployment, create a separate
+read-only token restricted to the required assets and your site's browser origin.
+A browser token is visible to visitors; do not use a personal administrative token.</p>
+<h2 id="2-try-a-flight-at-mojave">2. Try a flight at Mojave</h2>
+<p>From the Elodin repository root, build the Python SDK and desktop editor:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">export</span><span style="color: light-dark(#268BD2, #268BD2);"> ELODIN_SHELL_ID</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#268BD2, #268BD2);">cesium</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">nix</span><span style="color: light-dark(#2AA198, #2AA198);"> develop</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">just</span><span style="color: light-dark(#2AA198, #2AA198);"> install</span><span style="color: light-dark(#2AA198, #2AA198);"> py</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">just</span><span style="color: light-dark(#2AA198, #2AA198);"> install</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span></span></code></pre>
+<p>Inside that shell, point the launcher at your token file:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">export</span><span style="color: light-dark(#268BD2, #268BD2);"> CESIUM_ION_TOKEN_FILE</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#268BD2, #268BD2);">$</span><span style="color: light-dark(#268BD2, #268BD2);">HOME</span><span style="color: light-dark(#2AA198, #2AA198);">/.config/elodin/cesium-ion-token.txt</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">bash</span><span style="color: light-dark(#2AA198, #2AA198);"> examples/cesium/run_rc_jet_terrain.sh</span></span></code></pre>
+<p>The example starts at <strong>35.350664° N, 117.809027° W</strong>. Bevy-Cesium selects,
+downloads and renders terrain tiles for the editor and its sensor views as the
+flight progresses.</p>
+<p>To use terrain and aerial imagery instead of Photo 3D:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">bash</span><span style="color: light-dark(#2AA198, #2AA198);"> examples/cesium/run_rc_jet_terrain.sh</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-photo3d</span><span style="color: light-dark(#2AA198, #2AA198);"> off</span></span></code></pre>
+<p>The original local terrain is still available without streaming:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">unset</span><span style="color: light-dark(#2AA198, #2AA198);"> CESIUM_ION_ASSET_ID</span><span style="color: light-dark(#2AA198, #2AA198);"> CESIUM_ION_TOKEN</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">ELODIN_RC_JET_TERRAIN</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">p</span><span style="color: light-dark(#2AA198, #2AA198);">l</span><span style="color: light-dark(#2AA198, #2AA198);">a</span><span style="color: light-dark(#2AA198, #2AA198);">n</span><span style="color: light-dark(#2AA198, #2AA198);">a</span><span style="color: light-dark(#2AA198, #2AA198);">r</span><span style="color: light-dark(#268BD2, #268BD2);"> elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#2AA198, #2AA198);"> examples/rc-jet/main.py</span></span></code></pre><h2 id="3-put-the-flight-at-your-coordinates">3. Put the flight at your coordinates</h2>
+<p>Choose a latitude, longitude and reference altitude. Keep that same site in
+the simulation's initial conditions, the heightmap request and the editor's
+geographic configuration.</p>
+<p>For the current RC-jet example:</p>
+<ul>
+<li>Set the demo site's latitude, longitude and field elevation in
+<code>examples/rc-jet/scenario.py</code> (<code>MOJAVE_RC_FIELD</code>). The scenario derives its
+initial ECEF position and attitude from that site.</li>
+<li>Set the matching <code>ui.coordinate(...)</code> values in
+<code>examples/rc-jet/bdx_schematic.py</code>. Its <code>lat</code> and <code>lon</code> values are degrees;
+<code>alt</code> is meters above the WGS84 ellipsoid.</li>
+<li>Disable the bundled Mojave-specific OSM overlay when using another location:
+<code>export ELODIN_CESIUM_OVERLAY_FILE=''</code>.</li>
+<li>Run the Cesium launcher again. It prepares a height grid around the new
+initial position before starting the simulation.</li>
+</ul>
+<p>There is currently no latitude/longitude switch in the RC-jet launcher. Changing
+the editor's origin alone does <strong>not</strong> move the simulation or relocate a recorded
+flight. For your own model, use the existing
+<a href="https://docs.elodin.systems/preview/pr-914/reference/coords/">coordinate-system primitives</a> to keep the simulation and
+the displayed terrain in the same frame.</p>
+<h2 id="4-give-the-physics-a-ground-surface">4. Give the physics a ground surface</h2>
+<p>The streamed scene and the physical ground are separate. Elodin's
+<code>el.terrain_heightmap()</code> API asks Bevy-Cesium to prepare and cache heights before
+the run. During simulation, JAX samples that fixed grid without network access.</p>
+<ul>
+<li>Set the grid's center and extent to cover the planned flight.</li>
+<li>Choose an initial altitude above the sampled ground. Heights use the WGS84
+ellipsoid, not mean sea level.</li>
+<li>Check the lookup's <code>valid</code> result when the aircraft approaches the edge.</li>
+<li>Implement ground contact in your model. Visible Photo 3D buildings do not
+automatically become collision geometry.</li>
+</ul>
+<p>See <a href="https://docs.elodin.systems/preview/pr-914/reference/python-api/#terrain-heights">Terrain heights</a> for the API,
+units, cache behavior and an example you can adapt.</p>
+<h2 id="5-view-the-flight-in-a-browser">5. View the flight in a browser</h2>
+<p><a rel="external" href="https://medialoco.github.io/rc-jet-wasm/">Open the RC-jet WASM demo</a>.
+The browser runs the Elodin editor, including its timeline, graphs and camera
+controls. The flight is recorded; the terrain and Photo 3D tiles stream as needed.
+The Overlay button shows or hides the experimental OpenStreetMap layer.</p>
+<p>The demo uses Bevy-Cesium's renderer with an experimental Rust streaming backend
+adapted for WASM. The desktop integration uses Cesium Native. The browser demo
+has a color camera; its infrared view has not been ported.</p>
+<p>To publish your own location and flight today:</p>
+<ul>
+<li>Run your Python/JAX simulation outside the browser and keep its
+<a href="https://docs.elodin.systems/preview/pr-914/reference/replays/">recording</a>.</li>
+<li>Have the recording, geographic configuration and assets integrated into a
+browser build, with a dedicated ion token for its deployment origin.</li>
+<li>Rebuild and publish that application. The current RC-jet demo embeds a prepared
+recording; it does not yet have a general recording upload or location picker.</li>
+</ul>
+<h2 id="if-the-first-view-is-slow-or-blurry">If the first view is slow or blurry</h2>
+<ul>
+<li>Allow the initial terrain to load. Turning toward a new area requests more tiles.</li>
+<li>For the desktop example, try <code>--photo3d off</code> for a lighter scene, or increase
+<code>CESIUM_MAXIMUM_SCREEN_ERROR</code> to request less detail (the launcher defaults to <code>48</code>).</li>
+<li>If loading fails, check that the token can read every selected asset. For a
+browser token, also check the allowed origin.</li>
+<li>A cached physics heightmap does not cache the visual terrain or imagery.
+Streaming the scenery still requires network access.</li>
+</ul>
+
+                  
+<div class="footer-line-padding"></div>
+<div class="footer-line"></div>
+<div class="docs-navigation d-flex justify-content-between">
+                   
+</div>
+
+              </main>
+          </div>
+      </div>
+  </div>
+  
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-914/js/main.js"></script>
+<script>
+    // https://mathjax.github.io/MathJax-demos-web/convert-configuration/convert-configuration.html
+    window.MathJax = {
+        tex: {
+            inlineMath: [
+                ["$", "$"],
+                ["\\(", "\\)"],
+            ],
+            displayMath: [
+                ["$$", "$$"],
+                ["\[\[", "\]\]"],
+            ],
+            processEscapes: true,
+            processEnvironments: true,
+        },
+        options: {
+            skipHtmlTags: ["script", "noscript", "style", "textarea", "pre"],
+        },
+    };
+</script>
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-914/js/tex-mml-chtml.js"></script>
+<script type="module">
+    // Zola < 0.22 emits class="language-mermaid"; 0.22+ (giallo) emits data-lang="mermaid".
+    const blocks = document.querySelectorAll('pre > code.language-mermaid, pre > code[data-lang="mermaid"]');
+    if (blocks.length) {
+        const { default: mermaid } = await import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs");
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: document.body.classList.contains("dark") ? "dark" : "default",
+            securityLevel: "loose",
+        });
+        const nodes = [...blocks].map((code) => {
+            const div = document.createElement("div");
+            div.className = "mermaid";
+            div.style.margin = "2rem 0";
+            div.style.overflowX = "auto";
+            div.style.textAlign = "center";
+            div.textContent = code.textContent;
+            code.parentElement.replaceWith(div);
+            return div;
+        });
+        await mermaid.run({ nodes });
+    }
+</script>
+
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-914/js/elasticlunr.min.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-914/search_index.en.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-914/js/search.js"></script>
+
+
+</body>
+
+</html>
