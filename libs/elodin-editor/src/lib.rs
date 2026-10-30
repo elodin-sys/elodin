@@ -5,7 +5,7 @@
 )]
 
 #[cfg(target_family = "wasm")]
-use impeller_bevy::DbEndpoint;
+use impeller_bevy::{DbEndpoint, HostOrUrl};
 use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
 use crate::plugins::{editor_cam_input, editor_cam_touch};
@@ -482,6 +482,9 @@ pub struct EditorPlugin {
     window_resolution: WindowResolution,
     #[cfg(target_family = "wasm")]
     connection: Option<DbEndpoint>,
+    /// Parsed `&assets=` base. Applied to every wasm DB connection.
+    #[cfg(target_family = "wasm")]
+    assets: Option<HostOrUrl>,
 }
 
 /// The positions of camera of object_3d are sync'd in `PreUpdate`.
@@ -494,6 +497,8 @@ impl EditorPlugin {
             window_resolution: WindowResolution::new(width as u32, height as u32),
             #[cfg(target_family = "wasm")]
             connection: None,
+            #[cfg(target_family = "wasm")]
+            assets: None,
         }
     }
 
@@ -520,6 +525,22 @@ impl EditorPlugin {
     pub fn with_db_endpoint(mut self, endpoint: DbEndpoint) -> Self {
         self.connection = Some(endpoint);
         self
+    }
+
+    /// HTTP base for `db:` assets. `host:port` or `http(s)://…`.
+    /// On failure the plugin is returned unchanged.
+    #[cfg(target_family = "wasm")]
+    pub fn with_assets(
+        mut self,
+        assets: &str,
+    ) -> Result<Self, (Self, impeller_bevy::HostOrUrlError)> {
+        match assets.parse() {
+            Ok(assets) => {
+                self.assets = Some(assets);
+                Ok(self)
+            }
+            Err(err) => Err((self, err)),
+        }
     }
 }
 
@@ -661,6 +682,7 @@ impl Plugin for EditorPlugin {
         #[cfg(target_family = "wasm")]
         app.add_plugins(impeller_bevy::WsImpellerPlugin::new(
             self.connection.clone(),
+            self.assets.clone(),
         ));
         app.add_plugins(FrustumPlugin)
             .add_plugins(FrustumIntersectionPlugin)
