@@ -371,7 +371,7 @@ done
 baseline_root="${BASELINE_ROOT:-scripts/ci/baseline}"
 tolerances_file="${TOLERANCES_FILE:-${baseline_root}/tolerances.json}"
 ticks="${REGRESSION_TICKS:-100}"
-runs="${REGRESSION_RUNS:-3}"
+runs="${REGRESSION_RUNS:-5}"
 python_bin="${PYTHON:-python3}"
 
 if [[ ! -d "${baseline_root}" ]]; then

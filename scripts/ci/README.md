@@ -114,7 +114,7 @@ Absolute numbers swing by tens of percent with load on the shared CI host, so
    source being identical in a checkout and a `?rev=` export (no LFS files or
    submodule contents, see `nix/pkgs/src.nix`).
 3. Per example, candidate and base runs alternate `REGRESSION_RUNS` times
-   (default 3). Base runs put the base wheel first on `PYTHONPATH`.
+   (default 5). Base runs put the base wheel first on `PYTHONPATH`.
 4. `compare_profile_metrics.py` compares the median of each side.
 
 The A/B is skipped with a `WARN` line, while the CSV comparison still runs, when

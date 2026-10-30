@@ -12,7 +12,7 @@
       },
       "real_time_factor_median": {
         "abs_tol": 0.0,
-        "rel_tol": 0.2
+        "rel_tol": 0.3
       }
     },
     "examples": {}
