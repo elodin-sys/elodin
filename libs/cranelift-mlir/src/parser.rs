@@ -1,4 +1,6 @@
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use winnow::ascii::{digit1, multispace0};
 use winnow::combinator::{alt, opt};
@@ -1813,10 +1815,14 @@ fn parse_while_op(
         }
     }
 
+    // Cond and body share one set of iteration-argument ids: lowering
+    // binds `iter_arg_ids` as the block parameters of both regions.
+    let iter_arg_ids: Vec<ValueId> = init_names.iter().map(|_| ctx.fresh()).collect();
     let mut cond_ctx = ctx.child();
-    let mut cond_iter_ids = Vec::new();
-    for name in &init_names {
-        cond_iter_ids.push(cond_ctx.get_or_create(name));
+    let mut body_ctx = ctx.child();
+    for (name, &id) in init_names.iter().zip(&iter_arg_ids) {
+        cond_ctx.name_to_id.insert(name.clone(), id);
+        body_ctx.name_to_id.insert(name.clone(), id);
     }
 
     ws(input)?;
@@ -1828,12 +1834,6 @@ fn parse_while_op(
     ws(input)?;
     let _ = '}'.parse_next(input)?;
     ws(input)?;
-
-    let mut body_ctx = ctx.child();
-    let mut body_iter_ids = Vec::new();
-    for name in &init_names {
-        body_iter_ids.push(body_ctx.get_or_create(name));
-    }
 
     let _ = "do".parse_next(input)?;
     ws(input)?;
@@ -1855,7 +1855,7 @@ fn parse_while_op(
             cond_body,
             loop_body,
             init_values,
-            iter_arg_ids: body_iter_ids,
+            iter_arg_ids,
         },
     }))
 }
@@ -3330,15 +3330,20 @@ fn skip_braces(input: &mut Stream<'_>) -> PResult<()> {
 // SSA value context
 // ---------------------------------------------------------------------------
 
+/// SSA name scope for a function body or one of its nested regions.
+///
+/// Names are scoped per region, but `ValueId`s are unique per function:
+/// const folding, DCE and lowering key on `ValueId` across nested bodies,
+/// so every scope made by [`ValueCtx::child`] shares the function's counter.
 struct ValueCtx {
-    next_id: u32,
+    next_id: Rc<Cell<u32>>,
     name_to_id: HashMap<String, ValueId>,
 }
 
 impl ValueCtx {
     fn new() -> Self {
         Self {
-            next_id: 0,
+            next_id: Rc::new(Cell::new(0)),
             name_to_id: HashMap::new(),
         }
     }
@@ -3347,15 +3352,14 @@ impl ValueCtx {
         if let Some(&id) = self.name_to_id.get(name) {
             return id;
         }
-        let id = ValueId(self.next_id);
-        self.next_id += 1;
+        let id = self.fresh();
         self.name_to_id.insert(name.to_string(), id);
         id
     }
 
     fn fresh(&mut self) -> ValueId {
-        let id = ValueId(self.next_id);
-        self.next_id += 1;
+        let id = ValueId(self.next_id.get());
+        self.next_id.set(id.0 + 1);
         id
     }
 
@@ -3364,9 +3368,11 @@ impl ValueCtx {
         self.name_to_id.insert(alias.to_string(), id);
     }
 
+    /// Scope for a nested region: inherits the parent's names and shares its
+    /// id counter. Names the region defines stay local to it.
     fn child(&self) -> Self {
         Self {
-            next_id: self.next_id,
+            next_id: Rc::clone(&self.next_id),
             name_to_id: self.name_to_id.clone(),
         }
     }
@@ -3404,7 +3410,7 @@ fn make_values(
             let name = if !base_name.is_empty() {
                 format!("{}#{}", base_name, i)
             } else {
-                format!("__anon_{}", ctx.next_id + i as u32)
+                format!("__anon_{}", ctx.next_id.get() + i as u32)
             };
             let vid = ctx.get_or_create(&name);
             if i == 0 && !base_name.is_empty() {
