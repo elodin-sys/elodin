@@ -1176,7 +1176,7 @@ def test_spatial_inertia_rejects_bad_types_and_shapes():
             el.SpatialInertia(bad_mass)
 
     # Non-real or ragged inputs for inertia and inertia_off_diag
-    for bad_seq in ("123", [True, False, True], [[1.0, 2.0], [3.0]], None):
+    for bad_seq in ("123", [True, False, True], [[1.0, 2.0], [3.0]], 1j * np.ones(3)):
         with pytest.raises(TypeError, match="inertia must be a real number"):
             el.SpatialInertia(1.0, inertia=bad_seq)
         with pytest.raises(TypeError, match="inertia_off_diag must be a real number"):
