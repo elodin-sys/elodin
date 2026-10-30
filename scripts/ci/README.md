@@ -105,8 +105,8 @@ For profile metrics:
 
 - `build_time_ms` fails only when the candidate is slower than baseline beyond
   tolerance.
-- `real_time_factor` fails only when the candidate drops below baseline beyond
-  tolerance.
+- `real_time_factor` (simulated time over the median tick wall time) fails only
+  when the candidate drops below baseline beyond tolerance.
 - `ticks` must match exactly between baseline and candidate.
 
 ## Failure triage
