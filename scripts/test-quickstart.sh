@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Smoke-test `elodin monte-carlo quickstart` end-to-end (Buildkite step
-# :sparkles: monte-carlo quickstart).
+# :rocket: monte-carlo apollo + quickstart).
 #
 # Scaffolds a campaign from the lightweight examples/monte-carlo sim (declares
 # params, pure-Python fallback controller), then RUNS the generated artifacts
