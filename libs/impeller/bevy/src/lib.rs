@@ -45,10 +45,11 @@ pub use impeller_wkt::ElementValueMut;
 pub use impeller_wkt::{ComponentPart, ComponentPath};
 
 pub use address;
+pub use url;
 pub mod channels;
 pub use channels::{
-    ConnectionAddr, ConnectionStatus, DbEndpoint, MsgPacketRx, MsgPacketTx, PacketRx, PacketTx,
-    QUEUE_LEN, ThreadConnectionStatus,
+    ConnectionAddr, ConnectionStatus, DbEndpoint, HostOrUrl, HostOrUrlError, MsgPacketRx,
+    MsgPacketTx, PacketRx, PacketTx, QUEUE_LEN, ThreadConnectionStatus,
 };
 
 #[cfg(feature = "tcp")]

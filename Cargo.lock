@@ -8126,6 +8126,7 @@ dependencies = [
  "stellarator-buf",
  "thingbuf",
  "tracing",
+ "url",
  "wasm-bindgen",
  "web-sys",
  "web-time",

@@ -1,7 +1,7 @@
 use crate::{
     CurrentStreamId,
     channels::{
-        ConnectionAddr, ConnectionStatus, DbEndpoint, ThreadConnectionStatus, channels,
+        ConnectionAddr, ConnectionStatus, DbEndpoint, HostOrUrl, ThreadConnectionStatus, channels,
         msg_channels,
     },
     msg_sink, new_connection_packets, sink,
@@ -28,11 +28,12 @@ pub struct WsConnect(pub DbEndpoint);
 
 pub struct WsImpellerPlugin {
     endpoint: Option<DbEndpoint>,
+    assets: Option<HostOrUrl>,
 }
 
 impl WsImpellerPlugin {
-    pub fn new(endpoint: Option<DbEndpoint>) -> Self {
-        Self { endpoint }
+    pub fn new(endpoint: Option<DbEndpoint>, assets: Option<HostOrUrl>) -> Self {
+        Self { endpoint, assets }
     }
 }
 
@@ -40,6 +41,7 @@ impl Plugin for WsImpellerPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<WsConnect>()
             .init_resource::<PendingWsConnect>()
+            .insert_resource(WsAssets(self.assets.clone()))
             .add_systems(PreUpdate, queue_ws_connect)
             .add_systems(PreUpdate, apply_ws_connect.after(queue_ws_connect))
             .add_systems(
@@ -52,10 +54,16 @@ impl Plugin for WsImpellerPlugin {
     }
 }
 
+/// Page-level HTTP base for `db:` assets. Reconnects keep it when the new
+/// [`DbEndpoint`] does not set its own.
+#[derive(Resource, Clone)]
+struct WsAssets(Option<HostOrUrl>);
+
 #[derive(Resource, Default)]
 struct PendingWsConnect(Option<DbEndpoint>);
 
 fn install_connection(world: &mut World, endpoint: Option<DbEndpoint>, initial: bool) {
+    let endpoint = endpoint.map(|endpoint| attach_assets(world, endpoint));
     let (packet_tx, packet_rx, outgoing_packet_rx, incoming_packet_tx) = channels();
     let (msg_tx, msg_rx, msg_outgoing_rx, msg_incoming_tx) = msg_channels();
     let stream_id = fastrand::u64(..);
@@ -133,6 +141,16 @@ impl Drop for LiveSocket {
         self.ws.set_onclose(None);
         let _ = self.ws.close();
     }
+}
+
+fn attach_assets(world: &World, endpoint: DbEndpoint) -> DbEndpoint {
+    if endpoint.assets().is_some() {
+        return endpoint;
+    }
+    let Some(WsAssets(Some(assets))) = world.get_resource::<WsAssets>() else {
+        return endpoint;
+    };
+    endpoint.with_assets(assets.clone())
 }
 
 fn queue_ws_connect(mut events: MessageReader<WsConnect>, mut pending: ResMut<PendingWsConnect>) {
