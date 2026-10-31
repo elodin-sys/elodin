@@ -1,8 +1,8 @@
 # Vision-Guided Gate Racing Plan
 
 **Document status:** Authoritative living specification  
-**Last verified against repository:** 2026-10-23
-**Current resume point:** Package G1; E1 is complete, and F implementation is ready (qualification waits for G1)
+**Last verified against repository:** 2026-10-28 (clean G1 ordinary-operation qualification PASS)
+**Current resume point:** E1 and G1 complete; G1 qualified on `g1-clean`, ready for integration. F implementation ready; H/I and F qualification may proceed after G1 integration.
 
 ## 1. Purpose and authority
 
@@ -192,16 +192,11 @@ motor-response, or takeoff criteria return a failing process status.
 ### 3.3 Simulated aids and interface findings
 
 A review of the example at `a218f7a6` and the pinned Betaflight `6dbc4218`
-on 2026-10-21 established the following. Package G1 fixes the first two
-items; the rest are facts that later packages must respect.
+on 2026-10-21 established these baseline findings. G1's timing and GPS changes
+are complete; remaining findings still constrain later packages.
 
-- **Camera time.** `GuidanceUpdate.frame_sample_time` carries `FpvCamera`'s
-  requested query time as a DB-timestamp microsecond float, while `sim_time`
-  is in seconds. The query time is not the capture time. The headless render
-  server renders at cadence-aligned simulation timestamps, computes the camera
-  pose from `drone.world_pos` at that timestamp, and writes the frame with the
-  same timestamp. The selected message timestamp, which `FpvCamera.poll()`
-  uses only for freshness, is therefore the expected capture time.
+- **Camera time.** G1 replaces `frame_sample_time` (query-time microseconds)
+  with selected image-message time in simulation seconds; see Section 7.4.
 - **Truth-derived aids inside Betaflight.** `FEATURE_GPS` is in the SITL
   default features, and the GPS provider defaults to `GPS_VIRTUAL`, fed at
   10 Hz from FDM truth position and velocity. With a fix, Betaflight's Mahony
@@ -219,7 +214,7 @@ items; the rest are facts that later packages must respect.
   plane ends at x = 20 m. There is too little texture for generic
   feature-based visual-inertial odometry.
 - **Sensors.** The configured barometer noise variance is 0.01 m² (σ = 0.1 m),
-  although the `sensors.py` comment says about 0.03 m. The simulated sensors
+  now correctly documented in `sensors.py`. The simulated sensors
   are benign compared with hardware: negligible gyro bias drift, no
   accelerometer bias, and a magnetometer aligned with true north. Estimator
   noise parameters must stay explicit so results are not mistaken for
@@ -290,6 +285,8 @@ Completion of the core plan means:
 
 ### 5.3 Deferred until the core plan demonstrates a need
 
+- Strict rendered-pose/message-time alignment and aligned-stream optimization
+  (Section 7.4).
 - ACRO/rate-mode guidance and advanced attitude controllers.
 - CNN or other learned gate detectors.
 - Spec-size gates, sharp turns, slaloms, vertical courses, and procedural courses.
@@ -463,8 +460,8 @@ tick. The update contains:
 - simulation time and tick;
 - gyro and accelerometer samples;
 - barometer and magnetometer values plus freshness when available;
-- latest FPV RGBA frame or `None`, plus its capture time (`frame_time`, in
-  simulation seconds) and a freshness flag;
+- latest FPV RGBA frame or `None`, plus its nominal image/render time
+  (`frame_time`, simulation seconds; Section 7.4) and a freshness flag;
 - race progress: last gate passed and next gate index;
 - public course rules: gate count and inner-opening size;
 - optional truth state and gate poses, supplied only in truth mode.
@@ -529,19 +526,29 @@ rather than duplicating unexplained constants.
 A frame sample is offered to guidance at most once per nominal 30 Hz camera
 period. `FpvCamera` queries `read_msg_at` at `ctx.timestamp - latency` and
 keeps that requested time internally for its own accounting.
-`GuidanceUpdate.frame_time` is the frame's capture time: the selected DB
-message timestamp, which the render server sets to the simulation time of the
-pose it rendered, converted to simulation seconds on the `sim_time` clock.
+`GuidanceUpdate.frame_time` is the selected DB image-message timestamp T,
+converted by integer timestamp delta to simulation seconds on `sim_time`.
+It is nominal image/render time, not verified exact pose/exposure time.
 `frame_fresh` is true only when `read_msg_at` selects a timestamp different
 from the previous sample. A repeated timestamp is sample-and-hold: the held
 frame and its original `frame_time` may still be supplied, with
 `frame_fresh=False`. Shutdown accounting reports every renderer frame
 (`total_frames`) separately from the frames inside the post-warmup window used
 for observed FPS. Until the renderer produces a frame, guidance receives
-`None`.
+`None` with `frame_time=None`. Missing/malformed samples and an unsampled
+camera period also carry no frame/time; frame copying is unchanged.
 
-Before Package G1, the update carried `frame_sample_time`: the requested query
-time in DB-timestamp microseconds. G1 replaces it (decision log, 2026-10-22).
+**Known limitation (accepted 2026-10-27):** Scene-time alignment is approximate:
+the renderer uses an independently phased, throttled pose cache. One reviewed
+capture showed body state about 22 ms earlier than message T, not a universal
+offset or sub-frame guarantee; phase/backlog can add delay. Sparse unchanged
+state's last-change T is not actual image time. Future fusion must not assume
+exact scene rewind or compensate with a constant offset. Revisit alignment for
+timing-linked gate bias, innovations/rejections, vision hold/pass failures, or
+higher dynamics/backlog—not only ACRO. Strict alignment is deferred, outside G1
+acceptance.
+
+Before G1, `frame_sample_time` carried query time in DB-timestamp microseconds.
 
 ### 7.5 Courses and gates
 
@@ -603,7 +610,8 @@ The detector consumes one nominally fresh RGBA frame sample and returns zero or
 more candidates.
 Each candidate contains:
 
-- frame capture time (`GuidanceUpdate.frame_time`, simulation seconds);
+- nominal image/render time (`GuidanceUpdate.frame_time`, simulation seconds),
+  retained unchanged as `GateCandidate.sample_time` (Section 7.4);
 - four inner-opening corners ordered top-left, top-right, bottom-right,
   bottom-left in pixel coordinates;
 - `corner_order_ambiguous`, a heuristic warning set when the two best square
@@ -712,8 +720,8 @@ gate's yaw. Updates use the Joseph form.
 
 **Measurements.**
 
-- Gate position from PnP, applied at the frame's capture time using a short
-  ring buffer of past `(t, p, R_LB)`. Its noise is anisotropic:
+- Gate position from PnP, applied at nominal image/render time (Section 7.4)
+  using a short ring buffer of past `(t, p, R_LB)`. Its noise is anisotropic:
   bearing-limited across the line of sight and depth-limited, growing with
   range squared, along it. Frames older than the buffer or newer than the
   current step are dropped and counted. A candidate whose gate normal is not
@@ -1522,51 +1530,64 @@ review fixes; corner-order wording rechecked 2026-10-21:**
   and 179.9 px, 57.3 px down. Worst corner error is 1.7 px at tilt 0 and 2.7 px
   at +10°, on the compressed bottom corners.
 
-### [ ] G1 — Sensor timing and truth-boundary fixes
+### [x] G1 — Sensor timing and truth-boundary fixes
 
-**Objective:** Give guidance a correct camera capture time and remove the
-truth-derived aid Betaflight receives, before any recordings or qualifications
-that depend on either.
+**Status (2026-10-28):** Implementation and ordinary-operation qualification
+complete on `g1-clean` source `30d2c307`, based only on GitHub `origin/main`
+`8742b411`; ready for integration. Fresh matching artifacts qualify this source,
+not the prior agent-integrated trees.
 
-**Prerequisites:** B and G.
+**Objective:** Supply nominal image/render time on the simulation clock and
+remove Betaflight's truth-derived aid. **Prerequisites:** B and G.
 
-**Required work:**
+- `FpvCamera.poll()` supplies selected image-message time via integer-delta
+  conversion as `frame_time`, replacing `frame_sample_time`; query time stays
+  internal. `GateCandidate.sample_time` carries the same value (Section 7.4).
+- Focused tests cover conversion, held/missing/freshness and copy safety.
+- `init_eeprom.py` disables GPS and verifies persisted `trust_mag = OFF` and
+  prior settings using exact CLI lines/tokens; importing it does not start SITL.
+- The `sensors.py` barometer-noise comment now correctly states σ = 0.1 m.
 
-- Return the selected message timestamp from `FpvCamera.poll()` as a capture
-  time in simulation seconds, and replace `GuidanceUpdate.frame_sample_time`
-  with `frame_time` (Section 7.4). `GateCandidate.sample_time` carries the same
-  value. Keep the requested query time inside `FpvCamera` for its accounting.
-- Add pure tests for the conversion, for held frames retaining their capture
-  time with `frame_fresh=False`, and for samples before the first frame.
-- Verify on a moving segment that rendered frames match the pose at the capture
-  time. Choose a segment whose predicted image motion over one 33 ms latency
-  is well above the measurement residual, for example a Package D audit yaw
-  pulse at about 1.5 rad/s with the `single` gate in view (about 15 px). If no
-  existing scenario provides one, add a purpose-built qualification fixture.
-  Measure inner-opening corners in several frames by the same method as Package
-  G's rendered tilt check, and compare them with `project_gate_corners` at the
-  capture time and at the requested time.
-- Add `feature -GPS` to `init_eeprom.py`, and verify that GPS is disabled and
-  `trust_mag = OFF` alongside the existing checks.
-- Correct the barometer-noise comment in `sensors.py` (σ = 0.1 m).
+**Approved scope:** Approximate scene-time alignment is accepted (Section 7.4).
+Strict alignment remains a historical FAIL, deferred/non-gating. Its diagnostic
+and tests remain unchanged in reference commit `3584748d`, not in this minimal
+patch; historical evidence is retained under `/home/ubuntu/betaflight-g1/`.
+No timing offset, controller/gain change, renderer/query/stream fix, per-frame
+RPC, prototype promotion, or native/build/firmware change is included.
 
-**Out of scope:** Detection, tracking, telemetry additions, or any change to
-guidance behavior.
+**Qualification PASS:** Fresh private Python3.13.14/JAX0.10.0 CPU SDK,
+release runtime/DB (`0.20.1-alpha.0+30d2c307`) and default TARGET=SITL
+`betaflight_SITL.elf` passed required build/fmt/clippy, **270 Python tests**,
+**754 editor tests** (3 ignored; one doctest ignored), **5 controller tests**,
+**17 s10 tests** and actual headless lifecycle CI. Eight serialized unique
+first-attempt gates passed: default/single C0, C positive referee, D physical,
+three consecutive camera-off E holds and ordinary D+single+FPV. Online hold RMS
+was **0.071927 / 0.071675 / 0.075766 m** over continuous 10 s windows; additional,
+distinct DB-relative `[30,40]` windows measured **0.059985031 / 0.060709757
+/ 0.064263028 m**. FPV passed 720 total/659 window frames at 29.95 simulated FPS;
+721 raw RGBA frames include the known shutdown extra. All 18-file source bundles
+and frozen native/private/global artifacts were unchanged. Full pose telemetry
+includes initial duplicates and stationary/startup gaps; 125 µs continuity is
+claimed only for the measured hold windows, not globally.
 
-**Acceptance:** Pure tests pass. In the moving-segment check, the capture-time
-projection fits each measured frame within the static residual Package G
-recorded (worst corner at most 3 px), and the requested-time projection is
-offset by the amount the measured motion predicts. If the capture-time
-hypothesis fails, stop and report under Section 2.2 rather than adding a
-compensating offset. EEPROM verification passes. C0, the Package C referee
-audit, the Package D physical audit, three Package E truth runs, and one
-camera-enabled run with a passing `[FPV]` result all pass after the EEPROM
-change. The operator's keyboard and gamepad sign-off for Package D is not
-repeated; the automated physical audit covers the configuration change.
+Readonly EEPROM checks confirmed GPS absent, `trust_mag = OFF`, all four PID
+profiles and unchanged settings/bytes. The first structured dump was truncated;
+its complete original raw response was recovered offline and the evidence-only
+framing amendment independently approved before science. No prelive firmware
+retry, initialization, save, retuning or scientific retry. Each actual plan-stage
+cleanup used a reviewed qualification-only no-kill PATH guard at zero existing
+SITL/free ports; upstream global process-name cleanup remains unchanged and is
+not qualified as safe on a shared host. Actual child/native SDK/GPU provenance,
+postreadonly verification, stopped sparse DB science and exact owned firmware
+build-patch reversal passed. Full commands, hashes, raw evidence, amendment and
+limitations: `/home/ubuntu/betaflight-g1/clean-testing/qualification/report.md`.
+Previous `pkg-g1`/`origin-sync/` results remain historical only. Prior operator
+keyboard/gamepad sign-off stands; no new vision-flight, racing, editor visual,
+browser or strict-alignment qualification is claimed.
 
-**Handoff:** Record the measured corner residuals at both times, the frames
-and scenario used, the EEPROM verification output, and the requalification
-results.
+**Handoff:** Integrate the qualified G1-only diff before H/I and F qualification.
+E1 is complete and available to F/J; approximate alignment remains the accepted
+scope, not verified exact scene rewind.
 
 ### [ ] H — Classical detector, offline
 
@@ -1604,9 +1625,9 @@ without introducing closed-loop flight risk.
 - Add `replay.py` with a recorder enabled by `RACE_RECORD=<directory>` in
   camera runs. A compressed bundle holds the 500 Hz navigator inputs (interval
   means of gyro and specific force), barometer and magnetometer samples, fresh
-  frames with their capture times, and, in a separate array, truth `world_pos`
-  and `world_vel` at 500 Hz and at each capture time. The evaluator passes only
-  sensor fields to the detector and navigator.
+  frames with nominal image/render times (Section 7.4), and, separately, truth
+  `world_pos` and `world_vel` at 500 Hz and those nominal times. The evaluator
+  passes only sensor fields to the detector and navigator.
 - Fixtures: synthetic images made by filling projected outer and inner gate
   squares (test-only code), covering centred, translated, yawed, ranged,
   nested, and clipped gates; plus a small set of recorded renderer frames with
@@ -1647,7 +1668,7 @@ through depth noise, outliers, and short close-range detector loss.
   on-pad flag, and `next_gate_index`.
 - Model bearing as more reliable than monocular depth through the anisotropic
   PnP measurement noise.
-- Apply each visual update at its frame's capture time.
+- Apply each visual update at nominal image/render time (Section 7.4).
 - Reject implausible innovations, expose track state, age, and NIS, and reset
   after a documented rejection streak that excludes expected close-range
   invisibility.
@@ -1685,8 +1706,9 @@ pad, normalized innovation squared (NIS) and normalized estimation error
 squared within χ² bounds, bounded response to alternating depth
 errors, outlier rejection, stale-state behavior, a drift bound over a 2.5 s
 coast, reset after a rejection streak and no reset at close range, unbiased
-delayed frames with capture times (and measurable bias without them), a target
-switch on a progress change, and the passed indication. Attitude-filter tests
+synthetic delayed frames with known fixture times (and measurable bias without
+them), a target switch on a progress change, and the passed indication.
+Attitude-filter tests
 show tilt and yaw offsets decaying toward the accelerometer and magnetometer
 references and accelerometer gating during sustained tilt. The navigator
 produces no NaNs or unbounded values under any fixture.
@@ -1836,7 +1858,7 @@ Useful stopping points are:
 - after D: manually pilotable Betaflight vehicle with verified RC conventions;
 - after E: truth-guided single-gate position hold;
 - after E1: one mission controller behind a navigation-state interface;
-- after G1: correct camera capture time and no truth-derived Betaflight aid;
+- after G1: nominal image/render time (Section 7.4) and no truth-derived Betaflight aid;
 - after F: complete autonomous truth race;
 - after H/I: offline validated perception stack;
 - after J: vision-guided position hold;
@@ -1857,29 +1879,31 @@ branch for later resumption.
 | D | Complete | Command seam, one-tick ordering, AUX2 ANGLE configuration, s10 manual controller, 250 ms heartbeat failsafe, DB telemetry, and simulation-time physical sign audit are implemented. The combined automated qualification passed with roll 1.006, pitch 1.011, yaw 1.479 rad/s and accepted max motor 0.391; 5 controller tests also pass. On 2026-09-28, the operator tested and signed off on both keyboard and gamepad paths, including arm, takeoff, throttle/roll/pitch/yaw response, landing, and disarm. |
 | E | Complete | Opt-in truth-only single-gate standoff controller and independent 10 s hold grader. Three consecutive original 2026-09-29 runs exited 0 with RMS 0.075521/0.074801/0.074188 m (offline 0.075520758/0.074803460/0.074187954 m), no crossing or fault, and expected incomplete 0/1 race results; 138 pure tests on the original E branch, 5 controller tests, and default/scripted-single C0 regressions passed. The merged 2026-10-02 verification passed 180 pure tests, 5 controller tests, three further truth runs and opt-in B+E camera coexistence (details above). Requalified unchanged on 2026-10-12 atop main `729022c7` with a newly built runtime/SDK, three camera-off passes (0.073873/0.075235/0.074413 m RMS), independent DB agreement, C0/C/D regressions, and all four camera combinations (details above). |
 | E1 | Complete | Shared mission controller and immutable navigation/target inputs; thin per-tick truth adapter. Initial acceptance at commit `163c0529`: 39 original-source scenarios / 268 updates exact, 300 pure tests, clean independent review, and three unchanged-source truth holds at 0.076142/0.077087/0.072773 m RMS (historical details under E1). Current maintained characterization: 8 selected cases / 78 updates, each guarded by a canonical SHA-256 digest derived from the original fixture rows; current full pure suite passes 268 tests. This follow-up is test maintenance, not a new qualification. |
-| F | Ready for implementation; qualification blocked by G1 | E1 is complete. Three-gate course, race profile, COMMIT/pass sequencing, and safe finish remain; qualification must wait for G1. |
+| F | Ready for implementation; qualification waits for G1 integration | E1 is complete and G1 is qualified on `g1-clean`. Three-gate course, race profile, COMMIT/pass sequencing, and safe finish remain. |
 | G | Complete | `vision.py` owns intrinsics, corner order, the camera-to-body helper, and NumPy planar PnP. Positive tilt is nose-up and is registered as negative renderer pitch. `corner_order_ambiguous` flags labellings within 10°. `synthetic_vision.py` is the only truth-projection path. 222 pure tests pass, including centered, translated, yawed, and ranged round trips. |
-| G1 | Ready | B and G are complete; guidance still receives the query time in microseconds, and Betaflight's virtual GPS is enabled. |
-| H | Blocked by G1 | B, C, and G are complete; the offline detector and recorder remain. |
-| I | Blocked by G1 | G is complete; the navigator can proceed in parallel with H once G1 lands. |
+| G1 | Complete; qualified, ready for integration | GitHub-only base `8742b411`, source `30d2c307`; fresh matching artifacts, 270 Python tests, 754 editor tests, 5 controller tests, 17 s10 tests and eight first-attempt ordinary live gates PASS. See G1 brief for evidence/guard/framing caveats; strict alignment historical FAIL/deferred/non-gating. |
+| H | Ready after G1 integration | B, C, G and G1 qualification complete; the offline detector and recorder remain. |
+| I | Ready after G1 integration | G and G1 qualification complete; the navigator can proceed in parallel with H. |
 | J | Blocked by H, I | E1's shared mission controller is complete; detector, navigator, and vision guidance remain. |
 | K | Blocked by F, J | No vision race |
 | L | Blocked by F/K | No race CI or final docs |
 
 ### Resume point
 
-Package E1 is complete. Begin Package G1; Package F implementation may proceed,
-but its qualification runs must wait for G1.
+Packages E1 and G1 are complete. G1 ordinary-operation qualification passed on
+`g1-clean` source `30d2c307`, ready for integration. Package F implementation may
+proceed; integrate G1 before F qualification and H/I work, retaining the accepted
+approximate-alignment contract.
 
 - **E1, mission controller extraction:** the initial 2026-10-23 qualification
   preserved exact original-controller replay and three passing E holds (details
   above). The current maintained baseline is the 8-case/78-update digest set;
   the original 39/268 exact-equivalence evidence remains in commit `163c0529`.
   The shared controller is available to F and J.
-- **G1, sensor timing and truth-boundary fixes:** supply the camera capture
-  time in simulation seconds, disable Betaflight's virtual GPS, and requalify
-  C0, C, D, and E. Packages H and I start after G1, and F's qualification runs
-  wait for it.
+- **G1, sensor timing and truth-boundary fixes:** integrate the qualified clean
+  GitHub-only diff; matching fresh artifacts, GPS off and `trust_mag = OFF`
+  passed ordinary regressions (G1 brief above). Prior `pkg-g1` results do not
+  substitute for this qualification; strict alignment stays deferred/non-gating.
 
 Passing a gate is not yet implemented.
 
@@ -1892,10 +1916,11 @@ recoverable MPEG-TS fallback, are maintained in `README.md`.
 
 | Date | Decision | Reason and affected packages |
 |---|---|---|
+| 2026-10-27 | Accept approximate scene-time alignment for G1; defer strict alignment. Selected message T is nominal image/render time on `sim_time`. | Supersedes the exact capture-alignment assumption of 2026-10-22. Keep regressions and independent review; no renderer/query/stream fix or prototype promotion. H/I may proceed after G1 integration using Section 7.4's limitation; F still requires E1. |
 | 2026-10-23 | Keep E1's active original-controller characterization to eight representative cases / 78 updates, with digests derived from the original expected rows; retain the full 39-case / 268-update proof in commit `163c0529`. | The exact-equivalence acceptance was already performed and is preserved as historical evidence. This approved maintenance reduction avoids carrying exhaustive golden output during heavy development; behavioral tests and product acceptance remain unchanged. Affects only E1's ongoing characterization artifacts and reproduction instructions. |
 | 2026-10-22 | Add Packages E1 (mission controller extraction) and G1 (sensor timing and truth-boundary fixes) instead of folding these prerequisites into F. Keep the existing package letters. | The behavior-preserving refactor, the sensor and configuration fixes, and F's new race behavior are separate concerns; combining them would make a regression hard to attribute. G1 also gates H and I, not only F. Existing commits and PRs refer to packages by letter, so nothing is renumbered. Affects E1, G1, and F–K. |
 | 2026-10-22 | Package I is a gate-anchored navigator: a complementary attitude filter plus a 12-state linear Kalman filter in a gravity-aligned local frame, corrected by PnP at the frame capture time, the barometer, and zero velocity on the pad. It still publishes the body-FLU gate-relative estimate. Generic feature-based visual-inertial odometry and Betaflight GPS emulation are non-goals for the core course. | Chosen after a review of three independent research studies on 2026-10-21. The body-FLU tracker left attitude, gravity handling, and rotating-frame terms implicit, and degraded once the gate left view. The rendered scene is too sparse for feature tracking, and a GPS message discards attitude, covariance, and reset information while the pinned firmware's GPS paths have unit and parser defects. Affects §5, §7.7, §7.10, and I–K. |
-| 2026-10-22 | `GuidanceUpdate.frame_time`, the capture time in simulation seconds, replaces `frame_sample_time`; `GateCandidate.sample_time` follows. | `frame_sample_time` was the latency-adjusted query time in DB-timestamp microseconds, while `sim_time` is in seconds. The renderer stamps each frame with its pose time, so the selected message timestamp is the capture time. The 2026-09-26 freshness decision stands. Affects §7.2, §7.4, §7.7, G1, and H–K. |
+| 2026-10-22 | `GuidanceUpdate.frame_time`, the capture time in simulation seconds, replaces `frame_sample_time`; `GateCandidate.sample_time` follows. | `frame_sample_time` was query time in DB-timestamp microseconds, while `sim_time` is in seconds. The assumed exact capture alignment is superseded by the 2026-10-27 decision. The 2026-09-26 freshness decision stands. Affects §7.2, §7.4, §7.7, G1, and H–K. |
 | 2026-10-22 | Disable Betaflight's GPS feature and verify `trust_mag = OFF` in every mode. Label vision results by sensor set. | The virtual GPS is built from FDM truth and corrects Betaflight's yaw. Keeping truth out of `GuidanceUpdate` was necessary but not sufficient for a truth-free closed loop. The change applies to all modes, so G1 requalifies C0, C, D, and E. Affects §3.3, §7.3, and G1. |
 | 2026-10-22 | One mission controller behind `NavState` and `GateTarget` serves truth and vision guidance. The course selects a hold or race profile. Phase codes 7–9 are COMMIT, SEARCH, and FINISH. Vision-mode FAULT brakes, descends, and disarms. | Replaces the earlier expectation that J would adapt E's controller without a defined interface. Affects §7.9, §8, E1, F, J, and K. |
 | 2026-10-22 | Add `drone.nav_est`, `drone.nav_gate`, and `drone.nav_diag`, and define invalid values for `drone.gate_det` and `drone.gate_rel_est`. Add OpenCV inside `gate_detector.py` only, the `RACE_RECORD` replay recorder, shadow-mode entry gates for J and K, and a TRACKING-based availability definition for J. Invalid vision startup combinations exit with status 2. | These make detection, navigation, and control failures separately attributable and let the navigator be tuned offline before it gains control authority. The startup rule picks one of the two options §6.3 previously allowed. Affects §6.3, §7.8, §9, and H–L. |
@@ -1936,7 +1961,8 @@ recoverable MPEG-TS fallback, are maintained in `README.md`.
   without a gate map.
 - **Local navigation frame (L):** Gravity-aligned frame with its origin where
   the navigator initializes on the pad and heading from the magnetometer.
-- **Capture time:** Simulation time of the pose a camera frame was rendered at.
+- **Nominal image/render time:** Selected image-message T in simulation seconds;
+  `frame_time` and `GateCandidate.sample_time` share this value (Section 7.4).
 - **Shadow mode:** Running the detector and navigator during truth-guided
   flight with no control authority, to measure estimator error against truth.
 - **Truth:** Simulated world state or hidden gate pose unavailable to vision

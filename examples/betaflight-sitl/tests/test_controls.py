@@ -230,10 +230,12 @@ def test_truth_and_base_updates_inherit_b_fpv_frames_without_truth_leak() -> Non
         return (1, pixels)
 
     first = camera.poll(read_msg_at, 40_000, 0.04)
+    first_requested_us = camera.last_requested_us
     second = camera.poll(read_msg_at, 40_000 + PERIOD_US, 0.04 + PERIOD_US / 1e6)
+    second_requested_us = camera.last_requested_us
     assert first.fresh and not second.fresh
-    assert first.requested_us == 7_000
-    assert second.requested_us == 7_000 + PERIOD_US
+    assert first_requested_us == 7_000
+    assert second_requested_us == 7_000 + PERIOD_US
 
     shared = dict(sim_time=0.04, tick=320, gyro=np.zeros(3), accel=np.zeros(3))
     truth = TruthState((0.0, 0.0, 0.1), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0, 1.0))
@@ -243,7 +245,7 @@ def test_truth_and_base_updates_inherit_b_fpv_frames_without_truth_leak() -> Non
         truth_state=truth,
         gate_poses=(gate,),
         frame=first.frame,
-        frame_sample_time=float(first.requested_us),
+        frame_time=first.frame_time,
         frame_fresh=first.fresh,
     )
     # Camera stays observational even in truth mode. The base/vision update has
@@ -251,16 +253,17 @@ def test_truth_and_base_updates_inherit_b_fpv_frames_without_truth_leak() -> Non
     base_update = GuidanceUpdate(
         **shared,
         frame=second.frame,
-        frame_sample_time=float(second.requested_us),
+        frame_time=second.frame_time,
         frame_fresh=second.fresh,
     )
     pixels[:] = 100
     first.frame[:] = 99
     assert truth_update.frame.shape == (360, 640, 4)
     assert truth_update.frame[0, 0, 0] == 20
-    assert truth_update.frame_sample_time == 7_000.0
+    assert truth_update.frame_time == first.frame_time
+    assert truth_update.frame_time == pytest.approx(1e-6)
     assert truth_update.frame_fresh
-    assert base_update.frame_sample_time == float(second.requested_us)
+    assert base_update.frame_time == first.frame_time
     assert not base_update.frame_fresh
     assert not hasattr(base_update, "truth_state")
     assert not hasattr(base_update, "gate_poses")
@@ -278,7 +281,7 @@ def test_truth_update_without_camera_retains_none_and_no_freshness() -> None:
         gate_poses=(),
     )
     assert update.frame is None
-    assert update.frame_sample_time is None
+    assert update.frame_time is None
     assert not update.frame_fresh
 
 

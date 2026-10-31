@@ -1,6 +1,7 @@
 """GPU-free tests for FPV freshness, frame accounting, and acceptance."""
 
 import numpy as np
+import pytest
 
 from fpv_camera import FRAME_BYTES, MIN_FPS, PERIOD_US, WARMUP_US, FpvCamera
 
@@ -23,31 +24,83 @@ def _reader(frames: dict[int, np.ndarray]):
 
 def test_held_frame_is_not_fresh_and_a_new_timestamp_is() -> None:
     camera = FpvCamera()
-    reader = _reader({0: _frame(1)})
+    db_epoch_us = 1_761_234_567_890_000
+    initial_sim_time_s = 23.75
+    now_us = db_epoch_us + 23_750_000
+    selected_ts = db_epoch_us + 23_700_000
+    source_frame = _frame(1)
+    reader = _reader({selected_ts: source_frame})
 
-    first = camera.poll(reader, 40_000, 0.04)
-    second = camera.poll(reader, 40_000 + PERIOD_US, 0.04 + PERIOD_US / 1_000_000)
+    first = camera.poll(reader, now_us, initial_sim_time_s)
+    first_requested_us = camera.last_requested_us
+    second = camera.poll(
+        reader,
+        now_us + PERIOD_US,
+        initial_sim_time_s + PERIOD_US / 1_000_000,
+    )
 
+    source_frame[:] = 99
     assert first.fresh is True
     assert first.frame is not None
     assert first.frame.shape == (360, 640, 4)
+    assert first.frame[0, 0, 0] == 1
+    assert first.frame_time == 23.7
+    assert first_requested_us == db_epoch_us + 23_717_000
+    assert first_requested_us != selected_ts
     assert second.frame is not None
+    assert second.frame_time == first.frame_time
     assert second.fresh is False
+    assert camera.last_requested_us == db_epoch_us + 23_750_333
     assert camera.held_samples == 1
     assert camera.fresh_samples == 1
 
 
+def test_timestamp_conversion_preserves_integer_microsecond_delta() -> None:
+    camera = FpvCamera()
+    # Beyond float's exact-integer range: subtract integers before converting.
+    now_us = 2**54 + 123_457
+    sample = camera.poll(_reader({now_us - 50_001: _frame()}), now_us, 23.750125)
+
+    assert sample.frame_time == pytest.approx(23.700124, abs=1e-12, rel=0)
+
+
+def test_new_selected_timestamp_is_fresh_after_a_held_frame() -> None:
+    camera = FpvCamera()
+    frames = {1_000: _frame(1)}
+    reader = _reader(frames)
+    first = camera.poll(reader, 40_000, 0.04)
+    held = camera.poll(reader, 40_000 + PERIOD_US, 0.04 + PERIOD_US / 1e6)
+    frames[2_000] = _frame(2)
+    fresh = camera.poll(reader, 40_000 + 2 * PERIOD_US, 0.04 + 2 * PERIOD_US / 1e6)
+
+    assert first.fresh and not held.fresh and fresh.fresh
+    assert held.frame_time == first.frame_time
+    assert first.frame_time == pytest.approx(0.001)
+    assert fresh.frame_time == pytest.approx(0.002)
+    assert fresh.frame[0, 0, 0] == 2
+    assert camera.fresh_samples == 2
+    assert camera.held_samples == 1
+
+
 def test_only_one_sample_is_offered_per_camera_period() -> None:
     camera = FpvCamera()
-    reader = _reader({0: _frame()})
+    calls = []
+
+    def reader(name: str, timestamp: int):
+        calls.append((name, timestamp))
 
     first = camera.poll(reader, 40_000, 0.04)
+    first_requested_us = camera.last_requested_us
     second = camera.poll(reader, 40_000 + PERIOD_US // 2, 0.05)
 
-    assert first.requested_us == 7_000
+    assert first.frame is None
+    assert first.frame_time is None
+    assert first_requested_us == 7_000
     assert second.frame is None
-    assert second.requested_us is None
+    assert second.frame_time is None
     assert second.fresh is False
+    assert camera.last_requested_us == first_requested_us
+    assert calls == [("drone.fpv", 7_000)]
 
 
 def test_read_before_the_first_frame_returns_nothing() -> None:
@@ -55,8 +108,9 @@ def test_read_before_the_first_frame_returns_nothing() -> None:
     sample = camera.poll(_reader({100: _frame()}), 0, 0.0)
 
     assert sample.frame is None
+    assert sample.frame_time is None
     assert sample.fresh is False
-    assert sample.requested_us == -33_000
+    assert camera.last_requested_us == -33_000
 
 
 def test_malformed_payload_fails_acceptance() -> None:
@@ -67,6 +121,8 @@ def test_malformed_payload_fails_acceptance() -> None:
     report = camera.finish(reader, 40_000)
 
     assert sample.frame is None
+    assert sample.frame_time is None
+    assert sample.fresh is False
     assert report.malformed is True
     assert report.accepted is False
     assert report.reason == "malformed-frame"
