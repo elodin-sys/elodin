@@ -7,7 +7,9 @@ What it demonstrates:
 - Full graph gravity over all loaded bodies with `el.Integrator.Verlet`. Gravity depends only on
   position, so Verlet's energy error stays bounded over long runs instead of drifting, and it
   evaluates gravity half as often as `el.Integrator.Rk4`.
-- Truth-vs-sim visual overlay (ghost bodies + trails).
+- Truth-vs-sim visual overlay (ghost bodies + trails). The truth CSVs are heliocentric, so a
+  system places each truth position relative to the simulated Sun, which drifts slightly. It runs
+  inside the simulation, so truth is recorded in every run mode, including `bench`.
 - Higher simulation cadence than telemetry cadence.
 - Headless and editor-compatible execution with unified backend selection.
 
@@ -44,9 +46,8 @@ Useful env vars:
 - `ELODIN_NBODY_MAX_TICKS`: override max ticks for quick runs
 - `DBNAME`: explicit DB directory path
 
-By default the example combines:
-- `examples/n-body/planets_truth.csv`
-- `examples/n-body/moons_truth.csv`
+By default the example loads `examples/n-body/planets_truth.csv`; `body_metadata.py` also lists
+`examples/n-body/moons_truth.csv`, commented out.
 
 ## Backend Benchmark
 
@@ -69,7 +70,11 @@ elodin-db export <db_path_from_benchmark_output> --format csv --output /tmp/n-bo
 ELODIN_NBODY_EXPORT_DIR=/tmp/n-body-export.csv uv run examples/n-body/accuracy_report.py
 ```
 
-Recorded output snapshot from this branch:
-- Bodies compared: depends on loaded CSV body set
-- Global RMS error (AU): `1.551175590e-01`
-- Accuracy coefficient: `0.984776664`
+Recorded output for the full 1826-day timeline (`main.py bench --ticks 43824`):
+- Bodies compared: 9
+- Global RMS error (AU): `2.838570921e-05`
+- Accuracy coefficient: `0.999994334`
+
+Mercury, the fastest orbit, dominates at `8.2e-05` AU RMS. With `el.Integrator.Rk4` it drops to
+`1.4e-05` AU, the model's own floor (no moons, asteroids, or relativity), where the other planets
+already sit; that is the accuracy Verlet trades for half the gravity evaluations.

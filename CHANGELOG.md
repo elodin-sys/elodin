@@ -13,6 +13,7 @@
 - **(breaking:rust)** `nox_py::integrator::Rk4` is replaced by `ExplicitRk`, which takes a `ButcherTableau` (`RK2`, `RK3`, `RK4`, `RK78`, `DP54`); `Integrator::Rk4` becomes `Integrator::ExplicitRk(&RK4)`.
 - **(feat)** Add `Integrator.Verlet` (velocity Verlet) to `six_dof`: second order, and symplectic when forces depend only on position, so energy errors stay bounded over long runs.
 - **(feat:examples)** `n-body` integrates with `Integrator.Verlet`.
+- **(fix:examples)** `n-body` computes its truth positions inside the simulation, relative to the simulated Sun, so `bench` exports include them and the accuracy report measures the integration and the model instead of the Sun's drift: the global RMS error over five years is 2.8e-5 AU, not 7.5e-3 AU.
 - **(feat)** Add `Integrator.Rk78`, the eighth-order solution of Fehlberg's 7(8) Runge-Kutta pair.
 - **(feat)** Add the global `StageTime` component: the seconds past the start of the simulation step at which `six_dof` is evaluating its effectors, so time-dependent effectors keep the integrator's full order. Exports gain `globals.stage_time`.
 - **(fix:examples)** The voyager chapters interpolate Jupiter's position to each integrator stage's time, with a cubic through its SPICE positions and velocities, instead of holding it at the step's midpoint, cutting the integration error over six days from about 650 m to about 2 mm.

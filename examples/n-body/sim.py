@@ -41,7 +41,6 @@ TruthWorldPos = el.Annotated[
 GravityEdge = el.Annotated[el.Edge, el.Component("gravity_edge", el.ComponentType.Edge)]
 
 TRUTH_POSITIONS: jax.Array | None = None
-TRUTH_POSITIONS_NP: np.ndarray | None = None
 MAX_DAY_INDEX: int = 0
 TRUTH_DAY_COUNT: int = 0
 BODIES: list[Body] = []
@@ -139,9 +138,8 @@ def load_truth(csv_paths: tuple[Path, ...] = CSV_PATHS) -> tuple[jax.Array, np.n
 
 
 def build_world() -> el.World:
-    global TRUTH_POSITIONS, TRUTH_POSITIONS_NP, MAX_DAY_INDEX, TRUTH_DAY_COUNT
+    global TRUTH_POSITIONS, MAX_DAY_INDEX, TRUTH_DAY_COUNT
     TRUTH_POSITIONS, truth_velocities, dates = load_truth()
-    TRUTH_POSITIONS_NP = np.asarray(TRUTH_POSITIONS)
     TRUTH_DAY_COUNT = len(dates)
     MAX_DAY_INDEX = len(dates) - 1
 
@@ -225,28 +223,26 @@ def gravity(
     )
 
 
-def make_truth_post_step():
-    if TRUTH_POSITIONS_NP is None:
-        raise RuntimeError("truth positions not initialized; call build_world() first")
+@el.system
+def truth_track(
+    tick: el.Query[el.SimulationTick],
+    bodies: el.Query[el.WorldPos],
+    q: el.Query[TruthIdx, TruthWorldPos],
+) -> el.Query[TruthWorldPos]:
+    # The truth CSVs are heliocentric; the simulated Sun (spawned first) drifts, so truth
+    # follows it. The tick is incremented before the systems run.
+    sun = bodies[0].linear()
+    day = jnp.minimum(tick[0] // TICKS_PER_DAY, MAX_DAY_INDEX).astype(jnp.int32)
 
-    def post_step(tick: int, ctx: el.StepContext):
-        day_idx = min(int(tick // TICKS_PER_DAY), MAX_DAY_INDEX)
-        for body_idx, body in enumerate(BODIES):
-            pos = TRUTH_POSITIONS_NP[body_idx, day_idx]
-            world_pos = np.array(
-                [0.0, 0.0, 0.0, 1.0, float(pos[0]), float(pos[1]), float(pos[2])],
-                dtype=np.float64,
-            )
-            ctx.write_component(
-                f"truth_{body.name}.truth_world_pos",
-                world_pos,
-            )
+    def track(idx, _):
+        pos = TRUTH_POSITIONS[idx[0].astype(jnp.int32), day]
+        return jnp.concatenate([jnp.array([0.0, 0.0, 0.0, 1.0]), sun + pos])
 
-    return post_step
+    return q.map(TruthWorldPos, track)
 
 
 def build_system() -> el.System:
-    return el.six_dof(sys=gravity, integrator=el.Integrator.Verlet)
+    return el.six_dof(sys=gravity, integrator=el.Integrator.Verlet) | truth_track
 
 
 def get_default_max_ticks() -> int:
