@@ -1,4 +1,5 @@
 use std::{collections::HashMap, time::Duration};
+use web_time::Instant;
 
 #[cfg(not(target_os = "macos"))]
 use bevy::log::error;
@@ -112,7 +113,7 @@ pub async fn wait_for_winit_window(
     window_id: Entity,
     timeout: Duration,
 ) -> Result<bool, AccessError> {
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     while start.elapsed() < timeout {
         let window_ready = AsyncWorld.run(|_world| {
             WINIT_WINDOWS.with_borrow(|winit_windows| winit_windows.get_window(window_id).is_some())
@@ -141,14 +142,28 @@ pub async fn apply_physical_screen_rect(
         return Ok(());
     }
 
-    let target = AsyncWorld.run(|_world| {
+    let target = AsyncWorld.run(|world| {
+        let automatic = world
+            .get::<super::arrange::AutoArranged>(window_entity)
+            .is_some();
         WINIT_WINDOWS.with_borrow(|winit_windows| {
             let any_window = winit_windows.windows.values().next()?;
             let screens = collect_sorted_screens(any_window);
             log_screens("macos.load.screens", &screens);
             let screen = screens.get(screen_index)?;
-            let pos = screen_physical_position(screen);
-            let size = screen_physical_size(screen);
+            let (pos, size) = if automatic {
+                macos_work_area(screen_index).unwrap_or_else(|| {
+                    (
+                        screen_physical_position(screen),
+                        screen_physical_size(screen),
+                    )
+                })
+            } else {
+                (
+                    screen_physical_position(screen),
+                    screen_physical_size(screen),
+                )
+            };
             if size.width <= 0.0 || size.height <= 0.0 {
                 return None;
             }
@@ -223,6 +238,34 @@ pub async fn apply_physical_screen_rect(
         })
     });
     Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn macos_work_area(index: usize) -> Option<(LogicalPosition<f64>, LogicalSize<f64>)> {
+    let marker = objc2_foundation::MainThreadMarker::new()?;
+    let screens = objc2_app_kit::NSScreen::screens(marker);
+    let primary_height = screens.first()?.frame().size.height;
+    let mut frames: Vec<_> = screens
+        .iter()
+        .map(|screen| {
+            let frame = screen.frame();
+            let visible = screen.visibleFrame();
+            (
+                frame.origin.x,
+                primary_height - frame.origin.y - frame.size.height,
+                visible,
+            )
+        })
+        .collect();
+    frames.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.total_cmp(&b.1)));
+    let (_, _, rect) = frames.get(index)?;
+    Some((
+        LogicalPosition::new(
+            rect.origin.x,
+            primary_height - rect.origin.y - rect.size.height,
+        ),
+        LogicalSize::new(rect.size.width, rect.size.height),
+    ))
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -390,7 +433,7 @@ async fn apply_window_rect(
         && rect.width == 100
         && rect.height == 100;
 
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     let mut wait = true;
     while wait && start.elapsed() < timeout {
         AsyncWorld.yield_now().await;
@@ -460,7 +503,7 @@ async fn wait_for_window_to_change_screens(
     target_screen: usize,
     timeout: Duration,
 ) -> Result<bool, AccessError> {
-    let start = std::time::Instant::now();
+    let start = Instant::now();
     loop {
         if start.elapsed() > timeout {
             info!(

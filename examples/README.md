@@ -109,6 +109,7 @@ atlases, Monte Carlo campaigns). A few are headless checks, not editor scenes:
 | --- | --- |
 | [ball](./ball) | Gravity, drag, wind, bounce — canonical single-entity physics |
 | [rotating-cube](./rotating-cube) | One `Body` spinning at constant angular velocity |
+| [dzhanibekov-effect](./dzhanibekov-effect) | Tennis-racket theorem: a body rotating about its intermediate axis flips periodically |
 
 ### Coordinate frames & geodesy
 
@@ -173,6 +174,7 @@ An external flight-software process driven over UDP, alongside the sim.
 | [falcon9](./falcon9) | ECEF 6DOF booster, SemiImplicit integrator |
 | [apollo-lander](./apollo-lander) | Lunar-gravity 6DOF + throttle / RCS effectors |
 | [rotating-cube](./rotating-cube) | One `Body` with constant angular velocity |
+| [dzhanibekov-effect](./dzhanibekov-effect) | Demo of the tennis-racket theorem on a rigid body, RK4 6DOF |
 
 ### Component / Archetype
 
@@ -285,6 +287,7 @@ Alternatives to the default `World.run(...)` on the Cranelift backend.
 | [apollo-lander](./apollo-lander) | LM + Moon + Earth |
 | [cube-sat](./cube-sat) | OreSat mesh |
 | [n-body](./n-body) / [voyager](./voyager) | Procedural spheres for bodies |
+| [dzhanibekov-effect](./dzhanibekov-effect) | Two procedural cylinders posed from derived body-frame offsets |
 
 ### KDL: graph
 

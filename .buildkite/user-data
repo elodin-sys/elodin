@@ -49,10 +49,11 @@ write_files:
       set -eu
       set -f # disable globbing
       export IFS=" "
-      export AWS_CONFIG_FILE=/dev/null
-      export AWS_SHARED_CREDENTIALS_FILE=/dev/null
-      echo "Uploading paths to S3 cache: $OUT_PATHS"
-      exec /nix/var/nix/profiles/default/bin/nix copy --to "s3://elodin-nix-cache?region=us-west-2&secret-key=/etc/nix/cache-priv-key.pem" $OUT_PATHS
+      echo "Queueing upload to S3 cache: $OUT_PATHS"
+      # Nix holds the output lock until this hook exits, so upload in the background
+      exec /usr/bin/systemd-run --no-block --collect --quiet \
+        -E AWS_CONFIG_FILE=/dev/null -E AWS_SHARED_CREDENTIALS_FILE=/dev/null \
+        /nix/var/nix/profiles/default/bin/nix copy --to "s3://elodin-nix-cache?region=us-west-2&compression=zstd&secret-key=/etc/nix/cache-priv-key.pem" $OUT_PATHS
       UPLOADEOF
       '
 
@@ -130,6 +131,8 @@ write_files:
       sed -i "s/xxx/$BUILDKITE_AGENT_TOKEN/g" /etc/buildkite-agent/buildkite-agent.cfg
       sed -i 's/# spawn=1/spawn=5/' /etc/buildkite-agent/buildkite-agent.cfg
       sed -i "s/# tags=\"key1=val2,key2=val2\"/tags=\"nix=true,os=nixos,arch=${AGENT_ARCH},queue=${AGENT_QUEUE}\"/" /etc/buildkite-agent/buildkite-agent.cfg
+      # Keep target/ between jobs so cargo builds incrementally (default -ffxdq wipes it)
+      echo 'git-clean-flags="-ffdqx -e target"' >> /etc/buildkite-agent/buildkite-agent.cfg
 
       # Systemd drop-in so the agent has Nix in PATH without sourcing profiles
       mkdir -p /etc/systemd/system/buildkite-agent.service.d
@@ -140,6 +143,8 @@ write_files:
       Environment=PATH=/nix/var/nix/profiles/default/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
       # Disable eval cache to prevent SQLite contention between spawned agents
       Environment=NIX_CONFIG="eval-cache = false"
+      # io_uring tests (stellarator) hit ENOMEM under the default 8 MiB when jobs overlap
+      LimitMEMLOCK=infinity
       EOF
       '
 

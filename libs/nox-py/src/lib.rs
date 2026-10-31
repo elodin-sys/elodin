@@ -110,7 +110,14 @@ pub fn py_six_dof(
     time_step: Option<f64>,
     sys: Option<PySystem>,
     integrator: Integrator,
-) -> PySystem {
+) -> PyResult<PySystem> {
+    if let Some(dt) = time_step
+        && (!dt.is_finite() || dt <= 0.0)
+    {
+        return Err(PyValueError::new_err(format!(
+            "six_dof time_step must be finite and > 0, got {dt}"
+        )));
+    }
     let integrator = integrator.into();
     let sys: Arc<dyn crate::system::System<Arg = (), Ret = ()> + Send + Sync> =
         if let Some(dt) = time_step {
@@ -124,7 +131,7 @@ pub fn py_six_dof(
         } else {
             crate::six_dof::six_dof(|| (), integrator)
         };
-    PySystem { inner: sys }
+    Ok(PySystem { inner: sys })
 }
 
 #[pyfunction]

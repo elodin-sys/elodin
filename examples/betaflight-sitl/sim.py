@@ -123,6 +123,22 @@ RcCommandTelemetry = ty.Annotated[
     ),
 ]
 
+# Stable numeric mission phase written by the truth guidance adapter:
+# 0 disabled, 1 ARM, 2 TAKEOFF, 3 HOVER, 4 ACQUIRE, 5 HOLD, 6 FAULT.
+GuidanceModeTelemetry = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "guidance_mode",
+        el.ComponentType(el.PrimitiveType.I64, (1,)),
+        metadata={
+            "element_names": "phase_code",
+            "enum_values": "0=DISABLED,1=ARM,2=TAKEOFF,3=HOVER,4=ACQUIRE,5=HOLD,6=FAULT",
+            "priority": 203,
+            "external_control": "true",
+        },
+    ),
+]
+
 
 @dataclass
 class Drone(el.Archetype):
@@ -140,6 +156,9 @@ class Drone(el.Archetype):
     manual_control: ManualControl = field(default_factory=lambda: jnp.zeros(7))
     rc_command: RcCommandTelemetry = field(
         default_factory=lambda: jnp.array([1500, 1500, 1000, 1500, 1000, 1800], dtype=jnp.uint16)
+    )
+    guidance_mode: GuidanceModeTelemetry = field(
+        default_factory=lambda: jnp.zeros(1, dtype=jnp.int64)
     )
 
 

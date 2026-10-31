@@ -59,6 +59,18 @@ flowchart LR
 
 Do not run a follower Impeller server on `N+1`; that port is reserved for the DB Asset Server on the source.
 
+### Browser origins
+
+The asset server is what a browser talks to, including the `/impeller` WebSocket proxy. It always answers allowed browser origins with `Access-Control-Allow-Origin`. A client that sends no `Origin` (the native editor, follower sync, `curl`) is allowed.
+
+Without the `verify-cors` Cargo feature (the default), every browser origin is allowed, the same as `*`. With `verify-cors` enabled, a browser `Origin` is allowed when any of these hold:
+
+- its host is `localhost`, `127.0.0.1`, or `::1`, on any scheme and port
+- its host matches the request `Host` header, which is the name the browser used to reach the DB
+- it is listed in `ELODIN_DB_ALLOWED_ORIGINS` (comma-separated origins such as `https://ops.example.com`, or `*` for every origin)
+
+With `verify-cors` enabled, any other `Origin` is rejected with 403. When an origin is allowed, the response reflects it in `Access-Control-Allow-Origin`.
+
 ### The `db:` scheme
 
 At record time, a local schematic path such as `models/jet.glb` is stored as `db:models/jet.glb`. The file lands at `{db}/assets/models/jet.glb`.

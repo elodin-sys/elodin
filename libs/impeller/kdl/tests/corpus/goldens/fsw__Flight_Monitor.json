@@ -2594,6 +2594,7 @@
             "g": 0.03921568766236305,
             "r": 0.8313725590705872
           },
+          "fill": true,
           "size": 32.0,
           "source": {
             "Builtin": "star"
@@ -2643,6 +2644,7 @@
             "g": 0.03921568766236305,
             "r": 0.03921568766236305
           },
+          "fill": true,
           "size": 32.0,
           "source": {
             "Builtin": "star"
@@ -2726,6 +2728,7 @@
             "g": 0.686274528503418,
             "r": 0.2980392277240753
           },
+          "fill": true,
           "size": 32.0,
           "source": {
             "Builtin": "rocket_launch"
@@ -2934,6 +2937,7 @@
     },
     {
       "Window": {
+        "content": null,
         "path": null,
         "screen": null,
         "screen_rect": null,

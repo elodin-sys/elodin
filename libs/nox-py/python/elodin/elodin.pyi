@@ -231,6 +231,7 @@ class WorldBuilder:
         ev100: Optional[float] = None,
         bloom: Optional[dict[str, object]] = None,
         environment: Optional[dict[str, object]] = None,
+        frustums_face_alpha: float = 45.0 / 255.0,
     ) -> None:
         """Register a virtual sensor camera on an entity.
 
@@ -396,9 +397,15 @@ class SpatialMotion:
     def __add__(self, other: SpatialMotion) -> SpatialMotion: ...
 
 class SpatialInertia:
+    # Sign convention: `inertia_off_diag` holds the signed off-diagonal entries
+    # of the inertia tensor matrix ([Ixy, Ixz, Iyz], Ixy = -integral(x*y dm)),
+    # not products of inertia. Negate CAD products of inertia before passing.
     __metadata__: ClassVar[Tuple[Component,]]
     def __init__(
-        self, mass: jax.typing.ArrayLike, inertia: Optional[jax.typing.ArrayLike] = None
+        self,
+        mass: jax.typing.ArrayLike,
+        inertia: Optional[jax.typing.ArrayLike] = None,
+        inertia_off_diag: Optional[jax.typing.ArrayLike] = None,
     ): ...
     @staticmethod
     def from_array(arr: jax.typing.ArrayLike) -> SpatialInertia: ...
@@ -408,6 +415,8 @@ class SpatialInertia:
     def asarray(self) -> jax.typing.ArrayLike: ...
     def mass(self) -> jax.typing.ArrayLike: ...
     def inertia_diag(self) -> jax.typing.ArrayLike: ...
+    def inertia_off_diag(self) -> jax.typing.ArrayLike: ...
+    def inertia_matrix(self) -> jax.Array: ...
 
 class Quaternion:
     __metadata__: ClassVar[Tuple[Component,]]

@@ -52,7 +52,7 @@ The Elodin simulation world.
     Load a GLB asset as an Elodin Scene Archetype.
     - `url`: the URL or filepath of the GLB asset
 
-- `sensor_camera(entity, name, width=None, height=None, fov=None, near=0.01, far=1000.0, pos_offset=[0,0,0], rot_offset=[0,0,0], format="rgba", effect="normal", effect_params={}, camera_model=None, lens_hfov=None, create_frustum=False, show_ellipsoids=False, frustums_color=None, projection_color=None, frustums_thickness=0.006, frustums_up_marker="none", frustums_up_marker_overlay=True, fps=None, cinematic=False, ev100=None, bloom=None, environment=None)` -> None
+- `sensor_camera(entity, name, width=None, height=None, fov=None, near=0.01, far=1000.0, pos_offset=[0,0,0], rot_offset=[0,0,0], format="rgba", effect="normal", effect_params={}, camera_model=None, lens_hfov=None, create_frustum=False, show_ellipsoids=False, frustums_color=None, projection_color=None, frustums_thickness=0.006, frustums_up_marker="none", frustums_up_marker_overlay=True, fps=None, cinematic=False, ev100=None, bloom=None, environment=None, frustums_face_alpha=0.17647059)` -> None
 
     Register a virtual sensor camera on an entity. The headless GPU render-server emits one frame per camera every `1 / fps` µs of simulation time and pushes the bytes back to the database. The simulation reads frames asynchronously with `ctx.read_msg("entity.name", timestamp=...)`.
 
@@ -70,12 +70,16 @@ The Elodin simulation world.
     - `effect_params` : `dict`, effect-specific nested parameters. LWIR supports `palette`, `agc`, `dde`, `mtf_blur_px`, detector noise, scene temperatures, atmospheric transmission, and `sky_offset_dn` (cosmetic sky black level). Auto AGC adapts from the scene temperature statistics with sky masked out and freezes on sky-only views.
     - `camera_model` : `string | None`, calibrated camera preset. `"boson640p"` supplies 640×512, 60 Hz, the Boson+ detector defaults, and an 18° horizontal lens.
     - `lens_hfov` : `float | None`, physical horizontal field of view in degrees. Converted to vertical `fov` using the resolved image aspect ratio. Mutually exclusive with `fov`.
+    - `create_frustum` : `bool`, draw this camera's 3D frustum in schematic viewports that enable `show_frustums`. Defaults to `False`.
+    - `frustums_color` : three- or four-element normalized RGB(A) list for the frustum edges.
+    - `projection_color` : three- or four-element normalized RGB(A) list for the separate 2D far-plane projection overlay.
     - `show_ellipsoids` : `bool`, render ellipsoid debug objects in this sensor camera. Defaults to `False`.
     - `fps` : `float | None`, target rendering rate in frames per second of sim time. The renderer treats this as a target — if the GPU cannot sustain it (e.g., several high-resolution cameras), frames are spaced further apart in sim time but the simulation never blocks. Defaults to the camera-model rate, or `30.0` without a model.
     - `cinematic` : `bool`, same meaning as KDL `viewport cinematic=#true`. When true, the sibling render-server loads the cinematic Earth stack for this camera. Defaults to `False`.
     - `ev100` : `float | None`, camera exposure. With `cinematic=True` the default is `13.5`. Requires `cinematic=True`.
     - `bloom` : `dict | None`, viewport bloom settings (`preset`, `intensity`, `threshold`, `threshold_softness`). `None` with `cinematic=True` uses the cinematic preset. Requires `cinematic=True`.
     - `environment` : `dict | None`, schematic `environment { }` (`sun`, `ambient_scale`, `sky_color`, `atmosphere`, `earth`). `earth` may be `True` for the house look. Omitted with `cinematic=True` implies Earth, a 100 klx sun, and ambient `0.05`. Requires `cinematic=True`.
+    - `frustums_face_alpha` : `float`, opacity of the filled 3D frustum volume from `0.0` to `1.0`, independent of edge and 2D-projection alpha. Defaults to the historical `45/255` (`0.17647059`).
 
     At most one cinematic environment owner is allowed: a KDL `viewport cinematic=#true` **or** `sensor_camera(cinematic=True)`, never both, never two of either. Mixing them raises `ValueError` before the GPU starts.
 
@@ -527,6 +531,13 @@ Using the associated [elodin.Body] archetype and prebuilt components, we can cre
 
     Semi-Implicit Integrator: Elodin provides a built-in implementation for a [semi-implicit Euler integrator](https://en.wikipedia.org/wiki/Semi-implicit_Euler_method).
     The semi-implicit integrator is a numerical method used to solve ordinary differential equations. You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/semi_implicit.rs).
+
+    {% alert(kind="warning") %}
+    The semi-implicit integrator updates angular velocity with an explicit Euler step, so the gyroscopic term
+    $\omega_b \times I\omega_b$ is evaluated at the start of each step. For bodies with unequal principal moments that spin
+    quickly relative to the time step, angular momentum and rotational kinetic energy drift (typically growing) even with no
+    applied torque. Use `Integrator.Rk4` or a smaller time step for spinning or tumbling bodies.
+    {% end %}
 
 ### _class_ `elodin.Body`
 
@@ -1023,13 +1034,42 @@ A spatial force is a 6D vector that represents the linear force and torque appli
 
 ### _class_ `elodin.SpatialInertia`
 
-A spatial inertia is a 7D vector that represents the mass, moment of inertia, and momentum of a rigid body in 3D space. The moment of inertia is represented in its [diagonalized form] of $[I_1, I_2, I_3]$.
+A spatial inertia is a 7D vector that represents the mass and the symmetric 3x3 [moment of inertia] tensor of a rigid body, expressed in the body frame about its center of mass.
+The layout is $[I_{xx}, I_{yy}, I_{zz}, I_{xy}, I_{xz}, I_{yz}, m]$, and the full tensor is
 
-[diagonalized form]: https://en.wikipedia.org/wiki/Moment_of_inertia#Principal_axes
+$$I = \begin{bmatrix} I_{xx} & I_{xy} & I_{xz} \\\\ I_{xy} & I_{yy} & I_{yz} \\\\ I_{xz} & I_{yz} & I_{zz} \end{bmatrix}$$
 
-- `__init__(mass, inertia)` -> [elodin.SpatialInertia]
+If the body axes are its [principal axes], the off-diagonal entries are zero and only the diagonal is needed.
 
-    Create a spatial tensor inertia from a scalar mass and an optional inertia tensor diagonal with shape (3,). If the inertia tensor is not provided, it is set to the same value as the mass along all axes.
+{% alert(kind="warning") %}
+The off-diagonal entries are the signed entries of the tensor matrix, $I_{xy} = -\int xy \, dm$, not products of inertia.
+CAD tools usually report products of inertia $P_{xy} = +\int xy \, dm$; negate them before passing them in ($I_{xy} = -P_{xy}$).
+{% end %}
+
+[moment of inertia]: https://en.wikipedia.org/wiki/Moment_of_inertia#Inertia_tensor
+[principal axes]: https://en.wikipedia.org/wiki/Moment_of_inertia#Principal_axes
+
+- `__init__(mass, inertia=None, inertia_off_diag=None)` -> [elodin.SpatialInertia]
+
+    Create a spatial inertia from a scalar mass, an optional tensor diagonal $[I_{xx}, I_{yy}, I_{zz}]$, and optional off-diagonal entries $[I_{xy}, I_{xz}, I_{yz}]$.
+    If `inertia` is not provided, the diagonal is set to the mass along all axes. If `inertia_off_diag` is not provided, it is zero.
+
+    - `mass` : real scalar (`int`, `float`, or 0-D array)
+    - `inertia` : real array-like with shape (3,), optional
+    - `inertia_off_diag` : real array-like with shape (3,), optional
+
+    Ints, lists, tuples, and int or float32 arrays are converted to float64. Concrete (non-traced) values are validated. A `TypeError` or `ValueError` is raised if:
+    - an argument is not real-valued (e.g. a `bool`, string, or complex number) or has the wrong shape
+    - the mass is not finite and > 0
+    - an inertia entry is not finite
+    - the tensor is not positive-definite
+    - the principal moments violate the triangle inequality $\lambda_1 + \lambda_2 \geq \lambda_3$, which every physical rigid body satisfies
+
+    Values traced inside a system (e.g. in `@el.map`) are checked for shape only and must already be float64; cast them with `.astype(jnp.float64)` if needed.
+
+- `from_array(arr)` -> [elodin.SpatialInertia]
+
+    Create a spatial inertia from a real array-like with shape (7,) in the layout above. Concrete values are converted and validated the same way as `__init__`.
 
 - `mass()` -> [jax.Array]
 
@@ -1037,7 +1077,19 @@ A spatial inertia is a 7D vector that represents the mass, moment of inertia, an
 
 - `inertia_diag()` -> [jax.Array]
 
-    Get the inertia tensor diagonal of the spatial inertia with shape (3,).
+    Get the tensor diagonal $[I_{xx}, I_{yy}, I_{zz}]$ with shape (3,).
+
+- `inertia_off_diag()` -> [jax.Array]
+
+    Get the signed off-diagonal tensor entries $[I_{xy}, I_{xz}, I_{yz}]$ with shape (3,).
+
+- `inertia_matrix()` -> [jax.Array]
+
+    Get the full symmetric inertia tensor with shape (3, 3).
+
+- `asarray()` -> [jax.Array]
+
+    Get the underlying 7D array.
 
 <br></br>
 ## Elodin DB Client
@@ -1438,12 +1490,16 @@ A plain `graph` plots raw component elements straight from the database and cann
 coordinate frame="ECEF" lat=28.5 lon=-80.6
 
 # Local NED chase offset while the sim pose is ECEF
-viewport pos="rocket.world_pos.ecef_to_ned().translate(-2, 0, 0).ned_to_ecef()"
+viewport pos="rocket.world_pos.ecef_to_ned().translate(-2, 0, 0, true).ned_to_ecef()"
          look_at="rocket.world_pos"
 
 # Plot NED northing from an ECEF world_pos (query_plot)
 query_plot query="rocket.world_pos.ecef_to_ned()"
 ```
+
+### Math Formulas
+
+`sqrt()`, `abs()`, `sign()`, `degrees()`, `arccos()`, `clip(min, max)`, `atan2(x)`, and `norm()` evaluate in viewport, object_3d, and vector_arrow EQL as they do in graphs, e.g. `rocket.world_pos.translate(0, 0, rocket.drag.norm())`. Integer components promote to floats in arithmetic and indexing.
 
 ### Chaining Formulas
 

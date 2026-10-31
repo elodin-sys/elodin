@@ -65,6 +65,7 @@ pub struct SchematicParam<'w, 's> {
     pub eql_bindings: Query<'w, 's, &'static gauges::EqlBinding>,
     pub action_tiles: Query<'w, 's, &'static actions::ActionTile>,
     pub graph_states: Query<'w, 's, &'static plot::GraphState>,
+    pub pending_graphs: Query<'w, 's, &'static load::PendingGraphEql>,
     pub query_plots: Query<'w, 's, &'static query_plot::QueryPlotData>,
     pub viewports: Query<'w, 's, &'static inspector::viewport::Viewport>,
     pub projections: Query<'w, 's, &'static Projection>,
@@ -323,6 +324,9 @@ impl SchematicParam<'_, '_> {
                                     colors.push(impeller_wkt::Color::from_color32(color));
                                 }
                             }
+                        } else if let Ok(pending) = self.pending_graphs.get(graph.id) {
+                            eql = pending.0.eql.clone();
+                            colors = pending.0.colors.clone();
                         } else {
                             for (component_path, component_values) in &graph_state.components {
                                 for (index, (enabled, color)) in component_values.iter().enumerate()
@@ -696,6 +700,7 @@ pub fn tiles_to_schematic(
             path: file_name,
             screen: state.descriptor.screen.map(|idx| idx as u32),
             screen_rect: state.descriptor.screen_rect,
+            ..WindowSchematic::default()
         }));
     }
 

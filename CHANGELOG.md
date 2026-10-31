@@ -1,9 +1,49 @@
 # Changelog
 
 ## unreleased
-- **(feat)** Add the `point_trails` schematic node: batched trails and cube/sphere heads for every point in one flat `3 × N` component, with status colors and an optional path-length cap.
-- **(feat)** Record component samples only when their bytes change by default; use `record_every_tick="true"` to opt into dense telemetry.
-- **(fix)** Stop stellarator's kqueue reactor (macOS and other non-Linux hosts) from busy-spinning once its 1024-entry event buffer fills, which kept every stellarator thread in an Elodin process at 100 % CPU and delayed 1 kHz loops by milliseconds. The reactor also no longer keeps every completed op registered, which made each event slower over a process's lifetime, and a waiting reader no longer drops a waiting writer's registration on the same socket, a stall the busy-spin had hidden.
+- **(breaking)** `six_dof` solves Euler's rigid-body equations with the full inertia tensor, including the gyroscopic term `ω × Iω`. Bodies with unequal principal moments now precess and tumble when they spin; trajectories of such bodies change.
+- **(breaking)** `SpatialInertia` and `SpatialInertia.from_array` validate concrete inputs: mass must be finite and > 0, `inertia` and `inertia_off_diag` must have shape (3,), and the tensor must be positive-definite and satisfy the triangle inequality. Ints, lists, and int or float32 arrays are converted to float64; bools and strings raise.
+- **(breaking:rust)** `nox::SpatialInertia` slots 3..6 hold the off-diagonal inertia entries `[Ixy, Ixz, Iyz]` instead of momentum; `SpatialInertia::new` takes them as its second argument, and `momentum()` is replaced by `inertia_off_diag()`.
+- **(feat)** Add `inertia_off_diag` to `SpatialInertia(...)`, plus `inertia_off_diag()` and `inertia_matrix()`, for bodies whose axes are not principal axes. Entries are signed tensor entries (`Ixy = -∫xy dm`); negate CAD products of inertia.
+- **(feat:examples)** Add the `dzhanibekov-effect` example: a body spun about its intermediate axis flips periodically.
+- **(fix)** `six_dof(time_step=...)` with `Integrator.Rk4` uses `time_step` in every RK4 stage; the intermediate stages previously used the world's simulation time step. `six_dof` rejects a non-finite or non-positive `time_step`.
+- **(breaking)** An `object_3d` ellipsoid with `orientation=absolute` applies `scale` along the frame's x, y, z; it previously swapped y and z.
+- **(feat)** Add `fill=#false` (`ui.icon(fill=False)`) for outline built-in icons, and the `check_box_outline_blank` and `crop_square` icons.
+- **(feat)** Evaluate `sqrt`, `abs`, `sign`, `degrees`, `arccos`, `clip`, `atan2`, and `norm` in viewport and 3D-object EQL, and index integer components there.
+- **(feat)** Add `ELODIN_SCREENSHOT_TIME` and `ELODIN_SCREENSHOT_TAB` to capture a chosen moment and tab.
+- **(fix)** Keep graphs whose components register after the schematic loads; they fill in once the components appear instead of disappearing.
+- **(fix)** Send a component's metadata on real-time streams when it arrives after the component's first table, so live editors learn components that writers register mid-run.
+- **(fix)** Open the tab that holds an `active` split or viewport.
+- **(fix)** Apply a mesh's `visibility_range` without an icon.
+- **(fix)** Draw "±" and other Latin-1 characters in vector-arrow labels.
+- **(fix)** Log a 3D object's pose evaluation error once instead of hiding it silently, and drop the `[]` label on scalar component monitors.
+- **(fix)** Raise `TypeError` when a display kernel is passed to an EQL-only `elodin.ui` field instead of writing its repr into the schematic.
+- **(fix)** Live playback keeps pace with the simulation; the editor no longer falls behind as a recording grows.
+- **(fix)** Plots no longer redraw their whole line for each page of a loading recording, or leave a gap at the window's left edge when the sample before it loads late.
+- **(fix)** Keep pace with faster-than-real-time simulations: live `line_3d` trails no longer re-read their whole history every frame.
+
+## v0.20
+
+### v0.20.0
+- **(breaking:rust)** Rename the `impeller2` Rust crates, imports, and source paths to `impeller` now that the earlier protocol is gone. Update downstream Cargo dependencies and imports accordingly.
+- **(breaking)** Record component samples only when their bytes change by default; use component metadata `record_every_tick="true"` to opt into dense telemetry. (#868)
+- **(feat)** Define schematics in Python with typed `elodin.ui` builders, composable expressions, schemas, and JAX display kernels for graphs and viewport objects. Add `elodin schematic to-python` and `elodin ui watch`, and support KDL or Python preloads with `elodin editor --schematic`; `--kdl` remains a deprecated alias. (#846)
+- **(feat)** Add transient simulation components that remain available to systems in memory without being registered with or recorded to Elodin DB. (#871)
+- **(feat)** Add the `point_trails` schematic node: batched trails and cube/sphere heads for every point in one flat `3 × N` component, with status colors and an optional path-length cap. (#868)
+- **(feat)** Add optional up-direction markers for viewport and sensor-camera frustums, with video-view up indicators. (#860)
+- **(feat)** Add a clickable command-palette shortcut to the editor status bar. (#870)
+- **(feat:examples)** Add a Betaflight SITL race course, referee, race audit, and FPV sensor-camera view. (#864, #853)
+- **(fix)** Fix editor tick stepping, playback, and timeline controls for live simulations and recorded databases. (#861, #865)
+- **(fix)** Stop stellarator's kqueue reactor on macOS and other non-Linux hosts from busy-spinning when its event buffer fills, remove completed operations from the reactor, and preserve concurrent reader/writer registrations on the same socket. (#869)
+- **(fix)** Skip the bare timeline node when saving schematics. (#844)
+- **(fix)** Reject Python component names containing whitespace with a clear error. (#870)
+- **(fix:examples)** Preserve quaternion components in cube-sat-pysim plots. (#880)
+- **(fix:examples)** Use DE440 gravitational parameters in Voyager and document its model limits and trajectory-error telemetry. (#862, #867)
+- **(fix:examples)** Keep interactive RC-jet flights running until stopped while retaining bounded headless runs and tick overrides. (#870)
+- **(chore)** Make `just install` independent of the terminal session, support named development environments, and pin maturin to avoid empty staged Python libraries. (#852)
+- **(chore:examples)** Migrate example layouts to Python schematics, including Apollo lander, Falcon 9, RC-jet, n-body, and geo-frames. (#873, #874, #875, #876, #882)
+- **(doc)** Add the KDL-to-Python schematic migration guide and s10 reference documentation. (#846, #881)
+- **(fix:ci)** Retry documentation deployment pushes when concurrent updates race. (#866)
 
 ## v0.19
 

@@ -26,16 +26,18 @@ use bevy::{
     window::{PrimaryWindow, Window},
 };
 use bevy_egui::egui::{self, Align, CornerRadius, Frame, Layout, Margin, RichText, Stroke};
-use impeller::types::Timestamp;
+use impeller::types::{ComponentId, Timestamp};
 use impeller_bevy::{
-    ComponentMetadataRegistry, ComponentPath, ComponentSchemaRegistry, TelemetryCache,
+    ComponentMetadataRegistry, ComponentPath, ComponentSchemaRegistry, SeriesRevision,
+    TelemetryCache,
 };
-use impeller_wkt::{CurrentTimestamp, EarliestTimestamp};
-use std::time::{Duration, Instant};
+use impeller_wkt::{CurrentTimestamp, EarliestTimestamp, IsRecording};
+use std::time::Duration;
 use std::{
     fmt::Debug,
     ops::{Range, RangeInclusive},
 };
+use web_time::Instant;
 
 use crate::{
     Offset, SelectedTimeRange, TimeRangeBehavior,
@@ -46,7 +48,7 @@ use crate::{
         input_owner::UiInputOwners,
         plot::{
             CollectedGraphData, GraphState, GraphStateComponent, Line, OVERVIEW_MAX_POINTS,
-            data::evaluate_series,
+            data::{EvaluatedSeries, evaluate_series},
             element_names_for_graph,
             gpu::{LineBundle, LineConfig, LineUniform},
         },
@@ -124,14 +126,33 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             ui.max_rect(),
             get_inner_rect(ui.max_rect(), telemetry),
         );
+        // The stored y window can settle on a 1-unit band that contains none of
+        // the samples (fin axis at −29 while the series is −20..0). The stroke
+        // is then clipped off the plot. Re-fit from the samples the GPU draws.
+        #[cfg(target_family = "wasm")]
+        let mut bounds = bounds;
+        #[cfg(target_family = "wasm")]
+        if graph_state.auto_y_range
+            && let Some((min_y, max_y)) = wasm_sample_y_bounds(&graph_state, &lines, &line_query)
+        {
+            graph_state.y_range = min_y..max_y;
+            bounds.min_y = min_y;
+            bounds.max_y = max_y;
+        }
 
         let line_visible_range = bounds.timestamp_range(earliest_timestamp.0);
         graph_state.visible_range = LineVisibleRange(line_visible_range.clone());
         graph_state.widget_width = ui.max_rect().width() as f64;
 
+        // Wasm uploads timeseries x in seconds (`WASM_TIMESERIES_X_SCALE`).
+        // The camera has to match or the stroke sits far outside the clip rect.
+        #[cfg(target_family = "wasm")]
+        let projection = bounds.as_projection_x_scaled(super::gpu::WASM_TIMESERIES_X_SCALE);
+        #[cfg(not(target_family = "wasm"))]
+        let projection = bounds.as_projection();
         commands
             .entity(id)
-            .try_insert(Projection::Orthographic(bounds.as_projection()));
+            .try_insert(Projection::Orthographic(projection));
 
         let plot = TimeseriesPlot::from_bounds(
             ui.max_rect(),
@@ -1526,6 +1547,41 @@ pub fn draw_tick_mark(
     );
 }
 
+/// Padded y span of the samples `visible_plot_strips` will upload.
+#[cfg(target_family = "wasm")]
+fn wasm_sample_y_bounds(
+    graph_state: &GraphState,
+    lines: &Assets<Line>,
+    handles: &Query<&LineHandle>,
+) -> Option<(f64, f64)> {
+    let full = Timestamp(i64::MIN)..Timestamp(i64::MAX);
+    let mut ymin = f32::INFINITY;
+    let mut ymax = f32::NEG_INFINITY;
+    for (entity, _) in graph_state.enabled_lines.values() {
+        let Ok(LineHandle::Timeseries(handle)) = handles.get(*entity) else {
+            continue;
+        };
+        let Some(line) = lines.get(handle) else {
+            continue;
+        };
+        for strip in line
+            .data
+            .visible_plot_strips(full.clone(), Timestamp(0), false)
+        {
+            for (_, y) in strip {
+                if y.is_finite() {
+                    ymin = ymin.min(y);
+                    ymax = ymax.max(y);
+                }
+            }
+        }
+    }
+    if !ymin.is_finite() || !ymax.is_finite() {
+        return None;
+    }
+    Some(calculate_padded_y_bounds(ymin as f64, ymax as f64))
+}
+
 pub fn sync_bounds(
     graph_state: &mut GraphState,
     selected_range: Range<Timestamp>,
@@ -1549,7 +1605,7 @@ pub fn auto_y_bounds(
     line_handles: Query<&LineHandle>,
     mut lines: ResMut<Assets<Line>>,
     mut xy_lines: ResMut<Assets<XYLine>>,
-    mut last_run: Local<Option<std::time::Instant>>,
+    mut last_run: Local<Option<Instant>>,
 ) {
     let short = crate::is_short_accuracy_window(&selected_range.0);
     // Short windows: SelectedTimeRange tracks the playhead every frame — do not
@@ -1574,7 +1630,7 @@ pub fn auto_y_bounds(
     } else if !range_changed && !due {
         return;
     }
-    *last_run = Some(std::time::Instant::now());
+    *last_run = Some(Instant::now());
 
     for mut graph_state in graph_states.iter_mut() {
         if !graph_state.auto_y_range {
@@ -1750,13 +1806,147 @@ pub fn sync_graphs(
     }
 }
 
+/// How far a derived or kernel graph's lines hold its evaluated series, so a
+/// recording's live growth appends instead of re-evaluating the whole range.
+pub struct SeriesEvalCursor {
+    range_key: (i64, i64),
+    start: Timestamp,
+    end: Timestamp,
+    inputs: Vec<(SeriesRevision, Option<Timestamp>)>,
+}
+
+/// An input idle this long counts as held, so it cannot stall the line.
+const HELD_INPUT_AFTER_MICROS: i64 = 1_000_000;
+
+/// Each input's store revision and newest sample.
+fn series_inputs(
+    cache: &TelemetryCache,
+    inputs: &[ComponentId],
+) -> Vec<(SeriesRevision, Option<Timestamp>)> {
+    inputs
+        .iter()
+        .map(|id| {
+            let newest = cache
+                .series(id)
+                .and_then(|series| series.last_key_value())
+                .map(|(&ts, _)| ts);
+            (cache.revision(id), newest)
+        })
+        .collect()
+}
+
+/// The exclusive end before which no input can still change a value: each
+/// input's newest sample, or the held horizon for one idle past it.
+fn settled_end(
+    inputs: &[(SeriesRevision, Option<Timestamp>)],
+    range: &Range<Timestamp>,
+) -> Timestamp {
+    let held = range.end.0.saturating_sub(HELD_INPUT_AFTER_MICROS);
+    let end = inputs
+        .iter()
+        .map(|(_, newest)| match newest {
+            Some(ts) if ts.0 >= held => ts.0.saturating_add(1),
+            _ => held,
+        })
+        .min()
+        .unwrap_or(range.end.0);
+    Timestamp(end.clamp(range.start.0, range.end.0))
+}
+
+/// The span to evaluate and append after trimming the lines back to the
+/// oldest value an input changed since the cursor; `None` re-evaluates the
+/// whole range.
+fn series_append_span(
+    cache: &TelemetryCache,
+    dependencies: &[ComponentId],
+    cursor: &SeriesEvalCursor,
+    inputs: &[(SeriesRevision, Option<Timestamp>)],
+    range: &Range<Timestamp>,
+    line_handles: &[Handle<Line>],
+    lines: &mut Assets<Line>,
+) -> Option<Range<Timestamp>> {
+    if range.start < cursor.start
+        || range.end < cursor.end
+        || inputs.len() != cursor.inputs.len()
+        || line_handles.is_empty()
+    {
+        return None;
+    }
+    let mut resume = cursor.end;
+    for (id, (before_revision, before_newest)) in dependencies.iter().zip(&cursor.inputs) {
+        if let Some(from) = cache.changed_since(id, *before_revision) {
+            resume = resume.min(from);
+        }
+        // A sample that arrived late, before the cursor, changes values already drawn.
+        let first_new = cache.series(id).and_then(|series| match before_newest {
+            Some(newest) => series
+                .range((
+                    std::ops::Bound::Excluded(*newest),
+                    std::ops::Bound::Unbounded,
+                ))
+                .next(),
+            None => series.first_key_value(),
+        });
+        if let Some((&ts, _)) = first_new {
+            resume = resume.min(ts);
+        }
+    }
+    let mut start = cursor.end;
+    if resume < cursor.end {
+        for handle in line_handles {
+            let mut line = lines.get_mut(handle)?;
+            if !line.data.truncate_from(resume) {
+                return None;
+            }
+            let kept_end = line.data.latest_sample_timestamp()?;
+            start = start.min(Timestamp(kept_end.0.saturating_add(1)));
+        }
+    }
+    Some(start..settled_end(inputs, range).max(start))
+}
+
+/// Append an evaluated span to the graph's lines; false when its series no
+/// longer match them, so the caller re-evaluates in full.
+fn append_evaluated(
+    line_handles: &[Handle<Line>],
+    evaluated: &EvaluatedSeries,
+    range: &Range<Timestamp>,
+    earliest: Timestamp,
+    lines: &mut Assets<Line>,
+) -> bool {
+    if evaluated.values.is_empty() {
+        return true;
+    }
+    if evaluated.values.len() != line_handles.len() {
+        return false;
+    }
+    for (handle, values) in line_handles.iter().zip(&evaluated.values) {
+        if let Some(mut line) = lines.get_mut(handle) {
+            line.data.append_samples(
+                earliest,
+                evaluated
+                    .timestamps
+                    .iter()
+                    .copied()
+                    .zip(values.iter().copied()),
+            );
+            line.data
+                .evict_chunks_outside(crate::ui::plot::data::padded_sync_keep_range(range));
+        }
+    }
+    true
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn sync_derived_graphs(
     mut graph_states: Query<(Entity, &mut GraphState)>,
     cache: Res<TelemetryCache>,
     selected_range: Res<SelectedTimeRange>,
     earliest: Res<EarliestTimestamp>,
+    recording: Res<IsRecording>,
     mut lines: ResMut<Assets<Line>>,
     mut commands: Commands,
+    mut cursors: Local<HashMap<Entity, SeriesEvalCursor>>,
 ) {
     let range = selected_range.0.clone();
     if range.start >= range.end {
@@ -1766,9 +1956,11 @@ pub fn sync_derived_graphs(
     let generation = cache.generation();
     let max_points =
         (range.end.0.saturating_sub(range.start.0) > 600_000_000).then_some(OVERVIEW_MAX_POINTS);
+    cursors.retain(|entity, _| graph_states.contains(*entity));
 
     for (graph_entity, mut graph_state) in &mut graph_states {
         let Some(derived) = graph_state.derived.as_ref() else {
+            cursors.remove(&graph_entity);
             continue;
         };
         if derived.last_generation == generation && derived.last_range == Some(range_key) {
@@ -1778,17 +1970,65 @@ pub fn sync_derived_graphs(
         let dependencies = derived.dependencies.clone();
         let path = derived.path.clone();
         let colors = derived.colors.clone();
+        let inputs = series_inputs(&cache, &dependencies);
+        let append = cursors
+            .get(&graph_entity)
+            .filter(|cursor| {
+                recording.0 && max_points.is_none() && derived.last_range == Some(cursor.range_key)
+            })
+            .and_then(|cursor| {
+                series_append_span(
+                    &cache,
+                    &dependencies,
+                    cursor,
+                    &inputs,
+                    &range,
+                    &derived.lines,
+                    &mut lines,
+                )
+            });
+        let eval_range = match &append {
+            Some(span) => span.clone(),
+            None if recording.0 && max_points.is_none() => {
+                range.start..settled_end(&inputs, &range)
+            }
+            None => range.clone(),
+        };
         let evaluated =
-            match evaluate_series(&cache, &expr, &dependencies, range.clone(), max_points) {
+            match evaluate_series(&cache, &expr, &dependencies, eval_range.clone(), max_points) {
                 Ok(evaluated) => evaluated,
                 Err(err) => {
                     warn_once!(?err, "derived graph evaluation failed");
                     let derived = graph_state.derived.as_mut().expect("checked above");
                     derived.last_generation = generation;
                     derived.last_range = Some(range_key);
+                    cursors.remove(&graph_entity);
                     continue;
                 }
             };
+        let cursor = (recording.0 && max_points.is_none()).then_some(SeriesEvalCursor {
+            range_key,
+            start: range.start,
+            end: eval_range.end,
+            inputs,
+        });
+        if append.is_some() {
+            let derived = graph_state.derived.as_mut().expect("checked above");
+            if append_evaluated(&derived.lines, &evaluated, &range, earliest.0, &mut lines) {
+                derived.last_generation = generation;
+                derived.last_range = Some(range_key);
+                if let Some(cursor) = cursor {
+                    cursors.insert(graph_entity, cursor);
+                }
+            } else {
+                cursors.remove(&graph_entity);
+            }
+            continue;
+        }
+        match cursor {
+            Some(cursor) => cursors.insert(graph_entity, cursor),
+            None => cursors.remove(&graph_entity),
+        };
 
         {
             let label = graph_state.label.clone();
@@ -1876,7 +2116,6 @@ pub fn sync_derived_graphs(
     }
 }
 
-#[cfg(not(target_family = "wasm"))]
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 pub fn sync_kernel_graphs(
     mut graph_states: Query<(Entity, &mut GraphState)>,
@@ -1888,6 +2127,8 @@ pub fn sync_kernel_graphs(
     mut kernels: ResMut<crate::plugins::display_kernel::DisplayKernelCache>,
     connection_addr: Option<Res<impeller_bevy::ConnectionAddr>>,
     initial_kdl: Option<Res<crate::plugins::kdl_document::InitialKdlPath>>,
+    recording: Res<IsRecording>,
+    mut cursors: Local<HashMap<Entity, SeriesEvalCursor>>,
 ) {
     use crate::plugins::display_kernel::{KernelStatus, evaluate_kernel_series, kernel_fetch_ctx};
 
@@ -1900,9 +2141,11 @@ pub fn sync_kernel_graphs(
     let max_points =
         (range.end.0.saturating_sub(range.start.0) > 600_000_000).then_some(OVERVIEW_MAX_POINTS);
     let fetch = kernel_fetch_ctx(connection_addr, initial_kdl);
+    cursors.retain(|entity, _| graph_states.contains(*entity));
 
     for (graph_entity, mut graph_state) in &mut graph_states {
         let Some(kernel) = graph_state.kernel.as_ref() else {
+            cursors.remove(&graph_entity);
             continue;
         };
         if kernel.last_generation == generation && kernel.last_range == Some(range_key) {
@@ -1922,16 +2165,69 @@ pub fn sync_kernel_graphs(
                 continue;
             }
         };
-        let evaluated =
-            match evaluate_kernel_series(&cache, compiled, &binding, range.clone(), max_points) {
-                Ok(evaluated) => evaluated,
-                Err(err) => {
-                    warn_once!(?err, "display kernel graph evaluation failed");
-                    // Leave the cursor unset so a later sample can succeed
-                    // without waiting for a telemetry generation bump.
-                    continue;
+        let inputs = series_inputs(&cache, &kernel.dependencies);
+        let append = cursors
+            .get(&graph_entity)
+            .filter(|cursor| {
+                recording.0 && max_points.is_none() && kernel.last_range == Some(cursor.range_key)
+            })
+            .and_then(|cursor| {
+                series_append_span(
+                    &cache,
+                    &kernel.dependencies,
+                    cursor,
+                    &inputs,
+                    &range,
+                    &kernel.lines,
+                    &mut lines,
+                )
+            });
+        let eval_range = match &append {
+            Some(span) => span.clone(),
+            None if recording.0 && max_points.is_none() => {
+                range.start..settled_end(&inputs, &range)
+            }
+            None => range.clone(),
+        };
+        let evaluated = match evaluate_kernel_series(
+            &cache,
+            compiled,
+            &binding,
+            eval_range.clone(),
+            max_points,
+        ) {
+            Ok(evaluated) => evaluated,
+            Err(err) => {
+                warn_once!(?err, "display kernel graph evaluation failed");
+                // Leave the cursor unset so a later sample can succeed
+                // without waiting for a telemetry generation bump.
+                cursors.remove(&graph_entity);
+                continue;
+            }
+        };
+        let cursor = (recording.0 && max_points.is_none()).then_some(SeriesEvalCursor {
+            range_key,
+            start: range.start,
+            end: eval_range.end,
+            inputs,
+        });
+        if append.is_some() {
+            let kernel = graph_state.kernel.as_mut().expect("checked above");
+            if append_evaluated(&kernel.lines, &evaluated, &range, earliest.0, &mut lines) {
+                kernel.last_generation = generation;
+                kernel.last_range = Some(range_key);
+                if let Some(cursor) = cursor {
+                    cursors.insert(graph_entity, cursor);
                 }
-            };
+            } else {
+                cursors.remove(&graph_entity);
+            }
+            continue;
+        }
+        match cursor {
+            Some(cursor) => cursors.insert(graph_entity, cursor),
+            None => cursors.remove(&graph_entity),
+        };
 
         {
             let label = graph_state.label.clone();
@@ -2018,9 +2314,6 @@ pub fn sync_kernel_graphs(
         }
     }
 }
-
-#[cfg(target_family = "wasm")]
-pub fn sync_kernel_graphs() {}
 
 /// New locks adopt X from current leader but don't become leader yet.
 #[allow(clippy::type_complexity)]
@@ -2502,21 +2795,32 @@ impl PlotBounds {
     }
 
     pub fn as_projection(&self) -> OrthographicProjection {
-        let viewport_origin =
-            DVec2::new(-self.min_x / self.width(), -self.min_y / self.height()).as_vec2();
+        self.as_projection_x_scaled(1.0)
+    }
+
+    /// Orthographic projection with plot-x multiplied by `x_scale`.
+    ///
+    /// Y is unchanged. Wasm timeseries passes [`super::gpu::WASM_TIMESERIES_X_SCALE`]
+    /// so the camera is in seconds, matching the vertex buffer.
+    pub fn as_projection_x_scaled(&self, x_scale: f64) -> OrthographicProjection {
+        let min_x = self.min_x * x_scale;
+        let max_x = self.max_x * x_scale;
+        let width = max_x - min_x;
+        let height = self.height();
+        let viewport_origin = DVec2::new(-min_x / width, -self.min_y / height).as_vec2();
         OrthographicProjection {
             near: 0.0,
             far: 1000.0,
             viewport_origin,
             scaling_mode: ScalingMode::Fixed {
-                width: self.width() as f32,
-                height: self.height() as f32,
+                width: width as f32,
+                height: height as f32,
             },
             scale: 1.0,
             area: Rect::new(
-                self.min_x as f32,
+                min_x as f32,
                 self.min_y as f32,
-                self.max_x as f32,
+                max_x as f32,
                 self.max_y as f32,
             ),
         }
@@ -2744,5 +3048,87 @@ mod short_window_y_tests {
     fn short_y_hysteresis_shrinks_when_much_smaller() {
         let current = 0.0..10.0;
         assert!(should_update_short_window_y(&current, 4.0, 6.0));
+    }
+}
+
+#[cfg(test)]
+mod series_append_tests {
+    use super::{SeriesEvalCursor, series_append_span, series_inputs, settled_end};
+    use crate::ui::plot::{CHUNK_LEN, Line, data::LineTree};
+    use bevy::asset::Assets;
+    use impeller::types::{ComponentId, Timestamp};
+    use impeller_bevy::TelemetryCache;
+    use impeller_wkt::ComponentValue;
+
+    fn live(cache: &mut TelemetryCache, id: ComponentId, ts: i64) {
+        cache.insert_live(
+            id,
+            Timestamp(ts),
+            ComponentValue::F64(nox::array![ts as f64].to_dyn()),
+        );
+    }
+
+    #[test]
+    fn series_append_span_resumes_from_a_late_input_sample() {
+        let id = ComponentId::new("test.input");
+        let dependencies = [id];
+        let n = 2 * CHUNK_LEN as i64;
+        let mut cache = TelemetryCache::default();
+        let timestamps: Vec<Timestamp> = (0..n).map(|i| Timestamp(i * 10)).collect();
+        for ts in &timestamps {
+            live(&mut cache, id, ts.0);
+        }
+        let mut data = LineTree::default();
+        let values: Vec<f32> = timestamps.iter().map(|ts| ts.0 as f32).collect();
+        data.rebuild_from_time_value_pairs(Timestamp(0), &timestamps, &values);
+        let mut lines = Assets::<Line>::default();
+        let handles = vec![lines.add(Line {
+            data,
+            ..Default::default()
+        })];
+        let range = Timestamp(0)..Timestamp((n + 10) * 10);
+        let inputs = series_inputs(&cache, &dependencies);
+        let cursor = SeriesEvalCursor {
+            range_key: (range.start.0, range.end.0),
+            start: range.start,
+            end: settled_end(&inputs, &range),
+            inputs,
+        };
+
+        live(&mut cache, id, n * 10);
+        let inputs = series_inputs(&cache, &dependencies);
+        let span = series_append_span(
+            &cache,
+            &dependencies,
+            &cursor,
+            &inputs,
+            &range,
+            &handles,
+            &mut lines,
+        );
+        assert_eq!(span, Some(cursor.end..Timestamp(n * 10 + 1)));
+        assert_eq!(
+            lines.get(&handles[0]).unwrap().data.total_points(),
+            n as usize
+        );
+
+        let late = (n - 3) * 10 + 5;
+        live(&mut cache, id, late);
+        let inputs = series_inputs(&cache, &dependencies);
+        let span = series_append_span(
+            &cache,
+            &dependencies,
+            &cursor,
+            &inputs,
+            &range,
+            &handles,
+            &mut lines,
+        );
+        let kept_end = (CHUNK_LEN as i64 - 1) * 10 + 1;
+        assert_eq!(span, Some(Timestamp(kept_end)..Timestamp(n * 10 + 1)));
+        assert_eq!(
+            lines.get(&handles[0]).unwrap().data.total_points(),
+            CHUNK_LEN
+        );
     }
 }

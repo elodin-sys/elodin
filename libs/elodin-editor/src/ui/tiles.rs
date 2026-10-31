@@ -9,6 +9,7 @@ use bevy::{
     prelude::*,
     window::{Monitor, PrimaryWindow, Window, WindowPosition},
 };
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 use bevy_ai_skybox::prelude::PrimarySkybox;
 use bevy_editor_cam::{
     controller::{component::Sensitivity, zoom::ZoomLimits},
@@ -341,6 +342,7 @@ pub struct WindowDescriptor {
     pub screen: Option<usize>,
     pub mode: Option<String>,
     pub screen_rect: Option<WindowRect>,
+    pub inline_content: Option<impeller_wkt::Schematic>,
 }
 
 impl WindowDescriptor {
@@ -638,6 +640,7 @@ pub fn create_secondary_window(title: Option<String>) -> (WindowState, WindowId)
         screen: None,
         mode: None,
         screen_rect: None,
+        inline_content: None,
     };
     let tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
     (
@@ -789,8 +792,9 @@ impl TileState {
 
         container.add_child(tile_id);
 
-        if active && let Container::Tabs(tabs) = container {
-            tabs.set_active(tile_id);
+        if active {
+            // Selects the tile in every Tabs container above it, not only its parent.
+            self.tree.make_active(|id, _| id == tile_id);
         }
 
         Some(tile_id)
@@ -1781,6 +1785,11 @@ impl ViewportPane {
             crate::object_3d::EqlCompileCtx::new(geo_context).with_frame(viewport.frame);
         let compile = |eql: &str, label: &str| match eql_ctx.parse_str(eql) {
             Ok(expr) => crate::object_3d::compile_eql_expr_with_ctx(expr, &compile_ctx).ok(),
+            // `retry_viewport_eql_compile` compiles it once the component registers.
+            Err(eql::Error::ComponentNotFound(component)) => {
+                bevy::log::info!("viewport {label} expression '{eql}' waiting for {component}");
+                None
+            }
             Err(e) => {
                 bevy::log::error!("Failed to parse viewport {label} expression '{eql}': {e}");
                 None
@@ -1919,6 +1928,7 @@ impl ViewportPane {
             viewport.bloom.as_ref(),
             viewport.cinematic,
         ));
+        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
         camera.insert(PrimarySkybox);
         camera.insert(EnvironmentMapLight {
             diffuse_map: asset_server.load("embedded://elodin_editor/assets/diffuse.ktx2"),

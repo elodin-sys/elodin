@@ -160,7 +160,7 @@ fn random_stream_id() -> u64 {
 pub struct StreamSub {
     queue: Arc<BoundedQueue<RowData>>,
     shutdown: Arc<WaitQueue>,
-    thread: Option<Thread<Option<()>>>,
+    thread: Mutex<Option<Thread<Option<()>>>>,
 }
 
 #[pymethods]
@@ -225,7 +225,7 @@ impl StreamSub {
         Ok(Self {
             queue,
             shutdown,
-            thread: Some(thread),
+            thread: Mutex::new(Some(thread)),
         })
     }
 
@@ -259,10 +259,11 @@ impl StreamSub {
     }
 
     /// Stop the stream and join its thread.
-    fn close(&mut self, py: Python<'_>) {
+    fn close(&self, py: Python<'_>) {
         self.shutdown.close();
         self.queue.close();
-        if let Some(handle) = self.thread.take() {
+        let handle = self.thread.lock().ok().and_then(|mut thread| thread.take());
+        if let Some(handle) = handle {
             py.allow_threads(|| {
                 super::block_on(move || async move {
                     let _ = handle.join().await;
@@ -276,7 +277,7 @@ impl Drop for StreamSub {
     fn drop(&mut self) {
         self.shutdown.close();
         self.queue.close();
-        if let Some(handle) = self.thread.take() {
+        if let Some(handle) = self.thread.get_mut().ok().and_then(Option::take) {
             super::block_on(move || async move {
                 let _ = handle.join().await;
             });
@@ -360,7 +361,7 @@ type MsgItem = (i64, Vec<u8>);
 pub struct MsgStreamSub {
     queue: Arc<BoundedQueue<MsgItem>>,
     shutdown: Arc<WaitQueue>,
-    thread: Option<Thread<Option<()>>>,
+    thread: Mutex<Option<Thread<Option<()>>>>,
 }
 
 #[pymethods]
@@ -393,7 +394,7 @@ impl MsgStreamSub {
         Ok(Self {
             queue,
             shutdown,
-            thread: Some(thread),
+            thread: Mutex::new(Some(thread)),
         })
     }
 
@@ -417,10 +418,11 @@ impl MsgStreamSub {
     }
 
     /// Stop the stream and join its thread.
-    fn close(&mut self, py: Python<'_>) {
+    fn close(&self, py: Python<'_>) {
         self.shutdown.close();
         self.queue.close();
-        if let Some(handle) = self.thread.take() {
+        let handle = self.thread.lock().ok().and_then(|mut thread| thread.take());
+        if let Some(handle) = handle {
             py.allow_threads(|| {
                 super::block_on(move || async move {
                     let _ = handle.join().await;
@@ -434,7 +436,7 @@ impl Drop for MsgStreamSub {
     fn drop(&mut self) {
         self.shutdown.close();
         self.queue.close();
-        if let Some(handle) = self.thread.take() {
+        if let Some(handle) = self.thread.get_mut().ok().and_then(Option::take) {
             super::block_on(move || async move {
                 let _ = handle.join().await;
             });

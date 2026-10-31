@@ -242,6 +242,9 @@ pub(crate) fn copy_dir_native(src: &Path, dst: &Path) -> Result<(), Error> {
 
 pub struct DB {
     pub vtable_gen: AtomicCell<u64>,
+    /// Bumped on every metadata change, so real-time streams re-send a
+    /// component's metadata that changed after they first announced it.
+    pub metadata_gen: AtomicCell<u64>,
     state: RwLock<State>,
     pub recording_cell: PlayingCell,
 
@@ -314,11 +317,7 @@ impl RealTimeStreamFilter {
 
     fn set(&self, component_ids: Vec<ComponentId>, frequency: Option<u64>) {
         let mut current = self.component_ids.write().unwrap();
-        *current = if component_ids.is_empty() {
-            None
-        } else {
-            Some(component_ids.into_iter().collect())
-        };
+        *current = Some(component_ids.into_iter().collect());
         self.frequency
             .store(frequency.unwrap_or(0), atomic::Ordering::Release);
         self.generation.fetch_add(1, atomic::Ordering::Release);
@@ -390,6 +389,7 @@ impl DB {
             recording_cell: PlayingCell::new(true),
             path,
             vtable_gen: AtomicCell::new(0),
+            metadata_gen: AtomicCell::new(0),
             default_stream_time_step,
             last_updated: AtomicCell::new(Timestamp(i64::MIN)),
             earliest_timestamp: AtomicCell::new(now),
@@ -415,8 +415,22 @@ impl DB {
         f(&mut state)
     }
 
+    /// Sets a component's metadata and wakes real-time streams to re-send it.
+    pub fn set_component_metadata(&self, metadata: ComponentMetadata) -> Result<(), Error> {
+        self.with_state_mut(|state| state.set_component_metadata(metadata, &self.path))?;
+        self.metadata_gen.fetch_add(1, atomic::Ordering::SeqCst);
+        Ok(())
+    }
+
     fn db_config(&self) -> DbConfig {
         self.with_state(|db| db.db_config.clone())
+    }
+
+    /// `DbConfig` for client replies, including runtime capability flags.
+    fn client_db_config(&self) -> DbConfig {
+        let mut config = self.db_config();
+        config.advertise_exact_stream_filter();
+        config
     }
 
     pub fn save_db_state(&self) -> Result<(), Error> {
@@ -832,6 +846,7 @@ impl DB {
             state: RwLock::new(state),
             path,
             vtable_gen: AtomicCell::new(0),
+            metadata_gen: AtomicCell::new(0),
             recording_cell: PlayingCell::new(db_state.recording),
             default_stream_time_step: AtomicU64::new(
                 db_state.default_stream_time_step.as_nanos() as u64
@@ -1010,7 +1025,7 @@ impl DB {
                     "processing field"
                 );
 
-                let component_schema = ComponentSchema::new(ty, shape);
+                let component_schema = ComponentSchema::new(ty, shape.as_slice());
                 state.insert_component_with_timestamp_source_flag(
                     component_id,
                     component_schema,
@@ -2306,7 +2321,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
         }
         Packet::Msg(m) if m.id == SetComponentMetadata::ID => {
             let SetComponentMetadata(metadata) = m.parse::<SetComponentMetadata>()?;
-            db.with_state_mut(|state| state.set_component_metadata(metadata, &db.path))?;
+            db.set_component_metadata(metadata)?;
         }
         Packet::Msg(m) if m.id == GetComponentMetadata::ID => {
             let GetComponentMetadata { component_id } = m.parse::<GetComponentMetadata>()?;
@@ -2385,7 +2400,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                     let config_gen = db.db_config_gen.latest();
                     if config_gen != last_config_gen {
                         last_config_gen = config_gen;
-                        match tx.send_msg(&db.db_config()).await {
+                        match tx.send_msg(&db.client_db_config()).await {
                             Err(err) if err.is_stream_closed() => return,
                             Err(err) => {
                                 warn!(?err, "failed to send db config");
@@ -2424,7 +2439,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             if let Err(err) = db.apply_set_db_config_from_client(update) {
                 tracing::warn!(?err, "rejected db config patch");
             }
-            tx.send_msg(&db.db_config()).await?;
+            tx.send_msg(&db.client_db_config()).await?;
         }
         Packet::Msg(m) if m.id == StoreAsset::ID => {
             let StoreAsset { key, bytes } = m.parse::<StoreAsset>()?;
@@ -2444,8 +2459,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                 .await?;
         }
         Packet::Msg(m) if m.id == GetDbSettings::ID => {
-            let settings = db.db_config();
-            tx.send_msg(&settings).await?;
+            tx.send_msg(&db.client_db_config()).await?;
         }
         Packet::Table(table) => {
             let _table_span = tracing::info_span!("sink_table").entered();
@@ -2481,10 +2495,6 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             }
         }
 
-        Packet::Msg(m) if m.id == GetDbSettings::ID => {
-            let settings = db.db_config();
-            tx.send_msg(&settings).await?;
-        }
         Packet::Msg(m) if m.id == SQLQuery::ID => {
             let SQLQuery(query) = m.parse::<SQLQuery>()?;
             let db = db.clone();
@@ -3364,15 +3374,46 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
     filter: Arc<RealTimeStreamFilter>,
 ) -> Result<(), Error> {
     let mut current_vtable_gen = u64::MAX;
+    let mut current_metadata_gen = u64::MAX;
     let mut current_filter_gen = u64::MAX;
     let mut table = LenPacket::table([0; 2], 2048 - 16);
     let mut all_components = HashMap::new();
+    let mut sent_metadata: HashMap<ComponentId, ComponentMetadata> = HashMap::new();
     let mut stream_components = HashMap::new();
     let mut last_sent = None;
 
     loop {
+        // Created before reading the generations: a `Wait` sees every `wake_all`
+        // from creation, so changes made while this pass sends still wake it.
+        let changed = futures_lite::future::race(
+            db.last_updated.wait_queue.wait(),
+            futures_lite::future::race(filter.changed.wait(), db.metadata_gen.wait_queue.wait()),
+        );
         let vtable_gen = db.vtable_gen.latest();
         let filter_gen = filter.generation();
+        let metadata_gen = db.metadata_gen.latest();
+        // A writer may register a table before naming its components; the
+        // DB names them by ID until their metadata arrives.
+        if metadata_gen != current_metadata_gen {
+            let changed: Vec<ComponentMetadata> = db.with_state(|state| {
+                sent_metadata
+                    .iter()
+                    .filter_map(|(id, sent)| {
+                        let current = state.get_component_metadata(*id)?;
+                        (current != sent).then(|| current.clone())
+                    })
+                    .collect()
+            });
+            for metadata in changed {
+                send_with_timeout(
+                    &sink,
+                    metadata.clone().into_len_packet().with_request_id(req_id),
+                )
+                .await?;
+                sent_metadata.insert(metadata.component_id, metadata);
+            }
+            current_metadata_gen = metadata_gen;
+        }
         if vtable_gen != current_vtable_gen {
             let new_components: Vec<(Component, Option<ComponentMetadata>, Schema<Vec<u64>>)> = db
                 .with_state(|state| {
@@ -3392,8 +3433,12 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
 
             for (component, metadata, schema) in new_components {
                 if let Some(metadata) = metadata {
-                    send_with_timeout(&sink, metadata.into_len_packet().with_request_id(req_id))
-                        .await?;
+                    send_with_timeout(
+                        &sink,
+                        metadata.clone().into_len_packet().with_request_id(req_id),
+                    )
+                    .await?;
+                    sent_metadata.insert(component.component_id, metadata);
                 }
 
                 let start_ts = *component.index_extra();
@@ -3411,7 +3456,7 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
         let stream_changed = vtable_gen != current_vtable_gen || filter_gen != current_filter_gen;
         if stream_changed {
             let component_filter = filter.component_ids();
-            stream_components = match &component_filter {
+            let next_components = match &component_filter {
                 Some(filter) => all_components
                     .iter()
                     .filter(|(component_id, _)| filter.contains(*component_id))
@@ -3419,10 +3464,18 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
                     .collect(),
                 None => all_components.clone(),
             };
-            let vtable_msg = DBVisitor.vtable(&stream_components)?;
-            let id: PacketId = fastrand::u16(..).to_le_bytes();
-            table = LenPacket::table(id, 2048 - 16);
-            {
+            // Sinking the first sample bumps `vtable_gen` without changing
+            // columns. Republishing that vtable races with a filter update.
+            let layout_changed = next_components.len() != stream_components.len()
+                || next_components.iter().any(|(id, component)| {
+                    stream_components
+                        .get(id)
+                        .is_none_or(|existing: &Component| existing.schema != component.schema)
+                });
+            if layout_changed || filter_gen != current_filter_gen {
+                let vtable_msg = DBVisitor.vtable(&next_components)?;
+                let id: PacketId = fastrand::u16(..).to_le_bytes();
+                table = LenPacket::table(id, 2048 - 16);
                 let pkt = VTableMsg {
                     id,
                     vtable: vtable_msg,
@@ -3430,6 +3483,7 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
                 .into_len_packet();
                 send_with_timeout(&sink, pkt.with_request_id(req_id)).await?;
             }
+            stream_components = next_components;
             current_vtable_gen = vtable_gen;
             current_filter_gen = filter_gen;
         }
@@ -3440,16 +3494,13 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
             last_sent
                 .is_none_or(|last: Timestamp| timestamp.0.saturating_sub(last.0) >= interval_us)
         });
-        if stream_changed || due {
+        if stream_changed || (due && !stream_components.is_empty()) {
             table.clear();
             DBVisitor.populate_table_latest(&stream_components, &mut table);
             table = send_with_timeout(&sink, table.with_request_id(req_id)).await?;
             last_sent = Some(timestamp);
         }
-        futures_lite::future::race(db.last_updated.wait(), async {
-            let _ = filter.changed.wait().await;
-        })
-        .await;
+        let _ = changed.await;
     }
 }
 
@@ -3742,7 +3793,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_real_time_stream_filter_is_unfiltered() {
+    fn empty_real_time_stream_filter_selects_nothing() {
         let filter = RealTimeStreamFilter::new();
         assert!(filter.component_ids().is_none());
         filter.set(vec![ComponentId::new("a")], Some(60));
@@ -3751,7 +3802,7 @@ mod tests {
             Some([ComponentId::new("a")].into_iter().collect())
         );
         filter.set(vec![], Some(60));
-        assert!(filter.component_ids().is_none());
+        assert_eq!(filter.component_ids(), Some(HashSet::new()));
         assert_eq!(filter.frequency(), Some(60));
     }
 
@@ -3871,6 +3922,18 @@ mod tests {
                 .sample_count()),
             2
         );
+    }
+
+    #[test]
+    fn exact_stream_filter_capability_is_advertised_but_not_persisted() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("db");
+        let db = DB::create(path.clone()).unwrap();
+        assert!(db.client_db_config().supports_exact_stream_filter());
+        assert!(!db.db_config().supports_exact_stream_filter());
+        db.save_db_state().unwrap();
+        let persisted = DbConfig::read(path.join("db_state")).unwrap();
+        assert!(!persisted.supports_exact_stream_filter());
     }
 
     #[test]

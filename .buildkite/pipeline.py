@@ -46,22 +46,23 @@ test_steps = [
             ),
             nix_step(
                 emoji=":crab:",
-                label="cargo test",
-                command="cargo test --release --workspace --exclude elodin-db --exclude elodin-db-tests -- -Z unstable-options --format json --report-time | buildkite-test-collector && cargo test --release -p elodin-db --lib -- --test-threads=1 -Z unstable-options --format json --report-time | buildkite-test-collector && cargo test --release -p elodin-db-tests -- --test-threads=1 -Z unstable-options --format json --report-time | buildkite-test-collector",
-                env={
-                    "RUSTC_BOOTSTRAP": "1",
-                    "BUILDKITE_ANALYTICS_TOKEN": "R6hH2MNhtMdbfQWhDd9cvZfo",
-                },
+                label="cargo test workspace",
+                command="cargo test --release --workspace --exclude elodin-db --exclude elodin-db-tests -- -Z unstable-options --format json --report-time | buildkite-test-collector",
+            ),
+            nix_step(
+                emoji=":crab:",
+                label="cargo test elodin-db",
+                command="cargo test --release -p elodin-db --lib --bins -- --test-threads=1 -Z unstable-options --format json --report-time | buildkite-test-collector",
+            ),
+            nix_step(
+                emoji=":crab:",
+                label="cargo test elodin-db-tests",
+                command="cargo test --release -p elodin-db-tests -- --test-threads=1 -Z unstable-options --format json --report-time | buildkite-test-collector",
             ),
             nix_step(
                 emoji=":crab:",
                 label="cargo fmt",
                 command="cargo fmt --check && cargo fmt --check --manifest-path fsw/sensor-fw/Cargo.toml",
-            ),
-            nix_step(
-                emoji=":crab:",
-                label="elodin-db grpc",
-                command="export CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 RAYON_NUM_THREADS=1; cargo check -p elodin-db && cargo test -p elodin-db --features grpc --lib grpc:: -- --test-threads=1 && cargo test -p elodin-db --features grpc --bin elodin-db grpc_ -- --test-threads=1 && cargo test -p elodin-db --features grpc grpc_address_follows_main_port -- --test-threads=1",
             ),
         ],
     ),
@@ -141,34 +142,21 @@ test_steps = [
                 command="scripts/ci/db_grpc_full_api_demo.sh",
                 env={
                     "ELODIN_RC_JET_CONTROLLER_BIN": "target/release/rc-jet-controller",
-                    # 3000 ticks is ~10s at 300 Hz; CI llvmpipe needs longer
-                    # than that for sensor-camera prime before the sim exits.
-                    "ELODIN_GRPC_DEMO_TICKS": "30000",
                 },
             ),
-            nix_step(
-                label=":python: sensor-camera",
-                flake=".#tracy",
-                command="./scripts/ci/sensor_camera_perf.sh",
-                env={"ELODIN_SENSOR_CAMERA_CAPTURE_TRACY": "1"},
-            ),
-            # Monte Carlo steps must not run concurrently: each `monte-carlo run`
-            # reaps stray elodin/elodin-db processes at startup, so two campaigns
-            # sharing an agent would reap each other's orchestrator (SIGTERM /
-            # exit 143). Serialize them with depends_on.
-            nix_step(
-                emoji=":rocket:",
-                label="monte-carlo apollo",
-                key="monte-carlo-apollo",
-                command="just install && ./scripts/test-apollo-monte-carlo.sh",
-            ),
-            nix_step(
-                emoji=":sparkles:",
-                label="monte-carlo quickstart",
-                depends_on=["monte-carlo-apollo"],
-                command="just install && ./scripts/test-quickstart.sh",
-            ),
         ],
+    ),
+    nix_step(
+        label=":python: sensor-camera",
+        flake=".#tracy",
+        command="./scripts/ci/sensor_camera_perf.sh",
+        env={"ELODIN_SENSOR_CAMERA_CAPTURE_TRACY": "1"},
+    ),
+    nix_step(
+        emoji=":rocket:",
+        label="monte-carlo apollo + quickstart",
+        # Each campaign reaps stray elodin/elodin-db processes at startup, so they share one step.
+        command="just install && ./scripts/test-apollo-monte-carlo.sh && ./scripts/test-quickstart.sh",
     ),
     nix_step(
         emoji=":gear:",
@@ -181,9 +169,7 @@ test_steps = [
             nix_step(
                 emoji=":racehorse:",
                 label="perf-elodin-db",
-                pre_command="nix develop --command bash -c 'cargo build --release -p elodin-db --bin elodin-db-bench --features grpc,tracy'",
-                flake=".#tracy",
-                command="bash ./scripts/ci/db_perf.sh",
+                command="cargo build --release -p elodin-db --bin elodin-db-bench --features grpc,tracy && bash ./scripts/ci/db_perf.sh",
             ),
         ],
     ),
@@ -191,6 +177,7 @@ test_steps = [
     step(
         label=":nix: elodin-cli",
         key="elodin-cli",
+        depends_on=["nox-py"],
         command="nix build .#elodin-cli",
     ),
     step(
@@ -232,10 +219,26 @@ pipeline_steps = [
     *test_steps,
 ]
 
+# CI_PREWARM="cargo test": run only steps whose label contains it, one copy per x86 agent (needs an idle queue)
+if prewarm := os.getenv("CI_PREWARM"):
+    pipeline_steps = [
+        {**s, "parallelism": 8}
+        for g in test_steps
+        for s in g.get("steps", [g])
+        if prewarm in s["label"]
+    ]
+
 pipeline(
     steps=pipeline_steps,
     env={
         "BUILDKITE_PLUGIN_FS_CACHE_FOLDER": "/run/buildkite/cache",
+        # Cargo fingerprint inputs; keep identical across steps so each agent's target/ stays warm.
+        "RUSTC_BOOTSTRAP": "1",
+        "ELODIN_SHELL_ID": "ci",
+        "GIT_HASH": "ci",
+        "BUILDKITE_ANALYTICS_TOKEN": "R6hH2MNhtMdbfQWhDd9cvZfo",
+        # The default nice 19 starves sensor-camera rendering on a saturated host.
+        "ELODIN_RENDER_SERVER_NICE": "0",
     },
     agents={
         "queue": "nixos-x86-aws",

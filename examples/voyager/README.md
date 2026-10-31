@@ -84,6 +84,35 @@ which `main.py` loads at startup.
 python examples/voyager/main.py run
 ```
 
-Chapter 2 (`python examples/voyager/chapter_2.py run`) subtracts each
-planet's acceleration of the Sun. Same kernels, masses, RK4, and
-timestep. It does not reproduce the gravity assists.
+
+## Chapter 1
+
+`chapter1.py` runs Voyager 1 from Feb 22 to Feb 28, 1979 using
+just the Sun and Jupiter's gravity. It starts from a SPICE state and
+compares the result with the SPICE trajectory.
+
+From `examples/voyager`:
+
+```bash
+bash download_spice_data.sh
+python chapter1.py run
+```
+
+Jupiter's position is sampled at the midpoint of each one-hour step
+and stays fixed through the RK4 stages. This keeps things simple, but
+the overall propagation isn't fourth-order accurate, even though
+Voyager itself is integrated with RK4.
+
+## Chapter 2
+
+`chapter2.py` uses the same dates and SPICE data as Chapter 1.
+It also accounts for Jupiter pulling on the Sun.
+
+From `examples/voyager`:
+
+```bash
+python chapter2.py run
+```
+
+Jupiter's position is still fixed through each RK4 step, so the overall
+propagation isn't fourth-order accurate.

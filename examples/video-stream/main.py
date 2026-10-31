@@ -27,6 +27,8 @@ import elodin as el
 import jax
 from jax import numpy as jnp
 
+from schematic import build as build_schematic
+
 # =============================================================================
 # Constants
 # =============================================================================
@@ -218,8 +220,7 @@ rtsp_receiver = el.s10.PyRecipe.process(
 world.recipe(rtsp_receiver)
 
 # Define schematic with top-down camera view and video stream tiles
-SCHEMATIC_PATH = Path(__file__).with_name("schematic.kdl")
-world.schematic(SCHEMATIC_PATH.read_text())
+world.schematic(build_schematic(), "video-stream.kdl")
 
 print("Video Streaming Example - Rolling Ball")
 print("======================================")
