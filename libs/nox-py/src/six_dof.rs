@@ -8,7 +8,7 @@ use nox::{
 };
 use std::sync::Arc;
 
-use crate::integrator::{Integrator, Rk4, semi_implicit_euler, semi_implicit_euler_with_dt};
+use crate::integrator::{ExplicitRk, Integrator, semi_implicit_euler, semi_implicit_euler_with_dt};
 use crate::{ComponentArray, ErasedSystem};
 
 #[derive(Component, ReprMonad)]
@@ -215,7 +215,11 @@ where
 {
     let sys = clear_forces.pipe(effectors()).pipe(calc_accel);
     match integrator {
-        Integrator::Rk4 => Arc::new(Rk4::<U, Kinematics, DU, _>::new(sys, Some(time_step))),
+        Integrator::ExplicitRk(tableau) => Arc::new(ExplicitRk::<U, Kinematics, DU, _>::new(
+            tableau,
+            sys,
+            Some(time_step),
+        )),
         Integrator::SemiImplicit => {
             let integrate =
                 semi_implicit_euler_with_dt::<WorldPos, WorldVel, WorldAccel>(time_step);
@@ -237,7 +241,9 @@ where
 {
     let sys = clear_forces.pipe(effectors()).pipe(calc_accel);
     match integrator {
-        Integrator::Rk4 => Arc::new(Rk4::<U, Kinematics, DU, _>::new(sys, None)),
+        Integrator::ExplicitRk(tableau) => {
+            Arc::new(ExplicitRk::<U, Kinematics, DU, _>::new(tableau, sys, None))
+        }
         Integrator::SemiImplicit => {
             let integrate = semi_implicit_euler::<WorldPos, WorldVel, WorldAccel>();
             Arc::new(ErasedSystem::new(sys.pipe(integrate)))

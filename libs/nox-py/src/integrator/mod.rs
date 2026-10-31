@@ -1,10 +1,10 @@
-mod rk4;
+mod runge_kutta;
 mod semi_implicit;
 
-pub use rk4::*;
+pub use runge_kutta::*;
 pub use semi_implicit::*;
 
 pub enum Integrator {
-    Rk4,
+    ExplicitRk(&'static ButcherTableau),
     SemiImplicit,
 }

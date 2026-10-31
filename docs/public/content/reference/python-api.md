@@ -525,7 +525,17 @@ Using the associated [elodin.Body] archetype and prebuilt components, we can cre
 - `elodin.Integrator.Rk4` -> [elodin.Integrator]
 
     Runge-Kutta 4th Order (RK4) Integrator: Elodin provides a built-in implementation for a [4th order Runge-Kutta integrator](https://en.wikipedia.org/wiki/Runge%E2%80%93Kutta_methods).
-    The RK4 integrator is a numerical method used to solve ordinary differential equations. You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/rk4.rs).
+    The RK4 integrator is a numerical method used to solve ordinary differential equations. It evaluates the effectors 4 times per step. You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/runge_kutta.rs).
+
+- `elodin.Integrator.Rk2` -> [elodin.Integrator]
+
+    [Heun's method](https://en.wikipedia.org/wiki/Heun%27s_method), a second-order Runge-Kutta method that evaluates the effectors 2 times per step.
+    It costs half as much as `Rk4`, and suits time steps short enough that second-order accuracy is enough, or dynamics with discontinuities
+    such as contacts, where higher orders gain little.
+
+- `elodin.Integrator.Rk3` -> [elodin.Integrator]
+
+    Kutta's third-order Runge-Kutta method, which evaluates the effectors 3 times per step.
 
 - `elodin.Integrator.SemiImplicit` -> [elodin.Integrator]
 

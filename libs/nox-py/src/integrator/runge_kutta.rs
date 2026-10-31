@@ -6,17 +6,44 @@ use nox::Scalar;
 use std::ops::Add;
 use std::{marker::PhantomData, ops::Mul};
 
-/// Integrates state `U` with RK4. After each evaluation of `pipe`, the components in `S`
-/// are read and converted into the stage derivative `DU`.
-pub struct Rk4<U, S, DU, Pipe> {
+/// Coefficients of an explicit Runge-Kutta method: row `i` of `a` weights the derivatives
+/// of stages `0..i` in stage `i`, and `b` weights every stage in the step.
+pub struct ButcherTableau {
+    pub a: &'static [&'static [f64]],
+    pub b: &'static [f64],
+}
+
+/// Heun's method (explicit trapezoid rule), second order.
+pub const RK2: ButcherTableau = ButcherTableau {
+    a: &[&[], &[1.0]],
+    b: &[0.5, 0.5],
+};
+
+/// Kutta's third-order method.
+pub const RK3: ButcherTableau = ButcherTableau {
+    a: &[&[], &[0.5], &[-1.0, 2.0]],
+    b: &[1.0 / 6.0, 2.0 / 3.0, 1.0 / 6.0],
+};
+
+/// The classic fourth-order Runge-Kutta method.
+pub const RK4: ButcherTableau = ButcherTableau {
+    a: &[&[], &[0.5], &[0.0, 0.5], &[0.0, 0.0, 1.0]],
+    b: &[1.0 / 6.0, 1.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0],
+};
+
+/// Integrates state `U` with an explicit Runge-Kutta method. After each evaluation of
+/// `pipe`, the components in `S` are read and converted into the stage derivative `DU`.
+pub struct ExplicitRk<U, S, DU, Pipe> {
+    tableau: &'static ButcherTableau,
     dt: Option<f64>,
     pipe: Pipe,
     phantom_data: PhantomData<(U, S, DU)>,
 }
 
-impl<Pipe, U, S, DU> Rk4<U, S, DU, Pipe> {
-    pub fn new(pipe: Pipe, dt: Option<f64>) -> Self {
+impl<Pipe, U, S, DU> ExplicitRk<U, S, DU, Pipe> {
+    pub fn new(tableau: &'static ButcherTableau, pipe: Pipe, dt: Option<f64>) -> Self {
         Self {
+            tableau,
             dt,
             pipe,
             phantom_data: PhantomData,
@@ -25,10 +52,10 @@ impl<Pipe, U, S, DU> Rk4<U, S, DU, Pipe> {
 }
 
 pub trait Rk4Ext {
-    fn rk4<U, DU>(self) -> Rk4<U, DU, DU, Self>
+    fn rk4<U, DU>(self) -> ExplicitRk<U, DU, DU, Self>
     where
         Self: Sized;
-    fn rk4_with_dt<U, DU>(self, dt: f64) -> Rk4<U, DU, DU, Self>
+    fn rk4_with_dt<U, DU>(self, dt: f64) -> ExplicitRk<U, DU, DU, Self>
     where
         Self: Sized;
 }
@@ -37,22 +64,22 @@ impl<Sys> Rk4Ext for Sys
 where
     Sys: System,
 {
-    fn rk4<U, DU>(self) -> Rk4<U, DU, DU, Self>
+    fn rk4<U, DU>(self) -> ExplicitRk<U, DU, DU, Self>
     where
         Self: Sized,
     {
-        Rk4::new(self, None)
+        ExplicitRk::new(&RK4, self, None)
     }
 
-    fn rk4_with_dt<U, DU>(self, dt: f64) -> Rk4<U, DU, DU, Self>
+    fn rk4_with_dt<U, DU>(self, dt: f64) -> ExplicitRk<U, DU, DU, Self>
     where
         Self: Sized,
     {
-        Rk4::new(self, Some(dt))
+        ExplicitRk::new(&RK4, self, Some(dt))
     }
 }
 
-impl<Pipe, U, S, DU> System for Rk4<U, S, DU, Pipe>
+impl<Pipe, U, S, DU> System for ExplicitRk<U, S, DU, Pipe>
 where
     Query<U>: SystemParam<Item = Query<U>> + Clone,
     Query<(S,)>: SystemParam<Item = Query<(S,)>>,
@@ -86,39 +113,32 @@ where
         let sim_dt = ComponentArray::<SimulationTimeStep>::param(&builder)?;
         let dt = self.dt.map(Scalar::from).unwrap_or_else(|| sim_dt.get(0).0);
 
-        let eval = |builder: &mut SystemBuilder| -> Result<Query<DU>, Error> {
-            compiled_pipe.clone().insert_into_builder(builder)?;
-            Query::<(S,)>::param(builder)?.map(|s: S| DU::from(s))
-        };
-        // U and S can share components, so stages are built from the init_u and k_i
-        // snapshots rather than read back from the builder.
-        let stage =
-            |k: &Query<DU>, c: f64, builder: &mut SystemBuilder| -> Result<Query<DU>, Error> {
-                let h = &dt * c;
-                init_u
-                    .clone()
-                    .join_query(k.clone())
-                    .map(|u, du| u + h.clone() * du)?
-                    .insert_into_builder(builder);
-                eval(builder)
+        // init_u + dt * Σ w_j k_j. U and S can share components, so states are built from
+        // the init_u and k_j snapshots rather than read back from the builder.
+        let advance = |w: &[f64], k: &[Query<DU>]| -> Result<Query<U>, Error> {
+            let mut terms = w.iter().zip(k).filter(|(w, _)| **w != 0.0);
+            let Some((&w0, k0)) = terms.next() else {
+                return Ok(init_u.clone());
             };
+            let mut du = k0.clone().transmute::<(DU,)>().map(move |k: DU| w0 * k)?;
+            for (&w, k) in terms {
+                du = du
+                    .join_query(k.clone())
+                    .map(move |du: DU, k: DU| du + w * k)?;
+            }
+            init_u
+                .clone()
+                .join_query(du)
+                .map(|u, du| u + dt.clone() * du)
+        };
 
-        let k1 = eval(&mut builder)?;
-        let k2 = stage(&k1, 0.5, &mut builder)?;
-        let k3 = stage(&k2, 0.5, &mut builder)?;
-        let k4 = stage(&k3, 1.0, &mut builder)?;
-
-        let u = init_u
-            .join_query(k1)
-            .join_query(k2)
-            .join_query(k3)
-            .join_query(k4.clone())
-            .map(|(((u, k1), k2), k3), k4| {
-                let du = (&dt * (1.0 / 6.0)) * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
-                u + du
-            })
-            .unwrap();
-        u.insert_into_builder(&mut builder);
+        let mut k = Vec::with_capacity(self.tableau.b.len());
+        for a in self.tableau.a {
+            advance(a, &k)?.insert_into_builder(&mut builder);
+            compiled_pipe.clone().insert_into_builder(&mut builder)?;
+            k.push(Query::<(S,)>::param(&builder)?.map(|s: S| DU::from(s))?);
+        }
+        advance(self.tableau.b, &k)?.insert_into_builder(&mut builder);
         builder.to_compiled_system()
     }
 }
