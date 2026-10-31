@@ -25,10 +25,15 @@ This is an old object-oriented pattern that we do not need. Expose fields as
 `pub` or `pub(crate)` and access them directly.
 
 3. Do not allocate strings if you can help it. Be suspicious of `format!`,
-   `to_string()`, `to_owned()`, and `into()`.
+   `to_string()`, `to_owned()`, `into()`, `str::to_lowercase()`,
+   `str::to_uppercase()`, `str::replace*()`, `str::repeat()`,
+   `Path::to_string_lossy()`, `PathBuf::to_path_buf()`.
 
 4. Avoid `unwrap()` and `expect()` except for mutex locks, logical invariants
    (guaranteed success), prototypes, tests, and examples.
+   
+5. Don't call `format!` multiple times in succession; it allocates a string each
+   time. Use `write!` to build upon one `String`.
 
 ## DOs
 
