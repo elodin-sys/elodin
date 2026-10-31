@@ -326,4 +326,54 @@ mod tests {
         }
         assert!(att_err(&mekf.q_hat) < 1e-3);
     }
+
+    #[test]
+    fn missing_accel_falls_back_to_mag() {
+        let config = Config::default();
+        let q = Quat::from_axis_angle(Vec3::x_axis(), 0.3);
+        let mag_ref = config.mekf.mag_ref.normalize();
+        let mag = q.inverse() * mag_ref;
+        let input = Input {
+            accel: Vec3::from_buf([0.0; 3]),
+            gyro: Vec3::from_buf([0.0; 3]),
+            // undo the service's [-1, 1, -1] mag axis flip
+            mag: Vec3::from_buf(
+                (mag * tensor![-1.0, 1.0, -1.0])
+                    .into_buf()
+                    .map(|x| x as f32),
+            ),
+        };
+        let mut mekf = new_state(&config);
+        for _ in 0..800 {
+            let (next, output) = step(mekf, input.clone(), &config, 0);
+            mekf = next;
+            assert_finite(&output);
+            assert!((output.mag_cal.norm().into_buf() - 1.0).abs() < 1e-6);
+        }
+        let err = (mekf.q_hat.inverse() * mag_ref - mag).norm().into_buf();
+        assert!(err < 1e-3, "field direction error {err}");
+    }
+
+    #[test]
+    fn without_accel_and_mag_integrates_the_gyro() {
+        let config = Config::default();
+        let rate: f64 = 0.2;
+        let input = Input {
+            accel: Vec3::from_buf([0.0; 3]),
+            gyro: Vec3::from_buf([0.0, 0.0, rate.to_degrees() as f32]),
+            mag: Vec3::from_buf([0.0; 3]),
+        };
+        let mut mekf = new_state(&config);
+        // 800 samples at dt = 1/800 s: one second at `rate` about z
+        for _ in 0..800 {
+            let (next, output) = step(mekf, input.clone(), &config, 0);
+            mekf = next;
+            assert_finite(&output);
+            assert_eq!(output.mag_cal.into_buf(), [0.0; 3]);
+        }
+        let [x, y, _, _] = mekf.q_hat.0.into_buf();
+        assert!(x.abs() < 1e-9 && y.abs() < 1e-9, "q_hat = {:?}", mekf.q_hat);
+        let angle = att_err(&mekf.q_hat);
+        assert!((angle - rate).abs() < 1e-6, "rotated {angle} rad");
+    }
 }
