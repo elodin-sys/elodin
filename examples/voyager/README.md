@@ -84,6 +84,8 @@ which `main.py` loads at startup.
 python examples/voyager/main.py run
 ```
 
+The probes are integrated with `el.Integrator.Rk78` in one-hour steps.
+
 
 ## Chapter 1
 
@@ -98,12 +100,14 @@ bash download_spice_data.sh
 python chapter1.py run
 ```
 
-Voyager is integrated with RK4 in one-hour steps. Each step's four
-stages evaluate gravity at different times, so Jupiter's position is
-interpolated linearly to each stage's time (`el.StageTime`) between its
-SPICE positions at the start and end of the step. That keeps the
-integration error to a few meters over the six days; holding Jupiter at
-the midpoint of each step instead costs about 650 m.
+Voyager is integrated with `el.Integrator.Rk78`, an eighth-order
+Runge-Kutta method, in one-hour steps. Each step's 13 stages evaluate
+gravity at different times, so Jupiter's position is interpolated to
+each stage's time (`el.StageTime`) with a cubic through its SPICE
+positions and velocities at the start and end of the step. The
+integration error over the six days is about 2 mm; interpolating
+Jupiter linearly would cost about 6.5 m, and holding it at the midpoint
+of each step about 650 m.
 
 ## Chapter 2
 

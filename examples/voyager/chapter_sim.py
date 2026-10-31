@@ -32,9 +32,9 @@ jupiter_gm = float(spice.bodvrd("JUPITER BARYCENTER", "GM", 1)[1][0]) * 1.0e9
 JupiterPosition = el.Annotated[
     jax.Array, el.Component("jupiter_position", el.ComponentType(el.PrimitiveType.F64, (3,)))
 ]
-# Jupiter's position at the start and end of the current step.
+# Jupiter's position and velocity at the start and end of the current step.
 JupiterTrack = el.Annotated[
-    jax.Array, el.Component("jupiter_track", el.ComponentType(el.PrimitiveType.F64, (2, 3)))
+    jax.Array, el.Component("jupiter_track", el.ComponentType(el.PrimitiveType.F64, (2, 6)))
 ]
 
 
@@ -42,8 +42,17 @@ JupiterTrack = el.Annotated[
 def interpolate_jupiter(
     stage_time: el.Query[el.StageTime], q: el.Query[JupiterTrack]
 ) -> el.Query[JupiterPosition]:
+    # Cubic Hermite basis for [p0, v0, p1, v1]; the velocity terms scale by the step length.
     s = stage_time[0] / TIME_STEP
-    return q.map(JupiterPosition, lambda track: track[0] + s * (track[1] - track[0]))
+    basis = jnp.stack(
+        [
+            2 * s**3 - 3 * s**2 + 1,
+            (s**3 - 2 * s**2 + s) * TIME_STEP,
+            3 * s**2 - 2 * s**3,
+            (s**3 - s**2) * TIME_STEP,
+        ]
+    )
+    return q.map(JupiterPosition, lambda track: basis @ track.reshape(4, 3))
 
 
 def reference_state(et: float, target: str = "VOYAGER 1") -> np.ndarray:
@@ -63,7 +72,7 @@ def run(gravity, chapter: int) -> None:
                 inertia=el.Inertia(MASS_KG),
             ),
             el.C(JupiterPosition, reference_state(start_et, "JUPITER BARYCENTER")[:3]),
-            el.C(JupiterTrack, np.zeros((2, 3))),
+            el.C(JupiterTrack, np.zeros((2, 6))),
         ],
         name="voyager1",
     )
@@ -71,7 +80,7 @@ def run(gravity, chapter: int) -> None:
 
     def pre_step(tick: int, ctx: el.StepContext) -> None:
         et = start_et + tick * TIME_STEP
-        track = [reference_state(t, "JUPITER BARYCENTER")[:3] for t in (et, et + TIME_STEP)]
+        track = [reference_state(t, "JUPITER BARYCENTER") for t in (et, et + TIME_STEP)]
         ctx.write_component("voyager1.jupiter_track", np.stack(track))
 
     def post_step(tick: int, ctx: el.StepContext) -> None:
@@ -97,7 +106,7 @@ def run(gravity, chapter: int) -> None:
     world.run(
         el.six_dof(
             sys=interpolate_jupiter | gravity,
-            integrator=el.Integrator.Rk4,
+            integrator=el.Integrator.Rk78,
         ),
         simulation_rate=1.0 / TIME_STEP,
         max_ticks=steps,
