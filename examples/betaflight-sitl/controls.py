@@ -216,7 +216,10 @@ class GuidanceUpdate:
 
     Truth state and gate poses intentionally are not fields on this base type.
     Future vision guidance can therefore receive this type without having a
-    nullable back door to referee truth.
+    nullable back door to referee truth. ``frame_time`` is the selected image's
+    nominal image/render timestamp in simulation seconds on the ``sim_time``
+    clock, with approximate scene-time alignment (not a verified exact
+    capture-pose clock). It is ``None`` when no valid frame is supplied.
     """
 
     sim_time: float
@@ -228,7 +231,7 @@ class GuidanceUpdate:
     magnetometer: NDArray[np.float64] | None = None
     magnetometer_fresh: bool = False
     frame: NDArray[np.uint8] | None = None
-    frame_sample_time: float | None = None
+    frame_time: float | None = None
     frame_fresh: bool = False
     last_gate_passed: int = -1
     next_gate_index: int | None = None
