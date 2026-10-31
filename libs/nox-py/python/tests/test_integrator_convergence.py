@@ -2,7 +2,9 @@
 
 Every `el.Integrator` needs a METHODS entry: its order, a time-step ladder inside its
 asymptotic range, and the spring state after its first step. Run this file directly to
-print the error tables.
+print the error tables. A new explicit Runge-Kutta method is a `ButcherTableau` in
+libs/nox-py/src/integrator/runge_kutta.rs plus an `Integrator` variant in
+libs/nox-py/src/lib.rs and elodin.pyi.
 """
 
 import functools

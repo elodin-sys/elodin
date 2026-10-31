@@ -10,7 +10,7 @@
 - **(fix)** `Integrator.Rk4` evaluates each stage at that stage's velocity instead of the initial velocity, restoring fourth-order accuracy for position-dependent forces such as gravity and springs (#933).
 - **(fix)** `Integrator.Rk4` integrates orientation to fourth order; the quaternion update was second order, so attitude error shrank only 4× per halved time step. Trajectories of rotating bodies change slightly.
 - **(feat)** Add `Integrator.Rk2` (Heun's method) and `Integrator.Rk3` (Kutta's third-order method) to `six_dof`.
-- **(breaking:rust)** `nox_py::integrator::Rk4` is replaced by `ExplicitRk`, which takes a `ButcherTableau` (`RK2`, `RK3`, `RK4`); `Integrator::Rk4` becomes `Integrator::ExplicitRk(&RK4)`.
+- **(breaking:rust)** `nox_py::integrator::Rk4` is replaced by `ExplicitRk`, which takes a `ButcherTableau` (`RK2`, `RK3`, `RK4`, `RK78`, `DP54`); `Integrator::Rk4` becomes `Integrator::ExplicitRk(&RK4)`.
 - **(feat)** Add `Integrator.Verlet` (velocity Verlet) to `six_dof`: second order, and symplectic when forces depend only on position, so energy errors stay bounded over long runs.
 - **(feat:examples)** `n-body` integrates with `Integrator.Verlet`.
 - **(feat)** Add `Integrator.Rk78`, the eighth-order solution of Fehlberg's 7(8) Runge-Kutta pair.
