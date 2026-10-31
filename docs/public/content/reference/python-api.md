@@ -130,9 +130,9 @@ The Elodin simulation world.
     - `log_level` : `str`, optional, log level for the embedded Elodin-DB instance (`error`, `warn`, `info`, `debug`, `trace`). Defaults to `info` unless `RUST_LOG` is set.
     - `backend` : `str`, optional, execution backend. Defaults to `"cranelift"`. Supported values are `"cranelift"` (CPU), `"jax-cpu"`, and `"jax-gpu"`.
 
-- `build(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, db_path, backend)` -> `elodin.Exec`
+- `build(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, db_path, backend, start_timestamp)` -> `elodin.Exec`
 
-    Build and compile the simulation executor without starting the runtime loop.
+    Build and compile the simulation executor without starting the runtime loop. `Exec.run(ticks)` advances it and records each tick at its simulation time, so repeated calls continue one history.
     - `system` : [elodin.System], the systems to compile.
     - `simulation_rate` : `float`, optional, simulation frequency in Hz (ticks per second), defaults to `120.0`.
     - `generate_real_time` : `bool`, optional, when `True`, paces simulation to real-time wall clock speed. Defaults to `False`.
@@ -142,6 +142,7 @@ The Elodin simulation world.
     - `optimize` : `bool`, optional, enables optimization passes during compilation.
     - `db_path` : `string`, optional, the path to the database directory.
     - `backend` : `str`, optional, execution backend. Defaults to `"cranelift"`.
+    - `start_timestamp` : `int`, optional, the timestamp of the initial state in microseconds; tick `n` is recorded at `start_timestamp + n / simulation_rate`. If `None` (default), uses the current system time. Set to `0` for zero-based timing.
 
 ### Backend Selection
 

@@ -1165,6 +1165,7 @@ impl WorldBuilder {
                         optimize,
                         db_path.clone(),
                         backend,
+                        start_timestamp,
                     )?;
                     exec.exec.profiler_mut().detailed_timing = enable_detail;
                     exec.run(py, ticks, true, None)?;
@@ -1691,7 +1692,7 @@ impl WorldBuilder {
                         simulation_source_entrypoint.as_deref().map(Path::new),
                     )
                     .map_err(Error::DB)?;
-                    let start = impeller::types::Timestamp::now();
+                    let start = start_timestamp.map_or_else(Timestamp::now, Timestamp);
                     crate::impeller_server::init_db(&db, compiled_exec.world_mut(), start)?;
 
                     let mut exec_with_db = PyExec::new(compiled_exec, db, start);
@@ -1753,6 +1754,7 @@ impl WorldBuilder {
         optimize = false,
         db_path = None,
         backend = "cranelift",
+        start_timestamp = None,
     ))]
     pub fn build(
         &mut self,
@@ -1766,6 +1768,7 @@ impl WorldBuilder {
         #[allow(unused_variables)] optimize: bool,
         db_path: Option<String>,
         backend: &str,
+        start_timestamp: Option<i64>,
     ) -> Result<PyExec, Error> {
         let mut exec = self.build_with_backend(
             py,
@@ -1786,7 +1789,7 @@ impl WorldBuilder {
         // `$ELODIN_ASSETS` / cwd like before.
         crate::impeller_server::prime_schematic_assets(&db, exec.world_mut(), None)
             .map_err(Error::DB)?;
-        let start = Timestamp::now();
+        let start = start_timestamp.map_or_else(Timestamp::now, Timestamp);
         crate::impeller_server::init_db(&db, exec.world_mut(), start)?;
         Ok(PyExec::new(exec, db, start))
     }

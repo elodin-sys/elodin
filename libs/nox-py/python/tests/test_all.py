@@ -1371,7 +1371,7 @@ def test_exec_run_in_chunks():
     def drifting_body():
         w = el.World()
         w.spawn(el.Body(world_vel=el.SpatialMotion(linear=np.array([1.0, 0.0, 0.0]))), "e1")
-        return w.build(el.six_dof(1.0 / 120.0))
+        return w.build(el.six_dof(1.0 / 120.0), start_timestamp=0)
 
     chunked = drifting_body()
     for _ in range(4):
@@ -1382,8 +1382,8 @@ def test_exec_run_in_chunks():
     a = chunked.history("e1.world_pos")
     b = whole.history("e1.world_pos")
     assert a.height == b.height == 121
-    assert_frame_equal(a.drop("time"), b.drop("time"))
+    assert_frame_equal(a, b)
 
-    # Rows are one sim step apart from the initial state on, including across chunk boundaries.
-    step_us = a["time"].diff().dt.total_microseconds().to_numpy()[1:]
-    assert (abs(step_us - 1e6 / 120.0) <= 1.0).all()
+    # Tick n is recorded at n / 120 s, without rounding drift.
+    step_ns = round(1e9 / 120.0)
+    assert a["time"].dt.epoch("us").to_list() == [n * step_ns // 1000 for n in range(121)]

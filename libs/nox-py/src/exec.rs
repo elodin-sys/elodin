@@ -103,21 +103,27 @@ use pyo3::types::PyDict;
 pub struct PyExec {
     pub exec: WorldExec,
     pub db: Box<elodin_db::DB>,
-    /// Timestamp of the next tick `run` commits. Advances in sim time and never re-reads the wall
-    /// clock, so chunked runs stay monotonic and match one long run.
-    pub next_timestamp: Timestamp,
+    /// Timestamp `init_db` recorded the initial state at.
+    start: Timestamp,
+    /// Ticks run so far, across `run` calls.
+    ticks: u64,
 }
 
 impl PyExec {
-    /// `start` is the timestamp `init_db` recorded the initial state at; tick `n` is committed at
-    /// `start + n * sim_time_step`.
     pub fn new(exec: WorldExec, db: elodin_db::DB, start: Timestamp) -> Self {
-        let next_timestamp = start + exec.world().sim_time_step().0;
         Self {
             exec,
             db: Box::new(db),
-            next_timestamp,
+            start,
+            ticks: 0,
         }
+    }
+
+    /// `start` plus `tick` sim steps. Wall-clock stamps would go backwards whenever the sim runs
+    /// ahead of real time, and the db rejects those commits.
+    fn tick_timestamp(&self, tick: u64) -> Timestamp {
+        let nanos = self.exec.world().sim_time_step().0.as_nanos() * u128::from(tick);
+        self.start + Duration::from_nanos(nanos.min(u64::MAX as u128) as u64)
     }
 }
 
@@ -142,10 +148,6 @@ impl PyExec {
             .with_style(
                 ProgressStyle::with_template("{bar:50} {pos:>6}/{len:6} remaining: {eta}").unwrap(),
             );
-        // Batches are stamped in sim time, which can run ahead of the wall clock. Restarting from
-        // `Timestamp::now()` on every call would then go backwards and the db rejects the commit.
-        let mut timestamp = self.next_timestamp;
-        let sim_step = self.exec.world().sim_time_step().0;
         let configured_batch = self.exec.world().ticks_per_telemetry() as usize;
         let mut remaining = ticks;
         while remaining > 0 {
@@ -158,10 +160,8 @@ impl PyExec {
             if this_batch != configured_batch {
                 self.exec.world_mut().metadata.ticks_per_telemetry = configured_batch as u64;
             }
-            let commit_offset = Duration::from_secs_f64(
-                sim_step.as_secs_f64() * (this_batch.saturating_sub(1) as f64),
-            );
-            let commit_timestamp = timestamp + commit_offset;
+            self.ticks += this_batch as u64;
+            let commit_timestamp = self.tick_timestamp(self.ticks);
             self.db.with_state(|state| {
                 crate::impeller_server::commit_world_head_unified(
                     state,
@@ -170,8 +170,6 @@ impl PyExec {
                     None,
                 )
             })?;
-            timestamp += Duration::from_secs_f64(sim_step.as_secs_f64() * this_batch as f64);
-            self.next_timestamp = timestamp;
             remaining -= this_batch;
 
             if let Some(func) = &is_canceled {

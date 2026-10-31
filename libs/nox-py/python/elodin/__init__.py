@@ -749,6 +749,7 @@ class World(WorldBuilder):
         optimize: bool = False,
         db_path: Optional[str] = None,
         backend: str = "cranelift",
+        start_timestamp: Optional[int] = None,
     ) -> Exec:
         return super().build(
             system,
@@ -760,6 +761,7 @@ class World(WorldBuilder):
             optimize,
             db_path,
             backend,
+            start_timestamp,
         )
 
     def to_jax(
