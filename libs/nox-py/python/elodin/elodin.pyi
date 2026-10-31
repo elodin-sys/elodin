@@ -333,6 +333,7 @@ class WorldBuilder:
         optimize: bool = False,
         db_path: Optional[str] = None,
         backend: str = "cranelift",
+        start_timestamp: Optional[int] = None,
     ) -> Exec: ...
     def to_jax_func(
         self,

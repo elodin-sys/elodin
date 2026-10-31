@@ -1563,15 +1563,19 @@ module @module {
 }
 "#;
     let input = 10i64.to_le_bytes().to_vec();
-    let out = run_mlir(mlir, &[&input], &[8, 8]);
-    let seed = read_u32s(&out[0]);
-    let sum = i64::from_le_bytes(out[1].as_slice().try_into().unwrap());
-    assert_eq!(
-        seed,
-        vec![42, 99],
-        "First %c definition corrupted by redefinition"
-    );
-    assert_eq!(sum, 17, "Second %c definition incorrect");
+    for out in [
+        run_mlir(mlir, &[&input], &[8, 8]),
+        run_mlir_folded(mlir, &[&input], &[8, 8], false),
+    ] {
+        let seed = read_u32s(&out[0]);
+        let sum = i64::from_le_bytes(out[1].as_slice().try_into().unwrap());
+        assert_eq!(
+            seed,
+            vec![42, 99],
+            "First %c definition corrupted by redefinition"
+        );
+        assert_eq!(sum, 17, "Second %c definition incorrect");
+    }
 }
 
 #[test]

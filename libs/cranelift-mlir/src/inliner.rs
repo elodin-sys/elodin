@@ -261,53 +261,13 @@ fn body_has_scalar_abi_only_ops(body: &[InstrResult]) -> bool {
 /// Scan the module for the largest-ValueId we've seen so we can allocate
 /// fresh ones without collision.
 fn max_value_id_in_module(module: &Module) -> u32 {
-    let mut max_id = 0u32;
-    for f in &module.functions {
-        for (vid, _) in &f.params {
-            max_id = max_id.max(vid.0);
-        }
-        scan_body_for_max_value_id(&f.body, &mut max_id);
-    }
-    max_id
-}
-
-fn scan_body_for_max_value_id(body: &[InstrResult], max_id: &mut u32) {
-    for ir in body {
-        for (vid, _) in &ir.values {
-            *max_id = (*max_id).max(vid.0);
-        }
-        match &ir.instr {
-            Instruction::While {
-                cond_body,
-                loop_body,
-                iter_arg_ids,
-                ..
-            } => {
-                for v in iter_arg_ids {
-                    *max_id = (*max_id).max(v.0);
-                }
-                scan_body_for_max_value_id(cond_body, max_id);
-                scan_body_for_max_value_id(loop_body, max_id);
-            }
-            Instruction::Case { branches, .. } => {
-                for b in branches {
-                    scan_body_for_max_value_id(b, max_id);
-                }
-            }
-            Instruction::Map { body, .. } => scan_body_for_max_value_id(body, max_id),
-            Instruction::ReduceWindow { body, .. } => scan_body_for_max_value_id(body, max_id),
-            Instruction::SelectAndScatter {
-                select_body,
-                scatter_body,
-                ..
-            } => {
-                scan_body_for_max_value_id(select_body, max_id);
-                scan_body_for_max_value_id(scatter_body, max_id);
-            }
-            Instruction::Sort { comparator, .. } => scan_body_for_max_value_id(comparator, max_id),
-            _ => {}
-        }
-    }
+    module
+        .functions
+        .iter()
+        .flat_map(FuncDef::value_defs)
+        .map(|v| v.0)
+        .max()
+        .unwrap_or(0)
 }
 
 /// Find the first top-level `Call` in this function's body that matches
@@ -716,6 +676,76 @@ mod tests {
             mul_lhs, add_result_id,
             "Multiply should consume Add's result (was the Call's output)"
         );
+    }
+
+    /// Fresh ids for the inlined body must clear the block parameters of the caller's regions
+    /// too, not only instruction results.
+    #[test]
+    fn inlined_ids_skip_region_block_params() {
+        let f = FuncDef {
+            name: "f".into(),
+            is_public: false,
+            params: vec![(ValueId(0), ty_f64())],
+            result_types: vec![ty_f64()],
+            body: vec![
+                mk_constant(1, 1.0),
+                InstrResult {
+                    values: vec![(ValueId(2), ty_f64())],
+                    instr: Instruction::Add {
+                        lhs: ValueId(0),
+                        rhs: ValueId(1),
+                    },
+                },
+                InstrResult {
+                    values: vec![],
+                    instr: Instruction::Return {
+                        operands: vec![ValueId(2)],
+                    },
+                },
+            ],
+            source_line: None,
+        };
+        let block_params: Vec<ValueId> = (202..210).map(ValueId).collect();
+        let main = FuncDef {
+            name: "main".into(),
+            is_public: true,
+            params: vec![(ValueId(100), ty_f64())],
+            result_types: vec![ty_f64()],
+            body: vec![
+                InstrResult {
+                    values: vec![(ValueId(200), ty_f64())],
+                    instr: Instruction::Map {
+                        inputs: vec![ValueId(100)],
+                        dimensions: vec![0],
+                        body: vec![InstrResult {
+                            values: vec![],
+                            instr: Instruction::Return {
+                                operands: vec![block_params[0]],
+                            },
+                        }],
+                        body_params: block_params,
+                    },
+                },
+                InstrResult {
+                    values: vec![(ValueId(201), ty_f64())],
+                    instr: Instruction::Call {
+                        callee: "f".into(),
+                        args: vec![ValueId(200)],
+                    },
+                },
+                InstrResult {
+                    values: vec![],
+                    instr: Instruction::Return {
+                        operands: vec![ValueId(201)],
+                    },
+                },
+            ],
+            source_line: None,
+        };
+        let mut module = Module::new(vec![f, main]);
+        assert_eq!(inline_single_caller_callees(&mut module), 1);
+        let main = module.main_func().unwrap();
+        assert_eq!(main.duplicate_value_def(), None);
     }
 
     #[test]

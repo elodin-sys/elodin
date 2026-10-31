@@ -1,4 +1,6 @@
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use winnow::ascii::{digit1, multispace0};
 use winnow::combinator::{alt, opt};
@@ -15,6 +17,14 @@ pub fn parse_module(input: &str) -> Result<Module, String> {
     match module_parser(&mut s) {
         Ok(mut m) => {
             attach_source_lines(&mut m, input);
+            for f in &m.functions {
+                if let Some(v) = f.duplicate_value_def() {
+                    return Err(format!(
+                        "internal error: @{}: value id {} is defined more than once",
+                        f.name, v.0
+                    ));
+                }
+            }
             Ok(m)
         }
         Err(_e) => {
@@ -211,9 +221,6 @@ fn parse_instruction(input: &mut Stream<'_>, ctx: &mut ValueCtx) -> PResult<Opti
             let _ = ':'.parse_next(input)?;
             let n = integer(input)?;
             result_names.push(vn.clone());
-            // Alias "name#0" to the same ValueId as "name" so both
-            // %name and %name#0 resolve to the first result.
-            ctx.alias(&format!("{}#0", vn), &vn);
             for i in 1..n {
                 result_names.push(format!("{}#{}", vn, i));
             }
@@ -1813,10 +1820,14 @@ fn parse_while_op(
         }
     }
 
+    // Cond and body share one set of iteration-argument ids: lowering
+    // binds `iter_arg_ids` as the block parameters of both regions.
+    let iter_arg_ids: Vec<ValueId> = init_names.iter().map(|_| ctx.fresh()).collect();
     let mut cond_ctx = ctx.child();
-    let mut cond_iter_ids = Vec::new();
-    for name in &init_names {
-        cond_iter_ids.push(cond_ctx.get_or_create(name));
+    let mut body_ctx = ctx.child();
+    for (name, &id) in init_names.iter().zip(&iter_arg_ids) {
+        cond_ctx.name_to_id.insert(name.clone(), id);
+        body_ctx.name_to_id.insert(name.clone(), id);
     }
 
     ws(input)?;
@@ -1828,12 +1839,6 @@ fn parse_while_op(
     ws(input)?;
     let _ = '}'.parse_next(input)?;
     ws(input)?;
-
-    let mut body_ctx = ctx.child();
-    let mut body_iter_ids = Vec::new();
-    for name in &init_names {
-        body_iter_ids.push(body_ctx.get_or_create(name));
-    }
 
     let _ = "do".parse_next(input)?;
     ws(input)?;
@@ -1855,7 +1860,7 @@ fn parse_while_op(
             cond_body,
             loop_body,
             init_values,
-            iter_arg_ids: body_iter_ids,
+            iter_arg_ids,
         },
     }))
 }
@@ -1961,7 +1966,7 @@ fn parse_sort_op(
             let _ = ':'.parse_next(input)?;
             ws(input)?;
             let _ty_str: &str = take_till(0.., |c: char| c == ',' || c == ')').parse_next(input)?;
-            let pid = comp_ctx.get_or_create(&name);
+            let pid = comp_ctx.define(&name);
             comp_params.push(pid);
             ws(input)?;
             if input.starts_with(',') {
@@ -2314,7 +2319,7 @@ fn parse_region_body_with_block_args(
             let _ = ':'.parse_next(input)?;
             ws(input)?;
             let _ty: &str = take_till(0.., |c: char| c == ',' || c == ')').parse_next(input)?;
-            let pid = body_ctx.get_or_create(&name);
+            let pid = body_ctx.define(&name);
             params.push(pid);
             ws(input)?;
             if input.starts_with(',') {
@@ -3330,15 +3335,20 @@ fn skip_braces(input: &mut Stream<'_>) -> PResult<()> {
 // SSA value context
 // ---------------------------------------------------------------------------
 
+/// SSA name scope for a function body or one of its nested regions.
+///
+/// Names are scoped per region, but `ValueId`s are unique per function:
+/// const folding, DCE and lowering key on `ValueId` across nested bodies,
+/// so every scope made by [`ValueCtx::child`] shares the function's counter.
 struct ValueCtx {
-    next_id: u32,
+    next_id: Rc<Cell<u32>>,
     name_to_id: HashMap<String, ValueId>,
 }
 
 impl ValueCtx {
     fn new() -> Self {
         Self {
-            next_id: 0,
+            next_id: Rc::new(Cell::new(0)),
             name_to_id: HashMap::new(),
         }
     }
@@ -3347,26 +3357,29 @@ impl ValueCtx {
         if let Some(&id) = self.name_to_id.get(name) {
             return id;
         }
-        let id = ValueId(self.next_id);
-        self.next_id += 1;
+        let id = self.fresh();
         self.name_to_id.insert(name.to_string(), id);
         id
     }
 
     fn fresh(&mut self) -> ValueId {
-        let id = ValueId(self.next_id);
-        self.next_id += 1;
+        let id = ValueId(self.next_id.get());
+        self.next_id.set(id.0 + 1);
         id
     }
 
-    fn alias(&mut self, alias: &str, target: &str) {
-        let id = self.get_or_create(target);
-        self.name_to_id.insert(alias.to_string(), id);
+    /// Binds `name` to a new value. A redefinition shadows the old value for later uses.
+    fn define(&mut self, name: &str) -> ValueId {
+        let id = self.fresh();
+        self.name_to_id.insert(name.to_string(), id);
+        id
     }
 
+    /// Scope for a nested region: inherits the parent's names and shares its
+    /// id counter. Names the region defines stay local to it.
     fn child(&self) -> Self {
         Self {
-            next_id: self.next_id,
+            next_id: Rc::clone(&self.next_id),
             name_to_id: self.name_to_id.clone(),
         }
     }
@@ -3381,7 +3394,7 @@ fn make_values(
         let vid = if result_names.is_empty() {
             ctx.fresh()
         } else {
-            let vid = ctx.get_or_create(&result_names[0]);
+            let vid = ctx.define(&result_names[0]);
             if result_names.len() > 1 {
                 let alias = format!("{}#0", result_names[0]);
                 ctx.name_to_id.insert(alias, vid);
@@ -3401,13 +3414,11 @@ fn make_values(
         .into_iter()
         .enumerate()
         .map(|(i, ty)| {
-            let name = if !base_name.is_empty() {
-                format!("{}#{}", base_name, i)
-            } else {
-                format!("__anon_{}", ctx.next_id + i as u32)
-            };
-            let vid = ctx.get_or_create(&name);
-            if i == 0 && !base_name.is_empty() {
+            if base_name.is_empty() {
+                return (ctx.fresh(), ty);
+            }
+            let vid = ctx.define(&format!("{}#{}", base_name, i));
+            if i == 0 {
                 ctx.name_to_id.insert(base_name.clone(), vid);
             }
             (vid, ty)

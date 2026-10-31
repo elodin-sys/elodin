@@ -119,11 +119,13 @@ sim = w.to_jax(system, simulation_rate=120.0)
 sim.step(100)
 
 # Get/set component states
-state = sim.get_state("attitude", "satellite")
+attitude = sim.get_state("attitude", "satellite")
 sim.set_state("attitude", "satellite", new_quaternion)
 
-# Compatible with JAX transformations
-jax.vmap(sim.step)(batch_inputs)
+# Pure counterparts take and return a state, for jax.jit, jax.vmap and jax.lax.scan
+state = sim.set(sim.state, "attitude", "satellite", new_quaternion)
+state = jax.jit(sim.step_fn)(state)
+attitude = sim.get(state, "attitude", "satellite")
 ```
 *See full JAX-only example: [../../examples/cube-sat-pysim/main.py](../../examples/cube-sat-pysim/main.py)*
 
@@ -682,100 +684,36 @@ sys = non_effectors | el.six_dof(sys=effectors, integrator=el.Integrator.Rk4)
 ## Integration with Other Tools
 
 ### JAXMarl
-Complete example of training a multi-agent system with JAXMarl:
+JAX RL libraries such as JAXMarl expect environments whose `reset` and `step` are pure functions
+of an explicit state. `sim.step_fn`, `sim.get` and `sim.set` provide exactly that, so the whole
+environment step can be jitted and vectorized across environments:
 ```python
 import elodin as el
 import jax
 import jax.numpy as jnp
-from jaxmarl import make
 
-# Define Elodin simulation for drone swarm
-def build_drone_swarm():
-    w = el.World()
-    
-    # Spawn multiple drones
-    for i in range(4):
-        w.spawn(
-            DroneArchetype(
-                world_pos=el.WorldPos(linear=jnp.array([i*2.0, 0.0, 1.0])),
-                world_vel=el.WorldVel(),
-                control=DroneControl()
-            ),
-            name=f"drone_{i}"
-        )
-    
-    # Define control and physics systems
-    system = control_system | el.six_dof(sys=collision_avoidance)
-    return w, system
+world, system = build_drone_swarm()  # four drones named drone_0 .. drone_3
+sim = world.to_jax(system, simulation_rate=50.0)
+agents = [f"drone_{i}" for i in range(4)]
 
-# Wrap Elodin sim as JAXMarl environment
-class ElodinMARLEnv:
-    def __init__(self):
-        world, system = build_drone_swarm()
-        self.sim = world.to_jax(system, simulation_rate=50.0)
-        self.agents = [f"drone_{i}" for i in range(4)]
-        self.num_agents = len(self.agents)
-    
-    def reset(self, key):
-        # Reset simulation state
-        obs = {
-            agent: self.sim.get_state("sensors", agent)
-            for agent in self.agents
-        }
-        state = self.sim.state  # Internal state for simulator
-        return obs, state
-    
-    def step(self, key, state, actions):
-        # Apply actions to each drone
-        for agent, action in actions.items():
-            self.sim.set_state("control", agent, action)
-        
-        # Step simulation
-        self.sim.step(1)
-        
-        # Get observations, rewards, dones
-        obs = {agent: self.sim.get_state("sensors", agent) 
-               for agent in self.agents}
-        rewards = {agent: self._compute_reward(agent) 
-                  for agent in self.agents}
-        dones = {agent: False for agent in self.agents}
-        dones["__all__"] = self._check_episode_done()
-        
-        return obs, self.sim.state, rewards, dones, {}
-    
-    def action_space(self, agent):
-        return self.sim.get_action_space(agent)
+def reset(key):
+    state = sim.state
+    for agent, k in zip(agents, jax.random.split(key, len(agents))):
+        pos = sim.get(state, "world_pos", agent)
+        state = sim.set(state, "world_pos", agent, pos.at[4:].add(jax.random.normal(k, (3,))))
+    return state
 
-# Training loop with JAXMarl
-env = ElodinMARLEnv()
-key = jax.random.PRNGKey(0)
+def step(state, actions):
+    for agent in agents:
+        state = sim.set(state, "control", agent, actions[agent])
+    state = sim.step_fn(state)
+    obs = {agent: sim.get(state, "sensors", agent) for agent in agents}
+    return state, obs
 
-# JIT-compile the entire training step for performance
-@jax.jit
-def train_step(state, actions):
-    obs, state, rewards, dones, info = env.step(key, state, actions)
-    # Your RL algorithm update here (PPO, QMIX, etc.)
-    return state, obs, rewards
-
-# Train agents
-obs, state = env.reset(key)
-for episode in range(1000):
-    actions = {agent: policy(obs[agent]) for agent in env.agents}
-    state, obs, rewards = train_step(state, actions)
+# 1024 environments, each with its own start positions, stepped in parallel
+states = jax.vmap(reset)(jax.random.split(jax.random.key(0), 1024))
+states, obs = jax.jit(jax.vmap(step))(states, actions)
 ```
-
-This enables:
-- 14x faster training than CPU-based simulators
-- Seamless integration with JAXMarl's IPPO, QMIX, and other algorithms
-- GPU-accelerated physics and control
-- Fully differentiable simulation for policy gradient methods
-- Vectorized environments via `jax.vmap` for parallel training
-
-Key integration points:
-- `w.to_jax()` converts Elodin simulation to pure JAX operations
-- Component states map directly to agent observations/actions
-- JAX JIT compilation works across the entire train/sim loop
-- Compatible with JAXMarl's centralized training patterns
 
 ### OpenAI Gym
 ```python
@@ -793,7 +731,7 @@ class ElodinEnv(gym.Env):
 ## Performance Tips
 
 1. **Use cranelift backend** for production: `w.build(system)` (default)
-2. **Batch operations** in JAX mode: `jax.vmap(sim.step)`
+2. **Batch operations** in JAX mode: `jax.vmap(sim.step_fn)`
 3. **Profile bottlenecks**: `exec.profile()` returns timing breakdowns
 4. **Minimize Python callbacks** in hot loops
 5. **Use graph systems** for many-to-many relationships
