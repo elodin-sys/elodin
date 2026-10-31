@@ -34,6 +34,9 @@ Body axes:
 
 The body spins about body Y at one revolution per 0.75 seconds, with a small
 perturbation on the other axes to induce the instability.
+
+The body is integrated with Dormand-Prince 5(4), whose embedded error estimate
+(handle.step_error) peaks at each flip, where the motion changes fastest.
 """
 
 import typing as ty
@@ -150,6 +153,7 @@ _SMALL_CENTER_BODY = jnp.array([0.0, _small_center_y, 0.0])
 @el.dataclass
 class HandleDiagnostics(el.Archetype):
     body_omega: BodyOmega = field(default_factory=lambda: jnp.zeros(3, dtype=jnp.float64))
+    step_error: el.StepError = field(default_factory=lambda: jnp.zeros(4, dtype=jnp.float64))
     large_pos: LargePos = field(
         default_factory=lambda: el.SpatialTransform(
             angular=el.Quaternion.identity(), linear=_LARGE_CENTER_BODY
@@ -206,6 +210,7 @@ def build_world() -> tuple[el.World, el.System]:
             vsplit share=0.45 {
                 graph "handle.body_omega[0],handle.body_omega[1],handle.body_omega[2]" name="Body Omega (rad/s)"
                 graph "handle.world_vel[0],handle.world_vel[1],handle.world_vel[2]" name="World Omega (rad/s)"
+                graph "handle.step_error[0]" name="Attitude Step Error (rad)"
             }
         }
         object_3d handle.large_pos {
@@ -223,7 +228,7 @@ def build_world() -> tuple[el.World, el.System]:
     )
 
     sys = (
-        el.six_dof(SIM_TIME_STEP, integrator=el.Integrator.Rk4)
+        el.six_dof(SIM_TIME_STEP, integrator=el.Integrator.Dp54)
         | update_body_omega
         | update_large_pos
         | update_small_pos

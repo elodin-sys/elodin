@@ -9,6 +9,18 @@
 - **(fix)** `six_dof(time_step=...)` with `Integrator.Rk4` uses `time_step` in every RK4 stage; the intermediate stages previously used the world's simulation time step. `six_dof` rejects a non-finite or non-positive `time_step`.
 - **(fix)** `Integrator.Rk4` evaluates each stage at that stage's velocity instead of the initial velocity, restoring fourth-order accuracy for position-dependent forces such as gravity and springs (#933).
 - **(fix)** `Integrator.Rk4` integrates orientation to fourth order; the quaternion update was second order, so attitude error shrank only 4× per halved time step. Trajectories of rotating bodies change slightly.
+- **(feat)** Add `Integrator.Rk2` (Heun's method) and `Integrator.Rk3` (Kutta's third-order method) to `six_dof`.
+- **(breaking:rust)** `nox_py::integrator::Rk4` is replaced by `ExplicitRk`, which takes a `ButcherTableau` (`RK2`, `RK3`, `RK4`, `RK78`, `DP54`); `Integrator::Rk4` becomes `Integrator::ExplicitRk(&RK4)`.
+- **(feat)** Add `Integrator.Verlet` (velocity Verlet) to `six_dof`: second order, and symplectic when forces depend only on position, so energy errors stay bounded over long runs.
+- **(feat:examples)** `n-body` integrates with `Integrator.Verlet`.
+- **(fix:examples)** `n-body` computes its truth positions inside the simulation, relative to the simulated Sun, so `bench` exports include them and the accuracy report measures the integration and the model instead of the Sun's drift: the global RMS error over five years is 2.8e-5 AU, not 7.5e-3 AU.
+- **(feat)** Add `Integrator.Rk78`, the eighth-order solution of Fehlberg's 7(8) Runge-Kutta pair.
+- **(feat)** Add the global `StageTime` component: the seconds past the start of the simulation step at which `six_dof` is evaluating its effectors, so time-dependent effectors keep the integrator's full order. Exports gain `globals.stage_time`.
+- **(fix:examples)** The voyager chapters interpolate Jupiter's position to each integrator stage's time, with a cubic through its SPICE positions and velocities, instead of holding it at the step's midpoint, cutting the integration error over six days from about 650 m to about 2 mm.
+- **(feat:examples)** `voyager` and its chapters integrate with `Integrator.Rk78`.
+- **(feat)** Add `Integrator.Dp54`, the fifth-order solution of the Dormand-Prince 5(4) pair, with a fixed time step.
+- **(feat)** Add the `StepError` component: under `Integrator.Dp54` or `Integrator.Rk78`, bodies that have it receive each step's embedded error estimate (attitude, position, angular velocity, velocity).
+- **(feat:examples)** `dzhanibekov-effect` integrates with `Integrator.Dp54` and graphs its step error, which peaks at each flip.
 - **(breaking)** An `object_3d` ellipsoid with `orientation=absolute` applies `scale` along the frame's x, y, z; it previously swapped y and z.
 - **(feat)** Add `fill=#false` (`ui.icon(fill=False)`) for outline built-in icons, and the `check_box_outline_blank` and `crop_square` icons.
 - **(feat)** Evaluate `sqrt`, `abs`, `sign`, `degrees`, `arccos`, `clip`, `atan2`, and `norm` in viewport and 3D-object EQL, and index integer components there.

@@ -174,7 +174,7 @@ An external flight-software process driven over UDP, alongside the sim.
 | [falcon9](./falcon9) | ECEF 6DOF booster, SemiImplicit integrator |
 | [apollo-lander](./apollo-lander) | Lunar-gravity 6DOF + throttle / RCS effectors |
 | [rotating-cube](./rotating-cube) | One `Body` with constant angular velocity |
-| [dzhanibekov-effect](./dzhanibekov-effect) | Demo of the tennis-racket theorem on a rigid body, RK4 6DOF |
+| [dzhanibekov-effect](./dzhanibekov-effect) | Demo of the tennis-racket theorem on a rigid body, Dormand-Prince 5(4) 6DOF with its step error |
 
 ### Component / Archetype
 

@@ -1,6 +1,10 @@
 """Convergence order of the `six_dof` integrators against closed-form trajectories.
 
-Run directly to print error tables for both integrators.
+Every `el.Integrator` needs a METHODS entry: its order, a time-step ladder inside its
+asymptotic range, and the spring state after its first step. Run this file directly to
+print the error tables. A new explicit Runge-Kutta method is a `ButcherTableau` in
+libs/nox-py/src/integrator/runge_kutta.rs plus an `Integrator` variant in
+libs/nox-py/src/lib.rs and elodin.pyi.
 """
 
 import functools
@@ -8,15 +12,112 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 import elodin as el
+import jax
+import jax.numpy as jnp
 import numpy as np
 import pytest
 
-TIME_STEPS = (0.04, 0.02, 0.01, 0.005)
+pytestmark = pytest.mark.integrator
+
+DURATION = 4.0
+# Errors below this are dominated by roundoff.
+ERROR_FLOOR = 1e-13
 SPRING_K = 2.25
+KEPLER_E = 0.5
+DRIVE_FREQUENCY = 2.0
 SPIN = np.array([1.0, 2.0, 2.0])
 TORQUE_AXIS = np.array([1.0, 2.0, 2.0]) / 3.0
 TOP_INERTIA = np.array([1.0, 2.0, 2.0])
 TOP_OMEGA_BODY = np.array([3.0, 1.0, 0.0])
+
+
+@dataclass(frozen=True)
+class Method:
+    order: int
+    time_steps: tuple[float, ...]
+    # Spring state after one step of h from (x, v) = (1, 0), as (x, v / (-k h)) in z = k h^2.
+    one_step: Callable[[float], tuple[float, float]]
+    symplectic: bool = False
+    # Order of the embedded solution whose error `el.StepError` estimates.
+    embedded_order: int | None = None
+
+
+METHODS = {
+    "SemiImplicit": Method(1, (0.02, 0.01, 0.005), lambda z: (1 - z, 1), symplectic=True),
+    "Rk2": Method(2, (0.02, 0.01, 0.005), lambda z: (1 - z / 2, 1)),
+    "Rk3": Method(3, (0.04, 0.02, 0.01), lambda z: (1 - z / 2, 1 - z / 6)),
+    "Rk4": Method(4, (0.04, 0.02, 0.01), lambda z: (1 - z / 2 + z**2 / 24, 1 - z / 6)),
+    "Verlet": Method(2, (0.02, 0.01, 0.005), lambda z: (1 - z / 2, 1 - z / 4), symplectic=True),
+    "Rk78": Method(
+        8,
+        (0.4, 0.2, 0.1),
+        lambda z: (
+            1 - z / 2 + z**2 / 24 - z**3 / 720 + z**4 / 40320,
+            1 - z / 6 + z**2 / 120 - z**3 / 5040,
+        ),
+        embedded_order=7,
+    ),
+    "Dp54": Method(
+        5,
+        (0.08, 0.04, 0.02),
+        lambda z: (1 - z / 2 + z**2 / 24 - z**3 / 600, 1 - z / 6 + z**2 / 120),
+        embedded_order=4,
+    ),
+}
+
+SpringConstant = el.Annotated[
+    jax.Array, el.Component("spring_constant", el.ComponentType(el.PrimitiveType.F64, (1,)))
+]
+GravitationalParameter = el.Annotated[
+    jax.Array, el.Component("gravitational_parameter", el.ComponentType(el.PrimitiveType.F64, (1,)))
+]
+AppliedTorque = el.Annotated[
+    jax.Array, el.Component("applied_torque", el.ComponentType(el.PrimitiveType.F64, (3,)))
+]
+DriveFrequency = el.Annotated[
+    jax.Array, el.Component("drive_frequency", el.ComponentType(el.PrimitiveType.F64, (1,)))
+]
+StageProbe = el.Annotated[
+    jax.Array, el.Component("stage_probe", el.ComponentType(el.PrimitiveType.F64, (1,)))
+]
+
+
+@el.map
+def spring(pos: el.WorldPos, k: SpringConstant) -> el.Force:
+    return el.SpatialForce(linear=-k * pos.linear())
+
+
+@el.map
+def gravity(pos: el.WorldPos, mu: GravitationalParameter) -> el.Force:
+    r = pos.linear()
+    return el.SpatialForce(linear=-mu * r / jnp.linalg.norm(r) ** 3)
+
+
+@el.map
+def torque(tau: AppliedTorque) -> el.Force:
+    return el.SpatialForce(torque=tau)
+
+
+@el.system
+def drive(
+    tick: el.Query[el.SimulationTick],
+    dt: el.Query[el.SimulationTimeStep],
+    stage_time: el.Query[el.StageTime],
+    q: el.Query[el.WorldPos, DriveFrequency],
+) -> el.Query[el.Force]:
+    # The tick is incremented before the systems run.
+    t = (tick[0] - 1) * dt[0] + stage_time[0]
+    return q.map(
+        el.Force,
+        lambda pos, w: el.SpatialForce(linear=-pos.linear() + jnp.cos(w * t) * np.eye(3)[0]),
+    )
+
+
+@el.system
+def probe_stage_time(
+    stage_time: el.Query[el.StageTime], q: el.Query[StageProbe]
+) -> el.Query[StageProbe]:
+    return q.map(StageProbe, lambda _: stage_time[0] * jnp.ones(1))
 
 
 def _qmul(a, b):
@@ -46,16 +147,6 @@ def _angle_between(qa, qb):
     return 2 * np.arctan2(np.linalg.norm(d[..., :3], axis=-1), np.abs(d[..., 3]))
 
 
-@el.map
-def spring(pos: el.WorldPos) -> el.Force:
-    return el.SpatialForce(linear=-SPRING_K * pos.linear())
-
-
-@el.map
-def unit_torque(_: el.Force) -> el.Force:
-    return el.SpatialForce(torque=TORQUE_AXIS)
-
-
 def _spring_ref(t):
     w = np.sqrt(SPRING_K)
     zero = np.zeros_like(t)
@@ -65,12 +156,38 @@ def _spring_ref(t):
     }
 
 
+def _kepler_ref(t):
+    # mu = a = 1, starting at periapsis: solve Kepler's equation E - e sin E = t.
+    e = KEPLER_E
+    big_e = t.copy()
+    for _ in range(30):
+        big_e -= (big_e - e * np.sin(big_e) - t) / (1 - e * np.cos(big_e))
+    c, s = np.cos(big_e), np.sin(big_e)
+    b = np.sqrt(1 - e**2)
+    rate = 1 / (1 - e * c)
+    zero = np.zeros_like(t)
+    return {
+        "pos": np.hstack([c - e, b * s, zero]),
+        "vel": np.hstack([-s * rate, b * c * rate, zero]),
+    }
+
+
+def _driven_ref(t):
+    # x'' = -x + cos(w t) from rest.
+    w = DRIVE_FREQUENCY
+    zero = np.zeros_like(t)
+    return {
+        "pos": np.hstack([(np.cos(t) - np.cos(w * t)) / (w**2 - 1), zero, zero]),
+        "vel": np.hstack([(w * np.sin(w * t) - np.sin(t)) / (w**2 - 1), zero, zero]),
+    }
+
+
 def _free_spin_ref(t):
-    return {"att": _qexp(t * SPIN), "omega": np.broadcast_to(SPIN, (len(t), 3))}
+    return {"att": _qexp(t * SPIN)}
 
 
 def _torque_ref(t):
-    return {"att": _qexp(0.5 * t**2 * TORQUE_AXIS), "omega": t * TORQUE_AXIS}
+    return {"att": _qexp(0.5 * t**2 * TORQUE_AXIS)}
 
 
 def _top_ref(t):
@@ -86,107 +203,176 @@ def _top_ref(t):
 
 @dataclass(frozen=True)
 class Case:
-    body: Callable[[], el.Body]
-    effector: Any
-    duration: float
+    components: Callable[[], list[Any]]
     reference: Callable[[np.ndarray], dict[str, np.ndarray]]
 
 
 CASES = {
     "spring": Case(
-        lambda: el.Body(world_pos=el.SpatialTransform(linear=np.array([1.0, 0.0, 0.0]))),
-        spring,
-        4.0,
+        lambda: [
+            el.Body(world_pos=el.SpatialTransform(linear=np.array([1.0, 0.0, 0.0]))),
+            el.C(SpringConstant, np.array([SPRING_K])),
+        ],
         _spring_ref,
     ),
-    "free_spin": Case(
-        lambda: el.Body(world_vel=el.SpatialMotion(angular=SPIN)), None, 2.0, _free_spin_ref
+    "kepler": Case(
+        lambda: [
+            el.Body(
+                world_pos=el.SpatialTransform(linear=np.array([1 - KEPLER_E, 0.0, 0.0])),
+                world_vel=el.SpatialMotion(
+                    linear=np.array([0.0, np.sqrt((1 + KEPLER_E) / (1 - KEPLER_E)), 0.0])
+                ),
+            ),
+            el.C(GravitationalParameter, np.array([1.0])),
+        ],
+        _kepler_ref,
     ),
-    "constant_torque": Case(lambda: el.Body(), unit_torque, 2.0, _torque_ref),
+    "driven": Case(
+        lambda: [el.Body(), el.C(DriveFrequency, np.array([DRIVE_FREQUENCY]))], _driven_ref
+    ),
+    "free_spin": Case(lambda: [el.Body(world_vel=el.SpatialMotion(angular=SPIN))], _free_spin_ref),
+    "constant_torque": Case(lambda: [el.Body(), el.C(AppliedTorque, TORQUE_AXIS)], _torque_ref),
     "symmetric_top": Case(
-        lambda: el.Body(
-            world_vel=el.SpatialMotion(angular=TOP_OMEGA_BODY),
-            inertia=el.SpatialInertia(1.0, inertia=TOP_INERTIA),
-        ),
-        None,
-        2.0,
+        lambda: [
+            el.Body(
+                world_vel=el.SpatialMotion(angular=TOP_OMEGA_BODY),
+                inertia=el.SpatialInertia(1.0, inertia=TOP_INERTIA),
+            )
+        ],
         _top_ref,
     ),
 }
-
-
-def _simulate(case: Case, dt: float, steps: int, integrator: str):
-    w = el.World()
-    w.spawn(case.body(), "body")
-    sys = el.six_dof(dt, sys=case.effector, integrator=getattr(el.Integrator, integrator))
-    exec = w.build(sys, simulation_rate=1.0 / dt)
-    exec.run(steps, show_progress=False)
-    df = exec.history(["body.world_pos", "body.world_vel"])
-    pos, vel = df["body.world_pos"].to_numpy(), df["body.world_vel"].to_numpy()
-    assert len(pos) == steps + 1
-    return pos, vel
+METRICS = [(case, metric) for case, c in CASES.items() for metric in c.reference(np.zeros((1, 1)))]
 
 
 @functools.cache
-def max_errors(name: str, dt: float, integrator: str = "Rk4") -> dict[str, float]:
-    case = CASES[name]
-    pos, vel = _simulate(case, dt, round(case.duration / dt), integrator)
-    sim = {"att": pos[:, :4], "pos": pos[:, 4:], "omega": vel[:, :3], "vel": vel[:, 3:]}
-    ref = case.reference(np.arange(len(pos))[:, None] * dt)
-    return {
-        k: float(
-            np.max(_angle_between(sim[k], r) if k == "att" else np.linalg.norm(sim[k] - r, axis=-1))
-        )
-        for k, r in ref.items()
-    }
+def _simulate(method: str, dt: float, steps: int) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    w = el.World()
+    for name, case in CASES.items():
+        w.spawn(case.components(), name)
+    effectors = spring | gravity | torque | drive
+    sys = el.six_dof(dt, sys=effectors, integrator=getattr(el.Integrator, method))
+    exec = w.build(sys, simulation_rate=1.0 / dt)
+    exec.run(steps, show_progress=False)
+    df = exec.history([f"{name}.{c}" for name in CASES for c in ("world_pos", "world_vel")])
+    out = {}
+    for name in CASES:
+        pos, vel = df[f"{name}.world_pos"].to_numpy(), df[f"{name}.world_vel"].to_numpy()
+        assert len(pos) == steps + 1
+        out[name] = pos, vel
+    return out
 
 
-def observed_orders(name: str, metric: str, integrator: str = "Rk4") -> list[float]:
-    errs = [max_errors(name, dt, integrator)[metric] for dt in TIME_STEPS]
-    return [float(np.log2(a / b)) for a, b in zip(errs, errs[1:])]
+@functools.cache
+def max_errors(method: str, dt: float) -> dict[tuple[str, str], float]:
+    steps = round(DURATION / dt)
+    errors = {}
+    for name, (pos, vel) in _simulate(method, dt, steps).items():
+        sim = {"att": pos[:, :4], "pos": pos[:, 4:], "omega": vel[:, :3], "vel": vel[:, 3:]}
+        for metric, ref in CASES[name].reference(np.arange(steps + 1)[:, None] * dt).items():
+            err = (
+                _angle_between(sim[metric], ref)
+                if metric == "att"
+                else np.linalg.norm(sim[metric] - ref, axis=-1)
+            )
+            errors[name, metric] = float(np.max(err))
+    return errors
 
 
-def spring_one_step(h: float) -> tuple[float, float]:
-    pos, vel = _simulate(CASES["spring"], h, 1, "Rk4")
-    return float(pos[1, 4]), float(vel[1, 3])
+def observed_orders(method: str, case: str, metric: str) -> list[float | None]:
+    """Order between each pair of adjacent time steps; None where roundoff dominates."""
+    dts = METHODS[method].time_steps
+    errs = [max_errors(method, dt)[case, metric] for dt in dts]
+    return [
+        float(np.log(errs[i] / errs[i + 1]) / np.log(dts[i] / dts[i + 1]))
+        if errs[i + 1] > ERROR_FLOOR
+        else None
+        for i in range(len(dts) - 1)
+    ]
 
 
-def test_rk4_spring_single_step_matches_classical_rk4():
+@pytest.fixture(autouse=True)
+def _skip_asset_ingest(monkeypatch, tmp_path):
+    # Each built world would otherwise copy the repository's ~1 GB assets/ into its database.
+    monkeypatch.setenv("ELODIN_ASSETS", str(tmp_path))
+
+
+def test_every_integrator_is_benched():
+    variants = {name for name, v in vars(el.Integrator).items() if isinstance(v, el.Integrator)}
+    assert variants == set(METHODS)
+
+
+@pytest.mark.parametrize("method", METHODS)
+def test_one_step(method):
     h = 0.02
-    z = SPRING_K * h**2
-    x, v = spring_one_step(h)
-    # Classical RK4 on x'' = -k x reproduces the Taylor series of cos/sin through h^4.
-    assert x == pytest.approx(1 - z / 2 + z**2 / 24, abs=1e-13)
-    assert v == pytest.approx(-SPRING_K * h * (1 - z / 6), abs=1e-13)
+    pos, vel = _simulate(method, h, 1)["spring"]
+    x, v = METHODS[method].one_step(SPRING_K * h**2)
+    assert pos[1, 4] == pytest.approx(x, abs=1e-13)
+    assert vel[1, 3] == pytest.approx(-SPRING_K * h * v, abs=1e-13)
 
 
-@pytest.mark.parametrize(
-    ("name", "metric"),
-    [
-        ("spring", "pos"),
-        ("spring", "vel"),
-        ("free_spin", "att"),
-        ("constant_torque", "att"),
-        ("symmetric_top", "att"),
-        ("symmetric_top", "omega"),
-    ],
-)
-def test_rk4_is_fourth_order(name, metric):
-    assert min(observed_orders(name, metric)) > 3.5
+@pytest.mark.parametrize(("case", "metric"), METRICS)
+@pytest.mark.parametrize("method", METHODS)
+def test_order(method, case, metric):
+    # Coarse steps can sit outside the asymptotic range, so the finest measurable pair decides.
+    orders = [o for o in observed_orders(method, case, metric) if o is not None]
+    assert orders and orders[-1] > METHODS[method].order - 0.5, orders
+
+
+@pytest.mark.parametrize("method", ["Rk4", "Verlet"])
+def test_stage_time_follows_the_simulation_step(method):
+    # A six_dof time_step that differs from the simulation's must not move the effectors' clock.
+    dt = 0.01
+    w = el.World()
+    w.spawn([el.Body(), el.C(StageProbe, np.zeros(1))], "probe")
+    sys = el.six_dof(10 * dt, sys=probe_stage_time, integrator=getattr(el.Integrator, method))
+    exec = w.build(sys, simulation_rate=1.0 / dt)
+    exec.run(1, show_progress=False)
+    # The last evaluation sits at the end of the step.
+    probe = exec.history(["probe.stage_probe"])["probe.stage_probe"].to_numpy()
+    assert probe[1, 0] == pytest.approx(dt)
+
+
+@pytest.mark.parametrize("method", [name for name, m in METHODS.items() if m.embedded_order])
+def test_step_error_estimates_the_embedded_solution(method):
+    m = METHODS[method]
+    estimates = []
+    for h in m.time_steps[:2]:
+        w = el.World()
+        w.spawn([*CASES["spring"].components(), el.C(el.StepError, np.zeros(4))], "spring")
+        sys = el.six_dof(h, sys=spring, integrator=getattr(el.Integrator, method))
+        exec = w.build(sys, simulation_rate=1.0 / h)
+        exec.run(1, show_progress=False)
+        df = exec.history(["spring.world_pos", "spring.step_error"])
+        estimate = df["spring.step_error"].to_numpy()[1, 1]
+        # On this smooth problem the estimate exceeds the kept solution's actual error.
+        assert (
+            abs(df["spring.world_pos"].to_numpy()[1, 4] - np.cos(np.sqrt(SPRING_K) * h)) < estimate
+        )
+        estimates.append(estimate)
+    (h0, h1), (e0, e1) = m.time_steps[:2], estimates
+    # On a linear problem the estimate can shrink faster than the embedded solution's error.
+    assert np.log(e0 / e1) / np.log(h0 / h1) > m.embedded_order + 0.5
+
+
+@pytest.mark.parametrize("method", [name for name, m in METHODS.items() if m.symplectic])
+def test_symplectic_energy_error_is_bounded(method):
+    # Over 200 Kepler orbits the energy error oscillates instead of drifting.
+    dt = 0.02
+    pos, vel = _simulate(method, dt, round(200 * 2 * np.pi / dt))["kepler"]
+    energy = 0.5 * np.sum(vel[:, 3:] ** 2, -1) - 1 / np.linalg.norm(pos[:, 4:], axis=-1)
+    err = np.abs(energy + 0.5)
+    quarter = len(err) // 4
+    assert err[-quarter:].max() < 2 * err[:quarter].max()
 
 
 if __name__ == "__main__":
-    x, v = spring_one_step(0.02)
-    print(f"spring, one RK4 step of h=0.02: x={x:.11f} v={v:.8f}")
-    for name, case in CASES.items():
-        for integrator in ("Rk4", "SemiImplicit"):
-            errs = [max_errors(name, dt, integrator) for dt in TIME_STEPS]
-            print(f"\n{name}, {integrator}: max error over {case.duration:g} s")
-            print("     dt" + "".join(f"{m:>12} {'order':>6}" for m in errs[0]))
-            for i, (dt, row) in enumerate(zip(TIME_STEPS, errs)):
-                cells = "".join(
-                    f"{row[m]:12.3e} "
-                    + (f"{np.log2(errs[i - 1][m] / row[m]):6.2f}" if i and row[m] else "     -")
-                    for m in row
-                )
-                print(f"{dt:7.3f}{cells}")
+    for method, m in METHODS.items():
+        print(f"\n{method} (order {m.order}): max error over {DURATION:g} s")
+        print(f"{'dt':>24}" + "".join(f"{dt:>11g}" for dt in m.time_steps) + "  orders")
+        for case, metric in METRICS:
+            errs = "".join(f"{max_errors(method, dt)[case, metric]:11.3e}" for dt in m.time_steps)
+            orders = " ".join(
+                "    -" if o is None else f"{o:5.2f}" for o in observed_orders(method, case, metric)
+            )
+            print(f"  {case:16}{metric:6}{errs}  {orders}")

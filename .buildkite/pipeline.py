@@ -103,7 +103,12 @@ test_steps = [
             nix_step(
                 label=":python: pytest",
                 flake=".#run",
-                command="pytest libs/nox-py -o 'pythonpath='",
+                command="pytest libs/nox-py -o 'pythonpath=' -m 'not integrator'",
+            ),
+            nix_step(
+                label=":python: integrator convergence",
+                flake=".#run",
+                command="pytest libs/nox-py -o 'pythonpath=' -m integrator",
             ),
             nix_step(
                 label=":python: lint",

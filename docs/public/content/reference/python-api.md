@@ -520,12 +520,55 @@ Using the associated [elodin.Body] archetype and prebuilt components, we can cre
     - `sys` : one or more [elodin.System] instances used as effectors
     - `integrator` : [elodin.Integrator], default is `Integrator.Rk4`
 
+    Most integrators evaluate the effectors several times per step, at different times within it. The global
+    `elodin.StageTime` component holds the seconds past the start of the step for the current evaluation (zero outside
+    `six_dof`), so effectors that depend on time can follow it. The tick is incremented before the systems run, so the
+    effectors' time is `(tick[0] - 1) * dt[0] + stage_time[0]` for an `el.Query[el.SimulationTick]`, an
+    `el.Query[el.SimulationTimeStep]`, and an `el.Query[el.StageTime]`. `StageTime` is measured in the simulation step
+    even when `six_dof` integrates with its own `time_step`, so this time advances with the simulation either way.
+
 ### _class_ `elodin.Integrator`
 
 - `elodin.Integrator.Rk4` -> [elodin.Integrator]
 
     Runge-Kutta 4th Order (RK4) Integrator: Elodin provides a built-in implementation for a [4th order Runge-Kutta integrator](https://en.wikipedia.org/wiki/Runge%E2%80%93Kutta_methods).
-    The RK4 integrator is a numerical method used to solve ordinary differential equations. You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/rk4.rs).
+    The RK4 integrator is a numerical method used to solve ordinary differential equations. It evaluates the effectors 4 times per step. You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/runge_kutta.rs).
+
+- `elodin.Integrator.Rk2` -> [elodin.Integrator]
+
+    [Heun's method](https://en.wikipedia.org/wiki/Heun%27s_method), a second-order Runge-Kutta method that evaluates the effectors 2 times per step.
+    It costs half as much as `Rk4`, and suits time steps short enough that second-order accuracy is enough, or dynamics with discontinuities
+    such as contacts, where higher orders gain little.
+
+- `elodin.Integrator.Rk3` -> [elodin.Integrator]
+
+    Kutta's third-order Runge-Kutta method, which evaluates the effectors 3 times per step.
+
+- `elodin.Integrator.Verlet` -> [elodin.Integrator]
+
+    [Velocity Verlet](https://en.wikipedia.org/wiki/Verlet_integration#Velocity_Verlet), a second-order method that evaluates the effectors 2 times per step.
+    When forces depend only on position, as in gravitational N-body problems, it is symplectic: energy errors stay bounded over
+    long runs instead of drifting, as they do with the Runge-Kutta integrators, and orbits keep their size. Forces that depend on
+    velocity, such as drag or the gyroscopic torque of a spinning body, leave it second order but not symplectic. You can review
+    the implementation [here](https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/verlet.rs).
+
+- `elodin.Integrator.Rk78` -> [elodin.Integrator]
+
+    The eighth-order solution of Fehlberg's 7(8) Runge-Kutta pair, which evaluates the effectors 13 times per step. Its error
+    shrinks 256 times per halving of the time step, so it suits long, smooth propagations, such as orbits, where it can take
+    much larger steps than `Rk4` for the same accuracy.
+
+- `elodin.Integrator.Dp54` -> [elodin.Integrator]
+
+    The fifth-order solution of the [Dormand-Prince](https://en.wikipedia.org/wiki/Dormand%E2%80%93Prince_method) 5(4) pair
+    (the pair behind MATLAB's `ode45`), which evaluates the effectors 7 times per step. Elodin keeps the time step fixed.
+
+    `Dp54` and `Rk78` estimate each step's error from their embedded lower-order solution. A body that has the `elodin.StepError`
+    component, for example from `el.C(el.StepError, jnp.zeros(4))`, receives the estimate after every step: attitude (rad),
+    position, angular velocity, and velocity. It is the difference between the pair's two solutions, which approximates the
+    lower-order solution's error and usually exceeds the error of the solution Elodin keeps, but it is an estimate, not a
+    guarantee. Graphed over a run, it shows whether the time step is small enough and where the dynamics are hardest to
+    integrate.
 
 - `elodin.Integrator.SemiImplicit` -> [elodin.Integrator]
 

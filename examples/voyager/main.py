@@ -356,7 +356,7 @@ w.schematic(
 """.format(body_objects=body_objects)
 )
 
-sys = el.six_dof(sys=gravity)
+sys = el.six_dof(sys=gravity, integrator=el.Integrator.Rk78)
 db_path = Path(os.environ.get(DB_PATH_ENV, DEFAULT_DB_PATH))
 max_ticks_env = os.environ.get(MAX_TICKS_ENV)
 max_ticks = int(max_ticks_env) if max_ticks_env is not None else None
