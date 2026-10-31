@@ -1,18 +1,20 @@
 use crate::World;
 use crate::globals::SimulationTimeStep;
-use crate::system::{CompiledSystem, IntoSystem, System, SystemBuilder, SystemParam};
+use crate::system::{CompiledSystem, System, SystemBuilder, SystemParam};
 use crate::{ComponentArray, ComponentGroup, Error, Query};
 use nox::Scalar;
 use std::ops::Add;
 use std::{marker::PhantomData, ops::Mul};
 
-pub struct Rk4<U, DU, Pipe> {
+/// Integrates state `U` with RK4. After each evaluation of `pipe`, the components in `S`
+/// are read and converted into the stage derivative `DU`.
+pub struct Rk4<U, S, DU, Pipe> {
     dt: Option<f64>,
     pipe: Pipe,
-    phantom_data: PhantomData<(U, DU)>,
+    phantom_data: PhantomData<(U, S, DU)>,
 }
 
-impl<Pipe, U, DU> Rk4<U, DU, Pipe> {
+impl<Pipe, U, S, DU> Rk4<U, S, DU, Pipe> {
     pub fn new(pipe: Pipe, dt: Option<f64>) -> Self {
         Self {
             dt,
@@ -23,10 +25,10 @@ impl<Pipe, U, DU> Rk4<U, DU, Pipe> {
 }
 
 pub trait Rk4Ext {
-    fn rk4<U, DU>(self) -> Rk4<U, DU, Self>
+    fn rk4<U, DU>(self) -> Rk4<U, DU, DU, Self>
     where
         Self: Sized;
-    fn rk4_with_dt<U, DU>(self, dt: f64) -> Rk4<U, DU, Self>
+    fn rk4_with_dt<U, DU>(self, dt: f64) -> Rk4<U, DU, DU, Self>
     where
         Self: Sized;
 }
@@ -35,14 +37,14 @@ impl<Sys> Rk4Ext for Sys
 where
     Sys: System,
 {
-    fn rk4<U, DU>(self) -> Rk4<U, DU, Self>
+    fn rk4<U, DU>(self) -> Rk4<U, DU, DU, Self>
     where
         Self: Sized,
     {
         Rk4::new(self, None)
     }
 
-    fn rk4_with_dt<U, DU>(self, dt: f64) -> Rk4<U, DU, Self>
+    fn rk4_with_dt<U, DU>(self, dt: f64) -> Rk4<U, DU, DU, Self>
     where
         Self: Sized,
     {
@@ -50,12 +52,14 @@ where
     }
 }
 
-impl<Pipe, U, DU> System for Rk4<U, DU, Pipe>
+impl<Pipe, U, S, DU> System for Rk4<U, S, DU, Pipe>
 where
     Query<U>: SystemParam<Item = Query<U>> + Clone,
-    Query<DU>: SystemParam<Item = Query<DU>> + Clone,
+    Query<(S,)>: SystemParam<Item = Query<(S,)>>,
     U: Add<DU, Output = U> + ComponentGroup + for<'a> nox::FromBuilder<Item<'a> = U> + Send + Sync,
-    DU: Add<DU, Output = DU>
+    S: ComponentGroup + for<'a> nox::FromBuilder<Item<'a> = S> + Send + Sync,
+    DU: From<S>
+        + Add<DU, Output = DU>
         + ComponentGroup
         + for<'a> nox::FromBuilder<Item<'a> = DU>
         + Send
@@ -71,7 +75,7 @@ where
         self.pipe.init(builder)?;
         ComponentArray::<SimulationTimeStep>::init(builder)?;
         Query::<U>::init(builder)?;
-        Query::<DU>::init(builder)
+        Query::<S>::init(builder)
     }
 
     fn compile(&self, world: &World) -> Result<CompiledSystem, Error> {
@@ -82,34 +86,27 @@ where
         let sim_dt = ComponentArray::<SimulationTimeStep>::param(&builder)?;
         let dt = self.dt.map(Scalar::from).unwrap_or_else(|| sim_dt.get(0).0);
 
-        let step_dt = self.dt;
-        let step = |dt_factor: f64, builder: &mut SystemBuilder| -> Result<Query<DU>, Error> {
-            let f = move |sim_dt: ComponentArray<SimulationTimeStep>,
-                          init_u: Query<U>,
-                          du: Query<DU>|
-                  -> Query<U> {
-                let dt = &step_dt.map(Scalar::from).unwrap_or_else(|| sim_dt.get(0).0) * dt_factor;
+        let eval = |builder: &mut SystemBuilder| -> Result<Query<DU>, Error> {
+            compiled_pipe.clone().insert_into_builder(builder)?;
+            Query::<(S,)>::param(builder)?.map(|s: S| DU::from(s))
+        };
+        // U and S can share components, so stages are built from the init_u and k_i
+        // snapshots rather than read back from the builder.
+        let stage =
+            |k: &Query<DU>, c: f64, builder: &mut SystemBuilder| -> Result<Query<DU>, Error> {
+                let h = &dt * c;
                 init_u
                     .clone()
-                    .join_query(du.clone())
-                    .map(|u, du| u + dt.clone() * du)
-                    .unwrap()
+                    .join_query(k.clone())
+                    .map(|u, du| u + h.clone() * du)?
+                    .insert_into_builder(builder);
+                eval(builder)
             };
-            f.into_system()
-                .compile(world)?
-                .insert_into_builder(builder)?;
-            compiled_pipe.clone().insert_into_builder(builder)?;
-            Query::<DU>::param(builder)
-        };
 
-        let k1 = step(0.0, &mut builder)?;
-        init_u.insert_into_builder(&mut builder);
-        let k2 = step(0.5, &mut builder)?;
-        init_u.insert_into_builder(&mut builder);
-        let k3 = step(0.5, &mut builder)?;
-        init_u.insert_into_builder(&mut builder);
-        let k4 = step(1.0, &mut builder)?;
-        init_u.insert_into_builder(&mut builder);
+        let k1 = eval(&mut builder)?;
+        let k2 = stage(&k1, 0.5, &mut builder)?;
+        let k3 = stage(&k2, 0.5, &mut builder)?;
+        let k4 = stage(&k3, 1.0, &mut builder)?;
 
         let u = init_u
             .join_query(k1)
