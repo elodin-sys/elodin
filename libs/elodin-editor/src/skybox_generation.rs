@@ -428,7 +428,13 @@ pub(crate) struct RevertSkyboxParams<'w> {
     skyboxes: MessageWriter<'w, SetActiveSkybox>,
 }
 
-pub(crate) fn revert_previous_skybox(mut params: RevertSkyboxParams) {
+pub(crate) fn revert_previous_skybox(
+    mut params: RevertSkyboxParams,
+    capabilities: Option<Res<crate::ViewerCapabilities>>,
+) {
+    if capabilities.is_some_and(|c| !c.recording_write) {
+        return;
+    }
     let Some(name) = params.ui.revert_name.take() else {
         return;
     };

@@ -55,6 +55,7 @@ async fn request(method: &str, url: &str, body: Option<Vec<u8>>) -> Result<(u16,
     let opts = RequestInit::new();
     opts.set_method(method);
     opts.set_mode(RequestMode::Cors);
+    opts.set_credentials(web_sys::RequestCredentials::Include);
     if let Some(bytes) = body {
         let array = js_sys::Uint8Array::from(bytes.as_slice());
         opts.set_body(&array);

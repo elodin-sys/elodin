@@ -777,8 +777,9 @@ fn send_stream_request(
     commands: &mut Commands,
     entity: Entity,
     msg_id: [u8; 2],
-    _stream_id: u64,
+    stream_id: u64,
     _is_h264: bool,
+    bounded: bool,
 ) {
     let handler = move |InRef(pkt): InRef<OwnedPacket<PacketGrantR>>,
                         mut caches: Query<&mut VideoFrameCache>| {
@@ -792,7 +793,20 @@ fn send_stream_request(
         false
     };
 
-    commands.send_msg_req_reply_raw(TimestampedMsgStream { msg_id }, handler);
+    if bounded {
+        commands.send_msg_req_reply_raw(
+            impeller_wkt::FixedRateMsgStream {
+                msg_id,
+                fixed_rate: impeller_wkt::FixedRateOp {
+                    stream_id,
+                    behavior: Default::default(),
+                },
+            },
+            handler,
+        );
+    } else {
+        commands.send_msg_req_reply_raw(TimestampedMsgStream { msg_id }, handler);
+    }
 }
 
 /// Maximum payload size (in bytes) for a single backfill `GetMsgs` batch.
@@ -1211,7 +1225,11 @@ pub fn connect_streams(
     mut commands: Commands,
     stream_id: Res<CurrentStreamId>,
     last_updated: Res<impeller_wkt::LastUpdated>,
+    connection: Option<Res<impeller_bevy::ConnectionAddr>>,
 ) {
+    let bounded = connection
+        .as_ref()
+        .is_some_and(|c| matches!(c.endpoint(), impeller_bevy::DbEndpoint::Browser(_)));
     for (entity, mut stream, decoder, mut cache) in &mut query {
         match &mut stream.state {
             StreamState::WaitingToConnect { frames_waited } => {
@@ -1233,7 +1251,14 @@ pub fn connect_streams(
                         stream.msg_name,
                         stream.raw_dims
                     );
-                    send_stream_request(&mut commands, entity, msg_id, stream_id.0, cache.is_h264);
+                    send_stream_request(
+                        &mut commands,
+                        entity,
+                        msg_id,
+                        stream_id.0,
+                        cache.is_h264,
+                        bounded,
+                    );
                     stream.state = StreamState::Active;
                 }
             }
@@ -1292,7 +1317,14 @@ pub fn connect_streams(
                         cache.backfill_frontier,
                         limit,
                     );
-                    send_stream_request(&mut commands, entity, msg_id, stream_id.0, cache.is_h264);
+                    send_stream_request(
+                        &mut commands,
+                        entity,
+                        msg_id,
+                        stream_id.0,
+                        cache.is_h264,
+                        bounded,
+                    );
                     cache.last_stream_activity = None;
                 }
             }

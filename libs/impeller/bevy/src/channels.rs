@@ -86,53 +86,88 @@ impl ThreadConnectionStatus {
     }
 }
 
-/// Database address typed by a client: an IP literal or DNS name plus port.
-/// DNS names are kept so wasm can hand them to the browser.
+/// Complete browser routes. The browser supplies cookies for these URLs.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct DbEndpoint(Authority);
+pub struct BrowserEndpoints {
+    impeller: url::Url,
+    messages: url::Url,
+    assets: url::Url,
+}
+
+impl BrowserEndpoints {
+    pub fn new(impeller: &str, messages: &str, assets: &str) -> Result<Self, String> {
+        fn parse(value: &str, schemes: &[&str]) -> Result<url::Url, String> {
+            let url = url::Url::parse(value).map_err(|_| "Invalid browser endpoint URL")?;
+            if !schemes.contains(&url.scheme())
+                || url.host_str().is_none()
+                || !url.username().is_empty()
+                || url.password().is_some()
+                || url.fragment().is_some()
+            {
+                return Err("Browser endpoints require absolute HTTP(S) or WS(S) URLs without credentials or fragments".into());
+            }
+            Ok(url)
+        }
+        let mut assets = parse(assets, &["http", "https"])?;
+        if !assets.path().ends_with('/') {
+            assets.set_path(&format!("{}/", assets.path()));
+        }
+        Ok(Self {
+            impeller: parse(impeller, &["ws", "wss"])?,
+            messages: parse(messages, &["ws", "wss"])?,
+            assets,
+        })
+    }
+
+    pub fn impeller(&self) -> &str {
+        self.impeller.as_str()
+    }
+    pub fn messages(&self) -> &str {
+        self.messages.as_str()
+    }
+    pub fn assets(&self) -> &str {
+        self.assets.as_str()
+    }
+}
+
+/// A desktop database address or a complete set of browser routes.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum DbEndpoint {
+    Tcp(Authority),
+    Browser(Box<BrowserEndpoints>),
+}
 
 impl DbEndpoint {
     pub fn parse(input: &str) -> Result<Self, ParseError> {
-        input.trim().parse::<Authority>().map(Self)
+        input.trim().parse::<Authority>().map(Self::Tcp)
     }
 
     pub fn from_socket(addr: SocketAddr) -> Self {
-        Self(addr.into())
+        Self::Tcp(addr.into())
     }
 
-    pub fn port(&self) -> u16 {
-        self.0.port()
-    }
-
-    pub fn host(&self) -> HostRef<'_> {
-        self.0.host()
-    }
-
-    /// DNS name when `host` is not an IP literal.
     pub fn dns_host(&self) -> Option<&str> {
-        match self.0.host() {
-            HostRef::Domain(domain) => Some(domain.name()),
-            HostRef::IPAddress(_) => None,
+        match self {
+            Self::Tcp(authority) => match authority.host() {
+                HostRef::Domain(domain) => Some(domain.name()),
+                _ => None,
+            },
+            Self::Browser(_) => None,
         }
     }
 
     pub fn socket_addr(&self) -> Option<SocketAddr> {
-        match self.0.host() {
-            HostRef::IPAddress(ip) => Some(SocketAddr::new(ip.to_std(), self.port())),
-            HostRef::Domain(_) => None,
+        match self {
+            Self::Tcp(authority) => match authority.host() {
+                HostRef::IPAddress(ip) => Some(SocketAddr::new(ip.to_std(), authority.port())),
+                _ => None,
+            },
+            Self::Browser(_) => None,
         }
     }
 
-    /// Socket stored for session identity. DNS names use loopback at the same
-    /// port; callers that build URLs must use [`Self::authority`].
-    pub fn identity_socket(&self) -> SocketAddr {
-        self.socket_addr()
-            .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), self.port()))
-    }
-
-    /// Authority for http/ws URLs at `port`. Unspecified bind addresses become loopback.
-    fn client_authority(&self, port: u16) -> Authority {
-        match self.0.host() {
+    fn client_authority(authority: &Authority, port: u16) -> Authority {
+        match authority.host() {
             HostRef::IPAddress(ip) => {
                 let ip = match ip.to_std() {
                     IpAddr::V4(v4) if v4.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
@@ -145,85 +180,147 @@ impl DbEndpoint {
         }
     }
 
-    pub fn authority(&self) -> Authority {
-        self.client_authority(self.port())
-    }
-
-    fn assets_authority(&self) -> Authority {
-        self.client_authority(
-            self.port()
-                .saturating_add(impeller::ASSETS_HTTP_PORT_OFFSET),
-        )
+    pub fn authority(&self) -> Option<Authority> {
+        match self {
+            Self::Tcp(a) => Some(Self::client_authority(a, a.port())),
+            Self::Browser(_) => None,
+        }
     }
 
     pub fn http_base(&self) -> String {
-        format!("http://{}", self.assets_authority())
+        match self {
+            Self::Tcp(a) => format!(
+                "http://{}",
+                Self::client_authority(
+                    a,
+                    a.port().saturating_add(impeller::ASSETS_HTTP_PORT_OFFSET)
+                )
+            ),
+            Self::Browser(b) => b.assets().to_owned(),
+        }
+    }
+
+    /// Resolves a DB key without treating its query or fragment characters as URL syntax.
+    /// Existing percent escapes remain encoded. Routing parameters stay on the base URL.
+    pub fn asset_url(&self, key: &str) -> Result<String, String> {
+        let key = key.trim_start_matches('/');
+        if key.is_empty()
+            || key.contains('\\')
+            || key.split('/').any(|part| {
+                let dots = part.to_ascii_lowercase().replace("%2e", ".");
+                dots == "."
+                    || dots == ".."
+                    || part.to_ascii_lowercase().contains("%2f")
+                    || part.to_ascii_lowercase().contains("%5c")
+            })
+        {
+            return Err("Invalid database asset key".into());
+        }
+        let mut url = url::Url::parse(&self.http_base()).map_err(|e| e.to_string())?;
+        let path = format!("{}/{}", url.path().trim_end_matches('/'), key);
+        url.set_path(&path);
+        Ok(url.into())
     }
 
     pub fn ws_urls(&self) -> (String, String) {
-        let host = self.assets_authority();
-        (
-            format!("ws://{host}/impeller"),
-            format!("ws://{host}/impeller/msg"),
-        )
+        match self {
+            Self::Tcp(a) => {
+                let host = Self::client_authority(
+                    a,
+                    a.port().saturating_add(impeller::ASSETS_HTTP_PORT_OFFSET),
+                );
+                (
+                    format!("ws://{host}/impeller"),
+                    format!("ws://{host}/impeller/msg"),
+                )
+            }
+            Self::Browser(b) => (b.impeller().into(), b.messages().into()),
+        }
+    }
+
+    /// Restores routing parameters on relative dependencies loaded by Bevy,
+    /// such as an external glTF buffer or texture. Other origins stay untouched.
+    pub fn asset_request_url(&self, request: &str) -> Result<String, String> {
+        let Self::Browser(browser) = self else {
+            return Ok(request.into());
+        };
+        let mut url = url::Url::parse(request).map_err(|e| e.to_string())?;
+        if url.origin() == browser.assets.origin() && url.path().starts_with(browser.assets.path())
+        {
+            let routing: Vec<_> = browser.assets.query_pairs().collect();
+            let mut query: Vec<_> = url
+                .query()
+                .unwrap_or_default()
+                .split('&')
+                .filter(|pair| !pair.is_empty())
+                .filter(|pair| {
+                    url::form_urlencoded::parse(pair.as_bytes())
+                        .next()
+                        .is_none_or(|(key, _)| !routing.iter().any(|(k, _)| *k == key))
+                })
+                .map(str::to_owned)
+                .collect();
+            if let Some(routing) = browser.assets.query() {
+                query.push(routing.to_owned());
+            }
+            let query = query.join("&");
+            url.set_query((!query.is_empty()).then_some(query.as_str()));
+        }
+        Ok(url.into())
+    }
+
+    /// Resolves a glTF dependency and keeps the session query in its asset identity.
+    pub fn asset_dependency_url(&self, parent: &str, relative: &str) -> Result<String, String> {
+        let url = url::Url::parse(parent)
+            .and_then(|base| base.join(relative))
+            .map_err(|e| e.to_string())?;
+        self.asset_request_url(url.as_str())
     }
 }
 
 impl FromStr for DbEndpoint {
     type Err = ParseError;
-
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         Self::parse(s)
     }
 }
-
 impl From<SocketAddr> for DbEndpoint {
     fn from(addr: SocketAddr) -> Self {
         Self::from_socket(addr)
     }
 }
-
 impl From<Authority> for DbEndpoint {
     fn from(authority: Authority) -> Self {
-        Self(authority)
+        Self::Tcp(authority)
     }
 }
-
+impl From<BrowserEndpoints> for DbEndpoint {
+    fn from(endpoints: BrowserEndpoints) -> Self {
+        Self::Browser(Box::new(endpoints))
+    }
+}
 impl fmt::Display for DbEndpoint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.0, f)
+        match self {
+            Self::Tcp(a) => fmt::Display::fmt(a, f),
+            Self::Browser(b) => f.write_str(b.impeller()),
+        }
     }
 }
 
 #[derive(Clone, Debug, Resource)]
 pub struct ConnectionAddr {
-    pub socket: SocketAddr,
     endpoint: DbEndpoint,
 }
-
 impl ConnectionAddr {
     pub fn new(addr: SocketAddr) -> Self {
-        Self {
-            endpoint: DbEndpoint::from_socket(addr),
-            socket: addr,
-        }
+        Self::from_endpoint(addr.into())
     }
-
     pub fn from_endpoint(endpoint: DbEndpoint) -> Self {
-        let socket = endpoint.identity_socket();
-        Self { socket, endpoint }
+        Self { endpoint }
     }
-
     pub fn endpoint(&self) -> &DbEndpoint {
         &self.endpoint
-    }
-}
-
-impl std::ops::Deref for ConnectionAddr {
-    type Target = SocketAddr;
-
-    fn deref(&self) -> &Self::Target {
-        &self.socket
     }
 }
 
@@ -297,12 +394,113 @@ pub fn msg_channels() -> (
 
 #[cfg(test)]
 mod tests {
-    use super::{DbEndpoint, QUEUE_LEN};
+    use super::{BrowserEndpoints, DbEndpoint, QUEUE_LEN};
+
+    fn browser(session: &str) -> DbEndpoint {
+        BrowserEndpoints::new(
+            &format!("wss://example.com/sessions/{session}/impeller?route=main"),
+            &format!("wss://example.com/sessions/{session}/messages?route=messages"),
+            &format!("https://cdn.example.com/sessions/{session}/assets?route=a%2Fb"),
+        )
+        .unwrap()
+        .into()
+    }
+
+    #[test]
+    fn browser_routes_preserve_paths_queries_and_encoded_asset_names() {
+        let endpoint = browser("one");
+        assert_eq!(
+            endpoint.ws_urls().1,
+            "wss://example.com/sessions/one/messages?route=messages"
+        );
+        assert_eq!(
+            endpoint.asset_url("models/rocket%20one.glb").unwrap(),
+            "https://cdn.example.com/sessions/one/assets/models/rocket%20one.glb?route=a%2Fb"
+        );
+        assert_eq!(
+            endpoint.asset_url("icons/a #?.png").unwrap(),
+            "https://cdn.example.com/sessions/one/assets/icons/a%20%23%3F.png?route=a%2Fb"
+        );
+        assert!(endpoint.socket_addr().is_none());
+        assert_ne!(endpoint, browser("two"));
+    }
+
+    #[test]
+    fn browser_asset_dependencies_inherit_only_their_own_session_routing() {
+        let endpoint = browser("one");
+        assert_eq!(
+            endpoint
+                .asset_request_url("https://cdn.example.com/sessions/one/assets/models/buffer.bin")
+                .unwrap(),
+            "https://cdn.example.com/sessions/one/assets/models/buffer.bin?route=a%2Fb"
+        );
+        for url in [
+            "https://other.example.com/sessions/one/assets/a.png",
+            "https://cdn.example.com/sessions/two/assets/a.png",
+        ] {
+            assert_eq!(endpoint.asset_request_url(url).unwrap(), url);
+        }
+    }
+
+    #[test]
+    fn routing_parameters_keep_their_original_encoding() {
+        let endpoint: DbEndpoint = BrowserEndpoints::new(
+            "wss://example.com/main",
+            "wss://example.com/msg",
+            "https://example.com/assets?route=a%2fb&name=a%20b",
+        )
+        .unwrap()
+        .into();
+        assert_eq!(
+            endpoint
+                .asset_request_url("https://example.com/assets/a.bin?other=%2f")
+                .unwrap(),
+            "https://example.com/assets/a.bin?other=%2f&route=a%2fb&name=a%20b"
+        );
+    }
+
+    #[test]
+    fn browser_endpoints_reject_invalid_schemes_credentials_and_fragments() {
+        for bad in [
+            "",
+            "example.com/main",
+            "https://example.com/main",
+            "wss://user:secret@example.com/main",
+            "wss://example.com/main#fragment",
+        ] {
+            assert!(
+                BrowserEndpoints::new(
+                    bad,
+                    "wss://example.com/messages",
+                    "https://example.com/assets"
+                )
+                .is_err()
+            );
+        }
+        assert!(
+            BrowserEndpoints::new(
+                "wss://example.com/main",
+                "wss://example.com/messages",
+                "file:///assets"
+            )
+            .is_err()
+        );
+        for key in [
+            "../escape.glb",
+            "%2e%2e/escape.glb",
+            "a/%2Fescape",
+            "a/./b",
+            "a\\b",
+            "",
+        ] {
+            assert!(browser("one").asset_url(key).is_err(), "accepted {key}");
+        }
+    }
 
     #[test]
     fn parse_accepts_ip_and_dns_names() {
         let ip = DbEndpoint::parse("127.0.0.1:2240").unwrap();
-        assert_eq!(ip.authority().to_string(), "127.0.0.1:2240");
+        assert_eq!(ip.authority().unwrap().to_string(), "127.0.0.1:2240");
         assert!(ip.dns_host().is_none());
         assert_eq!(ip.socket_addr(), Some("127.0.0.1:2240".parse().unwrap()));
 
@@ -328,10 +526,12 @@ mod tests {
         // a SQL reply still fits when other packets are in flight.
         const MAX_WS_BODY: usize = 64 * 1024 * 1024;
         let one_frame = 4 + MAX_WS_BODY + 16 + size_of::<usize>();
-        assert!(
-            QUEUE_LEN >= 256 * 1024 * 1024,
-            "incoming queue {QUEUE_LEN} is below the 256 MiB Arrow IPC sizing"
-        );
+        const {
+            assert!(
+                QUEUE_LEN >= 256 * 1024 * 1024,
+                "incoming queue is below the 256 MiB Arrow IPC sizing"
+            );
+        }
         assert!(
             QUEUE_LEN > one_frame,
             "incoming queue {QUEUE_LEN} cannot hold a {one_frame}-byte Arrow IPC frame"
@@ -344,7 +544,7 @@ mod tests {
         assert_eq!(v4.http_base(), "http://127.0.0.1:2241");
         assert_eq!(v4.to_string(), "0.0.0.0:2240");
         let v6 = DbEndpoint::parse("[::]:2240").unwrap();
-        assert_eq!(v6.authority().to_string(), "[::1]:2240");
+        assert_eq!(v6.authority().unwrap().to_string(), "[::1]:2240");
         assert_eq!(v6.ws_urls().1, "ws://[::1]:2241/impeller/msg");
     }
 }

@@ -21,6 +21,7 @@ use crate::{
 
 #[derive(SystemParam)]
 pub struct InspectorQueryTable<'w, 's> {
+    capabilities: Option<Res<'w, crate::ViewerCapabilities>>,
     tables: Query<'w, 's, &'static mut QueryTableData>,
     eql_context: ResMut<'w, EqlContext>,
     selected_range: Res<'w, SelectedTimeRange>,
@@ -40,6 +41,7 @@ impl WidgetSystem for InspectorQueryTable<'_, '_> {
         entity: Self::Args,
     ) -> Self::Output {
         let InspectorQueryTable {
+            capabilities,
             mut tables,
             mut eql_context,
             selected_range,
@@ -47,6 +49,10 @@ impl WidgetSystem for InspectorQueryTable<'_, '_> {
             last_updated,
             mut commands,
         } = state.params_mut(world);
+        if capabilities.as_ref().is_some_and(|c| !c.sql_queries) {
+            ui.label("SQL queries are disabled for this viewer");
+            return;
+        }
         let Ok(mut table) = tables.get_mut(entity) else {
             return;
         };

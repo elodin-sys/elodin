@@ -22,6 +22,9 @@ use web_time::{Duration, Instant};
 
 const RECONNECT_DELAY: Duration = Duration::from_millis(250);
 
+#[cfg(test)]
+mod browser_tests;
+
 /// Rebuild the two Impeller WebSockets against `endpoint`.
 #[derive(Message, Clone, Debug)]
 pub struct WsConnect(pub DbEndpoint);
@@ -213,6 +216,9 @@ fn ws_reconnect(world: &mut World) {
 }
 
 fn ws_flush(world: &mut World) {
+    if world.resource::<WsIo>().status.status() != ConnectionStatus::Success {
+        return;
+    }
     let (main, msg) = {
         let Some(sockets) = world.get_non_send::<WsSockets>() else {
             return;
@@ -255,9 +261,10 @@ fn is_active(ready_state: u16) -> bool {
 
 fn open_sockets(world: &mut World) {
     let (endpoint, stream_id, incoming_main, incoming_msg, generation, my_gen, status) = {
-        let Some(io) = world.get_resource::<WsIo>() else {
+        let Some(mut io) = world.get_resource_mut::<WsIo>() else {
             return;
         };
+        io.stream_id = fastrand::u64(..);
         let Some(endpoint) = io.endpoint.clone() else {
             return;
         };
@@ -273,19 +280,36 @@ fn open_sockets(world: &mut World) {
         )
     };
     world.remove_non_send::<WsSockets>();
+    world.insert_resource(CurrentStreamId(stream_id));
+    // Requests and responses from a closed connection cannot cross a reconnect.
+    if let Some(mut rx) = world.get_resource_mut::<crate::PacketRx>() {
+        while rx.try_recv_pkt().is_some() {}
+    }
+    if let Some(mut rx) = world.get_resource_mut::<crate::MsgPacketRx>() {
+        while rx.try_recv_pkt().is_some() {}
+    }
     status.set_status(ConnectionStatus::Connecting);
     if let Some(mut io) = world.get_resource_mut::<WsIo>() {
         io.retry_at = None;
+        while io.main_outgoing.try_recv().is_ok() {}
+        while io.msg_outgoing.try_recv().is_ok() {}
     }
 
+    let opened = Arc::new(AtomicU64::new(0));
     let (main_url, msg_url) = endpoint.ws_urls();
+    let hello = if matches!(endpoint, DbEndpoint::Browser(_)) {
+        crate::browser_connection_packets(stream_id).collect()
+    } else {
+        new_connection_packets(stream_id).collect()
+    };
     let main = open_socket(
         &main_url,
         incoming_main,
         generation.clone(),
         my_gen,
-        Some(status.clone()),
-        new_connection_packets(stream_id).collect(),
+        status.clone(),
+        opened.clone(),
+        hello,
         true,
     );
     let msg = open_socket(
@@ -293,7 +317,8 @@ fn open_sockets(world: &mut World) {
         incoming_msg,
         generation,
         my_gen,
-        None,
+        status.clone(),
+        opened,
         Vec::new(),
         false,
     );
@@ -306,12 +331,14 @@ fn open_sockets(world: &mut World) {
     world.insert_non_send(WsSockets { main, msg });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn open_socket(
     url: &str,
     incoming: Arc<AsyncArcQueueTx>,
     generation: Arc<AtomicU64>,
     my_gen: u64,
-    status: Option<ThreadConnectionStatus>,
+    status: ThreadConnectionStatus,
+    opened: Arc<AtomicU64>,
     hello: Vec<LenPacket>,
     inject_new_connection: bool,
 ) -> Option<LiveSocket> {
@@ -328,6 +355,8 @@ fn open_socket(
     let incoming_open = incoming.clone();
     let generation_open = generation.clone();
     let status_open = status.clone();
+    let bit = if inject_new_connection { 1 } else { 2 };
+    let opened_open = opened.clone();
     let on_open = Closure::wrap(Box::new(move || {
         if generation_open.load(Ordering::SeqCst) != my_gen {
             return;
@@ -341,14 +370,16 @@ fn open_socket(
         for pkt in &hello {
             let _ = ws_open.send_with_u8_array(&pkt.inner);
         }
-        if let Some(status) = &status_open {
-            status.set_status(ConnectionStatus::Success);
+        if opened_open.fetch_or(bit, Ordering::SeqCst) | bit == 3 {
+            status_open.set_status(ConnectionStatus::Success);
         }
     }) as Box<dyn FnMut()>);
     ws.set_onopen(Some(on_open.as_ref().unchecked_ref()));
 
     let incoming_msg = incoming;
     let generation_msg = generation.clone();
+    let status_msg = status.clone();
+    let ws_msg = ws.clone();
     let on_message = Closure::wrap(Box::new(move |event: MessageEvent| {
         if generation_msg.load(Ordering::SeqCst) != my_gen {
             return;
@@ -359,7 +390,12 @@ fn open_socket(
         let arr = Uint8Array::new(&buf);
         let mut bytes = vec![0u8; arr.length() as usize];
         arr.copy_to(&mut bytes);
-        if bytes.len() < 4 {
+        if bytes.len() < 8
+            || u32::from_le_bytes(bytes[..4].try_into().expect("length checked")) as usize
+                != bytes.len() - 4
+        {
+            status_msg.set_status(ConnectionStatus::Error);
+            let _ = ws_msg.close();
             return;
         }
         push_incoming(&incoming_msg, LenPacket { inner: bytes });
@@ -368,13 +404,13 @@ fn open_socket(
 
     let status_err = status.clone();
     let generation_err = generation.clone();
+    let opened_err = opened.clone();
     let on_error = Closure::wrap(Box::new(move |_e: JsValue| {
         if generation_err.load(Ordering::SeqCst) != my_gen {
             return;
         }
-        if let Some(status) = &status_err {
-            status.set_status(ConnectionStatus::Error);
-        }
+        opened_err.fetch_and(!bit, Ordering::SeqCst);
+        status_err.set_status(ConnectionStatus::Error);
     }) as Box<dyn FnMut(_)>);
     ws.set_onerror(Some(on_error.as_ref().unchecked_ref()));
 
@@ -383,9 +419,8 @@ fn open_socket(
         if generation_close.load(Ordering::SeqCst) != my_gen {
             return;
         }
-        if let Some(status) = &status {
-            status.set_status(ConnectionStatus::Error);
-        }
+        opened.fetch_and(!bit, Ordering::SeqCst);
+        status.set_status(ConnectionStatus::Error);
     }) as Box<dyn FnMut(_)>);
     ws.set_onclose(Some(on_close.as_ref().unchecked_ref()));
 

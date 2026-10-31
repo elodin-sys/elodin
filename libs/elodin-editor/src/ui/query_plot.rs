@@ -171,6 +171,7 @@ pub fn sync_bounds_query(
 
 #[derive(SystemParam)]
 pub struct QueryPlotWidget<'w, 's> {
+    capabilities: Option<Res<'w, crate::ViewerCapabilities>>,
     states: Query<'w, 's, &'static mut QueryPlotData>,
     graphs_state: Query<'w, 's, &'static mut GraphState>,
     eql_context: Res<'w, EqlContext>,
@@ -211,6 +212,10 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
         // This should only happen during initialization, and will be set properly in the UI
         let scrub_icon = scrub_icon.unwrap_or(egui::TextureId::default());
         let mut state = state.params_mut(world);
+        if state.capabilities.as_ref().is_some_and(|c| !c.sql_queries) {
+            ui.label("SQL queries are disabled for this viewer");
+            return;
+        }
         let Ok(mut plot) = state.states.get_mut(entity) else {
             return;
         };

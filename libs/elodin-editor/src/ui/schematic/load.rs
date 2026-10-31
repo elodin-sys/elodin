@@ -249,6 +249,12 @@ pub struct PendingWindowSchematics {
     loads: Vec<PendingWindowLoad>,
 }
 
+impl PendingWindowSchematics {
+    pub fn is_empty(&self) -> bool {
+        self.loads.is_empty()
+    }
+}
+
 #[derive(Component)]
 pub struct MonitorsRoot;
 

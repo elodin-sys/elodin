@@ -1,63 +1,74 @@
+mod launch;
+
 use bevy::prelude::*;
-use elodin_editor::EditorPlugin;
+use elodin_editor::{EditorPlugin, ViewerEvent};
 use web_sys::UrlSearchParams;
 
 fn main() {
     console_error_panic_hook::set_once();
-    web_sys::console::log_1(&"elodin-web: main()".into());
-    let mut plugin = EditorPlugin::default();
-    if let Some(db) = db_query_value() {
-        plugin = apply_db_query(plugin, &db);
-    } else {
-        web_sys::console::log_1(&"elodin-web: no db query param".into());
-    }
+    let launch = match browser_launch() {
+        Ok(launch) => launch,
+        Err(error) => {
+            dispatch("elodin-error", Some(&error));
+            web_sys::console::error_1(&error.into());
+            return;
+        }
+    };
+    let plugin = EditorPlugin::default().with_viewer_capabilities(launch.capabilities);
+    #[cfg(target_family = "wasm")]
+    let plugin = match launch.endpoint {
+        Some(endpoint) => plugin.with_db_endpoint(endpoint),
+        None => plugin,
+    };
+    #[cfg(not(target_family = "wasm"))]
+    let _ = launch.endpoint;
     App::new()
         .add_plugins(plugin)
-        .add_systems(Startup, log_startup)
-        .add_systems(Update, log_first_update)
+        .add_systems(Last, publish_events)
         .run();
 }
 
-#[cfg(target_family = "wasm")]
-fn apply_db_query(plugin: EditorPlugin, db: &str) -> EditorPlugin {
-    match plugin.with_connection_str(db) {
-        Ok(next) => {
-            web_sys::console::log_1(&format!("elodin-web: db={db}").into());
-            next
+fn browser_launch() -> Result<launch::Launch, String> {
+    let window = web_sys::window().ok_or("No browser window")?;
+    let search = window
+        .location()
+        .search()
+        .map_err(|_| "Cannot read browser location")?;
+    let params = UrlSearchParams::new_with_str(&search).map_err(|_| "Invalid launch parameters")?;
+    let mut values = Vec::new();
+    for name in ["impeller", "messages", "assets", "db", "read_only"] {
+        let all = params.get_all(name);
+        for index in 0..all.length() {
+            values.push((
+                name.to_owned(),
+                all.get(index)
+                    .as_string()
+                    .ok_or("Invalid launch parameter")?,
+            ));
         }
-        Err((plugin, err)) => {
-            web_sys::console::warn_1(&format!("elodin-web: ignoring db={db:?}: {err}").into());
-            plugin
+    }
+    launch::parse(&values)
+}
+
+fn publish_events(mut events: MessageReader<ViewerEvent>) {
+    for event in events.read() {
+        match event {
+            ViewerEvent::Connecting => dispatch("elodin-connecting", None),
+            ViewerEvent::Ready => dispatch("elodin-ready", None),
+            ViewerEvent::Failed(error) => dispatch("elodin-error", Some(error)),
         }
     }
 }
 
-/// Host `cargo clippy` typechecks this bin. The connection API is wasm-only.
-#[cfg(not(target_family = "wasm"))]
-fn apply_db_query(plugin: EditorPlugin, db: &str) -> EditorPlugin {
-    let _ = db;
-    plugin
-}
-
-/// `?db=host:port` connects immediately. `host` may be an IP or a DNS name.
-fn db_query_value() -> Option<String> {
-    let window = web_sys::window()?;
-    let search = window.location().search().ok()?;
-    let params = UrlSearchParams::new_with_str(&search).ok()?;
-    params.get("db")
-}
-
-fn log_startup() {
-    web_sys::console::log_1(&"elodin-web: Startup".into());
-}
-
-fn log_first_update(mut done: Local<bool>) {
-    if *done {
-        return;
+fn dispatch(name: &str, error: Option<&str>) {
+    let init = web_sys::CustomEventInit::new();
+    if let Some(error) = error {
+        init.set_detail(&error.into());
     }
-    *done = true;
-    web_sys::console::log_1(&"elodin-web: first Update".into());
-    if let (Some(window), Ok(event)) = (web_sys::window(), web_sys::Event::new("elodin-ready")) {
+    if let (Some(window), Ok(event)) = (
+        web_sys::window(),
+        web_sys::CustomEvent::new_with_event_init_dict(name, &init),
+    ) {
         let _ = window.dispatch_event(&event);
     }
 }

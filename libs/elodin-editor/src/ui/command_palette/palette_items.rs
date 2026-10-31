@@ -1253,7 +1253,15 @@ fn queue_save_layout_now(
     connection_addr: Option<Res<ConnectionAddr>>,
     mut in_flight: ResMut<LayoutSaveInFlight>,
     mut failed: MessageWriter<DocumentCommandFailed>,
+    capabilities: Option<Res<crate::ViewerCapabilities>>,
 ) {
+    if capabilities.as_ref().is_some_and(|c| !c.recording_write) {
+        failed.write(DocumentCommandFailed {
+            title: "Read-only viewer".into(),
+            message: "This viewer cannot save changes to the recording".into(),
+        });
+        return;
+    }
     if in_flight.task.is_some() {
         failed.write(DocumentCommandFailed {
             title: "Failed to Save Layout".to_string(),
@@ -1429,7 +1437,15 @@ fn queue_save_schematic_db_now(
     mut pending_key: ResMut<PendingSchematicSaveKey>,
     mut save_in_flight: ResMut<SchematicSaveInFlight>,
     mut failed: MessageWriter<DocumentCommandFailed>,
+    capabilities: Option<Res<crate::ViewerCapabilities>>,
 ) {
+    if capabilities.as_ref().is_some_and(|c| !c.recording_write) {
+        failed.write(DocumentCommandFailed {
+            title: "Read-only viewer".into(),
+            message: "This viewer cannot save changes to the recording".into(),
+        });
+        return;
+    }
     // A "Save As" supplies an explicit key; a plain "Save" overwrites whatever
     // schematic is currently active (falling back to the default main key on a
     // fresh DB). Resolve the target without consuming the pending name yet: a
@@ -1748,6 +1764,10 @@ fn open_schematic_item(key: String) -> PaletteItem {
         SCHEMATIC_LABEL,
         move |_: In<String>,
               tx: Res<PacketTx>,
+              capabilities: Res<crate::ViewerCapabilities>,
+              mut open: MessageWriter<
+            crate::plugins::kdl_document::OpenDocumentFromActiveRequest,
+        >,
               config: Res<DbConfig>,
               mut pending_active: ResMut<PendingActiveSchematic>,
               mut last_synced: ResMut<LastSyncedActiveKey>,
@@ -1764,6 +1784,18 @@ fn open_schematic_item(key: String) -> PaletteItem {
             // we're leaving so the pin releases if the pointer moves elsewhere.
             // Drop the CLI `--kdl` pin so sticky sync cannot re-open the local file.
             initial_kdl.0 = None;
+            if !capabilities.recording_write {
+                open.write(
+                    crate::plugins::kdl_document::OpenDocumentFromActiveRequest {
+                        key: key.clone(),
+                        save_path: None,
+                        only_if_changed: false,
+                        explicit: true,
+                        revision: None,
+                    },
+                );
+                return PaletteEvent::Exit;
+            }
             let superseded = config.schematic_active().map(str::to_string);
             pending_active.pin(key.clone(), superseded);
             // Force a reload even when the chosen key is already `schematic.active`:
@@ -1894,7 +1926,13 @@ fn clear_skybox() -> PaletteItem {
          mut current_document: ResMut<CurrentDocument>,
          mut document_assets: ResMut<Assets<SchematicDocumentAsset>>,
          mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
-         tx: Res<PacketTx>| {
+         tx: Res<PacketTx>,
+         capabilities: Option<Res<crate::ViewerCapabilities>>| {
+            if capabilities.is_some_and(|c| !c.recording_write) {
+                return PaletteEvent::Error(
+                    "This viewer cannot change the recording skybox".into(),
+                );
+            }
             if cache.active.is_none() && schematic.skybox.is_none() {
                 return PaletteEvent::Error("No skybox is active".into());
             }
@@ -1939,7 +1977,13 @@ fn activate_skybox_item(label: String, name: String) -> PaletteItem {
               mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
               pending_active: Res<PendingActiveSchematic>,
               config: Res<DbConfig>,
-              tx: Res<PacketTx>| {
+              tx: Res<PacketTx>,
+              capabilities: Option<Res<crate::ViewerCapabilities>>| {
+            if capabilities.is_some_and(|c| !c.recording_write) {
+                return PaletteEvent::Error(
+                    "This viewer cannot change the recording skybox".into(),
+                );
+            }
             skyboxes.write(SetActiveSkybox::ByName(name.clone()));
             let write_key = active_write_key(&pending_active, &last_synced_key, &config);
             SkyboxDocumentSyncMut {
@@ -2511,7 +2555,10 @@ impl Default for PalettePage {
             PaletteItem::new(
                 "Toggle Recording",
                 SIMULATION_LABEL,
-                |_: In<String>, packet_tx: Res<PacketTx>, mut simulating: ResMut<IsRecording>| {
+                |_: In<String>, packet_tx: Res<PacketTx>, mut simulating: ResMut<IsRecording>, capabilities: Res<crate::ViewerCapabilities>| {
+                    if !capabilities.recording_write {
+                        return PaletteEvent::Error("This viewer cannot change recording state".into());
+                    }
                     simulating.0 = !simulating.0;
                     packet_tx.send_msg(SetDbConfig {
                         recording: Some(simulating.0),
@@ -2578,6 +2625,31 @@ mod tests {
     use impeller_kdl::FromKdl;
     use impeller_wkt::Schematic;
     use std::path::PathBuf;
+
+    #[test]
+    fn read_only_viewer_rejects_schematic_and_layout_uploads() {
+        use bevy::ecs::system::RunSystemOnce;
+        use bevy::prelude::Messages;
+        let mut world = World::new();
+        world.insert_resource(crate::ViewerCapabilities::READ_ONLY);
+        world.insert_resource(CurrentSchematic(Schematic::default()));
+        world.init_resource::<CurrentWindowSchematics>();
+        world.init_resource::<DbConfig>();
+        world.init_resource::<PendingSchematicSaveKey>();
+        world.init_resource::<SchematicSaveInFlight>();
+        world.init_resource::<LayoutSaveInFlight>();
+        world.init_resource::<Messages<DocumentCommandFailed>>();
+        world.run_system_once(queue_save_schematic_db_now).unwrap();
+        world.run_system_once(queue_save_layout_now).unwrap();
+        let failures: Vec<_> = world
+            .resource_mut::<Messages<DocumentCommandFailed>>()
+            .drain()
+            .collect();
+        assert_eq!(failures.len(), 2);
+        assert!(failures.iter().all(|e| e.title == "Read-only viewer"));
+        assert!(world.resource::<SchematicSaveInFlight>().task.is_none());
+        assert!(world.resource::<LayoutSaveInFlight>().task.is_none());
+    }
 
     fn parse_saved_schematic(kdl: &str) -> Schematic {
         Schematic::from_kdl(kdl).expect("saved KDL should parse")

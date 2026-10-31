@@ -141,6 +141,7 @@ impl egui_table::TableDelegate for QueryTableResults<'_> {
 
 #[derive(SystemParam)]
 pub struct QueryTableWidget<'w, 's> {
+    capabilities: Option<Res<'w, crate::ViewerCapabilities>>,
     states: Query<'w, 's, &'static mut QueryTableData>,
     eql_context: ResMut<'w, EqlContext>,
     selected_range: Res<'w, SelectedTimeRange>,
@@ -161,6 +162,7 @@ impl WidgetSystem for QueryTableWidget<'_, '_> {
         QueryTablePane { entity, .. }: Self::Args,
     ) -> Self::Output {
         let QueryTableWidget {
+            capabilities,
             mut states,
             mut eql_context,
             selected_range,
@@ -168,6 +170,10 @@ impl WidgetSystem for QueryTableWidget<'_, '_> {
             last_updated,
             mut commands,
         } = state.params_mut(world);
+        if capabilities.as_ref().is_some_and(|c| !c.sql_queries) {
+            ui.label("SQL queries are disabled for this viewer");
+            return;
+        }
         let Ok(mut table) = states.get_mut(entity) else {
             return;
         };

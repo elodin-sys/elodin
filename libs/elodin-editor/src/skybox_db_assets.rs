@@ -72,7 +72,11 @@ fn skybox_still_desired(
     connection_addr: Option<&ConnectionAddr>,
     key: &MirrorKey,
 ) -> bool {
-    let Some(addr) = connection_addr.map(|addr| addr.socket) else {
+    let Some(addr) = connection_addr.map(|addr| {
+        addr.endpoint()
+            .socket_addr()
+            .expect("TCP connection required")
+    }) else {
         return false;
     };
     matches!(
@@ -252,7 +256,10 @@ pub fn sync_db_skybox_assets_from_config(
         return;
     }
     let key = MirrorKey {
-        addr: connection_addr.socket,
+        addr: connection_addr
+            .endpoint()
+            .socket_addr()
+            .expect("TCP connection required"),
         skybox: desired.clone(),
     };
     if mirror.synced.as_ref() == Some(&key) {
@@ -280,7 +287,10 @@ pub fn sync_db_skybox_assets_from_config(
     }
 
     in_flight.key = Some(key);
-    let connection_addr = connection_addr.socket;
+    let connection_addr = connection_addr
+        .endpoint()
+        .socket_addr()
+        .expect("TCP connection required");
     in_flight.task = Some(IoTaskPool::get().spawn(async move {
         tokio::runtime::Runtime::new()
             .map_err(|err| err.to_string())?
@@ -426,7 +436,10 @@ pub fn upload_active_skybox_assets_to_db(
         None => return,
     };
 
-    let addr = connection_addr.socket;
+    let addr = connection_addr
+        .endpoint()
+        .socket_addr()
+        .expect("TCP connection required");
     let key = MirrorKey {
         addr,
         skybox: desired.clone(),

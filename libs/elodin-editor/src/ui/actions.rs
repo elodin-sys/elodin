@@ -185,7 +185,12 @@ pub fn spawn_lua_actor(
     status: Res<ThreadConnectionStatus>,
     mut last_status: Local<Option<ConnectionStatus>>,
     mut commands: Commands,
+    capabilities: Option<Res<crate::ViewerCapabilities>>,
 ) {
+    if capabilities.is_some_and(|c| !c.sql_queries || !c.recording_write) {
+        commands.remove_resource::<LuaActor>();
+        return;
+    }
     #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
     {
         let _ = (lua, addr, status, last_status, commands);
@@ -203,7 +208,11 @@ pub fn spawn_lua_actor(
             && lua.is_none()
             && status == ConnectionStatus::Success
         {
-            commands.insert_resource(LuaActor::spawn(addr.socket));
+            commands.insert_resource(LuaActor::spawn(
+                addr.endpoint()
+                    .socket_addr()
+                    .expect("TCP connection required"),
+            ));
         }
         if lua.is_some() {
             match status {

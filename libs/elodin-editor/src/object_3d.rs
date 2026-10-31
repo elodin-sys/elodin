@@ -80,12 +80,15 @@ pub fn resolve_db_asset_url(path: &str, connection_addr: Option<SocketAddr>) -> 
 
 pub fn resolve_db_endpoint(path: &str, endpoint: Option<&impeller_bevy::DbEndpoint>) -> String {
     if let Some(name) = path.strip_prefix("db:") {
-        let name = name.trim_start_matches('/');
-        let base = match endpoint {
-            Some(endpoint) => endpoint.http_base(),
-            None => assets_http_base("127.0.0.1:2240".parse().expect("valid addr")),
-        };
-        format!("{base}/{name}")
+        let fallback =
+            impeller_bevy::DbEndpoint::from_socket("127.0.0.1:2240".parse().expect("valid addr"));
+        endpoint
+            .unwrap_or(&fallback)
+            .asset_url(name)
+            .unwrap_or_else(|err| {
+                bevy::log::error!("{err}");
+                "invalid-db-asset://invalid".to_string()
+            })
     } else {
         path.to_string()
     }

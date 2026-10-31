@@ -669,7 +669,10 @@ fn sync_headless_skybox(params: SyncHeadlessSkyboxParams) {
 
     if let (Some(connection_addr), Some(name)) = (connection_addr.as_deref(), &desired) {
         if crate::skybox_db_assets::db_skybox_mirror_pending(
-            connection_addr.socket,
+            connection_addr
+                .endpoint()
+                .socket_addr()
+                .expect("TCP connection required"),
             name,
             &mirror,
             &in_flight,
@@ -677,7 +680,14 @@ fn sync_headless_skybox(params: SyncHeadlessSkyboxParams) {
             render_gate.applied = false;
             return;
         }
-        if crate::skybox_db_assets::db_skybox_mirror_synced(connection_addr.socket, name, &mirror) {
+        if crate::skybox_db_assets::db_skybox_mirror_synced(
+            connection_addr
+                .endpoint()
+                .socket_addr()
+                .expect("TCP connection required"),
+            name,
+            &mirror,
+        ) {
             render_gate.applied = false;
             if cache.active.as_deref() == Some(name.as_str()) {
                 skybox_writer.write(SetActiveSkybox::ByName(name.clone()));

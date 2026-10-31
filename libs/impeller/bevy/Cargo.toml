@@ -42,6 +42,7 @@ smallvec.version = "1.11.2"
 compact_str = "0.9"
 tracing = "0.1"
 web-time = "1.1.0"
+url = "2.5"
 
 # error
 miette.version = "7.2"
@@ -65,3 +66,7 @@ web-sys = { version = "0.3", features = [
   "MessageEvent",
   "WebSocket",
 ] }
+
+[target.'cfg(target_family = "wasm")'.dev-dependencies]
+wasm-bindgen-test = "0.3"
+wasm-bindgen-futures = "0.4"

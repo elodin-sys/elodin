@@ -142,6 +142,7 @@ web-sys = { version = "0.3", features = [
   "Request",
   "RequestInit",
   "RequestMode",
+  "RequestCredentials",
   "Response",
   "Window",
 ] }

@@ -8,6 +8,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 use web_time::Instant;
 
+type RecordingIdentity = (Option<impeller_bevy::DbEndpoint>, Option<i64>);
+
 use super::commands::*;
 use super::messages::*;
 use super::operations::{
@@ -229,15 +231,34 @@ pub(super) fn handle_open_document_requests(
 pub(super) fn handle_open_document_from_active_requests(
     mut requests: MessageReader<OpenDocumentFromActiveRequest>,
     connection_addr: Option<Res<impeller_bevy::ConnectionAddr>>,
-    pending_active: Res<PendingActiveSchematic>,
+    mut pending_active: ResMut<PendingActiveSchematic>,
     mut fetch: ResMut<ActiveSchematicFetch>,
     mut current_document: ResMut<CurrentDocument>,
     mut last_content: ResMut<LastActiveSchematicContent>,
+    mut last_synced_key: ResMut<LastSyncedActiveKey>,
     mut last_synced_revision: Option<ResMut<LastSyncedAssetsRevision>>,
     mut loaded: MessageWriter<DocumentLoaded>,
     mut failed: MessageWriter<DocumentCommandFailed>,
+    config: Option<Res<DbConfig>>,
+    mut previous_recording: Local<Option<RecordingIdentity>>,
 ) {
     let addr = connection_addr.as_deref().map(|c| c.endpoint().clone());
+    let identity = (
+        addr.clone(),
+        config
+            .as_ref()
+            .and_then(|c| c.time_start_timestamp_micros()),
+    );
+    if previous_recording
+        .as_ref()
+        .is_some_and(|previous| previous != &identity)
+    {
+        *fetch = ActiveSchematicFetch::default();
+        *last_content = LastActiveSchematicContent::default();
+        current_document.clear();
+        *pending_active = PendingActiveSchematic::default();
+    }
+    *previous_recording = Some(identity);
 
     // Latest request wins: a newer active schematic supersedes any in-flight
     // fetch so we never apply a stale load after the user switched schematics.
@@ -380,6 +401,18 @@ pub(super) fn handle_open_document_from_active_requests(
     ) {
         Ok(document) => {
             last_content.record(&request.key, &fetched.content);
+            // Loading a recording must establish its baseline even when the
+            // host disables skybox write-back or the build omits skyboxes.
+            if let Some(config) = config.as_ref()
+                && config.schematic_active() == Some(request.key.as_str())
+            {
+                last_synced_key.0 = Some(request.key.clone());
+                if let Some(revision) = last_synced_revision.as_deref_mut() {
+                    revision.revision = Some(config.assets_revision());
+                    revision.suppress_next = false;
+                    revision.requested = None;
+                }
+            }
             loaded.write(DocumentLoaded {
                 save_path: current_document.save_path.clone(),
                 document,
@@ -565,6 +598,68 @@ pub(super) fn emit_document_load_failures(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn active_fetch_records_sync_baseline_without_skybox_writeback() {
+        let mut app = App::new();
+        app.add_plugins(bevy::app::TaskPoolPlugin::default());
+        let mut config = DbConfig::default();
+        config.set_schematic_active("schematics/main.kdl");
+        config.metadata.insert("assets.revision".into(), "2".into());
+        app.insert_resource(config)
+            .insert_resource(crate::ViewerCapabilities::READ_ONLY)
+            .init_resource::<CurrentDocument>()
+            .init_resource::<PendingActiveSchematic>()
+            .init_resource::<LastActiveSchematicContent>()
+            .init_resource::<LastSyncedActiveKey>()
+            .init_resource::<LastSyncedAssetsRevision>()
+            .add_message::<OpenDocumentFromActiveRequest>()
+            .add_message::<DocumentLoaded>()
+            .add_message::<DocumentCleared>()
+            .add_message::<DocumentCommandFailed>()
+            .insert_resource(ActiveSchematicFetch {
+                key: Some("schematics/main.kdl".into()),
+                task: Some(IoTaskPool::get().spawn(async {
+                    ActiveSchematicFetched {
+                        request: request("schematics/main.kdl"),
+                        result: Ok(FetchedActiveSchematic {
+                            content: "viewport {\n}\n".into(),
+                            windows_changed: false,
+                        }),
+                    }
+                })),
+                ..Default::default()
+            })
+            .add_systems(Update, handle_open_document_from_active_requests);
+        for _ in 0..1000 {
+            app.update();
+            if app.world().resource::<LastSyncedActiveKey>().0.is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            app.world().resource::<LastSyncedActiveKey>().0.as_deref(),
+            Some("schematics/main.kdl")
+        );
+        assert_eq!(
+            app.world().resource::<LastSyncedAssetsRevision>().revision,
+            Some(2)
+        );
+        // A reconnect repeats the same config. It must preserve local layout
+        // rather than request another load of the unchanged schematic.
+        app.world_mut().resource_mut::<DbConfig>().recording = false;
+        app.add_systems(
+            Update,
+            (|| None::<PathBuf>).pipe(super::super::operations::sync_document_from_config),
+        );
+        app.update();
+        assert!(
+            app.world()
+                .resource::<Messages<OpenDocumentFromActiveRequest>>()
+                .is_empty()
+        );
+    }
 
     fn request(key: &str) -> OpenDocumentFromActiveRequest {
         OpenDocumentFromActiveRequest {

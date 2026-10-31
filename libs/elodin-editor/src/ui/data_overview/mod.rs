@@ -1187,7 +1187,20 @@ pub fn trigger_time_range_queries(
 pub fn dispatch_time_range_queries(
     mut time_ranges: ResMut<ComponentTimeRanges>,
     mut commands: Commands,
+    capabilities: Option<Res<crate::ViewerCapabilities>>,
 ) {
+    // Restricted viewers use typed sparkline queries. Exact SQL range/count
+    // statistics remain unavailable when the host disables SQL.
+    if capabilities.as_ref().is_some_and(|c| !c.sql_queries) {
+        if matches!(
+            time_ranges.state,
+            TimeRangeQueryState::QueryingTimeRanges(_)
+        ) {
+            time_ranges.state = TimeRangeQueryState::QueryingSparklines(Instant::now());
+            time_ranges.current_batch = 0;
+        }
+        return;
+    }
     if !matches!(
         time_ranges.state,
         TimeRangeQueryState::QueryingTimeRanges(_)
@@ -1298,6 +1311,26 @@ fn finest_sample_spacing_micros(time_ranges: &ComponentTimeRanges) -> Option<i64
 mod sample_spacing_tests {
     use super::*;
     use impeller_bevy::{ComponentPathRegistry, ComponentSchemaRegistry};
+
+    #[test]
+    fn restricted_viewer_skips_sql_statistics() {
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = bevy::prelude::World::new();
+        world.insert_resource(crate::ViewerCapabilities::READ_ONLY);
+        world.insert_resource(ComponentTimeRanges {
+            state: TimeRangeQueryState::QueryingTimeRanges(Instant::now()),
+            tables_to_query: vec!["component".into()],
+            total_queries: 1,
+            ..Default::default()
+        });
+        world.run_system_once(dispatch_time_range_queries).unwrap();
+        let ranges = world.resource::<ComponentTimeRanges>();
+        assert!(matches!(
+            ranges.state,
+            TimeRangeQueryState::QueryingSparklines(_)
+        ));
+        assert_eq!(ranges.pending_queries, 0);
+    }
 
     fn ranges(entries: &[(&str, i64, i64, usize)]) -> ComponentTimeRanges {
         let mut time_ranges = ComponentTimeRanges::default();

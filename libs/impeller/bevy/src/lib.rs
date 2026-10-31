@@ -47,8 +47,8 @@ pub use impeller_wkt::{ComponentPart, ComponentPath};
 pub use address;
 pub mod channels;
 pub use channels::{
-    ConnectionAddr, ConnectionStatus, DbEndpoint, MsgPacketRx, MsgPacketTx, PacketRx, PacketTx,
-    QUEUE_LEN, ThreadConnectionStatus,
+    BrowserEndpoints, ConnectionAddr, ConnectionStatus, DbEndpoint, MsgPacketRx, MsgPacketTx,
+    PacketRx, PacketTx, QUEUE_LEN, ThreadConnectionStatus,
 };
 
 #[cfg(feature = "tcp")]
@@ -64,6 +64,14 @@ pub use ws::*;
 #[derive(Debug, Message)]
 pub enum DbMessage {
     UpdateConfig,
+}
+
+/// Handshake evidence for the current connection, reset by `NewConnection`.
+#[derive(Resource, Default)]
+pub struct InitialConnectionState {
+    pub generation: u64,
+    pub config_received: bool,
+    pub schema_received: bool,
 }
 
 /// Per-component time-series cache. Stores raw component values keyed by
@@ -552,6 +560,12 @@ pub struct BackfillState {
 }
 
 impl BackfillState {
+    /// Whether the server completed historical data for this component.
+    /// Persistent message subscriptions do not affect this result.
+    pub fn is_complete(&self, component_id: ComponentId) -> bool {
+        self.complete.contains(&component_id)
+    }
+
     /// Clear backfill bookkeeping for a component so it can be re-fetched if
     /// re-subscribed.
     pub fn clear_component(&mut self, component_id: ComponentId) {
@@ -1035,6 +1049,31 @@ fn sink_inner(
             }
         }
         track_component_filter_support(world, &pkt)?;
+        if let OwnedPacket::Msg(m) = &pkt
+            && let Some(mut state) = world.get_resource_mut::<InitialConnectionState>()
+        {
+            match m.id {
+                NewConnection::ID => {
+                    *state = InitialConnectionState {
+                        generation: state.generation.wrapping_add(1),
+                        ..Default::default()
+                    };
+                }
+                DbConfig::ID => {
+                    m.parse::<DbConfig>()?;
+                    state.config_received = true;
+                }
+                DumpMetadataResp::ID => {
+                    m.parse::<DumpMetadataResp>()?;
+                    state.config_received = true;
+                }
+                DumpSchemaResp::ID => {
+                    m.parse::<DumpSchemaResp>()?;
+                    state.schema_received = true;
+                }
+                _ => {}
+            }
+        }
         let mut world_sink = world_sink_state
             .get_mut(world)
             .expect("WorldSink params invalid");
@@ -1678,6 +1717,7 @@ impl Plugin for ImpellerPlugin {
             .init_resource::<MsgRequestIdAlloc>()
             .init_resource::<MsgRequestQueue>()
             .init_resource::<DbConfig>()
+            .init_resource::<InitialConnectionState>()
             .init_resource::<TelemetryCache>()
             .init_resource::<BackfillState>()
             .init_resource::<SeriesStoreLoadState>()
@@ -2066,13 +2106,23 @@ impl CommandsExt for Commands<'_, '_> {
 }
 
 pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPacket> {
+    connection_packets_with_behavior(stream_id, StreamBehavior::RealTimeBatched)
+}
+
+/// Browser clients use a paced stream instead of an unbounded live stream.
+pub fn browser_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPacket> {
+    connection_packets_with_behavior(stream_id, StreamBehavior::FixedRate(Default::default()))
+}
+
+fn connection_packets_with_behavior(
+    stream_id: StreamId,
+    behavior: StreamBehavior,
+) -> impl Iterator<Item = LenPacket> {
     [
-        // RealTimeBatched delivers all component data whenever new data
-        // arrives (batched per last_updated change).  For recorded DBs this
-        // sends one table then blocks — historical data is loaded via
-        // GetTimeSeries backfill (triggered after DumpMetadata).
+        // Desktop clients receive live batches. Browser clients receive paced
+        // values. Both load historical data through GetTimeSeries backfill.
         Stream {
-            behavior: StreamBehavior::RealTimeBatched,
+            behavior,
             id: stream_id,
         }
         .into_len_packet(),
@@ -2407,6 +2457,23 @@ mod series_store_allowlist_tests {
     fn default_connection_opens_stream_without_a_filter() {
         let packets: Vec<_> = new_connection_packets(42).collect();
         assert_eq!(packets[0].as_packet().header.id, Stream::ID);
+    }
+
+    #[test]
+    fn browser_handshake_paces_the_stream_without_changing_desktop_behavior() {
+        let browser: Vec<_> = browser_connection_packets(42).collect();
+        let desktop: Vec<_> = new_connection_packets(42).collect();
+        let stream: Stream = postcard::from_bytes(&browser[0].inner[8..]).unwrap();
+        assert_eq!(stream.id, 42);
+        assert!(
+            matches!(stream.behavior, StreamBehavior::FixedRate(rate) if rate.frequency == 60 && rate.timestep > 0)
+        );
+        let stream: Stream = postcard::from_bytes(&desktop[0].inner[8..]).unwrap();
+        assert!(matches!(stream.behavior, StreamBehavior::RealTimeBatched));
+        assert_eq!(browser.len(), desktop.len());
+        for (browser, desktop) in browser[1..].iter().zip(&desktop[1..]) {
+            assert_eq!(browser.inner, desktop.inner);
+        }
     }
 
     #[test]
