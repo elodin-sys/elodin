@@ -181,8 +181,10 @@ where
         let compiled_pipe = self.pipe.compile(world)?;
         self.init(&mut builder)?;
         let init_u = Query::<U>::param(&builder)?;
-        let sim_dt = ComponentArray::<SimulationTimeStep>::param(&builder)?;
-        let dt = self.dt.map(Scalar::from).unwrap_or_else(|| sim_dt.get(0).0);
+        let sim_dt = ComponentArray::<SimulationTimeStep>::param(&builder)?
+            .get(0)
+            .0;
+        let dt = self.dt.map(Scalar::from).unwrap_or_else(|| sim_dt.clone());
         let stage_time = ComponentArray::<StageTime>::param(&builder)?;
 
         // dt * Σ w_j k_j over the nonzero weights.
@@ -214,7 +216,7 @@ where
         let mut k = Vec::with_capacity(self.tableau.b.len());
         for (a, &c) in self.tableau.a.iter().zip(self.tableau.c) {
             advance(a, &k)?.insert_into_builder(&mut builder);
-            set_stage_time(&stage_time, &dt * c, &mut builder)?;
+            set_stage_time(&stage_time, &sim_dt * c, &mut builder)?;
             compiled_pipe.clone().insert_into_builder(&mut builder)?;
             k.push(Query::<(S,)>::param(&builder)?.map(|s: S| DU::from(s))?);
         }

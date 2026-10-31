@@ -77,6 +77,9 @@ AppliedTorque = el.Annotated[
 DriveFrequency = el.Annotated[
     jax.Array, el.Component("drive_frequency", el.ComponentType(el.PrimitiveType.F64, (1,)))
 ]
+StageProbe = el.Annotated[
+    jax.Array, el.Component("stage_probe", el.ComponentType(el.PrimitiveType.F64, (1,)))
+]
 
 
 @el.map
@@ -108,6 +111,13 @@ def drive(
         el.Force,
         lambda pos, w: el.SpatialForce(linear=-pos.linear() + jnp.cos(w * t) * np.eye(3)[0]),
     )
+
+
+@el.system
+def probe_stage_time(
+    stage_time: el.Query[el.StageTime], q: el.Query[StageProbe]
+) -> el.Query[StageProbe]:
+    return q.map(StageProbe, lambda _: stage_time[0] * jnp.ones(1))
 
 
 def _qmul(a, b):
@@ -309,6 +319,20 @@ def test_order(method, case, metric):
     assert orders and orders[-1] > METHODS[method].order - 0.5, orders
 
 
+@pytest.mark.parametrize("method", ["Rk4", "Verlet"])
+def test_stage_time_follows_the_simulation_step(method):
+    # A six_dof time_step that differs from the simulation's must not move the effectors' clock.
+    dt = 0.01
+    w = el.World()
+    w.spawn([el.Body(), el.C(StageProbe, np.zeros(1))], "probe")
+    sys = el.six_dof(10 * dt, sys=probe_stage_time, integrator=getattr(el.Integrator, method))
+    exec = w.build(sys, simulation_rate=1.0 / dt)
+    exec.run(1, show_progress=False)
+    # The last evaluation sits at the end of the step.
+    probe = exec.history(["probe.stage_probe"])["probe.stage_probe"].to_numpy()
+    assert probe[1, 0] == pytest.approx(dt)
+
+
 @pytest.mark.parametrize("method", [name for name, m in METHODS.items() if m.embedded_order])
 def test_step_error_estimates_the_embedded_solution(method):
     m = METHODS[method]
@@ -321,7 +345,7 @@ def test_step_error_estimates_the_embedded_solution(method):
         exec.run(1, show_progress=False)
         df = exec.history(["spring.world_pos", "spring.step_error"])
         estimate = df["spring.step_error"].to_numpy()[1, 1]
-        # The lower-order solution's error bounds the step's own.
+        # On this smooth problem the estimate exceeds the kept solution's actual error.
         assert (
             abs(df["spring.world_pos"].to_numpy()[1, 4] - np.cos(np.sqrt(SPRING_K) * h)) < estimate
         )

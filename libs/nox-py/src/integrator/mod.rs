@@ -17,6 +17,8 @@ pub enum Integrator {
     Verlet,
 }
 
+/// Sets `StageTime` for the next evaluation of the effectors. `t` is measured in the
+/// simulation step that effectors read, even when the integrator's own step differs.
 fn set_stage_time(
     stage_time: &ComponentArray<StageTime>,
     t: Scalar<f64>,

@@ -54,8 +54,10 @@ where
         self.init(&mut builder)?;
         let x0 = Query::<X>::param(&builder)?;
         let v0 = Query::<V>::param(&builder)?;
-        let sim_dt = ComponentArray::<SimulationTimeStep>::param(&builder)?;
-        let dt = self.dt.map(Scalar::from).unwrap_or_else(|| sim_dt.get(0).0);
+        let sim_dt = ComponentArray::<SimulationTimeStep>::param(&builder)?
+            .get(0)
+            .0;
+        let dt = self.dt.map(Scalar::from).unwrap_or_else(|| sim_dt.clone());
         let half_dt = &dt * 0.5;
         let stage_time = ComponentArray::<StageTime>::param(&builder)?;
 
@@ -73,7 +75,7 @@ where
         v0.join_query(a0)
             .map(|v, a| v + dt.clone() * a)?
             .insert_into_builder(&mut builder);
-        set_stage_time(&stage_time, dt.clone(), &mut builder)?;
+        set_stage_time(&stage_time, sim_dt, &mut builder)?;
         compiled_pipe.insert_into_builder(&mut builder)?;
         let a1 = Query::<A>::param(&builder)?;
         v_half

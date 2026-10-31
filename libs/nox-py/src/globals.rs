@@ -11,8 +11,8 @@ pub struct SimulationTimeStep<R: OwnedRepr = Op>(pub Scalar<f64, R>);
 #[derive(Component, Clone, ReprMonad)]
 pub struct Tick<R: OwnedRepr = Op>(pub Scalar<u64, R>);
 
-/// Seconds past the start of the current step at which `six_dof` is evaluating its
-/// effectors; zero outside the integrator.
+/// Seconds past the start of the current simulation step at which `six_dof` is evaluating
+/// its effectors; zero outside the integrator.
 #[derive(Component, Clone, ReprMonad)]
 pub struct StageTime<R: OwnedRepr = Op>(pub Scalar<f64, R>);
 

@@ -14,7 +14,7 @@
 - **(feat)** Add `Integrator.Verlet` (velocity Verlet) to `six_dof`: second order, and symplectic when forces depend only on position, so energy errors stay bounded over long runs.
 - **(feat:examples)** `n-body` integrates with `Integrator.Verlet`.
 - **(feat)** Add `Integrator.Rk78`, the eighth-order solution of Fehlberg's 7(8) Runge-Kutta pair.
-- **(feat)** Add the global `StageTime` component: the seconds past the start of the step at which `six_dof` is evaluating its effectors, so time-dependent effectors keep the integrator's full order. Exports gain `globals.stage_time`.
+- **(feat)** Add the global `StageTime` component: the seconds past the start of the simulation step at which `six_dof` is evaluating its effectors, so time-dependent effectors keep the integrator's full order. Exports gain `globals.stage_time`.
 - **(fix:examples)** The voyager chapters interpolate Jupiter's position to each RK4 stage's time instead of holding it at the step's midpoint, cutting the integration error from about 650 m to a few meters.
 - **(feat)** Add `Integrator.Dp54`, the fifth-order solution of the Dormand-Prince 5(4) pair, with a fixed time step.
 - **(feat)** Add the `StepError` component: under `Integrator.Dp54` or `Integrator.Rk78`, bodies that have it receive each step's embedded error estimate (attitude, position, angular velocity, velocity).

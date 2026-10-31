@@ -524,7 +524,8 @@ Using the associated [elodin.Body] archetype and prebuilt components, we can cre
     `elodin.StageTime` component holds the seconds past the start of the step for the current evaluation (zero outside
     `six_dof`), so effectors that depend on time can follow it. The tick is incremented before the systems run, so the
     effectors' time is `(tick[0] - 1) * dt[0] + stage_time[0]` for an `el.Query[el.SimulationTick]`, an
-    `el.Query[el.SimulationTimeStep]`, and an `el.Query[el.StageTime]`.
+    `el.Query[el.SimulationTimeStep]`, and an `el.Query[el.StageTime]`. `StageTime` is measured in the simulation step
+    even when `six_dof` integrates with its own `time_step`, so this time advances with the simulation either way.
 
 ### _class_ `elodin.Integrator`
 
@@ -564,8 +565,10 @@ Using the associated [elodin.Body] archetype and prebuilt components, we can cre
 
     `Dp54` and `Rk78` estimate each step's error from their embedded lower-order solution. A body that has the `elodin.StepError`
     component, for example from `el.C(el.StepError, jnp.zeros(4))`, receives the estimate after every step: attitude (rad),
-    position, angular velocity, and velocity. It bounds the step's actual error, so graphing it shows whether the time step
-    is small enough, and where the dynamics are hardest to integrate.
+    position, angular velocity, and velocity. It is the difference between the pair's two solutions, which approximates the
+    lower-order solution's error and usually exceeds the error of the solution Elodin keeps, but it is an estimate, not a
+    guarantee. Graphed over a run, it shows whether the time step is small enough and where the dynamics are hardest to
+    integrate.
 
 - `elodin.Integrator.SemiImplicit` -> [elodin.Integrator]
 
