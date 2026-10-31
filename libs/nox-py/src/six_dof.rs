@@ -8,7 +8,9 @@ use nox::{
 };
 use std::sync::Arc;
 
-use crate::integrator::{ExplicitRk, Integrator, semi_implicit_euler, semi_implicit_euler_with_dt};
+use crate::integrator::{
+    ExplicitRk, Integrator, VelocityVerlet, semi_implicit_euler, semi_implicit_euler_with_dt,
+};
 use crate::{ComponentArray, ErasedSystem};
 
 #[derive(Component, ReprMonad)]
@@ -225,6 +227,10 @@ where
                 semi_implicit_euler_with_dt::<WorldPos, WorldVel, WorldAccel>(time_step);
             Arc::new(ErasedSystem::new(sys.pipe(integrate)))
         }
+        Integrator::Verlet => Arc::new(VelocityVerlet::<WorldPos, WorldVel, WorldAccel, _>::new(
+            sys,
+            Some(time_step),
+        )),
     }
 }
 
@@ -248,6 +254,9 @@ where
             let integrate = semi_implicit_euler::<WorldPos, WorldVel, WorldAccel>();
             Arc::new(ErasedSystem::new(sys.pipe(integrate)))
         }
+        Integrator::Verlet => Arc::new(VelocityVerlet::<WorldPos, WorldVel, WorldAccel, _>::new(
+            sys, None,
+        )),
     }
 }
 

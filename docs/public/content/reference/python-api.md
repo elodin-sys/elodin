@@ -537,6 +537,14 @@ Using the associated [elodin.Body] archetype and prebuilt components, we can cre
 
     Kutta's third-order Runge-Kutta method, which evaluates the effectors 3 times per step.
 
+- `elodin.Integrator.Verlet` -> [elodin.Integrator]
+
+    [Velocity Verlet](https://en.wikipedia.org/wiki/Verlet_integration#Velocity_Verlet), a second-order method that evaluates the effectors 2 times per step.
+    When forces depend only on position, as in gravitational N-body problems, it is symplectic: energy errors stay bounded over
+    long runs instead of drifting, as they do with the Runge-Kutta integrators, and orbits keep their size. Forces that depend on
+    velocity, such as drag or the gyroscopic torque of a spinning body, leave it second order but not symplectic. You can review
+    the implementation [here](https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/verlet.rs).
+
 - `elodin.Integrator.SemiImplicit` -> [elodin.Integrator]
 
     Semi-Implicit Integrator: Elodin provides a built-in implementation for a [semi-implicit Euler integrator](https://en.wikipedia.org/wiki/Semi-implicit_Euler_method).

@@ -4,7 +4,9 @@ This example simulates a solar system with full all-pairs gravity and overlays
 truth trajectories loaded from configured CSV files.
 
 What it demonstrates:
-- Full graph gravity over all loaded bodies with `el.Integrator.Rk4`.
+- Full graph gravity over all loaded bodies with `el.Integrator.Verlet`. Gravity depends only on
+  position, so Verlet's energy error stays bounded over long runs instead of drifting, and it
+  evaluates gravity half as often as `el.Integrator.Rk4`.
 - Truth-vs-sim visual overlay (ghost bodies + trails).
 - Higher simulation cadence than telemetry cadence.
 - Headless and editor-compatible execution with unified backend selection.

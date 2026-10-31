@@ -34,13 +34,15 @@ class Method:
     time_steps: tuple[float, ...]
     # Spring state after one step of h from (x, v) = (1, 0), as (x, v / (-k h)) in z = k h^2.
     one_step: Callable[[float], tuple[float, float]]
+    symplectic: bool = False
 
 
 METHODS = {
-    "SemiImplicit": Method(1, (0.02, 0.01, 0.005), lambda z: (1 - z, 1)),
+    "SemiImplicit": Method(1, (0.02, 0.01, 0.005), lambda z: (1 - z, 1), symplectic=True),
     "Rk2": Method(2, (0.02, 0.01, 0.005), lambda z: (1 - z / 2, 1)),
     "Rk3": Method(3, (0.04, 0.02, 0.01), lambda z: (1 - z / 2, 1 - z / 6)),
     "Rk4": Method(4, (0.04, 0.02, 0.01), lambda z: (1 - z / 2 + z**2 / 24, 1 - z / 6)),
+    "Verlet": Method(2, (0.02, 0.01, 0.005), lambda z: (1 - z / 2, 1 - z / 4), symplectic=True),
 }
 
 SpringConstant = el.Annotated[
@@ -245,6 +247,17 @@ def test_one_step(method):
 def test_order(method, case, metric):
     orders = observed_orders(method, case, metric)
     assert orders and min(orders) > METHODS[method].order - 0.5, orders
+
+
+@pytest.mark.parametrize("method", [name for name, m in METHODS.items() if m.symplectic])
+def test_symplectic_energy_error_is_bounded(method):
+    # Over 200 Kepler orbits the energy error oscillates instead of drifting.
+    dt = 0.02
+    pos, vel = _simulate(method, dt, round(200 * 2 * np.pi / dt))["kepler"]
+    energy = 0.5 * np.sum(vel[:, 3:] ** 2, -1) - 1 / np.linalg.norm(pos[:, 4:], axis=-1)
+    err = np.abs(energy + 0.5)
+    quarter = len(err) // 4
+    assert err[-quarter:].max() < 2 * err[:quarter].max()
 
 
 if __name__ == "__main__":

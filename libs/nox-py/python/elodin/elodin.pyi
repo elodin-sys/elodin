@@ -23,6 +23,7 @@ class Integrator:
     SemiImplicit: Integrator
     Rk2: Integrator
     Rk3: Integrator
+    Verlet: Integrator
 
 class StepContext:
     """Context object passed to pre_step and post_step callbacks, providing direct DB read/write access.

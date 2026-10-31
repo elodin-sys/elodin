@@ -83,6 +83,7 @@ pub enum Integrator {
     SemiImplicit,
     Rk2,
     Rk3,
+    Verlet,
 }
 
 impl FromStr for Integrator {
@@ -94,6 +95,7 @@ impl FromStr for Integrator {
             "semi-implicit" => Ok(Integrator::SemiImplicit),
             "rk2" => Ok(Integrator::Rk2),
             "rk3" => Ok(Integrator::Rk3),
+            "verlet" => Ok(Integrator::Verlet),
             _ => Err(Error::PyO3(PyValueError::new_err("unknown integrator"))),
         }
     }
@@ -107,6 +109,7 @@ impl From<Integrator> for crate::integrator::Integrator {
             Integrator::SemiImplicit => I::SemiImplicit,
             Integrator::Rk2 => I::ExplicitRk(&RK2),
             Integrator::Rk3 => I::ExplicitRk(&RK3),
+            Integrator::Verlet => I::Verlet,
         }
     }
 }

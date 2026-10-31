@@ -246,7 +246,7 @@ def make_truth_post_step():
 
 
 def build_system() -> el.System:
-    return el.six_dof(sys=gravity, integrator=el.Integrator.Rk4)
+    return el.six_dof(sys=gravity, integrator=el.Integrator.Verlet)
 
 
 def get_default_max_ticks() -> int:
