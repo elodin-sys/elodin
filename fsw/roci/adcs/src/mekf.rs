@@ -18,7 +18,7 @@ pub fn calculate_covariance(
     Matrix::concat_in_dim([q_0, q_1], 0)
 }
 
-fn propagate_quaternion(
+pub fn propagate_quaternion(
     q: Quaternion<f64, ArrayRepr>,
     omega: Vector<f64, 3, ArrayRepr>,
     dt: f64,

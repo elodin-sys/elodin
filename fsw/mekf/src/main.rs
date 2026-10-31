@@ -8,7 +8,7 @@ use nox::{
     array::{Mat3, Quat, SpatialTransform, Vec3},
     tensor,
 };
-use roci_adcs::mekf::State;
+use roci_adcs::mekf::{State, propagate_quaternion};
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, path::PathBuf};
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
@@ -73,21 +73,12 @@ fn step(mut mekf: State, input: Input, config: &Config, time: i64) -> (State, Ou
     let accel_ref = Vec3::new(0.0, 0.0, 1.0);
     let mag_ref = config.mekf.mag_ref.normalize();
     let (accel_sigma, mag_sigma) = (config.mekf.accel_sigma, config.mekf.mag_sigma);
-    let b_hat = mekf.b_hat;
-    // One reference vector cannot observe gyro bias about its own axis, and updating the bias
-    // from it lets that component run away, so a single-vector update corrects attitude only.
     mekf = match (accel, mag) {
         (Some(accel), Some(mag)) => {
             mekf.estimate_attitude([accel, mag], [accel_ref, mag_ref], [accel_sigma, mag_sigma])
         }
-        (Some(accel), None) => State {
-            b_hat,
-            ..mekf.estimate_attitude([accel], [accel_ref], [accel_sigma])
-        },
-        (None, Some(mag)) => State {
-            b_hat,
-            ..mekf.estimate_attitude([mag], [mag_ref], [mag_sigma])
-        },
+        (Some(accel), None) => fuse_one(mekf, accel, accel_ref, accel_sigma),
+        (None, Some(mag)) => fuse_one(mekf, mag, mag_ref, mag_sigma),
         (None, None) => mekf.estimate_attitude([], [], []),
     };
     mekf.reset_if_invalid();
@@ -107,6 +98,25 @@ fn step(mut mekf: State, input: Input, config: &Config, time: i64) -> (State, Ou
 
 fn unit(v: Vec3<f64>) -> Option<Vec3<f64>> {
     v.norm().into_buf().is_normal().then(|| v.normalize())
+}
+
+/// Fuses a single reference vector. It cannot observe rotation or gyro bias about its own axis,
+/// and letting the update move either makes them run away, so the bias holds and rotation about
+/// that axis follows the gyro alone.
+fn fuse_one(mekf: State, measured: Vec3<f64>, reference: Vec3<f64>, sigma: f64) -> State {
+    let b_hat = mekf.b_hat;
+    let q_prop = propagate_quaternion(mekf.q_hat, mekf.omega - b_hat, mekf.dt);
+    let next = mekf.estimate_attitude([measured], [reference], [sigma]);
+    // `integrate_body` applies `delta` as q * [delta / 2, 1], normalized
+    let [x, y, z, w] = (q_prop.inverse() * next.q_hat).0.into_buf();
+    let delta = Vec3::new(x, y, z) * (2.0 / w);
+    let axis = q_prop.inverse() * reference;
+    let delta = delta - delta.dot(&axis) * axis;
+    State {
+        q_hat: q_prop.integrate_body(delta),
+        b_hat,
+        ..next
+    }
 }
 
 async fn run() -> anyhow::Result<()> {
@@ -363,17 +373,15 @@ mod tests {
         assert!(err < 1e-3, "field direction error {err}");
     }
 
-    /// Level and at rest with noisy sensors and one reference vector missing: the bias about the
-    /// remaining vector's axis is unobservable and must not run away into `gyro_est`, and the
-    /// remaining vector still holds its direction.
+    /// Level and at rest with noisy sensors and one reference vector missing: rotation and gyro
+    /// bias about the remaining vector's axis are unobservable, and neither may run away.
     #[test]
-    fn single_reference_keeps_the_rate_bounded() {
+    fn single_reference_holds_attitude_and_rate() {
         let config = Config::default();
         let mut rng = fastrand::Rng::with_seed(7);
         let mut noise = |std: f64| (rng.f64() * 2.0 - 1.0) * std * 3f64.sqrt();
-        let down = Vec3::new(0.0, 0.0, 1.0);
         let field = config.mekf.mag_ref.normalize();
-        for (use_accel, reference) in [(true, down), (false, field)] {
+        for use_accel in [true, false] {
             let mut mekf = new_state(&config);
             for i in 0..800 * 10 {
                 let accel = [noise(0.005), noise(0.005), 1.0 + noise(0.005)];
@@ -394,10 +402,11 @@ mod tests {
                     "use_accel={use_accel}: |gyro_est| = {rate} rad/s at sample {i}"
                 );
             }
-            let err = (mekf.q_hat.inverse() * reference - reference)
-                .norm()
-                .into_buf();
-            assert!(err < 5e-3, "use_accel={use_accel}: direction error {err}");
+            let err = att_err(&mekf.q_hat);
+            assert!(
+                err < 1e-2,
+                "use_accel={use_accel}: attitude error {err} rad"
+            );
         }
     }
 

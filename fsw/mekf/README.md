@@ -245,7 +245,7 @@ Subscribes to the `imu` vtable (accel, gyro, mag) at ~770 Hz.
 - **gyro**: converted from dps to rad/s, used directly as angular velocity
 - **accel**: normalized, used as gravity reference vector `[0, 0, 1]` (FRD: down = +Z)
 - **mag**: soft-iron calibrated via configurable `mag_cal.a` (3x3 matrix) and `mag_cal.b` (3-vector offset), then transformed with `[-1, 1, -1]` axis flip, then normalized
-- A zero mag (sent by sensor-fw when the BMM350 is missing) or a zero accel is left out of the update, so the filter keeps running on the remaining vector and the gyro. With a single vector the update corrects attitude but holds the gyro bias: one vector cannot observe bias about its own axis, or rotation about it, so without the mag the yaw estimate drifts
+- A zero mag (sent by sensor-fw when the BMM350 is missing) or a zero accel is left out of the update, so the filter keeps running on the remaining vector and the gyro. A single vector cannot observe rotation or gyro bias about its own axis, so its update holds the bias and leaves rotation about that axis to the gyro: without the mag, yaw drifts with the residual gyro bias
 - A non-finite gyro sample is replaced with the bias estimate, so that step propagates a zero corrected rate (the attitude holds, the covariance still grows); if the filter state itself becomes non-finite, it resets to identity attitude with zero bias
 
 ### Output Component (`aleph`)
