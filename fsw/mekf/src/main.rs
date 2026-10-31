@@ -73,12 +73,21 @@ fn step(mut mekf: State, input: Input, config: &Config, time: i64) -> (State, Ou
     let accel_ref = Vec3::new(0.0, 0.0, 1.0);
     let mag_ref = config.mekf.mag_ref.normalize();
     let (accel_sigma, mag_sigma) = (config.mekf.accel_sigma, config.mekf.mag_sigma);
+    let b_hat = mekf.b_hat;
+    // One reference vector cannot observe gyro bias about its own axis, and updating the bias
+    // from it lets that component run away, so a single-vector update corrects attitude only.
     mekf = match (accel, mag) {
         (Some(accel), Some(mag)) => {
             mekf.estimate_attitude([accel, mag], [accel_ref, mag_ref], [accel_sigma, mag_sigma])
         }
-        (Some(accel), None) => mekf.estimate_attitude([accel], [accel_ref], [accel_sigma]),
-        (None, Some(mag)) => mekf.estimate_attitude([mag], [mag_ref], [mag_sigma]),
+        (Some(accel), None) => State {
+            b_hat,
+            ..mekf.estimate_attitude([accel], [accel_ref], [accel_sigma])
+        },
+        (None, Some(mag)) => State {
+            b_hat,
+            ..mekf.estimate_attitude([mag], [mag_ref], [mag_sigma])
+        },
         (None, None) => mekf.estimate_attitude([], [], []),
     };
     mekf.reset_if_invalid();
@@ -352,6 +361,44 @@ mod tests {
         }
         let err = (mekf.q_hat.inverse() * mag_ref - mag).norm().into_buf();
         assert!(err < 1e-3, "field direction error {err}");
+    }
+
+    /// Level and at rest with noisy sensors and one reference vector missing: the bias about the
+    /// remaining vector's axis is unobservable and must not run away into `gyro_est`, and the
+    /// remaining vector still holds its direction.
+    #[test]
+    fn single_reference_keeps_the_rate_bounded() {
+        let config = Config::default();
+        let mut rng = fastrand::Rng::with_seed(7);
+        let mut noise = |std: f64| (rng.f64() * 2.0 - 1.0) * std * 3f64.sqrt();
+        let down = Vec3::new(0.0, 0.0, 1.0);
+        let field = config.mekf.mag_ref.normalize();
+        for (use_accel, reference) in [(true, down), (false, field)] {
+            let mut mekf = new_state(&config);
+            for i in 0..800 * 10 {
+                let accel = [noise(0.005), noise(0.005), 1.0 + noise(0.005)];
+                // undo the service's [-1, 1, -1] mag axis flip
+                let mag = (field * tensor![-1.0, 1.0, -1.0])
+                    .into_buf()
+                    .map(|x| x + noise(0.01));
+                let input = Input {
+                    accel: Vec3::from_buf(accel.map(|x| if use_accel { x as f32 } else { 0.0 })),
+                    gyro: Vec3::from_buf([(); 3].map(|_| noise(0.002).to_degrees() as f32)),
+                    mag: Vec3::from_buf(mag.map(|x| if use_accel { 0.0 } else { x as f32 })),
+                };
+                let (next, output) = step(mekf, input, &config, 0);
+                mekf = next;
+                let rate = output.gyro_est.norm().into_buf();
+                assert!(
+                    rate < 0.02,
+                    "use_accel={use_accel}: |gyro_est| = {rate} rad/s at sample {i}"
+                );
+            }
+            let err = (mekf.q_hat.inverse() * reference - reference)
+                .norm()
+                .into_buf();
+            assert!(err < 5e-3, "use_accel={use_accel}: direction error {err}");
+        }
     }
 
     #[test]
