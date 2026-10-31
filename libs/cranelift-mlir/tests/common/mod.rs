@@ -12,7 +12,7 @@ use cranelift_mlir::parser::parse_module;
 pub type TickFn = unsafe extern "C" fn(*const *const u8, *mut *mut u8);
 
 pub fn run_mlir(mlir: &str, inputs: &[&[u8]], output_sizes: &[usize]) -> Vec<Vec<u8>> {
-    run_mlir_with(mlir, inputs, output_sizes, CompileConfig::from_env())
+    run_mlir_with(mlir, inputs, output_sizes, CompileConfig::from_env(), false)
 }
 
 pub fn run_mlir_mem(mlir: &str, inputs: &[&[u8]], output_sizes: &[usize]) -> Vec<Vec<u8>> {
@@ -20,20 +20,37 @@ pub fn run_mlir_mem(mlir: &str, inputs: &[&[u8]], output_sizes: &[usize]) -> Vec
         force_pointer_abi_main: true,
         ..CompileConfig::from_env()
     };
-    run_mlir_with(mlir, inputs, output_sizes, config)
+    run_mlir_with(mlir, inputs, output_sizes, config, false)
+}
+
+/// `run_mlir` (`run_mlir_mem` when `pointer_abi`) with `fold_module` run
+/// before compiling, as `nox-py` does.
+pub fn run_mlir_folded(
+    mlir: &str,
+    inputs: &[&[u8]],
+    output_sizes: &[usize],
+    pointer_abi: bool,
+) -> Vec<Vec<u8>> {
+    let config = CompileConfig {
+        force_pointer_abi_main: pointer_abi,
+        ..CompileConfig::from_env()
+    };
+    run_mlir_with(mlir, inputs, output_sizes, config, true)
 }
 
 /// Parse once, run the interpreter and the JIT, and require their outputs to
 /// match. Returns the JIT bytes so existing golden assertions stay on the
 /// compiled path. Ops the interpreter does not implement are skipped (logged)
-/// unless `ELODIN_CRANELIFT_INTERP_STRICT=1`.
+/// unless `ELODIN_CRANELIFT_INTERP_STRICT=1`. With `fold`, the JIT compiles the
+/// folded module while the interpreter runs the module as parsed.
 fn run_mlir_with(
     mlir: &str,
     inputs: &[&[u8]],
     output_sizes: &[usize],
     config: CompileConfig,
+    fold: bool,
 ) -> Vec<Vec<u8>> {
-    let module = parse_module(mlir).expect("parse failed");
+    let mut module = parse_module(mlir).expect("parse failed");
     let result_meta: Vec<(ElementType, usize)> = module
         .main_func()
         .expect("module is missing a callable main entrypoint")
@@ -50,6 +67,9 @@ fn run_mlir_with(
         cranelift_mlir::interp::interpret_main(&module, inputs, &mut outs)
     };
 
+    if fold {
+        fold_module(&mut module);
+    }
     let mem_path = config.force_pointer_abi_main;
     let compiled = compile_module_with_config(&module, config).unwrap_or_else(|err| {
         panic!(
@@ -97,31 +117,6 @@ fn run_mlir_with(
         Err(err) => panic!("interpreter failed: {err}"),
     }
 
-    output_bufs
-}
-
-/// `run_mlir` (`run_mlir_mem` when `pointer_abi`) with `fold_module` run
-/// before compiling, as `nox-py` does. JIT only: callers assert golden values.
-pub fn run_mlir_folded(
-    mlir: &str,
-    inputs: &[&[u8]],
-    output_sizes: &[usize],
-    pointer_abi: bool,
-) -> Vec<Vec<u8>> {
-    let mut module = parse_module(mlir).expect("parse failed");
-    fold_module(&mut module);
-    let config = CompileConfig {
-        force_pointer_abi_main: pointer_abi,
-        ..CompileConfig::from_env()
-    };
-    let compiled = compile_module_with_config(&module, config).expect("compile failed (folded)");
-    drop(module);
-
-    let tick_fn: TickFn = unsafe { std::mem::transmute(compiled.get_main_fn()) };
-    let input_ptrs: Vec<*const u8> = inputs.iter().map(|b| b.as_ptr()).collect();
-    let mut output_bufs: Vec<Vec<u8>> = output_sizes.iter().map(|&sz| vec![0u8; sz]).collect();
-    let mut output_ptrs: Vec<*mut u8> = output_bufs.iter_mut().map(|b| b.as_mut_ptr()).collect();
-    unsafe { tick_fn(input_ptrs.as_ptr(), output_ptrs.as_mut_ptr()) };
     output_bufs
 }
 
