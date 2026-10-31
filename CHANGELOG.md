@@ -7,6 +7,8 @@
 - **(feat)** Add `inertia_off_diag` to `SpatialInertia(...)`, plus `inertia_off_diag()` and `inertia_matrix()`, for bodies whose axes are not principal axes. Entries are signed tensor entries (`Ixy = -∫xy dm`); negate CAD products of inertia.
 - **(feat:examples)** Add the `dzhanibekov-effect` example: a body spun about its intermediate axis flips periodically.
 - **(fix)** `six_dof(time_step=...)` with `Integrator.Rk4` uses `time_step` in every RK4 stage; the intermediate stages previously used the world's simulation time step. `six_dof` rejects a non-finite or non-positive `time_step`.
+- **(fix)** `Integrator.Rk4` evaluates each stage at that stage's velocity instead of the initial velocity, restoring fourth-order accuracy for position-dependent forces such as gravity and springs (#933).
+- **(fix)** `Integrator.Rk4` integrates orientation to fourth order; the quaternion update was second order, so attitude error shrank only 4× per halved time step. Trajectories of rotating bodies change slightly.
 - **(breaking)** An `object_3d` ellipsoid with `orientation=absolute` applies `scale` along the frame's x, y, z; it previously swapped y and z.
 - **(feat)** Add `fill=#false` (`ui.icon(fill=False)`) for outline built-in icons, and the `check_box_outline_blank` and `crop_square` icons.
 - **(feat)** Evaluate `sqrt`, `abs`, `sign`, `degrees`, `arccos`, `clip`, `atan2`, and `norm` in viewport and 3D-object EQL, and index integer components there.
