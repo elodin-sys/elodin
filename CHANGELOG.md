@@ -21,6 +21,14 @@
 - **(feat)** Add `Integrator.Dp54`, the fifth-order solution of the Dormand-Prince 5(4) pair, with a fixed time step.
 - **(feat)** Add the `StepError` component: under `Integrator.Dp54` or `Integrator.Rk78`, bodies that have it receive each step's embedded error estimate (attitude, position, angular velocity, velocity).
 - **(feat:examples)** `dzhanibekov-effect` integrates with `Integrator.Dp54` and graphs its step error, which peaks at each flip.
+- **(fix)** Calling `Exec.run` more than once no longer fails with "db time travel" when the simulation runs faster than real time. Each tick is recorded at its simulation time, continuing from the previous call.
+- **(feat)** `World.build` accepts `start_timestamp`, like `World.run`.
+- **(fix)** `JaxSim.set_state` updates the state instead of discarding the new value, `JaxSim.get_state` and `set_state` return and accept the full value of a component held by a single entity, and `JaxSim.step` keeps the tick an integer.
+- **(fix)** `World.to_jax` accepts systems that read components no system writes, such as parameters or the tick.
+- **(feat)** Add `JaxSim.step_fn`, `JaxSim.get` and `JaxSim.set`, pure functions of a state for `jax.jit`, `jax.vmap` and `jax.lax.scan`. `JaxSim.set_state` with `entity_name=None` writes every entity's value.
+- **(fix)** The Cranelift backend no longer confuses values across `lax.cond`, `lax.switch`, `while_loop`, `fori_loop`, `map` and `sort` bodies. Such programs could return wrong values; in `examples/drone`, all four motors dropped to minimum the first time the mixer saturated.
+- **(fix:examples)** `examples/drone/main.py --telemetry` runs at the configured simulation rate.
+- **(fix:aleph)** The `mekf` service subtracts the gyro bias from `gyro_est` once instead of twice, and keeps estimating attitude from the remaining sensors when the magnetometer or accelerometer reads zero, as sensor-fw sends when the BMM350 is missing. `mag_cal` reads zero while the magnetometer is missing.
 - **(breaking)** An `object_3d` ellipsoid with `orientation=absolute` applies `scale` along the frame's x, y, z; it previously swapped y and z.
 - **(feat)** Add `fill=#false` (`ui.icon(fill=False)`) for outline built-in icons, and the `check_box_outline_blank` and `crop_square` icons.
 - **(feat)** Evaluate `sqrt`, `abs`, `sign`, `degrees`, `arccos`, `clip`, `atan2`, and `norm` in viewport and 3D-object EQL, and index integer components there.
