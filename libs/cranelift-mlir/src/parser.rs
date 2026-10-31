@@ -17,6 +17,14 @@ pub fn parse_module(input: &str) -> Result<Module, String> {
     match module_parser(&mut s) {
         Ok(mut m) => {
             attach_source_lines(&mut m, input);
+            for f in &m.functions {
+                if let Some(v) = f.duplicate_value_def() {
+                    return Err(format!(
+                        "internal error: @{}: value id {} is defined more than once",
+                        f.name, v.0
+                    ));
+                }
+            }
             Ok(m)
         }
         Err(_e) => {
@@ -213,9 +221,6 @@ fn parse_instruction(input: &mut Stream<'_>, ctx: &mut ValueCtx) -> PResult<Opti
             let _ = ':'.parse_next(input)?;
             let n = integer(input)?;
             result_names.push(vn.clone());
-            // Alias "name#0" to the same ValueId as "name" so both
-            // %name and %name#0 resolve to the first result.
-            ctx.alias(&format!("{}#0", vn), &vn);
             for i in 1..n {
                 result_names.push(format!("{}#{}", vn, i));
             }
@@ -1961,7 +1966,7 @@ fn parse_sort_op(
             let _ = ':'.parse_next(input)?;
             ws(input)?;
             let _ty_str: &str = take_till(0.., |c: char| c == ',' || c == ')').parse_next(input)?;
-            let pid = comp_ctx.get_or_create(&name);
+            let pid = comp_ctx.define(&name);
             comp_params.push(pid);
             ws(input)?;
             if input.starts_with(',') {
@@ -2314,7 +2319,7 @@ fn parse_region_body_with_block_args(
             let _ = ':'.parse_next(input)?;
             ws(input)?;
             let _ty: &str = take_till(0.., |c: char| c == ',' || c == ')').parse_next(input)?;
-            let pid = body_ctx.get_or_create(&name);
+            let pid = body_ctx.define(&name);
             params.push(pid);
             ws(input)?;
             if input.starts_with(',') {
@@ -3363,9 +3368,11 @@ impl ValueCtx {
         id
     }
 
-    fn alias(&mut self, alias: &str, target: &str) {
-        let id = self.get_or_create(target);
-        self.name_to_id.insert(alias.to_string(), id);
+    /// Binds `name` to a new value. A redefinition shadows the old value for later uses.
+    fn define(&mut self, name: &str) -> ValueId {
+        let id = self.fresh();
+        self.name_to_id.insert(name.to_string(), id);
+        id
     }
 
     /// Scope for a nested region: inherits the parent's names and shares its
@@ -3387,7 +3394,7 @@ fn make_values(
         let vid = if result_names.is_empty() {
             ctx.fresh()
         } else {
-            let vid = ctx.get_or_create(&result_names[0]);
+            let vid = ctx.define(&result_names[0]);
             if result_names.len() > 1 {
                 let alias = format!("{}#0", result_names[0]);
                 ctx.name_to_id.insert(alias, vid);
@@ -3407,13 +3414,11 @@ fn make_values(
         .into_iter()
         .enumerate()
         .map(|(i, ty)| {
-            let name = if !base_name.is_empty() {
-                format!("{}#{}", base_name, i)
-            } else {
-                format!("__anon_{}", ctx.next_id.get() + i as u32)
-            };
-            let vid = ctx.get_or_create(&name);
-            if i == 0 && !base_name.is_empty() {
+            if base_name.is_empty() {
+                return (ctx.fresh(), ty);
+            }
+            let vid = ctx.define(&format!("{}#{}", base_name, i));
+            if i == 0 {
                 ctx.name_to_id.insert(base_name.clone(), vid);
             }
             (vid, ty)

@@ -1,4 +1,7 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+};
 
 use crate::const_cache::CachedConst;
 use std::fmt;
@@ -581,6 +584,77 @@ pub struct FuncDef {
     pub source_line: Option<u32>,
 }
 
+impl FuncDef {
+    /// Every `ValueId` the function defines: its parameters, every instruction result and the
+    /// block parameters of nested regions. A `while` defines its iteration arguments once for
+    /// both of its regions.
+    pub fn value_defs(&self) -> Vec<ValueId> {
+        let mut defs: Vec<ValueId> = self.params.iter().map(|(v, _)| *v).collect();
+        collect_value_defs(&self.body, &mut defs);
+        defs
+    }
+
+    /// A `ValueId` defined more than once. Const folding, DCE and lowering key on `ValueId`
+    /// across nested regions, so a reused id silently miscompiles.
+    pub fn duplicate_value_def(&self) -> Option<ValueId> {
+        let mut seen = HashSet::new();
+        self.value_defs().into_iter().find(|v| !seen.insert(*v))
+    }
+}
+
+fn collect_value_defs(body: &[InstrResult], defs: &mut Vec<ValueId>) {
+    for ir in body {
+        defs.extend(ir.values.iter().map(|(v, _)| *v));
+        match &ir.instr {
+            Instruction::While {
+                cond_body,
+                loop_body,
+                iter_arg_ids,
+                ..
+            } => {
+                defs.extend(iter_arg_ids);
+                collect_value_defs(cond_body, defs);
+                collect_value_defs(loop_body, defs);
+            }
+            Instruction::Case { branches, .. } => {
+                for branch in branches {
+                    collect_value_defs(branch, defs);
+                }
+            }
+            Instruction::Map {
+                body, body_params, ..
+            }
+            | Instruction::ReduceWindow {
+                body, body_params, ..
+            } => {
+                defs.extend(body_params);
+                collect_value_defs(body, defs);
+            }
+            Instruction::SelectAndScatter {
+                select_body,
+                select_params,
+                scatter_body,
+                scatter_params,
+                ..
+            } => {
+                defs.extend(select_params);
+                collect_value_defs(select_body, defs);
+                defs.extend(scatter_params);
+                collect_value_defs(scatter_body, defs);
+            }
+            Instruction::Sort {
+                comparator,
+                comparator_params,
+                ..
+            } => {
+                defs.extend(comparator_params);
+                collect_value_defs(comparator, defs);
+            }
+            _ => {}
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Module {
     pub functions: Vec<FuncDef>,
@@ -606,5 +680,72 @@ impl Module {
 
     pub fn main_func(&self) -> Option<&FuncDef> {
         self.get_func("main")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn f64_ty() -> TensorType {
+        TensorType::scalar(ElementType::F64)
+    }
+
+    fn constant(id: u32) -> InstrResult {
+        InstrResult {
+            values: vec![(ValueId(id), f64_ty())],
+            instr: Instruction::Constant {
+                value: ConstantValue::DenseScalar(ScalarValue::F64(1.0)),
+            },
+        }
+    }
+
+    fn ret(id: u32) -> InstrResult {
+        InstrResult {
+            values: vec![],
+            instr: Instruction::Return {
+                operands: vec![ValueId(id)],
+            },
+        }
+    }
+
+    fn main_with(body: Vec<InstrResult>) -> FuncDef {
+        FuncDef {
+            name: "main".into(),
+            is_public: true,
+            params: vec![(ValueId(0), f64_ty())],
+            result_types: vec![f64_ty()],
+            body,
+            source_line: None,
+        }
+    }
+
+    /// `while` cond and body share the iteration arguments; any other id defined twice, at any
+    /// nesting depth, is reported.
+    #[test]
+    fn duplicate_value_def_spans_regions() {
+        let while_loop = |body_value: u32| InstrResult {
+            values: vec![(ValueId(9), f64_ty())],
+            instr: Instruction::While {
+                cond_body: vec![constant(3), ret(3)],
+                loop_body: vec![constant(body_value), ret(body_value)],
+                init_values: vec![ValueId(0)],
+                iter_arg_ids: vec![ValueId(2)],
+            },
+        };
+        let dup = |body| main_with(body).duplicate_value_def();
+        assert_eq!(dup(vec![while_loop(4), ret(9)]), None);
+        assert_eq!(dup(vec![while_loop(3), ret(9)]), Some(ValueId(3)));
+        assert_eq!(dup(vec![while_loop(2), ret(9)]), Some(ValueId(2)));
+        let map = InstrResult {
+            values: vec![(ValueId(5), f64_ty())],
+            instr: Instruction::Map {
+                inputs: vec![ValueId(0)],
+                dimensions: vec![0],
+                body: vec![ret(0)],
+                body_params: vec![ValueId(0)],
+            },
+        };
+        assert_eq!(dup(vec![map, ret(5)]), Some(ValueId(0)));
     }
 }
