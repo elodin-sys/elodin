@@ -1357,7 +1357,8 @@ to the simulation step (<code>1.0 / simulation_rate</code>) provided in <code>Wo
 <code>elodin.StageTime</code> component holds the seconds past the start of the step for the current evaluation (zero outside
 <code>six_dof</code>), so effectors that depend on time can follow it. The tick is incremented before the systems run, so the
 effectors' time is <code>(tick[0] - 1) * dt[0] + stage_time[0]</code> for an <code>el.Query[el.SimulationTick]</code>, an
-<code>el.Query[el.SimulationTimeStep]</code>, and an <code>el.Query[el.StageTime]</code>.</p>
+<code>el.Query[el.SimulationTimeStep]</code>, and an <code>el.Query[el.StageTime]</code>. <code>StageTime</code> is measured in the simulation step
+even when <code>six_dof</code> integrates with its own <code>time_step</code>, so this time advances with the simulation either way.</p>
 </li>
 </ul>
 <h3 id="class-elodin-integrator"><em>class</em> <code>elodin.Integrator</code></h3>
@@ -1397,8 +1398,10 @@ much larger steps than <code>Rk4</code> for the same accuracy.</p>
 (the pair behind MATLAB's <code>ode45</code>), which evaluates the effectors 7 times per step. Elodin keeps the time step fixed.</p>
 <p><code>Dp54</code> and <code>Rk78</code> estimate each step's error from their embedded lower-order solution. A body that has the <code>elodin.StepError</code>
 component, for example from <code>el.C(el.StepError, jnp.zeros(4))</code>, receives the estimate after every step: attitude (rad),
-position, angular velocity, and velocity. It bounds the step's actual error, so graphing it shows whether the time step
-is small enough, and where the dynamics are hardest to integrate.</p>
+position, angular velocity, and velocity. It is the difference between the pair's two solutions, which approximates the
+lower-order solution's error and usually exceeds the error of the solution Elodin keeps, but it is an estimate, not a
+guarantee. Graphed over a run, it shows whether the time step is small enough and where the dynamics are hardest to
+integrate.</p>
 </li>
 <li>
 <p><code>elodin.Integrator.SemiImplicit</code> -&gt; <a href="https://docs.elodin.systems/preview/pr-935/reference/python-api/#class-elodin-integrator">elodin.Integrator</a></p>
