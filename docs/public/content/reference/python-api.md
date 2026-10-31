@@ -532,6 +532,13 @@ Using the associated [elodin.Body] archetype and prebuilt components, we can cre
     Semi-Implicit Integrator: Elodin provides a built-in implementation for a [semi-implicit Euler integrator](https://en.wikipedia.org/wiki/Semi-implicit_Euler_method).
     The semi-implicit integrator is a numerical method used to solve ordinary differential equations. You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/semi_implicit.rs).
 
+    {% alert(kind="warning") %}
+    The semi-implicit integrator updates angular velocity with an explicit Euler step, so the gyroscopic term
+    $\omega_b \times I\omega_b$ is evaluated at the start of each step. For bodies with unequal principal moments that spin
+    quickly relative to the time step, angular momentum and rotational kinetic energy drift (typically growing) even with no
+    applied torque. Use `Integrator.Rk4` or a smaller time step for spinning or tumbling bodies.
+    {% end %}
+
 ### _class_ `elodin.Body`
 
 `Body` is an archetype that represents the state of a rigid body with six degrees of freedom. It provides all of the spatial information necessary for the [elodin.six_dof] system
@@ -1027,13 +1034,42 @@ A spatial force is a 6D vector that represents the linear force and torque appli
 
 ### _class_ `elodin.SpatialInertia`
 
-A spatial inertia is a 7D vector that represents the mass, moment of inertia, and momentum of a rigid body in 3D space. The moment of inertia is represented in its [diagonalized form] of $[I_1, I_2, I_3]$.
+A spatial inertia is a 7D vector that represents the mass and the symmetric 3x3 [moment of inertia] tensor of a rigid body, expressed in the body frame about its center of mass.
+The layout is $[I_{xx}, I_{yy}, I_{zz}, I_{xy}, I_{xz}, I_{yz}, m]$, and the full tensor is
 
-[diagonalized form]: https://en.wikipedia.org/wiki/Moment_of_inertia#Principal_axes
+$$I = \begin{bmatrix} I_{xx} & I_{xy} & I_{xz} \\\\ I_{xy} & I_{yy} & I_{yz} \\\\ I_{xz} & I_{yz} & I_{zz} \end{bmatrix}$$
 
-- `__init__(mass, inertia)` -> [elodin.SpatialInertia]
+If the body axes are its [principal axes], the off-diagonal entries are zero and only the diagonal is needed.
 
-    Create a spatial tensor inertia from a scalar mass and an optional inertia tensor diagonal with shape (3,). If the inertia tensor is not provided, it is set to the same value as the mass along all axes.
+{% alert(kind="warning") %}
+The off-diagonal entries are the signed entries of the tensor matrix, $I_{xy} = -\int xy \, dm$, not products of inertia.
+CAD tools usually report products of inertia $P_{xy} = +\int xy \, dm$; negate them before passing them in ($I_{xy} = -P_{xy}$).
+{% end %}
+
+[moment of inertia]: https://en.wikipedia.org/wiki/Moment_of_inertia#Inertia_tensor
+[principal axes]: https://en.wikipedia.org/wiki/Moment_of_inertia#Principal_axes
+
+- `__init__(mass, inertia=None, inertia_off_diag=None)` -> [elodin.SpatialInertia]
+
+    Create a spatial inertia from a scalar mass, an optional tensor diagonal $[I_{xx}, I_{yy}, I_{zz}]$, and optional off-diagonal entries $[I_{xy}, I_{xz}, I_{yz}]$.
+    If `inertia` is not provided, the diagonal is set to the mass along all axes. If `inertia_off_diag` is not provided, it is zero.
+
+    - `mass` : real scalar (`int`, `float`, or 0-D array)
+    - `inertia` : real array-like with shape (3,), optional
+    - `inertia_off_diag` : real array-like with shape (3,), optional
+
+    Ints, lists, tuples, and int or float32 arrays are converted to float64. Concrete (non-traced) values are validated. A `TypeError` or `ValueError` is raised if:
+    - an argument is not real-valued (e.g. a `bool`, string, or complex number) or has the wrong shape
+    - the mass is not finite and > 0
+    - an inertia entry is not finite
+    - the tensor is not positive-definite
+    - the principal moments violate the triangle inequality $\lambda_1 + \lambda_2 \geq \lambda_3$, which every physical rigid body satisfies
+
+    Values traced inside a system (e.g. in `@el.map`) are checked for shape only and must already be float64; cast them with `.astype(jnp.float64)` if needed.
+
+- `from_array(arr)` -> [elodin.SpatialInertia]
+
+    Create a spatial inertia from a real array-like with shape (7,) in the layout above. Concrete values are converted and validated the same way as `__init__`.
 
 - `mass()` -> [jax.Array]
 
@@ -1041,7 +1077,19 @@ A spatial inertia is a 7D vector that represents the mass, moment of inertia, an
 
 - `inertia_diag()` -> [jax.Array]
 
-    Get the inertia tensor diagonal of the spatial inertia with shape (3,).
+    Get the tensor diagonal $[I_{xx}, I_{yy}, I_{zz}]$ with shape (3,).
+
+- `inertia_off_diag()` -> [jax.Array]
+
+    Get the signed off-diagonal tensor entries $[I_{xy}, I_{xz}, I_{yz}]$ with shape (3,).
+
+- `inertia_matrix()` -> [jax.Array]
+
+    Get the full symmetric inertia tensor with shape (3, 3).
+
+- `asarray()` -> [jax.Array]
+
+    Get the underlying 7D array.
 
 <br></br>
 ## Elodin DB Client

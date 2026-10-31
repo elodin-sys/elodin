@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Compare benchmark profile metrics against a known-good baseline."""
+"""Compare the median profile metrics of candidate runs against base runs."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import math
+import statistics
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-METRIC_ORDER = ("build_time_ms", "real_time_factor")
+METRIC_ORDER = ("build_time_ms", "real_time_factor_median")
 HIGHER_IS_WORSE = {"build_time_ms"}
-LOWER_IS_WORSE = {"real_time_factor"}
+LOWER_IS_WORSE = {"real_time_factor_median"}
 
 
 @dataclass
@@ -27,14 +28,16 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--baseline",
         required=True,
+        nargs="+",
         type=Path,
-        help="Path to the baseline profile-metrics.json file",
+        help="Profile metrics JSON files from the base runs",
     )
     parser.add_argument(
         "--candidate",
         required=True,
+        nargs="+",
         type=Path,
-        help="Path to the candidate profile-metrics.json file",
+        help="Profile metrics JSON files from the candidate runs",
     )
     parser.add_argument(
         "--tolerances",
@@ -82,10 +85,12 @@ def _load_tolerance(config: dict, example: str, metric: str) -> MetricTolerance:
     return MetricTolerance(abs_tol=abs_tol, rel_tol=rel_tol)
 
 
-def _coerce_metric(data: dict, metric: str, path: Path) -> float:
+def _coerce_metric(data: dict, metric: str, path: Path) -> float | None:
     if metric not in data:
         raise ValueError(f"Missing '{metric}' in {path}")
     value = data[metric]
+    if value is None:
+        return None
     try:
         metric_value = float(value)
     except (TypeError, ValueError) as exc:
@@ -105,6 +110,13 @@ def _coerce_ticks(data: dict, path: Path) -> int:
         raise ValueError(f"Ticks value is not an integer in {path}: {value!r}") from exc
 
 
+def _median_metric(runs: list[tuple[Path, dict]], metric: str) -> float | None:
+    values = [_coerce_metric(data, metric, path) for path, data in runs]
+    if None in values:
+        return None
+    return statistics.median(values)
+
+
 def _regression_amount(metric: str, baseline: float, candidate: float) -> float:
     if metric in HIGHER_IS_WORSE:
         return candidate - baseline
@@ -116,44 +128,46 @@ def _regression_amount(metric: str, baseline: float, candidate: float) -> float:
 def main() -> int:
     args = _parse_args()
 
-    if not args.baseline.exists():
-        print(f"FAIL: baseline profile metrics file does not exist: {args.baseline}")
-        return 1
-    if not args.candidate.exists():
-        print(f"FAIL: candidate profile metrics file does not exist: {args.candidate}")
-        return 1
+    for path in [*args.baseline, *args.candidate]:
+        if not path.exists():
+            print(f"FAIL: profile metrics file does not exist: {path}")
+            return 1
     if not args.tolerances.exists():
         print(f"FAIL: tolerance config does not exist: {args.tolerances}")
         return 1
 
-    baseline = _load_json(args.baseline)
-    candidate = _load_json(args.candidate)
+    baseline = [(path, _load_json(path)) for path in args.baseline]
+    candidate = [(path, _load_json(path)) for path in args.candidate]
     config = _load_json(args.tolerances)
 
-    baseline_ticks = _coerce_ticks(baseline, args.baseline)
-    candidate_ticks = _coerce_ticks(candidate, args.candidate)
-    if baseline_ticks != candidate_ticks:
+    ticks = {_coerce_ticks(data, path) for path, data in [*baseline, *candidate]}
+    if len(ticks) != 1:
         print(
             f"FAIL: profile metric ticks mismatch for example '{args.example}' "
-            f"(baseline={baseline_ticks}, candidate={candidate_ticks})"
+            f"(ticks={sorted(ticks)})"
         )
         return 1
+    candidate_ticks = ticks.pop()
 
     failures: list[str] = []
-    rtf_baseline = 0.0
-    rtf_candidate = 0.0
+    rtf: tuple[float, float] | None = None
 
     for metric in METRIC_ORDER:
         tol = _load_tolerance(config, args.example, metric)
-        baseline_value = _coerce_metric(baseline, metric, args.baseline)
-        candidate_value = _coerce_metric(candidate, metric, args.candidate)
+        candidate_value = _median_metric(candidate, metric)
+        if candidate_value is None:
+            failures.append(f"{metric}: missing from a candidate run")
+            continue
+        baseline_value = _median_metric(baseline, metric)
+        if baseline_value is None:
+            print(f"WARN: {args.example}: '{metric}' missing from a base run; skipping it")
+            continue
         regression = _regression_amount(metric, baseline_value, candidate_value)
         allowed = max(tol.abs_tol, abs(baseline_value) * tol.rel_tol)
         rel_regression = regression / max(abs(baseline_value), 1e-30)
 
-        if metric == "real_time_factor":
-            rtf_baseline = baseline_value
-            rtf_candidate = candidate_value
+        if metric == "real_time_factor_median":
+            rtf = (baseline_value, candidate_value)
 
         if regression > allowed:
             direction = "slower" if metric in HIGHER_IS_WORSE else "lower"
@@ -164,12 +178,14 @@ def main() -> int:
                 f"allowed={allowed:.3e}, abs_tol={tol.abs_tol:.3e}, rel_tol={tol.rel_tol:.3e})"
             )
 
-    rtf_pct = ((rtf_candidate - rtf_baseline) / max(abs(rtf_baseline), 1e-30)) * 100
-    rtf_sign = "+" if rtf_pct >= 0 else ""
-    rtf_detail = f"{rtf_candidate:.1f}x (baseline {rtf_baseline:.1f}x, {rtf_sign}{rtf_pct:.1f}%)"
-
-    # Machine-readable line for regress.sh summary collection
-    print(f"RTF_DELTA: {args.example} {rtf_baseline:.3f} {rtf_candidate:.3f} {rtf_pct:.1f}")
+    rtf_detail = ""
+    if rtf is not None:
+        rtf_baseline, rtf_candidate = rtf
+        rtf_pct = ((rtf_candidate - rtf_baseline) / max(abs(rtf_baseline), 1e-30)) * 100
+        rtf_sign = "+" if rtf_pct >= 0 else ""
+        rtf_detail = f"{rtf_candidate:.1f}x (base {rtf_baseline:.1f}x, {rtf_sign}{rtf_pct:.1f}%)"
+        # Machine-readable line for regress.sh summary collection
+        print(f"RTF_DELTA: {args.example} {rtf_baseline:.3f} {rtf_candidate:.3f} {rtf_pct:.1f}")
 
     if failures:
         print(f"FAIL: profile metric regression(s) detected for example '{args.example}'")
@@ -178,7 +194,8 @@ def main() -> int:
         return 1
 
     print(f"PASS: {args.example} profile metrics within tolerance (ticks={candidate_ticks})")
-    print(f"  real_time_factor: {rtf_detail}")
+    if rtf_detail:
+        print(f"  real_time_factor_median: {rtf_detail}")
     return 0
 
 

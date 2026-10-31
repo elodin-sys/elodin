@@ -1,6 +1,12 @@
 # Changelog
 
 ## unreleased
+- **(breaking)** `six_dof` solves Euler's rigid-body equations with the full inertia tensor, including the gyroscopic term `ω × Iω`. Bodies with unequal principal moments now precess and tumble when they spin; trajectories of such bodies change.
+- **(breaking)** `SpatialInertia` and `SpatialInertia.from_array` validate concrete inputs: mass must be finite and > 0, `inertia` and `inertia_off_diag` must have shape (3,), and the tensor must be positive-definite and satisfy the triangle inequality. Ints, lists, and int or float32 arrays are converted to float64; bools and strings raise.
+- **(breaking:rust)** `nox::SpatialInertia` slots 3..6 hold the off-diagonal inertia entries `[Ixy, Ixz, Iyz]` instead of momentum; `SpatialInertia::new` takes them as its second argument, and `momentum()` is replaced by `inertia_off_diag()`.
+- **(feat)** Add `inertia_off_diag` to `SpatialInertia(...)`, plus `inertia_off_diag()` and `inertia_matrix()`, for bodies whose axes are not principal axes. Entries are signed tensor entries (`Ixy = -∫xy dm`); negate CAD products of inertia.
+- **(feat:examples)** Add the `dzhanibekov-effect` example: a body spun about its intermediate axis flips periodically.
+- **(fix)** `six_dof(time_step=...)` with `Integrator.Rk4` uses `time_step` in every RK4 stage; the intermediate stages previously used the world's simulation time step. `six_dof` rejects a non-finite or non-positive `time_step`.
 - **(breaking)** An `object_3d` ellipsoid with `orientation=absolute` applies `scale` along the frame's x, y, z; it previously swapped y and z.
 - **(feat)** Add `fill=#false` (`ui.icon(fill=False)`) for outline built-in icons, and the `check_box_outline_blank` and `crop_square` icons.
 - **(feat)** Evaluate `sqrt`, `abs`, `sign`, `degrees`, `arccos`, `clip`, `atan2`, and `norm` in viewport and 3D-object EQL, and index integer components there.

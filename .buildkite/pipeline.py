@@ -142,18 +142,15 @@ test_steps = [
                 command="scripts/ci/db_grpc_full_api_demo.sh",
                 env={
                     "ELODIN_RC_JET_CONTROLLER_BIN": "target/release/rc-jet-controller",
-                    # 3000 ticks is ~10s at 300 Hz; CI llvmpipe needs longer
-                    # than that for sensor-camera prime before the sim exits.
-                    "ELODIN_GRPC_DEMO_TICKS": "30000",
                 },
             ),
-            nix_step(
-                label=":python: sensor-camera",
-                flake=".#tracy",
-                command="./scripts/ci/sensor_camera_perf.sh",
-                env={"ELODIN_SENSOR_CAMERA_CAPTURE_TRACY": "1"},
-            ),
         ],
+    ),
+    nix_step(
+        label=":python: sensor-camera",
+        flake=".#tracy",
+        command="./scripts/ci/sensor_camera_perf.sh",
+        env={"ELODIN_SENSOR_CAMERA_CAPTURE_TRACY": "1"},
     ),
     nix_step(
         emoji=":rocket:",
@@ -172,9 +169,7 @@ test_steps = [
             nix_step(
                 emoji=":racehorse:",
                 label="perf-elodin-db",
-                pre_command="nix develop --command bash -c 'cargo build --release -p elodin-db --bin elodin-db-bench --features grpc,tracy'",
-                flake=".#tracy",
-                command="bash ./scripts/ci/db_perf.sh",
+                command="cargo build --release -p elodin-db --bin elodin-db-bench --features grpc,tracy && bash ./scripts/ci/db_perf.sh",
             ),
         ],
     ),
@@ -242,6 +237,8 @@ pipeline(
         "ELODIN_SHELL_ID": "ci",
         "GIT_HASH": "ci",
         "BUILDKITE_ANALYTICS_TOKEN": "R6hH2MNhtMdbfQWhDd9cvZfo",
+        # The default nice 19 starves sensor-camera rendering on a saturated host.
+        "ELODIN_RENDER_SERVER_NICE": "0",
     },
     agents={
         "queue": "nixos-x86-aws",

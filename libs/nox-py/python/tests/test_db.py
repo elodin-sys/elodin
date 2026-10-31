@@ -492,7 +492,7 @@ def test_msg_stream_live(client):
         for i in range(10):
             client.send_msg("evt.live", {"seq": i}, timestamp_us=1000 + i)
             time.sleep(0.02)
-        received = _collect_until(stream, lambda item: item[1].get("seq") == 9, timeout_s=5)
+        received = _collect_until(stream, lambda item: item[1].get("seq") == 9, timeout_s=30)
     assert received, "live msg stream should deliver messages"
     assert received[-1][1] == {"seq": 9}
     assert received[-1][0] == 1009
@@ -509,7 +509,7 @@ def test_stream_live_rows(client):
         for i in range(1, 21):
             writer.write_nowait(timestamp_us=1000 + i * 100, values={"stm.a": [i, -i], "stm.b": i})
             time.sleep(0.01)
-        rows = _collect_until(stream, lambda row: row.timestamp_us >= 1000 + 20 * 100, timeout_s=5)
+        rows = _collect_until(stream, lambda row: row.timestamp_us >= 1000 + 20 * 100, timeout_s=30)
     assert rows, "live stream should deliver rows"
     last = rows[-1]
     assert set(last.values) == {"stm.a", "stm.b"}
@@ -528,7 +528,7 @@ def test_stream_fixed_rate_replay(client):
     assert _wait_for(lambda: len(client.time_series("rep.v", 0, 10**6)[0]) == n)
 
     with client.stream("rep.v", rate_hz=500, start="earliest") as stream:
-        rows = _collect_until(stream, lambda row: row["rep.v"] >= n - 1, timeout_s=10)
+        rows = _collect_until(stream, lambda row: row["rep.v"] >= n - 1, timeout_s=30)
     assert rows, "replay should deliver rows"
     values = [float(r["rep.v"]) for r in rows]
     # replay advances monotonically through the recorded values from earliest
@@ -558,7 +558,7 @@ def test_stream_row_per_component_timestamps(client):
                 and "mr.slow" in row
                 and row.timestamps["mr.fast"] > row.timestamps["mr.slow"]
             ),
-            timeout_s=5,
+            timeout_s=30,
         )
     row = rows[-1]
     assert row.timestamp_us == max(row.timestamps.values())

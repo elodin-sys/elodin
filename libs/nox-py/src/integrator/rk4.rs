@@ -82,12 +82,13 @@ where
         let sim_dt = ComponentArray::<SimulationTimeStep>::param(&builder)?;
         let dt = self.dt.map(Scalar::from).unwrap_or_else(|| sim_dt.get(0).0);
 
+        let step_dt = self.dt;
         let step = |dt_factor: f64, builder: &mut SystemBuilder| -> Result<Query<DU>, Error> {
-            let f = |dt: ComponentArray<SimulationTimeStep>,
-                     init_u: Query<U>,
-                     du: Query<DU>|
-             -> Query<U> {
-                let dt = &dt.get(0).0 * dt_factor;
+            let f = move |sim_dt: ComponentArray<SimulationTimeStep>,
+                          init_u: Query<U>,
+                          du: Query<DU>|
+                  -> Query<U> {
+                let dt = &step_dt.map(Scalar::from).unwrap_or_else(|| sim_dt.get(0).0) * dt_factor;
                 init_u
                     .clone()
                     .join_query(du.clone())
