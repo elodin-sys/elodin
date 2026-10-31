@@ -520,6 +520,12 @@ Using the associated [elodin.Body] archetype and prebuilt components, we can cre
     - `sys` : one or more [elodin.System] instances used as effectors
     - `integrator` : [elodin.Integrator], default is `Integrator.Rk4`
 
+    Most integrators evaluate the effectors several times per step, at different times within it. The global
+    `elodin.StageTime` component holds the seconds past the start of the step for the current evaluation (zero outside
+    `six_dof`), so effectors that depend on time can follow it. The tick is incremented before the systems run, so the
+    effectors' time is `(tick[0] - 1) * dt[0] + stage_time[0]` for an `el.Query[el.SimulationTick]`, an
+    `el.Query[el.SimulationTimeStep]`, and an `el.Query[el.StageTime]`.
+
 ### _class_ `elodin.Integrator`
 
 - `elodin.Integrator.Rk4` -> [elodin.Integrator]
@@ -544,6 +550,12 @@ Using the associated [elodin.Body] archetype and prebuilt components, we can cre
     long runs instead of drifting, as they do with the Runge-Kutta integrators, and orbits keep their size. Forces that depend on
     velocity, such as drag or the gyroscopic torque of a spinning body, leave it second order but not symplectic. You can review
     the implementation [here](https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/verlet.rs).
+
+- `elodin.Integrator.Rk78` -> [elodin.Integrator]
+
+    The eighth-order solution of Fehlberg's 7(8) Runge-Kutta pair, which evaluates the effectors 13 times per step. Its error
+    shrinks 256 times per halving of the time step, so it suits long, smooth propagations, such as orbits, where it can take
+    much larger steps than `Rk4` for the same accuracy.
 
 - `elodin.Integrator.SemiImplicit` -> [elodin.Integrator]
 

@@ -18,10 +18,11 @@ import pytest
 pytestmark = pytest.mark.integrator
 
 DURATION = 4.0
-# Ratios whose finer error is below this are dominated by roundoff.
-ERROR_FLOOR = 1e-11
+# Errors below this are dominated by roundoff.
+ERROR_FLOOR = 1e-13
 SPRING_K = 2.25
 KEPLER_E = 0.5
+DRIVE_FREQUENCY = 2.0
 SPIN = np.array([1.0, 2.0, 2.0])
 TORQUE_AXIS = np.array([1.0, 2.0, 2.0]) / 3.0
 TOP_INERTIA = np.array([1.0, 2.0, 2.0])
@@ -43,6 +44,14 @@ METHODS = {
     "Rk3": Method(3, (0.04, 0.02, 0.01), lambda z: (1 - z / 2, 1 - z / 6)),
     "Rk4": Method(4, (0.04, 0.02, 0.01), lambda z: (1 - z / 2 + z**2 / 24, 1 - z / 6)),
     "Verlet": Method(2, (0.02, 0.01, 0.005), lambda z: (1 - z / 2, 1 - z / 4), symplectic=True),
+    "Rk78": Method(
+        8,
+        (0.4, 0.2, 0.1),
+        lambda z: (
+            1 - z / 2 + z**2 / 24 - z**3 / 720 + z**4 / 40320,
+            1 - z / 6 + z**2 / 120 - z**3 / 5040,
+        ),
+    ),
 }
 
 SpringConstant = el.Annotated[
@@ -53,6 +62,9 @@ GravitationalParameter = el.Annotated[
 ]
 AppliedTorque = el.Annotated[
     jax.Array, el.Component("applied_torque", el.ComponentType(el.PrimitiveType.F64, (3,)))
+]
+DriveFrequency = el.Annotated[
+    jax.Array, el.Component("drive_frequency", el.ComponentType(el.PrimitiveType.F64, (1,)))
 ]
 
 
@@ -70,6 +82,21 @@ def gravity(pos: el.WorldPos, mu: GravitationalParameter) -> el.Force:
 @el.map
 def torque(tau: AppliedTorque) -> el.Force:
     return el.SpatialForce(torque=tau)
+
+
+@el.system
+def drive(
+    tick: el.Query[el.SimulationTick],
+    dt: el.Query[el.SimulationTimeStep],
+    stage_time: el.Query[el.StageTime],
+    q: el.Query[el.WorldPos, DriveFrequency],
+) -> el.Query[el.Force]:
+    # The tick is incremented before the systems run.
+    t = (tick[0] - 1) * dt[0] + stage_time[0]
+    return q.map(
+        el.Force,
+        lambda pos, w: el.SpatialForce(linear=-pos.linear() + jnp.cos(w * t) * np.eye(3)[0]),
+    )
 
 
 def _qmul(a, b):
@@ -124,6 +151,16 @@ def _kepler_ref(t):
     }
 
 
+def _driven_ref(t):
+    # x'' = -x + cos(w t) from rest.
+    w = DRIVE_FREQUENCY
+    zero = np.zeros_like(t)
+    return {
+        "pos": np.hstack([(np.cos(t) - np.cos(w * t)) / (w**2 - 1), zero, zero]),
+        "vel": np.hstack([(w * np.sin(w * t) - np.sin(t)) / (w**2 - 1), zero, zero]),
+    }
+
+
 def _free_spin_ref(t):
     return {"att": _qexp(t * SPIN)}
 
@@ -169,6 +206,9 @@ CASES = {
         ],
         _kepler_ref,
     ),
+    "driven": Case(
+        lambda: [el.Body(), el.C(DriveFrequency, np.array([DRIVE_FREQUENCY]))], _driven_ref
+    ),
     "free_spin": Case(lambda: [el.Body(world_vel=el.SpatialMotion(angular=SPIN))], _free_spin_ref),
     "constant_torque": Case(lambda: [el.Body(), el.C(AppliedTorque, TORQUE_AXIS)], _torque_ref),
     "symmetric_top": Case(
@@ -189,7 +229,7 @@ def _simulate(method: str, dt: float, steps: int) -> dict[str, tuple[np.ndarray,
     w = el.World()
     for name, case in CASES.items():
         w.spawn(case.components(), name)
-    effectors = spring | gravity | torque
+    effectors = spring | gravity | torque | drive
     sys = el.six_dof(dt, sys=effectors, integrator=getattr(el.Integrator, method))
     exec = w.build(sys, simulation_rate=1.0 / dt)
     exec.run(steps, show_progress=False)
@@ -218,14 +258,22 @@ def max_errors(method: str, dt: float) -> dict[tuple[str, str], float]:
     return errors
 
 
-def observed_orders(method: str, case: str, metric: str) -> list[float]:
+def observed_orders(method: str, case: str, metric: str) -> list[float | None]:
+    """Order between each pair of adjacent time steps; None where roundoff dominates."""
     dts = METHODS[method].time_steps
     errs = [max_errors(method, dt)[case, metric] for dt in dts]
     return [
         float(np.log(errs[i] / errs[i + 1]) / np.log(dts[i] / dts[i + 1]))
-        for i in range(len(dts) - 1)
         if errs[i + 1] > ERROR_FLOOR
+        else None
+        for i in range(len(dts) - 1)
     ]
+
+
+@pytest.fixture(autouse=True)
+def _skip_asset_ingest(monkeypatch, tmp_path):
+    # Each built world would otherwise copy the repository's ~1 GB assets/ into its database.
+    monkeypatch.setenv("ELODIN_ASSETS", str(tmp_path))
 
 
 def test_every_integrator_is_benched():
@@ -245,8 +293,9 @@ def test_one_step(method):
 @pytest.mark.parametrize(("case", "metric"), METRICS)
 @pytest.mark.parametrize("method", METHODS)
 def test_order(method, case, metric):
-    orders = observed_orders(method, case, metric)
-    assert orders and min(orders) > METHODS[method].order - 0.5, orders
+    # Coarse steps can sit outside the asymptotic range, so the finest measurable pair decides.
+    orders = [o for o in observed_orders(method, case, metric) if o is not None]
+    assert orders and orders[-1] > METHODS[method].order - 0.5, orders
 
 
 @pytest.mark.parametrize("method", [name for name, m in METHODS.items() if m.symplectic])
@@ -266,5 +315,7 @@ if __name__ == "__main__":
         print(f"{'dt':>24}" + "".join(f"{dt:>11g}" for dt in m.time_steps) + "  orders")
         for case, metric in METRICS:
             errs = "".join(f"{max_errors(method, dt)[case, metric]:11.3e}" for dt in m.time_steps)
-            orders = " ".join(f"{o:5.2f}" for o in observed_orders(method, case, metric))
+            orders = " ".join(
+                "    -" if o is None else f"{o:5.2f}" for o in observed_orders(method, case, metric)
+            )
             print(f"  {case:16}{metric:6}{errs}  {orders}")

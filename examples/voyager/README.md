@@ -98,10 +98,12 @@ bash download_spice_data.sh
 python chapter1.py run
 ```
 
-Jupiter's position is sampled at the midpoint of each one-hour step
-and stays fixed through the RK4 stages. This keeps things simple, but
-the overall propagation isn't fourth-order accurate, even though
-Voyager itself is integrated with RK4.
+Voyager is integrated with RK4 in one-hour steps. Each step's four
+stages evaluate gravity at different times, so Jupiter's position is
+interpolated linearly to each stage's time (`el.StageTime`) between its
+SPICE positions at the start and end of the step. That keeps the
+integration error to a few meters over the six days; holding Jupiter at
+the midpoint of each step instead costs about 650 m.
 
 ## Chapter 2
 
@@ -114,5 +116,5 @@ From `examples/voyager`:
 python chapter2.py run
 ```
 
-Jupiter's position is still fixed through each RK4 step, so the overall
-propagation isn't fourth-order accurate.
+The remaining error against SPICE, about 1 km, comes from the model
+(only the Sun and Jupiter), not the integration.

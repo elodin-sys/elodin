@@ -11,6 +11,11 @@ pub struct SimulationTimeStep<R: OwnedRepr = Op>(pub Scalar<f64, R>);
 #[derive(Component, Clone, ReprMonad)]
 pub struct Tick<R: OwnedRepr = Op>(pub Scalar<u64, R>);
 
+/// Seconds past the start of the current step at which `six_dof` is evaluating its
+/// effectors; zero outside the integrator.
+#[derive(Component, Clone, ReprMonad)]
+pub struct StageTime<R: OwnedRepr = Op>(pub Scalar<f64, R>);
+
 impl Default for SimulationTimeStep {
     fn default() -> Self {
         SimulationTimeStep(0.01.into()) // TODO
@@ -28,6 +33,7 @@ impl Tick {
 pub struct SystemGlobals {
     sim_tick: Tick,
     sim_time_step: SimulationTimeStep,
+    stage_time: StageTime,
 }
 
 impl SystemGlobals {
@@ -35,6 +41,7 @@ impl SystemGlobals {
         SystemGlobals {
             sim_tick: Tick::zero(),
             sim_time_step: SimulationTimeStep(sim_time_step.into()),
+            stage_time: StageTime(0.0.into()),
         }
     }
 }

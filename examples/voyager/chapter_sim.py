@@ -32,6 +32,18 @@ jupiter_gm = float(spice.bodvrd("JUPITER BARYCENTER", "GM", 1)[1][0]) * 1.0e9
 JupiterPosition = el.Annotated[
     jax.Array, el.Component("jupiter_position", el.ComponentType(el.PrimitiveType.F64, (3,)))
 ]
+# Jupiter's position at the start and end of the current step.
+JupiterTrack = el.Annotated[
+    jax.Array, el.Component("jupiter_track", el.ComponentType(el.PrimitiveType.F64, (2, 3)))
+]
+
+
+@el.system
+def interpolate_jupiter(
+    stage_time: el.Query[el.StageTime], q: el.Query[JupiterTrack]
+) -> el.Query[JupiterPosition]:
+    s = stage_time[0] / TIME_STEP
+    return q.map(JupiterPosition, lambda track: track[0] + s * (track[1] - track[0]))
 
 
 def reference_state(et: float, target: str = "VOYAGER 1") -> np.ndarray:
@@ -51,17 +63,16 @@ def run(gravity, chapter: int) -> None:
                 inertia=el.Inertia(MASS_KG),
             ),
             el.C(JupiterPosition, reference_state(start_et, "JUPITER BARYCENTER")[:3]),
+            el.C(JupiterTrack, np.zeros((2, 3))),
         ],
         name="voyager1",
     )
     position_errors_km = []
 
     def pre_step(tick: int, ctx: el.StepContext) -> None:
-        # keep Jupiter at the midpoint for the whole RK4 step
-        et = start_et + (tick + 0.5) * TIME_STEP
-        ctx.write_component(
-            "voyager1.jupiter_position", reference_state(et, "JUPITER BARYCENTER")[:3]
-        )
+        et = start_et + tick * TIME_STEP
+        track = [reference_state(t, "JUPITER BARYCENTER")[:3] for t in (et, et + TIME_STEP)]
+        ctx.write_component("voyager1.jupiter_track", np.stack(track))
 
     def post_step(tick: int, ctx: el.StepContext) -> None:
         et = start_et + (tick + 1) * TIME_STEP
@@ -85,7 +96,7 @@ def run(gravity, chapter: int) -> None:
     )
     world.run(
         el.six_dof(
-            sys=gravity,
+            sys=interpolate_jupiter | gravity,
             integrator=el.Integrator.Rk4,
         ),
         simulation_rate=1.0 / TIME_STEP,

@@ -1,5 +1,6 @@
+use super::set_stage_time;
 use crate::World;
-use crate::globals::SimulationTimeStep;
+use crate::globals::{SimulationTimeStep, StageTime};
 use crate::system::{CompiledSystem, System, SystemBuilder, SystemParam};
 use crate::{ComponentArray, ComponentGroup, Error, Query};
 use nox::Scalar;
@@ -41,6 +42,7 @@ where
     fn init(&self, builder: &mut SystemBuilder) -> Result<(), Error> {
         self.pipe.init(builder)?;
         ComponentArray::<SimulationTimeStep>::init(builder)?;
+        ComponentArray::<StageTime>::init(builder)?;
         Query::<X>::init(builder)?;
         Query::<V>::init(builder)?;
         Query::<A>::init(builder)
@@ -55,6 +57,7 @@ where
         let sim_dt = ComponentArray::<SimulationTimeStep>::param(&builder)?;
         let dt = self.dt.map(Scalar::from).unwrap_or_else(|| sim_dt.get(0).0);
         let half_dt = &dt * 0.5;
+        let stage_time = ComponentArray::<StageTime>::param(&builder)?;
 
         compiled_pipe.clone().insert_into_builder(&mut builder)?;
         let a0 = Query::<A>::param(&builder)?;
@@ -70,12 +73,14 @@ where
         v0.join_query(a0)
             .map(|v, a| v + dt.clone() * a)?
             .insert_into_builder(&mut builder);
+        set_stage_time(&stage_time, dt.clone(), &mut builder)?;
         compiled_pipe.insert_into_builder(&mut builder)?;
         let a1 = Query::<A>::param(&builder)?;
         v_half
             .join_query(a1)
             .map(|v, a| v + half_dt.clone() * a)?
             .insert_into_builder(&mut builder);
+        Query::from(stage_time).insert_into_builder(&mut builder);
         builder.to_compiled_system()
     }
 }

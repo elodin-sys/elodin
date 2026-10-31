@@ -32,6 +32,7 @@ INTEGRATORS = [
     ("rk3", el.Integrator.Rk3),
     ("rk4", el.Integrator.Rk4),
     ("verlet", el.Integrator.Verlet),
+    ("rk78", el.Integrator.Rk78),
 ]
 
 
@@ -149,6 +150,7 @@ BALLISTIC_CASES = [
     ("rk3", 100.0, 200.0, 0.5),
     ("rk4", 100.0, 200.0, 0.5),
     ("verlet", 100.0, 200.0, 0.5),
+    ("rk78", 100.0, 200.0, 0.5),
 ]
 
 
@@ -181,8 +183,22 @@ def test_ballistic_arc_vs_inertial_oracle(name, rate_hz, coast_s, tol_m):
 # this dt is tiny. Both behaviors are expected and recorded, not bugs.
 # Bounded energy oscillation for symplectic Euler is O(dt * omega_orbit)
 # ~ 1e-3 relative at dt = 1 s; the endpoint sample sits inside that band.
-ORBIT_RADIUS_TOL_M = {"semi_implicit": 16_000.0, "rk2": 1.0, "rk3": 1.0, "rk4": 5.0, "verlet": 1.0}
-ORBIT_ENERGY_TOL = {"semi_implicit": 2e-3, "rk2": 1e-7, "rk3": 1e-7, "rk4": 1e-7, "verlet": 1e-7}
+ORBIT_RADIUS_TOL_M = {
+    "semi_implicit": 16_000.0,
+    "rk2": 1.0,
+    "rk3": 1.0,
+    "rk4": 5.0,
+    "verlet": 1.0,
+    "rk78": 5.0,
+}
+ORBIT_ENERGY_TOL = {
+    "semi_implicit": 2e-3,
+    "rk2": 1e-7,
+    "rk3": 1e-7,
+    "rk4": 1e-7,
+    "verlet": 1e-7,
+    "rk78": 1e-7,
+}
 
 
 @pytest.mark.parametrize("name,integrator", INTEGRATORS)

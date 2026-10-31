@@ -632,6 +632,10 @@ SimulationTimeStep = Annotated[
     jax.Array,
     Component("simulation_time_step", ComponentType.F64, metadata={"priority": 8}),
 ]
+StageTime = Annotated[
+    jax.Array,
+    Component("stage_time", ComponentType.F64, metadata={"priority": 8}),
+]
 Camera = Annotated[
     jax.Array,
     Component(

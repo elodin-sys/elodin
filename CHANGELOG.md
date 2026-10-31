@@ -13,6 +13,9 @@
 - **(breaking:rust)** `nox_py::integrator::Rk4` is replaced by `ExplicitRk`, which takes a `ButcherTableau` (`RK2`, `RK3`, `RK4`); `Integrator::Rk4` becomes `Integrator::ExplicitRk(&RK4)`.
 - **(feat)** Add `Integrator.Verlet` (velocity Verlet) to `six_dof`: second order, and symplectic when forces depend only on position, so energy errors stay bounded over long runs.
 - **(feat:examples)** `n-body` integrates with `Integrator.Verlet`.
+- **(feat)** Add `Integrator.Rk78`, the eighth-order solution of Fehlberg's 7(8) Runge-Kutta pair.
+- **(feat)** Add the global `StageTime` component: the seconds past the start of the step at which `six_dof` is evaluating its effectors, so time-dependent effectors keep the integrator's full order. Exports gain `globals.stage_time`.
+- **(fix:examples)** The voyager chapters interpolate Jupiter's position to each RK4 stage's time instead of holding it at the step's midpoint, cutting the integration error from about 650 m to a few meters.
 - **(breaking)** An `object_3d` ellipsoid with `orientation=absolute` applies `scale` along the frame's x, y, z; it previously swapped y and z.
 - **(feat)** Add `fill=#false` (`ui.icon(fill=False)`) for outline built-in icons, and the `check_box_outline_blank` and `crop_square` icons.
 - **(feat)** Evaluate `sqrt`, `abs`, `sign`, `degrees`, `arccos`, `clip`, `atan2`, and `norm` in viewport and 3D-object EQL, and index integer components there.
