@@ -11,7 +11,10 @@ use bevy::ecs::lifecycle::HookContext;
 use bevy::ecs::schedule::{IntoScheduleConfigs, SystemSet};
 use bevy::ecs::system::{Commands, Query, Res, ResMut, SystemState};
 use bevy::ecs::world::DeferredWorld;
+#[cfg(not(target_family = "wasm"))]
 use bevy::log::warn_once;
+#[cfg(target_family = "wasm")]
+use bevy::math::Rect;
 use bevy::math::{FloatOrd, Vec4};
 use bevy::prelude::Deref;
 use bevy::render::extract_component::{ComponentUniforms, DynamicUniformIndex};
@@ -20,7 +23,7 @@ use bevy::render::render_phase::{
     ViewSortedRenderPhases,
 };
 
-use bevy::camera::visibility::RenderLayers;
+use bevy::camera::{Projection, visibility::RenderLayers};
 use bevy::mesh::VertexBufferLayout;
 use bevy::render::renderer::RenderQueue;
 use bevy::render::view::{ExtractedView, Msaa};
@@ -46,12 +49,16 @@ use bevy::{
 };
 use bevy_render::extract_component::ExtractComponent;
 use bevy_render::sync_world::{MainEntity, SyncToRenderWorld, TemporaryRenderEntity};
+#[cfg(not(target_family = "wasm"))]
 use binding_types::storage_buffer_read_only_sized;
 use impeller::types::Timestamp;
 use impeller_wkt::GraphType;
 use std::collections::HashSet;
 use std::num::NonZeroU64;
 use std::ops::Range;
+use std::sync::Arc;
+#[cfg(target_family = "wasm")]
+use zerocopy::IntoBytes;
 
 #[cfg(not(target_family = "wasm"))]
 use crate::plugins::hw_stats::HardwareStats;
@@ -59,7 +66,7 @@ use crate::ui::ViewportRect;
 use crate::ui::plot::{CHUNK_COUNT, Line, XYLine};
 
 use super::data::{
-    PLOT_GPU_NEW_VALUE_BUFFERS_PER_FRAME, PLOT_VALUE_SHARD_CLASSES, value_buffer_bytes,
+    IndexLayout, PLOT_GPU_NEW_VALUE_BUFFERS_PER_FRAME, PLOT_VALUE_SHARD_CLASSES, value_buffer_bytes,
 };
 use super::{
     BufferShardAlloc, CollectedGraphData, PlotGpuAllocationPause, PlotGpuBufferPool,
@@ -74,6 +81,14 @@ const BAR_SHADER_HANDLE: Handle<Shader> = uuid_handle!("091989F7-D5B1-4C6C-B9C1-
 pub(crate) fn timeseries_uses_zoh(graph_type: GraphType) -> bool {
     matches!(graph_type, GraphType::Line)
 }
+
+/// Wasm timeseries x is scaled from microseconds into seconds.
+///
+/// The orthographic scale for a multi-minute window in microseconds is ~1e-8.
+/// ANGLE WebGL2 does not rasterize the resulting line quads. Query plots are
+/// already in seconds and draw on this same pipeline, so the graph camera and
+/// the vertex buffer both use this scale.
+pub(crate) const WASM_TIMESERIES_X_SCALE: f64 = 1.0 / 1_000_000.0;
 
 pub(crate) fn timeseries_data_range(
     line: &Line,
@@ -130,7 +145,6 @@ impl Plugin for PlotGpuPlugin {
                     .in_set(RenderSystems::Queue)
                     .ambiguous_with(bevy::pbr::queue_material_meshes),
             )
-            .add_systems(ExtractSchedule, extract_lines)
             .add_systems(
                 RenderStartup,
                 init_line_pipeline.after(init_mesh_2d_pipeline),
@@ -143,6 +157,10 @@ impl Plugin for PlotGpuPlugin {
                 Render,
                 queue_line.in_set(PlotSystem::QueueLine), //.after(prepare_gpu_line),
             );
+        #[cfg(not(target_family = "wasm"))]
+        render_app.add_systems(ExtractSchedule, extract_lines);
+        #[cfg(target_family = "wasm")]
+        render_app.add_systems(ExtractSchedule, extract_plot_lines_wasm);
     }
 
     fn finish(&self, app: &mut bevy::prelude::App) {
@@ -150,35 +168,49 @@ impl Plugin for PlotGpuPlugin {
             return;
         };
 
-        let render_device = render_app.world().resource::<RenderDevice>();
-        let single = BindGroupLayoutEntries::single(
-            ShaderStages::VERTEX,
-            uniform_buffer::<LineUniform>(true),
-        );
-        let uniform_descriptor = BindGroupLayoutDescriptor::new("LineUniform layout", &single);
-        let uniform_layout = render_device.create_bind_group_layout("LineUniform layout", &single);
+        // End the `RenderDevice` borrow before inserting resources (E0502).
+        let layouts = {
+            let render_device = render_app.world().resource::<RenderDevice>();
+            let single = BindGroupLayoutEntries::single(
+                ShaderStages::VERTEX,
+                uniform_buffer::<LineUniform>(true),
+            );
+            let uniform_descriptor = BindGroupLayoutDescriptor::new("LineUniform layout", &single);
+            let uniform_layout =
+                render_device.create_bind_group_layout("LineUniform layout", &single);
 
-        let layout_entries = BindGroupLayoutEntries::sequential(
-            ShaderStages::VERTEX,
+            #[cfg(not(target_family = "wasm"))]
+            let storage = {
+                let layout_entries = BindGroupLayoutEntries::sequential(
+                    ShaderStages::VERTEX,
+                    (
+                        storage_buffer_read_only_sized(false, Some(MIN_VALUE_BUFFER_SIZE)),
+                        storage_buffer_read_only_sized(false, Some(MIN_VALUE_BUFFER_SIZE)),
+                        storage_buffer_read_only_sized(false, Some(INDEX_BUFFER_SIZE)),
+                    ),
+                );
+                let values_descriptor =
+                    BindGroupLayoutDescriptor::new("LineValues layout", &layout_entries);
+                let values_layout =
+                    render_device.create_bind_group_layout("LineValues layout", &layout_entries);
+                (values_layout, values_descriptor)
+            };
             (
-                storage_buffer_read_only_sized(false, Some(MIN_VALUE_BUFFER_SIZE)),
-                storage_buffer_read_only_sized(false, Some(MIN_VALUE_BUFFER_SIZE)),
-                storage_buffer_read_only_sized(false, Some(INDEX_BUFFER_SIZE)),
-            ),
-        );
-        let values_descriptor =
-            BindGroupLayoutDescriptor::new("LineValues layout", &layout_entries);
-        let values_layout =
-            render_device.create_bind_group_layout("LineValues layout", &layout_entries);
-
-        render_app.insert_resource(LineValuesLayout {
-            layout: values_layout,
-            descriptor: values_descriptor,
-        });
+                uniform_layout,
+                uniform_descriptor,
+                #[cfg(not(target_family = "wasm"))]
+                storage,
+            )
+        };
         render_app.insert_resource(UniformLayout {
-            layout: uniform_layout,
-            descriptor: uniform_descriptor,
+            layout: layouts.0,
+            descriptor: layouts.1,
         });
+        #[cfg(not(target_family = "wasm"))]
+        {
+            let (layout, descriptor) = layouts.2;
+            render_app.insert_resource(LineValuesLayout { layout, descriptor });
+        }
     }
 }
 
@@ -374,15 +406,16 @@ impl LineMut<'_> {
         line_visible_range: Range<Timestamp>,
         pixel_width: usize,
         zoh: bool,
-    ) -> Option<u32> {
+        prev: Option<&IndexLayout>,
+    ) -> Option<(u32, Option<IndexLayout>)> {
         match self {
-            LineMut::Timeseries(line) => {
-                line.data
-                    .write_to_index_buffer(index_buffer, render_queue, line_visible_range, zoh)
-            }
-            LineMut::XY(xy_line) => {
-                xy_line.write_to_index_buffer(index_buffer, render_queue, pixel_width)
-            }
+            LineMut::Timeseries(line) => line
+                .data
+                .write_to_index_buffer(index_buffer, render_queue, line_visible_range, zoh, prev)
+                .map(|layout| (layout.count(), Some(layout))),
+            LineMut::XY(xy_line) => xy_line
+                .write_to_index_buffer(index_buffer, render_queue, pixel_width)
+                .map(|count| (count, None)),
         }
     }
 
@@ -490,6 +523,7 @@ impl LineUniform {
     }
 }
 
+#[cfg(not(target_family = "wasm"))]
 #[derive(Resource)]
 struct LineValuesLayout {
     layout: BindGroupLayout,
@@ -528,6 +562,7 @@ fn prepare_uniform_bind_group(
 pub struct LinePipeline {
     mesh_pipeline: Mesh2dPipeline,
     uniform_layout: BindGroupLayoutDescriptor,
+    #[cfg(not(target_family = "wasm"))]
     storage_layout: BindGroupLayoutDescriptor,
 }
 
@@ -535,11 +570,12 @@ fn init_line_pipeline(
     mut commands: Commands,
     mesh_pipeline: Res<Mesh2dPipeline>,
     uniform_layout: Res<UniformLayout>,
-    storage_layout: Res<LineValuesLayout>,
+    #[cfg(not(target_family = "wasm"))] storage_layout: Res<LineValuesLayout>,
 ) {
     commands.insert_resource(LinePipeline {
         mesh_pipeline: mesh_pipeline.clone(),
         uniform_layout: uniform_layout.descriptor.clone(),
+        #[cfg(not(target_family = "wasm"))]
         storage_layout: storage_layout.descriptor.clone(),
     });
 }
@@ -563,15 +599,15 @@ impl SpecializedRenderPipeline for LinePipeline {
         let shader_defs = vec![
             #[cfg(target_arch = "wasm32")]
             "SIXTEEN_BYTE_ALIGNMENT".into(),
+            #[cfg(target_family = "wasm")]
+            "LINE_VERTEX_ATTRIBUTES".into(),
         ];
 
         let view_layout = self.mesh_pipeline.view_layout.clone();
 
-        let layout = vec![
-            view_layout,
-            self.uniform_layout.clone(),
-            self.storage_layout.clone(),
-        ];
+        let mut layout = vec![view_layout, self.uniform_layout.clone()];
+        #[cfg(not(target_family = "wasm"))]
+        layout.push(self.storage_layout.clone());
 
         let format = key.target_format;
         let shader = match key.graph_type {
@@ -585,7 +621,7 @@ impl SpecializedRenderPipeline for LinePipeline {
                 shader: shader.clone(),
                 entry_point: Some("vertex".into()),
                 shader_defs: shader_defs.clone(),
-                buffers: line_vertex_buffer_layouts(),
+                buffers: line_vertex_buffer_layouts(key.graph_type),
             },
             fragment: Some(FragmentState {
                 shader,
@@ -599,8 +635,16 @@ impl SpecializedRenderPipeline for LinePipeline {
             }),
             layout,
             primitive: PrimitiveState {
-                topology: PrimitiveTopology::TriangleStrip,
-                strip_index_format: Some(IndexFormat::Uint32),
+                topology: if cfg!(target_family = "wasm") {
+                    PrimitiveTopology::TriangleList
+                } else {
+                    PrimitiveTopology::TriangleStrip
+                },
+                strip_index_format: if cfg!(target_family = "wasm") {
+                    None
+                } else {
+                    Some(IndexFormat::Uint32)
+                },
                 ..Default::default()
             },
             depth_stencil: Some(DepthStencilState {
@@ -631,8 +675,40 @@ impl SpecializedRenderPipeline for LinePipeline {
     }
 }
 
-fn line_vertex_buffer_layouts() -> Vec<VertexBufferLayout> {
-    vec![]
+fn line_vertex_buffer_layouts(graph_type: GraphType) -> Vec<VertexBufferLayout> {
+    #[cfg(not(target_family = "wasm"))]
+    {
+        let _ = graph_type;
+        vec![]
+    }
+    #[cfg(target_family = "wasm")]
+    match graph_type {
+        GraphType::Line => vec![VertexBufferLayout {
+            array_stride: 24,
+            step_mode: VertexStepMode::Instance,
+            attributes: vec![
+                VertexAttribute {
+                    format: VertexFormat::Float32x2,
+                    offset: 0,
+                    shader_location: 0,
+                },
+                VertexAttribute {
+                    format: VertexFormat::Float32x2,
+                    offset: 8,
+                    shader_location: 1,
+                },
+                VertexAttribute {
+                    format: VertexFormat::Float32,
+                    offset: 16,
+                    shader_location: 2,
+                },
+            ],
+        }],
+        GraphType::Point | GraphType::Bar => vec![VertexBufferLayout::from_vertex_formats(
+            VertexStepMode::Instance,
+            [VertexFormat::Float32x2],
+        )],
+    }
 }
 
 #[derive(Component, Clone, ExtractComponent)]
@@ -645,8 +721,14 @@ pub struct LineWidgetWidth(pub usize);
 
 #[derive(Clone, Component, ExtractComponent)]
 pub struct GpuLine {
+    #[cfg(not(target_family = "wasm"))]
     values_bind_group: BindGroup,
+    #[cfg(not(target_family = "wasm"))]
     index_buffer: Buffer,
+    /// On wasm this is the instance count. Native `count` is the index-strip
+    /// length, and the draw command turns that into instances.
+    #[cfg(target_family = "wasm")]
+    segment_buffer: Buffer,
     count: u32,
     zoh: bool,
     /// Cache key part A: `(selected_span_micros, clip_start)`.
@@ -657,9 +739,16 @@ pub struct GpuLine {
     /// offsets inside the same buffers, so the index strip must be rewritten
     /// even when the visible range is unchanged (same as `plot_3d`).
     content_gen: u64,
+    /// Orthographic area the wasm vertices were clipped against.
+    #[cfg(target_family = "wasm")]
+    clip_key: [u32; 4],
     /// Identity of the x/y value buffers the bind group references; the bind
     /// group must be rebuilt if the underlying `BufferShardAlloc` changes.
+    #[cfg(not(target_family = "wasm"))]
     value_buffer_ids: (BufferId, BufferId),
+    /// Where `index_buffer` holds each chunk's strip, so the next write keeps
+    /// the unchanged ones. `None` for XY lines, which rewrite in full.
+    index_layout: Option<Arc<IndexLayout>>,
 }
 
 /// Main-world cache of the per-line GPU resources, written back by
@@ -672,7 +761,16 @@ pub struct GpuLineCache(Option<GpuLine>);
 
 impl GpuLineCache {
     fn take_index_buffer(&mut self) -> Option<Buffer> {
-        self.0.take().map(|gpu| gpu.index_buffer)
+        let gpu = self.0.take()?;
+        #[cfg(not(target_family = "wasm"))]
+        {
+            Some(gpu.index_buffer)
+        }
+        #[cfg(target_family = "wasm")]
+        {
+            let _ = gpu;
+            None
+        }
     }
 }
 
@@ -721,14 +819,22 @@ impl<P: PhaseItem> RenderCommand<P> for DrawLine {
         let Some(gpu_line) = handle else {
             return RenderCommandResult::Failure("no gpu line");
         };
-        pass.set_bind_group(2, &gpu_line.values_bind_group, &[]);
-        let segments = gpu_line.count.saturating_sub(1);
-        let instances = if gpu_line.zoh {
-            segments.saturating_mul(2)
-        } else {
-            segments
-        };
-        pass.draw(0..4, 0..instances);
+        #[cfg(target_family = "wasm")]
+        {
+            pass.set_vertex_buffer(0, gpu_line.segment_buffer.slice(..));
+            pass.draw(0..6, 0..gpu_line.count);
+        }
+        #[cfg(not(target_family = "wasm"))]
+        {
+            pass.set_bind_group(2, &gpu_line.values_bind_group, &[]);
+            let segments = gpu_line.count.saturating_sub(1);
+            let instances = if gpu_line.zoh {
+                segments.saturating_mul(2)
+            } else {
+                segments
+            };
+            pass.draw(0..4, 0..instances);
+        }
         RenderCommandResult::Success
     }
 }
@@ -755,9 +861,11 @@ type LineQueryMut = (
 type ExtractLinesParams = (
     Query<'static, 'static, LineQueryMut>,
     Query<'static, 'static, &'static ViewportRect>,
+    Query<'static, 'static, &'static Projection>,
     ResMut<'static, Assets<Line>>,
     ResMut<'static, Assets<XYLine>>,
     Res<'static, crate::SelectedTimeRange>,
+    Res<'static, impeller_wkt::EarliestTimestamp>,
     ResMut<'static, PlotGpuBufferPool>,
     Commands<'static, 'static>,
 );
@@ -788,6 +896,7 @@ pub(crate) fn plot_draw_replay_allowed<T: PartialEq>(cached: Option<T>, owned: O
 }
 
 /// Last frame's draw for this line, if replaying it is safe.
+#[cfg(not(target_family = "wasm"))]
 fn replayable_gpu_line<'a>(
     cache: Option<&'a GpuLineCache>,
     line: &LineMut<'_>,
@@ -895,7 +1004,10 @@ pub(crate) fn evict_all_plot_gpu(
             let mut caches = world.query::<&mut GpuLineCache>();
             for mut cache in caches.iter_mut(world) {
                 if let Some(gpu) = cache.0.take() {
+                    #[cfg(not(target_family = "wasm"))]
                     pool.release_index(gpu.index_buffer);
+                    #[cfg(target_family = "wasm")]
+                    let _ = gpu;
                 }
             }
             pool.set_live_shard_occupancy(0, 0);
@@ -913,6 +1025,7 @@ pub(crate) fn evict_all_plot_gpu(
     trim
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn extract_lines(
     mut main_world: ResMut<MainWorld>,
     mut commands: Commands,
@@ -947,9 +1060,11 @@ fn extract_lines(
             let (
                 mut lines,
                 viewport_rects,
+                _projections,
                 mut line_assets,
                 mut xy_lines,
                 selected_range,
+                _earliest,
                 mut plot_gpu_pool,
                 mut main_commands,
             ) = cached_state.state.params_mut(world);
@@ -1152,7 +1267,7 @@ fn extract_lines(
                     let (ca, cb) = g.last_clip_range?;
                     Some((sa, sb, ca, cb, g.content_gen, g.zoh))
                 });
-                let count = if prev_key
+                let written = if prev_key
                     == Some((
                         range_key.0,
                         range_key.1,
@@ -1161,7 +1276,7 @@ fn extract_lines(
                         content_gen,
                         zoh,
                     )) {
-                    Some(cached.map(|g| g.count).unwrap_or(0))
+                    cached.map(|g| (g.count, g.index_layout.clone()))
                 } else {
                     line.write_to_index_buffer(
                         &index_buffer,
@@ -1169,9 +1284,11 @@ fn extract_lines(
                         data_range,
                         width.0,
                         zoh,
+                        cached.and_then(|g| g.index_layout.as_deref()),
                     )
+                    .map(|(count, layout)| (count, layout.map(Arc::new)))
                 };
-                let Some(count) = count else {
+                let Some((count, index_layout)) = written else {
                     if cached.is_none() {
                         plot_gpu_pool.release_index(index_buffer);
                     }
@@ -1187,6 +1304,7 @@ fn extract_lines(
                     last_clip_range: Some((range_key.2, range_key.3)),
                     content_gen,
                     value_buffer_ids,
+                    index_layout,
                 };
 
                 // Persist for the next frame's extract.
@@ -1240,6 +1358,358 @@ fn extract_lines(
     );
 }
 
+/// Packed line instances: `point_a.xy, point_b.xy, hold`.
+///
+/// Zero-order hold is baked here. The last sample of the last strip is one
+/// instance with `hold = 1`, which the shader stretches to the right edge.
+#[cfg(any(target_family = "wasm", test))]
+fn line_segments_from_strips(strips: &[Vec<(f32, f32)>], zoh: bool) -> Vec<f32> {
+    let mut out = Vec::new();
+    let mut last = None;
+    for strip in strips {
+        let mut prev = None;
+        for &point in strip {
+            if let Some(a) = prev {
+                if zoh {
+                    push_line_segment(&mut out, a, (point.0, a.1), 0.0);
+                    if a.1 != point.1 {
+                        push_line_segment(&mut out, (point.0, a.1), point, 0.0);
+                    }
+                } else {
+                    push_line_segment(&mut out, a, point, 0.0);
+                }
+            }
+            prev = Some(point);
+            last = Some(point);
+        }
+    }
+    if zoh && let Some(point) = last {
+        push_line_segment(&mut out, point, point, 1.0);
+    }
+    out
+}
+
+#[cfg(any(target_family = "wasm", test))]
+fn push_line_segment(out: &mut Vec<f32>, a: (f32, f32), b: (f32, f32), hold: f32) {
+    // Pad to 24 bytes so the instance stride is a multiple of the vec2 alignment.
+    out.extend_from_slice(&[a.0, a.1, b.0, b.1, hold, 0.0]);
+}
+
+#[cfg(any(target_family = "wasm", test))]
+fn point_instances_from_strips(strips: &[Vec<(f32, f32)>]) -> Vec<f32> {
+    let mut out = Vec::new();
+    for strip in strips {
+        for &(x, y) in strip {
+            out.extend_from_slice(&[x, y]);
+        }
+    }
+    out
+}
+
+#[cfg(target_family = "wasm")]
+fn plot_instance_stride(graph_type: GraphType) -> usize {
+    match graph_type {
+        GraphType::Line => 6,
+        GraphType::Point | GraphType::Bar => 2,
+    }
+}
+
+#[cfg(target_family = "wasm")]
+fn orthographic_area(projection: Option<&Projection>) -> Rect {
+    match projection {
+        Some(Projection::Orthographic(ortho)) => ortho.area,
+        _ => Rect::new(-1.0, -1.0, 1.0, 1.0),
+    }
+}
+
+#[cfg(target_family = "wasm")]
+fn plot_to_clip(area: Rect, point: (f32, f32)) -> (f32, f32) {
+    let width = area.max.x - area.min.x;
+    let height = area.max.y - area.min.y;
+    let x = if width.abs() > f32::EPSILON {
+        (point.0 - area.min.x) / width * 2.0 - 1.0
+    } else {
+        0.0
+    };
+    let y = if height.abs() > f32::EPSILON {
+        (point.1 - area.min.y) / height * 2.0 - 1.0
+    } else {
+        0.0
+    };
+    (x, y)
+}
+
+/// Line instances are plot-space. The wasm line shader consumes clip space.
+#[cfg(target_family = "wasm")]
+fn preclip_line_floats(floats: &mut [f32], area: Rect) {
+    let mut i = 0;
+    while i + 5 < floats.len() {
+        let a = plot_to_clip(area, (floats[i], floats[i + 1]));
+        let b = plot_to_clip(area, (floats[i + 2], floats[i + 3]));
+        floats[i] = a.0;
+        floats[i + 1] = a.1;
+        floats[i + 2] = b.0;
+        floats[i + 3] = b.1;
+        i += 6;
+    }
+}
+
+#[cfg(target_family = "wasm")]
+fn plot_vertex_floats(
+    line: &LineMut<'_>,
+    data_range: Range<Timestamp>,
+    earliest: Timestamp,
+    pixel_width: usize,
+    graph_type: GraphType,
+    zoh: bool,
+) -> Vec<f32> {
+    let strips = match line {
+        LineMut::Timeseries(line) => {
+            let strips = line
+                .data
+                .visible_plot_strips(data_range.clone(), earliest, zoh);
+            let mut strips = if strips.iter().any(|strip| !strip.is_empty()) {
+                strips
+            } else if let Some(span) = line.data.stored_exclusive_span() {
+                // The camera range can miss chunks when it was quantized from a
+                // stale visible range. The stored span still matches the samples
+                // that produced the axis bounds.
+                line.data.visible_plot_strips(span, earliest, zoh)
+            } else {
+                strips
+            };
+            let x_scale = WASM_TIMESERIES_X_SCALE as f32;
+            for strip in &mut strips {
+                for point in strip.iter_mut() {
+                    point.0 *= x_scale;
+                }
+            }
+            strips
+        }
+        LineMut::XY(xy) => vec![xy.visible_plot_points(pixel_width)],
+    };
+    match graph_type {
+        GraphType::Line => line_segments_from_strips(&strips, zoh),
+        GraphType::Point | GraphType::Bar => point_instances_from_strips(&strips),
+    }
+}
+
+#[cfg(target_family = "wasm")]
+fn extract_plot_lines_wasm(
+    mut main_world: ResMut<MainWorld>,
+    mut commands: Commands,
+    render_device: Res<RenderDevice>,
+) {
+    main_world.resource_scope(
+        |world, mut cached_state: bevy::prelude::Mut<ExtractLinesState>| {
+            let (
+                mut lines,
+                viewport_rects,
+                projections,
+                mut line_assets,
+                mut xy_lines,
+                selected_range,
+                earliest,
+                mut plot_gpu_pool,
+                mut main_commands,
+            ) = cached_state.state.params_mut(world);
+            plot_gpu_pool.tick();
+            let selected = selected_range.0.clone();
+            let selected_span_micros = selected.end.0.saturating_sub(selected.start.0);
+            let short_window = crate::is_short_accuracy_window(&selected);
+            let mut ts_seen = 0u32;
+            let mut xy_seen = 0u32;
+            let mut off_screen = 0u32;
+            let mut missing_asset = 0u32;
+            let mut no_samples = 0u32;
+            let mut empty_upload = 0u32;
+            let mut spawned = 0u32;
+            let mut rebuilt: Vec<String> = Vec::new();
+
+            for (
+                entity,
+                line_handle,
+                child_of,
+                config,
+                uniform,
+                line_visible_range,
+                width,
+                graph_type,
+                mut cache,
+            ) in lines.iter_mut()
+            {
+                match line_handle {
+                    LineHandle::Timeseries(_) => ts_seen += 1,
+                    LineHandle::XY(_) => xy_seen += 1,
+                }
+                if !line_gpu_pane_on_screen(child_of, &viewport_rects) {
+                    off_screen += 1;
+                    if let Some(ref mut cache) = cache {
+                        cache.0.take();
+                    }
+                    continue;
+                }
+                let Some(line) = line_handle.get(&mut line_assets, &mut xy_lines) else {
+                    missing_asset += 1;
+                    continue;
+                };
+                if !line.has_samples() {
+                    no_samples += 1;
+                    if let Some(ref mut cache) = cache {
+                        cache.0.take();
+                    }
+                    continue;
+                }
+                let zoh = line.uses_zoh(*graph_type);
+                let draw_uniform = uniform.with_zoh(zoh);
+                let visible = line_visible_range.0.clone();
+                let clip_range = if short_window {
+                    visible
+                } else {
+                    crate::quantize_visible_range(visible, crate::TRAILING_RANGE_QUANTUM_MICROS)
+                };
+                // Match auto-y, which reads `SelectedTimeRange`. The per-line visible
+                // range can be a short prefix of that window, so the stroke's samples
+                // never enter the y span the axis was built from.
+                let data_range = line.data_range(selected.clone(), *graph_type);
+                let content_gen = line.content_gen();
+                let area = orthographic_area(
+                    child_of.and_then(|child| projections.get(child.parent()).ok()),
+                );
+                let clip_key = [
+                    area.min.x.to_bits(),
+                    area.min.y.to_bits(),
+                    area.max.x.to_bits(),
+                    area.max.y.to_bits(),
+                ];
+                let range_key = (
+                    selected_span_micros,
+                    clip_range.start.0,
+                    clip_range.end.0,
+                    width.0 as i64,
+                );
+                let cached = cache.as_ref().and_then(|c| c.0.as_ref());
+                let prev_key = cached.and_then(|gpu| {
+                    let (span, start) = gpu.last_index_range?;
+                    let (end, pixels) = gpu.last_clip_range?;
+                    Some((
+                        span,
+                        start,
+                        end,
+                        pixels,
+                        gpu.content_gen,
+                        gpu.zoh,
+                        gpu.clip_key,
+                    ))
+                });
+                let gpu_line = if prev_key
+                    == Some((
+                        range_key.0,
+                        range_key.1,
+                        range_key.2,
+                        range_key.3,
+                        content_gen,
+                        zoh,
+                        clip_key,
+                    )) {
+                    cached.cloned()
+                } else {
+                    let mut floats = plot_vertex_floats(
+                        &line,
+                        data_range.clone(),
+                        earliest.0,
+                        width.0,
+                        *graph_type,
+                        zoh,
+                    );
+                    let mut plot_min = (f32::MAX, f32::MAX);
+                    let mut plot_max = (f32::MIN, f32::MIN);
+                    if matches!(*graph_type, GraphType::Line) {
+                        let mut i = 0;
+                        while i + 3 < floats.len() {
+                            for k in [0, 2] {
+                                plot_min.0 = plot_min.0.min(floats[i + k]);
+                                plot_max.0 = plot_max.0.max(floats[i + k]);
+                            }
+                            for k in [1, 3] {
+                                plot_min.1 = plot_min.1.min(floats[i + k]);
+                                plot_max.1 = plot_max.1.max(floats[i + k]);
+                            }
+                            i += 6;
+                        }
+                        preclip_line_floats(&mut floats, area);
+                    }
+                    if matches!(line_handle, LineHandle::Timeseries(_)) {
+                        let n = floats.len() / 6;
+                        rebuilt.push(format!(
+                            "{n} y={:.3}..{:.3} area_y={:.2}..{:.2}",
+                            plot_min.1, plot_max.1, area.min.y, area.max.y
+                        ));
+                    }
+                    let stride = plot_instance_stride(*graph_type);
+                    if floats.len() < stride {
+                        empty_upload += 1;
+                        None
+                    } else {
+                        let segment_buffer =
+                            render_device.create_buffer_with_data(&BufferInitDescriptor {
+                                label: Some("plot line segments"),
+                                contents: floats.as_bytes(),
+                                usage: BufferUsages::VERTEX,
+                            });
+                        Some(GpuLine {
+                            segment_buffer,
+                            count: (floats.len() / stride) as u32,
+                            zoh,
+                            last_index_range: Some((range_key.0, range_key.1)),
+                            last_clip_range: Some((range_key.2, range_key.3)),
+                            content_gen,
+                            clip_key,
+                            index_layout: None,
+                        })
+                    }
+                };
+                let Some(gpu_line) = gpu_line else {
+                    if let Some(ref mut cache) = cache {
+                        cache.0.take();
+                    }
+                    continue;
+                };
+                spawned += 1;
+                if let Some(ref mut cache) = cache {
+                    cache.0 = Some(gpu_line.clone());
+                } else {
+                    main_commands
+                        .entity(entity)
+                        .insert(GpuLineCache(Some(gpu_line.clone())));
+                }
+                commands.spawn((
+                    MainEntity::from(entity),
+                    LineBundle {
+                        line: line_handle.clone(),
+                        config: config.clone(),
+                        uniform: draw_uniform,
+                        line_visible_range: line_visible_range.clone(),
+                        graph_type: *graph_type,
+                    },
+                    gpu_line,
+                    TemporaryRenderEntity,
+                ));
+            }
+            if !rebuilt.is_empty() {
+                static LOGS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+                if LOGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) < 4 {
+                    bevy::log::warn!(
+                        "plot wasm ts={ts_seen} xy={xy_seen} off={off_screen} miss={missing_asset} nosamp={no_samples} empty={empty_upload} spawned={spawned} rebuilt={}",
+                        rebuilt.join(" ")
+                    );
+                }
+            }
+            cached_state.state.apply(world);
+        },
+    );
+}
+
 #[allow(clippy::too_many_arguments)]
 fn queue_line(
     draw_functions: Res<DrawFunctions<Transparent2d>>,
@@ -1282,7 +1752,7 @@ fn queue_line(
                 extra_index: PhaseItemExtraIndex::None,
                 sort_key: FloatOrd(0.0),
                 extracted_index: 0,
-                indexed: true,
+                indexed: !cfg!(target_family = "wasm"),
             });
         }
     }
@@ -1292,8 +1762,8 @@ fn queue_line(
 mod tests {
     use super::{
         LineHandle, PendingUnusedPlotLines, apply_pending_unused_plot_lines,
-        plot_draw_replay_allowed, release_unused_plot_line, timeseries_data_range,
-        timeseries_uses_zoh,
+        line_segments_from_strips, plot_draw_replay_allowed, release_unused_plot_line,
+        timeseries_data_range, timeseries_uses_zoh,
     };
     use crate::ui::plot::data::Chunk;
     use crate::ui::plot::{
@@ -1414,6 +1884,39 @@ mod tests {
             "nothing drawn yet"
         );
         assert!(!plot_draw_replay_allowed::<(u32, u32)>(None, None));
+    }
+
+    #[test]
+    fn zoh_segments_step_inside_a_strip_and_hold_the_last_sample() {
+        let strips = vec![vec![(0.0, 1.0), (2.0, 3.0)], vec![(4.0, 5.0)]];
+        let segments = line_segments_from_strips(&strips, true);
+        assert_eq!(
+            segments,
+            vec![
+                0.0, 1.0, 2.0, 1.0, 0.0, 0.0, 2.0, 1.0, 2.0, 3.0, 0.0, 0.0, 4.0, 5.0, 4.0, 5.0,
+                1.0, 0.0,
+            ]
+        );
+    }
+
+    #[test]
+    fn line_segments_do_not_bridge_strips() {
+        let strips = vec![vec![(0.0, 0.0), (1.0, 1.0)], vec![(3.0, 0.0), (4.0, 1.0)]];
+        let segments = line_segments_from_strips(&strips, false);
+        assert_eq!(
+            segments,
+            vec![0.0, 0.0, 1.0, 1.0, 0.0, 0.0, 3.0, 0.0, 4.0, 1.0, 0.0, 0.0,]
+        );
+    }
+
+    #[test]
+    fn flat_zoh_step_skips_a_zero_length_riser() {
+        let strips = vec![vec![(0.0, 1.0), (2.0, 1.0)]];
+        let segments = line_segments_from_strips(&strips, true);
+        assert_eq!(
+            segments,
+            vec![0.0, 1.0, 2.0, 1.0, 0.0, 0.0, 2.0, 1.0, 2.0, 1.0, 1.0, 0.0]
+        );
     }
 
     #[test]

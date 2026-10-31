@@ -206,7 +206,7 @@ impl WorldBuilder {
                 "nice",
                 vec![
                     "-n".to_string(),
-                    "19".to_string(),
+                    std::env::var("ELODIN_RENDER_SERVER_NICE").unwrap_or_else(|_| "19".to_string()),
                     "elodin".to_string(),
                     "render-server".to_string(),
                     "--addr".to_string(),
@@ -524,6 +524,7 @@ impl WorldBuilder {
         ev100 = None,
         bloom = None,
         environment = None,
+        frustums_face_alpha = impeller_wkt::default_frustums_face_alpha(),
     ))]
     #[allow(clippy::too_many_arguments)]
     fn sensor_camera(
@@ -554,6 +555,7 @@ impl WorldBuilder {
         ev100: Option<f32>,
         bloom: Option<&Bound<'_, PyAny>>,
         environment: Option<&Bound<'_, PyAny>>,
+        frustums_face_alpha: f32,
     ) -> Result<(), crate::error::Error> {
         if name.chars().any(|c| c.is_whitespace()) {
             return Err(crate::error::Error::PyO3(
@@ -702,6 +704,13 @@ impl WorldBuilder {
                 ),
             ));
         }
+        if !frustums_face_alpha.is_finite() || !(0.0..=1.0).contains(&frustums_face_alpha) {
+            return Err(crate::error::Error::PyO3(
+                pyo3::exceptions::PyValueError::new_err(
+                    "sensor_camera frustums_face_alpha must be finite and between 0 and 1",
+                ),
+            ));
+        }
         if !(fps > 0.0 && fps.is_finite()) {
             return Err(crate::error::Error::PyO3(
                 pyo3::exceptions::PyValueError::new_err(format!(
@@ -777,6 +786,7 @@ impl WorldBuilder {
                     impeller_wkt::default_viewport_frustums_color(),
                     "frustums_color",
                 )?,
+                frustums_face_alpha,
                 projection_color: color_from_vec(
                     projection_color,
                     impeller_wkt::default_viewport_projection_color(),
@@ -1161,11 +1171,19 @@ impl WorldBuilder {
                     let profile = exec.profile();
                     let tpt = profile.get("ticks_per_telemetry").copied().unwrap_or(1.0) as u64;
                     println!(
-                        "= tick time:          {:.3} ms (batch of {} ticks)",
-                        profile["tick"], tpt
+                        "= tick time:          {:.3} ms (median {:.3} ms, batch of {} ticks)",
+                        profile["tick"], profile["tick_median"], tpt
+                    );
+                    println!(
+                        "warm-up:              {:.3} ms (first batch)",
+                        profile["warmup"]
                     );
                     println!("build time:           {:.3} ms", profile["build"]);
                     println!("real_time_factor:     {:.3}", profile["real_time_factor"]);
+                    println!(
+                        "real_time_factor_median: {:.3}",
+                        profile["real_time_factor_median"]
+                    );
                     if enable_detail {
                         println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
                         println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
@@ -1690,8 +1708,12 @@ impl WorldBuilder {
                     let tpt = profile.get("ticks_per_telemetry").copied().unwrap_or(1.0) as u64;
                     println!("\n[Runtime Metrics]");
                     println!(
-                        "tick time:            {:.3} ms (batch of {} ticks)",
-                        profile["tick"], tpt
+                        "tick time:            {:.3} ms (median {:.3} ms, batch of {} ticks)",
+                        profile["tick"], profile["tick_median"], tpt
+                    );
+                    println!(
+                        "warm-up:              {:.3} ms (first batch)",
+                        profile["warmup"]
                     );
                     println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
                     println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
@@ -1704,6 +1726,10 @@ impl WorldBuilder {
                     println!("d2h_download time:    {:.3} ms", profile["d2h_download"]);
                     println!("build time:           {:.3} ms", profile["build"]);
                     println!("real_time_factor:     {:.3}", profile["real_time_factor"]);
+                    println!(
+                        "real_time_factor_median: {:.3}",
+                        profile["real_time_factor_median"]
+                    );
 
                     Ok(None)
                 }

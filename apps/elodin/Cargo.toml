@@ -12,7 +12,13 @@ cargo-clippy = []
 big_space = ["elodin-editor/big_space"]
 inspector = ["elodin-editor/inspector"]
 debug = ["elodin-editor/debug"]
-tracy = ["elodin-editor/tracy", "bevy/trace_tracy", "bevy/debug", "dep:tracing-tracy"]
+tracy = [
+    "elodin-editor/tracy",
+    "bevy/trace_tracy",
+    "bevy/debug",
+    "dep:tracing-tracy",
+    "dep:tracy-client-sys",
+]
 
 [dependencies]
 thiserror = "2.0"
@@ -43,6 +49,8 @@ directories = "5.0.1"
 bevy.workspace = true
 tracing-subscriber = { version = "0.3", features = ["chrono"] }
 tracing-tracy = { version = "0.11", optional = true }
+# Pin the Tracy 0.13 protocol. nixpkgs `tracy-capture` cannot read 0.14 traces.
+tracy-client-sys = { version = "=0.28.0", optional = true, default-features = false }
 
 elodin-editor.path = "../../libs/elodin-editor"
 elodin-editor.default-features = false
@@ -55,6 +63,16 @@ ring = "0.17"
 
 # machine id
 machine-uid = "0.5.1"
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+bevy = { workspace = true, features = [
+  "multi_threaded",
+  "sysinfo_plugin",
+  "x11",
+  "wayland",
+  "basis-universal",
+  "zstd_c",
+] }
 
 [target.'cfg(not(target_os = "windows"))'.dependencies]
 s10.path = "../../libs/s10"

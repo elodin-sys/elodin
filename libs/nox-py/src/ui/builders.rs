@@ -277,6 +277,12 @@ pub(crate) fn extract_eql(obj: &Bound<'_, PyAny>) -> PyResult<String> {
     if let Ok(s) = obj.extract::<String>() {
         return Ok(s);
     }
+    if obj.hasattr("_display_kernel")? {
+        return Err(pyo3::exceptions::PyTypeError::new_err(
+            "this field takes an EQL expression, not a display kernel; \
+             only graph and object_3d accept kernels",
+        ));
+    }
     if let Ok(list) = obj.downcast::<pyo3::types::PyList>() {
         let mut parts = Vec::with_capacity(list.len());
         for item in list.iter() {
@@ -1225,13 +1231,14 @@ fn visibility_range(min: f32, max: f32, fade_distance: f32) -> PyVisibilityRange
 }
 
 #[pyfunction]
-#[pyo3(signature = (path=None, builtin=None, color=None, size=32.0, visibility=None))]
+#[pyo3(signature = (path=None, builtin=None, color=None, size=32.0, visibility=None, fill=true))]
 fn icon(
     path: Option<String>,
     builtin: Option<String>,
     color: Option<&Bound<'_, PyAny>>,
     size: f32,
     visibility: Option<Bound<'_, PyAny>>,
+    fill: bool,
 ) -> PyResult<PyIcon> {
     let source = match (path, builtin) {
         (Some(path), None) => Object3DIconSource::Path(path),
@@ -1252,6 +1259,7 @@ fn icon(
                     Ok(obj.extract::<PyRef<'_, PyVisibilityRange>>()?.inner.clone())
                 })
                 .transpose()?,
+            fill,
         },
     })
 }
@@ -1594,14 +1602,26 @@ fn world_mesh(
 }
 
 #[pyfunction]
-#[pyo3(signature = (path=None, title=None, screen=None, rect=None))]
+#[pyo3(signature = (*children, path=None, title=None, screen=None, rect=None))]
 fn window(
+    _py: Python<'_>,
+    children: Vec<Bound<'_, PyAny>>,
     path: Option<String>,
     title: Option<String>,
     screen: Option<u32>,
     rect: Option<(u32, u32, u32, u32)>,
-) -> PyWindow {
-    PyWindow {
+) -> PyResult<PyWindow> {
+    if !children.is_empty() && path.is_some() {
+        return Err(PyValueError::new_err(
+            "window accepts either path= or inline panel children, not both",
+        ));
+    }
+    let mut content = Schematic::default();
+    for child in children {
+        super::push_elem(&mut content, &child)?;
+    }
+    let inline = (!content.elems.is_empty()).then_some(content);
+    Ok(PyWindow {
         inner: WindowSchematic {
             title,
             path,
@@ -1612,8 +1632,9 @@ fn window(
                 width,
                 height,
             }),
+            content: inline,
         },
-    }
+    })
 }
 
 pub(super) fn register_builders(module: &Bound<'_, PyModule>) -> PyResult<()> {

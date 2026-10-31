@@ -29,7 +29,7 @@
 - **Python CI checks** — `ruff format --check` and `ruff check --fix`.
 - **Nix formatting** — `alejandra` (check mode `alejandra --check .`).
 - **Buildkite CI infrastructure** — Self-hosted EC2 agents (overlayroot tmpfs, deploy keys) on `nixos-x86-aws` and `nixos-arm-aws` queues; post-build hook signs and uploads store paths to the S3 Nix cache.
-- **Simulation regression gate** — `scripts/ci/regress.sh [--all|--update]` benchmarks baselined examples (ball, drone, rocket, three-body, cube-sat), exports DB telemetry to CSV, and compares against baselines via `compare_baseline_csv.py` (tolerance-based, ignores time column) and `compare_profile_metrics.py` (build_time_ms, real_time_factor, ticks) with per-example `baseline/tolerances.json`.
+- **Simulation regression gate** — `scripts/ci/regress.sh [--all|--update]` benchmarks baselined examples (ball, drone, rocket, three-body, cube-sat), exports DB telemetry to CSV, and compares against baselines via `compare_baseline_csv.py` (tolerance-based, ignores time column) and `compare_profile_metrics.py` (build_time_ms, real_time_factor_median, ticks; median of interleaved runs vs the base commit's cached elodin-py) with per-example `baseline/tolerances.json`.
 - **Apollo Monte Carlo CI** — Buildkite step running `scripts/test-apollo-monte-carlo.sh`: truncated-tick, fixed-sample campaign that validates MC infrastructure (not landing quality).
 - **nox-py test suite** — `pytest libs/nox-py/tests/` unit/integration tests.
 - **cranelift-mlir test suite** — 220+ unit tests, per-op golden tests (scalar + pointer ABI), full-example e2e MLIR tests, checkpoint verifier, and external customer-MLIR compile validation.
@@ -183,7 +183,7 @@
 - **Line compression** — Hamann–Chen curvature-based downsampling of graph lines and 3D trails (`CurveCompressSettings`: thresholds, target points, keep-recent fraction); GPU index-buffer cap handling for `plot_3d`.
 
 ### 16.5 Playback, Timeline & Recording
-- **Timeline** — Scrub, pause, step (hold-to-multi-step), rewind; decoupled from simulation; live auto-follow (`follow_latest`) with Jump-to-Latest; replay-speed display; playback speed presets (default 1x, per-sim `default_playback_speed`).
+- **Timeline** — Scrub, pause, step (hold-to-multi-step), rewind; decoupled from simulation; live auto-follow (`follow_latest`) with Jump-to-Latest; replay-speed display; playback speed presets (default 1x, per-sim `default_playback_speed`); status-bar **TIME** field (monotonic seconds vs UTC, editable seek, **µs** clipboard copy for merge alignment).
 - **Navigation** — Goto Tick (pauses), Fix Current Time Range, Set Time Range (`+5m`, `-10s`, `=ISO8601`).
 - **Recording** — Toggle Recording start/stop on the connected DB; time-travel warning names the edited component.
 

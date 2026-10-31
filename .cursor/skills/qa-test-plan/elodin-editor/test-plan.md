@@ -532,7 +532,7 @@ bash .cursor/skills/qa-test-plan/elodin-editor/capture.sh voyager /tmp/qa-editor
 
 ```bash
 # Prefer a real on-disk schematic used by an example (embedded ball.kdl is not a file).
-KDL=examples/drone/motor-panel.kdl
+KDL=examples/drone/schematic.py
 test -f "$KDL"
 rm -f /tmp/qa-editor/EDITOR-120.png
 ELODIN_SCREENSHOT=/tmp/qa-editor/EDITOR-120.png \
@@ -546,7 +546,7 @@ rg -n "screenshot written|schematic|kdl|panic" /tmp/qa-editor/EDITOR-120.log | h
 
 **Pass criteria**
 
-- [ ] `--schematic examples/drone/motor-panel.kdl` was used and the editor captured a PNG
+- [ ] `--schematic examples/drone/schematic.py` was used and the editor captured a PNG
 - [ ] Non-empty screenshot; editor did not panic on load
 - [ ] Screenshot shows a populated schematic (viewport and/or motor panel content present)
 

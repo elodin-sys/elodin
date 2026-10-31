@@ -38,7 +38,7 @@ github = "https://github.com/elodin-sys"
 twitter = "https://twitter.com/elodinsystems"
 email = "info@elodin.systems"
 ganalytics = ""
-version = "v0.19.2"
+version = "v0.20.0"
 
 # If running on netlify.app site, set to true
 is_netlify = false
@@ -107,5 +107,5 @@ site_links_search_box = false
 # [[extra.menu.social]]
 # name = "Discord"
 # icon = "discord"
-# url = "https://discord.gg/Y89eJCtury"
+# url = "https://discord.gg/2XymNRBjfA"
 # weight = 20

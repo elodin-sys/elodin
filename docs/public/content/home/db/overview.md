@@ -117,11 +117,13 @@ elodin-db trim --from-start 60000000 --from-end 120000000 --output ./window ./my
 **Merge** -- Combine two databases (e.g. SITL and real telemetry) with optional time alignment and component prefixes:
 
 ```sh
-# Merge with alignment using playback-relative timestamps (what the Editor shows)
+# Merge with alignment using elapsed offsets from each recording start, in microseconds
 elodin-db merge -o merged --prefix1 sitl --prefix2 real \
   --align1 15000000 --align2 14000000 --from-playback-start ./sitl-db ./real-db
 ```
 
-Use `--from-playback-start` when alignment timestamps come from the Elodin Editor's playback timeline. Without it, `--align1`/`--align2` are interpreted as absolute timestamps.
+Use `--from-playback-start` only for elapsed offsets from each recording's playback start (recorded start metadata, falling back to the first data timestamp), expressed in microseconds. Values copied with the Editor **µs** button are raw timestamps: pass them to `--align1` / `--align2` **without** this flag. Seconds must be multiplied by 1,000,000 for the CLI; a seconds display is not necessarily relative to recording start.
+
+In the editor status bar, the **TIME** field shows monotonic recordings as seconds (for example `12 s`) and wall-clock recordings as UTC. Click the value to select it, press Enter to seek, or use the **µs** button to copy the raw microsecond timestamp for `--align1` / `--align2`.
 
 **Database tools** -- Additional offline commands for post-processing: `drop` (delete components by name or glob), `prune` (remove empties), `truncate` (clear data, keep schemas), `time-align` (shift timestamps), and `fix-timestamps` (normalize clock sources).

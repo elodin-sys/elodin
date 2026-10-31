@@ -4,8 +4,9 @@ use std::{
         Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 use bevy::{
     app::{App, Plugin},
@@ -37,6 +38,7 @@ use bevy::{
         view::{ViewDepthTexture, ViewTarget},
     },
 };
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 use bevy_ai_skybox::prelude::PrimarySkybox;
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use impeller::types::{ComponentId, Timestamp};
@@ -809,6 +811,7 @@ fn spawn_sensor_cameras(
         // Earth owns the cinematic cubemap (`CinematicSkybox`). Tagging this
         // camera as `PrimarySkybox` makes the render-server wait forever for
         // that cubemap to disappear before emitting frames.
+        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
         if !config.cinematic {
             entity.insert(PrimarySkybox);
         }
@@ -1242,7 +1245,10 @@ struct ReadbackJob {
 
 struct SensorReadbackWorker {
     sender: Option<std::sync::mpsc::Sender<ReadbackJob>>,
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
     handle: Option<std::thread::JoinHandle<()>>,
+    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+    handle: Option<()>,
 }
 
 impl SensorReadbackWorker {
@@ -1251,27 +1257,38 @@ impl SensorReadbackWorker {
         render_device: RenderDevice,
         frame_sender: SensorFrameSender,
     ) -> Result<Self, std::io::Error> {
-        let (sender, receiver) = std::sync::mpsc::channel::<ReadbackJob>();
-        let handle = std::thread::Builder::new()
-            .name(format!("sensor-readback-{index}"))
-            .spawn(move || {
-                while let Ok(mut job) = receiver.recv() {
-                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        readback_sensor_frame(&render_device, &frame_sender, &mut job);
-                    }))
-                    .is_err()
-                    {
-                        tracing::error!(
-                            worker = index,
-                            "sensor readback worker recovered from panic"
-                        );
+        #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+        {
+            let _ = (index, render_device, frame_sender);
+            return Ok(Self {
+                sender: None,
+                handle: None,
+            });
+        }
+        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+        {
+            let (sender, receiver) = std::sync::mpsc::channel::<ReadbackJob>();
+            let handle = std::thread::Builder::new()
+                .name(format!("sensor-readback-{index}"))
+                .spawn(move || {
+                    while let Ok(mut job) = receiver.recv() {
+                        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            readback_sensor_frame(&render_device, &frame_sender, &mut job);
+                        }))
+                        .is_err()
+                        {
+                            tracing::error!(
+                                worker = index,
+                                "sensor readback worker recovered from panic"
+                            );
+                        }
                     }
-                }
-            })?;
-        Ok(Self {
-            sender: Some(sender),
-            handle: Some(handle),
-        })
+                })?;
+            Ok(Self {
+                sender: Some(sender),
+                handle: Some(handle),
+            })
+        }
     }
 
     fn send(&self, job: ReadbackJob) {
@@ -1284,8 +1301,13 @@ impl SensorReadbackWorker {
 impl Drop for SensorReadbackWorker {
     fn drop(&mut self) {
         self.sender.take();
+        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
+        }
+        #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+        {
+            self.handle.take();
         }
     }
 }
@@ -1295,14 +1317,21 @@ fn release_slot_after_late_map<E: Send + 'static>(
     buffer: Buffer,
     slot: Option<InFlightSlot>,
 ) {
-    let _ = std::thread::Builder::new()
-        .name("sensor-readback-late-map".to_string())
-        .spawn(move || {
-            if let Ok(Ok(())) = receiver.recv() {
-                drop(MappedBufferGuard(&buffer));
-            }
-            drop(slot);
-        });
+    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+    {
+        let _ = (receiver, buffer, slot);
+    }
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+    {
+        let _ = std::thread::Builder::new()
+            .name("sensor-readback-late-map".to_string())
+            .spawn(move || {
+                if let Ok(Ok(())) = receiver.recv() {
+                    drop(MappedBufferGuard(&buffer));
+                }
+                drop(slot);
+            });
+    }
 }
 
 fn readback_sensor_frame(
@@ -1801,6 +1830,37 @@ mod tests {
         );
         let expected_rotation = Transform::from_translation(expected_translation.as_vec3())
             .looking_at((expected_translation + DVec3::X).as_vec3(), Vec3::Y)
+            .rotation;
+        assert!(
+            pose.rotation.dot(expected_rotation).abs() > 1.0 - 1e-6,
+            "got {:?}, expected {expected_rotation:?}",
+            pose.rotation
+        );
+    }
+
+    #[test]
+    fn positive_pitch_offset_turns_camera_toward_body_down() {
+        let context = GeoContext::default();
+        let mut config = camera_config([0.0, 0.0, 0.0]);
+        config.rot_offset = [0.0, 10.0, 0.0];
+        let pose = sensor_camera_pose(
+            &config,
+            world_pos(DVec3::ZERO, bevy::math::DQuat::IDENTITY),
+            GeoFrame::ENU,
+            &context,
+        )
+        .expect("valid sensor camera pose");
+
+        let pitch = 10.0_f64.to_radians();
+        let forward_enu = DVec3::new(pitch.cos(), 0.0, -pitch.sin());
+        let up_enu = DVec3::new(pitch.sin(), 0.0, pitch.cos());
+        let to_bevy = |vector: DVec3| DVec3::new(vector.x, vector.z, -vector.y);
+        let forward = to_bevy(forward_enu);
+        let expected_rotation = Transform::from_translation(pose.translation.as_vec3())
+            .looking_at(
+                (pose.translation + forward).as_vec3(),
+                to_bevy(up_enu).as_vec3(),
+            )
             .rotation;
         assert!(
             pose.rotation.dot(expected_rotation).abs() > 1.0 - 1e-6,

@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Extract profile metrics from a benchmark run log."""
+"""Extract profile metrics from a benchmark run log; missing metrics are written as null."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import re
-import sys
 from pathlib import Path
 
 METRIC_PATTERNS = {
     "build_time_ms": re.compile(r"^build time:\s*([0-9]+(?:\.[0-9]+)?)\s*ms\s*$", re.MULTILINE),
-    "real_time_factor": re.compile(r"^real_time_factor:\s*([0-9]+(?:\.[0-9]+)?)\s*$", re.MULTILINE),
+    "real_time_factor_median": re.compile(
+        r"^real_time_factor_median:\s*([0-9]+(?:\.[0-9]+)?)\s*$", re.MULTILINE
+    ),
 }
 
 
@@ -28,11 +29,9 @@ def _parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def _extract_metric(text: str, name: str) -> float:
+def _extract_metric(text: str, name: str) -> float | None:
     matches = METRIC_PATTERNS[name].findall(text)
-    if not matches:
-        raise ValueError(f"missing '{name}' in profile log output")
-    return float(matches[-1])
+    return float(matches[-1]) if matches else None
 
 
 def main() -> int:
@@ -42,7 +41,7 @@ def main() -> int:
     metrics = {
         "ticks": args.ticks,
         "build_time_ms": _extract_metric(text, "build_time_ms"),
-        "real_time_factor": _extract_metric(text, "real_time_factor"),
+        "real_time_factor_median": _extract_metric(text, "real_time_factor_median"),
     }
 
     args.output.write_text(json.dumps(metrics, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -50,8 +49,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    try:
-        raise SystemExit(main())
-    except ValueError as exc:
-        print(f"FAIL: {exc}", file=sys.stderr)
-        raise SystemExit(1) from exc
+    raise SystemExit(main())

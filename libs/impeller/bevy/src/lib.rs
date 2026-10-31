@@ -22,12 +22,11 @@ use impeller::{
     schema::Schema,
     types::{ComponentId, ComponentView, LenPacket, Msg, Timestamp},
 };
-use impeller_bbq::{AsyncArcQueueRx, RxExt};
 use impeller_wkt::{
     ComponentMetadata, CurrentTimestamp, DbConfig, DumpMetadata, DumpMetadataResp, DumpSchema,
     DumpSchemaResp, EarliestTimestamp, ErrorResponse, GetDbSettings, GetEarliestTimestamp,
-    GetTimeSeries, IsRecording, LastUpdated, Stream, StreamBehavior, StreamId, StreamTimestamp,
-    SubscribeLastUpdated, VTableMsg, WorldPos,
+    GetTimeSeries, IsRecording, LastUpdated, NewConnection, Stream, StreamBehavior, StreamId,
+    StreamTimestamp, SubscribeLastUpdated, VTableMsg, WorldPos,
 };
 use serde::de::DeserializeOwned;
 use std::{
@@ -35,75 +34,32 @@ use std::{
     convert::Infallible,
     marker::PhantomData,
     ops::Bound,
-    time::{Duration, Instant},
+    time::Duration,
 };
 use stellarator_buf::Slice;
+use web_time::Instant;
 
 pub use impeller_bbq::PacketGrantR;
 pub use impeller_wkt::ComponentValue;
 pub use impeller_wkt::ElementValueMut;
 pub use impeller_wkt::{ComponentPart, ComponentPath};
 
+pub use address;
+pub mod channels;
+pub use channels::{
+    ConnectionAddr, ConnectionStatus, DbEndpoint, MsgPacketRx, MsgPacketTx, PacketRx, PacketTx,
+    QUEUE_LEN, ThreadConnectionStatus,
+};
+
 #[cfg(feature = "tcp")]
 mod tcp;
 #[cfg(feature = "tcp")]
 pub use tcp::*;
 
-/// Size of the BBQ queue for incoming packets.
-/// Increased from 64MB to 256MB to handle large Arrow IPC responses from SQL queries.
-pub const QUEUE_LEN: usize = 256 * 1024 * 1024;
-
-#[derive(Resource)]
-pub struct PacketRx(AsyncArcQueueRx);
-
-impl From<AsyncArcQueueRx> for PacketRx {
-    fn from(rx: AsyncArcQueueRx) -> Self {
-        Self(rx)
-    }
-}
-
-impl PacketRx {
-    #[inline]
-    pub fn try_recv_pkt(&mut self) -> Option<OwnedPacket<PacketGrantR>> {
-        self.0.try_recv_pkt()
-    }
-}
-
-#[derive(Resource)]
-pub struct PacketTx(pub thingbuf::mpsc::Sender<Option<LenPacket>>);
-
-impl PacketTx {
-    pub fn send_msg(&self, msg: impl Msg) {
-        let pkt = msg.into_len_packet();
-        let _ = self.0.try_send(Some(pkt));
-    }
-}
-
-#[derive(Resource)]
-pub struct MsgPacketRx(AsyncArcQueueRx);
-
-impl From<AsyncArcQueueRx> for MsgPacketRx {
-    fn from(rx: AsyncArcQueueRx) -> Self {
-        Self(rx)
-    }
-}
-
-impl MsgPacketRx {
-    #[inline]
-    pub fn try_recv_pkt(&mut self) -> Option<OwnedPacket<PacketGrantR>> {
-        self.0.try_recv_pkt()
-    }
-}
-
-#[derive(Resource, Clone)]
-pub struct MsgPacketTx(pub thingbuf::mpsc::Sender<Option<LenPacket>>);
-
-impl MsgPacketTx {
-    pub fn send_msg(&self, msg: impl Msg) {
-        let pkt = msg.into_len_packet();
-        let _ = self.0.try_send(Some(pkt));
-    }
-}
+#[cfg(target_family = "wasm")]
+mod ws;
+#[cfg(target_family = "wasm")]
+pub use ws::*;
 
 #[derive(Debug, Message)]
 pub enum DbMessage {
@@ -122,7 +78,28 @@ pub struct TelemetryCache {
     components: HashMap<ComponentId, BTreeMap<Timestamp, ComponentValue>>,
     /// Merged half-open coverage intervals `[start, end)` per component (micros).
     coverage: HashMap<ComponentId, Vec<(i64, i64)>>,
+    /// Per component, bumped by every change a live consumer appending at the
+    /// tip has not seen: backfill, live samples older than the newest, removal.
+    revisions: HashMap<ComponentId, SeriesRevisions>,
+    /// Bumped by [`Self::reset`], so revisions taken before it never match.
+    epoch: u64,
     generation: u64,
+}
+
+/// A component's series state as of a [`TelemetryCache::revision`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SeriesRevision {
+    epoch: u64,
+    revision: u64,
+}
+
+/// Recent revisions keep the oldest timestamp they changed.
+const SERIES_REVISION_LOG_LEN: usize = 256;
+
+#[derive(Default)]
+struct SeriesRevisions {
+    current: u64,
+    changes: VecDeque<(u64, Timestamp)>,
 }
 
 /// Alias used by the telemetry-cache / SeriesStore work.
@@ -138,6 +115,14 @@ pub struct SeriesStoreLoadState {
 }
 
 impl TelemetryCache {
+    /// Drops every sample and series.
+    pub fn reset(&mut self) {
+        *self = Self {
+            epoch: self.epoch + 1,
+            ..Default::default()
+        };
+    }
+
     pub fn generation(&self) -> u64 {
         self.generation
     }
@@ -146,7 +131,31 @@ impl TelemetryCache {
         self.components.values().map(|s| s.len() as u64).sum()
     }
 
+    /// A historical (backfill) sample: it changes the component's revision.
     pub fn insert(&mut self, component_id: ComponentId, ts: Timestamp, value: ComponentValue) {
+        if self.insert_value(component_id, ts, value) {
+            self.bump_revision(component_id, ts);
+        }
+    }
+
+    /// A live sample: only one older than the series' newest changes the revision.
+    pub fn insert_live(&mut self, component_id: ComponentId, ts: Timestamp, value: ComponentValue) {
+        let behind_tip = self
+            .components
+            .get(&component_id)
+            .and_then(|series| series.last_key_value())
+            .is_some_and(|(&newest, _)| ts < newest);
+        if self.insert_value(component_id, ts, value) && behind_tip {
+            self.bump_revision(component_id, ts);
+        }
+    }
+
+    fn insert_value(
+        &mut self,
+        component_id: ComponentId,
+        ts: Timestamp,
+        value: ComponentValue,
+    ) -> bool {
         let series = self.components.entry(component_id).or_default();
         // Keep the first value seen for a timestamp. In mixed backfill+live
         // streaming, the same timestamp can be replayed; replacing it can make
@@ -154,7 +163,59 @@ impl TelemetryCache {
         if let std::collections::btree_map::Entry::Vacant(entry) = series.entry(ts) {
             entry.insert(value);
             self.generation = self.generation.wrapping_add(1);
+            true
+        } else {
+            false
         }
+    }
+
+    fn bump_revision(&mut self, component_id: ComponentId, from: Timestamp) {
+        let revisions = self.revisions.entry(component_id).or_default();
+        revisions.current += 1;
+        revisions.changes.push_back((revisions.current, from));
+        if revisions.changes.len() > SERIES_REVISION_LOG_LEN {
+            revisions.changes.pop_front();
+        }
+    }
+
+    /// Unchanged while the component's series has only grown at its tip by
+    /// [`Self::insert_live`].
+    pub fn revision(&self, component_id: &ComponentId) -> SeriesRevision {
+        SeriesRevision {
+            epoch: self.epoch,
+            revision: self.revisions.get(component_id).map_or(0, |r| r.current),
+        }
+    }
+
+    /// The oldest timestamp changed since `since`; `None` when unchanged,
+    /// `Timestamp(i64::MIN)` when that is no longer known (a reset, a trimmed
+    /// log, a removed series).
+    pub fn changed_since(
+        &self,
+        component_id: &ComponentId,
+        since: SeriesRevision,
+    ) -> Option<Timestamp> {
+        let now = self.revision(component_id);
+        if now == since {
+            return None;
+        }
+        if since.epoch != self.epoch || since.revision > now.revision {
+            return Some(Timestamp(i64::MIN));
+        }
+        let revisions = self.revisions.get(component_id)?;
+        let logged_from = revisions
+            .changes
+            .front()
+            .map_or(u64::MAX, |(revision, _)| *revision);
+        if logged_from > since.revision + 1 {
+            return Some(Timestamp(i64::MIN));
+        }
+        revisions
+            .changes
+            .iter()
+            .filter(|(revision, _)| *revision > since.revision)
+            .map(|(_, from)| *from)
+            .min()
     }
 
     pub fn get_at_or_before(
@@ -207,6 +268,7 @@ impl TelemetryCache {
         let removed_coverage = self.coverage.remove(component_id).is_some();
         if removed_components || removed_coverage {
             self.generation = self.generation.wrapping_add(1);
+            self.bump_revision(*component_id, Timestamp(i64::MIN));
         }
     }
 
@@ -236,11 +298,20 @@ impl TelemetryCache {
         component_id: &ComponentId,
         range: &std::ops::Range<Timestamp>,
     ) -> bool {
+        self.first_uncovered(component_id, range).is_none()
+    }
+
+    /// The start of the first gap in recorded coverage inside `range`.
+    pub fn first_uncovered(
+        &self,
+        component_id: &ComponentId,
+        range: &std::ops::Range<Timestamp>,
+    ) -> Option<Timestamp> {
         if range.end.0 <= range.start.0 {
-            return true;
+            return None;
         }
         let Some(intervals) = self.coverage.get(component_id) else {
-            return false;
+            return Some(range.start);
         };
         let mut cursor = range.start.0;
         let end = range.end.0;
@@ -249,14 +320,14 @@ impl TelemetryCache {
                 continue;
             }
             if a > cursor {
-                return false;
+                return Some(Timestamp(cursor));
             }
             cursor = cursor.max(b);
             if cursor >= end {
-                return true;
+                return None;
             }
         }
-        cursor >= end
+        (cursor < end).then_some(Timestamp(cursor))
     }
 
     /// Sample count in `[range.start, range.end)`.
@@ -397,6 +468,9 @@ struct TableCacheAndWorldSink<'a, 'w, 's> {
     /// When `None`, treat as empty allowlist (cache nothing). When `Some`, only
     /// push samples whose id is in the set.
     allowlist: Option<&'a std::collections::HashSet<ComponentId>>,
+    /// Each cached component's newest sample, queued or stored: the live
+    /// stream resends it with every table until the component updates.
+    tips: &'a mut HashMap<ComponentId, Timestamp>,
     world: &'a mut WorldSink<'w, 's>,
 }
 
@@ -412,7 +486,7 @@ impl Decomponentize for TableCacheAndWorldSink<'_, '_, '_> {
             let allowed = self
                 .allowlist
                 .is_some_and(|set| set.contains(&component_id));
-            if allowed {
+            if allowed && self.tips.insert(component_id, ts) != Some(ts) {
                 let value = ComponentValue::from_view(view);
                 self.pending_cache.push((component_id, ts, value));
             }
@@ -877,20 +951,28 @@ fn sink_inner(
     world_sink_state: &mut SystemState<WorldSink>,
 ) -> Result<(), impeller::error::Error> {
     let mut count = 0;
-    let sink_deadline = std::time::Instant::now() + std::time::Duration::from_millis(8);
+    let sink_deadline = Instant::now() + Duration::from_millis(8);
     let mut pending_cache_entries: Vec<(ComponentId, Timestamp, ComponentValue)> = Vec::new();
     let allowlist = world
         .get_resource::<SeriesFetchPriority>()
         .map(|p| p.high.clone());
+    let mut tips: HashMap<ComponentId, Timestamp> =
+        match (&allowlist, world.get_resource::<TelemetryCache>()) {
+            (Some(allowlist), Some(cache)) => allowlist
+                .iter()
+                .filter_map(|id| Some((*id, *cache.series(id)?.last_key_value()?.0)))
+                .collect(),
+            _ => HashMap::new(),
+        };
     loop {
         if !pending_cache_entries.is_empty()
             && let Some(mut cache) = world.get_resource_mut::<TelemetryCache>()
         {
             for (cid, ts, val) in pending_cache_entries.drain(..) {
-                cache.insert(cid, ts, val);
+                cache.insert_live(cid, ts, val);
             }
         }
-        if count > 2048 || (count >= 16 && std::time::Instant::now() > sink_deadline) {
+        if count > 2048 || (count >= 16 && Instant::now() > sink_deadline) {
             break;
         }
         let Some(pkt) = packet_rx.try_recv_pkt() else {
@@ -952,6 +1034,7 @@ fn sink_inner(
                 bevy::log::error!(?err, "packet handler error");
             }
         }
+        track_component_filter_support(world, &pkt)?;
         let mut world_sink = world_sink_state
             .get_mut(world)
             .expect("WorldSink params invalid");
@@ -965,6 +1048,15 @@ fn sink_inner(
                 // Create the full path hierarchy so the component appears in UI
                 // under DbComponentsRoot (not just an orphaned leaf entity).
                 let path = ComponentPath::from_name(&metadata.name);
+                // Replace an ID-only placeholder: its leaf hashes the placeholder name,
+                // not the component's ID, so `apply_cached_data` never gave it a value.
+                if let Some(old) = world_sink.path_reg.0.get(&metadata.component_id)
+                    && old.id != path.id
+                    && let Some(entity) = world_sink.entity_map.0.remove(&old.id)
+                {
+                    world_sink.metadata_reg.0.remove(&old.id);
+                    world_sink.commands.entity(entity).despawn();
+                }
                 ensure_component_path_hierarchy(
                     &mut world_sink.entity_map,
                     &mut world_sink.metadata_reg,
@@ -1020,6 +1112,7 @@ fn sink_inner(
                 let mut combined = TableCacheAndWorldSink {
                     pending_cache: &mut pending_cache_entries,
                     allowlist: allowlist.as_ref(),
+                    tips: &mut tips,
                     world: &mut world_sink,
                 };
                 let _ = table.sink(vtable_registry, &mut combined)?;
@@ -1044,7 +1137,7 @@ fn sink_inner(
         && let Some(mut cache) = world.get_resource_mut::<TelemetryCache>()
     {
         for (cid, ts, val) in pending_cache_entries.drain(..) {
-            cache.insert(cid, ts, val);
+            cache.insert_live(cid, ts, val);
         }
     }
     Ok(())
@@ -1097,10 +1190,10 @@ pub struct MsgSinkState<'w> {
 }
 
 pub fn msg_sink(world: &mut World, msg_sink_state: &mut SystemState<MsgSinkState>) {
-    let sink_deadline = std::time::Instant::now() + std::time::Duration::from_millis(8);
+    let sink_deadline = Instant::now() + Duration::from_millis(8);
     let mut count = 0;
     loop {
-        if count > 2048 || (count >= 16 && std::time::Instant::now() > sink_deadline) {
+        if count > 2048 || (count >= 16 && Instant::now() > sink_deadline) {
             return;
         }
         let pkt = {
@@ -1349,9 +1442,18 @@ impl Decomponentize for WorldSink<'_, '_> {
         _view: ComponentView<'_>,
         _timestamp: Option<Timestamp>,
     ) -> Result<(), Infallible> {
-        let Some(path) = self.path_reg.get(&component_id).cloned() else {
+        let Some(path) = self.path_reg.get(&component_id) else {
             return Ok(());
         };
+        // The leaf's entity is created with its parents.
+        if path
+            .path
+            .last()
+            .is_some_and(|leaf| self.entity_map.contains_key(&leaf.id))
+        {
+            return Ok(());
+        }
+        let path = path.clone();
 
         ensure_component_path_hierarchy(
             &mut self.entity_map,
@@ -1581,6 +1683,18 @@ impl Plugin for ImpellerPlugin {
             .init_resource::<SeriesStoreLoadState>()
             .init_resource::<SeriesFetchPriority>()
             .init_resource::<SimTimeStepFetch>();
+        #[cfg(all(not(feature = "tcp"), not(target_family = "wasm")))]
+        {
+            let (packet_tx, packet_rx, _outgoing, _incoming) = channels::channels();
+            let (msg_tx, msg_rx, _msg_outgoing, _msg_incoming) = channels::msg_channels();
+            app.insert_resource(packet_tx)
+                .insert_resource(packet_rx)
+                .insert_resource(msg_tx)
+                .insert_resource(msg_rx)
+                .insert_resource(CurrentStreamId::rand())
+                .insert_resource(ThreadConnectionStatus::new(ConnectionStatus::NoConnection))
+                .add_systems(bevy::prelude::PreUpdate, (sink, msg_sink));
+        }
     }
 }
 
@@ -1971,6 +2085,44 @@ pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPa
     .into_iter()
 }
 
+/// Per-connection `SetStreamFilter` support for component-filtered clients.
+/// Present only when the client opts into component filtering.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ComponentFilteredStream {
+    /// Bumped on every `NewConnection`.
+    pub connection: u64,
+    /// `None` until this connection's `DbConfig` arrives.
+    pub supported: Option<bool>,
+}
+
+fn track_component_filter_support(
+    world: &mut World,
+    pkt: &OwnedPacket<PacketGrantR>,
+) -> Result<(), impeller::error::Error> {
+    let OwnedPacket::Msg(m) = pkt else {
+        return Ok(());
+    };
+    let Some(mut state) = world.get_resource_mut::<ComponentFilteredStream>() else {
+        return Ok(());
+    };
+    if m.id == NewConnection::ID {
+        state.connection += 1;
+        state.supported = None;
+        return Ok(());
+    }
+    if m.id != DbConfig::ID || state.supported.is_some() {
+        return Ok(());
+    }
+    let supported = m.parse::<DbConfig>()?.supports_exact_stream_filter();
+    state.supported = Some(supported);
+    if !supported {
+        bevy::log::warn!(
+            "DB does not support component-filtered streams; streaming all components"
+        );
+    }
+    Ok(())
+}
+
 /// Initial packets for the msg TCP connection. Returns empty; main connection
 /// handles DumpMetadata, Stream, and subscriptions.
 pub fn msg_connection_packets(_stream_id: StreamId) -> impl Iterator<Item = LenPacket> {
@@ -2233,6 +2385,29 @@ mod series_store_allowlist_tests {
     use super::*;
     use impeller::types::PrimType;
     use std::collections::HashSet;
+
+    #[test]
+    #[should_panic(expected = "live stream filter update failed: outgoing packet queue is full")]
+    fn required_send_panics_when_queue_is_full() {
+        let (tx, _rx) = thingbuf::mpsc::channel::<Option<LenPacket>>(1);
+        let tx = PacketTx(tx);
+        tx.send_required(GetDbSettings.into_len_packet(), "live stream filter update");
+        tx.send_required(GetDbSettings.into_len_packet(), "live stream filter update");
+    }
+
+    #[test]
+    #[should_panic(expected = "live stream filter update failed: outgoing packet queue is closed")]
+    fn required_send_panics_when_queue_is_closed() {
+        let (tx, rx) = thingbuf::mpsc::channel::<Option<LenPacket>>(1);
+        drop(rx);
+        PacketTx(tx).send_required(GetDbSettings.into_len_packet(), "live stream filter update");
+    }
+
+    #[test]
+    fn default_connection_opens_stream_without_a_filter() {
+        let packets: Vec<_> = new_connection_packets(42).collect();
+        assert_eq!(packets[0].as_packet().header.id, Stream::ID);
+    }
 
     #[test]
     fn backfill_candidates_only_allowlisted_with_schema() {

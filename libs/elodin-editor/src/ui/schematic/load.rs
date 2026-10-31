@@ -21,9 +21,11 @@ use impeller_wkt::{
 use miette::{Diagnostic, miette};
 use std::{
     collections::{BTreeMap, HashMap},
+    future::Future,
     path::{Path, PathBuf},
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 #[cfg(not(target_os = "macos"))]
 use crate::tiles::WindowRelayout;
@@ -40,12 +42,12 @@ use crate::{
         render_layer_alloc::RenderLayerAllocator,
     },
     ui::{
-        DEFAULT_SECONDARY_RECT, HdrEnabled,
+        HdrEnabled,
         colors::{self, EColor},
         data_overview::DataOverviewPane,
         modal::ModalDialog,
         monitor::MonitorPane,
-        plot::{DerivedGraph, GraphBundle, KernelGraph},
+        plot::{DerivedGraph, GraphBundle, GraphState, KernelGraph},
         query_plot::QueryPlotData,
         schematic::{CurrentSchematic, EqlExt},
         tiles::{
@@ -170,6 +172,11 @@ fn apply_fallback_frame_to_panel(
             if v.frame.is_none() {
                 v.frame = fallback_frame;
             }
+            for arrow in &mut v.local_arrows {
+                if arrow.frame.is_none() {
+                    arrow.frame = fallback_frame;
+                }
+            }
             Panel::Viewport(v)
         }
         // Gauges keep `source: None` so they continue to track the schematic
@@ -268,7 +275,9 @@ pub struct LoadSchematicParams<'w, 's> {
     pub document_assets: Res<'w, Assets<SchematicDocumentAsset>>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
     pub materials: ResMut<'w, Assets<StandardMaterial>>,
-    pub world_mesh_materials: ResMut<'w, Assets<bevy_world_mesh::prelude::WorldMeshMaterial>>,
+    /// Optional: absent on wasm (world-mesh plugin is native-only).
+    pub world_mesh_materials:
+        Option<ResMut<'w, Assets<bevy_world_mesh::prelude::WorldMeshMaterial>>>,
     pub mat3_materials: ResMut<'w, Assets<Mat3Material>>,
     pub images: ResMut<'w, Assets<Image>>,
     pub icon_cache: ResMut<'w, IconTextureCache>,
@@ -332,28 +341,27 @@ fn is_remote_asset_path(path: &str) -> bool {
 /// the load.
 fn read_window_schematic_kdl(
     path: &Path,
-    connection_addr: Option<std::net::SocketAddr>,
-) -> Result<String, String> {
-    let path_str = path
-        .to_str()
-        .ok_or_else(|| "non-utf8 window path".to_string())?;
-    if !is_remote_asset_path(path_str) {
-        return std::fs::read_to_string(path).map_err(|err| err.to_string());
-    }
+    endpoint: Option<impeller_bevy::DbEndpoint>,
+) -> impl Future<Output = Result<String, String>> {
+    let path = path.to_path_buf();
+    async move {
+        let path_str = path
+            .to_str()
+            .ok_or_else(|| "non-utf8 window path".to_string())?;
+        if !is_remote_asset_path(path_str) {
+            return std::fs::read_to_string(&path).map_err(|err| err.to_string());
+        }
 
-    let url = crate::object_3d::resolve_db_asset_url(path_str, connection_addr);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .map_err(|err| format!("{url}: {err}"))?;
-    let response = client
-        .get(&url)
-        .send()
-        .map_err(|err| format!("{url}: {err}"))?;
-    if !response.status().is_success() {
-        return Err(format!("{url}: HTTP {}", response.status()));
+        let url = crate::object_3d::resolve_db_endpoint(path_str, endpoint.as_ref());
+        crate::plugins::http_client::get_text(&url).await
     }
-    response.text().map_err(|err| format!("{url}: {err}"))
+}
+
+fn window_has_inline_content(window: &WindowSchematic) -> bool {
+    window
+        .content
+        .as_ref()
+        .is_some_and(|content| !content.elems.is_empty())
 }
 
 fn resolve_window_descriptor(
@@ -361,6 +369,16 @@ fn resolve_window_descriptor(
     base_dir: Option<&Path>,
     theme_mode: Option<&str>,
 ) -> Option<WindowDescriptor> {
+    if window.path.is_none() && window_has_inline_content(window) {
+        return Some(WindowDescriptor {
+            path: None,
+            title: window.title.clone(),
+            screen: window.screen.map(|idx| idx as usize),
+            mode: theme_mode.map(|m| m.to_string()),
+            screen_rect: window.screen_rect,
+            inline_content: window.content.clone(),
+        });
+    }
     let path_str = window.path.as_ref()?;
     // Keep `db:`/HTTP references verbatim; only local paths are anchored to the
     // schematic's directory. The remote ones are fetched over HTTP at spawn time.
@@ -383,7 +401,8 @@ fn resolve_window_descriptor(
         title: window.title.clone(),
         screen: window.screen.map(|idx| idx as usize),
         mode: theme_mode.map(|m| m.to_string()),
-        screen_rect: window.screen_rect.or(Some(DEFAULT_SECONDARY_RECT)),
+        screen_rect: window.screen_rect,
+        inline_content: None,
     })
 }
 
@@ -644,6 +663,17 @@ impl LoadSchematicParams<'_, '_> {
 
         let mut loaded_windows = window_assets.unwrap_or(&[]).iter();
         for descriptor in descriptors.windows {
+            if let Some(inline) = descriptor.inline_content.clone() {
+                self.spawn_window(
+                    &inline,
+                    descriptor,
+                    theme_mode.as_deref(),
+                    &theme_selection.scheme,
+                    None,
+                );
+                continue;
+            }
+
             if let Some(window) = loaded_windows.next()
                 && let Some(root) = self
                     .document_assets
@@ -662,7 +692,10 @@ impl LoadSchematicParams<'_, '_> {
             }
 
             if let Some(path) = descriptor.path.clone() {
-                let connection_addr = self.connection_addr.as_ref().map(|addr| addr.0);
+                let connection_addr = self
+                    .connection_addr
+                    .as_ref()
+                    .map(|addr| addr.endpoint().clone());
                 if path.to_str().is_some_and(is_remote_asset_path) {
                     // Fetch `db:`/HTTP windows off the main thread: a blocking
                     // request per window could otherwise stall the UI for the
@@ -670,7 +703,7 @@ impl LoadSchematicParams<'_, '_> {
                     // `apply_pending_window_schematics` once the fetch lands.
                     let fetch_path = path.clone();
                     let task = IoTaskPool::get().spawn(async move {
-                        read_window_schematic_kdl(&fetch_path, connection_addr)
+                        read_window_schematic_kdl(&fetch_path, connection_addr).await
                     });
                     self.pending_windows.loads.push(PendingWindowLoad {
                         descriptor,
@@ -683,7 +716,7 @@ impl LoadSchematicParams<'_, '_> {
                     });
                     continue;
                 }
-                match read_window_schematic_kdl(&path, connection_addr) {
+                match std::fs::read_to_string(&path) {
                     Ok(kdl) => match impeller_wkt::Schematic::from_kdl(&kdl) {
                         Ok(window_schematic) => {
                             self.spawn_window(
@@ -734,7 +767,10 @@ impl LoadSchematicParams<'_, '_> {
         if self.pending_windows.loads.is_empty() {
             return;
         }
-        let connection_addr = self.connection_addr.as_ref().map(|addr| addr.0);
+        let connection_addr = self
+            .connection_addr
+            .as_ref()
+            .map(|addr| addr.endpoint().clone());
         let now = Instant::now();
         let mut ready = Vec::new();
         self.pending_windows.loads.retain_mut(|load| {
@@ -743,11 +779,11 @@ impl LoadSchematicParams<'_, '_> {
                     return true;
                 }
                 let fetch_path = load.path.clone();
+                let connection_addr = connection_addr.clone();
                 load.retry_at = None;
-                load.task =
-                    Some(IoTaskPool::get().spawn(async move {
-                        read_window_schematic_kdl(&fetch_path, connection_addr)
-                    }));
+                load.task = Some(IoTaskPool::get().spawn(async move {
+                    read_window_schematic_kdl(&fetch_path, connection_addr).await
+                }));
             }
             let task = load.task.as_mut().expect("window fetch task just spawned");
             let Some(result) = future::block_on(future::poll_once(task)) else {
@@ -995,7 +1031,10 @@ impl LoadSchematicParams<'_, '_> {
         };
         let icon = object_3d.icon.clone();
         let mesh_vr = object_3d.mesh_visibility_range.clone();
-        let connection_addr = self.connection_addr.as_ref().map(|addr| addr.0);
+        let connection_addr = self
+            .connection_addr
+            .as_ref()
+            .map(|addr| addr.endpoint().clone());
         let local_root = crate::object_3d::local_assets_root(self.initial_kdl.as_deref());
         let result = crate::object_3d::create_object_3d_entity(
             &mut self.commands,
@@ -1007,7 +1046,7 @@ impl LoadSchematicParams<'_, '_> {
             &mut self.mat3_materials,
             &self.asset_server,
             &self.geo_context,
-            connection_addr,
+            connection_addr.as_ref(),
             local_root.as_deref(),
         );
         match result {
@@ -1015,6 +1054,12 @@ impl LoadSchematicParams<'_, '_> {
                 {
                     let mut e = self.commands.entity(entity);
                     e.insert(SchematicSpawned);
+                    if let Some(vr) = &mesh_vr {
+                        e.insert(crate::object_3d::MeshVisibilityRange {
+                            min: vr.min,
+                            max: vr.max,
+                        });
+                    }
                     #[cfg(feature = "big_space")]
                     crate::spatial::parent_under_big_space(&mut e, self.big_space_root.as_deref());
                 }
@@ -1023,13 +1068,12 @@ impl LoadSchematicParams<'_, '_> {
                         &mut self.commands,
                         entity,
                         icon,
-                        mesh_vr.as_ref(),
                         &mut self.materials,
                         &mut self.meshes,
                         &mut self.images,
                         &self.asset_server,
                         &mut self.icon_cache,
-                        connection_addr,
+                        connection_addr.as_ref(),
                         local_root.as_deref(),
                     );
                 }
@@ -1123,11 +1167,15 @@ impl LoadSchematicParams<'_, '_> {
     }
 
     pub fn spawn_world_mesh(&mut self, world_mesh: impeller_wkt::WorldMesh) {
+        let Some(world_mesh_materials) = self.world_mesh_materials.as_mut() else {
+            warn!("skipping world_mesh: WorldMeshMaterial assets are unavailable");
+            return;
+        };
         let entity = crate::plugins::world_mesh::spawn_world_mesh_terrain(
             &mut self.commands,
             &mut self.meshes,
             &mut self.materials,
-            &mut self.world_mesh_materials,
+            world_mesh_materials,
             &world_mesh,
         );
         let mut e = self.commands.entity(entity);
@@ -1188,7 +1236,7 @@ impl LoadSchematicParams<'_, '_> {
                 let tile_id = tile_state.insert_tile(
                     Tile::Container(Container::Linear(linear)),
                     parent_id,
-                    false,
+                    split.active,
                 );
                 if let (Some(tile_id), Some(name)) = (tile_id, split.name.clone()) {
                     tile_state.container_titles.insert(tile_id, name);
@@ -1305,11 +1353,18 @@ impl LoadSchematicParams<'_, '_> {
                     let pane = GraphPane::new(graph_id, graph_label);
                     return tile_state.insert_tile(Tile::Pane(Pane::Graph(pane)), parent_id, false);
                 }
-                let eql = self
-                    .eql
-                    .0
-                    .parse_str(&graph.eql)
-                    .inspect_err(|err| {
+                let eql = match self.eql.0.parse_str(&graph.eql) {
+                    Ok(eql) => Some(eql),
+                    Err(eql::Error::ComponentNotFound(component)) => {
+                        info!(
+                            eql = %graph.eql,
+                            name = ?graph.name,
+                            %component,
+                            "graph waiting for its component"
+                        );
+                        None
+                    }
+                    Err(err) => {
                         let (ctx, path) = match context {
                             PanelContext::Main => ("main".to_string(), None),
                             PanelContext::Window(target_id) => {
@@ -1341,42 +1396,17 @@ impl LoadSchematicParams<'_, '_> {
                                 "error parsing graph eql"
                             );
                         }
-                    })
-                    .ok()?;
-                let requires_evaluation = eql.requires_plot_evaluation();
-                let uses_derived_plot = requires_evaluation && eql::eval::supports(&eql);
-                let uses_query_plot = requires_evaluation && !uses_derived_plot;
-
-                let mut components_tree: BTreeMap<ComponentPath, Vec<(bool, Color32)>> =
-                    BTreeMap::new();
-                if !requires_evaluation {
-                    let mut component_vec = eql.to_graph_components();
-                    component_vec.sort();
-                    for (j, (component, i)) in component_vec.iter().enumerate() {
-                        let line_color = graph
-                            .colors
-                            .get(j)
-                            .copied()
-                            .map(EColor::into_color32)
-                            .unwrap_or_else(|| colors::get_color_by_index_all(j));
-                        if let Some(elements) = components_tree.get_mut(component) {
-                            elements[*i] = (true, line_color);
-                        } else {
-                            let Some(schema) = self.schema_reg.0.get(&component.id) else {
-                                continue;
-                            };
-                            let len: usize = schema.shape().iter().copied().product();
-                            let mut elements: Vec<(bool, Color32)> =
-                                (0..len).map(|_| (false, line_color)).collect();
-                            elements[*i] = (true, line_color);
-                            components_tree.insert(component.clone(), elements);
-                        }
+                        return None;
                     }
-                }
+                };
+                let pending = eql.is_none();
+                let contents = eql
+                    .map(|eql| graph_contents(graph, &graph_label, eql, &self.schema_reg))
+                    .unwrap_or_default();
 
                 let mut bundle = GraphBundle::new(
                     &mut self.render_layer_alloc,
-                    components_tree,
+                    contents.components,
                     graph_label.clone(),
                 );
                 bundle.graph_state.locked = force_graph_lock || graph.locked;
@@ -1386,61 +1416,14 @@ impl LoadSchematicParams<'_, '_> {
                 bundle.graph_state.auto_y_range = graph.auto_y_range;
                 bundle.graph_state.y_range = graph.y_range.clone();
                 bundle.graph_state.graph_type = graph.graph_type;
-                if uses_derived_plot {
-                    let mut dependencies: Vec<_> = eql
-                        .to_graph_components()
-                        .into_iter()
-                        .map(|(path, _)| path.id)
-                        .collect();
-                    dependencies.sort();
-                    dependencies.dedup();
-                    bundle.graph_state.derived = Some(DerivedGraph {
-                        source: graph.eql.clone(),
-                        expr: eql.clone(),
-                        dependencies,
-                        lines: Vec::new(),
-                        colors: graph
-                            .colors
-                            .iter()
-                            .copied()
-                            .map(EColor::into_color32)
-                            .collect(),
-                        path: ComponentPath::from_name(&format!("derived.{graph_label}")),
-                        last_generation: u64::MAX,
-                        last_range: None,
-                    });
-                }
+                bundle.graph_state.derived = contents.derived;
 
                 let mut entity_cmds = self.commands.spawn(bundle);
-                if uses_query_plot {
-                    let series_colors: Vec<_> = graph
-                        .colors
-                        .iter()
-                        .copied()
-                        .map(EColor::into_color32)
-                        .collect();
-                    let default_color = series_colors
-                        .first()
-                        .copied()
-                        .unwrap_or_else(|| colors::get_scheme().highlight);
-                    entity_cmds.insert(QueryPlotData {
-                        data: impeller_wkt::QueryPlot {
-                            name: graph_label.clone(),
-                            query: graph.eql.clone(),
-                            refresh_interval: std::time::Duration::from_millis(500),
-                            auto_refresh: true,
-                            color: impeller_wkt::Color::from_color32(default_color),
-                            query_type: impeller_wkt::QueryType::EQL,
-                            plot_mode: impeller_wkt::PlotMode::TimeSeries,
-                            x_label: None,
-                            y_label: None,
-                            node_id: Default::default(),
-                        },
-                        auto_color: series_colors.is_empty(),
-                        series_colors,
-                        last_refresh: None,
-                        ..Default::default()
-                    });
+                if let Some(query_plot) = contents.query_plot {
+                    entity_cmds.insert(query_plot);
+                }
+                if pending {
+                    entity_cmds.insert(PendingGraphEql(graph.clone()));
                 }
                 let graph_id = entity_cmds.id();
                 if matches!(context, PanelContext::Window(_)) {
@@ -1922,6 +1905,140 @@ pub fn retry_pending_object_3d_spawns(mut params: LoadSchematicParams) {
     }
 }
 
+/// A graph whose EQL names a component the DB has not registered yet. The pane
+/// keeps its place in the layout and fills in once the component appears.
+#[derive(Component)]
+pub struct PendingGraphEql(pub Graph);
+
+/// What a graph's parsed EQL plots: component lines, a derived series, or an
+/// EQL query plot.
+#[derive(Default)]
+struct GraphContents {
+    components: BTreeMap<ComponentPath, Vec<(bool, Color32)>>,
+    derived: Option<DerivedGraph>,
+    query_plot: Option<QueryPlotData>,
+}
+
+fn graph_contents(
+    graph: &Graph,
+    graph_label: &str,
+    eql: eql::Expr,
+    schema_reg: &ComponentSchemaRegistry,
+) -> GraphContents {
+    let requires_evaluation = eql.requires_plot_evaluation();
+    let uses_derived_plot = requires_evaluation && eql::eval::supports(&eql);
+    let mut contents = GraphContents::default();
+    if !requires_evaluation {
+        let mut component_vec = eql.to_graph_components();
+        component_vec.sort();
+        for (j, (component, i)) in component_vec.iter().enumerate() {
+            let line_color = graph
+                .colors
+                .get(j)
+                .copied()
+                .map(EColor::into_color32)
+                .unwrap_or_else(|| colors::get_color_by_index_all(j));
+            if let Some(elements) = contents.components.get_mut(component) {
+                elements[*i] = (true, line_color);
+            } else {
+                let Some(schema) = schema_reg.0.get(&component.id) else {
+                    continue;
+                };
+                let len: usize = schema.shape().iter().copied().product();
+                let mut elements: Vec<(bool, Color32)> =
+                    (0..len).map(|_| (false, line_color)).collect();
+                elements[*i] = (true, line_color);
+                contents.components.insert(component.clone(), elements);
+            }
+        }
+    } else if uses_derived_plot {
+        let mut dependencies: Vec<_> = eql
+            .to_graph_components()
+            .into_iter()
+            .map(|(path, _)| path.id)
+            .collect();
+        dependencies.sort();
+        dependencies.dedup();
+        contents.derived = Some(DerivedGraph {
+            source: graph.eql.clone(),
+            expr: eql,
+            dependencies,
+            lines: Vec::new(),
+            colors: graph
+                .colors
+                .iter()
+                .copied()
+                .map(EColor::into_color32)
+                .collect(),
+            path: ComponentPath::from_name(&format!("derived.{graph_label}")),
+            last_generation: u64::MAX,
+            last_range: None,
+        });
+    } else {
+        let series_colors: Vec<_> = graph
+            .colors
+            .iter()
+            .copied()
+            .map(EColor::into_color32)
+            .collect();
+        let default_color = series_colors
+            .first()
+            .copied()
+            .unwrap_or_else(|| colors::get_scheme().highlight);
+        contents.query_plot = Some(QueryPlotData {
+            data: impeller_wkt::QueryPlot {
+                name: graph_label.to_string(),
+                query: graph.eql.clone(),
+                refresh_interval: std::time::Duration::from_millis(500),
+                auto_refresh: true,
+                color: impeller_wkt::Color::from_color32(default_color),
+                query_type: impeller_wkt::QueryType::EQL,
+                plot_mode: impeller_wkt::PlotMode::TimeSeries,
+                x_label: None,
+                y_label: None,
+                node_id: Default::default(),
+            },
+            auto_color: series_colors.is_empty(),
+            series_colors,
+            last_refresh: None,
+            ..Default::default()
+        });
+    }
+    contents
+}
+
+/// Fill each pending graph once every component its EQL names is registered.
+pub fn retry_pending_graphs(
+    mut commands: Commands,
+    eql: Res<EqlContext>,
+    schema_reg: Res<ComponentSchemaRegistry>,
+    mut graphs: Query<(Entity, &PendingGraphEql, &mut GraphState)>,
+) {
+    if !eql.is_changed() {
+        return;
+    }
+    for (entity, pending, mut graph_state) in &mut graphs {
+        let expr = match eql.0.parse_str(&pending.0.eql) {
+            Ok(expr) => expr,
+            Err(eql::Error::ComponentNotFound(_)) => continue,
+            Err(err) => {
+                warn!(?err, eql = %pending.0.eql, name = ?pending.0.name, "error parsing graph eql");
+                commands.entity(entity).remove::<PendingGraphEql>();
+                continue;
+            }
+        };
+        let label = graph_state.label.clone();
+        let contents = graph_contents(&pending.0, &label, expr, &schema_reg);
+        graph_state.components = contents.components;
+        graph_state.derived = contents.derived;
+        let mut entity_cmds = commands.entity(entity);
+        if let Some(query_plot) = contents.query_plot {
+            entity_cmds.insert(query_plot);
+        }
+        entity_cmds.remove::<PendingGraphEql>();
+    }
+}
+
 /// Finish a pending Data Overview once component metadata is available.
 pub fn retry_pending_data_overview(
     mut pending: ResMut<PendingDataOverview>,
@@ -2190,6 +2307,7 @@ mod tests {
     #[test]
     fn read_window_schematic_kdl_reads_local_file() {
         use super::read_window_schematic_kdl;
+        use bevy::tasks::futures_lite::future;
         let dir = std::env::temp_dir().join(format!(
             "elodin-window-kdl-{}",
             std::time::SystemTime::now()
@@ -2201,7 +2319,8 @@ mod tests {
         let path = dir.join("window.kdl");
         std::fs::write(&path, "viewport name=\"W\"\n").unwrap();
 
-        let kdl = read_window_schematic_kdl(&path, None).expect("read local window kdl");
+        let kdl = future::block_on(read_window_schematic_kdl(&path, None))
+            .expect("read local window kdl");
         assert!(kdl.contains("viewport"));
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -2275,6 +2394,63 @@ mod tests {
         assert_eq!(line.frame, Some(GeoFrame::ECEF));
         assert_eq!(geo_pos.0, GeoFrame::ECEF);
         assert_eq!(geo_rot.0, GeoFrame::ECEF);
+    }
+
+    #[test_case("", "", None; "default frame")]
+    #[test_case("coordinate frame=ECEF", "", Some(GeoFrame::ECEF); "ecef")]
+    #[test_case("coordinate frame=NED", "", Some(GeoFrame::NED); "ned")]
+    #[test_case("coordinate frame=ECEF", "frame=ENU", Some(GeoFrame::ECEF); "camera frame override")]
+    fn viewport_arrows_inherit_the_schematic_frame(
+        coordinate: &str,
+        viewport_frame: &str,
+        expected_frame: Option<GeoFrame>,
+    ) {
+        use crate::vector_arrow::ViewportArrow;
+        use impeller_wkt::VectorArrow3d;
+
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(&format!(
+            r#"
+            {coordinate}
+            vector_arrow "(0,1,0)" name="global"
+            tabs {{
+                hsplit {{
+                    vsplit {{
+                        viewport {viewport_frame} {{
+                            vector_arrow "(0,1,0)" name="inherited"
+                            vector_arrow "(0,0,1)" name="explicit" frame=ENU
+                        }}
+                    }}
+                }}
+            }}
+            "#,
+        ))
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app
+            .world_mut()
+            .query::<(&VectorArrow3d, Option<&ViewportArrow>)>();
+        let arrows: Vec<_> = query.iter(app.world()).collect();
+        assert_eq!(arrows.len(), 3);
+        for (arrow, viewport) in arrows {
+            match arrow.name.as_deref().expect("named arrow") {
+                "global" => {
+                    assert_eq!(arrow.frame, expected_frame);
+                    assert!(viewport.is_none());
+                }
+                "inherited" => {
+                    assert_eq!(arrow.frame, expected_frame);
+                    assert!(viewport.is_some());
+                }
+                "explicit" => {
+                    assert_eq!(arrow.frame, Some(GeoFrame::ENU));
+                    assert!(viewport.is_some());
+                }
+                name => panic!("unexpected arrow {name}"),
+            }
+        }
     }
 
     #[test]
@@ -2812,6 +2988,75 @@ mod tests {
 
         let mut query = app.world_mut().query::<&crate::ui::plot::GraphState>();
         assert_eq!(query.iter(app.world()).count(), 0);
+    }
+
+    #[test_case(r#"hsplit name="Second" { viewport name="Two" active=#true }"# ; "nested viewport")]
+    #[test_case(r#"hsplit name="Second" active=#true { viewport name="Two" }"# ; "split")]
+    fn active_selects_the_tab_that_holds_it(second_tab: &str) {
+        let mut app = test_app();
+        let kdl = format!(
+            "tabs {{\n    hsplit name=\"First\" {{ viewport name=\"One\" }}\n    {second_tab}\n}}"
+        );
+        load_schematic(&mut app, &Schematic::from_kdl(&kdl).expect("schematic"));
+
+        let tile_state = primary_window_state(&mut app).tile_state;
+        let active: Vec<_> = tile_state
+            .tree
+            .active_tiles()
+            .into_iter()
+            .filter_map(|id| tile_state.container_titles.get(&id).cloned())
+            .collect();
+        assert_eq!(active, ["Second"]);
+    }
+
+    #[test_case("sample.value", false ; "component")]
+    #[test_case("sample.value.sqrt()", true ; "formula")]
+    fn graph_waits_for_a_component_that_registers_later(eql: &str, derived: bool) {
+        let mut app = test_app();
+        let kdl = format!(r#"graph "{eql}" name="Late""#);
+        load_schematic(&mut app, &Schematic::from_kdl(&kdl).expect("schematic"));
+
+        let mut pending = app
+            .world_mut()
+            .query::<(&crate::ui::plot::GraphState, &super::PendingGraphEql)>();
+        let (state, _) = pending.single(app.world()).expect("a pending graph pane");
+        assert!(state.components.is_empty() && state.derived.is_none());
+        let saved = save_schematic(&mut app);
+        let saved_eql = saved.elems.iter().find_map(|elem| match elem {
+            impeller_wkt::SchematicElem::Panel(impeller_wkt::Panel::Graph(graph)) => {
+                Some(graph.eql.clone())
+            }
+            _ => None,
+        });
+        assert_eq!(
+            saved_eql.as_deref(),
+            Some(eql),
+            "saving keeps the pending graph"
+        );
+
+        install_scalar_eql_component(&mut app);
+        app.world_mut()
+            .resource_mut::<impeller_bevy::ComponentSchemaRegistry>()
+            .0
+            .insert(
+                impeller::types::ComponentId::new("sample.value"),
+                impeller::schema::Schema::new(impeller::types::PrimType::F64, Vec::<u64>::new())
+                    .expect("schema"),
+            );
+        app.world_mut()
+            .run_system_cached(super::retry_pending_graphs)
+            .expect("retry pending graphs");
+
+        let mut pending = app.world_mut().query::<&super::PendingGraphEql>();
+        assert_eq!(pending.iter(app.world()).count(), 0);
+        let mut graphs = app.world_mut().query::<&crate::ui::plot::GraphState>();
+        let state = graphs.single(app.world()).expect("the graph");
+        if derived {
+            assert!(state.derived.is_some());
+        } else {
+            let lines = &state.components[&impeller_bevy::ComponentPath::from_name("sample.value")];
+            assert!(lines.iter().any(|(enabled, _)| *enabled));
+        }
     }
 
     #[test]

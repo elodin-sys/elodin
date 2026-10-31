@@ -34,5 +34,5 @@ module @module {
     let out = run_mlir(mlir, &[&table], &[24]);
     let result = read_f64s(&out[0]);
     // Should sum both rows: [1+4, 2+5, 3+6] = [5, 7, 9]
-    assert_eq!(result, &[5.0, 7.0, 9.0]);
+    assert_eq!(&*result, &[5.0, 7.0, 9.0]);
 }

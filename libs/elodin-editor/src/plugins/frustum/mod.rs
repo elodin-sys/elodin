@@ -38,7 +38,14 @@ struct FrustumLineAssets {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum FrustumMaterialKind {
+    Line,
+    Face,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct FrustumMaterialKey {
+    kind: FrustumMaterialKind,
     r: u8,
     g: u8,
     b: u8,
@@ -76,26 +83,27 @@ struct CameraFrustumMarkerBallVisual {
     target: Entity,
 }
 
-const FRUSTUM_FACE_ALPHA: u8 = 45;
 const FRUSTUM_FACE_EMISSIVE_STRENGTH: f32 = 0.15;
 
 fn frustum_face_material_for_color(
     color: impeller_wkt::Color,
+    face_alpha: f32,
     materials: &mut Assets<StandardMaterial>,
     cache: &mut FrustumMaterialCache,
 ) -> Handle<StandardMaterial> {
     let key = FrustumMaterialKey {
+        kind: FrustumMaterialKind::Face,
         r: color_component_to_u8(color.r),
         g: color_component_to_u8(color.g),
         b: color_component_to_u8(color.b),
-        a: FRUSTUM_FACE_ALPHA,
+        a: color_component_to_u8(face_alpha),
     };
     if let Some(handle) = cache.materials.get(&key) {
         return handle.clone();
     }
 
     let material = materials.add(StandardMaterial {
-        base_color: Color::srgba_u8(key.r, key.g, key.b, FRUSTUM_FACE_ALPHA),
+        base_color: Color::srgba_u8(key.r, key.g, key.b, key.a),
         emissive: Color::srgba(
             (key.r as f32 / 255.0) * FRUSTUM_FACE_EMISSIVE_STRENGTH,
             (key.g as f32 / 255.0) * FRUSTUM_FACE_EMISSIVE_STRENGTH,
@@ -189,6 +197,7 @@ fn frustum_material_for_color(
     cache: &mut FrustumMaterialCache,
 ) -> Handle<StandardMaterial> {
     let key = FrustumMaterialKey {
+        kind: FrustumMaterialKind::Line,
         r: color_component_to_u8(color.r),
         g: color_component_to_u8(color.g),
         b: color_component_to_u8(color.b),
@@ -292,6 +301,7 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
             camera_entity,
             points,
             config.frustums_color,
+            impeller_wkt::default_frustums_face_alpha(),
             config.frustums_thickness,
             config.frustums_up_marker,
         ));
@@ -317,6 +327,7 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
             source_entity,
             points,
             config.frustums_color,
+            config.frustums_face_alpha,
             config.frustums_thickness,
             config.frustums_up_marker,
         ));
@@ -357,7 +368,7 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
         ),
     > = HashMap::new();
 
-    for (source_camera, points, color, thickness, up_marker) in sources {
+    for (source_camera, points, color, face_alpha, thickness, up_marker) in sources {
         let material =
             frustum_material_for_color(color, &mut params.materials, &mut params.material_cache);
         let marker_material = frustum_material_for_color(
@@ -367,6 +378,7 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
         );
         let face_material = frustum_face_material_for_color(
             color,
+            face_alpha,
             &mut params.materials,
             &mut params.material_cache,
         );
@@ -598,5 +610,29 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
 
     for (entity, _) in existing_faces_by_key.into_values() {
         commands.entity(entity).despawn();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn face_material_uses_configured_alpha_without_aliasing_line_material() {
+        let mut materials = Assets::<StandardMaterial>::default();
+        let mut cache = FrustumMaterialCache::default();
+        let color = impeller_wkt::Color::rgba(1.0, 0.5, 0.0, 0.25);
+
+        let line = frustum_material_for_color(color, &mut materials, &mut cache);
+        let face = frustum_face_material_for_color(color, 0.25, &mut materials, &mut cache);
+
+        assert_ne!(line.id(), face.id());
+        let material = materials.get(&face).expect("face material");
+        let expected = f32::from(color_component_to_u8(0.25)) / 255.0;
+        assert!((material.base_color.alpha() - expected).abs() < f32::EPSILON);
+        assert_eq!(
+            color_component_to_u8(impeller_wkt::default_frustums_face_alpha()),
+            45
+        );
     }
 }

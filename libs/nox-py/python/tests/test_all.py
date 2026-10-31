@@ -952,3 +952,414 @@ def test_map_seq_decorator_multiple_inputs_outputs():
         }
     )
     assert_frame_equal(df.drop("time"), expected_df)
+
+
+def _world_to_body(q_xyzw, v):
+    """Rotate a world-frame vector into the body frame via el.Quaternion."""
+    return el.Quaternion(q_xyzw).inverse() @ v
+
+
+def test_spatial_inertia_off_diag_and_matrix():
+    inertia_default = el.SpatialInertia(2.5, np.array([1.0, 2.0, 3.0]))
+    assert np.allclose(inertia_default.mass(), 2.5)
+    assert np.allclose(inertia_default.inertia_diag(), np.array([1.0, 2.0, 3.0]))
+    assert np.allclose(inertia_default.inertia_off_diag(), np.zeros(3))
+    assert np.allclose(inertia_default.asarray(), np.array([1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 2.5]))
+    assert np.allclose(inertia_default.inertia_matrix(), np.diag(np.array([1.0, 2.0, 3.0])))
+
+    inertia_full = el.SpatialInertia(
+        4.0,
+        inertia=np.array([5.0, 6.0, 7.0]),
+        inertia_off_diag=np.array([-0.2, 0.3, -0.4]),
+    )
+    assert np.allclose(inertia_full.inertia_diag(), np.array([5.0, 6.0, 7.0]))
+    assert np.allclose(inertia_full.inertia_off_diag(), np.array([-0.2, 0.3, -0.4]))
+    assert np.allclose(
+        inertia_full.asarray(),
+        np.array([5.0, 6.0, 7.0, -0.2, 0.3, -0.4, 4.0]),
+    )
+    expected_mat = np.array(
+        [
+            [5.0, -0.2, 0.3],
+            [-0.2, 6.0, -0.4],
+            [0.3, -0.4, 7.0],
+        ]
+    )
+    assert np.allclose(inertia_full.inertia_matrix(), expected_mat)
+
+
+def test_six_dof_euler_axisymmetric_precession_and_conservation():
+    """Torque-free axisymmetric top precesses at Omega_p = ((It - Ix) / It) * p0."""
+    ix = 0.05
+    it = 5.0
+    p0 = 20.0
+    q0 = 1.0
+    r0 = 0.0
+    dt = 0.001
+    steps = 1000
+
+    w = el.World()
+    w.spawn(
+        el.Body(
+            world_pos=el.SpatialTransform(linear=np.zeros(3)),
+            world_vel=el.SpatialMotion(angular=np.array([p0, q0, r0])),
+            inertia=el.SpatialInertia(10.0, inertia=np.array([ix, it, it])),
+        ),
+        "top",
+    )
+    exec = w.build(el.six_dof(dt), simulation_rate=1.0 / dt)
+    exec.run(steps)
+
+    df = exec.history(["top.world_pos", "top.world_vel"])
+    pos_hist = df["top.world_pos"].to_numpy()
+    vel_hist = df["top.world_vel"].to_numpy()
+
+    i_body = np.diag(np.array([ix, it, it]))
+    omega_p = ((it - ix) / it) * p0
+
+    l0_world = i_body @ np.array([p0, q0, r0])
+    ke0 = 0.5 * float(np.array([p0, q0, r0]) @ l0_world)
+
+    for step_idx in (250, 500, 1000):
+        t = step_idx * dt
+        q_xyzw = pos_hist[step_idx, :4]
+        omega_world = vel_hist[step_idx, :3]
+        omega_body = _world_to_body(q_xyzw, omega_world)
+
+        expected_omega_body = np.array(
+            [
+                p0,
+                q0 * float(np.cos(omega_p * t)),
+                -q0 * float(np.sin(omega_p * t)),
+            ]
+        )
+        assert np.allclose(omega_body, expected_omega_body, atol=2e-3, rtol=2e-3)
+
+        l_world = el.Quaternion(q_xyzw) @ (i_body @ omega_body)
+        ke = 0.5 * float(omega_body @ (i_body @ omega_body))
+        assert np.isclose(np.linalg.norm(l_world), np.linalg.norm(l0_world), rtol=1e-5)
+        assert np.allclose(l_world, l0_world, atol=6e-3, rtol=3e-3)
+        assert np.isclose(ke, ke0, rtol=1e-5)
+
+
+def test_six_dof_intermediate_axis_instability_and_rotated_inertia_invariance():
+    """Dzhanibekov flip matches between diagonal principal axes and dense rotated inertia."""
+    i_diag = np.array([1.0, 2.0, 3.0])
+    i_prin = np.diag(i_diag)
+
+    # Rotate body 2's coordinate frame relative to body 1 by R0:
+    # body 1 has q1(0) = I and diagonal inertia I_prin;
+    # body 2 has q2(0) = q_0^{-1} and dense inertia I_rot = R0 @ I_prin @ R0.T.
+    # Both represent the exact same physical rigid body in the world frame.
+    axis = np.array([1.0, 2.0, -1.0])
+    axis = axis / np.linalg.norm(axis)
+    angle = 0.6
+    q_r0 = el.Quaternion.from_axis_angle(axis, angle)
+    # Rotation matrix R0 with columns q_r0 @ e_i, built from quaternion-vector products.
+    r0 = np.column_stack([q_r0 @ e for e in np.eye(3)])
+    i_rot = r0 @ i_prin @ r0.T
+    i_rot_diag = np.array([i_rot[0, 0], i_rot[1, 1], i_rot[2, 2]])
+    i_rot_off_diag = np.array([i_rot[0, 1], i_rot[0, 2], i_rot[1, 2]])
+
+    # Spin near intermediate axis (axis 2) with small perturbation to trigger flip
+    omega_world_0 = np.array([0.05, 5.0, 0.05])
+    dt = 0.002
+    steps = 1800  # 3.6 seconds -> covers a full 180-deg flip of the intermediate axis
+
+    w = el.World()
+    w.spawn(
+        el.Body(
+            world_pos=el.SpatialTransform(angular=el.Quaternion.identity(), linear=np.zeros(3)),
+            world_vel=el.SpatialMotion(angular=omega_world_0),
+            inertia=el.SpatialInertia(1.0, inertia=i_diag),
+        ),
+        "principal",
+    )
+    w.spawn(
+        el.Body(
+            world_pos=el.SpatialTransform(angular=q_r0.inverse(), linear=np.zeros(3)),
+            world_vel=el.SpatialMotion(angular=omega_world_0),
+            inertia=el.SpatialInertia(
+                1.0,
+                inertia=i_rot_diag,
+                inertia_off_diag=i_rot_off_diag,
+            ),
+        ),
+        "rotated",
+    )
+
+    exec = w.build(el.six_dof(dt), simulation_rate=1.0 / dt)
+    exec.run(steps)
+
+    df = exec.history(
+        [
+            "principal.world_pos",
+            "principal.world_vel",
+            "rotated.world_pos",
+            "rotated.world_vel",
+        ]
+    )
+    vel_prin = df["principal.world_vel"].to_numpy()[:, :3]
+    vel_rot = df["rotated.world_vel"].to_numpy()[:, :3]
+    pos_prin = df["principal.world_pos"].to_numpy()[:, :4]
+
+    # World angular velocity trajectories must be identical for the two frames
+    assert np.allclose(vel_prin, vel_rot, atol=1e-6, rtol=1e-6)
+
+    # Confirm the intermediate-axis (body Y) actually flips sign in the principal body frame
+    omega_y_start = float(_world_to_body(pos_prin[0], vel_prin[0])[1])
+    omega_y_end = float(_world_to_body(pos_prin[-1], vel_prin[-1])[1])
+    assert omega_y_start > 4.0
+    assert omega_y_end < -4.0
+
+
+def test_spatial_inertia_coerces_real_number_inputs_to_float64():
+    import numpy
+
+    expected = np.array([2.0, 3.0, 4.0, 0.0, 0.0, 0.0, 2.0])
+    masses = (
+        2,
+        2.0,
+        numpy.int64(2),
+        numpy.float32(2.0),
+        np.array(2, dtype=np.int32),
+        np.array(2.0, dtype=np.float32),
+    )
+    inertias = (
+        [2, 3, 4],
+        (2.0, 3.0, 4.0),
+        numpy.array([2, 3, 4]),
+        np.array([2, 3, 4], dtype=np.int64),
+        np.array([2.0, 3.0, 4.0], dtype=np.float32),
+    )
+    for mass in masses:
+        for inertia in inertias:
+            si = el.SpatialInertia(mass, inertia=inertia, inertia_off_diag=[0, 0, 0])
+            assert si.asarray().dtype == np.float64
+            assert np.allclose(si.asarray(), expected)
+
+    # Default diagonal from an int mass
+    assert np.allclose(el.SpatialInertia(3).inertia_diag(), np.array([3.0, 3.0, 3.0]))
+    assert el.SpatialInertia(3).asarray().dtype == np.float64
+
+    # from_array accepts sequences and non-float64 real dtypes
+    for arr in ([2, 3, 4, 0, 0, 0, 2], np.array(expected, dtype=np.float32)):
+        si = el.SpatialInertia.from_array(arr)
+        assert si.asarray().dtype == np.float64
+        assert np.allclose(si.asarray(), expected)
+
+    # Coerced inputs flow through the ECS and six_dof
+    w = el.World()
+    w.spawn(
+        el.Body(
+            world_vel=el.SpatialMotion(angular=np.array([0.1, 2.0, 0.1])),
+            inertia=el.SpatialInertia(2, inertia=[2, 3, 4]),
+        ),
+        "b",
+    )
+    exec = w.build(el.six_dof(0.01))
+    exec.run(5)
+    df = exec.history(["b.inertia", "b.world_vel"])
+    assert np.allclose(df["b.inertia"][-1].to_numpy(), expected)
+    assert np.all(np.isfinite(df["b.world_vel"].to_numpy()))
+
+
+def test_spatial_inertia_rejects_bad_types_and_shapes():
+    # Bools, strings, None, and complex values are not real numbers
+    for bad_mass in (True, False, np.array(True), "1.0", None, 1j):
+        with pytest.raises(TypeError, match="mass must be a real number"):
+            el.SpatialInertia(bad_mass)
+
+    # Non-0D shapes for mass
+    for bad_mass in ([1.0], (1.0,), np.ones(1), np.ones(3), np.ones((1, 1))):
+        with pytest.raises(ValueError, match="mass must have shape \\[\\]"):
+            el.SpatialInertia(bad_mass)
+
+    # Non-real or ragged inputs for inertia and inertia_off_diag
+    for bad_seq in ("123", [True, False, True], [[1.0, 2.0], [3.0]], 1j * np.ones(3)):
+        with pytest.raises(TypeError, match="inertia must be a real number"):
+            el.SpatialInertia(1.0, inertia=bad_seq)
+        with pytest.raises(TypeError, match="inertia_off_diag must be a real number"):
+            el.SpatialInertia(1.0, inertia_off_diag=bad_seq)
+
+    # Wrong shapes (0-D, wrong-length 1-D, 2-D matrix) for inertia and inertia_off_diag
+    for bad_arr in (
+        1.0,
+        np.array(1.0),
+        np.ones(2),
+        [1.0, 2.0, 3.0, 4.0],
+        np.eye(3),
+        np.ones((3, 1)),
+    ):
+        with pytest.raises(ValueError, match="inertia must have shape \\[3\\]"):
+            el.SpatialInertia(1.0, inertia=bad_arr)
+        with pytest.raises(ValueError, match="inertia_off_diag must have shape \\[3\\]"):
+            el.SpatialInertia(1.0, inertia_off_diag=bad_arr)
+
+    # from_array type and shape checks
+    with pytest.raises(TypeError, match="from_array must be a real number"):
+        el.SpatialInertia.from_array(np.ones(7, dtype=np.bool_))
+    for bad_shape in ((), (3,), (6,), (8,), (7, 1)):
+        with pytest.raises(ValueError, match="from_array must have shape \\[7\\]"):
+            el.SpatialInertia.from_array(np.ones(bad_shape))
+
+    # Traced values inside a system must already be float64
+    @el.map
+    def float32_update(inertia: el.Inertia) -> el.Inertia:
+        return el.SpatialInertia(inertia.mass().astype(np.float32))
+
+    w = el.World()
+    w.spawn(el.Body(), "e1")
+    with pytest.raises(Exception, match="dtype float64 inside a system"):
+        w.build(float32_update)
+
+
+def test_spatial_inertia_rejects_unphysical_mass_and_inertia():
+    # Non-positive or non-finite mass
+    for bad_mass in (0.0, -1.0, float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(ValueError, match="mass must be finite and > 0"):
+            el.SpatialInertia(bad_mass)
+        with pytest.raises(ValueError, match="mass must be finite and > 0"):
+            el.SpatialInertia(np.array(bad_mass, dtype=np.float64))
+        with pytest.raises(ValueError, match="mass must be finite and > 0"):
+            el.SpatialInertia.from_array(
+                np.array([1.0, 1.0, 1.0, 0.0, 0.0, 0.0, bad_mass], dtype=np.float64)
+            )
+
+    # Non-finite inertia entries
+    for non_finite in (np.nan, np.inf, -np.inf):
+        with pytest.raises(ValueError, match="finite"):
+            el.SpatialInertia(1.0, inertia=np.array([1.0, non_finite, 1.0]))
+        with pytest.raises(ValueError, match="finite"):
+            el.SpatialInertia(1.0, inertia_off_diag=np.array([non_finite, 0.0, 0.0]))
+
+    # Non-positive-definite inertia tensors:
+    # 1. Zero or negative diagonal moment
+    with pytest.raises(ValueError, match="positive-definite"):
+        el.SpatialInertia(1.0, inertia=np.array([0.0, 1.0, 1.0]))
+    with pytest.raises(ValueError, match="positive-definite"):
+        el.SpatialInertia(1.0, inertia=np.array([1.0, -0.5, 1.0]))
+
+    # 2. Semidefinite (singular) tensor via off-diagonal (Ixx*Iyy - Ixy^2 == 0)
+    with pytest.raises(ValueError, match="positive-definite"):
+        el.SpatialInertia(
+            1.0,
+            inertia=np.array([2.0, 2.0, 2.0]),
+            inertia_off_diag=np.array([2.0, 0.0, 0.0]),
+        )
+
+    # 3. Indefinite tensor with positive diagonal and positive 2x2 minors but det(I) < 0
+    with pytest.raises(ValueError, match="positive-definite"):
+        el.SpatialInertia(
+            1.0,
+            inertia=np.array([1.0, 1.0, 1.0]),
+            inertia_off_diag=np.array([0.8, 0.8, -0.8]),
+        )
+
+    # Triangle inequality violations:
+    # 1. Diagonal principal moments violate l1 + l2 >= l3
+    for bad_diag in (
+        np.array([1.0, 1.0, 2.5]),
+        np.array([3.5, 1.0, 2.0]),
+        np.array([1.5, 4.0, 2.0]),
+    ):
+        with pytest.raises(ValueError, match="triangle inequality"):
+            el.SpatialInertia(1.0, inertia=bad_diag)
+
+    # 2. Positive-definite tensor whose diagonal satisfies 2 + 2 >= 3, but off-diagonal
+    # coupling shifts eigenvalues to [0.4, 3.0, 3.6] which violates 0.4 + 3.0 >= 3.6
+    with pytest.raises(ValueError, match="triangle inequality"):
+        el.SpatialInertia(
+            1.0,
+            inertia=np.array([2.0, 2.0, 3.0]),
+            inertia_off_diag=np.array([1.6, 0.0, 0.0]),
+        )
+    with pytest.raises(ValueError, match="triangle inequality"):
+        el.SpatialInertia.from_array(np.array([2.0, 2.0, 3.0, 1.6, 0.0, 0.0, 1.0]))
+
+
+def test_spatial_inertia_tracer_validation_in_map():
+    @el.map
+    def valid_update(x: X, inertia: el.Inertia) -> el.Inertia:
+        mass = inertia.mass() + x
+        diag = inertia.inertia_diag() + np.array([0.1, 0.1, 0.1])
+        return el.SpatialInertia(mass, inertia=diag)
+
+    w = el.World()
+    w.spawn([el.Body(inertia=el.SpatialInertia(2.0)), el.C(X, np.array(0.5))], "e1")
+    exec = w.build(valid_update)
+    exec.run()
+    df = exec.history("e1.inertia")
+    assert np.allclose(
+        df["e1.inertia"][-1].to_numpy(), np.array([2.1, 2.1, 2.1, 0.0, 0.0, 0.0, 2.5])
+    )
+
+    # Passing a (3, 3) matrix tracer inside @el.map is rejected at build/trace time
+    @el.map
+    def bad_matrix_update(inertia: el.Inertia) -> el.Inertia:
+        return el.SpatialInertia(inertia.mass(), inertia=inertia.inertia_matrix())
+
+    w_bad = el.World()
+    w_bad.spawn(el.Body(inertia=el.SpatialInertia(2.0)), "e1")
+    with pytest.raises(ValueError, match="inertia must have shape \\[3\\]"):
+        w_bad.build(bad_matrix_update)
+
+
+def test_spatial_inertia_traced_mass_with_concrete_jax_inertia_in_map():
+    # A concrete jnp array closed over by a system mixes with a traced mass (e.g. a fuel-burn update)
+    diag = np.array([2.0, 3.0, 4.0])
+    off_diag = np.array([0.1, -0.2, 0.3])
+
+    @el.map
+    def fuel_update(x: X, _inertia: el.Inertia) -> el.Inertia:
+        return el.SpatialInertia(2.0 + x, inertia=diag, inertia_off_diag=off_diag)
+
+    w = el.World()
+    w.spawn([el.Body(), el.C(X, np.array(0.5))], "e1")
+    exec = w.build(fuel_update)
+    exec.run()
+    df = exec.history("e1.inertia")
+    assert np.allclose(
+        df["e1.inertia"][-1].to_numpy(), np.array([2.0, 3.0, 4.0, 0.1, -0.2, 0.3, 2.5])
+    )
+
+
+def test_six_dof_rejects_invalid_time_step_and_rk4_uses_explicit_dt():
+    for bad_dt in (0.0, -0.01, float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(ValueError, match="six_dof time_step must be finite and > 0"):
+            el.six_dof(bad_dt)
+
+    # Verify that explicit `el.six_dof(dt)` uses `dt` in all RK4 intermediate stages
+    # even when `simulation_rate` differs from `1.0 / dt`.
+    dt = 0.01
+    omega_0 = np.array([20.0, 1.0, 0.0])
+    inertia_diag = np.array([0.05, 5.0, 5.0])
+
+    w1 = el.World()
+    w1.spawn(
+        el.Body(
+            world_pos=el.SpatialTransform(linear=np.zeros(3)),
+            world_vel=el.SpatialMotion(angular=omega_0),
+            inertia=el.SpatialInertia(10.0, inertia=inertia_diag),
+        ),
+        "top",
+    )
+    exec1 = w1.build(el.six_dof(dt), simulation_rate=1.0 / dt)
+    exec1.run(10)
+
+    w2 = el.World()
+    w2.spawn(
+        el.Body(
+            world_pos=el.SpatialTransform(linear=np.zeros(3)),
+            world_vel=el.SpatialMotion(angular=omega_0),
+            inertia=el.SpatialInertia(10.0, inertia=inertia_diag),
+        ),
+        "top",
+    )
+    # Default simulation_rate is 120.0 Hz (1/120 != 0.01)
+    exec2 = w2.build(el.six_dof(dt))
+    exec2.run(10)
+
+    vel1 = exec1.history("top.world_vel")["top.world_vel"].to_numpy()
+    vel2 = exec2.history("top.world_vel")["top.world_vel"].to_numpy()
+    assert np.allclose(vel1, vel2, atol=1e-12, rtol=1e-12)

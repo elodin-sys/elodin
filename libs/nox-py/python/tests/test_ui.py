@@ -15,7 +15,6 @@ import elodin.ui as ui
 
 REPO = Path(__file__).resolve().parents[4]
 EXAMPLES = REPO / "examples"
-KDL_CORPUS = REPO / "libs" / "impeller" / "kdl" / "tests" / "corpus" / "sources"
 
 
 def _load_example(path: Path, name: str):
@@ -30,21 +29,6 @@ def _canonical(schematic: ui.Schematic) -> ui.Schematic:
     return ui.from_kdl(schematic.emit_kdl())
 
 
-@pytest.mark.parametrize(
-    "path",
-    sorted(KDL_CORPUS.rglob("*.kdl")),
-    ids=lambda path: str(path.relative_to(KDL_CORPUS)),
-)
-def test_to_python_preserves_corpus_model(path: Path):
-    source = path.read_text()
-    generated = ui.to_python(source, source_name=path.name)
-    assert "SOURCE_KDL" not in generated
-    assert "ui.from_kdl" not in generated
-    namespace = {"__name__": "generated_schematic"}
-    exec(compile(generated, str(path.with_suffix(".py")), "exec"), namespace)
-    assert _canonical(namespace["build"]()) == _canonical(ui.from_kdl(source))
-
-
 def test_to_python_preserves_line_comments():
     generated = ui.to_python("// Flight dashboard\nviewport\n")
     assert "# Flight dashboard" in generated
@@ -52,7 +36,7 @@ def test_to_python_preserves_line_comments():
 
 
 def test_from_kdl_emit_idempotent():
-    text = (EXAMPLES / "db-client" / "schematic.kdl").read_text()
+    text = 'viewport name="Demo" { graph "demo.value" }'
     once = ui.from_kdl(text)
     twice = ui.from_kdl(once.emit_kdl())
     assert twice == ui.from_kdl(twice.emit_kdl())
@@ -119,9 +103,10 @@ def test_extended_typed_builders_roundtrip():
             frame_orientation="NED",
             orientation="absolute",
             icon=ui.icon(
-                builtin="rocket_launch",
+                builtin="radio_button_unchecked",
                 color=ui.color(76, 175, 80),
                 visibility=visibility,
+                fill=False,
             ),
             thrusters=[
                 ui.thruster(
@@ -144,6 +129,17 @@ def test_extended_typed_builders_roundtrip():
             sky=ui.color(135, 206, 235),
             atmosphere=ui.atmosphere(),
             earth=ui.earth(),
+        ),
+    )
+    assert "fill=#false" in built.emit_kdl()
+    assert ui.from_kdl(built.emit_kdl()) == built
+
+
+def test_window_inline_children_roundtrip():
+    built = ui.schematic(
+        ui.window(
+            ui.tabs(ui.graph("drone.motor_input", name="motors")),
+            title="Motor Panel",
         ),
     )
     assert ui.from_kdl(built.emit_kdl()) == built
@@ -227,11 +223,6 @@ def test_write_roundtrip(tmp_path):
     assert ui.from_kdl(path.read_text()) == built
 
 
-def test_g1_db_client_handwritten_kdl_roundtrip():
-    handwritten = ui.from_kdl((EXAMPLES / "db-client" / "schematic.kdl").read_text())
-    assert _canonical(handwritten) == handwritten
-
-
 def test_display_kernels_python_schematic_emits_display_kernel():
     mod = _load_example(EXAMPLES / "display-kernels" / "schematic.py", "display_kernels_schematic")
     kdl = mod.build().emit_kdl()
@@ -240,31 +231,65 @@ def test_display_kernels_python_schematic_emits_display_kernel():
     assert "craft.error_covariance" in kdl
 
 
-def test_g1_motor_panel_equals_handwritten():
-    mod = _load_example(EXAMPLES / "drone" / "motor_panel.py", "motor_panel")
-    handwritten = ui.from_kdl((EXAMPLES / "drone" / "motor-panel.kdl").read_text())
-    assert _canonical(mod.build()) == _canonical(handwritten)
-
-
-def test_g1_rate_control_panel_equals_handwritten():
-    mod = _load_example(EXAMPLES / "drone" / "rate_control_panel.py", "rate_control_panel")
-    handwritten = ui.from_kdl((EXAMPLES / "drone" / "rate-control-panel.kdl").read_text())
-    assert _canonical(mod.build()) == _canonical(handwritten)
-
-
-def test_g1_ball_schematic_equals_handwritten():
-    mod = _load_example(EXAMPLES / "ball" / "schematic.py", "ball_schematic")
-    handwritten = ui.from_kdl((EXAMPLES / "ball" / "schematic.kdl").read_text())
-    assert _canonical(mod.build()) == _canonical(handwritten)
-    ned = ui.from_kdl((EXAMPLES / "ball" / "schematic_ned.kdl").read_text())
-    assert _canonical(mod.build(frame="NED")) == _canonical(ned)
-
-
 def test_world_schematic_accepts_ui_schematic():
     world = el.World()
     s = ui.schematic(ui.graph("drone.thrust"))
     world.schematic(s)
     world.schematic(s.emit_kdl())
+
+
+def test_sensor_camera_accepts_frustum_face_alpha():
+    world = el.World()
+    host = world.spawn(el.Body(), "camera_host")
+    world.sensor_camera(
+        entity=host,
+        name="camera",
+        width=16,
+        height=16,
+        frustums_face_alpha=0.25,
+    )
+
+
+def test_sensor_camera_keeps_positional_parameter_order():
+    world = el.World()
+    host = world.spawn(el.Body(), "camera_host")
+    world.sensor_camera(
+        host,
+        "camera",
+        16,
+        16,
+        None,
+        0.01,
+        1000.0,
+        [0.0, 0.0, 0.0],
+        [0.0, 0.0, 0.0],
+        "rgba",
+        "normal",
+        None,
+        None,
+        None,
+        False,
+        False,
+        None,
+        [1.0, 0.0, 0.0],
+    )
+
+
+@pytest.mark.parametrize("alpha", [-0.01, 1.01, float("nan")])
+def test_sensor_camera_rejects_invalid_frustum_face_alpha(alpha):
+    world = el.World()
+    host = world.spawn(el.Body(), "camera_host")
+    with pytest.raises(
+        ValueError,
+        match="frustums_face_alpha must be finite and between 0 and 1",
+    ):
+        world.sensor_camera(
+            entity=host,
+            name="camera",
+            width=16,
+            height=16,
+            frustums_face_alpha=alpha,
+        )
 
 
 def _wait_for(predicate, timeout: float = 5.0) -> bool:

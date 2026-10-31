@@ -13,6 +13,29 @@ order = 1
 +++
 
 
+## v0.20
+
+### v0.20.0
+- **(breaking:rust)** Rename the `impeller2` Rust crates, imports, and source paths to `impeller` now that the earlier protocol is gone. Update downstream Cargo dependencies and imports accordingly.
+- **(breaking)** Record component samples only when their bytes change by default; use component metadata `record_every_tick="true"` to opt into dense telemetry. (#868)
+- **(feat)** Define schematics in Python with typed `elodin.ui` builders, composable expressions, schemas, and JAX display kernels for graphs and viewport objects. Add `elodin schematic to-python` and `elodin ui watch`, and support KDL or Python preloads with `elodin editor --schematic`; `--kdl` remains a deprecated alias. (#846)
+- **(feat)** Add transient simulation components that remain available to systems in memory without being registered with or recorded to Elodin DB. (#871)
+- **(feat)** Add the `point_trails` schematic node: batched trails and cube/sphere heads for every point in one flat `3 × N` component, with status colors and an optional path-length cap. (#868)
+- **(feat)** Add optional up-direction markers for viewport and sensor-camera frustums, with video-view up indicators. (#860)
+- **(feat)** Add a clickable command-palette shortcut to the editor status bar. (#870)
+- **(feat:examples)** Add a Betaflight SITL race course, referee, race audit, and FPV sensor-camera view. (#864, #853)
+- **(fix)** Fix editor tick stepping, playback, and timeline controls for live simulations and recorded databases. (#861, #865)
+- **(fix)** Stop stellarator's kqueue reactor on macOS and other non-Linux hosts from busy-spinning when its event buffer fills, remove completed operations from the reactor, and preserve concurrent reader/writer registrations on the same socket. (#869)
+- **(fix)** Skip the bare timeline node when saving schematics. (#844)
+- **(fix)** Reject Python component names containing whitespace with a clear error. (#870)
+- **(fix:examples)** Preserve quaternion components in cube-sat-pysim plots. (#880)
+- **(fix:examples)** Use DE440 gravitational parameters in Voyager and document its model limits and trajectory-error telemetry. (#862, #867)
+- **(fix:examples)** Keep interactive RC-jet flights running until stopped while retaining bounded headless runs and tick overrides. (#870)
+- **(chore)** Make `just install` independent of the terminal session, support named development environments, and pin maturin to avoid empty staged Python libraries. (#852)
+- **(chore:examples)** Migrate example layouts to Python schematics, including Apollo lander, Falcon 9, RC-jet, n-body, and geo-frames. (#873, #874, #875, #876, #882)
+- **(doc)** Add the KDL-to-Python schematic migration guide and s10 reference documentation. (#846, #881)
+- **(fix:ci)** Retry documentation deployment pushes when concurrent updates race. (#866)
+
 ## v0.19
 
 ### v0.19.2

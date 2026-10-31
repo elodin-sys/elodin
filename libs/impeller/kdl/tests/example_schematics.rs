@@ -1,6 +1,6 @@
-//! Every KDL schematic shipped with the examples must parse: the Python SDK
-//! embeds schematic text without validating it, so a syntax error would
-//! otherwise surface only when someone opens the editor.
+//! Validate the remaining file-backed example schematics. Migrated layouts
+//! live in Python; their builders are covered by the SDK's test_ui.py suite,
+//! while the historical KDL layouts remain in the golden corpus.
 
 use std::path::PathBuf;
 
@@ -23,7 +23,7 @@ fn all_example_schematics_parse() {
                 let text = std::fs::read_to_string(&path).expect("read kdl");
                 // Validate each generated visual-check viewport separately.
                 if path.file_name().is_some_and(|n| n == "visual_check.kdl") {
-                    for keep in ["Chase", "Landing", "NightSky"] {
+                    for keep in ["Chase", "Landing", "Waterline", "NightSky"] {
                         let filtered: String = text
                             .lines()
                             .filter(|line| {
@@ -47,7 +47,7 @@ fn all_example_schematics_parse() {
         }
     }
     assert!(
-        checked >= 2,
+        checked > 0,
         "expected to find example schematics, got {checked}"
     );
 }

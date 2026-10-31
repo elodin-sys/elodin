@@ -23,6 +23,7 @@ default = ["axum", "grpc", "parquet", "video-export", "mcap-export"]
 axum = [
     "dep:axum",
     "dep:axum-streams",
+    "dep:futures-util",
     "dep:serde_json",
     "dep:tokio",
     "dep:impeller-kdl",
@@ -46,7 +47,10 @@ grpc = [
 parquet = ["dep:parquet"]
 video-export = ["dep:muxide", "dep:scuffle-h264", "dep:openh264", "dep:serde_json"]
 mcap-export = ["dep:mcap", "dep:base64", "dep:serde_json", "dep:impeller-kdl"]
-tracy = ["dep:tracing-tracy"]
+tracy = ["dep:tracing-tracy", "dep:tracy-client-sys"]
+# Check browser origins (localhost, same-host, or ELODIN_DB_ALLOWED_ORIGINS).
+# Off by default: the asset server still sends CORS headers but allows every origin.
+verify-cors = []
 
 [dependencies]
 # ser-de
@@ -87,6 +91,8 @@ miette.features = ["fancy"]
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "chrono", "registry"] }
 tracing-tracy = { version = "0.11", optional = true }
+# Pin the Tracy 0.13 protocol. nixpkgs `tracy-capture` cannot read 0.14 traces.
+tracy-client-sys = { version = "=0.28.0", optional = true, default-features = false }
 hifitime.version = "4.0"
 
 # rand
@@ -128,10 +134,12 @@ axum.optional = true
 axum-streams.version = "0.20"
 axum-streams.features = ["json"]
 axum-streams.optional = true
+futures-util.version = "0.3"
+futures-util.optional = true
 serde_json.version = "1"
 serde_json.optional = true
 tokio.version = "1"
-tokio.features = ["rt-multi-thread", "time"]
+tokio.features = ["rt-multi-thread", "time", "net", "io-util", "macros"]
 tokio.optional = true
 
 impeller-kdl.path = "../impeller/kdl"
@@ -204,7 +212,9 @@ path = "tests_query/rtsp_ingest_export.rs"
 goldie = "0.7"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 tempfile = "3"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "net", "io-util"] }
+tokio-tungstenite = "0.29"
+futures-util = "0.3"
 zerocopy.version = "0.8.2"
 rtsp-ingest.path = "../rtsp-ingest"
 openh264 = "0.8"

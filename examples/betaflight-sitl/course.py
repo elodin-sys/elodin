@@ -194,24 +194,24 @@ def course_bars(course: Course) -> tuple[GateBar, ...]:
     return tuple(bar for gate in course.gates for bar in gate_bars(gate))
 
 
-def gate_schematic(course: Course) -> str:
-    """Build KDL objects for saturated-orange matte procedural gate bars.
+def gate_objects(course: Course) -> list:
+    """Saturated-orange matte gate bars for the editor schematic.
 
     The editor's procedural boxes use a non-emissive, non-metallic standard
-    material with default surface roughness, providing the required matte rather
-    than glowing look. ``orientation=absolute`` aligns each box's local XYZ
-    dimensions with ENU at yaw zero and then applies the entity's world-pose yaw.
+    material with default surface roughness. ``orientation="absolute"`` aligns
+    each box's local XYZ dimensions with ENU at yaw zero and then applies the
+    entity's world-pose yaw.
     """
 
-    red, green, blue = SATURATED_ORANGE_RGB
-    objects = []
-    for bar in course_bars(course):
-        x_size, y_size, z_size = bar.size
-        objects.append(
-            f"""    object_3d {bar.name}.world_pos frame=ENU orientation=absolute {{
-        box x={x_size:.6f} y={y_size:.6f} z={z_size:.6f} {{
-            color {red} {green} {blue}
-        }}
-    }}"""
+    import elodin.ui as ui
+
+    color = ui.color(*SATURATED_ORANGE_RGB)
+    return [
+        ui.object_3d(
+            f"{bar.name}.world_pos",
+            mesh=ui.box(x=bar.size[0], y=bar.size[1], z=bar.size[2], color=color),
+            frame="ENU",
+            orientation="absolute",
         )
-    return "\n".join(objects)
+        for bar in course_bars(course)
+    ]

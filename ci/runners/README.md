@@ -1,15 +1,15 @@
 # Self-hosted GitHub Actions runners
 
-Elodin release builds need more RAM than free GitHub-hosted runners provide. Heavy jobs now target machines you own. Tiny orchestration jobs (`plan`, `build-global-artifacts`, `host`, `announce`, `pypi-publish`, `release-dry-run`) stay on free `ubuntu-24.04`.
+Elodin release builds need more RAM than free GitHub-hosted runners provide. Heavy jobs and release orchestration run on machines you own. Pull-request `plan` stays on free `ubuntu-24.04`.
 
 | Label | Machine | Workload |
 |---|---|---|
-| `ci-linux-x64` | x86_64 Linux box, Docker, Ubuntu 24.04 image | `x86_64-unknown-linux-{gnu,musl}` dist builds, `linux-wheel`, `cargo-deb` |
+| `ci-linux-x64` | x86_64 Linux box, Docker, Ubuntu 24.04 image | `x86_64-unknown-linux-{gnu,musl}` dist builds, `linux-wheel`, `cargo-deb`, `build-global-artifacts`, `host`, `announce`, `pypi-publish`, `release-dry-run`, and `plan` except on pull requests |
 | `ci-macos-arm64` | Mac Studio, native runner | `aarch64-apple-darwin` dist build, `macos-wheel` |
 | `ci-linux-arm64` | Mac Studio, Apple Container, same Ubuntu 24.04 image | `aarch64-unknown-linux-musl` (`elodin-db`) |
 | `ci-windows-x64` | Windows 11 x64 box, native runner service | `x86_64-pc-windows-msvc` dist build + MSI |
 
-Do not merge these workflow changes until the corresponding runner is online. A `push` to `main` will sit in queue forever if the label is missing. Emergency fallback: **Actions → Release → Run workflow → runners = `hosted-large`**.
+Do not merge these workflow changes until the corresponding runner is online. A `push` to `main` will sit in queue forever if the label is missing.
 
 PR builds still only run `dist plan` plus `Windows Check` on free hosted runners.
 
@@ -62,7 +62,7 @@ Target: ≥ 8 cores, ≥ 32 GB RAM, ≥ 200 GB free. Any distro is fine; jobs ru
 
 5. Confirm **Settings → Actions → Runners** shows `ci-linux-x64` online.
 
-6. From the Studio, dispatch **CI runner smoke tests** with `linux_x64`. Then dispatch **Release** (dry-run, `runners=self-hosted`) and compare the x86_64 artifacts, `--print=linkage` output, wheel manylinux tag, and `.deb` against [run 34528998758](https://github.com/elodin-sys/elodin/actions/runs/34528998758).
+6. From the Studio, dispatch **CI runner smoke tests** with `linux_x64`. Then dispatch a Release dry-run and compare the x86_64 artifacts, `--print=linkage` output, wheel manylinux tag, and `.deb` against [run 34528998758](https://github.com/elodin-sys/elodin/actions/runs/34528998758).
 
 7. Reboot the box. The container should return on its own. Confirm the runner is online, then merge Phase 1.
 
@@ -174,8 +174,7 @@ Target: Windows 11 x64, ≥ 8 cores, ≥ 32 GB RAM, ≥ 200 GB free, always on (
 ## Final verification
 
 1. Reboot the Studio, unlock FileVault as `ci`. Both Studio runners (`ci-macos-arm64`, `ci-linux-arm64`) should return online. Reboot the x86 box; `ci-linux-x64` should return. Reboot the Windows box; `ci-windows-x64` returns as a service without login.
-2. Dispatch Release with `runners=hosted-large` once to prove the paid fallback still works.
-3. Watch the next `push` to `main`. GitHub Actions minutes for this repo should then be $0.
+2. Watch the next `push` to `main`. GitHub Actions minutes for this repo should then be $0.
 
 ## Resource budget
 

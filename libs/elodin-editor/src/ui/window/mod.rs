@@ -1,3 +1,4 @@
+pub mod arrange;
 pub mod context;
 pub mod default;
 pub mod placement;

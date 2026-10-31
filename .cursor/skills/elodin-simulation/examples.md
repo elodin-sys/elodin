@@ -188,8 +188,32 @@ Most examples use a `config.py` for tunable parameters, keeping `main.py` and `s
 ### File Organization
 ```
 example/
-├── main.py      # Entry point: world setup, spawn, run
-├── sim.py       # Physics systems (optional, for larger sims)
-├── config.py    # Constants and parameters (optional)
-└── README.md    # Usage and background
+├── main.py       # Entry point: world setup, spawn, run
+├── schematic.py  # Python `elodin.ui` layout (optional; preferred over inline KDL)
+├── sim.py        # Physics systems (optional, for larger sims)
+├── config.py     # Constants and parameters (optional)
+└── README.md     # Usage and background
 ```
+
+Register the layout from `main.py`:
+
+```python
+from schematic import build as build_schematic
+
+world.schematic(build_schematic(), "example.kdl")
+```
+
+Examples with a typed Python schematic include `ball`, `drone`, `geo-frames`, `rc-jet`, and `display-kernels`. See `.cursor/skills/kdl-to-python-schematic/SKILL.md` for migration notes.
+
+### Examples by focus
+
+| Focus | Examples |
+|-------|----------|
+| Basic 6DOF | `ball`, `three-body`, `n-body` |
+| Aircraft / rotorcraft | `drone`, `rc-jet`, `crazyflie-edu`, `betaflight-sitl` |
+| Space / orbit | `cube-sat`, `cube-sat-pysim`, `apollo-lander`, `falcon9`, `voyager` |
+| Coordinates / frames | `geo-frames` (ENU/NED/ECEF markers, `schematic.py`) |
+| Monte Carlo / truth | `monte-carlo` |
+| DB / telemetry | `db-client`, `logstream` |
+| Video / sensors | `video-stream`, `sensor-camera` |
+| Compute / JIT | `stablehlo`, `linalg`, `display-kernels` |

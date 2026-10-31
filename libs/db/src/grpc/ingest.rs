@@ -213,6 +213,7 @@ impl IngestServiceImpl {
             return Ok(OpenOutcome::Rejected(reject));
         }
         self.db.vtable_gen.fetch_add(1, Ordering::SeqCst);
+        self.db.metadata_gen.fetch_add(1, Ordering::SeqCst);
 
         // Skip the config write on reconnects with an unchanged fingerprint
         // so WatchDb subscribers do not see handshake noise.
@@ -1186,7 +1187,7 @@ fn internal_status(error: DbError) -> Status {
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, net::SocketAddr, path::Path};
+    use std::{fs, io::Read, net::SocketAddr, path::Path};
 
     use tempfile::TempDir;
 
@@ -2467,9 +2468,15 @@ mod tests {
     }
 
     fn read_append_log_committed(path: &Path) -> Vec<u8> {
-        let data = fs::read(path).unwrap();
-        let committed_len = u64::from_ne_bytes(data[0..8].try_into().unwrap()) as usize;
-        data[16..committed_len].to_vec()
+        let mut file = fs::File::open(path).unwrap();
+        let mut header = [0u8; 16];
+        file.read_exact(&mut header).unwrap();
+        let committed_len = u64::from_ne_bytes(header[0..8].try_into().unwrap());
+        let mut data = Vec::new();
+        file.take(committed_len - 16)
+            .read_to_end(&mut data)
+            .unwrap();
+        data
     }
 
     #[test]

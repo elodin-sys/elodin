@@ -1,13 +1,12 @@
 //! Fetch, verify, compile, and invoke content-addressed display kernels.
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use web_time::{Duration, Instant};
 
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
-use cranelift_mlir::display_kernel::DisplayKernelExec;
+use cranelift_mlir::display_kernel::{DisplayKernelExec, InvokeError};
 use impeller::types::{ComponentId, Timestamp};
 use impeller_bevy::{ConnectionAddr, EntityMap, TelemetryCache};
 use impeller_wkt::{
@@ -15,11 +14,10 @@ use impeller_wkt::{
 };
 use sha2::{Digest, Sha256};
 
-use crate::object_3d::{local_assets_root, resolve_db_asset_url};
+use crate::object_3d::{local_assets_root, resolve_db_endpoint};
 use crate::plugins::kdl_document::InitialKdlPath;
 use crate::ui::plot::data::EvaluatedSeries;
 
-const FETCH_TIMEOUT: Duration = Duration::from_secs(10);
 const RETRY_BACKOFF_CAP: Duration = Duration::from_secs(30);
 
 pub struct DisplayKernelPlugin;
@@ -85,7 +83,7 @@ pub struct CompiledDisplayKernel {
 
 #[derive(Clone, Default)]
 pub struct KernelFetchCtx {
-    pub connection_addr: Option<SocketAddr>,
+    pub connection_addr: Option<impeller_bevy::DbEndpoint>,
     pub local_root: Option<PathBuf>,
     pub kdl_dir: Option<PathBuf>,
 }
@@ -141,7 +139,7 @@ fn spawn_load(
     binding: DisplayKernelBinding,
     fetch: KernelFetchCtx,
 ) -> Task<Result<CompiledDisplayKernel, LoadError>> {
-    IoTaskPool::get().spawn(async move { load_compiled(&binding, &fetch) })
+    IoTaskPool::get().spawn(async move { load_compiled(&binding, &fetch).await })
 }
 
 fn retry_backoff(attempts: u32) -> Duration {
@@ -179,21 +177,20 @@ pub fn current_kernel_inputs(
 pub fn invoke_scalar(
     compiled: &mut CompiledDisplayKernel,
     inputs: &[Vec<u8>],
-) -> Result<Vec<Vec<u8>>, String> {
-    let expected = compiled.artifact.input_nbytes(false)?;
+) -> Result<Vec<Vec<u8>>, InvokeError> {
+    let expected = compiled.scalar.input_bytes();
     if inputs.len() != expected.len() {
-        return Err(format!(
-            "expected {} scalar inputs, got {}",
-            expected.len(),
-            inputs.len()
-        ));
+        return Err(InvokeError::InputCount {
+            expected: expected.len(),
+            actual: inputs.len(),
+        });
     }
     let input_refs: Vec<&[u8]> = inputs.iter().map(Vec::as_slice).collect();
     let mut outputs: Vec<Vec<u8>> = compiled
-        .artifact
-        .output_nbytes(false)?
-        .into_iter()
-        .map(|len| vec![0u8; len])
+        .scalar
+        .output_bytes()
+        .iter()
+        .map(|len| vec![0u8; *len])
         .collect();
     let mut output_refs: Vec<&mut [u8]> = outputs.iter_mut().map(Vec::as_mut_slice).collect();
     compiled.scalar.invoke(&input_refs, &mut output_refs)?;
@@ -207,7 +204,7 @@ pub fn evaluate_kernel_series(
     binding: &DisplayKernelBinding,
     range: std::ops::Range<Timestamp>,
     max_points: Option<usize>,
-) -> Result<EvaluatedSeries, String> {
+) -> Result<EvaluatedSeries, InvokeError> {
     let input_ids: Vec<ComponentId> = binding
         .inputs
         .iter()
@@ -226,9 +223,9 @@ pub fn evaluate_kernel_series(
         .unwrap_or(1)
         .max(1);
     let batch_size = compiled.artifact.batch_size as usize;
-    let input_sizes = compiled.artifact.input_nbytes(false)?;
-    let batched_in = compiled.artifact.input_nbytes(true)?;
-    let batched_out = compiled.artifact.output_nbytes(true)?;
+    let input_sizes = compiled.scalar.input_bytes().to_vec();
+    let batched_in = compiled.batched.input_bytes().to_vec();
+    let batched_out = compiled.batched.output_bytes().to_vec();
 
     let mut timestamps = Vec::new();
     let mut packed_inputs: Vec<Vec<Vec<u8>>> = vec![Vec::new(); compiled.artifact.inputs.len()];
@@ -307,12 +304,12 @@ pub fn evaluate_kernel_series(
     Ok(EvaluatedSeries { timestamps, values })
 }
 
-pub fn output_floats(bytes: &[u8], dtype: &str) -> Result<Vec<f64>, String> {
+pub fn output_floats(bytes: &[u8], dtype: &str) -> Result<Vec<f64>, InvokeError> {
     match dtype {
         "f64" => {
             let (chunks, rest) = bytes.as_chunks::<8>();
             if !rest.is_empty() {
-                return Err("f64 output is not 8-byte aligned".into());
+                return Err(InvokeError::MisalignedF64);
             }
             Ok(chunks
                 .iter()
@@ -322,14 +319,14 @@ pub fn output_floats(bytes: &[u8], dtype: &str) -> Result<Vec<f64>, String> {
         "f32" => {
             let (chunks, rest) = bytes.as_chunks::<4>();
             if !rest.is_empty() {
-                return Err("f32 output is not 4-byte aligned".into());
+                return Err(InvokeError::MisalignedF32);
             }
             Ok(chunks
                 .iter()
                 .map(|&chunk| f32::from_le_bytes(chunk) as f64)
                 .collect())
         }
-        other => Err(format!("unsupported display kernel output dtype {other}")),
+        other => Err(InvokeError::unsupported_output_dtype(other)),
     }
 }
 
@@ -338,7 +335,7 @@ pub fn kernel_fetch_ctx(
     initial_kdl: Option<Res<InitialKdlPath>>,
 ) -> KernelFetchCtx {
     KernelFetchCtx {
-        connection_addr: connection_addr.map(|a| a.0),
+        connection_addr: connection_addr.map(|a| a.endpoint().clone()),
         local_root: local_assets_root(initial_kdl.as_deref()),
         kdl_dir: initial_kdl
             .and_then(|path| path.0.clone())
@@ -346,11 +343,11 @@ pub fn kernel_fetch_ctx(
     }
 }
 
-fn load_compiled(
+async fn load_compiled(
     binding: &DisplayKernelBinding,
     fetch: &KernelFetchCtx,
 ) -> Result<CompiledDisplayKernel, LoadError> {
-    let bytes = fetch_kernel_bytes(binding, fetch)?;
+    let bytes = fetch_kernel_bytes(binding, fetch).await?;
     let artifact = DisplayKernelArtifact::parse(&bytes).map_err(LoadError::permanent)?;
     let (scalar_in, scalar_out, batched_in, batched_out) =
         verify_artifact(&artifact, binding).map_err(LoadError::permanent)?;
@@ -397,7 +394,7 @@ fn verify_artifact(
     Ok((scalar_in, scalar_out, batched_in, batched_out))
 }
 
-fn fetch_kernel_bytes(
+async fn fetch_kernel_bytes(
     binding: &DisplayKernelBinding,
     fetch: &KernelFetchCtx,
 ) -> Result<Vec<u8>, LoadError> {
@@ -407,6 +404,7 @@ fn fetch_kernel_bytes(
         .next()
         .unwrap_or(&binding.hash)
         .to_string();
+    #[cfg(not(target_family = "wasm"))]
     if let Some(dir) = &fetch.kdl_dir {
         let local = dir.join("kernels").join(&hash);
         if local.is_file() {
@@ -421,6 +419,7 @@ fn fetch_kernel_bytes(
     } else {
         DisplayKernelBinding::asset_key(&hash)
     };
+    #[cfg(not(target_family = "wasm"))]
     if let Some(root) = &fetch.local_root {
         let rel = key.strip_prefix("db:").unwrap_or(&key);
         let path = root.join(rel);
@@ -432,19 +431,13 @@ fn fetch_kernel_bytes(
     let url = if key.starts_with("http://") || key.starts_with("https://") {
         key
     } else if key.starts_with("db:") {
-        resolve_db_asset_url(&key, fetch.connection_addr)
+        resolve_db_endpoint(&key, fetch.connection_addr.as_ref())
     } else {
-        resolve_db_asset_url(&format!("db:{key}"), fetch.connection_addr)
+        resolve_db_endpoint(&format!("db:{key}"), fetch.connection_addr.as_ref())
     };
-    let client = reqwest::blocking::Client::builder()
-        .timeout(FETCH_TIMEOUT)
-        .build()
-        .map_err(|err| LoadError::fetch(err.to_string()))?;
-    client
-        .get(&url)
-        .send()
-        .and_then(|resp| resp.error_for_status()?.bytes().map(|b| b.to_vec()))
-        .map_err(|err| LoadError::fetch(format!("fetch {url}: {err}")))
+    crate::plugins::http_client::get_bytes(&url)
+        .await
+        .map_err(LoadError::fetch)
 }
 
 fn pack_component_value(value: &ComponentValue, dtype: &str) -> Result<Vec<u8>, String> {
@@ -535,10 +528,11 @@ fn unpack_batched_outputs(
     out_bufs: &[Vec<u8>],
     chunk_len: usize,
     values: &mut [Vec<f32>],
-) -> Result<(), String> {
+) -> Result<(), InvokeError> {
     let mut series = 0;
     for (index, tensor) in artifact.outputs.iter().enumerate() {
-        let width = impeller_wkt::dtype_width(&tensor.dtype)?;
+        let width = impeller_wkt::dtype_width(&tensor.dtype)
+            .map_err(|_| InvokeError::unsupported_output_dtype(&tensor.dtype))?;
         let elems = tensor
             .shape
             .iter()
@@ -551,10 +545,10 @@ fn unpack_batched_outputs(
             let sample = out_bufs
                 .get(index)
                 .and_then(|buf| buf.get(start..end))
-                .ok_or_else(|| "batched kernel output is short".to_string())?;
+                .ok_or(InvokeError::ShortBatchedOutput)?;
             let floats = output_floats(sample, &tensor.dtype)?;
             if series + floats.len() > values.len() {
-                return Err("kernel output series count mismatch".into());
+                return Err(InvokeError::OutputSeriesMismatch);
             }
             for (offset, value) in floats.iter().enumerate() {
                 values[series + offset].push(*value as f32);

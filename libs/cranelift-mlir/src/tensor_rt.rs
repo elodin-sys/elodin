@@ -357,7 +357,7 @@ pub extern "C" fn tensor_pow_f64(dst: *mut f64, a: *const f64, b: *const f64, n:
     while i + 2 <= n {
         let va = wide::f64x2::new([a[i], a[i + 1]]);
         let vb = wide::f64x2::new([b[i], b[i + 1]]);
-        let r = va.pow_f64x2(vb).to_array();
+        let r = va.powf_simd(vb).to_array();
         dst[i] = r[0];
         dst[i + 1] = r[1];
         i += 2;
@@ -1430,6 +1430,18 @@ pub extern "C" fn tensor_transpose_nd_generic(
     }
 }
 
+/// Clamp a dynamic-slice start into `[0, max_start]`. Negative starts become 0.
+fn clamped_start(start: i64, max_start: i64) -> usize {
+    let max_start = max_start.max(0);
+    if start <= 0 {
+        0
+    } else if start >= max_start {
+        max_start as usize
+    } else {
+        start as usize
+    }
+}
+
 pub extern "C" fn tensor_dynamic_slice_generic(
     dst: *mut u8,
     src: *const u8,
@@ -1460,8 +1472,7 @@ pub extern "C" fn tensor_dynamic_slice_generic(
         for d in 0..rank {
             let c = rem / dst_s[d];
             rem %= dst_s[d];
-            let start =
-                (start_indices[d] as usize).min(shape[d] as usize - slice_sizes[d] as usize);
+            let start = clamped_start(start_indices[d], shape[d] - slice_sizes[d]);
             sf += (start + c) * src_s[d];
         }
         sf = sf.min(n_src.saturating_sub(1));
@@ -1505,8 +1516,7 @@ pub extern "C" fn tensor_dynamic_update_slice_generic(
         for d in 0..rank {
             let c = rem / upd_s[d];
             rem %= upd_s[d];
-            let start =
-                (start_indices[d] as usize).min((shape[d] - update_shape[d]).max(0) as usize);
+            let start = clamped_start(start_indices[d], shape[d] - update_shape[d]);
             df += (start + c) * src_s[d];
         }
         if df < n_src {
