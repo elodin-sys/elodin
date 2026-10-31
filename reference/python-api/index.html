@@ -969,8 +969,8 @@ and running the simulation. The <code>World</code> object also provides helper m
 </ul>
 </li>
 <li>
-<p><code>build(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, db_path, backend)</code> -&gt; <code>elodin.Exec</code></p>
-<p>Build and compile the simulation executor without starting the runtime loop.</p>
+<p><code>build(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, db_path, backend, start_timestamp)</code> -&gt; <code>elodin.Exec</code></p>
+<p>Build and compile the simulation executor without starting the runtime loop. <code>Exec.run(ticks)</code> advances it and records each tick at its simulation time, so repeated calls continue one history.</p>
 <ul>
 <li><code>system</code> : <a href="/reference/python-api/#elodin-system">elodin.System</a>, the systems to compile.</li>
 <li><code>simulation_rate</code> : <code>float</code>, optional, simulation frequency in Hz (ticks per second), defaults to <code>120.0</code>.</li>
@@ -981,6 +981,7 @@ and running the simulation. The <code>World</code> object also provides helper m
 <li><code>optimize</code> : <code>bool</code>, optional, enables optimization passes during compilation.</li>
 <li><code>db_path</code> : <code>string</code>, optional, the path to the database directory.</li>
 <li><code>backend</code> : <code>str</code>, optional, execution backend. Defaults to <code>"cranelift"</code>.</li>
+<li><code>start_timestamp</code> : <code>int</code>, optional, the timestamp of the initial state in microseconds; tick <code>n</code> is recorded at <code>start_timestamp + n / simulation_rate</code>. If <code>None</code> (default), uses the current system time. Set to <code>0</code> for zero-based timing.</li>
 </ul>
 </li>
 </ul>
