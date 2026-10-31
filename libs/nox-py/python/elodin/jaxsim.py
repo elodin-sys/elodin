@@ -6,6 +6,10 @@ class JaxSim:
     """
     A class to simulate a system within a given world context.
 
+    `step`, `get_state` and `set_state` act on `self.state`. `step_fn`, `get` and `set` are
+    their pure counterparts: they take a state and return a new one, so they compose with
+    `jax.jit`, `jax.vmap` and `jax.lax.scan`.
+
     Attributes:
     py_sim : JAX simulation instance
         The simulation instance created from the world and system.
@@ -22,7 +26,8 @@ class JaxSim:
     component_entity_dict : dict
         A dictionary mapping component names to a list of their entity IDs.
     map : list
-        An index map for ordering inputs and outputs.
+        For each input, the output that updates it (None when no system writes it), its
+        position in the state and its component name.
     """
 
     def __init__(
@@ -91,33 +96,33 @@ class JaxSim:
 
         Returns:
         list
-            A list of tuples containing current position, desired position, and element name.
+            A list of tuples containing current position (None when the element is missing
+            from the current order), desired position, and element name.
         """
         index_map = []
-        for element in desired_order:
-            c_p = current_order.index(element)
-            d_p = desired_order.index(element)
-            name = self.dictionary[element]
-            index_map.append((c_p, d_p, name))
-
+        for d_p, element in enumerate(desired_order):
+            c_p = current_order.index(element) if element in current_order else None
+            index_map.append((c_p, d_p, self.dictionary[element]))
         return index_map
 
-    def order_array(self, array):
+    def step_fn(self, state):
         """
-        Orders an array according to the index map.
+        Advances a state by one tick, leaving `self.state` untouched.
 
         Parameters:
-        array : list
-            The array to be ordered.
+        state : list
+            A state like `self.state`, one array per component.
 
         Returns:
         list
-            The ordered array.
+            The state after the tick. Components no system writes carry over unchanged.
         """
-        ordered = [0] * len(self.map)
-        for c_p, d_p, name in self.map:
-            ordered[d_p] = array[c_p]
-        return ordered
+        state = list(state)
+        if self._tick_index is not None:
+            # Keep the tick's integer dtype; adding 1.0 would promote it to f64 and retrace py_sim
+            state[self._tick_index] = state[self._tick_index] + 1
+        out = self.py_sim(*state)
+        return [state[d_p] if c_p is None else out[c_p] for c_p, d_p, _ in self.map]
 
     def step(self, max_steps):
         """
@@ -127,16 +132,60 @@ class JaxSim:
         max_steps : int
             The maximum number of steps to simulate.
         """
-        for steps in range(max_steps):
-            # Auto-increment tick if enabled
-            if self._tick_index is not None:
-                # Keep the tick's integer dtype; adding 1.0 would promote it to f64 and retrace py_sim
-                self.state[self._tick_index] = self.state[self._tick_index] + 1
-                self._tick_steps += 1
+        for _ in range(max_steps):
+            self.state = self.step_fn(self.state)
+        if self._tick_index is not None:
+            self._tick_steps += max_steps
 
-            # Call the simulation function
-            self.state = self.py_sim(*self.state)
-            self.state = self.order_array(self.state)
+    def get(self, state, component_name, entity_name=None):
+        """
+        Reads a component from a state.
+
+        Parameters:
+        state : list
+            A state like `self.state`.
+        component_name : str
+            The name of the component to read.
+        entity_name : str, optional
+            The entity to read it for; without it, every entity's value.
+
+        Returns:
+        object
+            The component value.
+        """
+        d_p = self._slot(component_name)
+        index = None if entity_name is None else self._entity_index(component_name, entity_name)
+        return state[d_p] if index is None else state[d_p][index]
+
+    def set(self, state, component_name, entity_name, value):
+        """
+        Writes a component into a copy of a state.
+
+        Parameters:
+        state : list
+            A state like `self.state`.
+        component_name : str
+            The name of the component to write.
+        entity_name : str or None
+            The entity to write it for; None writes every entity's value at once.
+        value : object
+            The new value, with the shape `get` returns.
+
+        Returns:
+        list
+            The new state.
+        """
+        d_p = self._slot(component_name)
+        index = None if entity_name is None else self._entity_index(component_name, entity_name)
+        current = state[d_p] if index is None else state[d_p][index]
+        value = np.asarray(value, dtype=current.dtype)
+        if current.shape != value.shape:
+            raise Exception(
+                f"Value shape: {value.shape} does not match component: {component_name}, entity: {entity_name} state shape: {current.shape}"
+            )
+        state = list(state)
+        state[d_p] = value if index is None else state[d_p].at[index].set(value)
+        return state
 
     def get_state(self, component_name=None, entity_name=None):
         """
@@ -153,22 +202,7 @@ class JaxSim:
         """
         if component_name is None:
             return self.state
-        else:
-            if entity_name is None:
-                for c_p, d_p, name in self.map:
-                    if name == component_name:
-                        return self.state[d_p]
-            else:
-                entity_id = self.entity_dict[entity_name]
-                component_entity_map = self.component_entity_dict[component_name]
-                entity_index = component_entity_map.index(entity_id)
-
-                for c_p, d_p, name in self.map:
-                    if name == component_name:
-                        # A component held by a single entity has no entity axis.
-                        if len(component_entity_map) == 1:
-                            return self.state[d_p]
-                        return self.state[d_p][entity_index]
+        return self.get(self.state, component_name, entity_name)
 
     def set_state(self, component_name, entity_name, value):
         """
@@ -177,49 +211,32 @@ class JaxSim:
         Parameters:
         component_name : str
             The name of the component to set the state for.
-        entity_name : str
-            The name of the entity whose state is to be set.
+        entity_name : str or None
+            The name of the entity whose state is to be set; None sets every entity's value.
         value : object
             The value to set the state to.
-
-        Returns:
-        object
-            The state of the specified component for the specified entity.
         """
-        if component_name is None:
-            raise Exception("Component name must be provided")
-        else:
-            if entity_name is None:
-                raise Exception("Entity name must be provided")
-            else:
-                try:
-                    entity_id = self.entity_dict[entity_name]
-                except KeyError:
-                    raise Exception(f"Entity {entity_name} not found in world")
-                try:
-                    component_entity_map = self.component_entity_dict[component_name]
-                except KeyError:
-                    raise Exception(f"Component {component_name} not found in world")
-                try:
-                    entity_index = component_entity_map.index(entity_id)
-                except ValueError:
-                    raise Exception(f"Entity {entity_name} not found in component {component_name}")
-                value = np.asarray(value)
-                for c_p, d_p, name in self.map:
-                    if name == component_name:
-                        # A component held by a single entity has no entity axis.
-                        single = len(component_entity_map) == 1
-                        current = self.state[d_p] if single else self.state[d_p][entity_index]
-                        if current.shape == value.shape:
-                            # JAX arrays are immutable: store the updated array, don't discard it.
-                            if single:
-                                self.state[d_p] = value.astype(current.dtype)
-                            else:
-                                self.state[d_p] = self.state[d_p].at[entity_index].set(value)
-                        else:
-                            raise Exception(
-                                f"Value shape: {value.shape} does not match component: {component_name}, entity: {entity_name} state shape: {current.shape}"
-                            )
+        self.state = self.set(self.state, component_name, entity_name, value)
+
+    def _slot(self, component_name):
+        for _, d_p, name in self.map:
+            if name == component_name:
+                return d_p
+        raise Exception(f"Component {component_name} not found in world")
+
+    def _entity_index(self, component_name, entity_name):
+        """Row of the entity in the component, or None when the component has no entity axis."""
+        try:
+            entity_id = self.entity_dict[entity_name]
+        except KeyError:
+            raise Exception(f"Entity {entity_name} not found in world")
+        entity_ids = self.component_entity_dict[component_name]
+        try:
+            index = entity_ids.index(entity_id)
+        except ValueError:
+            raise Exception(f"Entity {entity_name} not found in component {component_name}")
+        # A component held by a single entity has no entity axis.
+        return None if len(entity_ids) == 1 else index
 
     def print_dictionary(self):
         """
