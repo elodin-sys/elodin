@@ -36,6 +36,8 @@ class Method:
     # Spring state after one step of h from (x, v) = (1, 0), as (x, v / (-k h)) in z = k h^2.
     one_step: Callable[[float], tuple[float, float]]
     symplectic: bool = False
+    # Order of the embedded solution whose error `el.StepError` estimates.
+    embedded_order: int | None = None
 
 
 METHODS = {
@@ -51,6 +53,13 @@ METHODS = {
             1 - z / 2 + z**2 / 24 - z**3 / 720 + z**4 / 40320,
             1 - z / 6 + z**2 / 120 - z**3 / 5040,
         ),
+        embedded_order=7,
+    ),
+    "Dp54": Method(
+        5,
+        (0.08, 0.04, 0.02),
+        lambda z: (1 - z / 2 + z**2 / 24 - z**3 / 600, 1 - z / 6 + z**2 / 120),
+        embedded_order=4,
     ),
 }
 
@@ -296,6 +305,28 @@ def test_order(method, case, metric):
     # Coarse steps can sit outside the asymptotic range, so the finest measurable pair decides.
     orders = [o for o in observed_orders(method, case, metric) if o is not None]
     assert orders and orders[-1] > METHODS[method].order - 0.5, orders
+
+
+@pytest.mark.parametrize("method", [name for name, m in METHODS.items() if m.embedded_order])
+def test_step_error_estimates_the_embedded_solution(method):
+    m = METHODS[method]
+    estimates = []
+    for h in m.time_steps[:2]:
+        w = el.World()
+        w.spawn([*CASES["spring"].components(), el.C(el.StepError, np.zeros(4))], "spring")
+        sys = el.six_dof(h, sys=spring, integrator=getattr(el.Integrator, method))
+        exec = w.build(sys, simulation_rate=1.0 / h)
+        exec.run(1, show_progress=False)
+        df = exec.history(["spring.world_pos", "spring.step_error"])
+        estimate = df["spring.step_error"].to_numpy()[1, 1]
+        # The lower-order solution's error bounds the step's own.
+        assert (
+            abs(df["spring.world_pos"].to_numpy()[1, 4] - np.cos(np.sqrt(SPRING_K) * h)) < estimate
+        )
+        estimates.append(estimate)
+    (h0, h1), (e0, e1) = m.time_steps[:2], estimates
+    # On a linear problem the estimate can shrink faster than the embedded solution's error.
+    assert np.log(e0 / e1) / np.log(h0 / h1) > m.embedded_order + 0.5
 
 
 @pytest.mark.parametrize("method", [name for name, m in METHODS.items() if m.symplectic])

@@ -557,6 +557,16 @@ Using the associated [elodin.Body] archetype and prebuilt components, we can cre
     shrinks 256 times per halving of the time step, so it suits long, smooth propagations, such as orbits, where it can take
     much larger steps than `Rk4` for the same accuracy.
 
+- `elodin.Integrator.Dp54` -> [elodin.Integrator]
+
+    The fifth-order solution of the [Dormand-Prince](https://en.wikipedia.org/wiki/Dormand%E2%80%93Prince_method) 5(4) pair
+    (the pair behind MATLAB's `ode45`), which evaluates the effectors 7 times per step. Elodin keeps the time step fixed.
+
+    `Dp54` and `Rk78` estimate each step's error from their embedded lower-order solution. A body that has the `elodin.StepError`
+    component, for example from `el.C(el.StepError, jnp.zeros(4))`, receives the estimate after every step: attitude (rad),
+    position, angular velocity, and velocity. It bounds the step's actual error, so graphing it shows whether the time step
+    is small enough, and where the dynamics are hardest to integrate.
+
 - `elodin.Integrator.SemiImplicit` -> [elodin.Integrator]
 
     Semi-Implicit Integrator: Elodin provides a built-in implementation for a [semi-implicit Euler integrator](https://en.wikipedia.org/wiki/Semi-implicit_Euler_method).

@@ -1,7 +1,11 @@
 use crate::{Archetype, Component};
-use crate::{Query, WorldPos, system::IntoSystem, system::System};
+use crate::{
+    Query, WorldPos,
+    system::{IntoSystem, System, SystemBuilder, SystemParam},
+};
 use core::ops::{Add, Mul};
 use elodin_macros::{ComponentGroup, FromBuilder, ReprMonad};
+use impeller::component::Component as _;
 use nox::{
     Const, Op, OwnedRepr, Quaternion, Scalar, SpatialForce, SpatialInertia, SpatialMotion,
     SpatialTransform, Vector,
@@ -34,6 +38,11 @@ impl Clone for WorldAccel {
 #[derive(Component, ReprMonad)]
 struct PoseRate<R: OwnedRepr = Op>(Vector<f64, 7, R>);
 
+/// Error estimate of a body's last step under an integrator with an embedded pair:
+/// attitude (rad), position, angular velocity, and velocity.
+#[derive(Component, ReprMonad)]
+pub struct StepError<R: OwnedRepr = Op>(pub Vector<f64, 4, R>);
+
 #[derive(FromBuilder, ComponentGroup)]
 struct U {
     x: WorldPos,
@@ -63,6 +72,32 @@ impl From<Kinematics> for DU {
             a: k.a,
         }
     }
+}
+
+/// Writes `StepError` for the bodies that have it.
+fn write_step_error(error: Query<DU>, builder: &mut SystemBuilder) -> Result<(), crate::Error> {
+    if !builder
+        .world
+        .host
+        .contains_key(&StepError::<Op>::COMPONENT_ID)
+    {
+        return Ok(());
+    }
+    Query::<StepError>::init(builder)?;
+    error
+        .join_query(Query::<StepError>::param(builder)?)
+        .map(|e: DU, _: StepError| {
+            let pose = SpatialTransform { inner: e.x.0 };
+            StepError(Vector::from_arr([
+                // A small change δq of a unit quaternion rotates by about 2|δq|.
+                pose.angular().0.norm() * 2.0,
+                pose.linear().norm(),
+                e.a.0.angular().norm(),
+                e.a.0.linear().norm(),
+            ]))
+        })?
+        .insert_into_builder(builder);
+    Ok(())
 }
 
 impl Add<DU> for U {
@@ -217,11 +252,10 @@ where
 {
     let sys = clear_forces.pipe(effectors()).pipe(calc_accel);
     match integrator {
-        Integrator::ExplicitRk(tableau) => Arc::new(ExplicitRk::<U, Kinematics, DU, _>::new(
-            tableau,
-            sys,
-            Some(time_step),
-        )),
+        Integrator::ExplicitRk(tableau) => Arc::new(
+            ExplicitRk::<U, Kinematics, DU, _>::new(tableau, sys, Some(time_step))
+                .with_error_sink(write_step_error),
+        ),
         Integrator::SemiImplicit => {
             let integrate =
                 semi_implicit_euler_with_dt::<WorldPos, WorldVel, WorldAccel>(time_step);
@@ -247,9 +281,10 @@ where
 {
     let sys = clear_forces.pipe(effectors()).pipe(calc_accel);
     match integrator {
-        Integrator::ExplicitRk(tableau) => {
-            Arc::new(ExplicitRk::<U, Kinematics, DU, _>::new(tableau, sys, None))
-        }
+        Integrator::ExplicitRk(tableau) => Arc::new(
+            ExplicitRk::<U, Kinematics, DU, _>::new(tableau, sys, None)
+                .with_error_sink(write_step_error),
+        ),
         Integrator::SemiImplicit => {
             let integrate = semi_implicit_euler::<WorldPos, WorldVel, WorldAccel>();
             Arc::new(ErasedSystem::new(sys.pipe(integrate)))

@@ -624,6 +624,14 @@ Inertia = Annotated[
     SpatialInertia,
     Component("inertia", metadata={"priority": 5}),
 ]
+StepError = Annotated[
+    jax.Array,
+    Component(
+        "step_error",
+        ComponentType(PrimitiveType.F64, (4,)),
+        metadata={"element_names": "θ,x,ω,v", "priority": 5},
+    ),
+]
 Seed = Annotated[jax.Array, Component("seed", ComponentType.U64, metadata={"priority": 5})]
 SimulationTick = Annotated[
     jax.Array, Component("tick", ComponentType.F64, metadata={"priority": 7})

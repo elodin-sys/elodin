@@ -33,6 +33,7 @@ INTEGRATORS = [
     ("rk4", el.Integrator.Rk4),
     ("verlet", el.Integrator.Verlet),
     ("rk78", el.Integrator.Rk78),
+    ("dp54", el.Integrator.Dp54),
 ]
 
 
@@ -151,6 +152,7 @@ BALLISTIC_CASES = [
     ("rk4", 100.0, 200.0, 0.5),
     ("verlet", 100.0, 200.0, 0.5),
     ("rk78", 100.0, 200.0, 0.5),
+    ("dp54", 100.0, 200.0, 0.5),
 ]
 
 
@@ -190,6 +192,7 @@ ORBIT_RADIUS_TOL_M = {
     "rk4": 5.0,
     "verlet": 1.0,
     "rk78": 5.0,
+    "dp54": 5.0,
 }
 ORBIT_ENERGY_TOL = {
     "semi_implicit": 2e-3,
@@ -198,6 +201,7 @@ ORBIT_ENERGY_TOL = {
     "rk4": 1e-7,
     "verlet": 1e-7,
     "rk78": 1e-7,
+    "dp54": 1e-7,
 }
 
 
