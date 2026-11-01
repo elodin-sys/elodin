@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::slice;
 
 unsafe fn f64_slices<'a>(
@@ -2216,6 +2217,12 @@ pub extern "C" fn tensor_rng_f64(
     }
 }
 
+/// JAX's sort comparators treat -0 as 0 and put NaN after everything.
+fn float_order(a: f64, b: f64) -> std::cmp::Ordering {
+    a.partial_cmp(&b)
+        .unwrap_or_else(|| a.is_nan().cmp(&b.is_nan()))
+}
+
 /// One sort key, read in place.
 enum SortKey<'a> {
     F64(&'a [f64]),
@@ -2229,14 +2236,9 @@ enum SortKey<'a> {
 
 impl SortKey<'_> {
     fn cmp(&self, i: usize, j: usize) -> std::cmp::Ordering {
-        // JAX's comparators treat -0 as 0 and put NaN after everything.
-        let float = |a: f64, b: f64| {
-            a.partial_cmp(&b)
-                .unwrap_or_else(|| a.is_nan().cmp(&b.is_nan()))
-        };
         match self {
-            SortKey::F64(v) => float(v[i], v[j]),
-            SortKey::F32(v) => float(v[i] as f64, v[j] as f64),
+            SortKey::F64(v) => float_order(v[i], v[j]),
+            SortKey::F32(v) => float_order(v[i] as f64, v[j] as f64),
             SortKey::I64(v) => v[i].cmp(&v[j]),
             SortKey::I32(v) => v[i].cmp(&v[j]),
             SortKey::U64(v) => v[i].cmp(&v[j]),
@@ -2244,6 +2246,25 @@ impl SortKey<'_> {
             SortKey::U8(v) => v[i].cmp(&v[j]),
         }
     }
+}
+
+/// Stable in-place sort of each `len`-element row of the `n` values at `p`.
+fn sort_rows<T>(
+    p: *mut u8,
+    n: usize,
+    len: usize,
+    descending: bool,
+    order: impl Fn(&T, &T) -> std::cmp::Ordering,
+) {
+    let data = unsafe { slice::from_raw_parts_mut(p.cast::<T>(), n) };
+    for row in data.chunks_exact_mut(len) {
+        row.sort_by(|a, b| if descending { order(b, a) } else { order(a, b) });
+    }
+}
+
+thread_local! {
+    static SORT_BUFFERS: RefCell<(Vec<usize>, Vec<u8>)> =
+        const { RefCell::new((Vec::new(), Vec::new())) };
 }
 
 /// Stable sort of several operands along one axis, each viewed as [outer, axis, after].
@@ -2257,50 +2278,60 @@ pub extern "C" fn tensor_sort(data: *const *mut u8, meta: *const i64) {
         [0, 1, 2, 3, 4, 5].map(|i| head[i] as usize);
     let codes = unsafe { slice::from_raw_parts(meta.add(6), n_ops) };
     let ptrs = unsafe { slice::from_raw_parts(data, n_ops) };
-    let n = outer * len * after;
-    let sizes: Vec<usize> = codes
-        .iter()
-        .map(|&c| [8, 4, 8, 4, 8, 4, 1][c as usize])
-        .collect();
-    let (mut perm, mut scratch) = (Vec::with_capacity(len), Vec::new());
-    for o in 0..outer {
-        for a in 0..after {
-            let at = |k: usize| (o * len + k) * after + a;
-            let keys: Vec<SortKey> = (0..n_keys)
-                .map(|k| unsafe {
-                    let p = ptrs[k];
-                    match codes[k] {
-                        0 => SortKey::F64(slice::from_raw_parts(p.cast(), n)),
-                        1 => SortKey::F32(slice::from_raw_parts(p.cast(), n)),
-                        2 => SortKey::I64(slice::from_raw_parts(p.cast(), n)),
-                        3 => SortKey::I32(slice::from_raw_parts(p.cast(), n)),
-                        4 => SortKey::U64(slice::from_raw_parts(p.cast(), n)),
-                        5 => SortKey::U32(slice::from_raw_parts(p.cast(), n)),
-                        _ => SortKey::U8(slice::from_raw_parts(p, n)),
+    let (n, descending) = (outer * len * after, descending != 0);
+    if n_ops == 1 && after == 1 && len > 0 {
+        let p = ptrs[0];
+        match codes[0] {
+            0 => sort_rows(p, n, len, descending, |a: &f64, b| float_order(*a, *b)),
+            1 => sort_rows(p, n, len, descending, |a: &f32, b| {
+                float_order(*a as f64, *b as f64)
+            }),
+            2 => sort_rows(p, n, len, descending, i64::cmp),
+            3 => sort_rows(p, n, len, descending, i32::cmp),
+            4 => sort_rows(p, n, len, descending, u64::cmp),
+            5 => sort_rows(p, n, len, descending, u32::cmp),
+            _ => sort_rows(p, n, len, descending, u8::cmp),
+        }
+        return;
+    }
+    // Built per compare so no key slice is alive while the operands are rewritten.
+    let key = |k: usize| unsafe {
+        let p = ptrs[k];
+        match codes[k] {
+            0 => SortKey::F64(slice::from_raw_parts(p.cast(), n)),
+            1 => SortKey::F32(slice::from_raw_parts(p.cast(), n)),
+            2 => SortKey::I64(slice::from_raw_parts(p.cast(), n)),
+            3 => SortKey::I32(slice::from_raw_parts(p.cast(), n)),
+            4 => SortKey::U64(slice::from_raw_parts(p.cast(), n)),
+            5 => SortKey::U32(slice::from_raw_parts(p.cast(), n)),
+            _ => SortKey::U8(slice::from_raw_parts(p, n)),
+        }
+    };
+    SORT_BUFFERS.with_borrow_mut(|(perm, scratch)| {
+        for o in 0..outer {
+            for a in 0..after {
+                let at = |k: usize| (o * len + k) * after + a;
+                perm.clear();
+                perm.extend(0..len);
+                perm.sort_by(|&x, &y| {
+                    let ord = (0..n_keys)
+                        .map(|k| key(k).cmp(at(x), at(y)))
+                        .find(|ord| ord.is_ne())
+                        .unwrap_or(std::cmp::Ordering::Equal);
+                    if descending { ord.reverse() } else { ord }
+                });
+                for (&p, &code) in ptrs.iter().zip(codes) {
+                    let sz = [8, 4, 8, 4, 8, 4, 1][code as usize];
+                    let buf = unsafe { slice::from_raw_parts_mut(p, n * sz) };
+                    scratch.clear();
+                    for &k in perm.iter() {
+                        scratch.extend_from_slice(&buf[at(k) * sz..(at(k) + 1) * sz]);
                     }
-                })
-                .collect();
-            perm.clear();
-            perm.extend(0..len);
-            perm.sort_by(|&x, &y| {
-                let ord = keys
-                    .iter()
-                    .map(|key| key.cmp(at(x), at(y)))
-                    .find(|ord| ord.is_ne())
-                    .unwrap_or(std::cmp::Ordering::Equal);
-                if descending != 0 { ord.reverse() } else { ord }
-            });
-            drop(keys);
-            for (&p, &sz) in ptrs.iter().zip(&sizes) {
-                let buf = unsafe { slice::from_raw_parts_mut(p, n * sz) };
-                scratch.clear();
-                for &k in &perm {
-                    scratch.extend_from_slice(&buf[at(k) * sz..(at(k) + 1) * sz]);
-                }
-                for (k, elem) in scratch.chunks_exact(sz).enumerate() {
-                    buf[at(k) * sz..(at(k) + 1) * sz].copy_from_slice(elem);
+                    for (k, elem) in scratch.chunks_exact(sz).enumerate() {
+                        buf[at(k) * sz..(at(k) + 1) * sz].copy_from_slice(elem);
+                    }
                 }
             }
         }
-    }
+    });
 }

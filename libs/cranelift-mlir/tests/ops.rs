@@ -5185,6 +5185,14 @@ fn test_sort_types_axes_and_keys() {
         let out = run(&mlir, &[&i64_buf(&[3, -2, 0])], &[24]);
         assert_eq!(read_i64s(&out[0]), [3, 0, -2]);
 
+        // jnp.sort: NaN last, and -0 and 0 keep their order.
+        let mlir = sort_mlir("5", &["f64"], 0, F64_KEY_LT);
+        let x = f64_buf(&[f64::NAN, 0.0, 1.0, -0.0, -1.0]);
+        let out = run(&mlir, &[&x], &[40]);
+        let sorted = read_f64s(&out[0]);
+        assert_eq!(sorted[..4], [-1.0, 0.0, -0.0, 1.0]);
+        assert!(sorted[4].is_nan() && sorted[2].is_sign_negative());
+
         // jnp.argsort: NaN last and -0 equal to 0, with i32 indices.
         let mlir = sort_mlir("6", &["f64", "i32"], 0, F64_KEY_LT);
         let x = f64_buf(&[3.0, f64::NAN, -0.0, 0.0, f64::NEG_INFINITY, 1.0]);
