@@ -4293,6 +4293,16 @@ fn test_scatter_forms() {
             &want,
         );
 
+        // Index [1, -1] is out of bounds and dropped, though its flat offset is in range
+        check_scatter(
+            (&x, &x_ty),
+            "inserted_window_dims = [0, 1], scatter_dims_to_operand_dims = [0, 1]",
+            "set",
+            (&[1, -1], "2xi32"),
+            (&[-7.0], "f64"),
+            &x,
+        );
+
         // x.at[1:3, 2:4].set(m)
         let m = [-1.0, -2.0, -3.0, -4.0];
         let mut want = x.clone();

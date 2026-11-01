@@ -3772,6 +3772,40 @@ fn emit_scatter(
     Ok(())
 }
 
+/// Set-scatters one update element into the operand lane its i64 index vector lands on. An
+/// out-of-bounds index selects no lane, as XLA drops the update.
+fn select_scatter_lane(
+    builder: &mut FunctionBuilder,
+    vals: &[Value],
+    indices: &[Value],
+    update: Value,
+    shape: &[i64],
+    scatter_dims: &[i64],
+) -> Vec<Value> {
+    let mut target = builder.ins().iconst(types::I64, 0);
+    let mut in_bounds = builder.ins().iconst(types::I8, 1);
+    for (&ix, &d) in indices.iter().zip(scatter_dims) {
+        let d = d as usize;
+        let ok = builder
+            .ins()
+            .icmp_imm(IntCC::UnsignedLessThan, ix, shape[d]);
+        in_bounds = builder.ins().band(in_bounds, ok);
+        let offset = builder
+            .ins()
+            .imul_imm(ix, shape[d + 1..].iter().product::<i64>());
+        target = builder.ins().iadd(target, offset);
+    }
+    let no_lane = builder.ins().iconst(types::I64, -1);
+    let target = builder.ins().select(in_bounds, target, no_lane);
+    vals.iter()
+        .enumerate()
+        .map(|(j, &v)| {
+            let hit = builder.ins().icmp_imm(IntCC::Equal, target, j as i64);
+            builder.ins().select(hit, update, v)
+        })
+        .collect()
+}
+
 fn lower_pointer_body(
     builder: &mut FunctionBuilder,
     func_def: &crate::ir::FuncDef,
@@ -8040,8 +8074,6 @@ fn lower_instruction(
                 .unwrap_or(TensorType::scalar(ElementType::I64));
             let upd_ty = type_map.get(updates).cloned().unwrap_or(rt.clone());
 
-            let base = spill_lanes(builder, &vals, elem_sz);
-            let upd = spill_lanes(builder, &upd_vals, elem_sz);
             let mut idx64 = Vec::with_capacity(idx_vals.len());
             for &v in &idx_vals {
                 idx64.push(if builder.func.dfg.value_type(v) == types::I64 {
@@ -8050,6 +8082,19 @@ fn lower_instruction(
                     builder.ins().sextend(types::I64, v)
                 });
             }
+            if *combiner == ScatterCombiner::Set && upd_vals.len() == 1 {
+                let lanes = select_scatter_lane(
+                    builder,
+                    &vals,
+                    &idx64,
+                    upd_vals[0],
+                    &src_ty.shape,
+                    &dims.scatter_dims_to_operand_dims,
+                );
+                return Ok(vec![LaneRepr::scalar(lanes)]);
+            }
+            let base = spill_lanes(builder, &vals, elem_sz);
+            let upd = spill_lanes(builder, &upd_vals, elem_sz);
             let idx = spill_lanes(builder, &idx64, 8);
             emit_scatter(
                 builder,
