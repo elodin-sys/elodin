@@ -309,6 +309,20 @@ When a pointer-ABI function calls a scalar-ABI callee, the reverse happens.
 The `main` function always uses pointer ABI (it receives raw byte pointers from the
 simulation runtime), so calls from `main` to scalar callees always marshal.
 
+### Pointer-ABI element types
+
+Pointer-ABI lowerings never read a buffer at another element width. An op without a
+runtime kernel for its element type (f32, unsigned and i1 for most elementwise ops,
+compare, clamp and sign) loads its lanes, lowers through the scalar-ABI code, and stores
+the result (`lower_mem_lanes`, chosen by `mem_has_kernel`). Ops whose kernels exist for
+f64 only (`map`, `reduce_window`, `select_and_scatter`, convolution, FFT, ...) fail to
+compile for other types.
+
+Float `reduce` and f64 `dot_general` take the scalar-ABI route whenever their tensors fit
+the scalar ABI, although kernels exist: the kernels sum in a different order, and the
+same `jnp.dot` must round identically in a pointer-ABI function and in a scalar-ABI
+callee such as a `fori_loop` body, or a comparison between the two can flip a branch.
+
 ---
 
 ## SIMD: Packed-f64 Lane Representation
@@ -445,8 +459,10 @@ jit_builder.symbol("tensor_broadcast_nd_f64", tensor_broadcast_nd_f64 as *const 
 | Elementwise | add, sub, mul, div, negate, sqrt, abs, ... | f64, i64, i32 variants |
 | Broadcast | broadcast_f64, broadcast_nd_f64, broadcast_i32 | N-D shape-aware |
 | Shape | transpose_f64, transpose_nd_f64, concat_nd_f64 | Element-size-aware concat |
-| Matrix | matmul_f64 | Row-major C = A·B; used by pointer-ABI `dot_general` batched fast path |
-| Reduce | reduce_{sum,prod,max,min}_{f64,i64}, reduce_{and,or}_i1 | One axis per call, viewed as outer x axis x after |
+| Matrix | matmul_f64, dot_general | `matmul_f64` for row-major layouts; `dot_general` for any other dims in f64, f32 or wrapping integers |
+| Reduce | reduce_{sum,prod,max,min}_{f64,f32,i64,i32}, reduce_{max,min}_{u64,u32}, reduce_{and,or}_i1 | One axis per call, viewed as outer x axis x after |
+| Argmin/argmax | argminmax | One axis, any value type, i32 or i64 indices; the first NaN wins, ties keep the smaller index |
+| Sort | sort | Stable, any element types, lexicographic over the comparator's keys, NaN last |
 | Indexing | gather_f64, gather_nd_f64, scatter | N-D with element-size param; scatter reads a stride table built at compile time |
 | Dynamic | dynamic_slice_f64, dynamic_update_slice_f64 | Runtime index values |
 | Utility | memcpy, select_f64, iota_nd_f64 | |
@@ -478,19 +494,22 @@ pointer-ABI threshold.
 
 **`stablehlo.dot_general`**
 
-The scalar path has a dedicated batched rank-2 handler (`batching_dims=[0]`,
-contracting on dim 1). The pointer-ABI path adds a `matmul_f64` fast path only
-when the batch slices are contiguous row-major `m×k` and `k×n` blocks:
+Both paths walk the same table of `(size, lhs stride, rhs stride)` axes (`dot_axes`):
+batch, lhs free and rhs free axes for the output, then the contracting axes. The
+pointer-ABI path calls `matmul_f64` when the f64 batch slices are contiguous row-major
+`m×k` and `k×n` blocks:
 
-- Leading batch dims: `[0, 1, …, nb−1]` on both operands
+- Leading batch dims: `[0, 1, …, nb−1]` on both operands (none for a plain matmul)
 - Single contracting dim on lhs: `lhs_contracting[0] == rank(lhs) − 1`
 - Single contracting dim on rhs: `rhs_contracting[0] == nb` (contracting axis
   immediately after the batch axes — e.g. `[batch…, k, n]` not `[batch…, n, k]`)
 
 Each batch index `b` calls `matmul_f64` on slice offsets `b·m·k` and `b·k·n`.
 This covers the common Elodin pattern `tensor<B×K> · tensor<B×K> → tensor<B>`
-(per-entity inner products in `six_dof`). Layouts outside the guard fall back
-to the generic pointer-ABI `dot_general` lowering.
+(per-entity inner products in `six_dof`). Every other layout calls
+`tensor_dot_general`, which walks the axis table. f64 products small enough for the
+scalar ABI lower through the scalar code instead
+([Pointer-ABI element types](#pointer-abi-element-types)).
 
 Golden tests: `test_concatenate_dim1_four_operands_mem`, `test_dot_general_batched_mem`
 in [`tests/ops.rs`](tests/ops.rs).
@@ -762,8 +781,8 @@ helpers parse once, execute the StableHLO interpreter (`src/interp.rs`) and the
 Cranelift JIT, and assert the outputs match before returning the JIT bytes to
 the golden assertions. Integer results are compared byte-for-byte; `f64` within
 `1e-12 * (1 + max(|a|, |b|))` and `f32` within `1e-6` on the same scale (NaN
-matches NaN). Ops the interpreter does not implement (LAPACK `custom_call`,
-sort, and the other variants whose error says "does not implement" or
+matches NaN). Ops the interpreter does not implement (LAPACK `custom_call`
+and the other variants whose error says "does not implement" or
 "not implemented") log `[interp skipped]` and continue as JIT-only golden tests. Set
 `ELODIN_CRANELIFT_INTERP_STRICT=1` to turn those skips into failures. E2E
 binaries that call `compile_module` directly stay JIT-only.
@@ -779,7 +798,7 @@ binaries that call `compile_module` directly stay JIT-only.
   and lowering regressions surface before they reach customer sims.
 - **Regression suite** (`scripts/ci/regress.sh --all`) runs every example
   end-to-end and diffs CSV telemetry against committed baselines with per-file
-  tolerances.
+  tolerances, then runs it again on jax-cpu against the same baseline.
 - **Checkpoint verifier** is the authoritative correctness gate for customer
   MLIRs: it compares every Cranelift output element against the XLA reference
   bit-for-bit (or within a tight tolerance). Always run it on new customer
@@ -810,6 +829,9 @@ ELODIN_BACKEND=cranelift bash scripts/ci/regress.sh --all   # full regression su
 ---
 
 ## Supported Operations
+
+Types in a Pointer ABI column are those with runtime kernels; other types lower lane by
+lane ([Pointer-ABI element types](#pointer-abi-element-types)).
 
 ### Arithmetic
 | Op | Tested | Scalar ABI | Pointer ABI | Notes |
@@ -900,9 +922,9 @@ ELODIN_BACKEND=cranelift bash scripts/ci/regress.sh --all   # full regression su
 ### Linear Algebra
 | Op | Tested | Notes |
 |----|--------|-------|
-| stablehlo.dot_general | yes | scalar ABI: any batch and contracting dims; pointer ABI: standard-layout inner product, matvec and matmul, plus a batched fast path when slices are row-major `[…,m,k]·[…,k,n]` ([details](#pointer-abi-dot_general-and-concatenate)) |
-| stablehlo.reduce | yes | add/multiply/min/max (f64 + i64), and/or (i1), any set of dimensions |
-| stablehlo.reduce (multi-operand) | yes | argmin/argmax pattern: 2-operand reduce with value+index, direction from the first compare; the scalar ABI reduces the whole operand, the pointer ABI its last axis |
+| stablehlo.dot_general | yes | any batch and contracting dims on both ABIs; the pointer ABI calls `matmul_f64` for row-major layouts and `tensor_dot_general` otherwise ([details](#pointer-abi-dot_general-and-concatenate)) |
+| stablehlo.reduce | yes | add/multiply/min/max (f64, f32, i64, i32; min/max on unsigned), and/or (i1), any set of dimensions |
+| stablehlo.reduce (multi-operand) | yes | argmin/argmax pattern: 2-operand reduce with value+index over one axis, any value type, i32 or i64 indices; the first NaN wins and ties keep the smaller index, as on jax-cpu |
 
 ### Indexing
 | Op | Tested | Notes |
@@ -915,10 +937,10 @@ ELODIN_BACKEND=cranelift bash scripts/ci/regress.sh --all   # full regression su
 |----|--------|-------|
 | stablehlo.while | yes | outer-scope access, cross-ABI calls, nested |
 | stablehlo.case | yes | multi-branch dispatch |
-| stablehlo.sort | yes | single-operand and 2-operand (argsort), comparator region, ascending/descending |
+| stablehlo.sort | yes | stable, any element types and axis, lexicographic over the comparator's keys, ascending/descending; NaN last and -0 equal to 0, as JAX's comparators order them |
 | stablehlo.map | yes | arbitrary compiled region body, variadic operands |
-| stablehlo.reduce_window | yes | compiled reducer, full window iteration with dilations/padding |
-| stablehlo.select_and_scatter | yes | compiled select + scatter regions, window-based |
+| stablehlo.reduce_window | yes | f64 on both ABIs, compiled reducer, full window iteration with dilations/padding; window attributes checked against the shapes |
+| stablehlo.select_and_scatter | yes | f64 on both ABIs, compiled select + scatter regions; `select(current, candidate)` true keeps the current element, as in XLA |
 | stablehlo.convolution | yes | N-D, dimension_numbers, strides, padding, dilations, grouping |
 | stablehlo.real_dynamic_slice | yes | runtime tensor bounds for start/limit/strides |
 | stablehlo.batch_norm_inference | yes | feature-axis broadcast, epsilon/feature_index attrs |
@@ -1115,15 +1137,11 @@ version and flags:
 unimplemented target. It's internal to eigensolvers and all tested customer
 simulations use `dsyevd` directly; implementable via faer if ever surfaced.
 
-**Type permutations.** A small number of pointer-ABI paths remain f64-only
-because no simulation has exercised them. All low-risk to add:
-
-| Op path | Missing types |
-|---------|---------------|
-| `power` pointer-ABI | integer |
-| `pad` pointer-ABI | integer |
-| `matmul` pointer-ABI | integer |
-| `convert` F32↔I64/UI64 | missing pairs |
+**Type permutations.** Pointer-ABI ops lower lane by lane for types without a kernel, so
+a type is missing on the pointer ABI only where the scalar ABI lacks it too: `power` on
+integers. `map`, `reduce_window`, `select_and_scatter`, convolution,
+`batch_norm_inference`, Cholesky, triangular solve, FFT and `rng` stay f64-only, and
+argmin/argmax over more than one dimension (which JAX does not emit) fails to compile.
 
 ### Structural
 
