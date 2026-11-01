@@ -989,7 +989,7 @@ fn float_unary(op: UnOp, a: f64) -> f64 {
         UnOp::Log1p => a.ln_1p(),
         UnOp::Expm1 => a.exp_m1(),
         UnOp::Cbrt => a.cbrt(),
-        UnOp::Erfc => tensor_rt::erfc_impl(a),
+        UnOp::Erfc => libm::erfc(a),
         UnOp::ErfInv | UnOp::IsFinite | UnOp::Not => a,
     }
 }

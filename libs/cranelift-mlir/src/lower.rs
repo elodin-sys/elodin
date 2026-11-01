@@ -891,7 +891,7 @@ extern "C" fn libc_cbrt(x: f64) -> f64 {
     x.cbrt()
 }
 extern "C" fn libc_erfc(x: f64) -> f64 {
-    crate::tensor_rt::erfc_impl(x)
+    libm::erfc(x)
 }
 
 extern "C" fn erf_inv_scalar(x: f64) -> f64 {

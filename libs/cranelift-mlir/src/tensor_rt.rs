@@ -242,12 +242,7 @@ unary_f64_op!(tensor_floor_f64, f64::floor);
 unary_f64_op!(tensor_rsqrt_f64, |x: f64| 1.0 / x.sqrt());
 unary_f64_op!(tensor_ceil_f64, f64::ceil);
 
-pub extern "C" fn tensor_erfc_f64(dst: *mut f64, a: *const f64, n: usize) {
-    let (dst, a) = unsafe { f64_unary(dst, a, n) };
-    for i in 0..n {
-        dst[i] = erfc_impl(a[i]);
-    }
-}
+unary_f64_op!(tensor_erfc_f64, libm::erfc);
 
 // ---------------------------------------------------------------------------
 // SIMD transcendentals: process `f64x2` chunks via the `wide` crate,
@@ -366,108 +361,6 @@ pub extern "C" fn tensor_pow_f64(dst: *mut f64, a: *const f64, b: *const f64, n:
         dst[i] = a[i].powf(b[i]);
         i += 1;
     }
-}
-
-// Series coefficients copied verbatim from the libm reference; trailing
-// digits beyond f64 precision are required for IEEE 754 round-trip.
-#[allow(clippy::excessive_precision)]
-pub(crate) fn erfc_impl(x: f64) -> f64 {
-    let p = [
-        2.46196981473530512524e-10,
-        5.64189564831068821977e-1,
-        7.46321056442269912687e0,
-        4.86371970985681366614e1,
-        1.96520832956077098242e2,
-        5.26445194995477358631e2,
-        9.34528527171957607540e2,
-        1.02755188689515710272e3,
-        5.57535335369399327526e2,
-    ];
-    let q = [
-        1.32281951154744992508e1,
-        8.67072140885989742329e1,
-        3.54937778887819891062e2,
-        9.75708501743205489753e2,
-        1.82390916687909736289e3,
-        2.24633760818710981792e3,
-        1.65666309194161350182e3,
-        5.57535340817727401220e2,
-    ];
-    let r = [
-        5.64189583547755073984e-1,
-        1.27536670759978104416e0,
-        5.01905042251180477414e0,
-        6.16021097993053585195e0,
-        7.40974269950958085306e0,
-        2.97886665372100240670e0,
-    ];
-    let s = [
-        2.26052863220117276590e0,
-        9.39603524938001434673e0,
-        1.20489539808096656605e1,
-        1.70814450747565897222e1,
-        9.60896088305422468066e0,
-        3.36907645100081462098e0,
-    ];
-    if x < 0.0 {
-        return 2.0 - erfc_impl(-x);
-    }
-    if x < 0.46875 {
-        return 1.0 - erf_central(x);
-    }
-    if x < 4.0 {
-        let mut num = p[0];
-        let mut den = 1.0;
-        for i in 1..9 {
-            num = num * x + p[i];
-            den = den * x + q[i - 1];
-        }
-        let result = num / den;
-        let xsq = (x * 16.0).floor() / 16.0;
-        let del = (x - xsq) * (x + xsq);
-        return ((-xsq * xsq).exp()) * (-del).exp() * result;
-    }
-    let ix = 1.0 / (x * x);
-    let mut num = r[0];
-    let mut den = 1.0;
-    for i in 1..6 {
-        num = num * ix + r[i];
-        den = den * ix + s[i - 1];
-    }
-    let frac_1_sqrt_pi = 1.0 / std::f64::consts::PI.sqrt();
-    let result = (ix * num / den + frac_1_sqrt_pi) / x;
-    let xsq = (x * 16.0).floor() / 16.0;
-    let del = (x - xsq) * (x + xsq);
-    ((-xsq * xsq).exp()) * (-del).exp() * result
-}
-
-// Series coefficients copied verbatim from the libm reference; trailing
-// digits beyond f64 precision are required for IEEE 754 round-trip.
-#[allow(clippy::excessive_precision)]
-fn erf_central(x: f64) -> f64 {
-    const A: [f64; 5] = [
-        3.20937758913846947e3,
-        3.77485237685302021e2,
-        1.13864154151050156e2,
-        3.16112374387056560e0,
-        1.85777706184603153e-1,
-    ];
-    const B: [f64; 4] = [
-        2.84423121743507280e3,
-        1.28261652607737228e3,
-        2.44024637934444173e2,
-        2.36012708905464931e1,
-    ];
-    let y = x * x;
-    let mut num = A[4];
-    for i in (0..4).rev() {
-        num = num * y + A[i];
-    }
-    let mut den = 1.0;
-    for &b in &B {
-        den = den * y + b;
-    }
-    x * num / den
 }
 
 pub extern "C" fn tensor_not_i64(dst: *mut i64, a: *const i64, n: usize) {

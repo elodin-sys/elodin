@@ -3877,22 +3877,31 @@ fn test_cosh_mem() {
     chlo_unop_mem_test("cosh", &[0.0, 1.0], &[1.0, 1.0_f64.cosh()]);
 }
 
+/// One input per range of the usual erfc approximations: |x| < 0.47, below 1, below 4, above 4.
+const ERFC_IN: [f64; 11] = [0.0, 0.05, -0.2, 0.3, 0.46, 0.7, 1.0, 3.0, -3.0, 4.5, 5.0];
+/// Python `math.erfc` of `ERFC_IN`.
+const ERFC_OUT: [f64; 11] = [
+    1.0,
+    0.9436280222029834,
+    1.2227025892104786,
+    0.6713732405408726,
+    0.5153446099983203,
+    0.32219880616258156,
+    0.15729920705028513,
+    2.2090496998585438e-05,
+    1.9999779095030015,
+    1.9661604415428873e-10,
+    1.5374597944280351e-12,
+];
+
 #[test]
 fn test_erfc() {
-    chlo_unop_test(
-        "erfc",
-        &[0.0, 1.0, 3.0],
-        &[1.0, 0.1572992070502851, 0.000022090496998585438],
-    );
+    chlo_unop_test("erfc", &ERFC_IN, &ERFC_OUT);
 }
 
 #[test]
 fn test_erfc_mem() {
-    chlo_unop_mem_test(
-        "erfc",
-        &[0.0, 1.0, 3.0],
-        &[1.0, 0.1572992070502851, 0.000022090496998585438],
-    );
+    chlo_unop_mem_test("erfc", &ERFC_IN, &ERFC_OUT);
 }
 
 #[test]
