@@ -19,6 +19,28 @@ unsafe fn f64_unary<'a>(dst: *mut f64, a: *const f64, n: usize) -> (&'a mut [f64
     })
 }
 
+/// IEEE 754-2019 maximum, which XLA's `max` computes: a NaN operand wins and +0 is above -0.
+pub(crate) fn float_max(a: f64, b: f64) -> f64 {
+    if a.is_nan() || b.is_nan() {
+        a + b
+    } else if a == b {
+        f64::from_bits(a.to_bits() & b.to_bits())
+    } else {
+        a.max(b)
+    }
+}
+
+/// IEEE 754-2019 minimum, which XLA's `min` computes: a NaN operand wins and -0 is below +0.
+pub(crate) fn float_min(a: f64, b: f64) -> f64 {
+    if a.is_nan() || b.is_nan() {
+        a + b
+    } else if a == b {
+        f64::from_bits(a.to_bits() | b.to_bits())
+    } else {
+        a.min(b)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Macro-generated elementwise operations
 // ---------------------------------------------------------------------------
@@ -70,18 +92,8 @@ binary_f64_simd_op!(
     |a: wide::f64x2, b: wide::f64x2| a / b,
     |a: f64, b: f64| a / b
 );
-binary_f64_simd_op!(
-    tensor_max_f64,
-    |a: wide::f64x2, b: wide::f64x2| a.max(b),
-    |a: f64, b: f64| if a > b { a } else { b }
-);
-binary_f64_simd_op!(
-    tensor_min_f64,
-    |a: wide::f64x2, b: wide::f64x2| a.min(b),
-    |a: f64, b: f64| if a < b { a } else { b }
-);
-// `wide::f64x2` doesn't have a remainder operator; keep the scalar
-// loop for `rem`. The SIMD path fires on the other five ops above.
+// `wide::f64x2` has no remainder operator, and its max/min drop NaNs; those
+// three keep the scalar loop.
 macro_rules! binary_f64_op {
     ($name:ident, $op:expr) => {
         pub extern "C" fn $name(dst: *mut f64, a: *const f64, b: *const f64, n: usize) {
@@ -93,6 +105,8 @@ macro_rules! binary_f64_op {
     };
 }
 binary_f64_op!(tensor_rem_f64, |a: f64, b: f64| a % b);
+binary_f64_op!(tensor_max_f64, float_max);
+binary_f64_op!(tensor_min_f64, float_min);
 // Note: tensor_pow_f64 and tensor_atan2_f64 are defined below with SIMD bodies.
 
 macro_rules! binary_int_op {
@@ -795,18 +809,8 @@ macro_rules! reduce_op {
 reduce_op!(tensor_reduce_sum_f64, f64, 0.0, |acc: f64, v: f64| acc
     .algebraic_add(v));
 reduce_op!(tensor_reduce_prod_f64, f64, 1.0, |acc: f64, v: f64| acc * v);
-reduce_op!(
-    tensor_reduce_max_f64,
-    f64,
-    f64::NEG_INFINITY,
-    |acc: f64, v: f64| if v > acc { v } else { acc }
-);
-reduce_op!(
-    tensor_reduce_min_f64,
-    f64,
-    f64::INFINITY,
-    |acc: f64, v: f64| if v < acc { v } else { acc }
-);
+reduce_op!(tensor_reduce_max_f64, f64, f64::NEG_INFINITY, float_max);
+reduce_op!(tensor_reduce_min_f64, f64, f64::INFINITY, float_min);
 reduce_op!(tensor_reduce_sum_i64, i64, 0, |acc: i64, v: i64| acc
     .wrapping_add(v));
 reduce_op!(tensor_reduce_prod_i64, i64, 1, |acc: i64, v: i64| acc
@@ -825,13 +829,13 @@ reduce_op!(
     tensor_reduce_max_f32,
     f32,
     f32::NEG_INFINITY,
-    |acc: f32, v: f32| if v > acc { v } else { acc }
+    |acc: f32, v: f32| float_max(acc.into(), v.into()) as f32
 );
 reduce_op!(
     tensor_reduce_min_f32,
     f32,
     f32::INFINITY,
-    |acc: f32, v: f32| if v < acc { v } else { acc }
+    |acc: f32, v: f32| float_min(acc.into(), v.into()) as f32
 );
 reduce_op!(tensor_reduce_sum_i32, i32, 0, |acc: i32, v: i32| acc
     .wrapping_add(v));
@@ -1084,8 +1088,8 @@ pub extern "C" fn tensor_scatter(
             let r = match combiner {
                 1 => a + b,
                 2 => a * b,
-                3 => a.min(b),
-                _ => a.max(b),
+                3 => float_min(a, b),
+                _ => float_max(a, b),
             };
             out.copy_from_slice(&r.to_ne_bytes());
         } else {

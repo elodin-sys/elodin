@@ -3526,6 +3526,125 @@ fn test_small_dot_and_sum_match_across_abis() {
     assert_eq!([read_f64s(&out[0])[0], read_f64s(&out[1])[0]], [0.0, 0.0]);
 }
 
+/// Float max and min as JAX computes them: a NaN in either operand wins and +0 is above -0,
+/// whichever path lowers them (SIMD chunks and odd tail, one lane, f32).
+#[test]
+fn test_max_min_nan_and_signed_zero() {
+    let mlir = |n: usize, ty: &str| {
+        format!(
+            "module @module {{
+  func.func public @main(%arg0: tensor<{n}x{ty}>, %arg1: tensor<{n}x{ty}>) -> (tensor<{n}x{ty}>, tensor<{n}x{ty}>) {{
+    %0 = stablehlo.maximum %arg0, %arg1 : tensor<{n}x{ty}>
+    %1 = stablehlo.minimum %arg0, %arg1 : tensor<{n}x{ty}>
+    return %0, %1 : tensor<{n}x{ty}>, tensor<{n}x{ty}>
+  }}
+}}"
+        )
+    };
+    let a = [f64::NAN, 1.0, -0.0, 0.0, f64::NAN];
+    let b = [1.0, f64::NAN, 0.0, -0.0, 2.0];
+    let check = |got: Vec<f64>, negative_zero: bool| {
+        for (i, v) in got.into_iter().enumerate() {
+            if [0, 1, 4].contains(&i) {
+                assert!(v.is_nan(), "lane {i}: {v}");
+            } else {
+                assert!(
+                    v == 0.0 && v.is_sign_negative() == negative_zero,
+                    "lane {i}: {v}"
+                );
+            }
+        }
+    };
+    for run in [run_mlir, run_mlir_mem] {
+        for n in [1, 5] {
+            let out = run(
+                &mlir(n, "f64"),
+                &[&f64_buf(&a[..n]), &f64_buf(&b[..n])],
+                &[n * 8; 2],
+            );
+            check(read_f64s(&out[0]).to_vec(), false);
+            check(read_f64s(&out[1]).to_vec(), true);
+        }
+        let (a32, b32) = (a.map(|v| v as f32), b.map(|v| v as f32));
+        let out = run(
+            &mlir(5, "f32"),
+            &[&f32_buf(&a32), &f32_buf(&b32)],
+            &[20, 20],
+        );
+        check(
+            read_f32s(&out[0]).iter().map(|&v| v.into()).collect(),
+            false,
+        );
+        check(read_f32s(&out[1]).iter().map(|&v| v.into()).collect(), true);
+    }
+}
+
+/// `jnp.max` and `jnp.min` propagate NaN and order signed zeros, in the scalar-ABI code and
+/// in the reduce kernels for more than 64 elements.
+#[test]
+fn test_reduce_max_min_nan_and_signed_zero() {
+    for (ty, low, high) in [
+        ("f64", "0xFFF0000000000000", "0x7FF0000000000000"),
+        ("f32", "0xFF800000", "0x7F800000"),
+    ] {
+        let (size, f32s) = if ty == "f64" { (8, false) } else { (4, true) };
+        let buf = |x: &[f64]| match f32s {
+            false => f64_buf(x),
+            true => f32_buf(&x.iter().map(|&v| v as f32).collect::<Vec<_>>()),
+        };
+        let read = |b: &[u8]| match f32s {
+            false => read_f64s(b)[0],
+            true => read_f32s(b)[0].into(),
+        };
+        for n in [3, 80] {
+            let max = reduce_mlir(&[n], &[0], "maximum", low, ty);
+            let min = reduce_mlir(&[n], &[0], "minimum", high, ty);
+            let mut nan = vec![1.0; n];
+            nan[n / 2] = f64::NAN;
+            let zeros: Vec<f64> = (0..n)
+                .map(|i| if i % 2 == 0 { -0.0 } else { 0.0 })
+                .collect();
+            for run in [run_mlir, run_mlir_mem] {
+                for mlir in [&max, &min] {
+                    assert!(
+                        read(&run(mlir, &[&buf(&nan)], &[size])[0]).is_nan(),
+                        "{ty} {n}"
+                    );
+                }
+                let top = read(&run(&max, &[&buf(&zeros)], &[size])[0]);
+                let bottom = read(&run(&min, &[&buf(&zeros)], &[size])[0]);
+                assert!(
+                    top.is_sign_positive() && bottom.is_sign_negative(),
+                    "{ty} {n}"
+                );
+            }
+        }
+    }
+}
+
+/// `.at[i].max(v)` and `.at[i].min(v)` keep a NaN from the operand or the update.
+#[test]
+fn test_scatter_max_min_nan() {
+    let dims = "inserted_window_dims = [0], scatter_dims_to_operand_dims = [0]";
+    for combine in ["maximum", "minimum"] {
+        let mlir = scatter_mlir("f64", "3xf64", "1xi32", "f64", dims, combine);
+        for run in [run_mlir, run_mlir_mem] {
+            for (x, update) in [([0.0, f64::NAN, 2.0], 5.0), ([0.0, 1.0, 2.0], f64::NAN)] {
+                let out = run(
+                    &mlir,
+                    &[&f64_buf(&x), &i32_buf(&[1]), &f64_buf(&[update])],
+                    &[24],
+                );
+                let got = read_f64s(&out[0]);
+                assert!(
+                    got[0] == 0.0 && got[1].is_nan() && got[2] == 2.0,
+                    "{combine}: {got:?}"
+                );
+            }
+        }
+    }
+}
+
 /// Float reductions over more elements than the scalar ABI holds run the reduce kernels.
 #[test]
 fn test_large_float_reductions() {

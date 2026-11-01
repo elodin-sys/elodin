@@ -2911,57 +2911,6 @@ fn lower_ptr_binop_elision_or_spill(
     LaneRepr::scalar(vec![dst])
 }
 
-/// Elision-or-spill dispatcher for ptr-ABI F64 Max/Min. Emits the
-/// XLA `fcmp + bitselect`/`select` per chunk so NaN handling matches
-/// `lower_ptr_cmp_select_simd_f64` bit-for-bit. Green path: operand
-/// chunks come from `get_chunks`, result stays in SSA; no stack slot
-/// allocated. Red path: operands spill (no-op if already `Scalar`)
-/// and `lower_ptr_cmp_select_simd_f64` writes into a fresh slot.
-fn lower_ptr_cmp_select_elision_or_spill(
-    builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
-    pool: &mut crate::slot_pool::SlotPool,
-    lhs_repr: &mut LaneRepr,
-    rhs_repr: &mut LaneRepr,
-    lhs_vid: Option<ValueId>,
-    rhs_vid: Option<ValueId>,
-    n: usize,
-    elem_sz: usize,
-    cc: FloatCC,
-    use_info: Option<&crate::useinfo::UseInfo>,
-    result_vid: Option<ValueId>,
-) -> LaneRepr {
-    let l_depth = lhs_repr.ptr_chain_depth();
-    let r_depth = rhs_repr.ptr_chain_depth();
-    if let Some(new_depth) = should_elide(use_info, result_vid, &[l_depth, r_depth]) {
-        let (l_chunks, l_tail) = lhs_repr.get_chunks(builder, n);
-        let (r_chunks, r_tail) = rhs_repr.get_chunks(builder, n);
-        let chunk_count = n / 2;
-        let mut out_chunks = Vec::with_capacity(chunk_count);
-        for i in 0..chunk_count {
-            let cmp_i = builder.ins().fcmp(cc, l_chunks[i], r_chunks[i]);
-            let cmp_f = builder.ins().bitcast(types::F64X2, MemFlags::new(), cmp_i);
-            let r = builder.ins().bitselect(cmp_f, l_chunks[i], r_chunks[i]);
-            out_chunks.push(r);
-        }
-        let out_tail = if n & 1 == 1 {
-            let lt = l_tail.expect("odd-n lhs missing tail");
-            let rt = r_tail.expect("odd-n rhs missing tail");
-            let cmp = builder.ins().fcmp(cc, lt, rt);
-            Some(builder.ins().select(cmp, lt, rt))
-        } else {
-            None
-        };
-        return LaneRepr::ptr_chunks(out_chunks, out_tail, n, new_depth);
-    }
-
-    let lhs_ptr = lhs_repr.spill_to_slot_pooled(builder, Some(pool), lhs_vid);
-    let rhs_ptr = rhs_repr.spill_to_slot_pooled(builder, Some(pool), rhs_vid);
-    let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
-    lower_ptr_cmp_select_simd_f64(builder, jit_module, dst, lhs_ptr, rhs_ptr, n, cc);
-    LaneRepr::scalar(vec![dst])
-}
-
 /// Clone operands out of `value_map`, invoke
 /// `lower_ptr_binop_elision_or_spill`, and write the (possibly
 /// post-spill) operand LaneReprs back. This is the call-site-facing
@@ -3091,10 +3040,9 @@ fn emit_ptr_unop_f64(
     Ok(out)
 }
 
-/// Max/Min call-site wrapper — same clone/invoke/write-back pattern
-/// as `emit_ptr_binop_f64`, but dispatches to
-/// `lower_ptr_cmp_select_elision_or_spill`.
-fn emit_ptr_cmp_select_f64(
+/// Max/Min call-site wrapper — `emit_ptr_binop_f64` without the op-timing
+/// samples, which have no Max/Min category.
+fn emit_ptr_minmax_f64(
     builder: &mut FunctionBuilder,
     jit_module: &mut JITModule,
     pool: &mut crate::slot_pool::SlotPool,
@@ -3103,7 +3051,7 @@ fn emit_ptr_cmp_select_f64(
     rhs: &ValueId,
     n: usize,
     elem_sz: usize,
-    cc: FloatCC,
+    emit_op: impl Fn(&mut FunctionBuilder, Value, Value) -> Value,
     use_info: Option<&crate::useinfo::UseInfo>,
     result_vid: Option<ValueId>,
 ) -> Result<LaneRepr, String> {
@@ -3115,7 +3063,7 @@ fn emit_ptr_cmp_select_f64(
         .get(rhs)
         .cloned()
         .ok_or_else(|| format!("mem: missing value {:?}", rhs))?;
-    let out = lower_ptr_cmp_select_elision_or_spill(
+    let out = lower_ptr_binop_elision_or_spill(
         builder,
         jit_module,
         pool,
@@ -3125,7 +3073,7 @@ fn emit_ptr_cmp_select_f64(
         Some(*rhs),
         n,
         elem_sz,
-        cc,
+        emit_op,
         use_info,
         result_vid,
     );
@@ -3322,81 +3270,6 @@ fn lower_ptr_splat_simd_f64(builder: &mut FunctionBuilder, dst: Value, scalar: V
     if n & 1 == 1 {
         let off = (chunks * 16) as i32;
         builder.ins().store(flags, scalar, dst, off);
-    }
-}
-
-/// Inline ptr-ABI SIMD for F64 Max/Min. Uses the same
-/// fcmp + bitcast + bitselect pattern as the scalar-ABI packed path.
-/// NaN semantics match XLA: `max(NaN, x) = NaN` — the fcmp mask is
-/// false for NaN, so bitselect picks the right operand (x or NaN
-/// depending on which side is NaN), matching tensor_rt's scalar loop.
-fn lower_ptr_cmp_select_simd_f64(
-    builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
-    dst: Value,
-    lhs: Value,
-    rhs: Value,
-    n: usize,
-    cc: FloatCC,
-) {
-    let chunks = n / 2;
-    let flags = MemFlags::trusted();
-    for i in 0..chunks {
-        let off = (i * 16) as i32;
-        let a = bracket_sampled_inner(
-            builder,
-            jit_module,
-            crate::op_sampler::OpCategory::Load,
-            |b| b.ins().load(types::F64X2, flags, lhs, off),
-        );
-        let b_v = bracket_sampled_inner(
-            builder,
-            jit_module,
-            crate::op_sampler::OpCategory::Load,
-            |b| b.ins().load(types::F64X2, flags, rhs, off),
-        );
-        let cmp_i = builder.ins().fcmp(cc, a, b_v);
-        // `bitcast` is a value-on-value op; the Cranelift verifier
-        // only accepts `big`/`little` byte-order flags, not the
-        // memory-access flags we use for loads/stores. Default flags
-        // are correct here.
-        let cmp_f = builder.ins().bitcast(types::F64X2, MemFlags::new(), cmp_i);
-        let r = builder.ins().bitselect(cmp_f, a, b_v);
-        bracket_sampled_inner(
-            builder,
-            jit_module,
-            crate::op_sampler::OpCategory::Store,
-            |b| {
-                b.ins().store(flags, r, dst, off);
-                r
-            },
-        );
-    }
-    if n & 1 == 1 {
-        let off = (chunks * 16) as i32;
-        let a = bracket_sampled_inner(
-            builder,
-            jit_module,
-            crate::op_sampler::OpCategory::Load,
-            |b| b.ins().load(types::F64, flags, lhs, off),
-        );
-        let b_v = bracket_sampled_inner(
-            builder,
-            jit_module,
-            crate::op_sampler::OpCategory::Load,
-            |b| b.ins().load(types::F64, flags, rhs, off),
-        );
-        let cmp = builder.ins().fcmp(cc, a, b_v);
-        let r = builder.ins().select(cmp, a, b_v);
-        bracket_sampled_inner(
-            builder,
-            jit_module,
-            crate::op_sampler::OpCategory::Store,
-            |b| {
-                b.ins().store(flags, r, dst, off);
-                r
-            },
-        );
     }
 }
 
@@ -4406,7 +4279,7 @@ fn lower_instruction_mem(
         Instruction::Maximum { lhs, rhs } => {
             // Elision-aware SIMD Max for F64 on ptr-ABI.
             if rt.element_type == ElementType::F64 && n >= 2 {
-                let out = emit_ptr_cmp_select_f64(
+                let out = emit_ptr_minmax_f64(
                     builder,
                     jit_module,
                     pool,
@@ -4415,7 +4288,7 @@ fn lower_instruction_mem(
                     rhs,
                     n,
                     elem_sz,
-                    FloatCC::GreaterThan,
+                    |b, l, r| b.ins().fmax(l, r),
                     use_info,
                     result_vid,
                 )?;
@@ -4439,7 +4312,7 @@ fn lower_instruction_mem(
         }
         Instruction::Minimum { lhs, rhs } => {
             if rt.element_type == ElementType::F64 && n >= 2 {
-                let out = emit_ptr_cmp_select_f64(
+                let out = emit_ptr_minmax_f64(
                     builder,
                     jit_module,
                     pool,
@@ -4448,7 +4321,7 @@ fn lower_instruction_mem(
                     rhs,
                     n,
                     elem_sz,
-                    FloatCC::LessThan,
+                    |b, l, r| b.ins().fmin(l, r),
                     use_info,
                     result_vid,
                 )?;
@@ -7116,16 +6989,14 @@ fn lower_instruction(
             let et = rt.element_type;
             if et == ElementType::F64 && rt.num_elements() >= 2 {
                 let (l, r) = align_packed_f64(builder, value_map, lhs, rhs)?;
-                let out =
-                    elementwise_cmp_select_packed_f64(builder, &l, &r, FloatCC::GreaterThan);
+                let out = elementwise_binop_packed_f64(builder, &l, &r, |b, x, y| b.ins().fmax(x, y));
                 return Ok(vec![out]);
             }
             let l = get_vals(builder, value_map, lhs)?.to_vec();
             let r = get_vals(builder, value_map, rhs)?.to_vec();
             let out = elementwise_binop(builder, &l, &r, |b, a, c| {
                 if is_float(et) {
-                    let cmp = b.ins().fcmp(FloatCC::GreaterThan, a, c);
-                    b.ins().select(cmp, a, c)
+                    b.ins().fmax(a, c)
                 } else {
                     let cc = if is_unsigned(et) {
                         IntCC::UnsignedGreaterThan
@@ -7375,15 +7246,14 @@ fn lower_instruction(
             let et = rt.element_type;
             if et == ElementType::F64 && rt.num_elements() >= 2 {
                 let (l, r) = align_packed_f64(builder, value_map, lhs, rhs)?;
-                let out = elementwise_cmp_select_packed_f64(builder, &l, &r, FloatCC::LessThan);
+                let out = elementwise_binop_packed_f64(builder, &l, &r, |b, x, y| b.ins().fmin(x, y));
                 return Ok(vec![out]);
             }
             let l = get_vals(builder, value_map, lhs)?.to_vec();
             let r = get_vals(builder, value_map, rhs)?.to_vec();
             let out = elementwise_binop(builder, &l, &r, |b, a, c| {
                 if is_float(et) {
-                    let cmp = b.ins().fcmp(FloatCC::LessThan, a, c);
-                    b.ins().select(cmp, a, c)
+                    b.ins().fmin(a, c)
                 } else {
                     let cc = if is_unsigned(et) {
                         IntCC::UnsignedLessThan
@@ -9312,48 +9182,6 @@ fn packed_dot_f64(
     scalar_acc
 }
 
-/// Emit fcmp+bitselect for each vector chunk (NaN-propagation matches the
-/// scalar `fcmp cc a b ? a : b` semantics that StableHLO Maximum/Minimum
-/// rely on) and fcmp+select for the scalar tail. Used by Maximum/Minimum.
-///
-/// Cranelift's `bitselect` requires the mask type to match the data type,
-/// but vector `fcmp` returns an `I64X2` mask. We `bitcast` the mask to
-/// `F64X2` (same bit pattern; `bitselect` only examines bits, so the
-/// all-ones / all-zeros lane bit pattern produces the correct per-bit
-/// select).
-fn elementwise_cmp_select_packed_f64(
-    builder: &mut FunctionBuilder,
-    l: &PackedF64Chunks,
-    r: &PackedF64Chunks,
-    cc: FloatCC,
-) -> LaneRepr {
-    assert_eq!(
-        l.n, r.n,
-        "elementwise_cmp_select_packed_f64: shape mismatch"
-    );
-    let mut chunks = Vec::with_capacity(l.chunks.len());
-    for (lc, rc) in l.chunks.iter().zip(r.chunks.iter()) {
-        let cmp_i = builder.ins().fcmp(cc, *lc, *rc);
-        let cmp_f = builder.ins().bitcast(types::F64X2, MemFlags::new(), cmp_i);
-        chunks.push(builder.ins().bitselect(cmp_f, *lc, *rc));
-    }
-    let tail = match (l.tail, r.tail) {
-        (Some(lt), Some(rt)) => {
-            let cmp = builder.ins().fcmp(cc, lt, rt);
-            Some(builder.ins().select(cmp, lt, rt))
-        }
-        (None, None) => None,
-        (Some(_), None) | (None, Some(_)) => {
-            unreachable!("align_packed_f64 ensures matched tail state")
-        }
-    };
-    LaneRepr::PackedF64 {
-        chunks,
-        tail,
-        n: l.n,
-    }
-}
-
 fn lower_int_binop(
     builder: &mut FunctionBuilder,
     value_map: &mut HashMap<ValueId, LaneRepr>,
@@ -9920,8 +9748,7 @@ fn apply_reduce_op(
         }
         ReduceOp::Minimum => {
             if val_type.is_float() {
-                let cmp = builder.ins().fcmp(FloatCC::LessThan, acc, v);
-                builder.ins().select(cmp, acc, v)
+                builder.ins().fmin(acc, v)
             } else {
                 let cc = if unsigned {
                     IntCC::UnsignedLessThan
@@ -9934,8 +9761,7 @@ fn apply_reduce_op(
         }
         ReduceOp::Maximum => {
             if val_type.is_float() {
-                let cmp = builder.ins().fcmp(FloatCC::GreaterThan, acc, v);
-                builder.ins().select(cmp, acc, v)
+                builder.ins().fmax(acc, v)
             } else {
                 let cc = if unsigned {
                     IntCC::UnsignedGreaterThan

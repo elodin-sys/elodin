@@ -321,6 +321,16 @@ def argmax_nan_gist(x, k):
     return x * jnp.argmax(y) + jnp.argmin(y), Z
 
 
+def nan_max_min(x, k):
+    y = jnp.where(x > 0.5, jnp.nan, x)
+    return jnp.maximum(y, 0.1), jnp.isnan(jnp.minimum(y, 0.2))
+
+
+def nan_reductions(x, k):
+    y = jnp.where(x > 0.5, jnp.nan, x)
+    return jnp.stack([jnp.max(y), jnp.min(y), jnp.max(y[:2]), jnp.min(y[2:])]), Z
+
+
 def loop_dot_sum(x, k):
     # The loop body is a separate function, which can get the other ABI than its caller.
     w = jnp.array([0.4, -1.1, 0.7, 0.2])
@@ -354,6 +364,8 @@ GIST_CASES = {
     "argmax_nan": argmax_nan_gist,
     "matvec_batched": lambda x, k: ((jnp.stack([M, M.T]) @ x).sum(axis=0), Z),
     "loop_dot_sum": loop_dot_sum,
+    "nan_max_min": nan_max_min,
+    "nan_reductions": nan_reductions,
 }
 
 

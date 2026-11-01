@@ -761,8 +761,8 @@ fn binary(
                     BinOp::Mul => x * y,
                     BinOp::Div => x / y,
                     BinOp::Rem => x % y,
-                    BinOp::Max => x.max(y),
-                    BinOp::Min => x.min(y),
+                    BinOp::Max => tensor_rt::float_max(x, y),
+                    BinOp::Min => tensor_rt::float_min(x, y),
                     BinOp::Atan2 => x.atan2(y),
                     BinOp::Pow => x.powf(y),
                     _ => x,
@@ -774,8 +774,8 @@ fn binary(
                     BinOp::Mul => x * y,
                     BinOp::Div => x / y,
                     BinOp::Rem => x % y,
-                    BinOp::Max => x.max(y),
-                    BinOp::Min => x.min(y),
+                    BinOp::Max => tensor_rt::float_max(x.into(), y.into()) as f32,
+                    BinOp::Min => tensor_rt::float_min(x.into(), y.into()) as f32,
                     BinOp::Atan2 => x.atan2(y),
                     BinOp::Pow => x.powf(y),
                     _ => x,
@@ -1502,8 +1502,8 @@ fn reduce(
         let fold: fn(f64, f64) -> f64 = match op {
             ReduceOp::Add => |a, b| a + b,
             ReduceOp::Multiply => |a, b| a * b,
-            ReduceOp::Maximum => f64::max,
-            ReduceOp::Minimum => f64::min,
+            ReduceOp::Maximum => tensor_rt::float_max,
+            ReduceOp::Minimum => tensor_rt::float_min,
             ReduceOp::And | ReduceOp::Or => return Err(not_implemented()),
         };
         let init = read_f64(&init_tensor.bytes, init_tensor.ty.element_type, 0);
@@ -1944,8 +1944,8 @@ fn scatter(
             let r = match combiner {
                 ScatterCombiner::Add => a + b,
                 ScatterCombiner::Multiply => a * b,
-                ScatterCombiner::Minimum => a.min(b),
-                _ => a.max(b),
+                ScatterCombiner::Minimum => tensor_rt::float_min(a, b),
+                _ => tensor_rt::float_max(a, b),
             };
             write_f64(&mut out.bytes, et, o, r);
         } else {
