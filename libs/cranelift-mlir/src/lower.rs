@@ -4127,7 +4127,7 @@ fn lower_instruction_mem(
         } => {
             let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
             // A rank-0 predicate is a single byte that picks a whole operand.
-            if type_map.get(cond).is_some_and(|t| t.num_elements() == 1) {
+            if n > 1 && type_map.get(cond).is_some_and(|t| t.num_elements() == 1) {
                 let c = builder
                     .ins()
                     .load(types::I8, MemFlags::trusted(), get(cond)?, 0);
