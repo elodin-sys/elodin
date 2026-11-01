@@ -145,6 +145,9 @@ pub enum InterpError {
     #[error("dot_general batch/contracting dims are not implemented in the interpreter")]
     DotDimsNotImplemented,
 
+    #[error("argmin/argmax over {0} dimensions is not implemented")]
+    ArgminmaxDims(usize),
+
     #[error("reduce {op:?} is not implemented for {element_type:?}")]
     ReduceNotImplemented {
         op: ReduceOp,
@@ -187,6 +190,7 @@ impl InterpError {
                 | Self::UnaryNotImplemented { .. }
                 | Self::DotDimsNotImplemented
                 | Self::ReduceNotImplemented { .. }
+                | Self::ArgminmaxDims(_)
         )
     }
 }
@@ -451,6 +455,12 @@ fn eval_instr(
             dims,
             combiner,
         } => scatter(env, *operand, *indices, *updates, dims, *combiner)?,
+        Instruction::ReduceArgminmax {
+            values,
+            indices,
+            dimensions,
+            is_min,
+        } => return argminmax(env, *values, *indices, dimensions, *is_min, results),
         Instruction::Call { callee, args } => {
             return call(module, callee, args, env);
         }
@@ -1987,6 +1997,64 @@ fn scatter(
         }
     }
     Ok(out)
+}
+
+fn argminmax(
+    env: &HashMap<ValueId, Tensor>,
+    values: ValueId,
+    indices: ValueId,
+    dimensions: &[i64],
+    is_min: bool,
+    results: &[(ValueId, TensorType)],
+) -> Result<Vec<Tensor>, InterpError> {
+    let vals = lookup_ref(env, values)?;
+    let idxs = lookup_ref(env, indices)?;
+    let &[axis] = dimensions else {
+        return Err(InterpError::ArgminmaxDims(dimensions.len()));
+    };
+    let (shape, vt, it) = (&vals.ty.shape, vals.ty.element_type, idxs.ty.element_type);
+    let axis = axis as usize;
+    let outer = shape[..axis].iter().product::<i64>() as usize;
+    let inner = shape[axis] as usize;
+    let after = shape[axis + 1..].iter().product::<i64>() as usize;
+    let int_value = |p: usize| match vt {
+        ElementType::UI64 => read_int(&vals.bytes, vt, p) as u64 as i128,
+        _ => read_int(&vals.bytes, vt, p) as i128,
+    };
+    let (mut out_v, mut out_i) = (
+        Tensor::alloc(results[0].1.clone()),
+        Tensor::alloc(results[1].1.clone()),
+    );
+    let (ev, ei) = (vals.elem_size(), idxs.elem_size());
+    for o in 0..outer {
+        for a in 0..after {
+            let mut best = o * inner * after + a;
+            for k in 1..inner {
+                let p = (o * inner + k) * after + a;
+                let smaller_index = read_int(&idxs.bytes, it, p) < read_int(&idxs.bytes, it, best);
+                let take = if is_real(vt) {
+                    let (b, v) = (
+                        read_f64(&vals.bytes, vt, best),
+                        read_f64(&vals.bytes, vt, p),
+                    );
+                    let better = if is_min { v < b } else { v > b };
+                    !b.is_nan() && (v.is_nan() || better || (v == b && smaller_index))
+                } else {
+                    let (b, v) = (int_value(best), int_value(p));
+                    (if is_min { v < b } else { v > b }) || (v == b && smaller_index)
+                };
+                if take {
+                    best = p;
+                }
+            }
+            let q = o * after + a;
+            out_v.bytes[q * ev..(q + 1) * ev]
+                .copy_from_slice(&vals.bytes[best * ev..(best + 1) * ev]);
+            out_i.bytes[q * ei..(q + 1) * ei]
+                .copy_from_slice(&idxs.bytes[best * ei..(best + 1) * ei]);
+        }
+    }
+    Ok(vec![out_v, out_i])
 }
 
 fn materialize_constant(value: &ConstantValue, ty: &TensorType) -> Result<Tensor, InterpError> {

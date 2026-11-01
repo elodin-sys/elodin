@@ -853,59 +853,88 @@ reduce_op!(tensor_reduce_or_i1, u8, 0, |acc: u8, v: u8| acc
 // Argmin/argmax: multi-operand reduce producing (value, index)
 // ---------------------------------------------------------------------------
 
-pub extern "C" fn tensor_argmin_f64(
-    dst_vals: *mut f64,
-    dst_idxs: *mut i64,
-    src_vals: *const f64,
-    src_idxs: *const i64,
-    outer: usize,
-    inner: usize,
+trait ArgValue: Copy + PartialOrd {
+    fn nan(self) -> bool {
+        false
+    }
+}
+impl ArgValue for f64 {
+    fn nan(self) -> bool {
+        self.is_nan()
+    }
+}
+impl ArgValue for f32 {
+    fn nan(self) -> bool {
+        self.is_nan()
+    }
+}
+impl ArgValue for i64 {}
+impl ArgValue for i32 {}
+impl ArgValue for u64 {}
+impl ArgValue for u32 {}
+impl ArgValue for u8 {}
+
+fn argminmax<V: ArgValue, I: Copy + PartialOrd>(
+    [dst_v, dst_i, src_v, src_i]: [*mut u8; 4],
+    is_min: bool,
+    [outer, inner, after]: [usize; 3],
 ) {
-    let src_v = unsafe { slice::from_raw_parts(src_vals, outer * inner) };
-    let src_i = unsafe { slice::from_raw_parts(src_idxs, outer * inner) };
-    let dst_v = unsafe { slice::from_raw_parts_mut(dst_vals, outer) };
-    let dst_i = unsafe { slice::from_raw_parts_mut(dst_idxs, outer) };
+    if inner == 0 {
+        return;
+    }
+    let n = outer * inner * after;
+    let src_v = unsafe { slice::from_raw_parts(src_v.cast::<V>(), n) };
+    let src_i = unsafe { slice::from_raw_parts(src_i.cast::<I>(), n) };
+    let dst_v = unsafe { slice::from_raw_parts_mut(dst_v.cast::<V>(), outer * after) };
+    let dst_i = unsafe { slice::from_raw_parts_mut(dst_i.cast::<I>(), outer * after) };
     for o in 0..outer {
-        let mut best_v = f64::INFINITY;
-        let mut best_i = 0i64;
-        for j in 0..inner {
-            let v = src_v[o * inner + j];
-            let idx = src_i[o * inner + j];
-            if v < best_v || (best_v.is_nan() && !v.is_nan()) || (v == best_v && idx < best_i) {
-                best_v = v;
-                best_i = idx;
+        for a in 0..after {
+            let at = |k: usize| (o * inner + k) * after + a;
+            let mut best = at(0);
+            for p in (1..inner).map(at) {
+                let (b, v) = (src_v[best], src_v[p]);
+                let better = if is_min { v < b } else { v > b };
+                if !b.nan() && (v.nan() || better || (v == b && src_i[p] < src_i[best])) {
+                    best = p;
+                }
             }
+            dst_v[o * after + a] = src_v[best];
+            dst_i[o * after + a] = src_i[best];
         }
-        dst_v[o] = best_v;
-        dst_i[o] = best_i;
     }
 }
 
-pub extern "C" fn tensor_argmax_f64(
-    dst_vals: *mut f64,
-    dst_idxs: *mut i64,
-    src_vals: *const f64,
-    src_idxs: *const i64,
-    outer: usize,
-    inner: usize,
+/// Argmin or argmax over one axis, with values and indices viewed as [outer, axis, after].
+/// `meta` is `[value_code, index_size, is_min, outer, axis, after]`; value codes are 0 f64,
+/// 1 f32, 2 i64, 3 i32, 4 u64, 5 u32, 6 i1. Like jax-cpu, the first NaN wins and ties keep
+/// the smaller index.
+pub extern "C" fn tensor_argminmax(
+    dst_v: *mut u8,
+    dst_i: *mut u8,
+    src_v: *const u8,
+    src_i: *const u8,
+    meta: *const i64,
 ) {
-    let src_v = unsafe { slice::from_raw_parts(src_vals, outer * inner) };
-    let src_i = unsafe { slice::from_raw_parts(src_idxs, outer * inner) };
-    let dst_v = unsafe { slice::from_raw_parts_mut(dst_vals, outer) };
-    let dst_i = unsafe { slice::from_raw_parts_mut(dst_idxs, outer) };
-    for o in 0..outer {
-        let mut best_v = f64::NEG_INFINITY;
-        let mut best_i = 0i64;
-        for j in 0..inner {
-            let v = src_v[o * inner + j];
-            let idx = src_i[o * inner + j];
-            if v > best_v || (v == best_v && idx < best_i) {
-                best_v = v;
-                best_i = idx;
+    let meta = unsafe { slice::from_raw_parts(meta, 6) };
+    let ptrs = [dst_v, dst_i, src_v.cast_mut(), src_i.cast_mut()];
+    let (is_min, dims) = (meta[2] != 0, [3, 4, 5].map(|i| meta[i] as usize));
+    macro_rules! run {
+        ($v:ty) => {
+            if meta[1] == 4 {
+                argminmax::<$v, i32>(ptrs, is_min, dims)
+            } else {
+                argminmax::<$v, i64>(ptrs, is_min, dims)
             }
-        }
-        dst_v[o] = best_v;
-        dst_i[o] = best_i;
+        };
+    }
+    match meta[0] {
+        0 => run!(f64),
+        1 => run!(f32),
+        2 => run!(i64),
+        3 => run!(i32),
+        4 => run!(u64),
+        5 => run!(u32),
+        _ => run!(u8),
     }
 }
 

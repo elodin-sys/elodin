@@ -109,6 +109,20 @@ def argmax(x):
     return x * jnp.argmax(x) + jnp.argmin(x)
 
 
+def argmax_axis(x):
+    m = outer(x)
+    return x * jnp.argmax(m, axis=0) + jnp.argmin(m, axis=1)
+
+
+def argmax_nan(x):
+    y = jnp.where(x > 0.5, jnp.nan, x)
+    return x * jnp.argmax(y) + jnp.argmin(y)
+
+
+def select(x):
+    return jnp.select([x < -0.2, x < 0.2], [x * 2.0, x * 3.0], x)
+
+
 def erfc(x):
     return jax.scipy.special.erfc(x) + jax.scipy.special.erfc(4.0 * x)
 
@@ -177,6 +191,9 @@ CASES = [
     egm08_roll,
     prod,
     argmax,
+    argmax_axis,
+    argmax_nan,
+    select,
     erfc,
     where_scalar,
     reduce_axes,
@@ -193,9 +210,8 @@ def test_cranelift_matches_jax_cpu(fn):
     np.testing.assert_allclose(history(fn, "cranelift"), expected, rtol=1e-12, atol=1e-12)
 
 
-# Several entities run the system under `jax.vmap`. Cranelift's argmax does not
-# yet reduce along one axis of a batch.
-@pytest.mark.parametrize("fn", [f for f in CASES if f is not argmax], ids=lambda fn: fn.__name__)
+# Several entities run the system under `jax.vmap`.
+@pytest.mark.parametrize("fn", CASES, ids=lambda fn: fn.__name__)
 def test_cranelift_matches_jax_cpu_batched(fn):
     expected = history(fn, "jax-cpu", entities=3)
     np.testing.assert_allclose(

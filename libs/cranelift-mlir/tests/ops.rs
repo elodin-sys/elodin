@@ -2241,6 +2241,100 @@ fn test_argmax_argmin() {
     }
 }
 
+/// `jnp.argmax`/`jnp.argmin` over `axis` as JAX emits it, returning values and indices.
+fn argminmax_nd_mlir(
+    shape: &[usize],
+    axis: usize,
+    [vty, ity]: [&str; 2],
+    [dir, init, cmp]: [&str; 3],
+) -> String {
+    let s: String = shape.iter().map(|d| format!("{d}x")).collect();
+    let o: String = (0..shape.len())
+        .filter(|&d| d != axis)
+        .map(|d| format!("{}x", shape[d]))
+        .collect();
+    format!(
+        "module @module {{
+  func.func public @main(%arg0: tensor<{s}{vty}>) -> (tensor<{o}{vty}>, tensor<{o}{ity}>) {{
+    %0 = stablehlo.iota dim = {axis} : tensor<{s}{ity}>
+    %cst = stablehlo.constant dense<{init}> : tensor<{vty}>
+    %c = stablehlo.constant dense<0> : tensor<{ity}>
+    %1:2 = stablehlo.reduce(%arg0 init: %cst), (%0 init: %c) across dimensions = [{axis}] : (tensor<{s}{vty}>, tensor<{s}{ity}>, tensor<{vty}>, tensor<{ity}>) -> (tensor<{o}{vty}>, tensor<{o}{ity}>)
+     reducer(%arg1: tensor<{vty}>, %arg3: tensor<{vty}>) (%arg2: tensor<{ity}>, %arg4: tensor<{ity}>)  {{
+      %2 = stablehlo.compare {dir}, %arg1, %arg3, {cmp} : (tensor<{vty}>, tensor<{vty}>) -> tensor<i1>
+      %3 = stablehlo.compare NE, %arg1, %arg1, {cmp} : (tensor<{vty}>, tensor<{vty}>) -> tensor<i1>
+      %4 = stablehlo.or %2, %3 : tensor<i1>
+      %5 = stablehlo.compare EQ, %arg1, %arg3, {cmp} : (tensor<{vty}>, tensor<{vty}>) -> tensor<i1>
+      %6 = stablehlo.compare LT, %arg2, %arg4, SIGNED : (tensor<{ity}>, tensor<{ity}>) -> tensor<i1>
+      %7 = stablehlo.and %5, %6 : tensor<i1>
+      %8 = stablehlo.or %4, %7 : tensor<i1>
+      %9 = stablehlo.select %4, %arg1, %arg3 : tensor<i1>, tensor<{vty}>
+      %10 = stablehlo.select %8, %arg2, %arg4 : tensor<i1>, tensor<{ity}>
+      stablehlo.return %9, %10 : tensor<{vty}>, tensor<{ity}>
+    }}
+    return %1#0, %1#1 : tensor<{o}{vty}>, tensor<{o}{ity}>
+  }}
+}}"
+    )
+}
+
+/// argmin/argmax over any axis and value type: the first NaN wins and ties keep the
+/// smaller index, as on jax-cpu.
+#[test]
+fn test_argminmax_axes_and_types() {
+    let max = ["GT", "0xFFF0000000000000", "FLOAT"];
+    let min = ["LT", "0x7FF0000000000000", "FLOAT"];
+    let check_f64 = |shape: &[usize], axis, op, x: &[f64], want_v: &[f64], want_i: &[i64]| {
+        let mlir = argminmax_nd_mlir(shape, axis, ["f64", "i64"], op);
+        for run in [run_mlir, run_mlir_mem] {
+            let out = run(&mlir, &[&f64_buf(x)], &[want_v.len() * 8, want_i.len() * 8]);
+            let got = read_f64s(&out[0]);
+            let same = |(g, w): (&f64, &f64)| g == w || (g.is_nan() && w.is_nan());
+            assert!(got.iter().zip(want_v).all(same), "{got:?} vs {want_v:?}");
+            assert_eq!(read_i64s(&out[1]), want_i);
+        }
+    };
+    let nan = f64::NAN;
+    check_f64(&[4], 0, max, &[1.0, nan, 2.0, nan], &[nan], &[1]);
+    check_f64(&[4], 0, min, &[1.0, nan, 2.0, nan], &[nan], &[1]);
+    check_f64(&[4], 0, max, &[1.0, 3.0, 3.0, 2.0], &[3.0], &[1]);
+    check_f64(&[4], 0, min, &[1.0, 3.0, 3.0, 2.0], &[1.0], &[0]);
+    let m = [
+        0.5, 3.0, -1.0, 2.0, 4.0, 3.0, -2.0, 2.0, 1.0, -5.0, -1.0, 7.0,
+    ];
+    check_f64(&[3, 4], 0, max, &m, &[4.0, 3.0, -1.0, 7.0], &[1, 0, 0, 2]);
+    check_f64(&[3, 4], 1, min, &m, &[-1.0, -2.0, -5.0], &[2, 2, 1]);
+    let t = [1.0, 6.0, 5.0, 2.0, 3.0, 4.0, 9.0, 0.0, 9.0, 8.0, 7.0, 8.0];
+    check_f64(&[2, 3, 2], 1, max, &t, &[5.0, 6.0, 9.0, 8.0], &[1, 0, 0, 1]);
+
+    let i64_max = ["GT", "-9223372036854775808", "SIGNED"];
+    let i64_min = ["LT", "9223372036854775807", "SIGNED"];
+    let x = i64_buf(&[3, -1, 7, 7]);
+    for (op, want) in [(i64_max, [7, 2]), (i64_min, [-1, 1])] {
+        let mlir = argminmax_nd_mlir(&[4], 0, ["i64", "i64"], op);
+        for run in [run_mlir, run_mlir_mem] {
+            let out = run(&mlir, &[&x], &[8, 8]);
+            assert_eq!([read_i64s(&out[0])[0], read_i64s(&out[1])[0]], want);
+        }
+    }
+
+    // The first true per column, as `jnp.select` computes it.
+    let b = [0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0];
+    let mlir = argminmax_nd_mlir(&[3, 4], 0, ["i1", "i64"], ["GT", "false", "UNSIGNED"]);
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(&mlir, &[&b], &[4, 32]);
+        assert_eq!(out[0], [1, 1, 1, 0]);
+        assert_eq!(read_i64s(&out[1]), [2, 1, 1, 0]);
+    }
+
+    let mlir = argminmax_nd_mlir(&[3], 0, ["f64", "i32"], max);
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(&mlir, &[&f64_buf(&[2.0, 9.0, 1.0])], &[8, 4]);
+        assert_eq!(read_f64s(&out[0])[0], 9.0);
+        assert_eq!(read_i32s(&out[1]), [1]);
+    }
+}
+
 #[test]
 fn test_reduce_unknown_reducer_is_a_parse_error() {
     let mlir = reduce_mlir(&[4], &[0], "xor", "0", "i64");
