@@ -1,6 +1,7 @@
 # Changelog
 
 ## unreleased
+- **(fix)** `EGM08` gravity includes its top degree (`EGM08(2)` now applies J2) and weights the tesseral and sectoral terms (order m ≥ 1) correctly; they were scaled by m + 1 in all four Pines sums, so order-1 terms were doubled. Orbits propagated with `EGM08` change; at degree 4 an ISS-like orbit moves about 3 km after one day.
 - **(breaking)** `six_dof` solves Euler's rigid-body equations with the full inertia tensor, including the gyroscopic term `ω × Iω`. Bodies with unequal principal moments now precess and tumble when they spin; trajectories of such bodies change.
 - **(breaking)** `SpatialInertia` and `SpatialInertia.from_array` validate concrete inputs: mass must be finite and > 0, `inertia` and `inertia_off_diag` must have shape (3,), and the tensor must be positive-definite and satisfy the triangle inequality. Ints, lists, and int or float32 arrays are converted to float64; bools and strings raise.
 - **(breaking:rust)** `nox::SpatialInertia` slots 3..6 hold the off-diagonal inertia entries `[Ixy, Ixz, Iyz]` instead of momentum; `SpatialInertia::new` takes them as its second argument, and `momentum()` is replaced by `inertia_off_diag()`.
