@@ -1817,7 +1817,8 @@ pub extern "C" fn tensor_select_and_scatter_f64(
             }
             if valid && op_flat < n_operand {
                 let val = operand[op_flat];
-                if best_idx.is_none() || select_fn(val, best_val) != 0 {
+                // Like XLA: `select(current, candidate)` true keeps the current element.
+                if best_idx.is_none() || select_fn(best_val, val) == 0 {
                     best_idx = Some(op_flat);
                     best_val = val;
                 }

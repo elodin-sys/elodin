@@ -5224,6 +5224,131 @@ module @module {
     assert_f64_close(result[3], 20.0);
 }
 
+/// A 1-D `reduce_window` as JAX 0.10 prints it, with properties before the region.
+fn reduce_window_mlir(n: usize, m: usize, [init, op, window, stride, pad]: [&str; 5]) -> String {
+    format!(
+        "module @module {{
+  func.func public @main(%arg0: tensor<{n}xf64>) -> tensor<{m}xf64> {{
+    %cst = stablehlo.constant dense<{init}> : tensor<f64>
+    %0 = \"stablehlo.reduce_window\"(%arg0, %cst) <{{base_dilations = array<i64: 1>, padding = {pad} : tensor<1x2xi64>, window_dilations = array<i64: 1>, window_dimensions = array<i64: {window}>, window_strides = array<i64: {stride}>}}> ({{
+    ^bb0(%arg1: tensor<f64>, %arg2: tensor<f64>):
+      %1 = stablehlo.{op} %arg1, %arg2 : tensor<f64>
+      stablehlo.return %1 : tensor<f64>
+    }}) : (tensor<{n}xf64>, tensor<f64>) -> tensor<{m}xf64>
+    return %0 : tensor<{m}xf64>
+  }}
+}}"
+    )
+}
+
+#[test]
+fn test_reduce_window_jax_forms() {
+    let x = [3.0, 1.0, 4.0, 1.0, 5.0, 9.0];
+    let neg_inf = "0xFFF0000000000000";
+    // jnp.cumsum, then lax.reduce_window add VALID and max SAME.
+    let cases: [(&[f64], [&str; 5], &[f64]); 3] = [
+        (
+            &[0.0, 1.0, 2.0, 3.0],
+            ["0.000000e+00", "add", "4", "1", "dense<[[3, 0]]>"],
+            &[0.0, 1.0, 3.0, 6.0],
+        ),
+        (
+            &x,
+            ["0.000000e+00", "add", "2", "2", "dense<0>"],
+            &[4.0, 5.0, 14.0],
+        ),
+        (
+            &x,
+            [neg_inf, "maximum", "3", "1", "dense<1>"],
+            &[3.0, 4.0, 4.0, 5.0, 9.0, 9.0],
+        ),
+    ];
+    for (input, attrs, expected) in cases {
+        let mlir = reduce_window_mlir(input.len(), expected.len(), attrs);
+        for run in [run_mlir, run_mlir_mem] {
+            let out = run(&mlir, &[&f64_buf(input)], &[expected.len() * 8]);
+            assert_eq!(read_f64s(&out[0])[..], *expected, "{attrs:?}");
+        }
+    }
+}
+
+/// `jax.vmap(jnp.cumsum)`: a padding row per dimension.
+#[test]
+fn test_batched_cumsum() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<2x3xf64>) -> tensor<2x3xf64> {
+    %cst = stablehlo.constant dense<0.000000e+00> : tensor<f64>
+    %0 = "stablehlo.reduce_window"(%arg0, %cst) <{base_dilations = array<i64: 1, 1>, padding = dense<[[0, 0], [2, 0]]> : tensor<2x2xi64>, window_dilations = array<i64: 1, 1>, window_dimensions = array<i64: 1, 3>, window_strides = array<i64: 1, 1>}> ({
+    ^bb0(%arg1: tensor<f64>, %arg2: tensor<f64>):
+      %1 = stablehlo.add %arg1, %arg2 : tensor<f64>
+      stablehlo.return %1 : tensor<f64>
+    }) : (tensor<2x3xf64>, tensor<f64>) -> tensor<2x3xf64>
+    return %0 : tensor<2x3xf64>
+  }
+}
+"#;
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&f64_buf(&[3.0, 1.0, 4.0, 1.0, 5.0, 9.0])], &[48]);
+        assert_eq!(read_f64s(&out[0])[..], [3.0, 4.0, 8.0, 1.0, 6.0, 15.0]);
+    }
+}
+
+/// The gradient of a 2x2 max pool; the tied 9s in the last window pick the first.
+#[test]
+fn test_max_pool_grad() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<4x4xf64>, %arg1: tensor<2x2xf64>) -> tensor<4x4xf64> {
+    %cst = stablehlo.constant dense<0.000000e+00> : tensor<f64>
+    %0 = "stablehlo.select_and_scatter"(%arg0, %arg1, %cst) <{padding = dense<0> : tensor<2x2xi64>, window_dimensions = array<i64: 2, 2>, window_strides = array<i64: 2, 2>}> ({
+    ^bb0(%arg2: tensor<f64>, %arg3: tensor<f64>):
+      %1 = stablehlo.compare GE, %arg2, %arg3, FLOAT : (tensor<f64>, tensor<f64>) -> tensor<i1>
+      stablehlo.return %1 : tensor<i1>
+    }, {
+    ^bb0(%arg2: tensor<f64>, %arg3: tensor<f64>):
+      %1 = stablehlo.add %arg2, %arg3 : tensor<f64>
+      stablehlo.return %1 : tensor<f64>
+    }) : (tensor<4x4xf64>, tensor<2x2xf64>, tensor<f64>) -> tensor<4x4xf64>
+    return %0 : tensor<4x4xf64>
+  }
+}
+"#;
+    let x = f64_buf(&[
+        1.0, 5.0, 2.0, 2.0, 3.0, 3.0, 0.0, 7.0, 8.0, 1.0, 6.0, 6.0, 2.0, 4.0, 9.0, 9.0,
+    ]);
+    let grad = f64_buf(&[10.0, 20.0, 30.0, 40.0]);
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&x, &grad], &[128]);
+        assert_eq!(
+            read_f64s(&out[0])[..],
+            [
+                0.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 20.0, 30.0, 0.0, 0.0, 0.0, 0.0, 0.0, 40.0, 0.0
+            ]
+        );
+    }
+}
+
+#[test]
+fn test_reduce_window_rejects_mismatched_window() {
+    let module = cranelift_mlir::parser::parse_module(&reduce_window_mlir(
+        6,
+        6,
+        ["0.000000e+00", "add", "2", "2", "dense<0>"],
+    ))
+    .unwrap();
+    for force_pointer_abi_main in [false, true] {
+        let config = cranelift_mlir::lower::CompileConfig {
+            force_pointer_abi_main,
+            ..cranelift_mlir::lower::CompileConfig::from_env()
+        };
+        let Err(err) = cranelift_mlir::lower::compile_module_with_config(&module, config) else {
+            panic!("a 6 -> 6 window of 2 with stride 2 compiled");
+        };
+        assert!(err.contains("window attributes"), "{err}");
+    }
+}
+
 // ---- convolution tests ----
 
 #[test]

@@ -160,6 +160,19 @@ def matvec(x):
     return outer(x) @ jnp.arange(1.0, 5.0) + jnp.arange(4.0, 0.0, -1.0) @ outer(x)
 
 
+def reduce_window(x):
+    pairs = jax.lax.reduce_window(outer(x), 0.0, jax.lax.add, (1, 2), (1, 2), "VALID")
+    peaks = jax.lax.reduce_window(x, -jnp.inf, jax.lax.max, (3,), (1,), "SAME")
+    return jnp.cumsum(x) + pairs.sum(axis=1) + peaks
+
+
+def max_pool_grad(x):
+    def pool(m):
+        return jax.lax.reduce_window(m, -jnp.inf, jax.lax.max, (2, 2), (2, 2), "VALID").sum()
+
+    return weighted_rows(jax.grad(pool)(outer(x)))
+
+
 def history(fn, backend: str, entities: int = 1) -> np.ndarray:
     @el.map
     def step(x: X) -> tuple[X, Y]:
@@ -201,6 +214,8 @@ CASES = [
     mekf_matmul,
     motor_thrust,
     matvec,
+    reduce_window,
+    max_pool_grad,
 ]
 
 

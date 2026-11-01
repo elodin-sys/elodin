@@ -2507,10 +2507,7 @@ fn parse_reduce_window_op(
     let operands = all_ops[..half].to_vec();
     let init_values = all_ops[half..].to_vec();
 
-    // Skip to region opening '('
-    while !input.is_empty() && !input.starts_with('(') {
-        let _ = any.parse_next(input)?;
-    }
+    let props = take_till(0.., '(').parse_next(input)?;
     let _ = '('.parse_next(input)?;
     ws(input)?;
     let (body, body_params) = parse_region_body_with_block_args(input, ctx)?;
@@ -2529,13 +2526,20 @@ fn parse_reduce_window_op(
     }
     let rest = take_till(0.., '\n').parse_next(input)?;
     let _ = opt('\n').parse_next(input)?;
-    let full = format!("{attr_text} {rest}");
+    let full = format!("{props} {attr_text} {rest}");
 
     let window_dimensions = extract_array_attr(&full, "window_dimensions");
-    let window_strides = extract_array_attr(&full, "window_strides");
-    let base_dilations = extract_array_attr(&full, "base_dilations");
-    let window_dilations = extract_array_attr(&full, "window_dilations");
-    let padding = extract_padding_attr(&full);
+    let ones_unless = |name| match extract_array_attr(&full, name) {
+        v if v.is_empty() => vec![1; window_dimensions.len()],
+        v => v,
+    };
+    let window_strides = ones_unless("window_strides");
+    let base_dilations = ones_unless("base_dilations");
+    let window_dilations = ones_unless("window_dilations");
+    let mut padding = extract_padding_attr(&full);
+    if padding.is_empty() {
+        padding = vec![(0, 0); window_dimensions.len()];
+    }
 
     let mut types = Vec::new();
     if let Some(arrow) = rest.rfind("-> ") {
@@ -2589,10 +2593,7 @@ fn parse_select_and_scatter_op(
     let _ = ')'.parse_next(input)?;
     ws(input)?;
 
-    // Skip to the opening '(' that wraps the two regions
-    while !input.is_empty() && !input.starts_with('(') {
-        let _ = any.parse_next(input)?;
-    }
+    let props = take_till(0.., '(').parse_next(input)?;
     let _ = '('.parse_next(input)?;
     ws(input)?;
     let (select_body, select_params) = parse_region_body_with_block_args(input, ctx)?;
@@ -2617,11 +2618,17 @@ fn parse_select_and_scatter_op(
     }
     let rest = take_till(0.., '\n').parse_next(input)?;
     let _ = opt('\n').parse_next(input)?;
-    let full = format!("{attr_text} {rest}");
+    let full = format!("{props} {attr_text} {rest}");
 
     let window_dimensions = extract_array_attr(&full, "window_dimensions");
-    let window_strides = extract_array_attr(&full, "window_strides");
-    let padding = extract_padding_attr(&full);
+    let mut window_strides = extract_array_attr(&full, "window_strides");
+    if window_strides.is_empty() {
+        window_strides = vec![1; window_dimensions.len()];
+    }
+    let mut padding = extract_padding_attr(&full);
+    if padding.is_empty() {
+        padding = vec![(0, 0); window_dimensions.len()];
+    }
 
     let mut types = Vec::new();
     if let Some(arrow) = rest.rfind("-> ") {
@@ -2733,32 +2740,24 @@ fn parse_convolution_op(
     }))
 }
 
+/// The integer list written right after `name = `, as `array<i64: ...>`, `[...]` or
+/// `dense<...>`.
 fn extract_array_attr(text: &str, name: &str) -> Vec<i64> {
-    if let Some(idx) = text.find(name) {
-        let after = &text[idx..];
-        if let Some(s) = after.find('[')
-            && let Some(e) = after[s..].find(']')
-        {
-            return parse_int_list(&after[s + 1..s + e]);
-        }
-        if let Some(s) = after.find("array<i64:")
-            && let Some(e) = after[s + 10..].find('>')
-        {
-            return parse_int_list(&after[s + 10..s + 10 + e]);
-        }
-        if let Some(s) = after.find("dense<")
-            && let Some(e) = after[s + 6..].find('>')
-        {
-            let inner = &after[s + 6..s + 6 + e];
-            if let Some(b) = inner.find('[')
-                && let Some(be) = inner.find(']')
-            {
-                return parse_int_list(&inner[b + 1..be]);
-            }
-            return parse_int_list(inner);
-        }
+    let key = format!("{name} = ");
+    let Some(idx) = text.find(&key) else {
+        return Vec::new();
+    };
+    let value = &text[idx + key.len()..];
+    let until = |s: &str, end: char| s[..s.find(end).unwrap_or(s.len())].to_string();
+    if let Some(v) = value.strip_prefix("array<i64:") {
+        parse_int_list(&until(v, '>'))
+    } else if let Some(v) = value.strip_prefix('[') {
+        parse_int_list(&until(v, ']'))
+    } else if let Some(v) = value.strip_prefix("dense<") {
+        parse_int_list(until(v, '>').trim_matches(|c| c == '[' || c == ']'))
+    } else {
+        Vec::new()
     }
-    Vec::new()
 }
 
 fn extract_padding_attr(text: &str) -> Vec<(i64, i64)> {
@@ -2786,21 +2785,13 @@ fn extract_padding_attr(text: &str) -> Vec<(i64, i64)> {
                 };
                 return (0..n_pairs).map(|_| (v, v)).collect();
             }
-            let mut pairs = Vec::new();
-            for seg in inner.split('[') {
-                let seg = seg.trim().trim_end_matches(']').trim_end_matches(',');
-                if seg.is_empty() {
-                    continue;
-                }
-                let nums: Vec<i64> = seg
-                    .split(',')
-                    .filter_map(|s| s.trim().parse().ok())
-                    .collect();
-                if nums.len() == 2 {
-                    pairs.push((nums[0], nums[1]));
-                }
-            }
-            return pairs;
+            let nums = parse_int_list(&inner.replace(['[', ']'], ""));
+            return nums
+                .as_chunks()
+                .0
+                .iter()
+                .map(|&[lo, hi]| (lo, hi))
+                .collect();
         }
     }
     Vec::new()

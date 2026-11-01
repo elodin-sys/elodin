@@ -477,6 +477,60 @@ fn eval_instr(
                 comparator_params,
             );
         }
+        Instruction::ReduceWindow {
+            operands,
+            init_values,
+            body,
+            body_params,
+            window_dimensions,
+            window_strides,
+            base_dilations,
+            window_dilations,
+            padding,
+        } => match (operands.as_slice(), init_values.as_slice()) {
+            ([operand], [init]) => reduce_window(
+                module,
+                env,
+                *operand,
+                *init,
+                (body, body_params),
+                [
+                    window_dimensions,
+                    window_strides,
+                    base_dilations,
+                    window_dilations,
+                ],
+                padding,
+                &result_ty,
+            )?,
+            _ => {
+                return Err(InterpError::UnimplementedInstruction(Box::new(
+                    instr.clone(),
+                )));
+            }
+        },
+        Instruction::SelectAndScatter {
+            operand,
+            source,
+            init_value,
+            select_body,
+            select_params,
+            scatter_body,
+            scatter_params,
+            window_dimensions,
+            window_strides,
+            padding,
+        } => select_and_scatter(
+            module,
+            env,
+            [*operand, *source, *init_value],
+            (select_body, select_params),
+            (scatter_body, scatter_params),
+            window_dimensions,
+            window_strides,
+            padding,
+            &result_ty,
+        )?,
         Instruction::Call { callee, args } => {
             return call(module, callee, args, env);
         }
@@ -2073,6 +2127,144 @@ fn argminmax(
     Ok(vec![out_v, out_i])
 }
 
+fn scalar_at(t: &Tensor, p: usize) -> Tensor {
+    let e = t.elem_size();
+    Tensor {
+        ty: TensorType::scalar(t.ty.element_type),
+        bytes: t.bytes[p * e..(p + 1) * e].to_vec(),
+    }
+}
+
+/// Evaluates a region with two scalar block arguments.
+fn apply_region(
+    module: &Module,
+    env: &mut HashMap<ValueId, Tensor>,
+    (body, params): (&[InstrResult], &[ValueId]),
+    a: Tensor,
+    b: Tensor,
+) -> Result<Tensor, InterpError> {
+    env.insert(params[0], a);
+    env.insert(params[1], b);
+    Ok(eval_body(module, body, env)?.swap_remove(0))
+}
+
+/// Flat operand index of window element `w` of window `o`, or `None` in padding or in a
+/// base-dilation hole.
+fn window_source(
+    [o, w]: [usize; 2],
+    [out_shape, src_shape, dims]: [&[i64]; 3],
+    [strides, base_dil, win_dil]: [&[i64]; 3],
+    padding: &[(i64, i64)],
+) -> Option<usize> {
+    let (out_st, src_st, win_st) = (
+        shape_strides(out_shape),
+        shape_strides(src_shape),
+        shape_strides(dims),
+    );
+    let mut flat = 0;
+    for d in 0..src_shape.len() {
+        let oc = (o / out_st[d]) as i64 % out_shape[d];
+        let wc = (w / win_st[d]) as i64 % dims[d];
+        let p = oc * strides[d] + wc * win_dil[d] - padding[d].0;
+        if p < 0 || p % base_dil[d] != 0 || p / base_dil[d] >= src_shape[d] {
+            return None;
+        }
+        flat += (p / base_dil[d]) as usize * src_st[d];
+    }
+    Some(flat)
+}
+
+/// Padding and base-dilation holes take the init value, as the StableHLO spec defines.
+#[allow(clippy::too_many_arguments)]
+fn reduce_window(
+    module: &Module,
+    env: &HashMap<ValueId, Tensor>,
+    operand: ValueId,
+    init: ValueId,
+    region: (&[InstrResult], &[ValueId]),
+    [dims, strides, base_dil, win_dil]: [&[i64]; 4],
+    padding: &[(i64, i64)],
+    result_ty: &TensorType,
+) -> Result<Tensor, InterpError> {
+    let src = lookup_ref(env, operand)?;
+    let init = lookup(env, init)?;
+    let mut out = Tensor::alloc(result_ty.clone());
+    let n_win = dims.iter().product::<i64>() as usize;
+    let mut local = env.clone();
+    let e = src.elem_size();
+    for o in 0..result_ty.num_elements() {
+        let mut acc = init.clone();
+        for w in 0..n_win {
+            let value = window_source(
+                [o, w],
+                [&result_ty.shape, &src.ty.shape, dims],
+                [strides, base_dil, win_dil],
+                padding,
+            )
+            .map_or_else(|| init.clone(), |f| scalar_at(src, f));
+            acc = apply_region(module, &mut local, region, acc, value)?;
+        }
+        out.bytes[o * e..(o + 1) * e].copy_from_slice(&acc.bytes);
+    }
+    Ok(out)
+}
+
+/// Each source element scatters onto the element its window selects; like XLA, padding
+/// is never selected and `select(current, candidate)` true keeps the current element.
+#[allow(clippy::too_many_arguments)]
+fn select_and_scatter(
+    module: &Module,
+    env: &HashMap<ValueId, Tensor>,
+    [operand, source, init]: [ValueId; 3],
+    select: (&[InstrResult], &[ValueId]),
+    scatter: (&[InstrResult], &[ValueId]),
+    dims: &[i64],
+    strides: &[i64],
+    padding: &[(i64, i64)],
+    result_ty: &TensorType,
+) -> Result<Tensor, InterpError> {
+    let op = lookup_ref(env, operand)?;
+    let src = lookup_ref(env, source)?;
+    let init = lookup(env, init)?;
+    let mut out = Tensor::alloc(result_ty.clone());
+    let e = op.elem_size();
+    for slot in out.bytes.chunks_exact_mut(e) {
+        slot.copy_from_slice(&init.bytes);
+    }
+    let ones = vec![1; dims.len()];
+    let n_win = dims.iter().product::<i64>() as usize;
+    let mut local = env.clone();
+    for s in 0..src.elem_count() {
+        let mut selected: Option<usize> = None;
+        for w in 0..n_win {
+            let Some(f) = window_source(
+                [s, w],
+                [&src.ty.shape, &op.ty.shape, dims],
+                [strides, &ones, &ones],
+                padding,
+            ) else {
+                continue;
+            };
+            let keep = match selected {
+                Some(cur) => {
+                    let (a, b) = (scalar_at(op, cur), scalar_at(op, f));
+                    apply_region(module, &mut local, select, a, b)?.bytes[0] != 0
+                }
+                None => false,
+            };
+            if !keep {
+                selected = Some(f);
+            }
+        }
+        if let Some(f) = selected {
+            let (a, b) = (scalar_at(&out, f), scalar_at(src, s));
+            let updated = apply_region(module, &mut local, scatter, a, b)?;
+            out.bytes[f * e..(f + 1) * e].copy_from_slice(&updated.bytes);
+        }
+    }
+    Ok(out)
+}
+
 /// Stable sort along one axis, ordered by evaluating the comparator region on each pair.
 fn sort(
     module: &Module,
@@ -2096,13 +2288,6 @@ fn sort(
     let outer = shape[..dim].iter().product::<i64>() as usize;
     let len = shape[dim] as usize;
     let after = shape[dim + 1..].iter().product::<i64>() as usize;
-    let element = |t: &Tensor, p: usize| {
-        let e = t.elem_size();
-        Tensor {
-            ty: TensorType::scalar(t.ty.element_type),
-            bytes: t.bytes[p * e..(p + 1) * e].to_vec(),
-        }
-    };
     let mut outs = ops.clone();
     for o in 0..outer {
         for a in 0..after {
@@ -2110,8 +2295,8 @@ fn sort(
             let less = |x: usize, y: usize| -> Result<bool, InterpError> {
                 let mut local = env.clone();
                 for (i, t) in ops.iter().enumerate() {
-                    local.insert(params[2 * i], element(t, at(x)));
-                    local.insert(params[2 * i + 1], element(t, at(y)));
+                    local.insert(params[2 * i], scalar_at(t, at(x)));
+                    local.insert(params[2 * i + 1], scalar_at(t, at(y)));
                 }
                 Ok(eval_body(module, comparator, &mut local)?[0].bytes[0] != 0)
             };
