@@ -962,8 +962,15 @@ fn parse_dot_general_op(
     let _ = ','.parse_next(input)?;
     ws(input)?;
 
-    let rest = take_till(0.., '\n').parse_next(input)?;
+    let mut rest = take_till(0.., '\n').parse_next(input)?.to_string();
     let _ = opt('\n').parse_next(input)?;
+    // A wrapped op ends its line with `:` and prints the type on the next.
+    while rest.trim_end().ends_with(':') && !input.is_empty() {
+        rest.push(' ');
+        rest.push_str(take_till(0.., '\n').parse_next(input)?);
+        let _ = opt('\n').parse_next(input)?;
+    }
+    let rest = rest.as_str();
 
     let mut lhs_batch = Vec::new();
     let mut rhs_batch = Vec::new();

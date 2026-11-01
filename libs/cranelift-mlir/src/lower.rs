@@ -2687,6 +2687,17 @@ fn mem_has_kernel(
             et == F64 && (n == 1 || [min, max].iter().all(|v| ty_of(v).num_elements() == n))
         }
         Instruction::IsFinite { operand } => ty_of(operand).element_type == F64,
+        // The scalar ABI sums floats in another order than the kernels; tensors it could
+        // hold lower its way so a value computes the same in functions of either ABI.
+        Instruction::Reduce { operand, .. } => {
+            !is_float(et) || ty_of(operand).num_elements() > LARGE_TENSOR_THRESHOLD
+        }
+        Instruction::DotGeneral { lhs, rhs, .. } => {
+            et != F64
+                || [ty_of(lhs), ty_of(rhs), rt.clone()]
+                    .iter()
+                    .any(|t| t.num_elements() > LARGE_TENSOR_THRESHOLD)
+        }
         Instruction::Iota { .. } => matches!(et, F64 | I64 | UI64),
         Instruction::Reverse { .. } => et.byte_size() == 8,
         Instruction::Pad {

@@ -3489,6 +3489,74 @@ fn test_dot_general_any_dims() {
     );
 }
 
+/// The same dot and sum in a pointer-ABI function and a scalar-ABI callee agree bit for bit,
+/// so a branch comparing them (as across a `fori_loop` body) cannot flip.
+#[test]
+fn test_small_dot_and_sum_match_across_abis() {
+    let ops = "%0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [0] x [0], precision = [DEFAULT, DEFAULT] : (tensor<4xf64>, tensor<4xf64>) -> tensor<f64>
+    %cst = stablehlo.constant dense<0.000000e+00> : tensor<f64>
+    %1 = stablehlo.reduce(%arg2 init: %cst) applies stablehlo.add across dimensions = [0] : (tensor<4xf64>, tensor<f64>) -> tensor<f64>";
+    let (args, tys) = (
+        "%arg0, %arg1, %arg2",
+        "(tensor<4xf64>, tensor<4xf64>, tensor<4xf64>) -> (tensor<f64>, tensor<f64>)",
+    );
+    let params = "%arg0: tensor<4xf64>, %arg1: tensor<4xf64>, %arg2: tensor<4xf64>";
+    // Two call sites keep `@inner` from being inlined into `main`.
+    let mlir = format!(
+        "module @module {{
+  func.func public @main({params}) -> (tensor<f64>, tensor<f64>) {{
+    {ops}
+    %2:2 = call @inner({args}) : {tys}
+    %3:2 = call @inner({args}) : {tys}
+    %4 = stablehlo.subtract %0, %2#0 : tensor<f64>
+    %5 = stablehlo.subtract %1, %3#1 : tensor<f64>
+    return %4, %5 : tensor<f64>, tensor<f64>
+  }}
+  func.func private @inner({params}) -> (tensor<f64>, tensor<f64>) {{
+    {ops}
+    return %0, %1 : tensor<f64>, tensor<f64>
+  }}
+}}"
+    );
+    // Sequential and pairwise summation round these differently.
+    let a = f64_buf(&[0.4, -1.1, 0.7, 0.2]);
+    let b = f64_buf(&[-1.1700000000000002, -0.27, -0.42, 0.24]);
+    let c = f64_buf(&[-0.25272, -0.58968, -0.16848, -0.7581600000000001]);
+    let out = run_mlir_mem(&mlir, &[&a, &b, &c], &[8, 8]);
+    assert_eq!([read_f64s(&out[0])[0], read_f64s(&out[1])[0]], [0.0, 0.0]);
+}
+
+/// Float reductions over more elements than the scalar ABI holds run the reduce kernels.
+#[test]
+fn test_large_float_reductions() {
+    let mlir = |ty: &str| {
+        format!(
+            "module @module {{
+  func.func public @main(%arg0: tensor<80x{ty}>) -> (tensor<{ty}>, tensor<{ty}>) {{
+    %zero = stablehlo.constant dense<0.000000e+00> : tensor<{ty}>
+    %low = stablehlo.constant dense<-1.000000e+30> : tensor<{ty}>
+    %0 = stablehlo.reduce(%arg0 init: %zero) applies stablehlo.add across dimensions = [0] : (tensor<80x{ty}>, tensor<{ty}>) -> tensor<{ty}>
+    %1 = stablehlo.reduce(%arg0 init: %low) applies stablehlo.maximum across dimensions = [0] : (tensor<80x{ty}>, tensor<{ty}>) -> tensor<{ty}>
+    return %0, %1 : tensor<{ty}>, tensor<{ty}>
+  }}
+}}"
+        )
+    };
+    let x: Vec<f64> = (0..80).map(|i| (i % 7) as f64 * 0.5 + i as f64).collect();
+    let (sum, max) = (
+        x.iter().sum::<f64>(),
+        x.iter().copied().fold(f64::MIN, f64::max),
+    );
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(&mlir("f64"), &[&f64_buf(&x)], &[8, 8]);
+        assert_eq!([read_f64s(&out[0])[0], read_f64s(&out[1])[0]], [sum, max]);
+        let x32: Vec<f32> = x.iter().map(|&v| v as f32).collect();
+        let out = run(&mlir("f32"), &[&f32_buf(&x32)], &[4, 4]);
+        assert_eq!(read_f32s(&out[0])[0], sum as f32);
+        assert_eq!(read_f32s(&out[1])[0], max as f32);
+    }
+}
+
 /// Matmuls in f32 and in wrapping 32-bit integer arithmetic.
 #[test]
 fn test_dot_general_types() {
