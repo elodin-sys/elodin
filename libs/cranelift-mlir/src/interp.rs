@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use crate::ir::{
     CompareDirection, CompareType, ConstantValue, ElementType, InstrResult, Instruction, Module,
-    ReduceOp, ScalarValue, TensorType, ValueId,
+    ReduceOp, ScalarValue, ScatterCombiner, ScatterDims, TensorType, ValueId,
 };
 use crate::tensor_rt;
 use thiserror::Error;
@@ -454,6 +454,13 @@ fn eval_instr(
             dims,
             slice_sizes,
         } => gather(env, *operand, *indices, dims, slice_sizes, &result_ty)?,
+        Instruction::Scatter {
+            operand,
+            indices,
+            updates,
+            dims,
+            combiner,
+        } => scatter(env, *operand, *indices, *updates, dims, *combiner)?,
         Instruction::Call { callee, args } => {
             return call(module, callee, args, env);
         }
@@ -1886,6 +1893,102 @@ fn gather(
         let db = flat * elem;
         let sb = src_flat * elem;
         out.bytes[db..db + elem].copy_from_slice(&src.bytes[sb..sb + elem]);
+    }
+    Ok(out)
+}
+
+fn scatter(
+    env: &HashMap<ValueId, Tensor>,
+    operand: ValueId,
+    indices: ValueId,
+    updates: ValueId,
+    dims: &ScatterDims,
+    combiner: ScatterCombiner,
+) -> Result<Tensor, InterpError> {
+    let idx = lookup_ref(env, indices)?;
+    let upd = lookup_ref(env, updates)?;
+    let mut out = lookup_ref(env, operand)?.clone();
+    let shape = out.ty.shape.clone();
+    let et = out.ty.element_type;
+    let ivd = dims.index_vector_dim as usize;
+    let uwd: Vec<usize> = dims
+        .update_window_dims
+        .iter()
+        .map(|&d| d as usize)
+        .collect();
+    let windowed: Vec<usize> = (0..shape.len())
+        .filter(|&d| {
+            let d = d as i64;
+            !dims.inserted_window_dims.contains(&d) && !dims.input_batching_dims.contains(&d)
+        })
+        .collect();
+    let (upd_strides, idx_strides, out_strides) = (
+        shape_strides(&upd.ty.shape),
+        shape_strides(&idx.ty.shape),
+        shape_strides(&shape),
+    );
+    for u in 0..upd.elem_count() {
+        let uc: Vec<usize> = (0..upd.ty.rank())
+            .map(|d| u / upd_strides[d] % upd.ty.shape[d] as usize)
+            .collect();
+        let scatter_index: Vec<usize> = (0..uc.len())
+            .filter(|d| !uwd.contains(d))
+            .map(|d| uc[d])
+            .collect();
+        let mut full = vec![0i64; shape.len()];
+        for (k, &d) in dims.scatter_dims_to_operand_dims.iter().enumerate() {
+            let mut ic = scatter_index.clone();
+            if ivd < idx.ty.rank() {
+                ic.insert(ivd, k);
+            }
+            let pos = ic.iter().zip(&idx_strides).map(|(c, s)| c * s).sum();
+            full[d as usize] = read_int(&idx.bytes, idx.ty.element_type, pos);
+        }
+        for (&d, &j) in dims
+            .input_batching_dims
+            .iter()
+            .zip(&dims.scatter_indices_batching_dims)
+        {
+            let j = j as usize;
+            full[d as usize] = scatter_index[if j < ivd { j } else { j - 1 }] as i64;
+        }
+        let window_size = |d: usize| {
+            windowed
+                .iter()
+                .position(|&w| w == d)
+                .map_or(1, |k| upd.ty.shape[uwd[k]])
+        };
+        if (0..shape.len()).any(|d| full[d] < 0 || full[d] + window_size(d) > shape[d]) {
+            continue;
+        }
+        for (k, &d) in windowed.iter().enumerate() {
+            full[d] += uc[uwd[k]] as i64;
+        }
+        let o: usize = (0..shape.len())
+            .map(|d| full[d] as usize * out_strides[d])
+            .sum();
+        let e = et.byte_size();
+        if combiner == ScatterCombiner::Set {
+            out.bytes[o * e..(o + 1) * e].copy_from_slice(&upd.bytes[u * e..(u + 1) * e]);
+        } else if is_real(et) {
+            let (a, b) = (read_f64(&out.bytes, et, o), read_f64(&upd.bytes, et, u));
+            let r = match combiner {
+                ScatterCombiner::Add => a + b,
+                ScatterCombiner::Multiply => a * b,
+                ScatterCombiner::Minimum => a.min(b),
+                _ => a.max(b),
+            };
+            write_f64(&mut out.bytes, et, o, r);
+        } else {
+            let (a, b) = (read_int(&out.bytes, et, o), read_int(&upd.bytes, et, u));
+            let r = match combiner {
+                ScatterCombiner::Add => a.wrapping_add(b),
+                ScatterCombiner::Multiply => a.wrapping_mul(b),
+                ScatterCombiner::Minimum => a.min(b),
+                _ => a.max(b),
+            };
+            write_int(&mut out.bytes, et, o, r);
+        }
     }
     Ok(out)
 }

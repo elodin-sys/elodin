@@ -1722,6 +1722,7 @@ fn rewrite_aliases_instr(instr: &mut Instruction, aliases: &HashMap<ValueId, Val
             operand,
             indices,
             updates,
+            ..
         } => {
             remap(operand);
             remap(indices);
@@ -2088,6 +2089,7 @@ pub(crate) fn operand_ids(instr: &Instruction) -> Vec<ValueId> {
             operand,
             indices,
             updates,
+            ..
         } => vec![*operand, *indices, *updates],
         Instruction::CustomCall { operands, .. } => operands.clone(),
         Instruction::Sort {

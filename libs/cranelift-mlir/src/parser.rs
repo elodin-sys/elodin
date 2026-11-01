@@ -1515,41 +1515,75 @@ fn parse_scatter_op(
     let _ = ')'.parse_next(input)?;
     ws(input)?;
 
-    // Skip everything until the line starting with "}) :" which ends the scatter
-    loop {
-        let line: &str = take_till(0.., '\n').parse_next(input)?;
-        let _ = opt('\n').parse_next(input)?;
-        let trimmed = line.trim();
-        if trimmed.starts_with("}) :") {
-            let ty = parse_final_type(trimmed);
-            let values = make_values(ctx, result_names, vec![ty]);
-            return Ok(Some(InstrResult {
-                values,
-                instr: Instruction::Scatter {
-                    operand,
-                    indices,
-                    updates,
-                },
-            }));
-        }
-        if input.is_empty() {
-            break;
-        }
-    }
+    let props = take_till(0.., '(').parse_next(input)?;
+    let _ = '('.parse_next(input)?;
+    ws(input)?;
+    let (body, params) = parse_region_body_with_block_args(input, ctx)?;
+    ws(input)?;
+    let _ = ')'.parse_next(input)?;
+    let rest = take_till(0.., '\n').parse_next(input)?;
+    let _ = opt('\n').parse_next(input)?;
 
-    let values = make_values(
-        ctx,
-        result_names,
-        vec![TensorType::scalar(ElementType::F64)],
-    );
+    let combiner = scatter_combiner(&body, &params).ok_or_else(winnow::error::ContextError::new)?;
+    // Dimension numbers precede the region as properties or follow it as attributes.
+    let attrs = [props, rest].concat();
+    let index_vector_dim = attrs.split_once("index_vector_dim = ").map_or(0, |(_, s)| {
+        let end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+        s[..end].parse().unwrap_or(0)
+    });
+    let dims = ScatterDims {
+        update_window_dims: extract_bracket_ints(&attrs, "update_window_dims = ["),
+        inserted_window_dims: extract_bracket_ints(&attrs, "inserted_window_dims = ["),
+        input_batching_dims: extract_bracket_ints(&attrs, "input_batching_dims = ["),
+        scatter_indices_batching_dims: extract_bracket_ints(
+            &attrs,
+            "scatter_indices_batching_dims = [",
+        ),
+        scatter_dims_to_operand_dims: extract_bracket_ints(
+            &attrs,
+            "scatter_dims_to_operand_dims = [",
+        ),
+        index_vector_dim,
+    };
+    let ty = parse_final_type(rest);
+    let values = make_values(ctx, result_names, vec![ty]);
     Ok(Some(InstrResult {
         values,
         instr: Instruction::Scatter {
             operand,
             indices,
             updates,
+            dims,
+            combiner,
         },
     }))
+}
+
+/// A region returning the update is `Set`; one binary op of both block arguments
+/// returned as-is is that combiner.
+fn scatter_combiner(body: &[InstrResult], params: &[ValueId]) -> Option<ScatterCombiner> {
+    let [current, update] = params else {
+        return None;
+    };
+    let (last, ops) = body.split_last()?;
+    let Instruction::Return { operands } = &last.instr else {
+        return None;
+    };
+    match (ops, operands.as_slice()) {
+        ([], [r]) if r == update => Some(ScatterCombiner::Set),
+        ([op], [r]) if op.values.first().map(|(v, _)| v) == Some(r) => {
+            let (combiner, lhs, rhs) = match &op.instr {
+                Instruction::Add { lhs, rhs } => (ScatterCombiner::Add, lhs, rhs),
+                Instruction::Multiply { lhs, rhs } => (ScatterCombiner::Multiply, lhs, rhs),
+                Instruction::Minimum { lhs, rhs } => (ScatterCombiner::Minimum, lhs, rhs),
+                Instruction::Maximum { lhs, rhs } => (ScatterCombiner::Maximum, lhs, rhs),
+                _ => return None,
+            };
+            let args = [lhs, rhs];
+            (args == [current, update] || args == [update, current]).then_some(combiner)
+        }
+        _ => None,
+    }
 }
 
 fn parse_custom_call_op(

@@ -3560,6 +3560,219 @@ module @module {
     assert_eq!(result, vec![99, 2, 3, 4, 88]);
 }
 
+fn scatter_mlir(ty: &str, x: &str, idx: &str, upd: &str, dims: &str, combine: &str) -> String {
+    let body = if combine == "set" {
+        format!("stablehlo.return %arg4 : tensor<{ty}>")
+    } else {
+        format!(
+            "%1 = stablehlo.{combine} %arg3, %arg4 : tensor<{ty}>\n      stablehlo.return %1 : tensor<{ty}>"
+        )
+    };
+    format!(
+        r#"module @module {{
+  func.func public @main(%arg0: tensor<{x}>, %arg1: tensor<{idx}>, %arg2: tensor<{upd}>) -> tensor<{x}> {{
+    %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) <{{indices_are_sorted = true, scatter_dimension_numbers = #stablehlo.scatter<{dims}>, unique_indices = true}}> ({{
+    ^bb0(%arg3: tensor<{ty}>, %arg4: tensor<{ty}>):
+      {body}
+    }}) : (tensor<{x}>, tensor<{idx}>, tensor<{upd}>) -> tensor<{x}>
+    return %0 : tensor<{x}>
+  }}
+}}"#
+    )
+}
+
+fn check_scatter(
+    (x, x_ty): (&[f64], &str),
+    dims: &str,
+    combine: &str,
+    (idx, idx_ty): (&[i32], &str),
+    (upd, upd_ty): (&[f64], &str),
+    want: &[f64],
+) {
+    let mlir = scatter_mlir("f64", x_ty, idx_ty, upd_ty, dims, combine);
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(
+            &mlir,
+            &[&f64_buf(x), &i32_buf(idx), &f64_buf(upd)],
+            &[x.len() * 8],
+        );
+        assert_f64s_close(&read_f64s(&out[0]), want);
+    }
+}
+
+#[test]
+fn test_scatter_forms() {
+    for (rows, cols) in [(3, 4), (9, 8)] {
+        let n = rows * cols;
+        let x: Vec<f64> = (0..n)
+            .map(|k| (10 * (k / cols) + k % cols) as f64)
+            .collect();
+        let x_ty = format!("{rows}x{cols}xf64");
+        let (i, j) = (rows - 1, 1);
+
+        // x.at[:, j].set(col)
+        let col: Vec<f64> = (0..rows).map(|r| -(r as f64) - 0.5).collect();
+        let mut want = x.clone();
+        for r in 0..rows {
+            want[r * cols + j] = col[r];
+        }
+        check_scatter(
+            (&x, &x_ty),
+            "update_window_dims = [0], inserted_window_dims = [1], scatter_dims_to_operand_dims = [1]",
+            "set",
+            (&[j as i32], "1xi32"),
+            (&col, &format!("{rows}xf64")),
+            &want,
+        );
+
+        // x.at[i, j].set(s)
+        let mut want = x.clone();
+        want[i * cols + j] = -7.0;
+        check_scatter(
+            (&x, &x_ty),
+            "inserted_window_dims = [0, 1], scatter_dims_to_operand_dims = [0, 1]",
+            "set",
+            (&[i as i32, j as i32], "2xi32"),
+            (&[-7.0], "f64"),
+            &want,
+        );
+
+        // x.at[1:3, 2:4].set(m)
+        let m = [-1.0, -2.0, -3.0, -4.0];
+        let mut want = x.clone();
+        for (k, &v) in m.iter().enumerate() {
+            want[(1 + k / 2) * cols + 2 + k % 2] = v;
+        }
+        check_scatter(
+            (&x, &x_ty),
+            "update_window_dims = [0, 1], scatter_dims_to_operand_dims = [0, 1]",
+            "set",
+            (&[1, 2], "2xi32"),
+            (&m, "2x2xf64"),
+            &want,
+        );
+
+        // x.at[i].add(row)
+        let row: Vec<f64> = (0..cols).map(|c| c as f64 + 0.25).collect();
+        let mut want = x.clone();
+        for c in 0..cols {
+            want[i * cols + c] += row[c];
+        }
+        check_scatter(
+            (&x, &x_ty),
+            "update_window_dims = [0], inserted_window_dims = [0], scatter_dims_to_operand_dims = [0]",
+            "add",
+            (&[i as i32], "1xi32"),
+            (&row, &format!("{cols}xf64")),
+            &want,
+        );
+
+        // v.at[n - 2].set(s) on the flattened matrix
+        let v_ty = format!("{n}xf64");
+        let mut want = x.clone();
+        want[n - 2] = 99.0;
+        check_scatter(
+            (&x, &v_ty),
+            "inserted_window_dims = [0], scatter_dims_to_operand_dims = [0]",
+            "set",
+            (&[n as i32 - 2], "1xi32"),
+            (&[99.0], "f64"),
+            &want,
+        );
+
+        // v.at[idx].set(u) with an out-of-bounds index, which is dropped
+        let mut want = x.clone();
+        want[0] = 5.0;
+        want[2] = 7.0;
+        check_scatter(
+            (&x, &v_ty),
+            "inserted_window_dims = [0], scatter_dims_to_operand_dims = [0], index_vector_dim = 1",
+            "set",
+            (&[0, n as i32, 2], "3x1xi32"),
+            (&[5.0, 6.0, 7.0], "3xf64"),
+            &want,
+        );
+
+        // jax.vmap(lambda x, s, i: x.at[i, 1].set(s)) over a batch of two
+        let xb: Vec<f64> = (0..2 * n).map(|k| k as f64).collect();
+        let mut want = xb.clone();
+        want[cols + 1] = -1.0;
+        want[n + (rows - 1) * cols + 1] = -2.0;
+        check_scatter(
+            (&xb, &format!("2x{rows}x{cols}xf64")),
+            "inserted_window_dims = [1, 2], input_batching_dims = [0], scatter_indices_batching_dims = [0], scatter_dims_to_operand_dims = [1, 2], index_vector_dim = 1",
+            "set",
+            (&[1, 1, rows as i32 - 1, 1], "2x2xi32"),
+            (&[-1.0, -2.0], "2xf64"),
+            &want,
+        );
+    }
+}
+
+#[test]
+fn test_scatter_add_i64() {
+    let mlir = scatter_mlir(
+        "i64",
+        "3x4xi64",
+        "1xi32",
+        "4xi64",
+        "update_window_dims = [0], inserted_window_dims = [0], scatter_dims_to_operand_dims = [0]",
+        "add",
+    );
+    let x: Vec<i64> = (0..12).collect();
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(
+            &mlir,
+            &[&i64_buf(&x), &i32_buf(&[1]), &i64_buf(&[10, 20, 30, 40])],
+            &[96],
+        );
+        assert_eq!(
+            read_i64s(&out[0]),
+            [0, 1, 2, 3, 14, 25, 36, 47, 8, 9, 10, 11]
+        );
+    }
+}
+
+/// EGM08's `jnp.roll(x, ...).at[:, -1].set(0)` as it appears in the cube-sat example.
+#[test]
+fn test_scatter_cube_sat_column() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%125: tensor<65x65xf64>) -> tensor<65x65xf64> {
+    %cst_39 = stablehlo.constant dense<0.000000e+00> : tensor<f64>
+    %126 = stablehlo.broadcast_in_dim %cst_39, dims = [] : (tensor<f64>) -> tensor<65xf64>
+    %c_40 = stablehlo.constant dense<64> : tensor<i32>
+    %127 = stablehlo.broadcast_in_dim %c_40, dims = [] : (tensor<i32>) -> tensor<1xi32>
+    %128 = "stablehlo.scatter"(%125, %127, %126) <{indices_are_sorted = true, scatter_dimension_numbers = #stablehlo.scatter<update_window_dims = [0], inserted_window_dims = [1], scatter_dims_to_operand_dims = [1]>, unique_indices = true}> ({
+    ^bb0(%arg5: tensor<f64>, %arg6: tensor<f64>):
+      stablehlo.return %arg6 : tensor<f64>
+    }) : (tensor<65x65xf64>, tensor<1xi32>, tensor<65xf64>) -> tensor<65x65xf64>
+    return %128 : tensor<65x65xf64>
+  }
+}
+"#;
+    let x: Vec<f64> = (0..65 * 65).map(|k| k as f64 + 1.0).collect();
+    let mut want = x.clone();
+    for r in 0..65 {
+        want[r * 65 + 64] = 0.0;
+    }
+    let out = run_mlir(mlir, &[&f64_buf(&x)], &[65 * 65 * 8]);
+    assert_f64s_close(&read_f64s(&out[0]), &want);
+}
+
+#[test]
+fn test_scatter_unknown_combiner_is_a_parse_error() {
+    let mlir = scatter_mlir(
+        "f64",
+        "4xf64",
+        "1xi32",
+        "f64",
+        "inserted_window_dims = [0], scatter_dims_to_operand_dims = [0]",
+        "subtract",
+    );
+    assert!(cranelift_mlir::parser::parse_module(&mlir).is_err());
+}
+
 // ---- Integer comparisons ----
 
 fn int_cmp_test(dir: &str, ty: &str, a: &[u8], b: &[u8], n: usize, expected: &[u8]) {

@@ -1517,7 +1517,7 @@ define_trt! {
     // byte-generic gather/scatter/layout ops with elem_sz
     gather_generic,    "__trt_gather_generic",    tensor_rt::tensor_gather_generic,    [ptr_type(), ptr_type(), types::I64, ptr_type(), types::I64, types::I64, types::I64];
     gather_nd_generic, "__trt_gather_nd_generic", tensor_rt::tensor_gather_nd_generic, [ptr_type(), ptr_type(), types::I64, ptr_type(), types::I64, types::I64, ptr_type(), types::I64, ptr_type(), ptr_type(), types::I64, types::I64];
-    scatter_generic,   "__trt_scatter_generic",   tensor_rt::tensor_scatter_generic,   [ptr_type(), ptr_type(), types::I64, ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    scatter,   "__trt_scatter",   tensor_rt::tensor_scatter,   [ptr_type(), ptr_type(), ptr_type(), ptr_type(), types::I64];
     matmul_f64,    "__trt_matmul_f64",    tensor_rt::tensor_matmul_f64,    [ptr_type(), ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
     // byte-generic layout ops with elem_sz
     broadcast_nd_generic,         "__trt_bcast_nd_generic",     tensor_rt::tensor_broadcast_nd_generic,         [ptr_type(), ptr_type(), types::I64, types::I64, ptr_type(), types::I64, ptr_type(), types::I64, ptr_type(), types::I64];
@@ -3239,6 +3239,48 @@ fn store_i64_array(builder: &mut FunctionBuilder, vals: &[i64]) -> Value {
     ptr
 }
 
+/// Scatters into `dst`, which must already hold the operand; `indices` must be i64.
+fn emit_scatter(
+    builder: &mut FunctionBuilder,
+    jit_module: &mut JITModule,
+    trt_ids: &TensorRtIds,
+    [dst, indices, updates]: [Value; 3],
+    [operand_ty, indices_ty, updates_ty]: [&TensorType; 3],
+    dims: &ScatterDims,
+    combiner: ScatterCombiner,
+) -> Result<(), String> {
+    let et = operand_ty.element_type;
+    if combiner != ScatterCombiner::Set && !matches!(et, ElementType::F64 | ElementType::I64) {
+        return Err(format!("scatter {combiner:?} is not supported for {et:?}"));
+    }
+    let mut meta = vec![
+        et.byte_size() as i64,
+        i64::from(is_float(et)),
+        combiner as i64,
+        dims.index_vector_dim,
+    ];
+    for list in [
+        &operand_ty.shape,
+        &updates_ty.shape,
+        &indices_ty.shape,
+        &dims.update_window_dims,
+        &dims.inserted_window_dims,
+        &dims.input_batching_dims,
+        &dims.scatter_indices_batching_dims,
+        &dims.scatter_dims_to_operand_dims,
+    ] {
+        meta.push(list.len() as i64);
+        meta.extend_from_slice(list);
+    }
+    let meta_ptr = store_i64_array(builder, &meta);
+    let n_meta = builder.ins().iconst(types::I64, meta.len() as i64);
+    let func_ref = jit_module.declare_func_in_func(trt_ids.scatter, builder.func);
+    builder
+        .ins()
+        .call(func_ref, &[dst, indices, updates, meta_ptr, n_meta]);
+    Ok(())
+}
+
 fn lower_pointer_body(
     builder: &mut FunctionBuilder,
     func_def: &crate::ir::FuncDef,
@@ -4610,6 +4652,8 @@ fn lower_instruction_mem(
             operand,
             indices,
             updates,
+            dims,
+            combiner,
         } => {
             let src_ty = type_map.get(operand).cloned().unwrap_or(rt.clone());
             let idx_ty = type_map
@@ -4617,42 +4661,32 @@ fn lower_instruction_mem(
                 .cloned()
                 .unwrap_or(TensorType::scalar(ElementType::I64));
             let upd_ty = type_map.get(updates).cloned().unwrap_or(rt.clone());
-            let n_src = src_ty.num_elements();
-            let n_updates = idx_ty.num_elements();
-            let inner_size = upd_ty.num_elements().checked_div(n_updates).unwrap_or(1);
+            let n_idx = idx_ty.num_elements();
             let idx_ptr = get(indices)?;
             let widened_idx = if matches!(idx_ty.element_type, ElementType::I32 | ElementType::UI32)
             {
-                let wide_buf = alloc_slot(builder, n_updates * 8);
+                let wide_buf = alloc_slot(builder, n_idx * 8);
                 let widen_ref =
                     jit_module.declare_func_in_func(trt_ids.widen_i32_to_i64, builder.func);
-                let n_upd_v2 = builder.ins().iconst(types::I64, n_updates as i64);
-                builder
-                    .ins()
-                    .call(widen_ref, &[wide_buf, idx_ptr, n_upd_v2]);
+                let n_idx_v = builder.ins().iconst(types::I64, n_idx as i64);
+                builder.ins().call(widen_ref, &[wide_buf, idx_ptr, n_idx_v]);
                 wide_buf
             } else {
                 idx_ptr
             };
             let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
-            let n_src_v = builder.ins().iconst(types::I64, n_src as i64);
-            let n_upd_v = builder.ins().iconst(types::I64, n_updates as i64);
-            let inner_v = builder.ins().iconst(types::I64, inner_size as i64);
-            let esz = builder.ins().iconst(types::I64, elem_sz as i64);
-            let func_ref = jit_module.declare_func_in_func(trt_ids.scatter_generic, builder.func);
-            builder.ins().call(
-                func_ref,
-                &[
-                    dst,
-                    get(operand)?,
-                    n_src_v,
-                    widened_idx,
-                    get(updates)?,
-                    n_upd_v,
-                    inner_v,
-                    esz,
-                ],
-            );
+            let memcpy_ref = jit_module.declare_func_in_func(trt_ids.memcpy, builder.func);
+            let nb = builder.ins().iconst(types::I64, (n * elem_sz) as i64);
+            builder.ins().call(memcpy_ref, &[dst, get(operand)?, nb]);
+            emit_scatter(
+                builder,
+                jit_module,
+                trt_ids,
+                [dst, widened_idx, get(updates)?],
+                [&src_ty, &idx_ty, &upd_ty],
+                dims,
+                *combiner,
+            )?;
             Ok(vec![LaneRepr::scalar(vec![dst])])
         }
 
@@ -7656,70 +7690,50 @@ fn lower_instruction(
             operand,
             indices,
             updates,
+            dims,
+            combiner,
         } => {
             let vals = get_vals(builder, value_map, operand)?.to_vec();
             let idx_vals = get_vals(builder, value_map, indices)?.to_vec();
             let upd_vals = get_vals(builder, value_map, updates)?.to_vec();
             let et = rt.element_type;
             let elem_sz = et.byte_size();
+            let src_ty = type_map.get(operand).cloned().unwrap_or(rt.clone());
+            let idx_ty = type_map
+                .get(indices)
+                .cloned()
+                .unwrap_or(TensorType::scalar(ElementType::I64));
+            let upd_ty = type_map.get(updates).cloned().unwrap_or(rt.clone());
 
-            let total_bytes = vals.len() * elem_sz;
-            let ss = builder.create_sized_stack_slot(StackSlotData::new(
-                StackSlotKind::ExplicitSlot,
-                total_bytes as u32,
-                SLOT_ALIGN,
-            ));
-            let base = builder.ins().stack_addr(ptr_type(), ss, 0);
-            for (i, &v) in vals.iter().enumerate() {
-                builder
-                    .ins()
-                    .store(MemFlags::trusted(), v, base, (i * elem_sz) as i32);
-            }
-
-            let n_indices = idx_vals.len();
-            let inner_size = if n_indices > 0 && upd_vals.len() >= n_indices {
-                upd_vals.len() / n_indices
-            } else {
-                0
+            let spill = |builder: &mut FunctionBuilder, vals: &[Value], sz: usize| {
+                let ptr = alloc_slot(builder, vals.len().max(1) * sz);
+                for (i, &v) in vals.iter().enumerate() {
+                    builder
+                        .ins()
+                        .store(MemFlags::trusted(), v, ptr, (i * sz) as i32);
+                }
+                ptr
             };
-
-            if inner_size > 1 {
-                for (u_idx, &upd_v) in upd_vals.iter().enumerate() {
-                    let batch = u_idx / inner_size;
-                    let inner = u_idx % inner_size;
-                    let raw_idx = idx_vals[batch.min(n_indices - 1)];
-                    let idx_i64 = if builder.func.dfg.value_type(raw_idx) == types::I64 {
-                        raw_idx
-                    } else if builder.func.dfg.value_type(raw_idx).bytes() < 8 {
-                        builder.ins().sextend(types::I64, raw_idx)
-                    } else {
-                        raw_idx
-                    };
-                    let flat_pos = builder.ins().imul_imm(idx_i64, inner_size as i64);
-                    let flat_pos = builder.ins().iadd_imm(flat_pos, inner as i64);
-                    let byte_offset = builder.ins().imul_imm(flat_pos, elem_sz as i64);
-                    let addr = builder.ins().iadd(base, byte_offset);
-                    builder.ins().store(MemFlags::trusted(), upd_v, addr, 0);
-                }
-            } else {
-                for (u_idx, &upd_v) in upd_vals.iter().enumerate() {
-                    let raw_idx = if u_idx < idx_vals.len() {
-                        idx_vals[u_idx]
-                    } else {
-                        idx_vals[0]
-                    };
-                    let idx_i64 = if builder.func.dfg.value_type(raw_idx) == types::I64 {
-                        raw_idx
-                    } else if builder.func.dfg.value_type(raw_idx).bytes() < 8 {
-                        builder.ins().sextend(types::I64, raw_idx)
-                    } else {
-                        raw_idx
-                    };
-                    let byte_offset = builder.ins().imul_imm(idx_i64, elem_sz as i64);
-                    let addr = builder.ins().iadd(base, byte_offset);
-                    builder.ins().store(MemFlags::trusted(), upd_v, addr, 0);
-                }
+            let base = spill(builder, &vals, elem_sz);
+            let upd = spill(builder, &upd_vals, elem_sz);
+            let mut idx64 = Vec::with_capacity(idx_vals.len());
+            for &v in &idx_vals {
+                idx64.push(if builder.func.dfg.value_type(v) == types::I64 {
+                    v
+                } else {
+                    builder.ins().sextend(types::I64, v)
+                });
             }
+            let idx = spill(builder, &idx64, 8);
+            emit_scatter(
+                builder,
+                jit_module,
+                trt_ids,
+                [base, idx, upd],
+                [&src_ty, &idx_ty, &upd_ty],
+                dims,
+                *combiner,
+            )?;
 
             let ct = cranelift_type_for(et);
             let mut result = Vec::with_capacity(vals.len());

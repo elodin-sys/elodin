@@ -195,6 +195,27 @@ pub struct GatherDims {
 }
 
 #[derive(Debug, Clone)]
+pub struct ScatterDims {
+    pub update_window_dims: Vec<i64>,
+    pub inserted_window_dims: Vec<i64>,
+    pub input_batching_dims: Vec<i64>,
+    pub scatter_indices_batching_dims: Vec<i64>,
+    pub scatter_dims_to_operand_dims: Vec<i64>,
+    pub index_vector_dim: i64,
+}
+
+/// How a scatter update combines with the operand element it lands on.
+/// The discriminants are the codes `tensor_rt::tensor_scatter` reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScatterCombiner {
+    Set,
+    Add,
+    Multiply,
+    Minimum,
+    Maximum,
+}
+
+#[derive(Debug, Clone)]
 pub enum Instruction {
     Constant {
         value: ConstantValue,
@@ -407,6 +428,8 @@ pub enum Instruction {
         operand: ValueId,
         indices: ValueId,
         updates: ValueId,
+        dims: ScatterDims,
+        combiner: ScatterCombiner,
     },
     CustomCall {
         call_target: String,
