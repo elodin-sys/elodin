@@ -142,6 +142,10 @@ def motor_thrust(x):
     return jnp.concatenate([jnp.sum(thrust, axis=0)[2:], jnp.sum(torque, axis=0)])
 
 
+def matvec(x):
+    return outer(x) @ jnp.arange(1.0, 5.0) + jnp.arange(4.0, 0.0, -1.0) @ outer(x)
+
+
 def history(fn, backend: str, entities: int = 1) -> np.ndarray:
     @el.map
     def step(x: X) -> tuple[X, Y]:
@@ -179,6 +183,7 @@ CASES = [
     reduce_axes_big,
     mekf_matmul,
     motor_thrust,
+    matvec,
 ]
 
 

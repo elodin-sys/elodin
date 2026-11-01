@@ -3294,6 +3294,90 @@ module @module {
     assert_f64s_close(&read_f64s(&out[0]), &[90.0, 120.0, 150.0]);
 }
 
+/// Batched matmuls, a batch of matrices times one vector, `a.T @ b`, and one matrix
+/// times a batch of vectors, on the scalar ABI.
+#[test]
+fn test_dot_general_any_dims() {
+    let check = |l: &str, r: &str, out: &str, dims: &str, a: &[f64], c: &[f64], want: &[f64]| {
+        let mlir = format!(
+            "module @module {{
+  func.func public @main(%arg0: tensor<{l}xf64>, %arg1: tensor<{r}xf64>) -> tensor<{out}xf64> {{
+    %0 = stablehlo.dot_general %arg0, %arg1, {dims}, precision = [DEFAULT, DEFAULT] : (tensor<{l}xf64>, tensor<{r}xf64>) -> tensor<{out}xf64>
+    return %0 : tensor<{out}xf64>
+  }}
+}}"
+        );
+        let got = run_mlir(&mlir, &[&f64_buf(a), &f64_buf(c)], &[want.len() * 8]);
+        assert_f64s_close(&read_f64s(&got[0]), want);
+    };
+    let vals = |n: usize| (0..n).map(|i| i as f64 * 0.5 - 1.0).collect::<Vec<_>>();
+    let (a, c) = (vals(18), vals(18).into_iter().rev().collect::<Vec<_>>());
+
+    let want: Vec<f64> = (0..18)
+        .map(|o| {
+            let (b, i, j) = (o / 9, o / 3 % 3, o % 3);
+            (0..3)
+                .map(|k| a[b * 9 + i * 3 + k] * c[b * 9 + k * 3 + j])
+                .sum()
+        })
+        .collect();
+    let batched = "batching_dims = [0] x [0], contracting_dims = [2] x [1]";
+    check("2x3x3", "2x3x3", "2x3x3", batched, &a, &c, &want);
+
+    let want: Vec<f64> = (0..18)
+        .map(|o| {
+            let (b, i, j) = (o / 9, o / 3 % 3, o % 3);
+            (0..3)
+                .map(|k| a[b * 9 + i * 3 + k] * c[b * 9 + j * 3 + k])
+                .sum()
+        })
+        .collect();
+    let batched_t = "batching_dims = [0] x [0], contracting_dims = [2] x [2]";
+    check("2x3x3", "2x3x3", "2x3x3", batched_t, &a, &c, &want);
+
+    let (m, v) = (vals(48), vals(4));
+    let want: Vec<f64> = (0..12)
+        .map(|o| (0..4).map(|k| m[o * 4 + k] * v[k]).sum())
+        .collect();
+    check(
+        "3x4x4",
+        "4",
+        "3x4",
+        "contracting_dims = [2] x [0]",
+        &m,
+        &v,
+        &want,
+    );
+
+    let (m, n) = (vals(6), vals(12));
+    let want: Vec<f64> = (0..8)
+        .map(|o| (0..3).map(|k| m[k * 2 + o / 4] * n[k * 4 + o % 4]).sum())
+        .collect();
+    check(
+        "3x2",
+        "3x4",
+        "2x4",
+        "contracting_dims = [0] x [0]",
+        &m,
+        &n,
+        &want,
+    );
+
+    let (m, v) = (vals(16), vals(8));
+    let want: Vec<f64> = (0..8)
+        .map(|o| (0..4).map(|k| m[o / 2 * 4 + k] * v[o % 2 * 4 + k]).sum())
+        .collect();
+    check(
+        "4x4",
+        "2x4",
+        "4x2",
+        "contracting_dims = [1] x [1]",
+        &m,
+        &v,
+        &want,
+    );
+}
+
 #[test]
 fn test_iota_2d_dim0() {
     let mlir = r#"
