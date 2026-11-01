@@ -14,6 +14,8 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
+pytestmark = pytest.mark.parity
+
 VEC4 = el.ComponentType(el.PrimitiveType.F64, (4,))
 X = ty.Annotated[jax.Array, el.Component("parity_x", VEC4)]
 Y = ty.Annotated[jax.Array, el.Component("parity_y", VEC4)]
