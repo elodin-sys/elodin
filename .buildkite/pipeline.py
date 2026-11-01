@@ -131,6 +131,11 @@ test_steps = [
                 command="pytest examples/rc-jet/tests -o 'pythonpath='",
             ),
             nix_step(
+                label=":python: rc-jet LWIR visual",
+                flake=".#run",
+                command='SKIP_BUILD=1 ELODIN_BIN="$(command -v elodin)" examples/rc-jet/run_visual_check.sh',
+            ),
+            nix_step(
                 label=":python: betaflight-sitl tests",
                 flake=".#run",
                 command="python3 -m pytest examples/betaflight-sitl/tests -q",

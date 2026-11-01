@@ -3,39 +3,16 @@
 Typed elodin.ui translation of bdx.kdl.
 """
 
-# BDX RC jet ECEF scene over the Mojave RC field.
-#
-# Site (baked): pilot pad 35.350664 N, 117.809027 W, ellipsoid height
-# 589.274 m — also the mojave_rc_field region center, so ENU east/north
-# are zero. Physics uses that ellipsoid height; world_mesh +Z (below)
-# lifts the planar DEM onto that pad. Chase / TGT / top-down
-# ECEF offsets keep the same local-ENU geometry as the Death Valley
-# scene at heading 350°.
-#
-# Cinematic Earth lives on `world.sensor_camera(..., cinematic=True)`
-# (render-server FPV), not on these viewports. The Boson-style LWIR camera
-# uses this terrain through a normal off-screen view plus its final sensor pass.
-# Planar TerrainModel: y=0 at region min (450 m), then Y -= 0.4*(max-min)
-# = 700 m. Pad DEM ≈ 621.5 m orthometric, so
-# tz = 700 - (621.5 - 450) ≈ 528 puts the mesh on the ENU origin
-# (physics ellipsoid 589.274 m). Align surfaces; do not add the ~32 m geoid.
-# ECEF pose: the gauge derives the local vertical from the
-# vehicle's own position (ellipsoid normal).
-# Package render mesh: already Elodin body (X forward, Y left, Z up, CG
-# origin). Absolute ECEF identity would map those axes onto ECEF, so do
-# not add a glTF Y-up lift — assets/bdx.glb is hash-checked by the tests.
+# The static terrain and optional atlas share the simulation's Mojave ECEF origin.
+# Cinematic Earth remains exclusive to the render-server FPV camera.
 
 import elodin.ui as ui
+from terrain_schematic import terrain
 
 
 def build() -> ui.Schematic:
     return ui.schematic(
-        ui.world_mesh(
-            "mojave_rc_field",
-            translate=(0.0, 0.0, 528.0),
-            frame="ENU",
-            visible=True,
-        ),
+        terrain(),
         ui.tabs(
             ui.hsplit(
                 ui.vsplit(

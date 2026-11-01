@@ -3300,6 +3300,7 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
     let mut all_components = HashMap::new();
     let mut sent_metadata: HashMap<ComponentId, ComponentMetadata> = HashMap::new();
     let mut stream_components = HashMap::new();
+    let mut stream_layout = Vec::new();
     let mut last_sent = None;
 
     loop {
@@ -3384,9 +3385,10 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
                     .collect(),
                 None => all_components.clone(),
             };
-            // Sinking the first sample bumps `vtable_gen` without changing
-            // columns. Republishing that vtable races with a filter update.
-            let layout_changed = next_components.len() != stream_components.len()
+            let next_layout: Vec<_> = next_components.keys().copied().collect();
+            // VTable offsets follow map iteration order; reuse only when both
+            // order and schemas are unchanged.
+            let layout_changed = next_layout != stream_layout
                 || next_components.iter().any(|(id, component)| {
                     stream_components
                         .get(id)
@@ -3402,6 +3404,7 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
                 }
                 .into_len_packet();
                 send_with_timeout(&sink, pkt.with_request_id(req_id)).await?;
+                stream_layout = next_layout;
             }
             stream_components = next_components;
             current_vtable_gen = vtable_gen;
