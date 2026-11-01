@@ -48,20 +48,26 @@ class EGM08:
         self.r_0 = 1.0
         self.i_0 = 0.0
 
-        self.c_bar = jnp.load(self.c_full_path)[: max_degree + 1, : max_degree + 1].astype(
-            jnp.float64
+        # The Pines terms for degree n use A[n + 1] and rho[n + 1], so the internal
+        # arrays run one degree past max_degree; that degree's C and S are zero.
+        size = max_degree + 2
+        pad = ((0, 1), (0, 1))
+        self.c_bar = jnp.pad(
+            jnp.load(self.c_full_path)[: max_degree + 1, : max_degree + 1].astype(jnp.float64),
+            pad,
         )
-        self.s_bar = jnp.load(self.s_full_path)[: max_degree + 1, : max_degree + 1].astype(
-            jnp.float64
+        self.s_bar = jnp.pad(
+            jnp.load(self.s_full_path)[: max_degree + 1, : max_degree + 1].astype(jnp.float64),
+            pad,
         )
 
-        self.l = jnp.arange(max_degree + 1)
-        self.m = jnp.arange(max_degree + 1)
+        self.l = jnp.arange(size)
+        self.m = jnp.arange(size)
 
-        self.nq1 = jnp.zeros((max_degree + 1, max_degree + 1))
-        self.nq2 = jnp.zeros((max_degree + 1, max_degree + 1))
-        self.i_r_m = jnp.zeros((max_degree + 1, 2))
-        self.rho_l = jnp.zeros(max_degree + 1)
+        self.nq1 = jnp.zeros((size, size))
+        self.nq2 = jnp.zeros((size, size))
+        self.i_r_m = jnp.zeros((size, 2))
+        self.rho_l = jnp.zeros(size)
 
         self.a_1 = 0.0
         self.a_2 = 0.0
@@ -153,7 +159,7 @@ class EGM08:
         r_m_1 = jnp.roll(self.i_r_m[1], 1).at[0].set(0.0)
         i_m_1 = jnp.roll(self.i_r_m[0], 1).at[0].set(0.0)
         e = self.c_bar * r_m_1 + self.s_bar * i_m_1
-        m = jnp.roll(self.m, -1).at[self.m.shape[0] - 1].set(0.0)
+        m = self.m.astype(jnp.float64)  # order of each column
         a_1 = ((rho_l_1 / self.r_ref) * self.a_bar.T).T * m * e
         self.a_1 = jnp.sum(jnp.sum(a_1, axis=1), axis=0)
 
@@ -167,7 +173,7 @@ class EGM08:
             .at[:, self.a_bar.shape[1] - 1]
             .set(jnp.zeros(self.a_bar.shape[0]))
         )
-        a_3 = ((rho_l_1 / self.r_ref) * a_bar1.T).T * m * self.nq1 * d
+        a_3 = ((rho_l_1 / self.r_ref) * a_bar1.T).T * self.nq1 * d
         self.a_3 = jnp.sum(jnp.sum(a_3, axis=1), axis=0)
 
         a_bar2 = (
@@ -181,7 +187,7 @@ class EGM08:
             .at[self.a_bar.shape[0] - 1, :]
             .set(jnp.zeros(self.a_bar.shape[1]))
         )
-        a_4 = ((rho_l_1 / self.r_ref) * a_bar2.T).T * m * self.nq2 * d * (-1)
+        a_4 = ((rho_l_1 / self.r_ref) * a_bar2.T).T * self.nq2 * d * (-1)
         self.a_4 = jnp.sum(jnp.sum(a_4, axis=1), axis=0)
 
     def initialize_parameters(self):
