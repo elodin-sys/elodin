@@ -240,3 +240,161 @@ def test_matvec_on_the_pointer_abi():
     np.testing.assert_allclose(
         history(matvec, "cranelift", entities=5), expected, rtol=1e-12, atol=1e-12
     )
+
+
+# The #922 repros as `prog(x, k) -> (y, yi)` over a float and an integer state.
+VEC4_I64 = el.ComponentType(el.PrimitiveType.I64, (4,))
+GX = ty.Annotated[jax.Array, el.Component("gist_x", VEC4)]
+GK = ty.Annotated[jax.Array, el.Component("gist_k", VEC4_I64)]
+GY = ty.Annotated[jax.Array, el.Component("gist_y", VEC4)]
+GYI = ty.Annotated[jax.Array, el.Component("gist_yi", VEC4_I64)]
+GP = ty.Annotated[jax.Array, el.Component("gist_p", el.ComponentType(el.PrimitiveType.F64, (80,)))]
+
+
+@dataclass
+class Gist(el.Archetype):
+    x: GX
+    k: GK
+    y: GY
+    yi: GYI
+
+
+@dataclass
+class PaddedGist(el.Archetype):
+    x: GX
+    k: GK
+    y: GY
+    yi: GYI
+    p: GP
+
+
+Z = jnp.zeros(4, jnp.int64)
+M = jnp.array(
+    [[0.5, -0.2, 0.1, 0.9], [0.3, 0.8, -0.4, 0.0], [-0.7, 0.1, 0.6, 0.2], [0.2, 0.2, -0.3, 1.1]]
+)
+double = jax.jit(lambda v: v * 2.0)
+
+
+def i1cmp(x, k):
+    a, b = x > 0.25, jnp.roll(x, 1) > 0.25
+    return (a != b) + 10.0 * (a == jnp.zeros(4, bool)), Z
+
+
+def c5(x, k):
+    def more(c):
+        return (c[0] < 3) & (jnp.abs(c[1]) < 3.0 + jnp.abs(jnp.sum(x)))
+
+    def body(c):
+        r = jax.lax.cond(x[0] > -10.0, lambda: c[1] * 0.5, lambda: x[1])
+        return c[0] + 1, 0.5 * c[1] + r
+
+    w = jnp.array([0.4, -1.1, 0.7, 0.2])
+    out = jax.lax.while_loop(more, body, (0, jnp.dot(w, x) * x[0]))[1]
+    return jnp.stack([out, x[1], x[2], x[3]]), Z
+
+
+def window(x, init, op, stride, pad):
+    return jnp.concatenate([jax.lax.reduce_window(x, init, op, (2,), (stride,), "VALID"), pad])
+
+
+def sas(x, k):
+    def pooled(u):
+        peaks = jax.lax.reduce_window(u, -jnp.inf, jax.lax.max, (2,), (1,), "VALID")
+        return jnp.sum(peaks * jnp.array([1.0, 2.0, 3.0]))
+
+    return jax.grad(pooled)(x), Z
+
+
+def f32_reduced(x, reduce):
+    x32 = x.astype(jnp.float32)
+    return (x32 * reduce(x32)).astype(jnp.float64), Z
+
+
+def empty_case(x, k):
+    # Both branches return the same capture, so JAX emits a case with no results.
+    s = jnp.max(x)
+    return x * jax.lax.cond(x[0] > 0, lambda: s, lambda: s), Z
+
+
+def argmax_nan_gist(x, k):
+    y = jnp.where(x > 0.5, jnp.nan, x)
+    return x * jnp.argmax(y) + jnp.argmin(y), Z
+
+
+def loop_dot_sum(x, k):
+    # The loop body is a separate function, which can get the other ABI than its caller.
+    w = jnp.array([0.4, -1.1, 0.7, 0.2])
+    dot, total = jnp.dot(w, x), jnp.sum(x)
+
+    def body(i, a):
+        return a + (dot != jnp.dot(w, x)) + 10 * (total != jnp.sum(x))
+
+    return x, jax.lax.fori_loop(0, 2, body, Z)
+
+
+GIST_CASES = {
+    "i1cmp": i1cmp,
+    "c5": c5,
+    "clamp_i64": lambda x, k: (x, jax.lax.clamp(jnp.int64(-1), k, jnp.int64(2))),
+    "sign_i64": lambda x, k: (x, jnp.sign(k * 5 + 3)),
+    "mod_i64": lambda x, k: (x, jnp.mod(k, 3) + 10 * jnp.floor_divide(k, 3)),
+    "cumsum": lambda x, k: (jnp.cumsum(x), Z),
+    "rw_add_s2": lambda x, k: (window(x, 0.0, jax.lax.add, 2, jnp.zeros(2)), Z),
+    "rw_max_s1": lambda x, k: (window(x, -jnp.inf, jax.lax.max, 1, jnp.zeros(1)), Z),
+    "sas": sas,
+    "sort_i64": lambda x, k: (x, jnp.sort(k)),
+    "argsort": lambda x, k: (x, jnp.argsort(k)),
+    "select": lambda x, k: (jnp.select([x < -0.2, x < 0.2], [x * 2.0, x * 3.0], x), Z),
+    "f32_max": lambda x, k: f32_reduced(x, jnp.max),
+    "f32_ptr": lambda x, k: f32_reduced(x, jnp.sum),
+    "i32_max": lambda x, k: (x, (k.astype(jnp.int32) * jnp.max(k.astype(jnp.int32)) * 3)),
+    "jit_lambda": lambda x, k: (double(x), Z),
+    "empty_case": empty_case,
+    "argmax_axis0": lambda x, k: (x, jnp.argmax(jnp.outer(x, x[::-1] + 1.0), axis=0)),
+    "argmax_nan": argmax_nan_gist,
+    "matvec_batched": lambda x, k: ((jnp.stack([M, M.T]) @ x).sum(axis=0), Z),
+    "loop_dot_sum": loop_dot_sum,
+}
+
+
+def gist_history(prog, backend: str, padded: bool) -> list[np.ndarray]:
+    def outputs(x, k):
+        y, yi = prog(x, k)
+        r = jnp.roll(k, 1)
+        return (
+            jnp.array([-1.3, -0.9, -0.6, 1.2]) * jnp.roll(x, 1),
+            jnp.where(r > 3, r - 9, r + 2),
+            jnp.asarray(y, jnp.float64),
+            jnp.asarray(yi, jnp.int64),
+        )
+
+    x0, k0 = jnp.array([0.3, 0.7, 0.2, 0.9]), jnp.array([1, -2, 3, 0], jnp.int64)
+    if padded:
+
+        @el.map
+        def step(x: GX, k: GK, p: GP) -> tuple[GX, GK, GY, GYI, GP]:
+            return *outputs(x, k), 0.999 * jnp.roll(p, 1) + 0.001 * jnp.sum(x)
+
+        body = PaddedGist(x=x0, k=k0, y=jnp.zeros(4), yi=Z, p=jnp.arange(80.0))
+    else:
+
+        @el.map
+        def step(x: GX, k: GK) -> tuple[GX, GK, GY, GYI]:
+            return outputs(x, k)
+
+        body = Gist(x=x0, k=k0, y=jnp.zeros(4), yi=Z)
+    w = el.World()
+    w.spawn(body, "g")
+    exec = w.build(step, backend=backend)
+    exec.run(5, show_progress=False)
+    return [np.stack(exec.history(c)[c].to_numpy()) for c in ("g.gist_y", "g.gist_yi")]
+
+
+# The padded world's 80-element component puts the system on the pointer ABI.
+@pytest.mark.parametrize("padded", [False, True], ids=["small", "padded"])
+@pytest.mark.parametrize("name", GIST_CASES)
+def test_gist_prog_matches_jax_cpu(name, padded):
+    want_y, want_yi = gist_history(GIST_CASES[name], "jax-cpu", padded)
+    y, yi = gist_history(GIST_CASES[name], "cranelift", padded)
+    np.testing.assert_allclose(y, want_y, rtol=1e-12, atol=1e-12)
+    np.testing.assert_array_equal(yi, want_yi)
