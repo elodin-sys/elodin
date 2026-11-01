@@ -5283,6 +5283,13 @@ fn lower_instruction_mem(
             dimensions,
         } => {
             let src_ty = type_map.get(operand).cloned().unwrap_or(rt.clone());
+            // Empty tensors count as one element throughout, so there is no empty result.
+            if src_ty.shape.contains(&0) {
+                return Err(format!(
+                    "mem: reduce over the empty tensor {:?}",
+                    src_ty.shape
+                ));
+            }
             use ElementType::*;
             let func_id = match (op, src_ty.element_type) {
                 (ReduceOp::Add, F64) => trt_ids.reduce_sum_f64,
@@ -7788,6 +7795,9 @@ fn lower_instruction(
             let vals = get_vals(builder, value_map, operand)?.to_vec();
             let init_vals = get_vals(builder, value_map, init)?.to_vec();
             let src_ty = type_map.get(operand).cloned().unwrap_or(rt.clone());
+            if src_ty.shape.contains(&0) {
+                return Err(format!("reduce over the empty tensor {:?}", src_ty.shape));
+            }
             Ok(vec![LaneRepr::scalar(lower_reduce(
                 builder, &vals, &init_vals, &src_ty, &rt, op, dimensions,
             ))])

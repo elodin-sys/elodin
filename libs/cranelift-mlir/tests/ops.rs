@@ -2159,6 +2159,24 @@ fn test_reduce_any_axes() {
     );
 }
 
+/// `jnp.sum(x, axis=0)` for an `x` whose trailing axis is empty fails to compile instead of
+/// crashing.
+#[test]
+fn test_reduce_rejects_empty_tensor() {
+    let mlir = reduce_mlir(&[2, 0], &[0], "add", "0", "i64");
+    let module = cranelift_mlir::parser::parse_module(&mlir).unwrap();
+    for force_pointer_abi_main in [false, true] {
+        let config = cranelift_mlir::lower::CompileConfig {
+            force_pointer_abi_main,
+            ..cranelift_mlir::lower::CompileConfig::from_env()
+        };
+        let Err(err) = cranelift_mlir::lower::compile_module_with_config(&module, config) else {
+            panic!("a reduce over tensor<2x0xi64> compiled");
+        };
+        assert!(err.contains("reduce over the empty tensor"), "{err}");
+    }
+}
+
 #[test]
 fn test_reduce_any_axes_i64() {
     let shape = [2, 3, 4];
