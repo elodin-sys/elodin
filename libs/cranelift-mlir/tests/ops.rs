@@ -3378,6 +3378,237 @@ fn test_dot_general_any_dims() {
     );
 }
 
+/// Bool compares, as `(i < n) & (...)` and integer `jnp.mod` emit.
+#[test]
+fn test_i1_compare() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<4xi1>, %arg1: tensor<4xi1>) -> (tensor<4xi1>, tensor<4xi1>, tensor<4xi1>) {
+    %0 = stablehlo.compare NE, %arg0, %arg1, UNSIGNED : (tensor<4xi1>, tensor<4xi1>) -> tensor<4xi1>
+    %1 = stablehlo.compare EQ, %arg0, %arg1, UNSIGNED : (tensor<4xi1>, tensor<4xi1>) -> tensor<4xi1>
+    %2 = stablehlo.compare LT, %arg0, %arg1, UNSIGNED : (tensor<4xi1>, tensor<4xi1>) -> tensor<4xi1>
+    return %0, %1, %2 : tensor<4xi1>, tensor<4xi1>, tensor<4xi1>
+  }
+}
+"#;
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&[1, 0, 1, 0], &[1, 1, 0, 0]], &[4, 4, 4]);
+        assert_eq!(out, [[0, 1, 1, 0], [1, 0, 0, 1], [0, 1, 0, 0]]);
+    }
+}
+
+/// `lax.clamp` with broadcast and rank-0 bounds.
+#[test]
+fn test_clamp_types() {
+    let check = |ty: &str, x: Vec<u8>, lo: Vec<u8>, hi: Vec<u8>, want: Vec<u8>| {
+        let mlir = format!(
+            "module @module {{
+  func.func public @main(%arg0: tensor<4x{ty}>, %arg1: tensor<{ty}>, %arg2: tensor<{ty}>) -> (tensor<4x{ty}>, tensor<4x{ty}>) {{
+    %0 = stablehlo.broadcast_in_dim %arg1, dims = [] : (tensor<{ty}>) -> tensor<4x{ty}>
+    %1 = stablehlo.broadcast_in_dim %arg2, dims = [] : (tensor<{ty}>) -> tensor<4x{ty}>
+    %2 = stablehlo.clamp %0, %arg0, %1 : tensor<4x{ty}>
+    %3 = stablehlo.clamp %arg1, %arg0, %arg2 : (tensor<{ty}>, tensor<4x{ty}>, tensor<{ty}>) -> tensor<4x{ty}>
+    return %2, %3 : tensor<4x{ty}>, tensor<4x{ty}>
+  }}
+}}"
+        );
+        for run in [run_mlir, run_mlir_mem] {
+            let out = run(&mlir, &[&x, &lo, &hi], &[want.len(), want.len()]);
+            assert_eq!(out, [want.clone(), want.clone()], "{ty}");
+        }
+    };
+    check(
+        "i64",
+        i64_buf(&[1, -2, 3, 0]),
+        i64_buf(&[-1]),
+        i64_buf(&[2]),
+        i64_buf(&[1, -1, 2, 0]),
+    );
+    check(
+        "i32",
+        i32_buf(&[1, -2, 3, 0]),
+        i32_buf(&[-1]),
+        i32_buf(&[2]),
+        i32_buf(&[1, -1, 2, 0]),
+    );
+    check(
+        "ui32",
+        u32_buf(&[1, 4_000_000_000, 3, 0]),
+        u32_buf(&[2]),
+        u32_buf(&[3_000_000_000]),
+        u32_buf(&[2, 3_000_000_000, 3, 2]),
+    );
+    check(
+        "f64",
+        f64_buf(&[1.5, -2.0, 3.0, 0.0]),
+        f64_buf(&[-1.0]),
+        f64_buf(&[2.0]),
+        f64_buf(&[1.5, -1.0, 2.0, 0.0]),
+    );
+}
+
+/// `jnp.sign` on integers, which integer `jnp.mod` and floor division lower through.
+#[test]
+fn test_int_sign() {
+    for (ty, x, want) in [
+        (
+            "i64",
+            i64_buf(&[8, -7, 0, i64::MIN]),
+            i64_buf(&[1, -1, 0, -1]),
+        ),
+        ("i32", i32_buf(&[8, -7, 0, 3]), i32_buf(&[1, -1, 0, 1])),
+    ] {
+        let mlir = format!(
+            "module @module {{
+  func.func public @main(%arg0: tensor<4x{ty}>) -> tensor<4x{ty}> {{
+    %0 = stablehlo.sign %arg0 : tensor<4x{ty}>
+    return %0 : tensor<4x{ty}>
+  }}
+}}"
+        );
+        for run in [run_mlir, run_mlir_mem] {
+            assert_eq!(run(&mlir, &[&x], &[want.len()])[0], want, "{ty}");
+        }
+    }
+}
+
+/// f32 reduce, arithmetic, splat and libm math. libm is f64, so f32 lanes round
+/// through f64.
+#[test]
+fn test_f32_ops() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<4xf32>, %arg1: tensor<4xf32>) -> (tensor<4xf32>, tensor<f32>, tensor<4xf32>, tensor<4xi1>) {
+    %cst = stablehlo.constant dense<-1.000000e+30> : tensor<f32>
+    %0 = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.maximum across dimensions = [0] : (tensor<4xf32>, tensor<f32>) -> tensor<f32>
+    %1 = stablehlo.broadcast_in_dim %0, dims = [] : (tensor<f32>) -> tensor<4xf32>
+    %2 = stablehlo.multiply %arg0, %1 : tensor<4xf32>
+    %half = stablehlo.constant dense<5.000000e-01> : tensor<4xf32>
+    %3 = stablehlo.multiply %2, %half : tensor<4xf32>
+    %zero = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+    %4 = stablehlo.reduce(%arg0 init: %zero) applies stablehlo.add across dimensions = [0] : (tensor<4xf32>, tensor<f32>) -> tensor<f32>
+    %5 = stablehlo.sine %arg0 : tensor<4xf32>
+    %6 = stablehlo.exponential %5 : tensor<4xf32>
+    %7 = stablehlo.is_finite %arg1 : (tensor<4xf32>) -> tensor<4xi1>
+    return %3, %4, %6, %7 : tensor<4xf32>, tensor<f32>, tensor<4xf32>, tensor<4xi1>
+  }
+}
+"#;
+    let x = [0.5f32, -1.25, 2.0, 0.75];
+    let special = [1.0f32, f32::INFINITY, f32::NEG_INFINITY, f32::NAN];
+    let exp_sin = x.map(|v| (((v as f64).sin() as f32) as f64).exp() as f32);
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&f32_buf(&x), &f32_buf(&special)], &[16, 4, 16, 4]);
+        assert_eq!(read_f32s(&out[0]), [0.5, -1.25, 2.0, 0.75]);
+        assert_eq!(read_f32s(&out[1]), [2.0]);
+        for (got, want) in read_f32s(&out[2]).iter().zip(exp_sin) {
+            assert!((got - want).abs() <= 1e-6 * want.abs(), "{got} vs {want}");
+        }
+        assert_eq!(out[3], [1, 0, 0, 0]);
+    }
+}
+
+/// The `pre_i32_max` repro plus i32 negate and abs.
+#[test]
+fn test_i32_ops() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<4xi32>) -> (tensor<4xi32>, tensor<4xi32>, tensor<4xi32>) {
+    %c = stablehlo.constant dense<-2147483648> : tensor<i32>
+    %0 = stablehlo.reduce(%arg0 init: %c) applies stablehlo.maximum across dimensions = [0] : (tensor<4xi32>, tensor<i32>) -> tensor<i32>
+    %1 = stablehlo.broadcast_in_dim %0, dims = [] : (tensor<i32>) -> tensor<4xi32>
+    %2 = stablehlo.multiply %arg0, %1 : tensor<4xi32>
+    %three = stablehlo.constant dense<3> : tensor<4xi32>
+    %3 = stablehlo.multiply %2, %three : tensor<4xi32>
+    %4 = stablehlo.negate %arg0 : tensor<4xi32>
+    %5 = stablehlo.abs %arg0 : tensor<4xi32>
+    return %3, %4, %5 : tensor<4xi32>, tensor<4xi32>, tensor<4xi32>
+  }
+}
+"#;
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&i32_buf(&[1, -2, 3, 0])], &[16, 16, 16]);
+        assert_eq!(read_i32s(&out[0]), [9, -18, 27, 0]);
+        assert_eq!(read_i32s(&out[1]), [-1, 2, -3, 0]);
+        assert_eq!(read_i32s(&out[2]), [1, 2, 3, 0]);
+    }
+}
+
+#[test]
+fn test_ui32_ops() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<4xui32>, %arg1: tensor<4xui32>) -> (tensor<4xi1>, tensor<4xui32>, tensor<4xui32>, tensor<4xui32>, tensor<ui32>) {
+    %0 = stablehlo.compare GT, %arg0, %arg1, UNSIGNED : (tensor<4xui32>, tensor<4xui32>) -> tensor<4xi1>
+    %1 = stablehlo.maximum %arg0, %arg1 : tensor<4xui32>
+    %2 = stablehlo.minimum %arg0, %arg1 : tensor<4xui32>
+    %3 = stablehlo.remainder %arg0, %arg1 : tensor<4xui32>
+    %c = stablehlo.constant dense<0> : tensor<ui32>
+    %4 = stablehlo.reduce(%arg0 init: %c) applies stablehlo.maximum across dimensions = [0] : (tensor<4xui32>, tensor<ui32>) -> tensor<ui32>
+    return %0, %1, %2, %3, %4 : tensor<4xi1>, tensor<4xui32>, tensor<4xui32>, tensor<4xui32>, tensor<ui32>
+  }
+}
+"#;
+    let x = u32_buf(&[3_000_000_000, 5, 7, 1]);
+    let y = u32_buf(&[1, 4_000_000_000, 3, 2]);
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&x, &y], &[4, 16, 16, 16, 4]);
+        assert_eq!(out[0], [1, 0, 1, 0]);
+        assert_eq!(read_u32s(&out[1]), [3_000_000_000, 4_000_000_000, 7, 2]);
+        assert_eq!(read_u32s(&out[2]), [1, 5, 3, 1]);
+        assert_eq!(read_u32s(&out[3]), [0, 5, 1, 1]);
+        assert_eq!(read_u32s(&out[4]), [3_000_000_000]);
+    }
+}
+
+/// Iota, reverse and pad with negative and interior padding on i32.
+#[test]
+fn test_layout_ops_i32() {
+    let mlir = r#"
+module @module {
+  func.func public @main() -> (tensor<5xi32>, tensor<5xi32>, tensor<10xi32>) {
+    %0 = stablehlo.iota dim = 0 : tensor<5xi32>
+    %1 = stablehlo.reverse %0, dims = [0] : tensor<5xi32>
+    %c = stablehlo.constant dense<9> : tensor<i32>
+    %2 = stablehlo.pad %1, %c, low = [-1], high = [2], interior = [1] : (tensor<5xi32>, tensor<i32>) -> tensor<10xi32>
+    return %0, %1, %2 : tensor<5xi32>, tensor<5xi32>, tensor<10xi32>
+  }
+}
+"#;
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[], &[20, 20, 40]);
+        assert_eq!(read_i32s(&out[0]), [0, 1, 2, 3, 4]);
+        assert_eq!(read_i32s(&out[1]), [4, 3, 2, 1, 0]);
+        assert_eq!(read_i32s(&out[2]), [9, 3, 9, 2, 9, 1, 9, 0, 9, 9]);
+    }
+}
+
+/// Float to integer conversions saturate and map NaN to zero, and nonzero converts
+/// to true, as on jax-cpu.
+#[test]
+fn test_convert_semantics() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<4xf32>, %arg1: tensor<4xf64>) -> (tensor<4xi64>, tensor<4xui32>, tensor<4xi1>, tensor<4xf32>) {
+    %0 = stablehlo.convert %arg0 : (tensor<4xf32>) -> tensor<4xi64>
+    %1 = stablehlo.convert %arg1 : (tensor<4xf64>) -> tensor<4xui32>
+    %2 = stablehlo.convert %arg1 : (tensor<4xf64>) -> tensor<4xi1>
+    %3 = stablehlo.convert %0 : (tensor<4xi64>) -> tensor<4xf32>
+    return %0, %1, %2, %3 : tensor<4xi64>, tensor<4xui32>, tensor<4xi1>, tensor<4xf32>
+  }
+}
+"#;
+    let x32 = f32_buf(&[1.5, -2.5, f32::NAN, 1e30]);
+    let x64 = f64_buf(&[3e9, -1.0, f64::NAN, 0.5]);
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&x32, &x64], &[32, 16, 4, 16]);
+        assert_eq!(read_i64s(&out[0]), [1, -2, 0, i64::MAX]);
+        assert_eq!(read_u32s(&out[1]), [3_000_000_000, 0, 0, 0]);
+        assert_eq!(out[2], [1, 1, 1, 1]);
+        assert_eq!(read_f32s(&out[3]), [1.0, -2.0, 0.0, i64::MAX as f32]);
+    }
+}
+
 #[test]
 fn test_iota_2d_dim0() {
     let mlir = r#"

@@ -127,9 +127,6 @@ pub enum InterpError {
     #[error("operand index is out of range")]
     OperandIndexOutOfRange,
 
-    #[error("clamp is only implemented for f64")]
-    ClampNotF64,
-
     #[error("reshape changed the number of bytes")]
     ReshapeByteSize,
 
@@ -156,12 +153,6 @@ pub enum InterpError {
 
     #[error("bitcast convert changed the number of bytes")]
     BitcastByteSize,
-
-    #[error("iota is only implemented for i64, i32, ui32, and f64")]
-    IotaElementType,
-
-    #[error("interior padding is not implemented")]
-    InteriorPadding,
 
     #[error("splat constant has {actual} elements but the result has {expected}")]
     SplatTooLarge { actual: usize, expected: usize },
@@ -196,7 +187,6 @@ impl InterpError {
                 | Self::UnaryNotImplemented { .. }
                 | Self::DotDimsNotImplemented
                 | Self::ReduceNotImplemented { .. }
-                | Self::InteriorPadding
         )
     }
 }
@@ -1185,27 +1175,34 @@ fn clamp(
     let src = lookup_ref(env, operand)?;
     let lo = lookup_ref(env, min)?;
     let hi = lookup_ref(env, max)?;
-    if result_ty.element_type != ElementType::F64
-        || src.ty.element_type != ElementType::F64
-        || lo.ty.element_type != ElementType::F64
-        || hi.ty.element_type != ElementType::F64
-    {
-        return Err(InterpError::ClampNotF64);
-    }
+    let et = result_ty.element_type;
     let src_map = broadcast_map(&result_ty.shape, &src.ty.shape)?;
     let lo_map = broadcast_map(&result_ty.shape, &lo.ty.shape)?;
     let hi_map = broadcast_map(&result_ty.shape, &hi.ty.shape)?;
     let mut out = Tensor::alloc(result_ty.clone());
-    let n = result_ty.num_elements();
-    for i in 0..n {
-        let v = read_f64(
-            &src.bytes,
-            ElementType::F64,
-            mapped_index(src, &src_map, i)?,
-        );
-        let lo_v = read_f64(&lo.bytes, ElementType::F64, mapped_index(lo, &lo_map, i)?);
-        let hi_v = read_f64(&hi.bytes, ElementType::F64, mapped_index(hi, &hi_map, i)?);
-        write_f64(&mut out.bytes, ElementType::F64, i, v.clamp(lo_v, hi_v));
+    for i in 0..result_ty.num_elements() {
+        let s = mapped_index(src, &src_map, i)?;
+        let l = mapped_index(lo, &lo_map, i)?;
+        let h = mapped_index(hi, &hi_map, i)?;
+        if is_real(et) {
+            let v = read_f64(&src.bytes, et, s);
+            let (l, h) = (read_f64(&lo.bytes, et, l), read_f64(&hi.bytes, et, h));
+            let r = if v.is_nan() || l.is_nan() || h.is_nan() {
+                f64::NAN
+            } else {
+                v.max(l).min(h)
+            };
+            write_f64(&mut out.bytes, et, i, r);
+        } else {
+            let v = read_int(&src.bytes, et, s);
+            let (l, h) = (read_int(&lo.bytes, et, l), read_int(&hi.bytes, et, h));
+            let r = if et == ElementType::UI64 {
+                (v as u64).max(l as u64).min(h as u64) as i64
+            } else {
+                v.max(l).min(h)
+            };
+            write_int(&mut out.bytes, et, i, r);
+        }
     }
     Ok(out)
 }
@@ -1551,6 +1548,8 @@ fn reduce(
             (ReduceOp::Or, ElementType::I1) => |a, b| i64::from(a != 0 || b != 0),
             (ReduceOp::Add, _) => i64::wrapping_add,
             (ReduceOp::Multiply, _) => i64::wrapping_mul,
+            (ReduceOp::Maximum, ElementType::UI64) => |a, b| (a as u64).max(b as u64) as i64,
+            (ReduceOp::Minimum, ElementType::UI64) => |a, b| (a as u64).min(b as u64) as i64,
             (ReduceOp::Maximum, _) => i64::max,
             (ReduceOp::Minimum, _) => i64::min,
             (ReduceOp::And | ReduceOp::Or, _) => return Err(not_implemented()),
@@ -1644,35 +1643,20 @@ fn bitcast(
 
 fn iota(dimension: i64, result_ty: &TensorType) -> Result<Tensor, InterpError> {
     let mut out = Tensor::alloc(result_ty.clone());
-    match result_ty.element_type {
-        ElementType::I64 => tensor_rt::tensor_iota_nd_i64(
-            out.bytes.as_mut_ptr().cast(),
-            out.elem_count(),
-            result_ty.shape.as_ptr(),
-            result_ty.rank(),
-            dimension as usize,
-        ),
-        ElementType::F64 => tensor_rt::tensor_iota_nd_f64(
-            out.bytes.as_mut_ptr().cast(),
-            out.elem_count(),
-            result_ty.shape.as_ptr(),
-            result_ty.rank(),
-            dimension as usize,
-        ),
-        ElementType::I32 | ElementType::UI32 => {
-            let strides = shape_strides(&result_ty.shape);
-            let dim = dimension as usize;
-            let n = out.elem_count();
-            for i in 0..n {
-                let coord = if result_ty.shape.is_empty() {
-                    0
-                } else {
-                    (i / strides[dim]) as i64 % result_ty.shape[dim]
-                };
-                write_int(&mut out.bytes, result_ty.element_type, i, coord);
-            }
+    let et = result_ty.element_type;
+    let strides = shape_strides(&result_ty.shape);
+    let dim = dimension as usize;
+    for i in 0..out.elem_count() {
+        let coord = if result_ty.shape.is_empty() {
+            0
+        } else {
+            (i / strides[dim]) as i64 % result_ty.shape[dim]
+        };
+        if is_real(et) {
+            write_f64(&mut out.bytes, et, i, coord as f64);
+        } else {
+            write_int(&mut out.bytes, et, i, coord);
         }
-        _ => return Err(InterpError::IotaElementType),
     }
     Ok(out)
 }
@@ -1704,17 +1688,24 @@ fn reverse(
     result_ty: &TensorType,
 ) -> Result<Tensor, InterpError> {
     let src = lookup_ref(env, operand)?;
-    expect_ty(src, ElementType::F64)?;
+    let shape = &src.ty.shape;
+    let strides = shape_strides(shape);
+    let e = src.elem_size();
     let mut out = Tensor::alloc(result_ty.clone());
-    tensor_rt::tensor_reverse_f64(
-        out.bytes.as_mut_ptr().cast(),
-        src.bytes.as_ptr().cast(),
-        src.elem_count(),
-        src.ty.shape.as_ptr(),
-        src.ty.rank(),
-        dimensions.as_ptr(),
-        dimensions.len(),
-    );
+    for i in 0..src.elem_count() {
+        let j: usize = (0..shape.len())
+            .map(|d| {
+                let c = i / strides[d] % shape[d] as usize;
+                let c = if dimensions.contains(&(d as i64)) {
+                    shape[d] as usize - 1 - c
+                } else {
+                    c
+                };
+                c * strides[d]
+            })
+            .sum();
+        out.bytes[i * e..(i + 1) * e].copy_from_slice(&src.bytes[j * e..(j + 1) * e]);
+    }
     Ok(out)
 }
 
@@ -1726,25 +1717,30 @@ fn pad(
     interior: &[i64],
     result_ty: &TensorType,
 ) -> Result<Tensor, InterpError> {
-    if interior.iter().any(|&v| v != 0) {
-        return Err(InterpError::InteriorPadding);
-    }
     let src = lookup_ref(env, operand)?;
-    expect_ty(src, ElementType::F64)?;
     let pad = lookup_ref(env, padding_value)?;
-    let pad_value = read_f64(&pad.bytes, ElementType::F64, 0);
+    let e = src.elem_size();
     let mut out = Tensor::alloc(result_ty.clone());
-    tensor_rt::tensor_pad_f64(
-        out.bytes.as_mut_ptr().cast(),
-        src.bytes.as_ptr().cast(),
-        out.elem_count(),
-        src.elem_count(),
-        pad_value,
-        result_ty.shape.as_ptr(),
-        src.ty.shape.as_ptr(),
-        src.ty.rank(),
-        low.as_ptr(),
+    for slot in out.bytes.chunks_exact_mut(e) {
+        slot.copy_from_slice(&pad.bytes[..e]);
+    }
+    let (src_strides, out_strides) = (
+        shape_strides(&src.ty.shape),
+        shape_strides(&result_ty.shape),
     );
+    'elements: for i in 0..src.elem_count() {
+        let mut o = 0;
+        for d in 0..src.ty.rank() {
+            let c = (i / src_strides[d]) as i64 % src.ty.shape[d];
+            let step = 1 + interior.get(d).copied().unwrap_or(0);
+            let p = low.get(d).copied().unwrap_or(0) + c * step;
+            if p < 0 || p >= result_ty.shape[d] {
+                continue 'elements;
+            }
+            o += p as usize * out_strides[d];
+        }
+        out.bytes[o * e..(o + 1) * e].copy_from_slice(&src.bytes[i * e..(i + 1) * e]);
+    }
     Ok(out)
 }
 

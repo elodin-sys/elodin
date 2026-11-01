@@ -610,12 +610,6 @@ macro_rules! cmp_op {
     };
 }
 
-cmp_op!(tensor_cmp_eq_f64, f64, |a: f64, b: f64| a == b);
-cmp_op!(tensor_cmp_lt_f64, f64, |a: f64, b: f64| a < b);
-cmp_op!(tensor_cmp_le_f64, f64, |a: f64, b: f64| a <= b);
-cmp_op!(tensor_cmp_gt_f64, f64, |a: f64, b: f64| a > b);
-cmp_op!(tensor_cmp_ge_f64, f64, |a: f64, b: f64| a >= b);
-cmp_op!(tensor_cmp_ne_f64, f64, |a: f64, b: f64| a != b);
 cmp_op!(tensor_cmp_eq_i64, i64, |a: i64, b: i64| a == b);
 cmp_op!(tensor_cmp_ne_i64, i64, |a: i64, b: i64| a != b);
 cmp_op!(tensor_cmp_lt_i64, i64, |a: i64, b: i64| a < b);
@@ -820,6 +814,35 @@ reduce_op!(tensor_reduce_prod_i64, i64, 1, |acc: i64, v: i64| acc
 reduce_op!(tensor_reduce_max_i64, i64, i64::MIN, |acc: i64, v: i64| acc
     .max(v));
 reduce_op!(tensor_reduce_min_i64, i64, i64::MAX, |acc: i64, v: i64| acc
+    .min(v));
+reduce_op!(tensor_reduce_max_u64, u64, 0, |acc: u64, v: u64| acc.max(v));
+reduce_op!(tensor_reduce_min_u64, u64, u64::MAX, |acc: u64, v: u64| acc
+    .min(v));
+reduce_op!(tensor_reduce_sum_f32, f32, 0.0, |acc: f32, v: f32| acc
+    .algebraic_add(v));
+reduce_op!(tensor_reduce_prod_f32, f32, 1.0, |acc: f32, v: f32| acc * v);
+reduce_op!(
+    tensor_reduce_max_f32,
+    f32,
+    f32::NEG_INFINITY,
+    |acc: f32, v: f32| if v > acc { v } else { acc }
+);
+reduce_op!(
+    tensor_reduce_min_f32,
+    f32,
+    f32::INFINITY,
+    |acc: f32, v: f32| if v < acc { v } else { acc }
+);
+reduce_op!(tensor_reduce_sum_i32, i32, 0, |acc: i32, v: i32| acc
+    .wrapping_add(v));
+reduce_op!(tensor_reduce_prod_i32, i32, 1, |acc: i32, v: i32| acc
+    .wrapping_mul(v));
+reduce_op!(tensor_reduce_max_i32, i32, i32::MIN, |acc: i32, v: i32| acc
+    .max(v));
+reduce_op!(tensor_reduce_min_i32, i32, i32::MAX, |acc: i32, v: i32| acc
+    .min(v));
+reduce_op!(tensor_reduce_max_u32, u32, 0, |acc: u32, v: u32| acc.max(v));
+reduce_op!(tensor_reduce_min_u32, u32, u32::MAX, |acc: u32, v: u32| acc
     .min(v));
 reduce_op!(tensor_reduce_and_i1, u8, 1, |acc: u8, v: u8| acc
     & u8::from(v != 0));
