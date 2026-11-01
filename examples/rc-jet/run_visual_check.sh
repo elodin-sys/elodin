@@ -3,15 +3,16 @@ set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
-# The scene references this repo's assets (mojave atlas, drone GLB); an
-# inherited ELODIN_ASSETS (e.g. from the fsw dev shell) would point elsewhere.
+# Never inherit another project's asset root.
 export ELODIN_ASSETS="$PWD/assets"
 
-ATLAS="assets/terrains/planar/mojave_rc_field/config.tc"
-if [[ ! -f "$ATLAS" ]]; then
-  echo "missing terrain atlas: $ATLAS" >&2
-  echo "run ./scripts/prepare_editor_terrain_region.sh mojave_rc_field first" >&2
-  exit 2
+if [[ "${ELODIN_RC_JET_TERRAIN:-static}" == "atlas" ]]; then
+  ATLAS="assets/terrains/planar/mojave_rc_field/config.tc"
+  if [[ ! -f "$ATLAS" ]]; then
+    echo "missing terrain atlas: $ATLAS" >&2
+    echo "run ./scripts/prepare_editor_terrain_region.sh mojave_rc_field first" >&2
+    exit 2
+  fi
 fi
 
 OUT="${ELODIN_LWIR_VISUAL_OUT:-/tmp/rc-jet-lwir-visual-check}"
