@@ -136,8 +136,9 @@ A lightweight representation with these key types:
   control flow, indexing, LAPACK custom calls, and type conversion
 - **`TensorType`**: shape (Vec of i64) + element type (F64, F32, I64, I32, UI32, I1, etc.)
 - **`GatherDims`**: offset_dims, collapsed_slice_dims, start_index_map, index_vector_dim
+- **`ScatterDims`**: update_window_dims, inserted_window_dims, the two batching dim lists, scatter_dims_to_operand_dims, index_vector_dim; `ScatterCombiner` is Set, Add, Multiply, Minimum or Maximum
 - **`DotDims`**: contracting and batching dimension lists for `dot_general`
-- **`ReduceOp`**: Add, Minimum, Maximum, And, Or
+- **`ReduceOp`**: Add, Multiply, Minimum, Maximum, And, Or
 
 ### Stage 3.5: Constant folding (`const_fold.rs`)
 
@@ -445,8 +446,8 @@ jit_builder.symbol("tensor_broadcast_nd_f64", tensor_broadcast_nd_f64 as *const 
 | Broadcast | broadcast_f64, broadcast_nd_f64, broadcast_i32 | N-D shape-aware |
 | Shape | transpose_f64, transpose_nd_f64, concat_nd_f64 | Element-size-aware concat |
 | Matrix | matmul_f64 | Row-major C = A·B; used by pointer-ABI `dot_general` batched fast path |
-| Reduce | reduce_sum_f64, reduce_max_f64, reduce_min_f64 | Outer x inner dimensions |
-| Indexing | gather_f64, gather_nd_f64, scatter_f64 | N-D with element-size param |
+| Reduce | reduce_{sum,prod,max,min}_{f64,i64}, reduce_{and,or}_i1 | One axis per call, viewed as outer x axis x after |
+| Indexing | gather_f64, gather_nd_f64, scatter | N-D with element-size param; scatter reads a stride table built at compile time |
 | Dynamic | dynamic_slice_f64, dynamic_update_slice_f64 | Runtime index values |
 | Utility | memcpy, select_f64, iota_nd_f64 | |
 
@@ -762,7 +763,7 @@ Cranelift JIT, and assert the outputs match before returning the JIT bytes to
 the golden assertions. Integer results are compared byte-for-byte; `f64` within
 `1e-12 * (1 + max(|a|, |b|))` and `f32` within `1e-6` on the same scale (NaN
 matches NaN). Ops the interpreter does not implement (LAPACK `custom_call`,
-scatter, sort, and the other variants whose error says "does not implement" or
+sort, and the other variants whose error says "does not implement" or
 "not implemented") log `[interp skipped]` and continue as JIT-only golden tests. Set
 `ELODIN_CRANELIFT_INTERP_STRICT=1` to turn those skips into failures. E2E
 binaries that call `compile_module` directly stay JIT-only.
@@ -843,7 +844,7 @@ ELODIN_BACKEND=cranelift bash scripts/ci/regress.sh --all   # full regression su
 | chlo.atan | yes | yes | yes | via libm (unary, distinct from atan2) |
 | chlo.sinh | yes | yes | yes | via libm |
 | chlo.cosh | yes | yes | yes | via libm |
-| chlo.erfc | yes | yes | yes | Cephes rational approximation |
+| chlo.erfc | yes | yes | yes | via libm |
 | chlo.erf_inv | yes | yes | yes | Cephes ndtri-based, ~15 digits f64 |
 | chlo.square | yes | yes | yes | lowered to Multiply{x, x} |
 | stablehlo.expm1 | yes | yes | yes | exp(x)-1, via libm |
@@ -899,15 +900,15 @@ ELODIN_BACKEND=cranelift bash scripts/ci/regress.sh --all   # full regression su
 ### Linear Algebra
 | Op | Tested | Notes |
 |----|--------|-------|
-| stablehlo.dot_general | yes | scalar + pointer ABI: 1D inner product, rank1-rank2, matvec, matmul, batched rank-2; pointer batched fast path when slices are row-major `[…,m,k]·[…,k,n]` ([details](#pointer-abi-dot_general-and-concatenate)) |
-| stablehlo.reduce | yes | add/min/max (f64 + i64), and/or, all dimensions |
-| stablehlo.reduce (multi-operand) | yes | argmin/argmax pattern: 2-operand reduce with value+index |
+| stablehlo.dot_general | yes | scalar ABI: any batch and contracting dims; pointer ABI: standard-layout inner product, matvec and matmul, plus a batched fast path when slices are row-major `[…,m,k]·[…,k,n]` ([details](#pointer-abi-dot_general-and-concatenate)) |
+| stablehlo.reduce | yes | add/multiply/min/max (f64 + i64), and/or (i1), any set of dimensions |
+| stablehlo.reduce (multi-operand) | yes | argmin/argmax pattern: 2-operand reduce with value+index, direction from the first compare; the scalar ABI reduces the whole operand, the pointer ABI its last axis |
 
 ### Indexing
 | Op | Tested | Notes |
 |----|--------|-------|
 | stablehlo.gather | yes | row-select + N-D, byte-generic for non-f64 data, i32/ui32 indices widened |
-| stablehlo.scatter | yes | byte-generic for non-f64 data, i32/i64 indices |
+| stablehlo.scatter | yes | full dimension numbers incl. batching dims; set on any type, add/multiply/min/max on f64 and i64; updates whose window starts out of bounds are dropped |
 
 ### Control Flow
 | Op | Tested | Notes |
@@ -1083,10 +1084,10 @@ directly.
   size cap would further trim per-tick work. Low ROI without a workload
   that surfaces this pattern.
 
-- **Cephes-backed scalar folds for `ErfInv` / `Erfc`.** `const_fold`
-  handles every other scalar libm op but skips these to avoid pulling a
-  Cephes dependency into the compiler. Add if a future sim benefits from
-  pre-evaluating inverse-erf at compile time.
+- **Scalar folds for `ErfInv` / `Erfc`.** `const_fold` handles every
+  other scalar libm op but skips these; they could fold through
+  `libm::erfc` and `tensor_rt::erf_inv_impl`. Add if a future sim benefits
+  from pre-evaluating them at compile time.
 
 - **Persistent fold cache.** Hash the input MLIR + compiler version stamp
   and cache the folded IR to disk. Skips parse + fold on unchanged MLIR

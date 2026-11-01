@@ -27,6 +27,12 @@
 - **(fix)** `World.to_jax` accepts systems that read components no system writes, such as parameters or the tick.
 - **(feat)** Add `JaxSim.step_fn`, `JaxSim.get` and `JaxSim.set`, pure functions of a state for `jax.jit`, `jax.vmap` and `jax.lax.scan`. `JaxSim.set_state` with `entity_name=None` writes every entity's value.
 - **(fix)** The Cranelift backend no longer confuses values across `lax.cond`, `lax.switch`, `while_loop`, `fori_loop`, `map` and `sort` bodies. Such programs could return wrong values; in `examples/drone`, all four motors dropped to minimum the first time the mixer saturated.
+- **(fix)** The Cranelift backend reduces over any axis or set of axes. Sums, products, minimums and maximums over a leading or middle axis, over several axes, or of arrays with three or more dimensions could return wrong values, for example `jnp.sum(x, axis=0)` in a system mapped over several entities.
+- **(fix)** The Cranelift backend computes `jnp.prod` instead of a sum, and `jnp.argmax` instead of `jnp.argmin`.
+- **(fix)** The Cranelift backend computes `jax.scipy.special.erfc` accurately; results were off by up to 7%.
+- **(fix)** The Cranelift backend applies `jnp.where` with a scalar condition to every element in large systems; elements after the first could take arbitrary values.
+- **(fix)** The Cranelift backend writes `.at[...]` updates with column, multi-dimensional, slice and per-entity indices to the indexed elements, and `.at[...].add`, `.multiply`, `.min` and `.max` combine with the existing values instead of overwriting them.
+- **(fix)** The Cranelift backend evaluates matrix products with any batch and contracting dimensions when every array in a system has at most 64 elements. Batched products such as `M @ v` with a constant `v` in a system mapped over several entities could evaluate to zeros.
 - **(fix:examples)** `examples/drone/main.py --telemetry` runs at the configured simulation rate.
 - **(fix:aleph)** The `mekf` service subtracts the gyro bias from `gyro_est` once instead of twice, and keeps estimating attitude from the remaining sensors when the magnetometer or accelerometer reads zero, as sensor-fw sends when the BMM350 is missing. With one sensor left it holds the gyro bias and integrates rotation about that sensor's axis from the gyro alone, so without the magnetometer yaw drifts with the residual gyro bias. `mag_cal` reads zero while the magnetometer is missing.
 - **(breaking)** An `object_3d` ellipsoid with `orientation=absolute` applies `scale` along the frame's x, y, z; it previously swapped y and z.
