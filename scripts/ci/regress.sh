@@ -107,9 +107,11 @@ run_example() (
   local scratch_dir=""
   local db_path=""
   local export_dir=""
+  local jax_prefix=""
   local run_log=""
   local discovered_db_path=""
   local csv_status=0
+  local jax_status=0
   local perf_status=0
   local i
   local -a bench_args=(bench --ticks "${ticks}" --profile --detail)
@@ -211,17 +213,29 @@ PY
   compare_args=(
     --example "${example_name}"
     --baseline-dir "${baseline_dir}"
-    --candidate-dir "${export_dir}"
     --tolerances "${tolerances_file}"
   )
   if [[ -n "${file_prefix}" ]]; then
     compare_args+=(--file-prefix "${file_prefix}")
   fi
 
-  if "${python_bin}" scripts/ci/compare_baseline_csv.py "${compare_args[@]}"; then
+  if "${python_bin}" scripts/ci/compare_baseline_csv.py "${compare_args[@]}" --candidate-dir "${export_dir}"; then
     :
   else
     csv_status=$?
+  fi
+
+  echo "==> [${example_name}] comparing a jax-cpu run against the same baseline"
+  jax_prefix="${scratch_dir}/jax-cpu"
+  mkdir -p "${jax_prefix}.db" "${jax_prefix}-csv"
+  if ELODIN_BACKEND=jax-cpu ELODIN_DB_PATH="${jax_prefix}.db" "${python_bin}" "${example_entrypoint}" "${bench_args[@]}" > "${jax_prefix}.log" 2>&1 \
+    && elodin-db export --format csv --flatten --include-private --output "${jax_prefix}-csv" "${jax_prefix}.db" > /dev/null \
+    && "${python_bin}" scripts/ci/compare_baseline_csv.py "${compare_args[@]}" --candidate-dir "${jax_prefix}-csv"; then
+    :
+  else
+    jax_status=1
+    tail -n 20 "${jax_prefix}.log"
+    echo "FAIL: [${example_name}] the jax-cpu run does not match the baseline"
   fi
 
   if [[ -n "${base_site}" ]]; then
@@ -247,7 +261,7 @@ PY
     fi
   fi
 
-  if [[ "${csv_status}" -ne 0 || "${perf_status}" -ne 0 ]]; then
+  if [[ "${csv_status}" -ne 0 || "${jax_status}" -ne 0 || "${perf_status}" -ne 0 ]]; then
     return 1
   fi
 )

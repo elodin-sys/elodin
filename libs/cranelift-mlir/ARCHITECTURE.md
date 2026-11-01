@@ -136,8 +136,9 @@ A lightweight representation with these key types:
   control flow, indexing, LAPACK custom calls, and type conversion
 - **`TensorType`**: shape (Vec of i64) + element type (F64, F32, I64, I32, UI32, I1, etc.)
 - **`GatherDims`**: offset_dims, collapsed_slice_dims, start_index_map, index_vector_dim
+- **`ScatterDims`**: update_window_dims, inserted_window_dims, the two batching dim lists, scatter_dims_to_operand_dims, index_vector_dim; `ScatterCombiner` is Set, Add, Multiply, Minimum or Maximum
 - **`DotDims`**: contracting and batching dimension lists for `dot_general`
-- **`ReduceOp`**: Add, Minimum, Maximum, And, Or
+- **`ReduceOp`**: Add, Multiply, Minimum, Maximum, And, Or
 
 ### Stage 3.5: Constant folding (`const_fold.rs`)
 
@@ -308,6 +309,19 @@ When a pointer-ABI function calls a scalar-ABI callee, the reverse happens.
 The `main` function always uses pointer ABI (it receives raw byte pointers from the
 simulation runtime), so calls from `main` to scalar callees always marshal.
 
+### Pointer-ABI element types
+
+Pointer-ABI lowerings never read a buffer at another element width. An op without a
+runtime kernel for its element type (f32, unsigned and i1 for most elementwise ops,
+compare, clamp and sign) loads its lanes, lowers through the scalar-ABI code, and stores
+the result (`lower_mem_lanes`, chosen by `mem_has_kernel`). Ops whose kernels exist for
+f64 only (`map`, convolution, FFT, ...) fail to compile for other types.
+
+Float `reduce` and f64 `dot_general` take the scalar-ABI route whenever their tensors fit
+the scalar ABI, although kernels exist: the kernels sum in a different order, and the
+same `jnp.dot` must round identically in a pointer-ABI function and in a scalar-ABI
+callee such as a `fori_loop` body, or a comparison between the two can flip a branch.
+
 ---
 
 ## SIMD: Packed-f64 Lane Representation
@@ -356,7 +370,7 @@ All on `ElementType::F64` with `num_elements >= 2`:
 | Family | Cranelift lowering |
 |---|---|
 | `add` / `subtract` / `multiply` / `divide` | `fadd` / `fsub` / `fmul` / `fdiv` on F64X2 per chunk |
-| `maximum` / `minimum` | `fcmp` (I64X2 mask) → `bitcast` to F64X2 → `bitselect`, NaN-propagation matches scalar path |
+| `maximum` / `minimum` | `fmax` / `fmin` on F64X2 per chunk (NaN propagates, as in XLA) |
 | `constant` (DenseScalar / DenseSplat) / `broadcast_in_dim` (1→N) | `splat.F64X2` |
 | `negate` / `sqrt` / `abs` / `floor` / `ceil` / `nearest` / `rsqrt` | polymorphic Cranelift IR instruction per chunk |
 | Rank-1·rank-1 dot / matvec / standard matmul with k ≥ 4 | `fmul.F64X2` + F64X2 accumulator + horizontal reduce |
@@ -444,9 +458,11 @@ jit_builder.symbol("tensor_broadcast_nd_f64", tensor_broadcast_nd_f64 as *const 
 | Elementwise | add, sub, mul, div, negate, sqrt, abs, ... | f64, i64, i32 variants |
 | Broadcast | broadcast_f64, broadcast_nd_f64, broadcast_i32 | N-D shape-aware |
 | Shape | transpose_f64, transpose_nd_f64, concat_nd_f64 | Element-size-aware concat |
-| Matrix | matmul_f64 | Row-major C = A·B; used by pointer-ABI `dot_general` batched fast path |
-| Reduce | reduce_sum_f64, reduce_max_f64, reduce_min_f64 | Outer x inner dimensions |
-| Indexing | gather_f64, gather_nd_f64, scatter_f64 | N-D with element-size param |
+| Matrix | matmul_f64, dot_general | `matmul_f64` for row-major layouts; `dot_general` for any other dims in f64, f32 or wrapping integers |
+| Reduce | reduce_{sum,prod,max,min}_{f64,f32,i64,i32}, reduce_{max,min}_{u64,u32}, reduce_{and,or}_i1 | One axis per call, viewed as outer x axis x after |
+| Argmin/argmax | argminmax | One axis, any value type, i32 or i64 indices; the first NaN wins, ties keep the smaller index |
+| Sort | sort | Stable, any element types, lexicographic over the comparator's keys, NaN last |
+| Indexing | gather_f64, gather_nd_f64, scatter | N-D with element-size param; scatter reads a stride table built at compile time |
 | Dynamic | dynamic_slice_f64, dynamic_update_slice_f64 | Runtime index values |
 | Utility | memcpy, select_f64, iota_nd_f64 | |
 
@@ -477,19 +493,22 @@ pointer-ABI threshold.
 
 **`stablehlo.dot_general`**
 
-The scalar path has a dedicated batched rank-2 handler (`batching_dims=[0]`,
-contracting on dim 1). The pointer-ABI path adds a `matmul_f64` fast path only
-when the batch slices are contiguous row-major `m×k` and `k×n` blocks:
+Both paths walk the same table of `(size, lhs stride, rhs stride)` axes (`dot_axes`):
+batch, lhs free and rhs free axes for the output, then the contracting axes. The
+pointer-ABI path calls `matmul_f64` when the f64 batch slices are contiguous row-major
+`m×k` and `k×n` blocks:
 
-- Leading batch dims: `[0, 1, …, nb−1]` on both operands
+- Leading batch dims: `[0, 1, …, nb−1]` on both operands (none for a plain matmul)
 - Single contracting dim on lhs: `lhs_contracting[0] == rank(lhs) − 1`
 - Single contracting dim on rhs: `rhs_contracting[0] == nb` (contracting axis
   immediately after the batch axes — e.g. `[batch…, k, n]` not `[batch…, n, k]`)
 
 Each batch index `b` calls `matmul_f64` on slice offsets `b·m·k` and `b·k·n`.
 This covers the common Elodin pattern `tensor<B×K> · tensor<B×K> → tensor<B>`
-(per-entity inner products in `six_dof`). Layouts outside the guard fall back
-to the generic pointer-ABI `dot_general` lowering.
+(per-entity inner products in `six_dof`). Every other layout calls
+`tensor_dot_general`, which walks the axis table. f64 products small enough for the
+scalar ABI lower through the scalar code instead
+([Pointer-ABI element types](#pointer-abi-element-types)).
 
 Golden tests: `test_concatenate_dim1_four_operands_mem`, `test_dot_general_batched_mem`
 in [`tests/ops.rs`](tests/ops.rs).
@@ -761,8 +780,8 @@ helpers parse once, execute the StableHLO interpreter (`src/interp.rs`) and the
 Cranelift JIT, and assert the outputs match before returning the JIT bytes to
 the golden assertions. Integer results are compared byte-for-byte; `f64` within
 `1e-12 * (1 + max(|a|, |b|))` and `f32` within `1e-6` on the same scale (NaN
-matches NaN). Ops the interpreter does not implement (LAPACK `custom_call`,
-scatter, sort, and the other variants whose error says "does not implement" or
+matches NaN). Ops the interpreter does not implement (LAPACK `custom_call`
+and the other variants whose error says "does not implement" or
 "not implemented") log `[interp skipped]` and continue as JIT-only golden tests. Set
 `ELODIN_CRANELIFT_INTERP_STRICT=1` to turn those skips into failures. E2E
 binaries that call `compile_module` directly stay JIT-only.
@@ -778,7 +797,7 @@ binaries that call `compile_module` directly stay JIT-only.
   and lowering regressions surface before they reach customer sims.
 - **Regression suite** (`scripts/ci/regress.sh --all`) runs every example
   end-to-end and diffs CSV telemetry against committed baselines with per-file
-  tolerances.
+  tolerances, then runs it again on jax-cpu against the same baseline.
 - **Checkpoint verifier** is the authoritative correctness gate for customer
   MLIRs: it compares every Cranelift output element against the XLA reference
   bit-for-bit (or within a tight tolerance). Always run it on new customer
@@ -810,6 +829,9 @@ ELODIN_BACKEND=cranelift bash scripts/ci/regress.sh --all   # full regression su
 
 ## Supported Operations
 
+Types in a Pointer ABI column are those with runtime kernels; other types lower lane by
+lane ([Pointer-ABI element types](#pointer-abi-element-types)).
+
 ### Arithmetic
 | Op | Tested | Scalar ABI | Pointer ABI | Notes |
 |----|--------|-----------|-------------|-------|
@@ -821,8 +843,8 @@ ELODIN_BACKEND=cranelift bash scripts/ci/regress.sh --all   # full regression su
 | stablehlo.sqrt | yes | yes | yes | inline Cranelift instruction |
 | stablehlo.rsqrt | yes | yes | yes | 1/sqrt(x) |
 | stablehlo.power | yes | yes | yes | via libm pow |
-| stablehlo.maximum | yes | yes | yes (f64/i64/i32) | |
-| stablehlo.minimum | yes | yes | yes (f64/i64/i32) | |
+| stablehlo.maximum | yes | yes | yes (f64/i64/i32) | floats as in XLA: NaN propagates, +0 is above -0 |
+| stablehlo.minimum | yes | yes | yes (f64/i64/i32) | floats as in XLA: NaN propagates, -0 is below +0 |
 | stablehlo.abs | yes | yes | yes (f64/i64/i32) | |
 | stablehlo.floor | yes | yes | yes | |
 | stablehlo.ceil | yes | yes | yes | |
@@ -843,7 +865,7 @@ ELODIN_BACKEND=cranelift bash scripts/ci/regress.sh --all   # full regression su
 | chlo.atan | yes | yes | yes | via libm (unary, distinct from atan2) |
 | chlo.sinh | yes | yes | yes | via libm |
 | chlo.cosh | yes | yes | yes | via libm |
-| chlo.erfc | yes | yes | yes | Cephes rational approximation |
+| chlo.erfc | yes | yes | yes | via libm |
 | chlo.erf_inv | yes | yes | yes | Cephes ndtri-based, ~15 digits f64 |
 | chlo.square | yes | yes | yes | lowered to Multiply{x, x} |
 | stablehlo.expm1 | yes | yes | yes | exp(x)-1, via libm |
@@ -899,25 +921,25 @@ ELODIN_BACKEND=cranelift bash scripts/ci/regress.sh --all   # full regression su
 ### Linear Algebra
 | Op | Tested | Notes |
 |----|--------|-------|
-| stablehlo.dot_general | yes | scalar + pointer ABI: 1D inner product, rank1-rank2, matvec, matmul, batched rank-2; pointer batched fast path when slices are row-major `[…,m,k]·[…,k,n]` ([details](#pointer-abi-dot_general-and-concatenate)) |
-| stablehlo.reduce | yes | add/min/max (f64 + i64), and/or, all dimensions |
-| stablehlo.reduce (multi-operand) | yes | argmin/argmax pattern: 2-operand reduce with value+index |
+| stablehlo.dot_general | yes | any batch and contracting dims on both ABIs; the pointer ABI calls `matmul_f64` for row-major layouts and `tensor_dot_general` otherwise ([details](#pointer-abi-dot_general-and-concatenate)) |
+| stablehlo.reduce | yes | add/multiply/min/max (f64, f32, i64, i32; min/max on unsigned), and/or (i1), any set of dimensions |
+| stablehlo.reduce (multi-operand) | yes | argmin/argmax pattern: 2-operand reduce with value+index over one axis, any value type, i32 or i64 indices; the first NaN wins and ties keep the smaller index, as on jax-cpu |
 
 ### Indexing
 | Op | Tested | Notes |
 |----|--------|-------|
 | stablehlo.gather | yes | row-select + N-D, byte-generic for non-f64 data, i32/ui32 indices widened |
-| stablehlo.scatter | yes | byte-generic for non-f64 data, i32/i64 indices |
+| stablehlo.scatter | yes | full dimension numbers incl. batching dims; set on any type, add/multiply/min/max on f64 and i64; updates whose window starts out of bounds are dropped |
 
 ### Control Flow
 | Op | Tested | Notes |
 |----|--------|-------|
 | stablehlo.while | yes | outer-scope access, cross-ABI calls, nested |
 | stablehlo.case | yes | multi-branch dispatch |
-| stablehlo.sort | yes | single-operand and 2-operand (argsort), comparator region, ascending/descending |
+| stablehlo.sort | yes | stable, any element types and axis, lexicographic over the comparator's keys, ascending/descending; NaN last and -0 equal to 0, as JAX's comparators order them |
 | stablehlo.map | yes | arbitrary compiled region body, variadic operands |
-| stablehlo.reduce_window | yes | compiled reducer, full window iteration with dilations/padding |
-| stablehlo.select_and_scatter | yes | compiled select + scatter regions, window-based |
+| stablehlo.reduce_window | yes | f64, f32 and integers on both ABIs, compiled reducer, full window iteration with dilations/padding; window attributes checked against the shapes |
+| stablehlo.select_and_scatter | yes | f64, f32 and integers on both ABIs, compiled select + scatter regions; `select(current, candidate)` true keeps the current element, as in XLA |
 | stablehlo.convolution | yes | N-D, dimension_numbers, strides, padding, dilations, grouping |
 | stablehlo.real_dynamic_slice | yes | runtime tensor bounds for start/limit/strides |
 | stablehlo.batch_norm_inference | yes | feature-axis broadcast, epsilon/feature_index attrs |
@@ -996,8 +1018,10 @@ improvement ideas live in [Opportunities](#opportunities).
 ## Opportunities
 
 Coverage of every StableHLO op JAX emits for single-device CPU execution
-is complete and the backend is validated against both the internal
-regression suite and production customer simulations. Nothing below is
+is complete and the backend is validated against jax-cpu (the parity tests
+in `libs/nox-py/python/tests/test_backend_parity.py`, and a jax-cpu run of
+every regression example), the internal regression suite and production
+customer simulations. Nothing below is
 blocking any known workload; this section is a forward-looking menu of
 improvements with predicted benefit.
 
@@ -1043,6 +1067,10 @@ directly.
   marshaling between SSA and slot for the common case. Complements
   elision: elision keeps intermediates in SSA across a single chain;
   mixed-ABI keeps them in SSA for a value's full lifetime.
+  `lower_mem_lanes` is a per-op version of this today: ops without a
+  pointer-ABI kernel for their type, and float dots and sums small enough
+  for the scalar ABI, already run the scalar-ABI code inside pointer-ABI
+  functions, but load and store their lanes around every op.
 
 - **Adaptive SIMD lane width.** The packed-f64 lowering uses `F64X2`
   uniformly because it's the only native lane width on every deployment
@@ -1083,10 +1111,10 @@ directly.
   size cap would further trim per-tick work. Low ROI without a workload
   that surfaces this pattern.
 
-- **Cephes-backed scalar folds for `ErfInv` / `Erfc`.** `const_fold`
-  handles every other scalar libm op but skips these to avoid pulling a
-  Cephes dependency into the compiler. Add if a future sim benefits from
-  pre-evaluating inverse-erf at compile time.
+- **Scalar folds for `ErfInv` / `Erfc`.** `const_fold` handles every
+  other scalar libm op but skips these; they could fold through
+  `libm::erfc` and `tensor_rt::erf_inv_impl`. Add if a future sim benefits
+  from pre-evaluating them at compile time.
 
 - **Persistent fold cache.** Hash the input MLIR + compiler version stamp
   and cache the folded IR to disk. Skips parse + fold on unchanged MLIR
@@ -1114,25 +1142,31 @@ version and flags:
 unimplemented target. It's internal to eigensolvers and all tested customer
 simulations use `dsyevd` directly; implementable via faer if ever surfaced.
 
-**Type permutations.** A small number of pointer-ABI paths remain f64-only
-because no simulation has exercised them. All low-risk to add:
+**Type permutations.** Pointer-ABI ops lower lane by lane for types without a kernel, so
+a type is missing on the pointer ABI only where the scalar ABI lacks it too: `power` on
+integers, which JAX does not emit (`jnp.power` on integers multiplies). `map`,
+convolution, `batch_norm_inference`, Cholesky, triangular solve, FFT and `rng` stay
+f64-only, and argmin/argmax over more than one dimension (which JAX does not emit) fails
+to compile.
 
-| Op path | Missing types |
-|---------|---------------|
-| `power` pointer-ABI | integer |
-| `pad` pointer-ABI | integer |
-| `matmul` pointer-ABI | integer |
-| `convert` F32↔I64/UI64 | missing pairs |
+**Empty tensors.** `TensorType::num_elements()` counts a tensor with a zero-size
+dimension as one element, so lowerings treat it as holding one value, and a reduce
+over one fails to compile. Supporting them means dropping that clamp and auditing
+every lowering.
 
 ### Structural
 
-- **Sort comparator region.** `stablehlo.sort` currently classifies a
-  comparator as ascending or descending by structural inspection. The general
-  path — compile the comparator via `compile_region_as_function` (the
-  mechanism already used by `map`, `reduce_window`, and `select_and_scatter`) —
-  has not been needed because the heuristic has not misclassified any known
-  JAX output. Upgrade is straightforward when a non-trivial comparator first
-  appears.
+- **Sort comparator region.** `stablehlo.sort` reads its comparator
+  structurally: the number of key operands, and descending if any compare is
+  `GT` or `GE`. The kernel then orders keys in total order with NaN last and
+  -0 equal to 0, reversed when descending. That matches every comparator JAX
+  emits (all ascending; `jnp.sort(..., descending=True)` reverses an
+  ascending sort), but not every comparator: a descending `FLOAT` compare
+  over NaN keys, for one, puts NaN first where the interpreter, which
+  evaluates the region, leaves it in place. The general path — compile the
+  comparator via `compile_region_as_function` (the mechanism already used
+  by `map`, `reduce_window`, and `select_and_scatter`) — is straightforward
+  when a non-trivial comparator first appears.
 
 - **LAPACK `custom_call` from pointer-ABI functions.** LAPACK lowering is
   wired on the scalar path only. In practice LAPACK buffers are always small

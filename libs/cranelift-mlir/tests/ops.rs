@@ -1894,6 +1894,36 @@ module @module {
     assert_f64s_close(&read_f64s(&out[0]), &[10.0, 200.0, 30.0]);
 }
 
+/// `jnp.where(scalar_bool, a, b)`: the one-byte predicate picks a whole operand on both ABIs.
+#[test]
+fn test_select_scalar_predicate() {
+    let mlir_f64 = r#"
+module @module {
+  func.func public @main(%arg0: tensor<i1>, %arg1: tensor<8xf64>, %arg2: tensor<8xf64>) -> tensor<8xf64> {
+    %0 = stablehlo.select %arg0, %arg1, %arg2 : tensor<i1>, tensor<8xf64>
+    return %0 : tensor<8xf64>
+  }
+}
+"#;
+    let mlir_i64 = mlir_f64.replace("f64", "i64");
+    let a: Vec<i64> = (1..=8).collect();
+    let b: Vec<i64> = a.iter().map(|v| -v).collect();
+    let to_f64 = |v: &[i64]| v.iter().map(|&x| x as f64).collect::<Vec<_>>();
+    for pred in [1u8, 0] {
+        let want = if pred == 1 { &a } else { &b };
+        for run in [run_mlir, run_mlir_mem] {
+            let out = run(
+                mlir_f64,
+                &[&[pred], &f64_buf(&to_f64(&a)), &f64_buf(&to_f64(&b))],
+                &[64],
+            );
+            assert_eq!(read_f64s(&out[0]).as_ref(), to_f64(want).as_slice());
+            let out = run(&mlir_i64, &[&[pred], &i64_buf(&a), &i64_buf(&b)], &[64]);
+            assert_eq!(&read_i64s(&out[0]), want);
+        }
+    }
+}
+
 #[test]
 fn test_convert_i64_to_f64_mem() {
     let mlir = r#"
@@ -2050,6 +2080,283 @@ module @module {
     let in0 = f64_buf(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
     let out = run_mlir_mem(mlir, &[&in0], &[16]);
     assert_f64s_close(&read_f64s(&out[0]), &[6.0, 15.0]);
+}
+
+fn reduce_mlir(shape: &[usize], dims: &[usize], op: &str, init: &str, ty: &str) -> String {
+    let src: String = shape.iter().map(|d| format!("{d}x")).collect();
+    let out: String = (0..shape.len())
+        .filter(|a| !dims.contains(a))
+        .map(|a| format!("{}x", shape[a]))
+        .collect();
+    let dims = dims
+        .iter()
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "module @module {{
+  func.func public @main(%arg0: tensor<{src}{ty}>) -> tensor<{out}{ty}> {{
+    %init = stablehlo.constant dense<{init}> : tensor<{ty}>
+    %0 = stablehlo.reduce(%arg0 init: %init) applies stablehlo.{op} across dimensions = [{dims}] : (tensor<{src}{ty}>, tensor<{ty}>) -> tensor<{out}{ty}>
+    return %0 : tensor<{out}{ty}>
+  }}
+}}"
+    )
+}
+
+fn reduce_reference(
+    shape: &[usize],
+    x: &[f64],
+    dims: &[usize],
+    init: f64,
+    f: fn(f64, f64) -> f64,
+) -> Vec<f64> {
+    let kept: Vec<usize> = (0..shape.len()).filter(|a| !dims.contains(a)).collect();
+    let mut out = vec![init; kept.iter().map(|&a| shape[a]).product()];
+    for (flat, &v) in x.iter().enumerate() {
+        let mut coords = vec![0; shape.len()];
+        let mut rem = flat;
+        for a in (0..shape.len()).rev() {
+            coords[a] = rem % shape[a];
+            rem /= shape[a];
+        }
+        let o = kept.iter().fold(0, |o, &a| o * shape[a] + coords[a]);
+        out[o] = f(out[o], v);
+    }
+    out
+}
+
+#[test]
+fn test_reduce_any_axes() {
+    let check = |shape: &[usize], dims: &[usize], op, init_text, init, f: fn(f64, f64) -> f64| {
+        let n: usize = shape.iter().product();
+        let x: Vec<f64> = (0..n)
+            .map(|i| ((i * 7) % 11) as f64 + i as f64 / 64.0)
+            .collect();
+        let want = reduce_reference(shape, &x, dims, init, f);
+        let mlir = reduce_mlir(shape, dims, op, init_text, "f64");
+        for run in [run_mlir, run_mlir_mem] {
+            let out = run(&mlir, &[&f64_buf(&x)], &[want.len() * 8]);
+            assert_f64s_close(&read_f64s(&out[0]), &want);
+        }
+    };
+    let add: fn(f64, f64) -> f64 = |a, b| a + b;
+    check(&[2, 3, 4], &[0], "add", "0.0", 0.0, add);
+    check(&[2, 3, 4], &[1], "add", "0.0", 0.0, add);
+    check(&[2, 3, 4], &[2], "add", "0.0", 0.0, add);
+    check(&[2, 3, 4], &[0, 2], "add", "0.0", 0.0, add);
+    check(&[2, 3, 4], &[0, 1, 2], "add", "0.0", 0.0, add);
+    check(&[4, 3], &[0], "add", "0.0", 0.0, add);
+    check(&[6, 6, 6], &[1], "add", "0.0", 0.0, add);
+    let neg_inf = "0xFFF0000000000000";
+    check(
+        &[2, 3, 4],
+        &[1],
+        "maximum",
+        neg_inf,
+        f64::NEG_INFINITY,
+        f64::max,
+    );
+}
+
+/// `jnp.sum(x, axis=0)` for an `x` whose trailing axis is empty fails to compile instead of
+/// crashing.
+#[test]
+fn test_reduce_rejects_empty_tensor() {
+    let mlir = reduce_mlir(&[2, 0], &[0], "add", "0", "i64");
+    let module = cranelift_mlir::parser::parse_module(&mlir).unwrap();
+    for force_pointer_abi_main in [false, true] {
+        let config = cranelift_mlir::lower::CompileConfig {
+            force_pointer_abi_main,
+            ..cranelift_mlir::lower::CompileConfig::from_env()
+        };
+        let Err(err) = cranelift_mlir::lower::compile_module_with_config(&module, config) else {
+            panic!("a reduce over tensor<2x0xi64> compiled");
+        };
+        assert!(err.contains("reduce over the empty tensor"), "{err}");
+    }
+}
+
+#[test]
+fn test_reduce_any_axes_i64() {
+    let shape = [2, 3, 4];
+    let x: Vec<i64> = (0..24).map(|i| (i * 7) % 11 - 5).collect();
+    let xf: Vec<f64> = x.iter().map(|&v| v as f64).collect();
+    let check = |dims: &[usize], op, init_text, init, f: fn(f64, f64) -> f64| {
+        let want: Vec<i64> = reduce_reference(&shape, &xf, dims, init, f)
+            .iter()
+            .map(|&v| v as i64)
+            .collect();
+        let mlir = reduce_mlir(&shape, dims, op, init_text, "i64");
+        for run in [run_mlir, run_mlir_mem] {
+            let out = run(&mlir, &[&i64_buf(&x)], &[want.len() * 8]);
+            assert_eq!(read_i64s(&out[0]), want, "{op} over {dims:?}");
+        }
+    };
+    check(&[0], "add", "0", 0.0, |a, b| a + b);
+    check(
+        &[1],
+        "minimum",
+        "9223372036854775807",
+        f64::INFINITY,
+        f64::min,
+    );
+}
+
+#[test]
+fn test_reduce_prod() {
+    let x = f64_buf(&[1.5, -2.0, 0.5, 3.0, 4.0, -0.25]);
+    let xi = i64_buf(&[2, -3, 5, 7, -1, 4]);
+    let check = |shape: &[usize], dims: &[usize], want: &[f64], want_i: &[i64]| {
+        let f64_mlir = reduce_mlir(shape, dims, "multiply", "1.0", "f64");
+        let i64_mlir = reduce_mlir(shape, dims, "multiply", "1", "i64");
+        for run in [run_mlir, run_mlir_mem] {
+            let out = run(&f64_mlir, &[&x], &[want.len() * 8]);
+            assert_f64s_close(&read_f64s(&out[0]), want);
+            let out = run(&i64_mlir, &[&xi], &[want_i.len() * 8]);
+            assert_eq!(read_i64s(&out[0]), want_i);
+        }
+    };
+    check(&[6], &[0], &[4.5], &[840]);
+    check(&[2, 3], &[1], &[-1.5, -3.0], &[-30, -28]);
+}
+
+/// `jnp.argmax` / `jnp.argmin` of a 5-vector as JAX emits it.
+fn argminmax_mlir(direction: &str, init: &str) -> String {
+    format!(
+        "module @module {{
+  func.func public @main(%arg0: tensor<5xf64>) -> tensor<i64> {{
+    %0 = stablehlo.iota dim = 0 : tensor<5xi64>
+    %cst = stablehlo.constant dense<{init}> : tensor<f64>
+    %c = stablehlo.constant dense<0> : tensor<i64>
+    %1:2 = stablehlo.reduce(%arg0 init: %cst), (%0 init: %c) across dimensions = [0] : (tensor<5xf64>, tensor<5xi64>, tensor<f64>, tensor<i64>) -> (tensor<f64>, tensor<i64>)
+     reducer(%arg1: tensor<f64>, %arg3: tensor<f64>) (%arg2: tensor<i64>, %arg4: tensor<i64>)  {{
+      %2 = stablehlo.compare {direction}, %arg1, %arg3, FLOAT : (tensor<f64>, tensor<f64>) -> tensor<i1>
+      %3 = stablehlo.compare NE, %arg1, %arg1, FLOAT : (tensor<f64>, tensor<f64>) -> tensor<i1>
+      %4 = stablehlo.or %2, %3 : tensor<i1>
+      %5 = stablehlo.compare EQ, %arg1, %arg3, FLOAT : (tensor<f64>, tensor<f64>) -> tensor<i1>
+      %6 = stablehlo.compare LT, %arg2, %arg4, SIGNED : (tensor<i64>, tensor<i64>) -> tensor<i1>
+      %7 = stablehlo.and %5, %6 : tensor<i1>
+      %8 = stablehlo.or %4, %7 : tensor<i1>
+      %9 = stablehlo.select %4, %arg1, %arg3 : tensor<i1>, tensor<f64>
+      %10 = stablehlo.select %8, %arg2, %arg4 : tensor<i1>, tensor<i64>
+      stablehlo.return %9, %10 : tensor<f64>, tensor<i64>
+    }}
+    return %1#1 : tensor<i64>
+  }}
+}}"
+    )
+}
+
+#[test]
+fn test_argmax_argmin() {
+    let x = f64_buf(&[0.5, 3.0, -1.0, 2.0, -0.5]);
+    let argmax = argminmax_mlir("GT", "0xFFF0000000000000");
+    let argmin = argminmax_mlir("LT", "0x7FF0000000000000");
+    for run in [run_mlir, run_mlir_mem] {
+        assert_eq!(read_i64s(&run(&argmax, &[&x], &[8])[0]), [1]);
+        assert_eq!(read_i64s(&run(&argmin, &[&x], &[8])[0]), [2]);
+    }
+}
+
+/// `jnp.argmax`/`jnp.argmin` over `axis` as JAX emits it, returning values and indices.
+fn argminmax_nd_mlir(
+    shape: &[usize],
+    axis: usize,
+    [vty, ity]: [&str; 2],
+    [dir, init, cmp]: [&str; 3],
+) -> String {
+    let s: String = shape.iter().map(|d| format!("{d}x")).collect();
+    let o: String = (0..shape.len())
+        .filter(|&d| d != axis)
+        .map(|d| format!("{}x", shape[d]))
+        .collect();
+    format!(
+        "module @module {{
+  func.func public @main(%arg0: tensor<{s}{vty}>) -> (tensor<{o}{vty}>, tensor<{o}{ity}>) {{
+    %0 = stablehlo.iota dim = {axis} : tensor<{s}{ity}>
+    %cst = stablehlo.constant dense<{init}> : tensor<{vty}>
+    %c = stablehlo.constant dense<0> : tensor<{ity}>
+    %1:2 = stablehlo.reduce(%arg0 init: %cst), (%0 init: %c) across dimensions = [{axis}] : (tensor<{s}{vty}>, tensor<{s}{ity}>, tensor<{vty}>, tensor<{ity}>) -> (tensor<{o}{vty}>, tensor<{o}{ity}>)
+     reducer(%arg1: tensor<{vty}>, %arg3: tensor<{vty}>) (%arg2: tensor<{ity}>, %arg4: tensor<{ity}>)  {{
+      %2 = stablehlo.compare {dir}, %arg1, %arg3, {cmp} : (tensor<{vty}>, tensor<{vty}>) -> tensor<i1>
+      %3 = stablehlo.compare NE, %arg1, %arg1, {cmp} : (tensor<{vty}>, tensor<{vty}>) -> tensor<i1>
+      %4 = stablehlo.or %2, %3 : tensor<i1>
+      %5 = stablehlo.compare EQ, %arg1, %arg3, {cmp} : (tensor<{vty}>, tensor<{vty}>) -> tensor<i1>
+      %6 = stablehlo.compare LT, %arg2, %arg4, SIGNED : (tensor<{ity}>, tensor<{ity}>) -> tensor<i1>
+      %7 = stablehlo.and %5, %6 : tensor<i1>
+      %8 = stablehlo.or %4, %7 : tensor<i1>
+      %9 = stablehlo.select %4, %arg1, %arg3 : tensor<i1>, tensor<{vty}>
+      %10 = stablehlo.select %8, %arg2, %arg4 : tensor<i1>, tensor<{ity}>
+      stablehlo.return %9, %10 : tensor<{vty}>, tensor<{ity}>
+    }}
+    return %1#0, %1#1 : tensor<{o}{vty}>, tensor<{o}{ity}>
+  }}
+}}"
+    )
+}
+
+/// argmin/argmax over any axis and value type: the first NaN wins and ties keep the
+/// smaller index, as on jax-cpu.
+#[test]
+fn test_argminmax_axes_and_types() {
+    let max = ["GT", "0xFFF0000000000000", "FLOAT"];
+    let min = ["LT", "0x7FF0000000000000", "FLOAT"];
+    let check_f64 = |shape: &[usize], axis, op, x: &[f64], want_v: &[f64], want_i: &[i64]| {
+        let mlir = argminmax_nd_mlir(shape, axis, ["f64", "i64"], op);
+        for run in [run_mlir, run_mlir_mem] {
+            let out = run(&mlir, &[&f64_buf(x)], &[want_v.len() * 8, want_i.len() * 8]);
+            let got = read_f64s(&out[0]);
+            let same = |(g, w): (&f64, &f64)| g == w || (g.is_nan() && w.is_nan());
+            assert!(got.iter().zip(want_v).all(same), "{got:?} vs {want_v:?}");
+            assert_eq!(read_i64s(&out[1]), want_i);
+        }
+    };
+    let nan = f64::NAN;
+    check_f64(&[4], 0, max, &[1.0, nan, 2.0, nan], &[nan], &[1]);
+    check_f64(&[4], 0, min, &[1.0, nan, 2.0, nan], &[nan], &[1]);
+    check_f64(&[4], 0, max, &[1.0, 3.0, 3.0, 2.0], &[3.0], &[1]);
+    check_f64(&[4], 0, min, &[1.0, 3.0, 3.0, 2.0], &[1.0], &[0]);
+    let m = [
+        0.5, 3.0, -1.0, 2.0, 4.0, 3.0, -2.0, 2.0, 1.0, -5.0, -1.0, 7.0,
+    ];
+    check_f64(&[3, 4], 0, max, &m, &[4.0, 3.0, -1.0, 7.0], &[1, 0, 0, 2]);
+    check_f64(&[3, 4], 1, min, &m, &[-1.0, -2.0, -5.0], &[2, 2, 1]);
+    let t = [1.0, 6.0, 5.0, 2.0, 3.0, 4.0, 9.0, 0.0, 9.0, 8.0, 7.0, 8.0];
+    check_f64(&[2, 3, 2], 1, max, &t, &[5.0, 6.0, 9.0, 8.0], &[1, 0, 0, 1]);
+
+    let i64_max = ["GT", "-9223372036854775808", "SIGNED"];
+    let i64_min = ["LT", "9223372036854775807", "SIGNED"];
+    let x = i64_buf(&[3, -1, 7, 7]);
+    for (op, want) in [(i64_max, [7, 2]), (i64_min, [-1, 1])] {
+        let mlir = argminmax_nd_mlir(&[4], 0, ["i64", "i64"], op);
+        for run in [run_mlir, run_mlir_mem] {
+            let out = run(&mlir, &[&x], &[8, 8]);
+            assert_eq!([read_i64s(&out[0])[0], read_i64s(&out[1])[0]], want);
+        }
+    }
+
+    // The first true per column, as `jnp.select` computes it.
+    let b = [0, 0, 0, 0, 0, 1, 1, 0, 1, 0, 1, 0];
+    let mlir = argminmax_nd_mlir(&[3, 4], 0, ["i1", "i64"], ["GT", "false", "UNSIGNED"]);
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(&mlir, &[&b], &[4, 32]);
+        assert_eq!(out[0], [1, 1, 1, 0]);
+        assert_eq!(read_i64s(&out[1]), [2, 1, 1, 0]);
+    }
+
+    let mlir = argminmax_nd_mlir(&[3], 0, ["f64", "i32"], max);
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(&mlir, &[&f64_buf(&[2.0, 9.0, 1.0])], &[8, 4]);
+        assert_eq!(read_f64s(&out[0])[0], 9.0);
+        assert_eq!(read_i32s(&out[1]), [1]);
+    }
+}
+
+#[test]
+fn test_reduce_unknown_reducer_is_a_parse_error() {
+    let mlir = reduce_mlir(&[4], &[0], "xor", "0", "i64");
+    assert!(cranelift_mlir::parser::parse_module(&mlir).is_err());
 }
 
 #[test]
@@ -3099,6 +3406,556 @@ module @module {
     assert_f64s_close(&read_f64s(&out[0]), &[90.0, 120.0, 150.0]);
 }
 
+/// Batched matmuls, a batch of matrices times one vector, `a.T @ b`, and one matrix
+/// times a batch of vectors, on both ABIs.
+#[test]
+fn test_dot_general_any_dims() {
+    let check = |l: &str, r: &str, out: &str, dims: &str, a: &[f64], c: &[f64], want: &[f64]| {
+        let mlir = format!(
+            "module @module {{
+  func.func public @main(%arg0: tensor<{l}xf64>, %arg1: tensor<{r}xf64>) -> tensor<{out}xf64> {{
+    %0 = stablehlo.dot_general %arg0, %arg1, {dims}, precision = [DEFAULT, DEFAULT] : (tensor<{l}xf64>, tensor<{r}xf64>) -> tensor<{out}xf64>
+    return %0 : tensor<{out}xf64>
+  }}
+}}"
+        );
+        for run in [run_mlir, run_mlir_mem] {
+            let got = run(&mlir, &[&f64_buf(a), &f64_buf(c)], &[want.len() * 8]);
+            assert_f64s_close(&read_f64s(&got[0]), want);
+        }
+    };
+    let vals = |n: usize| (0..n).map(|i| i as f64 * 0.5 - 1.0).collect::<Vec<_>>();
+    let (a, c) = (vals(18), vals(18).into_iter().rev().collect::<Vec<_>>());
+
+    let want: Vec<f64> = (0..18)
+        .map(|o| {
+            let (b, i, j) = (o / 9, o / 3 % 3, o % 3);
+            (0..3)
+                .map(|k| a[b * 9 + i * 3 + k] * c[b * 9 + k * 3 + j])
+                .sum()
+        })
+        .collect();
+    let batched = "batching_dims = [0] x [0], contracting_dims = [2] x [1]";
+    check("2x3x3", "2x3x3", "2x3x3", batched, &a, &c, &want);
+
+    let want: Vec<f64> = (0..18)
+        .map(|o| {
+            let (b, i, j) = (o / 9, o / 3 % 3, o % 3);
+            (0..3)
+                .map(|k| a[b * 9 + i * 3 + k] * c[b * 9 + j * 3 + k])
+                .sum()
+        })
+        .collect();
+    let batched_t = "batching_dims = [0] x [0], contracting_dims = [2] x [2]";
+    check("2x3x3", "2x3x3", "2x3x3", batched_t, &a, &c, &want);
+
+    let (m, v) = (vals(48), vals(4));
+    let want: Vec<f64> = (0..12)
+        .map(|o| (0..4).map(|k| m[o * 4 + k] * v[k]).sum())
+        .collect();
+    check(
+        "3x4x4",
+        "4",
+        "3x4",
+        "contracting_dims = [2] x [0]",
+        &m,
+        &v,
+        &want,
+    );
+
+    // 144 elements put `run_mlir` on the pointer ABI too.
+    let m = vals(144);
+    let want: Vec<f64> = (0..36)
+        .map(|o| (0..4).map(|k| m[o * 4 + k] * v[k]).sum())
+        .collect();
+    check(
+        "9x4x4",
+        "4",
+        "9x4",
+        "contracting_dims = [2] x [0]",
+        &m,
+        &v,
+        &want,
+    );
+
+    let (m, n) = (vals(6), vals(12));
+    let want: Vec<f64> = (0..8)
+        .map(|o| (0..3).map(|k| m[k * 2 + o / 4] * n[k * 4 + o % 4]).sum())
+        .collect();
+    check(
+        "3x2",
+        "3x4",
+        "2x4",
+        "contracting_dims = [0] x [0]",
+        &m,
+        &n,
+        &want,
+    );
+
+    let (m, v) = (vals(16), vals(8));
+    let want: Vec<f64> = (0..8)
+        .map(|o| (0..4).map(|k| m[o / 2 * 4 + k] * v[o % 2 * 4 + k]).sum())
+        .collect();
+    check(
+        "4x4",
+        "2x4",
+        "4x2",
+        "contracting_dims = [1] x [1]",
+        &m,
+        &v,
+        &want,
+    );
+}
+
+/// The same dot and sum in a pointer-ABI function and a scalar-ABI callee agree bit for bit,
+/// so a branch comparing them (as across a `fori_loop` body) cannot flip.
+#[test]
+fn test_small_dot_and_sum_match_across_abis() {
+    let ops = "%0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [0] x [0], precision = [DEFAULT, DEFAULT] : (tensor<4xf64>, tensor<4xf64>) -> tensor<f64>
+    %cst = stablehlo.constant dense<0.000000e+00> : tensor<f64>
+    %1 = stablehlo.reduce(%arg2 init: %cst) applies stablehlo.add across dimensions = [0] : (tensor<4xf64>, tensor<f64>) -> tensor<f64>";
+    let (args, tys) = (
+        "%arg0, %arg1, %arg2",
+        "(tensor<4xf64>, tensor<4xf64>, tensor<4xf64>) -> (tensor<f64>, tensor<f64>)",
+    );
+    let params = "%arg0: tensor<4xf64>, %arg1: tensor<4xf64>, %arg2: tensor<4xf64>";
+    // Two call sites keep `@inner` from being inlined into `main`.
+    let mlir = format!(
+        "module @module {{
+  func.func public @main({params}) -> (tensor<f64>, tensor<f64>) {{
+    {ops}
+    %2:2 = call @inner({args}) : {tys}
+    %3:2 = call @inner({args}) : {tys}
+    %4 = stablehlo.subtract %0, %2#0 : tensor<f64>
+    %5 = stablehlo.subtract %1, %3#1 : tensor<f64>
+    return %4, %5 : tensor<f64>, tensor<f64>
+  }}
+  func.func private @inner({params}) -> (tensor<f64>, tensor<f64>) {{
+    {ops}
+    return %0, %1 : tensor<f64>, tensor<f64>
+  }}
+}}"
+    );
+    // Sequential and pairwise summation round these differently.
+    let a = f64_buf(&[0.4, -1.1, 0.7, 0.2]);
+    let b = f64_buf(&[-1.1700000000000002, -0.27, -0.42, 0.24]);
+    let c = f64_buf(&[-0.25272, -0.58968, -0.16848, -0.7581600000000001]);
+    let out = run_mlir_mem(&mlir, &[&a, &b, &c], &[8, 8]);
+    assert_eq!([read_f64s(&out[0])[0], read_f64s(&out[1])[0]], [0.0, 0.0]);
+}
+
+/// Float max and min as JAX computes them: a NaN in either operand wins and +0 is above -0,
+/// whichever path lowers them (SIMD chunks and odd tail, one lane, f32).
+#[test]
+fn test_max_min_nan_and_signed_zero() {
+    let mlir = |n: usize, ty: &str| {
+        format!(
+            "module @module {{
+  func.func public @main(%arg0: tensor<{n}x{ty}>, %arg1: tensor<{n}x{ty}>) -> (tensor<{n}x{ty}>, tensor<{n}x{ty}>) {{
+    %0 = stablehlo.maximum %arg0, %arg1 : tensor<{n}x{ty}>
+    %1 = stablehlo.minimum %arg0, %arg1 : tensor<{n}x{ty}>
+    return %0, %1 : tensor<{n}x{ty}>, tensor<{n}x{ty}>
+  }}
+}}"
+        )
+    };
+    let a = [f64::NAN, 1.0, -0.0, 0.0, f64::NAN];
+    let b = [1.0, f64::NAN, 0.0, -0.0, 2.0];
+    let check = |got: Vec<f64>, negative_zero: bool| {
+        for (i, v) in got.into_iter().enumerate() {
+            if [0, 1, 4].contains(&i) {
+                assert!(v.is_nan(), "lane {i}: {v}");
+            } else {
+                assert!(
+                    v == 0.0 && v.is_sign_negative() == negative_zero,
+                    "lane {i}: {v}"
+                );
+            }
+        }
+    };
+    for run in [run_mlir, run_mlir_mem] {
+        for n in [1, 5] {
+            let out = run(
+                &mlir(n, "f64"),
+                &[&f64_buf(&a[..n]), &f64_buf(&b[..n])],
+                &[n * 8; 2],
+            );
+            check(read_f64s(&out[0]).to_vec(), false);
+            check(read_f64s(&out[1]).to_vec(), true);
+        }
+        let (a32, b32) = (a.map(|v| v as f32), b.map(|v| v as f32));
+        let out = run(
+            &mlir(5, "f32"),
+            &[&f32_buf(&a32), &f32_buf(&b32)],
+            &[20, 20],
+        );
+        check(
+            read_f32s(&out[0]).iter().map(|&v| v.into()).collect(),
+            false,
+        );
+        check(read_f32s(&out[1]).iter().map(|&v| v.into()).collect(), true);
+    }
+}
+
+/// `jnp.max` and `jnp.min` propagate NaN and order signed zeros, in the scalar-ABI code and
+/// in the reduce kernels for more than 64 elements.
+#[test]
+fn test_reduce_max_min_nan_and_signed_zero() {
+    for (ty, low, high) in [
+        ("f64", "0xFFF0000000000000", "0x7FF0000000000000"),
+        ("f32", "0xFF800000", "0x7F800000"),
+    ] {
+        let (size, f32s) = if ty == "f64" { (8, false) } else { (4, true) };
+        let buf = |x: &[f64]| match f32s {
+            false => f64_buf(x),
+            true => f32_buf(&x.iter().map(|&v| v as f32).collect::<Vec<_>>()),
+        };
+        let read = |b: &[u8]| match f32s {
+            false => read_f64s(b)[0],
+            true => read_f32s(b)[0].into(),
+        };
+        for n in [3, 80] {
+            let max = reduce_mlir(&[n], &[0], "maximum", low, ty);
+            let min = reduce_mlir(&[n], &[0], "minimum", high, ty);
+            let mut nan = vec![1.0; n];
+            nan[n / 2] = f64::NAN;
+            let zeros: Vec<f64> = (0..n)
+                .map(|i| if i % 2 == 0 { -0.0 } else { 0.0 })
+                .collect();
+            for run in [run_mlir, run_mlir_mem] {
+                for mlir in [&max, &min] {
+                    assert!(
+                        read(&run(mlir, &[&buf(&nan)], &[size])[0]).is_nan(),
+                        "{ty} {n}"
+                    );
+                }
+                let top = read(&run(&max, &[&buf(&zeros)], &[size])[0]);
+                let bottom = read(&run(&min, &[&buf(&zeros)], &[size])[0]);
+                assert!(
+                    top.is_sign_positive() && bottom.is_sign_negative(),
+                    "{ty} {n}"
+                );
+            }
+        }
+    }
+}
+
+/// `.at[i].max(v)` and `.at[i].min(v)` keep a NaN from the operand or the update.
+#[test]
+fn test_scatter_max_min_nan() {
+    let dims = "inserted_window_dims = [0], scatter_dims_to_operand_dims = [0]";
+    for combine in ["maximum", "minimum"] {
+        let mlir = scatter_mlir("f64", "3xf64", "1xi32", "f64", dims, combine);
+        for run in [run_mlir, run_mlir_mem] {
+            for (x, update) in [([0.0, f64::NAN, 2.0], 5.0), ([0.0, 1.0, 2.0], f64::NAN)] {
+                let out = run(
+                    &mlir,
+                    &[&f64_buf(&x), &i32_buf(&[1]), &f64_buf(&[update])],
+                    &[24],
+                );
+                let got = read_f64s(&out[0]);
+                assert!(
+                    got[0] == 0.0 && got[1].is_nan() && got[2] == 2.0,
+                    "{combine}: {got:?}"
+                );
+            }
+        }
+    }
+}
+
+/// Float reductions over more elements than the scalar ABI holds run the reduce kernels.
+#[test]
+fn test_large_float_reductions() {
+    let mlir = |ty: &str| {
+        format!(
+            "module @module {{
+  func.func public @main(%arg0: tensor<80x{ty}>) -> (tensor<{ty}>, tensor<{ty}>) {{
+    %zero = stablehlo.constant dense<0.000000e+00> : tensor<{ty}>
+    %low = stablehlo.constant dense<-1.000000e+30> : tensor<{ty}>
+    %0 = stablehlo.reduce(%arg0 init: %zero) applies stablehlo.add across dimensions = [0] : (tensor<80x{ty}>, tensor<{ty}>) -> tensor<{ty}>
+    %1 = stablehlo.reduce(%arg0 init: %low) applies stablehlo.maximum across dimensions = [0] : (tensor<80x{ty}>, tensor<{ty}>) -> tensor<{ty}>
+    return %0, %1 : tensor<{ty}>, tensor<{ty}>
+  }}
+}}"
+        )
+    };
+    let x: Vec<f64> = (0..80).map(|i| (i % 7) as f64 * 0.5 + i as f64).collect();
+    let (sum, max) = (
+        x.iter().sum::<f64>(),
+        x.iter().copied().fold(f64::MIN, f64::max),
+    );
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(&mlir("f64"), &[&f64_buf(&x)], &[8, 8]);
+        assert_eq!([read_f64s(&out[0])[0], read_f64s(&out[1])[0]], [sum, max]);
+        let x32: Vec<f32> = x.iter().map(|&v| v as f32).collect();
+        let out = run(&mlir("f32"), &[&f32_buf(&x32)], &[4, 4]);
+        assert_eq!(read_f32s(&out[0])[0], sum as f32);
+        assert_eq!(read_f32s(&out[1])[0], max as f32);
+    }
+}
+
+/// Matmuls in f32 and in wrapping 32-bit integer arithmetic.
+#[test]
+fn test_dot_general_types() {
+    let mlir = |ty: &str| {
+        format!(
+            "module @module {{
+  func.func public @main(%arg0: tensor<2x3x{ty}>, %arg1: tensor<3x2x{ty}>) -> tensor<2x2x{ty}> {{
+    %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0], precision = [DEFAULT, DEFAULT] : (tensor<2x3x{ty}>, tensor<3x2x{ty}>) -> tensor<2x2x{ty}>
+    return %0 : tensor<2x2x{ty}>
+  }}
+}}"
+        )
+    };
+    for run in [run_mlir, run_mlir_mem] {
+        let a = f32_buf(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let b = f32_buf(&[0.5, -1.0, 2.0, 0.0, -3.0, 1.0]);
+        let out = run(&mlir("f32"), &[&a, &b], &[16]);
+        assert_eq!(read_f32s(&out[0]), [-4.5, 2.0, -6.0, 2.0]);
+
+        let a = i32_buf(&[i32::MAX, 1, 0, -2, 3, 4]);
+        let b = i32_buf(&[2, 0, 1, -1, 5, 7]);
+        let out = run(&mlir("i32"), &[&a, &b], &[16]);
+        assert_eq!(read_i32s(&out[0]), [-1, -1, 19, 25]);
+
+        let a = u32_buf(&[u32::MAX, 1, 0, 2, 3, 4]);
+        let b = u32_buf(&[2, 0, 1, 1, 5, 7]);
+        let out = run(&mlir("ui32"), &[&a, &b], &[16]);
+        assert_eq!(read_u32s(&out[0]), [u32::MAX, 1, 27, 31]);
+    }
+}
+
+/// Bool compares, as `(i < n) & (...)` and integer `jnp.mod` emit.
+#[test]
+fn test_i1_compare() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<4xi1>, %arg1: tensor<4xi1>) -> (tensor<4xi1>, tensor<4xi1>, tensor<4xi1>) {
+    %0 = stablehlo.compare NE, %arg0, %arg1, UNSIGNED : (tensor<4xi1>, tensor<4xi1>) -> tensor<4xi1>
+    %1 = stablehlo.compare EQ, %arg0, %arg1, UNSIGNED : (tensor<4xi1>, tensor<4xi1>) -> tensor<4xi1>
+    %2 = stablehlo.compare LT, %arg0, %arg1, UNSIGNED : (tensor<4xi1>, tensor<4xi1>) -> tensor<4xi1>
+    return %0, %1, %2 : tensor<4xi1>, tensor<4xi1>, tensor<4xi1>
+  }
+}
+"#;
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&[1, 0, 1, 0], &[1, 1, 0, 0]], &[4, 4, 4]);
+        assert_eq!(out, [[0, 1, 1, 0], [1, 0, 0, 1], [0, 1, 0, 0]]);
+    }
+}
+
+/// `lax.clamp` with broadcast and rank-0 bounds.
+#[test]
+fn test_clamp_types() {
+    let check = |ty: &str, x: Vec<u8>, lo: Vec<u8>, hi: Vec<u8>, want: Vec<u8>| {
+        let mlir = format!(
+            "module @module {{
+  func.func public @main(%arg0: tensor<4x{ty}>, %arg1: tensor<{ty}>, %arg2: tensor<{ty}>) -> (tensor<4x{ty}>, tensor<4x{ty}>) {{
+    %0 = stablehlo.broadcast_in_dim %arg1, dims = [] : (tensor<{ty}>) -> tensor<4x{ty}>
+    %1 = stablehlo.broadcast_in_dim %arg2, dims = [] : (tensor<{ty}>) -> tensor<4x{ty}>
+    %2 = stablehlo.clamp %0, %arg0, %1 : tensor<4x{ty}>
+    %3 = stablehlo.clamp %arg1, %arg0, %arg2 : (tensor<{ty}>, tensor<4x{ty}>, tensor<{ty}>) -> tensor<4x{ty}>
+    return %2, %3 : tensor<4x{ty}>, tensor<4x{ty}>
+  }}
+}}"
+        );
+        for run in [run_mlir, run_mlir_mem] {
+            let out = run(&mlir, &[&x, &lo, &hi], &[want.len(), want.len()]);
+            assert_eq!(out, [want.clone(), want.clone()], "{ty}");
+        }
+    };
+    check(
+        "i64",
+        i64_buf(&[1, -2, 3, 0]),
+        i64_buf(&[-1]),
+        i64_buf(&[2]),
+        i64_buf(&[1, -1, 2, 0]),
+    );
+    check(
+        "i32",
+        i32_buf(&[1, -2, 3, 0]),
+        i32_buf(&[-1]),
+        i32_buf(&[2]),
+        i32_buf(&[1, -1, 2, 0]),
+    );
+    check(
+        "ui32",
+        u32_buf(&[1, 4_000_000_000, 3, 0]),
+        u32_buf(&[2]),
+        u32_buf(&[3_000_000_000]),
+        u32_buf(&[2, 3_000_000_000, 3, 2]),
+    );
+    check(
+        "f64",
+        f64_buf(&[1.5, -2.0, 3.0, 0.0]),
+        f64_buf(&[-1.0]),
+        f64_buf(&[2.0]),
+        f64_buf(&[1.5, -1.0, 2.0, 0.0]),
+    );
+}
+
+/// `jnp.sign` on integers, which integer `jnp.mod` and floor division lower through.
+#[test]
+fn test_int_sign() {
+    for (ty, x, want) in [
+        (
+            "i64",
+            i64_buf(&[8, -7, 0, i64::MIN]),
+            i64_buf(&[1, -1, 0, -1]),
+        ),
+        ("i32", i32_buf(&[8, -7, 0, 3]), i32_buf(&[1, -1, 0, 1])),
+    ] {
+        let mlir = format!(
+            "module @module {{
+  func.func public @main(%arg0: tensor<4x{ty}>) -> tensor<4x{ty}> {{
+    %0 = stablehlo.sign %arg0 : tensor<4x{ty}>
+    return %0 : tensor<4x{ty}>
+  }}
+}}"
+        );
+        for run in [run_mlir, run_mlir_mem] {
+            assert_eq!(run(&mlir, &[&x], &[want.len()])[0], want, "{ty}");
+        }
+    }
+}
+
+/// f32 reduce, arithmetic, splat and libm math. libm is f64, so f32 lanes round
+/// through f64.
+#[test]
+fn test_f32_ops() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<4xf32>, %arg1: tensor<4xf32>) -> (tensor<4xf32>, tensor<f32>, tensor<4xf32>, tensor<4xi1>) {
+    %cst = stablehlo.constant dense<-1.000000e+30> : tensor<f32>
+    %0 = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.maximum across dimensions = [0] : (tensor<4xf32>, tensor<f32>) -> tensor<f32>
+    %1 = stablehlo.broadcast_in_dim %0, dims = [] : (tensor<f32>) -> tensor<4xf32>
+    %2 = stablehlo.multiply %arg0, %1 : tensor<4xf32>
+    %half = stablehlo.constant dense<5.000000e-01> : tensor<4xf32>
+    %3 = stablehlo.multiply %2, %half : tensor<4xf32>
+    %zero = stablehlo.constant dense<0.000000e+00> : tensor<f32>
+    %4 = stablehlo.reduce(%arg0 init: %zero) applies stablehlo.add across dimensions = [0] : (tensor<4xf32>, tensor<f32>) -> tensor<f32>
+    %5 = stablehlo.sine %arg0 : tensor<4xf32>
+    %6 = stablehlo.exponential %5 : tensor<4xf32>
+    %7 = stablehlo.is_finite %arg1 : (tensor<4xf32>) -> tensor<4xi1>
+    return %3, %4, %6, %7 : tensor<4xf32>, tensor<f32>, tensor<4xf32>, tensor<4xi1>
+  }
+}
+"#;
+    let x = [0.5f32, -1.25, 2.0, 0.75];
+    let special = [1.0f32, f32::INFINITY, f32::NEG_INFINITY, f32::NAN];
+    let exp_sin = x.map(|v| (((v as f64).sin() as f32) as f64).exp() as f32);
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&f32_buf(&x), &f32_buf(&special)], &[16, 4, 16, 4]);
+        assert_eq!(read_f32s(&out[0]), [0.5, -1.25, 2.0, 0.75]);
+        assert_eq!(read_f32s(&out[1]), [2.0]);
+        for (got, want) in read_f32s(&out[2]).iter().zip(exp_sin) {
+            assert!((got - want).abs() <= 1e-6 * want.abs(), "{got} vs {want}");
+        }
+        assert_eq!(out[3], [1, 0, 0, 0]);
+    }
+}
+
+/// The `pre_i32_max` repro plus i32 negate and abs.
+#[test]
+fn test_i32_ops() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<4xi32>) -> (tensor<4xi32>, tensor<4xi32>, tensor<4xi32>) {
+    %c = stablehlo.constant dense<-2147483648> : tensor<i32>
+    %0 = stablehlo.reduce(%arg0 init: %c) applies stablehlo.maximum across dimensions = [0] : (tensor<4xi32>, tensor<i32>) -> tensor<i32>
+    %1 = stablehlo.broadcast_in_dim %0, dims = [] : (tensor<i32>) -> tensor<4xi32>
+    %2 = stablehlo.multiply %arg0, %1 : tensor<4xi32>
+    %three = stablehlo.constant dense<3> : tensor<4xi32>
+    %3 = stablehlo.multiply %2, %three : tensor<4xi32>
+    %4 = stablehlo.negate %arg0 : tensor<4xi32>
+    %5 = stablehlo.abs %arg0 : tensor<4xi32>
+    return %3, %4, %5 : tensor<4xi32>, tensor<4xi32>, tensor<4xi32>
+  }
+}
+"#;
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&i32_buf(&[1, -2, 3, 0])], &[16, 16, 16]);
+        assert_eq!(read_i32s(&out[0]), [9, -18, 27, 0]);
+        assert_eq!(read_i32s(&out[1]), [-1, 2, -3, 0]);
+        assert_eq!(read_i32s(&out[2]), [1, 2, 3, 0]);
+    }
+}
+
+#[test]
+fn test_ui32_ops() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<4xui32>, %arg1: tensor<4xui32>) -> (tensor<4xi1>, tensor<4xui32>, tensor<4xui32>, tensor<4xui32>, tensor<ui32>) {
+    %0 = stablehlo.compare GT, %arg0, %arg1, UNSIGNED : (tensor<4xui32>, tensor<4xui32>) -> tensor<4xi1>
+    %1 = stablehlo.maximum %arg0, %arg1 : tensor<4xui32>
+    %2 = stablehlo.minimum %arg0, %arg1 : tensor<4xui32>
+    %3 = stablehlo.remainder %arg0, %arg1 : tensor<4xui32>
+    %c = stablehlo.constant dense<0> : tensor<ui32>
+    %4 = stablehlo.reduce(%arg0 init: %c) applies stablehlo.maximum across dimensions = [0] : (tensor<4xui32>, tensor<ui32>) -> tensor<ui32>
+    return %0, %1, %2, %3, %4 : tensor<4xi1>, tensor<4xui32>, tensor<4xui32>, tensor<4xui32>, tensor<ui32>
+  }
+}
+"#;
+    let x = u32_buf(&[3_000_000_000, 5, 7, 1]);
+    let y = u32_buf(&[1, 4_000_000_000, 3, 2]);
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&x, &y], &[4, 16, 16, 16, 4]);
+        assert_eq!(out[0], [1, 0, 1, 0]);
+        assert_eq!(read_u32s(&out[1]), [3_000_000_000, 4_000_000_000, 7, 2]);
+        assert_eq!(read_u32s(&out[2]), [1, 5, 3, 1]);
+        assert_eq!(read_u32s(&out[3]), [0, 5, 1, 1]);
+        assert_eq!(read_u32s(&out[4]), [3_000_000_000]);
+    }
+}
+
+/// Iota, reverse and pad with negative and interior padding on i32.
+#[test]
+fn test_layout_ops_i32() {
+    let mlir = r#"
+module @module {
+  func.func public @main() -> (tensor<5xi32>, tensor<5xi32>, tensor<10xi32>) {
+    %0 = stablehlo.iota dim = 0 : tensor<5xi32>
+    %1 = stablehlo.reverse %0, dims = [0] : tensor<5xi32>
+    %c = stablehlo.constant dense<9> : tensor<i32>
+    %2 = stablehlo.pad %1, %c, low = [-1], high = [2], interior = [1] : (tensor<5xi32>, tensor<i32>) -> tensor<10xi32>
+    return %0, %1, %2 : tensor<5xi32>, tensor<5xi32>, tensor<10xi32>
+  }
+}
+"#;
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[], &[20, 20, 40]);
+        assert_eq!(read_i32s(&out[0]), [0, 1, 2, 3, 4]);
+        assert_eq!(read_i32s(&out[1]), [4, 3, 2, 1, 0]);
+        assert_eq!(read_i32s(&out[2]), [9, 3, 9, 2, 9, 1, 9, 0, 9, 9]);
+    }
+}
+
+/// Float to integer conversions saturate and map NaN to zero, and nonzero converts
+/// to true, as on jax-cpu.
+#[test]
+fn test_convert_semantics() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<4xf32>, %arg1: tensor<4xf64>) -> (tensor<4xi64>, tensor<4xui32>, tensor<4xi1>, tensor<4xf32>) {
+    %0 = stablehlo.convert %arg0 : (tensor<4xf32>) -> tensor<4xi64>
+    %1 = stablehlo.convert %arg1 : (tensor<4xf64>) -> tensor<4xui32>
+    %2 = stablehlo.convert %arg1 : (tensor<4xf64>) -> tensor<4xi1>
+    %3 = stablehlo.convert %0 : (tensor<4xi64>) -> tensor<4xf32>
+    return %0, %1, %2, %3 : tensor<4xi64>, tensor<4xui32>, tensor<4xi1>, tensor<4xf32>
+  }
+}
+"#;
+    let x32 = f32_buf(&[1.5, -2.5, f32::NAN, 1e30]);
+    let x64 = f64_buf(&[3e9, -1.0, f64::NAN, 0.5]);
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&x32, &x64], &[32, 16, 4, 16]);
+        assert_eq!(read_i64s(&out[0]), [1, -2, 0, i64::MAX]);
+        assert_eq!(read_u32s(&out[1]), [3_000_000_000, 0, 0, 0]);
+        assert_eq!(out[2], [1, 1, 1, 1]);
+        assert_eq!(read_f32s(&out[3]), [1.0, -2.0, 0.0, i64::MAX as f32]);
+    }
+}
+
 #[test]
 fn test_iota_2d_dim0() {
     let mlir = r#"
@@ -3357,6 +4214,229 @@ module @module {
     let out = run_mlir_mem(mlir, &[&data, &indices, &updates], &[20]);
     let result = read_i32s(&out[0]);
     assert_eq!(result, vec![99, 2, 3, 4, 88]);
+}
+
+fn scatter_mlir(ty: &str, x: &str, idx: &str, upd: &str, dims: &str, combine: &str) -> String {
+    let body = if combine == "set" {
+        format!("stablehlo.return %arg4 : tensor<{ty}>")
+    } else {
+        format!(
+            "%1 = stablehlo.{combine} %arg3, %arg4 : tensor<{ty}>\n      stablehlo.return %1 : tensor<{ty}>"
+        )
+    };
+    format!(
+        r#"module @module {{
+  func.func public @main(%arg0: tensor<{x}>, %arg1: tensor<{idx}>, %arg2: tensor<{upd}>) -> tensor<{x}> {{
+    %0 = "stablehlo.scatter"(%arg0, %arg1, %arg2) <{{indices_are_sorted = true, scatter_dimension_numbers = #stablehlo.scatter<{dims}>, unique_indices = true}}> ({{
+    ^bb0(%arg3: tensor<{ty}>, %arg4: tensor<{ty}>):
+      {body}
+    }}) : (tensor<{x}>, tensor<{idx}>, tensor<{upd}>) -> tensor<{x}>
+    return %0 : tensor<{x}>
+  }}
+}}"#
+    )
+}
+
+fn check_scatter(
+    (x, x_ty): (&[f64], &str),
+    dims: &str,
+    combine: &str,
+    (idx, idx_ty): (&[i32], &str),
+    (upd, upd_ty): (&[f64], &str),
+    want: &[f64],
+) {
+    let mlir = scatter_mlir("f64", x_ty, idx_ty, upd_ty, dims, combine);
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(
+            &mlir,
+            &[&f64_buf(x), &i32_buf(idx), &f64_buf(upd)],
+            &[x.len() * 8],
+        );
+        assert_f64s_close(&read_f64s(&out[0]), want);
+    }
+}
+
+#[test]
+fn test_scatter_forms() {
+    for (rows, cols) in [(3, 4), (9, 8)] {
+        let n = rows * cols;
+        let x: Vec<f64> = (0..n)
+            .map(|k| (10 * (k / cols) + k % cols) as f64)
+            .collect();
+        let x_ty = format!("{rows}x{cols}xf64");
+        let (i, j) = (rows - 1, 1);
+
+        // x.at[:, j].set(col)
+        let col: Vec<f64> = (0..rows).map(|r| -(r as f64) - 0.5).collect();
+        let mut want = x.clone();
+        for r in 0..rows {
+            want[r * cols + j] = col[r];
+        }
+        check_scatter(
+            (&x, &x_ty),
+            "update_window_dims = [0], inserted_window_dims = [1], scatter_dims_to_operand_dims = [1]",
+            "set",
+            (&[j as i32], "1xi32"),
+            (&col, &format!("{rows}xf64")),
+            &want,
+        );
+
+        // x.at[i, j].set(s)
+        let mut want = x.clone();
+        want[i * cols + j] = -7.0;
+        check_scatter(
+            (&x, &x_ty),
+            "inserted_window_dims = [0, 1], scatter_dims_to_operand_dims = [0, 1]",
+            "set",
+            (&[i as i32, j as i32], "2xi32"),
+            (&[-7.0], "f64"),
+            &want,
+        );
+
+        // Index [1, -1] is out of bounds and dropped, though its flat offset is in range
+        check_scatter(
+            (&x, &x_ty),
+            "inserted_window_dims = [0, 1], scatter_dims_to_operand_dims = [0, 1]",
+            "set",
+            (&[1, -1], "2xi32"),
+            (&[-7.0], "f64"),
+            &x,
+        );
+
+        // x.at[1:3, 2:4].set(m)
+        let m = [-1.0, -2.0, -3.0, -4.0];
+        let mut want = x.clone();
+        for (k, &v) in m.iter().enumerate() {
+            want[(1 + k / 2) * cols + 2 + k % 2] = v;
+        }
+        check_scatter(
+            (&x, &x_ty),
+            "update_window_dims = [0, 1], scatter_dims_to_operand_dims = [0, 1]",
+            "set",
+            (&[1, 2], "2xi32"),
+            (&m, "2x2xf64"),
+            &want,
+        );
+
+        // x.at[i].add(row)
+        let row: Vec<f64> = (0..cols).map(|c| c as f64 + 0.25).collect();
+        let mut want = x.clone();
+        for c in 0..cols {
+            want[i * cols + c] += row[c];
+        }
+        check_scatter(
+            (&x, &x_ty),
+            "update_window_dims = [0], inserted_window_dims = [0], scatter_dims_to_operand_dims = [0]",
+            "add",
+            (&[i as i32], "1xi32"),
+            (&row, &format!("{cols}xf64")),
+            &want,
+        );
+
+        // v.at[n - 2].set(s) on the flattened matrix
+        let v_ty = format!("{n}xf64");
+        let mut want = x.clone();
+        want[n - 2] = 99.0;
+        check_scatter(
+            (&x, &v_ty),
+            "inserted_window_dims = [0], scatter_dims_to_operand_dims = [0]",
+            "set",
+            (&[n as i32 - 2], "1xi32"),
+            (&[99.0], "f64"),
+            &want,
+        );
+
+        // v.at[idx].set(u) with an out-of-bounds index, which is dropped
+        let mut want = x.clone();
+        want[0] = 5.0;
+        want[2] = 7.0;
+        check_scatter(
+            (&x, &v_ty),
+            "inserted_window_dims = [0], scatter_dims_to_operand_dims = [0], index_vector_dim = 1",
+            "set",
+            (&[0, n as i32, 2], "3x1xi32"),
+            (&[5.0, 6.0, 7.0], "3xf64"),
+            &want,
+        );
+
+        // jax.vmap(lambda x, s, i: x.at[i, 1].set(s)) over a batch of two
+        let xb: Vec<f64> = (0..2 * n).map(|k| k as f64).collect();
+        let mut want = xb.clone();
+        want[cols + 1] = -1.0;
+        want[n + (rows - 1) * cols + 1] = -2.0;
+        check_scatter(
+            (&xb, &format!("2x{rows}x{cols}xf64")),
+            "inserted_window_dims = [1, 2], input_batching_dims = [0], scatter_indices_batching_dims = [0], scatter_dims_to_operand_dims = [1, 2], index_vector_dim = 1",
+            "set",
+            (&[1, 1, rows as i32 - 1, 1], "2x2xi32"),
+            (&[-1.0, -2.0], "2xf64"),
+            &want,
+        );
+    }
+}
+
+#[test]
+fn test_scatter_add_i64() {
+    let mlir = scatter_mlir(
+        "i64",
+        "3x4xi64",
+        "1xi32",
+        "4xi64",
+        "update_window_dims = [0], inserted_window_dims = [0], scatter_dims_to_operand_dims = [0]",
+        "add",
+    );
+    let x: Vec<i64> = (0..12).collect();
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(
+            &mlir,
+            &[&i64_buf(&x), &i32_buf(&[1]), &i64_buf(&[10, 20, 30, 40])],
+            &[96],
+        );
+        assert_eq!(
+            read_i64s(&out[0]),
+            [0, 1, 2, 3, 14, 25, 36, 47, 8, 9, 10, 11]
+        );
+    }
+}
+
+/// EGM08's `jnp.roll(x, ...).at[:, -1].set(0)` as it appears in the cube-sat example.
+#[test]
+fn test_scatter_cube_sat_column() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%125: tensor<65x65xf64>) -> tensor<65x65xf64> {
+    %cst_39 = stablehlo.constant dense<0.000000e+00> : tensor<f64>
+    %126 = stablehlo.broadcast_in_dim %cst_39, dims = [] : (tensor<f64>) -> tensor<65xf64>
+    %c_40 = stablehlo.constant dense<64> : tensor<i32>
+    %127 = stablehlo.broadcast_in_dim %c_40, dims = [] : (tensor<i32>) -> tensor<1xi32>
+    %128 = "stablehlo.scatter"(%125, %127, %126) <{indices_are_sorted = true, scatter_dimension_numbers = #stablehlo.scatter<update_window_dims = [0], inserted_window_dims = [1], scatter_dims_to_operand_dims = [1]>, unique_indices = true}> ({
+    ^bb0(%arg5: tensor<f64>, %arg6: tensor<f64>):
+      stablehlo.return %arg6 : tensor<f64>
+    }) : (tensor<65x65xf64>, tensor<1xi32>, tensor<65xf64>) -> tensor<65x65xf64>
+    return %128 : tensor<65x65xf64>
+  }
+}
+"#;
+    let x: Vec<f64> = (0..65 * 65).map(|k| k as f64 + 1.0).collect();
+    let mut want = x.clone();
+    for r in 0..65 {
+        want[r * 65 + 64] = 0.0;
+    }
+    let out = run_mlir(mlir, &[&f64_buf(&x)], &[65 * 65 * 8]);
+    assert_f64s_close(&read_f64s(&out[0]), &want);
+}
+
+#[test]
+fn test_scatter_unknown_combiner_is_a_parse_error() {
+    let mlir = scatter_mlir(
+        "f64",
+        "4xf64",
+        "1xi32",
+        "f64",
+        "inserted_window_dims = [0], scatter_dims_to_operand_dims = [0]",
+        "subtract",
+    );
+    assert!(cranelift_mlir::parser::parse_module(&mlir).is_err());
 }
 
 // ---- Integer comparisons ----
@@ -3877,22 +4957,31 @@ fn test_cosh_mem() {
     chlo_unop_mem_test("cosh", &[0.0, 1.0], &[1.0, 1.0_f64.cosh()]);
 }
 
+/// One input per range of the usual erfc approximations: |x| < 0.47, below 1, below 4, above 4.
+const ERFC_IN: [f64; 11] = [0.0, 0.05, -0.2, 0.3, 0.46, 0.7, 1.0, 3.0, -3.0, 4.5, 5.0];
+/// Python `math.erfc` of `ERFC_IN`.
+const ERFC_OUT: [f64; 11] = [
+    1.0,
+    0.9436280222029834,
+    1.2227025892104786,
+    0.6713732405408726,
+    0.5153446099983203,
+    0.32219880616258156,
+    0.15729920705028513,
+    2.2090496998585438e-05,
+    1.9999779095030015,
+    1.9661604415428873e-10,
+    1.5374597944280351e-12,
+];
+
 #[test]
 fn test_erfc() {
-    chlo_unop_test(
-        "erfc",
-        &[0.0, 1.0, 3.0],
-        &[1.0, 0.1572992070502851, 0.000022090496998585438],
-    );
+    chlo_unop_test("erfc", &ERFC_IN, &ERFC_OUT);
 }
 
 #[test]
 fn test_erfc_mem() {
-    chlo_unop_mem_test(
-        "erfc",
-        &[0.0, 1.0, 3.0],
-        &[1.0, 0.1572992070502851, 0.000022090496998585438],
-    );
+    chlo_unop_mem_test("erfc", &ERFC_IN, &ERFC_OUT);
 }
 
 #[test]
@@ -4028,6 +5117,193 @@ module @module {
     let out = run_mlir(mlir, &[&in0], &[40]);
     let result = read_f64s(&out[0]);
     assert_f64s_close(&result, &[1.0, 1.5, 2.0, 3.0, 4.0]);
+}
+
+/// A JAX 0.10 `stablehlo.sort` along `dim`, ordered by `body` over the block arguments
+/// `%a0, %b0, %a1, %b1, ...`.
+fn sort_mlir(shape: &str, tys: &[&str], dim: usize, body: &str) -> String {
+    let t = |ty: &&str| format!("tensor<{shape}x{ty}>");
+    let join = |items: Vec<String>| items.join(", ");
+    let args = join(
+        tys.iter()
+            .enumerate()
+            .map(|(i, ty)| format!("%arg{i}: {}", t(ty)))
+            .collect(),
+    );
+    let ops = join((0..tys.len()).map(|i| format!("%arg{i}")).collect());
+    let block = join(
+        tys.iter()
+            .enumerate()
+            .map(|(i, ty)| format!("%a{i}: tensor<{ty}>, %b{i}: tensor<{ty}>"))
+            .collect(),
+    );
+    let types = join(tys.iter().map(t).collect());
+    let (def, ret) = match tys.len() {
+        1 => ("%0".to_string(), "%0".to_string()),
+        n => (
+            format!("%0:{n}"),
+            join((0..n).map(|i| format!("%0#{i}")).collect()),
+        ),
+    };
+    format!(
+        "module @module {{
+  func.func public @main({args}) -> ({types}) {{
+    {def} = \"stablehlo.sort\"({ops}) <{{dimension = {dim} : i64, is_stable = true}}> ({{
+    ^bb0({block}):
+{body}
+    }}) : ({types}) -> ({types})
+    return {ret} : {types}
+  }}
+}}"
+    )
+}
+
+/// The comparator JAX emits for an f64 key: -0 becomes 0, NaN becomes the canonical NaN,
+/// then a total-order less-than.
+const F64_KEY_LT: &str = "      %z = stablehlo.constant dense<0.000000e+00> : tensor<f64>
+      %nan = stablehlo.constant dense<0x7FF8000000000000> : tensor<f64>
+      %1 = stablehlo.compare EQ, %a0, %z, FLOAT : (tensor<f64>, tensor<f64>) -> tensor<i1>
+      %2 = stablehlo.select %1, %z, %a0 : tensor<i1>, tensor<f64>
+      %3 = stablehlo.compare NE, %a0, %a0, FLOAT : (tensor<f64>, tensor<f64>) -> tensor<i1>
+      %4 = stablehlo.select %3, %nan, %2 : tensor<i1>, tensor<f64>
+      %5 = stablehlo.compare EQ, %b0, %z, FLOAT : (tensor<f64>, tensor<f64>) -> tensor<i1>
+      %6 = stablehlo.select %5, %z, %b0 : tensor<i1>, tensor<f64>
+      %7 = stablehlo.compare NE, %b0, %b0, FLOAT : (tensor<f64>, tensor<f64>) -> tensor<i1>
+      %8 = stablehlo.select %7, %nan, %6 : tensor<i1>, tensor<f64>
+      %9 = stablehlo.compare LT, %4, %8, TOTALORDER : (tensor<f64>, tensor<f64>) -> tensor<i1>
+      stablehlo.return %9 : tensor<i1>";
+
+fn int_key(dir: &str, ty: &str) -> String {
+    format!(
+        "      %1 = stablehlo.compare {dir}, %a0, %b0, SIGNED : (tensor<{ty}>, tensor<{ty}>) -> tensor<i1>
+      stablehlo.return %1 : tensor<i1>"
+    )
+}
+
+#[test]
+fn test_sort_types_axes_and_keys() {
+    for run in [run_mlir, run_mlir_mem] {
+        let mlir = sort_mlir("5", &["i64"], 0, &int_key("LT", "i64"));
+        let out = run(&mlir, &[&i64_buf(&[3, -2, 0, 3, -7])], &[40]);
+        assert_eq!(read_i64s(&out[0]), [-7, -2, 0, 3, 3]);
+
+        let mlir = sort_mlir("3", &["i32"], 0, &int_key("LT", "i32"));
+        let out = run(&mlir, &[&i32_buf(&[5, -1, 2])], &[12]);
+        assert_eq!(read_i32s(&out[0]), [-1, 2, 5]);
+
+        let mlir = sort_mlir("3", &["i64"], 0, &int_key("GT", "i64"));
+        let out = run(&mlir, &[&i64_buf(&[3, -2, 0])], &[24]);
+        assert_eq!(read_i64s(&out[0]), [3, 0, -2]);
+
+        // jnp.sort: NaN last, and -0 and 0 keep their order.
+        let mlir = sort_mlir("5", &["f64"], 0, F64_KEY_LT);
+        let x = f64_buf(&[f64::NAN, 0.0, 1.0, -0.0, -1.0]);
+        let out = run(&mlir, &[&x], &[40]);
+        let sorted = read_f64s(&out[0]);
+        assert_eq!(sorted[..4], [-1.0, 0.0, -0.0, 1.0]);
+        assert!(sorted[4].is_nan() && sorted[2].is_sign_negative());
+
+        // jnp.argsort: NaN last and -0 equal to 0, with i32 indices.
+        let mlir = sort_mlir("6", &["f64", "i32"], 0, F64_KEY_LT);
+        let x = f64_buf(&[3.0, f64::NAN, -0.0, 0.0, f64::NEG_INFINITY, 1.0]);
+        let out = run(&mlir, &[&x, &i32_buf(&[0, 1, 2, 3, 4, 5])], &[48, 24]);
+        let sorted = read_f64s(&out[0]);
+        assert_eq!(sorted[..5], [f64::NEG_INFINITY, -0.0, 0.0, 1.0, 3.0]);
+        assert!(sorted[5].is_nan() && sorted[1].is_sign_negative());
+        assert_eq!(read_i32s(&out[1]), [4, 2, 3, 5, 0, 1]);
+
+        // Argsort of each row.
+        let mlir = sort_mlir("2x3", &["i64", "i64"], 1, &int_key("LT", "i64"));
+        let x = i64_buf(&[3, 1, 2, 0, 5, 4]);
+        let out = run(&mlir, &[&x, &i64_buf(&[0, 1, 2, 0, 1, 2])], &[48, 48]);
+        assert_eq!(read_i64s(&out[0]), [1, 2, 3, 0, 4, 5]);
+        assert_eq!(read_i64s(&out[1]), [1, 2, 0, 0, 2, 1]);
+
+        // lax.sort((k0, k1, payload), num_keys=2).
+        let two_keys = "      %1 = stablehlo.compare LT, %a0, %b0, SIGNED : (tensor<i64>, tensor<i64>) -> tensor<i1>
+      %2 = stablehlo.compare EQ, %a0, %b0, SIGNED : (tensor<i64>, tensor<i64>) -> tensor<i1>
+      %3 = stablehlo.compare LT, %a1, %b1, SIGNED : (tensor<i64>, tensor<i64>) -> tensor<i1>
+      %4 = stablehlo.and %2, %3 : tensor<i1>
+      %5 = stablehlo.or %1, %4 : tensor<i1>
+      stablehlo.return %5 : tensor<i1>";
+        let mlir = sort_mlir("4", &["i64", "i64", "i64"], 0, two_keys);
+        let (k0, k1, p) = (
+            i64_buf(&[1, 0, 1, 0]),
+            i64_buf(&[5, 7, 2, 7]),
+            i64_buf(&[10, 20, 30, 40]),
+        );
+        let out = run(&mlir, &[&k0, &k1, &p], &[32, 32, 32]);
+        assert_eq!(read_i64s(&out[0]), [0, 0, 1, 1]);
+        assert_eq!(read_i64s(&out[1]), [7, 7, 2, 5]);
+        assert_eq!(read_i64s(&out[2]), [20, 40, 30, 10]);
+    }
+}
+
+/// A private function named `@"<lambda>"`, as a `jax.jit(lambda ...)` inside a system emits.
+#[test]
+fn test_quoted_function_name() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<4xf64>) -> tensor<4xf64> {
+    %0 = call @"<lambda>"(%arg0) : (tensor<4xf64>) -> tensor<4xf64>
+    return %0 : tensor<4xf64>
+  }
+  func.func private @"<lambda>"(%arg0: tensor<4xf64>) -> tensor<4xf64> {
+    %0 = stablehlo.add %arg0, %arg0 : tensor<4xf64>
+    return %0 : tensor<4xf64>
+  }
+}
+"#;
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&f64_buf(&[1.0, -2.0, 0.5, 3.0])], &[32]);
+        assert_eq!(read_f64s(&out[0])[..], [2.0, -4.0, 1.0, 6.0]);
+    }
+}
+
+/// An f32 constant printed in hex, like JAX's `-inf` init for an f32 max.
+#[test]
+fn test_f32_hex_constant() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<4xf32>) -> tensor<f32> {
+    %cst = stablehlo.constant dense<0xFF800000> : tensor<f32>
+    %0 = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.maximum across dimensions = [0] : (tensor<4xf32>, tensor<f32>) -> tensor<f32>
+    return %0 : tensor<f32>
+  }
+}
+"#;
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&f32_buf(&[-3.0, -1.5, -2.0, -8.0])], &[4]);
+        assert_eq!(read_f32s(&out[0]), [-1.5]);
+    }
+}
+
+/// `lax.cond` whose branches both return a captured value: JAX forwards the value and
+/// emits a `stablehlo.case` with no results.
+#[test]
+fn test_zero_result_case() {
+    let mlir = "
+module @module {
+  func.func public @main(%arg0: tensor<4xf64>) -> tensor<4xf64> {
+    %0 = stablehlo.slice %arg0 [0:1] : (tensor<4xf64>) -> tensor<1xf64>
+    %1 = stablehlo.reshape %0 : (tensor<1xf64>) -> tensor<f64>
+    %cst = stablehlo.constant dense<0.000000e+00> : tensor<f64>
+    %2 = stablehlo.compare GT, %1, %cst, FLOAT : (tensor<f64>, tensor<f64>) -> tensor<i1>
+    %3 = stablehlo.convert %2 : (tensor<i1>) -> tensor<i32>
+    \"stablehlo.case\"(%3) ({
+      stablehlo.return 
+    }, {
+      stablehlo.return
+    }) : (tensor<i32>) -> ()
+    %4 = stablehlo.multiply %arg0, %arg0 : tensor<4xf64>
+    return %4 : tensor<4xf64>
+  }
+}
+";
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&f64_buf(&[1.0, -2.0, 0.5, 3.0])], &[32]);
+        assert_eq!(read_f64s(&out[0])[..], [1.0, 4.0, 0.25, 9.0]);
+    }
 }
 
 #[test]
@@ -4217,6 +5493,210 @@ module @module {
     assert_f64_close(result[1], 10.0);
     assert_f64_close(result[2], 0.0);
     assert_f64_close(result[3], 20.0);
+}
+
+/// A 1-D `reduce_window` as JAX 0.10 prints it, with properties before the region.
+fn reduce_window_mlir(
+    n: usize,
+    m: usize,
+    ty: &str,
+    [init, op, window, stride, pad]: [&str; 5],
+) -> String {
+    format!(
+        "module @module {{
+  func.func public @main(%arg0: tensor<{n}x{ty}>) -> tensor<{m}x{ty}> {{
+    %cst = stablehlo.constant dense<{init}> : tensor<{ty}>
+    %0 = \"stablehlo.reduce_window\"(%arg0, %cst) <{{base_dilations = array<i64: 1>, padding = {pad} : tensor<1x2xi64>, window_dilations = array<i64: 1>, window_dimensions = array<i64: {window}>, window_strides = array<i64: {stride}>}}> ({{
+    ^bb0(%arg1: tensor<{ty}>, %arg2: tensor<{ty}>):
+      %1 = stablehlo.{op} %arg1, %arg2 : tensor<{ty}>
+      stablehlo.return %1 : tensor<{ty}>
+    }}) : (tensor<{n}x{ty}>, tensor<{ty}>) -> tensor<{m}x{ty}>
+    return %0 : tensor<{m}x{ty}>
+  }}
+}}"
+    )
+}
+
+/// `values` as a buffer of `ty` elements.
+fn typed_buf(ty: &str, values: &[f64]) -> Vec<u8> {
+    match ty {
+        "f64" => f64_buf(values),
+        "f32" => f32_buf(&values.iter().map(|&v| v as f32).collect::<Vec<_>>()),
+        "i64" => i64_buf(&values.iter().map(|&v| v as i64).collect::<Vec<_>>()),
+        "i32" => i32_buf(&values.iter().map(|&v| v as i32).collect::<Vec<_>>()),
+        "ui32" => u32_buf(&values.iter().map(|&v| v as u32).collect::<Vec<_>>()),
+        _ => unreachable!("{ty}"),
+    }
+}
+
+fn typed_values(ty: &str, buf: &[u8]) -> Vec<f64> {
+    match ty {
+        "f64" => read_f64s(buf).to_vec(),
+        "f32" => read_f32s(buf).into_iter().map(f64::from).collect(),
+        "i64" => read_i64s(buf).into_iter().map(|v| v as f64).collect(),
+        "i32" => read_i32s(buf).into_iter().map(f64::from).collect(),
+        "ui32" => read_u32s(buf).into_iter().map(f64::from).collect(),
+        _ => unreachable!("{ty}"),
+    }
+}
+
+#[test]
+fn test_reduce_window_jax_forms() {
+    let x = [3.0, 1.0, 4.0, 1.0, 5.0, 9.0];
+    let neg_inf = "0xFFF0000000000000";
+    // jnp.cumsum, then lax.reduce_window add VALID and max SAME.
+    let cases: [(&[f64], [&str; 5], &[f64]); 3] = [
+        (
+            &[0.0, 1.0, 2.0, 3.0],
+            ["0.000000e+00", "add", "4", "1", "dense<[[3, 0]]>"],
+            &[0.0, 1.0, 3.0, 6.0],
+        ),
+        (
+            &x,
+            ["0.000000e+00", "add", "2", "2", "dense<0>"],
+            &[4.0, 5.0, 14.0],
+        ),
+        (
+            &x,
+            [neg_inf, "maximum", "3", "1", "dense<1>"],
+            &[3.0, 4.0, 4.0, 5.0, 9.0, 9.0],
+        ),
+    ];
+    for (input, attrs, expected) in cases {
+        let mlir = reduce_window_mlir(input.len(), expected.len(), "f64", attrs);
+        for run in [run_mlir, run_mlir_mem] {
+            let out = run(&mlir, &[&f64_buf(input)], &[expected.len() * 8]);
+            assert_eq!(read_f64s(&out[0])[..], *expected, "{attrs:?}");
+        }
+    }
+}
+
+/// `jnp.cumsum` and `lax.cummax` of integer and float32 arrays, unsigned compares included.
+#[test]
+fn test_reduce_window_types() {
+    let cumulative = |init, op| [init, op, "4", "1", "dense<[[3, 0]]>"];
+    let cases = [
+        (
+            "i64",
+            [3.0, -1.0, 4.0, 1.0],
+            cumulative("0", "add"),
+            [3.0, 2.0, 6.0, 7.0],
+        ),
+        (
+            "f32",
+            [0.5, 1.0, 2.0, 4.0],
+            cumulative("0.000000e+00", "add"),
+            [0.5, 1.5, 3.5, 7.5],
+        ),
+        (
+            "i32",
+            [3.0, 1.0, 4.0, 1.0],
+            cumulative("-2147483648", "maximum"),
+            [3.0, 3.0, 4.0, 4.0],
+        ),
+        (
+            "ui32",
+            [1.0, 3e9, 2.0, 5.0],
+            cumulative("0", "maximum"),
+            [1.0, 3e9, 3e9, 3e9],
+        ),
+    ];
+    for (ty, input, attrs, expected) in cases {
+        let mlir = reduce_window_mlir(4, 4, ty, attrs);
+        let size = if ty.ends_with("64") { 8 } else { 4 };
+        for run in [run_mlir, run_mlir_mem] {
+            let out = run(&mlir, &[&typed_buf(ty, &input)], &[4 * size]);
+            assert_eq!(typed_values(ty, &out[0]), expected, "{ty}");
+        }
+    }
+}
+
+/// `jax.vmap(jnp.cumsum)`: a padding row per dimension.
+#[test]
+fn test_batched_cumsum() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<2x3xf64>) -> tensor<2x3xf64> {
+    %cst = stablehlo.constant dense<0.000000e+00> : tensor<f64>
+    %0 = "stablehlo.reduce_window"(%arg0, %cst) <{base_dilations = array<i64: 1, 1>, padding = dense<[[0, 0], [2, 0]]> : tensor<2x2xi64>, window_dilations = array<i64: 1, 1>, window_dimensions = array<i64: 1, 3>, window_strides = array<i64: 1, 1>}> ({
+    ^bb0(%arg1: tensor<f64>, %arg2: tensor<f64>):
+      %1 = stablehlo.add %arg1, %arg2 : tensor<f64>
+      stablehlo.return %1 : tensor<f64>
+    }) : (tensor<2x3xf64>, tensor<f64>) -> tensor<2x3xf64>
+    return %0 : tensor<2x3xf64>
+  }
+}
+"#;
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&f64_buf(&[3.0, 1.0, 4.0, 1.0, 5.0, 9.0])], &[48]);
+        assert_eq!(read_f64s(&out[0])[..], [3.0, 4.0, 8.0, 1.0, 6.0, 15.0]);
+    }
+}
+
+/// The gradient of a 2x2 max pool; the tied 9s in the last window pick the first.
+#[test]
+fn test_max_pool_grad() {
+    let x = [
+        1.0, 5.0, 2.0, 2.0, 3.0, 3.0, 0.0, 7.0, 8.0, 1.0, 6.0, 6.0, 2.0, 4.0, 9.0, 9.0,
+    ];
+    let grad = [10.0, 20.0, 30.0, 40.0];
+    let want = [
+        0.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 20.0, 30.0, 0.0, 0.0, 0.0, 0.0, 0.0, 40.0, 0.0,
+    ];
+    for (ty, zero, cmp, size) in [
+        ("f64", "0.000000e+00", "FLOAT", 8),
+        ("f32", "0.000000e+00", "FLOAT", 4),
+        ("i32", "0", "SIGNED", 4),
+    ] {
+        let mlir = format!(
+            r#"
+module @module {{
+  func.func public @main(%arg0: tensor<4x4x{ty}>, %arg1: tensor<2x2x{ty}>) -> tensor<4x4x{ty}> {{
+    %cst = stablehlo.constant dense<{zero}> : tensor<{ty}>
+    %0 = "stablehlo.select_and_scatter"(%arg0, %arg1, %cst) <{{padding = dense<0> : tensor<2x2xi64>, window_dimensions = array<i64: 2, 2>, window_strides = array<i64: 2, 2>}}> ({{
+    ^bb0(%arg2: tensor<{ty}>, %arg3: tensor<{ty}>):
+      %1 = stablehlo.compare GE, %arg2, %arg3, {cmp} : (tensor<{ty}>, tensor<{ty}>) -> tensor<i1>
+      stablehlo.return %1 : tensor<i1>
+    }}, {{
+    ^bb0(%arg2: tensor<{ty}>, %arg3: tensor<{ty}>):
+      %1 = stablehlo.add %arg2, %arg3 : tensor<{ty}>
+      stablehlo.return %1 : tensor<{ty}>
+    }}) : (tensor<4x4x{ty}>, tensor<2x2x{ty}>, tensor<{ty}>) -> tensor<4x4x{ty}>
+    return %0 : tensor<4x4x{ty}>
+  }}
+}}
+"#
+        );
+        for run in [run_mlir, run_mlir_mem] {
+            let out = run(
+                &mlir,
+                &[&typed_buf(ty, &x), &typed_buf(ty, &grad)],
+                &[16 * size],
+            );
+            assert_eq!(typed_values(ty, &out[0]), want, "{ty}");
+        }
+    }
+}
+
+#[test]
+fn test_reduce_window_rejects_mismatched_window() {
+    let module = cranelift_mlir::parser::parse_module(&reduce_window_mlir(
+        6,
+        6,
+        "f64",
+        ["0.000000e+00", "add", "2", "2", "dense<0>"],
+    ))
+    .unwrap();
+    for force_pointer_abi_main in [false, true] {
+        let config = cranelift_mlir::lower::CompileConfig {
+            force_pointer_abi_main,
+            ..cranelift_mlir::lower::CompileConfig::from_env()
+        };
+        let Err(err) = cranelift_mlir::lower::compile_module_with_config(&module, config) else {
+            panic!("a 6 -> 6 window of 2 with stride 2 compiled");
+        };
+        assert!(err.contains("window attributes"), "{err}");
+    }
 }
 
 // ---- convolution tests ----

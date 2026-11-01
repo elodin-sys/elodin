@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use crate::ir::{
     CompareDirection, CompareType, ConstantValue, ElementType, InstrResult, Instruction, Module,
-    ReduceOp, ScalarValue, TensorType, ValueId,
+    ReduceOp, ScalarValue, ScatterCombiner, ScatterDims, TensorType, ValueId,
 };
 use crate::tensor_rt;
 use thiserror::Error;
@@ -127,9 +127,6 @@ pub enum InterpError {
     #[error("operand index is out of range")]
     OperandIndexOutOfRange,
 
-    #[error("clamp is only implemented for f64")]
-    ClampNotF64,
-
     #[error("reshape changed the number of bytes")]
     ReshapeByteSize,
 
@@ -145,14 +142,8 @@ pub enum InterpError {
     #[error("dot_general contracting size does not match")]
     DotContractingSize,
 
-    #[error("dot_general batch/contracting dims are not implemented in the interpreter")]
-    DotDimsNotImplemented,
-
-    #[error("multi-dimension reduce is not implemented")]
-    ReduceMultiDim,
-
-    #[error("reduce is only implemented on the last axis")]
-    ReduceNotLastAxis,
+    #[error("argmin/argmax over {0} dimensions is not implemented")]
+    ArgminmaxDims(usize),
 
     #[error("reduce {op:?} is not implemented for {element_type:?}")]
     ReduceNotImplemented {
@@ -162,12 +153,6 @@ pub enum InterpError {
 
     #[error("bitcast convert changed the number of bytes")]
     BitcastByteSize,
-
-    #[error("iota is only implemented for i64, i32, ui32, and f64")]
-    IotaElementType,
-
-    #[error("interior padding is not implemented")]
-    InteriorPadding,
 
     #[error("splat constant has {actual} elements but the result has {expected}")]
     SplatTooLarge { actual: usize, expected: usize },
@@ -200,10 +185,8 @@ impl InterpError {
                 | Self::UnimplementedInstruction(_)
                 | Self::ErfInvNotImplemented
                 | Self::UnaryNotImplemented { .. }
-                | Self::DotDimsNotImplemented
-                | Self::ReduceMultiDim
                 | Self::ReduceNotImplemented { .. }
-                | Self::InteriorPadding
+                | Self::ArgminmaxDims(_)
         )
     }
 }
@@ -418,9 +401,7 @@ fn eval_instr(
             operands,
             dimension,
         } => concatenate(env, operands, *dimension, &result_ty)?,
-        Instruction::DotGeneral { lhs, rhs, dims } => {
-            dot_general(env, *lhs, *rhs, dims, &result_ty)?
-        }
+        Instruction::DotGeneral { lhs, rhs, dims } => dot_general(env, *lhs, *rhs, dims)?,
         Instruction::Reduce {
             operand,
             init,
@@ -461,6 +442,89 @@ fn eval_instr(
             dims,
             slice_sizes,
         } => gather(env, *operand, *indices, dims, slice_sizes, &result_ty)?,
+        Instruction::Scatter {
+            operand,
+            indices,
+            updates,
+            dims,
+            combiner,
+        } => scatter(env, *operand, *indices, *updates, dims, *combiner)?,
+        Instruction::ReduceArgminmax {
+            values,
+            indices,
+            dimensions,
+            is_min,
+        } => return argminmax(env, *values, *indices, dimensions, *is_min, results),
+        Instruction::Sort {
+            inputs,
+            dimension,
+            comparator,
+            comparator_params,
+            ..
+        } => {
+            return sort(
+                module,
+                env,
+                inputs,
+                *dimension,
+                comparator,
+                comparator_params,
+            );
+        }
+        Instruction::ReduceWindow {
+            operands,
+            init_values,
+            body,
+            body_params,
+            window_dimensions,
+            window_strides,
+            base_dilations,
+            window_dilations,
+            padding,
+        } => match (operands.as_slice(), init_values.as_slice()) {
+            ([operand], [init]) => reduce_window(
+                module,
+                env,
+                *operand,
+                *init,
+                (body, body_params),
+                [
+                    window_dimensions,
+                    window_strides,
+                    base_dilations,
+                    window_dilations,
+                ],
+                padding,
+                &result_ty,
+            )?,
+            _ => {
+                return Err(InterpError::UnimplementedInstruction(Box::new(
+                    instr.clone(),
+                )));
+            }
+        },
+        Instruction::SelectAndScatter {
+            operand,
+            source,
+            init_value,
+            select_body,
+            select_params,
+            scatter_body,
+            scatter_params,
+            window_dimensions,
+            window_strides,
+            padding,
+        } => select_and_scatter(
+            module,
+            env,
+            [*operand, *source, *init_value],
+            (select_body, select_params),
+            (scatter_body, scatter_params),
+            window_dimensions,
+            window_strides,
+            padding,
+            &result_ty,
+        )?,
         Instruction::Call { callee, args } => {
             return call(module, callee, args, env);
         }
@@ -697,8 +761,8 @@ fn binary(
                     BinOp::Mul => x * y,
                     BinOp::Div => x / y,
                     BinOp::Rem => x % y,
-                    BinOp::Max => x.max(y),
-                    BinOp::Min => x.min(y),
+                    BinOp::Max => tensor_rt::float_max(x, y),
+                    BinOp::Min => tensor_rt::float_min(x, y),
                     BinOp::Atan2 => x.atan2(y),
                     BinOp::Pow => x.powf(y),
                     _ => x,
@@ -710,8 +774,8 @@ fn binary(
                     BinOp::Mul => x * y,
                     BinOp::Div => x / y,
                     BinOp::Rem => x % y,
-                    BinOp::Max => x.max(y),
-                    BinOp::Min => x.min(y),
+                    BinOp::Max => tensor_rt::float_max(x.into(), y.into()) as f32,
+                    BinOp::Min => tensor_rt::float_min(x.into(), y.into()) as f32,
                     BinOp::Atan2 => x.atan2(y),
                     BinOp::Pow => x.powf(y),
                     _ => x,
@@ -989,7 +1053,7 @@ fn float_unary(op: UnOp, a: f64) -> f64 {
         UnOp::Log1p => a.ln_1p(),
         UnOp::Expm1 => a.exp_m1(),
         UnOp::Cbrt => a.cbrt(),
-        UnOp::Erfc => tensor_rt::erfc_impl(a),
+        UnOp::Erfc => libm::erfc(a),
         UnOp::ErfInv | UnOp::IsFinite | UnOp::Not => a,
     }
 }
@@ -1185,27 +1249,34 @@ fn clamp(
     let src = lookup_ref(env, operand)?;
     let lo = lookup_ref(env, min)?;
     let hi = lookup_ref(env, max)?;
-    if result_ty.element_type != ElementType::F64
-        || src.ty.element_type != ElementType::F64
-        || lo.ty.element_type != ElementType::F64
-        || hi.ty.element_type != ElementType::F64
-    {
-        return Err(InterpError::ClampNotF64);
-    }
+    let et = result_ty.element_type;
     let src_map = broadcast_map(&result_ty.shape, &src.ty.shape)?;
     let lo_map = broadcast_map(&result_ty.shape, &lo.ty.shape)?;
     let hi_map = broadcast_map(&result_ty.shape, &hi.ty.shape)?;
     let mut out = Tensor::alloc(result_ty.clone());
-    let n = result_ty.num_elements();
-    for i in 0..n {
-        let v = read_f64(
-            &src.bytes,
-            ElementType::F64,
-            mapped_index(src, &src_map, i)?,
-        );
-        let lo_v = read_f64(&lo.bytes, ElementType::F64, mapped_index(lo, &lo_map, i)?);
-        let hi_v = read_f64(&hi.bytes, ElementType::F64, mapped_index(hi, &hi_map, i)?);
-        write_f64(&mut out.bytes, ElementType::F64, i, v.clamp(lo_v, hi_v));
+    for i in 0..result_ty.num_elements() {
+        let s = mapped_index(src, &src_map, i)?;
+        let l = mapped_index(lo, &lo_map, i)?;
+        let h = mapped_index(hi, &hi_map, i)?;
+        if is_real(et) {
+            let v = read_f64(&src.bytes, et, s);
+            let (l, h) = (read_f64(&lo.bytes, et, l), read_f64(&hi.bytes, et, h));
+            let r = if v.is_nan() || l.is_nan() || h.is_nan() {
+                f64::NAN
+            } else {
+                v.max(l).min(h)
+            };
+            write_f64(&mut out.bytes, et, i, r);
+        } else {
+            let v = read_int(&src.bytes, et, s);
+            let (l, h) = (read_int(&lo.bytes, et, l), read_int(&hi.bytes, et, h));
+            let r = if et == ElementType::UI64 {
+                (v as u64).max(l as u64).min(h as u64) as i64
+            } else {
+                v.max(l).min(h)
+            };
+            write_int(&mut out.bytes, et, i, r);
+        }
     }
     Ok(out)
 }
@@ -1320,187 +1391,86 @@ fn concat_ty(a: &TensorType, b: &TensorType, dim: i64) -> Result<TensorType, Int
     })
 }
 
+/// Any batch, free and contracting axes, in the operands' own arithmetic (integers wrap).
+/// The output axes are batch, lhs free, then rhs free.
 fn dot_general(
     env: &HashMap<ValueId, Tensor>,
     lhs: ValueId,
     rhs: ValueId,
     dims: &crate::ir::DotDims,
-    result_ty: &TensorType,
 ) -> Result<Tensor, InterpError> {
     let a = lookup_ref(env, lhs)?;
     let b = lookup_ref(env, rhs)?;
-    expect_ty(a, ElementType::F64)?;
-    expect_ty(b, ElementType::F64)?;
-    let vals = dot_values(&a.ty, &a.bytes, &b.ty, &b.bytes, dims)?;
-    // A multiline `stablehlo.dot_general` can leave the result type as a
-    // scalar when the real shape is on the following line. Keep the declared
-    // type when it already has the right number of elements.
-    let out_ty =
-        if result_ty.element_type == ElementType::F64 && result_ty.num_elements() == vals.len() {
-            result_ty.clone()
-        } else if vals.len() == 1 {
-            TensorType::scalar(ElementType::F64)
-        } else {
-            TensorType {
-                shape: vec![vals.len() as i64],
-                element_type: ElementType::F64,
+    let et = a.ty.element_type;
+    expect_ty(b, et)?;
+    let (l_st, r_st) = (shape_strides(&a.ty.shape), shape_strides(&b.ty.shape));
+    // Axes as (size, lhs stride, rhs stride).
+    let paired = |l_axes: &[i64], r_axes: &[i64]| -> Option<Vec<(i64, usize, usize)>> {
+        if l_axes.len() != r_axes.len() {
+            return None;
+        }
+        l_axes
+            .iter()
+            .zip(r_axes)
+            .map(|(&l, &r)| {
+                let (l, r) = (usize::try_from(l).ok()?, usize::try_from(r).ok()?);
+                let size = *a.ty.shape.get(l)?;
+                (b.ty.shape.get(r) == Some(&size)).then(|| (size, l_st[l], r_st[r]))
+            })
+            .collect()
+    };
+    let mut out_axes =
+        paired(&dims.lhs_batch, &dims.rhs_batch).ok_or(InterpError::DotBatchShape)?;
+    let k_axes = paired(&dims.lhs_contracting, &dims.rhs_contracting)
+        .ok_or(InterpError::DotContractingSize)?;
+    let free = |rank: usize, batch: &[i64], contracting: &[i64]| -> Vec<usize> {
+        (0..rank)
+            .filter(|&d| !batch.contains(&(d as i64)) && !contracting.contains(&(d as i64)))
+            .collect()
+    };
+    for d in free(a.ty.rank(), &dims.lhs_batch, &dims.lhs_contracting) {
+        out_axes.push((a.ty.shape[d], l_st[d], 0));
+    }
+    for d in free(b.ty.rank(), &dims.rhs_batch, &dims.rhs_contracting) {
+        out_axes.push((b.ty.shape[d], 0, r_st[d]));
+    }
+    let shape = out_axes.iter().map(|axis| axis.0).collect();
+    let mut out = Tensor::alloc(TensorType {
+        shape,
+        element_type: et,
+    });
+    let offsets = |axes: &[(i64, usize, usize)], mut flat: usize| {
+        axes.iter().rev().fold((0, 0), |(l, r), &(size, ls, rs)| {
+            let c = flat % size as usize;
+            flat /= size as usize;
+            (l + c * ls, r + c * rs)
+        })
+    };
+    let n_k = k_axes.iter().map(|axis| axis.0).product::<i64>() as usize;
+    for o in 0..out.elem_count() {
+        let (lo, ro) = offsets(&out_axes, o);
+        let (mut real, mut single, mut int) = (0.0, 0.0f32, 0i64);
+        for k in 0..n_k {
+            let (lk, rk) = offsets(&k_axes, k);
+            let (x, y) = ((&a.bytes, lo + lk), (&b.bytes, ro + rk));
+            match et {
+                ElementType::F64 => real += read_f64(x.0, et, x.1) * read_f64(y.0, et, y.1),
+                ElementType::F32 => {
+                    single += read_f64(x.0, et, x.1) as f32 * read_f64(y.0, et, y.1) as f32;
+                }
+                _ => {
+                    let p = read_int(x.0, et, x.1).wrapping_mul(read_int(y.0, et, y.1));
+                    int = int.wrapping_add(p);
+                }
             }
-        };
-    let mut out = Tensor::alloc(out_ty);
-    for (i, v) in vals.iter().enumerate() {
-        write_f64(&mut out.bytes, ElementType::F64, i, *v);
+        }
+        match et {
+            ElementType::F64 => write_f64(&mut out.bytes, et, o, real),
+            ElementType::F32 => write_f64(&mut out.bytes, et, o, single as f64),
+            _ => write_int(&mut out.bytes, et, o, int),
+        }
     }
     Ok(out)
-}
-
-fn dot_values(
-    l_ty: &TensorType,
-    l: &[u8],
-    r_ty: &TensorType,
-    r: &[u8],
-    dims: &crate::ir::DotDims,
-) -> Result<Vec<f64>, InterpError> {
-    let at = |bytes: &[u8], i: usize| read_f64(bytes, ElementType::F64, i);
-    if dims.lhs_batch == [0] && dims.rhs_batch == [0] && l_ty.rank() == 2 && r_ty.rank() == 2 {
-        let batch = l_ty.shape[0] as usize;
-        let k = l_ty.shape[1] as usize;
-        if r_ty.shape[0] as usize != batch || r_ty.shape[1] as usize != k {
-            return Err(InterpError::DotBatchShape);
-        }
-        let mut out = Vec::with_capacity(batch);
-        for b in 0..batch {
-            let mut acc = 0.0;
-            for i in 0..k {
-                acc += at(l, b * k + i) * at(r, b * k + i);
-            }
-            out.push(acc);
-        }
-        return Ok(out);
-    }
-    if l_ty.is_scalar() && r_ty.is_scalar() {
-        return Ok(vec![at(l, 0) * at(r, 0)]);
-    }
-    // One in-range contracting axis. Empty or out-of-range dims fall through
-    // to the not-implemented error instead of guessing a layout.
-    let contract = |axes: &[i64], rank: usize| -> Option<usize> {
-        match axes {
-            [d] if *d >= 0 && (*d as usize) < rank => Some(*d as usize),
-            _ => None,
-        }
-    };
-    let unbatched = dims.lhs_batch.is_empty() && dims.rhs_batch.is_empty();
-    if unbatched
-        && l_ty.rank() == 1
-        && r_ty.rank() == 1
-        && contract(&dims.lhs_contracting, 1) == Some(0)
-        && contract(&dims.rhs_contracting, 1) == Some(0)
-    {
-        let n = l_ty.shape[0] as usize;
-        if r_ty.shape[0] as usize != n {
-            return Err(InterpError::DotContractingSize);
-        }
-        let mut acc = 0.0;
-        for i in 0..n {
-            acc += at(l, i) * at(r, i);
-        }
-        return Ok(vec![acc]);
-    }
-    if unbatched
-        && l_ty.rank() == 1
-        && r_ty.rank() == 2
-        && contract(&dims.lhs_contracting, 1) == Some(0)
-        && let Some(rhs_contract_dim) = contract(&dims.rhs_contracting, 2)
-    {
-        let k = l_ty.shape[0] as usize;
-        let rows = r_ty.shape[0] as usize;
-        let cols = r_ty.shape[1] as usize;
-        let (contracted, out_size) = if rhs_contract_dim == 1 {
-            (cols, rows)
-        } else {
-            (rows, cols)
-        };
-        if contracted != k {
-            return Err(InterpError::DotContractingSize);
-        }
-        let mut out = Vec::with_capacity(out_size);
-        for i in 0..out_size {
-            let mut acc = 0.0;
-            for j in 0..k {
-                let rv = if rhs_contract_dim == 1 {
-                    at(r, i * cols + j)
-                } else {
-                    at(r, j * cols + i)
-                };
-                acc += at(l, j) * rv;
-            }
-            out.push(acc);
-        }
-        return Ok(out);
-    }
-    if unbatched
-        && l_ty.rank() == 2
-        && r_ty.rank() == 1
-        && let (Some(lhs_contract_dim), Some(0)) = (
-            contract(&dims.lhs_contracting, 2),
-            contract(&dims.rhs_contracting, 1),
-        )
-    {
-        let rows = l_ty.shape[0] as usize;
-        let cols = l_ty.shape[1] as usize;
-        let k = r_ty.shape[0] as usize;
-        if lhs_contract_dim == 1 {
-            if cols != k {
-                return Err(InterpError::DotContractingSize);
-            }
-            let mut out = Vec::with_capacity(rows);
-            for row in 0..rows {
-                let mut acc = 0.0;
-                for col in 0..cols {
-                    acc += at(l, row * cols + col) * at(r, col);
-                }
-                out.push(acc);
-            }
-            return Ok(out);
-        }
-        if rows != k {
-            return Err(InterpError::DotContractingSize);
-        }
-        let mut out = Vec::with_capacity(cols);
-        for col in 0..cols {
-            let mut acc = 0.0;
-            for row in 0..rows {
-                acc += at(l, row * cols + col) * at(r, row);
-            }
-            out.push(acc);
-        }
-        return Ok(out);
-    }
-    if l_ty.rank() == 2
-        && r_ty.rank() == 2
-        && dims.lhs_batch.is_empty()
-        && dims.rhs_batch.is_empty()
-        && (dims.lhs_contracting.is_empty() || dims.lhs_contracting == [1])
-        && (dims.rhs_contracting.is_empty() || dims.rhs_contracting == [0])
-    {
-        let m = l_ty.shape[0] as usize;
-        let k = l_ty.shape[1] as usize;
-        let n_cols = r_ty.shape[1] as usize;
-        if r_ty.shape[0] as usize != k {
-            return Err(InterpError::DotContractingSize);
-        }
-        let mut out = vec![0.0; m * n_cols];
-        for row in 0..m {
-            for col in 0..n_cols {
-                let mut acc = 0.0;
-                for i in 0..k {
-                    acc += at(l, row * k + i) * at(r, i * n_cols + col);
-                }
-                out[row * n_cols + col] = acc;
-            }
-        }
-        return Ok(out);
-    }
-    Err(InterpError::DotDimsNotImplemented)
 }
 
 fn reduce(
@@ -1513,94 +1483,61 @@ fn reduce(
 ) -> Result<Tensor, InterpError> {
     let src = lookup_ref(env, operand)?;
     let init_tensor = lookup_ref(env, init)?;
-    if dimensions.len() != 1 {
-        return Err(InterpError::ReduceMultiDim);
-    }
-    let dim = dimensions[0] as usize;
-    if dim + 1 != src.ty.rank() {
-        return Err(InterpError::ReduceNotLastAxis);
-    }
-    let inner = src.ty.shape[dim] as usize;
-    let outer = src.elem_count() / inner.max(1);
-    match (op, src.ty.element_type) {
-        (ReduceOp::Add, ElementType::F64) => {
-            let mut out = Tensor::alloc(result_ty.clone());
-            tensor_rt::tensor_reduce_sum_f64(
-                out.bytes.as_mut_ptr().cast(),
-                src.bytes.as_ptr().cast(),
-                outer,
-                inner,
-            );
-            Ok(out)
-        }
-        (ReduceOp::Maximum, ElementType::F64) => {
-            let mut out = Tensor::alloc(result_ty.clone());
-            tensor_rt::tensor_reduce_max_f64(
-                out.bytes.as_mut_ptr().cast(),
-                src.bytes.as_ptr().cast(),
-                outer,
-                inner,
-            );
-            Ok(out)
-        }
-        (ReduceOp::Minimum, ElementType::F64) => {
-            let mut out = Tensor::alloc(result_ty.clone());
-            tensor_rt::tensor_reduce_min_f64(
-                out.bytes.as_mut_ptr().cast(),
-                src.bytes.as_ptr().cast(),
-                outer,
-                inner,
-            );
-            Ok(out)
-        }
-        (
-            ReduceOp::Add,
-            ElementType::I64 | ElementType::I32 | ElementType::UI64 | ElementType::UI32,
-        ) => {
-            let init = read_int(&init_tensor.bytes, init_tensor.ty.element_type, 0);
-            Ok(reduce_last_axis_int(src, init, result_ty, |acc, v| {
-                acc.wrapping_add(v)
-            }))
-        }
-        (ReduceOp::And, ElementType::I1) => {
-            let init = read_int(&init_tensor.bytes, init_tensor.ty.element_type, 0);
-            Ok(reduce_last_axis_int(src, init, result_ty, |acc, v| {
-                i64::from(acc != 0 && v != 0)
-            }))
-        }
-        (ReduceOp::Or, ElementType::I1) => {
-            let init = read_int(&init_tensor.bytes, init_tensor.ty.element_type, 0);
-            Ok(reduce_last_axis_int(src, init, result_ty, |acc, v| {
-                i64::from(acc != 0 || v != 0)
-            }))
-        }
-        _ => Err(InterpError::ReduceNotImplemented {
-            op,
-            element_type: src.ty.element_type,
-        }),
-    }
-}
-
-fn reduce_last_axis_int(
-    src: &Tensor,
-    init: i64,
-    result_ty: &TensorType,
-    op: impl Fn(i64, i64) -> i64,
-) -> Tensor {
-    let inner = src.ty.shape.last().copied().unwrap_or(1).max(1) as usize;
-    let outer = src.elem_count() / inner;
+    let et = src.ty.element_type;
+    let not_implemented = || InterpError::ReduceNotImplemented {
+        op,
+        element_type: et,
+    };
+    let shape: Vec<usize> = src.ty.shape.iter().map(|&d| d as usize).collect();
+    let kept: Vec<usize> = (0..shape.len())
+        .filter(|&a| !dimensions.contains(&(a as i64)))
+        .collect();
+    let out_index = |flat: usize| {
+        let coord = |a: usize| flat / shape[a + 1..].iter().product::<usize>() % shape[a];
+        kept.iter().fold(0, |o, &a| o * shape[a] + coord(a))
+    };
+    let n_out = result_ty.num_elements();
     let mut out = Tensor::alloc(result_ty.clone());
-    for group in 0..outer {
-        let mut acc = init;
-        for i in 0..inner {
-            acc = op(
-                acc,
-                read_int(&src.bytes, src.ty.element_type, group * inner + i),
-            );
+    if is_real(et) {
+        let fold: fn(f64, f64) -> f64 = match op {
+            ReduceOp::Add => |a, b| a + b,
+            ReduceOp::Multiply => |a, b| a * b,
+            ReduceOp::Maximum => tensor_rt::float_max,
+            ReduceOp::Minimum => tensor_rt::float_min,
+            ReduceOp::And | ReduceOp::Or => return Err(not_implemented()),
+        };
+        let init = read_f64(&init_tensor.bytes, init_tensor.ty.element_type, 0);
+        let mut acc = vec![init; n_out];
+        for flat in 0..src.elem_count() {
+            let o = out_index(flat);
+            acc[o] = fold(acc[o], read_f64(&src.bytes, et, flat));
         }
-        write_int(&mut out.bytes, result_ty.element_type, group, acc);
+        for (o, v) in acc.into_iter().enumerate() {
+            write_f64(&mut out.bytes, result_ty.element_type, o, v);
+        }
+    } else {
+        let fold: fn(i64, i64) -> i64 = match (op, et) {
+            (ReduceOp::And, ElementType::I1) => |a, b| i64::from(a != 0 && b != 0),
+            (ReduceOp::Or, ElementType::I1) => |a, b| i64::from(a != 0 || b != 0),
+            (ReduceOp::Add, _) => i64::wrapping_add,
+            (ReduceOp::Multiply, _) => i64::wrapping_mul,
+            (ReduceOp::Maximum, ElementType::UI64) => |a, b| (a as u64).max(b as u64) as i64,
+            (ReduceOp::Minimum, ElementType::UI64) => |a, b| (a as u64).min(b as u64) as i64,
+            (ReduceOp::Maximum, _) => i64::max,
+            (ReduceOp::Minimum, _) => i64::min,
+            (ReduceOp::And | ReduceOp::Or, _) => return Err(not_implemented()),
+        };
+        let init = read_int(&init_tensor.bytes, init_tensor.ty.element_type, 0);
+        let mut acc = vec![init; n_out];
+        for flat in 0..src.elem_count() {
+            let o = out_index(flat);
+            acc[o] = fold(acc[o], read_int(&src.bytes, et, flat));
+        }
+        for (o, v) in acc.into_iter().enumerate() {
+            write_int(&mut out.bytes, result_ty.element_type, o, v);
+        }
     }
-    out
+    Ok(out)
 }
 
 fn is_integral(ty: ElementType) -> bool {
@@ -1679,35 +1616,20 @@ fn bitcast(
 
 fn iota(dimension: i64, result_ty: &TensorType) -> Result<Tensor, InterpError> {
     let mut out = Tensor::alloc(result_ty.clone());
-    match result_ty.element_type {
-        ElementType::I64 => tensor_rt::tensor_iota_nd_i64(
-            out.bytes.as_mut_ptr().cast(),
-            out.elem_count(),
-            result_ty.shape.as_ptr(),
-            result_ty.rank(),
-            dimension as usize,
-        ),
-        ElementType::F64 => tensor_rt::tensor_iota_nd_f64(
-            out.bytes.as_mut_ptr().cast(),
-            out.elem_count(),
-            result_ty.shape.as_ptr(),
-            result_ty.rank(),
-            dimension as usize,
-        ),
-        ElementType::I32 | ElementType::UI32 => {
-            let strides = shape_strides(&result_ty.shape);
-            let dim = dimension as usize;
-            let n = out.elem_count();
-            for i in 0..n {
-                let coord = if result_ty.shape.is_empty() {
-                    0
-                } else {
-                    (i / strides[dim]) as i64 % result_ty.shape[dim]
-                };
-                write_int(&mut out.bytes, result_ty.element_type, i, coord);
-            }
+    let et = result_ty.element_type;
+    let strides = shape_strides(&result_ty.shape);
+    let dim = dimension as usize;
+    for i in 0..out.elem_count() {
+        let coord = if result_ty.shape.is_empty() {
+            0
+        } else {
+            (i / strides[dim]) as i64 % result_ty.shape[dim]
+        };
+        if is_real(et) {
+            write_f64(&mut out.bytes, et, i, coord as f64);
+        } else {
+            write_int(&mut out.bytes, et, i, coord);
         }
-        _ => return Err(InterpError::IotaElementType),
     }
     Ok(out)
 }
@@ -1739,17 +1661,24 @@ fn reverse(
     result_ty: &TensorType,
 ) -> Result<Tensor, InterpError> {
     let src = lookup_ref(env, operand)?;
-    expect_ty(src, ElementType::F64)?;
+    let shape = &src.ty.shape;
+    let strides = shape_strides(shape);
+    let e = src.elem_size();
     let mut out = Tensor::alloc(result_ty.clone());
-    tensor_rt::tensor_reverse_f64(
-        out.bytes.as_mut_ptr().cast(),
-        src.bytes.as_ptr().cast(),
-        src.elem_count(),
-        src.ty.shape.as_ptr(),
-        src.ty.rank(),
-        dimensions.as_ptr(),
-        dimensions.len(),
-    );
+    for i in 0..src.elem_count() {
+        let j: usize = (0..shape.len())
+            .map(|d| {
+                let c = i / strides[d] % shape[d] as usize;
+                let c = if dimensions.contains(&(d as i64)) {
+                    shape[d] as usize - 1 - c
+                } else {
+                    c
+                };
+                c * strides[d]
+            })
+            .sum();
+        out.bytes[i * e..(i + 1) * e].copy_from_slice(&src.bytes[j * e..(j + 1) * e]);
+    }
     Ok(out)
 }
 
@@ -1761,25 +1690,30 @@ fn pad(
     interior: &[i64],
     result_ty: &TensorType,
 ) -> Result<Tensor, InterpError> {
-    if interior.iter().any(|&v| v != 0) {
-        return Err(InterpError::InteriorPadding);
-    }
     let src = lookup_ref(env, operand)?;
-    expect_ty(src, ElementType::F64)?;
     let pad = lookup_ref(env, padding_value)?;
-    let pad_value = read_f64(&pad.bytes, ElementType::F64, 0);
+    let e = src.elem_size();
     let mut out = Tensor::alloc(result_ty.clone());
-    tensor_rt::tensor_pad_f64(
-        out.bytes.as_mut_ptr().cast(),
-        src.bytes.as_ptr().cast(),
-        out.elem_count(),
-        src.elem_count(),
-        pad_value,
-        result_ty.shape.as_ptr(),
-        src.ty.shape.as_ptr(),
-        src.ty.rank(),
-        low.as_ptr(),
+    for slot in out.bytes.chunks_exact_mut(e) {
+        slot.copy_from_slice(&pad.bytes[..e]);
+    }
+    let (src_strides, out_strides) = (
+        shape_strides(&src.ty.shape),
+        shape_strides(&result_ty.shape),
     );
+    'elements: for i in 0..src.elem_count() {
+        let mut o = 0;
+        for d in 0..src.ty.rank() {
+            let c = (i / src_strides[d]) as i64 % src.ty.shape[d];
+            let step = 1 + interior.get(d).copied().unwrap_or(0);
+            let p = low.get(d).copied().unwrap_or(0) + c * step;
+            if p < 0 || p >= result_ty.shape[d] {
+                continue 'elements;
+            }
+            o += p as usize * out_strides[d];
+        }
+        out.bytes[o * e..(o + 1) * e].copy_from_slice(&src.bytes[i * e..(i + 1) * e]);
+    }
     Ok(out)
 }
 
@@ -1930,6 +1864,359 @@ fn gather(
         out.bytes[db..db + elem].copy_from_slice(&src.bytes[sb..sb + elem]);
     }
     Ok(out)
+}
+
+fn scatter(
+    env: &HashMap<ValueId, Tensor>,
+    operand: ValueId,
+    indices: ValueId,
+    updates: ValueId,
+    dims: &ScatterDims,
+    combiner: ScatterCombiner,
+) -> Result<Tensor, InterpError> {
+    let idx = lookup_ref(env, indices)?;
+    let upd = lookup_ref(env, updates)?;
+    let mut out = lookup_ref(env, operand)?.clone();
+    let shape = out.ty.shape.clone();
+    let et = out.ty.element_type;
+    let ivd = dims.index_vector_dim as usize;
+    let uwd: Vec<usize> = dims
+        .update_window_dims
+        .iter()
+        .map(|&d| d as usize)
+        .collect();
+    let windowed: Vec<usize> = (0..shape.len())
+        .filter(|&d| {
+            let d = d as i64;
+            !dims.inserted_window_dims.contains(&d) && !dims.input_batching_dims.contains(&d)
+        })
+        .collect();
+    let (upd_strides, idx_strides, out_strides) = (
+        shape_strides(&upd.ty.shape),
+        shape_strides(&idx.ty.shape),
+        shape_strides(&shape),
+    );
+    for u in 0..upd.elem_count() {
+        let uc: Vec<usize> = (0..upd.ty.rank())
+            .map(|d| u / upd_strides[d] % upd.ty.shape[d] as usize)
+            .collect();
+        let scatter_index: Vec<usize> = (0..uc.len())
+            .filter(|d| !uwd.contains(d))
+            .map(|d| uc[d])
+            .collect();
+        let mut full = vec![0i64; shape.len()];
+        for (k, &d) in dims.scatter_dims_to_operand_dims.iter().enumerate() {
+            let mut ic = scatter_index.clone();
+            if ivd < idx.ty.rank() {
+                ic.insert(ivd, k);
+            }
+            let pos = ic.iter().zip(&idx_strides).map(|(c, s)| c * s).sum();
+            full[d as usize] = read_int(&idx.bytes, idx.ty.element_type, pos);
+        }
+        for (&d, &j) in dims
+            .input_batching_dims
+            .iter()
+            .zip(&dims.scatter_indices_batching_dims)
+        {
+            let j = j as usize;
+            full[d as usize] = scatter_index[if j < ivd { j } else { j - 1 }] as i64;
+        }
+        let window_size = |d: usize| {
+            windowed
+                .iter()
+                .position(|&w| w == d)
+                .map_or(1, |k| upd.ty.shape[uwd[k]])
+        };
+        if (0..shape.len()).any(|d| full[d] < 0 || full[d] + window_size(d) > shape[d]) {
+            continue;
+        }
+        for (k, &d) in windowed.iter().enumerate() {
+            full[d] += uc[uwd[k]] as i64;
+        }
+        let o: usize = (0..shape.len())
+            .map(|d| full[d] as usize * out_strides[d])
+            .sum();
+        let e = et.byte_size();
+        if combiner == ScatterCombiner::Set {
+            out.bytes[o * e..(o + 1) * e].copy_from_slice(&upd.bytes[u * e..(u + 1) * e]);
+        } else if is_real(et) {
+            let (a, b) = (read_f64(&out.bytes, et, o), read_f64(&upd.bytes, et, u));
+            let r = match combiner {
+                ScatterCombiner::Add => a + b,
+                ScatterCombiner::Multiply => a * b,
+                ScatterCombiner::Minimum => tensor_rt::float_min(a, b),
+                _ => tensor_rt::float_max(a, b),
+            };
+            write_f64(&mut out.bytes, et, o, r);
+        } else {
+            let (a, b) = (read_int(&out.bytes, et, o), read_int(&upd.bytes, et, u));
+            let r = match combiner {
+                ScatterCombiner::Add => a.wrapping_add(b),
+                ScatterCombiner::Multiply => a.wrapping_mul(b),
+                ScatterCombiner::Minimum => a.min(b),
+                _ => a.max(b),
+            };
+            write_int(&mut out.bytes, et, o, r);
+        }
+    }
+    Ok(out)
+}
+
+fn argminmax(
+    env: &HashMap<ValueId, Tensor>,
+    values: ValueId,
+    indices: ValueId,
+    dimensions: &[i64],
+    is_min: bool,
+    results: &[(ValueId, TensorType)],
+) -> Result<Vec<Tensor>, InterpError> {
+    let vals = lookup_ref(env, values)?;
+    let idxs = lookup_ref(env, indices)?;
+    let &[axis] = dimensions else {
+        return Err(InterpError::ArgminmaxDims(dimensions.len()));
+    };
+    let (shape, vt, it) = (&vals.ty.shape, vals.ty.element_type, idxs.ty.element_type);
+    let axis = axis as usize;
+    let outer = shape[..axis].iter().product::<i64>() as usize;
+    let inner = shape[axis] as usize;
+    let after = shape[axis + 1..].iter().product::<i64>() as usize;
+    let int_value = |p: usize| match vt {
+        ElementType::UI64 => read_int(&vals.bytes, vt, p) as u64 as i128,
+        _ => read_int(&vals.bytes, vt, p) as i128,
+    };
+    let (mut out_v, mut out_i) = (
+        Tensor::alloc(results[0].1.clone()),
+        Tensor::alloc(results[1].1.clone()),
+    );
+    let (ev, ei) = (vals.elem_size(), idxs.elem_size());
+    for o in 0..outer {
+        for a in 0..after {
+            let mut best = o * inner * after + a;
+            for k in 1..inner {
+                let p = (o * inner + k) * after + a;
+                let smaller_index = read_int(&idxs.bytes, it, p) < read_int(&idxs.bytes, it, best);
+                let take = if is_real(vt) {
+                    let (b, v) = (
+                        read_f64(&vals.bytes, vt, best),
+                        read_f64(&vals.bytes, vt, p),
+                    );
+                    let better = if is_min { v < b } else { v > b };
+                    !b.is_nan() && (v.is_nan() || better || (v == b && smaller_index))
+                } else {
+                    let (b, v) = (int_value(best), int_value(p));
+                    (if is_min { v < b } else { v > b }) || (v == b && smaller_index)
+                };
+                if take {
+                    best = p;
+                }
+            }
+            let q = o * after + a;
+            out_v.bytes[q * ev..(q + 1) * ev]
+                .copy_from_slice(&vals.bytes[best * ev..(best + 1) * ev]);
+            out_i.bytes[q * ei..(q + 1) * ei]
+                .copy_from_slice(&idxs.bytes[best * ei..(best + 1) * ei]);
+        }
+    }
+    Ok(vec![out_v, out_i])
+}
+
+fn scalar_at(t: &Tensor, p: usize) -> Tensor {
+    let e = t.elem_size();
+    Tensor {
+        ty: TensorType::scalar(t.ty.element_type),
+        bytes: t.bytes[p * e..(p + 1) * e].to_vec(),
+    }
+}
+
+/// Evaluates a region with two scalar block arguments.
+fn apply_region(
+    module: &Module,
+    env: &mut HashMap<ValueId, Tensor>,
+    (body, params): (&[InstrResult], &[ValueId]),
+    a: Tensor,
+    b: Tensor,
+) -> Result<Tensor, InterpError> {
+    env.insert(params[0], a);
+    env.insert(params[1], b);
+    Ok(eval_body(module, body, env)?.swap_remove(0))
+}
+
+/// Flat operand index of window element `w` of window `o`, or `None` in padding or in a
+/// base-dilation hole.
+fn window_source(
+    [o, w]: [usize; 2],
+    [out_shape, src_shape, dims]: [&[i64]; 3],
+    [strides, base_dil, win_dil]: [&[i64]; 3],
+    padding: &[(i64, i64)],
+) -> Option<usize> {
+    let (out_st, src_st, win_st) = (
+        shape_strides(out_shape),
+        shape_strides(src_shape),
+        shape_strides(dims),
+    );
+    let mut flat = 0;
+    for d in 0..src_shape.len() {
+        let oc = (o / out_st[d]) as i64 % out_shape[d];
+        let wc = (w / win_st[d]) as i64 % dims[d];
+        let p = oc * strides[d] + wc * win_dil[d] - padding[d].0;
+        if p < 0 || p % base_dil[d] != 0 || p / base_dil[d] >= src_shape[d] {
+            return None;
+        }
+        flat += (p / base_dil[d]) as usize * src_st[d];
+    }
+    Some(flat)
+}
+
+/// Padding and base-dilation holes take the init value, as the StableHLO spec defines.
+#[allow(clippy::too_many_arguments)]
+fn reduce_window(
+    module: &Module,
+    env: &HashMap<ValueId, Tensor>,
+    operand: ValueId,
+    init: ValueId,
+    region: (&[InstrResult], &[ValueId]),
+    [dims, strides, base_dil, win_dil]: [&[i64]; 4],
+    padding: &[(i64, i64)],
+    result_ty: &TensorType,
+) -> Result<Tensor, InterpError> {
+    let src = lookup_ref(env, operand)?;
+    let init = lookup(env, init)?;
+    let mut out = Tensor::alloc(result_ty.clone());
+    let n_win = dims.iter().product::<i64>() as usize;
+    let mut local = env.clone();
+    let e = src.elem_size();
+    for o in 0..result_ty.num_elements() {
+        let mut acc = init.clone();
+        for w in 0..n_win {
+            let value = window_source(
+                [o, w],
+                [&result_ty.shape, &src.ty.shape, dims],
+                [strides, base_dil, win_dil],
+                padding,
+            )
+            .map_or_else(|| init.clone(), |f| scalar_at(src, f));
+            acc = apply_region(module, &mut local, region, acc, value)?;
+        }
+        out.bytes[o * e..(o + 1) * e].copy_from_slice(&acc.bytes);
+    }
+    Ok(out)
+}
+
+/// Each source element scatters onto the element its window selects; like XLA, padding
+/// is never selected and `select(current, candidate)` true keeps the current element.
+#[allow(clippy::too_many_arguments)]
+fn select_and_scatter(
+    module: &Module,
+    env: &HashMap<ValueId, Tensor>,
+    [operand, source, init]: [ValueId; 3],
+    select: (&[InstrResult], &[ValueId]),
+    scatter: (&[InstrResult], &[ValueId]),
+    dims: &[i64],
+    strides: &[i64],
+    padding: &[(i64, i64)],
+    result_ty: &TensorType,
+) -> Result<Tensor, InterpError> {
+    let op = lookup_ref(env, operand)?;
+    let src = lookup_ref(env, source)?;
+    let init = lookup(env, init)?;
+    let mut out = Tensor::alloc(result_ty.clone());
+    let e = op.elem_size();
+    for slot in out.bytes.chunks_exact_mut(e) {
+        slot.copy_from_slice(&init.bytes);
+    }
+    let ones = vec![1; dims.len()];
+    let n_win = dims.iter().product::<i64>() as usize;
+    let mut local = env.clone();
+    for s in 0..src.elem_count() {
+        let mut selected: Option<usize> = None;
+        for w in 0..n_win {
+            let Some(f) = window_source(
+                [s, w],
+                [&src.ty.shape, &op.ty.shape, dims],
+                [strides, &ones, &ones],
+                padding,
+            ) else {
+                continue;
+            };
+            let keep = match selected {
+                Some(cur) => {
+                    let (a, b) = (scalar_at(op, cur), scalar_at(op, f));
+                    apply_region(module, &mut local, select, a, b)?.bytes[0] != 0
+                }
+                None => false,
+            };
+            if !keep {
+                selected = Some(f);
+            }
+        }
+        if let Some(f) = selected {
+            let (a, b) = (scalar_at(&out, f), scalar_at(src, s));
+            let updated = apply_region(module, &mut local, scatter, a, b)?;
+            out.bytes[f * e..(f + 1) * e].copy_from_slice(&updated.bytes);
+        }
+    }
+    Ok(out)
+}
+
+/// Stable sort along one axis, ordered by evaluating the comparator region on each pair.
+fn sort(
+    module: &Module,
+    env: &HashMap<ValueId, Tensor>,
+    inputs: &[ValueId],
+    dimension: i64,
+    comparator: &[InstrResult],
+    params: &[ValueId],
+) -> Result<Vec<Tensor>, InterpError> {
+    let ops = inputs
+        .iter()
+        .map(|v| lookup(env, *v))
+        .collect::<Result<Vec<_>, _>>()?;
+    let shape = ops[0].ty.shape.clone();
+    let rank = shape.len() as i64;
+    let dim = (if dimension < 0 {
+        dimension + rank
+    } else {
+        dimension
+    }) as usize;
+    let outer = shape[..dim].iter().product::<i64>() as usize;
+    let len = shape[dim] as usize;
+    let after = shape[dim + 1..].iter().product::<i64>() as usize;
+    let mut outs = ops.clone();
+    for o in 0..outer {
+        for a in 0..after {
+            let at = |k: usize| (o * len + k) * after + a;
+            let less = |x: usize, y: usize| -> Result<bool, InterpError> {
+                let mut local = env.clone();
+                for (i, t) in ops.iter().enumerate() {
+                    local.insert(params[2 * i], scalar_at(t, at(x)));
+                    local.insert(params[2 * i + 1], scalar_at(t, at(y)));
+                }
+                Ok(eval_body(module, comparator, &mut local)?[0].bytes[0] != 0)
+            };
+            let mut err = None;
+            let mut perm: Vec<usize> = (0..len).collect();
+            perm.sort_by(|&x, &y| match (less(x, y), less(y, x)) {
+                (Ok(true), _) => std::cmp::Ordering::Less,
+                (Ok(false), Ok(true)) => std::cmp::Ordering::Greater,
+                (Ok(_), Ok(_)) => std::cmp::Ordering::Equal,
+                (Err(e), _) | (_, Err(e)) => {
+                    err.get_or_insert(e);
+                    std::cmp::Ordering::Equal
+                }
+            });
+            if let Some(e) = err {
+                return Err(e);
+            }
+            for (out, op) in outs.iter_mut().zip(&ops) {
+                let e = op.elem_size();
+                for (k, &src) in perm.iter().enumerate() {
+                    out.bytes[at(k) * e..(at(k) + 1) * e]
+                        .copy_from_slice(&op.bytes[at(src) * e..(at(src) + 1) * e]);
+                }
+            }
+        }
+    }
+    Ok(outs)
 }
 
 fn materialize_constant(value: &ConstantValue, ty: &TensorType) -> Result<Tensor, InterpError> {
@@ -2528,14 +2815,7 @@ mod tests {
             lhs_batch: vec![],
             rhs_batch: vec![],
         };
-        let out = dot_general(
-            &env,
-            ValueId(1),
-            ValueId(2),
-            &dims,
-            &ty(&[], ElementType::F64),
-        )
-        .unwrap();
+        let out = dot_general(&env, ValueId(1), ValueId(2), &dims).unwrap();
         assert_eq!(read_f64s(&out), vec![32.0]);
     }
 
@@ -2550,14 +2830,7 @@ mod tests {
             lhs_batch: vec![],
             rhs_batch: vec![],
         };
-        let out = dot_general(
-            &env,
-            ValueId(1),
-            ValueId(2),
-            &dims,
-            &ty(&[2], ElementType::F64),
-        )
-        .unwrap();
+        let out = dot_general(&env, ValueId(1), ValueId(2), &dims).unwrap();
         assert_eq!(read_f64s(&out), vec![6.0, 15.0]);
     }
 
@@ -2575,31 +2848,18 @@ mod tests {
         let mut env = HashMap::new();
         env.insert(ValueId(1), f64s(&[2], &[1.0, 2.0]));
         env.insert(ValueId(2), f64s(&[3], &[4.0, 5.0, 6.0]));
-        let err = dot_general(
-            &env,
-            ValueId(1),
-            ValueId(2),
-            &dot_dims(&[0], &[0]),
-            &ty(&[], ElementType::F64),
-        )
-        .unwrap_err();
+        let err = dot_general(&env, ValueId(1), ValueId(2), &dot_dims(&[0], &[0])).unwrap_err();
         assert!(matches!(err, InterpError::DotContractingSize), "{err}");
     }
 
     #[test]
-    fn vector_dot_without_contracting_dims_is_not_implemented() {
+    fn vector_dot_without_contracting_dims_is_an_outer_product() {
         let mut env = HashMap::new();
         env.insert(ValueId(1), f64s(&[2], &[1.0, 2.0]));
         env.insert(ValueId(2), f64s(&[2], &[3.0, 4.0]));
-        let err = dot_general(
-            &env,
-            ValueId(1),
-            ValueId(2),
-            &dot_dims(&[], &[]),
-            &ty(&[2, 2], ElementType::F64),
-        )
-        .unwrap_err();
-        assert!(matches!(err, InterpError::DotDimsNotImplemented), "{err}");
+        let out = dot_general(&env, ValueId(1), ValueId(2), &dot_dims(&[], &[])).unwrap();
+        assert_eq!(out.ty.shape, [2, 2]);
+        assert_eq!(read_f64s(&out), vec![3.0, 4.0, 6.0, 8.0]);
     }
 
     #[test]
@@ -2607,14 +2867,7 @@ mod tests {
         let mut env = HashMap::new();
         env.insert(ValueId(1), f64s(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]));
         env.insert(ValueId(2), f64s(&[2], &[10.0, 20.0]));
-        let out = dot_general(
-            &env,
-            ValueId(1),
-            ValueId(2),
-            &dot_dims(&[0], &[0]),
-            &ty(&[3], ElementType::F64),
-        )
-        .unwrap();
+        let out = dot_general(&env, ValueId(1), ValueId(2), &dot_dims(&[0], &[0])).unwrap();
         assert_eq!(read_f64s(&out), vec![90.0, 120.0, 150.0]);
     }
 
@@ -2623,14 +2876,7 @@ mod tests {
         let mut env = HashMap::new();
         env.insert(ValueId(1), f64s(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]));
         env.insert(ValueId(2), f64s(&[2], &[10.0, 20.0]));
-        let err = dot_general(
-            &env,
-            ValueId(1),
-            ValueId(2),
-            &dot_dims(&[1], &[0]),
-            &ty(&[2], ElementType::F64),
-        )
-        .unwrap_err();
+        let err = dot_general(&env, ValueId(1), ValueId(2), &dot_dims(&[1], &[0])).unwrap_err();
         assert!(matches!(err, InterpError::DotContractingSize), "{err}");
     }
 
@@ -2639,14 +2885,7 @@ mod tests {
         let mut env = HashMap::new();
         env.insert(ValueId(1), f64s(&[2], &[10.0, 20.0]));
         env.insert(ValueId(2), f64s(&[2, 3], &[4.0, 5.0, 6.0, 7.0, 8.0, 9.0]));
-        let out = dot_general(
-            &env,
-            ValueId(1),
-            ValueId(2),
-            &dot_dims(&[0], &[0]),
-            &ty(&[3], ElementType::F64),
-        )
-        .unwrap();
+        let out = dot_general(&env, ValueId(1), ValueId(2), &dot_dims(&[0], &[0])).unwrap();
         assert_eq!(read_f64s(&out), vec![180.0, 210.0, 240.0]);
     }
 
@@ -2655,15 +2894,8 @@ mod tests {
         let mut env = HashMap::new();
         env.insert(ValueId(1), f64s(&[2], &[1.0, 2.0]));
         env.insert(ValueId(2), f64s(&[2, 3], &[4.0, 5.0, 6.0, 7.0, 8.0, 9.0]));
-        let err = dot_general(
-            &env,
-            ValueId(1),
-            ValueId(2),
-            &dot_dims(&[0], &[]),
-            &ty(&[2], ElementType::F64),
-        )
-        .unwrap_err();
-        assert!(matches!(err, InterpError::DotDimsNotImplemented), "{err}");
+        let err = dot_general(&env, ValueId(1), ValueId(2), &dot_dims(&[0], &[])).unwrap_err();
+        assert!(matches!(err, InterpError::DotContractingSize), "{err}");
     }
 
     #[test]
@@ -2671,14 +2903,7 @@ mod tests {
         let mut env = HashMap::new();
         env.insert(ValueId(1), f64s(&[4], &[1.0, 2.0, 3.0, 4.0]));
         env.insert(ValueId(2), f64s(&[2, 3], &[4.0, 5.0, 6.0, 7.0, 8.0, 9.0]));
-        let err = dot_general(
-            &env,
-            ValueId(1),
-            ValueId(2),
-            &dot_dims(&[0], &[1]),
-            &ty(&[2], ElementType::F64),
-        )
-        .unwrap_err();
+        let err = dot_general(&env, ValueId(1), ValueId(2), &dot_dims(&[0], &[1])).unwrap_err();
         assert!(matches!(err, InterpError::DotContractingSize), "{err}");
     }
 

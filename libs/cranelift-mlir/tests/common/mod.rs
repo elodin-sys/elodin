@@ -219,6 +219,10 @@ pub fn f64_buf(vals: &[f64]) -> Vec<u8> {
     vals.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
 
+pub fn f32_buf(vals: &[f32]) -> Vec<u8> {
+    vals.iter().flat_map(|v| v.to_le_bytes()).collect()
+}
+
 pub fn i64_buf(vals: &[i64]) -> Vec<u8> {
     vals.iter().flat_map(|v| v.to_le_bytes()).collect()
 }
@@ -281,6 +285,14 @@ pub fn read_i32s(buf: &[u8]) -> Vec<i32> {
         .0
         .iter()
         .map(|c| i32::from_le_bytes(*c))
+        .collect()
+}
+
+pub fn read_f32s(buf: &[u8]) -> Vec<f32> {
+    buf.as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| f32::from_le_bytes(*c))
         .collect()
 }
 

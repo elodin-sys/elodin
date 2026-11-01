@@ -276,6 +276,23 @@ either direction; percentage deltas tell you relative impact. The
 first line (`mean delta`) is the bottom line — did the change make
 the sim faster overall?
 
+### Against the base commit
+
+`regress.sh` benches a build against the base commit's cached
+`elodin-py` (the merge-base with `origin/main`, or `REGRESSION_BASE`)
+in interleaved runs, as CI does. CI's 100 ticks leave fast examples a
+few percent of noise, so raise the tick count; the CSV checks then
+report mismatches after tick 100, which you can ignore here. The base
+is a Nix build, so build the candidate the same way: a `maturin
+develop` build of the same source can run up to ~9% faster or slower.
+
+```bash
+cand=$(nix build --no-link --print-out-paths .#elodin-py)
+PYTHONPATH=$(echo "$cand"/lib/python3.*/site-packages) \
+REGRESSION_TICKS=20000 REGRESSION_RUNS=5 \
+    bash scripts/ci/regress.sh rocket examples/rocket/main.py
+```
+
 ---
 
 ## 6. Tracy deep-dive workflow
@@ -491,8 +508,9 @@ inputs).
 ELODIN_BACKEND=cranelift bash scripts/ci/regress.sh --all
 ```
 
-Expected: all outputs bit-identical to CSV baseline, no `FAIL`
-lines. Full-system correctness gate.
+Expected: every example matches its CSV baseline, within
+`scripts/ci/baseline/tolerances.json`, once on Cranelift and once on
+jax-cpu; no `FAIL` lines. Full-system correctness gate.
 
 ### 8.7 Spot-check on a real sim
 

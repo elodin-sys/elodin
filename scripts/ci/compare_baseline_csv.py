@@ -3,8 +3,11 @@
 
 The comparison is numeric and tolerance-based for all numeric cells. Columns
 named ``time`` are ignored so that runs with different wall-clock timestamps do
-not fail CI. Consecutive duplicate states are collapsed so dense and sparse
-recordings compare with the same semantics.
+not fail CI. When every row of both files has a timestamp from its export's
+``globals.tick.csv``, rows are aligned by tick, each side carrying its last value
+forward, so dense and sparse recordings compare at every tick. Otherwise (no
+tick file, or a baseline file kept from an earlier run) consecutive duplicate
+states are collapsed and the remaining change rows compare in order.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ from pathlib import Path
 from windows_paths import windows_safe_rel_path
 
 IGNORED_COLUMNS = {"time"}
+TICK_FILE = "globals.tick.csv"
 
 
 @dataclass
@@ -152,11 +156,32 @@ def _change_rows(rows: list[list[str]], columns: list[int]) -> list[tuple[int, l
     return changes
 
 
+def _read_ticks(path: Path) -> dict[str, int]:
+    """The tick recorded at each timestamp of a tick export."""
+    header, rows = _read_csv(path)
+    time_col, tick_col = header.index("time"), header.index("globals.tick")
+    return {row[time_col]: int(row[tick_col]) for row in rows}
+
+
+def _rows_by_tick(
+    header: list[str], rows: list[list[str]], ticks: dict[str, int]
+) -> dict[int, tuple[int, list[str]]] | None:
+    """Rows keyed by tick, or None when a row's timestamp is not a tick of this export."""
+    time_col = next(i for i, name in enumerate(header) if name.strip().lower() == "time")
+    by_tick: dict[int, tuple[int, list[str]]] = {}
+    for row_number, row in enumerate(rows, start=2):
+        if row[time_col] not in ticks:
+            return None
+        by_tick[ticks[row[time_col]]] = (row_number, row)
+    return by_tick
+
+
 def _compare_file(
     rel_path: str,
     baseline_path: Path,
     candidate_path: Path,
     tolerance: Tolerance,
+    ticks: tuple[dict[str, int], dict[str, int]] | None = None,
 ) -> tuple[FileStats | None, str | None]:
     baseline_header, baseline_rows = _read_csv(baseline_path)
     candidate_header, candidate_rows = _read_csv(candidate_path)
@@ -181,21 +206,39 @@ def _compare_file(
                     f"(expected {len(header)} columns, got {len(row)})"
                 )
 
-    baseline_changes = _change_rows(baseline_rows, baseline_cols)
-    candidate_changes = _change_rows(candidate_rows, candidate_cols)
-    if len(baseline_changes) != len(candidate_changes):
-        return None, (
-            f"{rel_path}: change-row count mismatch "
-            f"(baseline={len(baseline_changes)} from {len(baseline_rows)} rows, "
-            f"candidate={len(candidate_changes)} from {len(candidate_rows)} rows)"
-        )
+    baseline_ticks = candidate_ticks = None
+    if ticks is not None:
+        baseline_ticks = _rows_by_tick(baseline_header, baseline_rows, ticks[0])
+        candidate_ticks = _rows_by_tick(candidate_header, candidate_rows, ticks[1])
+    if baseline_ticks is None or candidate_ticks is None:
+        baseline_changes = _change_rows(baseline_rows, baseline_cols)
+        candidate_changes = _change_rows(candidate_rows, candidate_cols)
+        if len(baseline_changes) != len(candidate_changes):
+            return None, (
+                f"{rel_path}: change-row count mismatch "
+                f"(baseline={len(baseline_changes)} from {len(baseline_rows)} rows, "
+                f"candidate={len(candidate_changes)} from {len(candidate_rows)} rows)"
+            )
+        pairs = [
+            (f"change {index}", base, cand)
+            for index, (base, cand) in enumerate(
+                zip(baseline_changes, candidate_changes, strict=True), start=1
+            )
+        ]
+    else:
+        pairs, base, cand = [], None, None
+        for tick in sorted(baseline_ticks.keys() | candidate_ticks.keys()):
+            base = baseline_ticks.get(tick, base)
+            cand = candidate_ticks.get(tick, cand)
+            pairs.append((f"tick {tick}", base, cand))
 
     max_abs = 0.0
     max_rel = 0.0
 
-    for change_index, (baseline_change, candidate_change) in enumerate(
-        zip(baseline_changes, candidate_changes, strict=True), start=1
-    ):
+    for label, baseline_change, candidate_change in pairs:
+        if baseline_change is None or candidate_change is None:
+            side = "baseline" if baseline_change is None else "candidate"
+            return None, f"{rel_path}: no {side} row at or before {label}"
         baseline_row_number, base_row = baseline_change
         candidate_row_number, cand_row = candidate_change
         for name, base_col, cand_col in zip(baseline_names, baseline_cols, candidate_cols):
@@ -209,14 +252,14 @@ def _compare_file(
                 if math.isnan(baseline_num) or math.isnan(candidate_num):
                     if not (math.isnan(baseline_num) and math.isnan(candidate_num)):
                         return None, (
-                            f"{rel_path}:{name}: change {change_index} "
+                            f"{rel_path}:{name}: {label} "
                             f"NaN mismatch (baseline={baseline_raw}, candidate={candidate_raw})"
                         )
                     continue
                 if math.isinf(baseline_num) or math.isinf(candidate_num):
                     if baseline_num != candidate_num:
                         return None, (
-                            f"{rel_path}:{name}: change {change_index} "
+                            f"{rel_path}:{name}: {label} "
                             f"Inf mismatch (baseline={baseline_raw}, candidate={candidate_raw})"
                         )
                     continue
@@ -233,7 +276,7 @@ def _compare_file(
                     abs_tol=tolerance.abs_tol,
                 ):
                     return None, (
-                        f"{rel_path}:{name}: change {change_index} exceeds tolerance "
+                        f"{rel_path}:{name}: {label} exceeds tolerance "
                         f"(baseline row {baseline_row_number}, "
                         f"candidate row {candidate_row_number}; "
                         f"baseline={baseline_num:.16g}, candidate={candidate_num:.16g}, "
@@ -242,13 +285,11 @@ def _compare_file(
                     )
             elif baseline_raw != candidate_raw:
                 return None, (
-                    f"{rel_path}:{name}: change {change_index} string mismatch "
+                    f"{rel_path}:{name}: {label} string mismatch "
                     f"(baseline={baseline_raw!r}, candidate={candidate_raw!r})"
                 )
 
-    return FileStats(
-        rel_path=rel_path, rows=len(baseline_changes), max_abs=max_abs, max_rel=max_rel
-    ), None
+    return FileStats(rel_path=rel_path, rows=len(pairs), max_abs=max_abs, max_rel=max_rel), None
 
 
 def main() -> int:
@@ -289,6 +330,10 @@ def main() -> int:
                 print(f"    - {rel_path}")
         return 1
 
+    ticks = None
+    if TICK_FILE in baseline_files and TICK_FILE in candidate_files:
+        ticks = (_read_ticks(baseline_files[TICK_FILE]), _read_ticks(candidate_files[TICK_FILE]))
+
     failures: list[str] = []
     stats: list[FileStats] = []
     for rel_path in sorted(baseline_files):
@@ -298,6 +343,7 @@ def main() -> int:
             baseline_path=baseline_files[rel_path],
             candidate_path=candidate_files[rel_path],
             tolerance=tol,
+            ticks=ticks,
         )
         if error is not None:
             failures.append(error)

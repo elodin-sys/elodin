@@ -891,7 +891,7 @@ extern "C" fn libc_cbrt(x: f64) -> f64 {
     x.cbrt()
 }
 extern "C" fn libc_erfc(x: f64) -> f64 {
-    crate::tensor_rt::erfc_impl(x)
+    libm::erfc(x)
 }
 
 extern "C" fn erf_inv_scalar(x: f64) -> f64 {
@@ -1423,12 +1423,6 @@ define_trt! {
     // reverse: fn(dst, src, n, shape, rank, dims, n_dims)
     reverse_f64, "__trt_reverse_f64", tensor_rt::tensor_reverse_f64, [ptr_type(), ptr_type(), types::I64, ptr_type(), types::I64, ptr_type(), types::I64];
     // comparison: fn(dst_u8, a, b, n)
-    cmp_eq_f64, "__trt_cmp_eq_f64", tensor_rt::tensor_cmp_eq_f64, [ptr_type(), ptr_type(), ptr_type(), types::I64];
-    cmp_lt_f64, "__trt_cmp_lt_f64", tensor_rt::tensor_cmp_lt_f64, [ptr_type(), ptr_type(), ptr_type(), types::I64];
-    cmp_le_f64, "__trt_cmp_le_f64", tensor_rt::tensor_cmp_le_f64, [ptr_type(), ptr_type(), ptr_type(), types::I64];
-    cmp_gt_f64, "__trt_cmp_gt_f64", tensor_rt::tensor_cmp_gt_f64, [ptr_type(), ptr_type(), ptr_type(), types::I64];
-    cmp_ge_f64, "__trt_cmp_ge_f64", tensor_rt::tensor_cmp_ge_f64, [ptr_type(), ptr_type(), ptr_type(), types::I64];
-    cmp_ne_f64, "__trt_cmp_ne_f64", tensor_rt::tensor_cmp_ne_f64, [ptr_type(), ptr_type(), ptr_type(), types::I64];
     cmp_eq_i64, "__trt_cmp_eq_i64", tensor_rt::tensor_cmp_eq_i64, [ptr_type(), ptr_type(), ptr_type(), types::I64];
     cmp_ne_i64, "__trt_cmp_ne_i64", tensor_rt::tensor_cmp_ne_i64, [ptr_type(), ptr_type(), ptr_type(), types::I64];
     cmp_lt_i64, "__trt_cmp_lt_i64", tensor_rt::tensor_cmp_lt_i64, [ptr_type(), ptr_type(), ptr_type(), types::I64];
@@ -1493,13 +1487,22 @@ define_trt! {
     neg_i32,  "__trt_neg_i32",  tensor_rt::tensor_neg_i32,  [ptr_type(), ptr_type(), types::I64];
     abs_i32,  "__trt_abs_i32",  tensor_rt::tensor_abs_i32,  [ptr_type(), ptr_type(), types::I64];
     // integer reduce
-    reduce_sum_i64, "__trt_reduce_sum_i64", tensor_rt::tensor_reduce_sum_i64, [ptr_type(), ptr_type(), types::I64, types::I64];
-    reduce_max_i64, "__trt_reduce_max_i64", tensor_rt::tensor_reduce_max_i64, [ptr_type(), ptr_type(), types::I64, types::I64];
-    reduce_min_i64, "__trt_reduce_min_i64", tensor_rt::tensor_reduce_min_i64, [ptr_type(), ptr_type(), types::I64, types::I64];
-    reduce_and_i1,  "__trt_reduce_and_i1", tensor_rt::tensor_reduce_and_i1, [ptr_type(), ptr_type(), types::I64, types::I64];
-    reduce_or_i1,   "__trt_reduce_or_i1",  tensor_rt::tensor_reduce_or_i1,  [ptr_type(), ptr_type(), types::I64, types::I64];
-    argmin_f64, "__trt_argmin_f64", tensor_rt::tensor_argmin_f64, [ptr_type(), ptr_type(), ptr_type(), ptr_type(), types::I64, types::I64];
-    argmax_f64, "__trt_argmax_f64", tensor_rt::tensor_argmax_f64, [ptr_type(), ptr_type(), ptr_type(), ptr_type(), types::I64, types::I64];
+    reduce_sum_i64, "__trt_reduce_sum_i64", tensor_rt::tensor_reduce_sum_i64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_prod_i64, "__trt_reduce_prod_i64", tensor_rt::tensor_reduce_prod_i64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_max_i64, "__trt_reduce_max_i64", tensor_rt::tensor_reduce_max_i64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_min_i64, "__trt_reduce_min_i64", tensor_rt::tensor_reduce_min_i64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_max_u64, "__trt_reduce_max_u64", tensor_rt::tensor_reduce_max_u64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_min_u64, "__trt_reduce_min_u64", tensor_rt::tensor_reduce_min_u64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_sum_i32, "__trt_reduce_sum_i32", tensor_rt::tensor_reduce_sum_i32, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_prod_i32, "__trt_reduce_prod_i32", tensor_rt::tensor_reduce_prod_i32, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_max_i32, "__trt_reduce_max_i32", tensor_rt::tensor_reduce_max_i32, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_min_i32, "__trt_reduce_min_i32", tensor_rt::tensor_reduce_min_i32, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_max_u32, "__trt_reduce_max_u32", tensor_rt::tensor_reduce_max_u32, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_min_u32, "__trt_reduce_min_u32", tensor_rt::tensor_reduce_min_u32, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_and_i1,  "__trt_reduce_and_i1", tensor_rt::tensor_reduce_and_i1, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_or_i1,   "__trt_reduce_or_i1",  tensor_rt::tensor_reduce_or_i1,  [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    argminmax, "__trt_argminmax", tensor_rt::tensor_argminmax, [ptr_type(), ptr_type(), ptr_type(), ptr_type(), ptr_type()];
+    sort, "__trt_sort", tensor_rt::tensor_sort, [ptr_type(), ptr_type()];
     // memory
     memcpy, "__trt_memcpy", tensor_rt::tensor_memcpy, [ptr_type(), ptr_type(), types::I64];
     // layout / shape
@@ -1508,15 +1511,21 @@ define_trt! {
     concat_nd_f64,    "__trt_concat_nd_f64",    tensor_rt::tensor_concat_nd_f64,    [ptr_type(), types::I64, ptr_type(), types::I64, ptr_type(), types::I64, ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
     pad_f64,          "__trt_pad_f64",          tensor_rt::tensor_pad_f64,          [ptr_type(), ptr_type(), types::I64, types::I64, types::F64, ptr_type(), ptr_type(), types::I64, ptr_type()];
     // reduce
-    reduce_sum_f64, "__trt_reduce_sum_f64", tensor_rt::tensor_reduce_sum_f64, [ptr_type(), ptr_type(), types::I64, types::I64];
-    reduce_max_f64, "__trt_reduce_max_f64", tensor_rt::tensor_reduce_max_f64, [ptr_type(), ptr_type(), types::I64, types::I64];
-    reduce_min_f64, "__trt_reduce_min_f64", tensor_rt::tensor_reduce_min_f64, [ptr_type(), ptr_type(), types::I64, types::I64];
+    reduce_sum_f64, "__trt_reduce_sum_f64", tensor_rt::tensor_reduce_sum_f64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_prod_f64, "__trt_reduce_prod_f64", tensor_rt::tensor_reduce_prod_f64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_max_f64, "__trt_reduce_max_f64", tensor_rt::tensor_reduce_max_f64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_min_f64, "__trt_reduce_min_f64", tensor_rt::tensor_reduce_min_f64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_sum_f32, "__trt_reduce_sum_f32", tensor_rt::tensor_reduce_sum_f32, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_prod_f32, "__trt_reduce_prod_f32", tensor_rt::tensor_reduce_prod_f32, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_max_f32, "__trt_reduce_max_f32", tensor_rt::tensor_reduce_max_f32, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_min_f32, "__trt_reduce_min_f32", tensor_rt::tensor_reduce_min_f32, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
     // indexing
     // byte-generic gather/scatter/layout ops with elem_sz
     gather_generic,    "__trt_gather_generic",    tensor_rt::tensor_gather_generic,    [ptr_type(), ptr_type(), types::I64, ptr_type(), types::I64, types::I64, types::I64];
     gather_nd_generic, "__trt_gather_nd_generic", tensor_rt::tensor_gather_nd_generic, [ptr_type(), ptr_type(), types::I64, ptr_type(), types::I64, types::I64, ptr_type(), types::I64, ptr_type(), ptr_type(), types::I64, types::I64];
-    scatter_generic,   "__trt_scatter_generic",   tensor_rt::tensor_scatter_generic,   [ptr_type(), ptr_type(), types::I64, ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    scatter,   "__trt_scatter",   tensor_rt::tensor_scatter,   [ptr_type(), ptr_type(), ptr_type(), ptr_type(), types::I64];
     matmul_f64,    "__trt_matmul_f64",    tensor_rt::tensor_matmul_f64,    [ptr_type(), ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    dot_general,   "__trt_dot_general",   tensor_rt::tensor_dot_general,   [ptr_type(), ptr_type(), ptr_type(), ptr_type()];
     // byte-generic layout ops with elem_sz
     broadcast_nd_generic,         "__trt_bcast_nd_generic",     tensor_rt::tensor_broadcast_nd_generic,         [ptr_type(), ptr_type(), types::I64, types::I64, ptr_type(), types::I64, ptr_type(), types::I64, ptr_type(), types::I64];
     slice_generic,                "__trt_slice_generic",        tensor_rt::tensor_slice_generic,                [ptr_type(), ptr_type(), types::I64, types::I64, ptr_type(), types::I64, ptr_type(), ptr_type(), types::I64];
@@ -1621,14 +1630,6 @@ pub fn compile_module_with_config(
     jit_builder.symbol("__cranelift_geev", cranelift_geev as *const u8);
     jit_builder.symbol("__cranelift_gesvd", cranelift_gesvd as *const u8);
     jit_builder.symbol(
-        "__trt_sort_f64",
-        crate::tensor_rt::tensor_sort_f64 as *const u8,
-    );
-    jit_builder.symbol(
-        "__trt_argsort_f64",
-        crate::tensor_rt::tensor_argsort_f64 as *const u8,
-    );
-    jit_builder.symbol(
         "__trt_batch_norm_inference_f64",
         crate::tensor_rt::tensor_batch_norm_inference_f64 as *const u8,
     );
@@ -1640,14 +1641,21 @@ pub fn compile_module_with_config(
         "__trt_map_f64",
         crate::tensor_rt::tensor_map_f64 as *const u8,
     );
-    jit_builder.symbol(
-        "__trt_reduce_window_f64",
-        crate::tensor_rt::tensor_reduce_window_f64 as *const u8,
-    );
-    jit_builder.symbol(
-        "__trt_select_and_scatter_f64",
-        crate::tensor_rt::tensor_select_and_scatter_f64 as *const u8,
-    );
+    {
+        use crate::tensor_rt::{tensor_reduce_window as rw, tensor_select_and_scatter as sas};
+        for (symbol, kernel) in [
+            ("__trt_reduce_window_f64", rw::<f64> as *const u8),
+            ("__trt_reduce_window_f32", rw::<f32> as *const u8),
+            ("__trt_reduce_window_i64", rw::<i64> as *const u8),
+            ("__trt_reduce_window_i32", rw::<i32> as *const u8),
+            ("__trt_select_and_scatter_f64", sas::<f64> as *const u8),
+            ("__trt_select_and_scatter_f32", sas::<f32> as *const u8),
+            ("__trt_select_and_scatter_i64", sas::<i64> as *const u8),
+            ("__trt_select_and_scatter_i32", sas::<i32> as *const u8),
+        ] {
+            jit_builder.symbol(symbol, kernel);
+        }
+    }
     jit_builder.symbol(
         "__trt_conv_f64",
         crate::tensor_rt::tensor_conv_f64 as *const u8,
@@ -2648,6 +2656,177 @@ fn is_elision_aware_mem(instr: &Instruction) -> bool {
     )
 }
 
+/// Whether the pointer-ABI arm for `instr` has a kernel for its element types and
+/// operand shapes. The rest are lowered lane by lane by `lower_mem_lanes`.
+fn mem_has_kernel(
+    instr: &Instruction,
+    rt: &TensorType,
+    type_map: &HashMap<ValueId, TensorType>,
+) -> bool {
+    use ElementType::*;
+    let et = rt.element_type;
+    let ty_of = |vid: &ValueId| type_map.get(vid).cloned().unwrap_or(rt.clone());
+    match instr {
+        Instruction::Add { .. }
+        | Instruction::Subtract { .. }
+        | Instruction::Multiply { .. }
+        | Instruction::Negate { .. } => matches!(et, F64 | I32 | UI32 | I64 | UI64),
+        Instruction::Divide { .. }
+        | Instruction::Maximum { .. }
+        | Instruction::Minimum { .. }
+        | Instruction::Remainder { .. } => matches!(et, F64 | I32 | UI32 | I64),
+        Instruction::Abs { .. } => matches!(et, F64 | I32 | I64),
+        Instruction::Not { .. } | Instruction::And { .. } | Instruction::Or { .. } => !is_float(et),
+        Instruction::Xor { .. }
+        | Instruction::ShiftLeft { .. }
+        | Instruction::ShiftRightArithmetic { .. }
+        | Instruction::ShiftRightLogical { .. } => matches!(et, I32 | UI32 | I64 | UI64),
+        Instruction::Select { .. } => et != F32,
+        Instruction::Compare {
+            lhs, compare_type, ..
+        } => match ty_of(lhs).element_type {
+            F64 => true,
+            I32 | I64 => !matches!(compare_type, CompareType::Unsigned),
+            _ => false,
+        },
+        Instruction::Clamp { min, max, .. } => {
+            let n = rt.num_elements();
+            et == F64 && (n == 1 || [min, max].iter().all(|v| ty_of(v).num_elements() == n))
+        }
+        Instruction::IsFinite { operand } => ty_of(operand).element_type == F64,
+        // The scalar ABI sums floats in another order than the kernels; tensors it could
+        // hold lower its way so a value computes the same in functions of either ABI.
+        Instruction::Reduce { operand, .. } => {
+            !is_float(et) || ty_of(operand).num_elements() > LARGE_TENSOR_THRESHOLD
+        }
+        Instruction::DotGeneral { lhs, rhs, .. } => {
+            et != F64
+                || [ty_of(lhs), ty_of(rhs), rt.clone()]
+                    .iter()
+                    .any(|t| t.num_elements() > LARGE_TENSOR_THRESHOLD)
+        }
+        Instruction::Iota { .. } => matches!(et, F64 | I64 | UI64),
+        Instruction::Reverse { .. } => et.byte_size() == 8,
+        Instruction::Pad {
+            low,
+            high,
+            interior,
+            ..
+        } => {
+            et == F64 && low.iter().chain(high).all(|&p| p >= 0) && interior.iter().all(|&p| p == 0)
+        }
+        Instruction::Power { .. }
+        | Instruction::Sqrt { .. }
+        | Instruction::Rsqrt { .. }
+        | Instruction::Floor { .. }
+        | Instruction::Ceil { .. }
+        | Instruction::RoundNearestEven { .. }
+        | Instruction::Sign { .. }
+        | Instruction::Sine { .. }
+        | Instruction::Cosine { .. }
+        | Instruction::Tan { .. }
+        | Instruction::Tanh { .. }
+        | Instruction::Exponential { .. }
+        | Instruction::Expm1 { .. }
+        | Instruction::Log { .. }
+        | Instruction::Log1p { .. }
+        | Instruction::Asin { .. }
+        | Instruction::Acos { .. }
+        | Instruction::Atan { .. }
+        | Instruction::Atan2 { .. }
+        | Instruction::Sinh { .. }
+        | Instruction::Cosh { .. }
+        | Instruction::Erfc { .. }
+        | Instruction::ErfInv { .. }
+        | Instruction::Cbrt { .. } => et == F64,
+        _ => true,
+    }
+}
+
+/// Pointer-ABI ops whose runtime kernels exist for f64 only.
+fn f64_only_op(instr: &Instruction) -> Option<&'static str> {
+    Some(match instr {
+        Instruction::Map { .. } => "map",
+        Instruction::BatchNormInference { .. } => "batch_norm_inference",
+        Instruction::Convolution { .. } => "convolution",
+        Instruction::CholeskyOp { .. } => "cholesky",
+        Instruction::TriangularSolve { .. } => "triangular_solve",
+        Instruction::Fft { .. } => "fft",
+        Instruction::Rng { .. } => "rng",
+        _ => return None,
+    })
+}
+
+/// Lowers `instr` with the scalar-ABI code: loads every operand element at its own
+/// width, runs `lower_instruction` on the lanes, and stores each result to a fresh slot.
+#[allow(clippy::too_many_arguments)]
+fn lower_mem_lanes(
+    builder: &mut FunctionBuilder,
+    instr: &Instruction,
+    result_types: &[TensorType],
+    ir_module: &crate::ir::Module,
+    func_ids: &HashMap<String, FuncId>,
+    libm_ids: &LibmIds,
+    trt_ids: &TensorRtIds,
+    func_abis: &HashMap<String, FuncAbi>,
+    external_data_ids: &HashMap<String, DataId>,
+    jit_module: &mut JITModule,
+    value_map: &mut HashMap<ValueId, LaneRepr>,
+    type_map: &mut HashMap<ValueId, TensorType>,
+    pool: &mut crate::slot_pool::SlotPool,
+    result_vid: Option<ValueId>,
+) -> Result<Vec<LaneRepr>, String> {
+    let flags = MemFlags::trusted();
+    let mut lanes = HashMap::new();
+    for vid in crate::const_fold::operand_ids(instr) {
+        let ty = type_map
+            .get(&vid)
+            .cloned()
+            .ok_or_else(|| format!("mem: missing type for {vid:?}"))?;
+        let ptr = value_map
+            .get_mut(&vid)
+            .ok_or_else(|| format!("mem: missing value {vid:?}"))?
+            .as_scalar_or_spill(builder)[0];
+        let (ct, sz) = (
+            cranelift_type_for(ty.element_type),
+            ty.element_type.byte_size(),
+        );
+        let vals = (0..ty.num_elements())
+            .map(|i| builder.ins().load(ct, flags, ptr, (i * sz) as i32))
+            .collect();
+        lanes.insert(vid, LaneRepr::scalar(vals));
+    }
+    let outs = lower_instruction(
+        builder,
+        instr,
+        result_types,
+        ir_module,
+        func_ids,
+        libm_ids,
+        trt_ids,
+        func_abis,
+        external_data_ids,
+        jit_module,
+        &mut lanes,
+        type_map,
+    )?;
+    let mut results = Vec::with_capacity(outs.len());
+    for (i, (mut out, ty)) in outs.into_iter().zip(result_types).enumerate() {
+        out.unpack_in(builder);
+        let sz = ty.element_type.byte_size();
+        let bytes = ty.num_elements() * sz;
+        let dst = match i {
+            0 => alloc_slot_for_vid(builder, pool, result_vid, bytes),
+            _ => alloc_slot(builder, bytes),
+        };
+        for (j, &v) in out.as_scalar().iter().enumerate() {
+            builder.ins().store(flags, v, dst, (j * sz) as i32);
+        }
+        results.push(LaneRepr::scalar(vec![dst]));
+    }
+    Ok(results)
+}
+
 /// Returns `Some(new_depth)` when the current op can emit `PtrChunksF64`
 /// (keep chunks in SSA) without tripping the single-use / user-kind /
 /// chain-depth gates. Returns `None` when the op must spill to a stack
@@ -2734,57 +2913,6 @@ fn lower_ptr_binop_elision_or_spill(
     let rhs_ptr = rhs_repr.spill_to_slot_pooled(builder, Some(pool), rhs_vid);
     let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
     lower_ptr_binop_simd_f64(builder, jit_module, dst, lhs_ptr, rhs_ptr, n, emit_op);
-    LaneRepr::scalar(vec![dst])
-}
-
-/// Elision-or-spill dispatcher for ptr-ABI F64 Max/Min. Emits the
-/// XLA `fcmp + bitselect`/`select` per chunk so NaN handling matches
-/// `lower_ptr_cmp_select_simd_f64` bit-for-bit. Green path: operand
-/// chunks come from `get_chunks`, result stays in SSA; no stack slot
-/// allocated. Red path: operands spill (no-op if already `Scalar`)
-/// and `lower_ptr_cmp_select_simd_f64` writes into a fresh slot.
-fn lower_ptr_cmp_select_elision_or_spill(
-    builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
-    pool: &mut crate::slot_pool::SlotPool,
-    lhs_repr: &mut LaneRepr,
-    rhs_repr: &mut LaneRepr,
-    lhs_vid: Option<ValueId>,
-    rhs_vid: Option<ValueId>,
-    n: usize,
-    elem_sz: usize,
-    cc: FloatCC,
-    use_info: Option<&crate::useinfo::UseInfo>,
-    result_vid: Option<ValueId>,
-) -> LaneRepr {
-    let l_depth = lhs_repr.ptr_chain_depth();
-    let r_depth = rhs_repr.ptr_chain_depth();
-    if let Some(new_depth) = should_elide(use_info, result_vid, &[l_depth, r_depth]) {
-        let (l_chunks, l_tail) = lhs_repr.get_chunks(builder, n);
-        let (r_chunks, r_tail) = rhs_repr.get_chunks(builder, n);
-        let chunk_count = n / 2;
-        let mut out_chunks = Vec::with_capacity(chunk_count);
-        for i in 0..chunk_count {
-            let cmp_i = builder.ins().fcmp(cc, l_chunks[i], r_chunks[i]);
-            let cmp_f = builder.ins().bitcast(types::F64X2, MemFlags::new(), cmp_i);
-            let r = builder.ins().bitselect(cmp_f, l_chunks[i], r_chunks[i]);
-            out_chunks.push(r);
-        }
-        let out_tail = if n & 1 == 1 {
-            let lt = l_tail.expect("odd-n lhs missing tail");
-            let rt = r_tail.expect("odd-n rhs missing tail");
-            let cmp = builder.ins().fcmp(cc, lt, rt);
-            Some(builder.ins().select(cmp, lt, rt))
-        } else {
-            None
-        };
-        return LaneRepr::ptr_chunks(out_chunks, out_tail, n, new_depth);
-    }
-
-    let lhs_ptr = lhs_repr.spill_to_slot_pooled(builder, Some(pool), lhs_vid);
-    let rhs_ptr = rhs_repr.spill_to_slot_pooled(builder, Some(pool), rhs_vid);
-    let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
-    lower_ptr_cmp_select_simd_f64(builder, jit_module, dst, lhs_ptr, rhs_ptr, n, cc);
     LaneRepr::scalar(vec![dst])
 }
 
@@ -2917,10 +3045,9 @@ fn emit_ptr_unop_f64(
     Ok(out)
 }
 
-/// Max/Min call-site wrapper — same clone/invoke/write-back pattern
-/// as `emit_ptr_binop_f64`, but dispatches to
-/// `lower_ptr_cmp_select_elision_or_spill`.
-fn emit_ptr_cmp_select_f64(
+/// Max/Min call-site wrapper — `emit_ptr_binop_f64` without the op-timing
+/// samples, which have no Max/Min category.
+fn emit_ptr_minmax_f64(
     builder: &mut FunctionBuilder,
     jit_module: &mut JITModule,
     pool: &mut crate::slot_pool::SlotPool,
@@ -2929,7 +3056,7 @@ fn emit_ptr_cmp_select_f64(
     rhs: &ValueId,
     n: usize,
     elem_sz: usize,
-    cc: FloatCC,
+    emit_op: impl Fn(&mut FunctionBuilder, Value, Value) -> Value,
     use_info: Option<&crate::useinfo::UseInfo>,
     result_vid: Option<ValueId>,
 ) -> Result<LaneRepr, String> {
@@ -2941,7 +3068,7 @@ fn emit_ptr_cmp_select_f64(
         .get(rhs)
         .cloned()
         .ok_or_else(|| format!("mem: missing value {:?}", rhs))?;
-    let out = lower_ptr_cmp_select_elision_or_spill(
+    let out = lower_ptr_binop_elision_or_spill(
         builder,
         jit_module,
         pool,
@@ -2951,7 +3078,7 @@ fn emit_ptr_cmp_select_f64(
         Some(*rhs),
         n,
         elem_sz,
-        cc,
+        emit_op,
         use_info,
         result_vid,
     );
@@ -3151,81 +3278,6 @@ fn lower_ptr_splat_simd_f64(builder: &mut FunctionBuilder, dst: Value, scalar: V
     }
 }
 
-/// Inline ptr-ABI SIMD for F64 Max/Min. Uses the same
-/// fcmp + bitcast + bitselect pattern as the scalar-ABI packed path.
-/// NaN semantics match XLA: `max(NaN, x) = NaN` — the fcmp mask is
-/// false for NaN, so bitselect picks the right operand (x or NaN
-/// depending on which side is NaN), matching tensor_rt's scalar loop.
-fn lower_ptr_cmp_select_simd_f64(
-    builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
-    dst: Value,
-    lhs: Value,
-    rhs: Value,
-    n: usize,
-    cc: FloatCC,
-) {
-    let chunks = n / 2;
-    let flags = MemFlags::trusted();
-    for i in 0..chunks {
-        let off = (i * 16) as i32;
-        let a = bracket_sampled_inner(
-            builder,
-            jit_module,
-            crate::op_sampler::OpCategory::Load,
-            |b| b.ins().load(types::F64X2, flags, lhs, off),
-        );
-        let b_v = bracket_sampled_inner(
-            builder,
-            jit_module,
-            crate::op_sampler::OpCategory::Load,
-            |b| b.ins().load(types::F64X2, flags, rhs, off),
-        );
-        let cmp_i = builder.ins().fcmp(cc, a, b_v);
-        // `bitcast` is a value-on-value op; the Cranelift verifier
-        // only accepts `big`/`little` byte-order flags, not the
-        // memory-access flags we use for loads/stores. Default flags
-        // are correct here.
-        let cmp_f = builder.ins().bitcast(types::F64X2, MemFlags::new(), cmp_i);
-        let r = builder.ins().bitselect(cmp_f, a, b_v);
-        bracket_sampled_inner(
-            builder,
-            jit_module,
-            crate::op_sampler::OpCategory::Store,
-            |b| {
-                b.ins().store(flags, r, dst, off);
-                r
-            },
-        );
-    }
-    if n & 1 == 1 {
-        let off = (chunks * 16) as i32;
-        let a = bracket_sampled_inner(
-            builder,
-            jit_module,
-            crate::op_sampler::OpCategory::Load,
-            |b| b.ins().load(types::F64, flags, lhs, off),
-        );
-        let b_v = bracket_sampled_inner(
-            builder,
-            jit_module,
-            crate::op_sampler::OpCategory::Load,
-            |b| b.ins().load(types::F64, flags, rhs, off),
-        );
-        let cmp = builder.ins().fcmp(cc, a, b_v);
-        let r = builder.ins().select(cmp, a, b_v);
-        bracket_sampled_inner(
-            builder,
-            jit_module,
-            crate::op_sampler::OpCategory::Store,
-            |b| {
-                b.ins().store(flags, r, dst, off);
-                r
-            },
-        );
-    }
-}
-
 fn store_i64_array(builder: &mut FunctionBuilder, vals: &[i64]) -> Value {
     let ptr = alloc_slot(builder, vals.len() * 8);
     for (i, &v) in vals.iter().enumerate() {
@@ -3235,6 +3287,523 @@ fn store_i64_array(builder: &mut FunctionBuilder, vals: &[i64]) -> Value {
             .store(MemFlags::trusted(), cv, ptr, (i * 8) as i32);
     }
     ptr
+}
+
+/// Number of windows along each axis of a padded, base-dilated operand.
+fn window_counts(
+    shape: &[i64],
+    [dims, strides, base_dilations, window_dilations]: [&[i64]; 4],
+    padding: &[(i64, i64)],
+) -> Vec<i64> {
+    (0..shape.len())
+        .map(|d| {
+            let padded = (shape[d] - 1) * base_dilations[d] + 1 + padding[d].0 + padding[d].1;
+            let window = (dims[d] - 1) * window_dilations[d] + 1;
+            if padded < window {
+                0
+            } else {
+                (padded - window) / strides[d] + 1
+            }
+        })
+        .collect()
+}
+
+/// The `reduce_window` and `select_and_scatter` kernel instance for an element type.
+fn window_kernel(et: ElementType) -> Option<&'static str> {
+    use ElementType::*;
+    match et {
+        F64 => Some("f64"),
+        F32 => Some("f32"),
+        I64 | UI64 => Some("i64"),
+        I32 | UI32 => Some("i32"),
+        I1 => None,
+    }
+}
+
+/// Calls the `reduce_window` kernel with the reducer region compiled to a function.
+/// `ptrs` is `[dst, operand, init]`.
+#[allow(clippy::too_many_arguments)]
+fn emit_reduce_window(
+    builder: &mut FunctionBuilder,
+    jit_module: &mut JITModule,
+    ir_module: &crate::ir::Module,
+    func_ids: &HashMap<String, FuncId>,
+    func_abis: &HashMap<String, FuncAbi>,
+    libm_ids: &LibmIds,
+    trt_ids: &TensorRtIds,
+    external_data_ids: &HashMap<String, DataId>,
+    instr: &Instruction,
+    [dst, src, init]: [Value; 3],
+    [src_ty, out_ty]: [&TensorType; 2],
+) -> Result<(), String> {
+    let Instruction::ReduceWindow {
+        operands,
+        body,
+        body_params,
+        window_dimensions,
+        window_strides,
+        base_dilations,
+        window_dilations,
+        padding,
+        ..
+    } = instr
+    else {
+        unreachable!("emit_reduce_window on {instr:?}")
+    };
+    let et = src_ty.element_type;
+    let Some(kernel) = window_kernel(et).filter(|_| operands.len() == 1) else {
+        return Err(format!(
+            "reduce_window supports one numeric operand, not {} of {et:?}",
+            operands.len()
+        ));
+    };
+    let attrs: [&[i64]; 4] = [
+        window_dimensions,
+        window_strides,
+        base_dilations,
+        window_dilations,
+    ];
+    let rank = src_ty.rank();
+    if attrs
+        .iter()
+        .any(|a| a.len() != rank || a.iter().any(|&v| v < 1))
+        || padding.len() != rank
+        || window_counts(&src_ty.shape, attrs, padding) != out_ty.shape
+    {
+        return Err(format!(
+            "reduce_window: window attributes do not fit {:?} -> {:?}",
+            src_ty.shape, out_ty.shape
+        ));
+    }
+    let (ct, scalar) = (cranelift_type_for(et), TensorType::scalar(et));
+    let region_fid = compile_region_as_function(
+        jit_module,
+        ir_module,
+        func_ids,
+        func_abis,
+        libm_ids,
+        trt_ids,
+        external_data_ids,
+        &[ct, ct],
+        ct,
+        body,
+        body_params,
+        &[scalar.clone(), scalar],
+    )?;
+    let fn_ref = jit_module.declare_func_in_func(region_fid, builder.func);
+    let fn_addr = builder.ins().func_addr(ptr_type(), fn_ref);
+    let init_scalar = builder.ins().load(ct, MemFlags::trusted(), init, 0);
+    let pad_flat: Vec<i64> = padding.iter().flat_map(|&(l, h)| [l, h]).collect();
+    let arrays: [&[i64]; 6] = [
+        window_dimensions,
+        window_strides,
+        base_dilations,
+        window_dilations,
+        &pad_flat,
+        &src_ty.shape,
+    ];
+    let [wd, ws, bd, wdil, pad, shape] = arrays.map(|a| store_i64_array(builder, a));
+    let rank_val = builder.ins().iconst(types::I64, rank as i64);
+    let n_out = builder
+        .ins()
+        .iconst(types::I64, out_ty.num_elements() as i64);
+    let pt = ptr_type();
+    lapack_call(
+        builder,
+        jit_module,
+        &format!("__trt_reduce_window_{kernel}"),
+        &[
+            pt,
+            pt,
+            ct,
+            pt,
+            pt,
+            pt,
+            pt,
+            pt,
+            pt,
+            types::I64,
+            types::I64,
+            pt,
+        ],
+        &[
+            dst,
+            src,
+            init_scalar,
+            wd,
+            ws,
+            bd,
+            wdil,
+            pad,
+            shape,
+            rank_val,
+            n_out,
+            fn_addr,
+        ],
+    )
+}
+
+/// Calls the `select_and_scatter` kernel with both regions compiled to functions.
+/// `ptrs` is `[dst, operand, source, init]`.
+#[allow(clippy::too_many_arguments)]
+fn emit_select_and_scatter(
+    builder: &mut FunctionBuilder,
+    jit_module: &mut JITModule,
+    ir_module: &crate::ir::Module,
+    func_ids: &HashMap<String, FuncId>,
+    func_abis: &HashMap<String, FuncAbi>,
+    libm_ids: &LibmIds,
+    trt_ids: &TensorRtIds,
+    external_data_ids: &HashMap<String, DataId>,
+    instr: &Instruction,
+    [dst, operand, source, init]: [Value; 4],
+    [op_ty, source_ty]: [&TensorType; 2],
+) -> Result<(), String> {
+    let Instruction::SelectAndScatter {
+        select_body,
+        select_params,
+        scatter_body,
+        scatter_params,
+        window_dimensions,
+        window_strides,
+        padding,
+        ..
+    } = instr
+    else {
+        unreachable!("emit_select_and_scatter on {instr:?}")
+    };
+    let et = op_ty.element_type;
+    let Some(kernel) = window_kernel(et) else {
+        return Err(format!("select_and_scatter does not support {et:?}"));
+    };
+    let rank = op_ty.rank();
+    let ones = vec![1; rank];
+    let attrs: [&[i64]; 4] = [window_dimensions, window_strides, &ones, &ones];
+    if attrs
+        .iter()
+        .any(|a| a.len() != rank || a.iter().any(|&v| v < 1))
+        || padding.len() != rank
+        || window_counts(&op_ty.shape, attrs, padding) != source_ty.shape
+    {
+        return Err(format!(
+            "select_and_scatter: window attributes do not fit {:?} with source {:?}",
+            op_ty.shape, source_ty.shape
+        ));
+    }
+    let (ct, scalar) = (cranelift_type_for(et), TensorType::scalar(et));
+    let params = [scalar.clone(), scalar];
+    let mut region = |body: &[InstrResult], body_params: &[ValueId], ret: Type| {
+        compile_region_as_function(
+            jit_module,
+            ir_module,
+            func_ids,
+            func_abis,
+            libm_ids,
+            trt_ids,
+            external_data_ids,
+            &[ct, ct],
+            ret,
+            body,
+            body_params,
+            &params,
+        )
+    };
+    let select_fid = region(select_body, select_params, types::I8)?;
+    let scatter_fid = region(scatter_body, scatter_params, ct)?;
+    let sel_ref = jit_module.declare_func_in_func(select_fid, builder.func);
+    let sel_addr = builder.ins().func_addr(ptr_type(), sel_ref);
+    let scat_ref = jit_module.declare_func_in_func(scatter_fid, builder.func);
+    let scat_addr = builder.ins().func_addr(ptr_type(), scat_ref);
+    let init_scalar = builder.ins().load(ct, MemFlags::trusted(), init, 0);
+    let pad_flat: Vec<i64> = padding.iter().flat_map(|&(l, h)| [l, h]).collect();
+    let arrays: [&[i64]; 4] = [window_dimensions, window_strides, &pad_flat, &op_ty.shape];
+    let [wd, ws, pad, shape] = arrays.map(|a| store_i64_array(builder, a));
+    let rank_val = builder.ins().iconst(types::I64, rank as i64);
+    let n_op = builder
+        .ins()
+        .iconst(types::I64, op_ty.num_elements() as i64);
+    let n_src = builder
+        .ins()
+        .iconst(types::I64, source_ty.num_elements() as i64);
+    let pt = ptr_type();
+    lapack_call(
+        builder,
+        jit_module,
+        &format!("__trt_select_and_scatter_{kernel}"),
+        &[
+            pt,
+            pt,
+            pt,
+            ct,
+            pt,
+            pt,
+            pt,
+            pt,
+            pt,
+            pt,
+            types::I64,
+            types::I64,
+            types::I64,
+        ],
+        &[
+            dst,
+            operand,
+            source,
+            init_scalar,
+            sel_addr,
+            scat_addr,
+            wd,
+            ws,
+            pad,
+            shape,
+            rank_val,
+            n_op,
+            n_src,
+        ],
+    )
+}
+
+fn load_lanes(builder: &mut FunctionBuilder, ptr: Value, n: usize, et: ElementType) -> Vec<Value> {
+    let (ct, sz) = (cranelift_type_for(et), et.byte_size());
+    (0..n)
+        .map(|i| {
+            builder
+                .ins()
+                .load(ct, MemFlags::trusted(), ptr, (i * sz) as i32)
+        })
+        .collect()
+}
+
+/// Stores scalar-ABI lanes of `elem_sz` bytes each into a fresh stack slot.
+fn spill_lanes(builder: &mut FunctionBuilder, vals: &[Value], elem_sz: usize) -> Value {
+    let ptr = alloc_slot(builder, vals.len().max(1) * elem_sz);
+    for (i, &v) in vals.iter().enumerate() {
+        builder
+            .ins()
+            .store(MemFlags::trusted(), v, ptr, (i * elem_sz) as i32);
+    }
+    ptr
+}
+
+/// The element type code `tensor_argminmax` and `tensor_sort` read.
+fn value_code(et: ElementType) -> i64 {
+    match et {
+        ElementType::F64 => 0,
+        ElementType::F32 => 1,
+        ElementType::I64 => 2,
+        ElementType::I32 => 3,
+        ElementType::UI64 => 4,
+        ElementType::UI32 => 5,
+        ElementType::I1 => 6,
+    }
+}
+
+/// How many leading operands a sort comparator orders by, and whether it orders them
+/// descending. JAX's comparators are ascending and compare the first `num_keys` pairs.
+fn sort_order(comparator: &[InstrResult], params: &[ValueId]) -> (usize, bool) {
+    let used: std::collections::HashSet<ValueId> = comparator
+        .iter()
+        .flat_map(|ir| crate::const_fold::operand_ids(&ir.instr))
+        .collect();
+    let n_keys = params
+        .chunks(2)
+        .rposition(|pair| pair.iter().any(|p| used.contains(p)))
+        .map_or(1, |k| k + 1);
+    let descending = comparator.iter().any(|ir| {
+        matches!(
+            ir.instr,
+            Instruction::Compare {
+                direction: CompareDirection::Gt | CompareDirection::Ge,
+                ..
+            }
+        )
+    });
+    (n_keys, descending)
+}
+
+/// Sorts the operand buffers in `ptrs` in place with `tensor_sort`.
+fn emit_sort(
+    builder: &mut FunctionBuilder,
+    jit_module: &mut JITModule,
+    trt_ids: &TensorRtIds,
+    ptrs: &[Value],
+    types: &[TensorType],
+    dimension: i64,
+    (n_keys, descending): (usize, bool),
+) {
+    let shape = &types[0].shape;
+    let dim = if dimension < 0 {
+        shape.len() as i64 + dimension
+    } else {
+        dimension
+    } as usize;
+    let mut meta = vec![
+        ptrs.len() as i64,
+        n_keys as i64,
+        i64::from(descending),
+        shape[..dim].iter().product(),
+        shape[dim],
+        shape[dim + 1..].iter().product(),
+    ];
+    meta.extend(types.iter().map(|t| value_code(t.element_type)));
+    let ptr_array = alloc_slot(builder, ptrs.len() * 8);
+    for (i, &p) in ptrs.iter().enumerate() {
+        builder
+            .ins()
+            .store(MemFlags::trusted(), p, ptr_array, (i * 8) as i32);
+    }
+    let meta_ptr = store_i64_array(builder, &meta);
+    let func_ref = jit_module.declare_func_in_func(trt_ids.sort, builder.func);
+    builder.ins().call(func_ref, &[ptr_array, meta_ptr]);
+}
+
+/// Calls `tensor_argminmax` on `[dst_values, dst_indices, values, indices]`.
+fn emit_argminmax(
+    builder: &mut FunctionBuilder,
+    jit_module: &mut JITModule,
+    trt_ids: &TensorRtIds,
+    ptrs: [Value; 4],
+    [val_ty, idx_ty]: [&TensorType; 2],
+    dimensions: &[i64],
+    is_min: bool,
+) -> Result<(), String> {
+    let &[axis] = dimensions else {
+        return Err(format!(
+            "argmin/argmax over {} dimensions is not supported",
+            dimensions.len()
+        ));
+    };
+    let index_size = idx_ty.element_type.byte_size() as i64;
+    if is_float(idx_ty.element_type) || index_size == 1 {
+        return Err(format!(
+            "argmin/argmax indices of type {:?} are not supported",
+            idx_ty.element_type
+        ));
+    }
+    let (shape, axis) = (&val_ty.shape, axis as usize);
+    let meta = [
+        value_code(val_ty.element_type),
+        index_size,
+        i64::from(is_min),
+        shape[..axis].iter().product(),
+        shape[axis],
+        shape[axis + 1..].iter().product(),
+    ];
+    let meta_ptr = store_i64_array(builder, &meta);
+    let func_ref = jit_module.declare_func_in_func(trt_ids.argminmax, builder.func);
+    let [dst_v, dst_i, src_v, src_i] = ptrs;
+    builder
+        .ins()
+        .call(func_ref, &[dst_v, dst_i, src_v, src_i, meta_ptr]);
+    Ok(())
+}
+
+/// Scatters into `dst`, which must already hold the operand; `indices` must be i64.
+fn emit_scatter(
+    builder: &mut FunctionBuilder,
+    jit_module: &mut JITModule,
+    trt_ids: &TensorRtIds,
+    [dst, indices, updates]: [Value; 3],
+    [operand_ty, indices_ty, updates_ty]: [&TensorType; 3],
+    dims: &ScatterDims,
+    combiner: ScatterCombiner,
+) -> Result<(), String> {
+    let et = operand_ty.element_type;
+    if combiner != ScatterCombiner::Set && !matches!(et, ElementType::F64 | ElementType::I64) {
+        return Err(format!("scatter {combiner:?} is not supported for {et:?}"));
+    }
+    let (os, is, us) = (&operand_ty.shape, &indices_ty.shape, &updates_ty.shape);
+    let strides = |s: &[i64]| {
+        let mut st = vec![1i64; s.len()];
+        for d in (1..s.len()).rev() {
+            st[d - 1] = st[d] * s[d];
+        }
+        st
+    };
+    let (os_st, is_st) = (strides(os), strides(is));
+    let ivd = dims.index_vector_dim as usize;
+    let has = |dims: &[i64], d: usize| dims.contains(&(d as i64));
+    let window_dims: Vec<usize> = (0..os.len())
+        .filter(|&d| !has(&dims.inserted_window_dims, d) && !has(&dims.input_batching_dims, d))
+        .collect();
+    let mut meta = vec![
+        et.byte_size() as i64,
+        i64::from(is_float(et)),
+        combiner as i64,
+        operand_ty.num_elements() as i64,
+        indices_ty.num_elements() as i64,
+        is_st.get(ivd).copied().unwrap_or(0),
+        us.len() as i64,
+    ];
+    // Update window dims walk the operand's window dims in order; update scatter dims walk the
+    // indices dims other than index_vector_dim, and a batching one also selects an operand row.
+    let mut window = vec![1i64; os.len()];
+    let (mut next_window, mut next_index) =
+        (window_dims.iter(), (0..is.len()).filter(|&d| d != ivd));
+    for (d, &size) in us.iter().enumerate() {
+        let (operand_stride, indices_stride) = if has(&dims.update_window_dims, d) {
+            let w = *next_window
+                .next()
+                .ok_or("scatter: too many update window dims")?;
+            window[w] = size;
+            (os_st[w], 0)
+        } else {
+            let j = next_index
+                .next()
+                .ok_or("scatter: too many update scatter dims")?;
+            let batch = dims
+                .scatter_indices_batching_dims
+                .iter()
+                .position(|&b| b as usize == j)
+                .map_or(0, |p| os_st[dims.input_batching_dims[p] as usize]);
+            (batch, is_st[j])
+        };
+        meta.extend([size, operand_stride, indices_stride]);
+    }
+    for &d in &dims.scatter_dims_to_operand_dims {
+        meta.extend([os_st[d as usize], os[d as usize] - window[d as usize]]);
+    }
+    let meta_ptr = store_i64_array(builder, &meta);
+    let n_meta = builder.ins().iconst(types::I64, meta.len() as i64);
+    let func_ref = jit_module.declare_func_in_func(trt_ids.scatter, builder.func);
+    builder
+        .ins()
+        .call(func_ref, &[dst, indices, updates, meta_ptr, n_meta]);
+    Ok(())
+}
+
+/// Set-scatters one update element into the operand lane its i64 index vector lands on. An
+/// out-of-bounds index selects no lane, as XLA drops the update.
+fn select_scatter_lane(
+    builder: &mut FunctionBuilder,
+    vals: &[Value],
+    indices: &[Value],
+    update: Value,
+    shape: &[i64],
+    scatter_dims: &[i64],
+) -> Vec<Value> {
+    let mut target = builder.ins().iconst(types::I64, 0);
+    let mut in_bounds = builder.ins().iconst(types::I8, 1);
+    for (&ix, &d) in indices.iter().zip(scatter_dims) {
+        let d = d as usize;
+        let ok = builder
+            .ins()
+            .icmp_imm(IntCC::UnsignedLessThan, ix, shape[d]);
+        in_bounds = builder.ins().band(in_bounds, ok);
+        let offset = builder
+            .ins()
+            .imul_imm(ix, shape[d + 1..].iter().product::<i64>());
+        target = builder.ins().iadd(target, offset);
+    }
+    let no_lane = builder.ins().iconst(types::I64, -1);
+    let target = builder.ins().select(in_bounds, target, no_lane);
+    vals.iter()
+        .enumerate()
+        .map(|(j, &v)| {
+            let hit = builder.ins().icmp_imm(IntCC::Equal, target, j as i64);
+            builder.ins().select(hit, update, v)
+        })
+        .collect()
 }
 
 fn lower_pointer_body(
@@ -3479,6 +4048,33 @@ fn lower_instruction_mem(
         }
     }
 
+    if let Some(op) = f64_only_op(instr)
+        && rt.element_type != ElementType::F64
+    {
+        return Err(format!(
+            "mem: {op} supports only f64, not {:?}",
+            rt.element_type
+        ));
+    }
+    if !mem_has_kernel(instr, &rt, type_map) {
+        return lower_mem_lanes(
+            builder,
+            instr,
+            result_types,
+            ir_module,
+            func_ids,
+            libm_ids,
+            trt_ids,
+            func_abis,
+            external_data_ids,
+            jit_module,
+            value_map,
+            type_map,
+            pool,
+            result_vid,
+        );
+    }
+
     let get = |vid: &ValueId| -> Result<Value, String> {
         value_map
             .get(vid)
@@ -3512,11 +4108,15 @@ fn lower_instruction_mem(
                     lower_ptr_splat_simd_f64(builder, dst, scalar, n);
                     return Ok(vec![LaneRepr::scalar(vec![dst])]);
                 }
-                let fid = match rt.element_type {
-                    ElementType::F64 | ElementType::F32 => trt_ids.broadcast_f64,
-                    ElementType::I32 | ElementType::UI32 => trt_ids.broadcast_i32,
-                    ElementType::I1 => trt_ids.broadcast_i8,
-                    _ => trt_ids.broadcast_i64,
+                let (fid, scalar) = match rt.element_type {
+                    ElementType::F64 => (trt_ids.broadcast_f64, scalar),
+                    ElementType::F32 => (
+                        trt_ids.broadcast_i32,
+                        builder.ins().bitcast(types::I32, MemFlags::new(), scalar),
+                    ),
+                    ElementType::I32 | ElementType::UI32 => (trt_ids.broadcast_i32, scalar),
+                    ElementType::I1 => (trt_ids.broadcast_i8, scalar),
+                    ElementType::I64 | ElementType::UI64 => (trt_ids.broadcast_i64, scalar),
                 };
                 let n_val = builder.ins().iconst(types::I64, n as i64);
                 trt_call(builder, jit_module, fid, &[dst, scalar, n_val]);
@@ -3729,7 +4329,7 @@ fn lower_instruction_mem(
         Instruction::Maximum { lhs, rhs } => {
             // Elision-aware SIMD Max for F64 on ptr-ABI.
             if rt.element_type == ElementType::F64 && n >= 2 {
-                let out = emit_ptr_cmp_select_f64(
+                let out = emit_ptr_minmax_f64(
                     builder,
                     jit_module,
                     pool,
@@ -3738,7 +4338,7 @@ fn lower_instruction_mem(
                     rhs,
                     n,
                     elem_sz,
-                    FloatCC::GreaterThan,
+                    |b, l, r| b.ins().fmax(l, r),
                     use_info,
                     result_vid,
                 )?;
@@ -3762,7 +4362,7 @@ fn lower_instruction_mem(
         }
         Instruction::Minimum { lhs, rhs } => {
             if rt.element_type == ElementType::F64 && n >= 2 {
-                let out = emit_ptr_cmp_select_f64(
+                let out = emit_ptr_minmax_f64(
                     builder,
                     jit_module,
                     pool,
@@ -3771,7 +4371,7 @@ fn lower_instruction_mem(
                     rhs,
                     n,
                     elem_sz,
-                    FloatCC::LessThan,
+                    |b, l, r| b.ins().fmin(l, r),
                     use_info,
                     result_vid,
                 )?;
@@ -3974,17 +4574,15 @@ fn lower_instruction_mem(
             lhs,
             rhs,
             direction,
-            compare_type,
+            ..
         } => {
             let l_ty = type_map
                 .get(lhs)
                 .cloned()
                 .unwrap_or(TensorType::scalar(ElementType::F64));
-            let use_float = is_float(l_ty.element_type)
-                || matches!(compare_type, CompareType::Float | CompareType::TotalOrder);
             // Inline F64 compare: per-lane `fcmp` + u8 store, no
             // trt_call FFI hop. Output is u8 (0 or 1).
-            if use_float && l_ty.element_type == ElementType::F64 {
+            if l_ty.element_type == ElementType::F64 {
                 let dst = alloc_slot_for_vid(builder, pool, result_vid, n);
                 let lhs_ptr = get(lhs)?;
                 let rhs_ptr = get(rhs)?;
@@ -4007,16 +4605,7 @@ fn lower_instruction_mem(
                 }
                 return Ok(vec![LaneRepr::scalar(vec![dst])]);
             }
-            let func_id = if use_float {
-                match direction {
-                    CompareDirection::Eq => trt_ids.cmp_eq_f64,
-                    CompareDirection::Ne => trt_ids.cmp_ne_f64,
-                    CompareDirection::Lt => trt_ids.cmp_lt_f64,
-                    CompareDirection::Le => trt_ids.cmp_le_f64,
-                    CompareDirection::Gt => trt_ids.cmp_gt_f64,
-                    CompareDirection::Ge => trt_ids.cmp_ge_f64,
-                }
-            } else if matches!(l_ty.element_type, ElementType::I32 | ElementType::UI32) {
+            let func_id = if l_ty.element_type == ElementType::I32 {
                 match direction {
                     CompareDirection::Eq => trt_ids.cmp_eq_i32,
                     CompareDirection::Ne => trt_ids.cmp_ne_i32,
@@ -4050,6 +4639,17 @@ fn lower_instruction_mem(
             on_false,
         } => {
             let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
+            // A rank-0 predicate is a single byte that picks a whole operand.
+            if n > 1 && type_map.get(cond).is_some_and(|t| t.num_elements() == 1) {
+                let c = builder
+                    .ins()
+                    .load(types::I8, MemFlags::trusted(), get(cond)?, 0);
+                let src = builder.ins().select(c, get(on_true)?, get(on_false)?);
+                let memcpy_ref = jit_module.declare_func_in_func(trt_ids.memcpy, builder.func);
+                let nb = builder.ins().iconst(types::I64, (n * elem_sz) as i64);
+                builder.ins().call(memcpy_ref, &[dst, src, nb]);
+                return Ok(vec![LaneRepr::scalar(vec![dst])]);
+            }
             // Inline F64 select: per-lane `select(cond != 0, on_true,
             // on_false)`. No SIMD benefit (cond is u8, mask
             // materialization costs too much), but the tight scalar
@@ -4110,9 +4710,7 @@ fn lower_instruction_mem(
                 (ElementType::F64, ElementType::I64) => trt_ids.convert_f64_to_i64,
                 (ElementType::F64, ElementType::UI64) => trt_ids.convert_f64_to_ui64,
                 (ElementType::I1, ElementType::F64) => trt_ids.convert_i1_to_f64,
-                (ElementType::F64, ElementType::I32 | ElementType::UI32) => {
-                    trt_ids.convert_f64_to_i32
-                }
+                (ElementType::F64, ElementType::I32) => trt_ids.convert_f64_to_i32,
                 (ElementType::I64 | ElementType::UI64, ElementType::I32 | ElementType::UI32) => {
                     trt_ids.convert_i64_to_i32
                 }
@@ -4137,10 +4735,22 @@ fn lower_instruction_mem(
                 (ElementType::I32, ElementType::F32) => trt_ids.convert_i32_to_f32,
                 (ElementType::F32, ElementType::I32) => trt_ids.convert_f32_to_i32,
                 _ => {
-                    return Err(format!(
-                        "mem: unsupported convert {:?} -> {:?}",
-                        src_ty.element_type, rt.element_type
-                    ));
+                    return lower_mem_lanes(
+                        builder,
+                        instr,
+                        result_types,
+                        ir_module,
+                        func_ids,
+                        libm_ids,
+                        trt_ids,
+                        func_abis,
+                        external_data_ids,
+                        jit_module,
+                        value_map,
+                        type_map,
+                        pool,
+                        result_vid,
+                    );
                 }
             };
             let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
@@ -4164,7 +4774,10 @@ fn lower_instruction_mem(
             if src_n == 1 {
                 let src_ptr = get(operand)?;
                 let src_et = src_ty.element_type;
-                let ct = cranelift_type_for(src_et);
+                let ct = match src_et {
+                    ElementType::F32 => types::I32,
+                    _ => cranelift_type_for(src_et),
+                };
                 let scalar = builder.ins().load(ct, MemFlags::trusted(), src_ptr, 0);
                 // Inline F64 scalar splat, skipping the trt_call
                 // round-trip. F32 / integer types still dispatch.
@@ -4172,10 +4785,12 @@ fn lower_instruction_mem(
                     lower_ptr_splat_simd_f64(builder, dst, scalar, n);
                 } else {
                     let fid = match src_et {
-                        ElementType::F64 | ElementType::F32 => trt_ids.broadcast_f64,
-                        ElementType::I32 | ElementType::UI32 => trt_ids.broadcast_i32,
+                        ElementType::F64 => trt_ids.broadcast_f64,
+                        ElementType::F32 | ElementType::I32 | ElementType::UI32 => {
+                            trt_ids.broadcast_i32
+                        }
                         ElementType::I1 => trt_ids.broadcast_i8,
-                        _ => trt_ids.broadcast_i64,
+                        ElementType::I64 | ElementType::UI64 => trt_ids.broadcast_i64,
                     };
                     let func_ref = jit_module.declare_func_in_func(fid, builder.func);
                     let n_val = builder.ins().iconst(types::I64, n as i64);
@@ -4597,6 +5212,8 @@ fn lower_instruction_mem(
             operand,
             indices,
             updates,
+            dims,
+            combiner,
         } => {
             let src_ty = type_map.get(operand).cloned().unwrap_or(rt.clone());
             let idx_ty = type_map
@@ -4604,133 +5221,92 @@ fn lower_instruction_mem(
                 .cloned()
                 .unwrap_or(TensorType::scalar(ElementType::I64));
             let upd_ty = type_map.get(updates).cloned().unwrap_or(rt.clone());
-            let n_src = src_ty.num_elements();
-            let n_updates = idx_ty.num_elements();
-            let inner_size = upd_ty.num_elements().checked_div(n_updates).unwrap_or(1);
+            let n_idx = idx_ty.num_elements();
             let idx_ptr = get(indices)?;
             let widened_idx = if matches!(idx_ty.element_type, ElementType::I32 | ElementType::UI32)
             {
-                let wide_buf = alloc_slot(builder, n_updates * 8);
+                let wide_buf = alloc_slot(builder, n_idx * 8);
                 let widen_ref =
                     jit_module.declare_func_in_func(trt_ids.widen_i32_to_i64, builder.func);
-                let n_upd_v2 = builder.ins().iconst(types::I64, n_updates as i64);
-                builder
-                    .ins()
-                    .call(widen_ref, &[wide_buf, idx_ptr, n_upd_v2]);
+                let n_idx_v = builder.ins().iconst(types::I64, n_idx as i64);
+                builder.ins().call(widen_ref, &[wide_buf, idx_ptr, n_idx_v]);
                 wide_buf
             } else {
                 idx_ptr
             };
             let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
-            let n_src_v = builder.ins().iconst(types::I64, n_src as i64);
-            let n_upd_v = builder.ins().iconst(types::I64, n_updates as i64);
-            let inner_v = builder.ins().iconst(types::I64, inner_size as i64);
-            let esz = builder.ins().iconst(types::I64, elem_sz as i64);
-            let func_ref = jit_module.declare_func_in_func(trt_ids.scatter_generic, builder.func);
-            builder.ins().call(
-                func_ref,
-                &[
-                    dst,
-                    get(operand)?,
-                    n_src_v,
-                    widened_idx,
-                    get(updates)?,
-                    n_upd_v,
-                    inner_v,
-                    esz,
-                ],
-            );
+            let memcpy_ref = jit_module.declare_func_in_func(trt_ids.memcpy, builder.func);
+            let nb = builder.ins().iconst(types::I64, (n * elem_sz) as i64);
+            builder.ins().call(memcpy_ref, &[dst, get(operand)?, nb]);
+            emit_scatter(
+                builder,
+                jit_module,
+                trt_ids,
+                [dst, widened_idx, get(updates)?],
+                [&src_ty, &idx_ty, &upd_ty],
+                dims,
+                *combiner,
+            )?;
             Ok(vec![LaneRepr::scalar(vec![dst])])
         }
 
         Instruction::DotGeneral { lhs, rhs, dims } => {
             let l_ty = type_map.get(lhs).cloned().unwrap_or(rt.clone());
             let r_ty = type_map.get(rhs).cloned().unwrap_or(rt.clone());
-
+            let et = rt.element_type;
+            if l_ty.element_type != et || r_ty.element_type != et || et == ElementType::I1 {
+                return Err(format!(
+                    "mem: dot_general of {:?} x {:?} -> {et:?} is not supported",
+                    l_ty.element_type, r_ty.element_type
+                ));
+            }
+            let (out_axes, k_axes) = dot_axes(&l_ty, &r_ty, dims);
+            let n_out: usize = out_axes.iter().map(|a| a.0).product();
+            let dst = alloc_slot_for_vid(builder, pool, result_vid, n_out * elem_sz);
+            let (lhs_ptr, rhs_ptr) = (get(lhs)?, get(rhs)?);
             let nb = dims.lhs_batch.len();
             let leading_batch: Vec<i64> = (0..nb as i64).collect();
-            let lhs_contract_last = dims.lhs_contracting.len() == 1
-                && dims.lhs_contracting[0] == l_ty.rank() as i64 - 1;
-            let rhs_contract_after_batch =
-                dims.rhs_contracting.len() == 1 && dims.rhs_contracting[0] == nb as i64;
-            if nb > 0
+            // `[batch.., m.., k] x [batch.., k, n..]` is one row-major matmul per batch.
+            if et == ElementType::F64
                 && dims.lhs_batch == leading_batch
                 && dims.rhs_batch == leading_batch
-                && !dims.lhs_contracting.is_empty()
-                && lhs_contract_last
-                && rhs_contract_after_batch
+                && dims.lhs_contracting == [l_ty.rank() as i64 - 1]
+                && dims.rhs_contracting == [nb as i64]
             {
-                let batch: usize = dims
-                    .lhs_batch
-                    .iter()
-                    .map(|&d| l_ty.shape[d as usize] as usize)
-                    .product();
-                let k = l_ty.shape[dims.lhs_contracting[0] as usize] as usize;
-                let m: usize = (0..l_ty.rank())
-                    .filter(|&d| {
-                        !dims.lhs_batch.contains(&(d as i64))
-                            && !dims.lhs_contracting.contains(&(d as i64))
-                    })
-                    .map(|d| l_ty.shape[d] as usize)
-                    .product();
-                let nn: usize = (0..r_ty.rank())
-                    .filter(|&d| {
-                        !dims.rhs_batch.contains(&(d as i64))
-                            && !dims.rhs_contracting.contains(&(d as i64))
-                    })
-                    .map(|d| r_ty.shape[d] as usize)
-                    .product();
-                let out_size = batch * m * nn * elem_sz;
-                let dst = alloc_slot_for_vid(builder, pool, result_vid, out_size);
+                let size = |shape: &[i64]| shape.iter().product::<i64>() as usize;
+                let batch = size(&l_ty.shape[..nb]);
+                let k = l_ty.shape[l_ty.rank() - 1] as usize;
+                let m = size(&l_ty.shape[nb..l_ty.rank() - 1]);
+                let nn = size(&r_ty.shape[nb + 1..]);
                 let func_ref = jit_module.declare_func_in_func(trt_ids.matmul_f64, builder.func);
-                let m_v = builder.ins().iconst(types::I64, m as i64);
-                let k_v = builder.ins().iconst(types::I64, k as i64);
-                let n_v = builder.ins().iconst(types::I64, nn as i64);
-                let lhs_ptr = get(lhs)?;
-                let rhs_ptr = get(rhs)?;
+                let [m_v, k_v, n_v] =
+                    [m, k, nn].map(|v| builder.ins().iconst(types::I64, v as i64));
                 for b in 0..batch {
-                    let lp = builder
-                        .ins()
-                        .iadd_imm(lhs_ptr, (b * m * k * elem_sz) as i64);
-                    let rp = builder
-                        .ins()
-                        .iadd_imm(rhs_ptr, (b * k * nn * elem_sz) as i64);
-                    let dp = builder.ins().iadd_imm(dst, (b * m * nn * elem_sz) as i64);
+                    let lp = builder.ins().iadd_imm(lhs_ptr, (b * m * k * 8) as i64);
+                    let rp = builder.ins().iadd_imm(rhs_ptr, (b * k * nn * 8) as i64);
+                    let dp = builder.ins().iadd_imm(dst, (b * m * nn * 8) as i64);
                     builder.ins().call(func_ref, &[dp, lp, rp, m_v, k_v, n_v]);
                 }
-                return Ok(vec![LaneRepr::scalar(vec![dst])]);
-            }
-
-            let (m, k, nn) = if l_ty.rank() == 1 && r_ty.rank() == 1 {
-                let k = l_ty.shape[0] as usize;
-                (1usize, k, 1usize)
-            } else if l_ty.rank() >= 2 && r_ty.rank() >= 2 {
-                let m = l_ty.shape[0] as usize;
-                let nn = r_ty.shape[r_ty.rank() - 1] as usize;
-                let k = if !dims.lhs_contracting.is_empty() {
-                    l_ty.shape[dims.lhs_contracting[0] as usize] as usize
-                } else {
-                    1
-                };
-                (m, k, nn)
-            } else if l_ty.rank() == 1 && r_ty.rank() >= 2 {
-                let k = l_ty.shape[0] as usize;
-                let nn = r_ty.shape[r_ty.rank() - 1] as usize;
-                (1usize, k, nn)
             } else {
-                let m = l_ty.shape[0] as usize;
-                let k = r_ty.shape[0] as usize;
-                (m, k, 1usize)
-            };
-            let out_size = m * nn * elem_sz;
-            let dst = alloc_slot_for_vid(builder, pool, result_vid, out_size);
-            let func_ref = jit_module.declare_func_in_func(trt_ids.matmul_f64, builder.func);
-            let m_v = builder.ins().iconst(types::I64, m as i64);
-            let k_v = builder.ins().iconst(types::I64, k as i64);
-            let n_v = builder.ins().iconst(types::I64, nn as i64);
-            builder
-                .ins()
-                .call(func_ref, &[dst, get(lhs)?, get(rhs)?, m_v, k_v, n_v]);
+                let mut meta = vec![
+                    value_code(et),
+                    l_ty.num_elements() as i64,
+                    r_ty.num_elements() as i64,
+                    out_axes.len() as i64,
+                    k_axes.len() as i64,
+                ];
+                meta.extend(
+                    out_axes
+                        .iter()
+                        .chain(&k_axes)
+                        .flat_map(|&(size, l, r)| [size as i64, l as i64, r as i64]),
+                );
+                let meta_ptr = store_i64_array(builder, &meta);
+                let func_ref = jit_module.declare_func_in_func(trt_ids.dot_general, builder.func);
+                builder
+                    .ins()
+                    .call(func_ref, &[dst, lhs_ptr, rhs_ptr, meta_ptr]);
+            }
             Ok(vec![LaneRepr::scalar(vec![dst])])
         }
 
@@ -4738,63 +5314,91 @@ fn lower_instruction_mem(
             operand,
             init: _,
             op,
-            dimensions: _,
+            dimensions,
         } => {
             let src_ty = type_map.get(operand).cloned().unwrap_or(rt.clone());
-            let use_int = !is_float(src_ty.element_type);
-            let func_id = match (op, use_int) {
-                (ReduceOp::Add, false) => trt_ids.reduce_sum_f64,
-                (ReduceOp::Add, true) => trt_ids.reduce_sum_i64,
-                (ReduceOp::Maximum, false) => trt_ids.reduce_max_f64,
-                (ReduceOp::Maximum, true) => trt_ids.reduce_max_i64,
-                (ReduceOp::Minimum, false) => trt_ids.reduce_min_f64,
-                (ReduceOp::Minimum, true) => trt_ids.reduce_min_i64,
-                (ReduceOp::And, _) => trt_ids.reduce_and_i1,
-                (ReduceOp::Or, _) => trt_ids.reduce_or_i1,
+            // Empty tensors count as one element throughout, so there is no empty result.
+            if src_ty.shape.contains(&0) {
+                return Err(format!(
+                    "mem: reduce over the empty tensor {:?}",
+                    src_ty.shape
+                ));
+            }
+            use ElementType::*;
+            let func_id = match (op, src_ty.element_type) {
+                (ReduceOp::Add, F64) => trt_ids.reduce_sum_f64,
+                (ReduceOp::Add, F32) => trt_ids.reduce_sum_f32,
+                (ReduceOp::Add, I64 | UI64) => trt_ids.reduce_sum_i64,
+                (ReduceOp::Add, I32 | UI32) => trt_ids.reduce_sum_i32,
+                (ReduceOp::Multiply, F64) => trt_ids.reduce_prod_f64,
+                (ReduceOp::Multiply, F32) => trt_ids.reduce_prod_f32,
+                (ReduceOp::Multiply, I64 | UI64) => trt_ids.reduce_prod_i64,
+                (ReduceOp::Multiply, I32 | UI32) => trt_ids.reduce_prod_i32,
+                (ReduceOp::Maximum, F64) => trt_ids.reduce_max_f64,
+                (ReduceOp::Maximum, F32) => trt_ids.reduce_max_f32,
+                (ReduceOp::Maximum, I64) => trt_ids.reduce_max_i64,
+                (ReduceOp::Maximum, UI64) => trt_ids.reduce_max_u64,
+                (ReduceOp::Maximum, I32) => trt_ids.reduce_max_i32,
+                (ReduceOp::Maximum, UI32) => trt_ids.reduce_max_u32,
+                (ReduceOp::Minimum, F64) => trt_ids.reduce_min_f64,
+                (ReduceOp::Minimum, F32) => trt_ids.reduce_min_f32,
+                (ReduceOp::Minimum, I64) => trt_ids.reduce_min_i64,
+                (ReduceOp::Minimum, UI64) => trt_ids.reduce_min_u64,
+                (ReduceOp::Minimum, I32) => trt_ids.reduce_min_i32,
+                (ReduceOp::Minimum, UI32) => trt_ids.reduce_min_u32,
+                (ReduceOp::And, I1) => trt_ids.reduce_and_i1,
+                (ReduceOp::Or, I1) => trt_ids.reduce_or_i1,
+                (op, et) => return Err(format!("mem: reduce {op:?} is not supported for {et:?}")),
             };
-            let n_in = src_ty.num_elements();
-            let n_out = n;
-            let inner = n_in.checked_div(n_out).unwrap_or(n_in);
-            let dst = alloc_slot_for_vid(builder, pool, result_vid, n_out * elem_sz);
             let func_ref = jit_module.declare_func_in_func(func_id, builder.func);
-            let outer_v = builder.ins().iconst(types::I64, n_out as i64);
-            let inner_v = builder.ins().iconst(types::I64, inner as i64);
-            builder
-                .ins()
-                .call(func_ref, &[dst, get(operand)?, outer_v, inner_v]);
+            let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
+            let mut shape: Vec<usize> = src_ty.shape.iter().map(|&d| d as usize).collect();
+            let mut src = get(operand)?;
+            let runs = reduced_axis_runs(dimensions);
+            for (i, &(lo, hi)) in runs.iter().enumerate() {
+                let outer: usize = shape[..lo].iter().product();
+                let inner: usize = shape[lo..=hi].iter().product();
+                let after: usize = shape[hi + 1..].iter().product();
+                let out = if i + 1 == runs.len() {
+                    dst
+                } else {
+                    alloc_slot(builder, outer * after * elem_sz)
+                };
+                let [outer, inner, after] =
+                    [outer, inner, after].map(|v| builder.ins().iconst(types::I64, v as i64));
+                builder
+                    .ins()
+                    .call(func_ref, &[out, src, outer, inner, after]);
+                shape.drain(lo..=hi);
+                src = out;
+            }
+            if runs.is_empty() {
+                let memcpy_ref = jit_module.declare_func_in_func(trt_ids.memcpy, builder.func);
+                let nb = builder.ins().iconst(types::I64, (n * elem_sz) as i64);
+                builder.ins().call(memcpy_ref, &[dst, src, nb]);
+            }
             Ok(vec![LaneRepr::scalar(vec![dst])])
         }
 
         Instruction::ReduceArgminmax {
             values,
             indices,
-            dimensions: _,
+            dimensions,
             is_min,
         } => {
             let val_ty = type_map.get(values).cloned().unwrap_or(rt.clone());
-            let idx_ty = type_map.get(indices).cloned().unwrap_or(TensorType {
-                shape: val_ty.shape.clone(),
-                element_type: ElementType::I64,
-            });
-            let n_in = val_ty.num_elements();
-            let n_out = rt.num_elements().max(1);
-            let inner = n_in.checked_div(n_out).unwrap_or(n_in);
-            let val_sz = val_ty.element_type.byte_size();
-            let idx_sz = idx_ty.element_type.byte_size();
-            let dst_v = alloc_slot(builder, n_out * val_sz);
-            let dst_i = alloc_slot(builder, n_out * idx_sz);
-            let fid = if *is_min {
-                trt_ids.argmin_f64
-            } else {
-                trt_ids.argmax_f64
-            };
-            let func_ref = jit_module.declare_func_in_func(fid, builder.func);
-            let outer_v = builder.ins().iconst(types::I64, n_out as i64);
-            let inner_v = builder.ins().iconst(types::I64, inner as i64);
-            builder.ins().call(
-                func_ref,
-                &[dst_v, dst_i, get(values)?, get(indices)?, outer_v, inner_v],
-            );
+            let idx_ty = type_map.get(indices).cloned().unwrap_or(rt.clone());
+            let dst_v = alloc_slot(builder, n * val_ty.element_type.byte_size());
+            let dst_i = alloc_slot(builder, n * idx_ty.element_type.byte_size());
+            emit_argminmax(
+                builder,
+                jit_module,
+                trt_ids,
+                [dst_v, dst_i, get(values)?, get(indices)?],
+                [&val_ty, &idx_ty],
+                dimensions,
+                *is_min,
+            )?;
             Ok(vec![
                 LaneRepr::scalar(vec![dst_v]),
                 LaneRepr::scalar(vec![dst_i]),
@@ -5515,100 +6119,37 @@ fn lower_instruction_mem(
             inputs,
             dimension,
             comparator,
+            comparator_params,
             ..
         } => {
-            let src_ty = type_map.get(&inputs[0]).cloned().unwrap_or(rt.clone());
-            let dim = if *dimension < 0 {
-                src_ty.rank() as i64 + dimension
-            } else {
-                *dimension
-            } as usize;
-            let shape: Vec<usize> = src_ty.shape.iter().map(|&d| d as usize).collect();
-            let sort_len = shape.get(dim).copied().unwrap_or(n);
-            let ascending = !comparator.iter().any(|ir| {
-                matches!(
-                    &ir.instr,
-                    Instruction::Compare {
-                        direction: CompareDirection::Gt,
-                        ..
-                    }
-                )
-            });
-
-            if inputs.len() == 2 {
-                let idx_ty = type_map
-                    .get(&inputs[1])
-                    .cloned()
-                    .unwrap_or(TensorType::scalar(ElementType::I64));
-                let val_esz = src_ty.element_type.byte_size();
-                let idx_esz = idx_ty.element_type.byte_size();
-                let val_n = src_ty.num_elements();
-                let idx_n = idx_ty.num_elements();
-                let dst_vals = alloc_slot(builder, val_n * val_esz);
-                let dst_idxs = alloc_slot(builder, idx_n * idx_esz);
-                let val_nb = builder.ins().iconst(types::I64, (val_n * val_esz) as i64);
-                let idx_nb = builder.ins().iconst(types::I64, (idx_n * idx_esz) as i64);
-                trt_call(
-                    builder,
-                    jit_module,
-                    trt_ids.memcpy,
-                    &[dst_vals, get(&inputs[0])?, val_nb],
-                );
-                trt_call(
-                    builder,
-                    jit_module,
-                    trt_ids.memcpy,
-                    &[dst_idxs, get(&inputs[1])?, idx_nb],
-                );
-                let sort_v = builder.ins().iconst(types::I64, sort_len as i64);
-                let asc_v = builder.ins().iconst(types::I8, ascending as i64);
-                let pt = ptr_type();
-                lapack_call(
-                    builder,
-                    jit_module,
-                    "__trt_argsort_f64",
-                    &[pt, pt, types::I64, types::I8],
-                    &[dst_vals, dst_idxs, sort_v, asc_v],
-                )?;
-                return Ok(vec![
-                    LaneRepr::scalar(vec![dst_vals]),
-                    LaneRepr::scalar(vec![dst_idxs]),
-                ]);
+            let tys: Vec<TensorType> = inputs
+                .iter()
+                .map(|v| type_map.get(v).cloned().unwrap_or(rt.clone()))
+                .collect();
+            let mut dsts = Vec::with_capacity(inputs.len());
+            for (i, (vid, ty)) in inputs.iter().zip(&tys).enumerate() {
+                let bytes = ty.byte_size();
+                let dst = match i {
+                    0 => alloc_slot_for_vid(builder, pool, result_vid, bytes),
+                    _ => alloc_slot(builder, bytes),
+                };
+                let nb = builder.ins().iconst(types::I64, bytes as i64);
+                trt_call(builder, jit_module, trt_ids.memcpy, &[dst, get(vid)?, nb]);
+                dsts.push(dst);
             }
-
-            if inputs.len() != 1 {
-                return Err(format!("mem sort: unsupported {} operands", inputs.len()));
-            }
-            let mut n_outer = 1usize;
-            for s in shape.iter().take(dim) {
-                n_outer *= *s;
-            }
-            let mut n_inner = 1usize;
-            for s in shape.iter().skip(dim + 1) {
-                n_inner *= *s;
-            }
-            let total = n;
-            let dst = alloc_slot_for_vid(builder, pool, result_vid, total * elem_sz);
-            let total_v = builder.ins().iconst(types::I64, (total * elem_sz) as i64);
-            trt_call(
+            emit_sort(
                 builder,
                 jit_module,
-                trt_ids.memcpy,
-                &[dst, get(&inputs[0])?, total_v],
+                trt_ids,
+                &dsts,
+                &tys,
+                *dimension,
+                sort_order(comparator, comparator_params),
             );
-            let outer_v = builder.ins().iconst(types::I64, n_outer as i64);
-            let sort_v = builder.ins().iconst(types::I64, sort_len as i64);
-            let inner_v = builder.ins().iconst(types::I64, n_inner as i64);
-            let ascending_v = builder.ins().iconst(types::I8, ascending as i64);
-            let pt = ptr_type();
-            lapack_call(
-                builder,
-                jit_module,
-                "__trt_sort_f64",
-                &[pt, types::I64, types::I64, types::I64, types::I8],
-                &[dst, outer_v, sort_v, inner_v, ascending_v],
-            )?;
-            Ok(vec![LaneRepr::scalar(vec![dst])])
+            Ok(dsts
+                .into_iter()
+                .map(|p| LaneRepr::scalar(vec![p]))
+                .collect())
         }
         Instruction::IsFinite { operand } => {
             // Inline `is_finite`: matches `f64::is_finite()` via
@@ -5867,21 +6408,15 @@ fn lower_instruction_mem(
         Instruction::ReduceWindow {
             operands,
             init_values,
-            body,
-            body_params,
-            window_dimensions,
-            window_strides,
-            base_dilations,
-            window_dilations,
-            padding,
+            ..
         } => {
-            if operands.is_empty() {
+            let (Some(src), Some(init)) = (operands.first(), init_values.first()) else {
                 return Err("reduce_window: no operands".into());
-            }
-            let src_ty = type_map.get(&operands[0]).cloned().unwrap_or(rt.clone());
-            let scalar_ty = TensorType::scalar(ElementType::F64);
-            let param_tt = vec![scalar_ty.clone(), scalar_ty.clone()];
-            let region_fid = compile_region_as_function(
+            };
+            let src_ty = type_map.get(src).cloned().unwrap_or(rt.clone());
+            let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
+            emit_reduce_window(
+                builder,
                 jit_module,
                 ir_module,
                 func_ids,
@@ -5889,61 +6424,9 @@ fn lower_instruction_mem(
                 libm_ids,
                 trt_ids,
                 external_data_ids,
-                &[types::F64, types::F64],
-                types::F64,
-                body,
-                body_params,
-                &param_tt,
-            )?;
-            let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
-            let fn_ptr_val = jit_module.declare_func_in_func(region_fid, builder.func);
-            let fn_addr = builder.ins().func_addr(ptr_type(), fn_ptr_val);
-            let init_ptr = get(&init_values[0])?;
-            let init_scalar = builder
-                .ins()
-                .load(types::F64, MemFlags::trusted(), init_ptr, 0);
-            let src_shape_ptr = store_i64_array(builder, &src_ty.shape);
-            let rank_val = builder.ins().iconst(types::I64, src_ty.rank() as i64);
-            let n_out_val = builder.ins().iconst(types::I64, n as i64);
-            let wd_ptr = store_i64_array(builder, window_dimensions);
-            let ws_ptr = store_i64_array(builder, window_strides);
-            let bd_ptr = store_i64_array(builder, base_dilations);
-            let wdil_ptr = store_i64_array(builder, window_dilations);
-            let pad_flat: Vec<i64> = padding.iter().flat_map(|&(l, h)| [l, h]).collect();
-            let pad_ptr = store_i64_array(builder, &pad_flat);
-            let pt = ptr_type();
-            lapack_call(
-                builder,
-                jit_module,
-                "__trt_reduce_window_f64",
-                &[
-                    pt,
-                    pt,
-                    types::F64,
-                    pt,
-                    pt,
-                    pt,
-                    pt,
-                    pt,
-                    pt,
-                    types::I64,
-                    types::I64,
-                    pt,
-                ],
-                &[
-                    dst,
-                    get(&operands[0])?,
-                    init_scalar,
-                    wd_ptr,
-                    ws_ptr,
-                    bd_ptr,
-                    wdil_ptr,
-                    pad_ptr,
-                    src_shape_ptr,
-                    rank_val,
-                    n_out_val,
-                    fn_addr,
-                ],
+                instr,
+                [dst, get(src)?, get(init)?],
+                [&src_ty, &rt],
             )?;
             Ok(vec![LaneRepr::scalar(vec![dst])])
         }
@@ -5952,102 +6435,23 @@ fn lower_instruction_mem(
             operand,
             source,
             init_value,
-            select_body,
-            select_params,
-            scatter_body,
-            scatter_params,
-            window_dimensions,
-            window_strides,
-            padding,
+            ..
         } => {
-            let src_ty = type_map.get(operand).cloned().unwrap_or(rt.clone());
-            let scalar_ty = TensorType::scalar(ElementType::F64);
-            let param_tt2 = vec![scalar_ty.clone(), scalar_ty.clone()];
-            let select_fid = compile_region_as_function(
-                jit_module,
-                ir_module,
-                func_ids,
-                func_abis,
-                libm_ids,
-                trt_ids,
-                external_data_ids,
-                &[types::F64, types::F64],
-                types::I8,
-                select_body,
-                select_params,
-                &param_tt2,
-            )?;
-            let scatter_fid = compile_region_as_function(
-                jit_module,
-                ir_module,
-                func_ids,
-                func_abis,
-                libm_ids,
-                trt_ids,
-                external_data_ids,
-                &[types::F64, types::F64],
-                types::F64,
-                scatter_body,
-                scatter_params,
-                &param_tt2,
-            )?;
-            let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
-            let sel_ref = jit_module.declare_func_in_func(select_fid, builder.func);
-            let sel_addr = builder.ins().func_addr(ptr_type(), sel_ref);
-            let scat_ref = jit_module.declare_func_in_func(scatter_fid, builder.func);
-            let scat_addr = builder.ins().func_addr(ptr_type(), scat_ref);
-            let init_ptr = get(init_value)?;
-            let init_scalar = builder
-                .ins()
-                .load(types::F64, MemFlags::trusted(), init_ptr, 0);
-            let src_shape_ptr = store_i64_array(builder, &src_ty.shape);
-            let rank_val = builder.ins().iconst(types::I64, src_ty.rank() as i64);
-            let n_op_val = builder
-                .ins()
-                .iconst(types::I64, src_ty.num_elements() as i64);
+            let op_ty = type_map.get(operand).cloned().unwrap_or(rt.clone());
             let source_ty = type_map.get(source).cloned().unwrap_or(rt.clone());
-            let n_src_val = builder
-                .ins()
-                .iconst(types::I64, source_ty.num_elements() as i64);
-            let wd_ptr = store_i64_array(builder, window_dimensions);
-            let ws_ptr = store_i64_array(builder, window_strides);
-            let pad_flat: Vec<i64> = padding.iter().flat_map(|&(l, h)| [l, h]).collect();
-            let pad_ptr = store_i64_array(builder, &pad_flat);
-            let pt = ptr_type();
-            lapack_call(
+            let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
+            emit_select_and_scatter(
                 builder,
                 jit_module,
-                "__trt_select_and_scatter_f64",
-                &[
-                    pt,
-                    pt,
-                    pt,
-                    types::F64,
-                    pt,
-                    pt,
-                    pt,
-                    pt,
-                    pt,
-                    pt,
-                    types::I64,
-                    types::I64,
-                    types::I64,
-                ],
-                &[
-                    dst,
-                    get(operand)?,
-                    get(source)?,
-                    init_scalar,
-                    sel_addr,
-                    scat_addr,
-                    wd_ptr,
-                    ws_ptr,
-                    pad_ptr,
-                    src_shape_ptr,
-                    rank_val,
-                    n_op_val,
-                    n_src_val,
-                ],
+                ir_module,
+                func_ids,
+                func_abis,
+                libm_ids,
+                trt_ids,
+                external_data_ids,
+                instr,
+                [dst, get(operand)?, get(source)?, get(init_value)?],
+                [&op_ty, &source_ty],
             )?;
             Ok(vec![LaneRepr::scalar(vec![dst])])
         }
@@ -6642,18 +7046,21 @@ fn lower_instruction(
             let et = rt.element_type;
             if et == ElementType::F64 && rt.num_elements() >= 2 {
                 let (l, r) = align_packed_f64(builder, value_map, lhs, rhs)?;
-                let out =
-                    elementwise_cmp_select_packed_f64(builder, &l, &r, FloatCC::GreaterThan);
+                let out = elementwise_binop_packed_f64(builder, &l, &r, |b, x, y| b.ins().fmax(x, y));
                 return Ok(vec![out]);
             }
             let l = get_vals(builder, value_map, lhs)?.to_vec();
             let r = get_vals(builder, value_map, rhs)?.to_vec();
             let out = elementwise_binop(builder, &l, &r, |b, a, c| {
                 if is_float(et) {
-                    let cmp = b.ins().fcmp(FloatCC::GreaterThan, a, c);
-                    b.ins().select(cmp, a, c)
+                    b.ins().fmax(a, c)
                 } else {
-                    let cmp = b.ins().icmp(IntCC::SignedGreaterThan, a, c);
+                    let cc = if is_unsigned(et) {
+                        IntCC::UnsignedGreaterThan
+                    } else {
+                        IntCC::SignedGreaterThan
+                    };
+                    let cmp = b.ins().icmp(cc, a, c);
                     b.ins().select(cmp, a, c)
                 }
             });
@@ -6896,17 +7303,21 @@ fn lower_instruction(
             let et = rt.element_type;
             if et == ElementType::F64 && rt.num_elements() >= 2 {
                 let (l, r) = align_packed_f64(builder, value_map, lhs, rhs)?;
-                let out = elementwise_cmp_select_packed_f64(builder, &l, &r, FloatCC::LessThan);
+                let out = elementwise_binop_packed_f64(builder, &l, &r, |b, x, y| b.ins().fmin(x, y));
                 return Ok(vec![out]);
             }
             let l = get_vals(builder, value_map, lhs)?.to_vec();
             let r = get_vals(builder, value_map, rhs)?.to_vec();
             let out = elementwise_binop(builder, &l, &r, |b, a, c| {
                 if is_float(et) {
-                    let cmp = b.ins().fcmp(FloatCC::LessThan, a, c);
-                    b.ins().select(cmp, a, c)
+                    b.ins().fmin(a, c)
                 } else {
-                    let cmp = b.ins().icmp(IntCC::SignedLessThan, a, c);
+                    let cc = if is_unsigned(et) {
+                        IntCC::UnsignedLessThan
+                    } else {
+                        IntCC::SignedLessThan
+                    };
+                    let cmp = b.ins().icmp(cc, a, c);
                     b.ins().select(cmp, a, c)
                 }
             });
@@ -6920,11 +7331,16 @@ fn lower_instruction(
                 let l = get_vals(builder, value_map, lhs)?.to_vec();
                 let r = get_vals(builder, value_map, rhs)?.to_vec();
                 let n = l.len().max(r.len());
+                let unsigned = is_unsigned(rt.element_type);
                 let out: Vec<Value> = (0..n)
                     .map(|i| {
                         let lv = if i < l.len() { l[i] } else { l[0] };
                         let rv = if i < r.len() { r[i] } else { r[0] };
-                        builder.ins().srem(lv, rv)
+                        if unsigned {
+                            builder.ins().urem(lv, rv)
+                        } else {
+                            builder.ins().srem(lv, rv)
+                        }
                     })
                     .collect();
                 Ok(vec![LaneRepr::scalar(out)])
@@ -6946,9 +7362,14 @@ fn lower_instruction(
                         let clamped_lo = builder.ins().fmax(v, lo);
                         builder.ins().fmin(clamped_lo, hi)
                     } else {
-                        let gt_lo = builder.ins().icmp(IntCC::SignedGreaterThan, v, lo);
+                        let (gt, lt) = if is_unsigned(et) {
+                            (IntCC::UnsignedGreaterThan, IntCC::UnsignedLessThan)
+                        } else {
+                            (IntCC::SignedGreaterThan, IntCC::SignedLessThan)
+                        };
+                        let gt_lo = builder.ins().icmp(gt, v, lo);
                         let step1 = builder.ins().select(gt_lo, v, lo);
-                        let lt_hi = builder.ins().icmp(IntCC::SignedLessThan, step1, hi);
+                        let lt_hi = builder.ins().icmp(lt, step1, hi);
                         builder.ins().select(lt_hi, step1, hi)
                     }
                 })
@@ -7333,7 +7754,7 @@ fn lower_instruction(
                     let r_ty2 = r_ty.clone();
                     let r = get_vals(builder, value_map, rhs)?.to_vec();
                     return Ok(vec![LaneRepr::scalar(lower_dot_general(
-                        builder, &l, &r, &l_ty2, &r_ty2, &rt, dims,
+                        builder, &l, &r, &l_ty2, &r_ty2, dims,
                     ))]);
                 }
                 let mut out = Vec::with_capacity(rows);
@@ -7370,7 +7791,7 @@ fn lower_instruction(
                     let l_ty2 = l_ty.clone();
                     let r_ty2 = r_ty.clone();
                     return Ok(vec![LaneRepr::scalar(lower_dot_general(
-                        builder, &l, &r, &l_ty2, &r_ty2, &rt, dims,
+                        builder, &l, &r, &l_ty2, &r_ty2, dims,
                     ))]);
                 }
                 let mut out = Vec::with_capacity(m * n_cols);
@@ -7394,7 +7815,7 @@ fn lower_instruction(
             let l = get_vals(builder, value_map, lhs)?.to_vec();
             let r = get_vals(builder, value_map, rhs)?.to_vec();
             Ok(vec![LaneRepr::scalar(lower_dot_general(
-                builder, &l, &r, &l_ty, &r_ty, &rt, dims,
+                builder, &l, &r, &l_ty, &r_ty, dims,
             ))])
         }
 
@@ -7408,6 +7829,9 @@ fn lower_instruction(
             let vals = get_vals(builder, value_map, operand)?.to_vec();
             let init_vals = get_vals(builder, value_map, init)?.to_vec();
             let src_ty = type_map.get(operand).cloned().unwrap_or(rt.clone());
+            if src_ty.shape.contains(&0) {
+                return Err(format!("reduce over the empty tensor {:?}", src_ty.shape));
+            }
             Ok(vec![LaneRepr::scalar(lower_reduce(
                 builder, &vals, &init_vals, &src_ty, &rt, op, dimensions,
             ))])
@@ -7416,26 +7840,38 @@ fn lower_instruction(
         Instruction::ReduceArgminmax {
             values,
             indices,
+            dimensions,
             is_min,
-            ..
         } => {
             let vals = get_vals(builder, value_map, values)?.to_vec();
             let idx_vals = get_vals(builder, value_map, indices)?.to_vec();
-            if vals.is_empty() {
-                return Err("ReduceArgminmax: empty input".to_string());
-            }
-            let mut best_v = vals[0];
-            let mut best_i = idx_vals[0];
-            for k in 1..vals.len() {
-                let cmp = if *is_min {
-                    builder.ins().fcmp(FloatCC::LessThan, vals[k], best_v)
-                } else {
-                    builder.ins().fcmp(FloatCC::GreaterThan, vals[k], best_v)
-                };
-                best_v = builder.ins().select(cmp, vals[k], best_v);
-                best_i = builder.ins().select(cmp, idx_vals[k], best_i);
-            }
-            Ok(vec![LaneRepr::scalar(vec![best_v]), LaneRepr::scalar(vec![best_i])])
+            let val_ty = type_map.get(values).cloned().unwrap_or(rt.clone());
+            let idx_ty = type_map.get(indices).cloned().unwrap_or(rt.clone());
+            let (val_et, idx_et) = (val_ty.element_type, idx_ty.element_type);
+            let (val_sz, idx_sz) = (val_et.byte_size(), idx_et.byte_size());
+            let n = rt.num_elements();
+            let src_v = spill_lanes(builder, &vals, val_sz);
+            let src_i = spill_lanes(builder, &idx_vals, idx_sz);
+            let (dst_v, dst_i) = (alloc_slot(builder, n * val_sz), alloc_slot(builder, n * idx_sz));
+            emit_argminmax(
+                builder,
+                jit_module,
+                trt_ids,
+                [dst_v, dst_i, src_v, src_i],
+                [&val_ty, &idx_ty],
+                dimensions,
+                *is_min,
+            )?;
+            let flags = MemFlags::trusted();
+            let reload = |builder: &mut FunctionBuilder, ptr: Value, et: ElementType| -> Vec<Value> {
+                let (ct, sz) = (cranelift_type_for(et), et.byte_size());
+                (0..n)
+                    .map(|j| builder.ins().load(ct, flags, ptr, (j * sz) as i32))
+                    .collect()
+            };
+            let out_v = reload(builder, dst_v, val_et);
+            let out_i = reload(builder, dst_i, idx_et);
+            Ok(vec![LaneRepr::scalar(out_v), LaneRepr::scalar(out_i)])
         }
 
         // ----- Gather -----
@@ -7604,14 +8040,13 @@ fn lower_instruction(
                 for d in 0..rank {
                     let coord = remaining / src_strides[d];
                     remaining %= src_strides[d];
-                    let int_step = interior.get(d).copied().unwrap_or(0) as usize;
-                    let out_coord =
-                        low.get(d).copied().unwrap_or(0) as usize + coord * (1 + int_step);
-                    if out_coord >= out_shape[d] {
+                    let int_step = interior.get(d).copied().unwrap_or(0);
+                    let out_coord = low.get(d).copied().unwrap_or(0) + coord as i64 * (1 + int_step);
+                    if out_coord < 0 || out_coord >= out_shape[d] as i64 {
                         valid = false;
                         break;
                     }
-                    out_flat += out_coord * out_strides[d];
+                    out_flat += out_coord as usize * out_strides[d];
                 }
                 if valid && out_flat < n {
                     result[out_flat] = src_val;
@@ -7624,70 +8059,52 @@ fn lower_instruction(
             operand,
             indices,
             updates,
+            dims,
+            combiner,
         } => {
             let vals = get_vals(builder, value_map, operand)?.to_vec();
             let idx_vals = get_vals(builder, value_map, indices)?.to_vec();
             let upd_vals = get_vals(builder, value_map, updates)?.to_vec();
             let et = rt.element_type;
             let elem_sz = et.byte_size();
+            let src_ty = type_map.get(operand).cloned().unwrap_or(rt.clone());
+            let idx_ty = type_map
+                .get(indices)
+                .cloned()
+                .unwrap_or(TensorType::scalar(ElementType::I64));
+            let upd_ty = type_map.get(updates).cloned().unwrap_or(rt.clone());
 
-            let total_bytes = vals.len() * elem_sz;
-            let ss = builder.create_sized_stack_slot(StackSlotData::new(
-                StackSlotKind::ExplicitSlot,
-                total_bytes as u32,
-                SLOT_ALIGN,
-            ));
-            let base = builder.ins().stack_addr(ptr_type(), ss, 0);
-            for (i, &v) in vals.iter().enumerate() {
-                builder
-                    .ins()
-                    .store(MemFlags::trusted(), v, base, (i * elem_sz) as i32);
+            let mut idx64 = Vec::with_capacity(idx_vals.len());
+            for &v in &idx_vals {
+                idx64.push(if builder.func.dfg.value_type(v) == types::I64 {
+                    v
+                } else {
+                    builder.ins().sextend(types::I64, v)
+                });
             }
-
-            let n_indices = idx_vals.len();
-            let inner_size = if n_indices > 0 && upd_vals.len() >= n_indices {
-                upd_vals.len() / n_indices
-            } else {
-                0
-            };
-
-            if inner_size > 1 {
-                for (u_idx, &upd_v) in upd_vals.iter().enumerate() {
-                    let batch = u_idx / inner_size;
-                    let inner = u_idx % inner_size;
-                    let raw_idx = idx_vals[batch.min(n_indices - 1)];
-                    let idx_i64 = if builder.func.dfg.value_type(raw_idx) == types::I64 {
-                        raw_idx
-                    } else if builder.func.dfg.value_type(raw_idx).bytes() < 8 {
-                        builder.ins().sextend(types::I64, raw_idx)
-                    } else {
-                        raw_idx
-                    };
-                    let flat_pos = builder.ins().imul_imm(idx_i64, inner_size as i64);
-                    let flat_pos = builder.ins().iadd_imm(flat_pos, inner as i64);
-                    let byte_offset = builder.ins().imul_imm(flat_pos, elem_sz as i64);
-                    let addr = builder.ins().iadd(base, byte_offset);
-                    builder.ins().store(MemFlags::trusted(), upd_v, addr, 0);
-                }
-            } else {
-                for (u_idx, &upd_v) in upd_vals.iter().enumerate() {
-                    let raw_idx = if u_idx < idx_vals.len() {
-                        idx_vals[u_idx]
-                    } else {
-                        idx_vals[0]
-                    };
-                    let idx_i64 = if builder.func.dfg.value_type(raw_idx) == types::I64 {
-                        raw_idx
-                    } else if builder.func.dfg.value_type(raw_idx).bytes() < 8 {
-                        builder.ins().sextend(types::I64, raw_idx)
-                    } else {
-                        raw_idx
-                    };
-                    let byte_offset = builder.ins().imul_imm(idx_i64, elem_sz as i64);
-                    let addr = builder.ins().iadd(base, byte_offset);
-                    builder.ins().store(MemFlags::trusted(), upd_v, addr, 0);
-                }
+            if *combiner == ScatterCombiner::Set && upd_vals.len() == 1 {
+                let lanes = select_scatter_lane(
+                    builder,
+                    &vals,
+                    &idx64,
+                    upd_vals[0],
+                    &src_ty.shape,
+                    &dims.scatter_dims_to_operand_dims,
+                );
+                return Ok(vec![LaneRepr::scalar(lanes)]);
             }
+            let base = spill_lanes(builder, &vals, elem_sz);
+            let upd = spill_lanes(builder, &upd_vals, elem_sz);
+            let idx = spill_lanes(builder, &idx64, 8);
+            emit_scatter(
+                builder,
+                jit_module,
+                trt_ids,
+                [base, idx, upd],
+                [&src_ty, &idx_ty, &upd_ty],
+                dims,
+                *combiner,
+            )?;
 
             let ct = cranelift_type_for(et);
             let mut result = Vec::with_capacity(vals.len());
@@ -7772,7 +8189,11 @@ fn lower_instruction(
                 .iter()
                 .map(|&v| {
                     let abs_v = builder.ins().fabs(v);
-                    let inf = builder.ins().f64const(f64::INFINITY);
+                    let inf = if builder.func.dfg.value_type(v) == types::F32 {
+                        builder.ins().f32const(f32::INFINITY)
+                    } else {
+                        builder.ins().f64const(f64::INFINITY)
+                    };
                     let is_fin = builder.ins().fcmp(
                         cranelift_codegen::ir::condcodes::FloatCC::LessThan,
                         abs_v,
@@ -7908,157 +8329,110 @@ fn lower_instruction(
             inputs,
             dimension,
             comparator,
+            comparator_params,
             ..
         } => {
-            if inputs.len() == 2 {
-                let vals = get_vals(builder, value_map, &inputs[0])?.to_vec();
-                let idxs = get_vals(builder, value_map, &inputs[1])?.to_vec();
-                let ascending = !comparator.iter().any(|ir| {
-                    matches!(
-                        &ir.instr,
-                        Instruction::Compare {
-                            direction: CompareDirection::Gt,
-                            ..
-                        }
-                    )
-                });
-                let n_vals = vals.len();
-                let val_ss = builder.create_sized_stack_slot(StackSlotData::new(
-                    StackSlotKind::ExplicitSlot,
-                    (n_vals * 8) as u32,
-                    SLOT_ALIGN,
-                ));
-                let idx_ss = builder.create_sized_stack_slot(StackSlotData::new(
-                    StackSlotKind::ExplicitSlot,
-                    (n_vals * 8) as u32,
-                    SLOT_ALIGN,
-                ));
-                let val_base = builder.ins().stack_addr(ptr_type(), val_ss, 0);
-                let idx_base = builder.ins().stack_addr(ptr_type(), idx_ss, 0);
-                for (i, &v) in vals.iter().enumerate() {
-                    builder
-                        .ins()
-                        .store(MemFlags::trusted(), v, val_base, (i * 8) as i32);
-                }
-                for (i, &v) in idxs.iter().enumerate() {
-                    builder
-                        .ins()
-                        .store(MemFlags::trusted(), v, idx_base, (i * 8) as i32);
-                }
-                let sort_v = builder.ins().iconst(types::I64, n_vals as i64);
-                let asc_v = builder.ins().iconst(types::I8, ascending as i64);
-                let pt = ptr_type();
-                lapack_call(
-                    builder,
-                    jit_module,
-                    "__trt_argsort_f64",
-                    &[pt, pt, types::I64, types::I8],
-                    &[val_base, idx_base, sort_v, asc_v],
-                )?;
-                let out_vals: Vec<Value> = (0..n_vals)
-                    .map(|i| {
-                        builder.ins().load(
-                            types::F64,
-                            MemFlags::trusted(),
-                            val_base,
-                            (i * 8) as i32,
-                        )
-                    })
-                    .collect();
-                let out_idxs: Vec<Value> = (0..n_vals)
-                    .map(|i| {
-                        builder.ins().load(
-                            types::I64,
-                            MemFlags::trusted(),
-                            idx_base,
-                            (i * 8) as i32,
-                        )
-                    })
-                    .collect();
-                return Ok(vec![
-                    LaneRepr::scalar(out_vals),
-                    LaneRepr::scalar(out_idxs),
-                ]);
+            let mut ptrs = Vec::with_capacity(inputs.len());
+            let mut tys = Vec::with_capacity(inputs.len());
+            for vid in inputs {
+                let vals = get_vals(builder, value_map, vid)?.to_vec();
+                let ty = type_map.get(vid).cloned().unwrap_or(rt.clone());
+                ptrs.push(spill_lanes(builder, &vals, ty.element_type.byte_size()));
+                tys.push(ty);
             }
-            if inputs.len() != 1 {
-                return Err(format!(
-                    "scalar sort: unsupported {} operands",
-                    inputs.len()
-                ));
-            }
-            let vals = get_vals(builder, value_map, &inputs[0])?.to_vec();
-            let src_ty = type_map.get(&inputs[0]).cloned().unwrap_or(rt.clone());
-            let rank = src_ty.rank();
-            let dim = if *dimension < 0 {
-                rank as i64 + dimension
-            } else {
-                *dimension
-            } as usize;
-            let shape: Vec<usize> = src_ty.shape.iter().map(|&d| d as usize).collect();
-            let sort_len = shape[dim];
-            let mut n_outer = 1usize;
-            for s in shape.iter().take(dim) {
-                n_outer *= *s;
-            }
-            let mut n_inner = 1usize;
-            for s in shape.iter().skip(dim + 1) {
-                n_inner *= *s;
-            }
-
-            // Detect ascending vs descending from comparator body
-            let ascending = !comparator.iter().any(|ir| {
-                matches!(
-                    &ir.instr,
-                    Instruction::Compare {
-                        direction: CompareDirection::Gt,
-                        ..
-                    }
-                )
-            });
-
-            // Store all values into a stack buffer, sort at runtime, load back
-            let total = vals.len();
-            let ss = builder.create_sized_stack_slot(StackSlotData::new(
-                StackSlotKind::ExplicitSlot,
-                (total * 8) as u32,
-                SLOT_ALIGN,
-            ));
-            let base = builder.ins().stack_addr(ptr_type(), ss, 0);
-            for (i, &v) in vals.iter().enumerate() {
-                builder
-                    .ins()
-                    .store(MemFlags::trusted(), v, base, (i * 8) as i32);
-            }
-
-            // Call runtime sort
-            let outer_v = builder.ins().iconst(types::I64, n_outer as i64);
-            let sort_v = builder.ins().iconst(types::I64, sort_len as i64);
-            let inner_v = builder.ins().iconst(types::I64, n_inner as i64);
-            let asc_v = builder.ins().iconst(types::I8, ascending as i64);
-            let pt = ptr_type();
-            lapack_call(
+            emit_sort(
                 builder,
                 jit_module,
-                "__trt_sort_f64",
-                &[pt, types::I64, types::I64, types::I64, types::I8],
-                &[base, outer_v, sort_v, inner_v, asc_v],
-            )?;
-
-            let out: Vec<Value> = (0..total)
-                .map(|i| {
-                    builder
-                        .ins()
-                        .load(types::F64, MemFlags::trusted(), base, (i * 8) as i32)
+                trt_ids,
+                &ptrs,
+                &tys,
+                *dimension,
+                sort_order(comparator, comparator_params),
+            );
+            let flags = MemFlags::trusted();
+            Ok(ptrs
+                .iter()
+                .zip(&tys)
+                .map(|(&p, ty)| {
+                    let (ct, sz) = (cranelift_type_for(ty.element_type), ty.element_type.byte_size());
+                    LaneRepr::scalar(
+                        (0..ty.num_elements())
+                            .map(|j| builder.ins().load(ct, flags, p, (j * sz) as i32))
+                            .collect(),
+                    )
                 })
-                .collect();
-            Ok(vec![LaneRepr::scalar(out)])
+                .collect())
+        }
+
+        Instruction::ReduceWindow {
+            operands,
+            init_values,
+            ..
+        } => {
+            let (Some(src), Some(init)) = (operands.first(), init_values.first()) else {
+                return Err("reduce_window: no operands".into());
+            };
+            let src_ty = type_map.get(src).cloned().unwrap_or(rt.clone());
+            let sz = rt.element_type.byte_size();
+            let vals = get_vals(builder, value_map, src)?.to_vec();
+            let init_val = get_vals(builder, value_map, init)?[..1].to_vec();
+            let src_ptr = spill_lanes(builder, &vals, sz);
+            let init_ptr = spill_lanes(builder, &init_val, sz);
+            let dst = alloc_slot(builder, rt.num_elements() * sz);
+            emit_reduce_window(
+                builder,
+                jit_module,
+                ir_module,
+                func_ids,
+                func_abis,
+                libm_ids,
+                trt_ids,
+                external_data_ids,
+                instr,
+                [dst, src_ptr, init_ptr],
+                [&src_ty, &rt],
+            )?;
+            let n = rt.num_elements();
+            Ok(vec![LaneRepr::scalar(load_lanes(builder, dst, n, rt.element_type))])
+        }
+
+        Instruction::SelectAndScatter {
+            operand,
+            source,
+            init_value,
+            ..
+        } => {
+            let op_ty = type_map.get(operand).cloned().unwrap_or(rt.clone());
+            let source_ty = type_map.get(source).cloned().unwrap_or(rt.clone());
+            let sz = rt.element_type.byte_size();
+            let ptrs = [operand, source].map(|vid| -> Result<Value, String> {
+                let vals = get_vals(builder, value_map, vid)?.to_vec();
+                Ok(spill_lanes(builder, &vals, sz))
+            });
+            let init_val = get_vals(builder, value_map, init_value)?[..1].to_vec();
+            let init_ptr = spill_lanes(builder, &init_val, sz);
+            let dst = alloc_slot(builder, rt.num_elements() * sz);
+            let [op_ptr, source_ptr] = ptrs;
+            emit_select_and_scatter(
+                builder,
+                jit_module,
+                ir_module,
+                func_ids,
+                func_abis,
+                libm_ids,
+                trt_ids,
+                external_data_ids,
+                instr,
+                [dst, op_ptr?, source_ptr?, init_ptr],
+                [&op_ty, &source_ty],
+            )?;
+            let n = rt.num_elements();
+            Ok(vec![LaneRepr::scalar(load_lanes(builder, dst, n, rt.element_type))])
         }
 
         Instruction::BatchNormInference { .. }
         | Instruction::RealDynamicSlice { .. }
         | Instruction::Map { .. }
-        | Instruction::ReduceWindow { .. }
-        | Instruction::SelectAndScatter { .. }
         | Instruction::Convolution { .. }
         | Instruction::CholeskyOp { .. }
         | Instruction::TriangularSolve { .. }
@@ -8883,48 +9257,6 @@ fn packed_dot_f64(
     scalar_acc
 }
 
-/// Emit fcmp+bitselect for each vector chunk (NaN-propagation matches the
-/// scalar `fcmp cc a b ? a : b` semantics that StableHLO Maximum/Minimum
-/// rely on) and fcmp+select for the scalar tail. Used by Maximum/Minimum.
-///
-/// Cranelift's `bitselect` requires the mask type to match the data type,
-/// but vector `fcmp` returns an `I64X2` mask. We `bitcast` the mask to
-/// `F64X2` (same bit pattern; `bitselect` only examines bits, so the
-/// all-ones / all-zeros lane bit pattern produces the correct per-bit
-/// select).
-fn elementwise_cmp_select_packed_f64(
-    builder: &mut FunctionBuilder,
-    l: &PackedF64Chunks,
-    r: &PackedF64Chunks,
-    cc: FloatCC,
-) -> LaneRepr {
-    assert_eq!(
-        l.n, r.n,
-        "elementwise_cmp_select_packed_f64: shape mismatch"
-    );
-    let mut chunks = Vec::with_capacity(l.chunks.len());
-    for (lc, rc) in l.chunks.iter().zip(r.chunks.iter()) {
-        let cmp_i = builder.ins().fcmp(cc, *lc, *rc);
-        let cmp_f = builder.ins().bitcast(types::F64X2, MemFlags::new(), cmp_i);
-        chunks.push(builder.ins().bitselect(cmp_f, *lc, *rc));
-    }
-    let tail = match (l.tail, r.tail) {
-        (Some(lt), Some(rt)) => {
-            let cmp = builder.ins().fcmp(cc, lt, rt);
-            Some(builder.ins().select(cmp, lt, rt))
-        }
-        (None, None) => None,
-        (Some(_), None) | (None, Some(_)) => {
-            unreachable!("align_packed_f64 ensures matched tail state")
-        }
-    };
-    LaneRepr::PackedF64 {
-        chunks,
-        tail,
-        n: l.n,
-    }
-}
-
 fn lower_int_binop(
     builder: &mut FunctionBuilder,
     value_map: &mut HashMap<ValueId, LaneRepr>,
@@ -8956,11 +9288,21 @@ fn lower_libm_unary(
     let out: Vec<Value> = vals
         .iter()
         .map(|&v| {
+            let is_f32 = builder.func.dfg.value_type(v) == types::F32;
+            let arg = if is_f32 {
+                builder.ins().fpromote(types::F64, v)
+            } else {
+                v
+            };
             emit_call_begin(builder, jit_module);
-            let call = builder.ins().call(func_ref, &[v]);
+            let call = builder.ins().call(func_ref, &[arg]);
             let r = builder.inst_results(call)[0];
             emit_call_end(builder, jit_module);
-            r
+            if is_f32 {
+                builder.ins().fdemote(types::F32, r)
+            } else {
+                r
+            }
         })
         .collect();
     emit_xcend_end(builder, jit_module);
@@ -9084,11 +9426,24 @@ fn lower_libm_binary(
         .map(|i| {
             let lv = if i < l.len() { l[i] } else { l[0] };
             let rv = if i < r.len() { r[i] } else { r[0] };
+            let is_f32 = builder.func.dfg.value_type(lv) == types::F32;
+            let (lv, rv) = if is_f32 {
+                (
+                    builder.ins().fpromote(types::F64, lv),
+                    builder.ins().fpromote(types::F64, rv),
+                )
+            } else {
+                (lv, rv)
+            };
             emit_call_begin(builder, jit_module);
             let call = builder.ins().call(func_ref, &[lv, rv]);
             let r = builder.inst_results(call)[0];
             emit_call_end(builder, jit_module);
-            r
+            if is_f32 {
+                builder.ins().fdemote(types::F32, r)
+            } else {
+                r
+            }
         })
         .collect();
     emit_xcend_end(builder, jit_module);
@@ -9101,60 +9456,53 @@ fn convert_value(
     src: &ElementType,
     dst: &ElementType,
 ) -> Value {
-    match (src, dst) {
-        _ if src == dst => v,
-        (ElementType::F64, ElementType::I32) => builder.ins().fcvt_to_sint(types::I32, v),
-        (ElementType::F64, ElementType::I64) => builder.ins().fcvt_to_sint(types::I64, v),
-        (ElementType::F64, ElementType::UI32) => builder.ins().fcvt_to_uint(types::I32, v),
-        (ElementType::F64, ElementType::F32) => builder.ins().fdemote(types::F32, v),
-        (ElementType::F32, ElementType::F64) => builder.ins().fpromote(types::F64, v),
-        (ElementType::I64, ElementType::F64) => builder.ins().fcvt_from_sint(types::F64, v),
-        (ElementType::I64, ElementType::F32) => {
-            let f = builder.ins().fcvt_from_sint(types::F64, v);
-            builder.ins().fdemote(types::F32, f)
+    let (src, dst) = (*src, *dst);
+    if src == dst {
+        return v;
+    }
+    let ty = cranelift_type_for(dst);
+    let zero_extends = is_unsigned(src) || src == ElementType::I1;
+    if dst == ElementType::I1 {
+        // Any nonzero value, NaN included, converts to true.
+        return match src {
+            ElementType::F64 => {
+                let zero = builder.ins().f64const(0.0);
+                builder.ins().fcmp(FloatCC::NotEqual, v, zero)
+            }
+            ElementType::F32 => {
+                let zero = builder.ins().f32const(0.0);
+                builder.ins().fcmp(FloatCC::NotEqual, v, zero)
+            }
+            _ => builder.ins().icmp_imm(IntCC::NotEqual, v, 0),
+        };
+    }
+    match (is_float(src), is_float(dst)) {
+        (true, true) if dst == ElementType::F32 => builder.ins().fdemote(ty, v),
+        (true, true) => builder.ins().fpromote(ty, v),
+        // Saturating with NaN to zero, like XLA.
+        (true, false) if is_unsigned(dst) => builder.ins().fcvt_to_uint_sat(ty, v),
+        (true, false) => builder.ins().fcvt_to_sint_sat(ty, v),
+        (false, true) => {
+            let wide = match (builder.func.dfg.value_type(v), zero_extends) {
+                (types::I64, _) => v,
+                (_, true) => builder.ins().uextend(types::I64, v),
+                (_, false) => builder.ins().sextend(types::I64, v),
+            };
+            if zero_extends {
+                builder.ins().fcvt_from_uint(ty, wide)
+            } else {
+                builder.ins().fcvt_from_sint(ty, wide)
+            }
         }
-        (ElementType::I32, ElementType::F64) => {
-            let ext = builder.ins().sextend(types::I64, v);
-            builder.ins().fcvt_from_sint(types::F64, ext)
+        (false, false) => {
+            let from = builder.func.dfg.value_type(v).bits();
+            match from.cmp(&ty.bits()) {
+                std::cmp::Ordering::Less if zero_extends => builder.ins().uextend(ty, v),
+                std::cmp::Ordering::Less => builder.ins().sextend(ty, v),
+                std::cmp::Ordering::Greater => builder.ins().ireduce(ty, v),
+                std::cmp::Ordering::Equal => v,
+            }
         }
-        (ElementType::UI32, ElementType::F64) => {
-            let ext = builder.ins().uextend(types::I64, v);
-            builder.ins().fcvt_from_uint(types::F64, ext)
-        }
-        (ElementType::I32, ElementType::I64) => builder.ins().sextend(types::I64, v),
-        (ElementType::I32, ElementType::UI32) | (ElementType::UI32, ElementType::I32) => v,
-        (ElementType::I64, ElementType::UI64) | (ElementType::UI64, ElementType::I64) => v,
-        (ElementType::I64, ElementType::I32) => builder.ins().ireduce(types::I32, v),
-        (ElementType::I64, ElementType::UI32)
-        | (ElementType::UI64, ElementType::UI32)
-        | (ElementType::UI64, ElementType::I32) => builder.ins().ireduce(types::I32, v),
-        (ElementType::UI32, ElementType::I64) | (ElementType::UI32, ElementType::UI64) => {
-            builder.ins().uextend(types::I64, v)
-        }
-        (ElementType::I1, ElementType::I32) | (ElementType::I1, ElementType::UI32) => {
-            builder.ins().uextend(types::I32, v)
-        }
-        (ElementType::I1, ElementType::I64) | (ElementType::I1, ElementType::UI64) => {
-            builder.ins().uextend(types::I64, v)
-        }
-        (ElementType::I1, ElementType::F64) => {
-            let ext = builder.ins().uextend(types::I64, v);
-            builder.ins().fcvt_from_uint(types::F64, ext)
-        }
-        (ElementType::I1, ElementType::F32) => {
-            let ext = builder.ins().uextend(types::I32, v);
-            builder.ins().fcvt_from_uint(types::F32, ext)
-        }
-        (ElementType::I32, ElementType::I1) => builder.ins().ireduce(types::I8, v),
-        (ElementType::I64, ElementType::I1) => builder.ins().ireduce(types::I8, v),
-        (ElementType::F64, ElementType::I1) => {
-            let i = builder.ins().fcvt_to_sint(types::I32, v);
-            builder.ins().ireduce(types::I8, i)
-        }
-        (ElementType::UI64, ElementType::F64) => builder.ins().fcvt_from_uint(types::F64, v),
-        (ElementType::F64, ElementType::UI64) => builder.ins().fcvt_to_uint(types::I64, v),
-        (ElementType::I32, ElementType::F32) => builder.ins().fcvt_from_sint(types::F32, v),
-        _ => v,
     }
 }
 
@@ -9315,171 +9663,95 @@ fn slice_tensor(vals: &[Value], src_shape: &[i64], starts: &[i64], limits: &[i64
 // Dot product / matrix operations
 // ---------------------------------------------------------------------------
 
+/// A `dot_general` axis as `(size, lhs stride, rhs stride)`.
+type DotAxis = (usize, usize, usize);
+
+/// The output axes (batch, lhs free, then rhs free) and the contracting axes.
+fn dot_axes(l_ty: &TensorType, r_ty: &TensorType, dims: &DotDims) -> (Vec<DotAxis>, Vec<DotAxis>) {
+    let strides = |shape: &[i64]| {
+        let mut st = vec![1usize; shape.len()];
+        for d in (1..shape.len()).rev() {
+            st[d - 1] = st[d] * shape[d] as usize;
+        }
+        st
+    };
+    let (ls, rs) = (strides(&l_ty.shape), strides(&r_ty.shape));
+    let free = |rank: usize, batch: &[i64], contracting: &[i64]| -> Vec<usize> {
+        (0..rank)
+            .filter(|&d| !batch.contains(&(d as i64)) && !contracting.contains(&(d as i64)))
+            .collect()
+    };
+    let paired = |l_axes: &[i64], r_axes: &[i64]| -> Vec<(usize, usize, usize)> {
+        l_axes
+            .iter()
+            .zip(r_axes)
+            .map(|(&a, &b)| {
+                (
+                    l_ty.shape[a as usize] as usize,
+                    ls[a as usize],
+                    rs[b as usize],
+                )
+            })
+            .collect()
+    };
+    let mut out_axes = paired(&dims.lhs_batch, &dims.rhs_batch);
+    for d in free(l_ty.rank(), &dims.lhs_batch, &dims.lhs_contracting) {
+        out_axes.push((l_ty.shape[d] as usize, ls[d], 0));
+    }
+    for d in free(r_ty.rank(), &dims.rhs_batch, &dims.rhs_contracting) {
+        out_axes.push((r_ty.shape[d] as usize, 0, rs[d]));
+    }
+    (
+        out_axes,
+        paired(&dims.lhs_contracting, &dims.rhs_contracting),
+    )
+}
+
 fn lower_dot_general(
     builder: &mut FunctionBuilder,
     l: &[Value],
     r: &[Value],
     l_ty: &TensorType,
     r_ty: &TensorType,
-    out_ty: &TensorType,
     dims: &DotDims,
 ) -> TensorVals {
-    let n = out_ty.num_elements();
-
-    // Batched dot product: batching_dims=[0]x[0], contracting_dims=[1]x[1]
-    // tensor<BxK> . tensor<BxK> -> tensor<B>
-    if !dims.lhs_batch.is_empty()
-        && l_ty.rank() == 2
-        && r_ty.rank() == 2
-        && dims.lhs_batch == [0]
-        && dims.rhs_batch == [0]
-    {
-        let batch = l_ty.shape[0] as usize;
-        let k = l_ty.shape[1] as usize;
-        let mut out = Vec::new();
-        for b in 0..batch {
-            let zero = builder.ins().f64const(0.0);
-            let mut acc = zero;
-            for i in 0..k {
-                let lv = l[b * k + i];
-                let rv = r[b * k + i];
-                let prod = builder.ins().fmul(lv, rv);
-                acc = builder.ins().fadd(acc, prod);
-            }
-            out.push(acc);
+    let (out_axes, k_axes) = dot_axes(l_ty, r_ty, dims);
+    let offsets = |axes: &[DotAxis], mut flat: usize| {
+        let (mut lo, mut ro) = (0, 0);
+        for &(size, l_st, r_st) in axes.iter().rev() {
+            lo += flat % size * l_st;
+            ro += flat % size * r_st;
+            flat /= size;
         }
-        return out;
-    }
+        (lo, ro)
+    };
 
-    if l_ty.is_scalar() && r_ty.is_scalar() {
-        return vec![builder.ins().fmul(l[0], r[0])];
-    }
-
-    let unbatched = dims.lhs_batch.is_empty() && dims.rhs_batch.is_empty();
-    if unbatched
-        && l_ty.rank() == 1
-        && r_ty.rank() == 1
-        && dims.lhs_contracting == [0]
-        && dims.rhs_contracting == [0]
-        && l.len() == r.len()
-        && l.len() == l_ty.shape[0] as usize
-    {
-        let zero = builder.ins().f64const(0.0);
+    let n: usize = out_axes.iter().map(|a| a.0).product();
+    let n_k: usize = k_axes.iter().map(|a| a.0).product();
+    let ct = cranelift_type_for(l_ty.element_type);
+    let zero = match ct {
+        types::F64 => builder.ins().f64const(0.0),
+        types::F32 => builder.ins().f32const(0.0),
+        _ => builder.ins().iconst(ct, 0),
+    };
+    let mut out = Vec::with_capacity(n);
+    for o in 0..n {
+        let (lo, ro) = offsets(&out_axes, o);
         let mut acc = zero;
-        for i in 0..l.len() {
-            let prod = builder.ins().fmul(l[i], r[i]);
-            acc = builder.ins().fadd(acc, prod);
+        for k in 0..n_k {
+            let (lk, rk) = offsets(&k_axes, k);
+            let (a, b) = (l[lo + lk], r[ro + rk]);
+            acc = if ct.is_float() {
+                let p = builder.ins().fmul(a, b);
+                builder.ins().fadd(acc, p)
+            } else {
+                let p = builder.ins().imul(a, b);
+                builder.ins().iadd(acc, p)
+            };
         }
-        return vec![acc];
+        out.push(acc);
     }
-
-    if unbatched
-        && l_ty.rank() == 1
-        && r_ty.rank() == 2
-        && dims.lhs_contracting == [0]
-        && (dims.rhs_contracting == [0] || dims.rhs_contracting == [1])
-    {
-        let rhs_contract_dim = dims.rhs_contracting[0] as usize;
-        let k = l_ty.shape[0] as usize;
-        let rhs_rows = r_ty.shape[0] as usize;
-        let rhs_cols = r_ty.shape[1] as usize;
-        let contracted = if rhs_contract_dim == 1 {
-            rhs_cols
-        } else {
-            rhs_rows
-        };
-        let out_size = if rhs_contract_dim == 1 {
-            rhs_rows
-        } else {
-            rhs_cols
-        };
-        if contracted == k && l.len() >= k && r.len() >= rhs_rows * rhs_cols {
-            let mut out = Vec::new();
-            for i in 0..out_size {
-                let zero = builder.ins().f64const(0.0);
-                let mut acc = zero;
-                for j in 0..k {
-                    let lv = l[j];
-                    let rv = if rhs_contract_dim == 1 {
-                        r[i * rhs_cols + j]
-                    } else {
-                        r[j * rhs_cols + i]
-                    };
-                    let prod = builder.ins().fmul(lv, rv);
-                    acc = builder.ins().fadd(acc, prod);
-                }
-                out.push(acc);
-            }
-            return out;
-        }
-    }
-
-    if unbatched
-        && l_ty.rank() == 2
-        && r_ty.rank() == 1
-        && dims.rhs_contracting == [0]
-        && (dims.lhs_contracting == [0] || dims.lhs_contracting == [1])
-    {
-        let rows = l_ty.shape[0] as usize;
-        let cols = l_ty.shape[1] as usize;
-        let k = r_ty.shape[0] as usize;
-        if l.len() >= rows * cols && r.len() >= k {
-            if dims.lhs_contracting == [1] && cols == k {
-                let mut out = Vec::new();
-                for row in 0..rows {
-                    let zero = builder.ins().f64const(0.0);
-                    let mut acc = zero;
-                    for col in 0..cols {
-                        let lv = l[row * cols + col];
-                        let rv = r[col];
-                        let prod = builder.ins().fmul(lv, rv);
-                        acc = builder.ins().fadd(acc, prod);
-                    }
-                    out.push(acc);
-                }
-                return out;
-            }
-            if dims.lhs_contracting == [0] && rows == k {
-                let mut out = Vec::new();
-                for col in 0..cols {
-                    let zero = builder.ins().f64const(0.0);
-                    let mut acc = zero;
-                    for row in 0..rows {
-                        let lv = l[row * cols + col];
-                        let rv = r[row];
-                        let prod = builder.ins().fmul(lv, rv);
-                        acc = builder.ins().fadd(acc, prod);
-                    }
-                    out.push(acc);
-                }
-                return out;
-            }
-        }
-    }
-
-    if l_ty.rank() == 2 && r_ty.rank() == 2 {
-        let m = l_ty.shape[0] as usize;
-        let k = l_ty.shape[1] as usize;
-        let n_cols = r_ty.shape[1] as usize;
-        let mut out = Vec::new();
-        for row in 0..m {
-            for col in 0..n_cols {
-                let zero = builder.ins().f64const(0.0);
-                let mut acc = zero;
-                for i in 0..k {
-                    let lv = l[row * k + i];
-                    let rv = r[i * n_cols + col];
-                    let prod = builder.ins().fmul(lv, rv);
-                    acc = builder.ins().fadd(acc, prod);
-                }
-                out.push(acc);
-            }
-        }
-        return out;
-    }
-
-    let zero = builder.ins().f64const(0.0);
-    vec![zero; n]
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -9495,58 +9767,44 @@ fn lower_reduce(
     op: &ReduceOp,
     dimensions: &[i64],
 ) -> TensorVals {
-    let n_out = out_ty.num_elements();
-
-    if src_ty.rank() == 1 && dimensions == [0] {
-        let mut acc = init_vals[0];
-        for &v in vals {
-            acc = apply_reduce_op(builder, acc, v, op);
-        }
-        return vec![acc];
+    let shape: Vec<usize> = src_ty.shape.iter().map(|&d| d as usize).collect();
+    let kept: Vec<usize> = (0..shape.len())
+        .filter(|&a| !dimensions.contains(&(a as i64)))
+        .collect();
+    let unsigned = is_unsigned(src_ty.element_type);
+    let mut acc = vec![init_vals[0]; out_ty.num_elements()];
+    for (flat, &v) in vals.iter().enumerate() {
+        let coord = |a: usize| flat / shape[a + 1..].iter().product::<usize>() % shape[a];
+        let o = kept.iter().fold(0, |o, &a| o * shape[a] + coord(a));
+        acc[o] = apply_reduce_op(builder, acc[o], v, op, unsigned);
     }
-
-    if src_ty.rank() == 2 && dimensions == [0] {
-        let rows = src_ty.shape[0] as usize;
-        let cols = src_ty.shape[1] as usize;
-        let mut out = Vec::new();
-        for c in 0..cols {
-            let mut acc = if c < init_vals.len() {
-                init_vals[c]
-            } else {
-                init_vals[0]
-            };
-            for r in 0..rows {
-                let idx = r * cols + c;
-                if idx < vals.len() {
-                    acc = apply_reduce_op(builder, acc, vals[idx], op);
-                }
-            }
-            out.push(acc);
-        }
-        return out;
-    }
-
-    if src_ty.rank() == 2 && dimensions == [1] {
-        let rows = src_ty.shape[0] as usize;
-        let cols = src_ty.shape[1] as usize;
-        let mut out = Vec::new();
-        for r in 0..rows {
-            let mut acc = init_vals[0];
-            for c in 0..cols {
-                let idx = r * cols + c;
-                if idx < vals.len() {
-                    acc = apply_reduce_op(builder, acc, vals[idx], op);
-                }
-            }
-            out.push(acc);
-        }
-        return out;
-    }
-
-    init_vals[..n_out.min(init_vals.len())].to_vec()
+    acc
 }
 
-fn apply_reduce_op(builder: &mut FunctionBuilder, acc: Value, v: Value, op: &ReduceOp) -> Value {
+/// Reduced axes grouped into runs of adjacent axes, last run first, so reducing a run
+/// leaves the indices of the remaining runs unchanged.
+fn reduced_axis_runs(dimensions: &[i64]) -> Vec<(usize, usize)> {
+    let mut axes: Vec<usize> = dimensions.iter().map(|&d| d as usize).collect();
+    axes.sort_unstable();
+    axes.dedup();
+    let mut runs: Vec<(usize, usize)> = Vec::new();
+    for a in axes {
+        match runs.last_mut() {
+            Some((_, hi)) if *hi + 1 == a => *hi = a,
+            _ => runs.push((a, a)),
+        }
+    }
+    runs.reverse();
+    runs
+}
+
+fn apply_reduce_op(
+    builder: &mut FunctionBuilder,
+    acc: Value,
+    v: Value,
+    op: &ReduceOp,
+    unsigned: bool,
+) -> Value {
     let val_type = builder.func.dfg.value_type(acc);
     match op {
         ReduceOp::Add => {
@@ -9556,21 +9814,36 @@ fn apply_reduce_op(builder: &mut FunctionBuilder, acc: Value, v: Value, op: &Red
                 builder.ins().iadd(acc, v)
             }
         }
+        ReduceOp::Multiply => {
+            if val_type.is_float() {
+                builder.ins().fmul(acc, v)
+            } else {
+                builder.ins().imul(acc, v)
+            }
+        }
         ReduceOp::Minimum => {
             if val_type.is_float() {
-                let cmp = builder.ins().fcmp(FloatCC::LessThan, acc, v);
-                builder.ins().select(cmp, acc, v)
+                builder.ins().fmin(acc, v)
             } else {
-                let cmp = builder.ins().icmp(IntCC::SignedLessThan, acc, v);
+                let cc = if unsigned {
+                    IntCC::UnsignedLessThan
+                } else {
+                    IntCC::SignedLessThan
+                };
+                let cmp = builder.ins().icmp(cc, acc, v);
                 builder.ins().select(cmp, acc, v)
             }
         }
         ReduceOp::Maximum => {
             if val_type.is_float() {
-                let cmp = builder.ins().fcmp(FloatCC::GreaterThan, acc, v);
-                builder.ins().select(cmp, acc, v)
+                builder.ins().fmax(acc, v)
             } else {
-                let cmp = builder.ins().icmp(IntCC::SignedGreaterThan, acc, v);
+                let cc = if unsigned {
+                    IntCC::UnsignedGreaterThan
+                } else {
+                    IntCC::SignedGreaterThan
+                };
+                let cmp = builder.ins().icmp(cc, acc, v);
                 builder.ins().select(cmp, acc, v)
             }
         }

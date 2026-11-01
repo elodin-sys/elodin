@@ -40,6 +40,7 @@ markers = [
   "perf: wall-clock performance assertions; may flake on loaded machines (deselect with '-m \"not perf\"')",
   "slow: long-running acceptance tests",
   "integrator: six_dof integrator convergence bench; CI runs it in its own step",
+  "parity: Cranelift against jax-cpu; CI runs it in its own step",
 ]
 
 [project.entry-points.pytest11]

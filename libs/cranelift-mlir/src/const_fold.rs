@@ -537,12 +537,14 @@ fn try_fold(
         }
         Instruction::Maximum { lhs, rhs } => {
             binary_fold(env, lhs, rhs, result_ty, "maximum", |a, b| {
-                finite_binary_f64(a, b, f64::max).or_else(|| integer_binary(a, b, i64::max))
+                finite_binary_f64(a, b, crate::tensor_rt::float_max)
+                    .or_else(|| integer_binary(a, b, i64::max))
             })
         }
         Instruction::Minimum { lhs, rhs } => {
             binary_fold(env, lhs, rhs, result_ty, "minimum", |a, b| {
-                finite_binary_f64(a, b, f64::min).or_else(|| integer_binary(a, b, i64::min))
+                finite_binary_f64(a, b, crate::tensor_rt::float_min)
+                    .or_else(|| integer_binary(a, b, i64::min))
             })
         }
         Instruction::Atan2 { lhs, rhs } => {
@@ -1722,6 +1724,7 @@ fn rewrite_aliases_instr(instr: &mut Instruction, aliases: &HashMap<ValueId, Val
             operand,
             indices,
             updates,
+            ..
         } => {
             remap(operand);
             remap(indices);
@@ -2088,6 +2091,7 @@ pub(crate) fn operand_ids(instr: &Instruction) -> Vec<ValueId> {
             operand,
             indices,
             updates,
+            ..
         } => vec![*operand, *indices, *updates],
         Instruction::CustomCall { operands, .. } => operands.clone(),
         Instruction::Sort {

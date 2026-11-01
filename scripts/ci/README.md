@@ -9,11 +9,16 @@ For each example (`ball`, `drone`, `rocket`, `three-body`, `cube-sat`), CI runs:
 1. benchmark run (`bench --ticks 100`, profiling enabled by default)
 2. DB export (`elodin-db export --format csv --flatten`)
 3. telemetry comparison (`compare_baseline_csv.py`)
-4. performance A/B against the base commit (`compare_profile_metrics.py`, see
+4. the same run, export, and comparison with `ELODIN_BACKEND=jax-cpu`, so both
+   backends must match the baseline
+5. performance A/B against the base commit (`compare_profile_metrics.py`, see
    [Performance A/B](#performance-ab))
 
 The comparison is tolerance-based for numeric values and ignores columns named
-`time` to avoid wall-clock timestamp noise.
+`time` to avoid wall-clock timestamp noise. When every row of a file has a
+timestamp from its export's `globals.tick.csv`, rows are compared tick by tick,
+carrying unchanged values forward. Otherwise consecutive duplicate rows are
+collapsed and the remaining change rows are compared in order.
 
 ## Files
 
