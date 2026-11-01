@@ -1,5 +1,8 @@
 # Browser connections
 
+This branch, `feat/wasm-parascom`, is experimental and will not merge as it stands.
+Its changes require dedicated Elodin PRs with separate review and tests.
+
 The editor accepts complete browser routes through three query parameters: `impeller`, `messages`, and `assets`.
 Supply all three parameters together. Encode each parameter value with `URLSearchParams`.
 
@@ -58,6 +61,22 @@ The event can repeat after a reconnect or recording change.
 
 The host owns its loading screen and event handlers.
 The read-only controls govern editor actions. The server must enforce its own access rules.
+
+## Experimental schematic windows
+
+Browser schematics show additional windows as named tabs inside the existing canvas.
+WebGL cannot share the first canvas context with another window surface.
+The tabs share the root scene and timeline. Desktop screen placement does not apply.
+
+Window paths accept `db:` keys and paths relative to the containing schematic.
+The resolver loads external, nested, and inline window layouts before it reports readiness.
+Circular references, missing files, invalid KDL, excessive nesting, and excessive window counts produce load errors.
+Paths must stay within the recording. Separate HTTP origins are outside this experiment.
+The desktop loader retains its native windows.
+The browser palette omits desktop window creation and screen arrangement commands.
+
+This experiment covers schematic windows in the browser viewer.
+The dedicated Elodin PR must also review full-editor window creation, tab navigation, scene sharing, and reconnect behavior.
 
 ## Tests
 

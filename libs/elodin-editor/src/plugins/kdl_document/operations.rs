@@ -124,7 +124,14 @@ pub async fn fetch_active_schematic_kdl(
     endpoint: Option<impeller_bevy::DbEndpoint>,
 ) -> Result<String, String> {
     let url = crate::object_3d::resolve_db_endpoint(&format!("db:{key}"), endpoint.as_ref());
-    crate::plugins::http_client::get_text(&url).await
+    let content = crate::plugins::http_client::get_text(&url).await?;
+    #[cfg(target_family = "wasm")]
+    let content = super::browser_windows::expand(&content, key, &mut |key| {
+        let url = crate::object_3d::resolve_db_endpoint(&format!("db:{key}"), endpoint.as_ref());
+        async move { crate::plugins::http_client::get_text(&url).await }
+    })
+    .await?;
+    Ok(content)
 }
 
 /// List the schematic asset keys (`schematics/*.kdl`) the DB Asset Server holds,

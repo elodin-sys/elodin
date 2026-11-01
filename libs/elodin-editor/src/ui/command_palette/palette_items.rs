@@ -838,6 +838,7 @@ pub fn create_viewport(tile_id: Option<TileId>) -> PaletteItem {
     )
 }
 
+#[cfg(not(target_family = "wasm"))]
 pub fn create_window() -> PaletteItem {
     PaletteItem::new("Create Window", TILES_LABEL, move |_: In<String>| {
         PalettePage::new(vec![
@@ -2571,7 +2572,9 @@ impl Default for PalettePage {
             goto_tick(),
             fix_current_time_range(),
             set_time_range_behavior(),
+            #[cfg(not(target_family = "wasm"))]
             create_window(),
+            #[cfg(not(target_family = "wasm"))]
             PaletteItem::new(
                 "Arrange Windows",
                 "Windows",
