@@ -976,19 +976,11 @@ pub extern "C" fn tensor_gather_nd_generic(
 // Scatter with StableHLO dimension numbers, in place
 // ---------------------------------------------------------------------------
 
-fn split_list<'a>(meta: &mut &'a [i64]) -> &'a [i64] {
-    let (&n, rest) = meta.split_first().expect("scatter metadata list");
-    let (list, rest) = rest.split_at(n as usize);
-    *meta = rest;
-    list
-}
-
 /// Scatters `updates` into `dst`, which already holds the operand. `meta` is
-/// `[elem_sz, is_float, combiner, index_vector_dim]` then length-prefixed lists: operand,
-/// updates and indices shapes, update_window_dims, inserted_window_dims,
-/// input_batching_dims, scatter_indices_batching_dims, scatter_dims_to_operand_dims.
-/// Combiners other than set (0) are f64 or i64 only. Like XLA, an update whose window
-/// starts out of bounds is dropped.
+/// `[elem_sz, is_float, combiner, n_dst, n_indices, index_vector_stride, n_update_dims]`, then
+/// `(size, operand_stride, indices_stride)` per updates dim, then `(operand_stride, max_start)`
+/// per index-vector entry. Combiners other than set (0) are f64 or i64 only. Like XLA, an
+/// update whose window starts out of bounds is dropped.
 pub extern "C" fn tensor_scatter(
     dst: *mut u8,
     indices: *const i64,
@@ -997,71 +989,42 @@ pub extern "C" fn tensor_scatter(
     n_meta: usize,
 ) {
     let meta = unsafe { slice::from_raw_parts(meta, n_meta) };
-    let (head, mut rest) = meta.split_at(4);
-    let (elem_sz, is_float, combiner, ivd) =
-        (head[0] as usize, head[1] != 0, head[2], head[3] as usize);
-    let [os, us, is, uwd, iwd, ibd, sibd, sdod] = [(); 8].map(|()| split_list(&mut rest));
-    let numel = |s: &[i64]| s.iter().product::<i64>() as usize;
-    let dst = unsafe { slice::from_raw_parts_mut(dst, numel(os) * elem_sz) };
-    let indices = unsafe { slice::from_raw_parts(indices, numel(is)) };
-    let updates = unsafe { slice::from_raw_parts(updates, numel(us) * elem_sz) };
+    let [
+        elem_sz,
+        is_float,
+        combiner,
+        n_dst,
+        n_idx,
+        vec_stride,
+        n_dims,
+    ] = [0, 1, 2, 3, 4, 5, 6].map(|i| meta[i] as usize);
+    let (upd_dims, starts) = meta[7..].split_at(3 * n_dims);
+    let (upd_dims, starts) = (upd_dims.as_chunks::<3>().0, starts.as_chunks::<2>().0);
+    let n_upd: usize = upd_dims.iter().map(|d| d[0] as usize).product();
+    let dst = unsafe { slice::from_raw_parts_mut(dst, n_dst * elem_sz) };
+    let indices = unsafe { slice::from_raw_parts(indices, n_idx) };
+    let updates = unsafe { slice::from_raw_parts(updates, n_upd * elem_sz) };
 
-    let strides = |s: &[i64]| {
-        let mut st = vec![1usize; s.len()];
-        for d in (1..s.len()).rev() {
-            st[d - 1] = st[d] * s[d] as usize;
+    'updates: for u in 0..n_upd {
+        let (mut flat, mut idx, mut rem) = (0, 0, u);
+        for &[size, operand_stride, indices_stride] in upd_dims.iter().rev() {
+            let c = rem % size as usize;
+            rem /= size as usize;
+            flat += c * operand_stride as usize;
+            idx += c * indices_stride as usize;
         }
-        st
-    };
-    let (os_st, us_st, is_st) = (strides(os), strides(us), strides(is));
-    let has = |dims: &[i64], d: usize| dims.contains(&(d as i64));
-    let upd_scatter_dims: Vec<usize> = (0..us.len()).filter(|&d| !has(uwd, d)).collect();
-    let idx_scatter_dims: Vec<usize> = (0..is.len()).filter(|&d| d != ivd).collect();
-    let window_dims: Vec<usize> = (0..os.len())
-        .filter(|&d| !has(iwd, d) && !has(ibd, d))
-        .collect();
-    let mut window = vec![1i64; os.len()];
-    for (&d, &w) in window_dims.iter().zip(uwd) {
-        window[d] = us[w as usize];
-    }
-    let vec_stride = is_st.get(ivd).copied().unwrap_or(0);
-
-    let mut point = Vec::with_capacity(upd_scatter_dims.len());
-    let mut start = vec![0i64; os.len()];
-    for u in 0..numel(us) {
-        let coord = |d: usize| u / us_st[d] % us[d] as usize;
-        point.clear();
-        point.extend(upd_scatter_dims.iter().map(|&d| coord(d)));
-        let base: usize = idx_scatter_dims
-            .iter()
-            .zip(&point)
-            .map(|(&d, &c)| c * is_st[d])
-            .sum();
-        start.fill(0);
-        for (k, &d) in sdod.iter().enumerate() {
-            start[d as usize] = indices[base + k * vec_stride];
+        for (k, &[operand_stride, max_start]) in starts.iter().enumerate() {
+            let start = indices[idx + k * vec_stride];
+            if start < 0 || start > max_start {
+                continue 'updates;
+            }
+            flat += start as usize * operand_stride as usize;
         }
-        for (&d, &j) in ibd.iter().zip(sibd) {
-            let k = idx_scatter_dims.iter().position(|&s| s == j as usize);
-            start[d as usize] = point[k.expect("batching dim is a scatter dim")] as i64;
-        }
-        if (0..os.len()).any(|d| start[d] < 0 || start[d] + window[d] > os[d]) {
-            continue;
-        }
-        let flat = (0..os.len())
-            .map(|d| start[d] as usize * os_st[d])
-            .chain(
-                window_dims
-                    .iter()
-                    .zip(uwd)
-                    .map(|(&d, &w)| coord(w as usize) * os_st[d]),
-            )
-            .sum::<usize>();
         let out = &mut dst[flat * elem_sz..(flat + 1) * elem_sz];
         let upd = &updates[u * elem_sz..(u + 1) * elem_sz];
         if combiner == 0 {
             out.copy_from_slice(upd);
-        } else if is_float {
+        } else if is_float != 0 {
             let (a, b) = (
                 f64::from_ne_bytes(out.try_into().unwrap()),
                 f64::from_ne_bytes(upd.try_into().unwrap()),

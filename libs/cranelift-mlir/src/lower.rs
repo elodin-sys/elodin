@@ -3253,24 +3253,56 @@ fn emit_scatter(
     if combiner != ScatterCombiner::Set && !matches!(et, ElementType::F64 | ElementType::I64) {
         return Err(format!("scatter {combiner:?} is not supported for {et:?}"));
     }
+    let (os, is, us) = (&operand_ty.shape, &indices_ty.shape, &updates_ty.shape);
+    let strides = |s: &[i64]| {
+        let mut st = vec![1i64; s.len()];
+        for d in (1..s.len()).rev() {
+            st[d - 1] = st[d] * s[d];
+        }
+        st
+    };
+    let (os_st, is_st) = (strides(os), strides(is));
+    let ivd = dims.index_vector_dim as usize;
+    let has = |dims: &[i64], d: usize| dims.contains(&(d as i64));
+    let window_dims: Vec<usize> = (0..os.len())
+        .filter(|&d| !has(&dims.inserted_window_dims, d) && !has(&dims.input_batching_dims, d))
+        .collect();
     let mut meta = vec![
         et.byte_size() as i64,
         i64::from(is_float(et)),
         combiner as i64,
-        dims.index_vector_dim,
+        operand_ty.num_elements() as i64,
+        indices_ty.num_elements() as i64,
+        is_st.get(ivd).copied().unwrap_or(0),
+        us.len() as i64,
     ];
-    for list in [
-        &operand_ty.shape,
-        &updates_ty.shape,
-        &indices_ty.shape,
-        &dims.update_window_dims,
-        &dims.inserted_window_dims,
-        &dims.input_batching_dims,
-        &dims.scatter_indices_batching_dims,
-        &dims.scatter_dims_to_operand_dims,
-    ] {
-        meta.push(list.len() as i64);
-        meta.extend_from_slice(list);
+    // Update window dims walk the operand's window dims in order; update scatter dims walk the
+    // indices dims other than index_vector_dim, and a batching one also selects an operand row.
+    let mut window = vec![1i64; os.len()];
+    let (mut next_window, mut next_index) =
+        (window_dims.iter(), (0..is.len()).filter(|&d| d != ivd));
+    for (d, &size) in us.iter().enumerate() {
+        let (operand_stride, indices_stride) = if has(&dims.update_window_dims, d) {
+            let w = *next_window
+                .next()
+                .ok_or("scatter: too many update window dims")?;
+            window[w] = size;
+            (os_st[w], 0)
+        } else {
+            let j = next_index
+                .next()
+                .ok_or("scatter: too many update scatter dims")?;
+            let batch = dims
+                .scatter_indices_batching_dims
+                .iter()
+                .position(|&b| b as usize == j)
+                .map_or(0, |p| os_st[dims.input_batching_dims[p] as usize]);
+            (batch, is_st[j])
+        };
+        meta.extend([size, operand_stride, indices_stride]);
+    }
+    for &d in &dims.scatter_dims_to_operand_dims {
+        meta.extend([os_st[d as usize], os[d as usize] - window[d as usize]]);
     }
     let meta_ptr = store_i64_array(builder, &meta);
     let n_meta = builder.ins().iconst(types::I64, meta.len() as i64);
