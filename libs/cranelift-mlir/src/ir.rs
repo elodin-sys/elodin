@@ -171,6 +171,7 @@ pub enum ConstantValue {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReduceOp {
     Add,
+    Multiply,
     Minimum,
     Maximum,
     And,

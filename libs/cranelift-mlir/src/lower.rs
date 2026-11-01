@@ -1494,6 +1494,7 @@ define_trt! {
     abs_i32,  "__trt_abs_i32",  tensor_rt::tensor_abs_i32,  [ptr_type(), ptr_type(), types::I64];
     // integer reduce
     reduce_sum_i64, "__trt_reduce_sum_i64", tensor_rt::tensor_reduce_sum_i64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_prod_i64, "__trt_reduce_prod_i64", tensor_rt::tensor_reduce_prod_i64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
     reduce_max_i64, "__trt_reduce_max_i64", tensor_rt::tensor_reduce_max_i64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
     reduce_min_i64, "__trt_reduce_min_i64", tensor_rt::tensor_reduce_min_i64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
     reduce_and_i1,  "__trt_reduce_and_i1", tensor_rt::tensor_reduce_and_i1, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
@@ -1509,6 +1510,7 @@ define_trt! {
     pad_f64,          "__trt_pad_f64",          tensor_rt::tensor_pad_f64,          [ptr_type(), ptr_type(), types::I64, types::I64, types::F64, ptr_type(), ptr_type(), types::I64, ptr_type()];
     // reduce
     reduce_sum_f64, "__trt_reduce_sum_f64", tensor_rt::tensor_reduce_sum_f64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_prod_f64, "__trt_reduce_prod_f64", tensor_rt::tensor_reduce_prod_f64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
     reduce_max_f64, "__trt_reduce_max_f64", tensor_rt::tensor_reduce_max_f64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
     reduce_min_f64, "__trt_reduce_min_f64", tensor_rt::tensor_reduce_min_f64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
     // indexing
@@ -4756,6 +4758,8 @@ fn lower_instruction_mem(
             let func_id = match (op, use_int) {
                 (ReduceOp::Add, false) => trt_ids.reduce_sum_f64,
                 (ReduceOp::Add, true) => trt_ids.reduce_sum_i64,
+                (ReduceOp::Multiply, false) => trt_ids.reduce_prod_f64,
+                (ReduceOp::Multiply, true) => trt_ids.reduce_prod_i64,
                 (ReduceOp::Maximum, false) => trt_ids.reduce_max_f64,
                 (ReduceOp::Maximum, true) => trt_ids.reduce_max_i64,
                 (ReduceOp::Minimum, false) => trt_ids.reduce_min_f64,
@@ -9561,6 +9565,13 @@ fn apply_reduce_op(builder: &mut FunctionBuilder, acc: Value, v: Value, op: &Red
                 builder.ins().fadd(acc, v)
             } else {
                 builder.ins().iadd(acc, v)
+            }
+        }
+        ReduceOp::Multiply => {
+            if val_type.is_float() {
+                builder.ins().fmul(acc, v)
+            } else {
+                builder.ins().imul(acc, v)
             }
         }
         ReduceOp::Minimum => {

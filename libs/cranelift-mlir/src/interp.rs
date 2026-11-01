@@ -1524,6 +1524,7 @@ fn reduce(
     if is_real(et) {
         let fold: fn(f64, f64) -> f64 = match op {
             ReduceOp::Add => |a, b| a + b,
+            ReduceOp::Multiply => |a, b| a * b,
             ReduceOp::Maximum => f64::max,
             ReduceOp::Minimum => f64::min,
             ReduceOp::And | ReduceOp::Or => return Err(not_implemented()),
@@ -1542,6 +1543,7 @@ fn reduce(
             (ReduceOp::And, ElementType::I1) => |a, b| i64::from(a != 0 && b != 0),
             (ReduceOp::Or, ElementType::I1) => |a, b| i64::from(a != 0 || b != 0),
             (ReduceOp::Add, _) => i64::wrapping_add,
+            (ReduceOp::Multiply, _) => i64::wrapping_mul,
             (ReduceOp::Maximum, _) => i64::max,
             (ReduceOp::Minimum, _) => i64::min,
             (ReduceOp::And | ReduceOp::Or, _) => return Err(not_implemented()),

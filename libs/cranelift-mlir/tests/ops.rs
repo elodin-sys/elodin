@@ -2190,6 +2190,32 @@ fn test_reduce_any_axes_i64() {
 }
 
 #[test]
+fn test_reduce_prod() {
+    let x = f64_buf(&[1.5, -2.0, 0.5, 3.0, 4.0, -0.25]);
+    let xi = i64_buf(&[2, -3, 5, 7, -1, 4]);
+    let cases: [(&[usize], &[usize], &[f64], &[i64]); 2] = [
+        (&[6], &[0], &[4.5], &[840]),
+        (&[2, 3], &[1], &[-1.5, -3.0], &[-30, -28]),
+    ];
+    for (shape, dims, want, want_i) in cases {
+        let f64_mlir = reduce_mlir(shape, dims, "multiply", "1.0", "f64");
+        let i64_mlir = reduce_mlir(shape, dims, "multiply", "1", "i64");
+        for run in [run_mlir, run_mlir_mem] {
+            let out = run(&f64_mlir, &[&x], &[want.len() * 8]);
+            assert_f64s_close(&read_f64s(&out[0]), want);
+            let out = run(&i64_mlir, &[&xi], &[want_i.len() * 8]);
+            assert_eq!(read_i64s(&out[0]), want_i);
+        }
+    }
+}
+
+#[test]
+fn test_reduce_unknown_reducer_is_a_parse_error() {
+    let mlir = reduce_mlir(&[4], &[0], "xor", "0", "i64");
+    assert!(cranelift_mlir::parser::parse_module(&mlir).is_err());
+}
+
+#[test]
 fn test_while_mem_count1() {
     let mlir = r#"
 module @module {

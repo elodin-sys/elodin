@@ -800,6 +800,7 @@ macro_rules! reduce_op {
 
 reduce_op!(tensor_reduce_sum_f64, f64, 0.0, |acc: f64, v: f64| acc
     .algebraic_add(v));
+reduce_op!(tensor_reduce_prod_f64, f64, 1.0, |acc: f64, v: f64| acc * v);
 reduce_op!(
     tensor_reduce_max_f64,
     f64,
@@ -814,6 +815,8 @@ reduce_op!(
 );
 reduce_op!(tensor_reduce_sum_i64, i64, 0, |acc: i64, v: i64| acc
     .wrapping_add(v));
+reduce_op!(tensor_reduce_prod_i64, i64, 1, |acc: i64, v: i64| acc
+    .wrapping_mul(v));
 reduce_op!(tensor_reduce_max_i64, i64, i64::MIN, |acc: i64, v: i64| acc
     .max(v));
 reduce_op!(tensor_reduce_min_i64, i64, i64::MAX, |acc: i64, v: i64| acc

@@ -1124,6 +1124,8 @@ fn parse_reduce_op(
 
     let op = if full_text.contains("stablehlo.add") {
         ReduceOp::Add
+    } else if full_text.contains("stablehlo.multiply") {
+        ReduceOp::Multiply
     } else if full_text.contains("stablehlo.minimum") {
         ReduceOp::Minimum
     } else if full_text.contains("stablehlo.maximum") {
@@ -1133,7 +1135,7 @@ fn parse_reduce_op(
     } else if full_text.contains("stablehlo.or") {
         ReduceOp::Or
     } else {
-        ReduceOp::Add
+        return Err(winnow::error::ContextError::new());
     };
 
     let ty = parse_final_type(first_line);
