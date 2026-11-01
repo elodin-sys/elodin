@@ -4856,6 +4856,185 @@ module @module {
     assert_f64s_close(&result, &[1.0, 1.5, 2.0, 3.0, 4.0]);
 }
 
+/// A JAX 0.10 `stablehlo.sort` along `dim`, ordered by `body` over the block arguments
+/// `%a0, %b0, %a1, %b1, ...`.
+fn sort_mlir(shape: &str, tys: &[&str], dim: usize, body: &str) -> String {
+    let t = |ty: &&str| format!("tensor<{shape}x{ty}>");
+    let join = |items: Vec<String>| items.join(", ");
+    let args = join(
+        tys.iter()
+            .enumerate()
+            .map(|(i, ty)| format!("%arg{i}: {}", t(ty)))
+            .collect(),
+    );
+    let ops = join((0..tys.len()).map(|i| format!("%arg{i}")).collect());
+    let block = join(
+        tys.iter()
+            .enumerate()
+            .map(|(i, ty)| format!("%a{i}: tensor<{ty}>, %b{i}: tensor<{ty}>"))
+            .collect(),
+    );
+    let types = join(tys.iter().map(t).collect());
+    let (def, ret) = match tys.len() {
+        1 => ("%0".to_string(), "%0".to_string()),
+        n => (
+            format!("%0:{n}"),
+            join((0..n).map(|i| format!("%0#{i}")).collect()),
+        ),
+    };
+    format!(
+        "module @module {{
+  func.func public @main({args}) -> ({types}) {{
+    {def} = \"stablehlo.sort\"({ops}) <{{dimension = {dim} : i64, is_stable = true}}> ({{
+    ^bb0({block}):
+{body}
+    }}) : ({types}) -> ({types})
+    return {ret} : {types}
+  }}
+}}"
+    )
+}
+
+/// The comparator JAX emits for an f64 key: -0 becomes 0, NaN becomes the canonical NaN,
+/// then a total-order less-than.
+const F64_KEY_LT: &str = "      %z = stablehlo.constant dense<0.000000e+00> : tensor<f64>
+      %nan = stablehlo.constant dense<0x7FF8000000000000> : tensor<f64>
+      %1 = stablehlo.compare EQ, %a0, %z, FLOAT : (tensor<f64>, tensor<f64>) -> tensor<i1>
+      %2 = stablehlo.select %1, %z, %a0 : tensor<i1>, tensor<f64>
+      %3 = stablehlo.compare NE, %a0, %a0, FLOAT : (tensor<f64>, tensor<f64>) -> tensor<i1>
+      %4 = stablehlo.select %3, %nan, %2 : tensor<i1>, tensor<f64>
+      %5 = stablehlo.compare EQ, %b0, %z, FLOAT : (tensor<f64>, tensor<f64>) -> tensor<i1>
+      %6 = stablehlo.select %5, %z, %b0 : tensor<i1>, tensor<f64>
+      %7 = stablehlo.compare NE, %b0, %b0, FLOAT : (tensor<f64>, tensor<f64>) -> tensor<i1>
+      %8 = stablehlo.select %7, %nan, %6 : tensor<i1>, tensor<f64>
+      %9 = stablehlo.compare LT, %4, %8, TOTALORDER : (tensor<f64>, tensor<f64>) -> tensor<i1>
+      stablehlo.return %9 : tensor<i1>";
+
+fn int_key(dir: &str, ty: &str) -> String {
+    format!(
+        "      %1 = stablehlo.compare {dir}, %a0, %b0, SIGNED : (tensor<{ty}>, tensor<{ty}>) -> tensor<i1>
+      stablehlo.return %1 : tensor<i1>"
+    )
+}
+
+#[test]
+fn test_sort_types_axes_and_keys() {
+    for run in [run_mlir, run_mlir_mem] {
+        let mlir = sort_mlir("5", &["i64"], 0, &int_key("LT", "i64"));
+        let out = run(&mlir, &[&i64_buf(&[3, -2, 0, 3, -7])], &[40]);
+        assert_eq!(read_i64s(&out[0]), [-7, -2, 0, 3, 3]);
+
+        let mlir = sort_mlir("3", &["i32"], 0, &int_key("LT", "i32"));
+        let out = run(&mlir, &[&i32_buf(&[5, -1, 2])], &[12]);
+        assert_eq!(read_i32s(&out[0]), [-1, 2, 5]);
+
+        let mlir = sort_mlir("3", &["i64"], 0, &int_key("GT", "i64"));
+        let out = run(&mlir, &[&i64_buf(&[3, -2, 0])], &[24]);
+        assert_eq!(read_i64s(&out[0]), [3, 0, -2]);
+
+        // jnp.argsort: NaN last and -0 equal to 0, with i32 indices.
+        let mlir = sort_mlir("6", &["f64", "i32"], 0, F64_KEY_LT);
+        let x = f64_buf(&[3.0, f64::NAN, -0.0, 0.0, f64::NEG_INFINITY, 1.0]);
+        let out = run(&mlir, &[&x, &i32_buf(&[0, 1, 2, 3, 4, 5])], &[48, 24]);
+        let sorted = read_f64s(&out[0]);
+        assert_eq!(sorted[..5], [f64::NEG_INFINITY, -0.0, 0.0, 1.0, 3.0]);
+        assert!(sorted[5].is_nan() && sorted[1].is_sign_negative());
+        assert_eq!(read_i32s(&out[1]), [4, 2, 3, 5, 0, 1]);
+
+        // Argsort of each row.
+        let mlir = sort_mlir("2x3", &["i64", "i64"], 1, &int_key("LT", "i64"));
+        let x = i64_buf(&[3, 1, 2, 0, 5, 4]);
+        let out = run(&mlir, &[&x, &i64_buf(&[0, 1, 2, 0, 1, 2])], &[48, 48]);
+        assert_eq!(read_i64s(&out[0]), [1, 2, 3, 0, 4, 5]);
+        assert_eq!(read_i64s(&out[1]), [1, 2, 0, 0, 2, 1]);
+
+        // lax.sort((k0, k1, payload), num_keys=2).
+        let two_keys = "      %1 = stablehlo.compare LT, %a0, %b0, SIGNED : (tensor<i64>, tensor<i64>) -> tensor<i1>
+      %2 = stablehlo.compare EQ, %a0, %b0, SIGNED : (tensor<i64>, tensor<i64>) -> tensor<i1>
+      %3 = stablehlo.compare LT, %a1, %b1, SIGNED : (tensor<i64>, tensor<i64>) -> tensor<i1>
+      %4 = stablehlo.and %2, %3 : tensor<i1>
+      %5 = stablehlo.or %1, %4 : tensor<i1>
+      stablehlo.return %5 : tensor<i1>";
+        let mlir = sort_mlir("4", &["i64", "i64", "i64"], 0, two_keys);
+        let (k0, k1, p) = (
+            i64_buf(&[1, 0, 1, 0]),
+            i64_buf(&[5, 7, 2, 7]),
+            i64_buf(&[10, 20, 30, 40]),
+        );
+        let out = run(&mlir, &[&k0, &k1, &p], &[32, 32, 32]);
+        assert_eq!(read_i64s(&out[0]), [0, 0, 1, 1]);
+        assert_eq!(read_i64s(&out[1]), [7, 7, 2, 5]);
+        assert_eq!(read_i64s(&out[2]), [20, 40, 30, 10]);
+    }
+}
+
+/// A private function named `@"<lambda>"`, as a `jax.jit(lambda ...)` inside a system emits.
+#[test]
+fn test_quoted_function_name() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<4xf64>) -> tensor<4xf64> {
+    %0 = call @"<lambda>"(%arg0) : (tensor<4xf64>) -> tensor<4xf64>
+    return %0 : tensor<4xf64>
+  }
+  func.func private @"<lambda>"(%arg0: tensor<4xf64>) -> tensor<4xf64> {
+    %0 = stablehlo.add %arg0, %arg0 : tensor<4xf64>
+    return %0 : tensor<4xf64>
+  }
+}
+"#;
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&f64_buf(&[1.0, -2.0, 0.5, 3.0])], &[32]);
+        assert_eq!(read_f64s(&out[0])[..], [2.0, -4.0, 1.0, 6.0]);
+    }
+}
+
+/// An f32 constant printed in hex, like JAX's `-inf` init for an f32 max.
+#[test]
+fn test_f32_hex_constant() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<4xf32>) -> tensor<f32> {
+    %cst = stablehlo.constant dense<0xFF800000> : tensor<f32>
+    %0 = stablehlo.reduce(%arg0 init: %cst) applies stablehlo.maximum across dimensions = [0] : (tensor<4xf32>, tensor<f32>) -> tensor<f32>
+    return %0 : tensor<f32>
+  }
+}
+"#;
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&f32_buf(&[-3.0, -1.5, -2.0, -8.0])], &[4]);
+        assert_eq!(read_f32s(&out[0]), [-1.5]);
+    }
+}
+
+/// `lax.cond` whose branches both return a captured value: JAX forwards the value and
+/// emits a `stablehlo.case` with no results.
+#[test]
+fn test_zero_result_case() {
+    let mlir = "
+module @module {
+  func.func public @main(%arg0: tensor<4xf64>) -> tensor<4xf64> {
+    %0 = stablehlo.slice %arg0 [0:1] : (tensor<4xf64>) -> tensor<1xf64>
+    %1 = stablehlo.reshape %0 : (tensor<1xf64>) -> tensor<f64>
+    %cst = stablehlo.constant dense<0.000000e+00> : tensor<f64>
+    %2 = stablehlo.compare GT, %1, %cst, FLOAT : (tensor<f64>, tensor<f64>) -> tensor<i1>
+    %3 = stablehlo.convert %2 : (tensor<i1>) -> tensor<i32>
+    \"stablehlo.case\"(%3) ({
+      stablehlo.return 
+    }, {
+      stablehlo.return
+    }) : (tensor<i32>) -> ()
+    %4 = stablehlo.multiply %arg0, %arg0 : tensor<4xf64>
+    return %4 : tensor<4xf64>
+  }
+}
+";
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&f64_buf(&[1.0, -2.0, 0.5, 3.0])], &[32]);
+        assert_eq!(read_f64s(&out[0])[..], [1.0, 4.0, 0.25, 9.0]);
+    }
+}
+
 #[test]
 fn test_sort_descending() {
     let mlir = r#"

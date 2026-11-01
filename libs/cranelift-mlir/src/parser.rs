@@ -107,7 +107,7 @@ fn func_def(input: &mut Stream<'_>) -> PResult<FuncDef> {
         ws(input)?;
     }
     let _ = '@'.parse_next(input)?;
-    let name = ident(input)?;
+    let name = symbol_name(input)?;
     let _ = '('.parse_next(input)?;
     ws(input)?;
 
@@ -748,7 +748,11 @@ fn parse_scalar_value(input: &mut Stream<'_>) -> PResult<ScalarValue> {
         let _ = "0x".parse_next(input)?;
         let hex: &str = take_while(1.., |c: char| c.is_ascii_hexdigit()).parse_next(input)?;
         let bits = u64::from_str_radix(hex, 16).unwrap();
-        return Ok(ScalarValue::F64(f64::from_bits(bits)));
+        // MLIR prints hex floats at their type's width.
+        return Ok(match hex.len() {
+            8 => ScalarValue::F32(f32::from_bits(bits as u32)),
+            _ => ScalarValue::F64(f64::from_bits(bits)),
+        });
     }
 
     let checkpoint = *input;
@@ -1782,7 +1786,7 @@ fn parse_call_op(
         ws(input)?;
     }
     let _ = '@'.parse_next(input)?;
-    let callee = ident(input)?;
+    let callee = symbol_name(input)?;
     ws(input)?;
     let _ = '('.parse_next(input)?;
     let args = parse_value_list(input, ctx)?;
@@ -2031,6 +2035,9 @@ fn parse_sort_op(
     // Parse result types from the trailing `: (...) -> (...)` or `: ... -> ...`
     let rest_line = take_till(0.., '\n').parse_next(input)?;
     let _ = opt('\n').parse_next(input)?;
+    if let Some(d) = extract_i64_attr(rest_line, "dimension") {
+        dimension = d;
+    }
     let mut types = Vec::new();
     if let Some(arrow_pos) = rest_line.rfind("-> ") {
         let after = rest_line[arrow_pos + 3..].trim();
@@ -2928,6 +2935,10 @@ fn parse_case_op(
     let mut ret_types = Vec::new();
     if let Some(idx) = rest.find("-> ") {
         let after = strip_outer_parens(rest[idx + 3..].trim());
+        if after.trim().is_empty() {
+            // A case with no results has no effect.
+            return Ok(None);
+        }
         for part in split_tensor_types(after) {
             ret_types.push(parse_tensor_type_from_str(part.trim()));
         }
@@ -2958,7 +2969,8 @@ fn parse_return(input: &mut Stream<'_>, ctx: &mut ValueCtx) -> PResult<InstrResu
     } else {
         let _ = "return".parse_next(input)?;
     }
-    ws(input)?;
+    // A bare return ends at the newline; skipping it would consume the next line.
+    let _ = take_while(0.., |c: char| c == ' ' || c == '\t').parse_next(input)?;
 
     let mut operands = Vec::new();
 
@@ -3008,6 +3020,17 @@ fn ident(input: &mut Stream<'_>) -> PResult<String> {
     Ok(s.to_string())
 }
 
+/// A symbol after `@`: an identifier, or a quoted name such as `"<lambda>"`.
+fn symbol_name(input: &mut Stream<'_>) -> PResult<String> {
+    if input.starts_with('"') {
+        let _ = '"'.parse_next(input)?;
+        let name: &str = take_till(0.., '"').parse_next(input)?;
+        let _ = '"'.parse_next(input)?;
+        return Ok(name.to_string());
+    }
+    ident(input)
+}
+
 fn value_name(input: &mut Stream<'_>) -> PResult<String> {
     let _ = '%'.parse_next(input)?;
     let name = take_while(1.., |c: char| c.is_alphanumeric() || c == '_').parse_next(input)?;
@@ -3026,7 +3049,10 @@ fn float_literal(input: &mut Stream<'_>) -> PResult<f64> {
         let _ = "0x".parse_next(input)?;
         let hex: &str = take_while(1.., |c: char| c.is_ascii_hexdigit()).parse_next(input)?;
         let bits = u64::from_str_radix(hex, 16).unwrap();
-        return Ok(f64::from_bits(bits));
+        return Ok(match hex.len() {
+            8 => f32::from_bits(bits as u32) as f64,
+            _ => f64::from_bits(bits),
+        });
     }
 
     let start = *input;

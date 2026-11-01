@@ -2123,64 +2123,90 @@ pub extern "C" fn tensor_rng_f64(
     }
 }
 
-pub extern "C" fn tensor_sort_f64(
-    data: *mut f64,
-    n_outer: usize,
-    sort_len: usize,
-    n_inner: usize,
-    ascending: u8,
-) {
-    let total = n_outer * sort_len * n_inner;
-    let data = unsafe { slice::from_raw_parts_mut(data, total) };
-    let asc = ascending != 0;
-    for o in 0..n_outer {
-        for s in 0..n_inner {
-            // Stable insertion sort along the sort dimension
-            for i in 1..sort_len {
-                let mut j = i;
-                while j > 0 {
-                    let idx_a = (o * sort_len + j - 1) * n_inner + s;
-                    let idx_b = (o * sort_len + j) * n_inner + s;
-                    let should_swap = if asc {
-                        data[idx_a] > data[idx_b]
-                    } else {
-                        data[idx_a] < data[idx_b]
-                    };
-                    if should_swap {
-                        data.swap(idx_a, idx_b);
-                        j -= 1;
-                    } else {
-                        break;
-                    }
-                }
-            }
+/// One sort key, read in place.
+enum SortKey<'a> {
+    F64(&'a [f64]),
+    F32(&'a [f32]),
+    I64(&'a [i64]),
+    I32(&'a [i32]),
+    U64(&'a [u64]),
+    U32(&'a [u32]),
+    U8(&'a [u8]),
+}
+
+impl SortKey<'_> {
+    fn cmp(&self, i: usize, j: usize) -> std::cmp::Ordering {
+        // JAX's comparators treat -0 as 0 and put NaN after everything.
+        let float = |a: f64, b: f64| {
+            a.partial_cmp(&b)
+                .unwrap_or_else(|| a.is_nan().cmp(&b.is_nan()))
+        };
+        match self {
+            SortKey::F64(v) => float(v[i], v[j]),
+            SortKey::F32(v) => float(v[i] as f64, v[j] as f64),
+            SortKey::I64(v) => v[i].cmp(&v[j]),
+            SortKey::I32(v) => v[i].cmp(&v[j]),
+            SortKey::U64(v) => v[i].cmp(&v[j]),
+            SortKey::U32(v) => v[i].cmp(&v[j]),
+            SortKey::U8(v) => v[i].cmp(&v[j]),
         }
     }
 }
 
-pub extern "C" fn tensor_argsort_f64(
-    values: *mut f64,
-    indices: *mut i64,
-    sort_len: usize,
-    ascending: u8,
-) {
-    let vals = unsafe { slice::from_raw_parts_mut(values, sort_len) };
-    let idxs = unsafe { slice::from_raw_parts_mut(indices, sort_len) };
-    let asc = ascending != 0;
-    for i in 1..sort_len {
-        let mut j = i;
-        while j > 0 {
-            let should_swap = if asc {
-                vals[j - 1] > vals[j]
-            } else {
-                vals[j - 1] < vals[j]
-            };
-            if should_swap {
-                vals.swap(j - 1, j);
-                idxs.swap(j - 1, j);
-                j -= 1;
-            } else {
-                break;
+/// Stable sort of several operands along one axis, each viewed as [outer, axis, after].
+/// Orders lexicographically by the first `n_keys` operands, ascending unless
+/// `descending`, and applies the same permutation to every operand. `meta` is
+/// `[n_ops, n_keys, descending, outer, axis, after]` then a value code per operand
+/// (0 f64, 1 f32, 2 i64, 3 i32, 4 u64, 5 u32, 6 i1).
+pub extern "C" fn tensor_sort(data: *const *mut u8, meta: *const i64) {
+    let head = unsafe { slice::from_raw_parts(meta, 6) };
+    let [n_ops, n_keys, descending, outer, len, after] =
+        [0, 1, 2, 3, 4, 5].map(|i| head[i] as usize);
+    let codes = unsafe { slice::from_raw_parts(meta.add(6), n_ops) };
+    let ptrs = unsafe { slice::from_raw_parts(data, n_ops) };
+    let n = outer * len * after;
+    let sizes: Vec<usize> = codes
+        .iter()
+        .map(|&c| [8, 4, 8, 4, 8, 4, 1][c as usize])
+        .collect();
+    let (mut perm, mut scratch) = (Vec::with_capacity(len), Vec::new());
+    for o in 0..outer {
+        for a in 0..after {
+            let at = |k: usize| (o * len + k) * after + a;
+            let keys: Vec<SortKey> = (0..n_keys)
+                .map(|k| unsafe {
+                    let p = ptrs[k];
+                    match codes[k] {
+                        0 => SortKey::F64(slice::from_raw_parts(p.cast(), n)),
+                        1 => SortKey::F32(slice::from_raw_parts(p.cast(), n)),
+                        2 => SortKey::I64(slice::from_raw_parts(p.cast(), n)),
+                        3 => SortKey::I32(slice::from_raw_parts(p.cast(), n)),
+                        4 => SortKey::U64(slice::from_raw_parts(p.cast(), n)),
+                        5 => SortKey::U32(slice::from_raw_parts(p.cast(), n)),
+                        _ => SortKey::U8(slice::from_raw_parts(p, n)),
+                    }
+                })
+                .collect();
+            perm.clear();
+            perm.extend(0..len);
+            perm.sort_by(|&x, &y| {
+                let ord = keys
+                    .iter()
+                    .map(|key| key.cmp(at(x), at(y)))
+                    .find(|ord| ord.is_ne())
+                    .unwrap_or(std::cmp::Ordering::Equal);
+                if descending != 0 { ord.reverse() } else { ord }
+            });
+            drop(keys);
+            for (&p, &sz) in ptrs.iter().zip(&sizes) {
+                let buf = unsafe { slice::from_raw_parts_mut(p, n * sz) };
+                scratch.clear();
+                for &k in &perm {
+                    scratch.extend_from_slice(&buf[at(k) * sz..(at(k) + 1) * sz]);
+                }
+                for (k, elem) in scratch.chunks_exact(sz).enumerate() {
+                    buf[at(k) * sz..(at(k) + 1) * sz].copy_from_slice(elem);
+                }
             }
         }
     }

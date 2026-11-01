@@ -1502,6 +1502,7 @@ define_trt! {
     reduce_and_i1,  "__trt_reduce_and_i1", tensor_rt::tensor_reduce_and_i1, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
     reduce_or_i1,   "__trt_reduce_or_i1",  tensor_rt::tensor_reduce_or_i1,  [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
     argminmax, "__trt_argminmax", tensor_rt::tensor_argminmax, [ptr_type(), ptr_type(), ptr_type(), ptr_type(), ptr_type()];
+    sort, "__trt_sort", tensor_rt::tensor_sort, [ptr_type(), ptr_type()];
     // memory
     memcpy, "__trt_memcpy", tensor_rt::tensor_memcpy, [ptr_type(), ptr_type(), types::I64];
     // layout / shape
@@ -1627,14 +1628,6 @@ pub fn compile_module_with_config(
     jit_builder.symbol("__cranelift_gelsd", cranelift_gelsd as *const u8);
     jit_builder.symbol("__cranelift_geev", cranelift_geev as *const u8);
     jit_builder.symbol("__cranelift_gesvd", cranelift_gesvd as *const u8);
-    jit_builder.symbol(
-        "__trt_sort_f64",
-        crate::tensor_rt::tensor_sort_f64 as *const u8,
-    );
-    jit_builder.symbol(
-        "__trt_argsort_f64",
-        crate::tensor_rt::tensor_argsort_f64 as *const u8,
-    );
     jit_builder.symbol(
         "__trt_batch_norm_inference_f64",
         crate::tensor_rt::tensor_batch_norm_inference_f64 as *const u8,
@@ -3417,6 +3410,78 @@ fn spill_lanes(builder: &mut FunctionBuilder, vals: &[Value], elem_sz: usize) ->
     ptr
 }
 
+/// The element type code `tensor_argminmax` and `tensor_sort` read.
+fn value_code(et: ElementType) -> i64 {
+    match et {
+        ElementType::F64 => 0,
+        ElementType::F32 => 1,
+        ElementType::I64 => 2,
+        ElementType::I32 => 3,
+        ElementType::UI64 => 4,
+        ElementType::UI32 => 5,
+        ElementType::I1 => 6,
+    }
+}
+
+/// How many leading operands a sort comparator orders by, and whether it orders them
+/// descending. JAX's comparators are ascending and compare the first `num_keys` pairs.
+fn sort_order(comparator: &[InstrResult], params: &[ValueId]) -> (usize, bool) {
+    let used: std::collections::HashSet<ValueId> = comparator
+        .iter()
+        .flat_map(|ir| crate::const_fold::operand_ids(&ir.instr))
+        .collect();
+    let n_keys = params
+        .chunks(2)
+        .rposition(|pair| pair.iter().any(|p| used.contains(p)))
+        .map_or(1, |k| k + 1);
+    let descending = comparator.iter().any(|ir| {
+        matches!(
+            ir.instr,
+            Instruction::Compare {
+                direction: CompareDirection::Gt | CompareDirection::Ge,
+                ..
+            }
+        )
+    });
+    (n_keys, descending)
+}
+
+/// Sorts the operand buffers in `ptrs` in place with `tensor_sort`.
+fn emit_sort(
+    builder: &mut FunctionBuilder,
+    jit_module: &mut JITModule,
+    trt_ids: &TensorRtIds,
+    ptrs: &[Value],
+    types: &[TensorType],
+    dimension: i64,
+    (n_keys, descending): (usize, bool),
+) {
+    let shape = &types[0].shape;
+    let dim = if dimension < 0 {
+        shape.len() as i64 + dimension
+    } else {
+        dimension
+    } as usize;
+    let mut meta = vec![
+        ptrs.len() as i64,
+        n_keys as i64,
+        i64::from(descending),
+        shape[..dim].iter().product(),
+        shape[dim],
+        shape[dim + 1..].iter().product(),
+    ];
+    meta.extend(types.iter().map(|t| value_code(t.element_type)));
+    let ptr_array = alloc_slot(builder, ptrs.len() * 8);
+    for (i, &p) in ptrs.iter().enumerate() {
+        builder
+            .ins()
+            .store(MemFlags::trusted(), p, ptr_array, (i * 8) as i32);
+    }
+    let meta_ptr = store_i64_array(builder, &meta);
+    let func_ref = jit_module.declare_func_in_func(trt_ids.sort, builder.func);
+    builder.ins().call(func_ref, &[ptr_array, meta_ptr]);
+}
+
 /// Calls `tensor_argminmax` on `[dst_values, dst_indices, values, indices]`.
 fn emit_argminmax(
     builder: &mut FunctionBuilder,
@@ -3433,15 +3498,6 @@ fn emit_argminmax(
             dimensions.len()
         ));
     };
-    let value_code = match val_ty.element_type {
-        ElementType::F64 => 0,
-        ElementType::F32 => 1,
-        ElementType::I64 => 2,
-        ElementType::I32 => 3,
-        ElementType::UI64 => 4,
-        ElementType::UI32 => 5,
-        ElementType::I1 => 6,
-    };
     let index_size = idx_ty.element_type.byte_size() as i64;
     if is_float(idx_ty.element_type) || index_size == 1 {
         return Err(format!(
@@ -3451,7 +3507,7 @@ fn emit_argminmax(
     }
     let (shape, axis) = (&val_ty.shape, axis as usize);
     let meta = [
-        value_code,
+        value_code(val_ty.element_type),
         index_size,
         i64::from(is_min),
         shape[..axis].iter().product(),
@@ -5878,100 +5934,37 @@ fn lower_instruction_mem(
             inputs,
             dimension,
             comparator,
+            comparator_params,
             ..
         } => {
-            let src_ty = type_map.get(&inputs[0]).cloned().unwrap_or(rt.clone());
-            let dim = if *dimension < 0 {
-                src_ty.rank() as i64 + dimension
-            } else {
-                *dimension
-            } as usize;
-            let shape: Vec<usize> = src_ty.shape.iter().map(|&d| d as usize).collect();
-            let sort_len = shape.get(dim).copied().unwrap_or(n);
-            let ascending = !comparator.iter().any(|ir| {
-                matches!(
-                    &ir.instr,
-                    Instruction::Compare {
-                        direction: CompareDirection::Gt,
-                        ..
-                    }
-                )
-            });
-
-            if inputs.len() == 2 {
-                let idx_ty = type_map
-                    .get(&inputs[1])
-                    .cloned()
-                    .unwrap_or(TensorType::scalar(ElementType::I64));
-                let val_esz = src_ty.element_type.byte_size();
-                let idx_esz = idx_ty.element_type.byte_size();
-                let val_n = src_ty.num_elements();
-                let idx_n = idx_ty.num_elements();
-                let dst_vals = alloc_slot(builder, val_n * val_esz);
-                let dst_idxs = alloc_slot(builder, idx_n * idx_esz);
-                let val_nb = builder.ins().iconst(types::I64, (val_n * val_esz) as i64);
-                let idx_nb = builder.ins().iconst(types::I64, (idx_n * idx_esz) as i64);
-                trt_call(
-                    builder,
-                    jit_module,
-                    trt_ids.memcpy,
-                    &[dst_vals, get(&inputs[0])?, val_nb],
-                );
-                trt_call(
-                    builder,
-                    jit_module,
-                    trt_ids.memcpy,
-                    &[dst_idxs, get(&inputs[1])?, idx_nb],
-                );
-                let sort_v = builder.ins().iconst(types::I64, sort_len as i64);
-                let asc_v = builder.ins().iconst(types::I8, ascending as i64);
-                let pt = ptr_type();
-                lapack_call(
-                    builder,
-                    jit_module,
-                    "__trt_argsort_f64",
-                    &[pt, pt, types::I64, types::I8],
-                    &[dst_vals, dst_idxs, sort_v, asc_v],
-                )?;
-                return Ok(vec![
-                    LaneRepr::scalar(vec![dst_vals]),
-                    LaneRepr::scalar(vec![dst_idxs]),
-                ]);
+            let tys: Vec<TensorType> = inputs
+                .iter()
+                .map(|v| type_map.get(v).cloned().unwrap_or(rt.clone()))
+                .collect();
+            let mut dsts = Vec::with_capacity(inputs.len());
+            for (i, (vid, ty)) in inputs.iter().zip(&tys).enumerate() {
+                let bytes = ty.byte_size();
+                let dst = match i {
+                    0 => alloc_slot_for_vid(builder, pool, result_vid, bytes),
+                    _ => alloc_slot(builder, bytes),
+                };
+                let nb = builder.ins().iconst(types::I64, bytes as i64);
+                trt_call(builder, jit_module, trt_ids.memcpy, &[dst, get(vid)?, nb]);
+                dsts.push(dst);
             }
-
-            if inputs.len() != 1 {
-                return Err(format!("mem sort: unsupported {} operands", inputs.len()));
-            }
-            let mut n_outer = 1usize;
-            for s in shape.iter().take(dim) {
-                n_outer *= *s;
-            }
-            let mut n_inner = 1usize;
-            for s in shape.iter().skip(dim + 1) {
-                n_inner *= *s;
-            }
-            let total = n;
-            let dst = alloc_slot_for_vid(builder, pool, result_vid, total * elem_sz);
-            let total_v = builder.ins().iconst(types::I64, (total * elem_sz) as i64);
-            trt_call(
+            emit_sort(
                 builder,
                 jit_module,
-                trt_ids.memcpy,
-                &[dst, get(&inputs[0])?, total_v],
+                trt_ids,
+                &dsts,
+                &tys,
+                *dimension,
+                sort_order(comparator, comparator_params),
             );
-            let outer_v = builder.ins().iconst(types::I64, n_outer as i64);
-            let sort_v = builder.ins().iconst(types::I64, sort_len as i64);
-            let inner_v = builder.ins().iconst(types::I64, n_inner as i64);
-            let ascending_v = builder.ins().iconst(types::I8, ascending as i64);
-            let pt = ptr_type();
-            lapack_call(
-                builder,
-                jit_module,
-                "__trt_sort_f64",
-                &[pt, types::I64, types::I64, types::I64, types::I8],
-                &[dst, outer_v, sort_v, inner_v, ascending_v],
-            )?;
-            Ok(vec![LaneRepr::scalar(vec![dst])])
+            Ok(dsts
+                .into_iter()
+                .map(|p| LaneRepr::scalar(vec![p]))
+                .collect())
         }
         Instruction::IsFinite { operand } => {
             // Inline `is_finite`: matches `f64::is_finite()` via
@@ -8277,150 +8270,39 @@ fn lower_instruction(
             inputs,
             dimension,
             comparator,
+            comparator_params,
             ..
         } => {
-            if inputs.len() == 2 {
-                let vals = get_vals(builder, value_map, &inputs[0])?.to_vec();
-                let idxs = get_vals(builder, value_map, &inputs[1])?.to_vec();
-                let ascending = !comparator.iter().any(|ir| {
-                    matches!(
-                        &ir.instr,
-                        Instruction::Compare {
-                            direction: CompareDirection::Gt,
-                            ..
-                        }
-                    )
-                });
-                let n_vals = vals.len();
-                let val_ss = builder.create_sized_stack_slot(StackSlotData::new(
-                    StackSlotKind::ExplicitSlot,
-                    (n_vals * 8) as u32,
-                    SLOT_ALIGN,
-                ));
-                let idx_ss = builder.create_sized_stack_slot(StackSlotData::new(
-                    StackSlotKind::ExplicitSlot,
-                    (n_vals * 8) as u32,
-                    SLOT_ALIGN,
-                ));
-                let val_base = builder.ins().stack_addr(ptr_type(), val_ss, 0);
-                let idx_base = builder.ins().stack_addr(ptr_type(), idx_ss, 0);
-                for (i, &v) in vals.iter().enumerate() {
-                    builder
-                        .ins()
-                        .store(MemFlags::trusted(), v, val_base, (i * 8) as i32);
-                }
-                for (i, &v) in idxs.iter().enumerate() {
-                    builder
-                        .ins()
-                        .store(MemFlags::trusted(), v, idx_base, (i * 8) as i32);
-                }
-                let sort_v = builder.ins().iconst(types::I64, n_vals as i64);
-                let asc_v = builder.ins().iconst(types::I8, ascending as i64);
-                let pt = ptr_type();
-                lapack_call(
-                    builder,
-                    jit_module,
-                    "__trt_argsort_f64",
-                    &[pt, pt, types::I64, types::I8],
-                    &[val_base, idx_base, sort_v, asc_v],
-                )?;
-                let out_vals: Vec<Value> = (0..n_vals)
-                    .map(|i| {
-                        builder.ins().load(
-                            types::F64,
-                            MemFlags::trusted(),
-                            val_base,
-                            (i * 8) as i32,
-                        )
-                    })
-                    .collect();
-                let out_idxs: Vec<Value> = (0..n_vals)
-                    .map(|i| {
-                        builder.ins().load(
-                            types::I64,
-                            MemFlags::trusted(),
-                            idx_base,
-                            (i * 8) as i32,
-                        )
-                    })
-                    .collect();
-                return Ok(vec![
-                    LaneRepr::scalar(out_vals),
-                    LaneRepr::scalar(out_idxs),
-                ]);
+            let mut ptrs = Vec::with_capacity(inputs.len());
+            let mut tys = Vec::with_capacity(inputs.len());
+            for vid in inputs {
+                let vals = get_vals(builder, value_map, vid)?.to_vec();
+                let ty = type_map.get(vid).cloned().unwrap_or(rt.clone());
+                ptrs.push(spill_lanes(builder, &vals, ty.element_type.byte_size()));
+                tys.push(ty);
             }
-            if inputs.len() != 1 {
-                return Err(format!(
-                    "scalar sort: unsupported {} operands",
-                    inputs.len()
-                ));
-            }
-            let vals = get_vals(builder, value_map, &inputs[0])?.to_vec();
-            let src_ty = type_map.get(&inputs[0]).cloned().unwrap_or(rt.clone());
-            let rank = src_ty.rank();
-            let dim = if *dimension < 0 {
-                rank as i64 + dimension
-            } else {
-                *dimension
-            } as usize;
-            let shape: Vec<usize> = src_ty.shape.iter().map(|&d| d as usize).collect();
-            let sort_len = shape[dim];
-            let mut n_outer = 1usize;
-            for s in shape.iter().take(dim) {
-                n_outer *= *s;
-            }
-            let mut n_inner = 1usize;
-            for s in shape.iter().skip(dim + 1) {
-                n_inner *= *s;
-            }
-
-            // Detect ascending vs descending from comparator body
-            let ascending = !comparator.iter().any(|ir| {
-                matches!(
-                    &ir.instr,
-                    Instruction::Compare {
-                        direction: CompareDirection::Gt,
-                        ..
-                    }
-                )
-            });
-
-            // Store all values into a stack buffer, sort at runtime, load back
-            let total = vals.len();
-            let ss = builder.create_sized_stack_slot(StackSlotData::new(
-                StackSlotKind::ExplicitSlot,
-                (total * 8) as u32,
-                SLOT_ALIGN,
-            ));
-            let base = builder.ins().stack_addr(ptr_type(), ss, 0);
-            for (i, &v) in vals.iter().enumerate() {
-                builder
-                    .ins()
-                    .store(MemFlags::trusted(), v, base, (i * 8) as i32);
-            }
-
-            // Call runtime sort
-            let outer_v = builder.ins().iconst(types::I64, n_outer as i64);
-            let sort_v = builder.ins().iconst(types::I64, sort_len as i64);
-            let inner_v = builder.ins().iconst(types::I64, n_inner as i64);
-            let asc_v = builder.ins().iconst(types::I8, ascending as i64);
-            let pt = ptr_type();
-            lapack_call(
+            emit_sort(
                 builder,
                 jit_module,
-                "__trt_sort_f64",
-                &[pt, types::I64, types::I64, types::I64, types::I8],
-                &[base, outer_v, sort_v, inner_v, asc_v],
-            )?;
-
-            let out: Vec<Value> = (0..total)
-                .map(|i| {
-                    builder
-                        .ins()
-                        .load(types::F64, MemFlags::trusted(), base, (i * 8) as i32)
+                trt_ids,
+                &ptrs,
+                &tys,
+                *dimension,
+                sort_order(comparator, comparator_params),
+            );
+            let flags = MemFlags::trusted();
+            Ok(ptrs
+                .iter()
+                .zip(&tys)
+                .map(|(&p, ty)| {
+                    let (ct, sz) = (cranelift_type_for(ty.element_type), ty.element_type.byte_size());
+                    LaneRepr::scalar(
+                        (0..ty.num_elements())
+                            .map(|j| builder.ins().load(ct, flags, p, (j * sz) as i32))
+                            .collect(),
+                    )
                 })
-                .collect();
-            Ok(vec![LaneRepr::scalar(out)])
+                .collect())
         }
 
         Instruction::BatchNormInference { .. }

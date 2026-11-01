@@ -461,6 +461,22 @@ fn eval_instr(
             dimensions,
             is_min,
         } => return argminmax(env, *values, *indices, dimensions, *is_min, results),
+        Instruction::Sort {
+            inputs,
+            dimension,
+            comparator,
+            comparator_params,
+            ..
+        } => {
+            return sort(
+                module,
+                env,
+                inputs,
+                *dimension,
+                comparator,
+                comparator_params,
+            );
+        }
         Instruction::Call { callee, args } => {
             return call(module, callee, args, env);
         }
@@ -2055,6 +2071,74 @@ fn argminmax(
         }
     }
     Ok(vec![out_v, out_i])
+}
+
+/// Stable sort along one axis, ordered by evaluating the comparator region on each pair.
+fn sort(
+    module: &Module,
+    env: &HashMap<ValueId, Tensor>,
+    inputs: &[ValueId],
+    dimension: i64,
+    comparator: &[InstrResult],
+    params: &[ValueId],
+) -> Result<Vec<Tensor>, InterpError> {
+    let ops = inputs
+        .iter()
+        .map(|v| lookup(env, *v))
+        .collect::<Result<Vec<_>, _>>()?;
+    let shape = ops[0].ty.shape.clone();
+    let rank = shape.len() as i64;
+    let dim = (if dimension < 0 {
+        dimension + rank
+    } else {
+        dimension
+    }) as usize;
+    let outer = shape[..dim].iter().product::<i64>() as usize;
+    let len = shape[dim] as usize;
+    let after = shape[dim + 1..].iter().product::<i64>() as usize;
+    let element = |t: &Tensor, p: usize| {
+        let e = t.elem_size();
+        Tensor {
+            ty: TensorType::scalar(t.ty.element_type),
+            bytes: t.bytes[p * e..(p + 1) * e].to_vec(),
+        }
+    };
+    let mut outs = ops.clone();
+    for o in 0..outer {
+        for a in 0..after {
+            let at = |k: usize| (o * len + k) * after + a;
+            let less = |x: usize, y: usize| -> Result<bool, InterpError> {
+                let mut local = env.clone();
+                for (i, t) in ops.iter().enumerate() {
+                    local.insert(params[2 * i], element(t, at(x)));
+                    local.insert(params[2 * i + 1], element(t, at(y)));
+                }
+                Ok(eval_body(module, comparator, &mut local)?[0].bytes[0] != 0)
+            };
+            let mut err = None;
+            let mut perm: Vec<usize> = (0..len).collect();
+            perm.sort_by(|&x, &y| match (less(x, y), less(y, x)) {
+                (Ok(true), _) => std::cmp::Ordering::Less,
+                (Ok(false), Ok(true)) => std::cmp::Ordering::Greater,
+                (Ok(_), Ok(_)) => std::cmp::Ordering::Equal,
+                (Err(e), _) | (_, Err(e)) => {
+                    err.get_or_insert(e);
+                    std::cmp::Ordering::Equal
+                }
+            });
+            if let Some(e) = err {
+                return Err(e);
+            }
+            for (out, op) in outs.iter_mut().zip(&ops) {
+                let e = op.elem_size();
+                for (k, &src) in perm.iter().enumerate() {
+                    out.bytes[at(k) * e..(at(k) + 1) * e]
+                        .copy_from_slice(&op.bytes[at(src) * e..(at(src) + 1) * e]);
+                }
+            }
+        }
+    }
+    Ok(outs)
 }
 
 fn materialize_constant(value: &ConstantValue, ty: &TensorType) -> Result<Tensor, InterpError> {
