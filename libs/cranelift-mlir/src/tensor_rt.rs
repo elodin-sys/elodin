@@ -1742,10 +1742,12 @@ pub extern "C" fn tensor_map_f64(
     }
 }
 
-pub extern "C" fn tensor_reduce_window_f64(
-    dst: *mut f64,
-    src: *const f64,
-    init_val: f64,
+/// Registered once per value width; unsigned values use the signed instance, since the
+/// compiled reducer does the arithmetic.
+pub extern "C" fn tensor_reduce_window<T: Copy>(
+    dst: *mut T,
+    src: *const T,
+    init_val: T,
     window_dims: *const i64,
     window_strides: *const i64,
     base_dilations: *const i64,
@@ -1754,7 +1756,7 @@ pub extern "C" fn tensor_reduce_window_f64(
     src_shape: *const i64,
     rank: usize,
     n_out: usize,
-    reducer_fn: extern "C" fn(f64, f64) -> f64,
+    reducer_fn: extern "C" fn(T, T) -> T,
 ) {
     let src_shape = unsafe { slice::from_raw_parts(src_shape, rank) };
     let window_dims = unsafe { slice::from_raw_parts(window_dims, rank) };
@@ -1834,13 +1836,14 @@ pub extern "C" fn tensor_reduce_window_f64(
     }
 }
 
-pub extern "C" fn tensor_select_and_scatter_f64(
-    dst: *mut f64,
-    operand: *const f64,
-    source: *const f64,
-    init_val: f64,
-    select_fn: extern "C" fn(f64, f64) -> i8,
-    scatter_fn: extern "C" fn(f64, f64) -> f64,
+/// Registered once per value width, like `tensor_reduce_window`.
+pub extern "C" fn tensor_select_and_scatter<T: Copy>(
+    dst: *mut T,
+    operand: *const T,
+    source: *const T,
+    init_val: T,
+    select_fn: extern "C" fn(T, T) -> i8,
+    scatter_fn: extern "C" fn(T, T) -> T,
     window_dims: *const i64,
     window_strides: *const i64,
     padding: *const i64,
@@ -1889,8 +1892,7 @@ pub extern "C" fn tensor_select_and_scatter_f64(
             rem %= src_strides[d];
         }
 
-        let mut best_idx = None;
-        let mut best_val = 0.0f64;
+        let mut best: Option<(usize, T)> = None;
         for wf in 0..total_window {
             let mut op_flat = 0usize;
             let mut valid = true;
@@ -1909,13 +1911,12 @@ pub extern "C" fn tensor_select_and_scatter_f64(
             if valid && op_flat < n_operand {
                 let val = operand[op_flat];
                 // Like XLA: `select(current, candidate)` true keeps the current element.
-                if best_idx.is_none() || select_fn(best_val, val) == 0 {
-                    best_idx = Some(op_flat);
-                    best_val = val;
+                if best.is_none_or(|(_, current)| select_fn(current, val) == 0) {
+                    best = Some((op_flat, val));
                 }
             }
         }
-        if let Some(bi) = best_idx {
+        if let Some((bi, _)) = best {
             dst[bi] = scatter_fn(dst[bi], source[sf]);
         }
     }

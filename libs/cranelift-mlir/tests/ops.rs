@@ -5460,20 +5460,48 @@ module @module {
 }
 
 /// A 1-D `reduce_window` as JAX 0.10 prints it, with properties before the region.
-fn reduce_window_mlir(n: usize, m: usize, [init, op, window, stride, pad]: [&str; 5]) -> String {
+fn reduce_window_mlir(
+    n: usize,
+    m: usize,
+    ty: &str,
+    [init, op, window, stride, pad]: [&str; 5],
+) -> String {
     format!(
         "module @module {{
-  func.func public @main(%arg0: tensor<{n}xf64>) -> tensor<{m}xf64> {{
-    %cst = stablehlo.constant dense<{init}> : tensor<f64>
+  func.func public @main(%arg0: tensor<{n}x{ty}>) -> tensor<{m}x{ty}> {{
+    %cst = stablehlo.constant dense<{init}> : tensor<{ty}>
     %0 = \"stablehlo.reduce_window\"(%arg0, %cst) <{{base_dilations = array<i64: 1>, padding = {pad} : tensor<1x2xi64>, window_dilations = array<i64: 1>, window_dimensions = array<i64: {window}>, window_strides = array<i64: {stride}>}}> ({{
-    ^bb0(%arg1: tensor<f64>, %arg2: tensor<f64>):
-      %1 = stablehlo.{op} %arg1, %arg2 : tensor<f64>
-      stablehlo.return %1 : tensor<f64>
-    }}) : (tensor<{n}xf64>, tensor<f64>) -> tensor<{m}xf64>
-    return %0 : tensor<{m}xf64>
+    ^bb0(%arg1: tensor<{ty}>, %arg2: tensor<{ty}>):
+      %1 = stablehlo.{op} %arg1, %arg2 : tensor<{ty}>
+      stablehlo.return %1 : tensor<{ty}>
+    }}) : (tensor<{n}x{ty}>, tensor<{ty}>) -> tensor<{m}x{ty}>
+    return %0 : tensor<{m}x{ty}>
   }}
 }}"
     )
+}
+
+/// `values` as a buffer of `ty` elements.
+fn typed_buf(ty: &str, values: &[f64]) -> Vec<u8> {
+    match ty {
+        "f64" => f64_buf(values),
+        "f32" => f32_buf(&values.iter().map(|&v| v as f32).collect::<Vec<_>>()),
+        "i64" => i64_buf(&values.iter().map(|&v| v as i64).collect::<Vec<_>>()),
+        "i32" => i32_buf(&values.iter().map(|&v| v as i32).collect::<Vec<_>>()),
+        "ui32" => u32_buf(&values.iter().map(|&v| v as u32).collect::<Vec<_>>()),
+        _ => unreachable!("{ty}"),
+    }
+}
+
+fn typed_values(ty: &str, buf: &[u8]) -> Vec<f64> {
+    match ty {
+        "f64" => read_f64s(buf).to_vec(),
+        "f32" => read_f32s(buf).into_iter().map(f64::from).collect(),
+        "i64" => read_i64s(buf).into_iter().map(|v| v as f64).collect(),
+        "i32" => read_i32s(buf).into_iter().map(f64::from).collect(),
+        "ui32" => read_u32s(buf).into_iter().map(f64::from).collect(),
+        _ => unreachable!("{ty}"),
+    }
 }
 
 #[test]
@@ -5499,10 +5527,50 @@ fn test_reduce_window_jax_forms() {
         ),
     ];
     for (input, attrs, expected) in cases {
-        let mlir = reduce_window_mlir(input.len(), expected.len(), attrs);
+        let mlir = reduce_window_mlir(input.len(), expected.len(), "f64", attrs);
         for run in [run_mlir, run_mlir_mem] {
             let out = run(&mlir, &[&f64_buf(input)], &[expected.len() * 8]);
             assert_eq!(read_f64s(&out[0])[..], *expected, "{attrs:?}");
+        }
+    }
+}
+
+/// `jnp.cumsum` and `lax.cummax` of integer and float32 arrays, unsigned compares included.
+#[test]
+fn test_reduce_window_types() {
+    let cumulative = |init, op| [init, op, "4", "1", "dense<[[3, 0]]>"];
+    let cases = [
+        (
+            "i64",
+            [3.0, -1.0, 4.0, 1.0],
+            cumulative("0", "add"),
+            [3.0, 2.0, 6.0, 7.0],
+        ),
+        (
+            "f32",
+            [0.5, 1.0, 2.0, 4.0],
+            cumulative("0.000000e+00", "add"),
+            [0.5, 1.5, 3.5, 7.5],
+        ),
+        (
+            "i32",
+            [3.0, 1.0, 4.0, 1.0],
+            cumulative("-2147483648", "maximum"),
+            [3.0, 3.0, 4.0, 4.0],
+        ),
+        (
+            "ui32",
+            [1.0, 3e9, 2.0, 5.0],
+            cumulative("0", "maximum"),
+            [1.0, 3e9, 3e9, 3e9],
+        ),
+    ];
+    for (ty, input, attrs, expected) in cases {
+        let mlir = reduce_window_mlir(4, 4, ty, attrs);
+        let size = if ty.ends_with("64") { 8 } else { 4 };
+        for run in [run_mlir, run_mlir_mem] {
+            let out = run(&mlir, &[&typed_buf(ty, &input)], &[4 * size]);
+            assert_eq!(typed_values(ty, &out[0]), expected, "{ty}");
         }
     }
 }
@@ -5532,35 +5600,45 @@ module @module {
 /// The gradient of a 2x2 max pool; the tied 9s in the last window pick the first.
 #[test]
 fn test_max_pool_grad() {
-    let mlir = r#"
-module @module {
-  func.func public @main(%arg0: tensor<4x4xf64>, %arg1: tensor<2x2xf64>) -> tensor<4x4xf64> {
-    %cst = stablehlo.constant dense<0.000000e+00> : tensor<f64>
-    %0 = "stablehlo.select_and_scatter"(%arg0, %arg1, %cst) <{padding = dense<0> : tensor<2x2xi64>, window_dimensions = array<i64: 2, 2>, window_strides = array<i64: 2, 2>}> ({
-    ^bb0(%arg2: tensor<f64>, %arg3: tensor<f64>):
-      %1 = stablehlo.compare GE, %arg2, %arg3, FLOAT : (tensor<f64>, tensor<f64>) -> tensor<i1>
-      stablehlo.return %1 : tensor<i1>
-    }, {
-    ^bb0(%arg2: tensor<f64>, %arg3: tensor<f64>):
-      %1 = stablehlo.add %arg2, %arg3 : tensor<f64>
-      stablehlo.return %1 : tensor<f64>
-    }) : (tensor<4x4xf64>, tensor<2x2xf64>, tensor<f64>) -> tensor<4x4xf64>
-    return %0 : tensor<4x4xf64>
-  }
-}
-"#;
-    let x = f64_buf(&[
+    let x = [
         1.0, 5.0, 2.0, 2.0, 3.0, 3.0, 0.0, 7.0, 8.0, 1.0, 6.0, 6.0, 2.0, 4.0, 9.0, 9.0,
-    ]);
-    let grad = f64_buf(&[10.0, 20.0, 30.0, 40.0]);
-    for run in [run_mlir, run_mlir_mem] {
-        let out = run(mlir, &[&x, &grad], &[128]);
-        assert_eq!(
-            read_f64s(&out[0])[..],
-            [
-                0.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 20.0, 30.0, 0.0, 0.0, 0.0, 0.0, 0.0, 40.0, 0.0
-            ]
+    ];
+    let grad = [10.0, 20.0, 30.0, 40.0];
+    let want = [
+        0.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0, 20.0, 30.0, 0.0, 0.0, 0.0, 0.0, 0.0, 40.0, 0.0,
+    ];
+    for (ty, zero, cmp, size) in [
+        ("f64", "0.000000e+00", "FLOAT", 8),
+        ("f32", "0.000000e+00", "FLOAT", 4),
+        ("i32", "0", "SIGNED", 4),
+    ] {
+        let mlir = format!(
+            r#"
+module @module {{
+  func.func public @main(%arg0: tensor<4x4x{ty}>, %arg1: tensor<2x2x{ty}>) -> tensor<4x4x{ty}> {{
+    %cst = stablehlo.constant dense<{zero}> : tensor<{ty}>
+    %0 = "stablehlo.select_and_scatter"(%arg0, %arg1, %cst) <{{padding = dense<0> : tensor<2x2xi64>, window_dimensions = array<i64: 2, 2>, window_strides = array<i64: 2, 2>}}> ({{
+    ^bb0(%arg2: tensor<{ty}>, %arg3: tensor<{ty}>):
+      %1 = stablehlo.compare GE, %arg2, %arg3, {cmp} : (tensor<{ty}>, tensor<{ty}>) -> tensor<i1>
+      stablehlo.return %1 : tensor<i1>
+    }}, {{
+    ^bb0(%arg2: tensor<{ty}>, %arg3: tensor<{ty}>):
+      %1 = stablehlo.add %arg2, %arg3 : tensor<{ty}>
+      stablehlo.return %1 : tensor<{ty}>
+    }}) : (tensor<4x4x{ty}>, tensor<2x2x{ty}>, tensor<{ty}>) -> tensor<4x4x{ty}>
+    return %0 : tensor<4x4x{ty}>
+  }}
+}}
+"#
         );
+        for run in [run_mlir, run_mlir_mem] {
+            let out = run(
+                &mlir,
+                &[&typed_buf(ty, &x), &typed_buf(ty, &grad)],
+                &[16 * size],
+            );
+            assert_eq!(typed_values(ty, &out[0]), want, "{ty}");
+        }
     }
 }
 
@@ -5569,6 +5647,7 @@ fn test_reduce_window_rejects_mismatched_window() {
     let module = cranelift_mlir::parser::parse_module(&reduce_window_mlir(
         6,
         6,
+        "f64",
         ["0.000000e+00", "add", "2", "2", "dense<0>"],
     ))
     .unwrap();

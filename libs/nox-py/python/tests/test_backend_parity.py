@@ -297,12 +297,12 @@ def window(x, init, op, stride, pad):
     return jnp.concatenate([jax.lax.reduce_window(x, init, op, (2,), (stride,), "VALID"), pad])
 
 
-def sas(x, k):
+def sas(x, k, dtype=jnp.float64):
     def pooled(u):
         peaks = jax.lax.reduce_window(u, -jnp.inf, jax.lax.max, (2,), (1,), "VALID")
-        return jnp.sum(peaks * jnp.array([1.0, 2.0, 3.0]))
+        return jnp.sum(peaks * jnp.array([1.0, 2.0, 3.0], dtype))
 
-    return jax.grad(pooled)(x), Z
+    return jax.grad(pooled)(x.astype(dtype)).astype(jnp.float64), Z
 
 
 def f32_reduced(x, reduce):
@@ -366,6 +366,10 @@ GIST_CASES = {
     "loop_dot_sum": loop_dot_sum,
     "nan_max_min": nan_max_min,
     "nan_reductions": nan_reductions,
+    "cumsum_i64": lambda x, k: (x, jnp.cumsum(k)),
+    "cumsum_f32": lambda x, k: (jnp.cumsum(x.astype(jnp.float32)).astype(jnp.float64), Z),
+    "cummax_i32": lambda x, k: (x, jax.lax.cummax(k.astype(jnp.int32))),
+    "sas_f32": lambda x, k: sas(x, k, jnp.float32),
 }
 
 
