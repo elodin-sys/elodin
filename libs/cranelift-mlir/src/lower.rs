@@ -4050,6 +4050,17 @@ fn lower_instruction_mem(
             on_false,
         } => {
             let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
+            // A rank-0 predicate is a single byte that picks a whole operand.
+            if type_map.get(cond).is_some_and(|t| t.num_elements() == 1) {
+                let c = builder
+                    .ins()
+                    .load(types::I8, MemFlags::trusted(), get(cond)?, 0);
+                let src = builder.ins().select(c, get(on_true)?, get(on_false)?);
+                let memcpy_ref = jit_module.declare_func_in_func(trt_ids.memcpy, builder.func);
+                let nb = builder.ins().iconst(types::I64, (n * elem_sz) as i64);
+                builder.ins().call(memcpy_ref, &[dst, src, nb]);
+                return Ok(vec![LaneRepr::scalar(vec![dst])]);
+            }
             // Inline F64 select: per-lane `select(cond != 0, on_true,
             // on_false)`. No SIMD benefit (cond is u8, mask
             // materialization costs too much), but the tight scalar

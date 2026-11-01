@@ -1894,6 +1894,37 @@ module @module {
     assert_f64s_close(&read_f64s(&out[0]), &[10.0, 200.0, 30.0]);
 }
 
+/// `jnp.where(scalar_bool, a, b)`: the one-byte predicate picks a whole operand on both ABIs.
+#[test]
+fn test_select_scalar_predicate() {
+    let mlir_f64 = r#"
+module @module {
+  func.func public @main(%arg0: tensor<i1>, %arg1: tensor<8xf64>, %arg2: tensor<8xf64>) -> tensor<8xf64> {
+    %0 = stablehlo.select %arg0, %arg1, %arg2 : tensor<i1>, tensor<8xf64>
+    return %0 : tensor<8xf64>
+  }
+}
+"#;
+    let mlir_i64 = mlir_f64.replace("f64", "i64");
+    let a: Vec<i64> = (1..=8).collect();
+    let b: Vec<i64> = a.iter().map(|v| -v).collect();
+    let to_f64 = |v: &[i64]| v.iter().map(|&x| x as f64).collect::<Vec<_>>();
+    let runs: [fn(&str, &[&[u8]], &[usize]) -> Vec<Vec<u8>>; 2] = [run_mlir, run_mlir_mem];
+    for pred in [1u8, 0] {
+        let want = if pred == 1 { &a } else { &b };
+        for run in runs {
+            let out = run(
+                mlir_f64,
+                &[&[pred], &f64_buf(&to_f64(&a)), &f64_buf(&to_f64(&b))],
+                &[64],
+            );
+            assert_eq!(read_f64s(&out[0]).as_ref(), to_f64(want).as_slice());
+            let out = run(&mlir_i64, &[&[pred], &i64_buf(&a), &i64_buf(&b)], &[64]);
+            assert_eq!(&read_i64s(&out[0]), want);
+        }
+    }
+}
+
 #[test]
 fn test_convert_i64_to_f64_mem() {
     let mlir = r#"
