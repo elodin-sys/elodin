@@ -315,8 +315,7 @@ Pointer-ABI lowerings never read a buffer at another element width. An op withou
 runtime kernel for its element type (f32, unsigned and i1 for most elementwise ops,
 compare, clamp and sign) loads its lanes, lowers through the scalar-ABI code, and stores
 the result (`lower_mem_lanes`, chosen by `mem_has_kernel`). Ops whose kernels exist for
-f64 only (`map`, `reduce_window`, `select_and_scatter`, convolution, FFT, ...) fail to
-compile for other types.
+f64 only (`map`, convolution, FFT, ...) fail to compile for other types.
 
 Float `reduce` and f64 `dot_general` take the scalar-ABI route whenever their tensors fit
 the scalar ABI, although kernels exist: the kernels sum in a different order, and the
@@ -844,8 +843,8 @@ lane ([Pointer-ABI element types](#pointer-abi-element-types)).
 | stablehlo.sqrt | yes | yes | yes | inline Cranelift instruction |
 | stablehlo.rsqrt | yes | yes | yes | 1/sqrt(x) |
 | stablehlo.power | yes | yes | yes | via libm pow |
-| stablehlo.maximum | yes | yes | yes (f64/i64/i32) | |
-| stablehlo.minimum | yes | yes | yes (f64/i64/i32) | |
+| stablehlo.maximum | yes | yes | yes (f64/i64/i32) | floats as in XLA: NaN propagates, +0 is above -0 |
+| stablehlo.minimum | yes | yes | yes (f64/i64/i32) | floats as in XLA: NaN propagates, -0 is below +0 |
 | stablehlo.abs | yes | yes | yes (f64/i64/i32) | |
 | stablehlo.floor | yes | yes | yes | |
 | stablehlo.ceil | yes | yes | yes | |
@@ -939,8 +938,8 @@ lane ([Pointer-ABI element types](#pointer-abi-element-types)).
 | stablehlo.case | yes | multi-branch dispatch |
 | stablehlo.sort | yes | stable, any element types and axis, lexicographic over the comparator's keys, ascending/descending; NaN last and -0 equal to 0, as JAX's comparators order them |
 | stablehlo.map | yes | arbitrary compiled region body, variadic operands |
-| stablehlo.reduce_window | yes | f64 on both ABIs, compiled reducer, full window iteration with dilations/padding; window attributes checked against the shapes |
-| stablehlo.select_and_scatter | yes | f64 on both ABIs, compiled select + scatter regions; `select(current, candidate)` true keeps the current element, as in XLA |
+| stablehlo.reduce_window | yes | f64, f32 and integers on both ABIs, compiled reducer, full window iteration with dilations/padding; window attributes checked against the shapes |
+| stablehlo.select_and_scatter | yes | f64, f32 and integers on both ABIs, compiled select + scatter regions; `select(current, candidate)` true keeps the current element, as in XLA |
 | stablehlo.convolution | yes | N-D, dimension_numbers, strides, padding, dilations, grouping |
 | stablehlo.real_dynamic_slice | yes | runtime tensor bounds for start/limit/strides |
 | stablehlo.batch_norm_inference | yes | feature-axis broadcast, epsilon/feature_index attrs |
@@ -1139,9 +1138,10 @@ simulations use `dsyevd` directly; implementable via faer if ever surfaced.
 
 **Type permutations.** Pointer-ABI ops lower lane by lane for types without a kernel, so
 a type is missing on the pointer ABI only where the scalar ABI lacks it too: `power` on
-integers. `map`, `reduce_window`, `select_and_scatter`, convolution,
-`batch_norm_inference`, Cholesky, triangular solve, FFT and `rng` stay f64-only, and
-argmin/argmax over more than one dimension (which JAX does not emit) fails to compile.
+integers, which JAX does not emit (`jnp.power` on integers multiplies). `map`,
+convolution, `batch_norm_inference`, Cholesky, triangular solve, FFT and `rng` stay
+f64-only, and argmin/argmax over more than one dimension (which JAX does not emit) fails
+to compile.
 
 ### Structural
 
