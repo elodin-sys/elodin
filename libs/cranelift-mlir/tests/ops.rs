@@ -1909,10 +1909,9 @@ module @module {
     let a: Vec<i64> = (1..=8).collect();
     let b: Vec<i64> = a.iter().map(|v| -v).collect();
     let to_f64 = |v: &[i64]| v.iter().map(|&x| x as f64).collect::<Vec<_>>();
-    let runs: [fn(&str, &[&[u8]], &[usize]) -> Vec<Vec<u8>>; 2] = [run_mlir, run_mlir_mem];
     for pred in [1u8, 0] {
         let want = if pred == 1 { &a } else { &b };
-        for run in runs {
+        for run in [run_mlir, run_mlir_mem] {
             let out = run(
                 mlir_f64,
                 &[&[pred], &f64_buf(&to_f64(&a)), &f64_buf(&to_f64(&b))],
@@ -2129,25 +2128,7 @@ fn reduce_reference(
 
 #[test]
 fn test_reduce_any_axes() {
-    let add: fn(f64, f64) -> f64 = |a, b| a + b;
-    let cases: [(&[usize], &[usize], &str, &str, f64, fn(f64, f64) -> f64); 8] = [
-        (&[2, 3, 4], &[0], "add", "0.0", 0.0, add),
-        (&[2, 3, 4], &[1], "add", "0.0", 0.0, add),
-        (&[2, 3, 4], &[2], "add", "0.0", 0.0, add),
-        (&[2, 3, 4], &[0, 2], "add", "0.0", 0.0, add),
-        (&[2, 3, 4], &[0, 1, 2], "add", "0.0", 0.0, add),
-        (&[4, 3], &[0], "add", "0.0", 0.0, add),
-        (&[6, 6, 6], &[1], "add", "0.0", 0.0, add),
-        (
-            &[2, 3, 4],
-            &[1],
-            "maximum",
-            "0xFFF0000000000000",
-            f64::NEG_INFINITY,
-            f64::max,
-        ),
-    ];
-    for (shape, dims, op, init_text, init, f) in cases {
+    let check = |shape: &[usize], dims: &[usize], op, init_text, init, f: fn(f64, f64) -> f64| {
         let n: usize = shape.iter().product();
         let x: Vec<f64> = (0..n)
             .map(|i| ((i * 7) % 11) as f64 + i as f64 / 64.0)
@@ -2158,7 +2139,24 @@ fn test_reduce_any_axes() {
             let out = run(&mlir, &[&f64_buf(&x)], &[want.len() * 8]);
             assert_f64s_close(&read_f64s(&out[0]), &want);
         }
-    }
+    };
+    let add: fn(f64, f64) -> f64 = |a, b| a + b;
+    check(&[2, 3, 4], &[0], "add", "0.0", 0.0, add);
+    check(&[2, 3, 4], &[1], "add", "0.0", 0.0, add);
+    check(&[2, 3, 4], &[2], "add", "0.0", 0.0, add);
+    check(&[2, 3, 4], &[0, 2], "add", "0.0", 0.0, add);
+    check(&[2, 3, 4], &[0, 1, 2], "add", "0.0", 0.0, add);
+    check(&[4, 3], &[0], "add", "0.0", 0.0, add);
+    check(&[6, 6, 6], &[1], "add", "0.0", 0.0, add);
+    let neg_inf = "0xFFF0000000000000";
+    check(
+        &[2, 3, 4],
+        &[1],
+        "maximum",
+        neg_inf,
+        f64::NEG_INFINITY,
+        f64::max,
+    );
 }
 
 #[test]
@@ -2166,17 +2164,7 @@ fn test_reduce_any_axes_i64() {
     let shape = [2, 3, 4];
     let x: Vec<i64> = (0..24).map(|i| (i * 7) % 11 - 5).collect();
     let xf: Vec<f64> = x.iter().map(|&v| v as f64).collect();
-    let cases: [(&[usize], &str, &str, f64, fn(f64, f64) -> f64); 2] = [
-        (&[0], "add", "0", 0.0, |a, b| a + b),
-        (
-            &[1],
-            "minimum",
-            "9223372036854775807",
-            f64::INFINITY,
-            f64::min,
-        ),
-    ];
-    for (dims, op, init_text, init, f) in cases {
+    let check = |dims: &[usize], op, init_text, init, f: fn(f64, f64) -> f64| {
         let want: Vec<i64> = reduce_reference(&shape, &xf, dims, init, f)
             .iter()
             .map(|&v| v as i64)
@@ -2186,18 +2174,22 @@ fn test_reduce_any_axes_i64() {
             let out = run(&mlir, &[&i64_buf(&x)], &[want.len() * 8]);
             assert_eq!(read_i64s(&out[0]), want, "{op} over {dims:?}");
         }
-    }
+    };
+    check(&[0], "add", "0", 0.0, |a, b| a + b);
+    check(
+        &[1],
+        "minimum",
+        "9223372036854775807",
+        f64::INFINITY,
+        f64::min,
+    );
 }
 
 #[test]
 fn test_reduce_prod() {
     let x = f64_buf(&[1.5, -2.0, 0.5, 3.0, 4.0, -0.25]);
     let xi = i64_buf(&[2, -3, 5, 7, -1, 4]);
-    let cases: [(&[usize], &[usize], &[f64], &[i64]); 2] = [
-        (&[6], &[0], &[4.5], &[840]),
-        (&[2, 3], &[1], &[-1.5, -3.0], &[-30, -28]),
-    ];
-    for (shape, dims, want, want_i) in cases {
+    let check = |shape: &[usize], dims: &[usize], want: &[f64], want_i: &[i64]| {
         let f64_mlir = reduce_mlir(shape, dims, "multiply", "1.0", "f64");
         let i64_mlir = reduce_mlir(shape, dims, "multiply", "1", "i64");
         for run in [run_mlir, run_mlir_mem] {
@@ -2206,7 +2198,9 @@ fn test_reduce_prod() {
             let out = run(&i64_mlir, &[&xi], &[want_i.len() * 8]);
             assert_eq!(read_i64s(&out[0]), want_i);
         }
-    }
+    };
+    check(&[6], &[0], &[4.5], &[840]);
+    check(&[2, 3], &[1], &[-1.5, -3.0], &[-30, -28]);
 }
 
 /// `jnp.argmax` / `jnp.argmin` of a 5-vector as JAX emits it.
