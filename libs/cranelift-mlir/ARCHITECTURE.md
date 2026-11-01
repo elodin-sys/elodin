@@ -370,7 +370,7 @@ All on `ElementType::F64` with `num_elements >= 2`:
 | Family | Cranelift lowering |
 |---|---|
 | `add` / `subtract` / `multiply` / `divide` | `fadd` / `fsub` / `fmul` / `fdiv` on F64X2 per chunk |
-| `maximum` / `minimum` | `fcmp` (I64X2 mask) → `bitcast` to F64X2 → `bitselect`, NaN-propagation matches scalar path |
+| `maximum` / `minimum` | `fmax` / `fmin` on F64X2 per chunk (NaN propagates, as in XLA) |
 | `constant` (DenseScalar / DenseSplat) / `broadcast_in_dim` (1→N) | `splat.F64X2` |
 | `negate` / `sqrt` / `abs` / `floor` / `ceil` / `nearest` / `rsqrt` | polymorphic Cranelift IR instruction per chunk |
 | Rank-1·rank-1 dot / matvec / standard matmul with k ≥ 4 | `fmul.F64X2` + F64X2 accumulator + horizontal reduce |
@@ -1018,8 +1018,10 @@ improvement ideas live in [Opportunities](#opportunities).
 ## Opportunities
 
 Coverage of every StableHLO op JAX emits for single-device CPU execution
-is complete and the backend is validated against both the internal
-regression suite and production customer simulations. Nothing below is
+is complete and the backend is validated against jax-cpu (the parity tests
+in `libs/nox-py/python/tests/test_backend_parity.py`, and a jax-cpu run of
+every regression example), the internal regression suite and production
+customer simulations. Nothing below is
 blocking any known workload; this section is a forward-looking menu of
 improvements with predicted benefit.
 
@@ -1065,6 +1067,10 @@ directly.
   marshaling between SSA and slot for the common case. Complements
   elision: elision keeps intermediates in SSA across a single chain;
   mixed-ABI keeps them in SSA for a value's full lifetime.
+  `lower_mem_lanes` is a per-op version of this today: ops without a
+  pointer-ABI kernel for their type, and float dots and sums small enough
+  for the scalar ABI, already run the scalar-ABI code inside pointer-ABI
+  functions, but load and store their lanes around every op.
 
 - **Adaptive SIMD lane width.** The packed-f64 lowering uses `F64X2`
   uniformly because it's the only native lane width on every deployment
@@ -1143,15 +1149,24 @@ convolution, `batch_norm_inference`, Cholesky, triangular solve, FFT and `rng` s
 f64-only, and argmin/argmax over more than one dimension (which JAX does not emit) fails
 to compile.
 
+**Empty tensors.** `TensorType::num_elements()` counts a tensor with a zero-size
+dimension as one element, so lowerings treat it as holding one value, and a reduce
+over one fails to compile. Supporting them means dropping that clamp and auditing
+every lowering.
+
 ### Structural
 
-- **Sort comparator region.** `stablehlo.sort` currently classifies a
-  comparator as ascending or descending by structural inspection. The general
-  path — compile the comparator via `compile_region_as_function` (the
-  mechanism already used by `map`, `reduce_window`, and `select_and_scatter`) —
-  has not been needed because the heuristic has not misclassified any known
-  JAX output. Upgrade is straightforward when a non-trivial comparator first
-  appears.
+- **Sort comparator region.** `stablehlo.sort` reads its comparator
+  structurally: the number of key operands, and descending if any compare is
+  `GT` or `GE`. The kernel then orders keys in total order with NaN last and
+  -0 equal to 0, reversed when descending. That matches every comparator JAX
+  emits (all ascending; `jnp.sort(..., descending=True)` reverses an
+  ascending sort), but not every comparator: a descending `FLOAT` compare
+  over NaN keys, for one, puts NaN first where the interpreter, which
+  evaluates the region, leaves it in place. The general path — compile the
+  comparator via `compile_region_as_function` (the mechanism already used
+  by `map`, `reduce_window`, and `select_and_scatter`) — is straightforward
+  when a non-trivial comparator first appears.
 
 - **LAPACK `custom_call` from pointer-ABI functions.** LAPACK lowering is
   wired on the scalar path only. In practice LAPACK buffers are always small

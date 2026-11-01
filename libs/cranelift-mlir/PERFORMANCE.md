@@ -491,8 +491,9 @@ inputs).
 ELODIN_BACKEND=cranelift bash scripts/ci/regress.sh --all
 ```
 
-Expected: all outputs bit-identical to CSV baseline, no `FAIL`
-lines. Full-system correctness gate.
+Expected: every example matches its CSV baseline, within
+`scripts/ci/baseline/tolerances.json`, once on Cranelift and once on
+jax-cpu; no `FAIL` lines. Full-system correctness gate.
 
 ### 8.7 Spot-check on a real sim
 
