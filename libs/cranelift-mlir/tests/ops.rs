@@ -2209,6 +2209,44 @@ fn test_reduce_prod() {
     }
 }
 
+/// `jnp.argmax` / `jnp.argmin` of a 5-vector as JAX emits it.
+fn argminmax_mlir(direction: &str, init: &str) -> String {
+    format!(
+        "module @module {{
+  func.func public @main(%arg0: tensor<5xf64>) -> tensor<i64> {{
+    %0 = stablehlo.iota dim = 0 : tensor<5xi64>
+    %cst = stablehlo.constant dense<{init}> : tensor<f64>
+    %c = stablehlo.constant dense<0> : tensor<i64>
+    %1:2 = stablehlo.reduce(%arg0 init: %cst), (%0 init: %c) across dimensions = [0] : (tensor<5xf64>, tensor<5xi64>, tensor<f64>, tensor<i64>) -> (tensor<f64>, tensor<i64>)
+     reducer(%arg1: tensor<f64>, %arg3: tensor<f64>) (%arg2: tensor<i64>, %arg4: tensor<i64>)  {{
+      %2 = stablehlo.compare {direction}, %arg1, %arg3, FLOAT : (tensor<f64>, tensor<f64>) -> tensor<i1>
+      %3 = stablehlo.compare NE, %arg1, %arg1, FLOAT : (tensor<f64>, tensor<f64>) -> tensor<i1>
+      %4 = stablehlo.or %2, %3 : tensor<i1>
+      %5 = stablehlo.compare EQ, %arg1, %arg3, FLOAT : (tensor<f64>, tensor<f64>) -> tensor<i1>
+      %6 = stablehlo.compare LT, %arg2, %arg4, SIGNED : (tensor<i64>, tensor<i64>) -> tensor<i1>
+      %7 = stablehlo.and %5, %6 : tensor<i1>
+      %8 = stablehlo.or %4, %7 : tensor<i1>
+      %9 = stablehlo.select %4, %arg1, %arg3 : tensor<i1>, tensor<f64>
+      %10 = stablehlo.select %8, %arg2, %arg4 : tensor<i1>, tensor<i64>
+      stablehlo.return %9, %10 : tensor<f64>, tensor<i64>
+    }}
+    return %1#1 : tensor<i64>
+  }}
+}}"
+    )
+}
+
+#[test]
+fn test_argmax_argmin() {
+    let x = f64_buf(&[0.5, 3.0, -1.0, 2.0, -0.5]);
+    let argmax = argminmax_mlir("GT", "0xFFF0000000000000");
+    let argmin = argminmax_mlir("LT", "0x7FF0000000000000");
+    for run in [run_mlir, run_mlir_mem] {
+        assert_eq!(read_i64s(&run(&argmax, &[&x], &[8])[0]), [1]);
+        assert_eq!(read_i64s(&run(&argmin, &[&x], &[8])[0]), [2]);
+    }
+}
+
 #[test]
 fn test_reduce_unknown_reducer_is_a_parse_error() {
     let mlir = reduce_mlir(&[4], &[0], "xor", "0", "i64");

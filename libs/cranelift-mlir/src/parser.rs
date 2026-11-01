@@ -1094,9 +1094,12 @@ fn parse_reduce_op(
     }
 
     if let Some((indices, _init2)) = second_operand {
-        let has_lt = full_text.contains("LT,") || full_text.contains("LE,");
-        let has_gt = full_text.contains("GT,") || full_text.contains("GE,");
-        let is_min = !has_gt || has_lt;
+        // The first compare orders the values; a later LT breaks ties on the index.
+        let first_cmp = full_text
+            .split("stablehlo.compare")
+            .nth(1)
+            .unwrap_or_default();
+        let is_min = matches!(first_cmp.split_whitespace().next(), Some("LT," | "LE,"));
         let mut types = Vec::new();
         if let Some(arrow) = first_line.rfind("-> ") {
             let after = strip_outer_parens(first_line[arrow + 3..].trim());
