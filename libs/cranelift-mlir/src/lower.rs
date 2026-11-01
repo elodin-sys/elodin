@@ -1525,6 +1525,7 @@ define_trt! {
     gather_nd_generic, "__trt_gather_nd_generic", tensor_rt::tensor_gather_nd_generic, [ptr_type(), ptr_type(), types::I64, ptr_type(), types::I64, types::I64, ptr_type(), types::I64, ptr_type(), ptr_type(), types::I64, types::I64];
     scatter,   "__trt_scatter",   tensor_rt::tensor_scatter,   [ptr_type(), ptr_type(), ptr_type(), ptr_type(), types::I64];
     matmul_f64,    "__trt_matmul_f64",    tensor_rt::tensor_matmul_f64,    [ptr_type(), ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    dot_general,   "__trt_dot_general",   tensor_rt::tensor_dot_general,   [ptr_type(), ptr_type(), ptr_type(), ptr_type()];
     // byte-generic layout ops with elem_sz
     broadcast_nd_generic,         "__trt_bcast_nd_generic",     tensor_rt::tensor_broadcast_nd_generic,         [ptr_type(), ptr_type(), types::I64, types::I64, ptr_type(), types::I64, ptr_type(), types::I64, ptr_type(), types::I64];
     slice_generic,                "__trt_slice_generic",        tensor_rt::tensor_slice_generic,                [ptr_type(), ptr_type(), types::I64, types::I64, ptr_type(), types::I64, ptr_type(), ptr_type(), types::I64];
@@ -5318,91 +5319,60 @@ fn lower_instruction_mem(
         Instruction::DotGeneral { lhs, rhs, dims } => {
             let l_ty = type_map.get(lhs).cloned().unwrap_or(rt.clone());
             let r_ty = type_map.get(rhs).cloned().unwrap_or(rt.clone());
-
+            let et = rt.element_type;
+            if l_ty.element_type != et || r_ty.element_type != et || et == ElementType::I1 {
+                return Err(format!(
+                    "mem: dot_general of {:?} x {:?} -> {et:?} is not supported",
+                    l_ty.element_type, r_ty.element_type
+                ));
+            }
+            let (out_axes, k_axes) = dot_axes(&l_ty, &r_ty, dims);
+            let n_out: usize = out_axes.iter().map(|a| a.0).product();
+            let dst = alloc_slot_for_vid(builder, pool, result_vid, n_out * elem_sz);
+            let (lhs_ptr, rhs_ptr) = (get(lhs)?, get(rhs)?);
             let nb = dims.lhs_batch.len();
             let leading_batch: Vec<i64> = (0..nb as i64).collect();
-            let lhs_contract_last = dims.lhs_contracting.len() == 1
-                && dims.lhs_contracting[0] == l_ty.rank() as i64 - 1;
-            let rhs_contract_after_batch =
-                dims.rhs_contracting.len() == 1 && dims.rhs_contracting[0] == nb as i64;
-            if nb > 0
+            // `[batch.., m.., k] x [batch.., k, n..]` is one row-major matmul per batch.
+            if et == ElementType::F64
                 && dims.lhs_batch == leading_batch
                 && dims.rhs_batch == leading_batch
-                && !dims.lhs_contracting.is_empty()
-                && lhs_contract_last
-                && rhs_contract_after_batch
+                && dims.lhs_contracting == [l_ty.rank() as i64 - 1]
+                && dims.rhs_contracting == [nb as i64]
             {
-                let batch: usize = dims
-                    .lhs_batch
-                    .iter()
-                    .map(|&d| l_ty.shape[d as usize] as usize)
-                    .product();
-                let k = l_ty.shape[dims.lhs_contracting[0] as usize] as usize;
-                let m: usize = (0..l_ty.rank())
-                    .filter(|&d| {
-                        !dims.lhs_batch.contains(&(d as i64))
-                            && !dims.lhs_contracting.contains(&(d as i64))
-                    })
-                    .map(|d| l_ty.shape[d] as usize)
-                    .product();
-                let nn: usize = (0..r_ty.rank())
-                    .filter(|&d| {
-                        !dims.rhs_batch.contains(&(d as i64))
-                            && !dims.rhs_contracting.contains(&(d as i64))
-                    })
-                    .map(|d| r_ty.shape[d] as usize)
-                    .product();
-                let out_size = batch * m * nn * elem_sz;
-                let dst = alloc_slot_for_vid(builder, pool, result_vid, out_size);
+                let size = |shape: &[i64]| shape.iter().product::<i64>() as usize;
+                let batch = size(&l_ty.shape[..nb]);
+                let k = l_ty.shape[l_ty.rank() - 1] as usize;
+                let m = size(&l_ty.shape[nb..l_ty.rank() - 1]);
+                let nn = size(&r_ty.shape[nb + 1..]);
                 let func_ref = jit_module.declare_func_in_func(trt_ids.matmul_f64, builder.func);
-                let m_v = builder.ins().iconst(types::I64, m as i64);
-                let k_v = builder.ins().iconst(types::I64, k as i64);
-                let n_v = builder.ins().iconst(types::I64, nn as i64);
-                let lhs_ptr = get(lhs)?;
-                let rhs_ptr = get(rhs)?;
+                let [m_v, k_v, n_v] =
+                    [m, k, nn].map(|v| builder.ins().iconst(types::I64, v as i64));
                 for b in 0..batch {
-                    let lp = builder
-                        .ins()
-                        .iadd_imm(lhs_ptr, (b * m * k * elem_sz) as i64);
-                    let rp = builder
-                        .ins()
-                        .iadd_imm(rhs_ptr, (b * k * nn * elem_sz) as i64);
-                    let dp = builder.ins().iadd_imm(dst, (b * m * nn * elem_sz) as i64);
+                    let lp = builder.ins().iadd_imm(lhs_ptr, (b * m * k * 8) as i64);
+                    let rp = builder.ins().iadd_imm(rhs_ptr, (b * k * nn * 8) as i64);
+                    let dp = builder.ins().iadd_imm(dst, (b * m * nn * 8) as i64);
                     builder.ins().call(func_ref, &[dp, lp, rp, m_v, k_v, n_v]);
                 }
-                return Ok(vec![LaneRepr::scalar(vec![dst])]);
-            }
-
-            let (m, k, nn) = if l_ty.rank() == 1 && r_ty.rank() == 1 {
-                let k = l_ty.shape[0] as usize;
-                (1usize, k, 1usize)
-            } else if l_ty.rank() >= 2 && r_ty.rank() >= 2 {
-                let m = l_ty.shape[0] as usize;
-                let nn = r_ty.shape[r_ty.rank() - 1] as usize;
-                let k = if !dims.lhs_contracting.is_empty() {
-                    l_ty.shape[dims.lhs_contracting[0] as usize] as usize
-                } else {
-                    1
-                };
-                (m, k, nn)
-            } else if l_ty.rank() == 1 && r_ty.rank() >= 2 {
-                let k = l_ty.shape[0] as usize;
-                let nn = r_ty.shape[r_ty.rank() - 1] as usize;
-                (1usize, k, nn)
             } else {
-                let m = l_ty.shape[0] as usize;
-                let k = r_ty.shape[0] as usize;
-                (m, k, 1usize)
-            };
-            let out_size = m * nn * elem_sz;
-            let dst = alloc_slot_for_vid(builder, pool, result_vid, out_size);
-            let func_ref = jit_module.declare_func_in_func(trt_ids.matmul_f64, builder.func);
-            let m_v = builder.ins().iconst(types::I64, m as i64);
-            let k_v = builder.ins().iconst(types::I64, k as i64);
-            let n_v = builder.ins().iconst(types::I64, nn as i64);
-            builder
-                .ins()
-                .call(func_ref, &[dst, get(lhs)?, get(rhs)?, m_v, k_v, n_v]);
+                let mut meta = vec![
+                    value_code(et),
+                    l_ty.num_elements() as i64,
+                    r_ty.num_elements() as i64,
+                    out_axes.len() as i64,
+                    k_axes.len() as i64,
+                ];
+                meta.extend(
+                    out_axes
+                        .iter()
+                        .chain(&k_axes)
+                        .flat_map(|&(size, l, r)| [size as i64, l as i64, r as i64]),
+                );
+                let meta_ptr = store_i64_array(builder, &meta);
+                let func_ref = jit_module.declare_func_in_func(trt_ids.dot_general, builder.func);
+                builder
+                    .ins()
+                    .call(func_ref, &[dst, lhs_ptr, rhs_ptr, meta_ptr]);
+            }
             Ok(vec![LaneRepr::scalar(vec![dst])])
         }
 
@@ -9779,14 +9749,11 @@ fn slice_tensor(vals: &[Value], src_shape: &[i64], starts: &[i64], limits: &[i64
 // Dot product / matrix operations
 // ---------------------------------------------------------------------------
 
-fn lower_dot_general(
-    builder: &mut FunctionBuilder,
-    l: &[Value],
-    r: &[Value],
-    l_ty: &TensorType,
-    r_ty: &TensorType,
-    dims: &DotDims,
-) -> TensorVals {
+/// A `dot_general` axis as `(size, lhs stride, rhs stride)`.
+type DotAxis = (usize, usize, usize);
+
+/// The output axes (batch, lhs free, then rhs free) and the contracting axes.
+fn dot_axes(l_ty: &TensorType, r_ty: &TensorType, dims: &DotDims) -> (Vec<DotAxis>, Vec<DotAxis>) {
     let strides = |shape: &[i64]| {
         let mut st = vec![1usize; shape.len()];
         for d in (1..shape.len()).rev() {
@@ -9813,7 +9780,6 @@ fn lower_dot_general(
             })
             .collect()
     };
-    // Each axis is (size, lhs stride, rhs stride); output axes are batch, lhs free, rhs free.
     let mut out_axes = paired(&dims.lhs_batch, &dims.rhs_batch);
     for d in free(l_ty.rank(), &dims.lhs_batch, &dims.lhs_contracting) {
         out_axes.push((l_ty.shape[d] as usize, ls[d], 0));
@@ -9821,8 +9787,22 @@ fn lower_dot_general(
     for d in free(r_ty.rank(), &dims.rhs_batch, &dims.rhs_contracting) {
         out_axes.push((r_ty.shape[d] as usize, 0, rs[d]));
     }
-    let k_axes = paired(&dims.lhs_contracting, &dims.rhs_contracting);
-    let offsets = |axes: &[(usize, usize, usize)], mut flat: usize| {
+    (
+        out_axes,
+        paired(&dims.lhs_contracting, &dims.rhs_contracting),
+    )
+}
+
+fn lower_dot_general(
+    builder: &mut FunctionBuilder,
+    l: &[Value],
+    r: &[Value],
+    l_ty: &TensorType,
+    r_ty: &TensorType,
+    dims: &DotDims,
+) -> TensorVals {
+    let (out_axes, k_axes) = dot_axes(l_ty, r_ty, dims);
+    let offsets = |axes: &[DotAxis], mut flat: usize| {
         let (mut lo, mut ro) = (0, 0);
         for &(size, l_st, r_st) in axes.iter().rev() {
             lo += flat % size * l_st;

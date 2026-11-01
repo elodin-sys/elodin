@@ -232,3 +232,11 @@ def test_cranelift_matches_jax_cpu_batched(fn):
     np.testing.assert_allclose(
         history(fn, "cranelift", entities=3), expected, rtol=1e-12, atol=1e-12
     )
+
+
+def test_matvec_on_the_pointer_abi():
+    # Five entities make the batched matrix 80 elements, past the scalar ABI's 64.
+    expected = history(matvec, "jax-cpu", entities=5)
+    np.testing.assert_allclose(
+        history(matvec, "cranelift", entities=5), expected, rtol=1e-12, atol=1e-12
+    )

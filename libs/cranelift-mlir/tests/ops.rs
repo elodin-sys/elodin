@@ -3389,7 +3389,7 @@ module @module {
 }
 
 /// Batched matmuls, a batch of matrices times one vector, `a.T @ b`, and one matrix
-/// times a batch of vectors, on the scalar ABI.
+/// times a batch of vectors, on both ABIs.
 #[test]
 fn test_dot_general_any_dims() {
     let check = |l: &str, r: &str, out: &str, dims: &str, a: &[f64], c: &[f64], want: &[f64]| {
@@ -3401,8 +3401,10 @@ fn test_dot_general_any_dims() {
   }}
 }}"
         );
-        let got = run_mlir(&mlir, &[&f64_buf(a), &f64_buf(c)], &[want.len() * 8]);
-        assert_f64s_close(&read_f64s(&got[0]), want);
+        for run in [run_mlir, run_mlir_mem] {
+            let got = run(&mlir, &[&f64_buf(a), &f64_buf(c)], &[want.len() * 8]);
+            assert_f64s_close(&read_f64s(&got[0]), want);
+        }
     };
     let vals = |n: usize| (0..n).map(|i| i as f64 * 0.5 - 1.0).collect::<Vec<_>>();
     let (a, c) = (vals(18), vals(18).into_iter().rev().collect::<Vec<_>>());
@@ -3443,6 +3445,21 @@ fn test_dot_general_any_dims() {
         &want,
     );
 
+    // 144 elements put `run_mlir` on the pointer ABI too.
+    let m = vals(144);
+    let want: Vec<f64> = (0..36)
+        .map(|o| (0..4).map(|k| m[o * 4 + k] * v[k]).sum())
+        .collect();
+    check(
+        "9x4x4",
+        "4",
+        "9x4",
+        "contracting_dims = [2] x [0]",
+        &m,
+        &v,
+        &want,
+    );
+
     let (m, n) = (vals(6), vals(12));
     let want: Vec<f64> = (0..8)
         .map(|o| (0..3).map(|k| m[k * 2 + o / 4] * n[k * 4 + o % 4]).sum())
@@ -3470,6 +3487,37 @@ fn test_dot_general_any_dims() {
         &v,
         &want,
     );
+}
+
+/// Matmuls in f32 and in wrapping 32-bit integer arithmetic.
+#[test]
+fn test_dot_general_types() {
+    let mlir = |ty: &str| {
+        format!(
+            "module @module {{
+  func.func public @main(%arg0: tensor<2x3x{ty}>, %arg1: tensor<3x2x{ty}>) -> tensor<2x2x{ty}> {{
+    %0 = stablehlo.dot_general %arg0, %arg1, contracting_dims = [1] x [0], precision = [DEFAULT, DEFAULT] : (tensor<2x3x{ty}>, tensor<3x2x{ty}>) -> tensor<2x2x{ty}>
+    return %0 : tensor<2x2x{ty}>
+  }}
+}}"
+        )
+    };
+    for run in [run_mlir, run_mlir_mem] {
+        let a = f32_buf(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let b = f32_buf(&[0.5, -1.0, 2.0, 0.0, -3.0, 1.0]);
+        let out = run(&mlir("f32"), &[&a, &b], &[16]);
+        assert_eq!(read_f32s(&out[0]), [-4.5, 2.0, -6.0, 2.0]);
+
+        let a = i32_buf(&[i32::MAX, 1, 0, -2, 3, 4]);
+        let b = i32_buf(&[2, 0, 1, -1, 5, 7]);
+        let out = run(&mlir("i32"), &[&a, &b], &[16]);
+        assert_eq!(read_i32s(&out[0]), [-1, -1, 19, 25]);
+
+        let a = u32_buf(&[u32::MAX, 1, 0, 2, 3, 4]);
+        let b = u32_buf(&[2, 0, 1, 1, 5, 7]);
+        let out = run(&mlir("ui32"), &[&a, &b], &[16]);
+        assert_eq!(read_u32s(&out[0]), [u32::MAX, 1, 27, 31]);
+    }
 }
 
 /// Bool compares, as `(i < n) & (...)` and integer `jnp.mod` emit.

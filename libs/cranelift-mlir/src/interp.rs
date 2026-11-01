@@ -142,9 +142,6 @@ pub enum InterpError {
     #[error("dot_general contracting size does not match")]
     DotContractingSize,
 
-    #[error("dot_general batch/contracting dims are not implemented in the interpreter")]
-    DotDimsNotImplemented,
-
     #[error("argmin/argmax over {0} dimensions is not implemented")]
     ArgminmaxDims(usize),
 
@@ -188,7 +185,6 @@ impl InterpError {
                 | Self::UnimplementedInstruction(_)
                 | Self::ErfInvNotImplemented
                 | Self::UnaryNotImplemented { .. }
-                | Self::DotDimsNotImplemented
                 | Self::ReduceNotImplemented { .. }
                 | Self::ArgminmaxDims(_)
         )
@@ -405,9 +401,7 @@ fn eval_instr(
             operands,
             dimension,
         } => concatenate(env, operands, *dimension, &result_ty)?,
-        Instruction::DotGeneral { lhs, rhs, dims } => {
-            dot_general(env, *lhs, *rhs, dims, &result_ty)?
-        }
+        Instruction::DotGeneral { lhs, rhs, dims } => dot_general(env, *lhs, *rhs, dims)?,
         Instruction::Reduce {
             operand,
             init,
@@ -1397,187 +1391,86 @@ fn concat_ty(a: &TensorType, b: &TensorType, dim: i64) -> Result<TensorType, Int
     })
 }
 
+/// Any batch, free and contracting axes, in the operands' own arithmetic (integers wrap).
+/// The output axes are batch, lhs free, then rhs free.
 fn dot_general(
     env: &HashMap<ValueId, Tensor>,
     lhs: ValueId,
     rhs: ValueId,
     dims: &crate::ir::DotDims,
-    result_ty: &TensorType,
 ) -> Result<Tensor, InterpError> {
     let a = lookup_ref(env, lhs)?;
     let b = lookup_ref(env, rhs)?;
-    expect_ty(a, ElementType::F64)?;
-    expect_ty(b, ElementType::F64)?;
-    let vals = dot_values(&a.ty, &a.bytes, &b.ty, &b.bytes, dims)?;
-    // A multiline `stablehlo.dot_general` can leave the result type as a
-    // scalar when the real shape is on the following line. Keep the declared
-    // type when it already has the right number of elements.
-    let out_ty =
-        if result_ty.element_type == ElementType::F64 && result_ty.num_elements() == vals.len() {
-            result_ty.clone()
-        } else if vals.len() == 1 {
-            TensorType::scalar(ElementType::F64)
-        } else {
-            TensorType {
-                shape: vec![vals.len() as i64],
-                element_type: ElementType::F64,
+    let et = a.ty.element_type;
+    expect_ty(b, et)?;
+    let (l_st, r_st) = (shape_strides(&a.ty.shape), shape_strides(&b.ty.shape));
+    // Axes as (size, lhs stride, rhs stride).
+    let paired = |l_axes: &[i64], r_axes: &[i64]| -> Option<Vec<(i64, usize, usize)>> {
+        if l_axes.len() != r_axes.len() {
+            return None;
+        }
+        l_axes
+            .iter()
+            .zip(r_axes)
+            .map(|(&l, &r)| {
+                let (l, r) = (usize::try_from(l).ok()?, usize::try_from(r).ok()?);
+                let size = *a.ty.shape.get(l)?;
+                (b.ty.shape.get(r) == Some(&size)).then(|| (size, l_st[l], r_st[r]))
+            })
+            .collect()
+    };
+    let mut out_axes =
+        paired(&dims.lhs_batch, &dims.rhs_batch).ok_or(InterpError::DotBatchShape)?;
+    let k_axes = paired(&dims.lhs_contracting, &dims.rhs_contracting)
+        .ok_or(InterpError::DotContractingSize)?;
+    let free = |rank: usize, batch: &[i64], contracting: &[i64]| -> Vec<usize> {
+        (0..rank)
+            .filter(|&d| !batch.contains(&(d as i64)) && !contracting.contains(&(d as i64)))
+            .collect()
+    };
+    for d in free(a.ty.rank(), &dims.lhs_batch, &dims.lhs_contracting) {
+        out_axes.push((a.ty.shape[d], l_st[d], 0));
+    }
+    for d in free(b.ty.rank(), &dims.rhs_batch, &dims.rhs_contracting) {
+        out_axes.push((b.ty.shape[d], 0, r_st[d]));
+    }
+    let shape = out_axes.iter().map(|axis| axis.0).collect();
+    let mut out = Tensor::alloc(TensorType {
+        shape,
+        element_type: et,
+    });
+    let offsets = |axes: &[(i64, usize, usize)], mut flat: usize| {
+        axes.iter().rev().fold((0, 0), |(l, r), &(size, ls, rs)| {
+            let c = flat % size as usize;
+            flat /= size as usize;
+            (l + c * ls, r + c * rs)
+        })
+    };
+    let n_k = k_axes.iter().map(|axis| axis.0).product::<i64>() as usize;
+    for o in 0..out.elem_count() {
+        let (lo, ro) = offsets(&out_axes, o);
+        let (mut real, mut single, mut int) = (0.0, 0.0f32, 0i64);
+        for k in 0..n_k {
+            let (lk, rk) = offsets(&k_axes, k);
+            let (x, y) = ((&a.bytes, lo + lk), (&b.bytes, ro + rk));
+            match et {
+                ElementType::F64 => real += read_f64(x.0, et, x.1) * read_f64(y.0, et, y.1),
+                ElementType::F32 => {
+                    single += read_f64(x.0, et, x.1) as f32 * read_f64(y.0, et, y.1) as f32;
+                }
+                _ => {
+                    let p = read_int(x.0, et, x.1).wrapping_mul(read_int(y.0, et, y.1));
+                    int = int.wrapping_add(p);
+                }
             }
-        };
-    let mut out = Tensor::alloc(out_ty);
-    for (i, v) in vals.iter().enumerate() {
-        write_f64(&mut out.bytes, ElementType::F64, i, *v);
+        }
+        match et {
+            ElementType::F64 => write_f64(&mut out.bytes, et, o, real),
+            ElementType::F32 => write_f64(&mut out.bytes, et, o, single as f64),
+            _ => write_int(&mut out.bytes, et, o, int),
+        }
     }
     Ok(out)
-}
-
-fn dot_values(
-    l_ty: &TensorType,
-    l: &[u8],
-    r_ty: &TensorType,
-    r: &[u8],
-    dims: &crate::ir::DotDims,
-) -> Result<Vec<f64>, InterpError> {
-    let at = |bytes: &[u8], i: usize| read_f64(bytes, ElementType::F64, i);
-    if dims.lhs_batch == [0] && dims.rhs_batch == [0] && l_ty.rank() == 2 && r_ty.rank() == 2 {
-        let batch = l_ty.shape[0] as usize;
-        let k = l_ty.shape[1] as usize;
-        if r_ty.shape[0] as usize != batch || r_ty.shape[1] as usize != k {
-            return Err(InterpError::DotBatchShape);
-        }
-        let mut out = Vec::with_capacity(batch);
-        for b in 0..batch {
-            let mut acc = 0.0;
-            for i in 0..k {
-                acc += at(l, b * k + i) * at(r, b * k + i);
-            }
-            out.push(acc);
-        }
-        return Ok(out);
-    }
-    if l_ty.is_scalar() && r_ty.is_scalar() {
-        return Ok(vec![at(l, 0) * at(r, 0)]);
-    }
-    // One in-range contracting axis. Empty or out-of-range dims fall through
-    // to the not-implemented error instead of guessing a layout.
-    let contract = |axes: &[i64], rank: usize| -> Option<usize> {
-        match axes {
-            [d] if *d >= 0 && (*d as usize) < rank => Some(*d as usize),
-            _ => None,
-        }
-    };
-    let unbatched = dims.lhs_batch.is_empty() && dims.rhs_batch.is_empty();
-    if unbatched
-        && l_ty.rank() == 1
-        && r_ty.rank() == 1
-        && contract(&dims.lhs_contracting, 1) == Some(0)
-        && contract(&dims.rhs_contracting, 1) == Some(0)
-    {
-        let n = l_ty.shape[0] as usize;
-        if r_ty.shape[0] as usize != n {
-            return Err(InterpError::DotContractingSize);
-        }
-        let mut acc = 0.0;
-        for i in 0..n {
-            acc += at(l, i) * at(r, i);
-        }
-        return Ok(vec![acc]);
-    }
-    if unbatched
-        && l_ty.rank() == 1
-        && r_ty.rank() == 2
-        && contract(&dims.lhs_contracting, 1) == Some(0)
-        && let Some(rhs_contract_dim) = contract(&dims.rhs_contracting, 2)
-    {
-        let k = l_ty.shape[0] as usize;
-        let rows = r_ty.shape[0] as usize;
-        let cols = r_ty.shape[1] as usize;
-        let (contracted, out_size) = if rhs_contract_dim == 1 {
-            (cols, rows)
-        } else {
-            (rows, cols)
-        };
-        if contracted != k {
-            return Err(InterpError::DotContractingSize);
-        }
-        let mut out = Vec::with_capacity(out_size);
-        for i in 0..out_size {
-            let mut acc = 0.0;
-            for j in 0..k {
-                let rv = if rhs_contract_dim == 1 {
-                    at(r, i * cols + j)
-                } else {
-                    at(r, j * cols + i)
-                };
-                acc += at(l, j) * rv;
-            }
-            out.push(acc);
-        }
-        return Ok(out);
-    }
-    if unbatched
-        && l_ty.rank() == 2
-        && r_ty.rank() == 1
-        && let (Some(lhs_contract_dim), Some(0)) = (
-            contract(&dims.lhs_contracting, 2),
-            contract(&dims.rhs_contracting, 1),
-        )
-    {
-        let rows = l_ty.shape[0] as usize;
-        let cols = l_ty.shape[1] as usize;
-        let k = r_ty.shape[0] as usize;
-        if lhs_contract_dim == 1 {
-            if cols != k {
-                return Err(InterpError::DotContractingSize);
-            }
-            let mut out = Vec::with_capacity(rows);
-            for row in 0..rows {
-                let mut acc = 0.0;
-                for col in 0..cols {
-                    acc += at(l, row * cols + col) * at(r, col);
-                }
-                out.push(acc);
-            }
-            return Ok(out);
-        }
-        if rows != k {
-            return Err(InterpError::DotContractingSize);
-        }
-        let mut out = Vec::with_capacity(cols);
-        for col in 0..cols {
-            let mut acc = 0.0;
-            for row in 0..rows {
-                acc += at(l, row * cols + col) * at(r, row);
-            }
-            out.push(acc);
-        }
-        return Ok(out);
-    }
-    if l_ty.rank() == 2
-        && r_ty.rank() == 2
-        && dims.lhs_batch.is_empty()
-        && dims.rhs_batch.is_empty()
-        && (dims.lhs_contracting.is_empty() || dims.lhs_contracting == [1])
-        && (dims.rhs_contracting.is_empty() || dims.rhs_contracting == [0])
-    {
-        let m = l_ty.shape[0] as usize;
-        let k = l_ty.shape[1] as usize;
-        let n_cols = r_ty.shape[1] as usize;
-        if r_ty.shape[0] as usize != k {
-            return Err(InterpError::DotContractingSize);
-        }
-        let mut out = vec![0.0; m * n_cols];
-        for row in 0..m {
-            for col in 0..n_cols {
-                let mut acc = 0.0;
-                for i in 0..k {
-                    acc += at(l, row * k + i) * at(r, i * n_cols + col);
-                }
-                out[row * n_cols + col] = acc;
-            }
-        }
-        return Ok(out);
-    }
-    Err(InterpError::DotDimsNotImplemented)
 }
 
 fn reduce(
@@ -2922,14 +2815,7 @@ mod tests {
             lhs_batch: vec![],
             rhs_batch: vec![],
         };
-        let out = dot_general(
-            &env,
-            ValueId(1),
-            ValueId(2),
-            &dims,
-            &ty(&[], ElementType::F64),
-        )
-        .unwrap();
+        let out = dot_general(&env, ValueId(1), ValueId(2), &dims).unwrap();
         assert_eq!(read_f64s(&out), vec![32.0]);
     }
 
@@ -2944,14 +2830,7 @@ mod tests {
             lhs_batch: vec![],
             rhs_batch: vec![],
         };
-        let out = dot_general(
-            &env,
-            ValueId(1),
-            ValueId(2),
-            &dims,
-            &ty(&[2], ElementType::F64),
-        )
-        .unwrap();
+        let out = dot_general(&env, ValueId(1), ValueId(2), &dims).unwrap();
         assert_eq!(read_f64s(&out), vec![6.0, 15.0]);
     }
 
@@ -2969,31 +2848,18 @@ mod tests {
         let mut env = HashMap::new();
         env.insert(ValueId(1), f64s(&[2], &[1.0, 2.0]));
         env.insert(ValueId(2), f64s(&[3], &[4.0, 5.0, 6.0]));
-        let err = dot_general(
-            &env,
-            ValueId(1),
-            ValueId(2),
-            &dot_dims(&[0], &[0]),
-            &ty(&[], ElementType::F64),
-        )
-        .unwrap_err();
+        let err = dot_general(&env, ValueId(1), ValueId(2), &dot_dims(&[0], &[0])).unwrap_err();
         assert!(matches!(err, InterpError::DotContractingSize), "{err}");
     }
 
     #[test]
-    fn vector_dot_without_contracting_dims_is_not_implemented() {
+    fn vector_dot_without_contracting_dims_is_an_outer_product() {
         let mut env = HashMap::new();
         env.insert(ValueId(1), f64s(&[2], &[1.0, 2.0]));
         env.insert(ValueId(2), f64s(&[2], &[3.0, 4.0]));
-        let err = dot_general(
-            &env,
-            ValueId(1),
-            ValueId(2),
-            &dot_dims(&[], &[]),
-            &ty(&[2, 2], ElementType::F64),
-        )
-        .unwrap_err();
-        assert!(matches!(err, InterpError::DotDimsNotImplemented), "{err}");
+        let out = dot_general(&env, ValueId(1), ValueId(2), &dot_dims(&[], &[])).unwrap();
+        assert_eq!(out.ty.shape, [2, 2]);
+        assert_eq!(read_f64s(&out), vec![3.0, 4.0, 6.0, 8.0]);
     }
 
     #[test]
@@ -3001,14 +2867,7 @@ mod tests {
         let mut env = HashMap::new();
         env.insert(ValueId(1), f64s(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]));
         env.insert(ValueId(2), f64s(&[2], &[10.0, 20.0]));
-        let out = dot_general(
-            &env,
-            ValueId(1),
-            ValueId(2),
-            &dot_dims(&[0], &[0]),
-            &ty(&[3], ElementType::F64),
-        )
-        .unwrap();
+        let out = dot_general(&env, ValueId(1), ValueId(2), &dot_dims(&[0], &[0])).unwrap();
         assert_eq!(read_f64s(&out), vec![90.0, 120.0, 150.0]);
     }
 
@@ -3017,14 +2876,7 @@ mod tests {
         let mut env = HashMap::new();
         env.insert(ValueId(1), f64s(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]));
         env.insert(ValueId(2), f64s(&[2], &[10.0, 20.0]));
-        let err = dot_general(
-            &env,
-            ValueId(1),
-            ValueId(2),
-            &dot_dims(&[1], &[0]),
-            &ty(&[2], ElementType::F64),
-        )
-        .unwrap_err();
+        let err = dot_general(&env, ValueId(1), ValueId(2), &dot_dims(&[1], &[0])).unwrap_err();
         assert!(matches!(err, InterpError::DotContractingSize), "{err}");
     }
 
@@ -3033,14 +2885,7 @@ mod tests {
         let mut env = HashMap::new();
         env.insert(ValueId(1), f64s(&[2], &[10.0, 20.0]));
         env.insert(ValueId(2), f64s(&[2, 3], &[4.0, 5.0, 6.0, 7.0, 8.0, 9.0]));
-        let out = dot_general(
-            &env,
-            ValueId(1),
-            ValueId(2),
-            &dot_dims(&[0], &[0]),
-            &ty(&[3], ElementType::F64),
-        )
-        .unwrap();
+        let out = dot_general(&env, ValueId(1), ValueId(2), &dot_dims(&[0], &[0])).unwrap();
         assert_eq!(read_f64s(&out), vec![180.0, 210.0, 240.0]);
     }
 
@@ -3049,15 +2894,8 @@ mod tests {
         let mut env = HashMap::new();
         env.insert(ValueId(1), f64s(&[2], &[1.0, 2.0]));
         env.insert(ValueId(2), f64s(&[2, 3], &[4.0, 5.0, 6.0, 7.0, 8.0, 9.0]));
-        let err = dot_general(
-            &env,
-            ValueId(1),
-            ValueId(2),
-            &dot_dims(&[0], &[]),
-            &ty(&[2], ElementType::F64),
-        )
-        .unwrap_err();
-        assert!(matches!(err, InterpError::DotDimsNotImplemented), "{err}");
+        let err = dot_general(&env, ValueId(1), ValueId(2), &dot_dims(&[0], &[])).unwrap_err();
+        assert!(matches!(err, InterpError::DotContractingSize), "{err}");
     }
 
     #[test]
@@ -3065,14 +2903,7 @@ mod tests {
         let mut env = HashMap::new();
         env.insert(ValueId(1), f64s(&[4], &[1.0, 2.0, 3.0, 4.0]));
         env.insert(ValueId(2), f64s(&[2, 3], &[4.0, 5.0, 6.0, 7.0, 8.0, 9.0]));
-        let err = dot_general(
-            &env,
-            ValueId(1),
-            ValueId(2),
-            &dot_dims(&[0], &[1]),
-            &ty(&[2], ElementType::F64),
-        )
-        .unwrap_err();
+        let err = dot_general(&env, ValueId(1), ValueId(2), &dot_dims(&[0], &[1])).unwrap_err();
         assert!(matches!(err, InterpError::DotContractingSize), "{err}");
     }
 

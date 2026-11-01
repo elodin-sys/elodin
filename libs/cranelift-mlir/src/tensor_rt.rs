@@ -1134,6 +1134,93 @@ pub extern "C" fn tensor_matmul_f64(
 }
 
 // ---------------------------------------------------------------------------
+// General dot: any batch, free and contracting axes
+// ---------------------------------------------------------------------------
+
+/// Multiply-accumulate in the element type's own arithmetic; integers wrap.
+trait DotValue: Copy + Default {
+    fn add_product(self, a: Self, b: Self) -> Self;
+}
+impl DotValue for f64 {
+    fn add_product(self, a: Self, b: Self) -> Self {
+        self + a * b
+    }
+}
+impl DotValue for f32 {
+    fn add_product(self, a: Self, b: Self) -> Self {
+        self + a * b
+    }
+}
+impl DotValue for i64 {
+    fn add_product(self, a: Self, b: Self) -> Self {
+        self.wrapping_add(a.wrapping_mul(b))
+    }
+}
+impl DotValue for i32 {
+    fn add_product(self, a: Self, b: Self) -> Self {
+        self.wrapping_add(a.wrapping_mul(b))
+    }
+}
+
+fn dot_general<T: DotValue>(
+    [dst, lhs, rhs]: [*mut u8; 3],
+    [n_lhs, n_rhs]: [usize; 2],
+    out_axes: &[[usize; 3]],
+    k_axes: &[[usize; 3]],
+) {
+    let n: usize = out_axes.iter().map(|a| a[0]).product();
+    let n_k: usize = k_axes.iter().map(|a| a[0]).product();
+    let lhs = unsafe { slice::from_raw_parts(lhs.cast::<T>(), n_lhs) };
+    let rhs = unsafe { slice::from_raw_parts(rhs.cast::<T>(), n_rhs) };
+    let dst = unsafe { slice::from_raw_parts_mut(dst.cast::<T>(), n) };
+    let offsets = |axes: &[[usize; 3]], mut flat: usize| {
+        let (mut l, mut r) = (0, 0);
+        for &[size, l_stride, r_stride] in axes.iter().rev() {
+            l += flat % size * l_stride;
+            r += flat % size * r_stride;
+            flat /= size;
+        }
+        (l, r)
+    };
+    for (o, d) in dst.iter_mut().enumerate() {
+        let (lo, ro) = offsets(out_axes, o);
+        *d = (0..n_k).fold(T::default(), |acc, k| {
+            let (lk, rk) = offsets(k_axes, k);
+            acc.add_product(lhs[lo + lk], rhs[ro + rk])
+        });
+    }
+}
+
+/// `dot_general` with each axis given as `[size, lhs stride, rhs stride]`, output axes
+/// (batch, lhs free, then rhs free) before contracting axes. `meta` is `[value_code,
+/// lhs_len, rhs_len, n_output_axes, n_contracting_axes, axes...]`, with the value codes of
+/// `tensor_argminmax`; unsigned values use the wrapping signed kernels.
+pub extern "C" fn tensor_dot_general(
+    dst: *mut u8,
+    lhs: *const u8,
+    rhs: *const u8,
+    meta: *const i64,
+) {
+    let head = unsafe { slice::from_raw_parts(meta, 5) };
+    let [code, n_lhs, n_rhs, n_out, n_k] = [0, 1, 2, 3, 4].map(|i| head[i] as usize);
+    let axes = unsafe { slice::from_raw_parts(meta.add(5), 3 * (n_out + n_k)) };
+    let axes: Vec<[usize; 3]> = axes
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|a| a.map(|v| v as usize))
+        .collect();
+    let (out_axes, k_axes) = axes.split_at(n_out);
+    let ptrs = [dst, lhs.cast_mut(), rhs.cast_mut()];
+    match code {
+        0 => dot_general::<f64>(ptrs, [n_lhs, n_rhs], out_axes, k_axes),
+        1 => dot_general::<f32>(ptrs, [n_lhs, n_rhs], out_axes, k_axes),
+        2 | 4 => dot_general::<i64>(ptrs, [n_lhs, n_rhs], out_axes, k_axes),
+        _ => dot_general::<i32>(ptrs, [n_lhs, n_rhs], out_axes, k_axes),
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Concatenate along a dimension
 // ---------------------------------------------------------------------------
 
