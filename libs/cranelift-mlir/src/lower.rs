@@ -1493,11 +1493,11 @@ define_trt! {
     neg_i32,  "__trt_neg_i32",  tensor_rt::tensor_neg_i32,  [ptr_type(), ptr_type(), types::I64];
     abs_i32,  "__trt_abs_i32",  tensor_rt::tensor_abs_i32,  [ptr_type(), ptr_type(), types::I64];
     // integer reduce
-    reduce_sum_i64, "__trt_reduce_sum_i64", tensor_rt::tensor_reduce_sum_i64, [ptr_type(), ptr_type(), types::I64, types::I64];
-    reduce_max_i64, "__trt_reduce_max_i64", tensor_rt::tensor_reduce_max_i64, [ptr_type(), ptr_type(), types::I64, types::I64];
-    reduce_min_i64, "__trt_reduce_min_i64", tensor_rt::tensor_reduce_min_i64, [ptr_type(), ptr_type(), types::I64, types::I64];
-    reduce_and_i1,  "__trt_reduce_and_i1", tensor_rt::tensor_reduce_and_i1, [ptr_type(), ptr_type(), types::I64, types::I64];
-    reduce_or_i1,   "__trt_reduce_or_i1",  tensor_rt::tensor_reduce_or_i1,  [ptr_type(), ptr_type(), types::I64, types::I64];
+    reduce_sum_i64, "__trt_reduce_sum_i64", tensor_rt::tensor_reduce_sum_i64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_max_i64, "__trt_reduce_max_i64", tensor_rt::tensor_reduce_max_i64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_min_i64, "__trt_reduce_min_i64", tensor_rt::tensor_reduce_min_i64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_and_i1,  "__trt_reduce_and_i1", tensor_rt::tensor_reduce_and_i1, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_or_i1,   "__trt_reduce_or_i1",  tensor_rt::tensor_reduce_or_i1,  [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
     argmin_f64, "__trt_argmin_f64", tensor_rt::tensor_argmin_f64, [ptr_type(), ptr_type(), ptr_type(), ptr_type(), types::I64, types::I64];
     argmax_f64, "__trt_argmax_f64", tensor_rt::tensor_argmax_f64, [ptr_type(), ptr_type(), ptr_type(), ptr_type(), types::I64, types::I64];
     // memory
@@ -1508,9 +1508,9 @@ define_trt! {
     concat_nd_f64,    "__trt_concat_nd_f64",    tensor_rt::tensor_concat_nd_f64,    [ptr_type(), types::I64, ptr_type(), types::I64, ptr_type(), types::I64, ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
     pad_f64,          "__trt_pad_f64",          tensor_rt::tensor_pad_f64,          [ptr_type(), ptr_type(), types::I64, types::I64, types::F64, ptr_type(), ptr_type(), types::I64, ptr_type()];
     // reduce
-    reduce_sum_f64, "__trt_reduce_sum_f64", tensor_rt::tensor_reduce_sum_f64, [ptr_type(), ptr_type(), types::I64, types::I64];
-    reduce_max_f64, "__trt_reduce_max_f64", tensor_rt::tensor_reduce_max_f64, [ptr_type(), ptr_type(), types::I64, types::I64];
-    reduce_min_f64, "__trt_reduce_min_f64", tensor_rt::tensor_reduce_min_f64, [ptr_type(), ptr_type(), types::I64, types::I64];
+    reduce_sum_f64, "__trt_reduce_sum_f64", tensor_rt::tensor_reduce_sum_f64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_max_f64, "__trt_reduce_max_f64", tensor_rt::tensor_reduce_max_f64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
+    reduce_min_f64, "__trt_reduce_min_f64", tensor_rt::tensor_reduce_min_f64, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
     // indexing
     // byte-generic gather/scatter/layout ops with elem_sz
     gather_generic,    "__trt_gather_generic",    tensor_rt::tensor_gather_generic,    [ptr_type(), ptr_type(), types::I64, ptr_type(), types::I64, types::I64, types::I64];
@@ -4749,7 +4749,7 @@ fn lower_instruction_mem(
             operand,
             init: _,
             op,
-            dimensions: _,
+            dimensions,
         } => {
             let src_ty = type_map.get(operand).cloned().unwrap_or(rt.clone());
             let use_int = !is_float(src_ty.element_type);
@@ -4763,16 +4763,33 @@ fn lower_instruction_mem(
                 (ReduceOp::And, _) => trt_ids.reduce_and_i1,
                 (ReduceOp::Or, _) => trt_ids.reduce_or_i1,
             };
-            let n_in = src_ty.num_elements();
-            let n_out = n;
-            let inner = n_in.checked_div(n_out).unwrap_or(n_in);
-            let dst = alloc_slot_for_vid(builder, pool, result_vid, n_out * elem_sz);
             let func_ref = jit_module.declare_func_in_func(func_id, builder.func);
-            let outer_v = builder.ins().iconst(types::I64, n_out as i64);
-            let inner_v = builder.ins().iconst(types::I64, inner as i64);
-            builder
-                .ins()
-                .call(func_ref, &[dst, get(operand)?, outer_v, inner_v]);
+            let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
+            let mut shape: Vec<usize> = src_ty.shape.iter().map(|&d| d as usize).collect();
+            let mut src = get(operand)?;
+            let runs = reduced_axis_runs(dimensions);
+            for (i, &(lo, hi)) in runs.iter().enumerate() {
+                let outer: usize = shape[..lo].iter().product();
+                let inner: usize = shape[lo..=hi].iter().product();
+                let after: usize = shape[hi + 1..].iter().product();
+                let out = if i + 1 == runs.len() {
+                    dst
+                } else {
+                    alloc_slot(builder, outer * after * elem_sz)
+                };
+                let [outer, inner, after] =
+                    [outer, inner, after].map(|v| builder.ins().iconst(types::I64, v as i64));
+                builder
+                    .ins()
+                    .call(func_ref, &[out, src, outer, inner, after]);
+                shape.drain(lo..=hi);
+                src = out;
+            }
+            if runs.is_empty() {
+                let memcpy_ref = jit_module.declare_func_in_func(trt_ids.memcpy, builder.func);
+                let nb = builder.ins().iconst(types::I64, (n * elem_sz) as i64);
+                builder.ins().call(memcpy_ref, &[dst, src, nb]);
+            }
             Ok(vec![LaneRepr::scalar(vec![dst])])
         }
 
@@ -9506,55 +9523,34 @@ fn lower_reduce(
     op: &ReduceOp,
     dimensions: &[i64],
 ) -> TensorVals {
-    let n_out = out_ty.num_elements();
-
-    if src_ty.rank() == 1 && dimensions == [0] {
-        let mut acc = init_vals[0];
-        for &v in vals {
-            acc = apply_reduce_op(builder, acc, v, op);
-        }
-        return vec![acc];
+    let shape: Vec<usize> = src_ty.shape.iter().map(|&d| d as usize).collect();
+    let kept: Vec<usize> = (0..shape.len())
+        .filter(|&a| !dimensions.contains(&(a as i64)))
+        .collect();
+    let mut acc = vec![init_vals[0]; out_ty.num_elements()];
+    for (flat, &v) in vals.iter().enumerate() {
+        let coord = |a: usize| flat / shape[a + 1..].iter().product::<usize>() % shape[a];
+        let o = kept.iter().fold(0, |o, &a| o * shape[a] + coord(a));
+        acc[o] = apply_reduce_op(builder, acc[o], v, op);
     }
+    acc
+}
 
-    if src_ty.rank() == 2 && dimensions == [0] {
-        let rows = src_ty.shape[0] as usize;
-        let cols = src_ty.shape[1] as usize;
-        let mut out = Vec::new();
-        for c in 0..cols {
-            let mut acc = if c < init_vals.len() {
-                init_vals[c]
-            } else {
-                init_vals[0]
-            };
-            for r in 0..rows {
-                let idx = r * cols + c;
-                if idx < vals.len() {
-                    acc = apply_reduce_op(builder, acc, vals[idx], op);
-                }
-            }
-            out.push(acc);
+/// Reduced axes grouped into runs of adjacent axes, last run first, so reducing a run
+/// leaves the indices of the remaining runs unchanged.
+fn reduced_axis_runs(dimensions: &[i64]) -> Vec<(usize, usize)> {
+    let mut axes: Vec<usize> = dimensions.iter().map(|&d| d as usize).collect();
+    axes.sort_unstable();
+    axes.dedup();
+    let mut runs: Vec<(usize, usize)> = Vec::new();
+    for a in axes {
+        match runs.last_mut() {
+            Some((_, hi)) if *hi + 1 == a => *hi = a,
+            _ => runs.push((a, a)),
         }
-        return out;
     }
-
-    if src_ty.rank() == 2 && dimensions == [1] {
-        let rows = src_ty.shape[0] as usize;
-        let cols = src_ty.shape[1] as usize;
-        let mut out = Vec::new();
-        for r in 0..rows {
-            let mut acc = init_vals[0];
-            for c in 0..cols {
-                let idx = r * cols + c;
-                if idx < vals.len() {
-                    acc = apply_reduce_op(builder, acc, vals[idx], op);
-                }
-            }
-            out.push(acc);
-        }
-        return out;
-    }
-
-    init_vals[..n_out.min(init_vals.len())].to_vec()
+    runs.reverse();
+    runs
 }
 
 fn apply_reduce_op(builder: &mut FunctionBuilder, acc: Value, v: Value, op: &ReduceOp) -> Value {

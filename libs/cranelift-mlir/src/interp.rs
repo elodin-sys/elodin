@@ -148,12 +148,6 @@ pub enum InterpError {
     #[error("dot_general batch/contracting dims are not implemented in the interpreter")]
     DotDimsNotImplemented,
 
-    #[error("multi-dimension reduce is not implemented")]
-    ReduceMultiDim,
-
-    #[error("reduce is only implemented on the last axis")]
-    ReduceNotLastAxis,
-
     #[error("reduce {op:?} is not implemented for {element_type:?}")]
     ReduceNotImplemented {
         op: ReduceOp,
@@ -201,7 +195,6 @@ impl InterpError {
                 | Self::ErfInvNotImplemented
                 | Self::UnaryNotImplemented { .. }
                 | Self::DotDimsNotImplemented
-                | Self::ReduceMultiDim
                 | Self::ReduceNotImplemented { .. }
                 | Self::InteriorPadding
         )
@@ -1513,94 +1506,57 @@ fn reduce(
 ) -> Result<Tensor, InterpError> {
     let src = lookup_ref(env, operand)?;
     let init_tensor = lookup_ref(env, init)?;
-    if dimensions.len() != 1 {
-        return Err(InterpError::ReduceMultiDim);
-    }
-    let dim = dimensions[0] as usize;
-    if dim + 1 != src.ty.rank() {
-        return Err(InterpError::ReduceNotLastAxis);
-    }
-    let inner = src.ty.shape[dim] as usize;
-    let outer = src.elem_count() / inner.max(1);
-    match (op, src.ty.element_type) {
-        (ReduceOp::Add, ElementType::F64) => {
-            let mut out = Tensor::alloc(result_ty.clone());
-            tensor_rt::tensor_reduce_sum_f64(
-                out.bytes.as_mut_ptr().cast(),
-                src.bytes.as_ptr().cast(),
-                outer,
-                inner,
-            );
-            Ok(out)
-        }
-        (ReduceOp::Maximum, ElementType::F64) => {
-            let mut out = Tensor::alloc(result_ty.clone());
-            tensor_rt::tensor_reduce_max_f64(
-                out.bytes.as_mut_ptr().cast(),
-                src.bytes.as_ptr().cast(),
-                outer,
-                inner,
-            );
-            Ok(out)
-        }
-        (ReduceOp::Minimum, ElementType::F64) => {
-            let mut out = Tensor::alloc(result_ty.clone());
-            tensor_rt::tensor_reduce_min_f64(
-                out.bytes.as_mut_ptr().cast(),
-                src.bytes.as_ptr().cast(),
-                outer,
-                inner,
-            );
-            Ok(out)
-        }
-        (
-            ReduceOp::Add,
-            ElementType::I64 | ElementType::I32 | ElementType::UI64 | ElementType::UI32,
-        ) => {
-            let init = read_int(&init_tensor.bytes, init_tensor.ty.element_type, 0);
-            Ok(reduce_last_axis_int(src, init, result_ty, |acc, v| {
-                acc.wrapping_add(v)
-            }))
-        }
-        (ReduceOp::And, ElementType::I1) => {
-            let init = read_int(&init_tensor.bytes, init_tensor.ty.element_type, 0);
-            Ok(reduce_last_axis_int(src, init, result_ty, |acc, v| {
-                i64::from(acc != 0 && v != 0)
-            }))
-        }
-        (ReduceOp::Or, ElementType::I1) => {
-            let init = read_int(&init_tensor.bytes, init_tensor.ty.element_type, 0);
-            Ok(reduce_last_axis_int(src, init, result_ty, |acc, v| {
-                i64::from(acc != 0 || v != 0)
-            }))
-        }
-        _ => Err(InterpError::ReduceNotImplemented {
-            op,
-            element_type: src.ty.element_type,
-        }),
-    }
-}
-
-fn reduce_last_axis_int(
-    src: &Tensor,
-    init: i64,
-    result_ty: &TensorType,
-    op: impl Fn(i64, i64) -> i64,
-) -> Tensor {
-    let inner = src.ty.shape.last().copied().unwrap_or(1).max(1) as usize;
-    let outer = src.elem_count() / inner;
+    let et = src.ty.element_type;
+    let not_implemented = || InterpError::ReduceNotImplemented {
+        op,
+        element_type: et,
+    };
+    let shape: Vec<usize> = src.ty.shape.iter().map(|&d| d as usize).collect();
+    let kept: Vec<usize> = (0..shape.len())
+        .filter(|&a| !dimensions.contains(&(a as i64)))
+        .collect();
+    let out_index = |flat: usize| {
+        let coord = |a: usize| flat / shape[a + 1..].iter().product::<usize>() % shape[a];
+        kept.iter().fold(0, |o, &a| o * shape[a] + coord(a))
+    };
+    let n_out = result_ty.num_elements();
     let mut out = Tensor::alloc(result_ty.clone());
-    for group in 0..outer {
-        let mut acc = init;
-        for i in 0..inner {
-            acc = op(
-                acc,
-                read_int(&src.bytes, src.ty.element_type, group * inner + i),
-            );
+    if is_real(et) {
+        let fold: fn(f64, f64) -> f64 = match op {
+            ReduceOp::Add => |a, b| a + b,
+            ReduceOp::Maximum => f64::max,
+            ReduceOp::Minimum => f64::min,
+            ReduceOp::And | ReduceOp::Or => return Err(not_implemented()),
+        };
+        let init = read_f64(&init_tensor.bytes, init_tensor.ty.element_type, 0);
+        let mut acc = vec![init; n_out];
+        for flat in 0..src.elem_count() {
+            let o = out_index(flat);
+            acc[o] = fold(acc[o], read_f64(&src.bytes, et, flat));
         }
-        write_int(&mut out.bytes, result_ty.element_type, group, acc);
+        for (o, v) in acc.into_iter().enumerate() {
+            write_f64(&mut out.bytes, result_ty.element_type, o, v);
+        }
+    } else {
+        let fold: fn(i64, i64) -> i64 = match (op, et) {
+            (ReduceOp::And, ElementType::I1) => |a, b| i64::from(a != 0 && b != 0),
+            (ReduceOp::Or, ElementType::I1) => |a, b| i64::from(a != 0 || b != 0),
+            (ReduceOp::Add, _) => i64::wrapping_add,
+            (ReduceOp::Maximum, _) => i64::max,
+            (ReduceOp::Minimum, _) => i64::min,
+            (ReduceOp::And | ReduceOp::Or, _) => return Err(not_implemented()),
+        };
+        let init = read_int(&init_tensor.bytes, init_tensor.ty.element_type, 0);
+        let mut acc = vec![init; n_out];
+        for flat in 0..src.elem_count() {
+            let o = out_index(flat);
+            acc[o] = fold(acc[o], read_int(&src.bytes, et, flat));
+        }
+        for (o, v) in acc.into_iter().enumerate() {
+            write_int(&mut out.bytes, result_ty.element_type, o, v);
+        }
     }
-    out
+    Ok(out)
 }
 
 fn is_integral(ty: ElementType) -> bool {

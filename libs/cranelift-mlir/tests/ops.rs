@@ -2083,6 +2083,112 @@ module @module {
     assert_f64s_close(&read_f64s(&out[0]), &[6.0, 15.0]);
 }
 
+fn reduce_mlir(shape: &[usize], dims: &[usize], op: &str, init: &str, ty: &str) -> String {
+    let src: String = shape.iter().map(|d| format!("{d}x")).collect();
+    let out: String = (0..shape.len())
+        .filter(|a| !dims.contains(a))
+        .map(|a| format!("{}x", shape[a]))
+        .collect();
+    let dims = dims
+        .iter()
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!(
+        "module @module {{
+  func.func public @main(%arg0: tensor<{src}{ty}>) -> tensor<{out}{ty}> {{
+    %init = stablehlo.constant dense<{init}> : tensor<{ty}>
+    %0 = stablehlo.reduce(%arg0 init: %init) applies stablehlo.{op} across dimensions = [{dims}] : (tensor<{src}{ty}>, tensor<{ty}>) -> tensor<{out}{ty}>
+    return %0 : tensor<{out}{ty}>
+  }}
+}}"
+    )
+}
+
+fn reduce_reference(
+    shape: &[usize],
+    x: &[f64],
+    dims: &[usize],
+    init: f64,
+    f: fn(f64, f64) -> f64,
+) -> Vec<f64> {
+    let kept: Vec<usize> = (0..shape.len()).filter(|a| !dims.contains(a)).collect();
+    let mut out = vec![init; kept.iter().map(|&a| shape[a]).product()];
+    for (flat, &v) in x.iter().enumerate() {
+        let mut coords = vec![0; shape.len()];
+        let mut rem = flat;
+        for a in (0..shape.len()).rev() {
+            coords[a] = rem % shape[a];
+            rem /= shape[a];
+        }
+        let o = kept.iter().fold(0, |o, &a| o * shape[a] + coords[a]);
+        out[o] = f(out[o], v);
+    }
+    out
+}
+
+#[test]
+fn test_reduce_any_axes() {
+    let add: fn(f64, f64) -> f64 = |a, b| a + b;
+    let cases: [(&[usize], &[usize], &str, &str, f64, fn(f64, f64) -> f64); 8] = [
+        (&[2, 3, 4], &[0], "add", "0.0", 0.0, add),
+        (&[2, 3, 4], &[1], "add", "0.0", 0.0, add),
+        (&[2, 3, 4], &[2], "add", "0.0", 0.0, add),
+        (&[2, 3, 4], &[0, 2], "add", "0.0", 0.0, add),
+        (&[2, 3, 4], &[0, 1, 2], "add", "0.0", 0.0, add),
+        (&[4, 3], &[0], "add", "0.0", 0.0, add),
+        (&[6, 6, 6], &[1], "add", "0.0", 0.0, add),
+        (
+            &[2, 3, 4],
+            &[1],
+            "maximum",
+            "0xFFF0000000000000",
+            f64::NEG_INFINITY,
+            f64::max,
+        ),
+    ];
+    for (shape, dims, op, init_text, init, f) in cases {
+        let n: usize = shape.iter().product();
+        let x: Vec<f64> = (0..n)
+            .map(|i| ((i * 7) % 11) as f64 + i as f64 / 64.0)
+            .collect();
+        let want = reduce_reference(shape, &x, dims, init, f);
+        let mlir = reduce_mlir(shape, dims, op, init_text, "f64");
+        for run in [run_mlir, run_mlir_mem] {
+            let out = run(&mlir, &[&f64_buf(&x)], &[want.len() * 8]);
+            assert_f64s_close(&read_f64s(&out[0]), &want);
+        }
+    }
+}
+
+#[test]
+fn test_reduce_any_axes_i64() {
+    let shape = [2, 3, 4];
+    let x: Vec<i64> = (0..24).map(|i| (i * 7) % 11 - 5).collect();
+    let xf: Vec<f64> = x.iter().map(|&v| v as f64).collect();
+    let cases: [(&[usize], &str, &str, f64, fn(f64, f64) -> f64); 2] = [
+        (&[0], "add", "0", 0.0, |a, b| a + b),
+        (
+            &[1],
+            "minimum",
+            "9223372036854775807",
+            f64::INFINITY,
+            f64::min,
+        ),
+    ];
+    for (dims, op, init_text, init, f) in cases {
+        let want: Vec<i64> = reduce_reference(&shape, &xf, dims, init, f)
+            .iter()
+            .map(|&v| v as i64)
+            .collect();
+        let mlir = reduce_mlir(&shape, dims, op, init_text, "i64");
+        for run in [run_mlir, run_mlir_mem] {
+            let out = run(&mlir, &[&i64_buf(&x)], &[want.len() * 8]);
+            assert_eq!(read_i64s(&out[0]), want, "{op} over {dims:?}");
+        }
+    }
+}
+
 #[test]
 fn test_while_mem_count1() {
     let mlir = r#"

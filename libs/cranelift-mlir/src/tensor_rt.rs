@@ -762,91 +762,66 @@ pub extern "C" fn tensor_transpose_f64(dst: *mut f64, src: *const f64, rows: usi
 }
 
 // ---------------------------------------------------------------------------
-// Reduce along last axis
+// Reduce one axis: src viewed as [outer, inner, after], reduced over inner
 // ---------------------------------------------------------------------------
 
 macro_rules! reduce_op {
-    ($name:ident, $init:expr, $update:expr) => {
-        pub extern "C" fn $name(dst: *mut f64, src: *const f64, outer: usize, inner: usize) {
-            let src = unsafe { slice::from_raw_parts(src, outer * inner) };
-            let dst = unsafe { slice::from_raw_parts_mut(dst, outer) };
-            for i in 0..outer {
-                let mut acc: f64 = $init;
-                for j in 0..inner {
-                    acc = ($update)(acc, src[i * inner + j]);
+    ($name:ident, $ty:ty, $init:expr, $update:expr) => {
+        pub extern "C" fn $name(
+            dst: *mut $ty,
+            src: *const $ty,
+            outer: usize,
+            inner: usize,
+            after: usize,
+        ) {
+            let src = unsafe { slice::from_raw_parts(src, outer * inner * after) };
+            let dst = unsafe { slice::from_raw_parts_mut(dst, outer * after) };
+            if after == 1 {
+                for (o, out) in dst.iter_mut().enumerate() {
+                    let mut acc: $ty = $init;
+                    for &v in &src[o * inner..(o + 1) * inner] {
+                        acc = ($update)(acc, v);
+                    }
+                    *out = acc;
                 }
-                dst[i] = acc;
+                return;
+            }
+            for (o, out) in dst.chunks_exact_mut(after).enumerate() {
+                out.fill($init);
+                for row in src[o * inner * after..(o + 1) * inner * after].chunks_exact(after) {
+                    for (acc, &v) in out.iter_mut().zip(row) {
+                        *acc = ($update)(*acc, v);
+                    }
+                }
             }
         }
     };
 }
 
-reduce_op!(tensor_reduce_sum_f64, 0.0, |acc: f64, v: f64| {
-    acc.algebraic_add(v)
-});
+reduce_op!(tensor_reduce_sum_f64, f64, 0.0, |acc: f64, v: f64| acc
+    .algebraic_add(v));
 reduce_op!(
     tensor_reduce_max_f64,
+    f64,
     f64::NEG_INFINITY,
     |acc: f64, v: f64| if v > acc { v } else { acc }
 );
 reduce_op!(
     tensor_reduce_min_f64,
+    f64,
     f64::INFINITY,
     |acc: f64, v: f64| if v < acc { v } else { acc }
 );
-
-macro_rules! reduce_int_op {
-    ($name:ident, $ty:ty, $init:expr, $update:expr) => {
-        pub extern "C" fn $name(dst: *mut $ty, src: *const $ty, outer: usize, inner: usize) {
-            let src = unsafe { slice::from_raw_parts(src, outer * inner) };
-            let dst = unsafe { slice::from_raw_parts_mut(dst, outer) };
-            for i in 0..outer {
-                let mut acc: $ty = $init;
-                for j in 0..inner {
-                    acc = ($update)(acc, src[i * inner + j]);
-                }
-                dst[i] = acc;
-            }
-        }
-    };
-}
-
-reduce_int_op!(tensor_reduce_sum_i64, i64, 0, |acc: i64, v: i64| acc
+reduce_op!(tensor_reduce_sum_i64, i64, 0, |acc: i64, v: i64| acc
     .wrapping_add(v));
-reduce_int_op!(tensor_reduce_max_i64, i64, i64::MIN, |acc: i64, v: i64| acc
+reduce_op!(tensor_reduce_max_i64, i64, i64::MIN, |acc: i64, v: i64| acc
     .max(v));
-reduce_int_op!(tensor_reduce_min_i64, i64, i64::MAX, |acc: i64, v: i64| acc
+reduce_op!(tensor_reduce_min_i64, i64, i64::MAX, |acc: i64, v: i64| acc
     .min(v));
-
-pub extern "C" fn tensor_reduce_and_i1(dst: *mut u8, src: *const u8, outer: usize, inner: usize) {
-    let src = unsafe { slice::from_raw_parts(src, outer * inner) };
-    let dst = unsafe { slice::from_raw_parts_mut(dst, outer) };
-    for i in 0..outer {
-        let mut acc = 1u8;
-        for j in 0..inner {
-            if src[i * inner + j] == 0 {
-                acc = 0;
-                break;
-            }
-        }
-        dst[i] = acc;
-    }
-}
-
-pub extern "C" fn tensor_reduce_or_i1(dst: *mut u8, src: *const u8, outer: usize, inner: usize) {
-    let src = unsafe { slice::from_raw_parts(src, outer * inner) };
-    let dst = unsafe { slice::from_raw_parts_mut(dst, outer) };
-    for i in 0..outer {
-        let mut acc = 0u8;
-        for j in 0..inner {
-            if src[i * inner + j] != 0 {
-                acc = 1;
-                break;
-            }
-        }
-        dst[i] = acc;
-    }
-}
+reduce_op!(tensor_reduce_and_i1, u8, 1, |acc: u8, v: u8| acc
+    & u8::from(v != 0));
+reduce_op!(tensor_reduce_or_i1, u8, 0, |acc: u8, v: u8| acc
+    | u8::from(v != 0));
 
 // ---------------------------------------------------------------------------
 // Argmin/argmax: multi-operand reduce producing (value, index)
