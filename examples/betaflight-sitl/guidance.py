@@ -27,6 +27,9 @@ class GuidancePhase(enum.IntEnum):
     ACQUIRE = 4
     HOLD = 5
     FAULT = 6
+    COMMIT = 7
+    SEARCH = 8  # Reserved for Package K; never entered by truth guidance.
+    FINISH = 9
 
 
 GUIDANCE_PHASE_NAMES = MappingProxyType({phase.value: phase.name for phase in GuidancePhase})
@@ -74,8 +77,43 @@ class TruthGuidanceConfig:
     gate_brake_reaction_s: float = 0.5
     gate_brake_margin_m: float = 0.9
     gate_safety_slab_m: float = 2.0
+    profile: str = "hold"
+    race_hold_dwell_s: float = 1.0
+    race_alignment_yaw_rad: float = math.radians(5.0)
+    commit_timeout_s: float = 8.0
+    commit_exit_distance_m: float = 2.0
+    commit_speed_mps: float = 1.5
+    missed_gate_distance_m: float = 1.5
+    pad_settle_s: float = 0.5
+    pad_velocity_tolerance_mps: float = 0.05
+    finish_settle_s: float = 0.5
+    landing_rate_mps: float = 0.4
+    landing_reference_depth_m: float = 0.30
+    landing_altitude_tolerance_m: float = 0.01
+    landing_speed_mps: float = 0.18
+    landing_dwell_s: float = 0.5
+
+    @classmethod
+    def for_course(cls, course_name: str) -> TruthGuidanceConfig:
+        """Select the shared mission profile without changing qualified E gains."""
+
+        if course_name in ("none", "single"):
+            return cls()
+        if course_name == "c1_straight":
+            return cls(
+                profile="race",
+                simulation_duration_s=60.0,
+                takeoff_climb_rate_mps=0.4,
+                kp_xy=1.2,
+                kv_xy=2.5,
+                max_horizontal_speed_mps=1.5,
+                max_horizontal_accel_mps2=2.0,
+            )
+        raise ValueError(f"unknown guidance course: {course_name!r}")
 
     def __post_init__(self) -> None:
+        if self.profile not in ("hold", "race"):
+            raise ValueError("profile must be 'hold' or 'race'")
         positive = (
             "simulation_duration_s",
             "standoff_distance_m",
@@ -102,6 +140,20 @@ class TruthGuidanceConfig:
             "gate_brake_accel_mps2",
             "gate_brake_margin_m",
             "gate_safety_slab_m",
+            "race_hold_dwell_s",
+            "race_alignment_yaw_rad",
+            "commit_timeout_s",
+            "commit_exit_distance_m",
+            "commit_speed_mps",
+            "missed_gate_distance_m",
+            "pad_settle_s",
+            "pad_velocity_tolerance_mps",
+            "finish_settle_s",
+            "landing_rate_mps",
+            "landing_reference_depth_m",
+            "landing_altitude_tolerance_m",
+            "landing_speed_mps",
+            "landing_dwell_s",
         )
         nonnegative = (
             "boot_grace_s",
@@ -191,8 +243,8 @@ class NavState:
 class GateTarget:
     """Gate geometry in the navigation frame, plus observational track metadata.
 
-    E1 latches the first target and preserves E's hold behavior. Track and age
-    carry the Section 7.9 contract but do not yet change the phase machine.
+    The hold profile latches the first target, preserving E's behavior. The race
+    profile accepts the current ordered target and its tracking metadata.
     """
 
     index: int
@@ -267,11 +319,11 @@ def _yaw_from_xyzw(quaternion: tuple[float, float, float, float]) -> float:
 
 
 class MissionController:
-    """Deterministic ARM→TAKEOFF→HOVER→ACQUIRE→HOLD mission controller.
+    """Shared hold/race mission controller behind frame-neutral inputs.
 
     Normal updates use only NavState, GateTarget, simulation time and public
-    race progress. The first target is latched; retargeting and track-dependent
-    behavior are deliberately not part of E1.
+    race progress. Hold retains E's first-target latch and exact control law;
+    race retargets only on the referee's ordered pass events.
     """
 
     def __init__(self, config: TruthGuidanceConfig | None = None):
@@ -292,6 +344,12 @@ class MissionController:
         self._previous_gate_local_x: float | None = None
         self._fault_target: Vec3 | None = None
         self._fault_altitude: float | None = None
+        self._race_gate_count: int | None = None
+        self._pad_settle_since: float | None = None
+        self._pad_altitude: float | None = None
+        self._descent_started_at: float | None = None
+        self._descent_start_altitude: float | None = None
+        self._disarmed = False
 
     @property
     def phase_code(self) -> int:
@@ -346,7 +404,7 @@ class MissionController:
         next_gate_index: int | None = None,
         gate_count: int = 0,
     ) -> SemanticControl:
-        """Advance one tick. E1 observes passes but never retargets to progress."""
+        """Advance one tick; only referee progress can advance the race target."""
 
         if not self._accept_time(sim_time):
             return self._fault_control(nav)
@@ -365,16 +423,30 @@ class MissionController:
             self._launch_position = nav.position
             self._target_altitude = self._gate.center[2]
 
+        if self.config.profile == "race":
+            self._race_progress(sim_time, gate, last_gate_passed, next_gate_index, gate_count)
         local_x = self._gate.to_local(nav.position)[0]
         crossed = self._crossed_forward_plane(self._previous_gate_local_x, local_x)
         self._previous_gate_local_x = local_x
-        if crossed or last_gate_passed >= 0:
-            self._enter_fault("gate_crossing", sim_time)
+        if self.config.profile == "hold":
+            if crossed or last_gate_passed >= 0:
+                self._enter_fault("gate_crossing", sim_time)
+        elif crossed and self.phase not in (GuidancePhase.COMMIT, GuidancePhase.FINISH):
+            self._enter_fault("uncommitted_crossing", sim_time)
         if self.phase is GuidancePhase.FAULT:
             return self._fault_control(nav)
 
         if self.phase is GuidancePhase.ARM:
+            if self.config.profile == "race" and not self._arm_requested:
+                # Initialization is on the pad, but the spawn begins above it.
+                # Only settled, accepted pre-arm navigation supplies its height;
+                # freeze the reference before requesting any powered flight.
+                self._observe_pad(sim_time, nav)
             if sim_time < self.config.boot_grace_s:
+                return SemanticControl.safe()
+            if self.config.profile == "race" and self._pad_altitude is None:
+                if sim_time - self.phase_started_at >= self.config.arm_timeout_s:
+                    self._enter_fault("unsettled_pad", sim_time)
                 return SemanticControl.safe()
             self._arm_requested = True
             if self._arm_requested_at is None:
@@ -469,10 +541,24 @@ class MissionController:
                 )
 
         if self.phase is GuidancePhase.HOLD:
+            if self.config.profile == "race":
+                aligned = (
+                    _norm(_sub(self._target, nav.position))
+                    <= self.config.acquire_position_tolerance_m
+                    and _norm(nav.velocity) <= self.config.acquire_velocity_tolerance_mps
+                    and abs(wrap_to_pi(self._gate.yaw - nav.yaw))
+                    < self.config.race_alignment_yaw_rad
+                    and self._gate.track is TrackState.TRACKING
+                )
+                if aligned:
+                    if self._dwell(sim_time, self.config.race_hold_dwell_s):
+                        self._transition(GuidancePhase.COMMIT, sim_time)
+                else:
+                    self._dwell_since = None
             elapsed = sim_time - (self.phase_started_at or sim_time)
             if elapsed >= self.config.hold_timeout_s:
                 self._enter_fault("hold_timeout", sim_time)
-            else:
+            elif self.phase is GuidancePhase.HOLD:
                 return self._position_control(
                     state,
                     self._target,
@@ -480,7 +566,149 @@ class MissionController:
                     self._gate.yaw,
                 )
 
+        if self.phase is GuidancePhase.COMMIT:
+            if self._gate.track is TrackState.LOST:
+                self._enter_fault("lost_track", sim_time)
+            elif local_x > self.config.missed_gate_distance_m:
+                self._enter_fault("missed_gate", sim_time)
+            elif sim_time - self.phase_started_at >= self.config.commit_timeout_s:
+                self._enter_fault("commit_timeout", sim_time)
+            else:
+                return self._position_control(
+                    state,
+                    _add_scaled(
+                        self._gate.center, self._gate.normal, self.config.commit_exit_distance_m
+                    ),
+                    self._target_altitude,
+                    self._gate.yaw,
+                )
+
+        if self.phase is GuidancePhase.FINISH:
+            return self._finish_control(sim_time, state)
         return self._fault_control(nav)
+
+    def _observe_pad(self, sim_time: float, nav: NavState) -> None:
+        if _norm(nav.velocity) <= self.config.pad_velocity_tolerance_mps:
+            if self._pad_settle_since is None:
+                self._pad_settle_since = sim_time
+            if sim_time - self._pad_settle_since + 1.0e-12 >= self.config.pad_settle_s:
+                self._pad_altitude = nav.position[2]
+        else:
+            self._pad_settle_since = None
+            self._pad_altitude = None
+
+    def _finish_control(self, sim_time: float, nav: NavState) -> SemanticControl:
+        """Brake, then power down onto the captured pad before safe disarm.
+
+        Near-pad height/speed are navigation eligibility, not physical contact
+        or tilt proof. The independent host grader checks actual flight safety,
+        ground settling, tilt, exchanged disarm and stopped motors separately.
+        """
+
+        if self._disarmed:
+            return SemanticControl.safe()
+        if self._descent_started_at is None:
+            if (
+                _norm(_sub(self._target, nav.position)) <= self.config.acquire_position_tolerance_m
+                and _norm(nav.velocity) <= self.config.acquire_velocity_tolerance_mps
+            ):
+                if self._dwell(sim_time, self.config.finish_settle_s):
+                    self._descent_started_at = sim_time
+                    self._descent_start_altitude = nav.position[2]
+                    self._dwell_since = None
+            else:
+                self._dwell_since = None
+        altitude = self._target_altitude
+        if self._descent_started_at is not None:
+            # A bounded below-pad reference unloads thrust under the existing PD
+            # while the plant's contact constraint settles the powered vehicle.
+            # Never disarm suspended at +0.15: that drop can violate descent safety.
+            altitude = max(
+                self._pad_altitude - self.config.landing_reference_depth_m,
+                self._descent_start_altitude
+                - self.config.landing_rate_mps * (sim_time - self._descent_started_at),
+            )
+            if (
+                nav.position[2] <= self._pad_altitude + self.config.landing_altitude_tolerance_m
+                and _norm(nav.velocity) <= self.config.landing_speed_mps
+            ):
+                if self._dwell(sim_time, self.config.landing_dwell_s):
+                    self._disarmed = True
+                    self._arm_requested = False
+                    return SemanticControl.safe()
+            else:
+                self._dwell_since = None
+        return self._position_control(nav, self._target, altitude, self._gate.yaw)
+
+    def _race_progress(
+        self,
+        sim_time: float,
+        gate: GateTarget | None,
+        last_gate_passed: int,
+        next_gate_index: int | None,
+        gate_count: int,
+    ) -> None:
+        """Validate held/ordered progress; geometry alone never awards a pass."""
+
+        if self.phase is GuidancePhase.FAULT:
+            return
+        if self._race_gate_count is None:
+            if self._gate.index != 0:
+                self._enter_fault("invalid_progress", sim_time)
+                return
+            self._race_gate_count = gate_count
+        if gate_count != self._race_gate_count:
+            self._enter_fault("course_changed", sim_time)
+            return
+        if (
+            isinstance(gate_count, bool)
+            or not isinstance(gate_count, int)
+            or gate_count <= 0
+            or isinstance(last_gate_passed, bool)
+            or not isinstance(last_gate_passed, int)
+            or not -1 <= last_gate_passed < gate_count
+        ):
+            self._enter_fault("invalid_progress", sim_time)
+            return
+        expected_next = last_gate_passed + 1 if last_gate_passed + 1 < gate_count else None
+        if (
+            next_gate_index != expected_next
+            or isinstance(next_gate_index, bool)
+            or (next_gate_index is not None and not isinstance(next_gate_index, int))
+        ):
+            self._enter_fault("invalid_progress", sim_time)
+            return
+        if self.phase is GuidancePhase.FINISH:
+            if last_gate_passed != gate_count - 1:
+                self._enter_fault("unexpected_pass_event", sim_time)
+            return
+        if last_gate_passed == self._gate.index:
+            if self.phase is not GuidancePhase.COMMIT:
+                self._enter_fault("unexpected_pass_event", sim_time)
+                return
+            self._previous_gate_local_x = None
+            if next_gate_index is None:
+                self._target = _add_scaled(
+                    self._gate.center, self._gate.normal, self.config.commit_exit_distance_m
+                )
+                self._transition(GuidancePhase.FINISH, sim_time)
+                return
+            if gate is None or gate.index != next_gate_index:
+                self._enter_fault("missing_gate", sim_time)
+                return
+            self._gate = gate
+            self._target = self._standoff_target(gate, self.config.standoff_distance_m)
+            self._target_altitude = gate.center[2]
+            self._transition(GuidancePhase.ACQUIRE, sim_time)
+        elif last_gate_passed != self._gate.index - 1:
+            self._enter_fault("unexpected_pass_event", sim_time)
+            return
+        if gate is None or gate.index != next_gate_index:
+            self._enter_fault("missing_gate", sim_time)
+            return
+        self._gate = gate
+        self._target = self._standoff_target(gate, self.config.standoff_distance_m)
+        self._target_altitude = gate.center[2]
 
     @staticmethod
     def _standoff_target(gate: GateTarget, distance: float = 4.0) -> Vec3:
@@ -520,7 +748,7 @@ class MissionController:
 
     def _fault_control(self, nav: NavState | None) -> SemanticControl:
         state = nav or self._last_valid_state
-        if state is None or not self._arm_requested:
+        if self._disarmed or state is None or not self._arm_requested:
             return SemanticControl.safe()
         if self._gate is None or self._target is None or self._launch_position is None:
             return SemanticControl(armed=True, angle_mode=True)
@@ -540,9 +768,14 @@ class MissionController:
     ) -> SemanticControl:
         self.braking_active = False
         position_error = (target[0] - state.position[0], target[1] - state.position[1], 0.0)
+        speed_limit = (
+            self.config.commit_speed_mps
+            if self.phase is GuidancePhase.COMMIT
+            else self.config.max_horizontal_speed_mps
+        )
         velocity_setpoint = _clip_vector(
             (self.config.kp_xy * position_error[0], self.config.kp_xy * position_error[1], 0.0),
-            self.config.max_horizontal_speed_mps,
+            speed_limit,
         )
         acceleration = (
             self.config.kv_xy * (velocity_setpoint[0] - state.velocity[0]),
@@ -551,7 +784,7 @@ class MissionController:
         )
 
         gate = self._gate
-        if gate is not None:
+        if gate is not None and self.phase not in (GuidancePhase.COMMIT, GuidancePhase.FINISH):
             local_x = gate.to_local(state.position)[0]
             forward_velocity = _dot(state.velocity, gate.normal)
             distance_to_plane = -local_x
@@ -626,7 +859,7 @@ class MissionController:
 class TruthGuidance:
     """Per-tick truth/gyro adapter; all mission and control logic is shared.
 
-    The controller latches the converted gate_poses[0], irrespective of progress.
+    Hold latches the converted gate_poses[0]; race selects next_gate_index.
     Rejected samples retain E's unusual but qualified feedback rule: use current
     truth when present, otherwise the last accepted pose/velocity/yaw, always
     with CURRENT valid gyro (or zero for any malformed gyro). NavState|None alone
@@ -691,16 +924,23 @@ class TruthGuidance:
             return self.controller.reject_update(update.sim_time, "invalid_truth", nav)
 
         gate = self.controller.gate_target
-        if gate is None and update.gate_poses:
-            first = update.gate_poses[0]
+        if self.config.profile == "race":
+            selected = next(
+                (pose for pose in update.gate_poses if pose.index == update.next_gate_index), None
+            )
+        else:
+            selected = update.gate_poses[0] if gate is None and update.gate_poses else None
+        if selected is not None:
             gate = GateTarget(
-                first.index,
-                first.center_enu,
-                first.yaw_rad,
-                first.inner_size_m,
+                selected.index,
+                selected.center_enu,
+                selected.yaw_rad,
+                selected.inner_size_m,
                 TrackState.TRACKING,
                 0.0,
             )
+        elif self.config.profile == "race":
+            gate = None
         return self.controller.update(
             update.sim_time,
             nav,
