@@ -4,8 +4,8 @@ These examples connect Elodin to [Bevy-Cesium](https://github.com/elodin-sys/bev
 for streamed terrain and imagery. RC-jet also uses the shared nox-py height API
 for ground contact and produces color and infrared camera previews.
 
-For the user walkthrough, start with [Cesium terrain](../../docs/public/content/reference/cesium.md):
-ion setup, choosing coordinates, ground heights and the current browser demo.
+For the user walkthrough, start with [Terrain](../../docs/public/content/reference/terrain.md):
+geographic placement, aerial imagery, Photo 3D and height maps from Python.
 
 ## Architecture
 

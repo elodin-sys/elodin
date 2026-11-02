@@ -15,9 +15,8 @@ order = 1
 
 ## Simulate at a real location
 
-Use [Cesium](@/reference/cesium.md) to place your simulation at a real
-location and stream terrain, imagery or Photo 3D around it.
-For the ground data used by your physics, see [Terrain Heights](@/reference/terrain-heights.md).
+Use [Terrain](@/reference/terrain.md) to configure aerial imagery, Photo 3D and
+ground heights from Python, with or without the editor.
 
 ## Simulation Architecture
 

@@ -14,7 +14,7 @@ order = 3
 
 ## Terrain heights
 
-See [Terrain Heights](@/reference/terrain-heights.md) for preparing, sampling and
+See [Terrain](@/reference/terrain.md#height-maps) for preparing, sampling and
 reusing ground-height grids from Python, including offline use.
 
 ## World
