@@ -337,7 +337,7 @@
                 <a
                     class="docs-link "
                     href="https://docs.elodin.systems/preview/pr-914/reference/cesium/"
-                    >Cesium terrain</a
+                    >Cesium</a
                 >
             </li>
             
@@ -354,6 +354,14 @@
                     class="docs-link "
                     href="https://docs.elodin.systems/preview/pr-914/reference/grpc-client/"
                     >gRPC API</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-914/reference/terrain-heights/"
+                    >Terrain Heights</a
                 >
             </li>
             
@@ -852,44 +860,8 @@
               <main class="docs-content col-lg-11 col-xxl-10">
                   <h1>Python API</h1>
                    <h2 id="terrain-heights">Terrain heights</h2>
-<p>For the full setup, start with <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/">Cesium terrain</a>: ion assets,
-tokens, geographic placement and the desktop and browser workflows.</p>
-<p>Prepare terrain once, before building the simulation:</p>
-<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> elodin</span><span style="color: light-dark(#859900, #859900);"> as</span><span> el</span></span>
-<span class="giallo-l"></span>
-<span class="giallo-l"><span>terrain</span><span style="color: light-dark(#859900, #859900);"> =</span><span> el</span><span>.</span><span>terrain_heightmap</span><span>(</span></span>
-<span class="giallo-l"><span>    center_ecef</span><span style="color: light-dark(#859900, #859900);">=</span><span>initial_position</span><span>,</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">  #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> WGS84 ECEF position, in meters</span></span>
-<span class="giallo-l"><span>    dimensions</span><span style="color: light-dark(#859900, #859900);">=</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">24_000</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 24_000</span><span>)</span><span>,</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">   #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> east-west and north-south coverage, in meters</span></span>
-<span class="giallo-l"><span>    spacing</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">10</span><span>,</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">                  #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> sample spacing at the center, in meters</span></span>
-<span class="giallo-l"><span>    asset_id</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">1</span><span>,</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">                  #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Cesium ion terrain asset</span></span>
-<span class="giallo-l"><span>)</span></span>
-<span class="giallo-l"></span>
-<span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Inside a simulation system: only JAX operations, no network or file access.</span></span>
-<span class="giallo-l"><span>height</span><span>,</span><span> normal</span><span>,</span><span> valid</span><span style="color: light-dark(#859900, #859900);"> =</span><span> terrain</span><span>.</span><span>sample</span><span>(</span><span>position_ecef</span><span>)</span></span></code></pre>
-<p><code>height</code> is meters above the WGS84 ellipsoid, not sea level. <code>normal</code> is an
-outward unit vector in ECEF coordinates. Check <code>valid</code>: outside the prepared
-area, the lookup returns clamped edge values with <code>valid=False</code>.
-Both <code>jax.jit(terrain.sample)</code> and <code>jax.vmap(terrain.sample)</code> are supported.
-<code>sample_geodetic(latitude, longitude)</code> accepts angles in radians.</p>
-<p>Preparation requires an installed Elodin CLI with Cesium support and
-<code>CESIUM_ION_TOKEN</code> on a cache miss. Elodin calls Bevy-Cesium to fetch the most
-detailed heights, independently of camera detail. No renderer is opened.
-The SDK stores complete grids in <code>$XDG_CACHE_HOME/elodin/terrain-heights</code>
-(normally <code>~/.cache</code>). Use <code>cache_dir=</code> to choose another location and
-<code>offline=True</code> to forbid downloads. <code>timeout=</code> limits each native query in
-seconds (default 600, up to one million positions per batch). One CLI process
-reuses a native Cesium session across the grid's batches. A failed preparation
-is retried up to twice with a fresh session; failed or incomplete grids are not cached.</p>
-<p>The grid follows latitude and longitude lines; dimensions and spacing are
-measured at its center. Areas crossing a pole or the antimeridian are rejected.
-The maximum grid size is 25 million samples. Finer spacing increases preparation
-time and memory; it does not make this a full collision mesh.</p>
-<p>Cached heights are not automatically refreshed. Keep <code>terrain.path</code> and record
-<code>terrain.sha256</code> for repeatable physics. <code>el.TerrainHeightmap.load(path)</code> loads
-that exact grid without a network connection. This stores heights only, not
-rendered meshes or imagery. New downloads can change if the source changes.</p>
-<p>This API supplies terrain data; the simulation chooses its contact response
-and what to do when coverage ends. RC-jet demonstrates spring-and-damper contact.</p>
+<p>See <a href="https://docs.elodin.systems/preview/pr-914/reference/terrain-heights/">Terrain Heights</a> for preparing, sampling and
+reusing ground-height grids from Python, including offline use.</p>
 <h2 id="world">World</h2>
 <p>An Elodin simulation begins with a <code>World</code> object. The <code>World</code> object is the root of the simulation hierarchy and provides methods for composing
 and running the simulation. The <code>World</code> object also provides helper methods for displaying entities and graphs in the editor.</p>

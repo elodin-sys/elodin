@@ -67,7 +67,7 @@
 
 	
 
-<title>Cesium terrain | Elodin</title>
+<title>Cesium | Elodin</title>
 <meta name="description" content="Choose a real location for your Elodin simulation.">
 <link rel="canonical" href="https://docs.elodin.systems/preview/pr-914/reference/cesium/">
 
@@ -76,12 +76,12 @@
   
     <meta name="twitter:image" content="https://docs.elodin.systems/preview/pr-914/logo.png">
   
-  <meta name="twitter:title" content="Cesium terrain">
+  <meta name="twitter:title" content="Cesium">
   <meta name="twitter:description" content="Choose a real location for your Elodin simulation.">
   <meta name="twitter:site" content="@elodinsystems">
   <meta name="twitter:creator" content="@elodinsystems">
 
-  <meta property="og:title" content="Cesium terrain">
+  <meta property="og:title" content="Cesium">
   <meta property="og:description" content="Choose a real location for your Elodin simulation.">
   <meta property="og:type" content="article">
   <meta property="og:url" content="https://docs.elodin.systems/preview/pr-914/reference/cesium/">
@@ -91,7 +91,7 @@
   
 
   <meta property="og:updated_time" content="">
-  <meta property="og:site_name" content="Cesium terrain">
+  <meta property="og:site_name" content="Cesium">
 
   
 
@@ -334,7 +334,7 @@
                 <a
                     class="docs-link active"
                     href="https://docs.elodin.systems/preview/pr-914/reference/cesium/"
-                    >Cesium terrain</a
+                    >Cesium</a
                 >
             </li>
             
@@ -351,6 +351,14 @@
                     class="docs-link "
                     href="https://docs.elodin.systems/preview/pr-914/reference/grpc-client/"
                     >gRPC API</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-914/reference/terrain-heights/"
+                    >Terrain Heights</a
                 >
             </li>
             
@@ -432,22 +440,17 @@
             <ul>
                 
                 <li>
-                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#connect-cesium">Connect Cesium</a>
+                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#set-up-access-once">Set up access once</a>
                     
                 </li>
                 
                 <li>
-                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#choose-where-to-simulate">Choose where to simulate</a>
+                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#describe-the-scene-in-python">Describe the scene in Python</a>
                     
                 </li>
                 
                 <li>
-                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#choose-what-to-see">Choose what to see</a>
-                    
-                </li>
-                
-                <li>
-                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#run-your-simulation">Run your simulation</a>
+                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#run-with-or-without-the-editor">Run with or without the editor</a>
                     
                 </li>
                 
@@ -462,49 +465,56 @@
 </nav>
  
               <main class="docs-content col-lg-11 col-xxl-10">
-                  <h1>Cesium terrain</h1>
-                   <p>Use Cesium to run your simulation at a real location, with terrain, aerial imagery
-or photorealistic 3D scenery streamed into Elodin.</p>
-<h2 id="connect-cesium">Connect Cesium</h2>
-<p>In <a rel="external" href="https://ion.cesium.com/">Cesium ion</a>, add the assets you want to use and create
-a read-only access token for them.</p>
-<p>Open the Command Palette, choose <strong>Cesium: Connect account</strong>, and paste your token.</p>
-<h2 id="choose-where-to-simulate">Choose where to simulate</h2>
-<p>Choose <strong>Scene: Set location</strong> in the Command Palette. Enter the latitude,
-longitude and altitude of your simulation’s origin.</p>
-<p>For the Mojave RC field, use <strong>35.350664°, −117.809027°, 589.274 m</strong>.
-Latitude and longitude are in degrees; altitude is above the WGS84 ellipsoid.</p>
-<p>Elodin saves this origin with the simulation and uses it for both the scene and
-ground heights. There is only one location to configure.</p>
-<h2 id="choose-what-to-see">Choose what to see</h2>
-<p>Choose <strong>Cesium: Choose scenery</strong> in the Command Palette.</p>
-<table><thead><tr><th>Scenery</th><th>What you see</th></tr></thead><tbody>
-<tr><td>Local terrain</td><td>Your local scene, without streaming.</td></tr>
-<tr><td>Terrain and imagery</td><td>Cesium World Terrain with aerial imagery.</td></tr>
-<tr><td>Photo 3D</td><td>Google Photorealistic 3D Tiles, including buildings where available.</td></tr>
+                  <h1>Cesium</h1>
+                   <p>Configure Cesium in your simulation’s Python schematic. The same configuration
+works when you run headless or open the editor.</p>
+<h2 id="set-up-access-once">Set up access once</h2>
+<p>In <a rel="external" href="https://ion.cesium.com/">Cesium ion</a>, create a read-only access token for the
+terrain, imagery or Photo 3D you want to use.</p>
+<p>Save the token in <code>~/.config/elodin/cesium-ion-token.txt</code>. Elodin reuses it across
+runs, from both the CLI and the Python SDK. You do not need to open the editor
+or enter it again each time. Keep the token outside your simulation and recordings.</p>
+<h2 id="describe-the-scene-in-python">Describe the scene in Python</h2>
+<p>Add the geographic origin and Cesium scenery to your schematic:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> elodin</span><span>.</span><span>ui</span><span style="color: light-dark(#859900, #859900);"> as</span><span> ui</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>scene</span><span style="color: light-dark(#859900, #859900);"> =</span><span> ui</span><span>.</span><span>schematic</span><span>(</span></span>
+<span class="giallo-l"><span>    ui</span><span>.</span><span>viewport</span><span>(</span><span>name</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">World</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> frame</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">ENU</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    coordinate</span><span style="color: light-dark(#859900, #859900);">=</span><span>ui</span><span>.</span><span>coordinate</span><span>(</span></span>
+<span class="giallo-l"><span>        frame</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">ENU</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>        lat</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">35.350664</span><span>,</span></span>
+<span class="giallo-l"><span>        lon</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#859900, #859900);">-</span><span style="color: light-dark(#D33682, #D33682);">117.809027</span><span>,</span></span>
+<span class="giallo-l"><span>        alt</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">589.274</span><span>,</span></span>
+<span class="giallo-l"><span>    )</span><span>,</span></span>
+<span class="giallo-l"><span>    cesium</span><span style="color: light-dark(#859900, #859900);">=</span><span>ui</span><span>.</span><span>cesium</span><span>(</span><span>scenery</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">photo3d</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>world</span><span>.</span><span>schematic</span><span>(</span><span>scene</span><span>)</span></span></code></pre>
+<p>This places the local origin at the Mojave RC field. Latitude and longitude are
+in degrees; altitude is meters above the WGS84 ellipsoid. Use this same origin
+when placing your simulated objects and preparing ground heights.</p>
+<p>Choose the scenery in <code>ui.cesium(...)</code>:</p>
+<table><thead><tr><th><code>scenery</code></th><th>What you see</th></tr></thead><tbody>
+<tr><td><code>"local"</code></td><td>Your existing local terrain, without streaming.</td></tr>
+<tr><td><code>"terrain"</code></td><td>Cesium World Terrain with aerial imagery.</td></tr>
+<tr><td><code>"photo3d"</code></td><td>Google Photorealistic 3D Tiles, including buildings where available.</td></tr>
 </tbody></table>
-<p>Select the assets from your ion account. Photo 3D coverage varies by location.</p>
-<h2 id="run-your-simulation">Run your simulation</h2>
-<p>Elodin prepares and caches ground heights automatically before the run.
-Your model reads them during the simulation without waiting for the network.
-The model defines ground contact; visible Photo 3D buildings do not automatically
-provide collisions.</p>
-<p><strong>Bevy-Cesium</strong> streams and renders the scenery as you move. New areas may take
-a moment to load. Lower the scene detail if you need a smoother view.</p>
+<p>Photo 3D coverage varies by location. Changing the scenery changes the rendering;
+it does not change your model’s ground-contact behavior.</p>
+<h2 id="run-with-or-without-the-editor">Run with or without the editor</h2>
+<p>Run the simulation headless:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> run</span><span style="color: light-dark(#2AA198, #2AA198);"> my_simulation.py</span></span></code></pre>
+<p>Or open it in the editor:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#2AA198, #2AA198);"> my_simulation.py</span></span></code></pre>
+<p>Both use the configuration from your Python file. There is no separate Cesium
+launcher and no editor setup to repeat.</p>
 <h2 id="how-it-works">How it works</h2>
-<ul>
-<li><strong>One geographic origin.</strong> The location you choose anchors local simulation
-coordinates on Earth. The scene and ground-height queries use the same origin.</li>
-<li><strong>Scenery streams as you move.</strong> Bevy-Cesium loads terrain, imagery or 3D tiles
-from Cesium ion and renders them in Elodin. It refines the visible area as more
-detail arrives.</li>
-<li><strong>Heights are prepared before the run.</strong> Elodin’s Python SDK, nox-py, builds a
-height grid through Bevy-Cesium and caches it. During the simulation, JAX samples
-that grid locally; a slow connection does not slow down the physics.</li>
-<li><strong>Your model handles contact.</strong> The grid describes the terrain surface.
-Photo 3D supplies the visible scenery, including buildings, but does not add
-building collisions to your model.</li>
-</ul>
+<p>The schematic describes the visible scene. Bevy-Cesium streams terrain, imagery
+or 3D tiles and renders them in Elodin as you move through the area.</p>
+<p>The simulation’s ground heights are configured separately in Python. They work
+with or without Photo 3D and do not require the editor. See
+<a href="https://docs.elodin.systems/preview/pr-914/reference/terrain-heights/">Terrain Heights</a> for preparation, sampling and
+offline use. Changing the scenery does not change the physics.</p>
 
                   
 <div class="footer-line-padding"></div>
