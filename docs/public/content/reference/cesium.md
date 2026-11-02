@@ -1,5 +1,5 @@
 +++
-title = "Cesium terrain"
+title = "Cesium"
 description = "Choose a real location for your Elodin simulation."
 draft = false
 weight = 104
@@ -12,59 +12,77 @@ icon = ""
 order = 4
 +++
 
-Use Cesium to run your simulation at a real location, with terrain, aerial imagery
-or photorealistic 3D scenery streamed into Elodin.
+Configure Cesium in your simulation’s Python schematic. The same configuration
+works when you run headless or open the editor.
 
-## Connect Cesium
+## Set up access once
 
-In [Cesium ion](https://ion.cesium.com/), add the assets you want to use and create
-a read-only access token for them.
+In [Cesium ion](https://ion.cesium.com/), create a read-only access token for the
+terrain, imagery or Photo 3D you want to use.
 
-Open the Command Palette, choose **Cesium: Connect account**, and paste your token.
+Save the token in `~/.config/elodin/cesium-ion-token.txt`. Elodin reuses it across
+runs, from both the CLI and the Python SDK. You do not need to open the editor
+or enter it again each time. Keep the token outside your simulation and recordings.
 
-## Choose where to simulate
+## Describe the scene in Python
 
-Choose **Scene: Set location** in the Command Palette. Enter the latitude,
-longitude and altitude of your simulation’s origin.
+Add the geographic origin and Cesium scenery to your schematic:
 
-For the Mojave RC field, use **35.350664°, −117.809027°, 589.274 m**.
-Latitude and longitude are in degrees; altitude is above the WGS84 ellipsoid.
+```python
+import elodin.ui as ui
 
-Elodin saves this origin with the simulation and uses it for both the scene and
-ground heights. There is only one location to configure.
+scene = ui.schematic(
+    ui.viewport(name="World", frame="ENU"),
+    coordinate=ui.coordinate(
+        frame="ENU",
+        lat=35.350664,
+        lon=-117.809027,
+        alt=589.274,
+    ),
+    cesium=ui.cesium(scenery="photo3d"),
+)
 
-## Choose what to see
+world.schematic(scene)
+```
 
-Choose **Cesium: Choose scenery** in the Command Palette.
+This places the local origin at the Mojave RC field. Latitude and longitude are
+in degrees; altitude is meters above the WGS84 ellipsoid. Use this same origin
+when placing your simulated objects and preparing ground heights.
 
-| Scenery | What you see |
+Choose the scenery in `ui.cesium(...)`:
+
+| `scenery` | What you see |
 | --- | --- |
-| Local terrain | Your local scene, without streaming. |
-| Terrain and imagery | Cesium World Terrain with aerial imagery. |
-| Photo 3D | Google Photorealistic 3D Tiles, including buildings where available. |
+| `"local"` | Your existing local terrain, without streaming. |
+| `"terrain"` | Cesium World Terrain with aerial imagery. |
+| `"photo3d"` | Google Photorealistic 3D Tiles, including buildings where available. |
 
-Select the assets from your ion account. Photo 3D coverage varies by location.
+Photo 3D coverage varies by location. Changing the scenery changes the rendering;
+it does not change your model’s ground-contact behavior.
 
-## Run your simulation
+## Run with or without the editor
 
-Elodin prepares and caches ground heights automatically before the run.
-Your model reads them during the simulation without waiting for the network.
-The model defines ground contact; visible Photo 3D buildings do not automatically
-provide collisions.
+Run the simulation headless:
 
-**Bevy-Cesium** streams and renders the scenery as you move. New areas may take
-a moment to load. Lower the scene detail if you need a smoother view.
+```sh
+elodin run my_simulation.py
+```
+
+Or open it in the editor:
+
+```sh
+elodin editor my_simulation.py
+```
+
+Both use the configuration from your Python file. There is no separate Cesium
+launcher and no editor setup to repeat.
 
 ## How it works
 
-- **One geographic origin.** The location you choose anchors local simulation
-  coordinates on Earth. The scene and ground-height queries use the same origin.
-- **Scenery streams as you move.** Bevy-Cesium loads terrain, imagery or 3D tiles
-  from Cesium ion and renders them in Elodin. It refines the visible area as more
-  detail arrives.
-- **Heights are prepared before the run.** Elodin’s Python SDK, nox-py, builds a
-  height grid through Bevy-Cesium and caches it. During the simulation, JAX samples
-  that grid locally; a slow connection does not slow down the physics.
-- **Your model handles contact.** The grid describes the terrain surface.
-  Photo 3D supplies the visible scenery, including buildings, but does not add
-  building collisions to your model.
+The schematic describes the visible scene. Bevy-Cesium streams terrain, imagery
+or 3D tiles and renders them in Elodin as you move through the area.
+
+The simulation’s ground heights are configured separately in Python. They work
+with or without Photo 3D and do not require the editor. See
+[Terrain Heights](@/reference/terrain-heights.md) for preparation, sampling and
+offline use. Changing the scenery does not change the physics.

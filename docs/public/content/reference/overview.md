@@ -15,8 +15,9 @@ order = 1
 
 ## Simulate at a real location
 
-Use [Cesium terrain](@/reference/cesium.md) to place your simulation at a real
+Use [Cesium](@/reference/cesium.md) to place your simulation at a real
 location and stream terrain, imagery or Photo 3D around it.
+For the ground data used by your physics, see [Terrain Heights](@/reference/terrain-heights.md).
 
 ## Simulation Architecture
 
