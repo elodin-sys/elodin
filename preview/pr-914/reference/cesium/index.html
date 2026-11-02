@@ -68,7 +68,7 @@
 	
 
 <title>Cesium terrain | Elodin</title>
-<meta name="description" content="Place an Elodin simulation at a real location and stream its surroundings.">
+<meta name="description" content="Choose a real location for your Elodin simulation.">
 <link rel="canonical" href="https://docs.elodin.systems/preview/pr-914/reference/cesium/">
 
 
@@ -77,12 +77,12 @@
     <meta name="twitter:image" content="https://docs.elodin.systems/preview/pr-914/logo.png">
   
   <meta name="twitter:title" content="Cesium terrain">
-  <meta name="twitter:description" content="Place an Elodin simulation at a real location and stream its surroundings.">
+  <meta name="twitter:description" content="Choose a real location for your Elodin simulation.">
   <meta name="twitter:site" content="@elodinsystems">
   <meta name="twitter:creator" content="@elodinsystems">
 
   <meta property="og:title" content="Cesium terrain">
-  <meta property="og:description" content="Place an Elodin simulation at a real location and stream its surroundings.">
+  <meta property="og:description" content="Choose a real location for your Elodin simulation.">
   <meta property="og:type" content="article">
   <meta property="og:url" content="https://docs.elodin.systems/preview/pr-914/reference/cesium/">
 
@@ -432,32 +432,27 @@
             <ul>
                 
                 <li>
-                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#1-choose-your-scenery">1. Choose your scenery</a>
+                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#connect-cesium">Connect Cesium</a>
                     
                 </li>
                 
                 <li>
-                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#2-try-a-flight-at-mojave">2. Try a flight at Mojave</a>
+                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#choose-where-to-simulate">Choose where to simulate</a>
                     
                 </li>
                 
                 <li>
-                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#3-put-the-flight-at-your-coordinates">3. Put the flight at your coordinates</a>
+                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#choose-what-to-see">Choose what to see</a>
                     
                 </li>
                 
                 <li>
-                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#4-give-the-physics-a-ground-surface">4. Give the physics a ground surface</a>
+                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#run-your-simulation">Run your simulation</a>
                     
                 </li>
                 
                 <li>
-                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#5-view-the-browser-demo">5. View the browser demo</a>
-                    
-                </li>
-                
-                <li>
-                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#if-the-first-view-is-slow-or-blurry">If the first view is slow or blurry</a>
+                    <a href="https://docs.elodin.systems/preview/pr-914/reference/cesium/#how-it-works">How it works</a>
                     
                 </li>
                 
@@ -468,95 +463,47 @@
  
               <main class="docs-content col-lg-11 col-xxl-10">
                   <h1>Cesium terrain</h1>
-                   <p>You have a Cesium ion account and a latitude/longitude in mind. Start by flying
-RC-jet at Mojave, then move the simulation to your chosen site.</p>
-<p>The desktop example runs Python/JAX while streaming the scenery. The linked
-WASM demo is a separate browser prototype: it replays a prepared recording and
-streams the terrain. Publishing another flight there still requires a rebuild.</p>
-<p><img src="../../assets/cesium-rc-jet-wasm.jpg" alt="RC-jet in the WASM editor: streamed desert terrain, aircraft, color camera and telemetry." /></p>
-<p><em>The browser demo: a recorded flight, live terrain streaming and an optional OSM overlay.</em></p>
-<h2 id="1-choose-your-scenery">1. Choose your scenery</h2>
-<p>In <a rel="external" href="https://ion.cesium.com/">Cesium ion</a>, enable the assets used by your selected mode:</p>
-<table><thead><tr><th>Scenery</th><th>RC-jet launcher defaults</th></tr></thead><tbody>
-<tr><td>Terrain and aerial imagery</td><td>World Terrain (<code>1</code>) and imagery (<code>2</code>)</td></tr>
-<tr><td>Photo 3D, including buildings where covered</td><td>Google Photorealistic 3D Tiles (<code>2275207</code>)</td></tr>
+                   <p>Use Cesium to run your simulation at a real location, with terrain, aerial imagery
+or photorealistic 3D scenery streamed into Elodin.</p>
+<h2 id="connect-cesium">Connect Cesium</h2>
+<p>In <a rel="external" href="https://ion.cesium.com/">Cesium ion</a>, add the assets you want to use and create
+a read-only access token for them.</p>
+<p>Open the Command Palette, choose <strong>Cesium: Connect account</strong>, and paste your token.</p>
+<h2 id="choose-where-to-simulate">Choose where to simulate</h2>
+<p>Choose <strong>Scene: Set location</strong> in the Command Palette. Enter the latitude,
+longitude and altitude of your simulation’s origin.</p>
+<p>For the Mojave RC field, use <strong>35.350664°, −117.809027°, 589.274 m</strong>.
+Latitude and longitude are in degrees; altitude is above the WGS84 ellipsoid.</p>
+<p>Elodin saves this origin with the simulation and uses it for both the scene and
+ground heights. There is only one location to configure.</p>
+<h2 id="choose-what-to-see">Choose what to see</h2>
+<p>Choose <strong>Cesium: Choose scenery</strong> in the Command Palette.</p>
+<table><thead><tr><th>Scenery</th><th>What you see</th></tr></thead><tbody>
+<tr><td>Local terrain</td><td>Your local scene, without streaming.</td></tr>
+<tr><td>Terrain and imagery</td><td>Cesium World Terrain with aerial imagery.</td></tr>
+<tr><td>Photo 3D</td><td>Google Photorealistic 3D Tiles, including buildings where available.</td></tr>
 </tbody></table>
-<p>Photo 3D is the default. It supplies the visuals; the example also uses World
-Terrain (<code>1</code>) for physical ground heights. Coverage and detail vary by location.</p>
-<p>Create a read-only ion token for the required assets. Save its value in
-<code>$HOME/.config/elodin/cesium-ion-token.txt</code>; create the directory if needed.
-For a public browser build, use a separate token restricted to its assets and
-deployment origin. That token will be visible to visitors.</p>
-<h2 id="2-try-a-flight-at-mojave">2. Try a flight at Mojave</h2>
-<p>From the Elodin repository root:</p>
-<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">export</span><span style="color: light-dark(#268BD2, #268BD2);"> ELODIN_SHELL_ID</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#268BD2, #268BD2);">cesium</span></span>
-<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">nix</span><span style="color: light-dark(#2AA198, #2AA198);"> develop</span></span>
-<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">just</span><span style="color: light-dark(#2AA198, #2AA198);"> install</span><span style="color: light-dark(#2AA198, #2AA198);"> py</span></span>
-<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">just</span><span style="color: light-dark(#2AA198, #2AA198);"> install</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span></span></code></pre>
-<p>Inside that shell, launch RC-jet with your token file:</p>
-<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">export</span><span style="color: light-dark(#268BD2, #268BD2);"> CESIUM_ION_TOKEN_FILE</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#268BD2, #268BD2);">$</span><span style="color: light-dark(#268BD2, #268BD2);">HOME</span><span style="color: light-dark(#2AA198, #2AA198);">/.config/elodin/cesium-ion-token.txt</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span>
-<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">bash</span><span style="color: light-dark(#2AA198, #2AA198);"> examples/cesium/run_rc_jet_terrain.sh</span></span></code></pre>
-<p>The flight starts at <strong>35.350664° N, 117.809027° W</strong>. Bevy-Cesium streams and
-renders the surroundings for the editor and its sensor cameras.</p>
-<p>For terrain and aerial imagery instead of Photo 3D:</p>
-<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">bash</span><span style="color: light-dark(#2AA198, #2AA198);"> examples/cesium/run_rc_jet_terrain.sh</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-photo3d</span><span style="color: light-dark(#2AA198, #2AA198);"> off</span></span></code></pre>
-<p>For the original local Mojave terrain, without streaming:</p>
-<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">unset</span><span style="color: light-dark(#2AA198, #2AA198);"> CESIUM_ION_ASSET_ID</span><span style="color: light-dark(#2AA198, #2AA198);"> CESIUM_ION_TOKEN</span><span style="color: light-dark(#2AA198, #2AA198);"> CESIUM_TILESET_URL</span></span>
-<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">ELODIN_RC_JET_TERRAIN</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">p</span><span style="color: light-dark(#2AA198, #2AA198);">l</span><span style="color: light-dark(#2AA198, #2AA198);">a</span><span style="color: light-dark(#2AA198, #2AA198);">n</span><span style="color: light-dark(#2AA198, #2AA198);">a</span><span style="color: light-dark(#2AA198, #2AA198);">r</span><span style="color: light-dark(#268BD2, #268BD2);"> elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#2AA198, #2AA198);"> examples/rc-jet/main.py</span></span></code></pre><h2 id="3-put-the-flight-at-your-coordinates">3. Put the flight at your coordinates</h2>
-<p>The current RC-jet example needs two matching settings:</p>
+<p>Select the assets from your ion account. Photo 3D coverage varies by location.</p>
+<h2 id="run-your-simulation">Run your simulation</h2>
+<p>Elodin prepares and caches ground heights automatically before the run.
+Your model reads them during the simulation without waiting for the network.
+The model defines ground contact; visible Photo 3D buildings do not automatically
+provide collisions.</p>
+<p><strong>Bevy-Cesium</strong> streams and renders the scenery as you move. New areas may take
+a moment to load. Lower the scene detail if you need a smoother view.</p>
+<h2 id="how-it-works">How it works</h2>
 <ul>
-<li>In <code>examples/rc-jet/scenario.py</code>, update <code>MOJAVE_RC_FIELD</code> with your latitude,
-longitude and field elevation. The scenario derives its initial ECEF pose
-from this site.</li>
-<li>In <code>examples/rc-jet/bdx_schematic.py</code>, update <code>ui.coordinate(...)</code> to the same
-site. Latitude and longitude are degrees; altitude is meters above the
-WGS84 ellipsoid.</li>
-</ul>
-<p>Disable the bundled Mojave-specific OSM data at another location:</p>
-<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">export</span><span style="color: light-dark(#268BD2, #268BD2);"> ELODIN_CESIUM_OVERLAY_FILE</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span><span style="color: light-dark(#2AA198, #2AA198);">&#39;</span></span></code></pre>
-<p>Run the Cesium launcher again. It prepares heights around the new initial position.</p>
-<p>There is no latitude/longitude launcher switch yet. Changing only the editor's
-origin does not relocate the simulation or an existing recording. For your own
-model, use the existing <a href="https://docs.elodin.systems/preview/pr-914/reference/coords/">coordinate-system primitives</a>
-to keep initial conditions, height queries and the displayed scene compatible.</p>
-<h2 id="4-give-the-physics-a-ground-surface">4. Give the physics a ground surface</h2>
-<p><code>el.terrain_heightmap()</code> prepares and caches heights through Bevy-Cesium before
-the simulation starts. JAX samples that fixed grid during the run, without
-network access.</p>
-<ul>
-<li>Cover the planned flight with the grid and check the lookup's <code>valid</code> result.</li>
-<li>Start above the sampled ground. Heights are relative to the WGS84 ellipsoid,
-not mean sea level.</li>
-<li>Implement contact in your model. Photo 3D buildings are visible geometry;
-they do not automatically provide collisions.</li>
-</ul>
-<p>See <a href="https://docs.elodin.systems/preview/pr-914/reference/python-api/#terrain-heights">Terrain heights</a> for an API
-example, units and cache options. Cached heights do not make the visual scenery
-available offline.</p>
-<h2 id="5-view-the-browser-demo">5. View the browser demo</h2>
-<p><a rel="external" href="https://medialoco.github.io/rc-jet-wasm/">Open RC-jet in the WASM editor</a>.
-Use the timeline to replay the flight, move the viewport, and toggle the
-experimental OpenStreetMap layer with Overlay.</p>
-<ul>
-<li><strong>Flight data:</strong> selected telemetry exported from a local Elodin DB is embedded
-in the WASM bundle and loaded into browser memory. The original DB is not
-hosted by the demo.</li>
-<li><strong>Hosting:</strong> GitHub Pages serves the static application. There is no database
-server behind this demo.</li>
-<li><strong>Scenery:</strong> tiles stream on demand through an adaptation of Bevy-Cesium's
-renderer with an experimental Rust browser backend. Desktop uses Cesium Native.</li>
-<li><strong>Cameras:</strong> the browser demo has a color view; infrared has not been ported.</li>
-</ul>
-<p>Your own flight needs a new <a href="https://docs.elodin.systems/preview/pr-914/reference/replays/">recording</a>, an export of its
-telemetry, matching geographic settings and assets, and a rebuilt browser
-application. The demo has no general DB upload or location picker yet.</p>
-<h2 id="if-the-first-view-is-slow-or-blurry">If the first view is slow or blurry</h2>
-<ul>
-<li>Allow terrain to load; turning toward a new area requests more tiles.</li>
-<li>On desktop, try <code>--photo3d off</code>, or increase <code>CESIUM_MAXIMUM_SCREEN_ERROR</code>
-to request less detail (the launcher defaults to <code>48</code>).</li>
-<li>If loading fails, check token access to every selected asset and, for a
-browser token, the allowed origin.</li>
+<li><strong>One geographic origin.</strong> The location you choose anchors local simulation
+coordinates on Earth. The scene and ground-height queries use the same origin.</li>
+<li><strong>Scenery streams as you move.</strong> Bevy-Cesium loads terrain, imagery or 3D tiles
+from Cesium ion and renders them in Elodin. It refines the visible area as more
+detail arrives.</li>
+<li><strong>Heights are prepared before the run.</strong> Elodin’s Python SDK, nox-py, builds a
+height grid through Bevy-Cesium and caches it. During the simulation, JAX samples
+that grid locally; a slow connection does not slow down the physics.</li>
+<li><strong>Your model handles contact.</strong> The grid describes the terrain surface.
+Photo 3D supplies the visible scenery, including buildings, but does not add
+building collisions to your model.</li>
 </ul>
 
                   
