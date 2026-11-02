@@ -41,9 +41,10 @@ pub struct Decoder {
     codec: String,
     width: u32,
     height: u32,
-    /// `avcC` bytes. `avc1` decoders want length-prefixed samples plus this
-    /// description; Annex-B alone is rejected.
-    description: Option<Vec<u8>>,
+    /// SPS and PPS from the first keyframe. Samples stay Annex-B with the
+    /// parameter sets in band: Safari rejects every `description` (avcC)
+    /// configuration, while both Safari and Chrome decode Annex-B without one.
+    parameter_sets: Option<(Vec<u8>, Vec<u8>)>,
     /// Safari does not emit the last queued frame until `flush()`.
     pub drain_with_flush: bool,
     inner: Rc<RefCell<Inner>>,
@@ -92,7 +93,7 @@ impl Decoder {
             codec: codec.to_string(),
             width: 0,
             height: 0,
-            description: None,
+            parameter_sets: None,
             drain_with_flush: crate::is_safari(),
             inner,
             _output: output,
@@ -161,7 +162,7 @@ impl Decoder {
         {
             self.rebuild()?;
         }
-        if self.description.is_some() {
+        if self.parameter_sets.is_some() {
             self.configure()?;
         }
         self.inner.borrow_mut().error = None;
@@ -216,7 +217,7 @@ impl Decoder {
         if self.video.state() == web_sys::CodecState::Closed {
             self.rebuild()?;
         }
-        let avcc = self.prepare_sample(annexb, key)?;
+        let sample = self.prepare_sample(annexb, key)?;
         if self.video.state() != web_sys::CodecState::Configured {
             self.configure()?;
         }
@@ -225,11 +226,9 @@ impl Decoder {
         } else {
             web_sys::EncodedVideoChunkType::Delta
         };
-        // `EncodedVideoChunk::new` copies the bytes, so the view only has to
-        // live for this call.
         let chunk = {
-            let view = unsafe { js_sys::Uint8Array::view(&avcc) };
-            let init = web_sys::EncodedVideoChunkInit::new_with_u8_array(&view, 0, chunk_type);
+            let bytes = js_sys::Uint8Array::from(sample.as_slice());
+            let init = web_sys::EncodedVideoChunkInit::new_with_u8_array(&bytes, 0, chunk_type);
             init.set_timestamp_f64(pts_us as f64);
             // Safari drops chunks whose duration is missing.
             init.set_duration_f64(duration_us.max(1.0));
@@ -308,37 +307,44 @@ impl Decoder {
         if nals.is_empty() {
             return Err(Error::EmptyAccessUnit);
         }
-        if self.description.is_none() {
-            let sps = nals
-                .iter()
-                .find(|nal| nal::nal_type(nal) == Some(7))
-                .copied();
-            let pps = nals
-                .iter()
-                .find(|nal| nal::nal_type(nal) == Some(8))
-                .copied();
+        let sps = nals
+            .iter()
+            .find(|nal| nal::nal_type(nal) == Some(7))
+            .copied();
+        let pps = nals
+            .iter()
+            .find(|nal| nal::nal_type(nal) == Some(8))
+            .copied();
+        if self.parameter_sets.is_none() {
             let (Some(sps), Some(pps)) = (sps, pps) else {
                 return Err(Error::MissingParameterSets);
             };
             if self.codec.is_empty() {
                 self.codec = nal::avc1_codec_string(sps).ok_or(Error::ShortSps)?;
             }
-            self.description = Some(nal::avc_decoder_configuration_record(sps, pps));
+            self.parameter_sets = Some((sps.to_vec(), pps.to_vec()));
         }
-        // Parameter sets live in `description`. A key chunk that starts with
-        // SPS, AUD, or SEI is rejected: Chrome wants the sample to start at a
-        // picture, and Safari wants that picture to be an IDR.
-        let payload: Vec<&[u8]> = nals
-            .into_iter()
-            .filter(|nal| matches!(nal::nal_type(nal), Some(1..=5)))
-            .collect();
-        if payload.is_empty() {
+        let Some((cached_sps, cached_pps)) = self.parameter_sets.as_ref() else {
+            return Err(Error::MissingParameterSets);
+        };
+        if !nals
+            .iter()
+            .any(|nal| matches!(nal::nal_type(nal), Some(1..=5)))
+        {
             return Err(Error::NoPictureNal);
         }
-        if key && !payload.iter().any(|nal| nal::nal_type(nal) == Some(5)) {
+        if key && !nals.iter().any(|nal| nal::nal_type(nal) == Some(5)) {
             return Err(Error::NoIdr);
         }
-        Ok(nal::nals_to_avcc(&payload))
+        // Without a `description`, every keyframe has to carry its own
+        // parameter sets. Access unit delimiters are dropped.
+        let mut sample: Vec<&[u8]> = Vec::with_capacity(nals.len() + 2);
+        if key && (sps.is_none() || pps.is_none()) {
+            sample.push(cached_sps);
+            sample.push(cached_pps);
+        }
+        sample.extend(nals.into_iter().filter(|nal| nal::nal_type(nal) != Some(9)));
+        Ok(nal::nals_to_annexb(&sample))
     }
 
     fn configure(&self) -> Result<(), Error> {
@@ -351,10 +357,6 @@ impl Decoder {
             config.set_coded_height(self.height);
         }
         config.set_optimize_for_latency(true);
-        if let Some(description) = &self.description {
-            let bytes = js_sys::Uint8Array::from(description.as_slice());
-            config.set_description_u8_array(&bytes);
-        }
         self.video.configure(&config)?;
         if self.video.state() != web_sys::CodecState::Configured {
             return Err(Error::ConfigureFailed);

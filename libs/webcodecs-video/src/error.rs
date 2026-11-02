@@ -46,7 +46,7 @@ pub enum Error {
     Js(#[from] DomException),
     #[error("access unit has no NAL units")]
     EmptyAccessUnit,
-    #[error("first keyframe is missing SPS or PPS, so avcC cannot be built")]
+    #[error("first keyframe is missing SPS or PPS")]
     MissingParameterSets,
     #[error("SPS is too short to build an avc1 codec string")]
     ShortSps,

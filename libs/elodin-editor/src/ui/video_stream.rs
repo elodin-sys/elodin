@@ -282,9 +282,9 @@ pub struct VideoFrameCache {
     /// Playhead seen on the previous wasm UI frame. A still playhead means paused.
     #[cfg(target_family = "wasm")]
     last_playhead: Option<Timestamp>,
-    /// Keyframe the in-flight wasm seek started from, and when it was sent.
+    /// When the in-flight wasm seek was sent.
     #[cfg(target_family = "wasm")]
-    seek_target: Option<(Timestamp, Instant)>,
+    seek_sent_at: Option<Instant>,
 }
 
 impl Default for VideoFrameCache {
@@ -309,7 +309,7 @@ impl Default for VideoFrameCache {
             #[cfg(target_family = "wasm")]
             last_playhead: None,
             #[cfg(target_family = "wasm")]
-            seek_target: None,
+            seek_sent_at: None,
         }
     }
 }
@@ -1198,10 +1198,9 @@ fn drive_webcodecs(
     let was_seeking = cache.seeking;
     cache.seeking = wc.is_seeking();
     if was_seeking && !cache.seeking {
-        if let Some(pts) = wc.last_presented {
-            cache.last_decoded_ts = Some(Timestamp(pts));
-        }
-        cache.seek_target = None;
+        // `last_decoded_ts` already points at the last sample the seek
+        // submitted, so sequential feeding resumes after it.
+        cache.seek_sent_at = None;
     }
 
     let decoder_near = cache
@@ -1214,6 +1213,17 @@ fn drive_webcodecs(
 
     let mut fed = false;
     if is_sequential && !cache.seeking && !wc.needs_keyframe() {
+        // A UI slower than the stream falls behind feeding frame by frame. An
+        // IDR resets the decoder's references, so skip to the newest keyframe
+        // once the backlog is longer than the no-data threshold.
+        if let Some(last) = cache.last_decoded_ts
+            && current_ts.0 - last.0 > NO_DATA_THRESHOLD_US
+            && let Some(kf) = cache.nearest_keyframe_before(current_ts)
+            && kf > last
+            && let Some((&prev, _)) = cache.raw_frames.range(..kf).next_back()
+        {
+            cache.last_decoded_ts = Some(prev);
+        }
         for _ in 0..MAX_SEQUENTIAL_PER_TICK {
             let Some(last) = cache.last_decoded_ts else {
                 break;
@@ -1246,40 +1256,43 @@ fn drive_webcodecs(
         return;
     }
 
-    let (seek_start, seek_end) = if let Some(kf) = cache.nearest_keyframe_before(current_ts) {
-        (kf, current_ts)
-    } else if let Some(kf) = cache.first_keyframe_after(current_ts) {
-        let end = cache
-            .raw_frames
-            .range(kf..)
-            .nth(1)
-            .map(|(t, _)| *t)
-            .unwrap_or(kf);
-        (kf, end)
-    } else {
-        (current_ts, current_ts)
-    };
-
+    // A live stream lands a new IDR every GOP, so the nearest keyframe keeps
+    // moving. Let an in-flight seek finish rather than restarting it.
     let in_flight = cache.seeking
-        && cache.seek_target.is_some_and(|(start, sent)| {
-            start == seek_start && sent.elapsed().as_secs_f32() < SEEK_TIMEOUT_SECS
-        });
+        && cache
+            .seek_sent_at
+            .is_some_and(|sent| sent.elapsed().as_secs_f32() < SEEK_TIMEOUT_SECS);
     if in_flight {
         return;
     }
 
-    let mut frames = cache.get_raw_sequence(seek_start, seek_end);
-    if let Some((ts, data)) = cache.next_raw_frame_after(seek_end) {
-        frames.push((ts, data.to_vec()));
-    }
-    if frames.is_empty() {
+    let Some(kf) = cache
+        .nearest_keyframe_before(current_ts)
+        .or_else(|| cache.first_keyframe_after(current_ts))
+    else {
         return;
+    };
+    // The decoder discards everything before the target and completes only on
+    // an exact match, so the target has to be a real sample, not the playhead.
+    let mut frames = cache.get_raw_sequence(kf, current_ts.max(kf));
+    let Some(mut target) = frames.last().map(|(ts, _)| *ts) else {
+        return;
+    };
+    // Decoders hold the last submitted picture until the next one arrives
+    // (Safari always, Chrome for some streams), so submit one sample past the
+    // target. At the live edge there is none yet: show the previous frame and
+    // let the newest be the trailing sample.
+    if let Some((ts, data)) = cache.next_raw_frame_after(target) {
+        frames.push((ts, data.to_vec()));
+    } else if frames.len() >= 2 {
+        target = frames[frames.len() - 2].0;
     }
+    let last_submitted = frames[frames.len() - 1].0;
     let samples = frames.into_iter().map(|(ts, data)| (ts.0, data)).collect();
-    wc.seek_through(samples, seek_end.0);
+    wc.seek_through(samples, target.0);
     cache.seeking = true;
-    cache.last_decoded_ts = Some(seek_end);
-    cache.seek_target = Some((seek_start, Instant::now()));
+    cache.last_decoded_ts = Some(last_submitted);
+    cache.seek_sent_at = Some(Instant::now());
 }
 
 // ---------------------------------------------------------------------------
@@ -1459,8 +1472,15 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
         let viewport_pos = max_rect.left_top().to_vec2();
         let viewport_size = max_rect.size();
 
-        let (width, height) = if let Some(image) = state.images.get(&image_node.image) {
-            let aspect_ratio = image.height() as f32 / image.width() as f32;
+        // The wasm decoder's texture is render-world only, so it is absent
+        // from `Assets<Image>`; fall back to the stream's reported size.
+        let frame_size = state
+            .images
+            .get(&image_node.image)
+            .map(|image| Vec2::new(image.width() as f32, image.height() as f32))
+            .or_else(|| (stream.size != Vec2::ZERO).then_some(stream.size));
+        let (width, height) = if let Some(frame_size) = frame_size {
+            let aspect_ratio = frame_size.y / frame_size.x;
             let height = viewport_size.x * aspect_ratio;
             if height > viewport_size.y {
                 let width = viewport_size.y / aspect_ratio;
