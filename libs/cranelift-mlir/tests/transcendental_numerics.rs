@@ -199,7 +199,9 @@ mod snapshot {
 
     #[test]
     fn transcendental_bits_are_unchanged() {
-        let changed: Vec<String> = cases()
+        let cases = cases();
+        assert_eq!(cases.len(), HASHES.len(), "every case needs a hash");
+        let changed: Vec<String> = cases
             .iter()
             .zip(HASHES)
             .filter_map(|(case, (name, hash))| {
