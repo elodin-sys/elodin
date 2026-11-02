@@ -2451,6 +2451,31 @@ module @module {
     assert_f64s_close(&result, &[10.0, 30.0, 50.0]);
 }
 
+#[test]
+fn test_gather_batched_indices() {
+    // A table lookup in a system mapped over 2 entities: jax.vmap batches the
+    // indices to [2, 4, 1], and each of the 8 picks one element. The pointer
+    // ABI counted 2 indices and copied 4-element rows from 4 * idx.
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<10xf64>, %arg1: tensor<2x4x1xi32>) -> tensor<2x4xf64> {
+    %0 = "stablehlo.gather"(%arg0, %arg1) <{dimension_numbers = #stablehlo.gather<collapsed_slice_dims = [0], start_index_map = [0], index_vector_dim = 2>, indices_are_sorted = false, slice_sizes = array<i64: 1>}> : (tensor<10xf64>, tensor<2x4x1xi32>) -> tensor<2x4xf64>
+    return %0 : tensor<2x4xf64>
+  }
+}
+"#;
+    let table: Vec<f64> = (0..10).map(|i| 100.0 * i as f64).collect();
+    let data = f64_buf(&table);
+    let indices = i32_buf(&[7, 2, 9, 3, 0, 5, 8, 1]);
+    let want = [700.0, 200.0, 900.0, 300.0, 0.0, 500.0, 800.0, 100.0];
+    for out in [
+        run_mlir(mlir, &[&data, &indices], &[64]),
+        run_mlir_mem(mlir, &[&data, &indices], &[64]),
+    ] {
+        assert_f64s_close(&read_f64s(&out[0]), &want);
+    }
+}
+
 // ---- Drone @inner function regression test ----
 
 #[test]

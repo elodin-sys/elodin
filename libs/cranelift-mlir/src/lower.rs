@@ -5182,11 +5182,9 @@ fn lower_instruction_mem(
                     ],
                 );
             } else {
-                let n_idx = if !dims.collapsed_slice_dims.is_empty() {
-                    idx_ty.shape.first().copied().unwrap_or(1) as usize
-                } else {
-                    n_total_idx
-                };
+                // One start index per batch position: every indices dim but
+                // index_vector_dim, so [E, K, 1] under vmap is E * K indices.
+                let n_idx = n_total_idx / n_index_dims.max(1);
                 let row_size = n.checked_div(n_idx).unwrap_or(1);
                 let n_idx_v = builder.ins().iconst(types::I64, n_idx as i64);
                 let row_v = builder.ins().iconst(types::I64, row_size as i64);
