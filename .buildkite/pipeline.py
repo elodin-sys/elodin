@@ -133,7 +133,7 @@ test_steps = [
             nix_step(
                 label=":python: rc-jet acceptance",
                 flake=".#run",
-                command="pytest examples/rc-jet/tests -o 'pythonpath='",
+                command="pytest examples/rc-jet/tests scripts/ci/test_sensor_camera_perf.py -o 'pythonpath='",
             ),
             nix_step(
                 label=":python: rc-jet LWIR visual",

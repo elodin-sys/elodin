@@ -21,10 +21,39 @@ if command -v tracy-capture >/dev/null 2>&1; then
 fi
 [[ ${#tracy_pids[@]} -gt 0 ]] && sleep 1
 
+# Each agent may share its host with another simulation. Probe a free DB port
+# and its adjacent asset/gRPC ports instead of competing for the default 2240.
+db_port="$(python3 - <<'PORTS'
+import socket
+
+for _ in range(64):
+    sockets = []
+    try:
+        first = socket.socket()
+        sockets.append(first)
+        first.bind(("127.0.0.1", 0))
+        port = first.getsockname()[1]
+        for adjacent in (port + 1, port + 2):
+            sock = socket.socket()
+            sockets.append(sock)
+            sock.bind(("127.0.0.1", adjacent))
+        print(port)
+        break
+    except (OSError, OverflowError):
+        continue
+    finally:
+        for sock in sockets:
+            sock.close()
+else:
+    raise SystemExit("No free DB/asset/gRPC port triple found")
+PORTS
+)"
+
 # ── Run ──────────────────────────────────────────────────────────────────────
 set +e
 env ELODIN_SENSOR_CAMERA_MAX_TICKS=600 \
-  timeout --signal=INT 60 elodin run examples/sensor-camera/main.py 2>&1 | tee "${log_file}"
+  timeout --signal=INT 60 elodin run examples/sensor-camera/main.py \
+    --addr "127.0.0.1:${db_port}" 2>&1 | tee "${log_file}"
 rc="${PIPESTATUS[0]}"
 set -e
 

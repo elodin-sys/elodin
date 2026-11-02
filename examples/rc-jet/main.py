@@ -246,7 +246,8 @@ else:
     )
 # Keep the scenario's trim commands for unattended captures. The interactive
 # controller reads global keyboard state, including typing in other applications.
-if os.environ.get("ELODIN_NON_INTERACTIVE") != "1":
+# An explicit binary opts in for headless controller integration checks.
+if controller_binary or os.environ.get("ELODIN_NON_INTERACTIVE") != "1":
     world.recipe(controller)
 
 world.run(
