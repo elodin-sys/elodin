@@ -19,8 +19,10 @@ def terrain_mode() -> str:
     return mode
 
 
-def terrain():
-    mode = terrain_mode()
+def terrain(mode: str | None = None):
+    mode = terrain_mode() if mode is None else mode
+    if mode not in {"static", "atlas", "planar"}:
+        raise ValueError(f"Unsupported local terrain mode: {mode!r}")
     if mode == "static":
         return ui.object_3d(
             STATIC_TERRAIN_POSE,

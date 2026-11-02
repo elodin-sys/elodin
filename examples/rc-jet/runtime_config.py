@@ -7,6 +7,8 @@ from enum import Enum
 
 
 class TerrainMode(str, Enum):
+    STATIC = "static"
+    ATLAS = "atlas"
     PLANAR = "planar"
     CESIUM = "cesium"
 
@@ -37,20 +39,20 @@ PREVIEW_CAMERAS = CameraSettings(
 
 @dataclass(frozen=True)
 class RuntimeConfig:
-    terrain: TerrainMode = TerrainMode.PLANAR
+    terrain: TerrainMode = TerrainMode.STATIC
     cameras: CameraSettings = RAW_CAMERAS
     height_asset_id: int = 1
 
 
 def load_config(environ: Mapping[str, str] | None = None) -> RuntimeConfig:
-    """Keep the launcher presets; reject typos instead of silently using planar terrain."""
+    """Default to the static mesh and validate explicit terrain presets."""
     environ = os.environ if environ is None else environ
-    value = environ.get("ELODIN_RC_JET_TERRAIN", "planar")
+    value = environ.get("ELODIN_RC_JET_TERRAIN", "static")
     try:
         terrain = TerrainMode(value)
     except ValueError:
         raise ValueError(
-            f"ELODIN_RC_JET_TERRAIN must be 'planar' or 'cesium', got {value!r}"
+            f"ELODIN_RC_JET_TERRAIN must be 'static', 'atlas', 'planar' or 'cesium', got {value!r}"
         ) from None
     height_asset = environ.get("ELODIN_RC_JET_HEIGHT_ASSET_ID", "1")
     try:

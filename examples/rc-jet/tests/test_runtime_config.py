@@ -9,8 +9,11 @@ from runtime_config import PREVIEW_CAMERAS, RAW_CAMERAS, RuntimeConfig, TerrainM
 
 
 def test_existing_presets():
-    assert load_config({}) == RuntimeConfig(TerrainMode.PLANAR, RAW_CAMERAS)
-    assert load_config({"ELODIN_RC_JET_TERRAIN": "planar"}) == load_config({})
+    assert load_config({}) == RuntimeConfig(TerrainMode.STATIC, RAW_CAMERAS)
+    for mode in ("static", "atlas", "planar"):
+        assert load_config({"ELODIN_RC_JET_TERRAIN": mode}) == RuntimeConfig(
+            TerrainMode(mode), RAW_CAMERAS
+        )
     assert load_config({"ELODIN_RC_JET_TERRAIN": "cesium"}) == RuntimeConfig(
         TerrainMode.CESIUM, PREVIEW_CAMERAS
     )
@@ -22,7 +25,7 @@ def test_invalid_mode_is_not_a_silent_planar_fallback(mode):
         load_config({"ELODIN_RC_JET_TERRAIN": mode})
 
 
-@pytest.mark.parametrize("mode", ["planar", "cesium"])
+@pytest.mark.parametrize("mode", ["static", "atlas", "planar", "cesium"])
 def test_explicit_config_is_independent_of_later_environment_changes(monkeypatch, mode):
     monkeypatch.setenv("ELODIN_RC_JET_TERRAIN", mode)
     config = load_config()
@@ -50,3 +53,15 @@ def test_rendering_asset_cannot_change_the_physics_height_source():
     )
     assert config.height_asset_id == 1
     assert load_config({"ELODIN_RC_JET_HEIGHT_ASSET_ID": "42"}).height_asset_id == 42
+
+
+def test_cesium_does_not_include_local_terrain():
+    kdl = build(load_config({"ELODIN_RC_JET_TERRAIN": "cesium"})).emit_kdl()
+    assert "mojave_rc_field.glb" not in kdl
+    assert "world_mesh mojave_rc_field" not in kdl
+
+
+def test_planar_keeps_the_legacy_atlas():
+    planar = build(load_config({"ELODIN_RC_JET_TERRAIN": "planar"})).emit_kdl()
+    atlas = build(load_config({"ELODIN_RC_JET_TERRAIN": "atlas"})).emit_kdl()
+    assert planar == atlas

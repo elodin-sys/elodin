@@ -2,12 +2,10 @@
 //! screen-space labels and hover cards are shown only after a terrain ray test.
 use crate::{
     MainCamera,
-    object_3d::EditableEQL,
     plugins::render_layer_alloc::RenderLayerAllocator,
     spatial::{BigSpaceRootEntity, FloatingOriginSettings, GridCell},
     ui::inspector::viewport::Viewport,
 };
-use bevy::ecs::system::SystemParam;
 use bevy::gizmos::{
     config::{GizmoConfigGroup, GizmoConfigStore},
     gizmos::Gizmos,
@@ -19,7 +17,6 @@ use bevy::{
     prelude::*,
     window::PrimaryWindow,
 };
-use bevy_editor_cam::prelude::{EditorCam, OrbitConstraint};
 
 #[derive(Default, Reflect, GizmoConfigGroup)]
 struct MapRoadLines;
@@ -28,10 +25,7 @@ struct MapBuildingLines;
 #[derive(Default, Reflect, GizmoConfigGroup)]
 struct MapWaterLines;
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
-use std::{
-    collections::{BTreeMap, HashMap},
-    path::Path,
-};
+use std::{collections::BTreeMap, path::Path};
 
 #[derive(serde::Deserialize)]
 struct Feature {
@@ -50,9 +44,6 @@ struct Feature {
     #[serde(skip)]
     radius: f64,
 }
-struct FollowBackup {
-    pos: EditableEQL,
-}
 #[derive(Resource, serde::Deserialize)]
 struct MapOverlay {
     version: u32,
@@ -67,8 +58,6 @@ struct MapOverlay {
     road_entity: Option<Entity>,
     #[serde(skip)]
     road_layer: Option<RenderLayers>,
-    #[serde(skip)]
-    follow: HashMap<Entity, FollowBackup>,
     #[serde(skip)]
     road_lines: Vec<(Vec3, Vec3)>,
     #[serde(skip)]
@@ -100,11 +89,6 @@ impl Plugin for MapOverlayPlugin {
                     .add_systems(
                         PostUpdate,
                         draw_map_lines.after(bevy::transform::TransformSystems::Propagate),
-                    )
-                    .add_systems(
-                        PreUpdate,
-                        restore_follow_on_cube_reset
-                            .before(crate::ui::inspector::viewport::set_viewport_pos),
                     )
                     .add_systems(
                         Update,
@@ -299,12 +283,6 @@ fn draw_map_lines(
     }
 }
 
-#[derive(SystemParam)]
-struct MapNavigation<'w, 's> {
-    viewports: Query<'w, 's, &'static mut Viewport>,
-    controls: Query<'w, 's, &'static mut EditorCam>,
-}
-
 fn segment_t(p: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> f32 {
     ((p - a).dot(b - a) / (b - a).length_sq().max(1e-8)).clamp(0.0, 1.0)
 }
@@ -347,8 +325,6 @@ fn draw(
         ),
         (With<MainCamera>, With<Viewport>),
     >,
-    mut navigation: MapNavigation,
-    mut commands: Commands,
     windows: Query<Entity, With<PrimaryWindow>>,
     mut contexts: Query<(&crate::ui::tiles::WindowId, &mut bevy_egui::EguiContext)>,
     tiles: Query<(), With<bevy_cesium::CesiumPrimitive>>,
@@ -573,55 +549,6 @@ fn draw(
                                 {
                                     overlay.shown = !overlay.shown;
                                 }
-                                if !overlay.follow.contains_key(&entity) {
-                                    ui.small("Following RC-jet");
-                                    if ui.button("Explore terrain").clicked()
-                                        && let Ok(mut viewport) =
-                                            navigation.viewports.get_mut(entity)
-                                    {
-                                        overlay.follow.insert(
-                                            entity,
-                                            FollowBackup {
-                                                pos: std::mem::take(&mut viewport.pos),
-                                            },
-                                        );
-                                        if let (Ok(mut control), Ok(parent_global)) = (
-                                            navigation.controls.get_mut(entity),
-                                            globals.get(parent.parent()),
-                                        ) {
-                                            control.end_move();
-                                            let up = parent_global
-                                                .affine()
-                                                .inverse()
-                                                .transform_vector3(
-                                                    root_transform
-                                                        .affine()
-                                                        .transform_vector3(Vec3::Y),
-                                                )
-                                                .normalize()
-                                                .as_dvec3();
-                                            control.orbit_constraint = OrbitConstraint::Fixed {
-                                                up,
-                                                can_pass_tdc: false,
-                                            };
-                                        }
-                                    }
-                                }
-                                if ui.button("Recenter RC-jet").clicked()
-                                    && let Ok(mut viewport) = navigation.viewports.get_mut(entity)
-                                {
-                                    if let Some(backup) = overlay.follow.remove(&entity) {
-                                        viewport.pos = backup.pos;
-                                    }
-                                    commands.entity(entity).insert(Transform::IDENTITY);
-                                    if let Ok(mut control) = navigation.controls.get_mut(entity) {
-                                        control.end_move();
-                                        control.orbit_constraint = OrbitConstraint::Fixed {
-                                            up: DVec3::Y,
-                                            can_pass_tdc: false,
-                                        };
-                                    }
-                                }
                             });
                         });
                 });
@@ -658,47 +585,5 @@ fn draw(
                     });
             }
         }
-    }
-}
-
-// Resetting the child camera alone returns to the frozen free-camera anchor.
-// Restore the live follow expression before the next pose update as well.
-fn restore_follow_on_cube_reset(
-    mut events: MessageReader<crate::plugins::view_cube::ViewCubeEvent>,
-    links: Query<&crate::plugins::view_cube::ViewCubeLink>,
-    mut overlay: ResMut<MapOverlay>,
-    mut viewports: Query<&mut Viewport>,
-    mut controls: Query<&mut EditorCam>,
-    mut commands: Commands,
-) {
-    use crate::plugins::view_cube::{ViewCubeEvent, ViewportActionButton};
-    for event in events.read() {
-        let ViewCubeEvent::ViewportActionClicked {
-            action: ViewportActionButton::Reset,
-            source,
-        } = event
-        else {
-            continue;
-        };
-        let Ok(link) = links.get(*source) else {
-            continue;
-        };
-        let Some(backup) = overlay.follow.remove(&link.main_camera) else {
-            continue;
-        };
-        if let Ok(mut viewport) = viewports.get_mut(link.main_camera) {
-            viewport.pos = backup.pos;
-        }
-        if let Ok(mut control) = controls.get_mut(link.main_camera) {
-            control.current_motion = bevy_editor_cam::controller::motion::CurrentMotion::Stationary;
-            control.last_anchor_depth = -2.0;
-            control.orbit_constraint = OrbitConstraint::Fixed {
-                up: DVec3::Y,
-                can_pass_tdc: false,
-            };
-        }
-        commands
-            .entity(link.main_camera)
-            .insert(Transform::IDENTITY);
     }
 }

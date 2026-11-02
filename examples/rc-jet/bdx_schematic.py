@@ -28,24 +28,14 @@ Typed elodin.ui translation of bdx.kdl.
 import elodin.ui as ui
 
 from runtime_config import RuntimeConfig, TerrainMode, load_config
+from terrain_schematic import terrain as local_terrain
 
 
 def build(config: RuntimeConfig | None = None) -> ui.Schematic:
     # The standalone schematic/watch entry point must also support build().
     config = load_config() if config is None else config
     cesium_terrain = config.terrain is TerrainMode.CESIUM
-    terrain = (
-        []
-        if cesium_terrain
-        else [
-            ui.world_mesh(
-                "mojave_rc_field",
-                translate=(0.0, 0.0, 528.0),
-                frame="ENU",
-                visible=True,
-            )
-        ]
-    )
+    terrain = [] if cesium_terrain else [local_terrain(config.terrain.value)]
     return ui.schematic(
         *terrain,
         ui.tabs(
