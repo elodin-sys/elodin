@@ -398,6 +398,12 @@ batch helper, and loads output scalars back. For n ≥ 2 this is faster than
 the per-element libm loop; for scalars (n == 1) the per-element libm
 fallback is retained.
 
+The two paths can differ in the last bits, by design. The SIMD helpers'
+bits are pinned by
+[`tests/transcendental_numerics.rs`](tests/transcendental_numerics.rs), so
+changing them, including through a `wide` update, is a numerics change that
+needs a CHANGELOG entry: long simulations shift.
+
 ---
 
 ## JIT Memory Layout
