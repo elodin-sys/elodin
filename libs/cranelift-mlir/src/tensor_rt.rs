@@ -263,8 +263,8 @@ unary_f64_op!(tensor_erfc_f64, libm::erfc);
 // SIMD transcendentals: process `f64x2` chunks via the `wide` crate,
 // with a scalar tail for odd element counts. Pure Rust, stable. The
 // scalar-ABI lowering dispatches here instead of per-element libm
-// when a tensor has 2+ f64 lanes. Accuracy is SLEEF-class (a few
-// ULPs), within the CSV regression tolerance.
+// when a tensor has 2+ f64 lanes. `tests/transcendental_numerics.rs`
+// pins their results and bounds their error against std.
 // ---------------------------------------------------------------------------
 
 macro_rules! unary_f64_simd_op {
