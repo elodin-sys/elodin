@@ -12,8 +12,8 @@ icon = ""
 order = 4
 +++
 
-Terrain heights give your simulation a ground surface. They work with or without
-Photo 3D, and with or without the editor.
+Terrain heights give your simulation a ground surface. They can be used without
+rendering Cesium scenery or opening the editor.
 
 [Cesium](@/reference/cesium.md) controls the visible scenery. Switching Photo 3D
 on or off does not change the heights used by the physics.
