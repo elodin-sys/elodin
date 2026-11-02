@@ -15,11 +15,8 @@ order = 1
 
 ## Simulate at a real location
 
-Have a Cesium ion account and a latitude/longitude in mind?
-[Cesium terrain](@/reference/cesium.md) walks through choosing scenery,
-running RC-jet and placing it at your coordinates. It also explains what the
-separate WASM demo supports today and where its recording lives.
-
+Use [Cesium terrain](@/reference/cesium.md) to place your simulation at a real
+location and stream terrain, imagery or Photo 3D around it.
 
 ## Simulation Architecture
 
