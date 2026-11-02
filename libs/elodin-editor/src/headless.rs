@@ -271,6 +271,10 @@ fn disable_lwir_shadows(
 /// Backfill stops on the first short page, and the live table can keep
 /// resending that same sample. Ask for the newest pose so a camera is not
 /// stuck on the attitude from startup.
+///
+/// This has to ride the data connection. The msg connection is the one the
+/// render server fills with camera frames, and a pose request queued behind
+/// those frames never lands before the next render.
 fn refresh_sensor_world_pos(
     configs: Res<SensorCameraConfigs>,
     last_updated: Res<LastUpdated>,
@@ -292,7 +296,7 @@ fn refresh_sensor_world_pos(
             continue;
         }
         let timestamp = last_updated.0;
-        commands.send_msg_req_reply_raw::<_, GetTimeSeriesPredecessor, _>(
+        commands.send_req_reply_raw::<_, GetTimeSeriesPredecessor, _>(
             GetTimeSeriesPredecessor {
                 id: PacketId::default(),
                 timestamp,
@@ -301,6 +305,11 @@ fn refresh_sensor_world_pos(
             move |pkt: InRef<impeller::types::OwnedPacket<impeller_bevy::PacketGrantR>>,
                   mut cache: ResMut<impeller_bevy::TelemetryCache>,
                   schema_reg: Res<impeller_bevy::ComponentSchemaRegistry>| {
+                // A live table can share this request id. Completing on it
+                // drops the handler before the pose reply arrives.
+                if !matches!(&*pkt, impeller::types::OwnedPacket::TimeSeries(_)) {
+                    return false;
+                }
                 insert_world_pos_reply(&pkt, &mut cache, &schema_reg, component_id);
                 true
             },

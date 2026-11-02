@@ -3300,7 +3300,6 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
     let mut all_components = HashMap::new();
     let mut sent_metadata: HashMap<ComponentId, ComponentMetadata> = HashMap::new();
     let mut stream_components = HashMap::new();
-    let mut stream_layout = Vec::new();
     let mut last_sent = None;
 
     loop {
@@ -3385,15 +3384,13 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
                     .collect(),
                 None => all_components.clone(),
             };
-            let next_layout: Vec<_> = next_components.keys().copied().collect();
-            // VTable offsets follow map iteration order; reuse only when both
-            // order and schemas are unchanged.
-            let layout_changed = next_layout != stream_layout
-                || next_components.iter().any(|(id, component)| {
-                    stream_components
-                        .get(id)
-                        .is_none_or(|existing: &Component| existing.schema != component.schema)
-                });
+            // A new component anywhere in the DB bumps `vtable_gen`, and
+            // collecting the filtered set into a fresh HashMap can reorder
+            // columns that did not change. The published vtable is keyed by
+            // the non-empty columns in component-id order, so republish only
+            // when that column list changes.
+            let layout_changed =
+                stream_column_layout(&next_components) != stream_column_layout(&stream_components);
             if layout_changed || filter_gen != current_filter_gen {
                 let vtable_msg = DBVisitor.vtable(&next_components)?;
                 let id: PacketId = fastrand::u16(..).to_le_bytes();
@@ -3404,7 +3401,6 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
                 }
                 .into_len_packet();
                 send_with_timeout(&sink, pkt.with_request_id(req_id)).await?;
-                stream_layout = next_layout;
             }
             stream_components = next_components;
             current_vtable_gen = vtable_gen;
@@ -3542,23 +3538,40 @@ async fn handle_fixed_stream<A: AsyncWrite>(
 
 pub(crate) struct DBVisitor;
 
+/// Non-empty components in component-id order. Real-time tables and their
+/// vtables both walk this list, so a HashMap rebuild cannot swap columns.
+fn stream_column_layout(
+    components: &HashMap<ComponentId, Component>,
+) -> Vec<(ComponentId, ComponentSchema)> {
+    streamed_components(components)
+        .into_iter()
+        .map(|component| (component.component_id, component.schema.clone()))
+        .collect()
+}
+
+fn streamed_components(components: &HashMap<ComponentId, Component>) -> Vec<&Component> {
+    let mut ordered: Vec<&Component> = components
+        .values()
+        .filter(|component| !component.time_series.index().is_empty())
+        .collect();
+    ordered.sort_by_key(|component| component.component_id);
+    ordered
+}
+
 impl DBVisitor {
     fn vtable(&self, components: &HashMap<ComponentId, Component>) -> Result<VTable, Error> {
         let mut fields = vec![];
         let mut offset = 0;
-        self.visit(components, |entity| {
-            if !entity.time_series.index().is_empty() {
-                offset += PrimType::U64.padding(offset);
-                let op = timestamp(builder::raw_table(offset as u16, 8), entity.as_vtable_op());
-                offset += size_of::<Timestamp>();
-                offset += entity.schema.prim_type.padding(offset);
-                let len = entity.schema.size();
-                let size = len as u16;
-                fields.push(raw_field(offset as u16, size, op));
-                offset += len;
-            }
-            Ok(())
-        })?;
+        for entity in streamed_components(components) {
+            offset += PrimType::U64.padding(offset);
+            let op = timestamp(builder::raw_table(offset as u16, 8), entity.as_vtable_op());
+            offset += size_of::<Timestamp>();
+            offset += entity.schema.prim_type.padding(offset);
+            let len = entity.schema.size();
+            let size = len as u16;
+            fields.push(raw_field(offset as u16, size, op));
+            offset += len;
+        }
         Ok(vtable(fields))
     }
 
@@ -3575,12 +3588,7 @@ impl DBVisitor {
         timestamp: Timestamp,
     ) -> Result<(), Error> {
         const YIELD_EVERY: usize = 8;
-        for (i, (_, component)) in components.iter().enumerate() {
-            // Skip components with no data – the VTable builder
-            // (vtable()) excludes them, so we must too.
-            if component.time_series.index().is_empty() {
-                continue;
-            }
+        for (i, component) in streamed_components(components).into_iter().enumerate() {
             let tick = component.time_series.start_timestamp().max(timestamp);
             match component.get_nearest(tick) {
                 Some((ts, buf)) => {
@@ -3615,12 +3623,7 @@ impl DBVisitor {
         components: &HashMap<ComponentId, Component>,
         table: &mut LenPacket,
     ) {
-        for component in components.values() {
-            // Skip components with no data – the VTable builder
-            // (vtable()) excludes them, so we must too.
-            if component.time_series.index().is_empty() {
-                continue;
-            }
+        for component in streamed_components(components) {
             let elem_size = component.schema.size();
             let prim_type = component.schema.prim_type;
             match component.time_series.latest() {
@@ -3641,16 +3644,6 @@ impl DBVisitor {
                 }
             }
         }
-    }
-
-    fn visit(
-        &self,
-        components: &HashMap<ComponentId, Component>,
-        mut f: impl for<'a> FnMut(&'a Component) -> Result<(), Error>,
-    ) -> Result<(), Error> {
-        components
-            .iter()
-            .try_for_each(|(_, component)| f(component))
     }
 }
 
@@ -3707,6 +3700,63 @@ impl AtomicTimestampExt for AtomicCell<Timestamp> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn realtime_vtable_columns_follow_component_id_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        let later = ComponentId::new("zz.later");
+        let earlier = ComponentId::new("aa.earlier");
+        let empty = ComponentId::new("mm.empty");
+        let schema = ComponentSchema::new(PrimType::F64, &[7]);
+        db.with_state_mut(|state| {
+            for id in [later, earlier, empty] {
+                state
+                    .insert_component(id, schema.clone(), &db.path)
+                    .unwrap();
+            }
+        });
+        db.with_state(|state| {
+            let mut sink = DBSink {
+                components: &state.components,
+                component_metadata: &state.component_metadata,
+                last_updated: &db.last_updated,
+                earliest_timestamp: &db.earliest_timestamp,
+                sunk_new_time_series: false,
+                table_received: Timestamp(1),
+                followed_components: &db.followed_components,
+                has_followed_components: false,
+                is_follower: false,
+                batch_max_ts: Timestamp(i64::MIN),
+                batch_min_ts: Timestamp(i64::MAX),
+                batch_has_ts: false,
+            };
+            let sample = [0u8; 56];
+            sink.apply_buf(later, &sample, Some(Timestamp(1))).unwrap();
+            sink.apply_buf(earlier, &sample, Some(Timestamp(1)))
+                .unwrap();
+        });
+
+        let components = db.with_state(|state| state.components.clone());
+        let mut reversed = HashMap::new();
+        for id in [later, empty, earlier] {
+            reversed.insert(id, components.get(&id).unwrap().clone());
+        }
+        let forward = DBVisitor.vtable(&components).unwrap();
+        let backward = DBVisitor.vtable(&reversed).unwrap();
+        let ids = |vtable: &VTable| {
+            vtable
+                .realize_fields(None)
+                .map(|field| field.unwrap().component_id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&forward), ids(&backward));
+        assert_eq!(ids(&forward), vec![earlier, later]);
+        assert_eq!(
+            stream_column_layout(&components),
+            stream_column_layout(&reversed)
+        );
+    }
 
     #[test]
     fn stream_interval_matches_microsecond_timestamps() {
