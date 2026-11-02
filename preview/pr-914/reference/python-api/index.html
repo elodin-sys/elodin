@@ -1021,8 +1021,8 @@ and running the simulation. The <code>World</code> object also provides helper m
 </ul>
 </li>
 <li>
-<p><code>build(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, db_path, backend)</code> -&gt; <code>elodin.Exec</code></p>
-<p>Build and compile the simulation executor without starting the runtime loop.</p>
+<p><code>build(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, db_path, backend, start_timestamp)</code> -&gt; <code>elodin.Exec</code></p>
+<p>Build and compile the simulation executor without starting the runtime loop. <code>Exec.run(ticks)</code> advances it and records each tick at its simulation time, so repeated calls continue one history.</p>
 <ul>
 <li><code>system</code> : <a href="https://docs.elodin.systems/preview/pr-914/reference/python-api/#elodin-system">elodin.System</a>, the systems to compile.</li>
 <li><code>simulation_rate</code> : <code>float</code>, optional, simulation frequency in Hz (ticks per second), defaults to <code>120.0</code>.</li>
@@ -1033,6 +1033,7 @@ and running the simulation. The <code>World</code> object also provides helper m
 <li><code>optimize</code> : <code>bool</code>, optional, enables optimization passes during compilation.</li>
 <li><code>db_path</code> : <code>string</code>, optional, the path to the database directory.</li>
 <li><code>backend</code> : <code>str</code>, optional, execution backend. Defaults to <code>"cranelift"</code>.</li>
+<li><code>start_timestamp</code> : <code>int</code>, optional, the timestamp of the initial state in microseconds; tick <code>n</code> is recorded at <code>start_timestamp + n / simulation_rate</code>. If <code>None</code> (default), uses the current system time. Set to <code>0</code> for zero-based timing.</li>
 </ul>
 </li>
 </ul>
@@ -1405,6 +1406,12 @@ to the simulation step (<code>1.0 / simulation_rate</code>) provided in <code>Wo
 <li><code>sys</code> : one or more <a href="https://docs.elodin.systems/preview/pr-914/reference/python-api/#elodin-system">elodin.System</a> instances used as effectors</li>
 <li><code>integrator</code> : <a href="https://docs.elodin.systems/preview/pr-914/reference/python-api/#class-elodin-integrator">elodin.Integrator</a>, default is <code>Integrator.Rk4</code></li>
 </ul>
+<p>Most integrators evaluate the effectors several times per step, at different times within it. The global
+<code>elodin.StageTime</code> component holds the seconds past the start of the step for the current evaluation (zero outside
+<code>six_dof</code>), so effectors that depend on time can follow it. The tick is incremented before the systems run, so the
+effectors' time is <code>(tick[0] - 1) * dt[0] + stage_time[0]</code> for an <code>el.Query[el.SimulationTick]</code>, an
+<code>el.Query[el.SimulationTimeStep]</code>, and an <code>el.Query[el.StageTime]</code>. <code>StageTime</code> is measured in the simulation step
+even when <code>six_dof</code> integrates with its own <code>time_step</code>, so this time advances with the simulation either way.</p>
 </li>
 </ul>
 <h3 id="class-elodin-integrator"><em>class</em> <code>elodin.Integrator</code></h3>
@@ -1412,12 +1419,59 @@ to the simulation step (<code>1.0 / simulation_rate</code>) provided in <code>Wo
 <li>
 <p><code>elodin.Integrator.Rk4</code> -&gt; <a href="https://docs.elodin.systems/preview/pr-914/reference/python-api/#class-elodin-integrator">elodin.Integrator</a></p>
 <p>Runge-Kutta 4th Order (RK4) Integrator: Elodin provides a built-in implementation for a <a rel="external" href="https://en.wikipedia.org/wiki/Runge%E2%80%93Kutta_methods">4th order Runge-Kutta integrator</a>.
-The RK4 integrator is a numerical method used to solve ordinary differential equations. You can review the implementation <a rel="external" href="https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/rk4.rs">here</a>.</p>
+The RK4 integrator is a numerical method used to solve ordinary differential equations. It evaluates the effectors 4 times per step. You can review the implementation <a rel="external" href="https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/runge_kutta.rs">here</a>.</p>
+</li>
+<li>
+<p><code>elodin.Integrator.Rk2</code> -&gt; <a href="https://docs.elodin.systems/preview/pr-914/reference/python-api/#class-elodin-integrator">elodin.Integrator</a></p>
+<p><a rel="external" href="https://en.wikipedia.org/wiki/Heun%27s_method">Heun's method</a>, a second-order Runge-Kutta method that evaluates the effectors 2 times per step.
+It costs half as much as <code>Rk4</code>, and suits time steps short enough that second-order accuracy is enough, or dynamics with discontinuities
+such as contacts, where higher orders gain little.</p>
+</li>
+<li>
+<p><code>elodin.Integrator.Rk3</code> -&gt; <a href="https://docs.elodin.systems/preview/pr-914/reference/python-api/#class-elodin-integrator">elodin.Integrator</a></p>
+<p>Kutta's third-order Runge-Kutta method, which evaluates the effectors 3 times per step.</p>
+</li>
+<li>
+<p><code>elodin.Integrator.Verlet</code> -&gt; <a href="https://docs.elodin.systems/preview/pr-914/reference/python-api/#class-elodin-integrator">elodin.Integrator</a></p>
+<p><a rel="external" href="https://en.wikipedia.org/wiki/Verlet_integration#Velocity_Verlet">Velocity Verlet</a>, a second-order method that evaluates the effectors 2 times per step.
+When forces depend only on position, as in gravitational N-body problems, it is symplectic: energy errors stay bounded over
+long runs instead of drifting, as they do with the Runge-Kutta integrators, and orbits keep their size. Forces that depend on
+velocity, such as drag or the gyroscopic torque of a spinning body, leave it second order but not symplectic. You can review
+the implementation <a rel="external" href="https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/verlet.rs">here</a>.</p>
+</li>
+<li>
+<p><code>elodin.Integrator.Rk78</code> -&gt; <a href="https://docs.elodin.systems/preview/pr-914/reference/python-api/#class-elodin-integrator">elodin.Integrator</a></p>
+<p>The eighth-order solution of Fehlberg's 7(8) Runge-Kutta pair, which evaluates the effectors 13 times per step. Its error
+shrinks 256 times per halving of the time step, so it suits long, smooth propagations, such as orbits, where it can take
+much larger steps than <code>Rk4</code> for the same accuracy.</p>
+</li>
+<li>
+<p><code>elodin.Integrator.Dp54</code> -&gt; <a href="https://docs.elodin.systems/preview/pr-914/reference/python-api/#class-elodin-integrator">elodin.Integrator</a></p>
+<p>The fifth-order solution of the <a rel="external" href="https://en.wikipedia.org/wiki/Dormand%E2%80%93Prince_method">Dormand-Prince</a> 5(4) pair
+(the pair behind MATLAB's <code>ode45</code>), which evaluates the effectors 7 times per step. Elodin keeps the time step fixed.</p>
+<p><code>Dp54</code> and <code>Rk78</code> estimate each step's error from their embedded lower-order solution. A body that has the <code>elodin.StepError</code>
+component, for example from <code>el.C(el.StepError, jnp.zeros(4))</code>, receives the estimate after every step: attitude (rad),
+position, angular velocity, and velocity. It is the difference between the pair's two solutions, which approximates the
+lower-order solution's error and usually exceeds the error of the solution Elodin keeps, but it is an estimate, not a
+guarantee. Graphed over a run, it shows whether the time step is small enough and where the dynamics are hardest to
+integrate.</p>
 </li>
 <li>
 <p><code>elodin.Integrator.SemiImplicit</code> -&gt; <a href="https://docs.elodin.systems/preview/pr-914/reference/python-api/#class-elodin-integrator">elodin.Integrator</a></p>
 <p>Semi-Implicit Integrator: Elodin provides a built-in implementation for a <a rel="external" href="https://en.wikipedia.org/wiki/Semi-implicit_Euler_method">semi-implicit Euler integrator</a>.
 The semi-implicit integrator is a numerical method used to solve ordinary differential equations. You can review the implementation <a rel="external" href="https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/semi_implicit.rs">here</a>.</p>
+<div class="el-warning warning container-fluid">
+    <div class="row g-0 align-items-center">
+        <div class="col-1" style="padding: 4px">
+            <i class="bx bx-error" style="font-size: 1.5rem"></i>
+        </div>
+        <div class="col-15"><p>The semi-implicit integrator updates angular velocity with an explicit Euler step, so the gyroscopic term
+$\omega_b \times I\omega_b$ is evaluated at the start of each step. For bodies with unequal principal moments that spin
+quickly relative to the time step, angular momentum and rotational kinetic energy drift (typically growing) even with no
+applied torque. Use <code>Integrator.Rk4</code> or a smaller time step for spinning or tumbling bodies.</p>
+</div>
+    </div>
+</div>
 </li>
 </ul>
 <h3 id="class-elodin-body"><em>class</em> <code>elodin.Body</code></h3>
@@ -1865,11 +1919,43 @@ change streams with per-component row counts.</p>
 </li>
 </ul>
 <h3 id="class-elodin-spatialinertia"><em>class</em> <code>elodin.SpatialInertia</code></h3>
-<p>A spatial inertia is a 7D vector that represents the mass, moment of inertia, and momentum of a rigid body in 3D space. The moment of inertia is represented in its <a rel="external" href="https://en.wikipedia.org/wiki/Moment_of_inertia#Principal_axes">diagonalized form</a> of $[I_1, I_2, I_3]$.</p>
+<p>A spatial inertia is a 7D vector that represents the mass and the symmetric 3x3 <a rel="external" href="https://en.wikipedia.org/wiki/Moment_of_inertia#Inertia_tensor">moment of inertia</a> tensor of a rigid body, expressed in the body frame about its center of mass.
+The layout is $[I_{xx}, I_{yy}, I_{zz}, I_{xy}, I_{xz}, I_{yz}, m]$, and the full tensor is</p>
+<p>$$I = \begin{bmatrix} I_{xx} &amp; I_{xy} &amp; I_{xz} \\ I_{xy} &amp; I_{yy} &amp; I_{yz} \\ I_{xz} &amp; I_{yz} &amp; I_{zz} \end{bmatrix}$$</p>
+<p>If the body axes are its <a rel="external" href="https://en.wikipedia.org/wiki/Moment_of_inertia#Principal_axes">principal axes</a>, the off-diagonal entries are zero and only the diagonal is needed.</p>
+<div class="el-warning warning container-fluid">
+    <div class="row g-0 align-items-center">
+        <div class="col-1" style="padding: 4px">
+            <i class="bx bx-error" style="font-size: 1.5rem"></i>
+        </div>
+        <div class="col-15"><p>The off-diagonal entries are the signed entries of the tensor matrix, $I_{xy} = -\int xy , dm$, not products of inertia.
+CAD tools usually report products of inertia $P_{xy} = +\int xy , dm$; negate them before passing them in ($I_{xy} = -P_{xy}$).</p>
+</div>
+    </div>
+</div>
 <ul>
 <li>
-<p><code>__init__(mass, inertia)</code> -&gt; <a href="https://docs.elodin.systems/preview/pr-914/reference/python-api/#class-elodin-spatialinertia">elodin.SpatialInertia</a></p>
-<p>Create a spatial tensor inertia from a scalar mass and an optional inertia tensor diagonal with shape (3,). If the inertia tensor is not provided, it is set to the same value as the mass along all axes.</p>
+<p><code>__init__(mass, inertia=None, inertia_off_diag=None)</code> -&gt; <a href="https://docs.elodin.systems/preview/pr-914/reference/python-api/#class-elodin-spatialinertia">elodin.SpatialInertia</a></p>
+<p>Create a spatial inertia from a scalar mass, an optional tensor diagonal $[I_{xx}, I_{yy}, I_{zz}]$, and optional off-diagonal entries $[I_{xy}, I_{xz}, I_{yz}]$.
+If <code>inertia</code> is not provided, the diagonal is set to the mass along all axes. If <code>inertia_off_diag</code> is not provided, it is zero.</p>
+<ul>
+<li><code>mass</code> : real scalar (<code>int</code>, <code>float</code>, or 0-D array)</li>
+<li><code>inertia</code> : real array-like with shape (3,), optional</li>
+<li><code>inertia_off_diag</code> : real array-like with shape (3,), optional</li>
+</ul>
+<p>Ints, lists, tuples, and int or float32 arrays are converted to float64. Concrete (non-traced) values are validated. A <code>TypeError</code> or <code>ValueError</code> is raised if:</p>
+<ul>
+<li>an argument is not real-valued (e.g. a <code>bool</code>, string, or complex number) or has the wrong shape</li>
+<li>the mass is not finite and &gt; 0</li>
+<li>an inertia entry is not finite</li>
+<li>the tensor is not positive-definite</li>
+<li>the principal moments violate the triangle inequality $\lambda_1 + \lambda_2 \geq \lambda_3$, which every physical rigid body satisfies</li>
+</ul>
+<p>Values traced inside a system (e.g. in <code>@el.map</code>) are checked for shape only and must already be float64; cast them with <code>.astype(jnp.float64)</code> if needed.</p>
+</li>
+<li>
+<p><code>from_array(arr)</code> -&gt; <a href="https://docs.elodin.systems/preview/pr-914/reference/python-api/#class-elodin-spatialinertia">elodin.SpatialInertia</a></p>
+<p>Create a spatial inertia from a real array-like with shape (7,) in the layout above. Concrete values are converted and validated the same way as <code>__init__</code>.</p>
 </li>
 <li>
 <p><code>mass()</code> -&gt; <a rel="external" href="https://jax.readthedocs.io/en/latest/_autosummary/jax.Array.html#jax.Array">jax.Array</a></p>
@@ -1877,7 +1963,19 @@ change streams with per-component row counts.</p>
 </li>
 <li>
 <p><code>inertia_diag()</code> -&gt; <a rel="external" href="https://jax.readthedocs.io/en/latest/_autosummary/jax.Array.html#jax.Array">jax.Array</a></p>
-<p>Get the inertia tensor diagonal of the spatial inertia with shape (3,).</p>
+<p>Get the tensor diagonal $[I_{xx}, I_{yy}, I_{zz}]$ with shape (3,).</p>
+</li>
+<li>
+<p><code>inertia_off_diag()</code> -&gt; <a rel="external" href="https://jax.readthedocs.io/en/latest/_autosummary/jax.Array.html#jax.Array">jax.Array</a></p>
+<p>Get the signed off-diagonal tensor entries $[I_{xy}, I_{xz}, I_{yz}]$ with shape (3,).</p>
+</li>
+<li>
+<p><code>inertia_matrix()</code> -&gt; <a rel="external" href="https://jax.readthedocs.io/en/latest/_autosummary/jax.Array.html#jax.Array">jax.Array</a></p>
+<p>Get the full symmetric inertia tensor with shape (3, 3).</p>
+</li>
+<li>
+<p><code>asarray()</code> -&gt; <a rel="external" href="https://jax.readthedocs.io/en/latest/_autosummary/jax.Array.html#jax.Array">jax.Array</a></p>
+<p>Get the underlying 7D array.</p>
 </li>
 </ul>
 <p><br></br></p>
