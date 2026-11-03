@@ -1522,6 +1522,7 @@ define_trt! {
     // indexing
     // byte-generic gather/scatter/layout ops with elem_sz
     gather,    "__trt_gather",    tensor_rt::tensor_gather,    [ptr_type(), ptr_type(), ptr_type(), ptr_type(), types::I64];
+    gather_rows,   "__trt_gather_rows",   tensor_rt::tensor_gather_rows,   [ptr_type(), ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
     scatter,   "__trt_scatter",   tensor_rt::tensor_scatter,   [ptr_type(), ptr_type(), ptr_type(), ptr_type(), types::I64];
     matmul_f64,    "__trt_matmul_f64",    tensor_rt::tensor_matmul_f64,    [ptr_type(), ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
     dot_general,   "__trt_dot_general",   tensor_rt::tensor_dot_general,   [ptr_type(), ptr_type(), ptr_type(), ptr_type()];
@@ -5133,6 +5134,19 @@ fn lower_instruction_mem(
                 builder.ins().call(widen_ref, &[wide, idx_ptr, n_v]);
                 idx_ptr = wide;
             }
+            let src = get(operand)?;
+            // Lookups and row selects: consecutive indices that each pick one whole row.
+            if let (&[[n_rows, 0, 1]], &[[row, max_row]]) = (&axes.dims[..], &axes.starts[..])
+                && row == axes.inner
+            {
+                let [n_rows, row_bytes, max_row] = [n_rows, row * elem_sz as i64, max_row]
+                    .map(|v| builder.ins().iconst(types::I64, v));
+                let func_ref = jit_module.declare_func_in_func(trt_ids.gather_rows, builder.func);
+                builder
+                    .ins()
+                    .call(func_ref, &[dst, src, idx_ptr, n_rows, row_bytes, max_row]);
+                return Ok(vec![LaneRepr::scalar(vec![dst])]);
+            }
             let mut meta = vec![
                 elem_sz as i64,
                 src_ty.num_elements() as i64,
@@ -5149,7 +5163,7 @@ fn lower_instruction_mem(
             let func_ref = jit_module.declare_func_in_func(trt_ids.gather, builder.func);
             builder
                 .ins()
-                .call(func_ref, &[dst, get(operand)?, idx_ptr, meta_ptr, n_meta]);
+                .call(func_ref, &[dst, src, idx_ptr, meta_ptr, n_meta]);
             Ok(vec![LaneRepr::scalar(vec![dst])])
         }
 

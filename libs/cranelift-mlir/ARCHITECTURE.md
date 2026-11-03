@@ -468,7 +468,7 @@ jit_builder.symbol("tensor_broadcast_nd_f64", tensor_broadcast_nd_f64 as *const 
 | Reduce | reduce_{sum,prod,max,min}_{f64,f32,i64,i32}, reduce_{max,min}_{u64,u32}, reduce_{and,or}_i1 | One axis per call, viewed as outer x axis x after |
 | Argmin/argmax | argminmax | One axis, any value type, i32 or i64 indices; the first NaN wins, ties keep the smaller index |
 | Sort | sort | Stable, any element types, lexicographic over the comparator's keys, NaN last |
-| Indexing | gather, scatter | Any element type; both read a stride table built at compile time |
+| Indexing | gather, gather_rows, scatter | Any element type; gather and scatter read a stride table built at compile time, gather_rows copies whole rows |
 | Dynamic | dynamic_slice_f64, dynamic_update_slice_f64 | Runtime index values |
 | Utility | memcpy, select_f64, iota_nd_f64 | |
 
@@ -662,10 +662,13 @@ Each index row is a (row, col) pair for diagonal elements: (0,0), (1,1), (2,2).
 Both ABIs walk one table that `gather_axes` builds at compile time, as scatter does:
 `(size, operand stride, indices stride)` per output dimension and `(operand stride,
 max start)` per `start_index_map` entry. A batching dimension steps the operand and the
-indices together. The innermost run that is contiguous in both the source and the output
-becomes one copy, so a row select copies whole rows. The pointer ABI passes the table to
-`tensor_gather`; the scalar ABI emits the same walk as loads, with only the index values
-computed at run time. Start indices clamp to `[0, dim - slice_size]`, as in XLA.
+indices together. Output dimensions whose strides chain merge into one, and the innermost
+run that is contiguous in both the source and the output becomes one copy, so a vmapped
+lookup walks one dimension and a row select copies whole rows. The pointer ABI passes the
+table to `tensor_gather`, except that lookups and row selects, whose consecutive indices
+each pick one whole row, call the leaner `tensor_gather_rows`. The scalar ABI emits the same
+walk as loads, with only the index values computed at run time. Start indices clamp to
+`[0, dim - slice_size]`, as in XLA.
 
 ---
 

@@ -968,27 +968,7 @@ pub extern "C" fn tensor_gather(
     let dst = unsafe { slice::from_raw_parts_mut(dst, n_dst * elem_sz) };
     let indices = unsafe { slice::from_raw_parts(indices, n_idx) };
     let run = inner * elem_sz;
-    let copy = |out: &mut [u8], mut from: usize, idx: usize| {
-        for (k, &[operand_stride, max_start]) in starts.iter().enumerate() {
-            let start = indices[idx + k * vector_stride].clamp(0, max_start);
-            from += start as usize * operand_stride as usize;
-        }
-        out.copy_from_slice(&src[from * elem_sz..from * elem_sz + run]);
-    };
-    let positions = dst.chunks_exact_mut(run).enumerate();
-    // One walked dim (lookups and row selects) needs no per-position division.
-    if let [] | [_] = dims {
-        let [_, operand_stride, indices_stride] = dims.first().copied().unwrap_or_default();
-        for (c, out) in positions {
-            copy(
-                out,
-                c * operand_stride as usize,
-                c * indices_stride as usize,
-            );
-        }
-        return;
-    }
-    for (p, out) in positions {
+    for (p, out) in dst.chunks_exact_mut(run).enumerate() {
         let (mut from, mut idx, mut rem) = (0, 0, p);
         for &[size, operand_stride, indices_stride] in dims.iter().rev() {
             let c = rem % size as usize;
@@ -996,7 +976,30 @@ pub extern "C" fn tensor_gather(
             from += c * operand_stride as usize;
             idx += c * indices_stride as usize;
         }
-        copy(out, from, idx);
+        for (k, &[operand_stride, max_start]) in starts.iter().enumerate() {
+            let start = indices[idx + k * vector_stride].clamp(0, max_start);
+            from += start as usize * operand_stride as usize;
+        }
+        out.copy_from_slice(&src[from * elem_sz..from * elem_sz + run]);
+    }
+}
+
+/// The `tensor_gather` of a lookup or row select: row `r` of `dst` is row `indices[r]` of
+/// `src`, clamped to `[0, max_row]`.
+pub extern "C" fn tensor_gather_rows(
+    dst: *mut u8,
+    src: *const u8,
+    indices: *const i64,
+    n_rows: usize,
+    row_bytes: usize,
+    max_row: i64,
+) {
+    let src = unsafe { slice::from_raw_parts(src, (max_row as usize + 1) * row_bytes) };
+    let dst = unsafe { slice::from_raw_parts_mut(dst, n_rows * row_bytes) };
+    let indices = unsafe { slice::from_raw_parts(indices, n_rows) };
+    for (r, &i) in indices.iter().enumerate() {
+        let (from, to) = (i.clamp(0, max_row) as usize * row_bytes, r * row_bytes);
+        dst[to..to + row_bytes].copy_from_slice(&src[from..from + row_bytes]);
     }
 }
 
