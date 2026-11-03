@@ -126,6 +126,7 @@ impl PySchematic {
     timeline=None,
     skybox=None,
     environment=None,
+    place_names=None,
     telemetry_mode=false,
 ))]
 fn schematic(
@@ -136,6 +137,7 @@ fn schematic(
     timeline: Option<Bound<'_, PyAny>>,
     skybox: Option<String>,
     environment: Option<Bound<'_, PyAny>>,
+    place_names: Option<PyRef<'_, PyPlaceNames>>,
     telemetry_mode: bool,
 ) -> PyResult<PySchematic> {
     let mut inner = Schematic {
@@ -143,6 +145,9 @@ fn schematic(
         ..Schematic::default()
     };
 
+    if let Some(names) = place_names {
+        inner.place_names = Some(names.inner.clone());
+    }
     if let Some(coord) = coordinate {
         let c = builders::extract_coordinate(&coord)?;
         inner.frame = Some(c.frame);
@@ -464,6 +469,7 @@ pub fn register(parent_module: &Bound<'_, PyModule>) -> PyResult<()> {
     child.add_class::<PyMesh>()?;
     child.add_class::<PyJoint>()?;
     child.add_class::<PyCoordinate>()?;
+    child.add_class::<PyPlaceNames>()?;
     child.add_class::<PyTheme>()?;
     child.add_class::<PyTimeline>()?;
     child.add_class::<PyColor>()?;

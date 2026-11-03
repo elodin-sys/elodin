@@ -87,6 +87,10 @@ pub fn parse_schematic(input: &str) -> Result<Schematic, KdlSchematicError> {
     let mut schematic = Schematic::default();
 
     for node in doc.nodes() {
+        if node.name().value() == "place_names" {
+            schematic.place_names = Some(parse_place_names(node, input)?);
+            continue;
+        }
         if node.name().value() == "skybox" {
             schematic.skybox = Some(parse_skybox(node, input)?);
             continue;
@@ -203,6 +207,46 @@ fn validate_cinematic_earth(schematic: &Schematic, src: &str) -> Result<(), KdlS
         });
     }
     Ok(())
+}
+
+fn numeric_prop(node: &KdlNode, prop: &str) -> Option<f64> {
+    node.get(prop)
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+}
+
+fn parse_place_names(node: &KdlNode, src: &str) -> Result<PlaceNamesConfig, KdlSchematicError> {
+    let invalid = || KdlSchematicError::InvalidValue {
+        property: "place_names".into(),
+        node: "place_names".into(),
+        expected: "place nodes with a name and numeric lat, lon and alt".into(),
+        src: src.into(),
+        span: node.span(),
+    };
+    let visible = match node.get("visible") {
+        Some(value) => value.as_bool().ok_or_else(invalid)?,
+        None => false,
+    };
+    let mut places = Vec::new();
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if child.name().value() != "place" {
+                return Err(invalid());
+            }
+            places.push(PlaceName {
+                name: child
+                    .get(0)
+                    .and_then(|v| v.as_string())
+                    .ok_or_else(invalid)?
+                    .to_owned(),
+                latitude: numeric_prop(child, "lat").ok_or_else(invalid)?,
+                longitude: numeric_prop(child, "lon").ok_or_else(invalid)?,
+                altitude: numeric_prop(child, "alt").ok_or_else(invalid)?,
+            });
+        }
+    }
+    let config = PlaceNamesConfig { visible, places };
+    config.validate().map_err(|_| invalid())?;
+    Ok(config)
 }
 
 fn parse_skybox(node: &KdlNode, src: &str) -> Result<SkyboxConfig, KdlSchematicError> {
@@ -439,6 +483,10 @@ fn push_parsed_schematic_node(
     node: &KdlNode,
     src: &str,
 ) -> Result<(), KdlSchematicError> {
+    if node.name().value() == "place_names" {
+        schematic.place_names = Some(parse_place_names(node, src)?);
+        return Ok(());
+    }
     if node.name().value() == "skybox" {
         schematic.skybox = Some(parse_skybox(node, src)?);
         return Ok(());
@@ -2102,11 +2150,6 @@ fn parse_object_3d_mesh(
         src: src.to_string(),
         span: (0, 0).into(),
     })?;
-
-    fn numeric_prop(node: &KdlNode, prop: &str) -> Option<f64> {
-        node.get(prop)
-            .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
-    }
 
     match node.name().value() {
         "glb" => {

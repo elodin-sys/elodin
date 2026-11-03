@@ -29,6 +29,7 @@ WorldMesh = _native.WorldMesh
 Window = _native.Window
 Mesh = _native.Mesh
 Joint = _native.Joint
+PlaceNames = _native.PlaceNames
 Coordinate = _native.Coordinate
 Theme = _native.Theme
 Timeline = _native.Timeline
@@ -54,6 +55,7 @@ overlay_key = _native.overlay_key
 apply_overlay = _native.apply_overlay
 extract_overlay = _native.extract_overlay
 
+place_names = _native.place_names
 coordinate = _native.coordinate
 theme = _native.theme
 timeline = _native.timeline
@@ -102,6 +104,8 @@ window = _native.window
 
 __all__ = [
     "Schematic",
+    "PlaceNames",
+    "place_names",
     "Panel",
     "Object3D",
     "Line3d",

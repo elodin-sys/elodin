@@ -1,5 +1,4 @@
 //! Editor adapter for the independently maintained bevy-cesium plugin.
-mod map_overlay;
 use crate::{
     MainCamera,
     sensor_camera::{SensorCamera, SensorCameraConfig, SensorCameraConfigs},
@@ -460,7 +459,6 @@ impl Plugin for CesiumPlugin {
                 .after(update_startup)
                 .after(crate::ui::render_layout),
         );
-        app.add_plugins(map_overlay::MapOverlayPlugin);
         app.add_systems(Update, log_streaming_status.after(CesiumSet::Publish));
         if std::env::var("ELODIN_RC_JET_TERRAIN").as_deref() == Ok("cesium") {
             app.add_systems(Update, style_rc_jet_terrain.after(CesiumSet::Placement));

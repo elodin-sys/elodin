@@ -67,6 +67,32 @@ pub struct PyJoint {
     pub(crate) inner: JointAnimation,
 }
 
+#[pyclass(name = "PlaceNames", module = "elodin.ui")]
+#[derive(Clone, Debug)]
+pub struct PyPlaceNames {
+    pub(crate) inner: PlaceNamesConfig,
+}
+
+/// Names with latitude/longitude in degrees and ellipsoid altitude in meters.
+#[pyfunction]
+#[pyo3(signature = (names, *, visible=false))]
+fn place_names(names: Vec<(String, f64, f64, f64)>, visible: bool) -> PyResult<PyPlaceNames> {
+    let inner = PlaceNamesConfig {
+        visible,
+        places: names
+            .into_iter()
+            .map(|(name, latitude, longitude, altitude)| PlaceName {
+                name,
+                latitude,
+                longitude,
+                altitude,
+            })
+            .collect(),
+    };
+    inner.validate().map_err(PyValueError::new_err)?;
+    Ok(PyPlaceNames { inner })
+}
+
 #[pyclass(name = "Coordinate", module = "elodin.ui")]
 #[derive(Clone, Debug)]
 pub struct PyCoordinate {
@@ -1645,6 +1671,7 @@ pub(super) fn register_builders(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(environment, module)?)?;
     module.add_function(wrap_pyfunction!(bloom, module)?)?;
     module.add_function(wrap_pyfunction!(coordinate, module)?)?;
+    module.add_function(wrap_pyfunction!(place_names, module)?)?;
     module.add_function(wrap_pyfunction!(theme, module)?)?;
     module.add_function(wrap_pyfunction!(timeline, module)?)?;
     module.add_function(wrap_pyfunction!(tabs, module)?)?;

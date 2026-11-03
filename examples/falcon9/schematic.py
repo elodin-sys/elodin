@@ -19,6 +19,15 @@ Typed elodin.ui translation of falcon9.kdl.
 
 import elodin.ui as ui
 
+from constants import (
+    PAD_LAT_DEG,
+    PAD_LON_DEG,
+    PAD_ALT_M,
+    LZ1_LAT_DEG,
+    LZ1_LON_DEG,
+    LZ1_ALT_M,
+)
+
 
 def build() -> ui.Schematic:
     return ui.schematic(
@@ -369,6 +378,12 @@ def build() -> ui.Schematic:
                 160,
             ),
             perspective=False,
+        ),
+        place_names=ui.place_names(
+            [
+                ("LC-39A", PAD_LAT_DEG, PAD_LON_DEG, PAD_ALT_M),
+                ("Landing Zone 1", LZ1_LAT_DEG, LZ1_LON_DEG, LZ1_ALT_M),
+            ]
         ),
         coordinate=ui.coordinate(
             frame="ECEF",

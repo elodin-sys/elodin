@@ -207,6 +207,27 @@ fn schematic_expr(schematic: &Schematic) -> PyExpr {
             "environment",
             schematic.environment.as_ref().map(environment_expr),
         );
+    if let Some(names) = &schematic.place_names {
+        let entries = names
+            .places
+            .iter()
+            .map(|place| {
+                PyExpr::atom(format!(
+                    "({}, {}, {}, {})",
+                    py_str(&place.name).render(0),
+                    place.latitude,
+                    place.longitude,
+                    place.altitude
+                ))
+            })
+            .collect();
+        call = call.kw(
+            "place_names",
+            PyExpr::call("place_names")
+                .arg(PyExpr::List(entries))
+                .kw("visible", py_bool(names.visible)),
+        );
+    }
     if schematic.telemetry_mode {
         call = call.kw("telemetry_mode", py_bool(true));
     }

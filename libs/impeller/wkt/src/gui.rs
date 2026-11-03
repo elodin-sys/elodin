@@ -108,9 +108,52 @@ pub struct Schematic {
     /// color. Absent = the editor's default look.
     #[serde(default)]
     pub environment: Option<EnvironmentConfig>,
+    /// Optional geographic labels; shared by native and browser editors.
+    #[serde(default)]
+    pub place_names: Option<PlaceNamesConfig>,
     /// When true, enable dense telemetry presentation (locked graphs, compact chrome).
     #[serde(default)]
     pub telemetry_mode: bool,
+}
+
+/// A small, declarative set of geographic labels. Angles are degrees;
+/// altitude is meters above the WGS84 ellipsoid.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default)]
+pub struct PlaceNamesConfig {
+    #[serde(default)]
+    pub visible: bool,
+    pub places: Vec<PlaceName>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct PlaceName {
+    pub name: String,
+    pub latitude: f64,
+    pub longitude: f64,
+    pub altitude: f64,
+}
+
+impl PlaceNamesConfig {
+    pub fn validate(&self) -> Result<(), &'static str> {
+        if self.places.len() > 256 {
+            return Err("place_names supports at most 256 labels");
+        }
+        for place in &self.places {
+            if place.name.trim().is_empty()
+                || place.name.chars().count() > 160
+                || !place.latitude.is_finite()
+                || !(-90.0..=90.0).contains(&place.latitude)
+                || !place.longitude.is_finite()
+                || !(-180.0..=180.0).contains(&place.longitude)
+                || !place.altitude.is_finite()
+            {
+                return Err(
+                    "place_names requires a name, valid latitude/longitude and finite altitude",
+                );
+            }
+        }
+        Ok(())
+    }
 }
 
 /// Contents of the top-level `environment` schematic node

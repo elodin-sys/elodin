@@ -21,6 +21,7 @@ pub(crate) mod hw_stats;
 pub(crate) mod kdl_asset_source;
 pub(crate) mod kdl_document;
 mod logical_key;
+pub(crate) mod map_overlay;
 pub mod navigation_gizmo;
 pub mod render_layer_alloc;
 pub mod scene_environment;

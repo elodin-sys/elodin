@@ -84,6 +84,29 @@ pub fn serialize_schematic(schematic: &Schematic) -> String {
         doc.nodes_mut().push(serialize_environment(environment));
     }
 
+    if let Some(names) = &schematic.place_names {
+        let mut node = KdlNode::new("place_names");
+        node.entries_mut()
+            .push(KdlEntry::new_prop("visible", names.visible));
+        let mut children = KdlDocument::new();
+        for place in &names.places {
+            let mut child = KdlNode::new("place");
+            child.entries_mut().push(KdlEntry::new(place.name.clone()));
+            child
+                .entries_mut()
+                .push(KdlEntry::new_prop("lat", place.latitude));
+            child
+                .entries_mut()
+                .push(KdlEntry::new_prop("lon", place.longitude));
+            child
+                .entries_mut()
+                .push(KdlEntry::new_prop("alt", place.altitude));
+            children.nodes_mut().push(child);
+        }
+        node.set_children(children);
+        doc.nodes_mut().push(node);
+    }
+
     for elem in &schematic.elems {
         let node = serialize_schematic_elem(elem);
         doc.nodes_mut().push(node);
