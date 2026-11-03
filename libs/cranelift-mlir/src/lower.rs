@@ -1521,8 +1521,7 @@ define_trt! {
     reduce_min_f32, "__trt_reduce_min_f32", tensor_rt::tensor_reduce_min_f32, [ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
     // indexing
     // byte-generic gather/scatter/layout ops with elem_sz
-    gather_generic,    "__trt_gather_generic",    tensor_rt::tensor_gather_generic,    [ptr_type(), ptr_type(), types::I64, ptr_type(), types::I64, types::I64, types::I64];
-    gather_nd_generic, "__trt_gather_nd_generic", tensor_rt::tensor_gather_nd_generic, [ptr_type(), ptr_type(), types::I64, ptr_type(), types::I64, types::I64, ptr_type(), types::I64, ptr_type(), ptr_type(), types::I64, types::I64];
+    gather,    "__trt_gather",    tensor_rt::tensor_gather,    [ptr_type(), ptr_type(), ptr_type(), ptr_type(), types::I64];
     scatter,   "__trt_scatter",   tensor_rt::tensor_scatter,   [ptr_type(), ptr_type(), ptr_type(), ptr_type(), types::I64];
     matmul_f64,    "__trt_matmul_f64",    tensor_rt::tensor_matmul_f64,    [ptr_type(), ptr_type(), ptr_type(), types::I64, types::I64, types::I64];
     dot_general,   "__trt_dot_general",   tensor_rt::tensor_dot_general,   [ptr_type(), ptr_type(), ptr_type(), ptr_type()];
@@ -5118,91 +5117,39 @@ fn lower_instruction_mem(
                 .get(indices)
                 .cloned()
                 .unwrap_or(TensorType::scalar(ElementType::I64));
+            let axes = gather_axes(&src_ty, &idx_ty, &rt, dims, slice_sizes)?;
+            let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
+            if rt.shape.contains(&0) {
+                return Ok(vec![LaneRepr::scalar(vec![dst])]);
+            }
 
-            let ivd = dims.index_vector_dim as usize;
-            let idx_rank = idx_ty.rank();
-            let n_index_dims = if ivd < idx_rank {
-                idx_ty.shape[ivd] as usize
-            } else {
-                1
-            };
-            let use_nd = n_index_dims > 1 && !dims.start_index_map.is_empty();
-
-            let n_total_idx = idx_ty.num_elements();
-            let idx_ptr = get(indices)?;
-            let widened_idx = if matches!(idx_ty.element_type, ElementType::I32 | ElementType::UI32)
-            {
-                let wide_buf = alloc_slot(builder, n_total_idx * 8);
+            let n_idx = idx_ty.num_elements();
+            let mut idx_ptr = get(indices)?;
+            if matches!(idx_ty.element_type, ElementType::I32 | ElementType::UI32) {
+                let wide = alloc_slot(builder, n_idx * 8);
                 let widen_ref =
                     jit_module.declare_func_in_func(trt_ids.widen_i32_to_i64, builder.func);
-                let n_v = builder.ins().iconst(types::I64, n_total_idx as i64);
-                builder.ins().call(widen_ref, &[wide_buf, idx_ptr, n_v]);
-                wide_buf
-            } else {
-                idx_ptr
-            };
-
-            let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
-
-            let n_src_v = builder
-                .ins()
-                .iconst(types::I64, src_ty.num_elements() as i64);
-            let esz = builder.ins().iconst(types::I64, elem_sz as i64);
-
-            if use_nd {
-                let n_batch = if idx_rank > 1 {
-                    n_total_idx / n_index_dims
-                } else {
-                    1
-                };
-                let n_batch_v = builder.ins().iconst(types::I64, n_batch as i64);
-                let n_idx_dims_v = builder.ins().iconst(types::I64, n_index_dims as i64);
-                let src_shape_ptr = store_i64_array(builder, &src_ty.shape);
-                let src_rank_v = builder.ins().iconst(types::I64, src_ty.rank() as i64);
-                let sim_ptr = store_i64_array(builder, &dims.start_index_map);
-                let ss_ptr = store_i64_array(builder, slice_sizes);
-                let n_dst_v = builder.ins().iconst(types::I64, n as i64);
-                let func_ref =
-                    jit_module.declare_func_in_func(trt_ids.gather_nd_generic, builder.func);
-                builder.ins().call(
-                    func_ref,
-                    &[
-                        dst,
-                        get(operand)?,
-                        n_src_v,
-                        widened_idx,
-                        n_batch_v,
-                        n_idx_dims_v,
-                        src_shape_ptr,
-                        src_rank_v,
-                        sim_ptr,
-                        ss_ptr,
-                        n_dst_v,
-                        esz,
-                    ],
-                );
-            } else {
-                // One start index per batch position: every indices dim but
-                // index_vector_dim, so [E, K, 1] under vmap is E * K indices.
-                let n_idx = n_total_idx / n_index_dims.max(1);
-                let row_size = n.checked_div(n_idx).unwrap_or(1);
-                let n_idx_v = builder.ins().iconst(types::I64, n_idx as i64);
-                let row_v = builder.ins().iconst(types::I64, row_size as i64);
-                let func_ref =
-                    jit_module.declare_func_in_func(trt_ids.gather_generic, builder.func);
-                builder.ins().call(
-                    func_ref,
-                    &[
-                        dst,
-                        get(operand)?,
-                        n_src_v,
-                        widened_idx,
-                        n_idx_v,
-                        row_v,
-                        esz,
-                    ],
-                );
+                let n_v = builder.ins().iconst(types::I64, n_idx as i64);
+                builder.ins().call(widen_ref, &[wide, idx_ptr, n_v]);
+                idx_ptr = wide;
             }
+            let mut meta = vec![
+                elem_sz as i64,
+                src_ty.num_elements() as i64,
+                n_idx as i64,
+                n as i64,
+                axes.inner,
+                axes.vector_stride,
+                axes.dims.len() as i64,
+            ];
+            meta.extend(axes.dims.iter().flatten());
+            meta.extend(axes.starts.iter().flatten());
+            let meta_ptr = store_i64_array(builder, &meta);
+            let n_meta = builder.ins().iconst(types::I64, meta.len() as i64);
+            let func_ref = jit_module.declare_func_in_func(trt_ids.gather, builder.func);
+            builder
+                .ins()
+                .call(func_ref, &[dst, get(operand)?, idx_ptr, meta_ptr, n_meta]);
             Ok(vec![LaneRepr::scalar(vec![dst])])
         }
 
@@ -7895,7 +7842,7 @@ fn lower_instruction(
                 &rt,
                 dims,
                 slice_sizes,
-            ))])
+            )?)])
         }
 
         // ----- Function call -----
@@ -9851,8 +9798,103 @@ fn apply_reduce_op(
 }
 
 // ---------------------------------------------------------------------------
-// Gather — stack-slot based element lookup for small tensors
+// Gather
 // ---------------------------------------------------------------------------
+
+/// The strided walk a `stablehlo.gather` performs, shared by both ABIs.
+struct GatherAxes {
+    /// `[size, operand stride, indices stride]` per result dim, outermost first, without
+    /// size-1 dims or the contiguous innermost run.
+    dims: Vec<[i64; 3]>,
+    /// `[operand stride, max start]` per `start_index_map` entry.
+    starts: Vec<[i64; 2]>,
+    /// Indices stride between the entries of one start index vector.
+    vector_stride: i64,
+    /// Elements each position copies contiguously.
+    inner: i64,
+}
+
+fn gather_axes(
+    src_ty: &TensorType,
+    idx_ty: &TensorType,
+    out_ty: &TensorType,
+    dims: &GatherDims,
+    slice_sizes: &[i64],
+) -> Result<GatherAxes, String> {
+    let strides = |shape: &[i64]| {
+        let mut st = vec![1i64; shape.len()];
+        for d in (1..shape.len()).rev() {
+            st[d - 1] = st[d] * shape[d];
+        }
+        st
+    };
+    let (src_st, idx_st) = (strides(&src_ty.shape), strides(&idx_ty.shape));
+    let misfit = || {
+        format!(
+            "gather dimension numbers do not fit {:?} and {:?} -> {:?}",
+            src_ty.shape, idx_ty.shape, out_ty.shape
+        )
+    };
+    let has = |list: &[i64], d: usize| list.contains(&(d as i64));
+    let in_operand = |list: &[i64]| list.iter().all(|&d| (0..src_ty.rank() as i64).contains(&d));
+    let ivd = dims.index_vector_dim as usize;
+    let kept: Vec<usize> = (0..src_ty.rank())
+        .filter(|&d| !has(&dims.collapsed_slice_dims, d) && !has(&dims.operand_batching_dims, d))
+        .collect();
+    let batch: Vec<usize> = (0..idx_ty.rank()).filter(|&d| d != ivd).collect();
+    if slice_sizes.len() != src_ty.rank()
+        || kept.len() + batch.len() != out_ty.rank()
+        || dims.start_index_map.len() as i64 != idx_ty.shape.get(ivd).copied().unwrap_or(1)
+        || dims.operand_batching_dims.len() != dims.start_indices_batching_dims.len()
+        || !in_operand(&dims.start_index_map)
+        || !in_operand(&dims.operand_batching_dims)
+    {
+        return Err(misfit());
+    }
+    let (mut next_kept, mut next_batch) = (kept.iter(), batch.iter());
+    let mut axes = Vec::with_capacity(out_ty.rank());
+    for (d, &size) in out_ty.shape.iter().enumerate() {
+        let (expected, axis) = if has(&dims.offset_dims, d) {
+            let &k = next_kept.next().ok_or_else(misfit)?;
+            (slice_sizes[k], [size, src_st[k], 0])
+        } else {
+            let &j = next_batch.next().ok_or_else(misfit)?;
+            let operand_stride = dims
+                .start_indices_batching_dims
+                .iter()
+                .position(|&b| b as usize == j)
+                .map_or(0, |p| src_st[dims.operand_batching_dims[p] as usize]);
+            (idx_ty.shape[j], [size, operand_stride, idx_st[j]])
+        };
+        if size != expected {
+            return Err(misfit());
+        }
+        if size != 1 {
+            axes.push(axis);
+        }
+    }
+    let mut inner = 1;
+    while let Some(&[size, operand_stride, 0]) = axes.last()
+        && operand_stride == inner
+    {
+        inner *= size;
+        axes.pop();
+    }
+    let starts = dims
+        .start_index_map
+        .iter()
+        .map(|&d| {
+            let d = d as usize;
+            [src_st[d], (src_ty.shape[d] - slice_sizes[d]).max(0)]
+        })
+        .collect();
+    Ok(GatherAxes {
+        dims: axes,
+        starts,
+        vector_stride: idx_st.get(ivd).copied().unwrap_or(0),
+        inner,
+    })
+}
 
 fn lower_gather(
     builder: &mut FunctionBuilder,
@@ -9863,179 +9905,47 @@ fn lower_gather(
     out_ty: &TensorType,
     dims: &GatherDims,
     slice_sizes: &[i64],
-) -> TensorVals {
+) -> Result<TensorVals, String> {
     let n = out_ty.num_elements();
     let et = out_ty.element_type;
-    let ct = cranelift_type_for(et);
-    let elem_sz = et.byte_size();
-
-    if operand.is_empty() || indices.is_empty() {
-        return vec![make_zero(builder, et); n];
+    if operand.is_empty() || indices.is_empty() || out_ty.shape.contains(&0) {
+        return Ok(vec![make_zero(builder, et); n]);
     }
-
-    let src_shape: Vec<usize> = src_ty.shape.iter().map(|&d| d as usize).collect();
-    let src_rank = src_shape.len();
-    let out_shape: Vec<usize> = out_ty.shape.iter().map(|&d| d as usize).collect();
-    let out_rank = out_shape.len();
-    let idx_shape: Vec<usize> = idx_ty.shape.iter().map(|&d| d as usize).collect();
-    let index_vector_dim = dims.index_vector_dim as usize;
-
-    let mut src_strides = vec![1usize; src_rank];
-    for i in (0..src_rank.saturating_sub(1)).rev() {
-        src_strides[i] = src_strides[i + 1] * src_shape[i + 1];
-    }
-    let mut idx_strides = vec![1usize; idx_shape.len()];
-    for i in (0..idx_shape.len().saturating_sub(1)).rev() {
-        idx_strides[i] = idx_strides[i + 1] * idx_shape[i + 1];
-    }
-
-    let total_bytes = operand.len() * elem_sz;
-    let ss = builder.create_sized_stack_slot(StackSlotData::new(
-        StackSlotKind::ExplicitSlot,
-        total_bytes as u32,
-        SLOT_ALIGN,
-    ));
-    let base = builder.ins().stack_addr(ptr_type(), ss, 0);
-    for (i, &v) in operand.iter().enumerate() {
-        builder
-            .ins()
-            .store(MemFlags::trusted(), v, base, (i * elem_sz) as i32);
-    }
-
-    // Batch dims of the indices tensor = all dims except index_vector_dim
-    let idx_rank = idx_shape.len();
-    let batch_dims: Vec<usize> = (0..idx_rank).filter(|&d| d != index_vector_dim).collect();
-    let index_depth = if index_vector_dim < idx_rank {
-        idx_shape[index_vector_dim]
-    } else {
-        1
-    };
-
-    // Batch shape = indices shape with index_vector_dim removed
-    let batch_shape: Vec<usize> = batch_dims.iter().map(|&d| idx_shape[d]).collect();
-    let batch_rank = batch_shape.len();
-
-    // Offset shape = slice_sizes with collapsed dims removed
-    let offset_shape: Vec<usize> = (0..src_rank)
-        .filter(|d| !dims.collapsed_slice_dims.contains(&(*d as i64)))
-        .map(|d| slice_sizes[d] as usize)
-        .collect();
-    let offset_rank = offset_shape.len();
-
-    let mut results = Vec::with_capacity(n);
-
-    for flat_out in 0..n {
-        // Decompose flat output index into multi-index
-        let mut out_indices = vec![0usize; out_rank];
-        {
-            let mut rem = flat_out;
-            for d in (0..out_rank).rev() {
-                if out_shape[d] > 0 {
-                    out_indices[d] = rem % out_shape[d];
-                    rem /= out_shape[d];
-                }
-            }
+    let axes = gather_axes(src_ty, idx_ty, out_ty, dims, slice_sizes)?;
+    let (ct, elem_sz) = (cranelift_type_for(et), et.byte_size() as i64);
+    let base = spill_lanes(builder, operand, elem_sz as usize);
+    let mut out = Vec::with_capacity(n);
+    for p in 0..(n as i64 / axes.inner) {
+        let (mut from, mut idx, mut rem) = (0, 0, p);
+        for &[size, operand_stride, indices_stride] in axes.dims.iter().rev() {
+            let c = rem % size;
+            rem /= size;
+            from += c * operand_stride;
+            idx += c * indices_stride;
         }
-
-        // Split output indices into batch part and offset part
-        let mut batch_idx = vec![0usize; batch_rank];
-        let mut offset_idx = vec![0usize; offset_rank];
-        let offset_dims = &dims.offset_dims;
-        let mut bi = 0;
-        let mut oi = 0;
-        for (d, &out_idx) in out_indices.iter().enumerate() {
-            if offset_dims.contains(&(d as i64)) {
-                if oi < offset_rank {
-                    offset_idx[oi] = out_idx;
-                    oi += 1;
-                }
-            } else if bi < batch_rank {
-                batch_idx[bi] = out_idx;
-                bi += 1;
-            }
-        }
-
-        // Look up start indices from the indices tensor
-        let mut start_index = vec![0usize; index_depth];
-        for (k, si) in start_index.iter_mut().enumerate() {
-            let mut idx_multi = vec![0usize; idx_rank];
-            let mut b = 0;
-            for (d, im) in idx_multi.iter_mut().enumerate() {
-                if d == index_vector_dim {
-                    *im = k;
-                } else {
-                    if b < batch_rank {
-                        *im = batch_idx[b];
-                    }
-                    b += 1;
-                }
-            }
-            let mut flat_idx = 0;
-            for (d, &im) in idx_multi.iter().enumerate() {
-                flat_idx += im * idx_strides[d];
-            }
-            *si = flat_idx;
-        }
-
-        // Build source multi-index
-        let mut src_idx = vec![0usize; src_rank];
-
-        // Place start indices via start_index_map (runtime values)
-        // Place offset indices into non-collapsed dims
-        let mut oi2 = 0;
-        for (d, si) in src_idx.iter_mut().enumerate() {
-            if !dims.collapsed_slice_dims.contains(&(d as i64)) && oi2 < offset_rank {
-                *si = offset_idx[oi2];
-                oi2 += 1;
-            }
-        }
-
-        // The start_index values are RUNTIME (SSA) values from the indices tensor.
-        // We need to compute the source address dynamically.
-        // Static part: offset contribution to flat index
-        let mut static_offset = 0usize;
-        for d in 0..src_rank {
-            if !dims.collapsed_slice_dims.contains(&(d as i64)) {
-                static_offset += src_idx[d] * src_strides[d];
-            }
-        }
-
-        // Dynamic part: start_index contributions
-        // For each k in start_index_map, add indices[start_index[k]] * src_strides[start_index_map[k]]
-        let static_byte_off = (static_offset * elem_sz) as i32;
-        let mut addr = builder.ins().iadd_imm(base, static_byte_off as i64);
-
-        for (k, &mapped_dim) in dims.start_index_map.iter().enumerate() {
-            if k >= index_depth {
-                break;
-            }
-            let flat_idx = start_index[k];
-            if flat_idx >= indices.len() {
-                continue;
-            }
-            let raw_idx = indices[flat_idx];
-            let idx_i64 = if builder.func.dfg.value_type(raw_idx) == types::I64 {
-                raw_idx
+        let mut addr = base;
+        for (k, &[operand_stride, max_start]) in axes.starts.iter().enumerate() {
+            let raw = *indices
+                .get((idx + k as i64 * axes.vector_stride) as usize)
+                .ok_or("gather: start index outside the indices")?;
+            let start = if builder.func.dfg.value_type(raw) == types::I64 {
+                raw
             } else {
-                builder.ins().sextend(types::I64, raw_idx)
+                builder.ins().sextend(types::I64, raw)
             };
-            // Start indices clamp into the operand, as stablehlo.gather specifies.
-            let max_start =
-                (src_shape[mapped_dim as usize] as i64 - slice_sizes[mapped_dim as usize]).max(0);
             let lo = builder.ins().iconst(types::I64, 0);
             let hi = builder.ins().iconst(types::I64, max_start);
-            let idx_i64 = builder.ins().smax(idx_i64, lo);
-            let idx_i64 = builder.ins().smin(idx_i64, hi);
-            let stride_bytes = (src_strides[mapped_dim as usize] * elem_sz) as i64;
-            let byte_off = builder.ins().imul_imm(idx_i64, stride_bytes);
-            addr = builder.ins().iadd(addr, byte_off);
+            let start = builder.ins().smax(start, lo);
+            let start = builder.ins().smin(start, hi);
+            let offset = builder.ins().imul_imm(start, operand_stride * elem_sz);
+            addr = builder.ins().iadd(addr, offset);
         }
-
-        let v = builder.ins().load(ct, MemFlags::trusted(), addr, 0);
-        results.push(v);
+        for i in 0..axes.inner {
+            let byte = ((from + i) * elem_sz) as i32;
+            out.push(builder.ins().load(ct, MemFlags::trusted(), addr, byte));
+        }
     }
-
-    results
+    Ok(out)
 }
 
 fn lower_transpose(

@@ -1342,6 +1342,8 @@ fn parse_gather_op(
 
     let offset_dims = extract_bracket_ints(rest, "offset_dims = [");
     let collapsed_slice_dims = extract_bracket_ints(rest, "collapsed_slice_dims = [");
+    let operand_batching_dims = extract_bracket_ints(rest, "operand_batching_dims = [");
+    let start_indices_batching_dims = extract_bracket_ints(rest, "start_indices_batching_dims = [");
     let start_index_map = extract_bracket_ints(rest, "start_index_map = [");
 
     let mut index_vector_dim: i64 = 1;
@@ -1376,6 +1378,8 @@ fn parse_gather_op(
             dims: GatherDims {
                 offset_dims,
                 collapsed_slice_dims,
+                operand_batching_dims,
+                start_indices_batching_dims,
                 start_index_map,
                 index_vector_dim,
             },
