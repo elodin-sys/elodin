@@ -2451,6 +2451,71 @@ module @module {
     assert_f64s_close(&result, &[10.0, 30.0, 50.0]);
 }
 
+#[test]
+fn test_gather_batched_indices() {
+    // A table lookup in a system mapped over 2 entities: jax.vmap batches the
+    // indices to [2, 4, 1], and each of the 8 picks one element. The pointer
+    // ABI counted 2 indices and copied 4-element rows from 4 * idx.
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<10xf64>, %arg1: tensor<2x4x1xi32>) -> tensor<2x4xf64> {
+    %0 = "stablehlo.gather"(%arg0, %arg1) <{dimension_numbers = #stablehlo.gather<collapsed_slice_dims = [0], start_index_map = [0], index_vector_dim = 2>, indices_are_sorted = false, slice_sizes = array<i64: 1>}> : (tensor<10xf64>, tensor<2x4x1xi32>) -> tensor<2x4xf64>
+    return %0 : tensor<2x4xf64>
+  }
+}
+"#;
+    let table: Vec<f64> = (0..10).map(|i| 100.0 * i as f64).collect();
+    let data = f64_buf(&table);
+    let indices = i32_buf(&[7, 2, 9, 3, 0, 5, 8, 1]);
+    let want = [700.0, 200.0, 900.0, 300.0, 0.0, 500.0, 800.0, 100.0];
+    for out in [
+        run_mlir(mlir, &[&data, &indices], &[64]),
+        run_mlir_mem(mlir, &[&data, &indices], &[64]),
+    ] {
+        assert_f64s_close(&read_f64s(&out[0]), &want);
+    }
+}
+
+#[test]
+fn test_gather_clamps_out_of_range_indices() {
+    // stablehlo.gather clamps start indices into the operand. The pointer ABI
+    // left out-of-range rows uninitialized, the scalar ABI read outside the
+    // operand, and the N-d path sent negative indices to the last row.
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<5xf64>, %arg1: tensor<4x1xi32>) -> tensor<4xf64> {
+    %0 = "stablehlo.gather"(%arg0, %arg1) <{dimension_numbers = #stablehlo.gather<collapsed_slice_dims = [0], start_index_map = [0], index_vector_dim = 1>, indices_are_sorted = false, slice_sizes = array<i64: 1>}> : (tensor<5xf64>, tensor<4x1xi32>) -> tensor<4xf64>
+    return %0 : tensor<4xf64>
+  }
+}
+"#;
+    let data = f64_buf(&[10.0, 20.0, 30.0, 40.0, 50.0]);
+    let indices = i32_buf(&[-3, 2, 5, 9]);
+    for out in [
+        run_mlir(mlir, &[&data, &indices], &[32]),
+        run_mlir_mem(mlir, &[&data, &indices], &[32]),
+    ] {
+        assert_f64s_close(&read_f64s(&out[0]), &[10.0, 30.0, 50.0, 50.0]);
+    }
+
+    let mlir_nd = r#"
+module @module {
+  func.func public @main(%arg0: tensor<3x3xf64>, %arg1: tensor<2x2xi32>) -> tensor<2x1x1xf64> {
+    %0 = "stablehlo.gather"(%arg0, %arg1) <{dimension_numbers = #stablehlo.gather<offset_dims = [1, 2], start_index_map = [0, 1], index_vector_dim = 1>, indices_are_sorted = false, slice_sizes = array<i64: 1, 1>}> : (tensor<3x3xf64>, tensor<2x2xi32>) -> tensor<2x1x1xf64>
+    return %0 : tensor<2x1x1xf64>
+  }
+}
+"#;
+    let mat = f64_buf(&[10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0, 90.0]);
+    let idx = i32_buf(&[-1, 1, 5, -2]); // clamps to (0, 1) and (2, 0)
+    for out in [
+        run_mlir(mlir_nd, &[&mat, &idx], &[16]),
+        run_mlir_mem(mlir_nd, &[&mat, &idx], &[16]),
+    ] {
+        assert_f64s_close(&read_f64s(&out[0]), &[20.0, 70.0]);
+    }
+}
+
 // ---- Drone @inner function regression test ----
 
 #[test]
