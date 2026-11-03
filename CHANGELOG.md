@@ -1,6 +1,8 @@
 # Changelog
 
 ## unreleased
+- **(fix)** The Cranelift backend computes these lookups correctly: `table[:, idx]` and other indexing along a later axis, `lax.dynamic_slice` in a system mapped over several entities, and indexing into a table that differs per entity. They could return wrong values; the first two only in functions holding an array of more than 64 elements.
+- **(fix)** The Cranelift backend reads the right entries for `jnp.interp` and `table[idx]` in a system mapped over several entities when the function holds an array of more than 64 elements, and clamps indices outside a table to its ends, as jax-cpu does. Such indices could return arbitrary values.
 - **(fix)** The Cranelift backend computes `jnp.log` of arrays with two or more elements to full precision; it was off by up to about 1e-13 relative error, which also shifted `jnp.log1p` on such arrays. Long simulations that use them can drift slightly from earlier results.
 - **(breaking)** `six_dof` solves Euler's rigid-body equations with the full inertia tensor, including the gyroscopic term `ω × Iω`. Bodies with unequal principal moments now precess and tumble when they spin; trajectories of such bodies change.
 - **(breaking)** `SpatialInertia` and `SpatialInertia.from_array` validate concrete inputs: mass must be finite and > 0, `inertia` and `inertia_off_diag` must have shape (3,), and the tensor must be positive-definite and satisfy the triangle inequality. Ints, lists, and int or float32 arrays are converted to float64; bools and strings raise.
