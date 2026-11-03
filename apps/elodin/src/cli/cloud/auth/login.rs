@@ -11,20 +11,15 @@ use super::tokens::{self, Credentials};
 use super::{AuthCtx, LoginArgs, OidcConfig, TokenResponse, pkce, random_token, urlencode};
 use super::{CLIENT_ID, SCOPE};
 
-/// How long the loopback listener waits for the browser; signing up includes verifying an email.
+/// How long the loopback listener waits for the browser.
 const BROWSER_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 pub async fn run(ctx: &AuthCtx, args: &LoginArgs) -> miette::Result<()> {
-    sign_in(ctx, args, None).await
-}
-
-/// Log in, or with `prompt = Some("create")` open the registration page first (`elodin signup`).
-pub async fn sign_in(ctx: &AuthCtx, args: &LoginArgs, prompt: Option<&str>) -> miette::Result<()> {
     let oidc = ctx.discover().await.wrap_err("OIDC discovery failed")?;
     let creds = if args.device {
         device_flow(ctx, &oidc, args.no_browser).await?
     } else {
-        browser_flow(ctx, &oidc, args, prompt).await?
+        browser_flow(ctx, &oidc, args).await?
     };
     creds.save(&ctx.creds_path)?;
     println!(
@@ -39,7 +34,6 @@ async fn browser_flow(
     ctx: &AuthCtx,
     oidc: &OidcConfig,
     args: &LoginArgs,
-    prompt: Option<&str>,
 ) -> miette::Result<Credentials> {
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .await
@@ -50,7 +44,7 @@ async fn browser_flow(
 
     let (verifier, challenge) = pkce();
     let state = random_token();
-    let mut auth_url = format!(
+    let auth_url = format!(
         "{endpoint}?response_type=code&client_id={client}&redirect_uri={redirect}&scope={scope}\
          &code_challenge={challenge}&code_challenge_method=S256&state={state}",
         endpoint = oidc.authorization_endpoint,
@@ -60,9 +54,6 @@ async fn browser_flow(
         challenge = urlencode(&challenge),
         state = urlencode(&state),
     );
-    if let Some(prompt) = prompt {
-        auth_url.push_str(&format!("&prompt={}", urlencode(prompt)));
-    }
 
     if args.no_browser {
         println!("Open this URL to log in:\n  {auth_url}");

@@ -46,8 +46,6 @@ pub struct Cli {
 
 #[derive(Subcommand, Clone)]
 enum Commands {
-    /// Create an Elodin Cloud account in your browser, then log in
-    Signup(cloud::auth::SignupArgs),
     /// Log in to Elodin Cloud through your browser (OIDC + PKCE)
     Login(cloud::auth::LoginArgs),
     /// Remove stored Elodin Cloud credentials and end the session
@@ -140,7 +138,6 @@ impl Cli {
             .expect("tokio runtime failed to start");
 
         match &self.command {
-            Some(Commands::Signup(args)) => self.clone().signup(args.clone(), rt),
             Some(Commands::Login(args)) => self.clone().login(args.clone(), rt),
             Some(Commands::Logout) => self.clone().logout(rt),
             Some(Commands::Whoami(args)) => self.clone().whoami(args.clone(), rt),

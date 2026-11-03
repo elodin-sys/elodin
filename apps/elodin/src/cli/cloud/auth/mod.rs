@@ -16,7 +16,6 @@ use super::AuthCtx;
 
 mod login;
 mod logout;
-mod signup;
 pub(super) mod tokens;
 mod whoami;
 
@@ -40,13 +39,6 @@ pub struct WhoamiArgs {
     /// Print the raw identity JSON returned by the API.
     #[arg(long)]
     pub json: bool,
-}
-
-#[derive(Args, Clone, Default)]
-pub struct SignupArgs {
-    /// Print the registration URL instead of opening a browser.
-    #[arg(long)]
-    pub no_browser: bool,
 }
 
 /// The subset of the OIDC discovery document the CLI needs.
@@ -148,10 +140,5 @@ impl Cli {
     pub fn whoami(self, args: WhoamiArgs, rt: Runtime) -> miette::Result<()> {
         let ctx = self.auth_ctx()?;
         rt.block_on(whoami::run(&ctx, &args))
-    }
-
-    pub fn signup(self, args: SignupArgs, rt: Runtime) -> miette::Result<()> {
-        let ctx = self.auth_ctx()?;
-        rt.block_on(signup::run(&ctx, &args))
     }
 }
