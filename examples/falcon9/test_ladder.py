@@ -3,7 +3,7 @@
 Independent checks the plant must pass before any calibration is meaningful:
 US76 anchors, apparent-gravity wiring, the classic Coriolis drop, quaternion
 kinematics, a ballistic arc against an independent inertial-frame oracle, and
-a one-period orbit hold — the dynamic checks under BOTH integrators so the
+a one-period orbit hold — the dynamic checks under every integrator so the
 SemiImplicit-at-1000-Hz decision is quantified, not asserted.
 """
 
@@ -28,7 +28,12 @@ import elodin as el
 
 INTEGRATORS = [
     ("semi_implicit", el.Integrator.SemiImplicit),
+    ("rk2", el.Integrator.Rk2),
+    ("rk3", el.Integrator.Rk3),
     ("rk4", el.Integrator.Rk4),
+    ("verlet", el.Integrator.Verlet),
+    ("rk78", el.Integrator.Rk78),
+    ("dp54", el.Integrator.Dp54),
 ]
 
 
@@ -142,7 +147,12 @@ def _inertial_oracle(r_e0: np.ndarray, v_e0: np.ndarray, t_end: float, dt: float
 BALLISTIC_CASES = [
     ("semi_implicit", 1000.0, 20.0, 1.0),
     ("semi_implicit", 100.0, 200.0, 25.0),
+    ("rk2", 100.0, 200.0, 0.5),
+    ("rk3", 100.0, 200.0, 0.5),
     ("rk4", 100.0, 200.0, 0.5),
+    ("verlet", 100.0, 200.0, 0.5),
+    ("rk78", 100.0, 200.0, 0.5),
+    ("dp54", 100.0, 200.0, 0.5),
 ]
 
 
@@ -175,8 +185,24 @@ def test_ballistic_arc_vs_inertial_oracle(name, rate_hz, coast_s, tol_m):
 # this dt is tiny. Both behaviors are expected and recorded, not bugs.
 # Bounded energy oscillation for symplectic Euler is O(dt * omega_orbit)
 # ~ 1e-3 relative at dt = 1 s; the endpoint sample sits inside that band.
-ORBIT_RADIUS_TOL_M = {"semi_implicit": 16_000.0, "rk4": 5.0}
-ORBIT_ENERGY_TOL = {"semi_implicit": 2e-3, "rk4": 1e-7}
+ORBIT_RADIUS_TOL_M = {
+    "semi_implicit": 16_000.0,
+    "rk2": 1.0,
+    "rk3": 1.0,
+    "rk4": 5.0,
+    "verlet": 1.0,
+    "rk78": 5.0,
+    "dp54": 5.0,
+}
+ORBIT_ENERGY_TOL = {
+    "semi_implicit": 2e-3,
+    "rk2": 1e-7,
+    "rk3": 1e-7,
+    "rk4": 1e-7,
+    "verlet": 1e-7,
+    "rk78": 1e-7,
+    "dp54": 1e-7,
+}
 
 
 @pytest.mark.parametrize("name,integrator", INTEGRATORS)

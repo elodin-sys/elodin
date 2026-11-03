@@ -297,6 +297,7 @@ in {
       udev
       systemd
       gfortran.cc.lib
+      zlib
     ]);
 
   # Linux graphics environment variables

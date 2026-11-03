@@ -4317,6 +4317,7 @@ dependencies = [
  "cranelift-module",
  "cranelift-native",
  "faer",
+ "libm",
  "memmap2",
  "rayon",
  "serde",

@@ -81,6 +81,11 @@ impl PyUntypedArrayExt for Bound<'_, PyUntypedArray> {
 pub enum Integrator {
     Rk4,
     SemiImplicit,
+    Rk2,
+    Rk3,
+    Verlet,
+    Rk78,
+    Dp54,
 }
 
 impl FromStr for Integrator {
@@ -90,6 +95,11 @@ impl FromStr for Integrator {
         match s {
             "rk4" => Ok(Integrator::Rk4),
             "semi-implicit" => Ok(Integrator::SemiImplicit),
+            "rk2" => Ok(Integrator::Rk2),
+            "rk3" => Ok(Integrator::Rk3),
+            "verlet" => Ok(Integrator::Verlet),
+            "rk78" => Ok(Integrator::Rk78),
+            "dp54" => Ok(Integrator::Dp54),
             _ => Err(Error::PyO3(PyValueError::new_err("unknown integrator"))),
         }
     }
@@ -97,9 +107,15 @@ impl FromStr for Integrator {
 
 impl From<Integrator> for crate::integrator::Integrator {
     fn from(integrator: Integrator) -> Self {
+        use crate::integrator::{DP54, Integrator as I, RK2, RK3, RK4, RK78};
         match integrator {
-            Integrator::Rk4 => crate::integrator::Integrator::Rk4,
-            Integrator::SemiImplicit => crate::integrator::Integrator::SemiImplicit,
+            Integrator::Rk4 => I::ExplicitRk(&RK4),
+            Integrator::SemiImplicit => I::SemiImplicit,
+            Integrator::Rk2 => I::ExplicitRk(&RK2),
+            Integrator::Rk3 => I::ExplicitRk(&RK3),
+            Integrator::Verlet => I::Verlet,
+            Integrator::Rk78 => I::ExplicitRk(&RK78),
+            Integrator::Dp54 => I::ExplicitRk(&DP54),
         }
     }
 }

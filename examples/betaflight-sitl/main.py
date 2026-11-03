@@ -613,13 +613,12 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         pass  # Timeouts expected during bootgrace
 
     frame = None
-    frame_sample_time = None
+    frame_time = None
     frame_fresh = False
     if fpv is not None:
         sample = fpv.poll(ctx.read_msg_at, ctx.timestamp, t)
         frame = sample.frame
-        if sample.requested_us is not None:
-            frame_sample_time = float(sample.requested_us)
+        frame_time = sample.frame_time
         frame_fresh = sample.fresh
 
     progress = referee.progress()
@@ -633,7 +632,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         "magnetometer": magnetometer,
         "magnetometer_fresh": magnetometer_fresh and sensor_read_succeeded,
         "frame": frame,
-        "frame_sample_time": frame_sample_time,
+        "frame_time": frame_time,
         "frame_fresh": frame_fresh,
         "last_gate_passed": progress.last_gate_passed,
         "next_gate_index": progress.next_gate_index,

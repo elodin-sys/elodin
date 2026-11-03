@@ -3,23 +3,13 @@
 Typed elodin.ui translation of visual_check.kdl.
 """
 
-# Same planar DEM lift as bdx.kdl: tz = 700 - (621.5 - 450) puts the mesh
-# surface on the pad's ENU origin (physics ellipsoid 589.274 m).
-# Same contract as bdx.kdl: absolute ECEF body axes + Rx(+90°) so the
-# Y-up drone GLB sits upright in the LWIR chip (Relative would similarity-
-# rotate it by the site's ECEF level attitude).
-
 import elodin.ui as ui
+from terrain_schematic import terrain
 
 
 def build() -> ui.Schematic:
     return ui.schematic(
-        ui.world_mesh(
-            "mojave_rc_field",
-            translate=(0.0, 0.0, 528.0),
-            frame="ENU",
-            visible=True,
-        ),
+        terrain(),
         ui.tabs(
             ui.hsplit(
                 ui.sensor_view(

@@ -43,7 +43,7 @@ fn bench_reduce_sum_65x65() {
     let src: Vec<f64> = (0..OUTER * INNER).map(|i| (i % 19) as f64 * 0.05).collect();
     let mut dst = vec![0.0f64; OUTER];
     time_iters("tensor_reduce_sum_f64 65x65", 50_000, || {
-        tensor_reduce_sum_f64(dst.as_mut_ptr(), src.as_ptr(), OUTER, INNER);
+        tensor_reduce_sum_f64(dst.as_mut_ptr(), src.as_ptr(), OUTER, INNER, 1);
         black_box(&dst);
     });
 }
@@ -56,7 +56,7 @@ fn bench_reduce_sum_1x100k() {
     let src: Vec<f64> = (0..INNER).map(|i| (i % 23) as f64 * 0.01).collect();
     let mut dst = vec![0.0f64; OUTER];
     time_iters("tensor_reduce_sum_f64 1x100k", 5_000, || {
-        tensor_reduce_sum_f64(dst.as_mut_ptr(), src.as_ptr(), OUTER, INNER);
+        tensor_reduce_sum_f64(dst.as_mut_ptr(), src.as_ptr(), OUTER, INNER, 1);
         black_box(&dst);
     });
 }

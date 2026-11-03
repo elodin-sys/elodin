@@ -4,12 +4,75 @@ import socket
 import subprocess
 import tempfile
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 root = Path(__file__).resolve().parent
 binary = root / "betaflight/obj/main/betaflight_SITL.elf"
 CLI_HOST = "localhost"
 CLI_PORT = 5761
+
+CONFIGURE_COMMANDS = (
+    "feature -GPS",
+    "set trust_mag = OFF",
+    # AUX1 arms above 1700; AUX2 selects ANGLE mode above 1700.
+    "aux 0 0 0 1700 2100 0 0",
+    "aux 1 1 1 1700 2100 0 0",
+    "set gyro_hardware_lpf = NORMAL",
+    "set pid_process_denom = 1",
+    # RC smoothing's auto cutoff relies on a valid RX frame-rate
+    # measurement, which requires frame intervals >= RX_INTERVAL_MIN_US
+    # (800us). At lockstep rates above ~1.25kHz the interval is always
+    # below that floor, so the filter gain is never initialized and the
+    # throttle channel is smoothed to zero. The SITL link is clean and
+    # step-wise, so smoothing is unnecessary - disable it.
+    "set rc_smoothing = off",
+)
+
+EXPECTED_SETTINGS = (
+    ("get gyro_hardware_lpf", "gyro_hardware_lpf = NORMAL"),
+    ("get pid_process_denom", "pid_process_denom = 1"),
+    ("get rc_smoothing", "rc_smoothing = OFF"),
+    ("get trust_mag", "trust_mag = OFF"),
+    ("aux", "aux 0 0 0 1700 2100 0 0"),
+    ("aux", "aux 1 1 1 1700 2100 0 0"),
+)
+VERIFY_QUERIES = tuple(dict.fromkeys(query for query, _ in EXPECTED_SETTINGS)) + ("feature",)
+
+
+def _enabled_features(output: str) -> set[str]:
+    """Extract Betaflight's exact feature tokens from its ``Enabled:`` line."""
+    for line in output.splitlines():
+        label, separator, values = line.partition(":")
+        if separator and label.strip() == "Enabled":
+            return set(values.split())
+    raise ValueError("feature output is missing the Enabled: line")
+
+
+def _response_lines(output: str) -> set[str]:
+    """Return stripped, whole CLI response lines (without prompt whitespace)."""
+    return {line.strip() for line in output.splitlines()}
+
+
+def verification_failures(outputs: Mapping[str, str]) -> tuple[str, ...]:
+    """Return missing EEPROM settings using exact CLI-response line matching."""
+    missing = [
+        expected
+        for query, expected in EXPECTED_SETTINGS
+        if expected not in _response_lines(outputs.get(query, ""))
+    ]
+    feature_output = outputs.get("feature")
+    if feature_output is None:
+        missing.append("feature -GPS")
+    else:
+        try:
+            enabled = _enabled_features(feature_output)
+        except ValueError:
+            missing.append("feature output with Enabled: line")
+        else:
+            if "GPS" in enabled:
+                missing.append("feature -GPS")
+    return tuple(missing)
 
 
 def receive_until(cli, marker):
@@ -116,20 +179,7 @@ def initialize():
 
 def _configure(cli):
     with cli:
-        for text in (
-            # AUX1 arms above 1700; AUX2 selects ANGLE mode above 1700.
-            "aux 0 0 0 1700 2100 0 0",
-            "aux 1 1 1 1700 2100 0 0",
-            "set gyro_hardware_lpf = NORMAL",
-            "set pid_process_denom = 1",
-            # RC smoothing's auto cutoff relies on a valid RX frame-rate
-            # measurement, which requires frame intervals >= RX_INTERVAL_MIN_US
-            # (800us). At lockstep rates above ~1.25kHz the interval is always
-            # below that floor, so the filter gain is never initialized and the
-            # throttle channel is smoothed to zero. The SITL link is clean and
-            # step-wise, so smoothing is unnecessary - disable it.
-            "set rc_smoothing = off",
-        ):
+        for text in CONFIGURE_COMMANDS:
             command(cli, text)
         cli.sendall(b"save\n")
         receive_until(cli, b"Rebooting")
@@ -137,20 +187,11 @@ def _configure(cli):
 
 def verify():
     sitl, cli = start_sitl()
-    expected = (
-        ("get gyro_hardware_lpf", "gyro_hardware_lpf = NORMAL"),
-        ("get pid_process_denom", "pid_process_denom = 1"),
-        ("get rc_smoothing", "rc_smoothing = OFF"),
-        ("aux", "aux 0 0 0 1700 2100 0 0"),
-        ("aux", "aux 1 1 1 1700 2100 0 0"),
-    )
-
-    missing = []
+    outputs = {}
     try:
         with cli:
-            for query, value in expected:
-                if value not in command(cli, query):
-                    missing.append(value)
+            for query in VERIFY_QUERIES:
+                outputs[query] = command(cli, query)
             cli.sendall(b"exit\n")
             receive_until(cli, b"Rebooting")
         sitl.wait()
@@ -158,10 +199,16 @@ def verify():
         stop_sitl(sitl)
         raise
 
+    missing = verification_failures(outputs)
     if missing:
         raise RuntimeError("EEPROM verification failed: " + ", ".join(missing))
 
 
-initialize()
-verify()
-print(f"Initialized and verified {root / 'eeprom.bin'}")
+def main():
+    initialize()
+    verify()
+    print(f"Initialized and verified {root / 'eeprom.bin'}")
+
+
+if __name__ == "__main__":
+    main()

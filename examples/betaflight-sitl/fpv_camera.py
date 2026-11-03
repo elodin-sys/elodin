@@ -46,10 +46,17 @@ ReadMsgAt = Callable[[str, int], tuple[int, np.ndarray] | None]
 
 @dataclass(frozen=True)
 class FpvSample:
-    """One nominal camera-period offer. A held frame has fresh=False."""
+    """One camera-period offer with a nominal image/render ``frame_time``.
+
+    Time is simulation seconds on the ``sim_time`` clock, mapped from the
+    selected image-message timestamp; scene-time alignment is approximate, not
+    a verified exact capture-pose clock. A held frame retains its original
+    ``frame_time`` with ``fresh=False``. Both frame fields are ``None`` when no
+    valid frame was selected.
+    """
 
     frame: np.ndarray | None
-    requested_us: int | None
+    frame_time: float | None
     fresh: bool
 
 
@@ -101,7 +108,10 @@ class FpvCamera:
     def __init__(self) -> None:
         self.last_period_idx = -1
         self.last_selected_ts: int | None = None
-        self.sim_start_us: int | None = None
+        self.last_requested_us: int | None = None
+        self.sim_start_us: float | None = None
+        self._clock_anchor_us: int | None = None
+        self._clock_anchor_sim_time_s: float | None = None
         self.first_frame_sim_s: float | None = None
         self.valid_samples = 0
         self.fresh_samples = 0
@@ -109,25 +119,35 @@ class FpvCamera:
         self.malformed = False
 
     def poll(self, read_msg_at: ReadMsgAt, now_us: int, sim_time_s: float) -> FpvSample:
-        """Read the latency-adjusted frame for this tick, if this period is new."""
-        if self.sim_start_us is None:
-            self.sim_start_us = now_us - int(sim_time_s * 1_000_000)
+        """Read the latency-adjusted frame for this tick, if this period is new.
+
+        ``requested_us`` stays on the camera for accounting. A valid sample's
+        ``frame_time`` is the nominal image/render timestamp in simulation
+        seconds, derived from the selected message timestamp, not query,
+        callback, arrival, or a component's last-change time. Scene-time
+        alignment is approximate.
+        """
+        if self._clock_anchor_us is None:
+            self._clock_anchor_us = int(now_us)
+            self._clock_anchor_sim_time_s = float(sim_time_s)
+            self.sim_start_us = now_us - sim_time_s * 1_000_000.0
 
         period_idx = int(now_us // PERIOD_US)
         if period_idx == self.last_period_idx:
             return FpvSample(None, None, False)
         self.last_period_idx = period_idx
 
-        requested = now_us - LATENCY_US
+        requested = int(now_us) - LATENCY_US
+        self.last_requested_us = requested
         selected = read_msg_at(MSG, requested)
         if selected is None:
-            return FpvSample(None, requested, False)
+            return FpvSample(None, None, False)
 
         selected_ts, payload = selected
         frame = _valid_frame(payload)
         if frame is None:
             self.malformed = True
-            return FpvSample(None, requested, False)
+            return FpvSample(None, None, False)
 
         selected_ts = int(selected_ts)
         fresh = selected_ts != self.last_selected_ts
@@ -139,7 +159,12 @@ class FpvCamera:
             self.held_samples += 1
         if self.first_frame_sim_s is None:
             self.first_frame_sim_s = sim_time_s
-        return FpvSample(frame, requested, fresh)
+        assert self._clock_anchor_us is not None
+        assert self._clock_anchor_sim_time_s is not None
+        frame_time = (
+            self._clock_anchor_sim_time_s + (selected_ts - self._clock_anchor_us) / 1_000_000.0
+        )
+        return FpvSample(frame, frame_time, fresh)
 
     def finish(self, read_msg_at: ReadMsgAt, end_us: int) -> FpvReport:
         """Count every renderer frame, then score only the post-warmup window."""
