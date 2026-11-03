@@ -71,6 +71,18 @@ impl Read for CheckedSource {
     }
 }
 
+fn upload_file_len(path: &Path) -> miette::Result<u64> {
+    if path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(elodin_db::compact::is_append_log_file)
+    {
+        elodin_db::compact::compacted_file_len(path).into_diagnostic()
+    } else {
+        Ok(std::fs::metadata(path).into_diagnostic()?.len())
+    }
+}
+
 fn archive(root: &Path, manifest: &Manifest) -> miette::Result<(tempfile::NamedTempFile, Archive)> {
     let output = tempfile::NamedTempFile::new().into_diagnostic()?;
     let mut encoder = zstd::stream::write::Encoder::new(output.reopen().into_diagnostic()?, 3)
@@ -80,7 +92,7 @@ fn archive(root: &Path, manifest: &Manifest) -> miette::Result<(tempfile::NamedT
     for entry in &manifest.files {
         let path = root.join(&entry.path);
         let file = std::fs::File::open(&path).into_diagnostic()?;
-        if elodin_db::compact::compacted_file_len(&path).into_diagnostic()? != entry.size_bytes {
+        if upload_file_len(&path)? != entry.size_bytes {
             return Err(miette::miette!(
                 "upload source changed; keep the database stopped"
             ));
@@ -105,7 +117,7 @@ fn archive(root: &Path, manifest: &Manifest) -> miette::Result<(tempfile::NamedT
         builder
             .append_data(&mut header, name, &mut source)
             .into_diagnostic()?;
-        if elodin_db::compact::compacted_file_len(&path).into_diagnostic()? != entry.size_bytes
+        if upload_file_len(&path)? != entry.size_bytes
             || source.bytes != entry.size_bytes
             || source
                 .hash
@@ -653,7 +665,7 @@ fn manifest(root: &Path) -> miette::Result<Manifest> {
             ));
         }
         let disk_path = root.join(&path);
-        let compacted_len = elodin_db::compact::compacted_file_len(&disk_path).into_diagnostic()?;
+        let compacted_len = upload_file_len(&disk_path)?;
         let mut file = std::fs::File::open(&disk_path)
             .into_diagnostic()?
             .take(compacted_len);
@@ -848,7 +860,17 @@ mod tests {
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(&bytes).unwrap();
         file.set_len(8 * 1024 * 1024 * 1024).unwrap();
+        let mut asset = Vec::from(16u64.to_le_bytes());
+        asset.extend_from_slice(&[0; 24]);
+        std::fs::write(dir.path().join("asset.bin"), &asset).unwrap();
         let manifest = manifest(dir.path()).unwrap();
+        let asset_entry = manifest
+            .files
+            .iter()
+            .find(|file| file.path == "asset.bin")
+            .unwrap();
+        assert_eq!(asset_entry.size_bytes, asset.len() as u64);
+        archive(dir.path(), &manifest).unwrap();
         let entry = manifest
             .files
             .iter()
