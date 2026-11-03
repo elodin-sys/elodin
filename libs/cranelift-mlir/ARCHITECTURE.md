@@ -468,7 +468,7 @@ jit_builder.symbol("tensor_broadcast_nd_f64", tensor_broadcast_nd_f64 as *const 
 | Reduce | reduce_{sum,prod,max,min}_{f64,f32,i64,i32}, reduce_{max,min}_{u64,u32}, reduce_{and,or}_i1 | One axis per call, viewed as outer x axis x after |
 | Argmin/argmax | argminmax | One axis, any value type, i32 or i64 indices; the first NaN wins, ties keep the smaller index |
 | Sort | sort | Stable, any element types, lexicographic over the comparator's keys, NaN last |
-| Indexing | gather_f64, gather_nd_f64, scatter | N-D with element-size param; scatter reads a stride table built at compile time |
+| Indexing | gather, gather_rows, scatter | Any element type; gather and scatter read a stride table built at compile time, gather_rows copies whole rows |
 | Dynamic | dynamic_slice_f64, dynamic_update_slice_f64 | Runtime index values |
 | Utility | memcpy, select_f64, iota_nd_f64 | |
 
@@ -608,11 +608,13 @@ return all zeros and completely disabling every Kalman filter measurement update
 
 ## Gather: The Hardest Op
 
-`stablehlo.gather` is parameterized by five attributes that together describe an
+`stablehlo.gather` is parameterized by seven attributes that together describe an
 arbitrarily complex indexing operation:
 
 - **`offset_dims`**: which output dimensions correspond to slices from the source
 - **`collapsed_slice_dims`**: which source dimensions are sliced to size 1 and removed
+- **`operand_batching_dims`** and **`start_indices_batching_dims`**: source and index
+  dimensions that advance together, which is how `jax.vmap` expresses a per-entity table
 - **`start_index_map`**: which source dimensions the index values address
 - **`index_vector_dim`**: which dimension of the indices tensor holds the index vectors
 - **`slice_sizes`**: the size of each slice taken from the source
@@ -657,14 +659,16 @@ Each index row is a (row, col) pair for diagonal elements: (0,0), (1,1), (2,2).
 
 ### Implementation
 
-The **scalar-path** gather uses a general N-D algorithm: for each output element, it
-decomposes the output index into batch and offset parts, looks up start indices from the
-index tensor, applies `start_index_map` to compute source coordinates, and emits a
-dynamic load. All shape math is computed at compile time; only the index values are
-runtime SSA values.
-
-The **pointer-ABI path** delegates to `tensor_gather_nd_f64`, a runtime function that
-performs the same algorithm at execution time with explicit shape/stride arrays.
+Both ABIs walk one table that `gather_axes` builds at compile time, as scatter does:
+`(size, operand stride, indices stride)` per output dimension and `(operand stride,
+max start)` per `start_index_map` entry. A batching dimension steps the operand and the
+indices together. Output dimensions whose strides chain merge into one, and the innermost
+run that is contiguous in both the source and the output becomes one copy, so a vmapped
+lookup walks one dimension and a row select copies whole rows. The pointer ABI passes the
+table to `tensor_gather`, except that lookups and row selects, whose consecutive indices
+each pick one whole row, call the leaner `tensor_gather_rows`. The scalar ABI emits the same
+walk as loads, with only the index values computed at run time. Start indices clamp to
+`[0, dim - slice_size]`, as in XLA.
 
 ---
 
@@ -934,7 +938,7 @@ lane ([Pointer-ABI element types](#pointer-abi-element-types)).
 ### Indexing
 | Op | Tested | Notes |
 |----|--------|-------|
-| stablehlo.gather | yes | row-select + N-D, byte-generic for non-f64 data, i32/ui32 indices widened |
+| stablehlo.gather | yes | full dimension numbers incl. batching dims, any element type; start indices clamp into the operand, as in XLA |
 | stablehlo.scatter | yes | full dimension numbers incl. batching dims; set on any type, add/multiply/min/max on f64 and i64; updates whose window starts out of bounds are dropped |
 
 ### Control Flow

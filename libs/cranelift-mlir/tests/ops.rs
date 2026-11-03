@@ -406,7 +406,6 @@ module @module {
 }
 
 #[test]
-#[ignore = "known issue: 3D gather/broadcast path produces wrong results for matrix-RHS solve"]
 fn test_linalg_one_tick() {
     let mlir = include_str!("../testdata/linalg.stablehlo.mlir");
 
@@ -2513,6 +2512,108 @@ module @module {
         run_mlir_mem(mlir_nd, &[&mat, &idx], &[16]),
     ] {
         assert_f64s_close(&read_f64s(&out[0]), &[20.0, 70.0]);
+    }
+}
+
+/// Gather forms `jax.vmap` emits, each with start indices out of range on both sides.
+#[test]
+fn test_gather_dimension_numbers() {
+    let gather = |op: &str, idx: &str, out: &str, dims: &str, sizes: &str| {
+        format!(
+            r#"
+module @module {{
+  func.func public @main(%arg0: tensor<{op}xf64>, %arg1: tensor<{idx}xi32>) -> tensor<{out}xf64> {{
+    %0 = "stablehlo.gather"(%arg0, %arg1) <{{dimension_numbers = #stablehlo.gather<{dims}>, indices_are_sorted = false, slice_sizes = array<i64: {sizes}>}}> : (tensor<{op}xf64>, tensor<{idx}xi32>) -> tensor<{out}xf64>
+    return %0 : tensor<{out}xf64>
+  }}
+}}
+"#
+        )
+    };
+    // Each operand element holds its own coordinates, e.g. 100 * entity + 10 * row + col.
+    let cases = [
+        (
+            "table[:, idx]",
+            gather(
+                "4x6",
+                "3x1",
+                "4x3",
+                "offset_dims = [0], collapsed_slice_dims = [1], start_index_map = [1], index_vector_dim = 1",
+                "4, 1",
+            ),
+            (0..24)
+                .map(|i| (10 * (i / 6) + i % 6) as f64)
+                .collect::<Vec<_>>(),
+            vec![5, -2, 9],
+            vec![
+                5.0, 0.0, 5.0, 15.0, 10.0, 15.0, 25.0, 20.0, 25.0, 35.0, 30.0, 35.0,
+            ],
+        ),
+        (
+            "two-element windows",
+            gather(
+                "10",
+                "2x1",
+                "2x2",
+                "offset_dims = [1], start_index_map = [0], index_vector_dim = 1",
+                "2",
+            ),
+            (0..10).map(|i| 10.0 * i as f64).collect(),
+            vec![-4, 9],
+            vec![0.0, 10.0, 80.0, 90.0],
+        ),
+        (
+            "per-entity table",
+            gather(
+                "2x10",
+                "2x4x1",
+                "2x4",
+                "collapsed_slice_dims = [1], operand_batching_dims = [0], start_indices_batching_dims = [0], start_index_map = [1], index_vector_dim = 2",
+                "1, 1",
+            ),
+            (0..20).map(|i| (100 * (i / 10) + i % 10) as f64).collect(),
+            vec![3, -1, 12, 0, 9, 4, 2, -7],
+            vec![3.0, 0.0, 9.0, 0.0, 109.0, 104.0, 102.0, 100.0],
+        ),
+        (
+            "per-entity rows",
+            gather(
+                "2x5x3",
+                "2x2x1",
+                "2x2x3",
+                "offset_dims = [2], collapsed_slice_dims = [1], operand_batching_dims = [0], start_indices_batching_dims = [0], start_index_map = [1], index_vector_dim = 2",
+                "1, 1, 3",
+            ),
+            (0..30)
+                .map(|i| (100 * (i / 15) + 10 * (i / 3 % 5) + i % 3) as f64)
+                .collect(),
+            vec![4, 7, -1, 2],
+            vec![
+                40.0, 41.0, 42.0, 40.0, 41.0, 42.0, 100.0, 101.0, 102.0, 120.0, 121.0, 122.0,
+            ],
+        ),
+        (
+            "index_vector_dim = 0",
+            gather(
+                "11",
+                "1x2x3",
+                "2x3",
+                "collapsed_slice_dims = [0], start_index_map = [0], index_vector_dim = 0",
+                "1",
+            ),
+            (0..11).map(f64::from).collect(),
+            vec![3, 10, -5, 7, 11, 0],
+            vec![3.0, 10.0, 0.0, 7.0, 10.0, 0.0],
+        ),
+    ];
+    for (name, mlir, data, indices, want) in cases {
+        let (data, indices) = (f64_buf(&data), i32_buf(&indices));
+        for out in [
+            run_mlir(&mlir, &[&data, &indices], &[want.len() * 8]),
+            run_mlir_mem(&mlir, &[&data, &indices], &[want.len() * 8]),
+        ] {
+            assert_eq!(read_f64s(&out[0])[..], want[..], "{name}");
+        }
     }
 }
 
