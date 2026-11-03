@@ -968,7 +968,27 @@ pub extern "C" fn tensor_gather(
     let dst = unsafe { slice::from_raw_parts_mut(dst, n_dst * elem_sz) };
     let indices = unsafe { slice::from_raw_parts(indices, n_idx) };
     let run = inner * elem_sz;
-    for (p, out) in dst.chunks_exact_mut(run).enumerate() {
+    let copy = |out: &mut [u8], mut from: usize, idx: usize| {
+        for (k, &[operand_stride, max_start]) in starts.iter().enumerate() {
+            let start = indices[idx + k * vector_stride].clamp(0, max_start);
+            from += start as usize * operand_stride as usize;
+        }
+        out.copy_from_slice(&src[from * elem_sz..from * elem_sz + run]);
+    };
+    let positions = dst.chunks_exact_mut(run).enumerate();
+    // One walked dim (lookups and row selects) needs no per-position division.
+    if let [] | [_] = dims {
+        let [_, operand_stride, indices_stride] = dims.first().copied().unwrap_or_default();
+        for (c, out) in positions {
+            copy(
+                out,
+                c * operand_stride as usize,
+                c * indices_stride as usize,
+            );
+        }
+        return;
+    }
+    for (p, out) in positions {
         let (mut from, mut idx, mut rem) = (0, 0, p);
         for &[size, operand_stride, indices_stride] in dims.iter().rev() {
             let c = rem % size as usize;
@@ -976,11 +996,7 @@ pub extern "C" fn tensor_gather(
             from += c * operand_stride as usize;
             idx += c * indices_stride as usize;
         }
-        for (k, &[operand_stride, max_start]) in starts.iter().enumerate() {
-            let start = indices[idx + k * vector_stride].clamp(0, max_start);
-            from += start as usize * operand_stride as usize;
-        }
-        out.copy_from_slice(&src[from * elem_sz..from * elem_sz + run]);
+        copy(out, from, idx);
     }
 }
 

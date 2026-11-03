@@ -9803,8 +9803,8 @@ fn apply_reduce_op(
 
 /// The strided walk a `stablehlo.gather` performs, shared by both ABIs.
 struct GatherAxes {
-    /// `[size, operand stride, indices stride]` per result dim, outermost first, without
-    /// size-1 dims or the contiguous innermost run.
+    /// `[size, operand stride, indices stride]` per walked dim, outermost first. Result dims
+    /// whose strides chain merge into one, so a vmapped `[E, K]` lookup walks as `[E * K]`.
     dims: Vec<[i64; 3]>,
     /// `[operand stride, max start]` per `start_index_map` entry.
     starts: Vec<[i64; 2]>,
@@ -9852,7 +9852,7 @@ fn gather_axes(
         return Err(misfit());
     }
     let (mut next_kept, mut next_batch) = (kept.iter(), batch.iter());
-    let mut axes = Vec::with_capacity(out_ty.rank());
+    let mut axes: Vec<[i64; 3]> = Vec::with_capacity(out_ty.rank());
     for (d, &size) in out_ty.shape.iter().enumerate() {
         let (expected, axis) = if has(&dims.offset_dims, d) {
             let &k = next_kept.next().ok_or_else(misfit)?;
@@ -9869,8 +9869,12 @@ fn gather_axes(
         if size != expected {
             return Err(misfit());
         }
-        if size != 1 {
-            axes.push(axis);
+        match axes.last_mut() {
+            _ if size == 1 => {}
+            Some(outer) if outer[1] == size * axis[1] && outer[2] == size * axis[2] => {
+                *outer = [outer[0] * size, axis[1], axis[2]];
+            }
+            _ => axes.push(axis),
         }
     }
     let mut inner = 1;

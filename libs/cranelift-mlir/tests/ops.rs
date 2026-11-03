@@ -2596,8 +2596,8 @@ module @module {{
             "index_vector_dim = 0",
             gather(
                 "11",
-                "1x6",
-                "6",
+                "1x2x3",
+                "2x3",
                 "collapsed_slice_dims = [0], start_index_map = [0], index_vector_dim = 0",
                 "1",
             ),
