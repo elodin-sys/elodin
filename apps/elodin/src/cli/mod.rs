@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 use tracing_subscriber::{EnvFilter, fmt::time::ChronoLocal, prelude::*};
-mod auth;
+mod cloud;
 mod db;
 mod editor;
 #[cfg(not(target_os = "windows"))]
@@ -47,17 +47,17 @@ pub struct Cli {
 #[derive(Subcommand, Clone)]
 enum Commands {
     /// Create an Elodin Cloud account in your browser, then log in
-    Signup(auth::SignupArgs),
+    Signup(cloud::auth::SignupArgs),
     /// Log in to Elodin Cloud through your browser (OIDC + PKCE)
-    Login(auth::LoginArgs),
+    Login(cloud::auth::LoginArgs),
     /// Remove stored Elodin Cloud credentials and end the session
     Logout,
     /// Print the currently authenticated Elodin Cloud identity
-    Whoami(auth::WhoamiArgs),
+    Whoami(cloud::auth::WhoamiArgs),
     /// Create and list Elodin Cloud projects
-    Projects(auth::ProjectsArgs),
+    Projects(cloud::projects::ProjectsArgs),
     /// Upload a stopped TelemetryDB directory, compacting the transmitted logs
-    Upload(auth::UploadArgs),
+    Upload(cloud::upload::UploadArgs),
     /// Launch the Elodin editor (default)
     Editor(editor::Args),
     /// Run an Elodin simulation in headless mode

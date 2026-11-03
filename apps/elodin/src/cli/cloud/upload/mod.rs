@@ -5,12 +5,35 @@ use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use clap::Args;
 use miette::{Context, IntoDiagnostic};
 use ring::digest::{Context as Digest, SHA256};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::runtime::Runtime;
 
-use super::{AuthCtx, UploadArgs, random_token, tokens};
+use crate::cli::Cli;
+
+use super::AuthCtx;
+use super::auth::{random_token, tokens};
+
+#[derive(Args, Clone)]
+pub struct UploadArgs {
+    /// Stopped TelemetryDB directory containing db_state; compacted on upload without modifying it.
+    pub db_path: PathBuf,
+    /// Destination project UUID or name; optional when exactly one project is available.
+    #[arg(long, env = "ELODIN_PROJECT")]
+    pub project: Option<String>,
+    /// Print the final published upload status as JSON.
+    #[arg(long)]
+    pub json: bool,
+    /// Start a new upload instead of resuming the saved session for this snapshot.
+    #[arg(long)]
+    pub restart: bool,
+    /// Maximum seconds to wait for publication after acceptance.
+    #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..))]
+    pub timeout: u64,
+}
 
 #[derive(Debug, Serialize)]
 struct Manifest {
@@ -727,6 +750,13 @@ fn portable_path(path: &str) -> bool {
                     && (stem.starts_with("COM") || stem.starts_with("LPT"))
                     && matches!(stem.as_bytes()[3], b'1'..=b'9'))
         })
+}
+
+impl Cli {
+    pub fn upload(self, args: UploadArgs, rt: Runtime) -> miette::Result<()> {
+        let ctx = self.auth_ctx()?;
+        rt.block_on(run(&ctx, &args))
+    }
 }
 
 #[cfg(test)]
