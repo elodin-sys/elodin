@@ -50,10 +50,11 @@ from controls import (
     semantic_to_rc,
 )
 from race_options import race_options_from_env
-from exit_status import scenario_exit_code
+from exit_status import CallbackExecution, scenario_exit_code
 from schematic import build_schematic
 from referee import Referee, world_position_from_transform
 from guidance import GuidancePhase, TruthGuidance, TruthGuidanceConfig
+from course_referee import CourseQualification, TruthCourseReferee
 from hold_referee import (
     E_HOLD_RMS_LIMIT_M,
     E_HOLD_WINDOW_S,
@@ -94,13 +95,16 @@ from comms import (
 
 # --- Configuration ---
 config = DEFAULT_CONFIG
-truth_guidance_config = TruthGuidanceConfig()
 
 try:
     race_options = race_options_from_env()
     guidance_mode = race_options.guidance
     race_course = race_options.course
     CAMERA_ENABLED = race_options.camera_enabled
+    truth_course_requested = (
+        guidance_mode is GuidanceMode.TRUTH and race_course.name == "c1_straight"
+    )
+    truth_guidance_config = TruthGuidanceConfig.for_course(race_course.name)
     if guidance_mode is GuidanceMode.TRUTH:
         config.simulation_time = truth_guidance_config.simulation_duration_s
 except ValueError as exc:
@@ -362,6 +366,8 @@ class SITLState:
 
 # Calculate max ticks for completion detection
 MAX_TICKS = int(config.simulation_time / config.dt)
+callback_execution = CallbackExecution(MAX_TICKS) if truth_course_requested else None
+simulation_started = [False]
 
 # Shared state (using lists for mutable closure)
 bridge = [None]
@@ -387,9 +393,14 @@ truth_hold_referee = (
         threshold_m=E_HOLD_RMS_LIMIT_M,
         max_sample_gap_s=config.dt * 1.5,
     )
-    if guidance_mode is GuidanceMode.TRUTH
+    if guidance_mode is GuidanceMode.TRUTH and race_course.name == "single"
     else None
 )
+truth_course_referee = (
+    TruthCourseReferee(max_sample_gap_s=config.dt * 1.5) if truth_course_requested else None
+)
+truth_course_result: list[CourseQualification | None] = [None]
+truth_course_result_emitted = [False]
 truth_hold_result: list[HoldQualification | None] = [None]
 truth_hold_result_emitted = [False]
 referee_audit_collector = (
@@ -433,6 +444,17 @@ def emit_final_results() -> None:
         truth_hold_result[0] = result
         print(result.format())
         truth_hold_result_emitted[0] = True
+    if truth_course_referee is not None and not truth_course_result_emitted[0]:
+        result = truth_course_referee.result(
+            referee.result(), adapter_failure_reason=callback_execution.failure_reason
+        )
+        truth_course_result[0] = result
+        print(result.format())
+        print(
+            f"[F-GUIDANCE] phase={command_source.phase.name} "
+            f"reason={command_source.failure_reason or 'none'}"
+        )
+        truth_course_result_emitted[0] = True
 
 
 # Pre-allocated buffers to avoid allocation in hot loop
@@ -454,7 +476,7 @@ _barometer_tick_interval = config.baro_tick_interval
 _magnetometer_tick_interval = config.mag_tick_interval
 
 
-def sitl_post_step(tick: int, ctx: el.StepContext):
+def _sitl_post_step(tick: int, ctx: el.StepContext):
     """
     Post-step callback for lockstep SITL synchronization.
 
@@ -659,6 +681,11 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         s.phase = command_source.phase.name.lower()
         phase_code = command_source.phase_code
         if phase_code != s.guidance_phase_code:
+            print(
+                f"[GUIDANCE] t={t:.6f} phase={command_source.phase.name} "
+                f"next_gate={progress.next_gate_index} "
+                f"reason={command_source.failure_reason or 'none'}"
+            )
             ctx.write_component("drone.guidance_mode", np.array([phase_code], dtype=np.int64))
             s.guidance_phase_code = phase_code
     else:
@@ -715,6 +742,18 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
             ),
             gate_crossed=gate_event is not None,
             phase_fault=command_source.phase is GuidancePhase.FAULT,
+        )
+
+    if truth_course_referee is not None:
+        truth_course_referee.observe_truth(
+            t,
+            world_pos if sensor_read_succeeded else None,
+            world_vel if sensor_read_succeeded else None,
+            command_sent,
+            s.motors,
+            lockstep_response=s.lockstep_response and s.motor_response,
+            race_complete=referee.progress().next_gate_index is None,
+            guidance_fault=command_source.phase is GuidancePhase.FAULT,
         )
 
     # Print status every second
@@ -826,7 +865,28 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         if axis_audit is not None:
             print(axis_audit.format())
 
-        emit_final_results()
+
+def sitl_post_step(tick: int, ctx: el.StepContext):
+    """Keep fatal F callback evidence before the SDK can log/swallow PyErr.
+
+    Mark normal completion only after every callback and final cleanup succeeds.
+    Other scenarios retain their existing grading and shutdown behavior.
+    """
+    simulation_started[0] = True
+    try:
+        if callback_execution is not None:
+            callback_execution.begin(tick)
+        _sitl_post_step(tick, ctx)
+        if callback_execution is not None:
+            callback_execution.completed(tick)
+        if tick >= MAX_TICKS - 1:
+            emit_final_results()
+    except BaseException as error:
+        # KeyboardInterrupt/SystemExit are PyErr too: record before re-raising.
+        # The outer finally still emits the course result exactly once.
+        if callback_execution is not None:
+            callback_execution.record_error(error)
+        raise
 
 
 # Return the next non-existent filename with auto-incremented
@@ -869,19 +929,23 @@ try:
     )
 finally:
     # The CLI imports this file once to generate a recipe before starting the
-    # simulation child. Emit only from a process that actually initialized the
-    # bridge; this covers interrupted/exceptional simulation shutdown without
-    # duplicating the child's normal callback result in the recipe generator.
-    if bridge[0] is not None:
+    # simulation child. Callback entry, not successful bridge initialization,
+    # proves execution started: even a swallowed first-tick setup error must
+    # produce one failing result rather than look like recipe generation.
+    if simulation_started[0]:
         emit_final_results()
 # `world.run()` won't reach here unless `interactive` is false.
 print(f"Wrote database to: {db_filename}")
 
-if not bridge[0]:
+if not simulation_started[0]:
     print("\nNo simulation ticks executed.")
     print("Usage: python3 examples/betaflight-sitl/main.py run")
 else:
     exit_code = scenario_exit_code(
+        execution_exit_code=callback_execution.exit_code
+        if callback_execution is not None
+        else None,
+        course_exit_code=truth_course_result[0].exit_code if truth_course_result[0] else None,
         hold_exit_code=truth_hold_result[0].exit_code if truth_hold_result[0] else None,
         c0_passed=c0_result[0].passed if c0_result[0] else None,
         referee_exit_code=referee_audit_result[0].exit_code if referee_audit_result[0] else None,

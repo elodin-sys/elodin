@@ -1,8 +1,8 @@
 # Vision-Guided Gate Racing Plan
 
 **Document status:** Authoritative living specification  
-**Last verified against repository:** 2026-10-28 (clean G1 ordinary-operation qualification PASS)
-**Current resume point:** E1 and G1 complete; G1 qualified on `g1-clean`, ready for integration. F implementation ready; H/I and F qualification may proceed after G1 integration.
+**Last verified against repository:** 2026-11-02 (F headless qualification PASS; prior G1 qualification preserved)
+**Current resume point:** E1, G1 and F are integrated and complete. H/I are ready; L's truth-mode CI work may proceed, while vision qualification still waits for J/K.
 
 ## 1. Purpose and authority
 
@@ -146,8 +146,9 @@ The camera is independently opt-in for scripted, manual, and truth guidance; it
 is observational in truth mode and never replaces copied truth state.
 
 The example does **not** currently contain vision guidance or
-perception/tracking, the three-gate course, autonomous gate-passing/COMMIT
-behavior, race completion tests, or race CI.
+perception/tracking, or race CI. Package F adds qualified headless three-gate
+geometry, shared race-profile/COMMIT behavior, powered-touchdown FINISH, and
+independent completion/safety tests; acceptance is recorded below.
 
 ### 3.1 Current conventions
 
@@ -209,10 +210,11 @@ are complete; remaining findings still constrain later packages.
   barometer uses truth altitude but is unused because no altitude or position
   mode is configured. The build does not define `SITL_ATTITUDE_DIRECT`, so
   Betaflight runs its own attitude estimator on the simulated IMU.
-- **Scene.** With the camera enabled, the visual world is a uniform 40 × 40 m
-  ground plane centred on the origin, the sky, and the orange gate bars. The
-  plane ends at x = 20 m. There is too little texture for generic
-  feature-based visual-inertial odometry.
+- **Scene.** With the camera enabled, the visual world is a uniform ground
+  plane centred on the origin, the sky, and the orange gate bars. `none` and
+  `single` keep 40 × 40 m (ending at x = 20 m); F's `c1_straight` uses
+  80 × 80 m to extend beyond its last gate at x = 30 m. There is too little
+  texture for generic feature-based visual-inertial odometry.
 - **Sensors.** The configured barometer noise variance is 0.01 m² (σ = 0.1 m),
   now correctly documented in `sensors.py`. The simulated sensors
   are benign compared with hardware: negligible gyro bias drift, no
@@ -774,7 +776,18 @@ codes 7–9.
 | 6 | FAULT | Truth mode: hold the last valid state. Vision mode: brake, descend at 0.4 m/s, then disarm | — |
 | 7 | COMMIT | Braking off. Position target 2 m beyond the gate centre along its normal, at a bounded commit speed. Continues through COASTING | Referee pass event: ACQUIRE for the next gate, or FINISH after the last. More than 1.5 m past the plane without a pass event, or LOST: FAULT |
 | 8 | SEARCH | Vision mode only, from ACQUIRE or HOLD when the target is LOST. Hold the estimated position and yaw toward the last estimated bearing, within ±30° | TRACKING: ACQUIRE. After 6 s: FAULT |
-| 9 | FINISH | Brake to zero velocity, then descend at 0.4 m/s to 0.15 m above the pad | Disarm |
+| 9 | FINISH | Brake to zero velocity, then descend under power at 0.4 m/s through touchdown on the captured pad plane | After altitude ≤pad+0.01 m and total speed ≤0.18 m/s continuously for 0.5 s: disarm |
+
+The race FINISH uses **powered touchdown before disarm**, not a suspended
+pad+0.15 m drop. Capture the settled pre-arm navigation altitude as the pad
+reference and freeze it once arming is first requested. The descent reference
+may continue below that pad plane (for example to pad−0.30 m) to sustain
+controlled contact; this is a control target, not a change to collision physics.
+Disarm requires the low/slow dwell in the table, which resets whenever its
+conditions fail. These checks use the existing frame-neutral navigation inputs,
+not hidden truth or a new attitude/tilt field. The independent physical grader
+still checks actual tilt and the unchanged whole-flight and terminal safety
+bounds; controller disarm eligibility is not a safety grade.
 
 Until Package K adds SEARCH, vision mode enters FAULT wherever this table says
 SEARCH. In the hold profile any gate crossing remains a fault, as Package E
@@ -1416,7 +1429,23 @@ initial E1 acceptance. After this cleanup, the current full pure suite passes
 268 tests. Ordinary behavioral tests remain in place.
 
 
-### [ ] F — Truth-guided straight course
+### [x] F — Truth-guided straight course
+
+**Implementation status:** Complete. The E1 shared race profile and approved
+powered-touchdown FINISH passed three consecutive clean-start headless
+qualifications on 2026-11-02, with G1's final GPS-disabled/`trust_mag = OFF` configuration.
+No historical pre-E1/G1 FINISH-code-8 run is promoted to acceptance evidence
+for this code.
+
+The runtime selects `TruthGuidanceConfig.for_course`, preserves the E hold
+profile, and supplies exact C1 geometry with a 60 s cap. `course_referee.py`
+independently grades actual exchanged RC, physical truth and motors, including
+strict whole-flight limits and a final continuous 1 s low/slow/upright disarmed
+interval. `exit_status.py` also requires a complete successful callback
+sequence: SDK-swallowed exceptions, cleanup failures, gaps and truncation are
+sticky failures. Pure grader/adapter tests cover COMPLETE-but-unsafe,
+incomplete, interrupted and exactly-once result paths. Current qualification
+and its limitations are recorded below.
 
 **Objective:** Complete the core mission and three-gate course using trustworthy
 state, before integrating perception.
@@ -1435,7 +1464,10 @@ qualified under the final Betaflight configuration.
   (code 9), selected by course. The `single` hold profile keeps Package E's
   behavior and configuration.
 - Use the referee's ordered events for scoring and race progress.
-- Land or safely settle and disarm after completion.
+- Finish with the powered-touchdown policy of Section 8: retain thrust through
+  contact, then disarm only after the pad-relative low/slow dwell. Do not disarm
+  from a suspended pad+0.15 m hover. Keep the independent physical grader's
+  whole-flight and terminal safety limits unchanged.
 - Allow a course-specific simulation cap up to 60 simulated seconds.
 - Add a headless truth-course scenario with a nonzero exit on incomplete
   status, printing the phase and failure reason.
@@ -1451,6 +1483,69 @@ hold qualification still passes on `single`.
 
 **Handoff:** Record the three pass-time sets, time cap, completion command, race
 profile configuration, and known control limitations.
+
+**Qualified 2026-11-02 on GitHub main base `7bfa4493`:** The integrated Python
+source uses the matching unchanged native runtime/SDK built from that base;
+no Rust/compiler patch or shared SDK installation was needed. Betaflight pin
+`6dbc4218` ran at 8 kHz with a fresh private EEPROM generated and verified by
+the current G1 initialization script: GPS disabled, `trust_mag = OFF`, and
+unchanged ARM/ANGLE, LPF, PID-denominator and smoothing settings.
+
+From the repository root, run each qualification as a fresh process with the
+camera disabled and no backend/audit overrides:
+
+```bash
+python3 -m pytest examples/betaflight-sitl/tests -q
+RACE_GUIDANCE=truth RACE_COURSE=c1_straight \
+  elodin run examples/betaflight-sitl/main.py
+# Repeat the C1 command three times consecutively with unchanged configuration.
+RACE_GUIDANCE=truth RACE_COURSE=single \
+  elodin run examples/betaflight-sitl/main.py
+```
+
+The C1 cap is exactly 60 simulated seconds. An initial smoke passed, followed
+by these three consecutive unchanged-source/configuration runs (all exit 0,
+exactly one COMPLETE `[RACE]`, one passing `[F-COURSE]`, FINISH code 9 and no
+fault):
+
+| Run | Ordered gate pass times (sim s) | Final continuous physical-safe interval (s) |
+|---|---|---:|
+| 1 | 22.774508 / 32.063083 / 41.300038 | 9.036625 |
+| 2 | 22.765153 / 32.055958 / 41.275433 | 9.066750 |
+| 3 | 22.802875 / 32.096655 / 41.319041 | 9.025250 |
+
+Per-gate spreads are 0.037722 / 0.040697 / 0.043608 s, below the documented
+0.35 s repeatability tolerance. The terminal intervals persist through the
+last sample at 59.999875 s and are independently graded from physical truth,
+actual exchanged disarm/minimum-throttle RC, stopped motors and healthy I/O;
+race completion alone does not qualify.
+
+The race profile changes only climb to 0.4 m/s, horizontal `kp_xy=1.2`,
+`kv_xy=2.5`, speed limit 1.5 m/s and acceleration limit 2.0 m/s², plus its
+mission phases/timing. Commit speed is bounded at 1.5 m/s. HOLD alignment
+requires a continuous 1 s with yaw error strictly under 5°. FINISH uses the
+approved pad-relative powered touchdown (reference bounded at pad−0.30 m,
+low/slow disarm dwell from Section 8). E's hold gains remain unchanged.
+
+Three further consecutive `single` holds passed continuous 10 s windows with
+RMS 0.072516 / 0.073350 / 0.074414 m, armed/ANGLE/lockstep/motor evidence and
+no crossing/fault. Default and scripted-single C0, C positive referee audit,
+and D physical audit all passed on this same frozen source/configuration.
+The pure suite passed **450 tests**, including unchanged E1 characterization,
+frame-neutral race/pad tests, metadata, and callback/exit contracts. Targeted
+format checks passed; targeted lint has no new findings versus the existing
+16-finding baseline. Separate bounded 2 s live fixtures for incomplete course,
+unsafe altitude and an SDK-swallowed callback exception each exited 1 with
+exactly one failing course result; COMPLETE-but-unsafe finish and interrupted
+shutdown are additionally covered by pure tests. The strict physical grader
+and its thresholds are unchanged.
+
+**Limits:** Headless truth C1 only; no new camera/GPU/editor/hardware/manual or
+vision qualification. The 80 m camera plane is contract-tested, not visually
+requalified. Flights took about 130–156 wall seconds per 60 simulated seconds.
+Shared-host verification used an evidence-only no-kill cleanup guard; the
+existing global process-name cleanup is unmodified and is not qualified safe
+for coexistence with another SITL. Independent standard source review passed.
 
 ### [x] G — Vision contracts and synthetic geometry
 
@@ -1879,33 +1974,36 @@ branch for later resumption.
 | D | Complete | Command seam, one-tick ordering, AUX2 ANGLE configuration, s10 manual controller, 250 ms heartbeat failsafe, DB telemetry, and simulation-time physical sign audit are implemented. The combined automated qualification passed with roll 1.006, pitch 1.011, yaw 1.479 rad/s and accepted max motor 0.391; 5 controller tests also pass. On 2026-09-28, the operator tested and signed off on both keyboard and gamepad paths, including arm, takeoff, throttle/roll/pitch/yaw response, landing, and disarm. |
 | E | Complete | Opt-in truth-only single-gate standoff controller and independent 10 s hold grader. Three consecutive original 2026-09-29 runs exited 0 with RMS 0.075521/0.074801/0.074188 m (offline 0.075520758/0.074803460/0.074187954 m), no crossing or fault, and expected incomplete 0/1 race results; 138 pure tests on the original E branch, 5 controller tests, and default/scripted-single C0 regressions passed. The merged 2026-10-02 verification passed 180 pure tests, 5 controller tests, three further truth runs and opt-in B+E camera coexistence (details above). Requalified unchanged on 2026-10-12 atop main `729022c7` with a newly built runtime/SDK, three camera-off passes (0.073873/0.075235/0.074413 m RMS), independent DB agreement, C0/C/D regressions, and all four camera combinations (details above). |
 | E1 | Complete | Shared mission controller and immutable navigation/target inputs; thin per-tick truth adapter. Initial acceptance at commit `163c0529`: 39 original-source scenarios / 268 updates exact, 300 pure tests, clean independent review, and three unchanged-source truth holds at 0.076142/0.077087/0.072773 m RMS (historical details under E1). Current maintained characterization: 8 selected cases / 78 updates, each guarded by a canonical SHA-256 digest derived from the original fixture rows; current full pure suite passes 268 tests. This follow-up is test maintenance, not a new qualification. |
-| F | Ready for implementation; qualification waits for G1 integration | E1 is complete and G1 is qualified on `g1-clean`. Three-gate course, race profile, COMMIT/pass sequencing, and safe finish remain. |
+| F | Complete | Current E1/G1 integration qualified 2026-11-02: three consecutive C1 runs, final pass 41.300038/41.275433/41.319041 s, strict physical-safe intervals 9.036625/9.066750/9.025250 s; three E holds and C0/C/D regressions pass. 450 pure tests; approved powered touchdown, unchanged physical grader and generic inputs. |
 | G | Complete | `vision.py` owns intrinsics, corner order, the camera-to-body helper, and NumPy planar PnP. Positive tilt is nose-up and is registered as negative renderer pitch. `corner_order_ambiguous` flags labellings within 10°. `synthetic_vision.py` is the only truth-projection path. 222 pure tests pass, including centered, translated, yawed, and ranged round trips. |
-| G1 | Complete; qualified, ready for integration | GitHub-only base `8742b411`, source `30d2c307`; fresh matching artifacts, 270 Python tests, 754 editor tests, 5 controller tests, 17 s10 tests and eight first-attempt ordinary live gates PASS. See G1 brief for evidence/guard/framing caveats; strict alignment historical FAIL/deferred/non-gating. |
-| H | Ready after G1 integration | B, C, G and G1 qualification complete; the offline detector and recorder remain. |
-| I | Ready after G1 integration | G and G1 qualification complete; the navigator can proceed in parallel with H. |
+| G1 | Complete; integrated | GitHub-only base `8742b411`, source `30d2c307`; fresh matching artifacts, 270 Python tests, 754 editor tests, 5 controller tests, 17 s10 tests and eight first-attempt ordinary live gates PASS. Integrated in the current main base; see G1 brief for historical evidence/guard/framing caveats; strict alignment historical FAIL/deferred/non-gating. |
+| H | Ready | B, C, G and G1 are integrated and qualified; the offline detector and recorder remain. |
+| I | Ready | G and G1 are integrated and qualified; the navigator can proceed in parallel with H. |
 | J | Blocked by H, I | E1's shared mission controller is complete; detector, navigator, and vision guidance remain. |
-| K | Blocked by F, J | No vision race |
-| L | Blocked by F/K | No race CI or final docs |
+| K | Blocked by J | F is qualified; no vision race |
+| L | Truth CI ready; vision work waits for K | No race CI or final release cleanup |
 
 ### Resume point
 
-Packages E1 and G1 are complete. G1 ordinary-operation qualification passed on
-`g1-clean` source `30d2c307`, ready for integration. Package F implementation may
-proceed; integrate G1 before F qualification and H/I work, retaining the accepted
-approximate-alignment contract.
+Packages E1, G1 and F are complete and integrated. G1's historical
+ordinary-operation qualification on `g1-clean` source `30d2c307` is preserved
+above; F's current powered-touchdown qualification is recorded in its brief.
+H/I are ready with the accepted approximate-alignment contract. L may add
+truth-mode CI; vision work still depends on H/I/J/K.
 
 - **E1, mission controller extraction:** the initial 2026-10-23 qualification
   preserved exact original-controller replay and three passing E holds (details
   above). The current maintained baseline is the 8-case/78-update digest set;
   the original 39/268 exact-equivalence evidence remains in commit `163c0529`.
   The shared controller is available to F and J.
-- **G1, sensor timing and truth-boundary fixes:** integrate the qualified clean
-  GitHub-only diff; matching fresh artifacts, GPS off and `trust_mag = OFF`
-  passed ordinary regressions (G1 brief above). Prior `pkg-g1` results do not
-  substitute for this qualification; strict alignment stays deferred/non-gating.
-
-Passing a gate is not yet implemented.
+- **G1, sensor timing and truth-boundary fixes:** integrated in the current
+  main base, preserving nominal selected-message time, GPS off and
+  `trust_mag = OFF`. Historical qualification and strict-alignment limitations
+  remain in the G1 brief; prior `pkg-g1` results do not substitute for it.
+- **F, truth-guided straight course:** three consecutive current-integration
+  C1 runs and three E holds passed with the strict independent grader and
+  unchanged generic inputs. No vision guidance, race CI or new camera/manual
+  qualification is implied.
 
 Package C's durable qualification command, output contract, measured result, and
 scope are recorded with its work-package acceptance evidence above. User-facing
@@ -1916,6 +2014,7 @@ recoverable MPEG-TS fallback, are maintained in `README.md`.
 
 | Date | Decision | Reason and affected packages |
 |---|---|---|
+| 2026-11-02 | Require controlled powered touchdown before race FINISH disarm, using settled pre-arm pad-relative navigation altitude; keep public navigation inputs and the strict independent physical grader unchanged. | Explicit operator approval replaces the pad+0.15 m suspended-disarm policy: dropping from that height can violate the unchanged low-altitude descent-speed bound. FINISH keeps power through contact, then requires altitude ≤pad+0.01 m and total speed ≤0.18 m/s for 0.5 s before disarm. A below-pad control target is permitted without changing ground physics. Tilt remains an independent physical-grader check, not a controller-input guarantee. Affects F, K and shared race-profile semantics; E hold is unchanged. |
 | 2026-10-27 | Accept approximate scene-time alignment for G1; defer strict alignment. Selected message T is nominal image/render time on `sim_time`. | Supersedes the exact capture-alignment assumption of 2026-10-22. Keep regressions and independent review; no renderer/query/stream fix or prototype promotion. H/I may proceed after G1 integration using Section 7.4's limitation; F still requires E1. |
 | 2026-10-23 | Keep E1's active original-controller characterization to eight representative cases / 78 updates, with digests derived from the original expected rows; retain the full 39-case / 268-update proof in commit `163c0529`. | The exact-equivalence acceptance was already performed and is preserved as historical evidence. This approved maintenance reduction avoids carrying exhaustive golden output during heavy development; behavioral tests and product acceptance remain unchanged. Affects only E1's ongoing characterization artifacts and reproduction instructions. |
 | 2026-10-22 | Add Packages E1 (mission controller extraction) and G1 (sensor timing and truth-boundary fixes) instead of folding these prerequisites into F. Keep the existing package letters. | The behavior-preserving refactor, the sensor and configuration fixes, and F's new race behavior are separate concerns; combining them would make a regression hard to attribute. G1 also gates H and I, not only F. Existing commits and PRs refer to packages by letter, so nothing is renumbered. Affects E1, G1, and F–K. |
