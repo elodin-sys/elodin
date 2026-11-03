@@ -172,6 +172,35 @@ impl Client {
         url: String,
         cached_asset: Option<CachedAsset>,
     ) -> Result<(Vec<u8>, Option<String>), AssetReaderError> {
+        #[cfg(target_family = "wasm")]
+        let disk = impeller_bevy::browser_cache::asset_scope(&url);
+        #[cfg(target_family = "wasm")]
+        if let Some((scope, key, maximum, chunk_bytes)) = &disk {
+            use impeller_bevy::browser_cache;
+            if let Some(manifest) = browser_cache::lookup(scope, &format!("{key}/manifest"))
+                .await
+                .and_then(|bytes| browser_cache::decode::<(u64, u32)>(&bytes))
+                .filter(|(bytes, count)| {
+                    *bytes <= *maximum as u64
+                        && (*count as usize) <= maximum.div_ceil((*chunk_bytes).max(1))
+                })
+            {
+                let mut data = Vec::with_capacity(manifest.0 as usize);
+                for index in 0..manifest.1 {
+                    let Some(chunk) = browser_cache::lookup(scope, &format!("{key}/{index}")).await
+                    else {
+                        break;
+                    };
+                    if data.len().saturating_add(chunk.len()) > *maximum {
+                        break;
+                    }
+                    data.extend_from_slice(&chunk);
+                }
+                if data.len() as u64 == manifest.0 {
+                    return Ok((data, None));
+                }
+            }
+        }
         self.rt
             .spawn(async move {
                 let client = reqwest::Client::new();
@@ -200,11 +229,57 @@ impl Client {
                     .and_then(|v| v.to_str().ok())
                     .map(|s| s.to_owned());
 
+                #[cfg(target_family = "wasm")]
+                let data = {
+                    use bevy::tasks::futures_lite::StreamExt;
+                    let maximum = disk
+                        .as_ref()
+                        .map_or(64 * 1024 * 1024, |(_, _, maximum, _)| *maximum);
+                    let mut data = Vec::new();
+                    let mut chunks = response.bytes_stream();
+                    while let Some(chunk) = chunks.next().await {
+                        let chunk = chunk.map_err(|err| http_err(&url, err))?;
+                        if data.len().saturating_add(chunk.len()) > maximum {
+                            return Err(AssetReaderError::Io(
+                                io::Error::new(
+                                    io::ErrorKind::InvalidData,
+                                    "Recording asset exceeds the configured byte budget",
+                                )
+                                .into(),
+                            ));
+                        }
+                        data.extend_from_slice(&chunk);
+                    }
+                    data
+                };
+                #[cfg(not(target_family = "wasm"))]
                 let data = response
                     .bytes()
                     .await
                     .map_err(|err| http_err(&url, err))?
                     .to_vec();
+                #[cfg(target_family = "wasm")]
+                if let Some((scope, key, maximum, chunk_bytes)) =
+                    disk.filter(|(_, _, maximum, _)| data.len() <= *maximum)
+                {
+                    use impeller_bevy::browser_cache;
+                    let _ = maximum;
+                    let mut committed = chunk_bytes > 0;
+                    for (index, bytes) in data.chunks(chunk_bytes.max(1)).enumerate() {
+                        if !browser_cache::commit(&scope, &format!("{key}/{index}"), bytes).await {
+                            committed = false;
+                            break;
+                        }
+                    }
+                    if committed
+                        && let Ok(manifest) = postcard::to_allocvec(&(
+                            data.len() as u64,
+                            data.len().div_ceil(chunk_bytes.max(1)) as u32,
+                        ))
+                    {
+                        browser_cache::commit(&scope, &format!("{key}/manifest"), &manifest).await;
+                    }
+                }
                 Ok((data, etag))
             })
             .await

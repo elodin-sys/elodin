@@ -1078,6 +1078,13 @@ fn apply_visible_prefetch_payload(
     let Some(schema) = schema_reg.0.get(&component_id) else {
         return VisiblePageOutcome::Invalid;
     };
+    if timestamps.windows(2).any(|times| times[0] >= times[1])
+        || timestamps
+            .iter()
+            .any(|time| *time < req_start || *time >= req_end)
+    {
+        return VisiblePageOutcome::Invalid;
+    }
     let elem_size = schema.size();
     if buf.len() != timestamps.len().saturating_mul(elem_size) {
         return VisiblePageOutcome::Invalid;
@@ -1094,19 +1101,106 @@ fn apply_visible_prefetch_payload(
         series_store.insert(component_id, timestamp, ComponentValue::from_view(view));
     }
     if timestamps.len() < VISIBLE_PREFETCH_LIMIT {
-        series_store.mark_covered(component_id, req_start, req_end);
+        series_store.mark_page_covered(component_id, req_start, req_end, timestamps);
         return VisiblePageOutcome::Complete;
     }
     let Some(last_ts) = timestamps.last().copied() else {
-        series_store.mark_covered(component_id, req_start, req_end);
+        series_store.mark_page_covered(component_id, req_start, req_end, timestamps);
         return VisiblePageOutcome::Complete;
     };
     let next_start = Timestamp(last_ts.0.saturating_add(1));
-    series_store.mark_covered(component_id, req_start, next_start);
+    series_store.mark_page_covered(component_id, req_start, next_start, timestamps);
     if next_start < req_end {
         VisiblePageOutcome::Next(next_start)
     } else {
         VisiblePageOutcome::Complete
+    }
+}
+
+#[derive(Resource, Default)]
+pub struct VisibleDiskReads(Vec<VisibleDiskRead>);
+
+struct VisibleDiskRead {
+    scope: String,
+    key: PrefetchKey,
+    attempt: u64,
+    component: ComponentId,
+    start: Timestamp,
+    end: Timestamp,
+    read: impeller_bevy::browser_cache::CacheRead,
+    started: Instant,
+}
+
+fn visible_disk_key(component: ComponentId, start: Timestamp, end: Timestamp) -> String {
+    format!(
+        "series/{}/{}/{}/{VISIBLE_PREFETCH_LIMIT}",
+        component.0, start.0, end.0
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn drain_visible_disk_reads(
+    mut pending: ResMut<VisibleDiskReads>,
+    scope: Res<impeller_bevy::browser_cache::BrowserCacheScope>,
+    mut cache: ResMut<TelemetryCache>,
+    schema: Res<ComponentSchemaRegistry>,
+    priority: Res<SeriesFetchPriority>,
+    mut prefetch: ResMut<VisiblePrefetchState>,
+    mut commands: Commands,
+) {
+    let mut index = 0;
+    while index < pending.0.len() {
+        let item = &mut pending.0[index];
+        if scope.key.as_ref() != Some(&item.scope)
+            || !priority.high.contains(&item.component)
+            || !prefetch.is_current(item.key, item.attempt)
+        {
+            pending.0.swap_remove(index);
+            continue;
+        }
+        let ready = item.read.poll();
+        if ready.is_none() && item.started.elapsed() < Duration::from_secs(3) {
+            index += 1;
+            continue;
+        }
+        let item = pending.0.swap_remove(index);
+        let outcome = ready
+            .flatten()
+            .as_deref()
+            .and_then(
+                impeller_bevy::browser_cache::decode::<impeller_bevy::browser_series::SeriesPage>,
+            )
+            .map(|value| {
+                apply_visible_prefetch_payload(
+                    &value.timestamps,
+                    &value.data,
+                    item.component,
+                    item.start,
+                    item.end,
+                    &mut cache,
+                    &schema,
+                )
+            });
+        match outcome {
+            Some(VisiblePageOutcome::Complete) => prefetch.finish(item.key, item.attempt, true),
+            Some(VisiblePageOutcome::Next(next)) => send_visible_prefetch_page(
+                item.key,
+                item.attempt,
+                item.component,
+                next,
+                item.end,
+                &mut commands,
+            ),
+            _ => send_visible_network_page(
+                item.key,
+                item.attempt,
+                item.component,
+                item.start,
+                item.end,
+                Some(item.scope),
+                &mut commands,
+            ),
+        }
     }
 }
 
@@ -1118,10 +1212,59 @@ fn send_visible_prefetch_page(
     req_end: Timestamp,
     commands: &mut Commands,
 ) {
+    commands.queue(move |world: &mut bevy::prelude::World| {
+        let scope = world
+            .get_resource::<impeller_bevy::browser_cache::BrowserCacheScope>()
+            .and_then(|scope| scope.key.clone());
+        if let Some(scope) = scope {
+            let mut reads = world.resource_mut::<VisibleDiskReads>();
+            if reads.0.len() < 4 {
+                let read = impeller_bevy::browser_cache::lookup(
+                    &scope,
+                    &visible_disk_key(component_id, req_start, req_end),
+                );
+                reads.0.push(VisibleDiskRead {
+                    scope,
+                    key,
+                    attempt,
+                    component: component_id,
+                    start: req_start,
+                    end: req_end,
+                    read,
+                    started: Instant::now(),
+                });
+            } else {
+                world
+                    .resource_mut::<VisiblePrefetchState>()
+                    .finish(key, attempt, false);
+            }
+        } else {
+            send_visible_network_page(
+                key,
+                attempt,
+                component_id,
+                req_start,
+                req_end,
+                None,
+                &mut world.commands(),
+            );
+        }
+    });
+}
+
+fn send_visible_network_page(
+    key: PrefetchKey,
+    attempt: u64,
+    component_id: ComponentId,
+    req_start: Timestamp,
+    req_end: Timestamp,
+    disk_scope: Option<String>,
+    commands: &mut Commands,
+) {
     commands.send_req_reply_raw(
         GetTimeSeries {
             id: PacketId::default(),
-            range: req_start..req_end,
+            range: req_start..Timestamp(req_end.0.saturating_sub(1)),
             component_id,
             limit: Some(VISIBLE_PREFETCH_LIMIT),
         },
@@ -1130,14 +1273,30 @@ fn send_visible_prefetch_page(
               schema_reg: Res<ComponentSchemaRegistry>,
               priority: Res<SeriesFetchPriority>,
               mut prefetch: ResMut<VisiblePrefetchState>,
-              mut commands: Commands|
+              mut commands: Commands,
+              active_scope: Option<Res<impeller_bevy::browser_cache::BrowserCacheScope>>|
               -> bool {
+            if disk_scope.as_ref().is_some_and(|expected| {
+                active_scope.as_ref().and_then(|scope| scope.key.as_ref()) != Some(expected)
+            }) {
+                return true;
+            }
             if !priority.high.contains(&component_id) {
                 prefetch.cancel_component(component_id);
                 return true;
             }
             if !prefetch.is_current(key, attempt) {
                 return true;
+            }
+            if let (Some(scope), Some(value)) = (
+                &disk_scope,
+                impeller_bevy::browser_series::SeriesPage::from_packet(&pkt),
+            ) {
+                impeller_bevy::browser_cache::store(
+                    scope,
+                    &visible_disk_key(component_id, req_start, req_end),
+                    &value,
+                );
             }
             match apply_visible_prefetch_page(
                 &pkt,

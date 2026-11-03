@@ -35,6 +35,8 @@ use crate::ui::up_marker::paint_up_marker;
 use crate::ui::widgets::SystemStateExt;
 use impeller_wkt::FrustumUpMarker;
 
+mod browser;
+
 // ---------------------------------------------------------------------------
 // Public pane types (unchanged API)
 // ---------------------------------------------------------------------------
@@ -217,6 +219,9 @@ impl Default for StreamState {
 /// the decoder thread.
 #[derive(Component)]
 pub struct VideoFrameCache {
+    browser: Option<browser::BrowserVideoState>,
+    max_raw_bytes: usize,
+    max_decoded_bytes: usize,
     /// All raw frame data (H.264 NAL or raw RGBA), keyed by timestamp.
     /// Wrapped in Arc to avoid cloning large frame buffers on access.
     raw_frames: BTreeMap<Timestamp, Arc<Vec<u8>>>,
@@ -230,6 +235,7 @@ pub struct VideoFrameCache {
     max_raw_frames: usize,
     /// Timestamp of the last frame fed to the decoder (for sequential opt).
     last_decoded_ts: Option<Timestamp>,
+    eviction_pivot: Option<Timestamp>,
     /// `true` while a `SeekBatch` is in-flight on the decoder thread.
     seeking: bool,
     /// Generation counter for `SeekBatch` coalescing.
@@ -264,12 +270,16 @@ pub struct VideoFrameCache {
 impl Default for VideoFrameCache {
     fn default() -> Self {
         Self {
+            browser: None,
+            max_raw_bytes: usize::MAX,
+            max_decoded_bytes: usize::MAX,
             raw_frames: BTreeMap::new(),
             decoded_frames: BTreeMap::new(),
             keyframe_index: Vec::new(),
             max_frames: MAX_CACHED_FRAMES,
             max_raw_frames: MAX_RAW_FRAMES,
             last_decoded_ts: None,
+            eviction_pivot: None,
             seeking: false,
             seek_generation: 0,
             last_stream_activity: None,
@@ -389,6 +399,9 @@ impl VideoFrameCache {
 
     /// Insert a raw frame and evict oldest entries if over the limit.
     pub fn insert_raw(&mut self, timestamp: Timestamp, data: Vec<u8>) {
+        if data.len() > self.max_raw_bytes {
+            return;
+        }
         if self.is_h264 && is_keyframe(&data) {
             self.record_keyframe(timestamp);
         }
@@ -397,12 +410,24 @@ impl VideoFrameCache {
     }
 
     fn evict_if_needed(&mut self) {
-        while self.decoded_frames.len() > self.max_frames {
+        while self.decoded_frames.len() > self.max_frames
+            || (self.max_decoded_bytes != usize::MAX
+                && self
+                    .decoded_frames
+                    .values()
+                    .map(|image| image.data.as_ref().map_or(0, Vec::len))
+                    .sum::<usize>()
+                    > self.max_decoded_bytes)
+        {
             // Evict the frame farthest from where the decoder is currently
             // working.  This prevents freshly-decoded frames from being
             // immediately evicted when scrubbing backward (where new frames
             // have lower timestamps than old cached frames).
-            let pivot = self.last_decoded_ts.map(|t| t.0).unwrap_or(0);
+            let pivot = self
+                .eviction_pivot
+                .or(self.last_decoded_ts)
+                .map(|t| t.0)
+                .unwrap_or(0);
             let first_ts = self.decoded_frames.keys().next().map(|t| t.0);
             let last_ts = self.decoded_frames.keys().next_back().map(|t| t.0);
             match (first_ts, last_ts) {
@@ -421,6 +446,33 @@ impl VideoFrameCache {
     }
 
     fn evict_raw_if_needed(&mut self) {
+        if self.max_raw_bytes != usize::MAX {
+            while self
+                .raw_frames
+                .values()
+                .map(|bytes| bytes.len())
+                .sum::<usize>()
+                > self.max_raw_bytes
+            {
+                let pivot = self
+                    .eviction_pivot
+                    .or(self.last_decoded_ts)
+                    .unwrap_or(Timestamp(0));
+                let (Some(first), Some(last)) = (
+                    self.raw_frames.first_key_value(),
+                    self.raw_frames.last_key_value(),
+                ) else {
+                    break;
+                };
+                if pivot.0.abs_diff(first.0.0) > pivot.0.abs_diff(last.0.0) {
+                    self.raw_frames.pop_first();
+                } else {
+                    self.raw_frames.pop_last();
+                }
+            }
+            self.keyframe_index
+                .retain(|timestamp| self.raw_frames.contains_key(timestamp));
+        }
         while self.raw_frames.len() > self.max_raw_frames {
             if let Some((evicted_ts, _)) = self.raw_frames.pop_first() {
                 if let Some(&first_raw_ts) = self.raw_frames.keys().next() {
@@ -1215,6 +1267,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
 /// to `Active` after the startup delay, regardless of whether the panel is
 /// currently visible.  This ensures the raw-frame cache starts filling
 /// immediately for all streams.
+#[allow(clippy::too_many_arguments)]
 pub fn connect_streams(
     mut query: Query<(
         Entity,
@@ -1226,10 +1279,77 @@ pub fn connect_streams(
     stream_id: Res<CurrentStreamId>,
     last_updated: Res<impeller_wkt::LastUpdated>,
     connection: Option<Res<impeller_bevy::ConnectionAddr>>,
+    current_time: Res<CurrentTimestamp>,
+    scope: Res<impeller_bevy::browser_cache::BrowserCacheScope>,
+    limits: Res<impeller_bevy::browser_cache::PlaybackCacheLimits>,
 ) {
     let bounded = connection
         .as_ref()
         .is_some_and(|c| matches!(c.endpoint(), impeller_bevy::DbEndpoint::Browser(_)));
+    if bounded {
+        let count = query.iter().count().max(1);
+        let mut slots = 4usize.saturating_sub(
+            query
+                .iter()
+                .filter(|(_, _, _, cache)| {
+                    cache
+                        .browser
+                        .as_ref()
+                        .is_some_and(browser::BrowserVideoState::busy)
+                })
+                .count(),
+        );
+        for (entity, mut stream, decoder, mut cache) in &mut query {
+            if let StreamState::WaitingToConnect { frames_waited } = &mut stream.state {
+                *frames_waited += 1;
+                if *frames_waited < FRAMES_BEFORE_CONNECT {
+                    continue;
+                }
+                stream.state = StreamState::Active;
+            }
+            cache.max_raw_bytes = limits.video_bytes / count;
+            cache.max_decoded_bytes = limits.decoded_bytes / count;
+            if matches!(stream.state, StreamState::Error(_)) {
+                continue;
+            }
+            cache.eviction_pivot = Some(current_time.0);
+            cache.evict_raw_if_needed();
+            cache.evict_if_needed();
+            decoder.drain_into_cache(&mut cache);
+            browser::update(
+                entity,
+                &mut stream,
+                &mut cache,
+                current_time.0,
+                &scope,
+                &mut slots,
+                &mut commands,
+            );
+        }
+        let raw = query
+            .iter()
+            .map(|(_, _, _, cache)| {
+                cache
+                    .raw_frames
+                    .values()
+                    .map(|bytes| bytes.len())
+                    .sum::<usize>()
+            })
+            .sum();
+        let decoded = query
+            .iter()
+            .map(|(_, _, _, cache)| {
+                cache
+                    .decoded_frames
+                    .values()
+                    .map(|frame| frame.data.as_ref().map_or(0, Vec::len))
+                    .sum::<usize>()
+            })
+            .sum();
+        impeller_bevy::browser_cache::report_resident("videoBytes", raw);
+        impeller_bevy::browser_cache::report_resident("decodedBytes", decoded);
+        return;
+    }
     for (entity, mut stream, decoder, mut cache) in &mut query {
         match &mut stream.state {
             StreamState::WaitingToConnect { frames_waited } => {

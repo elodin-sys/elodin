@@ -124,7 +124,7 @@ fn initial_data_loaded(
     priority
         .high
         .iter()
-        .all(|id| !schema.0.contains_key(id) || backfill.is_complete(*id))
+        .all(|id| !schema.0.contains_key(id) || backfill.has_initial_data(*id))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -159,7 +159,7 @@ fn recording_lifecycle(
     });
     let schematic_loaded = loaded.read().count() + reloaded.read().count() > 0;
     // An empty subscription needs no telemetry fetch. A populated subscription
-    // waits for its first complete backfill, including an empty server response.
+    // waits for its first valid page, including an empty server response.
     let windows_pending = pending_windows.as_ref().is_some_and(|w| !w.is_empty());
     let data_loaded = !windows_pending
         && !*windows_were_pending

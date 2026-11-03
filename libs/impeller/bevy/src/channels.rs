@@ -12,12 +12,11 @@ use std::{
     },
 };
 
-/// Incoming BBQ queue capacity.
-///
-/// Raised from 64 MiB to 256 MiB so a large Arrow IPC SQL reply fits alongside
-/// other in-flight packets. WASM uses the same size: a 2 MiB queue makes
-/// `push_incoming` drop those frames while the socket still looks connected.
+/// Native SQL replies need 256 MiB. Browser queues hold several bounded replies.
+#[cfg(not(target_family = "wasm"))]
 pub const QUEUE_LEN: usize = 256 * 1024 * 1024;
+#[cfg(target_family = "wasm")]
+pub const QUEUE_LEN: usize = 64 * 1024 * 1024;
 
 #[derive(Resource)]
 pub struct PacketRx(AsyncArcQueueRx);

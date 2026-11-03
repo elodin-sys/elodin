@@ -45,6 +45,8 @@ pub use impeller_wkt::ElementValueMut;
 pub use impeller_wkt::{ComponentPart, ComponentPath};
 
 pub use address;
+pub mod browser_cache;
+pub mod browser_series;
 pub mod channels;
 pub use channels::{
     BrowserEndpoints, ConnectionAddr, ConnectionStatus, DbEndpoint, MsgPacketRx, MsgPacketTx,
@@ -83,6 +85,9 @@ pub struct InitialConnectionState {
 /// Plots project visible windows from this store into GPU LineTrees.
 #[derive(Resource, Default)]
 pub struct TelemetryCache {
+    resident_bytes: usize,
+    byte_limit: usize,
+    pivot: Timestamp,
     components: HashMap<ComponentId, BTreeMap<Timestamp, ComponentValue>>,
     /// Merged half-open coverage intervals `[start, end)` per component (micros).
     coverage: HashMap<ComponentId, Vec<(i64, i64)>>,
@@ -164,17 +169,86 @@ impl TelemetryCache {
         ts: Timestamp,
         value: ComponentValue,
     ) -> bool {
+        let bytes = Self::value_bytes(&value);
+        if self
+            .components
+            .get(&component_id)
+            .is_some_and(|series| series.contains_key(&ts))
+        {
+            return false;
+        }
+        if self.byte_limit > 0 {
+            if bytes > self.byte_limit {
+                return false;
+            }
+            while self.resident_bytes.saturating_add(bytes) > self.byte_limit {
+                if !self.evict_farthest() {
+                    break;
+                }
+            }
+        }
         let series = self.components.entry(component_id).or_default();
         // Keep the first value seen for a timestamp. In mixed backfill+live
         // streaming, the same timestamp can be replayed; replacing it can make
         // rendered poses jump between two states for the same tick.
         if let std::collections::btree_map::Entry::Vacant(entry) = series.entry(ts) {
             entry.insert(value);
+            self.resident_bytes = self.resident_bytes.saturating_add(bytes);
             self.generation = self.generation.wrapping_add(1);
             true
         } else {
             false
         }
+    }
+
+    fn value_bytes(value: &ComponentValue) -> usize {
+        value
+            .as_view()
+            .as_bytes()
+            .len()
+            .saturating_add(std::mem::size_of::<ComponentValue>() + 128)
+    }
+
+    pub fn resident_bytes(&self) -> usize {
+        self.resident_bytes
+    }
+
+    fn evict_farthest(&mut self) -> bool {
+        let candidate = self
+            .components
+            .iter()
+            .flat_map(|(&id, series)| {
+                [series.first_key_value(), series.last_key_value()]
+                    .into_iter()
+                    .flatten()
+                    .map(move |(&time, _)| (id, time))
+            })
+            .max_by_key(|(_, time)| time.0.abs_diff(self.pivot.0));
+        let Some((id, time)) = candidate else {
+            return false;
+        };
+        let series = self.components.get_mut(&id).expect("selected cache series");
+        if let Some(value) = series.remove(&time) {
+            self.resident_bytes = self
+                .resident_bytes
+                .saturating_sub(Self::value_bytes(&value));
+        }
+        if let Some(coverage) = self.coverage.get_mut(&id) {
+            if let (Some((&first, _)), Some((&last, _))) =
+                (series.first_key_value(), series.last_key_value())
+            {
+                for (start, end) in coverage.iter_mut() {
+                    *start = (*start).max(first.0);
+                    *end = (*end).min(last.0.saturating_add(1));
+                }
+                coverage.retain(|(start, end)| start < end);
+            } else {
+                coverage.clear();
+            }
+        }
+        self.generation = self.generation.wrapping_add(1);
+        self.bump_revision(id, time);
+        true
     }
 
     fn bump_revision(&mut self, component_id: ComponentId, from: Timestamp) {
@@ -272,7 +346,13 @@ impl TelemetryCache {
 
     /// Drop all samples and coverage for a component (unsubscribe / reclaim RAM).
     pub fn remove_series(&mut self, component_id: &ComponentId) {
-        let removed_components = self.components.remove(component_id).is_some();
+        let removed = self.components.remove(component_id);
+        if let Some(series) = &removed {
+            self.resident_bytes = self
+                .resident_bytes
+                .saturating_sub(series.values().map(Self::value_bytes).sum::<usize>());
+        }
+        let removed_components = removed.is_some();
         let removed_coverage = self.coverage.remove(component_id).is_some();
         if removed_components || removed_coverage {
             self.generation = self.generation.wrapping_add(1);
@@ -298,6 +378,31 @@ impl TelemetryCache {
         let intervals = self.coverage.entry(component_id).or_default();
         intervals.push((start.0, end.0));
         merge_intervals(intervals);
+    }
+
+    pub fn mark_page_covered(
+        &mut self,
+        id: ComponentId,
+        start: Timestamp,
+        end: Timestamp,
+        timestamps: &[Timestamp],
+    ) {
+        let retained = self.components.get(&id);
+        let missing = timestamps
+            .iter()
+            .any(|time| retained.is_none_or(|series| !series.contains_key(time)));
+        if !missing {
+            self.mark_covered(id, start, end);
+        } else if let Some(series) = retained {
+            let mut present = timestamps
+                .iter()
+                .copied()
+                .filter(|time| series.contains_key(time));
+            if let Some(first) = present.next() {
+                let last = present.next_back().unwrap_or(first);
+                self.mark_covered(id, first, Timestamp(last.0.saturating_add(1)));
+            }
+        }
     }
 
     /// True when `range` is fully contained in recorded coverage for this component.
@@ -555,11 +660,26 @@ pub fn apply_cached_data(
 /// Tracks which components have had their backfill requests sent.
 #[derive(Resource, Default)]
 pub struct BackfillState {
+    initial: std::collections::HashSet<ComponentId>,
     requested: std::collections::HashSet<ComponentId>,
     complete: std::collections::HashSet<ComponentId>,
 }
 
 impl BackfillState {
+    /// Whether a first valid page or an empty response arrived.
+    pub fn has_initial_data(&self, component_id: ComponentId) -> bool {
+        self.initial.contains(&component_id)
+    }
+
+    fn record_page(&mut self, component_id: ComponentId, count: usize, loaded: usize) {
+        if count == 0 || loaded > 0 {
+            self.initial.insert(component_id);
+        }
+        if count < BACKFILL_CHUNK_SIZE && loaded == count {
+            self.complete.insert(component_id);
+        }
+    }
+
     /// Whether the server completed historical data for this component.
     /// Persistent message subscriptions do not affect this result.
     pub fn is_complete(&self, component_id: ComponentId) -> bool {
@@ -569,6 +689,7 @@ impl BackfillState {
     /// Clear backfill bookkeeping for a component so it can be re-fetched if
     /// re-subscribed.
     pub fn clear_component(&mut self, component_id: ComponentId) {
+        self.initial.remove(&component_id);
         self.requested.remove(&component_id);
         self.complete.remove(&component_id);
     }
@@ -596,6 +717,7 @@ pub fn series_store_backfill_candidates(
 /// Starts from the beginning of each series so early timeline scrubbing works
 /// as soon as the first pages land. Playback never waits for
 /// `SeriesStoreLoadState.complete`. Empty allowlist ⇒ no backfill.
+#[allow(clippy::too_many_arguments)]
 pub fn backfill_cache(
     schema_reg: bevy::prelude::Res<ComponentSchemaRegistry>,
     msg_request_handlers: bevy::prelude::Res<MsgRequestIdHandlers>,
@@ -603,7 +725,34 @@ pub fn backfill_cache(
     priority: bevy::prelude::Res<SeriesFetchPriority>,
     mut load_state: ResMut<SeriesStoreLoadState>,
     mut commands: Commands,
+    connection: Option<bevy::prelude::Res<ConnectionAddr>>,
+    scope: Option<bevy::prelude::Res<browser_cache::BrowserCacheScope>>,
+    limits: Option<bevy::prelude::Res<browser_cache::PlaybackCacheLimits>>,
+    current: Option<bevy::prelude::Res<CurrentTimestamp>>,
+    browser: Option<ResMut<browser_series::BrowserSeriesState>>,
+    cache: Option<ResMut<TelemetryCache>>,
 ) {
+    if connection
+        .as_ref()
+        .is_some_and(|c| matches!(c.endpoint(), DbEndpoint::Browser(_)))
+    {
+        if let (Some(scope), Some(limits), Some(current), Some(mut browser), Some(mut cache)) =
+            (scope, limits, current, browser, cache)
+        {
+            browser_series::update(
+                &scope,
+                &limits,
+                current.0,
+                &priority,
+                &schema_reg,
+                &mut browser,
+                &mut cache,
+                &mut backfill,
+                &mut commands,
+            );
+        }
+        return;
+    }
     if msg_request_handlers.len() >= BACKFILL_MAX_CONCURRENT {
         return;
     }
@@ -683,6 +832,7 @@ fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start:
             let elem_size = schema.size();
             let count = timestamps.len();
             let mut last_ts = start;
+            let mut loaded = 0;
 
             for (i, &timestamp) in timestamps.iter().enumerate() {
                 let offset = i * elem_size;
@@ -697,6 +847,7 @@ fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start:
                 ) {
                     let value = ComponentValue::from_view(view);
                     cache.insert(component_id, timestamp, value);
+                    loaded += 1;
                     last_ts = timestamp;
                 }
             }
@@ -713,12 +864,11 @@ fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start:
                 return true;
             }
 
+            backfill.record_page(component_id, count, loaded);
+            load_state.components_complete = backfill.complete.len();
             if count >= BACKFILL_CHUNK_SIZE {
                 // Continue from the beginning forward — usable incrementally.
                 send_backfill_page(&mut cmds, component_id, Timestamp(last_ts.0 + 1));
-            } else {
-                backfill.complete.insert(component_id);
-                load_state.components_complete = backfill.complete.len();
             }
             true
         },
@@ -1688,6 +1838,10 @@ pub struct ImpellerPlugin;
 impl Plugin for ImpellerPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_message::<DbMessage>()
+            .init_resource::<browser_cache::PlaybackCacheLimits>()
+            .init_resource::<browser_cache::BrowserCacheScope>()
+            .init_resource::<browser_series::BrowserSeriesState>()
+            .add_systems(bevy::prelude::PreUpdate, browser_cache::sync_scope)
             .add_plugins(DefaultAdaptersPlugin)
             .add_systems(bevy::prelude::Startup, ensure_db_components_root)
             .add_systems(
@@ -2474,6 +2628,39 @@ mod series_store_allowlist_tests {
         for (browser, desktop) in browser[1..].iter().zip(&desktop[1..]) {
             assert_eq!(browser.inner, desktop.inner);
         }
+    }
+
+    #[test]
+    fn initial_data_arrives_before_complete_history_and_resets_on_refetch() {
+        let mut state = BackfillState::default();
+        let first = ComponentId(1);
+        let empty = ComponentId(2);
+        state.requested.insert(first);
+        assert!(!state.has_initial_data(first));
+        state.record_page(first, BACKFILL_CHUNK_SIZE, BACKFILL_CHUNK_SIZE);
+        assert!(state.has_initial_data(first));
+        assert!(!state.is_complete(first));
+        state.record_page(empty, 0, 0);
+        assert!(state.has_initial_data(empty));
+        assert!(state.is_complete(empty));
+        state.record_page(first, 3, 3);
+        assert!(state.is_complete(first));
+        state.clear_component(first);
+        assert!(!state.has_initial_data(first));
+        assert!(!state.is_complete(first));
+        assert!(state.has_initial_data(empty));
+    }
+
+    #[test]
+    fn malformed_pages_do_not_report_initial_data() {
+        let mut state = BackfillState::default();
+        let id = ComponentId(1);
+        state.record_page(id, 1, 0);
+        assert!(!state.has_initial_data(id));
+        assert!(!state.is_complete(id));
+        state.record_page(id, 1, 1);
+        assert!(state.has_initial_data(id));
+        assert!(state.is_complete(id));
     }
 
     #[test]

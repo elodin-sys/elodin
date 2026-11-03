@@ -47,6 +47,8 @@ impl Plugin for PlotPlugin {
             .init_resource::<XSyncClock>()
             .init_resource::<PlotSyncState>()
             .init_resource::<crate::ui::plot::data::VisiblePrefetchState>()
+            .init_resource::<data::VisibleDiskReads>()
+            .add_systems(Update, data::drain_visible_disk_reads)
             .add_systems(Startup, setup_pkt_handler)
             .add_systems(Update, zoom_graph.in_set(UiInputConsumerSet))
             .add_systems(Update, graph_touch.in_set(UiInputConsumerSet))

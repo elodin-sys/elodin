@@ -488,6 +488,7 @@ pub(crate) fn register_ibl_embedded_assets(app: &mut App) {
 pub struct EditorPlugin {
     window_resolution: WindowResolution,
     capabilities: viewer::ViewerCapabilities,
+    cache_limits: impeller_bevy::browser_cache::PlaybackCacheLimits,
     #[cfg(target_family = "wasm")]
     connection: Option<DbEndpoint>,
 }
@@ -497,6 +498,13 @@ pub struct EditorPlugin {
 pub struct PositionSync;
 
 impl EditorPlugin {
+    pub fn with_cache_limits(
+        mut self,
+        limits: impeller_bevy::browser_cache::PlaybackCacheLimits,
+    ) -> Self {
+        self.cache_limits = limits;
+        self
+    }
     pub fn with_viewer_capabilities(mut self, capabilities: ViewerCapabilities) -> Self {
         self.capabilities = capabilities;
         self
@@ -510,6 +518,7 @@ impl EditorPlugin {
         Self {
             window_resolution: WindowResolution::new(width as u32, height as u32),
             capabilities: viewer::ViewerCapabilities::default(),
+            cache_limits: impeller_bevy::browser_cache::PlaybackCacheLimits::default(),
             #[cfg(target_family = "wasm")]
             connection: None,
         }
@@ -544,6 +553,7 @@ impl EditorPlugin {
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(self.capabilities);
+        app.insert_resource(self.cache_limits.clone());
         // Must run before anything can spawn a `WorldPos` entity.
         register_world_pos_components(app);
         let composite_alpha_mode = if cfg!(target_os = "macos") {

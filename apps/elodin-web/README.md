@@ -78,6 +78,38 @@ The browser palette omits desktop window creation and screen arrangement command
 This experiment covers schematic windows in the browser viewer.
 The dedicated Elodin PR must also review full-editor window creation, tab navigation, scene sharing, and reconnect behavior.
 
+## Experimental playback cache
+
+Browser connections fetch camera frames and telemetry near the playhead.
+Seeks keep the full recording available through new range requests.
+Late responses cannot replace data for a newer seek or session.
+The native connection retains its existing playback path.
+
+The Cache API stores disposable chunks for the active viewer session.
+The cache does not store cookies, authentication headers, or credential-bearing keys.
+Storage failures fall back to bounded memory and authorized network requests.
+The same adapter caches static GLB and glTF files, external buffers, and textures.
+This experiment does not enable the native `world_mesh` terrain renderer.
+
+Default limits are 192 MiB for camera payloads, 32 MiB for decoded camera images, and 64 MiB for telemetry.
+Each browser transport queue has a 64 MiB capacity.
+The disk payload limit is 512 MiB, with 8 MiB chunks and at most 4096 index entries.
+An asset has a 64 MiB download limit. This limit does not bound total decoded scene or graphics memory.
+The regenerated static terrain still needs separate graphics and memory qualification.
+H.264 decoding remains unavailable in the existing WASM build. Native H.264 decoding retains its existing implementation.
+
+Rust callers can supply `impeller_bevy::browser_cache::PlaybackCacheLimits` through `EditorPlugin::with_cache_limits`.
+Set `disk_bytes` to zero to disable persistence.
+For browser tests, set `globalThis.__elodinDisableDiskCache` before startup.
+`globalThis.__elodinCacheStats` exposes cache counters and resident payload estimates for this experiment.
+WASM linear memory needs a separate measurement because these counters do not include allocator capacity.
+
+Run the cache adapter tests inside the Nix shell:
+
+```sh
+node --test tests/browser-cache/cache.test.mjs
+```
+
 ## Tests
 
 Run native tests from the repository root inside `nix develop`:
