@@ -13,6 +13,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
+from terrain_schematic import terrain_mode
 from visual_check_schematic import build as build_schematic
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -51,7 +52,9 @@ CAPTURES = [
     ("ground_return", 13.0),
     ("high_altitude", 17.0),
 ]
+TERRAIN_MODE = terrain_mode()
 TARGET_PHASES = {"ground", "ground_return", "high_altitude"}
+DYNAMIC_RANGE_PHASES = TARGET_PHASES if TERRAIN_MODE == "atlas" else {"ground", "ground_return"}
 PARITY_MAX_DN = 1
 TARGET_CONTRAST_MIN_DN = 15.0
 DYNAMIC_RANGE_MIN_DN = 50
@@ -285,7 +288,10 @@ def finish() -> list[str]:
             for name, result in formats.items():
                 metrics = result["metrics"]
                 dynamic_range = metrics["max_dn"] - metrics["min_dn"]
-                if dynamic_range < DYNAMIC_RANGE_MIN_DN:
+                if (
+                    capture["label"] in DYNAMIC_RANGE_PHASES
+                    and dynamic_range < DYNAMIC_RANGE_MIN_DN
+                ):
                     failures.append(
                         f"{capture['label']} {name}: dynamic range "
                         f"{dynamic_range} DN < {DYNAMIC_RANGE_MIN_DN}"

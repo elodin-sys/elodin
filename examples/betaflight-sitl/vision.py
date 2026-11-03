@@ -138,7 +138,10 @@ class GateCandidate:
     labellings are within 10°. An unset flag does not guarantee the gate-frame
     orientation: perspective can still mislabel corners. Gate position, bearing,
     range, and the crossing normal are unaffected by a cyclic relabelling. The
-    in-plane gate orientation is not reliable.
+    in-plane gate orientation is not reliable. ``sample_time`` is the same
+    nominal image/render timestamp as ``GuidanceUpdate.frame_time``, in
+    simulation seconds on the ``sim_time`` clock, with approximate scene-time
+    alignment rather than a verified exact capture-pose clock.
     """
 
     sample_time: float

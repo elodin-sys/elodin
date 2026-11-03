@@ -95,7 +95,7 @@ class Noise:
 # motor imbalance at liftoff.
 gyro_noise = Noise(0, 0, 1e-7, 1e-8)  # Gyro noise + bias drift
 accel_noise = Noise(0, 1, 0.01, 0.001)  # Accel noise (no drift)
-baro_noise = Noise(0, 2, 0.01, 0.001)  # ~0.03m std dev
+baro_noise = Noise(0, 2, 0.01, 0.001)  # 0.1m std dev
 mag_noise = Noise(0, 3, 0.01, 0.001)  # Magnetometer noise (very low)
 
 

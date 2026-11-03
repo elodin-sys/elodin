@@ -1,9 +1,37 @@
 //! `elodin projects`: create/list org-scoped projects via the authenticated API.
 
+use clap::{Args, Subcommand};
 use miette::{Context, IntoDiagnostic};
+use tokio::runtime::Runtime;
 
-use super::tokens::Credentials;
-use super::{AuthCtx, ProjectsArgs, ProjectsCommand, tokens};
+use crate::cli::Cli;
+
+use super::AuthCtx;
+use super::auth::tokens::{self, Credentials};
+
+#[derive(Args, Clone)]
+pub struct ProjectsArgs {
+    #[command(subcommand)]
+    pub command: ProjectsCommand,
+}
+
+#[derive(Subcommand, Clone)]
+pub enum ProjectsCommand {
+    /// Create a project in your organization
+    Create {
+        /// Project name (unique within your org)
+        name: String,
+        /// Print the raw JSON returned by the API.
+        #[arg(long)]
+        json: bool,
+    },
+    /// List your organization's projects
+    List {
+        /// Print the raw JSON returned by the API.
+        #[arg(long)]
+        json: bool,
+    },
+}
 
 pub async fn run(ctx: &AuthCtx, args: &ProjectsArgs) -> miette::Result<()> {
     let creds = tokens::ensure_valid(ctx).await?;
@@ -98,4 +126,11 @@ async fn parse(resp: reqwest::Response) -> miette::Result<serde_json::Value> {
         });
     }
     Ok(value)
+}
+
+impl Cli {
+    pub fn projects(self, args: ProjectsArgs, rt: Runtime) -> miette::Result<()> {
+        let ctx = self.auth_ctx()?;
+        rt.block_on(run(&ctx, &args))
+    }
 }

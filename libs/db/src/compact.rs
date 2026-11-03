@@ -62,7 +62,8 @@ pub fn compact(db_path: &Path, dry_run: bool) -> Result<CompactStats, Error> {
     Ok(stats)
 }
 
-fn is_append_log_file(name: &str) -> bool {
+/// Return whether the filename identifies an append log.
+pub fn is_append_log_file(name: &str) -> bool {
     APPEND_LOG_FILE_NAMES.contains(&name)
         || name
             .strip_prefix("data_log.")
@@ -86,16 +87,10 @@ fn compact_file(path: &PathBuf, dry_run: bool, stats: &mut CompactStats) -> Resu
     Ok(())
 }
 
-/// Length after compaction, without modifying the file. Non-log files retain their full length.
+/// Return the length after compaction without modifying the append log.
+/// Callers must filter filenames with `is_append_log_file` first.
 pub fn compacted_file_len(path: &Path) -> Result<u64, Error> {
     let file_len = fs::metadata(path)?.len();
-    if !path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(is_append_log_file)
-    {
-        return Ok(file_len);
-    }
     let mut header = [0u8; 8];
     {
         let mut file = fs::File::open(path)?;

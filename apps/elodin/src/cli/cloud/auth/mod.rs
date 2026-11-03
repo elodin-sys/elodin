@@ -5,21 +5,18 @@
 //! caches the resulting tokens, and `elodin whoami` calls an auth-protected API
 //! route with the access token.
 
-use std::path::PathBuf;
-
-use clap::{Args, Subcommand};
+use clap::Args;
 use miette::{Context, IntoDiagnostic};
 use serde::Deserialize;
 use tokio::runtime::Runtime;
 
-use super::Cli;
+use crate::cli::Cli;
+
+use super::AuthCtx;
 
 mod login;
 mod logout;
-mod projects;
-mod signup;
-mod tokens;
-mod upload;
+pub(super) mod tokens;
 mod whoami;
 
 /// Public OIDC client id for the CLI (matches the Keycloak realm import).
@@ -42,69 +39,6 @@ pub struct WhoamiArgs {
     /// Print the raw identity JSON returned by the API.
     #[arg(long)]
     pub json: bool,
-}
-
-#[derive(Args, Clone, Default)]
-pub struct SignupArgs {
-    /// Print the registration URL instead of opening a browser.
-    #[arg(long)]
-    pub no_browser: bool,
-}
-
-#[derive(Args, Clone)]
-pub struct UploadArgs {
-    /// Stopped TelemetryDB directory containing db_state; compacted on upload without modifying it.
-    pub db_path: PathBuf,
-    /// Destination project UUID or name; optional when exactly one project is available.
-    #[arg(long, env = "ELODIN_PROJECT")]
-    pub project: Option<String>,
-    /// Print the final published upload status as JSON.
-    #[arg(long)]
-    pub json: bool,
-    /// Start a new upload instead of resuming the saved session for this snapshot.
-    #[arg(long)]
-    pub restart: bool,
-    /// Maximum seconds to wait for publication after acceptance.
-    #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..))]
-    pub timeout: u64,
-}
-
-#[derive(Args, Clone)]
-pub struct ProjectsArgs {
-    #[command(subcommand)]
-    pub command: ProjectsCommand,
-}
-
-#[derive(Subcommand, Clone)]
-pub enum ProjectsCommand {
-    /// Create a project in your organization
-    Create {
-        /// Project name (unique within your org)
-        name: String,
-        /// Print the raw JSON returned by the API.
-        #[arg(long)]
-        json: bool,
-    },
-    /// List your organization's projects
-    List {
-        /// Print the raw JSON returned by the API.
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-/// Resolved context shared by the auth subcommands.
-pub(crate) struct AuthCtx {
-    pub client: reqwest::Client,
-    pub issuer: String,
-    pub api_url: String,
-    pub creds_path: PathBuf,
-}
-
-impl AuthCtx {
-    pub async fn discover(&self) -> miette::Result<OidcConfig> {
-        discover_at(&self.client, &self.issuer).await
-    }
 }
 
 /// The subset of the OIDC discovery document the CLI needs.
@@ -193,28 +127,6 @@ pub(crate) fn urlencode(s: &str) -> String {
 }
 
 impl Cli {
-    fn auth_ctx(&self) -> miette::Result<AuthCtx> {
-        let config_dir = match &self.config_dir {
-            Some(path) => path.clone(),
-            None => self.dirs().into_diagnostic()?.config_dir().to_path_buf(),
-        };
-        std::fs::create_dir_all(&config_dir)
-            .into_diagnostic()
-            .wrap_err("failed to create config directory")?;
-        let creds_path = config_dir.join("credentials.json");
-        let client = reqwest::Client::builder()
-            .user_agent(concat!("elodin-cli/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .into_diagnostic()
-            .wrap_err("failed to build HTTP client")?;
-        Ok(AuthCtx {
-            client,
-            issuer: self.issuer.trim_end_matches('/').to_string(),
-            api_url: self.api_url.trim_end_matches('/').to_string(),
-            creds_path,
-        })
-    }
-
     pub fn login(self, args: LoginArgs, rt: Runtime) -> miette::Result<()> {
         let ctx = self.auth_ctx()?;
         rt.block_on(login::run(&ctx, &args))
@@ -228,20 +140,5 @@ impl Cli {
     pub fn whoami(self, args: WhoamiArgs, rt: Runtime) -> miette::Result<()> {
         let ctx = self.auth_ctx()?;
         rt.block_on(whoami::run(&ctx, &args))
-    }
-
-    pub fn signup(self, args: SignupArgs, rt: Runtime) -> miette::Result<()> {
-        let ctx = self.auth_ctx()?;
-        rt.block_on(signup::run(&ctx, &args))
-    }
-
-    pub fn projects(self, args: ProjectsArgs, rt: Runtime) -> miette::Result<()> {
-        let ctx = self.auth_ctx()?;
-        rt.block_on(projects::run(&ctx, &args))
-    }
-
-    pub fn upload(self, args: UploadArgs, rt: Runtime) -> miette::Result<()> {
-        let ctx = self.auth_ctx()?;
-        rt.block_on(upload::run(&ctx, &args))
     }
 }

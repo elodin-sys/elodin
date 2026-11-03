@@ -516,6 +516,86 @@ mod tests {
     }
 
     #[test]
+    async fn test_batched_stream_republishes_reordered_filtered_layout() {
+        let (addr, _db) = setup_test_db().await.unwrap();
+        let mut writer = Client::connect(addr).await.unwrap();
+        let mut selected = Vec::new();
+        for index in 0_u16..8 {
+            let name = format!("layout.selected.{index}");
+            let component_id = ComponentId::new(&name);
+            send_f64_samples(
+                &mut writer,
+                component_id,
+                &name,
+                (100 + index).to_le_bytes(),
+                &[(Timestamp(1), f64::from(index))],
+            )
+            .await;
+            selected.push(component_id);
+        }
+        flush(&mut writer).await;
+
+        let stream_id = 46;
+        let mut reader = Client::connect(addr).await.unwrap();
+        reader
+            .send(&SetStreamFilter {
+                id: stream_id,
+                component_ids: selected,
+                frequency: None,
+            })
+            .await
+            .0
+            .unwrap();
+        let mut stream = reader
+            .stream(&Stream {
+                behavior: StreamBehavior::RealTimeBatched,
+                id: stream_id,
+            })
+            .await
+            .unwrap();
+        loop {
+            if matches!(stream.next().await.unwrap(), StreamReply::VTable(_)) {
+                break;
+            }
+        }
+
+        let mut republished = false;
+        for index in 0_u16..8 {
+            let name = format!("layout.unselected.{index}");
+            send_f64_samples(
+                &mut writer,
+                ComponentId::new(&name),
+                &name,
+                (200 + index).to_le_bytes(),
+                &[(Timestamp(2 + i64::from(index)), 100.0 + f64::from(index))],
+            )
+            .await;
+            flush(&mut writer).await;
+            republished = futures_lite::future::race(
+                async {
+                    loop {
+                        if matches!(stream.next().await.unwrap(), StreamReply::VTable(_)) {
+                            break true;
+                        }
+                    }
+                },
+                async {
+                    sleep(Duration::from_millis(250)).await;
+                    false
+                },
+            )
+            .await;
+            if republished {
+                break;
+            }
+        }
+        assert!(
+            republished,
+            "filtered layout order changed without a new VTable"
+        );
+    }
+
+    #[test]
     async fn test_batched_stream_sends_metadata_that_arrives_after_the_table() {
         let (addr, _db) = setup_test_db().await.unwrap();
         let mut reader = Client::connect(addr).await.unwrap();

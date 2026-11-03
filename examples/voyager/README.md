@@ -84,6 +84,8 @@ which `main.py` loads at startup.
 python examples/voyager/main.py run
 ```
 
+The probes are integrated with `el.Integrator.Rk78` in one-hour steps.
+
 
 ## Chapter 1
 
@@ -98,10 +100,14 @@ bash download_spice_data.sh
 python chapter1.py run
 ```
 
-Jupiter's position is sampled at the midpoint of each one-hour step
-and stays fixed through the RK4 stages. This keeps things simple, but
-the overall propagation isn't fourth-order accurate, even though
-Voyager itself is integrated with RK4.
+Voyager is integrated with `el.Integrator.Rk78`, an eighth-order
+Runge-Kutta method, in one-hour steps. Each step's 13 stages evaluate
+gravity at different times, so Jupiter's position is interpolated to
+each stage's time (`el.StageTime`) with a cubic through its SPICE
+positions and velocities at the start and end of the step. The
+integration error over the six days is about 2 mm; interpolating
+Jupiter linearly would cost about 6.5 m, and holding it at the midpoint
+of each step about 650 m.
 
 ## Chapter 2
 
@@ -114,5 +120,5 @@ From `examples/voyager`:
 python chapter2.py run
 ```
 
-Jupiter's position is still fixed through each RK4 step, so the overall
-propagation isn't fourth-order accurate.
+The remaining error against SPICE, about 1 km, comes from the model
+(only the Sun and Jupiter), not the integration.

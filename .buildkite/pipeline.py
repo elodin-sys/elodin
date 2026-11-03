@@ -103,7 +103,17 @@ test_steps = [
             nix_step(
                 label=":python: pytest",
                 flake=".#run",
-                command="pytest libs/nox-py -o 'pythonpath='",
+                command="pytest libs/nox-py -o 'pythonpath=' -m 'not integrator and not parity'",
+            ),
+            nix_step(
+                label=":python: integrator convergence",
+                flake=".#run",
+                command="pytest libs/nox-py -o 'pythonpath=' -m integrator",
+            ),
+            nix_step(
+                label=":python: cranelift parity",
+                flake=".#run",
+                command="pytest libs/nox-py -o 'pythonpath=' -m parity",
             ),
             nix_step(
                 label=":python: lint",
@@ -124,6 +134,11 @@ test_steps = [
                 label=":python: rc-jet acceptance",
                 flake=".#run",
                 command="pytest examples/rc-jet/tests -o 'pythonpath='",
+            ),
+            nix_step(
+                label=":python: rc-jet LWIR visual",
+                flake=".#run",
+                command='SKIP_BUILD=1 ELODIN_BIN="$(command -v elodin)" examples/rc-jet/run_visual_check.sh',
             ),
             nix_step(
                 label=":python: betaflight-sitl tests",

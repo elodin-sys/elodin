@@ -5,12 +5,35 @@ use std::io::{IsTerminal, Read};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use clap::Args;
 use miette::{Context, IntoDiagnostic};
 use ring::digest::{Context as Digest, SHA256};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::runtime::Runtime;
 
-use super::{AuthCtx, UploadArgs, random_token, tokens};
+use crate::cli::Cli;
+
+use super::AuthCtx;
+use super::auth::{random_token, tokens};
+
+#[derive(Args, Clone)]
+pub struct UploadArgs {
+    /// Stopped TelemetryDB directory containing db_state; compacted on upload without modifying it.
+    pub db_path: PathBuf,
+    /// Destination project UUID or name; optional when exactly one project is available.
+    #[arg(long, env = "ELODIN_PROJECT")]
+    pub project: Option<String>,
+    /// Print the final published upload status as JSON.
+    #[arg(long)]
+    pub json: bool,
+    /// Start a new upload instead of resuming the saved session for this snapshot.
+    #[arg(long)]
+    pub restart: bool,
+    /// Maximum seconds to wait for publication after acceptance.
+    #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..))]
+    pub timeout: u64,
+}
 
 #[derive(Debug, Serialize)]
 struct Manifest {
@@ -48,6 +71,18 @@ impl Read for CheckedSource {
     }
 }
 
+fn upload_file_len(path: &Path) -> miette::Result<u64> {
+    if path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(elodin_db::compact::is_append_log_file)
+    {
+        elodin_db::compact::compacted_file_len(path).into_diagnostic()
+    } else {
+        Ok(std::fs::metadata(path).into_diagnostic()?.len())
+    }
+}
+
 fn archive(root: &Path, manifest: &Manifest) -> miette::Result<(tempfile::NamedTempFile, Archive)> {
     let output = tempfile::NamedTempFile::new().into_diagnostic()?;
     let mut encoder = zstd::stream::write::Encoder::new(output.reopen().into_diagnostic()?, 3)
@@ -57,7 +92,7 @@ fn archive(root: &Path, manifest: &Manifest) -> miette::Result<(tempfile::NamedT
     for entry in &manifest.files {
         let path = root.join(&entry.path);
         let file = std::fs::File::open(&path).into_diagnostic()?;
-        if elodin_db::compact::compacted_file_len(&path).into_diagnostic()? != entry.size_bytes {
+        if upload_file_len(&path)? != entry.size_bytes {
             return Err(miette::miette!(
                 "upload source changed; keep the database stopped"
             ));
@@ -82,7 +117,7 @@ fn archive(root: &Path, manifest: &Manifest) -> miette::Result<(tempfile::NamedT
         builder
             .append_data(&mut header, name, &mut source)
             .into_diagnostic()?;
-        if elodin_db::compact::compacted_file_len(&path).into_diagnostic()? != entry.size_bytes
+        if upload_file_len(&path)? != entry.size_bytes
             || source.bytes != entry.size_bytes
             || source
                 .hash
@@ -630,7 +665,7 @@ fn manifest(root: &Path) -> miette::Result<Manifest> {
             ));
         }
         let disk_path = root.join(&path);
-        let compacted_len = elodin_db::compact::compacted_file_len(&disk_path).into_diagnostic()?;
+        let compacted_len = upload_file_len(&disk_path)?;
         let mut file = std::fs::File::open(&disk_path)
             .into_diagnostic()?
             .take(compacted_len);
@@ -729,6 +764,13 @@ fn portable_path(path: &str) -> bool {
         })
 }
 
+impl Cli {
+    pub fn upload(self, args: UploadArgs, rt: Runtime) -> miette::Result<()> {
+        let ctx = self.auth_ctx()?;
+        rt.block_on(run(&ctx, &args))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -818,7 +860,17 @@ mod tests {
         let mut file = std::fs::File::create(&path).unwrap();
         file.write_all(&bytes).unwrap();
         file.set_len(8 * 1024 * 1024 * 1024).unwrap();
+        let mut asset = Vec::from(16u64.to_le_bytes());
+        asset.extend_from_slice(&[0; 24]);
+        std::fs::write(dir.path().join("asset.bin"), &asset).unwrap();
         let manifest = manifest(dir.path()).unwrap();
+        let asset_entry = manifest
+            .files
+            .iter()
+            .find(|file| file.path == "asset.bin")
+            .unwrap();
+        assert_eq!(asset_entry.size_bytes, asset.len() as u64);
+        archive(dir.path(), &manifest).unwrap();
         let entry = manifest
             .files
             .iter()
