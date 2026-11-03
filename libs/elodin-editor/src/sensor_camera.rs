@@ -1115,9 +1115,6 @@ fn update_sensor_camera_transforms(
     )>,
     #[cfg(feature = "big_space")] mut cells: Query<&mut crate::spatial::GridCell>,
     #[cfg(feature = "big_space")] settings: Res<crate::spatial::FloatingOriginSettings>,
-    #[cfg(feature = "big_space")] parents: Query<&ChildOf>,
-    #[cfg(feature = "big_space")] grids: Query<&crate::spatial::Grid>,
-    #[cfg(feature = "big_space")] mut globals: Query<&mut GlobalTransform>,
     cache: Res<impeller_bevy::TelemetryCache>,
     current_ts: Res<impeller_wkt::CurrentTimestamp>,
     coordinate: Res<crate::Coordinate>,
@@ -1151,16 +1148,6 @@ fn update_sensor_camera_transforms(
         #[cfg(feature = "big_space")]
         if let Ok(mut cell) = cells.get_mut(_entity) {
             place_on_grid(&settings, &mut cell, &mut transform, pose.translation);
-        }
-        #[cfg(feature = "big_space")]
-        if let Ok(parent) = parents.get(_entity)
-            && let Ok(grid) = grids.get(parent.parent())
-            && let Ok(cell) = cells.get(_entity)
-            && let Ok(mut global) = globals.get_mut(_entity)
-        {
-            // big_space skips a clean grid, which leaves this camera on the
-            // pose it had when the first sample arrived.
-            *global = grid.global_transform(cell, &transform);
         }
         #[cfg(not(feature = "big_space"))]
         {
