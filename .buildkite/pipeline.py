@@ -170,7 +170,6 @@ test_steps = [
     nix_step(
         emoji=":rocket:",
         label="monte-carlo apollo + quickstart",
-        # Each campaign reaps stray elodin/elodin-db processes at startup, so they share one step.
         command="just install && ./scripts/test-apollo-monte-carlo.sh && ./scripts/test-quickstart.sh",
     ),
     nix_step(
