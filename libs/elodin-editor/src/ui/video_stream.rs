@@ -132,8 +132,10 @@ const DECODER_NEAR_THRESHOLD_US: i64 = 2_000_000;
 #[cfg(target_family = "wasm")]
 const MAX_SEQUENTIAL_PER_TICK: usize = 8;
 
-/// Re-issue an in-flight wasm seek to the same keyframe after this long.
-#[cfg(target_family = "wasm")]
+/// Re-issue a wasm seek that has not completed after this long. A stalled
+/// seek still looks sequential (its last submitted sample is near the
+/// playhead), so the timeout is what unsticks it.
+#[cfg(any(target_family = "wasm", test))]
 const SEEK_TIMEOUT_SECS: f32 = 1.0;
 
 /// Per-stream cap on cached raw bytes. A count cap sized for H.264 never
@@ -1182,6 +1184,67 @@ pub fn attach_webcodecs(
     }
 }
 
+/// Whether the wasm feeder should start a seek this tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(any(target_family = "wasm", test))]
+enum WasmSeekDecision {
+    /// A seek is in flight and still inside [`SEEK_TIMEOUT_SECS`].
+    Wait,
+    /// Decode from the keyframe at or before the playhead.
+    /// `stale` means the previous seek timed out.
+    Seek {
+        stale: bool,
+    },
+    Idle,
+}
+
+/// Inputs for [`wasm_seek_decision`]. Timestamps are microseconds.
+#[derive(Clone, Copy)]
+#[cfg(any(target_family = "wasm", test))]
+struct WasmSeekQuery {
+    current_us: i64,
+    last_decoded_us: Option<i64>,
+    last_presented_us: Option<i64>,
+    /// Seconds since the in-flight seek was sent. `None` when nothing is in flight.
+    seek_age_secs: Option<f32>,
+    seeking: bool,
+    needs_keyframe: bool,
+    /// Raw frames cover the playhead and this tick has not already fed one.
+    can_seek: bool,
+}
+
+/// Seek when the playhead is not the frame on screen. A seek older than
+/// [`SEEK_TIMEOUT_SECS`] is re-issued even if the last submitted sample is
+/// still within [`DECODER_NEAR_THRESHOLD_US`], which is the live-edge case
+/// where the decoder never emits the target pts.
+#[cfg(any(target_family = "wasm", test))]
+fn wasm_seek_decision(query: &WasmSeekQuery) -> WasmSeekDecision {
+    let decoder_near = query
+        .last_decoded_us
+        .is_some_and(|last| (query.current_us - last).abs() < DECODER_NEAR_THRESHOLD_US);
+    let is_sequential = query.last_decoded_us.is_some_and(|last| {
+        query.current_us >= last && query.current_us - last < DECODER_NEAR_THRESHOLD_US
+    });
+    let at_playhead = query
+        .last_presented_us
+        .is_some_and(|pts| (query.current_us - pts).abs() <= NO_DATA_THRESHOLD_US);
+    let seek_stale = query.seeking
+        && query
+            .seek_age_secs
+            .is_some_and(|age| age >= SEEK_TIMEOUT_SECS);
+
+    let wants_seek = query.can_seek
+        && !at_playhead
+        && (query.needs_keyframe || !is_sequential || !decoder_near || seek_stale);
+    if !wants_seek {
+        return WasmSeekDecision::Idle;
+    }
+    if query.seeking && !seek_stale {
+        return WasmSeekDecision::Wait;
+    }
+    WasmSeekDecision::Seek { stale: seek_stale }
+}
+
 /// Feed the wasm decoder from the raw Annex-B cache and keep the playhead in sync.
 #[cfg(target_family = "wasm")]
 fn drive_webcodecs(
@@ -1195,24 +1258,32 @@ fn drive_webcodecs(
     wc.set_playing(cache.last_playhead.is_some_and(|last| last != current_ts));
     cache.last_playhead = Some(current_ts);
 
-    let was_seeking = cache.seeking;
-    cache.seeking = wc.is_seeking();
-    if was_seeking && !cache.seeking {
-        // `last_decoded_ts` already points at the last sample the seek
-        // submitted, so sequential feeding resumes after it.
+    let decoder_seeking = wc.is_seeking();
+    cache.seeking = decoder_seeking;
+    let seek_age_secs = cache.seek_sent_at.map(|sent| sent.elapsed().as_secs_f32());
+    let seek_timed_out =
+        decoder_seeking && seek_age_secs.is_some_and(|age| age >= SEEK_TIMEOUT_SECS);
+    if !decoder_seeking {
+        // Seek finished (or never started). `last_decoded_ts` already points
+        // at the last sample submitted, so sequential feeding resumes after
+        // it. Also drops a timestamp left behind by a seek we abandoned.
         cache.seek_sent_at = None;
+    } else if seek_timed_out {
+        // The target pts never arrived. Drop the cache-side flag so
+        // sequential feeding can resume if the decoder leaves the seek on
+        // its own. This tick still re-seeks from the keyframe.
+        cache.seeking = false;
     }
 
-    let decoder_near = cache
-        .last_decoded_ts
-        .is_some_and(|last| (current_ts.0 - last.0).abs() < DECODER_NEAR_THRESHOLD_US);
     let is_sequential = cache.last_decoded_ts.is_some_and(|last| {
         current_ts.0 >= last.0 && (current_ts.0 - last.0) < DECODER_NEAR_THRESHOLD_US
     });
     let has_raw = cache.has_video_at(current_ts);
 
     let mut fed = false;
-    if is_sequential && !cache.seeking && !wc.needs_keyframe() {
+    // `decoder_seeking` rather than `cache.seeking`: a timed-out seek clears
+    // the cache flag above, but the decoder is still inside that seek.
+    if is_sequential && !decoder_seeking && !wc.needs_keyframe() {
         // A UI slower than the stream falls behind feeding frame by frame. An
         // IDR resets the decoder's references, so skip to the newest keyframe
         // once the backlog is longer than the no-data threshold.
@@ -1247,23 +1318,23 @@ fn drive_webcodecs(
     // cache. Wasm only has the texture, so a playhead that is not the frame
     // on screen seeks. Skip that seek when the texture is already there, or a
     // paused flush (`needs_keyframe`) would re-decode the same GOP forever.
-    let at_playhead = wc
-        .last_presented
-        .is_some_and(|pts| (current_ts.0 - pts).abs() <= NO_DATA_THRESHOLD_US);
-    let wants_seek =
-        has_raw && !fed && !at_playhead && (wc.needs_keyframe() || !is_sequential || !decoder_near);
-    if !wants_seek {
+    let decision = wasm_seek_decision(&WasmSeekQuery {
+        current_us: current_ts.0,
+        last_decoded_us: cache.last_decoded_ts.map(|ts| ts.0),
+        last_presented_us: wc.last_presented,
+        seek_age_secs,
+        seeking: decoder_seeking,
+        needs_keyframe: wc.needs_keyframe(),
+        can_seek: has_raw && !fed,
+    });
+    let WasmSeekDecision::Seek { stale } = decision else {
         return;
-    }
-
-    // A live stream lands a new IDR every GOP, so the nearest keyframe keeps
-    // moving. Let an in-flight seek finish rather than restarting it.
-    let in_flight = cache.seeking
-        && cache
-            .seek_sent_at
-            .is_some_and(|sent| sent.elapsed().as_secs_f32() < SEEK_TIMEOUT_SECS);
-    if in_flight {
-        return;
+    };
+    // The samples below already start at the keyframe. Move `last_decoded_ts`
+    // there too, so a bail-out (no samples yet) does not look sequential and
+    // swallow the next timeout.
+    if stale && let Some(kf) = cache.nearest_keyframe_before(current_ts) {
+        cache.last_decoded_ts = Some(kf);
     }
 
     let Some(kf) = cache
@@ -1914,5 +1985,67 @@ mod tests {
         assert!(window < FETCH_WINDOW_US);
         let h264 = fetch_window_us(BACKFILL_ASSUMED_H264_FRAME, 30.0, 256 * 1024 * 1024);
         assert_eq!(h264, FETCH_WINDOW_US);
+    }
+
+    fn seek_query() -> WasmSeekQuery {
+        WasmSeekQuery {
+            current_us: 5_000_000,
+            last_decoded_us: None,
+            last_presented_us: None,
+            seek_age_secs: None,
+            seeking: false,
+            needs_keyframe: false,
+            can_seek: true,
+        }
+    }
+
+    #[test]
+    fn seek_when_playhead_is_not_sequential() {
+        let decision = wasm_seek_decision(&WasmSeekQuery {
+            last_decoded_us: Some(0),
+            ..seek_query()
+        });
+        assert_eq!(decision, WasmSeekDecision::Seek { stale: false });
+    }
+
+    #[test]
+    fn in_flight_seek_is_not_reissued() {
+        let decision = wasm_seek_decision(&WasmSeekQuery {
+            last_decoded_us: Some(0),
+            seeking: true,
+            seek_age_secs: Some(SEEK_TIMEOUT_SECS - 0.1),
+            ..seek_query()
+        });
+        assert_eq!(decision, WasmSeekDecision::Wait);
+    }
+
+    #[test]
+    fn timed_out_seek_retries_when_decoder_looks_sequential() {
+        // Live follow: the last submitted sample is just behind the playhead,
+        // so the decoder looks sequential and near. That used to suppress the
+        // timeout retry and leave the tile black.
+        let playhead = 5_000_000;
+        let decision = wasm_seek_decision(&WasmSeekQuery {
+            current_us: playhead,
+            last_decoded_us: Some(playhead - 50_000),
+            seeking: true,
+            seek_age_secs: Some(SEEK_TIMEOUT_SECS),
+            ..seek_query()
+        });
+        assert_eq!(decision, WasmSeekDecision::Seek { stale: true });
+    }
+
+    #[test]
+    fn no_seek_when_presented_frame_is_at_the_playhead() {
+        let playhead = 5_000_000;
+        let decision = wasm_seek_decision(&WasmSeekQuery {
+            current_us: playhead,
+            last_decoded_us: Some(0),
+            last_presented_us: Some(playhead - 100_000),
+            seeking: true,
+            seek_age_secs: Some(SEEK_TIMEOUT_SECS),
+            ..seek_query()
+        });
+        assert_eq!(decision, WasmSeekDecision::Idle);
     }
 }
