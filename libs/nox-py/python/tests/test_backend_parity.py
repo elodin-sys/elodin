@@ -175,6 +175,15 @@ def max_pool_grad(x):
     return weighted_rows(jax.grad(pool)(outer(x)))
 
 
+def table_lookup(x):
+    # jnp.interp on a 65-point curve and an index into it: gathers whose indices are
+    # batched over entities, on the pointer ABI (the table alone is past its 64).
+    xp = np.linspace(-4.0, 4.0, 65)
+    fp = xp**3
+    idx = jnp.clip(jnp.round(8.0 * (x + 4.0)), 0, 64).astype(jnp.int32)
+    return jnp.interp(x, xp, fp) + jnp.asarray(fp)[idx]
+
+
 def history(fn, backend: str, entities: int = 1) -> np.ndarray:
     @el.map
     def step(x: X) -> tuple[X, Y]:
@@ -218,6 +227,7 @@ CASES = [
     matvec,
     reduce_window,
     max_pool_grad,
+    table_lookup,
 ]
 
 

@@ -959,14 +959,19 @@ pub extern "C" fn tensor_gather_generic(
     let src = unsafe { slice::from_raw_parts(src, n_src * elem_sz) };
     let dst = unsafe { slice::from_raw_parts_mut(dst, n_indices * row_size * elem_sz) };
     let indices = unsafe { slice::from_raw_parts(indices, n_indices) };
+    let row_bytes = row_size * elem_sz;
+    let Some(last_row) = n_src
+        .checked_div(row_size)
+        .and_then(|rows| rows.checked_sub(1))
+    else {
+        return;
+    };
     for i in 0..n_indices {
-        let idx = indices[i] as usize;
-        let src_off = idx * row_size * elem_sz;
-        let dst_off = i * row_size * elem_sz;
-        let row_bytes = row_size * elem_sz;
-        if src_off + row_bytes <= src.len() {
-            dst[dst_off..dst_off + row_bytes].copy_from_slice(&src[src_off..src_off + row_bytes]);
-        }
+        // Out-of-range start indices clamp, as stablehlo.gather specifies.
+        let idx = indices[i].clamp(0, last_row as i64) as usize;
+        let src_off = idx * row_bytes;
+        let dst_off = i * row_bytes;
+        dst[dst_off..dst_off + row_bytes].copy_from_slice(&src[src_off..src_off + row_bytes]);
     }
 }
 
@@ -1005,10 +1010,9 @@ pub extern "C" fn tensor_gather_nd_generic(
     for b in 0..n_batch {
         let mut base_flat = 0usize;
         for j in 0..n_index_dims {
-            let idx = indices[b * n_index_dims + j] as usize;
             let dim = start_index_map[j] as usize;
-            let clamped =
-                idx.min((src_shape[dim] as usize).saturating_sub(slice_sizes[dim] as usize));
+            let max_start = (src_shape[dim] - slice_sizes[dim]).max(0);
+            let clamped = indices[b * n_index_dims + j].clamp(0, max_start) as usize;
             base_flat += clamped * src_strides[dim];
         }
         for s in 0..slice_elems {

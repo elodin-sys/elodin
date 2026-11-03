@@ -5182,11 +5182,9 @@ fn lower_instruction_mem(
                     ],
                 );
             } else {
-                let n_idx = if !dims.collapsed_slice_dims.is_empty() {
-                    idx_ty.shape.first().copied().unwrap_or(1) as usize
-                } else {
-                    n_total_idx
-                };
+                // One start index per batch position: every indices dim but
+                // index_vector_dim, so [E, K, 1] under vmap is E * K indices.
+                let n_idx = n_total_idx / n_index_dims.max(1);
                 let row_size = n.checked_div(n_idx).unwrap_or(1);
                 let n_idx_v = builder.ins().iconst(types::I64, n_idx as i64);
                 let row_v = builder.ins().iconst(types::I64, row_size as i64);
@@ -10021,6 +10019,13 @@ fn lower_gather(
             } else {
                 builder.ins().sextend(types::I64, raw_idx)
             };
+            // Start indices clamp into the operand, as stablehlo.gather specifies.
+            let max_start =
+                (src_shape[mapped_dim as usize] as i64 - slice_sizes[mapped_dim as usize]).max(0);
+            let lo = builder.ins().iconst(types::I64, 0);
+            let hi = builder.ins().iconst(types::I64, max_start);
+            let idx_i64 = builder.ins().smax(idx_i64, lo);
+            let idx_i64 = builder.ins().smin(idx_i64, hi);
             let stride_bytes = (src_strides[mapped_dim as usize] * elem_sz) as i64;
             let byte_off = builder.ins().imul_imm(idx_i64, stride_bytes);
             addr = builder.ins().iadd(addr, byte_off);
