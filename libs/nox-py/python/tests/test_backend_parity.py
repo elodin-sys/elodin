@@ -176,12 +176,36 @@ def max_pool_grad(x):
 
 
 def table_lookup(x):
-    # jnp.interp on a 65-point curve and an index into it: gathers whose indices are
-    # batched over entities, on the pointer ABI (the table alone is past its 64).
+    # jnp.interp on a 65-point curve and indices into it, two of them past the ends, which
+    # gather clamps. The table alone is past the scalar ABI's 64 elements.
     xp = np.linspace(-4.0, 4.0, 65)
     fp = xp**3
-    idx = jnp.clip(jnp.round(8.0 * (x + 4.0)), 0, 64).astype(jnp.int32)
+    idx = jnp.round(8.0 * (x + 4.0)).astype(jnp.int32) + jnp.array([0, 0, 100, -200])
     return jnp.interp(x, xp, fp) + jnp.asarray(fp)[idx]
+
+
+def per_entity_table(x):
+    # Each entity scales its own 65-point table, so under vmap the gather's operand is batched.
+    table = jnp.asarray(np.linspace(-4.0, 4.0, 65) ** 3) * (1.0 + x[0])
+    idx = jnp.round(8.0 * (x + 4.0)).astype(jnp.int32) + jnp.array([0, 0, 100, -200])
+    return table[idx]
+
+
+def column_lookup(x):
+    # table[:, idx] gathers along dim 1 of an 80-element table. Adding x changes the
+    # result every tick, so the history keeps a row per tick for each entity.
+    table = jnp.asarray(np.arange(80.0).reshape(4, 20) ** 1.5)
+    idx = jnp.round(2.0 * (x + 4.0)).astype(jnp.int32) + jnp.array([0, 0, 30, -60])
+    return table[:, idx][1] + x
+
+
+def window_lookup(x):
+    # Under vmap, lax.dynamic_slice becomes a gather of two-element windows; the second
+    # window starts past the end of the table.
+    table = jnp.asarray(np.linspace(-4.0, 4.0, 65) ** 3)
+    i = jnp.round(8.0 * (x[0] + 4.0)).astype(jnp.int32)
+    windows = [jax.lax.dynamic_slice(table, (start,), (2,)) for start in (i, i + 100)]
+    return jnp.concatenate(windows)
 
 
 def history(fn, backend: str, entities: int = 1) -> np.ndarray:
@@ -228,6 +252,9 @@ CASES = [
     reduce_window,
     max_pool_grad,
     table_lookup,
+    per_entity_table,
+    column_lookup,
+    window_lookup,
 ]
 
 
