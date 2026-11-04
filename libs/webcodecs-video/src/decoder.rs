@@ -49,10 +49,9 @@ pub struct Decoder {
     /// Safari does not emit the last queued frame until `flush()`.
     pub drain_with_flush: bool,
     inner: Rc<RefCell<Inner>>,
-    _output: Closure<dyn FnMut(web_sys::VideoFrame)>,
-    /// Old decoder callbacks stay alive so already-queued outputs can close
-    /// themselves after a reset without entering the new generation.
-    _retired_outputs: Vec<Closure<dyn FnMut(web_sys::VideoFrame)>>,
+    /// Current output callback. JS owns every previous one: `VideoDecoder`
+    /// retains it, and a queued output task retains it until that task runs.
+    output_fn: JsValue,
     _error: Closure<dyn FnMut(JsValue)>,
 }
 
@@ -77,7 +76,7 @@ impl Decoder {
             flush_generation: 0,
             needs_keyframe: false,
         }));
-        let output = output_callback(inner.clone(), 1);
+        let output_fn = output_callback(inner.clone(), 1);
         let error_inner = inner.clone();
         let error = Closure::wrap(Box::new(move |err: JsValue| {
             let mut inner = error_inner.borrow_mut();
@@ -87,7 +86,7 @@ impl Decoder {
         }) as Box<dyn FnMut(JsValue)>);
         let init = web_sys::VideoDecoderInit::new(
             error.as_ref().unchecked_ref(),
-            output.as_ref().unchecked_ref(),
+            output_fn.unchecked_ref(),
         );
         let video = web_sys::VideoDecoder::new(&init)?;
         Ok(Self {
@@ -98,8 +97,7 @@ impl Decoder {
             parameter_sets: None,
             drain_with_flush: crate::is_safari(),
             inner,
-            _output: output,
-            _retired_outputs: Vec::new(),
+            output_fn,
             _error: error,
         })
     }
@@ -162,14 +160,13 @@ impl Decoder {
             }
         }
         let _ = self.video.close();
-        let output = output_callback(self.inner.clone(), generation);
+        let output_fn = output_callback(self.inner.clone(), generation);
         let init = web_sys::VideoDecoderInit::new(
             self._error.as_ref().unchecked_ref(),
-            output.as_ref().unchecked_ref(),
+            output_fn.unchecked_ref(),
         );
         self.video = web_sys::VideoDecoder::new(&init)?;
-        self._retired_outputs
-            .push(std::mem::replace(&mut self._output, output));
+        self.output_fn = output_fn;
         if self.parameter_sets.is_some() {
             self.configure()?;
         }
@@ -304,7 +301,7 @@ impl Decoder {
     fn rebuild(&mut self) -> Result<(), Error> {
         let init = web_sys::VideoDecoderInit::new(
             self._error.as_ref().unchecked_ref(),
-            self._output.as_ref().unchecked_ref(),
+            self.output_fn.unchecked_ref(),
         );
         self.video = web_sys::VideoDecoder::new(&init)?;
         Ok(())
@@ -373,13 +370,13 @@ impl Decoder {
     }
 }
 
-fn output_callback(
-    inner: Rc<RefCell<Inner>>,
-    generation: u64,
-) -> Closure<dyn FnMut(web_sys::VideoFrame)> {
-    Closure::wrap(Box::new(move |frame: web_sys::VideoFrame| {
+fn output_callback(inner: Rc<RefCell<Inner>>, generation: u64) -> JsValue {
+    let output = Closure::wrap(Box::new(move |frame: web_sys::VideoFrame| {
         on_generation_output(&inner, generation, frame);
-    }) as Box<dyn FnMut(web_sys::VideoFrame)>)
+    }) as Box<dyn FnMut(web_sys::VideoFrame)>);
+    // The decoder and any already-queued output task retain this function.
+    // Dropping the `JsValue` releases only Rust's reference.
+    output.into_js_value()
 }
 
 fn on_generation_output(inner: &Rc<RefCell<Inner>>, generation: u64, frame: web_sys::VideoFrame) {
