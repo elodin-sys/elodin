@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{AuthCtx, CLIENT_ID, OidcConfig, TokenResponse, discover_at};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Credentials {
     pub access_token: String,
     #[serde(default)]
