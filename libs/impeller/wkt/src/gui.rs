@@ -104,6 +104,9 @@ pub struct Schematic {
     pub body: Option<CelestialBody>,
     #[serde(default)]
     pub skybox: Option<SkyboxConfig>,
+    /// Streamed scenery, independent of the coordinate origin.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terrain: Option<TerrainConfig>,
     /// Cinematic scene environment: sun light + shadows, ambient scaling, sky
     /// color. Absent = the editor's default look.
     #[serde(default)]
@@ -111,6 +114,13 @@ pub struct Schematic {
     /// When true, enable dense telemetry presentation (locked graphs, compact chrome).
     #[serde(default)]
     pub telemetry_mode: bool,
+}
+
+/// One ion dataset supplies both displayed scenery and prepared heights.
+/// Credentials are read at runtime; never serialized into a schematic.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TerrainConfig {
+    pub asset_id: i64,
 }
 
 /// Contents of the top-level `environment` schematic node

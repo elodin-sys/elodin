@@ -7,7 +7,7 @@ use crate::{
 use bevy::{math::DMat4, picking::Pickable, prelude::*};
 use bevy_cesium::{
     CesiumDetailViews, CesiumPlugin as StreamingPlugin, CesiumPrimitive, CesiumSelectionMode,
-    CesiumSet, CesiumSource, CesiumStatus, CesiumView, CesiumViews,
+    CesiumSet, CesiumSource, CesiumSourceUpdate, CesiumStatus, CesiumView, CesiumViews,
 };
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 
@@ -438,26 +438,6 @@ mod coordinate_tests {
 
 impl Plugin for CesiumPlugin {
     fn build(&self, app: &mut App) {
-        let source = match CesiumSource::from_env() {
-            Ok(Some(source)) => source,
-            Ok(None) => {
-                assert!(
-                    std::env::var_os("ELODIN_CESIUM_CAPTURE_VIEWS").is_none(),
-                    "Fixed terrain capture requires a Cesium source"
-                );
-                return;
-            }
-            Err(error) => {
-                assert!(
-                    std::env::var_os("ELODIN_CESIUM_CAPTURE_VIEWS").is_none(),
-                    "Fixed terrain capture requires a valid Cesium source"
-                );
-                error!("{error}");
-                return;
-            }
-        };
-        let margin = env_positive("CESIUM_LOD_RETENTION_METERS", 500.0, true);
-        let screen_error = env_positive("CESIUM_MAXIMUM_SCREEN_ERROR", 16.0, false);
         if let Ok(path) = std::env::var("ELODIN_CESIUM_CAPTURE_VIEWS") {
             let bytes = std::fs::read(path).expect("Cannot read ELODIN_CESIUM_CAPTURE_VIEWS");
             let views = parse_capture_views(&bytes).expect("Invalid ECEF capture view file");
@@ -476,41 +456,98 @@ impl Plugin for CesiumPlugin {
                     )),
                 });
         }
-        info!(
-            margin_meters = margin,
-            screen_error_pixels = screen_error,
-            "Cesium terrain selection configured"
-        );
         app.add_plugins(
-            StreamingPlugin::new(source)
+            StreamingPlugin::deferred()
                 .with_external_coordinates()
                 .with_initial_load_wait()
-                .with_lod_retention_margin(margin)
-                .with_maximum_screen_error(screen_error),
+                .with_lod_retention_margin(500.0)
+                .with_maximum_screen_error(24.0),
         )
-        .insert_resource(TerrainStartup {
-            gate: TerrainCapture {
-                started: std::time::Instant::now(),
-                timeout: std::time::Duration::from_secs_f64(env_positive(
-                    "ELODIN_CESIUM_CAPTURE_TIMEOUT",
-                    120.0,
-                    false,
-                )),
-            },
-            ready: false,
-            error: None,
-        })
+        .add_systems(Update, configure_terrain.before(CesiumSet::Stream))
         .add_systems(Update, collect_views.in_set(CesiumSet::Views))
         .add_systems(Update, place_tiles.in_set(CesiumSet::Placement))
-        .add_systems(Update, update_startup.after(CesiumSet::Publish))
+        .add_systems(
+            Update,
+            update_startup
+                .after(CesiumSet::Publish)
+                .run_if(resource_exists::<TerrainStartup>),
+        )
         .add_systems(
             Update,
             show_startup
+                .run_if(resource_exists::<TerrainStartup>)
                 .after(update_startup)
                 .after(crate::ui::render_layout),
         );
         app.add_systems(Update, log_streaming_status.after(CesiumSet::Publish));
     }
+}
+
+/// A local credential is shared by scenery and height preparation. It never
+/// enters the schematic or the recording. The environment override is for CI.
+pub fn ion_access_token() -> Result<String, &'static str> {
+    let value = match std::env::var("CESIUM_ION_TOKEN") {
+        Ok(token) => token,
+        Err(std::env::VarError::NotPresent) => {
+            let root = std::env::var_os("XDG_CONFIG_HOME")
+                .map(std::path::PathBuf::from)
+                .or_else(|| {
+                    std::env::var_os("HOME")
+                        .map(|home| std::path::PathBuf::from(home).join(".config"))
+                })
+                .ok_or("Cannot locate terrain credentials")?;
+            std::fs::read_to_string(root.join("elodin/cesium-ion-token.txt")).map_err(
+                |_| "Save your terrain read token in ~/.config/elodin/cesium-ion-token.txt",
+            )?
+        }
+        Err(_) => return Err("Invalid terrain credentials"),
+    };
+    let token = value.trim();
+    if token.is_empty() || token.contains(['\r', '\n']) {
+        return Err("Invalid terrain credentials");
+    }
+    Ok(token.to_string())
+}
+
+fn configure_terrain(
+    world: &mut World,
+    mut previous: Local<Option<Option<impeller_wkt::TerrainConfig>>>,
+) {
+    let Some(schematic) = world.get_resource::<crate::ui::schematic::CurrentSchematic>() else {
+        return;
+    };
+    let terrain = schematic.terrain;
+    if previous.as_ref() == Some(&terrain) {
+        return;
+    }
+    *previous = Some(terrain);
+    let Some(terrain) = terrain else {
+        world.insert_resource(CesiumSourceUpdate(None));
+        world.remove_resource::<TerrainStartup>();
+        return;
+    };
+    let mut startup = TerrainStartup {
+        gate: TerrainCapture {
+            started: std::time::Instant::now(),
+            timeout: std::time::Duration::from_secs(120),
+        },
+        ready: false,
+        error: None,
+    };
+    match ion_access_token() {
+        Ok(access_token) => {
+            world.insert_resource(CesiumSourceUpdate(Some(CesiumSource::Ion {
+                asset_id: terrain.asset_id,
+                access_token,
+            })));
+        }
+        Err(error) => {
+            error!("{error}");
+            startup.error = Some(error);
+            world.insert_resource(CesiumSourceUpdate(None));
+        }
+    }
+    world.insert_resource(startup);
 }
 
 fn update_startup(
@@ -556,7 +593,11 @@ fn show_startup(startup: Res<TerrainStartup>, mut contexts: Query<&mut bevy_egui
             .show(context, |ui| {
                 if startup.error.is_some() {
                     ui.label("Terrain could not finish loading.");
-                    ui.label("Check the connection and data access, then restart.");
+                    ui.label(
+                        startup
+                            .error
+                            .unwrap_or("Check the connection and data access, then restart."),
+                    );
                 } else {
                     ui.horizontal(|ui| {
                         ui.spinner();

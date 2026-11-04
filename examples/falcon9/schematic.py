@@ -18,6 +18,10 @@ Typed elodin.ui translation of falcon9.kdl.
 
 import elodin.ui as ui
 
+from constants import PAD_ALT_M, PAD_LAT_DEG, PAD_LON_DEG, SITES
+
+TERRAIN = ui.terrain(asset_id=SITES["ion_asset_id"])
+
 
 def build() -> ui.Schematic:
     return ui.schematic(
@@ -363,8 +367,12 @@ def build() -> ui.Schematic:
             ),
             perspective=False,
         ),
+        terrain=TERRAIN,
         coordinate=ui.coordinate(
             frame="ECEF",
+            lat=PAD_LAT_DEG,
+            lon=PAD_LON_DEG,
+            alt=PAD_ALT_M,
         ),
         timeline=ui.timeline(
             played_color="yalk",

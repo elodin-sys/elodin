@@ -182,6 +182,7 @@ impl Plugin for HeadlessEditorPlugin {
         .init_resource::<crate::EqlContext>()
         .init_resource::<crate::Coordinate>()
         .init_resource::<crate::SyncedObject3d>()
+        .insert_resource(crate::ui::schematic::CurrentSchematic(Default::default()))
         .init_resource::<HeadlessSchematicSkybox>()
         .init_resource::<HeadlessSkyboxRenderGate>()
         .insert_resource(crate::stream_filter::StreamFilterRate::CameraMaxFps)
@@ -384,6 +385,7 @@ fn load_headless_scene(
     config: Res<DbConfig>,
     mut pending: Local<HeadlessSchematicLoad>,
     mut schematic_skybox: ResMut<HeadlessSchematicSkybox>,
+    mut current_schematic: ResMut<crate::ui::schematic::CurrentSchematic>,
     mut commands: Commands,
     eql: Res<EqlContext>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -429,6 +431,7 @@ fn load_headless_scene(
             // The active pointer was cleared: tear down the loaded scene so the
             // renderer doesn't keep a schematic the DB no longer designates.
             scene_environment.0 = None;
+            current_schematic.0 = Default::default();
             if let Some(previous) = pending.loaded.take() {
                 despawn_headless_scene(&mut commands, &previous);
                 schematic_skybox.0 = None;
@@ -485,6 +488,7 @@ fn load_headless_scene(
     }
     let connection_addr = connection_addr.as_ref().map(|addr| addr.endpoint());
     schematic_skybox.0 = Some(schematic.skybox.as_ref().map(|skybox| skybox.name.clone()));
+    current_schematic.0 = schematic.clone();
     let fallback_frame = schematic.frame;
     coordinate.0 = schematic.frame;
     scene_environment.0 = schematic.environment.clone().map(|mut environment| {

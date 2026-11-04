@@ -197,6 +197,12 @@ fn schematic_expr(schematic: &Schematic) -> PyExpr {
                 coordinate.kw_opt("body", schematic.body.map(|body| py_str(body.as_str())))
             }),
         )
+        .kw_opt(
+            "terrain",
+            schematic.terrain.map(|terrain| {
+                PyExpr::call("terrain").kw("asset_id", PyExpr::Atom(terrain.asset_id.to_string()))
+            }),
+        )
         .kw_opt("theme", schematic.theme.as_ref().map(theme_expr))
         .kw_opt("timeline", schematic.timeline.as_ref().map(timeline_expr))
         .kw_opt(

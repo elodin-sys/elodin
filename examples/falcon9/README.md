@@ -346,17 +346,18 @@ uv run python -m pytest -q examples/falcon9/
 scripts/test-falcon9-monte-carlo.sh
 ```
 
-For the Photo 3D terrain view, set `CESIUM_ION_TOKEN` in your environment
-and run inside `nix develop`:
+Terrain is configured in `schematic.py`, alongside the geographic origin.
+Save a read-only ion token in `~/.config/elodin/cesium-ion-token.txt` once, then
+run inside `nix develop`:
 
 ```sh
-CESIUM_ION_ASSET_ID=2275207 CESIUM_MAXIMUM_SCREEN_ERROR=24 \
-  elodin editor examples/falcon9/main.py
+elodin editor examples/falcon9/main.py
 ```
 
-The token needs read access to that asset and stays outside the repository.
-The editor streams the ground surface and keeps the existing atmosphere and
-cinematic lighting.
+No terrain switches are needed. The editor streams the selected dataset through
+Bevy-Cesium and keeps the existing atmosphere and cinematic lighting. The token
+stays outside the schematic and recording. See [Terrain](../../docs/public/content/reference/terrain.md)
+for schematic configuration and height queries without the editor.
 The vehicle model, reference data, graphs and particle effects are retained.
 The landing target is the measured center of the LZ-1 concrete circle.
 The previous coordinate identified the old launch-complex slab, about 140 m west
@@ -365,9 +366,8 @@ landing-pad surface; no offshore barge or overlay is added.
 
 The launch and landing ground heights are stored in
 [`data/sites.json`](data/sites.json), shared by the plant and
-flight software. The demo Photo 3D asset selects its sampled heights;
-running without it retains the original example's ground heights. No extra
-height setting is needed. The site file records the independent georeferenced
+flight software. These sampled heights match the Photo 3D dataset selected in
+the schematic. No extra height setting is needed. The site file records the independent georeferenced
 imagery used to locate the concrete-circle center and the Photo 3D heights in
 WGS84 ellipsoid meters. These are dataset measurements, not a survey.
 Terminal guidance keeps braking lateral motion until touchdown.

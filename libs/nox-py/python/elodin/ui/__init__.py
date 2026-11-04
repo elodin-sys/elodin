@@ -6,6 +6,7 @@ Author schematics in Python; the editor continues to consume KDL artifacts.
 from __future__ import annotations
 
 from elodin.elodin import ui as _native
+from elodin.terrain import Terrain
 
 from .expr import (
     ComponentHandle,
@@ -54,6 +55,7 @@ overlay_key = _native.overlay_key
 apply_overlay = _native.apply_overlay
 extract_overlay = _native.extract_overlay
 
+terrain = Terrain
 coordinate = _native.coordinate
 theme = _native.theme
 timeline = _native.timeline
@@ -101,6 +103,8 @@ world_mesh = _native.world_mesh
 window = _native.window
 
 __all__ = [
+    "Terrain",
+    "terrain",
     "Schematic",
     "Panel",
     "Object3D",

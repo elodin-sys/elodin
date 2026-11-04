@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import math
-import os
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -40,9 +39,8 @@ START_TIMESTAMP_US = int(LAUNCH_EPOCH.timestamp() * 1_000_000)
 SITES = json.loads((Path(__file__).parent / "data/sites.json").read_text())
 PAD_LAT_DEG = SITES["launch"]["latitude_degrees"]
 PAD_LON_DEG = SITES["launch"]["longitude_degrees"]
-GROUND_HEIGHTS = SITES[
-    "photo3d" if os.environ.get("CESIUM_ION_ASSET_ID") == str(SITES["ion_asset_id"]) else "legacy"
-]
+# These measured pad heights match the dataset selected in schematic.py.
+GROUND_HEIGHTS = SITES["photo3d"]
 LAUNCH_GROUND_ALT_M = GROUND_HEIGHTS["launch_m"]
 PAD_ALT_M = LAUNCH_GROUND_ALT_M + GROUND_HEIGHTS.get("launch_clearance_m", 0.0)
 LZ1_LAT_DEG = SITES["landing"]["latitude_degrees"]

@@ -748,6 +748,7 @@ impl LoadSchematicParams<'_, '_> {
             }
         }
 
+        self.current_schematic.0.terrain = schematic.terrain;
         self.current_schematic.0.skybox = schematic.skybox.clone();
         self.current_schematic.0.environment = schematic.environment.clone();
         if let Some(scene_environment) = self.scene_environment.as_mut() {
@@ -1880,6 +1881,7 @@ pub fn apply_document_cleared(
     if events.read().next().is_none() {
         return;
     }
+    params.current_schematic.0.terrain = None;
     if !params.load_default_data_overview() {
         pending.0 = true;
     }
@@ -2187,6 +2189,16 @@ mod tests {
             .run_system_cached(crate::ui::schematic::tiles_to_schematic)
             .expect("run tiles_to_schematic");
         app.world().resource::<CurrentSchematic>().0.clone()
+    }
+
+    #[test]
+    fn terrain_survives_loading_and_saving_and_can_be_removed() {
+        let mut app = test_app();
+        let terrain = Schematic::from_kdl("terrain asset_id=2275207\nviewport").unwrap();
+        load_schematic(&mut app, &terrain);
+        assert_eq!(save_schematic(&mut app).terrain, terrain.terrain);
+        load_schematic(&mut app, &Schematic::from_kdl("viewport").unwrap());
+        assert!(save_schematic(&mut app).terrain.is_none());
     }
 
     #[test_case("line_3d \"(0,0,0)\""; "line_3d")]

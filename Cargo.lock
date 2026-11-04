@@ -1257,7 +1257,7 @@ dependencies = [
 [[package]]
 name = "bevy-cesium"
 version = "0.3.0"
-source = "git+https://github.com/elodin-sys/bevy-cesium?rev=c9f5fc0e2f72ceaf4a0a523239a765ebdf86d005#c9f5fc0e2f72ceaf4a0a523239a765ebdf86d005"
+source = "git+https://github.com/elodin-sys/bevy-cesium?rev=c4ff32d1e095aaba9152aa2f72115165fcc07e7c#c4ff32d1e095aaba9152aa2f72115165fcc07e7c"
 dependencies = [
  "bevy",
  "cxx",
@@ -5687,6 +5687,7 @@ version = "0.20.1-alpha.0"
 dependencies = [
  "base64 0.22.1",
  "bevy",
+ "bevy-cesium",
  "chrono",
  "clap 4.6.7",
  "clap-markdown",
