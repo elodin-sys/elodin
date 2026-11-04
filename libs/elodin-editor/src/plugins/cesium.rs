@@ -164,6 +164,22 @@ mod coordinate_tests {
     use bevy_geo_frames::{GeoOrigin, Present};
 
     #[test]
+    fn terrain_credentials_use_the_os_home_or_explicit_config_directory() {
+        use std::path::PathBuf;
+        let home = PathBuf::from("user-profile");
+        assert_eq!(
+            terrain_token_path(None, Some(home.clone())).unwrap(),
+            home.join(".config/elodin/cesium-ion-token.txt"),
+        );
+        let config = PathBuf::from("custom-config");
+        assert_eq!(
+            terrain_token_path(Some(config.clone()), Some(home)).unwrap(),
+            config.join("elodin/cesium-ion-token.txt"),
+        );
+        assert!(terrain_token_path(None, None).is_err());
+    }
+
+    #[test]
     fn interactive_screenshot_waits_for_startup_and_reports_failure() {
         let mut world = World::new();
         assert_eq!(capture_ready(&world), Ok(true));
@@ -489,14 +505,11 @@ pub fn ion_access_token() -> Result<String, &'static str> {
     let value = match std::env::var("CESIUM_ION_TOKEN") {
         Ok(token) => token,
         Err(std::env::VarError::NotPresent) => {
-            let root = std::env::var_os("XDG_CONFIG_HOME")
-                .map(std::path::PathBuf::from)
-                .or_else(|| {
-                    std::env::var_os("HOME")
-                        .map(|home| std::path::PathBuf::from(home).join(".config"))
-                })
-                .ok_or("Cannot locate terrain credentials")?;
-            std::fs::read_to_string(root.join("elodin/cesium-ion-token.txt")).map_err(
+            let path = terrain_token_path(
+                std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from),
+                directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf()),
+            )?;
+            std::fs::read_to_string(path).map_err(
                 |_| "Save your terrain read token in ~/.config/elodin/cesium-ion-token.txt",
             )?
         }
@@ -507,6 +520,16 @@ pub fn ion_access_token() -> Result<String, &'static str> {
         return Err("Invalid terrain credentials");
     }
     Ok(token.to_string())
+}
+
+fn terrain_token_path(
+    config_home: Option<std::path::PathBuf>,
+    home: Option<std::path::PathBuf>,
+) -> Result<std::path::PathBuf, &'static str> {
+    config_home
+        .or_else(|| home.map(|home| home.join(".config")))
+        .map(|root| root.join("elodin/cesium-ion-token.txt"))
+        .ok_or("Cannot locate terrain credentials")
 }
 
 fn configure_terrain(

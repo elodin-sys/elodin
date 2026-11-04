@@ -188,7 +188,7 @@ struct NightGlobeFill;
 pub(crate) struct CinematicSkybox;
 
 /// Strong handles retained across Earth activation cycles.
-#[derive(Resource, Clone)]
+#[derive(Resource, Clone, Default)]
 struct CinematicEarthAssets {
     globe_scene: Handle<WorldAsset>,
     skybox: Handle<Image>,
@@ -486,17 +486,25 @@ fn sync_cinematic_earth(
     mut images: ResMut<Assets<Image>>,
     roots: Query<Entity, With<CinematicEarthRoot>>,
     streamed_surface: Option<Res<bevy_cesium::CesiumStatus>>,
+    schematic: Option<Res<crate::ui::schematic::CurrentSchematic>>,
     spawned: Query<Entity, With<CinematicEarthEntity>>,
     skybox_cameras: Query<Entity, With<CinematicSkybox>>,
     mut tune: ResMut<DensityTune>,
     mut look: ResMut<EarthLookTune>,
+    mut surface_mode: Local<Option<bool>>,
 ) {
     let active = environment
         .0
         .as_ref()
         .is_some_and(|env| env.earth.is_some());
 
-    if !active {
+    let streamed_surface =
+        streamed_surface.is_some() && schematic.as_ref().is_some_and(|s| s.terrain.is_some());
+    let surface_changed = surface_mode
+        .replace(streamed_surface)
+        .is_some_and(|previous| previous != streamed_surface);
+
+    if !active || surface_changed {
         if !spawned.is_empty() || !skybox_cameras.is_empty() {
             for entity in &spawned {
                 commands.entity(entity).despawn();
@@ -512,7 +520,9 @@ fn sync_cinematic_earth(
             look.seen = None;
             look.idle_s = 0.0;
         }
-        return;
+        if !active || !roots.is_empty() {
+            return;
+        }
     }
 
     if !roots.is_empty() {
@@ -567,7 +577,7 @@ fn sync_cinematic_earth(
                 .with_children(|parent| spawn_earth_emitters(parent, &assets))
                 // Keep the atmosphere's Earth-centered rig; streaming owns the surface.
                 .insert_if(WorldAssetRoot(assets.globe_scene.clone()), || {
-                    streamed_surface.is_none()
+                    !streamed_surface
                 });
         });
 
@@ -1191,6 +1201,47 @@ fn tune_atmosphere(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terrain_status_alone_keeps_the_globe_and_schematic_toggles_restore_it() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Image>()
+            .init_asset::<EffectAsset>()
+            .init_resource::<DensityTune>()
+            .init_resource::<EarthLookTune>()
+            .insert_resource(CinematicEarthAssets::default())
+            .insert_resource(crate::ui::schematic::CurrentSchematic(Default::default()))
+            .insert_resource(bevy_cesium::CesiumStatus::default())
+            .insert_resource(SceneEnvironment(Some(impeller_wkt::EnvironmentConfig {
+                earth: Some(Default::default()),
+                ..Default::default()
+            })))
+            .insert_resource(crate::Coordinate(Some(GeoFrame::ECEF)))
+            .insert_resource(GeoContext::default())
+            .add_systems(Update, sync_cinematic_earth);
+        let globe_count = |app: &mut App| {
+            let world = app.world_mut();
+            world
+                .query_filtered::<Entity, With<WorldAssetRoot>>()
+                .iter(world)
+                .count()
+        };
+        app.update();
+        assert_eq!(globe_count(&mut app), 1);
+        app.world_mut()
+            .resource_mut::<crate::ui::schematic::CurrentSchematic>()
+            .terrain = Some(impeller_wkt::TerrainConfig { asset_id: 2275207 });
+        app.update();
+        app.update();
+        assert_eq!(globe_count(&mut app), 0);
+        app.world_mut()
+            .resource_mut::<crate::ui::schematic::CurrentSchematic>()
+            .terrain = None;
+        app.update();
+        app.update();
+        assert_eq!(globe_count(&mut app), 1);
+    }
 
     fn assert_dir_near(got: DVec3, expect: DVec3, label: &str) {
         assert!(
