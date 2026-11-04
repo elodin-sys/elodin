@@ -41,6 +41,15 @@ pub enum Error {
     Postcard(#[from] postcard::Error),
     #[error("invalid component id")]
     InvalidComponentId,
+    #[error(
+        "component {component:?} has duplicate element name {name:?} at indices {first} and {second}"
+    )]
+    DuplicateElementName {
+        component: String,
+        name: String,
+        first: usize,
+        second: usize,
+    },
     #[error("time travel - you tried to push a time stamp in the past")]
     TimeTravel,
     #[error("datafusion {0}")]

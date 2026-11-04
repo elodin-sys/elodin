@@ -226,6 +226,7 @@ mod tests {
 
 pub(super) fn db_error(error: Error) -> Status {
     match error {
+        Error::DuplicateElementName { .. } => Status::invalid_argument(error.to_string()),
         Error::ComponentNotFound(_) => {
             status_with_reason(Code::NotFound, error.to_string(), "COMPONENT_NOT_FOUND")
         }

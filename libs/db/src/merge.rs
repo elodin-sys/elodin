@@ -653,6 +653,16 @@ fn copy_component_with_prefix(
     };
 
     // Compute new name and ID
+    let old_metadata = if metadata_path.exists() {
+        ComponentMetadata::read(&metadata_path)?
+    } else {
+        ComponentMetadata {
+            component_id: ComponentId::new(&old_name),
+            name: old_name.clone(),
+            metadata: HashMap::new(),
+        }
+    };
+    crate::validate_component_metadata(&old_metadata)?;
     let new_name = apply_prefix(&old_name, prefix);
     let new_component_id = ComponentId::new(&new_name);
     let new_component_dir = target_db_dir.join(new_component_id.to_string());
@@ -697,16 +707,6 @@ fn copy_component_with_prefix(
     }
 
     // Write updated metadata with new name and component_id
-    let old_metadata = if metadata_path.exists() {
-        ComponentMetadata::read(&metadata_path)?
-    } else {
-        ComponentMetadata {
-            component_id: ComponentId::new(&old_name),
-            name: old_name.clone(),
-            metadata: HashMap::new(),
-        }
-    };
-
     let new_metadata = ComponentMetadata {
         component_id: new_component_id,
         name: new_name,
@@ -1053,6 +1053,52 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use tempfile::TempDir;
+
+    #[test]
+    fn merge_preserves_component_and_element_spelling() {
+        let dir = TempDir::new().unwrap();
+        let target = dir.path().join("output");
+        fs::create_dir(&target).unwrap();
+        for (id, name) in [(1, "Jet.Aero"), (2, "jet.aero")] {
+            let source = dir.path().join(id.to_string());
+            fs::create_dir(&source).unwrap();
+            ComponentMetadata {
+                component_id: ComponentId(id),
+                name: name.to_string(),
+                metadata: [("element_names".to_string(), "X,Y".to_string())].into(),
+            }
+            .write(source.join("metadata"))
+            .unwrap();
+        }
+        copy_component_with_prefix(&dir.path().join("1"), &target, Some("SIM"), None).unwrap();
+        let id = ComponentId::new("SIM_Jet.Aero");
+        let stored = ComponentMetadata::read(target.join(id.to_string()).join("metadata")).unwrap();
+        assert_eq!(stored.name, "SIM_Jet.Aero");
+        assert_eq!(stored.component_id, id);
+        assert_eq!(stored.element_names(), "X,Y");
+        copy_component_with_prefix(&dir.path().join("2"), &target, Some("sim"), None).unwrap();
+    }
+
+    #[test]
+    fn duplicate_element_names_are_rejected_before_merge_creates_files() {
+        let dir = TempDir::new().unwrap();
+        let source = dir.path().join("source");
+        let target = dir.path().join("output");
+        fs::create_dir(&source).unwrap();
+        fs::create_dir(&target).unwrap();
+        ComponentMetadata {
+            component_id: ComponentId(1),
+            name: "aero".to_string(),
+            metadata: [("element_names".to_string(), "CL,Cl".to_string())].into(),
+        }
+        .write(source.join("metadata"))
+        .unwrap();
+        assert!(matches!(
+            copy_component_with_prefix(&source, &target, None, None),
+            Err(Error::DuplicateElementName { .. })
+        ));
+        assert_eq!(fs::read_dir(target).unwrap().count(), 0);
+    }
 
     #[test]
     fn test_apply_prefix() {
