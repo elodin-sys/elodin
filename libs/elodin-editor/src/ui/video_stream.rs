@@ -1206,6 +1206,8 @@ struct WasmSeekQuery {
     seek_age_secs: Option<f32>,
     seeking: bool,
     needs_keyframe: bool,
+    /// Newest raw sample. `None` when the cache has no frames.
+    latest_raw_us: Option<i64>,
     /// Raw frames cover the playhead and this tick has not already fed one.
     can_seek: bool,
 }
@@ -1229,9 +1231,19 @@ fn wasm_seek_decision(query: &WasmSeekQuery) -> WasmSeekDecision {
         && query
             .seek_age_secs
             .is_some_and(|age| age >= SEEK_TIMEOUT_SECS);
+    // The picture on screen is the newest sample and the playhead is at or
+    // ahead of it. A live-edge flush leaves `needs_keyframe` set, and
+    // `LastUpdated` can lead that sample by more than
+    // [`NO_DATA_THRESHOLD_US`]. Seeking again would re-decode the same group.
+    let showing_latest = query.last_presented_us.is_some_and(|presented| {
+        query
+            .latest_raw_us
+            .is_some_and(|latest| presented >= latest && query.current_us >= latest)
+    });
 
     let wants_seek = query.can_seek
         && !at_playhead
+        && !showing_latest
         && (query.needs_keyframe || !is_sequential || !decoder_near || seek_stale);
     if !wants_seek {
         return WasmSeekDecision::Idle;
@@ -1320,6 +1332,7 @@ fn drive_webcodecs(
         seek_age_secs,
         seeking: decoder_seeking,
         needs_keyframe: wc.needs_keyframe(),
+        latest_raw_us: cache.raw_frames.keys().next_back().map(|ts| ts.0),
         can_seek: has_raw && !fed,
     });
     let WasmSeekDecision::Seek { stale } = decision else {
@@ -1990,6 +2003,7 @@ mod tests {
             seek_age_secs: None,
             seeking: false,
             needs_keyframe: false,
+            latest_raw_us: None,
             can_seek: true,
         }
     }
@@ -2042,5 +2056,48 @@ mod tests {
             ..seek_query()
         });
         assert_eq!(decision, WasmSeekDecision::Idle);
+    }
+
+    #[test]
+    fn no_seek_when_the_latest_frame_is_already_showing() {
+        // Live follow: LastUpdated leads the newest access unit, and the
+        // live-edge flush left the decoder needing a keyframe.
+        let latest = 1_000_000;
+        let decision = wasm_seek_decision(&WasmSeekQuery {
+            current_us: latest + NO_DATA_THRESHOLD_US + 1,
+            last_decoded_us: Some(latest),
+            last_presented_us: Some(latest),
+            latest_raw_us: Some(latest),
+            needs_keyframe: true,
+            ..seek_query()
+        });
+        assert_eq!(decision, WasmSeekDecision::Idle);
+    }
+
+    #[test]
+    fn seek_backward_while_showing_the_latest_frame() {
+        let latest = 5_000_000;
+        let decision = wasm_seek_decision(&WasmSeekQuery {
+            current_us: 1_000_000,
+            last_decoded_us: Some(latest),
+            last_presented_us: Some(latest),
+            latest_raw_us: Some(latest),
+            needs_keyframe: true,
+            ..seek_query()
+        });
+        assert_eq!(decision, WasmSeekDecision::Seek { stale: false });
+    }
+
+    #[test]
+    fn seek_when_a_newer_frame_needs_a_keyframe() {
+        let decision = wasm_seek_decision(&WasmSeekQuery {
+            current_us: 5_000_000,
+            last_decoded_us: Some(4_000_000),
+            last_presented_us: Some(4_000_000),
+            latest_raw_us: Some(4_900_000),
+            needs_keyframe: true,
+            ..seek_query()
+        });
+        assert_eq!(decision, WasmSeekDecision::Seek { stale: false });
     }
 }
