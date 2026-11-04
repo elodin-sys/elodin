@@ -449,6 +449,16 @@
                         </li>
                         
                         <li>
+                            <a href="/reference/elodin-cli/#elodin-login">elodin login</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="/reference/elodin-cli/#elodin-upload">elodin upload</a>
+                            
+                        </li>
+                        
+                        <li>
                             <a href="/reference/elodin-cli/#elodin-editor">elodin editor</a>
                             
                             <ul>
@@ -911,6 +921,8 @@
 <p><strong>Command Overview:</strong></p>
 <ul>
 <li><a href="/reference/elodin-cli/#elodin"><code>elodin</code>↴</a></li>
+<li><a href="/reference/elodin-cli/#elodin-login"><code>elodin login</code>↴</a></li>
+<li><a href="/reference/elodin-cli/#elodin-upload"><code>elodin upload</code>↴</a></li>
 <li><a href="/reference/elodin-cli/#elodin-editor"><code>elodin editor</code>↴</a></li>
 <li><a href="/reference/elodin-cli/#elodin-run"><code>elodin run</code>↴</a></li>
 <li><a href="/reference/elodin-cli/#elodin-db"><code>elodin-db</code>↴</a></li>
@@ -937,6 +949,8 @@
 <li><code>editor</code> — Launch the Elodin editor (default)</li>
 <li><code>run</code> — Run an Elodin simulation in headless mode</li>
 <li><code>monte-carlo</code> — Run Monte Carlo campaigns</li>
+<li><code>login</code> — Log in to Elodin Cloud through your browser</li>
+<li><code>upload</code> — Upload a stopped TelemetryDB directory, compacting transmitted logs</li>
 </ul>
 <h6 id="options"><strong>Options</strong></h6>
 <ul>
@@ -945,6 +959,36 @@
 <p>Default value: <code>https://app.elodin.systems</code></p>
 </li>
 </ul>
+<h2 id="elodin-login"><code>elodin login</code></h2>
+<p><strong>Usage:</strong> <code>elodin login [--device] [--no-browser]</code></p>
+<p>Browser login uses authorization code + PKCE and a temporary loopback callback.
+For SSH/headless terminals, <code>--device</code> prints a verification URL and code.
+<code>--no-browser</code> prevents opening a browser in either flow. Sessions are stored per
+issuer with private file permissions; authenticated commands refresh expired tokens.</p>
+<p><code>ELODIN_ISSUER</code> / <code>--issuer</code> and <code>ELODIN_API_URL</code> / <code>--api-url</code> select an environment
+before login. The session retains its API endpoint. <code>ELODIN_CONFIG_DIR</code> /
+<code>--config-dir</code> overrides the platform credential directory. Use <code>elodin whoami</code>
+to inspect your identity and <code>elodin logout</code> to end that issuer's session.</p>
+<h2 id="elodin-upload"><code>elodin upload</code></h2>
+<p><strong>Usage:</strong> <code>elodin upload &lt;DB_PATH&gt; [--project &lt;NAME_OR_UUID&gt;] [--json] [--timeout &lt;SECONDS&gt;]</code></p>
+<p>Only TelemetryDB directories containing <code>db_state</code> are supported. Stop the writer
+and keep it stopped until upload finishes. The command automatically sends only
+committed log bytes, excluding sparse preallocation. It does not modify the source database or infer
+simulation/flight provenance from its contents. Symlinks, special files, and
+nonportable paths are rejected.</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> login</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> projects</span><span style="color: light-dark(#2AA198, #2AA198);"> create</span><span style="color: light-dark(#2AA198, #2AA198);"> demo</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> upload</span><span style="color: light-dark(#2AA198, #2AA198);"> dbs/ball</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> upload</span><span style="color: light-dark(#2AA198, #2AA198);"> dbs/ball</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-project</span><span style="color: light-dark(#2AA198, #2AA198);"> demo</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-json</span></span></code></pre>
+<p>One available project is selected automatically; multiple projects prompt for a
+destination. In scripts, specify <code>--project</code> or <code>ELODIN_PROJECT</code>. Files stream
+with a manifest of sizes and SHA-256 digests. Success means the server has published
+the run, not merely accepted the upload. <code>--json</code> prints the final ticket/run status
+to stdout, with progress on stderr. Publication failures return a nonzero exit code.</p>
+<p><code>--timeout</code> bounds the publication wait (default 300 seconds), not transmission.
+On timeout the accepted upload may still publish; the error includes its ticket
+and status URL. Each invocation starts a new upload intent; chunk resumption and
+automatic transmission retries are not supported.</p>
 <h2 id="elodin-editor"><code>elodin editor</code></h2>
 <p>Launch the Elodin editor (default)</p>
 <p><strong>Usage:</strong> <code>elodin editor [OPTIONS] [addr/path]</code></p>
