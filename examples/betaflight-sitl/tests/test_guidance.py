@@ -86,6 +86,9 @@ def test_numeric_phase_codes_and_single_gate_standoff_target() -> None:
         4: "ACQUIRE",
         5: "HOLD",
         6: "FAULT",
+        7: "COMMIT",
+        8: "SEARCH",
+        9: "FINISH",
     }
 
 
@@ -135,7 +138,7 @@ def test_full_phase_sequence_uses_capture_dwell_and_never_commits() -> None:
     assert command.armed and command.angle_mode
     assert command.roll == pytest.approx(0.0)
     assert command.pitch == pytest.approx(0.0)
-    assert not hasattr(GuidancePhase, "COMMIT")
+    assert source.config.profile == "hold"
 
 
 def test_positive_forward_and_left_acceleration_use_measured_stick_signs() -> None:
