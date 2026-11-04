@@ -26,7 +26,9 @@ use crate::plugins::render_layer_alloc::CINEMATIC_EARTH_RENDER_LAYER;
 use crate::plugins::scene_environment::{
     CinematicViewport, SceneEnvironment, SchematicAtmosphere, SchematicSun, SpaceVisibility,
 };
-use crate::plugins::thruster_particles::images_ready;
+use crate::plugins::thruster_particles::{
+    ReadyEffectImages, images_ready, init_ready_effect_images,
+};
 
 use earth_night_material::{EarthNightExt, EarthNightMaterial, EarthNightParams};
 
@@ -283,6 +285,7 @@ pub struct CinematicEarthPlugin;
 
 impl Plugin for CinematicEarthPlugin {
     fn build(&self, app: &mut App) {
+        init_ready_effect_images(app);
         app.init_resource::<ViewerFrame>()
             .init_resource::<DensityTune>()
             .init_resource::<EarthLookTune>()
@@ -450,11 +453,12 @@ fn sky_emitter_bundle(
 
 fn bind_ready_emitters(
     mut commands: Commands,
+    ready_images: Res<ReadyEffectImages>,
     pending: Query<(Entity, &PendingEffectMaterial)>,
     asset_server: Res<AssetServer>,
 ) {
     for (entity, pending) in &pending {
-        if !images_ready(&pending.images, &asset_server) {
+        if !images_ready(&pending.images, &asset_server, &ready_images) {
             continue;
         }
         commands
@@ -481,6 +485,7 @@ fn sync_cinematic_earth(
     mut effects: ResMut<Assets<EffectAsset>>,
     mut images: ResMut<Assets<Image>>,
     roots: Query<Entity, With<CinematicEarthRoot>>,
+    streamed_surface: Option<Res<bevy_cesium::CesiumStatus>>,
     spawned: Query<Entity, With<CinematicEarthEntity>>,
     skybox_cameras: Query<Entity, With<CinematicSkybox>>,
     mut tune: ResMut<DensityTune>,
@@ -555,12 +560,15 @@ fn sync_cinematic_earth(
                 .spawn((
                     CinematicEarthEllipsoid,
                     Name::new("earth model"),
-                    WorldAssetRoot(assets.globe_scene.clone()),
                     // Scale the model and Earth-attached effects together.
                     Transform::from_scale(Vec3::new(1.0, 1.0, WGS84_POLAR_SCALE)),
                     Visibility::default(),
                 ))
-                .with_children(|parent| spawn_earth_emitters(parent, &assets));
+                .with_children(|parent| spawn_earth_emitters(parent, &assets))
+                // Keep the atmosphere's Earth-centered rig; streaming owns the surface.
+                .insert_if(WorldAssetRoot(assets.globe_scene.clone()), || {
+                    streamed_surface.is_none()
+                });
         });
 
     commands
