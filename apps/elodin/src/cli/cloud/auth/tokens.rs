@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use super::{AuthCtx, CLIENT_ID, OidcConfig, TokenResponse, discover_at};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Credentials {
     pub access_token: String,
     #[serde(default)]
@@ -154,8 +154,7 @@ pub async fn refresh(
         .wrap_err("token refresh request failed")?;
     if !resp.status().is_success() {
         let status = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(miette::miette!("token refresh failed ({status}): {body}"));
+        return Err(miette::miette!("token refresh failed ({status})"));
     }
     let token: TokenResponse = resp
         .json()

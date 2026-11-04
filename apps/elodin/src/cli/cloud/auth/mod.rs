@@ -75,7 +75,7 @@ pub(crate) async fn discover_at(
         .wrap_err("failed to parse the OIDC discovery document")
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 pub(crate) struct TokenResponse {
     pub access_token: String,
     #[serde(default)]

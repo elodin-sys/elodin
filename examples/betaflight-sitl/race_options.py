@@ -1,7 +1,7 @@
 """Pure startup selection for the Betaflight racing example.
 
-Camera selection is independent of guidance and course; only Package E truth
-selection constrains the course. Invalid/reserved values fail before recipes run.
+Camera selection is independent of guidance and course; truth guidance requires
+an enabled course. Invalid/reserved values fail before recipes run.
 """
 
 import os
@@ -22,8 +22,8 @@ class RaceOptions:
 def race_options_from_env(environ: Mapping[str, str] = os.environ) -> RaceOptions:
     guidance = guidance_mode_from_env(environ)
     course = course_from_env(environ)
-    if guidance is GuidanceMode.TRUTH and course.name != "single":
-        raise ValueError("RACE_GUIDANCE='truth' currently requires RACE_COURSE='single'")
+    if guidance is GuidanceMode.TRUTH and course.name == "none":
+        raise ValueError("RACE_GUIDANCE='truth' requires RACE_COURSE='single' or 'c1_straight'")
 
     camera = environ.get("RACE_CAMERA", "0")
     if camera not in ("0", "1"):

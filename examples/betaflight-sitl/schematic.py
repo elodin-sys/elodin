@@ -72,10 +72,13 @@ def build_schematic(
         ),
     ]
     if camera_enabled:
+        # C1's last gate is at X=30; keep visible ground beyond it. This is
+        # observational scene geometry only, never a physics/course change.
+        ground_size = 80 if course.name == "c1_straight" else 40
         elements.append(
             ui.object_3d(
                 "(0,0,0,1, 0,0,0)",
-                mesh=ui.plane(width=40, depth=40, color=ui.color(70, 90, 70)),
+                mesh=ui.plane(width=ground_size, depth=ground_size, color=ui.color(70, 90, 70)),
             )
         )
     elements.extend(gate_objects(course))
