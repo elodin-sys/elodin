@@ -20,7 +20,6 @@ import elodin as el
 import numpy as np
 from constants import (
     GUIDANCE_RATE_HZ,
-    GROUND_HEIGHTS,
     LOX_LOAD_KG,
     LZ1_ALT_M,
     LZ1_LAT_DEG,
@@ -193,7 +192,6 @@ controller_dir = Path(__file__).parent / "controller"
 state_port = el.monte_carlo.port("state", DEFAULT_STATE_PORT)
 command_port = el.monte_carlo.port("command", DEFAULT_COMMAND_PORT)
 fsw_env = {
-    "ELODIN_F9_GROUND_HEIGHTS": json.dumps(GROUND_HEIGHTS),
     "ELODIN_MC_PORT_STATE": str(state_port),
     "ELODIN_MC_PORT_COMMAND": str(command_port),
     # The FSW's designed ascent reference: the recorded profile it must fly.

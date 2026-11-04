@@ -106,7 +106,22 @@ pub(crate) struct TerrainStartup {
 }
 
 impl TerrainStartup {
-    fn update(&mut self, status: &CesiumStatus) {
+    pub(crate) fn waiting() -> Self {
+        Self {
+            gate: TerrainCapture {
+                started: std::time::Instant::now(),
+                timeout: std::time::Duration::from_secs(120),
+            },
+            ready: false,
+            error: None,
+        }
+    }
+
+    pub(crate) fn owns_surface(&self) -> bool {
+        self.error.is_none()
+    }
+
+    pub(crate) fn update(&mut self, status: &CesiumStatus) {
         if self.ready || self.error.is_some() {
             return;
         }
@@ -145,7 +160,7 @@ pub(crate) fn capture_readiness(
 pub(crate) fn playback_ready(world: &World) -> bool {
     world
         .get_resource::<TerrainStartup>()
-        .is_none_or(|startup| startup.ready)
+        .is_none_or(|startup| startup.ready || startup.error.is_some())
 }
 
 fn camera_position_ecef(
@@ -177,6 +192,58 @@ mod coordinate_tests {
             config.join("elodin/cesium-ion-token.txt"),
         );
         assert!(terrain_token_path(None, None).is_err());
+    }
+
+    #[test]
+    fn failed_terrain_releases_playback_but_keeps_captures_failed() {
+        let mut world = World::new();
+        world.insert_resource(TerrainStartup::waiting());
+        assert!(!playback_ready(&world));
+        world
+            .resource_mut::<TerrainStartup>()
+            .update(&CesiumStatus {
+                load_failed: true,
+                ..default()
+            });
+        assert!(playback_ready(&world));
+        assert!(!world.resource::<TerrainStartup>().owns_surface());
+        assert_eq!(capture_ready(&world), Err("Terrain capture failed to load"));
+    }
+
+    #[test]
+    fn terrain_can_retry_the_same_schematic_or_continue_without_it() {
+        let mut app = App::new();
+        let terrain = Some(impeller_wkt::TerrainConfig { asset_id: 2275207 });
+        app.insert_resource(crate::ui::schematic::CurrentSchematic(
+            impeller_wkt::Schematic {
+                terrain,
+                ..default()
+            },
+        ))
+        .add_systems(Update, configure_terrain);
+        app.update();
+        assert!(app.world().contains_resource::<TerrainStartup>());
+        retry_terrain(app.world_mut());
+        assert!(!app.world().contains_resource::<TerrainStartup>());
+        app.update();
+        assert!(app.world().contains_resource::<TerrainStartup>());
+        assert_eq!(
+            app.world()
+                .resource::<crate::ui::schematic::CurrentSchematic>()
+                .terrain,
+            terrain
+        );
+        disable_terrain(app.world_mut());
+        app.update();
+        assert!(!app.world().contains_resource::<TerrainStartup>());
+        assert!(
+            app.world()
+                .resource::<crate::ui::schematic::CurrentSchematic>()
+                .terrain
+                .is_none()
+        );
+        assert!(app.world().resource::<CesiumSourceUpdate>().0.is_none());
+        assert!(playback_ready(app.world()));
     }
 
     #[test]
@@ -540,7 +607,9 @@ fn configure_terrain(
         return;
     };
     let terrain = schematic.terrain;
-    if previous.as_ref() == Some(&terrain) {
+    if previous.as_ref() == Some(&terrain)
+        && (terrain.is_none() || world.contains_resource::<TerrainStartup>())
+    {
         return;
     }
     *previous = Some(terrain);
@@ -549,14 +618,7 @@ fn configure_terrain(
         world.remove_resource::<TerrainStartup>();
         return;
     };
-    let mut startup = TerrainStartup {
-        gate: TerrainCapture {
-            started: std::time::Instant::now(),
-            timeout: std::time::Duration::from_secs(120),
-        },
-        ready: false,
-        error: None,
-    };
+    let mut startup = TerrainStartup::waiting();
     match ion_access_token() {
         Ok(access_token) => {
             world.insert_resource(CesiumSourceUpdate(Some(CesiumSource::Ion {
@@ -577,6 +639,7 @@ fn update_startup(
     status: Res<CesiumStatus>,
     mut startup: ResMut<TerrainStartup>,
     mut updates: Local<u32>,
+    mut commands: Commands,
 ) {
     if startup.ready || startup.error.is_some() {
         return;
@@ -595,6 +658,9 @@ fn update_startup(
     }
     *updates = updates.wrapping_add(1);
     startup.update(&status);
+    if startup.error.is_some() {
+        commands.insert_resource(CesiumSourceUpdate(None));
+    }
     if startup.ready {
         info!(
             seconds = startup.gate.started.elapsed().as_secs_f64(),
@@ -603,31 +669,58 @@ fn update_startup(
     }
 }
 
-fn show_startup(startup: Res<TerrainStartup>, mut contexts: Query<&mut bevy_egui::EguiContext>) {
+fn retry_terrain(world: &mut World) {
+    // The unchanged schematic is reapplied on the next update.
+    world.remove_resource::<TerrainStartup>();
+}
+
+fn disable_terrain(world: &mut World) {
+    if let Some(mut schematic) = world.get_resource_mut::<crate::ui::schematic::CurrentSchematic>()
+    {
+        schematic.terrain = None;
+    }
+    world.insert_resource(CesiumSourceUpdate(None));
+    world.remove_resource::<TerrainStartup>();
+}
+
+fn show_startup(
+    startup: Res<TerrainStartup>,
+    mut contexts: Query<&mut bevy_egui::EguiContext>,
+    mut commands: Commands,
+) {
     if startup.ready {
         return;
     }
+    let mut retry = false;
+    let mut disable = false;
     for mut context in &mut contexts {
         let context = context.get_mut();
-        // Keep the scene out of view until its initial terrain is GPU-ready.
-        // A modal also prevents camera input from moving the loading target.
-        egui::Modal::new(egui::Id::new("cesium_startup"))
-            .backdrop_color(context.global_style().visuals.panel_fill.to_opaque())
-            .show(context, |ui| {
-                if startup.error.is_some() {
-                    ui.label("Terrain could not finish loading.");
-                    ui.label(
-                        startup
-                            .error
-                            .unwrap_or("Check the connection and data access, then restart."),
-                    );
-                } else {
+        if let Some(error) = startup.error {
+            egui::Window::new("Terrain unavailable")
+                .collapsible(false)
+                .resizable(false)
+                .show(context, |ui| {
+                    ui.label(error);
+                    ui.horizontal(|ui| {
+                        retry |= ui.button("Retry").clicked();
+                        disable |= ui.button("Continue without terrain").clicked();
+                    });
+                });
+        } else {
+            egui::Modal::new(egui::Id::new("cesium_startup"))
+                .backdrop_color(context.global_style().visuals.panel_fill.to_opaque())
+                .show(context, |ui| {
                     ui.horizontal(|ui| {
                         ui.spinner();
                         ui.label("Loading terrain and aerial images…");
                     });
-                }
-            });
+                });
+        }
+    }
+    if retry {
+        commands.queue(retry_terrain);
+    } else if disable {
+        commands.queue(disable_terrain);
     }
 }
 

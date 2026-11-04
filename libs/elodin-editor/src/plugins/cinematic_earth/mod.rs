@@ -485,8 +485,7 @@ fn sync_cinematic_earth(
     mut effects: ResMut<Assets<EffectAsset>>,
     mut images: ResMut<Assets<Image>>,
     roots: Query<Entity, With<CinematicEarthRoot>>,
-    streamed_surface: Option<Res<bevy_cesium::CesiumStatus>>,
-    schematic: Option<Res<crate::ui::schematic::CurrentSchematic>>,
+    #[cfg(feature = "big_space")] streamed_surface: Option<Res<super::cesium::TerrainStartup>>,
     spawned: Query<Entity, With<CinematicEarthEntity>>,
     skybox_cameras: Query<Entity, With<CinematicSkybox>>,
     mut tune: ResMut<DensityTune>,
@@ -498,8 +497,12 @@ fn sync_cinematic_earth(
         .as_ref()
         .is_some_and(|env| env.earth.is_some());
 
-    let streamed_surface =
-        streamed_surface.is_some() && schematic.as_ref().is_some_and(|s| s.terrain.is_some());
+    #[cfg(feature = "big_space")]
+    let streamed_surface = streamed_surface
+        .as_ref()
+        .is_some_and(|startup| startup.owns_surface());
+    #[cfg(not(feature = "big_space"))]
+    let streamed_surface = false;
     let surface_changed = surface_mode
         .replace(streamed_surface)
         .is_some_and(|previous| previous != streamed_surface);
@@ -1202,8 +1205,9 @@ fn tune_atmosphere(
 mod tests {
     use super::*;
 
+    #[cfg(feature = "big_space")]
     #[test]
-    fn terrain_status_alone_keeps_the_globe_and_schematic_toggles_restore_it() {
+    fn globe_returns_when_terrain_fails() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
             .init_asset::<Image>()
@@ -1211,7 +1215,6 @@ mod tests {
             .init_resource::<DensityTune>()
             .init_resource::<EarthLookTune>()
             .insert_resource(CinematicEarthAssets::default())
-            .insert_resource(crate::ui::schematic::CurrentSchematic(Default::default()))
             .insert_resource(bevy_cesium::CesiumStatus::default())
             .insert_resource(SceneEnvironment(Some(impeller_wkt::EnvironmentConfig {
                 earth: Some(Default::default()),
@@ -1229,16 +1232,21 @@ mod tests {
         };
         app.update();
         assert_eq!(globe_count(&mut app), 1);
-        app.world_mut()
-            .resource_mut::<crate::ui::schematic::CurrentSchematic>()
-            .terrain = Some(impeller_wkt::TerrainConfig { asset_id: 2275207 });
+        app.insert_resource(super::super::cesium::TerrainStartup::waiting());
         app.update();
         app.update();
         assert_eq!(globe_count(&mut app), 0);
         app.world_mut()
-            .resource_mut::<crate::ui::schematic::CurrentSchematic>()
-            .terrain = None;
+            .resource_mut::<super::super::cesium::TerrainStartup>()
+            .update(&bevy_cesium::CesiumStatus {
+                load_failed: true,
+                ..default()
+            });
         app.update();
+        app.update();
+        assert_eq!(globe_count(&mut app), 1);
+        app.world_mut()
+            .remove_resource::<super::super::cesium::TerrainStartup>();
         app.update();
         assert_eq!(globe_count(&mut app), 1);
     }

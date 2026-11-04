@@ -58,7 +58,7 @@ struct SiteCoordinates {
 #[derive(serde::Deserialize)]
 struct Sites {
     landing: SiteCoordinates,
-    legacy: GroundHeights,
+    photo3d: GroundHeights,
 }
 
 impl Sites {
@@ -69,10 +69,7 @@ impl Sites {
 
 impl GroundHeights {
     fn load(sites: &Sites) -> Self {
-        let heights: Self = match std::env::var("ELODIN_F9_GROUND_HEIGHTS") {
-            Ok(value) => serde_json::from_str(&value).expect("valid Falcon 9 ground heights"),
-            Err(_) => sites.legacy,
-        };
+        let heights = sites.photo3d;
         assert!(heights.launch_m.is_finite() && heights.landing_m.is_finite());
         heights
     }
@@ -1050,6 +1047,21 @@ fn main() -> std::io::Result<()> {
 #[cfg(test)]
 mod terminal_guidance_tests {
     use super::*;
+
+    #[test]
+    fn fsw_pad_heights_and_ecef_target_match_the_plant_dataset() {
+        let source: serde_json::Value =
+            serde_json::from_str(include_str!("../../data/sites.json")).unwrap();
+        let launch = source["photo3d"]["launch_m"].as_f64().unwrap();
+        let landing = source["photo3d"]["landing_m"].as_f64().unwrap();
+        let mut fsw = Fsw::new();
+        let (_, _, target_altitude) = ecef_to_geodetic(fsw.lz1_pos);
+        assert!((target_altitude - landing).abs() < 1e-6);
+        fsw.nav.pos = fsw.lz1_pos;
+        assert_eq!(fsw.nav.site_alt(), landing);
+        fsw.nav.pos = add(fsw.lz1_pos, [10_000.0, 0.0, 0.0]);
+        assert_eq!(fsw.nav.site_alt(), launch);
+    }
 
     #[test]
     fn radar_clearance_uses_the_selected_ellipsoid_ground_height() {
