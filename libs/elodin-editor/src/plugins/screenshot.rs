@@ -122,12 +122,14 @@ fn select_tab(tile_state: &mut TileState, name: &str) -> bool {
     true
 }
 
+#[allow(clippy::too_many_arguments)]
 fn capture_screenshot(
     mut commands: Commands,
     time: Res<Time>,
     mut state: Local<ScreenshotState>,
     mut exit: MessageWriter<AppExit>,
     #[cfg(feature = "big_space")] terrain_capture: Option<Res<super::cesium::TerrainCapture>>,
+    #[cfg(feature = "big_space")] terrain_startup: Option<Res<super::cesium::TerrainStartup>>,
     #[cfg(feature = "big_space")] terrain_status: Option<Res<bevy_cesium::CesiumStatus>>,
     windows: Query<&WindowState, With<PrimaryWindow>>,
 ) {
@@ -146,8 +148,12 @@ fn capture_screenshot(
                 return;
             }
             #[cfg(feature = "big_space")]
-            if let Some(capture) = terrain_capture {
-                match capture.ready(terrain_status.as_deref()) {
+            {
+                match super::cesium::capture_readiness(
+                    terrain_startup.as_deref(),
+                    terrain_capture.as_deref(),
+                    terrain_status.as_deref(),
+                ) {
                     Ok(true) => {}
                     Ok(false) => return,
                     Err(message) => {

@@ -99,7 +99,7 @@ impl TerrainCapture {
 /// Interactive streaming needs one complete initial selection too. Afterwards,
 /// normal flight can refine terrain without repeatedly stopping sensor output.
 #[derive(Resource)]
-struct TerrainStartup {
+pub(crate) struct TerrainStartup {
     gate: TerrainCapture,
     ready: bool,
     error: Option<&'static str>,
@@ -122,16 +122,24 @@ impl TerrainStartup {
 }
 
 pub(crate) fn capture_ready(world: &World) -> Result<bool, &'static str> {
-    if let Some(startup) = world.get_resource::<TerrainStartup>()
+    capture_readiness(
+        world.get_resource::<TerrainStartup>(),
+        world.get_resource::<TerrainCapture>(),
+        world.get_resource::<CesiumStatus>(),
+    )
+}
+
+pub(crate) fn capture_readiness(
+    startup: Option<&TerrainStartup>,
+    capture: Option<&TerrainCapture>,
+    status: Option<&CesiumStatus>,
+) -> Result<bool, &'static str> {
+    if let Some(startup) = startup
         && !startup.result()?
     {
         return Ok(false);
     }
-    world
-        .get_resource::<TerrainCapture>()
-        .map_or(Ok(true), |capture| {
-            capture.ready(world.get_resource::<CesiumStatus>())
-        })
+    capture.map_or(Ok(true), |capture| capture.ready(status))
 }
 
 pub(crate) fn playback_ready(world: &World) -> bool {
@@ -154,6 +162,34 @@ mod coordinate_tests {
     use super::*;
     use bevy::math::DVec3;
     use bevy_geo_frames::{GeoOrigin, Present};
+
+    #[test]
+    fn interactive_screenshot_waits_for_startup_and_reports_failure() {
+        let mut world = World::new();
+        assert_eq!(capture_ready(&world), Ok(true));
+        world.insert_resource(TerrainStartup {
+            gate: TerrainCapture {
+                started: std::time::Instant::now(),
+                timeout: std::time::Duration::from_secs(120),
+            },
+            ready: false,
+            error: None,
+        });
+        // Interactive streaming has no fixed-path TerrainCapture resource.
+        assert!(!world.contains_resource::<TerrainCapture>());
+        assert_eq!(capture_ready(&world), Ok(false));
+        world.resource_mut::<TerrainStartup>().ready = true;
+        assert_eq!(capture_ready(&world), Ok(true));
+        world.resource_mut::<TerrainStartup>().ready = false;
+        world.resource_mut::<TerrainStartup>().gate.timeout = std::time::Duration::ZERO;
+        world
+            .resource_mut::<TerrainStartup>()
+            .update(&CesiumStatus::default());
+        assert_eq!(
+            capture_ready(&world),
+            Err("Terrain capture warm-up timed out")
+        );
+    }
 
     #[test]
     fn playback_waits_only_for_the_initial_terrain() {
