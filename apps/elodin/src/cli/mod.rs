@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 use tracing_subscriber::{EnvFilter, fmt::time::ChronoLocal, prelude::*};
+mod cloud;
 mod db;
 mod editor;
 #[cfg(not(target_os = "windows"))]
@@ -18,6 +19,25 @@ mod ui;
 pub struct Cli {
     #[arg(short, long, default_value = "https://app.elodin.systems")]
     url: String,
+    /// OIDC issuer (Keycloak realm) used by `elodin login`.
+    #[arg(
+        long,
+        env = "ELODIN_ISSUER",
+        default_value = "https://auth.elodin.systems/realms/elodin",
+        global = true
+    )]
+    issuer: String,
+    /// Elodin Cloud API base URL used by authenticated commands.
+    #[arg(
+        long,
+        env = "ELODIN_API_URL",
+        default_value = "https://api.elodin.systems",
+        global = true
+    )]
+    api_url: String,
+    /// Directory for Elodin Cloud credentials (defaults to the platform config directory).
+    #[arg(long, env = "ELODIN_CONFIG_DIR", global = true)]
+    config_dir: Option<std::path::PathBuf>,
     #[command(subcommand)]
     command: Option<Commands>,
     #[arg(long, hide = true)]
@@ -26,6 +46,16 @@ pub struct Cli {
 
 #[derive(Subcommand, Clone)]
 enum Commands {
+    /// Log in to Elodin Cloud through your browser (OIDC + PKCE)
+    Login(cloud::auth::LoginArgs),
+    /// Remove stored Elodin Cloud credentials and end the session
+    Logout,
+    /// Print the currently authenticated Elodin Cloud identity
+    Whoami(cloud::auth::WhoamiArgs),
+    /// Create and list Elodin Cloud projects
+    Projects(cloud::projects::ProjectsArgs),
+    /// Upload a stopped TelemetryDB directory, compacting the transmitted logs
+    Upload(cloud::upload::UploadArgs),
     /// Launch the Elodin editor (default)
     Editor(editor::Args),
     /// Run an Elodin simulation in headless mode
@@ -108,6 +138,11 @@ impl Cli {
             .expect("tokio runtime failed to start");
 
         match &self.command {
+            Some(Commands::Login(args)) => self.clone().login(args.clone(), rt),
+            Some(Commands::Logout) => self.clone().logout(rt),
+            Some(Commands::Whoami(args)) => self.clone().whoami(args.clone(), rt),
+            Some(Commands::Projects(args)) => self.clone().projects(args.clone(), rt),
+            Some(Commands::Upload(args)) => self.clone().upload(args.clone(), rt),
             Some(Commands::Editor(args)) => self.clone().editor(args.clone(), rt),
             #[cfg(not(target_os = "windows"))]
             Some(Commands::Run(args)) => self.clone().run_headless(args.clone(), rt),
