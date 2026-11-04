@@ -17,6 +17,7 @@ struct Ready {
 }
 
 struct Inner {
+    generation: u64,
     /// PTS values submitted since the last reset, in decode order.
     /// An output whose timestamp is not the front of this queue is from a
     /// superseded seek and is closed.
@@ -49,6 +50,9 @@ pub struct Decoder {
     pub drain_with_flush: bool,
     inner: Rc<RefCell<Inner>>,
     _output: Closure<dyn FnMut(web_sys::VideoFrame)>,
+    /// Old decoder callbacks stay alive so already-queued outputs can close
+    /// themselves after a reset without entering the new generation.
+    _retired_outputs: Vec<Closure<dyn FnMut(web_sys::VideoFrame)>>,
     _error: Closure<dyn FnMut(JsValue)>,
 }
 
@@ -61,6 +65,7 @@ impl Decoder {
     /// `codec` may be empty. The first keyframe's SPS then supplies `avc1.PPCCLL`.
     pub fn new(codec: &str) -> Result<Self, Error> {
         let inner = Rc::new(RefCell::new(Inner {
+            generation: 1,
             submitted: VecDeque::new(),
             queue: VecDeque::new(),
             discard_before: None,
@@ -72,10 +77,7 @@ impl Decoder {
             flush_generation: 0,
             needs_keyframe: false,
         }));
-        let output_inner = inner.clone();
-        let output = Closure::wrap(Box::new(move |frame: web_sys::VideoFrame| {
-            on_output(&output_inner, frame);
-        }) as Box<dyn FnMut(web_sys::VideoFrame)>);
+        let output = output_callback(inner.clone(), 1);
         let error_inner = inner.clone();
         let error = Closure::wrap(Box::new(move |err: JsValue| {
             let mut inner = error_inner.borrow_mut();
@@ -97,6 +99,7 @@ impl Decoder {
             drain_with_flush: crate::is_safari(),
             inner,
             _output: output,
+            _retired_outputs: Vec::new(),
             _error: error,
         })
     }
@@ -143,8 +146,11 @@ impl Decoder {
 
     /// Abort pending outputs and reconfigure. In-flight frames are closed.
     pub fn reset(&mut self) -> Result<(), Error> {
+        let generation;
         {
             let mut inner = self.inner.borrow_mut();
+            inner.generation = inner.generation.wrapping_add(1).max(1);
+            generation = inner.generation;
             inner.submitted.clear();
             inner.discard_before = None;
             inner.flush_generation = inner.flush_generation.wrapping_add(1).max(1);
@@ -155,13 +161,15 @@ impl Decoder {
                 inner.open = inner.open.saturating_sub(1);
             }
         }
-        if self.video.state() == web_sys::CodecState::Closed {
-            self.rebuild()?;
-        } else if self.video.state() != web_sys::CodecState::Unconfigured
-            && self.video.reset().is_err()
-        {
-            self.rebuild()?;
-        }
+        let _ = self.video.close();
+        let output = output_callback(self.inner.clone(), generation);
+        let init = web_sys::VideoDecoderInit::new(
+            self._error.as_ref().unchecked_ref(),
+            output.as_ref().unchecked_ref(),
+        );
+        self.video = web_sys::VideoDecoder::new(&init)?;
+        self._retired_outputs
+            .push(std::mem::replace(&mut self._output, output));
         if self.parameter_sets.is_some() {
             self.configure()?;
         }
@@ -365,9 +373,22 @@ impl Decoder {
     }
 }
 
-fn on_output(inner: &Rc<RefCell<Inner>>, frame: web_sys::VideoFrame) {
+fn output_callback(
+    inner: Rc<RefCell<Inner>>,
+    generation: u64,
+) -> Closure<dyn FnMut(web_sys::VideoFrame)> {
+    Closure::wrap(Box::new(move |frame: web_sys::VideoFrame| {
+        on_generation_output(&inner, generation, frame);
+    }) as Box<dyn FnMut(web_sys::VideoFrame)>)
+}
+
+fn on_generation_output(inner: &Rc<RefCell<Inner>>, generation: u64, frame: web_sys::VideoFrame) {
     let reported = frame.timestamp().round() as i64;
     let mut inner = inner.borrow_mut();
+    if generation != inner.generation {
+        frame.close();
+        return;
+    }
     // Outputs are in decode order. Safari sometimes reports timestamp 0, so a
     // non-zero timestamp that is not the one we submitted is a stale frame
     // and must not consume the queue.
