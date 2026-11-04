@@ -301,7 +301,7 @@ fn drive(mut images: ResMut<Assets<Image>>, mut streams: Query<&mut VideoStream>
                 return None;
             };
             feed_seek(slot);
-            if !slot.playing && seek_submitted(slot) {
+            if seek_submitted(slot) && (!slot.playing || seek_needs_flush(slot)) {
                 if let Some(decoder) = slot.decoder.as_ref() {
                     let _ = decoder.flush();
                 }
@@ -378,6 +378,14 @@ fn seek_submitted(slot: &Slot) -> bool {
     slot.seek
         .as_ref()
         .is_some_and(|seek| seek.next >= seek.frames.len())
+}
+
+fn seek_needs_flush(slot: &Slot) -> bool {
+    slot.seek.as_ref().is_some_and(|seek| {
+        seek.frames
+            .last()
+            .is_some_and(|sample| sample.pts_us <= seek.target_pts)
+    })
 }
 
 fn apply_copy(slot: &mut Slot, images: &mut Assets<Image>) {
