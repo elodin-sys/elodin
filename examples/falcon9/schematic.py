@@ -13,8 +13,7 @@ Typed elodin.ui translation of falcon9.kdl.
 # Keep the exhaust trail world-anchored while thinning it with air density.
 # Cold-gas RCS: falcon9-sized darts (rcs_dart) at interstage station 46 m.
 # World-fixed launch-pad smoke.
-# Landing dust and ASDS visual at LZ-1.
-# Barge floats above the coarse globe until the surface fix.
+# Landing dust at LZ-1; Cesium supplies the real landing-pad surface.
 # CRS-12 truth ghost.
 
 import elodin.ui as ui
@@ -302,14 +301,8 @@ def build() -> ui.Schematic:
         ),
         ui.object_3d(
             "lz1.world_pos",
-            mesh=ui.glb(
-                "spacex_drone_barge.glb",
-                scale=1.0,
-                translate=(0.0, 0.0, 0.0),
-                rotate=(0.0, 0.0, 0.0),
-                emissivity=0.0,
-                glow=0.0,
-            ),
+            # Invisible anchor for landing dust; no duplicate pad geometry.
+            mesh=ui.sphere(radius=0.01, color=ui.color(0, 0, 0, 0)),
             orientation="absolute",
             thrusters=[
                 ui.thruster(

@@ -48,7 +48,14 @@ calibrated model should reproduce it without retuning. Sources, quality
 notes, and selection rationale live in [`data/README.md`](data/README.md).
 
 - **Launch:** Kennedy Space Center LC-39A (28.6084 N, −80.6043 E)
-- **Landing:** Landing Zone 1 (28.4858 N, −80.5444 E), ~15 km south
+- **Landing:** Landing Zone 1 (28.485738 N, -80.542948 E), ~15 km south
+
+Open these reference videos alongside the simulation:
+
+- [CRS-12 — launch and landing](https://www.youtube.com/watch?v=9LeQepvdrbc)
+  ([landing around 08:00](https://www.youtube.com/watch?v=9LeQepvdrbc&t=480s)).
+- [CRS-11 — launch and landing](https://www.youtube.com/watch?v=GrP3jHuLQ9o),
+  the held-out reference flight.
 
 ## Mission Profile (RTLS)
 
@@ -230,8 +237,7 @@ recorded flight is reproduced within thresholds.
   the booster GLB renders as a full stack throughout; a visual split at MECO
   is future work)
 - Touchdown envelope thresholds (derive from truth-data uncertainty)
-- ~~Booster / pad / landing-zone GLB assets~~ booster GLB + ASDS barge
-  landed with the cinematic port; a modeled LC-39A pad remains open
+- Booster GLB is included; Cesium provides the launch and landing scenery.
 
 ## Cinematic Visuals (pyrotechnique port)
 
@@ -250,8 +256,8 @@ telemetry (design record: `docs/design-thruster-effects-port.md` §10):
   (`environment { earth }` + Chase `cinematic=#true`: true-scale WGS84 globe,
   camera-driven raymarched atmosphere, stars, night city lights, airglow —
   all embedded in the editor binary). Regular viewports can sit beside Chase
-  without seeing Earth visuals. ASDS barge GLB at LZ-1. Launch is on the
-  cinematic Earth's Florida coast (LC-39A); no placeholder pad disc.
+  without seeing Earth visuals. With Cesium, the streamed surface replaces
+  the embedded globe; no substitute platform or place-name overlay is added.
 
 Wall-clock pacing is on by default. Monte Carlo sets `ELODIN_MONTE_CARLO_CONTEXT`
 and runs flat out. Particle integration follows the editor playhead when
@@ -339,6 +345,36 @@ uv run python -m pytest -q examples/falcon9/
 # CI smoke (one truncated deterministic campaign)
 scripts/test-falcon9-monte-carlo.sh
 ```
+
+For the Photo 3D terrain view, set `CESIUM_ION_TOKEN` in your environment
+and run inside `nix develop`:
+
+```sh
+CESIUM_ION_ASSET_ID=2275207 CESIUM_MAXIMUM_SCREEN_ERROR=24 \
+  elodin editor examples/falcon9/main.py
+```
+
+The token needs read access to that asset and stays outside the repository.
+The editor streams the ground surface and keeps the existing atmosphere and
+cinematic lighting.
+The vehicle model, reference data, graphs and particle effects are retained.
+The landing target is the measured center of the LZ-1 concrete circle.
+The previous coordinate identified the old launch-complex slab, about 140 m west
+of the pad. The launch location is unchanged. Cesium supplies the real
+landing-pad surface; no offshore barge or overlay is added.
+
+The launch and landing ground heights are stored in
+[`data/sites.json`](data/sites.json), shared by the plant and
+flight software. The demo Photo 3D asset selects its sampled heights;
+running without it retains the original example's ground heights. No extra
+height setting is needed. The site file records the independent georeferenced
+imagery used to locate the concrete-circle center and the Photo 3D heights in
+WGS84 ellipsoid meters. These are dataset measurements, not a survey.
+Terminal guidance keeps braking lateral motion until touchdown.
+
+The checked CRS-12 terrain run finishes 4.2 m from the pad center. Contact is
+still too fast to meet the existing soft-landing criterion (4.7 m/s vertical).
+The calibration results below predate these target and guidance corrections.
 
 Stale `falcon9-fsw` processes hold the campaign UDP ports; `pkill -f
 falcon9-fsw` if a campaign refuses to start.

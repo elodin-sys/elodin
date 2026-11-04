@@ -8,6 +8,7 @@ import numpy as np
 import sensors as sn
 from constants import (
     GLB_ORIGIN_STATION_M,
+    LAUNCH_GROUND_ALT_M,
     LOX_LOAD_KG,
     LZ1_LAT_DEG,
     LZ1_LON_DEG,
@@ -154,7 +155,7 @@ def _attitude_along_up(up):
 
 
 def test_radar_geometry_gates():
-    # 100 m up, nose up: boresight from the engine plane to ellipsoid 0.
+    # 100 m up, nose up: range from the engine plane to the launch surface.
     import frames
     import propulsion
 
@@ -170,7 +171,7 @@ def test_radar_geometry_gates():
     rng_meas = float(get("radar_range")[0])
     alt = float(get("altitude_geodetic")[0])
     assert rng_meas > 0.0
-    assert abs(rng_meas - (alt - cg)) < 2.0
+    assert abs(rng_meas - (alt - cg - LAUNCH_GROUND_ALT_M)) < 2.0
     # 45-degree tilt about the pad's local NORTH axis exceeds the 35-degree
     # FOV: invalid (-1). (Tilting about a world axis would not tilt from
     # vertical by the same angle.)

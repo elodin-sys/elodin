@@ -8,8 +8,11 @@ or standards-defined figures.
 
 from __future__ import annotations
 
+import json
 import math
+import os
 from datetime import datetime, timezone
+from pathlib import Path
 
 # --- WGS84 / Earth (NGA TR8350.2) -------------------------------------------
 WGS84_A_M = 6_378_137.0
@@ -32,12 +35,19 @@ IMU_RATE_HZ = SIM_RATE_HZ
 # --- Reference mission: CRS-12 (data/crs12/mission.json) ---------------------
 LAUNCH_EPOCH = datetime(2017, 8, 14, 16, 31, 37, tzinfo=timezone.utc)
 START_TIMESTAMP_US = int(LAUNCH_EPOCH.timestamp() * 1_000_000)
-PAD_LAT_DEG = 28.60839  # LC-39A
-PAD_LON_DEG = -80.60433
-PAD_ALT_M = 3.0
-LZ1_LAT_DEG = 28.48580  # Landing Zone 1
-LZ1_LON_DEG = -80.54440
-LZ1_ALT_M = 5.0
+# Shared pad coordinates and cached surface heights. The landing coordinate is
+# the concrete-circle center, not the old launch-complex reference point.
+SITES = json.loads((Path(__file__).parent / "data/sites.json").read_text())
+PAD_LAT_DEG = SITES["launch"]["latitude_degrees"]
+PAD_LON_DEG = SITES["launch"]["longitude_degrees"]
+GROUND_HEIGHTS = SITES[
+    "photo3d" if os.environ.get("CESIUM_ION_ASSET_ID") == str(SITES["ion_asset_id"]) else "legacy"
+]
+LAUNCH_GROUND_ALT_M = GROUND_HEIGHTS["launch_m"]
+PAD_ALT_M = LAUNCH_GROUND_ALT_M + GROUND_HEIGHTS.get("launch_clearance_m", 0.0)
+LZ1_LAT_DEG = SITES["landing"]["latitude_degrees"]
+LZ1_LON_DEG = SITES["landing"]["longitude_degrees"]
+LZ1_ALT_M = GROUND_HEIGHTS["landing_m"]
 # falcon9.glb origin is 0.13 m above the Merlin bells (Y-up); KDL scale 0.9944.
 GLB_ORIGIN_STATION_M = 0.129
 

@@ -35,17 +35,48 @@ const V_PURGE: usize = 7;
 const THROTTLE_MIN: f64 = 0.57;
 const T_VAC_PER_ENGINE: f64 = 829_000.0; // matches plant constants
 const A_E_M2: f64 = 0.681;
-const LZ1_ALT_M: f64 = 5.0;
-const LZ1_LAT_RAD: f64 = 28.48580_f64.to_radians();
-const LZ1_LON_RAD: f64 = -80.54440_f64.to_radians();
 /// ZEM/ZEV terminal guidance (Guo/Hawkins/Wie) — LandingBurn.
 const ZEM_WAYPOINT_ALT_M: f64 = 150.0;
 const ZEM_WAYPOINT_VDOWN_MPS: f64 = 25.0;
 const ZEM_V_TD_MPS: f64 = 1.2;
 const ZEM_TILT_CAP_RAD: f64 = 0.25;
-const ZEM_COMMIT_ALT_M: f64 = 50.0;
-const ZEM_COMMIT_TGO_S: f64 = 5.0;
 const ZEM_A_LAND_TGO: f64 = 12.0;
+
+/// Shared with the plant through constants.py; heights are WGS84 ellipsoidal.
+#[derive(Clone, Copy, serde::Deserialize)]
+struct GroundHeights {
+    launch_m: f64,
+    landing_m: f64,
+}
+
+#[derive(serde::Deserialize)]
+struct SiteCoordinates {
+    latitude_degrees: f64,
+    longitude_degrees: f64,
+}
+
+#[derive(serde::Deserialize)]
+struct Sites {
+    landing: SiteCoordinates,
+    legacy: GroundHeights,
+}
+
+impl Sites {
+    fn load() -> Self {
+        serde_json::from_str(include_str!("../../data/sites.json")).expect("valid Falcon 9 sites")
+    }
+}
+
+impl GroundHeights {
+    fn load(sites: &Sites) -> Self {
+        let heights: Self = match std::env::var("ELODIN_F9_GROUND_HEIGHTS") {
+            Ok(value) => serde_json::from_str(&value).expect("valid Falcon 9 ground heights"),
+            Err(_) => sites.legacy,
+        };
+        assert!(heights.launch_m.is_finite() && heights.landing_m.is_finite());
+        heights
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum Phase {
@@ -209,6 +240,8 @@ fn cg_station_m(lox_kg: f64, rp1_kg: f64) -> f64 {
 
 /// IMU + GPS navigator with the rotating-frame mechanization (WHITEPAPER 12).
 struct Navigator {
+    ground: GroundHeights,
+    landing_pos: V3,
     pos: V3,
     vel: V3,
     att: Quat, // body -> ECEF
@@ -224,8 +257,10 @@ struct Navigator {
 }
 
 impl Navigator {
-    fn new() -> Self {
+    fn new(ground: GroundHeights, landing_pos: V3) -> Self {
         Navigator {
+            ground,
+            landing_pos,
             pos: [0.0; 3],
             vel: [0.0; 3],
             att: QUAT_IDENT,
@@ -239,11 +274,10 @@ impl Navigator {
     }
 
     fn site_alt(&self) -> f64 {
-        let lz1 = geodetic_to_ecef(LZ1_LAT_RAD, LZ1_LON_RAD, LZ1_ALT_M);
-        if norm(sub(self.pos, lz1)) < 5_000.0 {
-            LZ1_ALT_M
+        if norm(sub(self.pos, self.landing_pos)) < 5_000.0 {
+            self.ground.landing_m
         } else {
-            0.0
+            self.ground.launch_m
         }
     }
 
@@ -347,8 +381,6 @@ struct Fsw {
     /// 1-3-1 landing-burn engine latch: (escalated to 3, back down to 1).
     landing_escalated: bool,
     landing_deescalated: bool,
-    /// Commit-to-vertical latch (freeze lateral ZEM below ~50 m / short t_go).
-    landing_vertical_commit: bool,
     /// The designed ascent reference: the recorded webcast profile.
     ascent_profile: Option<AscentProfile>,
     t_liftoff: f64,
@@ -359,9 +391,15 @@ struct Fsw {
 
 impl Fsw {
     fn new() -> Self {
-        let lz1 = geodetic_to_ecef(LZ1_LAT_RAD, LZ1_LON_RAD, LZ1_ALT_M);
+        let sites = Sites::load();
+        let ground = GroundHeights::load(&sites);
+        let lz1 = geodetic_to_ecef(
+            sites.landing.latitude_degrees.to_radians(),
+            sites.landing.longitude_degrees.to_radians(),
+            ground.landing_m,
+        );
         Fsw {
-            nav: Navigator::new(),
+            nav: Navigator::new(ground, lz1),
             phase: Phase::PadPress,
             phase_t0: 0.0,
             meco_speed_reached: false,
@@ -373,7 +411,6 @@ impl Fsw {
             track_dir: [1.0, 0.0, 0.0],
             landing_escalated: false,
             landing_deescalated: false,
-            landing_vertical_commit: false,
             ascent_profile: std::env::var("ELODIN_F9_PROFILE")
                 .ok()
                 .and_then(|p| AscentProfile::load(&p)),
@@ -723,27 +760,13 @@ impl Fsw {
                     a_up += 2.0; // last-metres flare for spool lag
                 }
 
-                let (t_go, t_raw) = Self::t_go_hoverslam(h, vdown.max(1.0));
-                let miss_h = {
-                    let d = sub(self.lz1_pos, self.nav.pos);
-                    norm(sub(d, scale(up_here, dot(d, up_here))))
-                };
-                // Commit-to-vertical once near the pad *and* the divert is
-                // mostly closed — don't freeze lateral with a large miss left.
-                if !self.landing_vertical_commit {
-                    let time_gate = t_raw > 0.0 && t_raw < ZEM_COMMIT_TGO_S && h_agl < 200.0;
-                    let alt_gate = h_agl < ZEM_COMMIT_ALT_M;
-                    if (alt_gate || time_gate) && (miss_h < 25.0 || h_agl < 25.0) {
-                        self.landing_vertical_commit = true;
-                    }
-                }
-                let a_zem = self.zem_zev_accel(up_here, t_go, self.landing_vertical_commit);
-                let a_lat = if self.landing_vertical_commit {
-                    [0.0; 3]
-                } else {
-                    let a_up_zem = dot(a_zem, up_here);
-                    sub(a_zem, scale(up_here, a_up_zem))
-                };
+                let (t_go, _) = Self::t_go_hoverslam(h, vdown.max(1.0));
+                // Being close to the pad does not mean lateral velocity is zero.
+                // Keep braking it until touchdown rather than committing to
+                // a vertical thrust direction during the final metres.
+                let a_zem = self.zem_zev_accel(up_here, t_go);
+                let a_up_zem = dot(a_zem, up_here);
+                let a_lat = sub(a_zem, scale(up_here, a_up_zem));
                 let lat_mag = norm(a_lat);
                 let max_lat = (a_up.max(9.81)) * ZEM_TILT_CAP_RAD.tan();
                 let a_lat = if lat_mag > max_lat && lat_mag > 1e-6 {
@@ -759,8 +782,7 @@ impl Fsw {
                 cmd.fins = self.fin_attitude_pd(body_x, s, true);
 
                 let cos_tilt = dot(body_x, up_here).max(0.6);
-                let mut u = ((mass * a_up / cos_tilt / n + 101_325.0 * A_E_M2)
-                    / T_VAC_PER_ENGINE)
+                let mut u = ((mass * a_up / cos_tilt / n + 101_325.0 * A_E_M2) / T_VAC_PER_ENGINE)
                     .clamp(THROTTLE_MIN, 1.0);
                 if h_agl < 2.5 && vdown > 2.2 {
                     u = u.max(0.76); // don't ease off in the last 2.5 m
@@ -777,8 +799,7 @@ impl Fsw {
                     }
                 }
                 cmd.engines = engines;
-                if s.landed > 0.5 || (h_agl < 0.25 && vdown > 0.0 && vdown < 1.0 && speed < 1.5)
-                {
+                if s.landed > 0.5 || (h_agl < 0.25 && vdown > 0.0 && vdown < 1.0 && speed < 1.5) {
                     self.cutoff_with_purge(&mut cmd, t);
                     self.set_phase(Phase::Touchdown, t);
                 }
@@ -808,7 +829,7 @@ impl Fsw {
         let dt = 0.5;
         for _ in 0..2400 {
             let alt = ecef_to_geodetic(r).2;
-            if alt <= 0.0 {
+            if alt <= self.nav.ground.landing_m {
                 return r;
             }
             let speed = norm(v);
@@ -924,11 +945,7 @@ impl Fsw {
         let err_body = quat_rotate_inv(self.nav.att, err_world);
         let wn = s.params.fin_wn;
         let zeta = 0.85;
-        let err = if rate_only {
-            [0.0, 0.0, 0.0]
-        } else {
-            err_body
-        };
+        let err = if rate_only { [0.0, 0.0, 0.0] } else { err_body };
         let alpha = [
             wn * wn * err[0] - 2.0 * zeta * wn * s.imu_gyro[0],
             wn * wn * err[1] - 2.0 * zeta * wn * s.imu_gyro[1],
@@ -967,12 +984,7 @@ impl Fsw {
 
     /// ZEM/ZEV thrust-acceleration command (ECEF). Target is LZ-1 with a
     /// 150 m / −25 m/s waypoint until crossed, then pad / −1.5 m/s.
-    fn zem_zev_accel(&self, up: V3, t_go: f64, commit: bool) -> V3 {
-        if commit {
-            let vdown = -dot(self.nav.vel, up);
-            let a_up = 9.81 + 3.0 * (vdown - ZEM_V_TD_MPS);
-            return scale(up, a_up);
-        }
+    fn zem_zev_accel(&self, up: V3, t_go: f64) -> V3 {
         // Wind-bias the aim point upwind by the expected terminal drift.
         let wind_h = sub(self.nav.wind_est, scale(up, dot(self.nav.wind_est, up)));
         let aim = sub(self.lz1_pos, scale(wind_h, t_go.min(25.0)));
@@ -981,21 +993,18 @@ impl Fsw {
         let alt = self.nav.height_agl();
         let g_vec = scale(up, -9.81);
         let (r_tgt, v_tgt) = if alt > ZEM_WAYPOINT_ALT_M {
-            (scale(up, ZEM_WAYPOINT_ALT_M), scale(up, -ZEM_WAYPOINT_VDOWN_MPS))
+            (
+                scale(up, ZEM_WAYPOINT_ALT_M),
+                scale(up, -ZEM_WAYPOINT_VDOWN_MPS),
+            )
         } else {
             ([0.0; 3], scale(up, -ZEM_V_TD_MPS))
         };
         let t2 = t_go * t_go;
-        let zem = sub(
-            r_tgt,
-            add(add(r, scale(v, t_go)), scale(g_vec, 0.5 * t2)),
-        );
+        let zem = sub(r_tgt, add(add(r, scale(v, t_go)), scale(g_vec, 0.5 * t2)));
         let zev = sub(v_tgt, add(v, scale(g_vec, t_go)));
         // a_cmd = 6 ZEM/t² − 2 ZEV/t − g  (thrust accel; plant adds gravity)
-        sub(
-            add(scale(zem, 6.0 / t2), scale(zev, -2.0 / t_go)),
-            g_vec,
-        )
+        sub(add(scale(zem, 6.0 / t2), scale(zev, -2.0 / t_go)), g_vec)
     }
 }
 
@@ -1035,5 +1044,56 @@ fn main() -> std::io::Result<()> {
             out[i * 8..i * 8 + 8].copy_from_slice(&v.to_le_bytes());
         }
         sock.send_to(&out, ("127.0.0.1", command_port))?;
+    }
+}
+
+#[cfg(test)]
+mod terminal_guidance_tests {
+    use super::*;
+
+    #[test]
+    fn radar_clearance_uses_the_selected_ellipsoid_ground_height() {
+        let ground = GroundHeights {
+            launch_m: -7.0,
+            landing_m: -25.0,
+        };
+        let target = geodetic_to_ecef(0.0, 0.0, ground.landing_m);
+        let mut nav = Navigator::new(ground, target);
+        nav.pos = geodetic_to_ecef(0.0, 0.0, ground.landing_m + 50.0);
+        nav.radar_agl_m = 30.0;
+        nav.station_m = 20.0;
+        assert!((nav.altitude() - 25.0).abs() < 1e-6);
+        assert!((nav.height_agl() - 30.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn terminal_guidance_brakes_residual_lateral_velocity() {
+        let (lat, lon, _) = ecef_to_geodetic(Fsw::new().lz1_pos);
+        let basis = ned_basis(lat, lon);
+        let up = scale(basis[2], -1.0);
+        let east = basis[1];
+        for lateral_speed in [-5.5, 5.5] {
+            let mut fsw = Fsw::new();
+            fsw.phase = Phase::LandingBurn;
+            fsw.nav.initialized = true;
+            fsw.nav.last_t = 1.0;
+            // Above the target, but still moving sideways: proximity alone
+            // must not disable lateral braking before ground contact.
+            fsw.nav.pos = add(fsw.lz1_pos, scale(up, 35.0));
+            fsw.nav.vel = add(scale(east, lateral_speed), scale(up, -8.0));
+            fsw.nav.att = quat_between([1.0, 0.0, 0.0], up);
+            let mut values = [0.0; STATE_FLOATS];
+            values[0] = 1.0;
+            values[14] = -1.0;
+            values[20] = 3000.0;
+            values[21] = 1300.0;
+            values[33] = 1.273;
+            let command = fsw.step(&SensorPacket::parse(&values));
+            let thrust_direction = quat_rotate(command.attitude, [1.0, 0.0, 0.0]);
+            assert!(
+                dot(thrust_direction, east) * lateral_speed < -0.01,
+                "terminal thrust must oppose lateral velocity: speed={lateral_speed}, direction={thrust_direction:?}",
+            );
+        }
     }
 }
