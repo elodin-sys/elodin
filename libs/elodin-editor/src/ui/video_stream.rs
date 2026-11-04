@@ -281,9 +281,6 @@ pub struct VideoFrameCache {
     last_displayed_ts: Option<Timestamp>,
     /// When false, raw frames are RGBA (sensor camera); skip H.264 keyframe scan.
     pub is_h264: bool,
-    /// Playhead seen on the previous wasm UI frame. A still playhead means paused.
-    #[cfg(target_family = "wasm")]
-    last_playhead: Option<Timestamp>,
     /// When the in-flight wasm seek was sent.
     #[cfg(target_family = "wasm")]
     seek_sent_at: Option<Instant>,
@@ -308,8 +305,6 @@ impl Default for VideoFrameCache {
             backfill_started_at: None,
             last_displayed_ts: None,
             is_h264: true,
-            #[cfg(target_family = "wasm")]
-            last_playhead: None,
             #[cfg(target_family = "wasm")]
             seek_sent_at: None,
         }
@@ -949,6 +944,8 @@ pub struct WidgetQuery {
 pub struct VideoStreamWidget<'w, 's> {
     query: Query<'w, 's, WidgetQuery>,
     current_time: Res<'w, CurrentTimestamp>,
+    #[cfg(target_family = "wasm")]
+    paused: Res<'w, super::Paused>,
     images: ResMut<'w, Assets<Image>>,
     window_settings: Query<'w, 's, &'static bevy_egui::EguiContextSettings>,
     sensor_camera_configs: Option<Res<'w, SensorCameraConfigs>>,
@@ -1249,14 +1246,12 @@ fn wasm_seek_decision(query: &WasmSeekQuery) -> WasmSeekDecision {
 #[cfg(target_family = "wasm")]
 fn drive_webcodecs(
     current_ts: Timestamp,
+    playing: bool,
     cache: &mut VideoFrameCache,
     wc: &mut webcodecs_video::bevy::VideoStream,
 ) {
     wc.set_time(current_ts.0);
-    // A moving playhead is playback. A still one is a paused scrub, which
-    // must flush the decoder so the frame under the playhead paints.
-    wc.set_playing(cache.last_playhead.is_some_and(|last| last != current_ts));
-    cache.last_playhead = Some(current_ts);
+    wc.set_playing(playing);
 
     let decoder_seeking = wc.is_seeking();
     cache.seeking = decoder_seeking;
@@ -1519,7 +1514,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                     #[cfg(target_family = "wasm")]
                     {
                         if let Some(wc) = wc.as_deref_mut() {
-                            drive_webcodecs(current_ts, &mut cache, wc);
+                            drive_webcodecs(current_ts, !state.paused.0, &mut cache, wc);
                         }
                     }
                 }
