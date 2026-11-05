@@ -58,6 +58,8 @@ struct SiteCoordinates {
 #[derive(serde::Deserialize)]
 struct Sites {
     landing: SiteCoordinates,
+    legacy: GroundHeights,
+    aerial: GroundHeights,
     photo3d: GroundHeights,
 }
 
@@ -68,10 +70,25 @@ impl Sites {
 }
 
 impl GroundHeights {
-    fn load(sites: &Sites) -> Self {
-        let heights = sites.photo3d;
-        assert!(heights.launch_m.is_finite() && heights.landing_m.is_finite());
-        heights
+    fn load(sites: &Sites, mode: &str) -> std::io::Result<Self> {
+        let heights = match mode {
+            "legacy" => sites.legacy,
+            "aerial" => sites.aerial,
+            "photo3d" => sites.photo3d,
+            _ => {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "terrain mode must be legacy, aerial, or photo3d",
+                ));
+            }
+        };
+        if !heights.launch_m.is_finite() || !heights.landing_m.is_finite() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "invalid site heights",
+            ));
+        }
+        Ok(heights)
     }
 }
 
@@ -387,15 +404,15 @@ struct Fsw {
 }
 
 impl Fsw {
-    fn new() -> Self {
+    fn new(mode: &str) -> std::io::Result<Self> {
         let sites = Sites::load();
-        let ground = GroundHeights::load(&sites);
+        let ground = GroundHeights::load(&sites, mode)?;
         let lz1 = geodetic_to_ecef(
             sites.landing.latitude_degrees.to_radians(),
             sites.landing.longitude_degrees.to_radians(),
             ground.landing_m,
         );
-        Fsw {
+        Ok(Fsw {
             nav: Navigator::new(ground, lz1),
             phase: Phase::PadPress,
             phase_t0: 0.0,
@@ -414,7 +431,7 @@ impl Fsw {
             t_liftoff: -1.0,
             att_cmd: QUAT_IDENT,
             att_cmd_init: false,
-        }
+        })
     }
 
     /// Slew-limit the attitude setpoint toward `desired` (max ATT_SLEW_RADPS).
@@ -1017,13 +1034,27 @@ fn port_from_env(name: &str, default: u16) -> u16 {
         .unwrap_or(default)
 }
 
+fn fsw_from_args(mut args: impl Iterator<Item = String>) -> std::io::Result<Fsw> {
+    let mode = match (args.next(), args.next(), args.next()) {
+        (None, None, None) => "photo3d".to_string(),
+        (Some(flag), Some(mode), None) if flag == "--terrain-mode" => mode,
+        _ => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "usage: falcon9-fsw [--terrain-mode legacy|aerial|photo3d]",
+            ));
+        }
+    };
+    Fsw::new(&mode)
+}
+
 fn main() -> std::io::Result<()> {
+    let mut fsw = fsw_from_args(std::env::args().skip(1))?;
     let state_port = port_from_env("ELODIN_MC_PORT_STATE", 9114);
     let command_port = port_from_env("ELODIN_MC_PORT_COMMAND", 9115);
     let sock = UdpSocket::bind(("127.0.0.1", state_port))?;
     eprintln!("[fsw] listening on 127.0.0.1:{state_port}, replying to :{command_port}");
 
-    let mut fsw = Fsw::new();
     let mut buf = [0u8; STATE_FLOATS * 8];
     loop {
         let (n, _src) = sock.recv_from(&mut buf)?;
@@ -1052,15 +1083,39 @@ mod terminal_guidance_tests {
     fn fsw_pad_heights_and_ecef_target_match_the_plant_dataset() {
         let source: serde_json::Value =
             serde_json::from_str(include_str!("../../data/sites.json")).unwrap();
-        let launch = source["photo3d"]["launch_m"].as_f64().unwrap();
-        let landing = source["photo3d"]["landing_m"].as_f64().unwrap();
-        let mut fsw = Fsw::new();
-        let (_, _, target_altitude) = ecef_to_geodetic(fsw.lz1_pos);
-        assert!((target_altitude - landing).abs() < 1e-6);
-        fsw.nav.pos = fsw.lz1_pos;
-        assert_eq!(fsw.nav.site_alt(), landing);
-        fsw.nav.pos = add(fsw.lz1_pos, [10_000.0, 0.0, 0.0]);
-        assert_eq!(fsw.nav.site_alt(), launch);
+        for mode in ["legacy", "aerial", "photo3d"] {
+            let launch = source[mode]["launch_m"].as_f64().unwrap();
+            let landing = source[mode]["landing_m"].as_f64().unwrap();
+            let mut fsw =
+                fsw_from_args(["--terrain-mode", mode].map(String::from).into_iter()).unwrap();
+            let (_, _, target_altitude) = ecef_to_geodetic(fsw.lz1_pos);
+            assert!((target_altitude - landing).abs() < 1e-6);
+            fsw.nav.pos = fsw.lz1_pos;
+            assert_eq!(fsw.nav.site_alt(), landing);
+            let (lat, lon, _) = ecef_to_geodetic(fsw.lz1_pos);
+            fsw.nav.pos = geodetic_to_ecef(lat, lon, landing + 50.0);
+            fsw.nav.radar_agl_m = 30.0;
+            fsw.nav.station_m = 20.0;
+            assert!((fsw.nav.altitude() - (landing + 50.0)).abs() < 1e-6);
+            assert!((fsw.nav.height_agl() - 30.0).abs() < 1e-6);
+            fsw.nav.pos = add(fsw.lz1_pos, [10_000.0, 0.0, 0.0]);
+            assert_eq!(fsw.nav.site_alt(), launch);
+        }
+    }
+
+    #[test]
+    fn standalone_default_is_photo3d_and_invalid_modes_are_rejected() {
+        let fsw = fsw_from_args(std::iter::empty()).unwrap();
+        let (_, _, altitude) = ecef_to_geodetic(fsw.lz1_pos);
+        assert!((altitude - Sites::load().photo3d.landing_m).abs() < 1e-6);
+        for args in [
+            vec!["--terrain-mode", "typo"],
+            vec!["--terrain-mode"],
+            vec!["--unknown", "aerial"],
+            vec!["--terrain-mode", "aerial", "extra"],
+        ] {
+            assert!(fsw_from_args(args.into_iter().map(String::from)).is_err());
+        }
     }
 
     #[test]
@@ -1080,12 +1135,12 @@ mod terminal_guidance_tests {
 
     #[test]
     fn terminal_guidance_brakes_residual_lateral_velocity() {
-        let (lat, lon, _) = ecef_to_geodetic(Fsw::new().lz1_pos);
+        let (lat, lon, _) = ecef_to_geodetic(Fsw::new("photo3d").unwrap().lz1_pos);
         let basis = ned_basis(lat, lon);
         let up = scale(basis[2], -1.0);
         let east = basis[1];
         for lateral_speed in [-5.5, 5.5] {
-            let mut fsw = Fsw::new();
+            let mut fsw = Fsw::new("photo3d").unwrap();
             fsw.phase = Phase::LandingBurn;
             fsw.nav.initialized = true;
             fsw.nav.last_t = 1.0;
