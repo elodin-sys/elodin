@@ -40,9 +40,6 @@ ellipsoid.
 `Terrain()` selects Google Photorealistic 3D Tiles, streamed through Bevy-Cesium.
 Omit `terrain=terrain` to use the location on its own.
 
-Save your read-only ion token in `~/.config/elodin/cesium-ion-token.txt` once.
-The editor and height preparation both use it.
-
 ## Terrain Heights
 
 Prepare a grid before running the simulation, using the same `terrain` object:

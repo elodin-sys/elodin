@@ -95,12 +95,11 @@ pub fn run(args: Args) -> miette::Result<()> {
     let request: Request =
         serde_json::from_reader(File::open(args.request).into_diagnostic()?).into_diagnostic()?;
     let count = request.point_count()?;
-    let token =
-        elodin_editor::plugins::cesium::ion_access_token().map_err(|e| miette::miette!("{e}"))?;
+    let token = elodin_editor::plugins::cesium::ion_access_token();
     eprintln!("Preparing {count} terrain heights from Cesium ion…");
     // Reuse the tileset and downloaded tiles across all batches. A failed query
     // aborts the request; Python can retry with a fresh native session.
-    let mut sampler = TerrainSampler::from_ion(request.asset_id, &token).into_diagnostic()?;
+    let mut sampler = TerrainSampler::from_ion(request.asset_id, token).into_diagnostic()?;
     let heights = request.sample(|positions| {
         sampler
             .sample_heights(positions, Duration::from_secs(args.timeout_seconds))

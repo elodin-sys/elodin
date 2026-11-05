@@ -179,22 +179,6 @@ mod coordinate_tests {
     use bevy_geo_frames::{GeoOrigin, Present};
 
     #[test]
-    fn terrain_credentials_use_the_os_home_or_explicit_config_directory() {
-        use std::path::PathBuf;
-        let home = PathBuf::from("user-profile");
-        assert_eq!(
-            terrain_token_path(None, Some(home.clone())).unwrap(),
-            home.join(".config/elodin/cesium-ion-token.txt"),
-        );
-        let config = PathBuf::from("custom-config");
-        assert_eq!(
-            terrain_token_path(Some(config.clone()), Some(home)).unwrap(),
-            config.join("elodin/cesium-ion-token.txt"),
-        );
-        assert!(terrain_token_path(None, None).is_err());
-    }
-
-    #[test]
     fn failed_terrain_releases_playback_but_keeps_captures_failed() {
         let mut world = World::new();
         world.insert_resource(TerrainStartup::waiting());
@@ -211,7 +195,7 @@ mod coordinate_tests {
     }
 
     #[test]
-    fn terrain_can_retry_the_same_schematic_or_continue_without_it() {
+    fn removing_terrain_from_the_schematic_disables_streaming() {
         let mut app = App::new();
         let terrain = Some(impeller_wkt::TerrainConfig { asset_id: 2275207 });
         app.insert_resource(crate::ui::schematic::CurrentSchematic(
@@ -223,17 +207,9 @@ mod coordinate_tests {
         .add_systems(Update, configure_terrain);
         app.update();
         assert!(app.world().contains_resource::<TerrainStartup>());
-        retry_terrain(app.world_mut());
-        assert!(!app.world().contains_resource::<TerrainStartup>());
-        app.update();
-        assert!(app.world().contains_resource::<TerrainStartup>());
-        assert_eq!(
-            app.world()
-                .resource::<crate::ui::schematic::CurrentSchematic>()
-                .terrain,
-            terrain
-        );
-        disable_terrain(app.world_mut());
+        app.world_mut()
+            .resource_mut::<crate::ui::schematic::CurrentSchematic>()
+            .terrain = None;
         app.update();
         assert!(!app.world().contains_resource::<TerrainStartup>());
         assert!(
@@ -566,37 +542,10 @@ impl Plugin for CesiumPlugin {
     }
 }
 
-/// A local credential is shared by scenery and height preparation. It never
-/// enters the schematic or the recording. The environment override is for CI.
-pub fn ion_access_token() -> Result<String, &'static str> {
-    let value = match std::env::var("CESIUM_ION_TOKEN") {
-        Ok(token) => token,
-        Err(std::env::VarError::NotPresent) => {
-            let path = terrain_token_path(
-                std::env::var_os("XDG_CONFIG_HOME").map(std::path::PathBuf::from),
-                directories::BaseDirs::new().map(|dirs| dirs.home_dir().to_path_buf()),
-            )?;
-            std::fs::read_to_string(path).map_err(
-                |_| "Save your terrain read token in ~/.config/elodin/cesium-ion-token.txt",
-            )?
-        }
-        Err(_) => return Err("Invalid terrain credentials"),
-    };
-    let token = value.trim();
-    if token.is_empty() || token.contains(['\r', '\n']) {
-        return Err("Invalid terrain credentials");
-    }
-    Ok(token.to_string())
-}
-
-fn terrain_token_path(
-    config_home: Option<std::path::PathBuf>,
-    home: Option<std::path::PathBuf>,
-) -> Result<std::path::PathBuf, &'static str> {
-    config_home
-        .or_else(|| home.map(|home| home.join(".config")))
-        .map(|root| root.join("elodin/cesium-ion-token.txt"))
-        .ok_or("Cannot locate terrain credentials")
+/// The V1 demo account is shared by scenery and height preparation.
+/// This read-only token is intentionally distributed with the application.
+pub fn ion_access_token() -> &'static str {
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6Ii1XcElsai05enF6U2lUTEQiLCJqdGkiOiJhMGEyMjBlNy00ZjFjLTQ2YTctYWNkYi0wZWNlZWJmYjc3NzciLCJpZCI6NTMyMjI0LCJzdWIiOiJ6eHE4MmxtIiwiaXNzIjoiaHR0cHM6Ly9hcGkuY2VzaXVtLmNvbSIsImF1ZCI6IkVsb2RpbiBUZXJyYWluIGRlbW8gwrcgZGVza3RvcCIsImlhdCI6MTc5MzY2NDI0OX0.0aUiiGh55YtAMAe3hUrBLqlasel0qXoALs_zzSyrzpE"
 }
 
 fn configure_terrain(
@@ -607,9 +556,7 @@ fn configure_terrain(
         return;
     };
     let terrain = schematic.terrain;
-    if previous.as_ref() == Some(&terrain)
-        && (terrain.is_none() || world.contains_resource::<TerrainStartup>())
-    {
+    if previous.as_ref() == Some(&terrain) {
         return;
     }
     *previous = Some(terrain);
@@ -618,20 +565,11 @@ fn configure_terrain(
         world.remove_resource::<TerrainStartup>();
         return;
     };
-    let mut startup = TerrainStartup::waiting();
-    match ion_access_token() {
-        Ok(access_token) => {
-            world.insert_resource(CesiumSourceUpdate(Some(CesiumSource::Ion {
-                asset_id: terrain.asset_id,
-                access_token,
-            })));
-        }
-        Err(error) => {
-            error!("{error}");
-            startup.error = Some(error);
-            world.insert_resource(CesiumSourceUpdate(None));
-        }
-    }
+    let startup = TerrainStartup::waiting();
+    world.insert_resource(CesiumSourceUpdate(Some(CesiumSource::Ion {
+        asset_id: terrain.asset_id,
+        access_token: ion_access_token().to_string(),
+    })));
     world.insert_resource(startup);
 }
 
@@ -669,30 +607,10 @@ fn update_startup(
     }
 }
 
-fn retry_terrain(world: &mut World) {
-    // The unchanged schematic is reapplied on the next update.
-    world.remove_resource::<TerrainStartup>();
-}
-
-fn disable_terrain(world: &mut World) {
-    if let Some(mut schematic) = world.get_resource_mut::<crate::ui::schematic::CurrentSchematic>()
-    {
-        schematic.terrain = None;
-    }
-    world.insert_resource(CesiumSourceUpdate(None));
-    world.remove_resource::<TerrainStartup>();
-}
-
-fn show_startup(
-    startup: Res<TerrainStartup>,
-    mut contexts: Query<&mut bevy_egui::EguiContext>,
-    mut commands: Commands,
-) {
+fn show_startup(startup: Res<TerrainStartup>, mut contexts: Query<&mut bevy_egui::EguiContext>) {
     if startup.ready {
         return;
     }
-    let mut retry = false;
-    let mut disable = false;
     for mut context in &mut contexts {
         let context = context.get_mut();
         if let Some(error) = startup.error {
@@ -701,10 +619,6 @@ fn show_startup(
                 .resizable(false)
                 .show(context, |ui| {
                     ui.label(error);
-                    ui.horizontal(|ui| {
-                        retry |= ui.button("Retry").clicked();
-                        disable |= ui.button("Continue without terrain").clicked();
-                    });
                 });
         } else {
             egui::Modal::new(egui::Id::new("cesium_startup"))
@@ -716,11 +630,6 @@ fn show_startup(
                     });
                 });
         }
-    }
-    if retry {
-        commands.queue(retry_terrain);
-    } else if disable {
-        commands.queue(disable_terrain);
     }
 }
 

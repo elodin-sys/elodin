@@ -347,16 +347,15 @@ scripts/test-falcon9-monte-carlo.sh
 ```
 
 Terrain is configured in `schematic.py`, alongside the geographic origin.
-Save a read-only ion token in `~/.config/elodin/cesium-ion-token.txt` once, then
-run inside `nix develop`:
+Run inside `nix develop`:
 
 ```sh
 elodin editor examples/falcon9/main.py
 ```
 
 No terrain switches are needed. The editor streams the selected dataset through
-Bevy-Cesium and keeps the existing atmosphere and cinematic lighting. The token
-stays outside the schematic and recording. See [Terrain](../../docs/public/content/reference/terrain.md)
+Bevy-Cesium and keeps the existing atmosphere and cinematic lighting.
+See [Terrain](../../docs/public/content/reference/terrain.md)
 for schematic configuration and height queries without the editor.
 The vehicle model, reference data, graphs and particle effects are retained.
 The landing target is the measured center of the LZ-1 concrete circle.
