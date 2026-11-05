@@ -6,11 +6,13 @@ pub fn annexb_nals(data: &[u8]) -> Vec<&[u8]> {
     let mut nals = Vec::new();
     let mut nal_start: Option<usize> = None;
     let mut i = 0;
-    while i + 3 < data.len() {
-        let start_code_len = if data[i] == 0
+    // `i + 2` so a 3-byte start code in the last three bytes still ends the
+    // previous NAL. A 4-byte code needs the extra length check below.
+    while i + 2 < data.len() {
+        let start_code_len = if i + 3 < data.len()
+            && data[i] == 0
             && data[i + 1] == 0
             && data[i + 2] == 0
-            && i + 3 < data.len()
             && data[i + 3] == 1
         {
             4
@@ -96,5 +98,11 @@ mod tests {
             expected.extend_from_slice(nal);
         }
         assert_eq!(sample, expected);
+    }
+
+    #[test]
+    fn annexb_splits_a_three_byte_start_code_at_the_end() {
+        let annexb = [0, 0, 0, 1, 0x65, 0x88, 0, 0, 1];
+        assert_eq!(annexb_nals(&annexb), vec![&[0x65, 0x88][..]]);
     }
 }
