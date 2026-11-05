@@ -2158,10 +2158,43 @@ fn test_reduce_any_axes() {
     );
 }
 
+/// An empty reduction returns the supplied init, including when it must be broadcast.
+#[test]
+fn test_reduce_empty_source_returns_init() {
+    let cases = [
+        ("f64", "add", "7.25", f64_buf(&[7.25])),
+        ("f32", "multiply", "-2.5", f32_buf(&[-2.5])),
+        ("i64", "maximum", "-17", i64_buf(&[-17])),
+        ("i32", "add", "7", i32_buf(&[7])),
+        ("ui64", "minimum", "17", u64_buf(&[17])),
+        ("ui32", "multiply", "19", u32_buf(&[19])),
+        ("i1", "and", "true", vec![1]),
+        ("i1", "or", "false", vec![0]),
+    ];
+    let shapes: &[(&[usize], &[usize], usize)] = &[
+        (&[0], &[0], 1),
+        (&[2, 0, 3], &[1], 6),
+        (&[0, 3, 0], &[0, 2], 3),
+    ];
+    for (ty, op, init, expected) in cases {
+        // The ABI reserves one element even for an empty input. Its contents must
+        // not participate in the reduction.
+        let dummy = vec![0x55; expected.len()];
+        for &(shape, dims, n_out) in shapes {
+            let mlir = reduce_mlir(shape, dims, op, init, ty);
+            let expected = expected.repeat(n_out);
+            for run in [run_mlir, run_mlir_mem] {
+                let out = run(&mlir, &[&dummy], &[expected.len()]);
+                assert_eq!(out[0], expected, "{ty} {op} over {shape:?}/{dims:?}");
+            }
+        }
+    }
+}
+
 /// `jnp.sum(x, axis=0)` for an `x` whose trailing axis is empty fails to compile instead of
 /// crashing.
 #[test]
-fn test_reduce_rejects_empty_tensor() {
+fn test_reduce_rejects_empty_result() {
     let mlir = reduce_mlir(&[2, 0], &[0], "add", "0", "i64");
     let module = cranelift_mlir::parser::parse_module(&mlir).unwrap();
     for force_pointer_abi_main in [false, true] {

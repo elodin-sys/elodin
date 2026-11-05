@@ -1489,6 +1489,7 @@ fn reduce(
         element_type: et,
     };
     let shape: Vec<usize> = src.ty.shape.iter().map(|&d| d as usize).collect();
+    let n_src: usize = shape.iter().product();
     let kept: Vec<usize> = (0..shape.len())
         .filter(|&a| !dimensions.contains(&(a as i64)))
         .collect();
@@ -1508,7 +1509,7 @@ fn reduce(
         };
         let init = read_f64(&init_tensor.bytes, init_tensor.ty.element_type, 0);
         let mut acc = vec![init; n_out];
-        for flat in 0..src.elem_count() {
+        for flat in 0..n_src {
             let o = out_index(flat);
             acc[o] = fold(acc[o], read_f64(&src.bytes, et, flat));
         }
@@ -1529,7 +1530,7 @@ fn reduce(
         };
         let init = read_int(&init_tensor.bytes, init_tensor.ty.element_type, 0);
         let mut acc = vec![init; n_out];
-        for flat in 0..src.elem_count() {
+        for flat in 0..n_src {
             let o = out_index(flat);
             acc[o] = fold(acc[o], read_int(&src.bytes, et, flat));
         }
