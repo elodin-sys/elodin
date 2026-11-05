@@ -3,7 +3,7 @@
 Typed elodin.ui translation of bdx.kdl.
 """
 
-# The static terrain uses the simulation's Mojave ECEF origin.
+# The static terrain and optional atlas share the simulation's Mojave ECEF origin.
 # Cinematic Earth remains exclusive to the render-server FPV camera.
 
 import elodin.ui as ui
