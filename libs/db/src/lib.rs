@@ -3299,7 +3299,7 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
     let mut table = LenPacket::table([0; 2], 2048 - 16);
     let mut all_components = HashMap::new();
     let mut sent_metadata: HashMap<ComponentId, ComponentMetadata> = HashMap::new();
-    let mut stream_components = HashMap::new();
+    let mut stream_layout = DBVisitor::default();
     let mut last_sent = None;
 
     loop {
@@ -3376,15 +3376,17 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
         let stream_changed = vtable_gen != current_vtable_gen || filter_gen != current_filter_gen;
         if stream_changed {
             let component_filter = filter.component_ids();
-            stream_components = match &component_filter {
-                Some(filter) => all_components
-                    .iter()
-                    .filter(|(component_id, _)| filter.contains(*component_id))
-                    .map(|(component_id, component)| (*component_id, component.clone()))
-                    .collect(),
-                None => all_components.clone(),
-            };
-            let vtable_msg = DBVisitor.vtable(&stream_components)?;
+            stream_layout = DBVisitor::snapshot(
+                all_components
+                    .values()
+                    .filter(|component| {
+                        component_filter
+                            .as_ref()
+                            .is_none_or(|filter| filter.contains(&component.component_id))
+                    })
+                    .cloned(),
+            );
+            let vtable_msg = stream_layout.vtable()?;
             let id: PacketId = fastrand::u16(..).to_le_bytes();
             table = LenPacket::table(id, 2048 - 16);
             {
@@ -3405,9 +3407,9 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
             last_sent
                 .is_none_or(|last: Timestamp| timestamp.0.saturating_sub(last.0) >= interval_us)
         });
-        if stream_changed || (due && !stream_components.is_empty()) {
+        if stream_changed || (due && !stream_layout.components.is_empty()) {
             table.clear();
-            DBVisitor.populate_table_latest(&stream_components, &mut table);
+            stream_layout.populate_table_latest(&mut table);
             table = send_with_timeout(&sink, table.with_request_id(req_id)).await?;
             last_sent = Some(timestamp);
         }
@@ -3423,7 +3425,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
 ) -> Result<(), Error> {
     let mut current_gen = u64::MAX;
     let mut table = LenPacket::table([0; 2], 2048 - 16);
-    let mut components = db.with_state(|state| state.components.clone());
+    let mut stream_layout = DBVisitor::default();
     let mut current_timestamp;
 
     // Lightweight profiling: accumulate timings and log every LOG_INTERVAL frames.
@@ -3453,18 +3455,19 @@ async fn handle_fixed_stream<A: AsyncWrite>(
 
         let vtable_gen = db.vtable_gen.latest();
         if vtable_gen != current_gen {
-            components = db.with_state(|state| state.components.clone());
+            stream_layout =
+                db.with_state(|state| DBVisitor::snapshot(state.components.values().cloned()));
             let id: PacketId = state.stream_id.to_le_bytes()[..2].try_into().unwrap();
             table = LenPacket::table(id, 2048 - 16);
-            let vtable = DBVisitor.vtable(&components)?;
+            let vtable = stream_layout.vtable()?;
             let msg = VTableMsg { id, vtable };
             send_with_timeout(&stream, msg.into_len_packet().with_request_id(req_id)).await?;
             current_gen = vtable_gen;
         }
         table.clear();
         let t0 = Instant::now();
-        if let Err(err) = DBVisitor
-            .populate_table(&components, &mut table, current_timestamp)
+        if let Err(err) = stream_layout
+            .populate_table(&mut table, current_timestamp)
             .await
         {
             warn!(?err, "failed to populate table");
@@ -3504,7 +3507,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
                 work_avg_ms = accum_work_us as f64 / n / 1000.0,
                 wall_avg_ms = accum_wall_us as f64 / n / 1000.0,
                 wall_fps,
-                components = components.len(),
+                components = stream_layout.components.len(),
                 "fixed_stream consumer stats"
             );
             accum_populate_us = 0;
@@ -3528,25 +3531,39 @@ async fn handle_fixed_stream<A: AsyncWrite>(
     }
 }
 
-pub(crate) struct DBVisitor;
+/// One advertised stream layout. Values stay live, but field membership and
+/// order cannot change between VTable publication and any table using it.
+#[derive(Default)]
+pub(crate) struct DBVisitor {
+    components: Vec<Component>,
+}
 
 impl DBVisitor {
-    fn vtable(&self, components: &HashMap<ComponentId, Component>) -> Result<VTable, Error> {
+    fn snapshot(components: impl IntoIterator<Item = Component>) -> Self {
+        Self {
+            components: components
+                .into_iter()
+                .filter(|component| !component.time_series.index().is_empty())
+                .collect(),
+        }
+    }
+
+    fn vtable(&self) -> Result<VTable, Error> {
         let mut fields = vec![];
         let mut offset = 0;
-        self.visit(components, |entity| {
-            if !entity.time_series.index().is_empty() {
-                offset += PrimType::U64.padding(offset);
-                let op = timestamp(builder::raw_table(offset as u16, 8), entity.as_vtable_op());
-                offset += size_of::<Timestamp>();
-                offset += entity.schema.prim_type.padding(offset);
-                let len = entity.schema.size();
-                let size = len as u16;
-                fields.push(raw_field(offset as u16, size, op));
-                offset += len;
-            }
-            Ok(())
-        })?;
+        for component in &self.components {
+            offset += PrimType::U64.padding(offset);
+            let op = timestamp(
+                builder::raw_table(offset as u16, 8),
+                component.as_vtable_op(),
+            );
+            offset += size_of::<Timestamp>();
+            offset += component.schema.prim_type.padding(offset);
+            let len = component.schema.size();
+            let size = len as u16;
+            fields.push(raw_field(offset as u16, size, op));
+            offset += len;
+        }
         Ok(vtable(fields))
     }
 
@@ -3558,17 +3575,11 @@ impl DBVisitor {
     /// starve the tick driver and produce choppy visual updates at ~6-10 FPS.
     async fn populate_table(
         &self,
-        components: &HashMap<ComponentId, Component>,
         table: &mut LenPacket,
         timestamp: Timestamp,
     ) -> Result<(), Error> {
         const YIELD_EVERY: usize = 8;
-        for (i, (_, component)) in components.iter().enumerate() {
-            // Skip components with no data – the VTable builder
-            // (vtable()) excludes them, so we must too.
-            if component.time_series.index().is_empty() {
-                continue;
-            }
+        for (i, component) in self.components.iter().enumerate() {
             let tick = component.time_series.start_timestamp().max(timestamp);
             match component.get_nearest(tick) {
                 Some((ts, buf)) => {
@@ -3577,8 +3588,8 @@ impl DBVisitor {
                     table.extend_from_slice(buf);
                 }
                 None => {
-                    // Component has data but not at this timestamp.
-                    // Write zeros to preserve VTable field offset alignment.
+                    // A selected component may have been truncated since the
+                    // layout was published. Its field must retain its offset.
                     table.push_aligned(Timestamp(0));
                     table.pad_for_type(component.schema.prim_type);
                     for _ in 0..component.schema.size() {
@@ -3598,17 +3609,8 @@ impl DBVisitor {
     /// Used by the `RealTimeBatched` stream handler which always wants the
     /// freshest value, unlike `populate_table` which looks up data at a
     /// specific playback timestamp.
-    fn populate_table_latest(
-        &self,
-        components: &HashMap<ComponentId, Component>,
-        table: &mut LenPacket,
-    ) {
-        for component in components.values() {
-            // Skip components with no data – the VTable builder
-            // (vtable()) excludes them, so we must too.
-            if component.time_series.index().is_empty() {
-                continue;
-            }
+    fn populate_table_latest(&self, table: &mut LenPacket) {
+        for component in &self.components {
             let elem_size = component.schema.size();
             let prim_type = component.schema.prim_type;
             match component.time_series.latest() {
@@ -3618,9 +3620,8 @@ impl DBVisitor {
                     table.extend_from_slice(buf);
                 }
                 None => {
-                    // Component has data in index but latest() returned
-                    // None (e.g. data AppendLog shorter than index).
-                    // Write zeros to preserve VTable field offset alignment.
+                    // Truncation or an incomplete latest sample must not
+                    // remove a field from the already-advertised layout.
                     table.push_aligned(Timestamp(0));
                     table.pad_for_type(prim_type);
                     for _ in 0..elem_size {
@@ -3629,16 +3630,6 @@ impl DBVisitor {
                 }
             }
         }
-    }
-
-    fn visit(
-        &self,
-        components: &HashMap<ComponentId, Component>,
-        mut f: impl for<'a> FnMut(&'a Component) -> Result<(), Error>,
-    ) -> Result<(), Error> {
-        components
-            .iter()
-            .try_for_each(|(_, component)| f(component))
     }
 }
 
@@ -3695,6 +3686,199 @@ impl AtomicTimestampExt for AtomicCell<Timestamp> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn stream_layout_component(
+        path: &Path,
+        name: &str,
+        prim_type: PrimType,
+        shape: &[usize],
+        value: Option<&[u8]>,
+    ) -> Component {
+        let component = Component::create(
+            path,
+            ComponentId::new(name),
+            name.into(),
+            ComponentSchema::new(prim_type, shape),
+            Timestamp(0),
+        )
+        .unwrap();
+        if let Some(value) = value {
+            component
+                .time_series
+                .push_buf(Timestamp(10), value)
+                .unwrap();
+        }
+        component
+    }
+
+    fn assert_stream_layout_packet(
+        vtable: &VTable,
+        packet: &LenPacket,
+        expected: &[(ComponentId, Timestamp, Vec<u8>)],
+    ) {
+        let body = &packet.as_packet().body;
+        let advertised_len = vtable
+            .fields
+            .iter()
+            .map(|field| field.offset.to_index() + usize::from(field.len))
+            .max()
+            .unwrap_or(0);
+        assert_eq!(
+            body.len(),
+            advertised_len,
+            "table must use its advertised field set"
+        );
+        let mut decoded = HashMap::new();
+        let mut sink = |id, value: ComponentView<'_>, timestamp| {
+            assert!(
+                decoded
+                    .insert(id, (timestamp, value.as_bytes().to_vec()))
+                    .is_none()
+            );
+        };
+        vtable.apply(body, &mut sink).unwrap().unwrap();
+        assert_eq!(decoded.len(), expected.len());
+        for (id, timestamp, value) in expected {
+            assert_eq!(decoded.get(id), Some(&(Some(*timestamp), value.clone())));
+        }
+    }
+
+    #[stellarator::test]
+    async fn stream_layout_first_write_cannot_shift_an_advertised_epoch() {
+        for latest in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let late = stream_layout_component(dir.path(), "late", PrimType::U8, &[], None);
+            let epoch = stream_layout_component(
+                dir.path(),
+                "epoch",
+                PrimType::U32,
+                &[],
+                Some(&1_u32.to_le_bytes()),
+            );
+            let wide = stream_layout_component(
+                dir.path(),
+                "wide",
+                PrimType::F64,
+                &[],
+                Some(&1.5_f64.to_le_bytes()),
+            );
+            // Explicit order makes the formerly empty field precede the known
+            // epoch: no randomized HashMap order or stress scheduling is needed.
+            let components = [late.clone(), epoch.clone(), wide.clone()];
+            let layout = DBVisitor::snapshot(components.clone());
+            let advertised = layout.vtable().unwrap();
+            assert_eq!(advertised.fields.len(), 2);
+            // The exact interleaving at the stream's VTable-send await: first
+            // data arrives after the layout was built, before population.
+            late.time_series.push_buf(Timestamp(20), &[2]).unwrap();
+            let mut packet = LenPacket::table([1, 0], 128);
+            if latest {
+                layout.populate_table_latest(&mut packet);
+            } else {
+                layout
+                    .populate_table(&mut packet, Timestamp(20))
+                    .await
+                    .unwrap();
+            }
+            let expected = vec![
+                (
+                    epoch.component_id,
+                    Timestamp(10),
+                    1_u32.to_le_bytes().to_vec(),
+                ),
+                (
+                    wide.component_id,
+                    Timestamp(10),
+                    1.5_f64.to_le_bytes().to_vec(),
+                ),
+            ];
+            assert_stream_layout_packet(&advertised, &packet, &expected);
+            // The next schema-generation rebuild adds the first-written field
+            // and its offsets together; excluding it is not permanent.
+            let rebuilt = DBVisitor::snapshot(components);
+            let advertised = rebuilt.vtable().unwrap();
+            packet.clear();
+            if latest {
+                rebuilt.populate_table_latest(&mut packet);
+            } else {
+                rebuilt
+                    .populate_table(&mut packet, Timestamp(20))
+                    .await
+                    .unwrap();
+            }
+            let mut expected = expected;
+            expected.push((late.component_id, Timestamp(20), vec![2]));
+            assert_stream_layout_packet(&advertised, &packet, &expected);
+        }
+    }
+
+    #[stellarator::test]
+    async fn stream_layout_truncation_keeps_zero_slots_and_mixed_alignment() {
+        for latest in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let values = [
+                vec![7],
+                0x1234_u16.to_le_bytes().to_vec(),
+                0x12345678_u32.to_le_bytes().to_vec(),
+                0x123456789abcdef0_u64.to_le_bytes().to_vec(),
+                vec![3, 4, 5],
+                42.5_f64.to_le_bytes().to_vec(),
+            ];
+            let types = [
+                PrimType::U8,
+                PrimType::U16,
+                PrimType::U32,
+                PrimType::U64,
+                PrimType::U8,
+                PrimType::F64,
+            ];
+            let components: Vec<_> = types
+                .into_iter()
+                .enumerate()
+                .map(|(index, prim_type)| {
+                    let shape: &[usize] = if index == 4 { &[3] } else { &[] };
+                    stream_layout_component(
+                        dir.path(),
+                        &format!("field{index}"),
+                        prim_type,
+                        shape,
+                        Some(&values[index]),
+                    )
+                })
+                .collect();
+            let layout = DBVisitor::snapshot(components.clone());
+            let advertised = layout.vtable().unwrap();
+            for index in [0, 2, 4] {
+                components[index].time_series.truncate();
+            }
+            let mut packet = LenPacket::table([2, 0], 256);
+            if latest {
+                layout.populate_table_latest(&mut packet);
+            } else {
+                layout
+                    .populate_table(&mut packet, Timestamp(20))
+                    .await
+                    .unwrap();
+            }
+            let expected: Vec<_> = components
+                .iter()
+                .enumerate()
+                .map(|(index, component)| {
+                    let empty = index % 2 == 0;
+                    (
+                        component.component_id,
+                        Timestamp(if empty { 0 } else { 10 }),
+                        if empty {
+                            vec![0; values[index].len()]
+                        } else {
+                            values[index].clone()
+                        },
+                    )
+                })
+                .collect();
+            assert_stream_layout_packet(&advertised, &packet, &expected);
+        }
+    }
 
     #[test]
     fn stream_interval_matches_microsecond_timestamps() {
