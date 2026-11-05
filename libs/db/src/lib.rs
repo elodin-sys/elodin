@@ -3307,7 +3307,13 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
         // from creation, so changes made while this pass sends still wake it.
         let changed = futures_lite::future::race(
             db.last_updated.wait_queue.wait(),
-            futures_lite::future::race(filter.changed.wait(), db.metadata_gen.wait_queue.wait()),
+            futures_lite::future::race(
+                filter.changed.wait(),
+                futures_lite::future::race(
+                    db.metadata_gen.wait_queue.wait(),
+                    db.vtable_gen.wait_queue.wait(),
+                ),
+            ),
         );
         let vtable_gen = db.vtable_gen.latest();
         let filter_gen = filter.generation();
@@ -3898,6 +3904,216 @@ mod tests {
                 })
                 .collect();
             assert_stream_layout_packet(&advertised, &packet, &expected);
+        }
+    }
+
+    #[cfg(feature = "axum")]
+    #[stellarator::test]
+    async fn direct_first_write_refreshes_advertised_stream() {
+        for http in [false, true] {
+            for timestamp_source in [false, true] {
+                let dir = tempfile::tempdir().unwrap();
+                let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                let address = listener.local_addr().unwrap();
+                let server = Server::from_listener(listener, dir.path().join("db")).unwrap();
+                let db = server.db.clone();
+                let name = "direct.first";
+                let component_id = ComponentId::new(name);
+                db.with_state_mut(|state| {
+                    state.insert_component_with_timestamp_source_flag(
+                        component_id,
+                        ComponentSchema::new(PrimType::F64, &[]),
+                        timestamp_source,
+                        &db.path,
+                    )
+                })
+                .unwrap();
+                stellarator::struc_con::stellar(move || server.run());
+                let mut client = impeller_stellar::Client::connect(address).await.unwrap();
+                let mut stream = client
+                    .stream(&Stream {
+                        behavior: StreamBehavior::RealTimeBatched,
+                        id: 91,
+                    })
+                    .await
+                    .unwrap();
+                futures_lite::future::race(
+                    async {
+                        loop {
+                            if let StreamReply::VTable(msg) = stream.next().await.unwrap() {
+                                assert!(msg.vtable.fields.is_empty());
+                                break;
+                            }
+                        }
+                    },
+                    async {
+                        stellarator::sleep(Duration::from_secs(3)).await;
+                        panic!("initial empty VTable was not published");
+                    },
+                )
+                .await;
+
+                let generation = db.vtable_gen.latest();
+                let last_updated = db.last_updated.latest();
+                let earliest = db.earliest_timestamp.latest();
+                if http {
+                    assert!(
+                        crate::axum::push_entity_table(
+                            ::axum::extract::Path(name.to_owned()),
+                            ::axum::extract::State(db.clone()),
+                            ::axum::Json(ComponentValue::zeros(&[], PrimType::U32)),
+                        )
+                        .await
+                        .is_err()
+                    );
+                } else {
+                    // Incomplete packets and reconnect dedup must not publish
+                    // a layout or move the clock without an appended sample.
+                    crate::follow::apply_follow_time_series(
+                        &db,
+                        component_id,
+                        &[Timestamp(100)],
+                        &[],
+                        0,
+                    )
+                    .unwrap();
+                    crate::follow::apply_follow_time_series(
+                        &db,
+                        component_id,
+                        &[Timestamp(100)],
+                        &42.5_f64.to_le_bytes(),
+                        1,
+                    )
+                    .unwrap();
+                }
+                assert_eq!(db.vtable_gen.latest(), generation);
+                assert_eq!(db.last_updated.latest(), last_updated);
+                assert_eq!(db.earliest_timestamp.latest(), earliest);
+                if http {
+                    crate::axum::push_entity_table(
+                        ::axum::extract::Path(name.to_owned()),
+                        ::axum::extract::State(db.clone()),
+                        ::axum::Json(ComponentValue::zeros(&[], PrimType::F64)),
+                    )
+                    .await
+                    .unwrap();
+                } else {
+                    crate::follow::apply_follow_time_series(
+                        &db,
+                        component_id,
+                        &[Timestamp(100)],
+                        &42.5_f64.to_le_bytes(),
+                        0,
+                    )
+                    .unwrap();
+                }
+                assert_eq!(db.vtable_gen.latest(), generation + 1);
+                let written_timestamp = db.with_state(|state| {
+                    *state.components[&component_id]
+                        .time_series
+                        .latest()
+                        .unwrap()
+                        .0
+                });
+                if timestamp_source {
+                    assert_eq!(db.last_updated.latest(), last_updated);
+                    assert_eq!(db.earliest_timestamp.latest(), earliest);
+                } else {
+                    assert_eq!(db.last_updated.latest(), written_timestamp);
+                    assert_eq!(
+                        db.earliest_timestamp.latest(),
+                        earliest.min(written_timestamp)
+                    );
+                }
+                futures_lite::future::race(
+                    async {
+                        let mut advertised = None;
+                        loop {
+                            match stream.next().await.unwrap() {
+                                StreamReply::VTable(msg) => {
+                                    assert_eq!(msg.vtable.fields.len(), 1);
+                                    advertised = Some(msg);
+                                }
+                                StreamReply::Table(table) if advertised.is_some() => {
+                                    let advertised = advertised.as_ref().unwrap();
+                                    assert_eq!(table.id, advertised.id);
+                                    let mut decoded = Vec::new();
+                                    advertised
+                                        .vtable
+                                        .apply(
+                                            &table.buf,
+                                            &mut |id, value: ComponentView<'_>, timestamp| {
+                                                decoded.push((
+                                                    id,
+                                                    timestamp,
+                                                    value.as_bytes().to_vec(),
+                                                ));
+                                            },
+                                        )
+                                        .unwrap()
+                                        .unwrap();
+                                    let value = if http { 0.0_f64 } else { 42.5_f64 };
+                                    assert_eq!(
+                                        decoded,
+                                        [(
+                                            component_id,
+                                            Some(written_timestamp),
+                                            value.to_le_bytes().to_vec()
+                                        )]
+                                    );
+                                    break;
+                                }
+                                _ => {}
+                            }
+                        }
+                    },
+                    async {
+                        stellarator::sleep(Duration::from_secs(3)).await;
+                        panic!("direct first write did not publish its layout and value");
+                    },
+                )
+                .await;
+                if http {
+                    crate::axum::push_entity_table(
+                        ::axum::extract::Path(name.to_owned()),
+                        ::axum::extract::State(db.clone()),
+                        ::axum::Json(ComponentValue::zeros(&[], PrimType::F64)),
+                    )
+                    .await
+                    .unwrap();
+                } else {
+                    crate::follow::apply_follow_time_series(
+                        &db,
+                        component_id,
+                        &[Timestamp(90)],
+                        &0.0_f64.to_le_bytes(),
+                        0,
+                    )
+                    .unwrap();
+                    if !timestamp_source {
+                        assert_eq!(db.earliest_timestamp.latest(), Timestamp(100));
+                    }
+                    // Only timestamp 200 has a complete value; 300 must not
+                    // advance the DB clock when its trailing bytes are absent.
+                    crate::follow::apply_follow_time_series(
+                        &db,
+                        component_id,
+                        &[Timestamp(200), Timestamp(300)],
+                        &1.0_f64.to_le_bytes(),
+                        0,
+                    )
+                    .unwrap();
+                    if !timestamp_source {
+                        assert_eq!(db.last_updated.latest(), Timestamp(200));
+                        assert_eq!(db.earliest_timestamp.latest(), Timestamp(100));
+                    }
+                }
+                assert_eq!(db.vtable_gen.latest(), generation + 1);
+                if timestamp_source {
+                    assert_eq!(db.last_updated.latest(), last_updated);
+                    assert_eq!(db.earliest_timestamp.latest(), earliest);
+                }
+            }
         }
     }
 
