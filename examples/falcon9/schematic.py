@@ -43,6 +43,7 @@ def build() -> ui.Schematic:
                     effects=True,
                     hdr=False,
                     cinematic=True,
+                    bloom=ui.bloom(preset="old_school", intensity=0.05),
                     pos="booster.visual_pos.translate(20, 0, 0, true).translate_world(46.740, -100.549, -144.705)",
                     look_at="booster.visual_pos.translate(20, 0, 0, true).translate_world(1.433, -8.661, 4.788)",
                     up="(0.1433, -0.8661, 0.4788)",
