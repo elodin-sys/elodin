@@ -46,8 +46,6 @@ pub struct Decoder {
     /// parameter sets in band: Safari rejects every `description` (avcC)
     /// configuration, while both Safari and Chrome decode Annex-B without one.
     parameter_sets: Option<(Vec<u8>, Vec<u8>)>,
-    /// Safari does not emit the last queued frame until `flush()`.
-    pub drain_with_flush: bool,
     inner: Rc<RefCell<Inner>>,
     /// Current output callback. JS owns every previous one: `VideoDecoder`
     /// retains it, and a queued output task retains it until that task runs.
@@ -95,7 +93,6 @@ impl Decoder {
             width: 0,
             height: 0,
             parameter_sets: None,
-            drain_with_flush: crate::is_safari(),
             inner,
             output_fn,
             _error: error,

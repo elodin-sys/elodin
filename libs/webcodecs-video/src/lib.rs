@@ -25,17 +25,6 @@ pub use error::{DomException, Error};
 
 #[cfg(target_arch = "wasm32")]
 mod platform {
-    /// Safari's WebKit build, not Chrome or a Chromium shell that also says Safari.
-    pub fn is_safari() -> bool {
-        let Some(window) = web_sys::window() else {
-            return false;
-        };
-        let Ok(agent) = window.navigator().user_agent() else {
-            return false;
-        };
-        agent.contains("Safari") && !agent.contains("Chrome") && !agent.contains("Chromium")
-    }
-
     #[allow(dead_code)]
     pub fn perf_now() -> f64 {
         web_sys::window()
@@ -47,4 +36,4 @@ mod platform {
 
 #[cfg(target_arch = "wasm32")]
 #[allow(unused_imports)]
-pub(crate) use platform::{is_safari, perf_now};
+pub(crate) use platform::perf_now;
