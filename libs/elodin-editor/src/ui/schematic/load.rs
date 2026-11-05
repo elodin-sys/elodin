@@ -1594,10 +1594,10 @@ impl LoadSchematicParams<'_, '_> {
                         crate::ui::video_stream::RawPixelFormat::Rgba8,
                     )),
                 });
-                let frame_cache = if sensor_config.is_some_and(|config| config.format == "h264") {
-                    crate::ui::video_stream::VideoFrameCache::default()
-                } else {
+                let frame_cache = if sensor_config.is_some_and(|config| config.format != "h264") {
                     crate::ui::video_stream::VideoFrameCache::for_raw()
+                } else {
+                    crate::ui::video_stream::VideoFrameCache::default()
                 };
 
                 let entity = self
@@ -2290,6 +2290,25 @@ mod tests {
         );
 
         loaded
+    }
+
+    #[test]
+    fn sensor_view_without_config_defaults_to_h264() {
+        let mut app = test_app();
+        let schematic =
+            Schematic::from_kdl(r#"tabs { sensor_view "rocket_ecef.ir_cam" }"#).unwrap();
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app.world_mut().query::<(
+            &crate::ui::video_stream::VideoStream,
+            &crate::ui::video_stream::VideoFrameCache,
+        )>();
+        let (stream, cache) = query
+            .iter(app.world())
+            .find(|(stream, _)| stream.msg_name == "rocket_ecef.ir_cam")
+            .unwrap();
+        assert!(stream.raw_dims.is_none());
+        assert!(cache.is_h264);
     }
 
     #[test]
