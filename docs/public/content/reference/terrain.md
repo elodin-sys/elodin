@@ -55,13 +55,13 @@ Prepare a grid from the selected aerial terrain or Photo 3D before running the s
 import jax.numpy as jnp
 from elodin.geodesy import geodetic_to_ecef
 
-landing = geodetic_to_ecef(
+location = geodetic_to_ecef(
     jnp.deg2rad(28.485738),
     jnp.deg2rad(-80.542948),
     0.0,
 )
 heights = terrain.heightmap(
-    landing, dimensions=(200.0, 200.0), spacing=10.0,
+    location, dimensions=(200.0, 200.0), spacing=10.0,
 )
 ```
 
