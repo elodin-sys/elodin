@@ -665,7 +665,6 @@ impl Plugin for EditorPlugin {
         app.add_plugins(FrustumPlugin)
             .add_plugins(FrustumIntersectionPlugin)
             .add_plugins(GizmoPlugin);
-        #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::thruster_particles::ThrusterParticlesPlugin);
         app.add_plugins(plugins::scene_environment::SceneEnvironmentPlugin);
         #[cfg(not(target_family = "wasm"))]
@@ -676,7 +675,6 @@ impl Plugin for EditorPlugin {
             plugins::simulation_startup::release_simulation
                 .run_if(resource_exists::<Messages<ui::schematic::DocumentLoaded>>),
         );
-        // Cinematic Earth follows the native Hanabi plugin registration.
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::cinematic_earth::earth_night_material::EarthNightMaterialPlugin);
         #[cfg(not(target_family = "wasm"))]

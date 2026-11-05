@@ -96,6 +96,8 @@ nodit.rev = "cd284cd0f16d475786dae8629cebda4e14177ee1"
 heapless.version = "0.8"
 arc-swap = "1.7.1"
 
+bevy_hanabi = { version = "0.20.0-dev", default-features = false, features = ["3d"] }
+
 # helpers
 itertools = "0.12.1"
 hex = "0.4.3"
@@ -127,6 +129,8 @@ thiserror.version = "2"
 miette.version = "7.2"
 
 [target.'cfg(target_family = "wasm")'.dependencies]
+# Hanabi needs compute shaders, so the wasm editor uses WebGPU.
+bevy = { workspace = true, features = ["webgpu"] }
 impeller-bevy.path = "../../libs/impeller/bevy"
 impeller-bevy.default-features = false
 cranelift-mlir.path = "../cranelift-mlir"
@@ -166,7 +170,6 @@ reqwest = { version = "0.12", features = [
   "gzip",
   "blocking",
 ], default-features = false }
-bevy_hanabi = { version = "0.20.0-dev", default-features = false, features = ["3d"] }
 bevy_ai_skybox.path = "../bevy_ai_skybox"
 tokio = { version = "1.34", features = ["rt-multi-thread", "net"] }
 # os

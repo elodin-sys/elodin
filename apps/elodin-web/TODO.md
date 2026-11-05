@@ -22,17 +22,15 @@ wired up. Unchecked items are compiled out, stubbed, or still native-only.
 - [x] `web_time` instead of `std::time::Instant`
 - [x] Malformed `WorldPos` samples are ignored instead of panicking
 - [x] H.264 video decode via `webcodecs-video` (`attach_webcodecs` / `drive_webcodecs` in `video_stream.rs`)
+- [x] Thruster particles (Hanabi). The wasm editor requests the WebGPU backend so compute shaders are available
 
 ## Not finished
-
 
 - [ ] Cesium Native terrain streaming (native platforms only)
 - [ ] Skyboxes: cache, generation, schematic activation, and DB asset sync (`wasm_cut.rs` stubs)
 - [ ] Skybox status overlay
-- [ ] Lua action tiles (the button renders; `LuaActor::spawn` does not connect)
 - [ ] Sensor-camera GPU readback
 - [ ] Unix `sensor_h264`
-- [ ] Thruster particles
 - [ ] Cinematic Earth and the night-side material
 - [ ] Screenshots and the FPS log
 - [ ] Hardware stats, system-information diagnostics, and the status bar
@@ -42,5 +40,8 @@ wired up. Unchecked items are compiled out, stubbed, or still native-only.
 - [ ] Local display-kernel files (WASM fetches kernels over HTTP only)
 - [ ] Interpreter coverage for every StableHLO op (`erfinv`, batched `dot_general`, and other ops still return errors)
 - [ ] `wasm-opt` (`data-wasm-opt="0"` in `index.html`)
-- [ ] Rust symbol names in browser stack traces (`strip = "symbols"` replaces them with `wasm-function[N]`)
 - [ ] Click-through check of the ViewCube fix in a running browser session
+
+## Not planned
+- [ ] Lua action tiles (the button renders; `LuaActor::spawn` does not connect)
+- [ ] Rust symbol names in browser stack traces (`strip = "symbols"` replaces them with `wasm-function[N]`)
