@@ -52,7 +52,12 @@ test_steps = [
             nix_step(
                 emoji=":crab:",
                 label="cargo test elodin-db",
-                command="cargo test --release -p elodin-db --lib --bins -- --test-threads=1 -Z unstable-options --format json --report-time | buildkite-test-collector",
+                command="CARGO_BUILD_JOBS=1 RAYON_NUM_THREADS=1 cargo test --release -p elodin-db --lib --bins --test embedded_connection -- --test-threads=1 -Z unstable-options --format json --report-time | buildkite-test-collector",
+            ),
+            nix_step(
+                emoji=":crab:",
+                label="cargo test stellarator poll",
+                command="cargo test --release -p stellarator --features poll -- -Z unstable-options --format json --report-time | buildkite-test-collector",
             ),
             nix_step(
                 emoji=":crab:",

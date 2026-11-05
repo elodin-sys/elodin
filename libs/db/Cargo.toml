@@ -212,7 +212,7 @@ path = "tests_query/rtsp_ingest_export.rs"
 goldie = "0.7"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 tempfile = "3"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "net", "io-util"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "net", "io-util", "sync"] }
 tokio-tungstenite = "0.29"
 futures-util = "0.3"
 zerocopy.version = "0.8.2"

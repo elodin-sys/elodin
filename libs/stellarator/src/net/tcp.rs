@@ -22,7 +22,7 @@ impl TcpStream {
         )?;
         #[cfg(not(target_os = "windows"))]
         socket.set_cloexec(true)?;
-        socket.set_nonblocking(!cfg!(target_os = "linux"))?;
+        socket.set_nonblocking(cfg!(any(not(target_os = "linux"), feature = "poll")))?;
         let addr: SockAddr = addr.into();
         Completion::run(ops::Connect::new(&socket, Box::new(addr.into()))?).await?;
         // Stellarator TCP streams carry latency-sensitive telemetry and control
@@ -88,7 +88,7 @@ impl TcpListener {
         socket.set_reuse_address(true)?;
         socket.bind(&addr.into())?;
         socket.listen(1024)?;
-        socket.set_nonblocking(!cfg!(target_os = "linux"))?;
+        socket.set_nonblocking(cfg!(any(not(target_os = "linux"), feature = "poll")))?;
 
         Ok(TcpListener { socket })
     }
@@ -98,6 +98,7 @@ impl TcpListener {
         let socket = Completion::run(op).await.0?;
         #[cfg(not(target_os = "windows"))]
         socket.set_cloexec(true)?;
+        socket.set_nonblocking(cfg!(any(not(target_os = "linux"), feature = "poll")))?;
         // Apply the same low-latency policy to the server side of the stream.
         socket.set_nodelay(true)?;
         Ok(TcpStream { socket })
