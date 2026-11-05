@@ -432,7 +432,7 @@
             <ul>
                 
                 <li>
-                    <a href="https://docs.elodin.systems/preview/pr-948/reference/terrain/#location-and-scenery">Location and scenery</a>
+                    <a href="https://docs.elodin.systems/preview/pr-948/reference/terrain/#scenery">Scenery</a>
                     
                 </li>
                 
@@ -446,6 +446,30 @@
                     
                 </li>
                 
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-948/reference/terrain/#api-reference">API Reference</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-948/reference/terrain/#class-elodin-terrain">class elodin.Terrain</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-948/reference/terrain/#class-elodin-terrainheightmap">class elodin.TerrainHeightmap</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-948/reference/terrain/#class-elodin-terrainsample">class elodin.TerrainSample</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
             </ul>
         </nav>
     </div>
@@ -453,9 +477,17 @@
  
               <main class="docs-content col-lg-11 col-xxl-10">
                   <h1>Terrain</h1>
-                   <p>Define the location and terrain in your Python schematic. The same terrain
-provides scenery for the editor and heights for your simulation.</p>
-<h2 id="location-and-scenery">Location and scenery</h2>
+                   <p>Choose the scenery and location in your Python schematic. Prepare ground heights
+from the same terrain when your simulation needs them.</p>
+<h2 id="scenery">Scenery</h2>
+<table><thead><tr><th>Mode</th><th><code>terrain</code></th><th>Display</th></tr></thead><tbody>
+<tr><td>Legacy</td><td><code>None</code></td><td>The existing GLB or world mesh defined in your schematic.</td></tr>
+<tr><td>Aerial</td><td><code>el.Terrain.aerial()</code></td><td>Streamed terrain with aerial images.</td></tr>
+<tr><td>Photo 3D</td><td><code>el.Terrain()</code></td><td>Streamed photogrammetry, including buildings where covered.</td></tr>
+</tbody></table>
+<p>The editor streams aerial terrain and Photo 3D through Bevy-Cesium.
+Local models are loaded by the schematic, as in
+<a rel="external" href="https://github.com/elodin-sys/elodin/blob/main/examples/rc-jet/terrain_schematic.py">RC-jet's Mojave terrain</a>.</p>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> elodin</span><span style="color: light-dark(#859900, #859900);"> as</span><span> el</span></span>
 <span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> elodin</span><span>.</span><span>ui</span><span style="color: light-dark(#859900, #859900);"> as</span><span> ui</span></span>
 <span class="giallo-l"></span>
@@ -475,10 +507,8 @@ provides scenery for the editor and heights for your simulation.</p>
 <span class="giallo-l"><span>world</span><span>.</span><span>schematic</span><span>(</span><span>scene</span><span>)</span></span></code></pre>
 <p>Latitude and longitude are in degrees; altitude is in meters above the WGS84
 ellipsoid.</p>
-<p><code>Terrain()</code> selects Google Photorealistic 3D Tiles, streamed through Bevy-Cesium.
-Omit <code>terrain=terrain</code> to use the location on its own.</p>
 <h2 id="terrain-heights">Terrain Heights</h2>
-<p>Prepare a grid before running the simulation, using the same <code>terrain</code> object:</p>
+<p>Prepare a grid from the selected aerial terrain or Photo 3D before running the simulation:</p>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> jax</span><span>.</span><span>numpy</span><span style="color: light-dark(#859900, #859900);"> as</span><span> jnp</span></span>
 <span class="giallo-l"><span style="color: light-dark(#859900, #859900);">from</span><span> elodin</span><span>.</span><span>geodesy</span><span style="color: light-dark(#859900, #859900);"> import</span><span> geodetic_to_ecef</span></span>
 <span class="giallo-l"></span>
@@ -498,11 +528,82 @@ runs. Use <code>offline=True</code> to read from the cache. No editor is needed.
 <p>Use <code>sample.height_m</code> and <code>sample.normal_ecef</code> in your ground-contact model,
 after checking <code>sample.valid</code>. Heights are above the WGS84 ellipsoid; normals
 are in ECEF. Queries work inside JAX systems.</p>
+<p>See <a href="https://docs.elodin.systems/preview/pr-948/reference/terrain/#api-reference">API Reference</a> for parameters and return values.</p>
 <h2 id="run-falcon-9">Run Falcon 9</h2>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#2AA198, #2AA198);"> examples/falcon9/main.py</span></span></code></pre>
 <p>Falcon 9 flies from LC-39A to Landing Zone 1 at Cape Canaveral. See its
 <a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/falcon9">README</a>
 for the simulation and reference flights.</p>
+<p>In <code>examples/falcon9/constants.py</code>, set <code>TERRAIN_MODE</code> to <code>"legacy"</code>, <code>"aerial"</code>
+or <code>"photo3d"</code>. This selects both the scenery and the matching launch and landing
+ground heights. <code>"legacy"</code> uses Falcon 9's original globe. Photo 3D is the default.</p>
+<h2 id="api-reference">API Reference</h2>
+<h3 id="class-elodin-terrain"><em>class</em> <code>elodin.Terrain</code></h3>
+<p><code>Terrain(asset_id=2275207)</code></p>
+<table><thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>asset_id</code></td><td><code>2275207</code></td><td>Positive ion asset ID. The default is Google Photorealistic 3D Tiles; <code>1</code> selects Cesium World Terrain with Bing aerial imagery in the editor.</td></tr>
+</tbody></table>
+<p>Constructing a <code>Terrain</code> performs no network or disk access.</p>
+<ul>
+<li>
+<p><code>Terrain.aerial()</code> → <code>Terrain</code></p>
+<p>Select Cesium World Terrain with aerial imagery. Heights come from Cesium
+World Terrain; imagery does not change the surface used for height queries.</p>
+</li>
+<li>
+<p><code>heightmap(center_ecef, dimensions, spacing, *, cache_dir=None, offline=False, timeout=600)</code> → <code>TerrainHeightmap</code></p>
+<p>Prepare a grid from this terrain before running the simulation.</p>
+<table><thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>center_ecef</code></td><td>Required</td><td>Three-element WGS84 ECEF position, in meters.</td></tr>
+<tr><td><code>dimensions</code></td><td>Required</td><td><code>(east_west, north_south)</code> coverage in meters; both lengths must be positive.</td></tr>
+<tr><td><code>spacing</code></td><td>Required</td><td>Maximum sample spacing in meters; must be positive.</td></tr>
+<tr><td><code>cache_dir</code></td><td><code>None</code></td><td>Directory for saved height grids. Defaults to <code>$XDG_CACHE_HOME/elodin/terrain-heights</code>, or <code>~/.cache/elodin/terrain-heights</code>. Accepts a string or <code>Path</code>.</td></tr>
+<tr><td><code>offline</code></td><td><code>False</code></td><td>Require an existing cached grid; raise <code>FileNotFoundError</code> on a cache miss.</td></tr>
+<tr><td><code>timeout</code></td><td><code>600</code></td><td>Integer seconds per native batch, from <code>1</code> to <code>3600</code>. Failed preparation is retried up to twice.</td></tr>
+</tbody></table>
+<p>The grid includes both edges and contains at least two samples along each
+axis. Coverage must not cross a pole or the antimeridian. Grids are limited
+to 25 million samples. An existing cached grid is reused; preparation needs
+the Elodin CLI on a cache miss. The editor does not need to be open.</p>
+<p><code>elodin.terrain_heightmap(center_ecef, dimensions, spacing, *, asset_id=2275207, cache_dir=None, offline=False, timeout=600)</code>
+provides the same operation with an explicit asset ID.</p>
+</li>
+</ul>
+<h3 id="class-elodin-terrainheightmap"><em>class</em> <code>elodin.TerrainHeightmap</code></h3>
+<ul>
+<li>
+<p><code>TerrainHeightmap.load(path)</code> → <code>TerrainHeightmap</code></p>
+<p>Load a saved JSON grid without network access. <code>path</code> accepts a string or <code>Path</code>.</p>
+</li>
+<li>
+<p><code>TerrainHeightmap(data)</code> → <code>TerrainHeightmap</code></p>
+<p>Construct from a decoded grid dictionary. Required fields are <code>version=1</code>,
+<code>ellipsoid="WGS84"</code>, <code>asset_id</code>, <code>bounds_degrees=[west, south, east, north]</code>,
+<code>rows</code>, <code>columns</code>, and <code>heights_m</code> in row-major order from south to north.
+Heights must be finite, with <code>rows * columns</code> values.</p>
+</li>
+<li>
+<p><code>sample(position_ecef)</code> → <code>TerrainSample</code></p>
+<p>Query a three-element ECEF position in meters. Compatible with <code>jax.jit</code>
+and <code>jax.vmap</code>; performs no I/O.</p>
+</li>
+<li>
+<p><code>sample_geodetic(latitude, longitude)</code> → <code>TerrainSample</code></p>
+<p>Query geodetic latitude and longitude in radians.</p>
+</li>
+</ul>
+<p>Queries interpolate heights bilinearly. Outside coverage, values are clamped
+to the grid boundary and <code>valid</code> is false. Invalid input positions also return
+<code>valid=False</code>; check it before using the height or normal.</p>
+<p>Prepared and loaded grids expose <code>path</code> (absolute file path) and <code>sha256</code> (file
+checksum). <code>asset_id</code> identifies the dataset; <code>bounds</code> contains west, south,
+east and north limits in degrees; <code>heights</code> is the two-dimensional JAX height array.</p>
+<h3 id="class-elodin-terrainsample"><em>class</em> <code>elodin.TerrainSample</code></h3>
+<table><thead><tr><th>Field</th><th>Description</th></tr></thead><tbody>
+<tr><td><code>height_m</code></td><td>Surface altitude in meters above the WGS84 ellipsoid.</td></tr>
+<tr><td><code>normal_ecef</code></td><td>Outward unit surface normal in ECEF coordinates.</td></tr>
+<tr><td><code>valid</code></td><td>Whether the input position is valid and inside the grid coverage.</td></tr>
+</tbody></table>
 
                   
 <div class="footer-line-padding"></div>
