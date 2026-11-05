@@ -65,3 +65,6 @@ replace_with.optional = true
 # integrations
 hifitime.version = "4.0"
 hifitime.optional = true
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+web-time = "1.1.0"

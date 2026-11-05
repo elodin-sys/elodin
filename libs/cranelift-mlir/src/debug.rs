@@ -27,9 +27,16 @@ pub fn dir() -> Option<&'static PathBuf> {
     static CACHE: OnceLock<Option<PathBuf>> = OnceLock::new();
     CACHE
         .get_or_init(|| {
-            std::env::var("ELODIN_CRANELIFT_DEBUG_DIR")
-                .ok()
-                .map(PathBuf::from)
+            #[cfg(not(target_family = "wasm"))]
+            {
+                std::env::var("ELODIN_CRANELIFT_DEBUG_DIR")
+                    .ok()
+                    .map(PathBuf::from)
+            }
+            #[cfg(target_family = "wasm")]
+            {
+                None
+            }
         })
         .as_ref()
 }

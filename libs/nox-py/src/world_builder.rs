@@ -214,7 +214,7 @@ impl WorldBuilder {
                 "nice",
                 vec![
                     "-n".to_string(),
-                    "19".to_string(),
+                    std::env::var("ELODIN_RENDER_SERVER_NICE").unwrap_or_else(|_| "19".to_string()),
                     "elodin".to_string(),
                     "render-server".to_string(),
                     "--addr".to_string(),
@@ -1175,17 +1175,26 @@ impl WorldBuilder {
                         optimize,
                         db_path.clone(),
                         backend,
+                        start_timestamp,
                     )?;
                     exec.exec.profiler_mut().detailed_timing = enable_detail;
                     exec.run(py, ticks, true, None)?;
                     let profile = exec.profile();
                     let tpt = profile.get("ticks_per_telemetry").copied().unwrap_or(1.0) as u64;
                     println!(
-                        "= tick time:          {:.3} ms (batch of {} ticks)",
-                        profile["tick"], tpt
+                        "= tick time:          {:.3} ms (median {:.3} ms, batch of {} ticks)",
+                        profile["tick"], profile["tick_median"], tpt
+                    );
+                    println!(
+                        "warm-up:              {:.3} ms (first batch)",
+                        profile["warmup"]
                     );
                     println!("build time:           {:.3} ms", profile["build"]);
                     println!("real_time_factor:     {:.3}", profile["real_time_factor"]);
+                    println!(
+                        "real_time_factor_median: {:.3}",
+                        profile["real_time_factor_median"]
+                    );
                     if enable_detail {
                         println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
                         println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
@@ -1693,16 +1702,10 @@ impl WorldBuilder {
                         simulation_source_entrypoint.as_deref().map(Path::new),
                     )
                     .map_err(Error::DB)?;
-                    crate::impeller_server::init_db(
-                        &db,
-                        compiled_exec.world_mut(),
-                        impeller::types::Timestamp::now(),
-                    )?;
+                    let start = start_timestamp.map_or_else(Timestamp::now, Timestamp);
+                    crate::impeller_server::init_db(&db, compiled_exec.world_mut(), start)?;
 
-                    let mut exec_with_db = PyExec {
-                        exec: compiled_exec,
-                        db: Box::new(db),
-                    };
+                    let mut exec_with_db = PyExec::new(compiled_exec, db, start);
                     exec_with_db.exec.profiler_mut().detailed_timing = true;
                     exec_with_db.run(py, ticks, true, None)?;
                     let profile = exec_with_db.profile();
@@ -1710,8 +1713,12 @@ impl WorldBuilder {
                     let tpt = profile.get("ticks_per_telemetry").copied().unwrap_or(1.0) as u64;
                     println!("\n[Runtime Metrics]");
                     println!(
-                        "tick time:            {:.3} ms (batch of {} ticks)",
-                        profile["tick"], tpt
+                        "tick time:            {:.3} ms (median {:.3} ms, batch of {} ticks)",
+                        profile["tick"], profile["tick_median"], tpt
+                    );
+                    println!(
+                        "warm-up:              {:.3} ms (first batch)",
+                        profile["warmup"]
                     );
                     println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
                     println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
@@ -1724,6 +1731,10 @@ impl WorldBuilder {
                     println!("d2h_download time:    {:.3} ms", profile["d2h_download"]);
                     println!("build time:           {:.3} ms", profile["build"]);
                     println!("real_time_factor:     {:.3}", profile["real_time_factor"]);
+                    println!(
+                        "real_time_factor_median: {:.3}",
+                        profile["real_time_factor_median"]
+                    );
 
                     Ok(None)
                 }
@@ -1753,6 +1764,7 @@ impl WorldBuilder {
         optimize = false,
         db_path = None,
         backend = "cranelift",
+        start_timestamp = None,
     ))]
     pub fn build(
         &mut self,
@@ -1766,6 +1778,7 @@ impl WorldBuilder {
         #[allow(unused_variables)] optimize: bool,
         db_path: Option<String>,
         backend: &str,
+        start_timestamp: Option<i64>,
     ) -> Result<PyExec, Error> {
         let mut exec = self.build_with_backend(
             py,
@@ -1786,11 +1799,9 @@ impl WorldBuilder {
         // `$ELODIN_ASSETS` / cwd like before.
         crate::impeller_server::prime_schematic_assets(&db, exec.world_mut(), None)
             .map_err(Error::DB)?;
-        crate::impeller_server::init_db(&db, exec.world_mut(), Timestamp::now())?;
-        Ok(PyExec {
-            exec,
-            db: Box::new(db),
-        })
+        let start = start_timestamp.map_or_else(Timestamp::now, Timestamp);
+        crate::impeller_server::init_db(&db, exec.world_mut(), start)?;
+        Ok(PyExec::new(exec, db, start))
     }
 
     #[allow(clippy::too_many_arguments)]

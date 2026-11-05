@@ -84,6 +84,41 @@ which `main.py` loads at startup.
 python examples/voyager/main.py run
 ```
 
-Chapter 2 (`python examples/voyager/chapter_2.py run`) subtracts each
-planet's acceleration of the Sun. Same kernels, masses, RK4, and
-timestep. It does not reproduce the gravity assists.
+The probes are integrated with `el.Integrator.Rk78` in one-hour steps.
+
+
+## Chapter 1
+
+`chapter1.py` runs Voyager 1 from Feb 22 to Feb 28, 1979 using
+just the Sun and Jupiter's gravity. It starts from a SPICE state and
+compares the result with the SPICE trajectory.
+
+From `examples/voyager`:
+
+```bash
+bash download_spice_data.sh
+python chapter1.py run
+```
+
+Voyager is integrated with `el.Integrator.Rk78`, an eighth-order
+Runge-Kutta method, in one-hour steps. Each step's 13 stages evaluate
+gravity at different times, so Jupiter's position is interpolated to
+each stage's time (`el.StageTime`) with a cubic through its SPICE
+positions and velocities at the start and end of the step. The
+integration error over the six days is about 2 mm; interpolating
+Jupiter linearly would cost about 6.5 m, and holding it at the midpoint
+of each step about 650 m.
+
+## Chapter 2
+
+`chapter2.py` uses the same dates and SPICE data as Chapter 1.
+It also accounts for Jupiter pulling on the Sun.
+
+From `examples/voyager`:
+
+```bash
+python chapter2.py run
+```
+
+The remaining error against SPICE, about 1 km, comes from the model
+(only the Sun and Jupiter), not the integration.

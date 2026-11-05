@@ -26,7 +26,7 @@ from elodin.db.v1 import (
 from grpc_health.v1 import health_pb2, health_pb2_grpc
 from grpc_reflection.v1alpha import reflection_pb2, reflection_pb2_grpc
 
-LIVE_BUDGET_S = 90.0
+LIVE_BUDGET_S = 240.0
 
 
 def live_timeout(deadline):

@@ -14,6 +14,12 @@ struct LineUniform {
 
 @group(1) @binding(0) var<uniform> line_uniform : LineUniform;
 
+#ifdef LINE_VERTEX_ATTRIBUTES
+struct VertexInput {
+    @builtin(vertex_index) vertex_index : u32,
+    @location(0) point : vec2<f32>,
+};
+#else
 @group(2) @binding(0) var<storage> x_values : array<f32>;
 @group(2) @binding(1) var<storage> y_values : array<f32>;
 @group(2) @binding(2) var<storage> index_buffer : array<u32>;
@@ -25,6 +31,7 @@ struct VertexInput {
     @builtin(vertex_index) vertex_index : u32,
                                           @builtin(instance_index) instance_index : u32,
 };
+#endif
 
 struct VertexOutput {
 
@@ -37,13 +44,27 @@ struct VertexOutput {
 
 @vertex fn vertex(vertex : VertexInput) -> VertexOutput
 {
+#ifdef LINE_VERTEX_ATTRIBUTES
+    var positions = array<vec2<f32>, 6>(
+        vec2(-1.0, -1.0),
+        vec2(-1.0, 1.),
+        vec2(1.0, -1.0),
+        vec2(1.0, -1.0),
+        vec2(-1.0, 1.),
+        vec2(1.0, 1.),
+    );
+#else
     var positions = array<vec2<f32>, 4>(vec2(-1.0, -1.0), // bottom-left
         vec2(-1.0, 1.), // top-left
         vec2(1.0, -1.0), // bottom-right
         vec2(1.0, 1.)); // top-right
+#endif
     let position = positions[vertex.vertex_index];
     let resolution = view.viewport.zw;
     let width = line_uniform.line_width / resolution;
+#ifdef LINE_VERTEX_ATTRIBUTES
+    let pos = vertex.point;
+#else
     let index = index_buffer[vertex.instance_index];
     if index == STRIP_SEPARATOR_INDEX {
         return VertexOutput(
@@ -58,6 +79,7 @@ struct VertexOutput {
     let data = y_values[index];
 
     let pos = vec2(time, data);
+#endif
     let clip = (view.clip_from_view * vec4(pos, 0.0, 1.0)).xy;
     let point = position * width * 3.0 + clip;
     let clip_position = vec4(point, 0, 1.0);

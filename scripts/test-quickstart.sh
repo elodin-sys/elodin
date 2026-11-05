@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Smoke-test `elodin monte-carlo quickstart` end-to-end (Buildkite step
-# :sparkles: monte-carlo quickstart).
+# :rocket: monte-carlo apollo + quickstart).
 #
 # Scaffolds a campaign from the lightweight examples/monte-carlo sim (declares
 # params, pure-Python fallback controller), then RUNS the generated artifacts
@@ -55,8 +55,11 @@ sed -i.bak 's/^n_samples = .*/n_samples = 2/' "$CAMPAIGN_DIR/spec.toml"
 rm -f "$CAMPAIGN_DIR/spec.toml.bak"
 export ELODIN_MONTE_CARLO_CONTROLLER=0
 export ELODIN_MONTE_CARLO_GRID_SIZE="${ELODIN_MONTE_CARLO_GRID_SIZE:-1024}"
+# CI agents share a host, so a fixed db_port collides with other jobs.
+sed -i.bak 's/^db_port = .*/db_port = "auto"/' "$CAMPAIGN_DIR/campaign.toml"
+rm -f "$CAMPAIGN_DIR/campaign.toml.bak"
 
-# 4. Run the generated artifacts unedited, serially (one run at a time).
+# 4. Run the generated artifacts, serially (one run at a time).
 "$ELODIN_BIN" monte-carlo run "$SIM" \
   --campaign "$CAMPAIGN_DIR/campaign.toml" \
   --spec "$CAMPAIGN_DIR/spec.toml" \

@@ -34,6 +34,8 @@
 "Parm" = "Parm"
 "Parms" = "Parms"
 "Shepperd" = "Shepperd"
+"precess" = "precess"
+"precesses" = "precesses"
 
 [files]
 extend-exclude = [

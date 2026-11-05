@@ -124,7 +124,8 @@ RcCommandTelemetry = ty.Annotated[
 ]
 
 # Stable numeric mission phase written by the truth guidance adapter:
-# 0 disabled, 1 ARM, 2 TAKEOFF, 3 HOVER, 4 ACQUIRE, 5 HOLD, 6 FAULT.
+# 0 disabled, 1 ARM, 2 TAKEOFF, 3 HOVER, 4 ACQUIRE, 5 HOLD, 6 FAULT,
+# 7 COMMIT, 8 SEARCH (reserved for vision), 9 FINISH.
 GuidanceModeTelemetry = ty.Annotated[
     jax.Array,
     el.Component(
@@ -132,7 +133,10 @@ GuidanceModeTelemetry = ty.Annotated[
         el.ComponentType(el.PrimitiveType.I64, (1,)),
         metadata={
             "element_names": "phase_code",
-            "enum_values": "0=DISABLED,1=ARM,2=TAKEOFF,3=HOVER,4=ACQUIRE,5=HOLD,6=FAULT",
+            "enum_values": (
+                "0=DISABLED,1=ARM,2=TAKEOFF,3=HOVER,4=ACQUIRE,5=HOLD,6=FAULT,"
+                "7=COMMIT,8=SEARCH,9=FINISH"
+            ),
             "priority": 203,
             "external_control": "true",
         },

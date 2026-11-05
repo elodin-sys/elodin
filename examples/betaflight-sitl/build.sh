@@ -32,6 +32,10 @@ SITL_RATE_HZ="${SITL_RATE_HZ:-8000}"
 RUN_LOOP_DELAY_US="${RUN_LOOP_DELAY_US:-0}"
 BETAFLIGHT_OPTIONS="ENABLE_SIMULATOR_GYROPID_SYNC=1 VIRTUAL_GYRO_SAMPLE_RATE_HZ=$SITL_RATE_HZ RUN_LOOP_DELAY_US=$RUN_LOOP_DELAY_US"
 
+# The dev shell's -isystem flags push gcc's COLLECT_GCC_OPTIONS past Linux's
+# 128 KiB per-string limit at link time; SITL needs none of them.
+unset NIX_CFLAGS_COMPILE
+
 # Check if betaflight submodule is cloned (directory may exist as empty gitlink before update)
 if [ ! -f "$BETAFLIGHT_DIR/Makefile" ]; then
     echo "Error: Betaflight submodule not initialized at $BETAFLIGHT_DIR"

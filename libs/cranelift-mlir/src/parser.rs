@@ -1,4 +1,6 @@
+use std::cell::Cell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use winnow::ascii::{digit1, multispace0};
 use winnow::combinator::{alt, opt};
@@ -15,6 +17,14 @@ pub fn parse_module(input: &str) -> Result<Module, String> {
     match module_parser(&mut s) {
         Ok(mut m) => {
             attach_source_lines(&mut m, input);
+            for f in &m.functions {
+                if let Some(v) = f.duplicate_value_def() {
+                    return Err(format!(
+                        "internal error: @{}: value id {} is defined more than once",
+                        f.name, v.0
+                    ));
+                }
+            }
             Ok(m)
         }
         Err(_e) => {
@@ -97,7 +107,7 @@ fn func_def(input: &mut Stream<'_>) -> PResult<FuncDef> {
         ws(input)?;
     }
     let _ = '@'.parse_next(input)?;
-    let name = ident(input)?;
+    let name = symbol_name(input)?;
     let _ = '('.parse_next(input)?;
     ws(input)?;
 
@@ -211,9 +221,6 @@ fn parse_instruction(input: &mut Stream<'_>, ctx: &mut ValueCtx) -> PResult<Opti
             let _ = ':'.parse_next(input)?;
             let n = integer(input)?;
             result_names.push(vn.clone());
-            // Alias "name#0" to the same ValueId as "name" so both
-            // %name and %name#0 resolve to the first result.
-            ctx.alias(&format!("{}#0", vn), &vn);
             for i in 1..n {
                 result_names.push(format!("{}#{}", vn, i));
             }
@@ -741,7 +748,11 @@ fn parse_scalar_value(input: &mut Stream<'_>) -> PResult<ScalarValue> {
         let _ = "0x".parse_next(input)?;
         let hex: &str = take_while(1.., |c: char| c.is_ascii_hexdigit()).parse_next(input)?;
         let bits = u64::from_str_radix(hex, 16).unwrap();
-        return Ok(ScalarValue::F64(f64::from_bits(bits)));
+        // MLIR prints hex floats at their type's width.
+        return Ok(match hex.len() {
+            8 => ScalarValue::F32(f32::from_bits(bits as u32)),
+            _ => ScalarValue::F64(f64::from_bits(bits)),
+        });
     }
 
     let checkpoint = *input;
@@ -951,8 +962,15 @@ fn parse_dot_general_op(
     let _ = ','.parse_next(input)?;
     ws(input)?;
 
-    let rest = take_till(0.., '\n').parse_next(input)?;
+    let mut rest = take_till(0.., '\n').parse_next(input)?.to_string();
     let _ = opt('\n').parse_next(input)?;
+    // A wrapped op ends its line with `:` and prints the type on the next.
+    while rest.trim_end().ends_with(':') && !input.is_empty() {
+        rest.push(' ');
+        rest.push_str(take_till(0.., '\n').parse_next(input)?);
+        let _ = opt('\n').parse_next(input)?;
+    }
+    let rest = rest.as_str();
 
     let mut lhs_batch = Vec::new();
     let mut rhs_batch = Vec::new();
@@ -1087,9 +1105,12 @@ fn parse_reduce_op(
     }
 
     if let Some((indices, _init2)) = second_operand {
-        let has_lt = full_text.contains("LT,") || full_text.contains("LE,");
-        let has_gt = full_text.contains("GT,") || full_text.contains("GE,");
-        let is_min = !has_gt || has_lt;
+        // The first compare orders the values; a later LT breaks ties on the index.
+        let first_cmp = full_text
+            .split("stablehlo.compare")
+            .nth(1)
+            .unwrap_or_default();
+        let is_min = matches!(first_cmp.split_whitespace().next(), Some("LT," | "LE,"));
         let mut types = Vec::new();
         if let Some(arrow) = first_line.rfind("-> ") {
             let after = strip_outer_parens(first_line[arrow + 3..].trim());
@@ -1117,6 +1138,8 @@ fn parse_reduce_op(
 
     let op = if full_text.contains("stablehlo.add") {
         ReduceOp::Add
+    } else if full_text.contains("stablehlo.multiply") {
+        ReduceOp::Multiply
     } else if full_text.contains("stablehlo.minimum") {
         ReduceOp::Minimum
     } else if full_text.contains("stablehlo.maximum") {
@@ -1126,7 +1149,7 @@ fn parse_reduce_op(
     } else if full_text.contains("stablehlo.or") {
         ReduceOp::Or
     } else {
-        ReduceOp::Add
+        return Err(winnow::error::ContextError::new());
     };
 
     let ty = parse_final_type(first_line);
@@ -1319,6 +1342,8 @@ fn parse_gather_op(
 
     let offset_dims = extract_bracket_ints(rest, "offset_dims = [");
     let collapsed_slice_dims = extract_bracket_ints(rest, "collapsed_slice_dims = [");
+    let operand_batching_dims = extract_bracket_ints(rest, "operand_batching_dims = [");
+    let start_indices_batching_dims = extract_bracket_ints(rest, "start_indices_batching_dims = [");
     let start_index_map = extract_bracket_ints(rest, "start_index_map = [");
 
     let mut index_vector_dim: i64 = 1;
@@ -1353,6 +1378,8 @@ fn parse_gather_op(
             dims: GatherDims {
                 offset_dims,
                 collapsed_slice_dims,
+                operand_batching_dims,
+                start_indices_batching_dims,
                 start_index_map,
                 index_vector_dim,
             },
@@ -1503,41 +1530,75 @@ fn parse_scatter_op(
     let _ = ')'.parse_next(input)?;
     ws(input)?;
 
-    // Skip everything until the line starting with "}) :" which ends the scatter
-    loop {
-        let line: &str = take_till(0.., '\n').parse_next(input)?;
-        let _ = opt('\n').parse_next(input)?;
-        let trimmed = line.trim();
-        if trimmed.starts_with("}) :") {
-            let ty = parse_final_type(trimmed);
-            let values = make_values(ctx, result_names, vec![ty]);
-            return Ok(Some(InstrResult {
-                values,
-                instr: Instruction::Scatter {
-                    operand,
-                    indices,
-                    updates,
-                },
-            }));
-        }
-        if input.is_empty() {
-            break;
-        }
-    }
+    let props = take_till(0.., '(').parse_next(input)?;
+    let _ = '('.parse_next(input)?;
+    ws(input)?;
+    let (body, params) = parse_region_body_with_block_args(input, ctx)?;
+    ws(input)?;
+    let _ = ')'.parse_next(input)?;
+    let rest = take_till(0.., '\n').parse_next(input)?;
+    let _ = opt('\n').parse_next(input)?;
 
-    let values = make_values(
-        ctx,
-        result_names,
-        vec![TensorType::scalar(ElementType::F64)],
-    );
+    let combiner = scatter_combiner(&body, &params).ok_or_else(winnow::error::ContextError::new)?;
+    // Dimension numbers precede the region as properties or follow it as attributes.
+    let attrs = [props, rest].concat();
+    let index_vector_dim = attrs.split_once("index_vector_dim = ").map_or(0, |(_, s)| {
+        let end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+        s[..end].parse().unwrap_or(0)
+    });
+    let dims = ScatterDims {
+        update_window_dims: extract_bracket_ints(&attrs, "update_window_dims = ["),
+        inserted_window_dims: extract_bracket_ints(&attrs, "inserted_window_dims = ["),
+        input_batching_dims: extract_bracket_ints(&attrs, "input_batching_dims = ["),
+        scatter_indices_batching_dims: extract_bracket_ints(
+            &attrs,
+            "scatter_indices_batching_dims = [",
+        ),
+        scatter_dims_to_operand_dims: extract_bracket_ints(
+            &attrs,
+            "scatter_dims_to_operand_dims = [",
+        ),
+        index_vector_dim,
+    };
+    let ty = parse_final_type(rest);
+    let values = make_values(ctx, result_names, vec![ty]);
     Ok(Some(InstrResult {
         values,
         instr: Instruction::Scatter {
             operand,
             indices,
             updates,
+            dims,
+            combiner,
         },
     }))
+}
+
+/// A region returning the update is `Set`; one binary op of both block arguments
+/// returned as-is is that combiner.
+fn scatter_combiner(body: &[InstrResult], params: &[ValueId]) -> Option<ScatterCombiner> {
+    let [current, update] = params else {
+        return None;
+    };
+    let (last, ops) = body.split_last()?;
+    let Instruction::Return { operands } = &last.instr else {
+        return None;
+    };
+    match (ops, operands.as_slice()) {
+        ([], [r]) if r == update => Some(ScatterCombiner::Set),
+        ([op], [r]) if op.values.first().map(|(v, _)| v) == Some(r) => {
+            let (combiner, lhs, rhs) = match &op.instr {
+                Instruction::Add { lhs, rhs } => (ScatterCombiner::Add, lhs, rhs),
+                Instruction::Multiply { lhs, rhs } => (ScatterCombiner::Multiply, lhs, rhs),
+                Instruction::Minimum { lhs, rhs } => (ScatterCombiner::Minimum, lhs, rhs),
+                Instruction::Maximum { lhs, rhs } => (ScatterCombiner::Maximum, lhs, rhs),
+                _ => return None,
+            };
+            let args = [lhs, rhs];
+            (args == [current, update] || args == [update, current]).then_some(combiner)
+        }
+        _ => None,
+    }
 }
 
 fn parse_custom_call_op(
@@ -1736,7 +1797,7 @@ fn parse_call_op(
         ws(input)?;
     }
     let _ = '@'.parse_next(input)?;
-    let callee = ident(input)?;
+    let callee = symbol_name(input)?;
     ws(input)?;
     let _ = '('.parse_next(input)?;
     let args = parse_value_list(input, ctx)?;
@@ -1813,10 +1874,14 @@ fn parse_while_op(
         }
     }
 
+    // Cond and body share one set of iteration-argument ids: lowering
+    // binds `iter_arg_ids` as the block parameters of both regions.
+    let iter_arg_ids: Vec<ValueId> = init_names.iter().map(|_| ctx.fresh()).collect();
     let mut cond_ctx = ctx.child();
-    let mut cond_iter_ids = Vec::new();
-    for name in &init_names {
-        cond_iter_ids.push(cond_ctx.get_or_create(name));
+    let mut body_ctx = ctx.child();
+    for (name, &id) in init_names.iter().zip(&iter_arg_ids) {
+        cond_ctx.name_to_id.insert(name.clone(), id);
+        body_ctx.name_to_id.insert(name.clone(), id);
     }
 
     ws(input)?;
@@ -1828,12 +1893,6 @@ fn parse_while_op(
     ws(input)?;
     let _ = '}'.parse_next(input)?;
     ws(input)?;
-
-    let mut body_ctx = ctx.child();
-    let mut body_iter_ids = Vec::new();
-    for name in &init_names {
-        body_iter_ids.push(body_ctx.get_or_create(name));
-    }
 
     let _ = "do".parse_next(input)?;
     ws(input)?;
@@ -1855,7 +1914,7 @@ fn parse_while_op(
             cond_body,
             loop_body,
             init_values,
-            iter_arg_ids: body_iter_ids,
+            iter_arg_ids,
         },
     }))
 }
@@ -1961,7 +2020,7 @@ fn parse_sort_op(
             let _ = ':'.parse_next(input)?;
             ws(input)?;
             let _ty_str: &str = take_till(0.., |c: char| c == ',' || c == ')').parse_next(input)?;
-            let pid = comp_ctx.get_or_create(&name);
+            let pid = comp_ctx.define(&name);
             comp_params.push(pid);
             ws(input)?;
             if input.starts_with(',') {
@@ -1987,6 +2046,9 @@ fn parse_sort_op(
     // Parse result types from the trailing `: (...) -> (...)` or `: ... -> ...`
     let rest_line = take_till(0.., '\n').parse_next(input)?;
     let _ = opt('\n').parse_next(input)?;
+    if let Some(d) = extract_i64_attr(rest_line, "dimension") {
+        dimension = d;
+    }
     let mut types = Vec::new();
     if let Some(arrow_pos) = rest_line.rfind("-> ") {
         let after = rest_line[arrow_pos + 3..].trim();
@@ -2314,7 +2376,7 @@ fn parse_region_body_with_block_args(
             let _ = ':'.parse_next(input)?;
             ws(input)?;
             let _ty: &str = take_till(0.., |c: char| c == ',' || c == ')').parse_next(input)?;
-            let pid = body_ctx.get_or_create(&name);
+            let pid = body_ctx.define(&name);
             params.push(pid);
             ws(input)?;
             if input.starts_with(',') {
@@ -2456,10 +2518,7 @@ fn parse_reduce_window_op(
     let operands = all_ops[..half].to_vec();
     let init_values = all_ops[half..].to_vec();
 
-    // Skip to region opening '('
-    while !input.is_empty() && !input.starts_with('(') {
-        let _ = any.parse_next(input)?;
-    }
+    let props = take_till(0.., '(').parse_next(input)?;
     let _ = '('.parse_next(input)?;
     ws(input)?;
     let (body, body_params) = parse_region_body_with_block_args(input, ctx)?;
@@ -2478,13 +2537,20 @@ fn parse_reduce_window_op(
     }
     let rest = take_till(0.., '\n').parse_next(input)?;
     let _ = opt('\n').parse_next(input)?;
-    let full = format!("{attr_text} {rest}");
+    let full = format!("{props} {attr_text} {rest}");
 
     let window_dimensions = extract_array_attr(&full, "window_dimensions");
-    let window_strides = extract_array_attr(&full, "window_strides");
-    let base_dilations = extract_array_attr(&full, "base_dilations");
-    let window_dilations = extract_array_attr(&full, "window_dilations");
-    let padding = extract_padding_attr(&full);
+    let ones_unless = |name| match extract_array_attr(&full, name) {
+        v if v.is_empty() => vec![1; window_dimensions.len()],
+        v => v,
+    };
+    let window_strides = ones_unless("window_strides");
+    let base_dilations = ones_unless("base_dilations");
+    let window_dilations = ones_unless("window_dilations");
+    let mut padding = extract_padding_attr(&full);
+    if padding.is_empty() {
+        padding = vec![(0, 0); window_dimensions.len()];
+    }
 
     let mut types = Vec::new();
     if let Some(arrow) = rest.rfind("-> ") {
@@ -2538,10 +2604,7 @@ fn parse_select_and_scatter_op(
     let _ = ')'.parse_next(input)?;
     ws(input)?;
 
-    // Skip to the opening '(' that wraps the two regions
-    while !input.is_empty() && !input.starts_with('(') {
-        let _ = any.parse_next(input)?;
-    }
+    let props = take_till(0.., '(').parse_next(input)?;
     let _ = '('.parse_next(input)?;
     ws(input)?;
     let (select_body, select_params) = parse_region_body_with_block_args(input, ctx)?;
@@ -2566,11 +2629,17 @@ fn parse_select_and_scatter_op(
     }
     let rest = take_till(0.., '\n').parse_next(input)?;
     let _ = opt('\n').parse_next(input)?;
-    let full = format!("{attr_text} {rest}");
+    let full = format!("{props} {attr_text} {rest}");
 
     let window_dimensions = extract_array_attr(&full, "window_dimensions");
-    let window_strides = extract_array_attr(&full, "window_strides");
-    let padding = extract_padding_attr(&full);
+    let mut window_strides = extract_array_attr(&full, "window_strides");
+    if window_strides.is_empty() {
+        window_strides = vec![1; window_dimensions.len()];
+    }
+    let mut padding = extract_padding_attr(&full);
+    if padding.is_empty() {
+        padding = vec![(0, 0); window_dimensions.len()];
+    }
 
     let mut types = Vec::new();
     if let Some(arrow) = rest.rfind("-> ") {
@@ -2682,32 +2751,24 @@ fn parse_convolution_op(
     }))
 }
 
+/// The integer list written right after `name = `, as `array<i64: ...>`, `[...]` or
+/// `dense<...>`.
 fn extract_array_attr(text: &str, name: &str) -> Vec<i64> {
-    if let Some(idx) = text.find(name) {
-        let after = &text[idx..];
-        if let Some(s) = after.find('[')
-            && let Some(e) = after[s..].find(']')
-        {
-            return parse_int_list(&after[s + 1..s + e]);
-        }
-        if let Some(s) = after.find("array<i64:")
-            && let Some(e) = after[s + 10..].find('>')
-        {
-            return parse_int_list(&after[s + 10..s + 10 + e]);
-        }
-        if let Some(s) = after.find("dense<")
-            && let Some(e) = after[s + 6..].find('>')
-        {
-            let inner = &after[s + 6..s + 6 + e];
-            if let Some(b) = inner.find('[')
-                && let Some(be) = inner.find(']')
-            {
-                return parse_int_list(&inner[b + 1..be]);
-            }
-            return parse_int_list(inner);
-        }
+    let key = format!("{name} = ");
+    let Some(idx) = text.find(&key) else {
+        return Vec::new();
+    };
+    let value = &text[idx + key.len()..];
+    let until = |s: &str, end: char| s[..s.find(end).unwrap_or(s.len())].to_string();
+    if let Some(v) = value.strip_prefix("array<i64:") {
+        parse_int_list(&until(v, '>'))
+    } else if let Some(v) = value.strip_prefix('[') {
+        parse_int_list(&until(v, ']'))
+    } else if let Some(v) = value.strip_prefix("dense<") {
+        parse_int_list(until(v, '>').trim_matches(|c| c == '[' || c == ']'))
+    } else {
+        Vec::new()
     }
-    Vec::new()
 }
 
 fn extract_padding_attr(text: &str) -> Vec<(i64, i64)> {
@@ -2735,21 +2796,13 @@ fn extract_padding_attr(text: &str) -> Vec<(i64, i64)> {
                 };
                 return (0..n_pairs).map(|_| (v, v)).collect();
             }
-            let mut pairs = Vec::new();
-            for seg in inner.split('[') {
-                let seg = seg.trim().trim_end_matches(']').trim_end_matches(',');
-                if seg.is_empty() {
-                    continue;
-                }
-                let nums: Vec<i64> = seg
-                    .split(',')
-                    .filter_map(|s| s.trim().parse().ok())
-                    .collect();
-                if nums.len() == 2 {
-                    pairs.push((nums[0], nums[1]));
-                }
-            }
-            return pairs;
+            let nums = parse_int_list(&inner.replace(['[', ']'], ""));
+            return nums
+                .as_chunks()
+                .0
+                .iter()
+                .map(|&[lo, hi]| (lo, hi))
+                .collect();
         }
     }
     Vec::new()
@@ -2884,6 +2937,10 @@ fn parse_case_op(
     let mut ret_types = Vec::new();
     if let Some(idx) = rest.find("-> ") {
         let after = strip_outer_parens(rest[idx + 3..].trim());
+        if after.trim().is_empty() {
+            // A case with no results has no effect.
+            return Ok(None);
+        }
         for part in split_tensor_types(after) {
             ret_types.push(parse_tensor_type_from_str(part.trim()));
         }
@@ -2914,7 +2971,8 @@ fn parse_return(input: &mut Stream<'_>, ctx: &mut ValueCtx) -> PResult<InstrResu
     } else {
         let _ = "return".parse_next(input)?;
     }
-    ws(input)?;
+    // A bare return ends at the newline; skipping it would consume the next line.
+    let _ = take_while(0.., |c: char| c == ' ' || c == '\t').parse_next(input)?;
 
     let mut operands = Vec::new();
 
@@ -2964,6 +3022,17 @@ fn ident(input: &mut Stream<'_>) -> PResult<String> {
     Ok(s.to_string())
 }
 
+/// A symbol after `@`: an identifier, or a quoted name such as `"<lambda>"`.
+fn symbol_name(input: &mut Stream<'_>) -> PResult<String> {
+    if input.starts_with('"') {
+        let _ = '"'.parse_next(input)?;
+        let name: &str = take_till(0.., '"').parse_next(input)?;
+        let _ = '"'.parse_next(input)?;
+        return Ok(name.to_string());
+    }
+    ident(input)
+}
+
 fn value_name(input: &mut Stream<'_>) -> PResult<String> {
     let _ = '%'.parse_next(input)?;
     let name = take_while(1.., |c: char| c.is_alphanumeric() || c == '_').parse_next(input)?;
@@ -2982,7 +3051,10 @@ fn float_literal(input: &mut Stream<'_>) -> PResult<f64> {
         let _ = "0x".parse_next(input)?;
         let hex: &str = take_while(1.., |c: char| c.is_ascii_hexdigit()).parse_next(input)?;
         let bits = u64::from_str_radix(hex, 16).unwrap();
-        return Ok(f64::from_bits(bits));
+        return Ok(match hex.len() {
+            8 => f32::from_bits(bits as u32) as f64,
+            _ => f64::from_bits(bits),
+        });
     }
 
     let start = *input;
@@ -3330,15 +3402,20 @@ fn skip_braces(input: &mut Stream<'_>) -> PResult<()> {
 // SSA value context
 // ---------------------------------------------------------------------------
 
+/// SSA name scope for a function body or one of its nested regions.
+///
+/// Names are scoped per region, but `ValueId`s are unique per function:
+/// const folding, DCE and lowering key on `ValueId` across nested bodies,
+/// so every scope made by [`ValueCtx::child`] shares the function's counter.
 struct ValueCtx {
-    next_id: u32,
+    next_id: Rc<Cell<u32>>,
     name_to_id: HashMap<String, ValueId>,
 }
 
 impl ValueCtx {
     fn new() -> Self {
         Self {
-            next_id: 0,
+            next_id: Rc::new(Cell::new(0)),
             name_to_id: HashMap::new(),
         }
     }
@@ -3347,26 +3424,29 @@ impl ValueCtx {
         if let Some(&id) = self.name_to_id.get(name) {
             return id;
         }
-        let id = ValueId(self.next_id);
-        self.next_id += 1;
+        let id = self.fresh();
         self.name_to_id.insert(name.to_string(), id);
         id
     }
 
     fn fresh(&mut self) -> ValueId {
-        let id = ValueId(self.next_id);
-        self.next_id += 1;
+        let id = ValueId(self.next_id.get());
+        self.next_id.set(id.0 + 1);
         id
     }
 
-    fn alias(&mut self, alias: &str, target: &str) {
-        let id = self.get_or_create(target);
-        self.name_to_id.insert(alias.to_string(), id);
+    /// Binds `name` to a new value. A redefinition shadows the old value for later uses.
+    fn define(&mut self, name: &str) -> ValueId {
+        let id = self.fresh();
+        self.name_to_id.insert(name.to_string(), id);
+        id
     }
 
+    /// Scope for a nested region: inherits the parent's names and shares its
+    /// id counter. Names the region defines stay local to it.
     fn child(&self) -> Self {
         Self {
-            next_id: self.next_id,
+            next_id: Rc::clone(&self.next_id),
             name_to_id: self.name_to_id.clone(),
         }
     }
@@ -3381,7 +3461,7 @@ fn make_values(
         let vid = if result_names.is_empty() {
             ctx.fresh()
         } else {
-            let vid = ctx.get_or_create(&result_names[0]);
+            let vid = ctx.define(&result_names[0]);
             if result_names.len() > 1 {
                 let alias = format!("{}#0", result_names[0]);
                 ctx.name_to_id.insert(alias, vid);
@@ -3401,13 +3481,11 @@ fn make_values(
         .into_iter()
         .enumerate()
         .map(|(i, ty)| {
-            let name = if !base_name.is_empty() {
-                format!("{}#{}", base_name, i)
-            } else {
-                format!("__anon_{}", ctx.next_id + i as u32)
-            };
-            let vid = ctx.get_or_create(&name);
-            if i == 0 && !base_name.is_empty() {
+            if base_name.is_empty() {
+                return (ctx.fresh(), ty);
+            }
+            let vid = ctx.define(&format!("{}#{}", base_name, i));
+            if i == 0 {
                 ctx.name_to_id.insert(base_name.clone(), vid);
             }
             (vid, ty)

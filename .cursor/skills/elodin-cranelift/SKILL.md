@@ -97,8 +97,9 @@ ELODIN_CRANELIFT_CHECKPOINT_HOLD_AFTER_TICK_MS=120000 \
 3. **Lowering (scalar)**: add match arm in `lower_instruction()` in `src/lower.rs`
 4. **Lowering (pointer-ABI)**: add match arm in `lower_instruction_mem()` in `src/lower.rs`
 5. **Runtime** (if N-D): add `tensor_<op>_f64` in `src/tensor_rt.rs`, register in `TensorRtIds`
-6. **Tests**: golden-value tests in `tests/ops.rs` exercising both `run_mlir` and `run_mlir_mem`
-7. `cargo test -p cranelift-mlir`
+6. **Interpreter**: add a match arm in `eval_instr()` in `src/interp.rs`. `run_mlir` / `run_mlir_mem` execute the interpreter and require it to match the JIT; an unimplemented op logs `[interp skipped]` (or fails under `ELODIN_CRANELIFT_INTERP_STRICT=1`).
+7. **Tests**: golden-value tests in `tests/ops.rs` exercising both `run_mlir` and `run_mlir_mem`
+8. `cargo test -p cranelift-mlir`
 
 The dual-ABI / SIMD / tensor-runtime design constraints each step has to satisfy are documented in [`ARCHITECTURE.md`](../../libs/cranelift-mlir/ARCHITECTURE.md).
 

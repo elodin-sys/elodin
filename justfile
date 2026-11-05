@@ -167,3 +167,8 @@ install target="all":
       echo "usage: just install [py|editor|db|tracy|all]" >&2
       exit 1;;
   esac
+
+# Serve the wasm editor locally (Trunk). Requires `nix develop`.
+# Some agent shells set NO_COLOR=1; Trunk 0.21 treats that as --no-color=1 and exits.
+web:
+  TRUNK_COLOR=never trunk serve --config apps/elodin-web/Trunk.toml

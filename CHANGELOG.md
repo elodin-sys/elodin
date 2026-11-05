@@ -1,6 +1,52 @@
 # Changelog
 
 ## unreleased
+- **(fix)** `EGM08` gravity includes its top degree (`EGM08(2)` now applies J2) and weights the tesseral and sectoral terms (order m ≥ 1) correctly; they were scaled by m + 1 in all four Pines sums, so order-1 terms were doubled. Trajectories propagated with `EGM08` change.
+- **(fix)** The Cranelift backend computes these lookups correctly: `table[:, idx]` and other indexing along a later axis, `lax.dynamic_slice` in a system mapped over several entities, and indexing into a table that differs per entity. They could return wrong values; the first two only in functions holding an array of more than 64 elements.
+- **(fix)** The Cranelift backend reads the right entries for `jnp.interp` and `table[idx]` in a system mapped over several entities when the function holds an array of more than 64 elements, and clamps indices outside a table to its ends, as jax-cpu does. Such indices could return arbitrary values.
+- **(fix)** The Cranelift backend computes `jnp.log` of arrays with two or more elements to full precision; it was off by up to about 1e-13 relative error, which also shifted `jnp.log1p` on such arrays. Long simulations that use them can drift slightly from earlier results.
+- **(breaking)** `six_dof` solves Euler's rigid-body equations with the full inertia tensor, including the gyroscopic term `ω × Iω`. Bodies with unequal principal moments now precess and tumble when they spin; trajectories of such bodies change.
+- **(breaking)** `SpatialInertia` and `SpatialInertia.from_array` validate concrete inputs: mass must be finite and > 0, `inertia` and `inertia_off_diag` must have shape (3,), and the tensor must be positive-definite and satisfy the triangle inequality. Ints, lists, and int or float32 arrays are converted to float64; bools and strings raise.
+- **(breaking:rust)** `nox::SpatialInertia` slots 3..6 hold the off-diagonal inertia entries `[Ixy, Ixz, Iyz]` instead of momentum; `SpatialInertia::new` takes them as its second argument, and `momentum()` is replaced by `inertia_off_diag()`.
+- **(feat)** Add `inertia_off_diag` to `SpatialInertia(...)`, plus `inertia_off_diag()` and `inertia_matrix()`, for bodies whose axes are not principal axes. Entries are signed tensor entries (`Ixy = -∫xy dm`); negate CAD products of inertia.
+- **(feat:examples)** Add the `dzhanibekov-effect` example: a body spun about its intermediate axis flips periodically.
+- **(fix)** `six_dof(time_step=...)` with `Integrator.Rk4` uses `time_step` in every RK4 stage; the intermediate stages previously used the world's simulation time step. `six_dof` rejects a non-finite or non-positive `time_step`.
+- **(fix)** `Integrator.Rk4` evaluates each stage at that stage's velocity instead of the initial velocity, restoring fourth-order accuracy for position-dependent forces such as gravity and springs (#933).
+- **(fix)** `Integrator.Rk4` integrates orientation to fourth order; the quaternion update was second order, so attitude error shrank only 4× per halved time step. Trajectories of rotating bodies change slightly.
+- **(feat)** Add `Integrator.Rk2` (Heun's method) and `Integrator.Rk3` (Kutta's third-order method) to `six_dof`.
+- **(breaking:rust)** `nox_py::integrator::Rk4` is replaced by `ExplicitRk`, which takes a `ButcherTableau` (`RK2`, `RK3`, `RK4`, `RK78`, `DP54`); `Integrator::Rk4` becomes `Integrator::ExplicitRk(&RK4)`.
+- **(feat)** Add `Integrator.Verlet` (velocity Verlet) to `six_dof`: second order, and symplectic when forces depend only on position, so energy errors stay bounded over long runs.
+- **(feat:examples)** `n-body` integrates with `Integrator.Verlet`.
+- **(fix:examples)** `n-body` computes its truth positions inside the simulation, relative to the simulated Sun, so `bench` exports include them and the accuracy report measures the integration and the model instead of the Sun's drift: the global RMS error over five years is 2.8e-5 AU, not 7.5e-3 AU.
+- **(feat)** Add `Integrator.Rk78`, the eighth-order solution of Fehlberg's 7(8) Runge-Kutta pair.
+- **(feat)** Add the global `StageTime` component: the seconds past the start of the simulation step at which `six_dof` is evaluating its effectors, so time-dependent effectors keep the integrator's full order. Exports gain `globals.stage_time`.
+- **(fix:examples)** The voyager chapters interpolate Jupiter's position to each integrator stage's time, with a cubic through its SPICE positions and velocities, instead of holding it at the step's midpoint, cutting the integration error over six days from about 650 m to about 2 mm.
+- **(feat:examples)** `voyager` and its chapters integrate with `Integrator.Rk78`.
+- **(feat)** Add `Integrator.Dp54`, the fifth-order solution of the Dormand-Prince 5(4) pair, with a fixed time step.
+- **(feat)** Add the `StepError` component: under `Integrator.Dp54` or `Integrator.Rk78`, bodies that have it receive each step's embedded error estimate (attitude, position, angular velocity, velocity).
+- **(feat:examples)** `dzhanibekov-effect` integrates with `Integrator.Dp54` and graphs its step error, which peaks at each flip.
+- **(fix)** Calling `Exec.run` more than once no longer fails with "db time travel" when the simulation runs faster than real time. Each tick is recorded at its simulation time, continuing from the previous call.
+- **(feat)** `World.build` accepts `start_timestamp`, like `World.run`.
+- **(fix)** `JaxSim.set_state` updates the state instead of discarding the new value, `JaxSim.get_state` and `set_state` return and accept the full value of a component held by a single entity, and `JaxSim.step` keeps the tick an integer.
+- **(fix)** `World.to_jax` accepts systems that read components no system writes, such as parameters or the tick.
+- **(feat)** Add `JaxSim.step_fn`, `JaxSim.get` and `JaxSim.set`, pure functions of a state for `jax.jit`, `jax.vmap` and `jax.lax.scan`. `JaxSim.set_state` with `entity_name=None` writes every entity's value.
+- **(fix)** The Cranelift backend no longer confuses values across `lax.cond`, `lax.switch`, `while_loop`, `fori_loop`, `map` and `sort` bodies. Such programs could return wrong values; in `examples/drone`, all four motors dropped to minimum the first time the mixer saturated.
+- **(fix)** The Cranelift backend reduces over any axis or set of axes. Sums, products, minimums and maximums over a leading or middle axis, over several axes, or of arrays with three or more dimensions could return wrong values, for example `jnp.sum(x, axis=0)` in a system mapped over several entities.
+- **(fix)** The Cranelift backend computes `jnp.prod` instead of a sum, and `jnp.argmax` instead of `jnp.argmin`.
+- **(fix)** The Cranelift backend computes `jax.scipy.special.erfc` accurately; results were off by up to 7%.
+- **(fix)** The Cranelift backend applies `jnp.where` with a scalar condition to every element in large systems; elements after the first could take arbitrary values.
+- **(fix)** The Cranelift backend writes `.at[...]` updates with column, multi-dimensional, slice and per-entity indices to the indexed elements, and `.at[...].add`, `.multiply`, `.min` and `.max` combine with the existing values instead of overwriting them.
+- **(fix)** The Cranelift backend evaluates matrix products with any batch and contracting dimensions and in float32 and integer arithmetic. Batched products such as `M @ v` in a system mapped over several entities could evaluate to zeros or wrong values.
+- **(fix)** The Cranelift backend computes `jnp.argmax` and `jnp.argmin` over any axis and of integer, boolean and float32 arrays, taking the first NaN and the lowest tied index as JAX does. `jnp.select` no longer fails to compile.
+- **(fix)** The Cranelift backend handles boolean, integer and float32 arrays in large systems: boolean comparisons such as a `while_loop` condition `(i < n) & ...` could loop forever, and `lax.clamp`, `jnp.sign` and `jnp.mod` on integers and float32 and int32 arithmetic and reductions returned wrong values or failed to compile. Float-to-integer conversions saturate and turn NaN into 0, as on jax-cpu.
+- **(fix)** The Cranelift backend sorts integer and float32 arrays, along any axis and by several keys (`jnp.sort`, `jnp.argsort`, `lax.sort`), with NaN last as in JAX.
+- **(fix)** The Cranelift backend compiles functions JAX names `<lambda>` (from `jax.jit(lambda ...)` inside a system), float32 constants such as `-inf`, and `lax.cond` branches that all return the same captured value.
+- **(fix)** The Cranelift backend computes `jnp.cumsum`, `lax.reduce_window` and the gradient of a max pool in every system and for integer and float32 arrays; they could fail to compile, ignore their window, or hang. A gradient through tied maxima goes to the first one, as on jax-cpu.
+- **(fix)** The Cranelift backend propagates NaN through `jnp.maximum`, `jnp.minimum`, `jnp.max`, `jnp.min` and `.at[].max` and `.at[].min`, as jax-cpu does. A NaN in the first argument or inside a reduction was dropped, which could hide a simulation that had gone NaN.
+- **(fix)** The Cranelift backend computes a `jnp.dot` or `jnp.sum` inside a `fori_loop` or `while_loop` body exactly as outside it, so comparing the two can no longer flip a branch.
+- **(test:ci)** `regress.sh` also runs every example on jax-cpu against the same baseline, and compares telemetry tick by tick, so a value that changes by an ulp every tick on one backend matches a value that settles on the other.
+- **(fix:examples)** `examples/drone/main.py --telemetry` runs at the configured simulation rate.
+- **(fix:aleph)** The `mekf` service subtracts the gyro bias from `gyro_est` once instead of twice, and keeps estimating attitude from the remaining sensors when the magnetometer or accelerometer reads zero, as sensor-fw sends when the BMM350 is missing. With one sensor left it holds the gyro bias and integrates rotation about that sensor's axis from the gyro alone, so without the magnetometer yaw drifts with the residual gyro bias. `mag_cal` reads zero while the magnetometer is missing.
 - **(breaking)** An `object_3d` ellipsoid with `orientation=absolute` applies `scale` along the frame's x, y, z; it previously swapped y and z.
 - **(feat)** Add `fill=#false` (`ui.icon(fill=False)`) for outline built-in icons, and the `check_box_outline_blank` and `crop_square` icons.
 - **(feat)** Evaluate `sqrt`, `abs`, `sign`, `degrees`, `arccos`, `clip`, `atan2`, and `norm` in viewport and 3D-object EQL, and index integer components there.

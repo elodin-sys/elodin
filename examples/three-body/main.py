@@ -1,11 +1,30 @@
+from dataclasses import field
+
 import elodin as el
 import elodin.ui as ui
+import jax
 from jax import numpy as jnp
 from jax.numpy import linalg as la
 
 SIM_TIME_STEP = 1.0 / 120.0
 # Set the gravitational constant for Newton's law of universal gravitation
 G = 6.6743e-11
+
+# Axis-major 3×N world points for A, B, C.
+TrailPositions = el.Annotated[
+    jax.Array,
+    el.Component(
+        "trail_positions",
+        el.ComponentType(el.PrimitiveType.F64, (9,)),
+        metadata={"element_names": "x0,x1,x2,y0,y1,y2,z0,z1,z2"},
+    ),
+]
+
+
+@el.dataclass
+class TrailBuf(el.Archetype):
+    trail_positions: TrailPositions = field(default_factory=lambda: jnp.zeros(9))
+
 
 w = el.World()
 
@@ -16,6 +35,7 @@ a = w.spawn(
             world_vel=el.WorldVel(linear=jnp.array([0.0, 0.9957939373, 0.0])),
             inertia=el.Inertia(1.0 / G),
         ),
+        TrailBuf(),
     ],
     name="A",
 )
@@ -79,6 +99,19 @@ def gravity(
     )
 
 
+@el.system
+def pack_trails(
+    dest: el.Query[TrailPositions],
+    bodies: el.Query[el.WorldPos],
+) -> el.Query[TrailPositions]:
+    pts = jnp.stack(
+        [bodies[0].linear(), bodies[1].linear(), bodies[2].linear()],
+        axis=1,
+    )
+    packed = pts.reshape(-1)
+    return dest.map(TrailPositions, lambda _: packed)
+
+
 # Add the gravity constraint entities to the world
 w.spawn(GravityConstraint(a, b), name="A -> B")
 w.spawn(GravityConstraint(b, a), name="B -> A")
@@ -125,13 +158,21 @@ w.schematic(
             mesh=ui.sphere(radius=0.2, emissivity=1.0, color="cyan"),
         ),
         ui.line_3d("b.world_pos", line_width=10.0, perspective=False, color="yolk"),
+        ui.point_trails(
+            "a.trail_positions",
+            head_shape="sphere",
+            head_size=0.12,
+            line_width=5.0,
+            max_length=2.0,
+            color="white",
+        ),
         # This is not exactly correct. HCI might be more appropriate.
         coordinate=ui.coordinate(frame="ECEF"),
     ),
 )
 
 
-sys = el.six_dof(sys=gravity)
+sys = el.six_dof(sys=gravity) | pack_trails
 sim = w.run(
     sys,
     simulation_rate=1.0 / SIM_TIME_STEP,

@@ -4,6 +4,8 @@ use bevy::ecs::query::QueryData;
 use bevy::ecs::system::In;
 use bevy::ecs::system::InRef;
 use bevy::image::Image;
+#[cfg(target_family = "wasm")]
+use bevy::prelude::{With, Without};
 use bevy::render::render_resource::Extent3d;
 use bevy::render::render_resource::TextureDimension;
 use bevy::ui::Display;
@@ -16,14 +18,15 @@ use bevy::{
 };
 use egui::{self, Color32, Vec2};
 use impeller::types::{OwnedPacket, Timestamp};
-use impeller_bevy::{CommandsExt, CurrentStreamId, PacketGrantR};
+use impeller_bevy::{CommandsExt, PacketGrantR};
 use impeller_wkt::{CurrentTimestamp, ErrorResponse, GetMsgs, MsgBatch, TimestampedMsgStream};
 use std::collections::BTreeMap;
+use std::ops::Range;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{self};
-use std::time::Instant;
+use web_time::Instant;
 
 use super::{
     PaneName,
@@ -124,10 +127,31 @@ const LIVE_HOLD_THRESHOLD_US: i64 = 2_000_000;
 /// wide frame spacing).  2 seconds.
 const DECODER_NEAR_THRESHOLD_US: i64 = 2_000_000;
 
-/// Maximum number of raw H.264 frames to keep in the cache.
-/// At ~25 KB/frame (OBS 1080p), 50 000 frames ≈ 1.2 GB, covering ~28 min
-/// at 30 fps.  Prevents unbounded memory growth during long live sessions.
-const MAX_RAW_FRAMES: usize = 50_000;
+/// Raw frames fed to the wasm decoder per UI frame. A UI running below the
+/// stream rate must feed several frames per tick or it falls into a seek.
+#[cfg(target_family = "wasm")]
+const MAX_SEQUENTIAL_PER_TICK: usize = 8;
+
+/// Re-issue a wasm seek that has not completed after this long. A stalled
+/// seek still looks sequential (its last submitted sample is near the
+/// playhead), so the timeout is what unsticks it.
+#[cfg(any(target_family = "wasm", test))]
+const SEEK_TIMEOUT_SECS: f32 = 1.0;
+
+/// Per-stream cap on cached raw bytes. A count cap sized for H.264 never
+/// fires for raw RGBA (~1.2 MB/frame), which fills wasm linear memory.
+#[cfg(target_family = "wasm")]
+const MAX_RAW_BYTES: usize = 256 * 1024 * 1024;
+/// About the old 50 000-frame H.264 ceiling, so encoded streams keep the
+/// same headroom they had under the count cap.
+#[cfg(not(target_family = "wasm"))]
+const MAX_RAW_BYTES: usize = 1536 * 1024 * 1024;
+
+/// How far behind and ahead of the playhead a fetch tries to keep raw frames.
+const FETCH_WINDOW_US: i64 = 3_000_000;
+
+/// Extra windows walked backward looking for an H.264 IDR.
+const KEYFRAME_EXTEND_LIMIT: u8 = 4;
 
 /// If the live-tail `TimestampedMsgStream` has not delivered a frame for this
 /// many seconds, re-send the backfill and stream requests to recover from
@@ -208,7 +232,8 @@ impl Default for StreamState {
 /// Cache of raw H.264 data and decoded RGBA frames.
 ///
 /// Two sources fill `raw_frames`:
-/// - A one-shot `GetMsgs` backfill (historical data already in the DB)
+/// - `GetMsgs` pages for the part of a window around the playhead that this
+///   cache does not already cover, re-fetched after eviction
 /// - A continuous live tail (`TimestampedMsgStream`) so H.264 sensor cameras
 ///   land on the same clock as gray8/rgba instead of the playback tick driver.
 ///
@@ -226,8 +251,15 @@ pub struct VideoFrameCache {
     keyframe_index: Vec<Timestamp>,
     /// Maximum number of decoded frames to retain.
     max_frames: usize,
-    /// Maximum number of raw frames to retain.
-    max_raw_frames: usize,
+    /// Cap on [`Self::raw_bytes`].
+    max_raw_bytes: usize,
+    /// Sum of `raw_frames` payload lengths.
+    raw_bytes: usize,
+    /// DB ranges whose messages have been fetched or received live.
+    /// Sorted and disjoint. Gaps of at most [`NO_DATA_THRESHOLD_US`] merge.
+    coverage: Vec<Range<Timestamp>>,
+    /// How many extra fetch windows have been walked back looking for an IDR.
+    keyframe_extend_steps: u8,
     /// Timestamp of the last frame fed to the decoder (for sequential opt).
     last_decoded_ts: Option<Timestamp>,
     /// `true` while a `SeekBatch` is in-flight on the decoder thread.
@@ -238,20 +270,10 @@ pub struct VideoFrameCache {
     /// `TimestampedMsgStream`.  Used to detect DB disconnection and trigger
     /// recovery.  `None` until the first live frame arrives.
     last_stream_activity: Option<Instant>,
-    /// Timestamp just past the last frame loaded by the paginated backfill.
-    /// Used by `connect_streams` to continue backfilling from where it left
-    /// off, ensuring all frames eventually make it into the cache even when
-    /// the initial backfill fires before the simulation has produced data.
-    backfill_frontier: Timestamp,
-    /// `true` while a backfill `GetMsgs` request is in-flight. Prevents
-    /// duplicate requests from piling up.
+    /// `true` while a `GetMsgs` request is in-flight. Prevents duplicate
+    /// requests from piling up.
     backfill_in_flight: bool,
-    /// Wall-clock time of the last backfill retry from `connect_streams`.
-    /// Rate-limited to 1 second to avoid wrapping the u8 RequestId counter.
-    /// (Pagination within the backfill callback fires immediately and is
-    /// not rate-limited — only the retry from `connect_streams` is.)
-    backfill_retry_at: Option<Instant>,
-    /// When the current backfill request was sent; used to auto-reset
+    /// When the current `GetMsgs` request was sent; used to auto-reset
     /// `backfill_in_flight` if the reply never arrives (e.g. channel full).
     backfill_started_at: Option<Instant>,
     /// Timestamp of the raw RGBA frame currently displayed. Used to skip
@@ -259,6 +281,13 @@ pub struct VideoFrameCache {
     last_displayed_ts: Option<Timestamp>,
     /// When false, raw frames are RGBA (sensor camera); skip H.264 keyframe scan.
     pub is_h264: bool,
+    /// When the in-flight wasm seek was sent.
+    #[cfg(target_family = "wasm")]
+    seek_sent_at: Option<Instant>,
+    /// Sample the last wasm seek was meant to show. Stays set after the seek
+    /// finishes, so the same sample is not sought again.
+    #[cfg(target_family = "wasm")]
+    seek_wanted_ts: Option<Timestamp>,
 }
 
 impl Default for VideoFrameCache {
@@ -268,17 +297,22 @@ impl Default for VideoFrameCache {
             decoded_frames: BTreeMap::new(),
             keyframe_index: Vec::new(),
             max_frames: MAX_CACHED_FRAMES,
-            max_raw_frames: MAX_RAW_FRAMES,
+            max_raw_bytes: MAX_RAW_BYTES,
+            raw_bytes: 0,
+            coverage: Vec::new(),
+            keyframe_extend_steps: 0,
             last_decoded_ts: None,
             seeking: false,
             seek_generation: 0,
             last_stream_activity: None,
-            backfill_frontier: Timestamp(i64::MIN),
             backfill_in_flight: false,
-            backfill_retry_at: None,
             backfill_started_at: None,
             last_displayed_ts: None,
             is_h264: true,
+            #[cfg(target_family = "wasm")]
+            seek_sent_at: None,
+            #[cfg(target_family = "wasm")]
+            seek_wanted_ts: None,
         }
     }
 }
@@ -387,13 +421,138 @@ impl VideoFrameCache {
             .map(|(t, d)| (*t, d.as_slice()))
     }
 
-    /// Insert a raw frame and evict oldest entries if over the limit.
-    pub fn insert_raw(&mut self, timestamp: Timestamp, data: Vec<u8>) {
-        if self.is_h264 && is_keyframe(&data) {
-            self.record_keyframe(timestamp);
+    /// Insert a raw frame, mark that instant covered, and evict away from `anchor`.
+    pub fn insert_raw(&mut self, timestamp: Timestamp, data: Vec<u8>, anchor: Timestamp) {
+        self.store_raw(timestamp, data);
+        let end = Timestamp(timestamp.0.saturating_add(1));
+        self.note_covered(timestamp..end);
+        self.evict_raw_if_needed(anchor);
+    }
+
+    fn store_raw(&mut self, timestamp: Timestamp, data: Vec<u8>) {
+        let keyframe = self.is_h264 && is_keyframe(&data);
+        let len = data.len();
+        if let Some(old) = self.raw_frames.insert(timestamp, Arc::new(data)) {
+            self.raw_bytes = self.raw_bytes.saturating_sub(old.len());
         }
-        self.raw_frames.insert(timestamp, Arc::new(data));
-        self.evict_raw_if_needed();
+        self.raw_bytes = self.raw_bytes.saturating_add(len);
+        if !self.is_h264 {
+            return;
+        }
+        if keyframe {
+            self.record_keyframe(timestamp);
+        } else if let Ok(pos) = self.keyframe_index.binary_search(&timestamp) {
+            self.keyframe_index.remove(pos);
+        }
+    }
+
+    fn note_covered(&mut self, range: Range<Timestamp>) {
+        if range.start.0 >= range.end.0 {
+            return;
+        }
+        let mut start = range.start.0;
+        let mut end = range.end.0;
+        let mut kept = Vec::with_capacity(self.coverage.len() + 1);
+        for existing in &self.coverage {
+            let near = existing.end.0.saturating_add(NO_DATA_THRESHOLD_US) >= start
+                && end.saturating_add(NO_DATA_THRESHOLD_US) >= existing.start.0;
+            if near {
+                start = start.min(existing.start.0);
+                end = end.max(existing.end.0);
+            } else {
+                kept.push(existing.start..existing.end);
+            }
+        }
+        kept.push(Timestamp(start)..Timestamp(end));
+        kept.sort_by_key(|covered| covered.start.0);
+        self.coverage = kept;
+    }
+
+    /// First sub-range of `want` that has not been fetched.
+    fn first_uncovered(&self, want: &Range<Timestamp>) -> Option<Range<Timestamp>> {
+        if want.start.0 >= want.end.0 {
+            return None;
+        }
+        let mut cursor = want.start.0;
+        for covered in &self.coverage {
+            if covered.end.0 <= cursor {
+                continue;
+            }
+            if covered.start.0 > cursor {
+                let end = covered.start.0.min(want.end.0);
+                if end > cursor {
+                    return Some(Timestamp(cursor)..Timestamp(end));
+                }
+                return None;
+            }
+            cursor = covered.end.0;
+            if cursor >= want.end.0 {
+                return None;
+            }
+        }
+        (cursor < want.end.0).then_some(Timestamp(cursor)..want.end)
+    }
+
+    fn uncover_before(&mut self, ts: Timestamp) {
+        let mut kept = Vec::with_capacity(self.coverage.len());
+        for range in self.coverage.drain(..) {
+            if range.end.0 <= ts.0 {
+                continue;
+            }
+            if range.start.0 < ts.0 {
+                kept.push(Timestamp(ts.0)..range.end);
+            } else {
+                kept.push(range);
+            }
+        }
+        self.coverage = kept;
+    }
+
+    fn uncover_from(&mut self, ts: Timestamp) {
+        let mut kept = Vec::with_capacity(self.coverage.len());
+        for range in self.coverage.drain(..) {
+            if range.start.0 >= ts.0 {
+                continue;
+            }
+            if range.end.0 > ts.0 {
+                kept.push(range.start..Timestamp(ts.0));
+            } else {
+                kept.push(range);
+            }
+        }
+        self.coverage = kept;
+    }
+
+    fn consider_keyframe_extend(&mut self, playhead: Timestamp, earliest: Timestamp) {
+        if !self.is_h264 {
+            self.keyframe_extend_steps = 0;
+            return;
+        }
+        let no_keyframe = self.nearest_keyframe_before(playhead).is_none();
+        let above_earliest = self
+            .coverage
+            .first()
+            .is_some_and(|range| range.start.0 > earliest.0);
+        if no_keyframe && above_earliest && self.keyframe_extend_steps < KEYFRAME_EXTEND_LIMIT {
+            self.keyframe_extend_steps += 1;
+        } else if !no_keyframe {
+            self.keyframe_extend_steps = 0;
+        }
+    }
+
+    fn clear_raw_keeping(&mut self, keep: Option<(Timestamp, Arc<Vec<u8>>)>) {
+        self.raw_frames.clear();
+        self.raw_bytes = 0;
+        self.coverage.clear();
+        self.keyframe_index.clear();
+        self.decoded_frames.clear();
+        self.keyframe_extend_steps = 0;
+        if let Some((timestamp, frame)) = keep {
+            self.raw_bytes = frame.len();
+            self.raw_frames.insert(timestamp, frame);
+            let end = Timestamp(timestamp.0.saturating_add(1));
+            self.coverage.push(timestamp..end);
+        }
     }
 
     fn evict_if_needed(&mut self) {
@@ -420,23 +579,38 @@ impl VideoFrameCache {
         }
     }
 
-    fn evict_raw_if_needed(&mut self) {
-        while self.raw_frames.len() > self.max_raw_frames {
-            if let Some((evicted_ts, _)) = self.raw_frames.pop_first() {
-                if let Some(&first_raw_ts) = self.raw_frames.keys().next() {
-                    self.keyframe_index.retain(|ts| *ts >= first_raw_ts);
-                }
-                while let Some((&decoded_ts, _)) = self.decoded_frames.iter().next() {
-                    if decoded_ts <= evicted_ts {
-                        self.decoded_frames.pop_first();
-                    } else {
-                        break;
-                    }
-                }
+    fn evict_raw_if_needed(&mut self, anchor: Timestamp) {
+        while self.raw_bytes > self.max_raw_bytes && self.raw_frames.len() > 1 {
+            let first = *self.raw_frames.keys().next().unwrap();
+            let last = *self.raw_frames.keys().next_back().unwrap();
+            let drop_last = anchor.0.abs_diff(last.0) >= anchor.0.abs_diff(first.0);
+            let Some((evicted_ts, data)) = (if drop_last {
+                self.raw_frames.pop_last()
             } else {
+                self.raw_frames.pop_first()
+            }) else {
                 break;
+            };
+            self.raw_bytes = self.raw_bytes.saturating_sub(data.len());
+            if drop_last {
+                self.uncover_from(evicted_ts);
+            } else if let Some(&new_first) = self.raw_frames.keys().next() {
+                self.uncover_before(new_first);
             }
         }
+        self.trim_to_raw_span();
+    }
+
+    fn trim_to_raw_span(&mut self) {
+        let Some(&first) = self.raw_frames.keys().next() else {
+            self.keyframe_index.clear();
+            self.decoded_frames.clear();
+            return;
+        };
+        let &last = self.raw_frames.keys().next_back().unwrap();
+        self.keyframe_index.retain(|ts| *ts >= first && *ts <= last);
+        self.decoded_frames
+            .retain(|ts, _| *ts >= first && *ts <= last);
     }
 }
 
@@ -465,11 +639,13 @@ pub enum DecoderOutput {
 
 #[derive(Component)]
 pub struct VideoDecoderHandle {
+    #[cfg(not(target_family = "wasm"))]
     tx: flume::Sender<DecoderInput>,
     rx: flume::Receiver<DecoderOutput>,
     width: Arc<AtomicUsize>,
     /// Shared with the decoder thread so it can skip stale seek batches.
     latest_seek_generation: Arc<AtomicU64>,
+    #[cfg(not(target_family = "wasm"))]
     _handle: std::thread::JoinHandle<()>,
 }
 
@@ -477,7 +653,7 @@ pub struct VideoDecoderHandle {
 // Decoder implementations (platform-specific)
 // ---------------------------------------------------------------------------
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(not(target_os = "macos"), not(target_family = "wasm")))]
 fn decode_one_frame(
     decoder: &mut openh264::decoder::Decoder,
     packet: &[u8],
@@ -505,7 +681,7 @@ fn decode_one_frame(
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(not(target_os = "macos"), not(target_family = "wasm")))]
 fn decode_video(
     _frame_width: Arc<AtomicUsize>,
     packet_rx: flume::Receiver<DecoderInput>,
@@ -661,6 +837,7 @@ fn decode_video(
 // VideoDecoderHandle
 // ---------------------------------------------------------------------------
 
+#[cfg(not(target_family = "wasm"))]
 impl Default for VideoDecoderHandle {
     fn default() -> Self {
         let (packet_tx, packet_rx) = flume::bounded::<DecoderInput>(32);
@@ -681,25 +858,51 @@ impl Default for VideoDecoderHandle {
     }
 }
 
+#[cfg(target_family = "wasm")]
+impl Default for VideoDecoderHandle {
+    fn default() -> Self {
+        let (_, rx) = flume::bounded::<DecoderOutput>(1);
+        VideoDecoderHandle {
+            rx,
+            width: Arc::new(AtomicUsize::new(0)),
+            latest_seek_generation: Arc::new(AtomicU64::new(0)),
+        }
+    }
+}
+
 impl VideoDecoderHandle {
     /// Send a single raw H.264 frame for sequential decode (warm decoder).
     /// Returns `true` if the frame was successfully enqueued.
+    #[cfg(not(target_family = "wasm"))]
     pub fn process_frame(&self, timestamp: Timestamp, frame_data: &[u8]) -> bool {
         self.tx
             .try_send(DecoderInput::Frame(frame_data.to_vec(), timestamp))
             .is_ok()
     }
 
+    /// Wasm playback feeds `webcodecs_video::bevy::VideoStream` directly.
+    #[cfg(target_family = "wasm")]
+    pub fn process_frame(&self, _timestamp: Timestamp, _frame_data: &[u8]) -> bool {
+        false
+    }
+
     /// Send a batch of raw frames for seek-decode (resets the decoder).
     /// Returns `true` if the batch was successfully enqueued.
     /// Also publishes `generation` to the shared atomic so the decoder
     /// thread can skip any older (stale) batches still in the queue.
+    #[cfg(not(target_family = "wasm"))]
     pub fn send_seek_batch(&self, frames: Vec<(Timestamp, Vec<u8>)>, generation: u64) -> bool {
         self.latest_seek_generation
             .store(generation, atomic::Ordering::Relaxed);
         self.tx
             .try_send(DecoderInput::SeekBatch { frames, generation })
             .is_ok()
+    }
+
+    /// Wasm playback feeds `webcodecs_video::bevy::VideoStream` directly.
+    #[cfg(target_family = "wasm")]
+    pub fn send_seek_batch(&self, _frames: Vec<(Timestamp, Vec<u8>)>, _generation: u64) -> bool {
+        false
     }
 
     /// Drain decoded frames from the decoder thread into the cache.
@@ -739,12 +942,16 @@ pub struct WidgetQuery {
     cache: &'static mut VideoFrameCache,
     ui_node: &'static mut Node,
     image_node: &'static mut ImageNode,
+    #[cfg(target_family = "wasm")]
+    wc: Option<&'static mut webcodecs_video::bevy::VideoStream>,
 }
 
 #[derive(SystemParam)]
 pub struct VideoStreamWidget<'w, 's> {
     query: Query<'w, 's, WidgetQuery>,
     current_time: Res<'w, CurrentTimestamp>,
+    #[cfg(target_family = "wasm")]
+    paused: Res<'w, super::Paused>,
     images: ResMut<'w, Assets<Image>>,
     window_settings: Query<'w, 's, &'static bevy_egui::EguiContextSettings>,
     sensor_camera_configs: Option<Res<'w, SensorCameraConfigs>>,
@@ -758,20 +965,15 @@ pub struct VideoStreamWidget<'w, 's> {
 ///
 /// The callback **only** inserts raw frames into the cache and records
 /// keyframe timestamps.  It never touches the decoder.
-fn send_stream_request(
-    commands: &mut Commands,
-    entity: Entity,
-    msg_id: [u8; 2],
-    _stream_id: u64,
-    _is_h264: bool,
-) {
+fn send_stream_request(commands: &mut Commands, entity: Entity, msg_id: [u8; 2]) {
     let handler = move |InRef(pkt): InRef<OwnedPacket<PacketGrantR>>,
-                        mut caches: Query<&mut VideoFrameCache>| {
+                        mut caches: Query<&mut VideoFrameCache>,
+                        current_ts: Res<CurrentTimestamp>| {
         if let OwnedPacket::Msg(msg_buf) = pkt
             && let Some(timestamp) = msg_buf.timestamp
             && let Ok(mut cache) = caches.get_mut(entity)
         {
-            cache.insert_raw(timestamp, msg_buf.buf.to_vec());
+            cache.insert_raw(timestamp, msg_buf.buf.to_vec(), current_ts.0);
             cache.last_stream_activity = Some(Instant::now());
         }
         false
@@ -797,63 +999,121 @@ const BACKFILL_ASSUMED_MAX_RAW_FRAME: usize = 640 * 480 * 4;
 /// Typical H.264 frame size when dims unknown (~25–50 KB); avoids 4-frame batch for video_stream.
 const BACKFILL_ASSUMED_H264_FRAME: usize = 50 * 1024;
 
-/// Compute the backfill frame limit from a byte budget.
-fn backfill_frame_limit(raw_dims: Option<(u32, u32, RawPixelFormat)>, is_h264: bool) -> usize {
-    let frame_bytes = match raw_dims {
+fn stream_frame_bytes(raw_dims: Option<(u32, u32, RawPixelFormat)>, is_h264: bool) -> usize {
+    match raw_dims {
         Some((w, h, format)) => (w as usize * h as usize * format.bytes_per_pixel()).max(1),
         None if is_h264 => BACKFILL_ASSUMED_H264_FRAME,
         None => BACKFILL_ASSUMED_MAX_RAW_FRAME,
-    };
+    }
+}
+
+fn stream_fps(configs: Option<&SensorCameraConfigs>, camera_name: &str) -> f32 {
+    configs
+        .and_then(|configs| {
+            configs
+                .0
+                .iter()
+                .find(|config| config.camera_name == camera_name)
+        })
+        .map(|config| config.fps)
+        .filter(|fps| *fps > 0.0)
+        .unwrap_or(30.0)
+}
+
+/// `2 * window * frame_bytes * fps <= budget / 2`, and never more than
+/// [`FETCH_WINDOW_US`]. Keeps a fetched window from being evicted on arrival.
+fn fetch_window_us(frame_bytes: usize, fps: f32, budget: usize) -> i64 {
+    if frame_bytes == 0 || fps <= 0.0 || budget == 0 {
+        return FETCH_WINDOW_US;
+    }
+    let denom = 4.0 * frame_bytes as f64 * f64::from(fps);
+    if denom <= 0.0 {
+        return FETCH_WINDOW_US;
+    }
+    let max_us = (budget as f64 * 1_000_000.0 / denom) as i64;
+    FETCH_WINDOW_US.min(max_us.max(1))
+}
+
+fn clamped_fetch_window(
+    playhead: Timestamp,
+    behind_us: i64,
+    ahead_us: i64,
+    earliest: Timestamp,
+    last_updated: Timestamp,
+) -> Option<Range<Timestamp>> {
+    if earliest.0 == i64::MAX || last_updated.0 == i64::MIN || earliest.0 > last_updated.0 {
+        return None;
+    }
+    let start = playhead.0.saturating_sub(behind_us).max(earliest.0);
+    let end = playhead.0.saturating_add(ahead_us).min(last_updated.0);
+    (start < end).then_some(Timestamp(start)..Timestamp(end))
+}
+
+/// Compute the backfill frame limit from a byte budget.
+fn backfill_frame_limit(raw_dims: Option<(u32, u32, RawPixelFormat)>, is_h264: bool) -> usize {
+    let frame_bytes = stream_frame_bytes(raw_dims, is_h264);
     (BACKFILL_MAX_BATCH_BYTES / frame_bytes).max(1)
 }
 
-/// Paginated `GetMsgs` backfill: fetch historical raw data from the DB
-/// in small batches of `BACKFILL_FRAME_LIMIT` frames.  When a full batch
-/// arrives, the callback immediately requests the next page.  This keeps
-/// each individual DB response small (~6-12 MB) while progressively
-/// filling the entire raw cache.
-fn send_backfill_request(
+/// Fetch one page of `range`. A full page continues from the last timestamp;
+/// a short page marks the whole range covered, including stretches with no frames.
+fn send_window_request(
     commands: &mut Commands,
     entity: Entity,
     msg_id: [u8; 2],
-    start_from: Timestamp,
+    range: Range<Timestamp>,
     limit: usize,
 ) {
+    let range_end = range.end;
     commands.send_msg_req_reply(
         GetMsgs {
             msg_id,
-            range: start_from..Timestamp(i64::MAX),
+            range: range.start..range_end,
             limit: Some(limit),
         },
         move |In(result): In<Result<MsgBatch, ErrorResponse>>,
               mut caches: Query<&mut VideoFrameCache>,
+              current_ts: Res<CurrentTimestamp>,
+              earliest: Res<impeller_wkt::EarliestTimestamp>,
               mut cmds: Commands| {
             let Ok(mut cache) = caches.get_mut(entity) else {
                 return true;
             };
             cache.backfill_in_flight = false;
             cache.backfill_started_at = None;
-            if let Ok(batch) = result {
-                let count = batch.data.len();
-                let mut last_ts = start_from;
-                for (timestamp, data) in batch.data {
-                    last_ts = timestamp;
-                    cache.insert_raw(timestamp, data);
+            let Ok(batch) = result else {
+                return true;
+            };
+            let mut count = 0usize;
+            let mut first_ts = range.start;
+            let mut last_ts = range.start;
+            for (timestamp, data) in batch.data {
+                if count == 0 {
+                    first_ts = timestamp;
                 }
-                if count > 0 {
-                    cache.backfill_frontier = Timestamp(last_ts.0 + 1);
-                }
-                if count >= limit {
-                    cache.backfill_in_flight = true;
-                    cache.backfill_started_at = Some(Instant::now());
-                    send_backfill_request(
-                        &mut cmds,
-                        entity,
-                        msg_id,
-                        Timestamp(last_ts.0 + 1),
-                        limit,
-                    );
-                }
+                last_ts = timestamp;
+                count += 1;
+                cache.store_raw(timestamp, data);
+            }
+            // `GetMsgs` snaps the start to the message at or before it, so the
+            // first sample can sit just outside `range`.
+            let covered_start = if count == 0 {
+                range.start
+            } else {
+                Timestamp(first_ts.0.min(range.start.0))
+            };
+            let covered_end = if count >= limit {
+                Timestamp(last_ts.0.saturating_add(1))
+            } else {
+                range_end
+            };
+            cache.note_covered(covered_start..covered_end);
+            cache.evict_raw_if_needed(current_ts.0);
+            cache.consider_keyframe_extend(current_ts.0, earliest.0);
+            if count >= limit && covered_end.0 < range_end.0 {
+                cache.backfill_in_flight = true;
+                cache.backfill_started_at = Some(Instant::now());
+                send_window_request(&mut cmds, entity, msg_id, covered_end..range_end, limit);
             }
             true
         },
@@ -866,6 +1126,7 @@ fn send_backfill_request(
 
 /// Upload a decoded frame to the GPU, reusing the existing texture when
 /// the resolution has not changed.
+#[cfg(not(target_family = "wasm"))]
 fn upload_frame(
     frame: Image,
     image_node: &mut bevy::prelude::Mut<'_, ImageNode>,
@@ -906,6 +1167,238 @@ fn copy_raw_frame_to_rgba(src: &[u8], dst: &mut [u8], format: RawPixelFormat) ->
     }
 }
 
+/// Insert the library decoder beside a video tile. Spawn sites stay shared
+/// with native; this runs once per entity on wasm.
+#[cfg(target_family = "wasm")]
+pub fn attach_webcodecs(
+    mut commands: Commands,
+    query: Query<
+        Entity,
+        (
+            With<VideoDecoderHandle>,
+            Without<webcodecs_video::bevy::VideoStream>,
+        ),
+    >,
+) {
+    for entity in &query {
+        commands
+            .entity(entity)
+            .insert(webcodecs_video::bevy::VideoStream::new());
+    }
+}
+
+/// Whether the wasm feeder should start a seek this tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(any(target_family = "wasm", test))]
+enum WasmSeekDecision {
+    /// A seek is in flight and still inside [`SEEK_TIMEOUT_SECS`].
+    Wait,
+    /// Decode from the keyframe at or before the playhead.
+    /// `stale` means the previous seek timed out.
+    Seek {
+        stale: bool,
+    },
+    Idle,
+}
+
+/// Inputs for [`wasm_seek_decision`]. Timestamps are microseconds.
+#[derive(Clone, Copy)]
+#[cfg(any(target_family = "wasm", test))]
+struct WasmSeekQuery {
+    current_us: i64,
+    last_decoded_us: Option<i64>,
+    last_presented_us: Option<i64>,
+    /// Seconds since the in-flight seek was sent. `None` when nothing is in flight.
+    seek_age_secs: Option<f32>,
+    seeking: bool,
+    needs_keyframe: bool,
+    /// Sample the playhead maps to: newest raw at or before it, or the first
+    /// keyframe after it.
+    wanted_us: Option<i64>,
+    /// Sample the last seek was meant to show.
+    seek_wanted_us: Option<i64>,
+    /// Raw frames cover the playhead and this tick has not already fed one.
+    can_seek: bool,
+}
+
+/// Seek when the playhead maps to a sample the last seek was not for.
+/// That record only holds while the presented frame is still at or before
+/// the sample, so a rewind back to it seeks again. A seek older than
+/// [`SEEK_TIMEOUT_SECS`] is re-issued for that same sample, which is the
+/// live-edge case where the decoder never emits the target pts.
+#[cfg(any(target_family = "wasm", test))]
+fn wasm_seek_decision(query: &WasmSeekQuery) -> WasmSeekDecision {
+    let decoder_near = query
+        .last_decoded_us
+        .is_some_and(|last| (query.current_us - last).abs() < DECODER_NEAR_THRESHOLD_US);
+    let is_sequential = query.last_decoded_us.is_some_and(|last| {
+        query.current_us >= last && query.current_us - last < DECODER_NEAR_THRESHOLD_US
+    });
+    let at_playhead = query
+        .last_presented_us
+        .is_some_and(|pts| (query.current_us - pts).abs() <= NO_DATA_THRESHOLD_US);
+    let seek_stale = query.seeking
+        && query
+            .seek_age_secs
+            .is_some_and(|age| age >= SEEK_TIMEOUT_SECS);
+    // Once a later frame is on screen the recorded sample is behind us, and
+    // rewinding to it has to seek. Nothing presented yet means the seek is
+    // still in flight.
+    let already_sought = query.wanted_us.is_some_and(|wanted| {
+        query.seek_wanted_us == Some(wanted)
+            && query
+                .last_presented_us
+                .is_none_or(|presented| presented <= wanted)
+    });
+
+    let wants_seek = query.can_seek
+        && !at_playhead
+        && (seek_stale
+            || (!already_sought && (query.needs_keyframe || !is_sequential || !decoder_near)));
+    if !wants_seek {
+        return WasmSeekDecision::Idle;
+    }
+    if query.seeking && !seek_stale {
+        return WasmSeekDecision::Wait;
+    }
+    WasmSeekDecision::Seek { stale: seek_stale }
+}
+
+/// Feed the wasm decoder from the raw Annex-B cache and keep the playhead in sync.
+#[cfg(target_family = "wasm")]
+fn drive_webcodecs(
+    current_ts: Timestamp,
+    playing: bool,
+    cache: &mut VideoFrameCache,
+    wc: &mut webcodecs_video::bevy::VideoStream,
+) {
+    wc.set_time(current_ts.0);
+    wc.set_playing(playing);
+
+    let decoder_seeking = wc.is_seeking();
+    cache.seeking = decoder_seeking;
+    let seek_age_secs = cache.seek_sent_at.map(|sent| sent.elapsed().as_secs_f32());
+    let seek_timed_out =
+        decoder_seeking && seek_age_secs.is_some_and(|age| age >= SEEK_TIMEOUT_SECS);
+    if !decoder_seeking {
+        // Seek finished (or never started). `last_decoded_ts` already points
+        // at the last sample submitted, so sequential feeding resumes after
+        // it. Also drops a timestamp left behind by a seek we abandoned.
+        cache.seek_sent_at = None;
+    } else if seek_timed_out {
+        // The target pts never arrived. Drop the cache-side flag so
+        // sequential feeding can resume if the decoder leaves the seek on
+        // its own. This tick still re-seeks from the keyframe.
+        cache.seeking = false;
+    }
+
+    let is_sequential = cache.last_decoded_ts.is_some_and(|last| {
+        current_ts.0 >= last.0 && (current_ts.0 - last.0) < DECODER_NEAR_THRESHOLD_US
+    });
+    let has_raw = cache.has_video_at(current_ts);
+
+    let mut fed = false;
+    // `decoder_seeking` rather than `cache.seeking`: a timed-out seek clears
+    // the cache flag above, but the decoder is still inside that seek.
+    if is_sequential && !decoder_seeking && !wc.needs_keyframe() {
+        // A UI slower than the stream falls behind feeding frame by frame. An
+        // IDR resets the decoder's references, so skip to the newest keyframe
+        // once the backlog is longer than the no-data threshold.
+        if let Some(last) = cache.last_decoded_ts
+            && current_ts.0 - last.0 > NO_DATA_THRESHOLD_US
+            && let Some(kf) = cache.nearest_keyframe_before(current_ts)
+            && kf > last
+            && let Some((&prev, _)) = cache.raw_frames.range(..kf).next_back()
+        {
+            cache.last_decoded_ts = Some(prev);
+        }
+        for _ in 0..MAX_SEQUENTIAL_PER_TICK {
+            let Some(last) = cache.last_decoded_ts else {
+                break;
+            };
+            let Some((ts, data)) = cache.next_raw_frame_after(last) else {
+                break;
+            };
+            if ts.0 > current_ts.0 + DECODER_NEAR_THRESHOLD_US {
+                break;
+            }
+            let data = data.to_vec();
+            if !wc.push(ts.0, &data) {
+                break;
+            }
+            cache.last_decoded_ts = Some(ts);
+            fed = true;
+        }
+    }
+
+    // The native path can step backward inside `decoder_near` from its RGBA
+    // cache. Wasm only has the texture, so a playhead that maps to a
+    // different sample seeks. The same sample is not sought again: a
+    // live-edge flush sets `needs_keyframe` while the playhead sits ahead of
+    // that sample.
+    let wanted = cache
+        .raw_frames
+        .range(..=current_ts)
+        .next_back()
+        .map(|(ts, _)| *ts)
+        .or_else(|| cache.first_keyframe_after(current_ts));
+    let decision = wasm_seek_decision(&WasmSeekQuery {
+        current_us: current_ts.0,
+        last_decoded_us: cache.last_decoded_ts.map(|ts| ts.0),
+        last_presented_us: wc.last_presented,
+        seek_age_secs,
+        seeking: decoder_seeking,
+        needs_keyframe: wc.needs_keyframe(),
+        wanted_us: wanted.map(|ts| ts.0),
+        seek_wanted_us: cache.seek_wanted_ts.map(|ts| ts.0),
+        can_seek: has_raw && !fed,
+    });
+    let WasmSeekDecision::Seek { stale } = decision else {
+        return;
+    };
+    // The samples below already start at the keyframe. Move `last_decoded_ts`
+    // there too, so a bail-out (no samples yet) does not look sequential and
+    // swallow the next timeout.
+    if stale && let Some(kf) = cache.nearest_keyframe_before(current_ts) {
+        cache.last_decoded_ts = Some(kf);
+    }
+
+    let Some(kf) = cache
+        .nearest_keyframe_before(current_ts)
+        .or_else(|| cache.first_keyframe_after(current_ts))
+    else {
+        return;
+    };
+    // The decoder discards everything before the target and completes only on
+    // an exact match, so the target has to be a real sample, not the playhead.
+    let mut frames = cache.get_raw_sequence(kf, current_ts.max(kf));
+    let Some(mut target) = frames.last().map(|(ts, _)| *ts) else {
+        return;
+    };
+    // Decoders hold the last submitted picture until the next one arrives
+    // (Safari always, Chrome for some streams), so submit one sample past the
+    // target. At the live edge there is none yet: show the previous frame and
+    // let the newest be the trailing sample.
+    if let Some((ts, data)) = cache.next_raw_frame_after(target) {
+        frames.push((ts, data.to_vec()));
+    } else if frames.len() >= 2 {
+        target = frames[frames.len() - 2].0;
+    }
+    let last_submitted = frames[frames.len() - 1].0;
+    let samples = frames.into_iter().map(|(ts, data)| (ts.0, data)).collect();
+    wc.seek_through(samples, target.0);
+    // `reset` can fail. Leave the recorded sample alone so the next tick retries.
+    if !wc.is_seeking() {
+        return;
+    }
+    if let Some(wanted) = wanted {
+        cache.seek_wanted_ts = Some(wanted);
+    }
+    cache.seeking = true;
+    cache.last_decoded_ts = Some(last_submitted);
+    cache.seek_sent_at = Some(Instant::now());
+}
+
 // ---------------------------------------------------------------------------
 // Widget implementation — cache-first playback
 // ---------------------------------------------------------------------------
@@ -928,6 +1421,8 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
             mut cache,
             mut image_node,
             mut ui_node,
+            #[cfg(target_family = "wasm")]
+            mut wc,
         }) = state.query.get_mut(entity)
         else {
             return;
@@ -986,69 +1481,78 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                         }
                     }
                 } else {
-                    // H.264 decoded video: existing decode pipeline.
-                    let seek_done = decoder.drain_into_cache(&mut cache);
-                    if seek_done {
-                        cache.seeking = false;
-                    }
-
-                    if let Some((ts, img)) = cache.decoded_at_or_before(current_ts)
-                        && ((current_ts.0 - ts.0).abs() <= NO_DATA_THRESHOLD_US
-                            || (current_ts.0 >= ts.0
-                                && current_ts.0 - ts.0 <= LIVE_HOLD_THRESHOLD_US))
+                    #[cfg(not(target_family = "wasm"))]
                     {
-                        stream.current_frame = Some(img.clone());
-                    } else if let Some((ts, img)) = cache.decoded_at_or_after(current_ts)
-                        && (ts.0 - current_ts.0).abs() <= NO_DATA_THRESHOLD_US
-                    {
-                        stream.current_frame = Some(img.clone());
-                    }
-
-                    let decoder_near = if let Some(last) = cache.last_decoded_ts {
-                        (current_ts.0 - last.0).abs() < DECODER_NEAR_THRESHOLD_US
-                    } else {
-                        false
-                    };
-
-                    let is_sequential = if let Some(last) = cache.last_decoded_ts {
-                        current_ts.0 >= last.0
-                            && (current_ts.0 - last.0) < DECODER_NEAR_THRESHOLD_US
-                    } else {
-                        false
-                    };
-
-                    let has_raw = cache.has_video_at(current_ts);
-
-                    if is_sequential && !cache.seeking {
-                        if let Some((ts, data)) =
-                            cache.next_raw_frame_after(cache.last_decoded_ts.unwrap())
-                            && ts.0 <= current_ts.0 + DECODER_NEAR_THRESHOLD_US
-                            && decoder.process_frame(ts, data)
-                        {
-                            cache.last_decoded_ts = Some(ts);
+                        // H.264 decoded video: existing decode pipeline.
+                        let seek_done = decoder.drain_into_cache(&mut cache);
+                        if seek_done {
+                            cache.seeking = false;
                         }
-                    } else if !decoder_near && has_raw {
-                        let (seek_start, seek_end) =
-                            if let Some(kf) = cache.nearest_keyframe_before(current_ts) {
-                                (kf, current_ts)
-                            } else if let Some(kf) = cache.first_keyframe_after(current_ts) {
-                                let end = cache
-                                    .raw_frames
-                                    .range(kf..)
-                                    .nth(1)
-                                    .map(|(t, _)| *t)
-                                    .unwrap_or(kf);
-                                (kf, end)
-                            } else {
-                                (current_ts, current_ts)
-                            };
 
-                        let frames = cache.get_raw_sequence(seek_start, seek_end);
-                        if !frames.is_empty() {
-                            cache.seek_generation += 1;
-                            if decoder.send_seek_batch(frames, cache.seek_generation) {
-                                cache.seeking = true;
+                        if let Some((ts, img)) = cache.decoded_at_or_before(current_ts)
+                            && ((current_ts.0 - ts.0).abs() <= NO_DATA_THRESHOLD_US
+                                || (current_ts.0 >= ts.0
+                                    && current_ts.0 - ts.0 <= LIVE_HOLD_THRESHOLD_US))
+                        {
+                            stream.current_frame = Some(img.clone());
+                        } else if let Some((ts, img)) = cache.decoded_at_or_after(current_ts)
+                            && (ts.0 - current_ts.0).abs() <= NO_DATA_THRESHOLD_US
+                        {
+                            stream.current_frame = Some(img.clone());
+                        }
+
+                        let decoder_near = if let Some(last) = cache.last_decoded_ts {
+                            (current_ts.0 - last.0).abs() < DECODER_NEAR_THRESHOLD_US
+                        } else {
+                            false
+                        };
+
+                        let is_sequential = if let Some(last) = cache.last_decoded_ts {
+                            current_ts.0 >= last.0
+                                && (current_ts.0 - last.0) < DECODER_NEAR_THRESHOLD_US
+                        } else {
+                            false
+                        };
+
+                        let has_raw = cache.has_video_at(current_ts);
+
+                        if is_sequential && !cache.seeking {
+                            if let Some((ts, data)) =
+                                cache.next_raw_frame_after(cache.last_decoded_ts.unwrap())
+                                && ts.0 <= current_ts.0 + DECODER_NEAR_THRESHOLD_US
+                                && decoder.process_frame(ts, data)
+                            {
+                                cache.last_decoded_ts = Some(ts);
                             }
+                        } else if !decoder_near && has_raw {
+                            let (seek_start, seek_end) =
+                                if let Some(kf) = cache.nearest_keyframe_before(current_ts) {
+                                    (kf, current_ts)
+                                } else if let Some(kf) = cache.first_keyframe_after(current_ts) {
+                                    let end = cache
+                                        .raw_frames
+                                        .range(kf..)
+                                        .nth(1)
+                                        .map(|(t, _)| *t)
+                                        .unwrap_or(kf);
+                                    (kf, end)
+                                } else {
+                                    (current_ts, current_ts)
+                                };
+
+                            let frames = cache.get_raw_sequence(seek_start, seek_end);
+                            if !frames.is_empty() {
+                                cache.seek_generation += 1;
+                                if decoder.send_seek_batch(frames, cache.seek_generation) {
+                                    cache.seeking = true;
+                                }
+                            }
+                        }
+                    }
+                    #[cfg(target_family = "wasm")]
+                    {
+                        if let Some(wc) = wc.as_deref_mut() {
+                            drive_webcodecs(current_ts, !state.paused.0, &mut cache, wc);
                         }
                     }
                 }
@@ -1072,8 +1576,15 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
         let viewport_pos = max_rect.left_top().to_vec2();
         let viewport_size = max_rect.size();
 
-        let (width, height) = if let Some(image) = state.images.get(&image_node.image) {
-            let aspect_ratio = image.height() as f32 / image.width() as f32;
+        // The wasm decoder's texture is render-world only, so it is absent
+        // from `Assets<Image>`; fall back to the stream's reported size.
+        let frame_size = state
+            .images
+            .get(&image_node.image)
+            .map(|image| Vec2::new(image.width() as f32, image.height() as f32))
+            .or_else(|| (stream.size != Vec2::ZERO).then_some(stream.size));
+        let (width, height) = if let Some(frame_size) = frame_size {
+            let aspect_ratio = frame_size.y / frame_size.x;
             let height = viewport_size.x * aspect_ratio;
             if height > viewport_size.y {
                 let width = viewport_size.y / aspect_ratio;
@@ -1113,12 +1624,28 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                     .width
                     .store(width as usize, atomic::Ordering::Relaxed);
 
-                // Upload the current frame to the GPU.
+                // Native copies a decoded RGBA image into the tile. Wasm points the
+                // tile at the decoder's persistent GPU texture.
+                #[cfg(not(target_family = "wasm"))]
                 if let Some(frame) = stream.current_frame.take() {
                     if stream.size == Vec2::ZERO {
                         stream.size = Vec2::new(frame.width() as f32, frame.height() as f32);
                     }
                     upload_frame(frame, &mut image_node, &mut state.images);
+                }
+                #[cfg(target_family = "wasm")]
+                if stream.raw_dims.is_none()
+                    && let Some(wc) = wc.as_ref()
+                    && let Some(handle) = wc.image.as_ref()
+                {
+                    if stream.size == Vec2::ZERO
+                        && let Some((w, h)) = wc.size
+                    {
+                        stream.size = Vec2::new(w as f32, h as f32);
+                    }
+                    if image_node.image != *handle {
+                        image_node.image = handle.clone();
+                    }
                 }
 
                 // "No video at this time" overlay when there is no raw data
@@ -1194,8 +1721,10 @@ pub fn connect_streams(
         &mut VideoFrameCache,
     )>,
     mut commands: Commands,
-    stream_id: Res<CurrentStreamId>,
     last_updated: Res<impeller_wkt::LastUpdated>,
+    current_ts: Res<CurrentTimestamp>,
+    earliest: Res<impeller_wkt::EarliestTimestamp>,
+    sensor_configs: Option<Res<SensorCameraConfigs>>,
 ) {
     for (entity, mut stream, decoder, mut cache) in &mut query {
         match &mut stream.state {
@@ -1203,22 +1732,12 @@ pub fn connect_streams(
                 *frames_waited += 1;
                 if *frames_waited >= FRAMES_BEFORE_CONNECT {
                     let msg_id = stream.msg_id;
-                    let limit = backfill_frame_limit(stream.raw_dims, cache.is_h264);
-                    cache.backfill_in_flight = true;
-                    cache.backfill_started_at = Some(Instant::now());
-                    send_backfill_request(
-                        &mut commands,
-                        entity,
-                        msg_id,
-                        Timestamp(i64::MIN),
-                        limit,
-                    );
                     bevy::log::debug!(
                         "video stream connected: msg_name={}, raw_dims={:?}",
                         stream.msg_name,
                         stream.raw_dims
                     );
-                    send_stream_request(&mut commands, entity, msg_id, stream_id.0, cache.is_h264);
+                    send_stream_request(&mut commands, entity, msg_id);
                     stream.state = StreamState::Active;
                 }
             }
@@ -1239,51 +1758,56 @@ pub fn connect_streams(
                     cache.backfill_started_at = None;
                 }
 
-                // Continue backfilling: if the backfill stopped (short page)
-                // but the DB has newer data, request the next page from
-                // where the previous backfill left off. Retries are
-                // rate-limited to 1/sec to avoid wrapping the u8 RequestId
-                // counter; pagination within the callback fires immediately.
-                let retry_ok = cache
-                    .backfill_retry_at
-                    .is_none_or(|t| t.elapsed().as_secs_f32() >= 1.0);
-                if !cache.backfill_in_flight && retry_ok && cache.backfill_frontier < last_updated.0
-                {
-                    let msg_id = stream.msg_id;
-                    let limit = backfill_frame_limit(stream.raw_dims, cache.is_h264);
-                    cache.backfill_in_flight = true;
-                    cache.backfill_started_at = Some(Instant::now());
-                    cache.backfill_retry_at = Some(Instant::now());
-                    send_backfill_request(
-                        &mut commands,
-                        entity,
-                        msg_id,
-                        cache.backfill_frontier,
-                        limit,
-                    );
-                }
-
                 if let Some(last) = cache.last_stream_activity
                     && last.elapsed().as_secs_f32() > STREAM_RECOVERY_TIMEOUT_SECS
                 {
-                    let msg_id = stream.msg_id;
-                    let limit = backfill_frame_limit(stream.raw_dims, cache.is_h264);
-                    cache.backfill_in_flight = true;
-                    cache.backfill_started_at = Some(Instant::now());
-                    send_backfill_request(
+                    send_stream_request(&mut commands, entity, stream.msg_id);
+                    cache.last_stream_activity = None;
+                }
+
+                if !cache.backfill_in_flight {
+                    request_playhead_window(
                         &mut commands,
                         entity,
-                        msg_id,
-                        cache.backfill_frontier,
-                        limit,
+                        &stream,
+                        &mut cache,
+                        (current_ts.0, earliest.0, last_updated.0),
+                        sensor_configs.as_deref(),
                     );
-                    send_stream_request(&mut commands, entity, msg_id, stream_id.0, cache.is_h264);
-                    cache.last_stream_activity = None;
                 }
             }
             StreamState::Error(_) => {}
         }
     }
+}
+
+fn request_playhead_window(
+    commands: &mut Commands,
+    entity: Entity,
+    stream: &VideoStream,
+    cache: &mut VideoFrameCache,
+    (playhead, earliest, last_updated): (Timestamp, Timestamp, Timestamp),
+    sensor_configs: Option<&SensorCameraConfigs>,
+) {
+    let frame_bytes = stream_frame_bytes(stream.raw_dims, cache.is_h264);
+    let fps = stream_fps(sensor_configs, &stream.msg_name);
+    let ahead_us = fetch_window_us(frame_bytes, fps, cache.max_raw_bytes);
+    let behind_us = if cache.is_h264 {
+        ahead_us.saturating_mul(1 + i64::from(cache.keyframe_extend_steps))
+    } else {
+        ahead_us
+    };
+    let Some(want) = clamped_fetch_window(playhead, behind_us, ahead_us, earliest, last_updated)
+    else {
+        return;
+    };
+    let Some(gap) = cache.first_uncovered(&want) else {
+        return;
+    };
+    let limit = backfill_frame_limit(stream.raw_dims, cache.is_h264);
+    cache.backfill_in_flight = true;
+    cache.backfill_started_at = Some(Instant::now());
+    send_window_request(commands, entity, stream.msg_id, gap, limit);
 }
 
 // ---------------------------------------------------------------------------
@@ -1313,8 +1837,12 @@ pub(crate) fn invalidate_sensor_frames_if_loaded_skybox_differs(
 
 pub(crate) fn invalidate_sensor_frames_on_db_skybox_change(
     config: Res<impeller_wkt::DbConfig>,
-    skybox_ui: Option<Res<bevy_ai_skybox::prelude::SkyboxGenerationUi>>,
-    mut locally_pushed: ResMut<crate::skybox_generation::LocallyPushedSkyboxActive>,
+    #[cfg(not(target_family = "wasm"))] skybox_ui: Option<
+        Res<bevy_ai_skybox::prelude::SkyboxGenerationUi>,
+    >,
+    #[cfg(not(target_family = "wasm"))] mut locally_pushed: ResMut<
+        crate::skybox_generation::LocallyPushedSkyboxActive,
+    >,
     mut last_active: Local<Option<String>>,
     mut caches: Query<&mut VideoFrameCache>,
 ) {
@@ -1322,16 +1850,19 @@ pub(crate) fn invalidate_sensor_frames_on_db_skybox_change(
     if *last_active == active {
         return;
     }
-    if locally_pushed.consume_matching(active.as_deref()) {
-        *last_active = active;
-        return;
-    }
-    if let (Some(active), Some(skybox_ui)) = (active.as_deref(), skybox_ui.as_deref())
-        && skybox_ui.is_busy()
-        && skybox_ui.target_name.as_deref() == Some(active)
+    #[cfg(not(target_family = "wasm"))]
     {
-        *last_active = Some(active.to_string());
-        return;
+        if locally_pushed.consume_matching(active.as_deref()) {
+            *last_active = active;
+            return;
+        }
+        if let (Some(active), Some(skybox_ui)) = (active.as_deref(), skybox_ui.as_deref())
+            && skybox_ui.is_busy()
+            && skybox_ui.target_name.as_deref() == Some(active)
+        {
+            *last_active = Some(active.to_string());
+            return;
+        }
     }
     *last_active = active;
     clear_sensor_raw_frame_caches(&mut caches);
@@ -1345,10 +1876,9 @@ fn clear_sensor_raw_frame_caches(caches: &mut Query<&mut VideoFrameCache>) {
         let displayed = cache
             .last_displayed_ts
             .and_then(|timestamp| cache.raw_frames.get(&timestamp).cloned());
-        cache.raw_frames.clear();
-        if let (Some(timestamp), Some(frame)) = (cache.last_displayed_ts, displayed) {
-            cache.raw_frames.insert(timestamp, frame);
-        } else {
+        let keep = cache.last_displayed_ts.zip(displayed);
+        cache.clear_raw_keeping(keep);
+        if cache.raw_frames.is_empty() {
             cache.last_displayed_ts = None;
         }
     }
@@ -1379,10 +1909,279 @@ mod tests {
     #[test]
     fn live_hold_keeps_video_when_playhead_is_ahead() {
         let mut cache = VideoFrameCache::default();
-        cache.insert_raw(Timestamp(1_000_000), vec![0, 0, 0, 1, 0x65]);
+        cache.insert_raw(
+            Timestamp(1_000_000),
+            vec![0, 0, 0, 1, 0x65],
+            Timestamp(1_000_000),
+        );
         assert!(cache.has_video_at(Timestamp(1_000_000)));
         assert!(cache.has_video_at(Timestamp(2_500_000)));
         assert!(!cache.has_video_at(Timestamp(4_000_000)));
         assert!(!cache.has_video_at(Timestamp(0)));
+    }
+
+    #[test]
+    fn raw_bytes_track_insert_replace_and_clear() {
+        let mut cache = VideoFrameCache::for_raw();
+        cache.max_raw_bytes = 1_000;
+        let anchor = Timestamp(1);
+        cache.insert_raw(Timestamp(1), vec![0; 4], anchor);
+        cache.insert_raw(Timestamp(1), vec![0; 7], anchor);
+        assert_eq!(cache.raw_bytes, 7);
+        assert_eq!(cache.raw_frames.len(), 1);
+
+        cache.insert_raw(Timestamp(2), vec![0; 3], anchor);
+        assert_eq!(cache.raw_bytes, 10);
+        let kept = cache.raw_frames.get(&Timestamp(1)).unwrap().clone();
+        cache.clear_raw_keeping(Some((Timestamp(1), kept)));
+        assert_eq!(cache.raw_bytes, 7);
+        assert_eq!(cache.raw_frames.len(), 1);
+        assert_eq!(cache.coverage.len(), 1);
+    }
+
+    #[test]
+    fn eviction_drops_the_end_farthest_from_the_anchor() {
+        let mut cache = VideoFrameCache::for_raw();
+        cache.max_raw_bytes = 10;
+        cache.insert_raw(Timestamp(1_000), vec![0; 6], Timestamp(1_000));
+        cache.insert_raw(Timestamp(2_000), vec![0; 6], Timestamp(1_000));
+        assert!(cache.raw_frames.contains_key(&Timestamp(1_000)));
+        assert!(!cache.raw_frames.contains_key(&Timestamp(2_000)));
+        assert_eq!(cache.raw_bytes, 6);
+        assert!(
+            cache
+                .first_uncovered(&(Timestamp(1_500)..Timestamp(2_500)))
+                .is_some()
+        );
+        assert!(
+            cache
+                .first_uncovered(&(Timestamp(1_000)..Timestamp(1_001)))
+                .is_none()
+        );
+
+        let mut cache = VideoFrameCache::for_raw();
+        cache.max_raw_bytes = 10;
+        cache.insert_raw(Timestamp(1_000), vec![0; 6], Timestamp(2_000));
+        cache.insert_raw(Timestamp(2_000), vec![0; 6], Timestamp(2_000));
+        assert!(!cache.raw_frames.contains_key(&Timestamp(1_000)));
+        assert!(cache.raw_frames.contains_key(&Timestamp(2_000)));
+    }
+
+    #[test]
+    fn coverage_merges_within_tolerance_and_reports_the_gap() {
+        let mut cache = VideoFrameCache::for_raw();
+        cache.note_covered(Timestamp(0)..Timestamp(1_000));
+        cache.note_covered(Timestamp(1_000 + NO_DATA_THRESHOLD_US)..Timestamp(2_000_000));
+        assert_eq!(cache.coverage.len(), 1);
+        assert_eq!(cache.coverage[0].end.0, 2_000_000);
+
+        let gap_start = 2_000_000 + NO_DATA_THRESHOLD_US + 1;
+        cache.note_covered(Timestamp(gap_start)..Timestamp(3_000_000));
+        assert_eq!(cache.coverage.len(), 2);
+        let gap = cache
+            .first_uncovered(&(Timestamp(0)..Timestamp(3_000_000)))
+            .unwrap();
+        assert_eq!(gap.start.0, 2_000_000);
+        assert_eq!(gap.end.0, gap_start);
+    }
+
+    #[test]
+    fn fetch_window_clamps_to_db_bounds_and_skips_covered_ranges() {
+        let want = clamped_fetch_window(
+            Timestamp(1_000_000),
+            100_000,
+            100_000,
+            Timestamp(950_000),
+            Timestamp(1_050_000),
+        )
+        .unwrap();
+        assert_eq!(want.start.0, 950_000);
+        assert_eq!(want.end.0, 1_050_000);
+
+        assert!(
+            clamped_fetch_window(
+                Timestamp(1_000),
+                10,
+                10,
+                Timestamp(i64::MAX),
+                Timestamp(2_000),
+            )
+            .is_none()
+        );
+
+        let mut cache = VideoFrameCache::for_raw();
+        cache.note_covered(want.start..want.end);
+        assert!(cache.first_uncovered(&want).is_none());
+
+        let rgba = stream_frame_bytes(Some((640, 480, RawPixelFormat::Rgba8)), false);
+        let window = fetch_window_us(rgba, 30.0, 256 * 1024 * 1024);
+        assert!(window < FETCH_WINDOW_US);
+        let h264 = fetch_window_us(BACKFILL_ASSUMED_H264_FRAME, 30.0, 256 * 1024 * 1024);
+        assert_eq!(h264, FETCH_WINDOW_US);
+    }
+
+    fn seek_query() -> WasmSeekQuery {
+        WasmSeekQuery {
+            current_us: 5_000_000,
+            last_decoded_us: None,
+            last_presented_us: None,
+            seek_age_secs: None,
+            seeking: false,
+            needs_keyframe: false,
+            wanted_us: None,
+            seek_wanted_us: None,
+            can_seek: true,
+        }
+    }
+
+    #[test]
+    fn seek_when_playhead_is_not_sequential() {
+        let decision = wasm_seek_decision(&WasmSeekQuery {
+            last_decoded_us: Some(0),
+            ..seek_query()
+        });
+        assert_eq!(decision, WasmSeekDecision::Seek { stale: false });
+    }
+
+    #[test]
+    fn in_flight_seek_is_not_reissued() {
+        let decision = wasm_seek_decision(&WasmSeekQuery {
+            last_decoded_us: Some(0),
+            seeking: true,
+            seek_age_secs: Some(SEEK_TIMEOUT_SECS - 0.1),
+            ..seek_query()
+        });
+        assert_eq!(decision, WasmSeekDecision::Wait);
+    }
+
+    #[test]
+    fn timed_out_seek_retries_when_decoder_looks_sequential() {
+        // Live follow: the last submitted sample is just behind the playhead,
+        // so the decoder looks sequential and near. That used to suppress the
+        // timeout retry and leave the tile black.
+        let playhead = 5_000_000;
+        let decision = wasm_seek_decision(&WasmSeekQuery {
+            current_us: playhead,
+            last_decoded_us: Some(playhead - 50_000),
+            seeking: true,
+            seek_age_secs: Some(SEEK_TIMEOUT_SECS),
+            ..seek_query()
+        });
+        assert_eq!(decision, WasmSeekDecision::Seek { stale: true });
+    }
+
+    #[test]
+    fn no_seek_when_presented_frame_is_at_the_playhead() {
+        let playhead = 5_000_000;
+        let decision = wasm_seek_decision(&WasmSeekQuery {
+            current_us: playhead,
+            last_decoded_us: Some(0),
+            last_presented_us: Some(playhead - 100_000),
+            seeking: true,
+            seek_age_secs: Some(SEEK_TIMEOUT_SECS),
+            ..seek_query()
+        });
+        assert_eq!(decision, WasmSeekDecision::Idle);
+    }
+
+    #[test]
+    fn no_seek_when_the_latest_frame_is_already_showing() {
+        // Live follow: LastUpdated leads the newest access unit, and the
+        // live-edge flush left the decoder needing a keyframe. The last seek
+        // was already for that sample.
+        let latest = 1_000_000;
+        let decision = wasm_seek_decision(&WasmSeekQuery {
+            current_us: latest + NO_DATA_THRESHOLD_US + 1,
+            last_decoded_us: Some(latest),
+            last_presented_us: Some(latest),
+            wanted_us: Some(latest),
+            seek_wanted_us: Some(latest),
+            needs_keyframe: true,
+            ..seek_query()
+        });
+        assert_eq!(decision, WasmSeekDecision::Idle);
+    }
+
+    #[test]
+    fn no_seek_while_the_live_edge_predecessor_is_showing() {
+        // Paused live edge: the seek presents the previous access unit first
+        // and the newest arrives a tick later. The playhead is past the
+        // no-data window, but the seek was already for the newest sample.
+        let previous = 900_000;
+        let newest = 1_000_000;
+        let decision = wasm_seek_decision(&WasmSeekQuery {
+            current_us: newest + NO_DATA_THRESHOLD_US + 1,
+            last_decoded_us: Some(newest),
+            last_presented_us: Some(previous),
+            wanted_us: Some(newest),
+            seek_wanted_us: Some(newest),
+            needs_keyframe: true,
+            seeking: false,
+            ..seek_query()
+        });
+        assert_eq!(decision, WasmSeekDecision::Idle);
+    }
+
+    #[test]
+    fn seek_backward_while_showing_the_latest_frame() {
+        let latest = 5_000_000;
+        let earlier = 1_000_000;
+        let decision = wasm_seek_decision(&WasmSeekQuery {
+            current_us: earlier,
+            last_decoded_us: Some(latest),
+            last_presented_us: Some(latest),
+            wanted_us: Some(earlier),
+            seek_wanted_us: Some(latest),
+            needs_keyframe: true,
+            ..seek_query()
+        });
+        assert_eq!(decision, WasmSeekDecision::Seek { stale: false });
+    }
+
+    #[test]
+    fn seek_when_a_newer_frame_needs_a_keyframe() {
+        let decision = wasm_seek_decision(&WasmSeekQuery {
+            current_us: 5_000_000,
+            last_decoded_us: Some(4_000_000),
+            last_presented_us: Some(4_000_000),
+            wanted_us: Some(4_900_000),
+            seek_wanted_us: Some(4_000_000),
+            needs_keyframe: true,
+            ..seek_query()
+        });
+        assert_eq!(decision, WasmSeekDecision::Seek { stale: false });
+    }
+
+    #[test]
+    fn seek_back_to_a_previously_sought_sample() {
+        // Playback moved past the sample the last seek was for. Rewinding to
+        // it must seek again; the record no longer describes the picture.
+        let sample = 1_000_000;
+        let decision = wasm_seek_decision(&WasmSeekQuery {
+            current_us: sample,
+            last_decoded_us: Some(sample + 3_000_000),
+            last_presented_us: Some(sample + 3_000_000),
+            wanted_us: Some(sample),
+            seek_wanted_us: Some(sample),
+            seeking: false,
+            ..seek_query()
+        });
+        assert_eq!(decision, WasmSeekDecision::Seek { stale: false });
+    }
+
+    #[test]
+    fn timed_out_seek_retries_for_the_same_sample() {
+        let sample = 1_000_000;
+        let decision = wasm_seek_decision(&WasmSeekQuery {
+            current_us: sample + NO_DATA_THRESHOLD_US + 1,
+            last_decoded_us: Some(sample),
+            wanted_us: Some(sample),
+            seek_wanted_us: Some(sample),
+            seeking: true,
+            seek_age_secs: Some(SEEK_TIMEOUT_SECS),
+            needs_keyframe: true,
+            ..seek_query()
+        });
+        assert_eq!(decision, WasmSeekDecision::Seek { stale: true });
     }
 }

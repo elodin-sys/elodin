@@ -85,7 +85,7 @@ The Apollo hooks and `calibrate.py` share their metric logic in
 ## CI test
 
 Buildkite runs a **fast infrastructure check** (target under 5 minutes) via the
-`:rocket: apollo monte-carlo` step in [`.buildkite/pipeline.py`](../../.buildkite/pipeline.py),
+`:rocket: monte-carlo apollo + quickstart` step in [`.buildkite/pipeline.py`](../../.buildkite/pipeline.py),
 which calls `scripts/test-apollo-monte-carlo.sh`. It uses `campaign.ci.toml` and
 `spec.ci.toml` (one fixed nominal sample), truncates the sim with
 `ELODIN_APOLLO_MAX_TICKS=600` (~5 s at 120 Hz), and scores runs with

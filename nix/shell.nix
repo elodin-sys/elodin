@@ -83,6 +83,7 @@ with pkgs; let
         gettext
         just
         jq
+        trunk
         yq
         git
         git-filter-repo
@@ -132,6 +133,10 @@ with pkgs; let
     # Environment variables
     LIBCLANG_PATH = "${libclang.lib}/lib";
     TOKTX = "${common.ktxTools}/bin/toktx";
+    # Host `clang` is a Nix cc-wrapper (glibc + hardening). zstd-sys and other
+    # C build-scripts target wasm32 and need the unwrapped compiler plus the
+    # crate's own wasm shim headers. cc-rs accepts either hyphens or underscores.
+    CC_wasm32_unknown_unknown = "${llvm.clang.cc}/bin/clang";
 
     # The nox-py cdylib (.so) carries a DF_STATIC_TLS flag that forces glibc
     # to allocate ~10 KB from the tiny static-TLS surplus on dlopen.  Raise

@@ -115,9 +115,9 @@ pub use window::{
 #[cfg(not(target_family = "wasm"))]
 pub mod status_bar;
 
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 pub mod skybox_status;
 
-#[cfg(not(target_family = "wasm"))]
 pub mod startup_window;
 
 #[derive(Resource, Default)]
@@ -360,9 +360,10 @@ impl Plugin for UiPlugin {
             .init_resource::<command_palette::CommandPaletteState>()
             .add_message::<DialogEvent>()
             .configure_sets(Update, UiInputConsumerSet)
-            .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
-            .add_systems(Update, actions::spawn_lua_actor)
-            .add_systems(Update, update_focused_window)
+            .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout));
+        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+        app.add_systems(Update, actions::spawn_lua_actor);
+        app.add_systems(Update, update_focused_window)
             .add_systems(Update, shortcuts)
             .add_systems(
                 PreUpdate,
@@ -492,6 +493,7 @@ pub struct ViewportOverlay<'w, 's> {
     window: Query<'w, 's, &'static Window>,
     entities_meta: Query<'w, 's, EntityDataReadOnly<'static>>,
     hovered_entity: Res<'w, HoveredEntity>,
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
     skybox_ui: Res<'w, bevy_ai_skybox::prelude::SkyboxGenerationUi>,
 }
 
@@ -510,13 +512,13 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
         let window = state_mut.window;
         let entities_meta = state_mut.entities_meta;
         let hovered_entity = state_mut.hovered_entity;
-        let skybox_ui = &state_mut.skybox_ui;
 
         let Ok(window) = window.single() else {
             return;
         };
 
-        skybox_status::draw_skybox_generation_overlay(ctx, skybox_ui);
+        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+        skybox_status::draw_skybox_generation_overlay(ctx, &state_mut.skybox_ui);
 
         let hovered_entity_meta = if let Some(hovered_entity_pair) = hovered_entity.0 {
             entities_meta
@@ -575,6 +577,12 @@ pub fn render_layout(
             .map(|(id, window_id)| (id, *window_id)),
     );
     for (id, window_id) in windows.drain(..) {
+        if window_id.is_primary()
+            && (world.contains_resource::<startup_window::StartupActive>()
+                || world.contains_resource::<startup_window::UrlConnect>())
+        {
+            continue;
+        }
         if window_id.is_primary() {
             world.add_root_widget_to::<MainLayout>(id, "main_layout", ());
 
@@ -706,7 +714,7 @@ type MainCameraViewportQueryItem = (
     &'static RenderTarget,
 );
 
-fn set_camera_viewport(
+pub(crate) fn set_camera_viewport(
     window: Query<(Entity, &Window), With<PrimaryWindow>>,
     mut main_camera_query: Query<MainCameraViewportQueryItem, With<MainCamera>>,
     mut entries: Local<Vec<(Entity, bool)>>,

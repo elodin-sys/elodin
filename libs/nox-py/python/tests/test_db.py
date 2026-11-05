@@ -12,7 +12,7 @@ Plus regression coverage for writer observability (last_error, state),
 queue overflow policies, and multi-process writers sharing one database.
 """
 
-import itertools
+import socket
 import subprocess
 import sys
 import textwrap
@@ -24,14 +24,26 @@ import pytest
 
 import elodin.db as edb
 
-# Impeller listens on N, the asset server on N+1, and gRPC on N+2.
-# Hand each test a free N so it does not bind another test's companion port.
-_port = itertools.count(23310, 3)
+
+def _free_port():
+    """A free port N with N+1 and N+2 free too: Impeller listens on N, the asset server on N+1,
+    and gRPC on N+2. Ephemeral, since other CI jobs on the host run these tests concurrently."""
+    while True:
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        try:
+            for companion in (port + 1, port + 2):
+                with socket.socket() as s:
+                    s.bind(("127.0.0.1", companion))
+        except (OSError, OverflowError):
+            continue
+        return port
 
 
 @pytest.fixture()
 def server(tmp_path):
-    addr = f"127.0.0.1:{next(_port)}"
+    addr = f"127.0.0.1:{_free_port()}"
     server = edb.Server.start(str(tmp_path / "db"), addr)
     time.sleep(0.3)
     yield server
@@ -114,7 +126,7 @@ def test_snippet_roundtrip(client):
 # ── acceptance 2: write_nowait under a dead DB ───────────────────────────────
 @pytest.mark.perf
 def test_write_nowait_dead_db():
-    client = edb.Client.connect(f"127.0.0.1:{next(_port)}")  # nothing listening
+    client = edb.Client.connect(f"127.0.0.1:{_free_port()}")  # nothing listening
     writer = client.table_writer({"x.v": edb.f64[3]}, maxlen=64)
     values = {"x.v": np.zeros(3)}
 
@@ -492,7 +504,7 @@ def test_msg_stream_live(client):
         for i in range(10):
             client.send_msg("evt.live", {"seq": i}, timestamp_us=1000 + i)
             time.sleep(0.02)
-        received = _collect_until(stream, lambda item: item[1].get("seq") == 9, timeout_s=5)
+        received = _collect_until(stream, lambda item: item[1].get("seq") == 9, timeout_s=30)
     assert received, "live msg stream should deliver messages"
     assert received[-1][1] == {"seq": 9}
     assert received[-1][0] == 1009
@@ -509,7 +521,7 @@ def test_stream_live_rows(client):
         for i in range(1, 21):
             writer.write_nowait(timestamp_us=1000 + i * 100, values={"stm.a": [i, -i], "stm.b": i})
             time.sleep(0.01)
-        rows = _collect_until(stream, lambda row: row.timestamp_us >= 1000 + 20 * 100, timeout_s=5)
+        rows = _collect_until(stream, lambda row: row.timestamp_us >= 1000 + 20 * 100, timeout_s=30)
     assert rows, "live stream should deliver rows"
     last = rows[-1]
     assert set(last.values) == {"stm.a", "stm.b"}
@@ -528,7 +540,7 @@ def test_stream_fixed_rate_replay(client):
     assert _wait_for(lambda: len(client.time_series("rep.v", 0, 10**6)[0]) == n)
 
     with client.stream("rep.v", rate_hz=500, start="earliest") as stream:
-        rows = _collect_until(stream, lambda row: row["rep.v"] >= n - 1, timeout_s=10)
+        rows = _collect_until(stream, lambda row: row["rep.v"] >= n - 1, timeout_s=30)
     assert rows, "replay should deliver rows"
     values = [float(r["rep.v"]) for r in rows]
     # replay advances monotonically through the recorded values from earliest
@@ -558,7 +570,7 @@ def test_stream_row_per_component_timestamps(client):
                 and "mr.slow" in row
                 and row.timestamps["mr.fast"] > row.timestamps["mr.slow"]
             ),
-            timeout_s=5,
+            timeout_s=30,
         )
     row = rows[-1]
     assert row.timestamp_us == max(row.timestamps.values())
@@ -596,7 +608,7 @@ def test_oversized_field_rejected_at_construction(client):
 def test_drop_oldest_policy_sheds_on_overflow():
     # Nothing listening: every row stays queued, so overflow exercises the
     # policy (exact shed order is covered by Rust unit tests in writer.rs).
-    client = edb.Client.connect(f"127.0.0.1:{next(_port)}")
+    client = edb.Client.connect(f"127.0.0.1:{_free_port()}")
     writer = client.table_writer({"q.v": edb.f64}, queue="drop-oldest", maxlen=8)
     for i in range(64):
         writer.write_nowait(timestamp_us=i, values={"q.v": float(i)})

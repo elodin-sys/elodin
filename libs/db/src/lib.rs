@@ -1024,7 +1024,7 @@ impl DB {
                     "processing field"
                 );
 
-                let component_schema = ComponentSchema::new(ty, shape);
+                let component_schema = ComponentSchema::new(ty, shape.as_slice());
                 state.insert_component_with_timestamp_source_flag(
                     component_id,
                     component_schema,
@@ -3376,7 +3376,7 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
         let stream_changed = vtable_gen != current_vtable_gen || filter_gen != current_filter_gen;
         if stream_changed {
             let component_filter = filter.component_ids();
-            stream_layout = DBVisitor::snapshot(
+            let next_layout = DBVisitor::snapshot(
                 all_components
                     .values()
                     .filter(|component| {
@@ -3386,10 +3386,14 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
                     })
                     .cloned(),
             );
-            let vtable_msg = stream_layout.vtable()?;
-            let id: PacketId = fastrand::u16(..).to_le_bytes();
-            table = LenPacket::table(id, 2048 - 16);
-            {
+            // A new component anywhere in the DB bumps `vtable_gen`. Compare
+            // against the frozen advertised layout, not the old components'
+            // current non-empty state: their first sample or truncation may
+            // have changed membership since the last VTable was sent.
+            if !next_layout.same_layout(&stream_layout) || filter_gen != current_filter_gen {
+                let vtable_msg = next_layout.vtable()?;
+                let id: PacketId = fastrand::u16(..).to_le_bytes();
+                table = LenPacket::table(id, 2048 - 16);
                 let pkt = VTableMsg {
                     id,
                     vtable: vtable_msg,
@@ -3397,6 +3401,7 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
                 .into_len_packet();
                 send_with_timeout(&sink, pkt.with_request_id(req_id)).await?;
             }
+            stream_layout = next_layout;
             current_vtable_gen = vtable_gen;
             current_filter_gen = filter_gen;
         }
@@ -3540,12 +3545,24 @@ pub(crate) struct DBVisitor {
 
 impl DBVisitor {
     fn snapshot(components: impl IntoIterator<Item = Component>) -> Self {
-        Self {
-            components: components
-                .into_iter()
-                .filter(|component| !component.time_series.index().is_empty())
-                .collect(),
-        }
+        let mut components: Vec<_> = components
+            .into_iter()
+            .filter(|component| !component.time_series.index().is_empty())
+            .collect();
+        // Stable ordering lets an unchanged filtered layout reuse its VTable,
+        // regardless of the iteration order of a rebuilt component map.
+        components.sort_by_key(|component| component.component_id);
+        Self { components }
+    }
+
+    fn same_layout(&self, other: &Self) -> bool {
+        self.components
+            .iter()
+            .map(|component| (component.component_id, &component.schema))
+            .eq(other
+                .components
+                .iter()
+                .map(|component| (component.component_id, &component.schema)))
     }
 
     fn vtable(&self) -> Result<VTable, Error> {
@@ -3762,8 +3779,8 @@ mod tests {
                 &[],
                 Some(&1.5_f64.to_le_bytes()),
             );
-            // Explicit order makes the formerly empty field precede the known
-            // epoch: no randomized HashMap order or stress scheduling is needed.
+            // Snapshot ordering is deterministic: no randomized HashMap order
+            // or stress scheduling is needed to reproduce the interleaving.
             let components = [late.clone(), epoch.clone(), wide.clone()];
             let layout = DBVisitor::snapshot(components.clone());
             let advertised = layout.vtable().unwrap();
@@ -3796,6 +3813,7 @@ mod tests {
             // The next schema-generation rebuild adds the first-written field
             // and its offsets together; excluding it is not permanent.
             let rebuilt = DBVisitor::snapshot(components);
+            assert!(!rebuilt.same_layout(&layout));
             let advertised = rebuilt.vtable().unwrap();
             packet.clear();
             if latest {
@@ -3851,6 +3869,9 @@ mod tests {
             for index in [0, 2, 4] {
                 components[index].time_series.truncate();
             }
+            // Caching must compare frozen membership too: re-reading both
+            // snapshots' current emptiness would incorrectly call this equal.
+            assert!(!DBVisitor::snapshot(components.clone()).same_layout(&layout));
             let mut packet = LenPacket::table([2, 0], 256);
             if latest {
                 layout.populate_table_latest(&mut packet);
@@ -3878,6 +3899,62 @@ mod tests {
                 .collect();
             assert_stream_layout_packet(&advertised, &packet, &expected);
         }
+    }
+
+    #[test]
+    fn realtime_vtable_columns_follow_component_id_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        let later = ComponentId::new("zz.later");
+        let earlier = ComponentId::new("aa.earlier");
+        let empty = ComponentId::new("mm.empty");
+        let schema = ComponentSchema::new(PrimType::F64, &[7]);
+        db.with_state_mut(|state| {
+            for id in [later, earlier, empty] {
+                state
+                    .insert_component(id, schema.clone(), &db.path)
+                    .unwrap();
+            }
+        });
+        db.with_state(|state| {
+            let mut sink = DBSink {
+                components: &state.components,
+                component_metadata: &state.component_metadata,
+                last_updated: &db.last_updated,
+                earliest_timestamp: &db.earliest_timestamp,
+                sunk_new_time_series: false,
+                table_received: Timestamp(1),
+                followed_components: &db.followed_components,
+                has_followed_components: false,
+                is_follower: false,
+                batch_max_ts: Timestamp(i64::MIN),
+                batch_min_ts: Timestamp(i64::MAX),
+                batch_has_ts: false,
+            };
+            let sample = [0u8; 56];
+            sink.apply_buf(later, &sample, Some(Timestamp(1))).unwrap();
+            sink.apply_buf(earlier, &sample, Some(Timestamp(1)))
+                .unwrap();
+        });
+
+        let components = db.with_state(|state| state.components.clone());
+        let mut reversed = HashMap::new();
+        for id in [later, empty, earlier] {
+            reversed.insert(id, components.get(&id).unwrap().clone());
+        }
+        let forward_layout = DBVisitor::snapshot(components.into_values());
+        let backward_layout = DBVisitor::snapshot(reversed.into_values());
+        assert!(forward_layout.same_layout(&backward_layout));
+        let forward = forward_layout.vtable().unwrap();
+        let backward = backward_layout.vtable().unwrap();
+        let ids = |vtable: &VTable| {
+            vtable
+                .realize_fields(None)
+                .map(|field| field.unwrap().component_id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&forward), ids(&backward));
+        assert_eq!(ids(&forward), vec![earlier, later]);
     }
 
     #[test]

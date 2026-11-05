@@ -25,7 +25,7 @@ All six regression examples pass with matched correctness:
 
 ```bash
 cargo test -p cranelift-mlir --release          # all 220+ tests
-ELODIN_BACKEND=cranelift bash scripts/ci/regress.sh --all  # full regression suite
+ELODIN_BACKEND=cranelift bash scripts/ci/regress.sh --all  # every example on Cranelift, then jax-cpu
 ```
 
 ### Dumping StableHLO MLIR and capturing a debug snapshot
@@ -46,7 +46,9 @@ every stderr report all land flat under `/tmp/dbg/`. See
 3. Add lowering in `src/lower.rs` (both scalar and pointer-ABI paths)
 4. If needed, add a runtime function in `src/tensor_rt.rs` and register in `TensorRtIds`
 5. Add golden-value tests in `tests/ops.rs` for both paths
-6. Run `cargo test -p cranelift-mlir`
+6. Add a case to `libs/nox-py/python/tests/test_backend_parity.py`, which checks the op
+   against jax-cpu on both ABIs
+7. Run `cargo test -p cranelift-mlir` and that test
 
 ## Debugging a Failing Example
 

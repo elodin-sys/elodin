@@ -1,4 +1,5 @@
-use std::{net::SocketAddr, time::Instant};
+use std::net::SocketAddr;
+use web_time::Instant;
 
 use bevy::{
     ecs::system::{Local, SystemParam},
@@ -7,6 +8,7 @@ use bevy::{
 };
 use egui::{CornerRadius, RichText};
 use impeller_bevy::{ConnectionAddr, ConnectionStatus, ThreadConnectionStatus};
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 use impeller_cli::mlua::MultiValue;
 
 use super::{
@@ -22,6 +24,7 @@ pub struct LuaActor {
 }
 
 impl LuaActor {
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
     pub fn spawn(addr: SocketAddr) -> Self {
         let (cmd_tx, cmd_rx) =
             flume::unbounded::<(String, flume::Sender<Result<String, String>>)>();
@@ -57,6 +60,13 @@ impl LuaActor {
                 }
             }
         });
+        LuaActor { tx: cmd_tx }
+    }
+
+    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+    pub fn spawn(_addr: SocketAddr) -> Self {
+        let (cmd_tx, _cmd_rx) =
+            flume::unbounded::<(String, flume::Sender<Result<String, String>>)>();
         LuaActor { tx: cmd_tx }
     }
 
@@ -176,25 +186,33 @@ pub fn spawn_lua_actor(
     mut last_status: Local<Option<ConnectionStatus>>,
     mut commands: Commands,
 ) {
-    let status = status.status();
-    if *last_status == Some(status) {
-        *last_status = Some(status);
+    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+    {
+        let _ = (lua, addr, status, last_status, commands);
         return;
     }
-    *last_status = Some(status);
-    if let Some(addr) = addr
-        && lua.is_none()
-        && status == ConnectionStatus::Success
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
     {
-        commands.insert_resource(LuaActor::spawn(addr.0));
-    }
-    if lua.is_some() {
-        match status {
-            impeller_bevy::ConnectionStatus::NoConnection
-            | impeller_bevy::ConnectionStatus::Error => {
-                commands.remove_resource::<LuaActor>();
+        let status = status.status();
+        if *last_status == Some(status) {
+            *last_status = Some(status);
+            return;
+        }
+        *last_status = Some(status);
+        if let Some(addr) = addr
+            && lua.is_none()
+            && status == ConnectionStatus::Success
+        {
+            commands.insert_resource(LuaActor::spawn(addr.socket));
+        }
+        if lua.is_some() {
+            match status {
+                impeller_bevy::ConnectionStatus::NoConnection
+                | impeller_bevy::ConnectionStatus::Error => {
+                    commands.remove_resource::<LuaActor>();
+                }
+                _ => {}
             }
-            _ => {}
         }
     }
 }

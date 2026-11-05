@@ -8,7 +8,7 @@ use impeller_wkt::{
     CurrentTimestamp, ErrorResponse, FixedRateMsgStream, FixedRateOp, GetMsgs, LogEntry, MsgBatch,
 };
 use std::collections::BTreeMap;
-use std::time::Instant;
+use web_time::Instant;
 
 use super::PaneName;
 use crate::ui::widgets::SystemStateExt;

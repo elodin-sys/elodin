@@ -21,6 +21,11 @@ class PrimitiveType:
 class Integrator:
     Rk4: Integrator
     SemiImplicit: Integrator
+    Rk2: Integrator
+    Rk3: Integrator
+    Verlet: Integrator
+    Rk78: Integrator
+    Dp54: Integrator
 
 class StepContext:
     """Context object passed to pre_step and post_step callbacks, providing direct DB read/write access.
@@ -328,6 +333,7 @@ class WorldBuilder:
         optimize: bool = False,
         db_path: Optional[str] = None,
         backend: str = "cranelift",
+        start_timestamp: Optional[int] = None,
     ) -> Exec: ...
     def to_jax_func(
         self,
@@ -397,9 +403,15 @@ class SpatialMotion:
     def __add__(self, other: SpatialMotion) -> SpatialMotion: ...
 
 class SpatialInertia:
+    # Sign convention: `inertia_off_diag` holds the signed off-diagonal entries
+    # of the inertia tensor matrix ([Ixy, Ixz, Iyz], Ixy = -integral(x*y dm)),
+    # not products of inertia. Negate CAD products of inertia before passing.
     __metadata__: ClassVar[Tuple[Component,]]
     def __init__(
-        self, mass: jax.typing.ArrayLike, inertia: Optional[jax.typing.ArrayLike] = None
+        self,
+        mass: jax.typing.ArrayLike,
+        inertia: Optional[jax.typing.ArrayLike] = None,
+        inertia_off_diag: Optional[jax.typing.ArrayLike] = None,
     ): ...
     @staticmethod
     def from_array(arr: jax.typing.ArrayLike) -> SpatialInertia: ...
@@ -409,6 +421,8 @@ class SpatialInertia:
     def asarray(self) -> jax.typing.ArrayLike: ...
     def mass(self) -> jax.typing.ArrayLike: ...
     def inertia_diag(self) -> jax.typing.ArrayLike: ...
+    def inertia_off_diag(self) -> jax.typing.ArrayLike: ...
+    def inertia_matrix(self) -> jax.Array: ...
 
 class Quaternion:
     __metadata__: ClassVar[Tuple[Component,]]

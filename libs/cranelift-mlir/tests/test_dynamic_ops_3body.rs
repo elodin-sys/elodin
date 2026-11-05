@@ -101,7 +101,7 @@ module @module {
     let result = read_f64s(&out[0]);
     // Each row is replicated: [[10,10,10],[20,20,20],[30,30,30]]
     assert_eq!(
-        result,
+        &*result,
         &[10.0, 10.0, 10.0, 20.0, 20.0, 20.0, 30.0, 30.0, 30.0]
     );
 }

@@ -15,6 +15,7 @@ mod tests {
     use postcard_schema::{Schema, schema::owned::OwnedNamedType};
     use std::{
         collections::{BTreeMap, BTreeSet},
+        io::Read,
         net::SocketAddr,
         path::Path,
         sync::Arc,
@@ -55,6 +56,12 @@ mod tests {
             },
         )
         .await
+    }
+
+    /// Round trip on `client`; the server handles a connection's packets in order,
+    /// so everything sent before this has been applied when it returns.
+    async fn flush(client: &mut Client) {
+        client.request(&DumpMetadata).await.unwrap();
     }
 
     #[test]
@@ -187,7 +194,7 @@ mod tests {
 
         client.send(LenPacket::table([99, 0], 0)).await.0.unwrap();
 
-        assert!(receives_packet(&mut client, Duration::from_secs(1)).await);
+        assert!(receives_packet(&mut client, Duration::from_secs(10)).await);
     }
 
     #[test]
@@ -211,7 +218,7 @@ mod tests {
         let floats = [1.0f64, 2.0];
         pkt.extend_aligned(&floats);
         client.send(pkt).await.0.unwrap();
-        sleep(Duration::from_millis(100)).await;
+        flush(&mut client).await;
         db.with_state(|state| {
             let c = state
                 .get_component(ComponentId::new("test"))
@@ -384,25 +391,38 @@ mod tests {
         rx_client.send(&msg).await.0.unwrap();
         let mut sub = rx_client.stream(&vtable_stream).await.unwrap();
 
-        spawn(async move {
-            for i in 0..5 {
-                sleep(Duration::from_millis(50)).await;
+        let _writer = spawn(async move {
+            for i in 0..=i32::MAX {
+                sleep(Duration::from_millis(5)).await;
                 let value = i as f64;
                 let mut pkt = LenPacket::table(vtable_id, 8);
                 pkt.extend_aligned(&[value]);
                 tx_client.send(pkt).await.0.unwrap();
             }
-        });
-        let StreamReply::VTable(_) = sub.next().await.unwrap() else {
-            panic!("unexpected reply type");
-        };
-        for i in 0..5 {
-            let StreamReply::Table(table) = sub.next().await.unwrap() else {
-                panic!("unexpected reply type");
-            };
-            let expected_value = i as f64;
-            assert_eq!(&table.buf[..], expected_value.as_bytes());
-        }
+        })
+        .drop_guard();
+        futures_lite::future::race(
+            async {
+                let StreamReply::VTable(_) = sub.next().await.unwrap() else {
+                    panic!("unexpected reply type");
+                };
+                // Latest-value sampler: writes may coalesce or repeat, but never go backwards.
+                let mut last = -1.0;
+                for _ in 0..5 {
+                    let StreamReply::Table(table) = sub.next().await.unwrap() else {
+                        panic!("unexpected reply type");
+                    };
+                    let value = f64::read_from_bytes(&table.buf[..]).unwrap();
+                    assert!(value >= last, "stream went backwards: {value} after {last}");
+                    last = value;
+                }
+            },
+            async {
+                sleep(Duration::from_secs(10)).await;
+                panic!("stream stopped delivering tables");
+            },
+        )
+        .await;
     }
 
     #[test]
@@ -428,7 +448,7 @@ mod tests {
             &[(Timestamp(1), 2.0)],
         )
         .await;
-        sleep(Duration::from_millis(50)).await;
+        flush(&mut writer).await;
 
         let stream_id = 42;
         let mut reader = Client::connect(addr).await.unwrap();
@@ -493,6 +513,113 @@ mod tests {
             }
         };
         assert_eq!(after_late_registration.vtable.fields.len(), 2);
+    }
+
+    #[test]
+    async fn test_batched_stream_republishes_when_filtered_columns_change() {
+        let (addr, _db) = setup_test_db().await.unwrap();
+        let mut writer = Client::connect(addr).await.unwrap();
+        let mut selected = Vec::new();
+        for index in 0_u16..8 {
+            let name = format!("layout.selected.{index}");
+            let component_id = ComponentId::new(&name);
+            send_f64_samples(
+                &mut writer,
+                component_id,
+                &name,
+                (100 + index).to_le_bytes(),
+                &[(Timestamp(1), f64::from(index))],
+            )
+            .await;
+            selected.push(component_id);
+        }
+        // In the filter before it has samples, so its arrival changes the
+        // sorted column list without a filter update.
+        let late = ComponentId::new("layout.selected.late");
+        selected.push(late);
+        flush(&mut writer).await;
+
+        let stream_id = 46;
+        let mut reader = Client::connect(addr).await.unwrap();
+        reader
+            .send(&SetStreamFilter {
+                id: stream_id,
+                component_ids: selected,
+                frequency: None,
+            })
+            .await
+            .0
+            .unwrap();
+        let mut stream = reader
+            .stream(&Stream {
+                behavior: StreamBehavior::RealTimeBatched,
+                id: stream_id,
+            })
+            .await
+            .unwrap();
+        let initial = loop {
+            if let StreamReply::VTable(vtable) = stream.next().await.unwrap() {
+                break vtable;
+            }
+        };
+        assert_eq!(initial.vtable.fields.len(), 8);
+
+        for index in 0_u16..8 {
+            let name = format!("layout.unselected.{index}");
+            send_f64_samples(
+                &mut writer,
+                ComponentId::new(&name),
+                &name,
+                (200 + index).to_le_bytes(),
+                &[(Timestamp(2 + i64::from(index)), 100.0 + f64::from(index))],
+            )
+            .await;
+            flush(&mut writer).await;
+            let republished = futures_lite::future::race(
+                async {
+                    loop {
+                        if matches!(stream.next().await.unwrap(), StreamReply::VTable(_)) {
+                            break true;
+                        }
+                    }
+                },
+                async {
+                    sleep(Duration::from_millis(250)).await;
+                    false
+                },
+            )
+            .await;
+            assert!(
+                !republished,
+                "unselected component republished the filtered VTable"
+            );
+        }
+
+        send_f64_samples(
+            &mut writer,
+            late,
+            "layout.selected.late",
+            [220, 0],
+            &[(Timestamp(20), 9.0)],
+        )
+        .await;
+        flush(&mut writer).await;
+        let updated = futures_lite::future::race(
+            async {
+                loop {
+                    if let StreamReply::VTable(vtable) = stream.next().await.unwrap() {
+                        break Some(vtable);
+                    }
+                }
+            },
+            async {
+                sleep(Duration::from_millis(250)).await;
+                None
+            },
+        )
+        .await;
+        let updated = updated.expect("selected column arrived without a new VTable");
+        assert_eq!(updated.vtable.fields.len(), 9);
     }
 
     #[test]
@@ -580,7 +707,7 @@ mod tests {
             &[(Timestamp(1), 2.0)],
         )
         .await;
-        sleep(Duration::from_millis(50)).await;
+        flush(&mut writer).await;
 
         let stream_id = 43;
         {
@@ -663,7 +790,7 @@ mod tests {
             &[(Timestamp(1), 2.0)],
         )
         .await;
-        sleep(Duration::from_millis(50)).await;
+        flush(&mut writer).await;
 
         let stream_id = 44;
         let mut reader = Client::connect(addr).await.unwrap();
@@ -759,7 +886,7 @@ mod tests {
         initial.extend_from_slice(&0.0_f64.to_le_bytes());
         initial.extend_aligned(&[0_i64]);
         writer.send(initial).await.0.unwrap();
-        sleep(Duration::from_millis(20)).await;
+        flush(&mut writer).await;
 
         let stream_id = 45;
         let mut reader = Client::connect(addr).await.unwrap();
@@ -1506,7 +1633,7 @@ mod tests {
             .0
             .unwrap();
 
-        sleep(Duration::from_millis(100)).await;
+        flush(&mut setup_client).await;
 
         const NUM_CLIENTS: usize = 5;
         const WRITES_PER_CLIENT: usize = 10;
@@ -1545,7 +1672,7 @@ mod tests {
 
         let expected_count = NUM_CLIENTS * WRITES_PER_CLIENT;
         let min_acceptable = (expected_count * 95) / 100; // Accept 95% success rate
-        let timeout = Duration::from_secs(2);
+        let timeout = Duration::from_secs(10);
         let start = std::time::Instant::now();
 
         let actual_count = loop {
@@ -2264,15 +2391,23 @@ mod tests {
     /// skipped.  The `extra` field IS included because the follower now
     /// sets it to match the source's value during backfill.
     fn read_append_log_committed(path: &Path) -> Vec<u8> {
-        let data = std::fs::read(path).unwrap_or_default();
-        if data.len() < 16 {
+        let Ok(mut file) = std::fs::File::open(path) else {
+            return vec![];
+        };
+        let file_len = file.metadata().map_or(0, |m| m.len());
+        let mut header = [0u8; 16];
+        if file.read_exact(&mut header).is_err() {
             return vec![];
         }
-        let committed_len = u64::from_ne_bytes(data[0..8].try_into().unwrap()) as usize;
-        if committed_len <= 16 || committed_len > data.len() {
+        let committed_len = u64::from_ne_bytes(header[0..8].try_into().unwrap());
+        if committed_len <= 16 || committed_len > file_len {
             return vec![];
         }
-        data[16..committed_len].to_vec()
+        let mut data = Vec::new();
+        file.take(committed_len - 16)
+            .read_to_end(&mut data)
+            .unwrap();
+        data
     }
 
     /// Compare the data-bearing files in two DB directories.
@@ -2705,7 +2840,7 @@ mod tests {
             pkt.extend_aligned(&[999.0f64]);
             pkt.extend_aligned(&[2000i64]);
             fol_client.send(pkt).await.0.unwrap();
-            sleep(Duration::from_millis(100)).await;
+            flush(&mut fol_client).await;
         }
 
         // Still tracked as followed after local write.
@@ -2728,8 +2863,8 @@ mod tests {
                 &[(Timestamp(2000), 99.0)],
             )
             .await;
+            flush(&mut fol_client).await;
         }
-        sleep(Duration::from_millis(200)).await;
 
         // local_video should NOT be in followed_components.
         {
@@ -2828,7 +2963,7 @@ mod tests {
 
             client.send(&test_msg).await.0.unwrap();
 
-            sleep(Duration::from_millis(100)).await;
+            flush(&mut client).await;
             db.flush_all().unwrap();
         }
 

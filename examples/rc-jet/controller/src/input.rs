@@ -11,6 +11,7 @@
 use device_query::{DeviceQuery, DeviceState, Keycode};
 use gilrs::{Axis, Gilrs};
 use std::f64::consts::PI;
+use std::time::{Duration, Instant};
 
 /// Throttle held when no one is on the sticks: the package cruise trim
 /// (results/bdx/baseline trim_map cruise row, effective throttle 0.2125).
@@ -75,6 +76,36 @@ fn combine(gamepad: ControlInput, keyboard: ControlInput, gamepad_throttle: bool
     }
 }
 
+/// Opt-in fake stick, selected with `ELODIN_RC_JET_SCRIPT`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Script {
+    None,
+    /// Repeating aileron doublet so a camera view can be checked against bank.
+    Roll,
+}
+
+fn script_from_env() -> Script {
+    match std::env::var("ELODIN_RC_JET_SCRIPT") {
+        Ok(value) if value == "roll" => Script::Roll,
+        Ok(value) if !value.is_empty() => {
+            tracing::warn!("unknown ELODIN_RC_JET_SCRIPT={value}; ignoring");
+            Script::None
+        }
+        _ => Script::None,
+    }
+}
+
+/// +half throw, neutral, −half throw, neutral, three seconds each.
+fn roll_doublet_aileron(elapsed: Duration) -> f64 {
+    const PHASE_S: f64 = 3.0;
+    let half = MAX_DEFLECTION_RAD * 0.5;
+    match (elapsed.as_secs_f64() / PHASE_S) as u64 % 4 {
+        0 => half,
+        2 => -half,
+        _ => 0.0,
+    }
+}
+
 /// The larger of two commands for one surface, gamepad winning a tie.
 ///
 /// Comparing deflections rather than testing the gamepad against a small
@@ -105,6 +136,8 @@ pub struct InputReader {
     /// an untouched pad would otherwise out-vote the keyboard. A transmitter's
     /// ratcheted throttle sits off centre, so it latches on the first read.
     gamepad_throttle_engaged: bool,
+    script: Script,
+    script_started: Instant,
 }
 
 impl InputReader {
@@ -147,6 +180,12 @@ impl InputReader {
             tracing::info!("No X display; keyboard input disabled");
         }
 
+        let script = script_from_env();
+        if script == Script::Roll {
+            tracing::info!("ELODIN_RC_JET_SCRIPT=roll: aileron doublet, half throw, 3s phases");
+            println!("  Scripted input: roll doublet (aileron half throw, 3s phases)");
+        }
+
         Self {
             gilrs,
             device_state,
@@ -157,6 +196,8 @@ impl InputReader {
                 ..Default::default()
             },
             gamepad_throttle_engaged: false,
+            script,
+            script_started: Instant::now(),
         }
     }
 
@@ -176,7 +217,10 @@ impl InputReader {
         // Read keyboard input
         let keyboard_input = self.read_keyboard();
 
-        let combined = combine(gamepad_input, keyboard_input, self.gamepad_throttle_engaged);
+        let mut combined = combine(gamepad_input, keyboard_input, self.gamepad_throttle_engaged);
+        if self.script == Script::Roll {
+            combined.aileron = roll_doublet_aileron(self.script_started.elapsed());
+        }
 
         // Apply some smoothing
         let smoothing = 0.3;
@@ -502,6 +546,17 @@ mod tests {
         let combined = combine(ControlInput::default(), keyboard, false);
         assert_eq!(combined.throttle, 0.9);
         assert_eq!(combined.elevator, 0.2);
+    }
+
+    #[test]
+    fn roll_doublet_alternates_half_throw_every_three_seconds() {
+        let half = MAX_DEFLECTION_RAD * 0.5;
+        assert_eq!(roll_doublet_aileron(Duration::from_secs(0)), half);
+        assert_eq!(roll_doublet_aileron(Duration::from_millis(2_999)), half);
+        assert_eq!(roll_doublet_aileron(Duration::from_secs(3)), 0.0);
+        assert_eq!(roll_doublet_aileron(Duration::from_secs(6)), -half);
+        assert_eq!(roll_doublet_aileron(Duration::from_secs(9)), 0.0);
+        assert_eq!(roll_doublet_aileron(Duration::from_secs(12)), half);
     }
 
     #[test]

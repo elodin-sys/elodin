@@ -33,8 +33,10 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 colored = "2"
 
-# TUI with IOCraft
+# TUI with IOCraft. Macros 0.2.5 emit `RequiredPropSet`, which iocraft 0.7.18
+# does not export, so keep the macro crate on the last compatible release.
 iocraft = "0.7"
+iocraft-macros = "=0.2.4"
 smol = "2"
 async-channel = "2"
 futures-lite = "2"

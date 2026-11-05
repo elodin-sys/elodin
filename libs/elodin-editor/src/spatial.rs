@@ -194,3 +194,92 @@ fn on_child_of_inserted_for_grid_cell(
     }
     commands.entity(entity).insert(ChildOf(root.0));
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bevy::app::TaskPoolPlugin;
+
+    fn app_with_origin() -> App {
+        let mut app = App::new();
+        app.add_plugins((
+            TaskPoolPlugin::default(),
+            FloatingOriginPlugin::new(16_000., 100.),
+        ));
+        // Startup spawns the BigSpace root the cell is parented under.
+        app.update();
+        app
+    }
+
+    fn spawn_cell(app: &mut App) -> Entity {
+        let root = app.world().resource::<BigSpaceRootEntity>().0;
+        app.world_mut()
+            .spawn((
+                Transform::IDENTITY,
+                GlobalTransform::default(),
+                GridCell::default(),
+                ChildOf(root),
+            ))
+            .id()
+    }
+
+    /// Attitude-only motion never changes the cell. Propagation still has to
+    /// recompute `GlobalTransform`; a clean-grid skip would leave the spawn pose.
+    #[test]
+    fn attitude_change_reaches_global_transform() {
+        let mut app = app_with_origin();
+        let entity = spawn_cell(&mut app);
+        app.update();
+
+        let before = app
+            .world()
+            .get::<GlobalTransform>(entity)
+            .unwrap()
+            .rotation();
+        app.world_mut()
+            .get_mut::<Transform>(entity)
+            .unwrap()
+            .rotation = Quat::from_rotation_y(1.0);
+        app.update();
+
+        let after = app
+            .world()
+            .get::<GlobalTransform>(entity)
+            .unwrap()
+            .rotation();
+        assert!(
+            before.angle_between(after) > 0.5,
+            "propagation left the spawn rotation in place: {before:?} -> {after:?}"
+        );
+    }
+
+    /// A translation that stays inside the current cell must still move the
+    /// rendered transform.
+    #[test]
+    fn in_cell_translation_reaches_global_transform() {
+        let mut app = app_with_origin();
+        let entity = spawn_cell(&mut app);
+        app.update();
+
+        let before = app
+            .world()
+            .get::<GlobalTransform>(entity)
+            .unwrap()
+            .translation();
+        app.world_mut()
+            .get_mut::<Transform>(entity)
+            .unwrap()
+            .translation = Vec3::new(1.0, 2.0, 3.0);
+        app.update();
+
+        let after = app
+            .world()
+            .get::<GlobalTransform>(entity)
+            .unwrap()
+            .translation();
+        assert!(
+            before.distance(after) > 0.5,
+            "propagation left the spawn translation in place: {before:?} -> {after:?}"
+        );
+    }
+}

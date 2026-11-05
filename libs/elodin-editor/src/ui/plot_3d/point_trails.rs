@@ -24,9 +24,9 @@ use impeller_bevy::TelemetryCache;
 use impeller_wkt::{ComponentValue, CurrentTimestamp, PointTrails, PointTrailsHeadShape};
 use nox::ArrayBuf;
 
-use super::gpu::{
-    GpuLine, LineConfig, LineIndexLayout, LineUniform, LineValuesLayout, build_gpu_line,
-};
+use super::gpu::{GpuLine, LineConfig, LineUniform, build_gpu_line};
+#[cfg(not(target_family = "wasm"))]
+use super::gpu::{LineIndexLayout, LineValuesLayout};
 use crate::{
     BevyExt, SelectedTimeRange,
     ui::{
@@ -157,8 +157,12 @@ fn trail_start_timestamp(
     })
 }
 
-fn point(values: &[f64], n: usize, i: usize) -> DVec3 {
-    DVec3::new(values[i], values[n + i], values[2 * n + i])
+fn point(values: &[f64], n: usize, i: usize) -> Option<DVec3> {
+    Some(DVec3::new(
+        *values.get(i)?,
+        *values.get(n.checked_add(i)?)?,
+        *values.get(n.checked_mul(2)?.checked_add(i)?)?,
+    ))
 }
 
 fn trail_points(
@@ -171,12 +175,17 @@ fn trail_points(
     let Some((_, latest)) = samples.last() else {
         return Vec::new();
     };
-    let mut points = vec![point(latest, n, index)];
-    let mut newer = points[0];
+    let Some(latest) = point(latest, n, index) else {
+        return Vec::new();
+    };
+    let mut points = vec![latest];
+    let mut newer = latest;
     let mut remaining = max_length.unwrap_or(f64::INFINITY);
 
     for (_, values) in samples[..samples.len() - 1].iter().rev() {
-        let older = point(values, n, index);
+        let Some(older) = point(values, n, index) else {
+            continue;
+        };
         let delta = older - newer;
         let segment = delta.length();
         if segment > remaining {
@@ -359,13 +368,21 @@ fn sync_point_trails(
         let budget = trail_sample_budget(n);
         let max_length = trails.max_length.map(f64::from);
         let first_trail = trail_points(&samples, n, 0, max_length, budget);
-        let anchor = first_trail[0];
+        let Some(&anchor) = first_trail.first() else {
+            visibility.set_if_neq(Visibility::Hidden);
+            if strips.groups.iter().any(|group| !group.xs.is_empty()) {
+                strips.groups = default();
+                strips.generation = strips.generation.wrapping_add(1);
+            }
+            state.key = None;
+            continue;
+        };
         if geo.1 != anchor {
             geo.1 = anchor;
         }
 
         let latest = samples[samples.len() - 1].1;
-        let head_offset = |i: usize| (point(latest, n, i) - anchor).as_vec3();
+        let head_offset = |i: usize| (point(latest, n, i).unwrap_or(anchor) - anchor).as_vec3();
         let mesh = state.meshes[head_mesh_index(style.head_shape)].clone();
         if state.heads.len() == n {
             for (i, &head) in state.heads.iter().enumerate() {
@@ -446,8 +463,8 @@ fn extract_point_trails(
     mut commands: Commands,
     mut cache: ResMut<PointTrailsGpuCache>,
     render_device: Res<RenderDevice>,
-    values_layout: Res<LineValuesLayout>,
-    index_layout: Res<LineIndexLayout>,
+    #[cfg(not(target_family = "wasm"))] values_layout: Res<LineValuesLayout>,
+    #[cfg(not(target_family = "wasm"))] index_layout: Res<LineIndexLayout>,
 ) {
     main_world.resource_scope(|world, mut state: Mut<PointTrailsExtractState>| {
         let query = state.0.params(world);
@@ -467,7 +484,9 @@ fn extract_point_trails(
                             &group.strip_ends,
                             strips.anchor,
                             &render_device,
+                            #[cfg(not(target_family = "wasm"))]
                             &values_layout,
+                            #[cfg(not(target_family = "wasm"))]
                             &index_layout,
                         ) else {
                             cache.0.remove(&key);
@@ -686,5 +705,16 @@ mod tests {
             trail_start_timestamp(&series, Timestamp(250)),
             Some(Timestamp(100))
         );
+    }
+
+    #[test]
+    fn empty_sample_is_skipped() {
+        let full = [1.0, 2.0, 3.0];
+        let samples = [(Timestamp(0), &[][..]), (Timestamp(10), full.as_slice())];
+        assert_eq!(
+            trail_points(&samples, 1, 0, None, 100),
+            [DVec3::new(1.0, 2.0, 3.0)]
+        );
+        assert!(trail_points(&[(Timestamp(0), &[][..])], 1, 0, None, 100).is_empty());
     }
 }

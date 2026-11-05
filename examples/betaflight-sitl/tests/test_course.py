@@ -9,7 +9,7 @@ from course import (
     course_bars,
     course_from_env,
     course_from_name,
-    gate_schematic,
+    gate_objects,
 )
 
 
@@ -21,7 +21,7 @@ def test_no_course_is_default_or_explicit_and_has_no_geometry(env):
     assert course.gates == ()
     assert course.inner_size is None
     assert course_bars(course) == ()
-    assert gate_schematic(course) == ""
+    assert gate_objects(course) == []
 
 
 def test_single_course_has_exact_contract_geometry():
@@ -38,9 +38,19 @@ def test_single_course_has_exact_contract_geometry():
     assert gate.inner_size == SINGLE_GATE_INNER_SIZE_M == 2.5
 
 
-def test_c1_straight_is_reserved_until_package_f():
-    with pytest.raises(ValueError, match="reserved for Package F.*not implemented"):
-        course_from_name("c1_straight")
+def test_c1_straight_has_exact_ordered_contract_geometry():
+    course = course_from_name("c1_straight")
+    assert course.name == "c1_straight"
+    assert tuple(gate.index for gate in course.gates) == (0, 1, 2)
+    assert tuple(gate.center for gate in course.gates) == (
+        (10.0, 0.0, 1.8),
+        (20.0, 0.0, 1.8),
+        (30.0, 0.0, 1.8),
+    )
+    assert all(gate.yaw == 0.0 and gate.inner_size == 2.5 for gate in course.gates)
+    assert course.inner_size == 2.5
+    assert len(course_bars(course)) == 12
+    assert len({bar.name for bar in course_bars(course)}) == 12
 
 
 def test_unknown_course_is_rejected_clearly():
@@ -83,12 +93,15 @@ def test_gate_render_geometry_is_four_static_box_poses_with_exact_opening():
     assert all(bar.quaternion_xyzw == (0.0, 0.0, 0.0, 1.0) for bar in bars)
 
 
-def test_gate_schematic_has_four_saturated_orange_matte_boxes():
-    schematic = gate_schematic(course_from_name("single"))
+def test_gate_objects_are_four_saturated_orange_matte_boxes():
+    import elodin.ui as ui
+
+    schematic = ui.schematic(*gate_objects(course_from_name("single"))).emit_kdl()
 
     assert schematic.count("object_3d gate_0_") == 4
     assert schematic.count("orientation=absolute") == 4
-    assert schematic.count("box x=") == 4
-    rgb = " ".join(str(channel) for channel in SATURATED_ORANGE_RGB)
-    assert schematic.count(f"color {rgb}") == 4
+    assert schematic.count("box ") == 4
+    # 255,128,0 rounds to the editor's named orange, rgb(1, 0.5, 0).
+    assert schematic.count("color orange") == 4
+    assert SATURATED_ORANGE_RGB == (255, 128, 0)
     assert "emissivity" not in schematic

@@ -2,7 +2,6 @@
   pkgs,
   rustToolchain,
   lib,
-  gitRev ? "unknown",
   elodinPy,
   python,
   pythonPackages,
@@ -16,11 +15,11 @@
   # Derive version from Cargo.toml workspace configuration
   cargoToml = builtins.fromTOML (builtins.readFile ../../Cargo.toml);
   version = cargoToml.workspace.package.version;
-  src = pkgs.nix-gitignore.gitignoreSource [] ../..;
+  src = common.src;
   pythonPath = pythonPackages.makePythonPath [elodinPy];
   pythonMajorMinor = lib.versions.majorMinor python.version;
 
-  bin = pkgs.rustPlatform.buildRustPackage rec {
+  unwrapped = pkgs.rustPlatform.buildRustPackage rec {
     inherit pname version src;
 
     cargoLock = {
@@ -33,7 +32,6 @@
     nativeBuildInputs = with pkgs;
       [
         (rustToolchain pkgs)
-        makeWrapper # Required for wrapProgram in postInstall
         protobuf
         clang
       ]
@@ -54,17 +52,7 @@
 
     doCheck = false;
 
-    GIT_HASH = gitRev;
     LIBCLANG_PATH = "${pkgs.buildPackages.libclang.lib}/lib";
-
-    postInstall = ''
-      wrapProgram $out/bin/elodin \
-        --set TOKTX "${common.ktxTools}/bin/toktx" \
-        ${common.makeWrapperArgs {
-        inherit pkgs python pythonPath pythonMajorMinor;
-        inherit graphicsWrapperArgs;
-      }}
-    '';
 
     # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
     # GCC 14 treats -Wincompatible-pointer-types as error by default
@@ -79,4 +67,18 @@
     };
   };
 in
-  bin
+  # Wrapping in a separate derivation keeps the Rust build independent of the Python wheel.
+  pkgs.runCommand "${pname}-${version}" {
+    nativeBuildInputs = [pkgs.makeWrapper];
+    inherit pname version;
+    inherit (unwrapped) meta;
+    passthru.unwrapped = unwrapped;
+  } ''
+    makeWrapper ${unwrapped}/bin/elodin $out/bin/elodin \
+      --inherit-argv0 \
+      --set TOKTX "${common.ktxTools}/bin/toktx" \
+      ${common.makeWrapperArgs {
+      inherit pkgs python pythonPath pythonMajorMinor;
+      inherit graphicsWrapperArgs;
+    }}
+  ''

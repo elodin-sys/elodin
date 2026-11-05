@@ -4,13 +4,16 @@ set -euo pipefail
 tracy_out="$(pwd)/profile_output/tracy-db-perf"
 mkdir -p "${tracy_out}"
 
-# Binary is pre-built by the pipeline's pre_command step (default nix shell with cargo).
+# Binary is pre-built by the pipeline step (default nix shell with cargo).
 bench_bin="./target/release/elodin-db-bench"
 
 if [[ ! -x "${bench_bin}" ]]; then
   echo "error: ${bench_bin} not found -- build with: cargo build --release -p elodin-db --bin elodin-db-bench --features grpc,tracy"
   exit 1
 fi
+
+# CI agents share a host, so a fixed Tracy port can collide with another job.
+tracy_port="$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
 
 run_bench() {
   local label="$1"
@@ -19,19 +22,20 @@ run_bench() {
 
   trace_file="${tracy_out}/trace-db-${label}.tracy"
 
-  # Start Tracy capture on port 8090 (elodin-db) before the bench
+  # Start Tracy capture before the bench; the timeout covers a bench that never connects
   local capture_seconds=30
   if [[ "${label}" == grpc-* ]]; then
     capture_seconds=5
   fi
-  tracy-capture -a 127.0.0.1 -p 8090 -o "${trace_file}" -s "${capture_seconds}" >/dev/null 2>&1 &
+  timeout $((capture_seconds + 60)) \
+    tracy-capture -a 127.0.0.1 -p "${tracy_port}" -o "${trace_file}" -s "${capture_seconds}" >/dev/null 2>&1 &
   tracy_pid=$!
   sleep 0.5
 
   # Run the bench -- TRACY_PORT is read by TracyClient's static constructor.
   # Exit 141 (SIGPIPE) is expected when tracy-capture disconnects; treat as success.
   set +e
-  TRACY_PORT=8090 "${bench_bin}" "$@"
+  TRACY_PORT="${tracy_port}" "${bench_bin}" "$@"
   rc=$?
   set -e
   if [[ "${rc}" -ne 0 ]] && [[ "${rc}" -ne 141 ]]; then

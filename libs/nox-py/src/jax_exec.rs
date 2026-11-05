@@ -1,5 +1,5 @@
 use std::collections::HashSet;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use impeller::types::ComponentId;
 use pyo3::prelude::*;
@@ -7,7 +7,7 @@ use pyo3::types::{PyBytes, PyTuple};
 
 use crate::error::Error;
 use crate::exec::ExecMetadata;
-use crate::profile::{Profiler, TickTimings};
+use crate::profile::{BatchTimings, Profiler, TickTimings};
 use crate::system::CompiledSystem;
 use crate::utils::SchemaExt;
 use crate::world::World;
@@ -261,26 +261,18 @@ impl JaxWorldExec {
             ticks_per_telemetry,
             self.profiler.detailed_timing,
         )?;
-        let tick_elapsed = tick_start.elapsed();
-        if self.profiler.detailed_timing {
-            let h2d = Duration::from_secs_f64(timings.h2d_upload_ms / 1000.0);
-            let kernel = Duration::from_secs_f64(timings.kernel_invoke_ms / 1000.0);
-            let d2h = Duration::from_secs_f64(timings.d2h_download_ms / 1000.0);
-            self.profiler.copy_to_client.observe_duration(h2d);
-            self.profiler.execute_buffers.observe_duration(kernel);
-            self.profiler.copy_to_host.observe_duration(d2h);
-            self.profiler.h2d_upload.observe_duration(h2d);
-            self.profiler.kernel_invoke.observe_duration(kernel);
-            self.profiler.d2h_download.observe_duration(d2h);
-        } else {
-            self.profiler.execute_buffers.observe_duration(tick_elapsed);
-        }
+        let exec = tick_start.elapsed();
 
-        let mut start = Instant::now();
+        let history_start = Instant::now();
         for _ in 0..ticks_per_telemetry {
             self.world.advance_tick();
         }
-        self.profiler.add_to_history.observe(&mut start);
+        self.profiler.record_batch(BatchTimings {
+            total: tick_start.elapsed(),
+            exec,
+            history: history_start.elapsed(),
+            detail: self.profiler.detailed_timing.then_some(timings),
+        });
         Ok(())
     }
 

@@ -72,7 +72,7 @@ fn skybox_still_desired(
     connection_addr: Option<&ConnectionAddr>,
     key: &MirrorKey,
 ) -> bool {
-    let Some(addr) = connection_addr.map(|addr| addr.0) else {
+    let Some(addr) = connection_addr.map(|addr| addr.socket) else {
         return false;
     };
     matches!(
@@ -252,7 +252,7 @@ pub fn sync_db_skybox_assets_from_config(
         return;
     }
     let key = MirrorKey {
-        addr: connection_addr.0,
+        addr: connection_addr.socket,
         skybox: desired.clone(),
     };
     if mirror.synced.as_ref() == Some(&key) {
@@ -280,7 +280,7 @@ pub fn sync_db_skybox_assets_from_config(
     }
 
     in_flight.key = Some(key);
-    let connection_addr = connection_addr.0;
+    let connection_addr = connection_addr.socket;
     in_flight.task = Some(IoTaskPool::get().spawn(async move {
         tokio::runtime::Runtime::new()
             .map_err(|err| err.to_string())?
@@ -426,7 +426,7 @@ pub fn upload_active_skybox_assets_to_db(
         None => return,
     };
 
-    let addr = connection_addr.0;
+    let addr = connection_addr.socket;
     let key = MirrorKey {
         addr,
         skybox: desired.clone(),

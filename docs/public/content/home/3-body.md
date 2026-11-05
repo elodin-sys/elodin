@@ -355,7 +355,7 @@ And voila, you have a randomly selected stable three-body system!
 You'll notice all of the simulations we've done here are in the x-y plane. As a further exercise, you could try to extend
 what you've learned here to find and apply the starting configurations for stable three-body systems in all three dimensions.
 
-Post what you discover in the [Elodin Discord](https://discord.gg/7vzr8j6)!
+Post what you discover in the [Elodin Discord](https://discord.gg/2XymNRBjfA)!
 
 ## Next Steps
 

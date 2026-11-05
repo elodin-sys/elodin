@@ -1,69 +1,163 @@
-use std::{
-    fs::{self, File, OpenOptions},
-    io::Write,
-    path::{Path, PathBuf},
-    sync::{
-        Arc,
-        atomic::{AtomicU64, Ordering},
-    },
-};
-
-use memmap2::MmapRaw;
+use std::sync::Arc;
 
 use crate::ir::ElementType;
 
-static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+#[cfg(not(target_family = "wasm"))]
+mod native {
+    use super::*;
+    use std::{
+        fs::{self, File, OpenOptions},
+        io::Write,
+        path::{Path, PathBuf},
+        sync::atomic::{AtomicU64, Ordering},
+    };
 
-#[derive(Debug)]
-pub struct CachedConst {
-    pub hash: String,
-    pub symbol: String,
-    pub byte_len: usize,
-    pub path: PathBuf,
-    map: MmapRaw,
-}
+    use memmap2::MmapRaw;
 
-impl CachedConst {
-    pub fn ptr(&self) -> *const u8 {
-        self.map.as_mut_ptr().cast_const()
+    static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+    #[derive(Debug)]
+    pub struct CachedConst {
+        pub hash: String,
+        pub symbol: String,
+        pub byte_len: usize,
+        pub path: PathBuf,
+        map: MmapRaw,
+    }
+
+    impl CachedConst {
+        pub fn ptr(&self) -> *const u8 {
+            self.map.as_mut_ptr().cast_const()
+        }
+
+        pub fn as_bytes(&self) -> &[u8] {
+            unsafe { std::slice::from_raw_parts(self.ptr(), self.byte_len) }
+        }
+    }
+
+    pub fn intern_bytes(elem_type: ElementType, bytes: &[u8]) -> Result<Arc<CachedConst>, String> {
+        if !cfg!(target_endian = "little") {
+            return Err("large constant cache requires a little-endian target".to_string());
+        }
+
+        let hash = super::hash_bytes(elem_type, bytes);
+        let symbol = format!("__elodin_const_{hash}");
+        let dir = cache_dir();
+        fs::create_dir_all(&dir).map_err(|e| format!("create constant cache dir {dir:?}: {e}"))?;
+        let path = dir.join(format!("{hash}.bin"));
+
+        let cache_entry_valid = path.exists()
+            && fs::metadata(&path)
+                .map(|metadata| metadata.len() as usize == bytes.len())
+                .unwrap_or(false);
+        if !cache_entry_valid {
+            let _ = fs::remove_file(&path);
+            write_atomic(&path, bytes)?;
+        }
+
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .map_err(|e| format!("open cached constant {path:?}: {e}"))?;
+        let map = MmapRaw::map_raw(&file).map_err(|e| format!("mmap {path:?}: {e}"))?;
+        Ok(Arc::new(CachedConst {
+            hash,
+            symbol,
+            byte_len: bytes.len(),
+            path,
+            map,
+        }))
+    }
+
+    fn cache_dir() -> PathBuf {
+        if let Ok(dir) = std::env::var("ELODIN_CACHE_DIR") {
+            return PathBuf::from(dir);
+        }
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_else(|_| ".".to_string());
+        PathBuf::from(home).join(".cache/elodin/const-cache")
+    }
+
+    fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+        let parent = path
+            .parent()
+            .ok_or_else(|| format!("cached constant path has no parent: {path:?}"))?;
+        let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+        let tmp = parent.join(format!(
+            ".{}.{}.{}.tmp",
+            path.file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("constant"),
+            std::process::id(),
+            seq
+        ));
+
+        {
+            let mut file =
+                File::create(&tmp).map_err(|e| format!("create temp constant {tmp:?}: {e}"))?;
+            file.write_all(bytes)
+                .map_err(|e| format!("write temp constant {tmp:?}: {e}"))?;
+            file.sync_all()
+                .map_err(|e| format!("sync temp constant {tmp:?}: {e}"))?;
+        }
+
+        match fs::hard_link(&tmp, path) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(err) => {
+                let _ = fs::remove_file(&tmp);
+                return Err(format!(
+                    "publish cached constant {tmp:?} -> {path:?}: {err}"
+                ));
+            }
+        }
+        let _ = fs::remove_file(&tmp);
+        Ok(())
     }
 }
 
-pub fn intern_bytes(elem_type: ElementType, bytes: &[u8]) -> Result<Arc<CachedConst>, String> {
-    if !cfg!(target_endian = "little") {
-        return Err("large constant cache requires a little-endian target".to_string());
+#[cfg(target_family = "wasm")]
+mod wasm {
+    use super::*;
+
+    #[derive(Debug)]
+    pub struct CachedConst {
+        pub hash: String,
+        pub symbol: String,
+        pub byte_len: usize,
+        bytes: Vec<u8>,
     }
 
-    let hash = hash_bytes(elem_type, bytes);
-    let symbol = format!("__elodin_const_{hash}");
-    let dir = cache_dir();
-    fs::create_dir_all(&dir).map_err(|e| format!("create constant cache dir {dir:?}: {e}"))?;
-    let path = dir.join(format!("{hash}.bin"));
+    impl CachedConst {
+        pub fn ptr(&self) -> *const u8 {
+            self.bytes.as_ptr()
+        }
 
-    let cache_entry_valid = path.exists()
-        && fs::metadata(&path)
-            .map(|metadata| metadata.len() as usize == bytes.len())
-            .unwrap_or(false);
-    if !cache_entry_valid {
-        // Repair missing or truncated cache entries before mapping; byte_len must match file size.
-        let _ = fs::remove_file(&path);
-        write_atomic(&path, bytes)?;
+        pub fn as_bytes(&self) -> &[u8] {
+            &self.bytes
+        }
     }
 
-    let file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(&path)
-        .map_err(|e| format!("open cached constant {path:?}: {e}"))?;
-    let map = MmapRaw::map_raw(&file).map_err(|e| format!("mmap {path:?}: {e}"))?;
-    Ok(Arc::new(CachedConst {
-        hash,
-        symbol,
-        byte_len: bytes.len(),
-        path,
-        map,
-    }))
+    pub fn intern_bytes(elem_type: ElementType, bytes: &[u8]) -> Result<Arc<CachedConst>, String> {
+        if !cfg!(target_endian = "little") {
+            return Err("large constant cache requires a little-endian target".to_string());
+        }
+        let hash = super::hash_bytes(elem_type, bytes);
+        Ok(Arc::new(CachedConst {
+            symbol: format!("__elodin_const_{hash}"),
+            hash,
+            byte_len: bytes.len(),
+            bytes: bytes.to_vec(),
+        }))
+    }
 }
+
+#[cfg(not(target_family = "wasm"))]
+pub use native::{CachedConst, intern_bytes};
+#[cfg(target_family = "wasm")]
+pub use wasm::{CachedConst, intern_bytes};
 
 fn hash_bytes(elem_type: ElementType, bytes: &[u8]) -> String {
     let mut hasher = blake3::Hasher::new();
@@ -84,52 +178,4 @@ fn element_tag(elem_type: ElementType) -> u8 {
         ElementType::UI32 => 6,
         ElementType::UI64 => 7,
     }
-}
-
-fn cache_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var("ELODIN_CACHE_DIR") {
-        return PathBuf::from(dir);
-    }
-    let home = std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".cache/elodin/const-cache")
-}
-
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| format!("cached constant path has no parent: {path:?}"))?;
-    let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
-    // Same-process concurrent interners of one hash must not share a temp path.
-    let tmp = parent.join(format!(
-        ".{}.{}.{}.tmp",
-        path.file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("constant"),
-        std::process::id(),
-        seq
-    ));
-
-    {
-        let mut file =
-            File::create(&tmp).map_err(|e| format!("create temp constant {tmp:?}: {e}"))?;
-        file.write_all(bytes)
-            .map_err(|e| format!("write temp constant {tmp:?}: {e}"))?;
-        file.sync_all()
-            .map_err(|e| format!("sync temp constant {tmp:?}: {e}"))?;
-    }
-
-    match fs::hard_link(&tmp, path) {
-        Ok(()) => {}
-        Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {}
-        Err(err) => {
-            let _ = fs::remove_file(&tmp);
-            return Err(format!(
-                "publish cached constant {tmp:?} -> {path:?}: {err}"
-            ));
-        }
-    }
-    let _ = fs::remove_file(&tmp);
-    Ok(())
 }

@@ -4,8 +4,9 @@ use std::{
         Arc,
         atomic::{AtomicBool, AtomicUsize, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
+use web_time::Instant;
 
 use bevy::{
     app::{App, Plugin},
@@ -37,6 +38,7 @@ use bevy::{
         view::{ViewDepthTexture, ViewTarget},
     },
 };
+#[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 use bevy_ai_skybox::prelude::PrimarySkybox;
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use impeller::types::{ComponentId, Timestamp};
@@ -809,6 +811,7 @@ fn spawn_sensor_cameras(
         // Earth owns the cinematic cubemap (`CinematicSkybox`). Tagging this
         // camera as `PrimarySkybox` makes the render-server wait forever for
         // that cubemap to disappear before emitting frames.
+        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
         if !config.cinematic {
             entity.insert(PrimarySkybox);
         }
@@ -1001,6 +1004,106 @@ fn place_on_grid(
     transform.translation = local_translation;
 }
 
+const WORLD_POS_STALE_US: i64 = 1_000_000;
+
+#[derive(Default)]
+struct WorldPosLog {
+    missing_since: Vec<Option<Instant>>,
+    last_emit: Vec<Option<Instant>>,
+}
+
+struct CachedWorldPos {
+    len: usize,
+    newest: Option<impeller::types::Timestamp>,
+    sample_ts: Option<impeller::types::Timestamp>,
+    world_pos: Option<impeller_wkt::WorldPos>,
+}
+
+fn cached_world_pos(
+    cache: &impeller_bevy::TelemetryCache,
+    id: &ComponentId,
+    ts: impeller::types::Timestamp,
+) -> CachedWorldPos {
+    let Some(series) = cache.series(id) else {
+        return CachedWorldPos {
+            len: 0,
+            newest: None,
+            sample_ts: None,
+            world_pos: None,
+        };
+    };
+    let newest = series.last_key_value().map(|(timestamp, _)| *timestamp);
+    let (sample_ts, world_pos) = match series.range(..=ts).next_back() {
+        Some((timestamp, value)) => (Some(*timestamp), value.as_world_pos()),
+        None => (None, None),
+    };
+    CachedWorldPos {
+        len: series.len(),
+        newest,
+        sample_ts,
+        world_pos,
+    }
+}
+
+fn log_world_pos(
+    log: &mut WorldPosLog,
+    index: usize,
+    camera: &str,
+    render_ts: i64,
+    cached: &CachedWorldPos,
+) {
+    if log.missing_since.len() <= index {
+        log.missing_since.resize(index + 1, None);
+        log.last_emit.resize(index + 1, None);
+    }
+    let now = Instant::now();
+    let stale = match cached.sample_ts {
+        None => {
+            let since = *log.missing_since[index].get_or_insert(now);
+            now.duration_since(since) >= Duration::from_secs(1)
+        }
+        Some(sample_ts) => {
+            log.missing_since[index] = None;
+            render_ts.saturating_sub(sample_ts.0) >= WORLD_POS_STALE_US
+        }
+    };
+    let due =
+        log.last_emit[index].is_none_or(|at| now.duration_since(at) >= Duration::from_secs(1));
+    if !due {
+        return;
+    }
+    log.last_emit[index] = Some(now);
+    let sample_age_ms = cached
+        .sample_ts
+        .map(|timestamp| render_ts.saturating_sub(timestamp.0) / 1_000);
+    let newest_age_ms = cached
+        .newest
+        .map(|timestamp| render_ts.saturating_sub(timestamp.0) / 1_000);
+    let quat = cached.world_pos.map(|world_pos| {
+        let [x, y, z, w] = world_pos.att.parts().map(nox::Tensor::into_buf);
+        (x, y, z, w)
+    });
+    if stale {
+        tracing::warn!(
+            camera,
+            series_len = cached.len,
+            sample_age_ms,
+            newest_age_ms,
+            ?quat,
+            "sensor camera world_pos is missing or more than 1s behind the render time"
+        );
+    } else {
+        tracing::debug!(
+            camera,
+            series_len = cached.len,
+            sample_age_ms,
+            newest_age_ms,
+            ?quat,
+            "sensor camera world_pos"
+        );
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn update_sensor_camera_transforms(
     configs: Res<SensorCameraConfigs>,
@@ -1016,6 +1119,7 @@ fn update_sensor_camera_transforms(
     current_ts: Res<impeller_wkt::CurrentTimestamp>,
     coordinate: Res<crate::Coordinate>,
     geo_context: Res<GeoContext>,
+    mut pose_log: Local<WorldPosLog>,
 ) {
     let ts = current_ts.0;
     let frame = coordinate.0.unwrap_or_default();
@@ -1023,8 +1127,19 @@ fn update_sensor_camera_transforms(
         let Some(config) = configs.0.get(sensor_cam.config_index) else {
             continue;
         };
-
-        let Some(pose) = sensor_camera_transform(config, &cache, ts, frame, &geo_context) else {
+        let world_pos_id = ComponentId::new(&format!("{}.world_pos", config.entity_name));
+        let cached = cached_world_pos(&cache, &world_pos_id, ts);
+        log_world_pos(
+            &mut pose_log,
+            sensor_cam.config_index,
+            &config.camera_name,
+            ts.0,
+            &cached,
+        );
+        let Some(world_pos) = cached.world_pos else {
+            continue;
+        };
+        let Some(pose) = sensor_camera_pose(config, world_pos, frame, &geo_context) else {
             continue;
         };
         transform.rotation = pose.rotation;
@@ -1242,7 +1357,10 @@ struct ReadbackJob {
 
 struct SensorReadbackWorker {
     sender: Option<std::sync::mpsc::Sender<ReadbackJob>>,
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
     handle: Option<std::thread::JoinHandle<()>>,
+    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+    handle: Option<()>,
 }
 
 impl SensorReadbackWorker {
@@ -1251,27 +1369,38 @@ impl SensorReadbackWorker {
         render_device: RenderDevice,
         frame_sender: SensorFrameSender,
     ) -> Result<Self, std::io::Error> {
-        let (sender, receiver) = std::sync::mpsc::channel::<ReadbackJob>();
-        let handle = std::thread::Builder::new()
-            .name(format!("sensor-readback-{index}"))
-            .spawn(move || {
-                while let Ok(mut job) = receiver.recv() {
-                    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        readback_sensor_frame(&render_device, &frame_sender, &mut job);
-                    }))
-                    .is_err()
-                    {
-                        tracing::error!(
-                            worker = index,
-                            "sensor readback worker recovered from panic"
-                        );
+        #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+        {
+            let _ = (index, render_device, frame_sender);
+            return Ok(Self {
+                sender: None,
+                handle: None,
+            });
+        }
+        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+        {
+            let (sender, receiver) = std::sync::mpsc::channel::<ReadbackJob>();
+            let handle = std::thread::Builder::new()
+                .name(format!("sensor-readback-{index}"))
+                .spawn(move || {
+                    while let Ok(mut job) = receiver.recv() {
+                        if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            readback_sensor_frame(&render_device, &frame_sender, &mut job);
+                        }))
+                        .is_err()
+                        {
+                            tracing::error!(
+                                worker = index,
+                                "sensor readback worker recovered from panic"
+                            );
+                        }
                     }
-                }
-            })?;
-        Ok(Self {
-            sender: Some(sender),
-            handle: Some(handle),
-        })
+                })?;
+            Ok(Self {
+                sender: Some(sender),
+                handle: Some(handle),
+            })
+        }
     }
 
     fn send(&self, job: ReadbackJob) {
@@ -1284,8 +1413,13 @@ impl SensorReadbackWorker {
 impl Drop for SensorReadbackWorker {
     fn drop(&mut self) {
         self.sender.take();
+        #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
         if let Some(handle) = self.handle.take() {
             let _ = handle.join();
+        }
+        #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+        {
+            self.handle.take();
         }
     }
 }
@@ -1295,14 +1429,21 @@ fn release_slot_after_late_map<E: Send + 'static>(
     buffer: Buffer,
     slot: Option<InFlightSlot>,
 ) {
-    let _ = std::thread::Builder::new()
-        .name("sensor-readback-late-map".to_string())
-        .spawn(move || {
-            if let Ok(Ok(())) = receiver.recv() {
-                drop(MappedBufferGuard(&buffer));
-            }
-            drop(slot);
-        });
+    #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
+    {
+        let _ = (receiver, buffer, slot);
+    }
+    #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
+    {
+        let _ = std::thread::Builder::new()
+            .name("sensor-readback-late-map".to_string())
+            .spawn(move || {
+                if let Ok(Ok(())) = receiver.recv() {
+                    drop(MappedBufferGuard(&buffer));
+                }
+                drop(slot);
+            });
+    }
 }
 
 fn readback_sensor_frame(
@@ -1801,6 +1942,37 @@ mod tests {
         );
         let expected_rotation = Transform::from_translation(expected_translation.as_vec3())
             .looking_at((expected_translation + DVec3::X).as_vec3(), Vec3::Y)
+            .rotation;
+        assert!(
+            pose.rotation.dot(expected_rotation).abs() > 1.0 - 1e-6,
+            "got {:?}, expected {expected_rotation:?}",
+            pose.rotation
+        );
+    }
+
+    #[test]
+    fn positive_pitch_offset_turns_camera_toward_body_down() {
+        let context = GeoContext::default();
+        let mut config = camera_config([0.0, 0.0, 0.0]);
+        config.rot_offset = [0.0, 10.0, 0.0];
+        let pose = sensor_camera_pose(
+            &config,
+            world_pos(DVec3::ZERO, bevy::math::DQuat::IDENTITY),
+            GeoFrame::ENU,
+            &context,
+        )
+        .expect("valid sensor camera pose");
+
+        let pitch = 10.0_f64.to_radians();
+        let forward_enu = DVec3::new(pitch.cos(), 0.0, -pitch.sin());
+        let up_enu = DVec3::new(pitch.sin(), 0.0, pitch.cos());
+        let to_bevy = |vector: DVec3| DVec3::new(vector.x, vector.z, -vector.y);
+        let forward = to_bevy(forward_enu);
+        let expected_rotation = Transform::from_translation(pose.translation.as_vec3())
+            .looking_at(
+                (pose.translation + forward).as_vec3(),
+                to_bevy(up_enu).as_vec3(),
+            )
             .rotation;
         assert!(
             pose.rotation.dot(expected_rotation).abs() > 1.0 - 1e-6,

@@ -5,7 +5,7 @@ use impeller::types::ComponentId;
 
 use crate::error::Error;
 use crate::exec::ExecMetadata;
-use crate::profile::{Profiler, TickTimings};
+use crate::profile::{BatchTimings, Profiler, TickTimings};
 use crate::world::World;
 
 type TickFn = unsafe extern "C" fn(*const *const u8, *mut *mut u8);
@@ -290,14 +290,18 @@ impl CraneliftWorldExec {
             ticks_per_telemetry,
             self.profiler.detailed_timing,
         )?;
-        let tick_elapsed = tick_start.elapsed();
-        self.profiler.execute_buffers.observe_duration(tick_elapsed);
+        let exec = tick_start.elapsed();
 
-        let mut start = Instant::now();
+        let history_start = Instant::now();
         for _ in 0..ticks_per_telemetry {
             self.world.advance_tick();
         }
-        self.profiler.add_to_history.observe(&mut start);
+        self.profiler.record_batch(BatchTimings {
+            total: tick_start.elapsed(),
+            exec,
+            history: history_start.elapsed(),
+            detail: None,
+        });
         Ok(())
     }
 

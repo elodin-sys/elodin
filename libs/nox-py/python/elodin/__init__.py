@@ -624,6 +624,14 @@ Inertia = Annotated[
     SpatialInertia,
     Component("inertia", metadata={"priority": 5}),
 ]
+StepError = Annotated[
+    jax.Array,
+    Component(
+        "step_error",
+        ComponentType(PrimitiveType.F64, (4,)),
+        metadata={"element_names": "θ,x,ω,v", "priority": 5},
+    ),
+]
 Seed = Annotated[jax.Array, Component("seed", ComponentType.U64, metadata={"priority": 5})]
 SimulationTick = Annotated[
     jax.Array, Component("tick", ComponentType.F64, metadata={"priority": 7})
@@ -631,6 +639,10 @@ SimulationTick = Annotated[
 SimulationTimeStep = Annotated[
     jax.Array,
     Component("simulation_time_step", ComponentType.F64, metadata={"priority": 8}),
+]
+StageTime = Annotated[
+    jax.Array,
+    Component("stage_time", ComponentType.F64, metadata={"priority": 8}),
 ]
 Camera = Annotated[
     jax.Array,
@@ -737,6 +749,7 @@ class World(WorldBuilder):
         optimize: bool = False,
         db_path: Optional[str] = None,
         backend: str = "cranelift",
+        start_timestamp: Optional[int] = None,
     ) -> Exec:
         return super().build(
             system,
@@ -748,6 +761,7 @@ class World(WorldBuilder):
             optimize,
             db_path,
             backend,
+            start_timestamp,
         )
 
     def to_jax(
@@ -756,7 +770,7 @@ class World(WorldBuilder):
         simulation_rate: float = 120.0,
         default_playback_speed: float = 1.0,
         max_ticks: Optional[int] = None,
-    ) -> object:
+    ) -> jaxsim.JaxSim:
         obj, ins, outs, state, dictionary, entity_dict, component_entity_dict = super().to_jax_func(
             system, simulation_rate, default_playback_speed, max_ticks
         )

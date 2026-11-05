@@ -4,7 +4,7 @@
 //! data density across time. Useful for identifying gaps or disparities in data.
 
 use std::collections::HashMap;
-use std::time::Instant;
+use web_time::Instant;
 
 use arrow::array::{Array, Float64Array, TimestampMicrosecondArray};
 use arrow::record_batch::RecordBatch;

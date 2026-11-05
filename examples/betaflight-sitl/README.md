@@ -16,6 +16,7 @@ The simulation provides:
 - **Multi-Rate Sensors**: Requested sensor rates are capped by the simulation rate
 - **Opt-in FPV**: `RACE_CAMERA=1` records a 640×360 forward camera independently of guidance
 - **Opt-in Truth Hold**: `RACE_GUIDANCE=truth RACE_COURSE=single` holds 4 m before one gate
+- **Opt-in Truth Course**: `RACE_GUIDANCE=truth RACE_COURSE=c1_straight` runs the qualified headless three-gate race profile
 
 ```
 ┌─────────────────────┐        UDP        ┌─────────────────────┐
@@ -61,8 +62,9 @@ This compiles the Betaflight firmware for SITL mode. The binary will be at:
 ### First-Time Setup: Configure Arming and ANGLE Mode
 
 **IMPORTANT**: Before running the simulation, configure the ARM switch on AUX1
-and ANGLE mode on AUX2. This only needs to be done once; the config is saved to
-`eeprom.bin`.
+and ANGLE mode on AUX2, disable GPS, and keep `trust_mag = OFF`. Rerun the
+initialization script when upgrading from a pre-G1 EEPROM; the config is saved
+to `eeprom.bin` and applies to every guidance mode.
 
 Run the initialization script from the repository root:
 
@@ -100,12 +102,19 @@ and verifies the persisted settings. To do the same setup manually:
    # Process every available gyro/PID update
    set gyro_hardware_lpf = NORMAL
    set pid_process_denom = 1
+   set rc_smoothing = OFF
+
+   # No truth-derived GPS or magnetic heading aid inside Betaflight
+   feature -GPS
+   set trust_mag = OFF
    
    save
    ```
    
-   This configures ARM on AUX1 and processes every lockstep update. The actual
-   lockstep rate is set by `simulation_rate` (8kHz by default).
+   This configures ARM/ANGLE, processes every lockstep update, and removes
+   truth-derived heading aids. Run the initialization script to verify all
+   persisted settings. The actual lockstep rate is set by `simulation_rate`
+   (8kHz by default).
 
 4. **Exit screen**: Press `Ctrl+A` then `K` then `Y`
 
@@ -205,10 +214,55 @@ prints one shutdown line:
 [FPV] total_frames=... window_frames=... observed_fps=... status=PASS|FAIL reason=...
 ```
 
-`status=FAIL` exits 1. `frame_fresh` is true only for a newly rendered frame. A
-held frame is still supplied, with `frame_fresh=False`. The exported video can
-be one frame ahead of `total_frames`, because the render server may write one
-more frame while it shuts down after the final tick.
+`status=FAIL` exits 1. `GuidanceUpdate.frame_time` is selected image-message T
+converted by integer timestamp delta to simulation seconds on `sim_time`:
+**nominal image/render time, not verified exact pose/exposure time**.
+`GateCandidate.sample_time` carries the same value. A newly selected timestamp
+is fresh; held frames keep their time with `frame_fresh=False`. Missing/pre-first
+frames have frame/time `None`; copying is unchanged.
+
+Scene-time alignment is approximate; renderer cache phase and backlog can add
+variable delay. There is no guaranteed sub-frame bound or fixed offset to apply.
+Sparse state's last-change T is not actual image time. See
+[RACING_PLAN.md §7.4](RACING_PLAN.md#74-camera) for the timing contract and revisit
+criteria; future fusion must not assume exact alignment.
+
+The exported video can be one frame ahead of `total_frames`, because the render
+server may write one more frame while it shuts down after the final tick.
+
+### Vision geometry
+
+Package G proves the camera and detection geometry without reading rendered
+pixels. The camera frame is OpenCV: +Z forward, +X image-right, +Y image-down.
+Body axes stay FLU. Image-right maps to body −Y, image-down to body −Z, and the
+optical axis to body +X. Positive `TILT_DEG` pitches that axis up (nose-up).
+Positive `sensor_camera` pitch is nose-down, a right-handed turn about body +Y,
+so `sensor_rot_offset` registers the tilt as a negative pitch. Inner-opening
+corners are ordered top-left, top-right, bottom-right, bottom-left. In the gate
+frame those points are `(0, +h, +h)`, `(0, −h, +h)`, `(0, −h, −h)`,
+`(0, +h, −h)` with `h = 1.25` m.
+
+`order_corners` labels corners with a midline heuristic. `corner_order_ambiguous`
+is a heuristic warning, set when the two best labellings are within 10°. An unset
+flag does not guarantee the gate-frame orientation: perspective can still mislabel
+corners. Gate position, bearing, range, and the crossing normal are unaffected by
+a cyclic relabelling. The in-plane gate orientation is not reliable.
+`candidate_from_ordered_corners` is the path for corners that are already TL, TR,
+BR, BL; it does not reorder.
+
+Noise-free projection followed by planar PnP recovers bearing within 0.25° and
+translation within `1e-6·range + 1e-6` m. A half-pixel quantizer is allowed a
+depth error of `Z²/(f·S)` metres (`f = 320`, `S = 2.5`), twice the first-order
+single-corner estimate because all four corners quantize together.
+
+```bash
+python3 -m pytest examples/betaflight-sitl/tests -q
+python3 examples/betaflight-sitl/synthetic_vision.py
+```
+
+The fixture command prints the canonical centered, translated, yawed, and ranged
+poses as JSON. `synthetic_vision.py` is for tests and offline fixtures.
+Production vision code does not import it.
 
 ### Race Course and Referee
 
@@ -225,9 +279,8 @@ RACE_COURSE=single elodin run examples/betaflight-sitl/main.py
 RACE_COURSE=single elodin editor examples/betaflight-sitl/main.py
 ```
 
-`RACE_COURSE` accepts `none` (default) and `single`. `c1_straight` is a
-reserved value and fails clearly until Package F implements it; every other
-value is also rejected at startup. Course parsing does not select or alter
+`RACE_COURSE` accepts `none` (default), `single`, and `c1_straight`; every other
+value is rejected at startup. Course parsing does not select or alter
 `RACE_GUIDANCE`, so the no-environment default remains the scripted C0 run.
 
 The single gate is centered at ENU `(10, 0, 1.8)` metres with yaw `0` and an
@@ -235,7 +288,10 @@ exact `2.5 m` square inner opening. Yaw is about world +Z; yaw zero gives a
 plane normal along world +X. A pass approaches from negative gate-local X and
 crosses toward positive local X. Four static `0.2 m` saturated-orange matte
 bars render the frame; they carry only `WorldPos` and do not participate in
-rigid-body integration or collision physics.
+rigid-body integration or collision physics. `c1_straight` uses three gates
+at `(10, 0, 1.8)`, `(20, 0, 1.8)`, and `(30, 0, 1.8)` m with that same yaw
+and opening. With the camera enabled, its observational ground plane is
+80 × 80 m so the ground extends past the last gate; other courses keep 40 × 40 m.
 
 The referee scores simulation truth after command selection, independently of
 guidance mode. It interpolates each sampled segment at the next ordered gate
@@ -297,31 +353,56 @@ response, no forward crossing and no guidance fault. `FAIL` (for example no
 qualified window, fault, or crossing) exits nonzero in headless mode. An E hold
 PASS still accompanies one **expected** incomplete `[RACE]` result with
 `course=single`, `gates_passed=0/1`, and `status=INCOMPLETE`; incomplete race
-status does not fail Package E. Three consecutive qualified headless runs
-measured online RMS `0.075521`, `0.074801`, and `0.074188` m (independent DB
-RMS `0.075520758`, `0.074803460`, and `0.074187954` m), each over exactly
-10 s.
-The qualification command, windows, regression checks, and operating envelope
-are recorded in [RACING_PLAN.md](RACING_PLAN.md). In the 2026-10-02
-latest-main reconciliation, three additional consecutive camera-off truth
-runs passed at 0.074574/0.073668/0.073832 m RMS; a separate camera-enabled
-truth run passed at 0.071955 m RMS with 1350 renderer frames at 29.98 simulated
-FPS. Scripted C0 and both C/D audits also passed with `RACE_CAMERA=1`.
+status does not fail Package E. See [RACING_PLAN.md](RACING_PLAN.md) for the
+controller design, operating envelope, and acceptance criteria.
 
-Requalified **2026-10-12 on main `729022c7`**, with a freshly built
-`0.20.1-alpha.0` runtime and `0.20.1a0` Python SDK: 180 pure tests and
-5 controller tests passed. Three consecutive unchanged-code camera-off truth
-runs passed at **0.073873 / 0.075235 / 0.074413 m RMS**, each over exactly
-10 s; independent DB reconstruction agreed within 0.0000005 m. All retained
-armed/ANGLE/lockstep/motor evidence, no crossing/fault, and the expected
-incomplete race result. Default C0, scripted-single, C positive referee and D
-physical audits also passed. Offscreen truth+camera passed independently at
-0.075011 m RMS with 1350 frames and 29.98 simulated FPS; camera-enabled
-scripted C0 and C/D audits passed as well. Video export and ingested
-schematic/phase/RC telemetry were verified, but no new editor visual review or
-manual hardware qualification was performed. See the current-main evidence
-under Package E in [RACING_PLAN.md](RACING_PLAN.md); the original qualifications
-above remain historical evidence.
+#### Truth-guided straight course (Package F)
+
+**Headless truth qualification passed on 2026-11-02** with E1's shared
+controller and G1's GPS-disabled/`trust_mag = OFF` configuration: three consecutive flights
+completed all gates in 41.28–41.32 simulated seconds, then maintained over
+9 s of independently verified terminal safety inside the 60 s cap. Historical
+pre-E1/G1 F runs used a different controller/configuration and FINISH code 8;
+they are not acceptance evidence for this implementation. The current codes
+are `7` COMMIT, `8` reserved SEARCH (vision only), and `9` FINISH.
+
+```bash
+RACE_GUIDANCE=truth RACE_COURSE=c1_straight \
+  elodin run examples/betaflight-sitl/main.py
+```
+
+The course selects the shared mission controller's race profile via
+`TruthGuidanceConfig.for_course`, leaving `single` hold gains and behavior
+unchanged. Repeated ACQUIRE/HOLD/COMMIT cycles advance only on the independent
+referee's ordered pass events. The explicitly approved FINISH policy is to brake
+and descend at 0.4 m/s **under power through touchdown before disarming**, not
+to drop from a suspended pad+0.15 m hover. It freezes the settled pre-arm
+navigation altitude as the pad reference, permits a below-pad control target
+without changing ground physics, and requests disarm only after altitude
+≤pad+0.01 m and total speed ≤0.18 m/s persist for 0.5 s. A broken low/slow dwell
+resets the timer. The shared controller uses unchanged frame-neutral inputs;
+it makes no tilt guarantee. The independent physical grader retains all its
+tilt and flight-safety checks; see the current three-run qualification and
+unchanged-grader evidence in [RACING_PLAN.md](RACING_PLAN.md).
+Truth guidance never uses camera pixels; no camera or GPU is required. The cap
+is **60 simulated seconds** at the unchanged 8 kHz physics/PID rate. The six
+PWM values retain the same one-tick command latch.
+
+One final `[RACE]` line reports ordered progress. An independent host grader
+also emits `[F-COURSE] status=PASS|FAIL ... reason=...`; `[F-GUIDANCE]` reports
+final phase and failure reason. COMPLETE alone cannot pass: the grader uses
+physical truth and the command actually exchanged with Betaflight, not a
+controller completion flag. It requires healthy post-boot lockstep/truth/motor
+samples, a bounded whole-flight envelope, and at least one continuous final
+second after completion at altitude ≤0.15 m, speed ≤0.20 m/s, tilt ≤10°, with
+centered, minimum-throttle, disarmed exchanged RC and all motors ≤0.02.
+Callback failures are sticky even if the SDK logs and swallows them; skipped,
+truncated, or unsuccessfully cleaned-up callback sequences cannot pass.
+Incomplete, interrupted, unsafe, or faulted truth C1 runs fail nonzero. Ordinary
+scripted/manual course incompletion remains observational; E hold retains its
+separate acceptance. Camera acceptance, if enabled, is an additional check.
+See [RACING_PLAN.md](RACING_PLAN.md) for the current qualification status and
+remaining limitations; no vision-guided racing is implemented.
 
 #### Package C referee qualification
 
@@ -346,18 +427,15 @@ the scripted source leaves its safe boot phase, so no steering or motor command
 causes the pass. Ordinary six-DOF gravity and drag carry the drone through the
 unchanged vertical 2.5 m gate, then leave it visible beyond the plane.
 
-On the verified fixture, the interpolated pass time is `1.085149 s`, the sampled
-crossing height is approximately `1.7958 m`, and final X is `11.7776 m` (the
-qualification accepts the deliberate `0.9–1.3 s` simulation-time interval and
-requires at least X=10.5 m departure). The simulation portion takes about 3.0
-wall seconds after bridge startup. The audit reads referee telemetry on a later
+The audit requires a crossing in the `0.9–1.3 s` simulation-time interval and
+at least X=10.5 m departure. It reads referee telemetry on a later
 callback tick and requires exactly one gate-0 event, `last_gate_passed == 0`,
 matching pass time, untouched `-1.0` slots, and a complete `1/1` `RaceResult`.
 Success emits exactly one line of each contract and exits zero:
 
 ```text
-[RACE] course=single gates_passed=1/1 lap_time=1.085149 status=COMPLETE pass_times=[1.085149]
-[C-REFEREE-AUDIT] gate=0 passes=1 telemetry=true result=COMPLETE pass_time=1.085149 status=PASS
+[RACE] course=single gates_passed=1/1 lap_time=... status=COMPLETE pass_times=[...]
+[C-REFEREE-AUDIT] gate=0 passes=1 telemetry=true result=COMPLETE pass_time=... status=PASS
 ```
 
 A convenient visual record starts capture as soon as Gamescope publishes its
@@ -430,10 +508,10 @@ A successful run prints one machine-readable C0 result in addition to the human
 diagnostics:
 
 ```text
-[C0] lockstep_steps=119995 motor_response=true max_motor=0.574 takeoff_delta_m=56.836 status=PASS
+[C0] lockstep_steps=... motor_response=... max_motor=... takeoff_delta_m=... status=PASS|FAIL
 ```
 
-The measured values may vary slightly by host. C0 requires at least one
+C0 requires at least one
 successful simulation-loop lockstep response, motor output greater than 0.06,
 and a peak altitude at least 0.1 m above the configured initial altitude. If any
 criterion is unmet, the result reports `status=FAIL` and the command exits
@@ -449,10 +527,11 @@ examples/betaflight-sitl/
 ├── course.py          # Pure gate/course geometry and KDL bar generation
 ├── fpv_camera.py      # FPV sampling, freshness, frame accounting, and acceptance
 ├── race_options.py    # Pure guidance/course/camera startup selection
-├── exit_status.py     # Independent scenario failure exit-code aggregation
+├── exit_status.py     # Independent scenario exits and sticky callback evidence
 ├── referee.py         # Pure ordered crossing scorer and race result
 ├── hold_referee.py    # Independent truth-based single-gate hold grader
-├── guidance.py        # Pure truth-guided single-gate standoff controller
+├── course_referee.py  # Independent physical truth-course completion/safety grader
+├── guidance.py        # Shared frame-neutral hold/race controller and truth adapter
 ├── referee_audit.py   # Pure opt-in live-audit config and acceptance evaluator
 ├── race_runtime.py    # Static scene entities and referee telemetry adapters
 ├── controller/        # s10-managed Rust gamepad/keyboard input provider
@@ -522,7 +601,8 @@ The simulation handles complex coordinate frame conversions:
 
 - **Elodin Physics**: ENU world frame with FLU (Forward-Left-Up) body frame
 - **Betaflight Sensors**: FRD (Forward-Right-Down) body frame
-- **Betaflight GPS**: ENU for position/velocity
+- **FDM position/velocity**: ENU metres and metres/second; GPS is disabled.
+  These are not valid longitude/latitude inputs for Betaflight's virtual GPS.
 
 ### Body Frame Conversion (FLU → FRD)
 
@@ -542,12 +622,19 @@ Betaflight's SITL (sitl.c) then maps these onto its internal axes:
 
 The attitude quaternion is sent in the Gazebo BetaflightPlugin convention
 (conjugated by Rx(π), i.e. qy/qz negated). SITL undoes the conjugation and rotates
-the world frame from ENU to NWU internally; the result drives the virtual
-magnetometer feed and the attitude estimator's heading reference.
+the world frame from ENU to NWU internally and synthesizes a virtual
+magnetometer. `init_eeprom.py` verifies `trust_mag = OFF` and GPS disabled, so
+neither this truth-derived field nor virtual GPS course-over-ground corrects
+Betaflight's heading estimate. The truth-altitude barometer remains unused;
+no altitude or position mode is configured.
 
-Note: 2026.6.1+ SITL runs the real Mahony attitude estimator fusing the virtual
-gyro/accel/mag feeds. (The legacy behavior of setting attitude directly from the
-FDM quaternion is still available by building with `-DSITL_ATTITUDE_DIRECT`.)
+Note: 2026.6.1+ SITL runs the real Mahony attitude estimator using the simulated
+gyro/accelerometer in this configuration. The legacy behavior of setting
+attitude directly from the FDM quaternion is available with
+`-DSITL_ATTITUDE_DIRECT`, which this example does not enable. Future vision
+results use the sensor-set label "camera, IMU, barometer, and magnetometer on
+the companion; referee pass events used for gate sequencing"; they are not
+sensor-only autonomy.
 
 ### Motor Mapping (Betaflight Quad-X, Native Order)
 
@@ -607,7 +694,7 @@ Pre-configured drone types:
 The simulation includes a realistic sensor noise model based on the proven drone example:
 - **Gyroscope**: Gaussian noise + bias drift (random walk)
 - **Accelerometer**: Gaussian noise
-- **Barometer**: Gaussian noise (~0.03m std dev)
+- **Barometer**: Gaussian noise (σ = 0.1 m; variance 0.01 m²)
 
 The gyro uses `1e-7 (rad/s)²` measurement covariance and `1e-8` bias-drift
 covariance. The measurement covariance corresponds to approximately

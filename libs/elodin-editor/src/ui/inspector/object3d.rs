@@ -62,7 +62,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
         let tree_actions = SmallVec::new();
         let connection_addr = world
             .get_resource::<impeller_bevy::ConnectionAddr>()
-            .map(|addr| addr.0);
+            .map(|addr| addr.endpoint().clone());
         let local_root = crate::object_3d::local_assets_root(
             world.get_resource::<crate::plugins::kdl_document::InitialKdlPath>(),
         );
@@ -669,7 +669,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                     &mut mesh_assets,
                     &mut mat3_material_assets,
                     &assets,
-                    connection_addr,
+                    connection_addr.as_ref(),
                     local_root.as_deref(),
                 );
             }

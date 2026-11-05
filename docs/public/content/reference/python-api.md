@@ -130,9 +130,9 @@ The Elodin simulation world.
     - `log_level` : `str`, optional, log level for the embedded Elodin-DB instance (`error`, `warn`, `info`, `debug`, `trace`). Defaults to `info` unless `RUST_LOG` is set.
     - `backend` : `str`, optional, execution backend. Defaults to `"cranelift"`. Supported values are `"cranelift"` (CPU), `"jax-cpu"`, and `"jax-gpu"`.
 
-- `build(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, db_path, backend)` -> `elodin.Exec`
+- `build(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, db_path, backend, start_timestamp)` -> `elodin.Exec`
 
-    Build and compile the simulation executor without starting the runtime loop.
+    Build and compile the simulation executor without starting the runtime loop. `Exec.run(ticks)` advances it and records each tick at its simulation time, so repeated calls continue one history.
     - `system` : [elodin.System], the systems to compile.
     - `simulation_rate` : `float`, optional, simulation frequency in Hz (ticks per second), defaults to `120.0`.
     - `generate_real_time` : `bool`, optional, when `True`, paces simulation to real-time wall clock speed. Defaults to `False`.
@@ -142,6 +142,7 @@ The Elodin simulation world.
     - `optimize` : `bool`, optional, enables optimization passes during compilation.
     - `db_path` : `string`, optional, the path to the database directory.
     - `backend` : `str`, optional, execution backend. Defaults to `"cranelift"`.
+    - `start_timestamp` : `int`, optional, the timestamp of the initial state in microseconds; tick `n` is recorded at `start_timestamp + n / simulation_rate`. If `None` (default), uses the current system time. Set to `0` for zero-based timing.
 
 ### Backend Selection
 
@@ -520,17 +521,67 @@ Using the associated [elodin.Body] archetype and prebuilt components, we can cre
     - `sys` : one or more [elodin.System] instances used as effectors
     - `integrator` : [elodin.Integrator], default is `Integrator.Rk4`
 
+    Most integrators evaluate the effectors several times per step, at different times within it. The global
+    `elodin.StageTime` component holds the seconds past the start of the step for the current evaluation (zero outside
+    `six_dof`), so effectors that depend on time can follow it. The tick is incremented before the systems run, so the
+    effectors' time is `(tick[0] - 1) * dt[0] + stage_time[0]` for an `el.Query[el.SimulationTick]`, an
+    `el.Query[el.SimulationTimeStep]`, and an `el.Query[el.StageTime]`. `StageTime` is measured in the simulation step
+    even when `six_dof` integrates with its own `time_step`, so this time advances with the simulation either way.
+
 ### _class_ `elodin.Integrator`
 
 - `elodin.Integrator.Rk4` -> [elodin.Integrator]
 
     Runge-Kutta 4th Order (RK4) Integrator: Elodin provides a built-in implementation for a [4th order Runge-Kutta integrator](https://en.wikipedia.org/wiki/Runge%E2%80%93Kutta_methods).
-    The RK4 integrator is a numerical method used to solve ordinary differential equations. You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/rk4.rs).
+    The RK4 integrator is a numerical method used to solve ordinary differential equations. It evaluates the effectors 4 times per step. You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/runge_kutta.rs).
+
+- `elodin.Integrator.Rk2` -> [elodin.Integrator]
+
+    [Heun's method](https://en.wikipedia.org/wiki/Heun%27s_method), a second-order Runge-Kutta method that evaluates the effectors 2 times per step.
+    It costs half as much as `Rk4`, and suits time steps short enough that second-order accuracy is enough, or dynamics with discontinuities
+    such as contacts, where higher orders gain little.
+
+- `elodin.Integrator.Rk3` -> [elodin.Integrator]
+
+    Kutta's third-order Runge-Kutta method, which evaluates the effectors 3 times per step.
+
+- `elodin.Integrator.Verlet` -> [elodin.Integrator]
+
+    [Velocity Verlet](https://en.wikipedia.org/wiki/Verlet_integration#Velocity_Verlet), a second-order method that evaluates the effectors 2 times per step.
+    When forces depend only on position, as in gravitational N-body problems, it is symplectic: energy errors stay bounded over
+    long runs instead of drifting, as they do with the Runge-Kutta integrators, and orbits keep their size. Forces that depend on
+    velocity, such as drag or the gyroscopic torque of a spinning body, leave it second order but not symplectic. You can review
+    the implementation [here](https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/verlet.rs).
+
+- `elodin.Integrator.Rk78` -> [elodin.Integrator]
+
+    The eighth-order solution of Fehlberg's 7(8) Runge-Kutta pair, which evaluates the effectors 13 times per step. Its error
+    shrinks 256 times per halving of the time step, so it suits long, smooth propagations, such as orbits, where it can take
+    much larger steps than `Rk4` for the same accuracy.
+
+- `elodin.Integrator.Dp54` -> [elodin.Integrator]
+
+    The fifth-order solution of the [Dormand-Prince](https://en.wikipedia.org/wiki/Dormand%E2%80%93Prince_method) 5(4) pair
+    (the pair behind MATLAB's `ode45`), which evaluates the effectors 7 times per step. Elodin keeps the time step fixed.
+
+    `Dp54` and `Rk78` estimate each step's error from their embedded lower-order solution. A body that has the `elodin.StepError`
+    component, for example from `el.C(el.StepError, jnp.zeros(4))`, receives the estimate after every step: attitude (rad),
+    position, angular velocity, and velocity. It is the difference between the pair's two solutions, which approximates the
+    lower-order solution's error and usually exceeds the error of the solution Elodin keeps, but it is an estimate, not a
+    guarantee. Graphed over a run, it shows whether the time step is small enough and where the dynamics are hardest to
+    integrate.
 
 - `elodin.Integrator.SemiImplicit` -> [elodin.Integrator]
 
     Semi-Implicit Integrator: Elodin provides a built-in implementation for a [semi-implicit Euler integrator](https://en.wikipedia.org/wiki/Semi-implicit_Euler_method).
     The semi-implicit integrator is a numerical method used to solve ordinary differential equations. You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/semi_implicit.rs).
+
+    {% alert(kind="warning") %}
+    The semi-implicit integrator updates angular velocity with an explicit Euler step, so the gyroscopic term
+    $\omega_b \times I\omega_b$ is evaluated at the start of each step. For bodies with unequal principal moments that spin
+    quickly relative to the time step, angular momentum and rotational kinetic energy drift (typically growing) even with no
+    applied torque. Use `Integrator.Rk4` or a smaller time step for spinning or tumbling bodies.
+    {% end %}
 
 ### _class_ `elodin.Body`
 
@@ -1027,13 +1078,42 @@ A spatial force is a 6D vector that represents the linear force and torque appli
 
 ### _class_ `elodin.SpatialInertia`
 
-A spatial inertia is a 7D vector that represents the mass, moment of inertia, and momentum of a rigid body in 3D space. The moment of inertia is represented in its [diagonalized form] of $[I_1, I_2, I_3]$.
+A spatial inertia is a 7D vector that represents the mass and the symmetric 3x3 [moment of inertia] tensor of a rigid body, expressed in the body frame about its center of mass.
+The layout is $[I_{xx}, I_{yy}, I_{zz}, I_{xy}, I_{xz}, I_{yz}, m]$, and the full tensor is
 
-[diagonalized form]: https://en.wikipedia.org/wiki/Moment_of_inertia#Principal_axes
+$$I = \begin{bmatrix} I_{xx} & I_{xy} & I_{xz} \\\\ I_{xy} & I_{yy} & I_{yz} \\\\ I_{xz} & I_{yz} & I_{zz} \end{bmatrix}$$
 
-- `__init__(mass, inertia)` -> [elodin.SpatialInertia]
+If the body axes are its [principal axes], the off-diagonal entries are zero and only the diagonal is needed.
 
-    Create a spatial tensor inertia from a scalar mass and an optional inertia tensor diagonal with shape (3,). If the inertia tensor is not provided, it is set to the same value as the mass along all axes.
+{% alert(kind="warning") %}
+The off-diagonal entries are the signed entries of the tensor matrix, $I_{xy} = -\int xy \, dm$, not products of inertia.
+CAD tools usually report products of inertia $P_{xy} = +\int xy \, dm$; negate them before passing them in ($I_{xy} = -P_{xy}$).
+{% end %}
+
+[moment of inertia]: https://en.wikipedia.org/wiki/Moment_of_inertia#Inertia_tensor
+[principal axes]: https://en.wikipedia.org/wiki/Moment_of_inertia#Principal_axes
+
+- `__init__(mass, inertia=None, inertia_off_diag=None)` -> [elodin.SpatialInertia]
+
+    Create a spatial inertia from a scalar mass, an optional tensor diagonal $[I_{xx}, I_{yy}, I_{zz}]$, and optional off-diagonal entries $[I_{xy}, I_{xz}, I_{yz}]$.
+    If `inertia` is not provided, the diagonal is set to the mass along all axes. If `inertia_off_diag` is not provided, it is zero.
+
+    - `mass` : real scalar (`int`, `float`, or 0-D array)
+    - `inertia` : real array-like with shape (3,), optional
+    - `inertia_off_diag` : real array-like with shape (3,), optional
+
+    Ints, lists, tuples, and int or float32 arrays are converted to float64. Concrete (non-traced) values are validated. A `TypeError` or `ValueError` is raised if:
+    - an argument is not real-valued (e.g. a `bool`, string, or complex number) or has the wrong shape
+    - the mass is not finite and > 0
+    - an inertia entry is not finite
+    - the tensor is not positive-definite
+    - the principal moments violate the triangle inequality $\lambda_1 + \lambda_2 \geq \lambda_3$, which every physical rigid body satisfies
+
+    Values traced inside a system (e.g. in `@el.map`) are checked for shape only and must already be float64; cast them with `.astype(jnp.float64)` if needed.
+
+- `from_array(arr)` -> [elodin.SpatialInertia]
+
+    Create a spatial inertia from a real array-like with shape (7,) in the layout above. Concrete values are converted and validated the same way as `__init__`.
 
 - `mass()` -> [jax.Array]
 
@@ -1041,7 +1121,19 @@ A spatial inertia is a 7D vector that represents the mass, moment of inertia, an
 
 - `inertia_diag()` -> [jax.Array]
 
-    Get the inertia tensor diagonal of the spatial inertia with shape (3,).
+    Get the tensor diagonal $[I_{xx}, I_{yy}, I_{zz}]$ with shape (3,).
+
+- `inertia_off_diag()` -> [jax.Array]
+
+    Get the signed off-diagonal tensor entries $[I_{xy}, I_{xz}, I_{yz}]$ with shape (3,).
+
+- `inertia_matrix()` -> [jax.Array]
+
+    Get the full symmetric inertia tensor with shape (3, 3).
+
+- `asarray()` -> [jax.Array]
+
+    Get the underlying 7D array.
 
 <br></br>
 ## Elodin DB Client
@@ -1442,7 +1534,7 @@ A plain `graph` plots raw component elements straight from the database and cann
 coordinate frame="ECEF" lat=28.5 lon=-80.6
 
 # Local NED chase offset while the sim pose is ECEF
-viewport pos="rocket.world_pos.ecef_to_ned().translate(-2, 0, 0).ned_to_ecef()"
+viewport pos="rocket.world_pos.ecef_to_ned().translate(-2, 0, 0, true).ned_to_ecef()"
          look_at="rocket.world_pos"
 
 # Plot NED northing from an ECEF world_pos (query_plot)

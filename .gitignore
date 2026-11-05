@@ -1,5 +1,6 @@
 .DS_Store
 target
+apps/elodin-web/dist
 out.png
 out.rrd
 .idea
