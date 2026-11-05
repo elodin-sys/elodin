@@ -41,7 +41,7 @@ use stellarator::{
     io::{AsyncRead, AsyncWrite, OwnedReader, OwnedWriter, SplitExt},
     net::{TcpListener, TcpStream, UdpSocket},
     sync::{Mutex, WaitQueue},
-    util::{AtomicCell, CancelToken},
+    util::AtomicCell,
 };
 use time_series::TimeSeries;
 use tracing::{debug, info, trace, warn};
@@ -50,7 +50,11 @@ use zerocopy::IntoBytes;
 
 pub use error::Error;
 mod connection;
-use connection::ConnectionTasks;
+pub use connection::TaskOwner;
+use connection::drive_ticks;
+#[cfg(test)]
+#[path = "../tests/support/task_owner.rs"]
+mod test_task_owner;
 
 pub(crate) const COMPONENT_CREATION_INDEX_METADATA_KEY: &str = "_creation_index";
 pub const TX_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -1892,7 +1896,7 @@ impl Server {
 
     pub async fn handle_udp(addr: SocketAddr, db: Arc<DB>) -> Result<(), Error> {
         let socket = UdpSocket::bind(addr)?;
-        serve_connection(socket, db, CancelToken::new()).await
+        serve_connection(socket, db, ()).await
     }
 }
 
@@ -1903,7 +1907,7 @@ impl Server {
 const MAX_PACKET_LEN: usize = 256 * 1024 * 1024;
 
 pub async fn handle_conn(stream: TcpStream, db: Arc<DB>) {
-    match serve_connection(stream, db, CancelToken::new()).await {
+    match serve_connection(stream, db, ()).await {
         Ok(_) => {}
         Err(err) if err.is_stream_closed() => {}
         Err(err) => {
@@ -1914,45 +1918,42 @@ pub async fn handle_conn(stream: TcpStream, db: Arc<DB>) {
 
 /// Serve Impeller on caller-provided I/O and an existing database.
 ///
-/// This function binds no listeners. Poll it on a Stellarator executor.
-/// The transport must implement Stellarator's buffer-owning I/O traits.
+/// This function binds no listeners and returns protocol and transport errors.
+/// Poll it on a Stellarator executor. Background work is created through `tasks`.
+/// Completion stops the protocol loop only. The caller must stop and await its
+/// task owner before releasing the DB or removing its storage directory.
+/// Dropping this future does not cancel work already submitted to the owner.
+/// Use `()` for the ordinary server's detached runtime behavior.
 ///
-/// To stop the connection, cancel `cancel` and await this function.
-/// Cancellation returns [`Error::Cancelled`]. Transport and framing errors also
-/// return to the caller, including EOF when the peer closes the transport.
-/// On return, all connection tasks release their I/O and DB references.
-/// Shared tick drivers continue while another connection needs them.
+/// ```no_run
+/// use std::sync::Arc;
+/// use elodin_db::{DB, Error, TaskOwner, serve_connection};
+/// use stellarator::io::{AsyncRead, AsyncWrite};
 ///
-/// Dropping this future requests cancellation but does not wait for cleanup.
-/// Await completion before deleting the database or its storage directory.
-pub async fn serve_connection<A>(stream: A, db: Arc<DB>, cancel: CancelToken) -> Result<(), Error>
+/// async fn connection<A, T>(io: A, db: Arc<DB>, owner: T) -> Result<(), Error>
+/// where
+///     A: AsyncRead + AsyncWrite + Send + Sync + 'static,
+///     T: TaskOwner,
+/// {
+///     serve_connection(io, db, owner).await
+/// }
+/// ```
+pub async fn serve_connection<A, T>(stream: A, db: Arc<DB>, tasks: T) -> Result<(), Error>
 where
     A: AsyncRead + AsyncWrite + Send + Sync + 'static,
+    T: TaskOwner,
 {
-    let tasks = ConnectionTasks::new();
-    let _cancel_on_drop = tasks.cancel_guard();
-    let result = futures_lite::future::or(
-        async {
-            cancel.wait().await;
-            Err(Error::Cancelled)
-        },
-        async {
-            let (rx, tx) = stream.split();
-            let rx = PacketStream::new(rx).with_max_len(MAX_PACKET_LEN);
-            let tx = Arc::new(Mutex::new(PacketSink::new(tx)));
-            handle_conn_inner(tx, rx, db, &tasks).await
-        },
-    )
-    .await;
-    tasks.finish().await;
-    result
+    let (rx, tx) = stream.split();
+    let rx = PacketStream::new(rx).with_max_len(MAX_PACKET_LEN);
+    let tx = Arc::new(Mutex::new(PacketSink::new(tx)));
+    handle_conn_inner(tx, rx, db, &tasks).await
 }
 
-async fn handle_conn_inner<A: AsyncRead + AsyncWrite + Send + Sync + 'static>(
+async fn handle_conn_inner<A: AsyncRead + AsyncWrite + Send + Sync + 'static, T: TaskOwner>(
     mut tx: Arc<Mutex<PacketSink<OwnedWriter<A>>>>,
     mut rx: PacketStream<OwnedReader<A>>,
     db: Arc<DB>,
-    tasks: &ConnectionTasks,
+    tasks: &T,
 ) -> Result<(), Error> {
     let _conn_span = tracing::info_span!("handle_conn").entered();
     let mut buf = vec![0u8; 8 * 1024 * 1024];
@@ -2180,12 +2181,12 @@ fn silent_connection_ignores_msg(id: PacketId) -> bool {
     .contains(&id)
 }
 
-async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
+async fn handle_packet<A: AsyncWrite + Send + Sync + 'static, T: TaskOwner>(
     pkt: &Packet<Slice<Vec<u8>>>,
     db: &Arc<DB>,
     tx: &mut PacketTx<A>,
     silent: bool,
-    tasks: &ConnectionTasks,
+    tasks: &T,
 ) -> Result<PacketAction, Error> {
     let _pkt_span = tracing::info_span!("handle_packet").entered();
     trace!(?pkt, "handling pkt");
@@ -2499,7 +2500,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             let SQLQuery(query) = m.parse::<SQLQuery>()?;
             let db = db.clone();
             let (tokio_tx, rx) = thingbuf::mpsc::channel::<Vec<u8>>(4);
-            let res = tasks.query(move || async move {
+            let res = tasks.spawn_tokio(move || async move {
                 let mut ctx = db.as_session_context()?;
                 db.insert_views(&mut ctx).await?;
                 let df = ctx.sql(&query).await?;
@@ -2771,11 +2772,11 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             let msg_log =
                 db.with_state_mut(|s| s.get_or_insert_msg_log(msg_id, &db.path).cloned())?;
             let stream_state = db.fixed_rate_state(fixed_rate.stream_id, fixed_rate.behavior);
-            tasks.drive_ticks(stream_state.clone());
+            drive_ticks(tasks, stream_state.clone());
             {
                 let req_id = m.req_id;
                 let tx = tx.tx.clone();
-                tasks.stellar(move || {
+                tasks.spawn_stellar(move || {
                     handle_fixed_rate_msg_stream(msg_id, req_id, msg_log, tx, stream_state)
                 });
             }
@@ -2866,7 +2867,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                     addr,
                     id,
                 };
-                tasks.stellar(move || async move {
+                tasks.spawn_stellar(move || async move {
                     let _stream_guard = stream_guard;
                     info!("VTable streaming to udp://{}", addr);
                     let mut socket = UdpSocket::ephemeral()?;
@@ -3153,9 +3154,9 @@ async fn run_tick_driver(state: Arc<FixedRateStreamState>) {
     }
 }
 
-fn handle_unicast_stream(addr: SocketAddr, stream: Stream, db: Arc<DB>, tasks: ConnectionTasks) {
+fn handle_unicast_stream<T: TaskOwner>(addr: SocketAddr, stream: Stream, db: Arc<DB>, tasks: T) {
     let children = tasks.clone();
-    tasks.stellar(move || async move {
+    tasks.spawn_stellar(move || async move {
         info!("UDP unicasting to {}", addr);
         let mut socket = UdpSocket::ephemeral()?;
         socket.connect(addr);
@@ -3168,12 +3169,12 @@ fn handle_unicast_stream(addr: SocketAddr, stream: Stream, db: Arc<DB>, tasks: C
     });
 }
 
-fn handle_stream<A: AsyncWrite + 'static>(
+fn handle_stream<A: AsyncWrite + 'static, T: TaskOwner>(
     tx: Arc<Mutex<PacketSink<A>>>,
     stream: Stream,
     db: Arc<DB>,
     req_id: RequestId,
-    tasks: ConnectionTasks,
+    tasks: T,
 ) -> stellarator::JoinHandle<()> {
     match stream.behavior {
         StreamBehavior::RealTime => {
@@ -3201,7 +3202,7 @@ fn handle_stream<A: AsyncWrite + 'static>(
             ));
             debug!(stream.id = ?stream.id, "inserting stream");
             db.with_state_mut(|s| s.streams.insert(stream.id, state.clone()));
-            tasks.drive_ticks(state.clone());
+            drive_ticks(&tasks, state.clone());
             tasks.spawn(async move {
                 match handle_fixed_stream(tx, req_id, state, db).await {
                     Ok(_) => {}
@@ -3264,11 +3265,11 @@ fn handle_stream<A: AsyncWrite + 'static>(
     }
 }
 
-async fn handle_real_time_stream<A: AsyncWrite + 'static>(
+async fn handle_real_time_stream<A: AsyncWrite + 'static, T: TaskOwner>(
     sink: Arc<Mutex<PacketSink<A>>>,
     req_id: RequestId,
     db: Arc<DB>,
-    tasks: ConnectionTasks,
+    tasks: T,
 ) -> Result<(), Error> {
     let mut visited_ids = HashSet::new();
     loop {

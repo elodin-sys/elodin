@@ -194,12 +194,23 @@ where
 
 impl Executor<DefaultReactor> {
     pub(crate) fn with<R>(f: impl for<'a> FnOnce(&'a Self) -> R) -> R {
+        Self::try_with(f).expect("missing executor")
+    }
+
+    fn try_with<R>(f: impl for<'a> FnOnce(&'a Self) -> R) -> Option<R> {
         EXEC.with(|exec| {
             // safety: We only ever gain mutable access to the executor when `run` is complete,
             // and we are removing the executor so this is safe
             let exec = unsafe { &*exec.get() };
-            f(exec.as_ref().expect("missing executor"))
+            exec.as_ref().map(f)
         })
+    }
+
+    #[cfg(any(not(target_os = "linux"), feature = "poll"))]
+    pub(crate) fn try_with_reactor<R>(
+        f: impl for<'a> FnOnce(&'a mut DefaultReactor) -> R,
+    ) -> Option<R> {
+        Self::try_with(|exec| exec.reactor.try_borrow_mut().ok().map(|mut r| f(&mut r))).flatten()
     }
 
     pub(crate) fn with_reactor<R>(f: impl for<'a> FnOnce(&'a mut DefaultReactor) -> R) -> R {

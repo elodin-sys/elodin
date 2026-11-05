@@ -6,7 +6,9 @@ use std::{
     time::Duration,
 };
 
-use elodin_db::{DB, Error, serve_connection};
+use elodin_db::{DB, Error, TaskOwner, serve_connection};
+#[path = "support/task_owner.rs"]
+mod task_owner;
 use impeller::{
     types::{
         ComponentId, IntoLenPacket, LenPacket, OwnedPacket, PrimType, Request, Timestamp,
@@ -23,6 +25,7 @@ use stellarator::{
     sync::Mutex,
     util::{AtomicCell, CancelToken},
 };
+use task_owner::OwnedTasks;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream, ReadHalf, WriteHalf};
 
 struct Probe {
@@ -156,7 +159,22 @@ fn connect(db: &Arc<DB>, capacity: usize) -> (Client, Connection) {
     let life = Arc::downgrade(&server._life);
     let probe = server.probe.clone();
     let cancel = CancelToken::new();
-    let done = stellarator::spawn(serve_connection(server, db.clone(), cancel.clone()));
+    let tasks = OwnedTasks::new();
+    let stop = cancel.clone();
+    let db = db.clone();
+    let done = stellarator::spawn(async move {
+        let _cancel_on_drop = tasks.cancel_guard();
+        let result = futures_lite::future::or(
+            async {
+                stop.wait().await;
+                Err(Error::Cancelled)
+            },
+            serve_connection(server, db, tasks.clone()),
+        )
+        .await;
+        tasks.finish().await;
+        result
+    });
     let (rx, tx) = MemoryIo::new(client).split();
     (
         Client {
@@ -364,5 +382,84 @@ async fn peer_eof_releases_subscriptions() {
             .is_stream_closed()
     );
     assert!(connection.life.upgrade().is_none());
+    assert_eq!(Arc::strong_count(&db), 1);
+}
+
+#[stellarator::test]
+async fn the_caller_owns_cleanup_after_the_protocol_loop_returns() {
+    let (_dir, db) = database();
+    let owner = OwnedTasks::new();
+    let (server, client) = tokio::io::duplex(1024);
+    let server = MemoryIo::new(server);
+    let life = Arc::downgrade(&server._life);
+    let done = stellarator::spawn(serve_connection(server, db.clone(), owner.clone()));
+    let (rx, tx) = MemoryIo::new(client).split();
+    let mut client = Client {
+        tx: PacketSink::new(tx),
+        rx: PacketStream::new(rx),
+    };
+    client.send(&SubscribeLastUpdated).await;
+    loop {
+        if let OwnedPacket::Msg(packet) = client.recv().await
+            && packet.id == <LastUpdated as impeller::types::Msg>::ID
+        {
+            break;
+        }
+    }
+    drop(client);
+    assert!(bounded(done).await.unwrap().unwrap_err().is_stream_closed());
+    assert!(
+        life.upgrade().is_some(),
+        "the live owner must still own its subscription"
+    );
+    assert!(Arc::strong_count(&db) > 1);
+    bounded(owner.finish()).await;
+    assert!(life.upgrade().is_none());
+    assert_eq!(Arc::strong_count(&db), 1);
+}
+
+#[stellarator::test]
+async fn a_caller_owner_accepts_thread_local_futures() {
+    let owner = OwnedTasks::new();
+    let value = std::rc::Rc::new(std::cell::Cell::new(false));
+    let observed = value.clone();
+    owner
+        .spawn(async move {
+            value.set(true);
+        })
+        .await
+        .unwrap();
+    owner.finish().await;
+    assert!(observed.get());
+}
+
+#[stellarator::test]
+async fn built_in_udp_accepts_metadata_with_the_unit_owner() {
+    let (_dir, db) = database();
+    let reserved = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let addr = reserved.local_addr().unwrap();
+    drop(reserved);
+    let server_db = db.clone();
+    let server = stellarator::spawn(elodin_db::Server::handle_udp(addr, server_db));
+    let socket = stellarator::net::UdpSocket::bind(([127, 0, 0, 1], 0).into()).unwrap();
+    let id = ComponentId::new("udp.value");
+    bounded(async {
+        while !db.with_state(|state| state.get_component_metadata(id).is_some()) {
+            socket
+                .send_to(
+                    SetComponentMetadata::new(id, "udp.value")
+                        .into_len_packet()
+                        .inner,
+                    addr,
+                )
+                .await
+                .0
+                .unwrap();
+            stellarator::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await;
+    socket.send_to(vec![0; 4], addr).await.0.unwrap();
+    assert!(bounded(server).await.unwrap().is_err());
     assert_eq!(Arc::strong_count(&db), 1);
 }

@@ -46,3 +46,16 @@ async fn canceled_udp_read_releases_readiness_for_the_next_reader() {
     assert_eq!(&bytes[..4], b"next");
     sender.await.unwrap();
 }
+
+#[stellarator::test]
+async fn file_access_round_trips_with_polling() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("data");
+    let file = stellarator::fs::File::create(&path).await.unwrap();
+    assert_eq!(file.write_at(b"recording", 7).await.0.unwrap(), 9);
+    drop(file);
+    let file = stellarator::fs::File::open(&path).await.unwrap();
+    let (read, bytes) = file.read_at(vec![0; 9], 7).await;
+    assert_eq!(read.unwrap(), 9);
+    assert_eq!(&bytes, b"recording");
+}
