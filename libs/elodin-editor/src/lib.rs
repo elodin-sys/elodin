@@ -1993,6 +1993,7 @@ impl EditorUiHardClear<'_, '_> {
 #[derive(SystemParam)]
 struct SeriesStoreReconnect<'w> {
     session: ResMut<'w, SeriesStoreSession>,
+    replay: Option<ResMut<'w, ReplayMode>>,
     connection_addr: Option<Res<'w, ConnectionAddr>>,
     msg_handlers: ResMut<'w, MsgRequestIdHandlers>,
     req_handlers: ResMut<'w, RequestIdHandlers>,
@@ -2048,6 +2049,9 @@ pub(crate) fn sync_series_store_session_from_db_config(
     editor_ui.clear_ui_and_invalidate_schematic_sync();
     // Stale playhead from the previous recording must not survive identity change.
     current.0 = Timestamp::EPOCH;
+    if let Some(replay) = series.replay.as_deref_mut() {
+        *replay = ReplayMode::default();
+    }
     *series.session = SeriesStoreSession::identity(addr, start_ts);
 }
 
@@ -2122,11 +2126,15 @@ fn apply_timestamp_bounds_reset_on_reconnect(
     earliest: &mut EarliestTimestamp,
     latest: &mut LastUpdated,
     current: &mut CurrentTimestamp,
+    replay: Option<&mut ReplayMode>,
 ) {
     *earliest = EarliestTimestamp(Timestamp(i64::MAX));
     *latest = LastUpdated(Timestamp(i64::MIN));
     if !soft {
         current.0 = Timestamp::EPOCH;
+        if let Some(replay) = replay {
+            *replay = ReplayMode::default();
+        }
     }
 }
 
@@ -2139,6 +2147,7 @@ fn reset_timestamps_on_new_connection(
     mut current: ResMut<CurrentTimestamp>,
     connection_addr: Option<Res<ConnectionAddr>>,
     session: Res<SeriesStoreSession>,
+    mut replay: Option<ResMut<ReplayMode>>,
 ) {
     match packet {
         OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
@@ -2146,7 +2155,13 @@ fn reset_timestamps_on_new_connection(
     }
     let addr = connection_addr.as_ref().map(|a| a.socket);
     let soft = series_store_soft_reconnect(&session, addr);
-    apply_timestamp_bounds_reset_on_reconnect(soft, &mut earliest, &mut latest, &mut current);
+    apply_timestamp_bounds_reset_on_reconnect(
+        soft,
+        &mut earliest,
+        &mut latest,
+        &mut current,
+        replay.as_deref_mut(),
+    );
 }
 
 #[derive(Resource, Clone)]
@@ -3373,6 +3388,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<impeller_wkt::DbConfig>()
             .init_resource::<SeriesStoreSession>()
+            .init_resource::<ReplayMode>()
             .init_resource::<MsgRequestIdHandlers>()
             .init_resource::<RequestIdHandlers>()
             .init_resource::<PacketIdHandlers>()
@@ -3399,7 +3415,19 @@ mod tests {
         let mut earliest = EarliestTimestamp(Timestamp(100));
         let mut latest = LastUpdated(Timestamp(10_000));
         let mut current = CurrentTimestamp(Timestamp(5_000));
-        apply_timestamp_bounds_reset_on_reconnect(true, &mut earliest, &mut latest, &mut current);
+        let mut replay = ReplayMode::default();
+        replay.reveal_until(9, earliest.0, latest.0, latest.0);
+        apply_timestamp_bounds_reset_on_reconnect(
+            true,
+            &mut earliest,
+            &mut latest,
+            &mut current,
+            Some(&mut replay),
+        );
+        assert_eq!(
+            replay.reveal_until(9, Timestamp(100), Timestamp(10_000), current.0),
+            Timestamp(10_000),
+        );
         assert_eq!(earliest.0, Timestamp(i64::MAX));
         assert_eq!(latest.0, Timestamp(i64::MIN));
         assert_eq!(current.0, Timestamp(5_000));
@@ -3410,7 +3438,19 @@ mod tests {
         let mut earliest = EarliestTimestamp(Timestamp(100));
         let mut latest = LastUpdated(Timestamp(10_000));
         let mut current = CurrentTimestamp(Timestamp(5_000));
-        apply_timestamp_bounds_reset_on_reconnect(false, &mut earliest, &mut latest, &mut current);
+        let mut replay = ReplayMode::default();
+        replay.reveal_until(9, earliest.0, latest.0, latest.0);
+        apply_timestamp_bounds_reset_on_reconnect(
+            false,
+            &mut earliest,
+            &mut latest,
+            &mut current,
+            Some(&mut replay),
+        );
+        assert_eq!(
+            replay.reveal_until(9, Timestamp(100), Timestamp(1_000), Timestamp(200)),
+            Timestamp(200),
+        );
         assert_eq!(earliest.0, Timestamp(i64::MAX));
         assert_eq!(latest.0, Timestamp(i64::MIN));
         assert_eq!(current.0, Timestamp::EPOCH);
@@ -3423,6 +3463,12 @@ mod tests {
 
         let addr = sample_addr(2240);
         let mut app = sync_app(addr);
+        app.world_mut().resource_mut::<ReplayMode>().reveal_until(
+            9,
+            Timestamp(100),
+            Timestamp(10_000),
+            Timestamp(10_000),
+        );
 
         let msg_sys = app
             .world_mut()
@@ -3486,6 +3532,15 @@ mod tests {
         assert!(!cache.has_series(&ComponentId(42)));
         let session = app.world().resource::<SeriesStoreSession>();
         assert_eq!(session.start_ts, Some(200));
+        assert_eq!(
+            app.world_mut().resource_mut::<ReplayMode>().reveal_until(
+                9,
+                Timestamp(200),
+                Timestamp(1_000),
+                Timestamp(300),
+            ),
+            Timestamp(300),
+        );
         assert!(app.world().resource::<MsgRequestIdHandlers>().0.is_empty());
         assert!(app.world().resource::<RequestIdHandlers>().0.is_empty());
         assert!(app.world().resource::<PacketIdHandlers>().0.is_empty());
