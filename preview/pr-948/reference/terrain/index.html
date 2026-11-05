@@ -512,13 +512,13 @@ ellipsoid.</p>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> jax</span><span>.</span><span>numpy</span><span style="color: light-dark(#859900, #859900);"> as</span><span> jnp</span></span>
 <span class="giallo-l"><span style="color: light-dark(#859900, #859900);">from</span><span> elodin</span><span>.</span><span>geodesy</span><span style="color: light-dark(#859900, #859900);"> import</span><span> geodetic_to_ecef</span></span>
 <span class="giallo-l"></span>
-<span class="giallo-l"><span>landing</span><span style="color: light-dark(#859900, #859900);"> =</span><span> geodetic_to_ecef</span><span>(</span></span>
+<span class="giallo-l"><span>location</span><span style="color: light-dark(#859900, #859900);"> =</span><span> geodetic_to_ecef</span><span>(</span></span>
 <span class="giallo-l"><span>    jnp</span><span>.</span><span>deg2rad</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">28.485738</span><span>)</span><span>,</span></span>
 <span class="giallo-l"><span>    jnp</span><span>.</span><span>deg2rad</span><span>(</span><span style="color: light-dark(#859900, #859900);">-</span><span style="color: light-dark(#D33682, #D33682);">80.542948</span><span>)</span><span>,</span></span>
 <span class="giallo-l"><span style="color: light-dark(#D33682, #D33682);">    0.0</span><span>,</span></span>
 <span class="giallo-l"><span>)</span></span>
 <span class="giallo-l"><span>heights</span><span style="color: light-dark(#859900, #859900);"> =</span><span> terrain</span><span>.</span><span>heightmap</span><span>(</span></span>
-<span class="giallo-l"><span>    landing</span><span>,</span><span> dimensions</span><span style="color: light-dark(#859900, #859900);">=</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">200.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 200.0</span><span>)</span><span>,</span><span> spacing</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">10.0</span><span>,</span></span>
+<span class="giallo-l"><span>    location</span><span>,</span><span> dimensions</span><span style="color: light-dark(#859900, #859900);">=</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">200.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 200.0</span><span>)</span><span>,</span><span> spacing</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">10.0</span><span>,</span></span>
 <span class="giallo-l"><span>)</span></span></code></pre>
 <p>Dimensions and spacing are in meters. The grid is cached and reused on later
 runs. Use <code>offline=True</code> to read from the cache. No editor is needed.</p>
