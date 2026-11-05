@@ -284,6 +284,10 @@ pub struct VideoFrameCache {
     /// When the in-flight wasm seek was sent.
     #[cfg(target_family = "wasm")]
     seek_sent_at: Option<Instant>,
+    /// Sample the last wasm seek was meant to show. Stays set after the seek
+    /// finishes, so the same sample is not sought again.
+    #[cfg(target_family = "wasm")]
+    seek_wanted_ts: Option<Timestamp>,
 }
 
 impl Default for VideoFrameCache {
@@ -307,6 +311,8 @@ impl Default for VideoFrameCache {
             is_h264: true,
             #[cfg(target_family = "wasm")]
             seek_sent_at: None,
+            #[cfg(target_family = "wasm")]
+            seek_wanted_ts: None,
         }
     }
 }
@@ -1206,16 +1212,19 @@ struct WasmSeekQuery {
     seek_age_secs: Option<f32>,
     seeking: bool,
     needs_keyframe: bool,
-    /// Newest raw sample. `None` when the cache has no frames.
-    latest_raw_us: Option<i64>,
+    /// Sample the playhead maps to: newest raw at or before it, or the first
+    /// keyframe after it.
+    wanted_us: Option<i64>,
+    /// Sample the last seek was meant to show.
+    seek_wanted_us: Option<i64>,
     /// Raw frames cover the playhead and this tick has not already fed one.
     can_seek: bool,
 }
 
-/// Seek when the playhead is not the frame on screen. A seek older than
-/// [`SEEK_TIMEOUT_SECS`] is re-issued even if the last submitted sample is
-/// still within [`DECODER_NEAR_THRESHOLD_US`], which is the live-edge case
-/// where the decoder never emits the target pts.
+/// Seek when the playhead maps to a sample the last seek was not for.
+/// A seek older than [`SEEK_TIMEOUT_SECS`] is re-issued for that same
+/// sample, which is the live-edge case where the decoder never emits the
+/// target pts.
 #[cfg(any(target_family = "wasm", test))]
 fn wasm_seek_decision(query: &WasmSeekQuery) -> WasmSeekDecision {
     let decoder_near = query
@@ -1231,20 +1240,12 @@ fn wasm_seek_decision(query: &WasmSeekQuery) -> WasmSeekDecision {
         && query
             .seek_age_secs
             .is_some_and(|age| age >= SEEK_TIMEOUT_SECS);
-    // The picture on screen is the newest sample and the playhead is at or
-    // ahead of it. A live-edge flush leaves `needs_keyframe` set, and
-    // `LastUpdated` can lead that sample by more than
-    // [`NO_DATA_THRESHOLD_US`]. Seeking again would re-decode the same group.
-    let showing_latest = query.last_presented_us.is_some_and(|presented| {
-        query
-            .latest_raw_us
-            .is_some_and(|latest| presented >= latest && query.current_us >= latest)
-    });
+    let already_sought = query.wanted_us.is_some() && query.wanted_us == query.seek_wanted_us;
 
     let wants_seek = query.can_seek
         && !at_playhead
-        && !showing_latest
-        && (query.needs_keyframe || !is_sequential || !decoder_near || seek_stale);
+        && (seek_stale
+            || (!already_sought && (query.needs_keyframe || !is_sequential || !decoder_near)));
     if !wants_seek {
         return WasmSeekDecision::Idle;
     }
@@ -1322,9 +1323,16 @@ fn drive_webcodecs(
     }
 
     // The native path can step backward inside `decoder_near` from its RGBA
-    // cache. Wasm only has the texture, so a playhead that is not the frame
-    // on screen seeks. Skip that seek when the texture is already there, or a
-    // paused flush (`needs_keyframe`) would re-decode the same GOP forever.
+    // cache. Wasm only has the texture, so a playhead that maps to a
+    // different sample seeks. The same sample is not sought again: a
+    // live-edge flush sets `needs_keyframe` while the playhead sits ahead of
+    // that sample.
+    let wanted = cache
+        .raw_frames
+        .range(..=current_ts)
+        .next_back()
+        .map(|(ts, _)| *ts)
+        .or_else(|| cache.first_keyframe_after(current_ts));
     let decision = wasm_seek_decision(&WasmSeekQuery {
         current_us: current_ts.0,
         last_decoded_us: cache.last_decoded_ts.map(|ts| ts.0),
@@ -1332,7 +1340,8 @@ fn drive_webcodecs(
         seek_age_secs,
         seeking: decoder_seeking,
         needs_keyframe: wc.needs_keyframe(),
-        latest_raw_us: cache.raw_frames.keys().next_back().map(|ts| ts.0),
+        wanted_us: wanted.map(|ts| ts.0),
+        seek_wanted_us: cache.seek_wanted_ts.map(|ts| ts.0),
         can_seek: has_raw && !fed,
     });
     let WasmSeekDecision::Seek { stale } = decision else {
@@ -1369,6 +1378,13 @@ fn drive_webcodecs(
     let last_submitted = frames[frames.len() - 1].0;
     let samples = frames.into_iter().map(|(ts, data)| (ts.0, data)).collect();
     wc.seek_through(samples, target.0);
+    // `reset` can fail. Leave the recorded sample alone so the next tick retries.
+    if !wc.is_seeking() {
+        return;
+    }
+    if let Some(wanted) = wanted {
+        cache.seek_wanted_ts = Some(wanted);
+    }
     cache.seeking = true;
     cache.last_decoded_ts = Some(last_submitted);
     cache.seek_sent_at = Some(Instant::now());
@@ -2003,7 +2019,8 @@ mod tests {
             seek_age_secs: None,
             seeking: false,
             needs_keyframe: false,
-            latest_raw_us: None,
+            wanted_us: None,
+            seek_wanted_us: None,
             can_seek: true,
         }
     }
@@ -2061,14 +2078,36 @@ mod tests {
     #[test]
     fn no_seek_when_the_latest_frame_is_already_showing() {
         // Live follow: LastUpdated leads the newest access unit, and the
-        // live-edge flush left the decoder needing a keyframe.
+        // live-edge flush left the decoder needing a keyframe. The last seek
+        // was already for that sample.
         let latest = 1_000_000;
         let decision = wasm_seek_decision(&WasmSeekQuery {
             current_us: latest + NO_DATA_THRESHOLD_US + 1,
             last_decoded_us: Some(latest),
             last_presented_us: Some(latest),
-            latest_raw_us: Some(latest),
+            wanted_us: Some(latest),
+            seek_wanted_us: Some(latest),
             needs_keyframe: true,
+            ..seek_query()
+        });
+        assert_eq!(decision, WasmSeekDecision::Idle);
+    }
+
+    #[test]
+    fn no_seek_while_the_live_edge_predecessor_is_showing() {
+        // Paused live edge: the seek presents the previous access unit first
+        // and the newest arrives a tick later. The playhead is past the
+        // no-data window, but the seek was already for the newest sample.
+        let previous = 900_000;
+        let newest = 1_000_000;
+        let decision = wasm_seek_decision(&WasmSeekQuery {
+            current_us: newest + NO_DATA_THRESHOLD_US + 1,
+            last_decoded_us: Some(newest),
+            last_presented_us: Some(previous),
+            wanted_us: Some(newest),
+            seek_wanted_us: Some(newest),
+            needs_keyframe: true,
+            seeking: false,
             ..seek_query()
         });
         assert_eq!(decision, WasmSeekDecision::Idle);
@@ -2077,11 +2116,13 @@ mod tests {
     #[test]
     fn seek_backward_while_showing_the_latest_frame() {
         let latest = 5_000_000;
+        let earlier = 1_000_000;
         let decision = wasm_seek_decision(&WasmSeekQuery {
-            current_us: 1_000_000,
+            current_us: earlier,
             last_decoded_us: Some(latest),
             last_presented_us: Some(latest),
-            latest_raw_us: Some(latest),
+            wanted_us: Some(earlier),
+            seek_wanted_us: Some(latest),
             needs_keyframe: true,
             ..seek_query()
         });
@@ -2094,10 +2135,27 @@ mod tests {
             current_us: 5_000_000,
             last_decoded_us: Some(4_000_000),
             last_presented_us: Some(4_000_000),
-            latest_raw_us: Some(4_900_000),
+            wanted_us: Some(4_900_000),
+            seek_wanted_us: Some(4_000_000),
             needs_keyframe: true,
             ..seek_query()
         });
         assert_eq!(decision, WasmSeekDecision::Seek { stale: false });
+    }
+
+    #[test]
+    fn timed_out_seek_retries_for_the_same_sample() {
+        let sample = 1_000_000;
+        let decision = wasm_seek_decision(&WasmSeekQuery {
+            current_us: sample + NO_DATA_THRESHOLD_US + 1,
+            last_decoded_us: Some(sample),
+            wanted_us: Some(sample),
+            seek_wanted_us: Some(sample),
+            seeking: true,
+            seek_age_secs: Some(SEEK_TIMEOUT_SECS),
+            needs_keyframe: true,
+            ..seek_query()
+        });
+        assert_eq!(decision, WasmSeekDecision::Seek { stale: true });
     }
 }
