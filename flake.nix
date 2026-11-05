@@ -16,11 +16,6 @@
       url = "github:numtide/flake-utils";
       inputs.systems.follows = "systems";
     };
-    aleph = {
-      url = "path:./aleph";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.rust-overlay.follows = "rust-overlay";
-    };
   };
 
   outputs = {
