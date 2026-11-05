@@ -22,15 +22,17 @@ use stellarator::{
 };
 use tracing::{trace, warn};
 
-use crate::{Component, ConnectionTasks, DB, Error, FixedRateStreamState, send_with_timeout};
+use crate::{
+    Component, DB, Error, FixedRateStreamState, TaskOwner, drive_ticks, send_with_timeout,
+};
 
-pub(crate) async fn handle_vtable_stream<A: AsyncWrite + 'static>(
+pub(crate) async fn handle_vtable_stream<A: AsyncWrite + 'static, T: TaskOwner>(
     id: [u8; 2],
     vtable: VTable,
     db: Arc<DB>,
     tx: Arc<Mutex<PacketSink<A>>>,
     req_id: RequestId,
-    tasks: ConnectionTasks,
+    tasks: T,
 ) -> Result<(), Error> {
     trace!("spawning vtable stream");
     let table_len = vtable
@@ -101,7 +103,7 @@ pub(crate) async fn handle_vtable_stream<A: AsyncWrite + 'static>(
                         .clone();
 
                     let state = db.fixed_rate_state(stream_id, behavior);
-                    tasks.drive_ticks(state.clone());
+                    drive_ticks(&tasks, state.clone());
                     let initial_tick = state.current_timestamp();
                     plan.insert(
                         0,

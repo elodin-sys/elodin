@@ -19,26 +19,30 @@ elodin-db run [::]:2240 $HOME/.local/share/elodin/db --config examples/db-config
 
 ### Embed an Impeller connection in Rust
 
-`serve_connection(io, db, cancel)` serves an existing `Arc<DB>` through caller-provided I/O.
+`serve_connection(io, db, owner)` serves an existing `Arc<DB>` through caller-provided I/O.
 Impeller is the telemetry protocol that Elodin uses.
 The I/O type implements `stellarator::io::AsyncRead` and `AsyncWrite`.
 This function starts no TCP, UDP, or HTTP listener.
 It exposes the normal Impeller protocol, including writes and queries.
 The embedding application must enforce its access and operation restrictions before forwarding packets.
 
+Implement `TaskOwner` to own local tasks, Stellarator worker threads, and Tokio query workers.
+Clones of an owner must share a lifetime scope.
+The owner registers work before it starts and controls cancellation and awaited cleanup.
+Tokio workers start immediately, even before their result future is polled.
+The owner must retain workers until teardown finishes, even if a request drops its result future.
+Shared playback drivers transfer to surviving connections when their current owner stops.
+
 Poll the connection future on a Stellarator executor.
-To stop one connection, call `cancel.cancel()` on its `stellarator::util::CancelToken`.
-Then await the connection future to wait for cleanup.
-Cancellation returns `Error::Cancelled`.
-Other connection errors return to the caller, including EOF when the peer disconnects.
+The caller can stop that future through its own cancellation mechanism.
+Returning from or dropping the connection future does not finish background work.
+Stop and await the owner before releasing the DB or removing the database directory.
+Connection errors return to the caller, including EOF when the peer disconnects.
+Use `()` as the owner to preserve the ordinary server's detached runtime behavior.
 
-Completion means that internal subscriptions, stream tasks, and query workers release their transport and DB references.
-A shared playback clock continues while another connection uses it.
-Dropping the future requests cancellation but does not wait for cleanup.
-Await completion before removing the database directory.
-
-The integration tests in `tests/embedded_connection.rs` show a memory transport adapter and protocol requests against a real DB.
-The existing `handle_conn` TCP entry point uses the same connection API.
+`tests/embedded_connection.rs` exercises an owner implemented outside the DB library.
+`tests/support/task_owner.rs` shows a cancellation and completion policy for that caller.
+The existing TCP and UDP entry points use the same protocol implementation.
 
 ### gRPC API for foreign clients
 
