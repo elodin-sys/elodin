@@ -39,8 +39,8 @@ use impeller::types::{ComponentId, OwnedPacket};
 use impeller::types::{Msg, Timestamp};
 use impeller_bevy::{
     ComponentMetadataRegistry, ComponentPathRegistry, ComponentSchemaRegistry, ComponentValueMap,
-    ConnectionAddr, CurrentStreamId, EntityMap, MsgRequestIdHandlers, PacketHandlerInput,
-    PacketHandlers, PacketIdHandlers, RequestIdHandlers,
+    ConnectionAddr, EntityMap, MsgRequestIdHandlers, PacketHandlerInput, PacketHandlers,
+    PacketIdHandlers, RequestIdHandlers,
 };
 use impeller_wkt::{CurrentTimestamp, NewConnection, Object3D, WorldPos};
 use impeller_wkt::{EarliestTimestamp, LastUpdated};
@@ -1993,7 +1993,6 @@ impl EditorUiHardClear<'_, '_> {
 #[derive(SystemParam)]
 struct SeriesStoreReconnect<'w> {
     session: ResMut<'w, SeriesStoreSession>,
-    replay: Option<ResMut<'w, ReplayMode>>,
     connection_addr: Option<Res<'w, ConnectionAddr>>,
     msg_handlers: ResMut<'w, MsgRequestIdHandlers>,
     req_handlers: ResMut<'w, RequestIdHandlers>,
@@ -2049,9 +2048,6 @@ pub(crate) fn sync_series_store_session_from_db_config(
     editor_ui.clear_ui_and_invalidate_schematic_sync();
     // Stale playhead from the previous recording must not survive identity change.
     current.0 = Timestamp::EPOCH;
-    if let Some(replay) = series.replay.as_deref_mut() {
-        *replay = ReplayMode::default();
-    }
     *series.session = SeriesStoreSession::identity(addr, start_ts);
 }
 
@@ -2126,15 +2122,11 @@ fn apply_timestamp_bounds_reset_on_reconnect(
     earliest: &mut EarliestTimestamp,
     latest: &mut LastUpdated,
     current: &mut CurrentTimestamp,
-    replay: Option<&mut ReplayMode>,
 ) {
     *earliest = EarliestTimestamp(Timestamp(i64::MAX));
     *latest = LastUpdated(Timestamp(i64::MIN));
     if !soft {
         current.0 = Timestamp::EPOCH;
-        if let Some(replay) = replay {
-            *replay = ReplayMode::default();
-        }
     }
 }
 
@@ -2147,7 +2139,6 @@ fn reset_timestamps_on_new_connection(
     mut current: ResMut<CurrentTimestamp>,
     connection_addr: Option<Res<ConnectionAddr>>,
     session: Res<SeriesStoreSession>,
-    mut replay: Option<ResMut<ReplayMode>>,
 ) {
     match packet {
         OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
@@ -2155,13 +2146,7 @@ fn reset_timestamps_on_new_connection(
     }
     let addr = connection_addr.as_ref().map(|a| a.socket);
     let soft = series_store_soft_reconnect(&session, addr);
-    apply_timestamp_bounds_reset_on_reconnect(
-        soft,
-        &mut earliest,
-        &mut latest,
-        &mut current,
-        replay.as_deref_mut(),
-    );
+    apply_timestamp_bounds_reset_on_reconnect(soft, &mut earliest, &mut latest, &mut current);
 }
 
 #[derive(Resource, Clone)]
@@ -2187,38 +2172,9 @@ pub struct FullTimeRange(pub Range<Timestamp>);
 
 /// When present, the Editor operates in replay mode: the timeline reveals data
 /// progressively as `CurrentTimestamp` advances, simulating a live session from
-/// a recorded database. Seeking backwards preserves the range already revealed.
+/// a recorded database.
 #[derive(Resource, Default)]
-pub struct ReplayMode {
-    stream_id: Option<u64>,
-    revealed_until: Option<Timestamp>,
-}
-
-impl ReplayMode {
-    fn reveal_until(
-        &mut self,
-        stream_id: u64,
-        earliest: Timestamp,
-        latest: Timestamp,
-        current: Timestamp,
-    ) -> Timestamp {
-        if self.stream_id != Some(stream_id) {
-            self.stream_id = Some(stream_id);
-            self.revealed_until = None;
-        }
-        if earliest >= latest {
-            return latest.min(current);
-        }
-        let current = current.clamp(earliest, latest);
-        let revealed = self
-            .revealed_until
-            .unwrap_or(current)
-            .max(current)
-            .clamp(earliest, latest);
-        self.revealed_until = Some(revealed);
-        revealed
-    }
-}
+pub struct ReplayMode;
 
 /// Quantize step for trailing `LAST_*` **fetch** windows (not display camera).
 pub(crate) const TRAILING_RANGE_QUANTUM_MICROS: i64 = 100_000; // 100 ms
@@ -2292,7 +2248,7 @@ pub(crate) fn quantize_trailing_range(
 /// anchors.
 ///
 /// - Non-replay: the timeline bar spans the full DB (`earliest..LastUpdated`).
-/// - Replay: both bar and non-trailing selection retain the furthest revealed time.
+/// - Replay: both bar and non-trailing selection progressive-reveal to the playhead.
 /// - Trailing `LAST_*` presets always end at `min(LastUpdated, CurrentTimestamp)`
 ///   so recordings without `--replay` still window relative to the playhead.
 ///
@@ -2303,10 +2259,10 @@ fn resolve_time_range_anchors(
     db_latest: Timestamp,
     current: Timestamp,
     behavior: TimeRangeBehavior,
-    replay_revealed_until: Option<Timestamp>,
+    replay: bool,
 ) -> (Range<Timestamp>, Result<Range<Timestamp>, TimeRangeError>) {
     let playhead_capped = db_latest.min(current);
-    let full_latest = replay_revealed_until.unwrap_or(db_latest).min(db_latest);
+    let full_latest = if replay { playhead_capped } else { db_latest };
 
     let full_range = if earliest < full_latest {
         earliest..full_latest
@@ -2335,18 +2291,14 @@ pub fn set_selected_range(
     latest: Res<LastUpdated>,
     current_ts: Res<CurrentTimestamp>,
     behavior: Res<TimeRangeBehavior>,
-    stream_id: Res<CurrentStreamId>,
-    mut replay: Option<ResMut<ReplayMode>>,
+    replay: Option<Res<ReplayMode>>,
 ) {
-    let revealed_until = replay
-        .as_mut()
-        .map(|replay| replay.reveal_until(stream_id.0, earliest.0, latest.0, current_ts.0));
     let (resolved_full, selected) = resolve_time_range_anchors(
         earliest.0,
         latest.0,
         current_ts.0,
         *behavior,
-        revealed_until,
+        replay.is_some(),
     );
 
     if resolved_full.start < resolved_full.end && full_range.0 != resolved_full {
@@ -2669,7 +2621,7 @@ mod time_range_tests {
             db_latest,
             playhead,
             TimeRangeBehavior::LAST_5S,
-            None,
+            false,
         );
         assert_eq!(full, earliest..db_latest);
         let selected = selected.expect("valid last_5s window");
@@ -2687,7 +2639,7 @@ mod time_range_tests {
             db_latest,
             playhead,
             TimeRangeBehavior::LAST_5S,
-            None,
+            false,
         );
         assert_eq!(full, earliest..db_latest);
         let selected = selected.expect("valid last_5s window");
@@ -2705,7 +2657,7 @@ mod time_range_tests {
             db_latest,
             playhead,
             TimeRangeBehavior::FULL,
-            None,
+            false,
         );
         assert_eq!(full, earliest..db_latest);
         let selected = selected.expect("valid full window");
@@ -2722,7 +2674,7 @@ mod time_range_tests {
             db_latest,
             db_latest,
             TimeRangeBehavior::LAST_5S,
-            None,
+            false,
         );
         assert_eq!(full, earliest..db_latest);
         let selected = selected.expect("valid last_5s window");
@@ -2740,91 +2692,12 @@ mod time_range_tests {
             db_latest,
             playhead,
             TimeRangeBehavior::FULL,
-            Some(playhead),
+            true,
         );
         assert_eq!(full, earliest..playhead);
         let selected = selected.expect("valid replay full window");
         assert_eq!(selected.start, earliest);
         assert_eq!(selected.end, playhead);
-    }
-
-    #[test]
-    fn replay_seeking_backwards_keeps_forward_scrubbing_available() {
-        let earliest = timestamp_secs(0);
-        let latest = timestamp_secs(520);
-        let mut replay = ReplayMode::default();
-        for seconds in [20, 520, 414, 359, 450, 520] {
-            let current = timestamp_secs(seconds);
-            let revealed = replay.reveal_until(9, earliest, latest, current);
-            let expected_end = timestamp_secs(if seconds == 20 { 20 } else { 520 });
-            for behavior in [TimeRangeBehavior::FULL, TimeRangeBehavior::LAST_5S] {
-                let (full, selected) =
-                    resolve_time_range_anchors(earliest, latest, current, behavior, Some(revealed));
-                assert_eq!(full, earliest..expected_end);
-                let selected = selected.expect("valid replay range");
-                if behavior.is_trailing_window() {
-                    assert_eq!(selected, timestamp_secs(seconds - 5)..current);
-                } else {
-                    assert_eq!(selected, full);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn replay_range_system_preserves_navigation_after_jump_to_end() {
-        let earliest = timestamp_secs(0);
-        let latest = timestamp_secs(520);
-        let mut app = App::new();
-        app.insert_resource(EarliestTimestamp(earliest))
-            .insert_resource(LastUpdated(latest))
-            .insert_resource(CurrentTimestamp(latest))
-            .insert_resource(CurrentStreamId(9))
-            .insert_resource(TimeRangeBehavior::FULL)
-            .insert_resource(FullTimeRange(earliest..latest))
-            .init_resource::<SelectedTimeRange>()
-            .init_resource::<FetchTimeRange>()
-            .init_resource::<ReplayMode>()
-            .add_systems(Update, set_selected_range);
-        for seconds in [520, 414, 359, 0, 450, 520] {
-            app.world_mut().resource_mut::<CurrentTimestamp>().0 = timestamp_secs(seconds);
-            app.update();
-            assert_eq!(app.world().resource::<FullTimeRange>().0, earliest..latest);
-            assert_eq!(
-                app.world().resource::<SelectedTimeRange>().0,
-                earliest..latest
-            );
-            assert_eq!(app.world().resource::<FetchTimeRange>().0, earliest..latest);
-        }
-    }
-
-    #[test]
-    fn replay_progress_resets_when_switching_streams() {
-        let mut replay = ReplayMode::default();
-        let earliest = timestamp_secs(0);
-        let latest = timestamp_secs(520);
-        assert_eq!(replay.reveal_until(9, earliest, latest, latest), latest);
-        let current = timestamp_secs(20);
-        assert_eq!(replay.reveal_until(10, earliest, latest, current), current);
-    }
-
-    #[test]
-    fn replay_progress_stays_within_available_data() {
-        let mut replay = ReplayMode::default();
-        let earliest = timestamp_secs(0);
-        let latest = timestamp_secs(520);
-        replay.reveal_until(9, Timestamp(i64::MAX), Timestamp(i64::MIN), earliest);
-        let current = timestamp_secs(20);
-        assert_eq!(replay.reveal_until(9, earliest, latest, current), current);
-        assert_eq!(
-            replay.reveal_until(9, earliest, latest, timestamp_secs(600)),
-            latest
-        );
-        let shorter_end = timestamp_secs(100);
-        assert_eq!(
-            replay.reveal_until(9, earliest, shorter_end, current),
-            shorter_end
-        );
     }
 
     #[test]
@@ -2843,14 +2716,14 @@ mod time_range_tests {
             db_latest,
             Timestamp(40_050_000),
             TimeRangeBehavior::LAST_5S,
-            None,
+            false,
         );
         let (_, b) = resolve_time_range_anchors(
             earliest,
             db_latest,
             Timestamp(40_090_000),
             TimeRangeBehavior::LAST_5S,
-            None,
+            false,
         );
         let a = a.expect("a");
         let b = b.expect("b");
@@ -2868,14 +2741,14 @@ mod time_range_tests {
             db_latest,
             Timestamp(40_050_000),
             TimeRangeBehavior::LAST_5S,
-            None,
+            false,
         );
         let (_, b) = resolve_time_range_anchors(
             earliest,
             db_latest,
             Timestamp(40_090_000),
             TimeRangeBehavior::LAST_5S,
-            None,
+            false,
         );
         let fa = quantize_trailing_range(a.expect("a"), TRAILING_RANGE_QUANTUM_MICROS);
         let fb = quantize_trailing_range(b.expect("b"), TRAILING_RANGE_QUANTUM_MICROS);
@@ -2891,14 +2764,14 @@ mod time_range_tests {
             db_latest,
             Timestamp(40_000_000),
             TimeRangeBehavior::LAST_5S,
-            None,
+            false,
         );
         let (_, b) = resolve_time_range_anchors(
             earliest,
             db_latest,
             Timestamp(40_100_000),
             TimeRangeBehavior::LAST_5S,
-            None,
+            false,
         );
         let fa = quantize_trailing_range(a.expect("a"), TRAILING_RANGE_QUANTUM_MICROS);
         let fb = quantize_trailing_range(b.expect("b"), TRAILING_RANGE_QUANTUM_MICROS);
@@ -3388,7 +3261,6 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<impeller_wkt::DbConfig>()
             .init_resource::<SeriesStoreSession>()
-            .init_resource::<ReplayMode>()
             .init_resource::<MsgRequestIdHandlers>()
             .init_resource::<RequestIdHandlers>()
             .init_resource::<PacketIdHandlers>()
@@ -3415,19 +3287,7 @@ mod tests {
         let mut earliest = EarliestTimestamp(Timestamp(100));
         let mut latest = LastUpdated(Timestamp(10_000));
         let mut current = CurrentTimestamp(Timestamp(5_000));
-        let mut replay = ReplayMode::default();
-        replay.reveal_until(9, earliest.0, latest.0, latest.0);
-        apply_timestamp_bounds_reset_on_reconnect(
-            true,
-            &mut earliest,
-            &mut latest,
-            &mut current,
-            Some(&mut replay),
-        );
-        assert_eq!(
-            replay.reveal_until(9, Timestamp(100), Timestamp(10_000), current.0),
-            Timestamp(10_000),
-        );
+        apply_timestamp_bounds_reset_on_reconnect(true, &mut earliest, &mut latest, &mut current);
         assert_eq!(earliest.0, Timestamp(i64::MAX));
         assert_eq!(latest.0, Timestamp(i64::MIN));
         assert_eq!(current.0, Timestamp(5_000));
@@ -3438,19 +3298,7 @@ mod tests {
         let mut earliest = EarliestTimestamp(Timestamp(100));
         let mut latest = LastUpdated(Timestamp(10_000));
         let mut current = CurrentTimestamp(Timestamp(5_000));
-        let mut replay = ReplayMode::default();
-        replay.reveal_until(9, earliest.0, latest.0, latest.0);
-        apply_timestamp_bounds_reset_on_reconnect(
-            false,
-            &mut earliest,
-            &mut latest,
-            &mut current,
-            Some(&mut replay),
-        );
-        assert_eq!(
-            replay.reveal_until(9, Timestamp(100), Timestamp(1_000), Timestamp(200)),
-            Timestamp(200),
-        );
+        apply_timestamp_bounds_reset_on_reconnect(false, &mut earliest, &mut latest, &mut current);
         assert_eq!(earliest.0, Timestamp(i64::MAX));
         assert_eq!(latest.0, Timestamp(i64::MIN));
         assert_eq!(current.0, Timestamp::EPOCH);
@@ -3463,12 +3311,6 @@ mod tests {
 
         let addr = sample_addr(2240);
         let mut app = sync_app(addr);
-        app.world_mut().resource_mut::<ReplayMode>().reveal_until(
-            9,
-            Timestamp(100),
-            Timestamp(10_000),
-            Timestamp(10_000),
-        );
 
         let msg_sys = app
             .world_mut()
@@ -3532,15 +3374,6 @@ mod tests {
         assert!(!cache.has_series(&ComponentId(42)));
         let session = app.world().resource::<SeriesStoreSession>();
         assert_eq!(session.start_ts, Some(200));
-        assert_eq!(
-            app.world_mut().resource_mut::<ReplayMode>().reveal_until(
-                9,
-                Timestamp(200),
-                Timestamp(1_000),
-                Timestamp(300),
-            ),
-            Timestamp(300),
-        );
         assert!(app.world().resource::<MsgRequestIdHandlers>().0.is_empty());
         assert!(app.world().resource::<RequestIdHandlers>().0.is_empty());
         assert!(app.world().resource::<PacketIdHandlers>().0.is_empty());
