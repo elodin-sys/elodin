@@ -24,6 +24,7 @@ wired up. Unchecked items are compiled out, stubbed, or still native-only.
 - [x] H.264 video decode via `webcodecs-video` (`attach_webcodecs` / `drive_webcodecs` in `video_stream.rs`)
 - [x] Thruster particles (Hanabi). The wasm editor requests the WebGPU backend so compute shaders are available
 - [x] Component stream filter (`SetStreamFilter` on the WebSocket client, same handshake as TCP)
+- [x] Status bar (connection, schematic build error, FPS, TPS, plot-buffer usage, command palette)
 
 ## Not finished
 
@@ -34,7 +35,7 @@ wired up. Unchecked items are compiled out, stubbed, or still native-only.
 - [ ] Unix `sensor_h264`
 - [ ] Cinematic Earth and the night-side material
 - [ ] Screenshots and the FPS log
-- [ ] Hardware stats, system-information diagnostics, and the status bar
+- [ ] Hardware stats and system-information diagnostics (NVML, RAM/CPU)
 - [ ] Saved and on-disk color schemes (built-in presets still apply; nothing is written)
 - [ ] Disk asset cache and asset-directory watching (WASM uses `NoCache`)
 - [ ] Local display-kernel files (WASM fetches kernels over HTTP only)
