@@ -179,6 +179,25 @@ mod coordinate_tests {
     use bevy_geo_frames::{GeoOrigin, Present};
 
     #[test]
+    fn aerial_and_photo3d_select_their_matching_sources() {
+        assert!(matches!(
+            terrain_source(1),
+            CesiumSource::IonTerrain {
+                asset_id: 1,
+                imagery_asset_id: 2,
+                ..
+            }
+        ));
+        assert!(matches!(
+            terrain_source(2275207),
+            CesiumSource::Ion {
+                asset_id: 2275207,
+                ..
+            }
+        ));
+    }
+
+    #[test]
     fn failed_terrain_releases_playback_but_keeps_captures_failed() {
         let mut world = World::new();
         world.insert_resource(TerrainStartup::waiting());
@@ -548,6 +567,22 @@ pub fn ion_access_token() -> &'static str {
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6Ii1XcElsai05enF6U2lUTEQiLCJqdGkiOiJhMGEyMjBlNy00ZjFjLTQ2YTctYWNkYi0wZWNlZWJmYjc3NzciLCJpZCI6NTMyMjI0LCJzdWIiOiJ6eHE4MmxtIiwiaXNzIjoiaHR0cHM6Ly9hcGkuY2VzaXVtLmNvbSIsImF1ZCI6IkVsb2RpbiBUZXJyYWluIGRlbW8gwrcgZGVza3RvcCIsImlhdCI6MTc5MzY2NDI0OX0.0aUiiGh55YtAMAe3hUrBLqlasel0qXoALs_zzSyrzpE"
 }
 
+fn terrain_source(asset_id: i64) -> CesiumSource {
+    let access_token = ion_access_token().to_string();
+    if asset_id == 1 {
+        CesiumSource::IonTerrain {
+            asset_id,
+            imagery_asset_id: 2,
+            access_token,
+        }
+    } else {
+        CesiumSource::Ion {
+            asset_id,
+            access_token,
+        }
+    }
+}
+
 fn configure_terrain(
     world: &mut World,
     mut previous: Local<Option<Option<impeller_wkt::TerrainConfig>>>,
@@ -566,10 +601,7 @@ fn configure_terrain(
         return;
     };
     let startup = TerrainStartup::waiting();
-    world.insert_resource(CesiumSourceUpdate(Some(CesiumSource::Ion {
-        asset_id: terrain.asset_id,
-        access_token: ion_access_token().to_string(),
-    })));
+    world.insert_resource(CesiumSourceUpdate(Some(terrain_source(terrain.asset_id))));
     world.insert_resource(startup);
 }
 

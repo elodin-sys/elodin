@@ -12,6 +12,12 @@
     "launch_m": -7.063374189989003,
     "landing_m": -27.12141869552742
   },
+  "aerial": {
+    "source": "Cesium World Terrain, ion asset 1, sampleHeightMostDetailed",
+    "sampled_on": "2026-11-05",
+    "launch_m": -26.628647982777505,
+    "landing_m": -26.769988252819342
+  },
   "launch": {
     "name": "LC-39A",
     "latitude_degrees": 28.60839,

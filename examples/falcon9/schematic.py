@@ -16,11 +16,16 @@ Typed elodin.ui translation of falcon9.kdl.
 # Landing dust at LZ-1; Cesium supplies the real landing-pad surface.
 # CRS-12 truth ghost.
 
+import elodin as el
 import elodin.ui as ui
 
-from constants import PAD_ALT_M, PAD_LAT_DEG, PAD_LON_DEG, SITES
+from constants import PAD_ALT_M, PAD_LAT_DEG, PAD_LON_DEG, TERRAIN_MODE
 
-TERRAIN = ui.terrain(asset_id=SITES["ion_asset_id"])
+TERRAIN = {
+    "legacy": None,
+    "aerial": el.Terrain.aerial(),
+    "photo3d": el.Terrain(),
+}[TERRAIN_MODE]
 
 
 def build() -> ui.Schematic:

@@ -34,6 +34,11 @@ class Terrain:
         if type(self.asset_id) is not int or not 0 < self.asset_id <= 2**63 - 1:
             raise ValueError("asset_id must be a positive 64-bit integer")
 
+    @classmethod
+    def aerial(cls) -> Terrain:
+        """Cesium World Terrain with aerial imagery; heights come from the terrain."""
+        return cls(asset_id=1)
+
     def heightmap(
         self, center_ecef, dimensions, spacing, *, cache_dir=None, offline=False, timeout=600
     ):
@@ -162,7 +167,7 @@ def terrain_heightmap(
     lines. Areas crossing a pole or the antimeridian are not supported.
 
     Cache misses use the installed Elodin CLI and its Bevy-Cesium backend.
-    Downloads use the same local credentials as the editor. Existing cached data is never refreshed
+    Downloads use the same demo account as the editor. Existing cached data is never refreshed
     automatically. ``offline=True`` requires a cache hit. For portable replay,
     retain ``result.path`` and load it with ``TerrainHeightmap.load(path)``.
     Network and disk access happen only here, never in ``sample``.

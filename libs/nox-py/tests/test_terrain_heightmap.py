@@ -250,11 +250,13 @@ def test_concurrent_cache_publication_returns_the_winning_file(tmp_path, monkeyp
     assert list(tmp_path.iterdir()) == [terrain.path]
 
 
-def test_terrain_shares_dataset_with_schematic_and_height_preparation(monkeypatch, tmp_path):
+@pytest.mark.parametrize("terrain", [el.Terrain(), el.Terrain.aerial()])
+def test_terrain_shares_dataset_with_schematic_and_height_preparation(
+    monkeypatch, tmp_path, terrain
+):
     calls = fake_backend(monkeypatch)
-    terrain = el.Terrain()
     scene = el.ui.schematic(el.ui.viewport(name="Flight"), terrain=terrain)
-    assert "terrain asset_id=2275207" in scene.emit_kdl()
+    assert f"terrain asset_id={terrain.asset_id}" in scene.emit_kdl()
     assert "coordinate" not in scene.emit_kdl()
     heights = terrain.heightmap([6378137.0, 0, 0], (20, 20), 10, cache_dir=tmp_path)
     assert heights.asset_id == terrain.asset_id == calls[0]["asset_id"]
@@ -271,8 +273,8 @@ def test_terrain_rejects_invalid_dataset(asset_id):
         el.Terrain(asset_id=asset_id)
 
 
-def test_terrain_schematic_survives_kdl_and_python_roundtrip():
-    terrain = el.Terrain()
+@pytest.mark.parametrize("terrain", [el.Terrain(), el.Terrain.aerial()])
+def test_terrain_schematic_survives_kdl_and_python_roundtrip(terrain):
     scene = el.ui.schematic(
         el.ui.viewport(name="Flight"),
         terrain=terrain,

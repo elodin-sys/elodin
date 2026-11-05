@@ -39,8 +39,9 @@ START_TIMESTAMP_US = int(LAUNCH_EPOCH.timestamp() * 1_000_000)
 SITES = json.loads((Path(__file__).parent / "data/sites.json").read_text())
 PAD_LAT_DEG = SITES["launch"]["latitude_degrees"]
 PAD_LON_DEG = SITES["launch"]["longitude_degrees"]
-# These measured pad heights match the dataset selected in schematic.py.
-GROUND_HEIGHTS = SITES["photo3d"]
+# Shared scenery and ground-contact choice: "legacy", "aerial", or "photo3d".
+TERRAIN_MODE = "photo3d"
+GROUND_HEIGHTS = SITES[TERRAIN_MODE]
 LAUNCH_GROUND_ALT_M = GROUND_HEIGHTS["launch_m"]
 PAD_ALT_M = LAUNCH_GROUND_ALT_M + GROUND_HEIGHTS.get("launch_clearance_m", 0.0)
 LZ1_LAT_DEG = SITES["landing"]["latitude_degrees"]
