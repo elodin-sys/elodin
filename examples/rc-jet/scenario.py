@@ -55,7 +55,7 @@ DEATH_VALLEY_FLOOR = Site(
     field_elevation_m=-60.0,
 )
 
-# Pilot's ground position; region center of the mojave_rc_field world_mesh.
+# Pilot's ground position at the static Mojave terrain origin.
 MOJAVE_RC_FIELD = Site(
     name="Mojave RC field (CA)",
     lat_deg=35.350664,

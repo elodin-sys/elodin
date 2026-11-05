@@ -76,7 +76,7 @@ so its mask renders as the cold dark silhouette seen in the reference
 flight recording. `bdx.fpv_cam` remains the independent cinematic RGB
 camera.
 
-The default terrain is `assets/mojave_rc_field.glb`, the curvature-baked
+The terrain is `assets/mojave_rc_field.glb`, the curvature-baked
 static mesh used by Revere FSW at this same pad. It is committed with Git LFS,
 works in a fresh clone without preprocessing, and is anchored 2 m below the
 ECEF pad position.
@@ -86,18 +86,7 @@ The package GLB is already Elodin body (X forward, Y left, Z up), so
 identity maps those axes straight onto ECEF. The Y-up drone GLB next to it
 does carry `rotate="(90, 0, 0)"`. The hashed package GLB is not rewritten.
 
-For the higher-detail planar `world_mesh`, generate the terrain atlas and opt
-in with `ELODIN_RC_JET_TERRAIN=atlas`:
-
-```bash
-./scripts/prepare_editor_terrain_region.sh mojave_rc_field
-ELODIN_RC_JET_TERRAIN=atlas elodin editor examples/rc-jet/main.py
-```
-
-The same variable selects the atlas for `run_visual_check.sh`. The generated
-mesh is shifted by 528 m in local ENU so its 621.5 m orthometric surface meets
-the 589.274 m ellipsoid pad. Cinematic Earth for FPV remains embedded in the
-render-server.
+Cinematic Earth for FPV remains embedded in the render-server.
 
 This example ships binary geometry under `assets/` and
 `model/elodin_package/` via Git LFS — run `git lfs pull` if geometry is missing
@@ -198,7 +187,7 @@ mass updates as it burns, and an empty tank is a flameout. Thrust acts
 examples/rc-jet/
 ├── main.py              # scenario select, ECEF world, builds the Python schematic
 ├── bdx_schematic.py     # editor layout (terrain + GLB + sensor views)
-├── terrain_schematic.py # static default / generated-atlas terrain selector
+├── terrain_schematic.py # static Mojave terrain layout
 ├── visual_check_schematic.py # layout for the RGBA/gray8 LWIR parity check
 ├── bdx.kdl              # retained migration reference and Rust parser fixture
 ├── visual_check.kdl     # retained migration reference for the LWIR check

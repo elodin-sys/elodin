@@ -6,15 +6,6 @@ cd "$(git rev-parse --show-toplevel)"
 # Never inherit another project's asset root.
 export ELODIN_ASSETS="$PWD/assets"
 
-if [[ "${ELODIN_RC_JET_TERRAIN:-static}" == "atlas" ]]; then
-  ATLAS="assets/terrains/planar/mojave_rc_field/config.tc"
-  if [[ ! -f "$ATLAS" ]]; then
-    echo "missing terrain atlas: $ATLAS" >&2
-    echo "run ./scripts/prepare_editor_terrain_region.sh mojave_rc_field first" >&2
-    exit 2
-  fi
-fi
-
 OUT="${ELODIN_LWIR_VISUAL_OUT:-/tmp/rc-jet-lwir-visual-check}"
 case "$OUT" in
   /tmp/*) ;;
