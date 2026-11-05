@@ -115,7 +115,6 @@ pub mod run;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[cfg(not(target_family = "wasm"))]
 mod stream_filter {
     use std::collections::HashSet;
 
@@ -838,7 +837,6 @@ impl Plugin for EditorPlugin {
         .add_systems(Update, sensor_camera::patch_sensor_view_dims)
         .add_systems(Update, throttle_for_sensor_cameras);
 
-        #[cfg(not(target_family = "wasm"))]
         app.insert_resource(stream_filter::StreamFilterRate::FullResolution)
             .add_systems(
                 Update,

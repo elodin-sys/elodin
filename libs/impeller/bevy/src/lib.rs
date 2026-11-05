@@ -25,8 +25,8 @@ use impeller::{
 use impeller_wkt::{
     ComponentMetadata, CurrentTimestamp, DbConfig, DumpMetadata, DumpMetadataResp, DumpSchema,
     DumpSchemaResp, EarliestTimestamp, ErrorResponse, GetDbSettings, GetEarliestTimestamp,
-    GetTimeSeries, IsRecording, LastUpdated, NewConnection, Stream, StreamBehavior, StreamId,
-    StreamTimestamp, SubscribeLastUpdated, VTableMsg, WorldPos,
+    GetTimeSeries, IsRecording, LastUpdated, NewConnection, SetStreamFilter, Stream,
+    StreamBehavior, StreamId, StreamTimestamp, SubscribeLastUpdated, VTableMsg, WorldPos,
 };
 use serde::de::DeserializeOwned;
 use std::{
@@ -2063,6 +2063,44 @@ impl CommandsExt for Commands<'_, '_> {
         };
         self.queue(cmd);
     }
+}
+
+/// Component-filtered clients defer `Stream` to the per-connection handshake.
+pub(crate) fn connection_packets(
+    stream_id: StreamId,
+    component_filtered: bool,
+) -> impl Iterator<Item = LenPacket> {
+    new_connection_packets(stream_id)
+        .filter(move |packet| !component_filtered || packet.as_packet().header.id != Stream::ID)
+}
+
+/// Packets that open a component-filtered client's live stream. A supporting
+/// DB gets an empty allowlist first so the stream starts with no components;
+/// older DBs get a plain unfiltered stream, since they either ignore an empty
+/// filter or persist the filter message as telemetry.
+pub(crate) fn component_filtered_stream_handshake(
+    stream_id: StreamId,
+    config: &DbConfig,
+) -> Vec<LenPacket> {
+    let mut packets = Vec::with_capacity(2);
+    if config.supports_exact_stream_filter() {
+        packets.push(
+            SetStreamFilter {
+                id: stream_id,
+                component_ids: Vec::new(),
+                frequency: None,
+            }
+            .into_len_packet(),
+        );
+    }
+    packets.push(
+        Stream {
+            behavior: StreamBehavior::RealTimeBatched,
+            id: stream_id,
+        }
+        .into_len_packet(),
+    );
+    packets
 }
 
 pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPacket> {

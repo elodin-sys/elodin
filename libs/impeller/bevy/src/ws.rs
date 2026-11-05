@@ -1,15 +1,15 @@
 use crate::{
-    CurrentStreamId,
+    ComponentFilteredStream, CurrentStreamId, PacketTx,
     channels::{
         ConnectionAddr, ConnectionStatus, DbEndpoint, ThreadConnectionStatus, channels,
         msg_channels,
     },
-    msg_sink, new_connection_packets, sink,
+    component_filtered_stream_handshake, connection_packets, msg_sink, sink,
 };
 use bevy::prelude::*;
 use impeller::types::{LenPacket, Msg, PacketTy};
 use impeller_bbq::{AsyncArcQueueTx, PacketGrantW};
-use impeller_wkt::{NewConnection, StreamId};
+use impeller_wkt::{DbConfig, NewConnection, StreamId};
 use js_sys::Uint8Array;
 use std::sync::{
     Arc,
@@ -40,11 +40,18 @@ impl Plugin for WsImpellerPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<WsConnect>()
             .init_resource::<PendingWsConnect>()
+            .init_resource::<ComponentFilteredStream>()
             .add_systems(PreUpdate, queue_ws_connect)
             .add_systems(PreUpdate, apply_ws_connect.after(queue_ws_connect))
             .add_systems(
                 PreUpdate,
-                (ws_reconnect, ws_flush, sink, msg_sink)
+                (
+                    ws_reconnect,
+                    ws_flush,
+                    sink,
+                    send_filtered_stream_handshake,
+                    msg_sink,
+                )
                     .chain()
                     .after(apply_ws_connect),
             );
@@ -249,6 +256,32 @@ fn flush_outgoing(rx: &mut mpsc::Receiver<Option<LenPacket>>, socket: Option<&We
     }
 }
 
+/// `sink` records whether this connection's `DbConfig` accepts an exact
+/// allowlist. Open the live stream the same way TCP does: an empty filter
+/// first when the DB supports it, then `Stream`.
+fn send_filtered_stream_handshake(
+    filtered: Res<ComponentFilteredStream>,
+    stream_id: Res<CurrentStreamId>,
+    packet_tx: Res<PacketTx>,
+    mut sent_for: Local<Option<u64>>,
+) {
+    let Some(supported) = filtered.supported else {
+        *sent_for = None;
+        return;
+    };
+    if *sent_for == Some(filtered.connection) {
+        return;
+    }
+    *sent_for = Some(filtered.connection);
+    let mut config = DbConfig::default();
+    if supported {
+        config.advertise_exact_stream_filter();
+    }
+    for pkt in component_filtered_stream_handshake(stream_id.0, &config) {
+        packet_tx.send_required(pkt, "component-filtered stream handshake");
+    }
+}
+
 fn is_active(ready_state: u16) -> bool {
     ready_state == WebSocket::CONNECTING || ready_state == WebSocket::OPEN
 }
@@ -285,7 +318,7 @@ fn open_sockets(world: &mut World) {
         generation.clone(),
         my_gen,
         Some(status.clone()),
-        new_connection_packets(stream_id).collect(),
+        connection_packets(stream_id, true).collect(),
         true,
     );
     let msg = open_socket(
