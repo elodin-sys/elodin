@@ -25,6 +25,7 @@ wired up. Unchecked items are compiled out, stubbed, or still native-only.
 - [x] Thruster particles (Hanabi). The wasm editor requests the WebGPU backend so compute shaders are available
 - [x] Component stream filter (`SetStreamFilter` on the WebSocket client, same handshake as TCP)
 - [x] Status bar (connection, schematic build error, FPS, TPS, plot-buffer usage, command palette)
+- [x] Saved built-in color scheme (preset and mode in `localStorage`)
 
 ## Not finished
 
@@ -36,7 +37,7 @@ wired up. Unchecked items are compiled out, stubbed, or still native-only.
 - [ ] Cinematic Earth and the night-side material
 - [ ] Screenshots and the FPS log
 - [ ] Hardware stats and system-information diagnostics (NVML, RAM/CPU)
-- [ ] Saved and on-disk color schemes (built-in presets still apply; nothing is written)
+- [ ] On-disk color scheme files (WASM does not scan scheme directories)
 - [ ] Asset-directory watching (WASM uses the browser HTTP cache for assets)
 - [ ] Local display-kernel files (WASM fetches kernels over HTTP only)
 - [ ] Interpreter coverage for every StableHLO op (`erfinv`, batched `dot_general`, and other ops still return errors)
