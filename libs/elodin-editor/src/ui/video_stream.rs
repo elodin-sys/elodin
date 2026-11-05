@@ -1222,9 +1222,10 @@ struct WasmSeekQuery {
 }
 
 /// Seek when the playhead maps to a sample the last seek was not for.
-/// A seek older than [`SEEK_TIMEOUT_SECS`] is re-issued for that same
-/// sample, which is the live-edge case where the decoder never emits the
-/// target pts.
+/// That record only holds while the presented frame is still at or before
+/// the sample, so a rewind back to it seeks again. A seek older than
+/// [`SEEK_TIMEOUT_SECS`] is re-issued for that same sample, which is the
+/// live-edge case where the decoder never emits the target pts.
 #[cfg(any(target_family = "wasm", test))]
 fn wasm_seek_decision(query: &WasmSeekQuery) -> WasmSeekDecision {
     let decoder_near = query
@@ -1240,7 +1241,15 @@ fn wasm_seek_decision(query: &WasmSeekQuery) -> WasmSeekDecision {
         && query
             .seek_age_secs
             .is_some_and(|age| age >= SEEK_TIMEOUT_SECS);
-    let already_sought = query.wanted_us.is_some() && query.wanted_us == query.seek_wanted_us;
+    // Once a later frame is on screen the recorded sample is behind us, and
+    // rewinding to it has to seek. Nothing presented yet means the seek is
+    // still in flight.
+    let already_sought = query.wanted_us.is_some_and(|wanted| {
+        query.seek_wanted_us == Some(wanted)
+            && query
+                .last_presented_us
+                .is_none_or(|presented| presented <= wanted)
+    });
 
     let wants_seek = query.can_seek
         && !at_playhead
@@ -2138,6 +2147,23 @@ mod tests {
             wanted_us: Some(4_900_000),
             seek_wanted_us: Some(4_000_000),
             needs_keyframe: true,
+            ..seek_query()
+        });
+        assert_eq!(decision, WasmSeekDecision::Seek { stale: false });
+    }
+
+    #[test]
+    fn seek_back_to_a_previously_sought_sample() {
+        // Playback moved past the sample the last seek was for. Rewinding to
+        // it must seek again; the record no longer describes the picture.
+        let sample = 1_000_000;
+        let decision = wasm_seek_decision(&WasmSeekQuery {
+            current_us: sample,
+            last_decoded_us: Some(sample + 3_000_000),
+            last_presented_us: Some(sample + 3_000_000),
+            wanted_us: Some(sample),
+            seek_wanted_us: Some(sample),
+            seeking: false,
             ..seek_query()
         });
         assert_eq!(decision, WasmSeekDecision::Seek { stale: false });
