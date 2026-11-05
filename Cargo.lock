@@ -1257,7 +1257,7 @@ dependencies = [
 [[package]]
 name = "bevy-cesium"
 version = "0.3.0"
-source = "git+https://github.com/elodin-sys/bevy-cesium?rev=0c4a076d699bd7fd8e39711a2a46237ba57b758f#0c4a076d699bd7fd8e39711a2a46237ba57b758f"
+source = "git+https://github.com/elodin-sys/bevy-cesium?rev=f22b5bc56c56f746abba1037e055474bf1428403#f22b5bc56c56f746abba1037e055474bf1428403"
 dependencies = [
  "bevy",
  "cxx",
