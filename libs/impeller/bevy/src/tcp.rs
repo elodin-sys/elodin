@@ -1,4 +1,5 @@
 use crate::*;
+use crate::{component_filtered_stream_handshake, connection_packets};
 use bevy::app::{Plugin, PreUpdate};
 use impeller::types::LenPacket;
 use impeller_bbq::AsyncArcQueueTx;
@@ -112,41 +113,6 @@ pub fn spawn_tcp_connect(
     ret_connection_status
 }
 
-/// Component-filtered clients defer `Stream` to the per-connection handshake.
-fn connection_packets(
-    stream_id: StreamId,
-    component_filtered: bool,
-) -> impl Iterator<Item = LenPacket> {
-    new_connection_packets(stream_id)
-        .filter(move |packet| !component_filtered || packet.as_packet().header.id != Stream::ID)
-}
-
-/// Packets that open a component-filtered client's live stream. A supporting
-/// DB gets an empty allowlist first so the stream starts with no components;
-/// older DBs get a plain unfiltered stream, since they either ignore an empty
-/// filter or persist the filter message as telemetry.
-fn component_filtered_stream_handshake(stream_id: StreamId, config: &DbConfig) -> Vec<LenPacket> {
-    let mut packets = Vec::with_capacity(2);
-    if config.supports_exact_stream_filter() {
-        packets.push(
-            SetStreamFilter {
-                id: stream_id,
-                component_ids: Vec::new(),
-                frequency: None,
-            }
-            .into_len_packet(),
-        );
-    }
-    packets.push(
-        Stream {
-            behavior: StreamBehavior::RealTimeBatched,
-            id: stream_id,
-        }
-        .into_len_packet(),
-    );
-    packets
-}
-
 pub fn spawn_msg_tcp_connect(
     addr: SocketAddr,
     mut outgoing_packet_rx: mpsc::Receiver<Option<LenPacket>>,
@@ -180,8 +146,9 @@ pub fn spawn_msg_tcp_connect(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{component_filtered_stream_handshake, connection_packets};
     use impeller::types::{Msg, PacketId};
-    use impeller_wkt::GetDbSettings;
+    use impeller_wkt::{DbConfig, GetDbSettings, Stream};
 
     fn packet_ids(packets: impl IntoIterator<Item = LenPacket>) -> Vec<PacketId> {
         packets
