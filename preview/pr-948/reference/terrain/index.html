@@ -477,8 +477,6 @@ provides scenery for the editor and heights for your simulation.</p>
 ellipsoid.</p>
 <p><code>Terrain()</code> selects Google Photorealistic 3D Tiles, streamed through Bevy-Cesium.
 Omit <code>terrain=terrain</code> to use the location on its own.</p>
-<p>Save your read-only ion token in <code>~/.config/elodin/cesium-ion-token.txt</code> once.
-The editor and height preparation both use it.</p>
 <h2 id="terrain-heights">Terrain Heights</h2>
 <p>Prepare a grid before running the simulation, using the same <code>terrain</code> object:</p>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> jax</span><span>.</span><span>numpy</span><span style="color: light-dark(#859900, #859900);"> as</span><span> jnp</span></span>
