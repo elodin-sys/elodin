@@ -356,7 +356,12 @@ fn sync_atmosphere(
     environment: Res<SceneEnvironment>,
     earth: Option<Single<(Entity, &GlobalTransform), With<CinematicEarthRoot>>>,
     mut media: ResMut<Assets<ScatteringMedium>>,
-    mut existing: Query<(Entity, &SchematicAtmosphere, &mut Transform)>,
+    mut existing: Query<(
+        Entity,
+        &SchematicAtmosphere,
+        &mut Transform,
+        Option<&ChildOf>,
+    )>,
 ) {
     let Some((earth, earth_transform)) = earth.map(|x| *x) else {
         return;
@@ -364,8 +369,11 @@ fn sync_atmosphere(
     let config = environment.0.as_ref().and_then(effective_atmosphere);
     let current = existing.iter_mut().next();
     match (config, current) {
-        (Some(config), Some((entity, spawned, mut transform))) if spawned.0 == config => {
-            let _ = entity;
+        (Some(config), Some((entity, spawned, mut transform, parent))) if spawned.0 == config => {
+            if parent.is_none_or(|parent| parent.parent() != earth) {
+                debug!(?entity, ?earth, "Reattaching schematic atmosphere to Earth");
+                commands.entity(entity).insert(ChildOf(earth));
+            }
             let rotation = atmosphere_local_rotation(earth_transform);
             if transform.rotation.angle_between(rotation) > 1e-6 {
                 transform.rotation = rotation;
@@ -678,6 +686,46 @@ mod tests {
                 .get::<crate::spatial::LowPrecisionRoot>(atmosphere)
                 .is_some()
         );
+    }
+
+    #[test]
+    fn atmosphere_rejoins_earth_after_its_parent_is_replaced() {
+        let mut app = App::new();
+        app.add_plugins(TransformPlugin)
+            .insert_resource(SceneEnvironment(Some(EnvironmentConfig {
+                earth: Some(Default::default()),
+                ..default()
+            })))
+            .init_resource::<Assets<ScatteringMedium>>()
+            .add_systems(Update, sync_atmosphere);
+        let old_earth = app
+            .world_mut()
+            .spawn((CinematicEarthRoot, Transform::default()))
+            .id();
+        app.update();
+        let atmosphere = app
+            .world_mut()
+            .query_filtered::<Entity, With<SchematicAtmosphere>>()
+            .single(app.world())
+            .unwrap();
+
+        // A deferred spawn can outlive the root being replaced for streamed terrain.
+        app.world_mut().entity_mut(atmosphere).remove::<ChildOf>();
+        app.world_mut().entity_mut(old_earth).despawn();
+        app.update();
+        let transform = Transform::from_translation(Vec3::new(-100.0, -6_371_000.0, 50.0))
+            .with_rotation(Quat::from_rotation_x(std::f32::consts::PI));
+        let new_earth = app.world_mut().spawn((CinematicEarthRoot, transform)).id();
+        app.update();
+        app.update();
+
+        assert_eq!(
+            app.world().get::<ChildOf>(atmosphere).map(ChildOf::parent),
+            Some(new_earth)
+        );
+        let actual = app.world().get::<GlobalTransform>(atmosphere).unwrap();
+        assert_eq!(actual.translation(), transform.translation);
+        assert!(actual.rotation().angle_between(Quat::IDENTITY) < 1e-6);
     }
 
     #[test]

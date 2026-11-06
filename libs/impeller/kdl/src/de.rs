@@ -87,6 +87,10 @@ pub fn parse_schematic(input: &str) -> Result<Schematic, KdlSchematicError> {
     let mut schematic = Schematic::default();
 
     for node in doc.nodes() {
+        if node.name().value() == "terrain" {
+            schematic.terrain = Some(parse_terrain(node, input)?);
+            continue;
+        }
         if node.name().value() == "skybox" {
             schematic.skybox = Some(parse_skybox(node, input)?);
             continue;
@@ -203,6 +207,23 @@ fn validate_cinematic_earth(schematic: &Schematic, src: &str) -> Result<(), KdlS
         });
     }
     Ok(())
+}
+
+fn parse_terrain(node: &KdlNode, src: &str) -> Result<TerrainConfig, KdlSchematicError> {
+    let asset_id = node
+        .get("asset_id")
+        .and_then(|v| v.as_integer())
+        .and_then(|id| i64::try_from(id).ok())
+        .filter(|id| *id > 0);
+    asset_id
+        .map(|asset_id| TerrainConfig { asset_id })
+        .ok_or_else(|| KdlSchematicError::InvalidValue {
+            property: "asset_id".to_string(),
+            node: "terrain".to_string(),
+            expected: "a positive integer".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        })
 }
 
 fn parse_skybox(node: &KdlNode, src: &str) -> Result<SkyboxConfig, KdlSchematicError> {
@@ -439,6 +460,10 @@ fn push_parsed_schematic_node(
     node: &KdlNode,
     src: &str,
 ) -> Result<(), KdlSchematicError> {
+    if node.name().value() == "terrain" {
+        schematic.terrain = Some(parse_terrain(node, src)?);
+        return Ok(());
+    }
     if node.name().value() == "skybox" {
         schematic.skybox = Some(parse_skybox(node, src)?);
         return Ok(());
@@ -479,6 +504,7 @@ fn push_parsed_schematic_node(
 
 fn window_content_is_nonempty(content: &Schematic) -> bool {
     !content.elems.is_empty()
+        || content.terrain.is_some()
         || content.skybox.is_some()
         || content.environment.is_some()
         || content.theme.is_some()
@@ -5209,5 +5235,33 @@ graph "value" {
             "kdl_schematic::unknown_node\n\n  × Unknown node type 'blah'\n   ╭─[2:1]\n 1 │ \n 2 │ blah\n   · ──┬─\n   ·   ╰── unknown node\n 3 │ graph \"value\" {\n   ╰────\n",
             &b
         );
+    }
+}
+
+#[cfg(test)]
+mod terrain_tests {
+    use super::*;
+
+    #[test]
+    fn terrain_and_origin_are_independent_and_roundtrip() {
+        let terrain = parse_schematic("terrain asset_id=2275207").unwrap();
+        assert_eq!(terrain.terrain.unwrap().asset_id, 2275207);
+        assert!(terrain.origin.is_none());
+        assert_eq!(
+            parse_schematic(&crate::ser::serialize_schematic(&terrain)).unwrap(),
+            terrain
+        );
+        let coordinate =
+            parse_schematic("coordinate frame=ECEF lat=28.60839 lon=-80.60433").unwrap();
+        assert!(coordinate.origin.is_some());
+        assert!(coordinate.terrain.is_none());
+        for invalid in [
+            "terrain",
+            "terrain asset_id=-1",
+            "terrain asset_id=0",
+            "terrain asset_id=1.5",
+        ] {
+            assert!(parse_schematic(invalid).is_err(), "{invalid}");
+        }
     }
 }

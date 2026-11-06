@@ -25,13 +25,16 @@
 //!   `db:textures/smoke_puff.png`, anything else ->
 //!   `db:textures/soft_circle.png`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use bevy::asset::{LoadState, RenderAssetUsages};
+use bevy::asset::{AssetId, LoadState, RenderAssetUsages};
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::math::{DQuat, DVec3, Quat, Vec4};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use bevy::render::{
+    ExtractSchedule, MainWorld, RenderApp, render_asset::RenderAssets, texture::GpuImage,
+};
 use bevy::transform::TransformSystems;
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use bevy_hanabi::{
@@ -122,12 +125,36 @@ impl FileEffectAssets {
     }
 }
 
-/// Server-loaded images must be `Loaded` before `EffectMaterial` is inserted.
-/// `Assets::add` handles have no load state (`None`) and are ready immediately.
-pub(crate) fn images_ready(images: &[Handle<Image>], server: &AssetServer) -> bool {
-    images
-        .iter()
-        .all(|h| server.get_load_state(h.id()).is_none_or(|s| s.is_loaded()))
+/// CPU load completion does not imply GPU readiness when uploads are budgeted.
+#[derive(Resource, Default)]
+pub(crate) struct ReadyEffectImages(HashSet<AssetId<Image>>);
+
+pub(crate) fn init_ready_effect_images(app: &mut App) {
+    if app.world().contains_resource::<ReadyEffectImages>() {
+        return;
+    }
+    app.init_resource::<ReadyEffectImages>();
+    if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
+        render_app.add_systems(ExtractSchedule, sync_ready_effect_images);
+    }
+}
+
+fn sync_ready_effect_images(
+    mut main_world: ResMut<MainWorld>,
+    gpu_images: Res<RenderAssets<GpuImage>>,
+) {
+    main_world.resource_mut::<ReadyEffectImages>().0 =
+        gpu_images.iter().map(|(id, _)| id).collect();
+}
+
+pub(crate) fn images_ready(
+    images: &[Handle<Image>],
+    server: &AssetServer,
+    ready: &ReadyEffectImages,
+) -> bool {
+    images.iter().all(|h| {
+        server.get_load_state(h.id()).is_none_or(|s| s.is_loaded()) && ready.0.contains(&h.id())
+    })
 }
 
 fn images_failed(images: &[Handle<Image>], server: &AssetServer) -> bool {
@@ -238,6 +265,7 @@ pub struct ThrusterParticlesPlugin;
 
 impl Plugin for ThrusterParticlesPlugin {
     fn build(&self, app: &mut App) {
+        init_ready_effect_images(app);
         app.add_plugins(HanabiPlugin)
             .init_resource::<EffectPlayheadClock>()
             .init_resource::<FileEffectAssets>()
@@ -833,6 +861,7 @@ fn spawn_trail_anchor(
 #[allow(clippy::too_many_arguments)]
 fn bind_file_effect_assets(
     mut commands: Commands,
+    ready_images: Res<ReadyEffectImages>,
     mut jets: Query<(Entity, &mut KdlThrusterJet, &KdlThrusterJetOf)>,
     objects: Query<&WorldPos, (With<Object3DState>, With<WorldPosReceived>)>,
     effects: Res<Assets<EffectAsset>>,
@@ -887,7 +916,7 @@ fn bind_file_effect_assets(
             jet.pending_effect = None;
             continue;
         }
-        if !images_ready(&images, &asset_server) {
+        if !images_ready(&images, &asset_server, &ready_images) {
             continue;
         }
         jet.has_intensity_property = asset

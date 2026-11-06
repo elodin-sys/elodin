@@ -673,6 +673,8 @@ impl Plugin for EditorPlugin {
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::thruster_particles::ThrusterParticlesPlugin);
         app.add_plugins(plugins::scene_environment::SceneEnvironmentPlugin);
+        #[cfg(feature = "big_space")]
+        app.add_plugins(plugins::cesium::CesiumPlugin);
         // Cinematic Earth follows the native Hanabi plugin registration.
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::cinematic_earth::earth_night_material::EarthNightMaterialPlugin);
@@ -713,7 +715,13 @@ impl Plugin for EditorPlugin {
                 PreUpdate,
                 (
                     clamp_current_time,
+                    #[cfg(feature = "big_space")]
+                    advance_playback.run_if(plugins::cesium::playback_ready),
+                    #[cfg(not(feature = "big_space"))]
                     advance_playback,
+                    #[cfg(feature = "big_space")]
+                    follow_latest.run_if(plugins::cesium::playback_ready),
+                    #[cfg(not(feature = "big_space"))]
                     follow_latest,
                     // Update selection after playback advances to keep line_3d and object_3d in sync.
                     set_selected_range,

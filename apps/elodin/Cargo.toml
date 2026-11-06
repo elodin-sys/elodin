@@ -45,6 +45,7 @@ tokio = { version = "1.35.1", features = ["full"] }
 tonic = { version = "=0.14.6", features = ["tls-webpki-roots"] }
 stellarator.path = "../../libs/stellarator"
 uuid = "1.7.0"
+bevy-cesium.workspace = true
 directories = "5.0.1"
 bevy.workspace = true
 tracing-subscriber = { version = "0.3", features = ["chrono"] }
