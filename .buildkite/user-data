@@ -149,7 +149,48 @@ write_files:
       '
 
       systemctl daemon-reload
+      systemctl enable --now nix-store-gc.timer
       systemctl enable --now buildkite-agent
+
+  - path: /usr/local/sbin/nix-store-gc
+    permissions: "0755"
+    owner: root:root
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+
+      exec /nix/var/nix/profiles/default/bin/nix-collect-garbage --delete-older-than 21d
+
+  - path: /etc/systemd/system/nix-store-gc.service
+    permissions: "0644"
+    owner: root:root
+    content: |
+      [Unit]
+      Description=Delete Nix profile generations older than three weeks and collect garbage
+      Requires=nix-daemon.service
+      After=nix-daemon.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/nix-store-gc
+      TimeoutStartSec=2h
+      Nice=19
+      IOSchedulingClass=idle
+
+  - path: /etc/systemd/system/nix-store-gc.timer
+    permissions: "0644"
+    owner: root:root
+    content: |
+      [Unit]
+      Description=Run Nix store garbage collection nightly
+
+      [Timer]
+      OnCalendar=*-*-* 11:00:00 UTC
+      Persistent=true
+      RandomizedDelaySec=10m
+
+      [Install]
+      WantedBy=timers.target
 
 runcmd:
   # Run the bootstrap script directly (no reboot needed)
