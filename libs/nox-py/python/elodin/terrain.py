@@ -168,8 +168,8 @@ def terrain_heightmap(
     lines. Areas crossing a pole or the antimeridian are not supported.
 
     Cache misses use the installed Elodin CLI and its Bevy-Cesium backend.
-    Downloads use the same demo account as the editor. Existing cached data is never refreshed
-    automatically. ``offline=True`` requires a cache hit. For portable replay,
+    Downloads use the same demo account as the editor. Prepared height grids are
+    reused without refreshing. ``offline=True`` requires a cached grid. For portable replay,
     retain ``result.path`` and load it with ``TerrainHeightmap.load(path)``.
     Network and disk access happen only here, never in ``sample``.
     ``timeout`` applies to each native batch of up to one million positions.

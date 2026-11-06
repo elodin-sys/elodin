@@ -346,15 +346,17 @@ uv run python -m pytest -q examples/falcon9/
 scripts/test-falcon9-monte-carlo.sh
 ```
 
-Terrain is configured in `schematic.py`, alongside the geographic origin.
+Set `TERRAIN_MODE` in [`constants.py`](constants.py) to `"legacy"`, `"aerial"`
+or `"photo3d"` (the default). The schematic, plant and flight software use
+the same mode and matching ground heights.
 Run inside `nix develop`:
 
 ```sh
 elodin editor examples/falcon9/main.py
 ```
 
-No terrain switches are needed. The editor streams the selected dataset through
-Bevy-Cesium and keeps the existing atmosphere and cinematic lighting.
+The streamed modes use Bevy-Cesium and keep the existing atmosphere and
+cinematic lighting. Legacy uses the original globe.
 See [Terrain](../../docs/public/content/reference/terrain.md)
 for schematic configuration and height queries without the editor.
 The vehicle model, reference data, graphs and particle effects are retained.
@@ -363,12 +365,11 @@ The previous coordinate identified the old launch-complex slab, about 140 m west
 of the pad. The launch location is unchanged. Cesium supplies the real
 landing-pad surface; no offshore barge or overlay is added.
 
-The launch and landing ground heights are stored in
-[`data/sites.json`](data/sites.json), shared by the plant and
-flight software. These sampled heights match the Photo 3D dataset selected in
-the schematic. No extra height setting is needed. The site file records the independent georeferenced
-imagery used to locate the concrete-circle center and the Photo 3D heights in
-WGS84 ellipsoid meters. These are dataset measurements, not a survey.
+The launch and landing coordinates and ground heights for each mode are stored
+in [`data/sites.json`](data/sites.json), shared by the plant and flight software.
+The aerial and Photo 3D heights were sampled from their respective datasets,
+in WGS84 ellipsoid meters. The file also records the georeferenced imagery used
+to locate the concrete-circle center.
 Terminal guidance keeps braking lateral motion until touchdown.
 
 The checked CRS-12 terrain run finishes 4.2 m from the pad center. Contact is

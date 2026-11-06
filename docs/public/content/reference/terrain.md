@@ -118,7 +118,7 @@ ground heights. `"legacy"` uses Falcon 9's original globe. Photo 3D is the defau
 
 | Parameter | Default | Description |
 | --- | --- | --- |
-| `asset_id` | `2275207` | Positive ion asset ID. The default is Google Photorealistic 3D Tiles; `1` selects Cesium World Terrain with Bing aerial imagery in the editor. |
+| `asset_id` | `2275207` | Positive signed 64-bit ion asset ID. The default is Google Photorealistic 3D Tiles; `1` selects Cesium World Terrain with Bing aerial imagery in the editor. |
 
 Constructing a `Terrain` performs no network or disk access.
 
@@ -135,7 +135,7 @@ Constructing a `Terrain` performs no network or disk access.
     | --- | --- | --- |
     | `center_ecef` | Required | Three-element WGS84 ECEF position, in meters. |
     | `dimensions` | Required | `(east_west, north_south)` coverage in meters; both lengths must be positive. |
-    | `spacing` | Required | Maximum sample spacing in meters; must be positive. |
+    | `spacing` | Required | Maximum sample spacing in meters at the grid center; must be positive. |
     | `cache_dir` | `None` | Directory for saved height grids. Defaults to `$XDG_CACHE_HOME/elodin/terrain-heights`, or `~/.cache/elodin/terrain-heights`. Accepts a string or `Path`. |
     | `offline` | `False` | Require an existing cached grid; raise `FileNotFoundError` on a cache miss. |
     | `timeout` | `600` | Integer seconds per native batch, from `1` to `3600`. Failed preparation is retried up to twice. |
