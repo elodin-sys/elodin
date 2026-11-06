@@ -73,6 +73,7 @@ from referee_audit import (
 from race_runtime import RaceTelemetry, spawn_course
 from fpv_camera import (
     FAR,
+    FOCAL_PX,
     FOV_DEG,
     FPS,
     HEIGHT,
@@ -80,10 +81,12 @@ from fpv_camera import (
     MOUNT,
     MSG,
     NEAR,
+    TILT_DEG,
     WIDTH,
     sensor_rot_offset,
     FpvCamera,
 )
+from replay import ReplayRecorder
 from sim import Drone, create_physics_system
 from sensors import IMU, create_sensor_system, SensorDataBuffer
 from comms import (
@@ -101,6 +104,7 @@ try:
     guidance_mode = race_options.guidance
     race_course = race_options.course
     CAMERA_ENABLED = race_options.camera_enabled
+    RECORD_DIR = race_options.record_dir
     truth_course_requested = (
         guidance_mode is GuidanceMode.TRUTH and race_course.name == "c1_straight"
     )
@@ -410,6 +414,42 @@ referee_audit_collector = (
 )
 fpv = FpvCamera() if CAMERA_ENABLED else None
 fpv_report = [None]
+recorder_box: list[ReplayRecorder | None] = [None]
+
+
+def _recorder() -> ReplayRecorder | None:
+    """Create the replay writer on the first recorded tick, not at import."""
+
+    if RECORD_DIR is None:
+        return None
+    if recorder_box[0] is None:
+        recorder_box[0] = ReplayRecorder(
+            RECORD_DIR,
+            simulation_rate_hz=config.pid_rate,
+            block_ticks=16,
+            frame_shape=(HEIGHT, WIDTH, 4),
+            intrinsics={
+                "fx": FOCAL_PX,
+                "fy": FOCAL_PX,
+                "cx": WIDTH / 2.0,
+                "cy": HEIGHT / 2.0,
+                "width": WIDTH,
+                "height": HEIGHT,
+            },
+            mount_position_body=MOUNT,
+            tilt_deg=TILT_DEG,
+            inner_size_m=race_course.inner_size,
+            gates=tuple(
+                (gate.index, gate.center, gate.yaw, gate.inner_size) for gate in race_course.gates
+            ),
+        )
+    return recorder_box[0]
+
+
+def finish_recording() -> None:
+    recorder = recorder_box[0]
+    if recorder is not None:
+        recorder.finish()
 
 
 def emit_race_result() -> None:
@@ -642,6 +682,24 @@ def _sitl_post_step(tick: int, ctx: el.StepContext):
         frame = sample.frame
         frame_time = sample.frame_time
         frame_fresh = sample.fresh
+    if sensor_read_succeeded and world_pos is not None and world_vel is not None:
+        recorder = _recorder()
+        if recorder is not None:
+            recorder.observe(
+                tick=tick,
+                sim_time=t,
+                gyro=gyro,
+                accel=accel,
+                world_pos=world_pos,
+                world_vel=world_vel,
+                barometer=barometer,
+                barometer_fresh=barometer_fresh,
+                magnetometer=magnetometer,
+                magnetometer_fresh=magnetometer_fresh,
+                frame=frame,
+                frame_time=frame_time,
+                frame_fresh=frame_fresh,
+            )
 
     progress = referee.progress()
     update_values = {
@@ -832,6 +890,7 @@ def _sitl_post_step(tick: int, ctx: el.StepContext):
             fpv_report[0] = fpv.finish(ctx.read_msg_at, ctx.timestamp)
             print(fpv_report[0].format())
             print()
+        finish_recording()
 
         if guidance_mode is GuidanceMode.SCRIPTED and not referee_audit_requested:
             result = evaluate_c0(
@@ -934,6 +993,7 @@ finally:
     # produce one failing result rather than look like recipe generation.
     if simulation_started[0]:
         emit_final_results()
+        finish_recording()
 # `world.run()` won't reach here unless `interactive` is false.
 print(f"Wrote database to: {db_filename}")
 

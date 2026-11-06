@@ -2,7 +2,7 @@
 
 **Document status:** Authoritative living specification  
 **Last verified against repository:** 2026-11-02 (F headless qualification PASS; prior G1 qualification preserved)
-**Current resume point:** E1, G1 and F are integrated and complete. H/I are ready; L's truth-mode CI work may proceed, while vision qualification still waits for J/K.
+**Current resume point:** E1, G1, F and H are complete. I is ready; L's truth-mode CI work may proceed, while vision qualification still waits for J/K.
 
 ## 1. Purpose and authority
 
@@ -1684,7 +1684,7 @@ browser or strict-alignment qualification is claimed.
 E1 is complete and available to F/J; approximate alignment remains the accepted
 scope, not verified exact scene rewind.
 
-### [ ] H — Classical detector, offline
+### [x] H — Classical detector, offline
 
 **Objective:** Detect rendered training gates and estimate their relative pose
 without introducing closed-loop flight risk.
@@ -1747,6 +1747,59 @@ development host, but hardware-dependent timing is not a normal CI failure.
 
 **Handoff:** Record fixture provenance, metrics, command, thresholds, recorder
 bundle format, and known failure ranges.
+
+**Verified 2026-11-02 on `pkg-h-gate-detector` from `7bfa4493`; rebased onto
+main `95f53257` (after F) on 2026-11-06:**
+
+- `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest examples/betaflight-sitl/tests -q`
+  → 478 passed after the rebase (297 before F). The detector, replay, and
+  isolation tests also pass on nixpkgs OpenCV 4.13, the `.#run` version.
+  `ruff format`, `ruff check`, `typos`, and `alejandra -c nix/run.nix` passed.
+- F's shutdown contract holds: `[RACE]`/`[F-COURSE]` are emitted before the
+  recorder finishes, so a bundle write error cannot suppress the result line.
+- `gate_detector.py` is the only OpenCV importer. CI gets `opencv4` from the
+  `.#run` shell. Local uv environments install `opencv-python-headless`. 8-bit
+  hue stays 0–180. Thresholds: hue 5–25, saturation ≥ 120, value ≥ 50.
+- Contour indices are refined to the orange-to-hole coverage crossing on each
+  edge, then adjacent lines are intersected. That is the half-pixel offset,
+  measured against truth projections rather than a fixed 0.5 px add. Clean
+  synthetic corners stay within 0.5 px.
+- Synthetic core course, 4–20 m and bearings −10° to 10°: 45/45 detected,
+  median bearing 0.0007°, p95 0.015°. Recorded fixture: 10/10 detected, median
+  bearing 0.094°. On the full truth-run bundle, 844/856 fully visible frames
+  detected (98.6%), median bearing 0.075°. The 2–4 m bin on that bundle was
+  about 2.8° and is outside the 4–20 m acceptance window.
+- Package G leftovers: holes under 200 px² and ranges outside 1–40 m are
+  rejected; `sample_time` must be finite; a rotation within 1e-6° of 180° still
+  yields no pose; `bearing_body` remains the body-origin direction.
+- Recorder bundle version 1: `meta.json`, `sensors.npz` (500 Hz interval means),
+  `frames/chunk_NNNNN.npz`, and separate `truth.npz`. `load_sensor_bundle` does
+  not open `truth.npz`. Frames are copied on the callback thread and
+  compressed 30 per chunk on one writer thread, with at most two chunks
+  queued, so held frame memory stays near 80 MB for any run length.
+  `RACE_RECORD` without `RACE_CAMERA=1` exits 2.
+- `evaluate_detector.py --bundle` scores each frame against the nearest course
+  gate whose inner opening is fully in view and skips the rest; `--check` uses
+  only 4–20 m frames. Recorded truth frames cover about 4–12 m; 12–20 m is
+  covered by the synthetic set until a C1 recording is added.
+- `evaluate_detector.py --synthetic --check` and `--fixture --check` exited 0.
+  Median processing time was 7.5 ms on synthetic frames and 11.3 ms on the
+  recorded fixture, above the 5 ms target. Timing is reported and is not a CI
+  failure.
+- On the development host the E hold stalls in ACQUIRE, faults, and crosses
+  the gate at about 41.1 s. It does so with the camera on or off, with or
+  without `RACE_RECORD`, and on unmodified main `95f53257` without H, so it
+  comes from that host's runtime or SITL build, not from H. FPV passed with
+  1349 fresh frames. E/F qualification evidence is unchanged; requalify E on
+  a fresh `just install` before using this host as a hold gate. Default C0,
+  camera off, exited 0:
+  `[C0] lockstep_steps=119995 motor_response=true max_motor=0.574
+  takeoff_delta_m=56.836 status=PASS`.
+- Fixture provenance is in `tests/fixtures/README.md`. The checked-in extract is
+  `rendered_gate_frames.npz` (10 frames, about 560 KB), built by
+  `tests/fixtures/make_rendered_gate_fixture.py`.
+- `evaluate_detector.py` may import `synthetic_vision`. `gate_detector.py` and
+  `replay.py` may not.
 
 ### [ ] I — Gate navigator, offline
 
@@ -1977,7 +2030,7 @@ branch for later resumption.
 | F | Complete | Current E1/G1 integration qualified 2026-11-02: three consecutive C1 runs, final pass 41.300038/41.275433/41.319041 s, strict physical-safe intervals 9.036625/9.066750/9.025250 s; three E holds and C0/C/D regressions pass. 450 pure tests; approved powered touchdown, unchanged physical grader and generic inputs. |
 | G | Complete | `vision.py` owns intrinsics, corner order, the camera-to-body helper, and NumPy planar PnP. Positive tilt is nose-up and is registered as negative renderer pitch. `corner_order_ambiguous` flags labellings within 10°. `synthetic_vision.py` is the only truth-projection path. 222 pure tests pass, including centered, translated, yawed, and ranged round trips. |
 | G1 | Complete; integrated | GitHub-only base `8742b411`, source `30d2c307`; fresh matching artifacts, 270 Python tests, 754 editor tests, 5 controller tests, 17 s10 tests and eight first-attempt ordinary live gates PASS. Integrated in the current main base; see G1 brief for historical evidence/guard/framing caveats; strict alignment historical FAIL/deferred/non-gating. |
-| H | Ready | B, C, G and G1 are integrated and qualified; the offline detector and recorder remain. |
+| H | Complete | `gate_detector.py`, `replay.py`, and `evaluate_detector.py`. Pure suite passes, including synthetic 45/45 detection and the 10-frame recorded fixture. OpenCV is confined to `gate_detector.py` and added to the `.#run` shell. |
 | I | Ready | G and G1 are integrated and qualified; the navigator can proceed in parallel with H. |
 | J | Blocked by H, I | E1's shared mission controller is complete; detector, navigator, and vision guidance remain. |
 | K | Blocked by J | F is qualified; no vision race |
@@ -1985,11 +2038,12 @@ branch for later resumption.
 
 ### Resume point
 
-Packages E1, G1 and F are complete and integrated. G1's historical
+Packages E1, G1, F and H are complete. G1's historical
 ordinary-operation qualification on `g1-clean` source `30d2c307` is preserved
 above; F's current powered-touchdown qualification is recorded in its brief.
-H/I are ready with the accepted approximate-alignment contract. L may add
-truth-mode CI; vision work still depends on H/I/J/K.
+I is ready with the accepted approximate-alignment contract and can consume H's
+detector and `RACE_RECORD` bundles. L may add truth-mode CI; vision work still
+depends on I/J/K.
 
 - **E1, mission controller extraction:** the initial 2026-10-23 qualification
   preserved exact original-controller replay and three passing E holds (details
@@ -2015,6 +2069,7 @@ recoverable MPEG-TS fallback, are maintained in `README.md`.
 | Date | Decision | Reason and affected packages |
 |---|---|---|
 | 2026-11-02 | Require controlled powered touchdown before race FINISH disarm, using settled pre-arm pad-relative navigation altitude; keep public navigation inputs and the strict independent physical grader unchanged. | Explicit operator approval replaces the pad+0.15 m suspended-disarm policy: dropping from that height can violate the unchanged low-altitude descent-speed bound. FINISH keeps power through contact, then requires altitude ≤pad+0.01 m and total speed ≤0.18 m/s for 0.5 s before disarm. A below-pad control target is permitted without changing ground physics. Tilt remains an independent physical-grader check, not a controller-input guarantee. Affects F, K and shared race-profile semantics; E hold is unchanged. |
+| 2026-11-02 | OpenCV stays inside `gate_detector.py`. The `.#run` CI shell installs nixpkgs `opencv4`; local uv environments use `opencv-python-headless`. The offline evaluator may import `synthetic_vision`. Edge corners are the orange-to-hole coverage crossing, not a fixed half-pixel add. | CI pytest must import `cv2` without adding OpenCV to the Elodin SDK. The evaluator needs truth projections the detector is forbidden to import. A constant pixel shift could not hold the 0.5 px corner bound across ranges; the coverage crossing did. Affects §7.3, §9, and H. |
 | 2026-10-27 | Accept approximate scene-time alignment for G1; defer strict alignment. Selected message T is nominal image/render time on `sim_time`. | Supersedes the exact capture-alignment assumption of 2026-10-22. Keep regressions and independent review; no renderer/query/stream fix or prototype promotion. H/I may proceed after G1 integration using Section 7.4's limitation; F still requires E1. |
 | 2026-10-23 | Keep E1's active original-controller characterization to eight representative cases / 78 updates, with digests derived from the original expected rows; retain the full 39-case / 268-update proof in commit `163c0529`. | The exact-equivalence acceptance was already performed and is preserved as historical evidence. This approved maintenance reduction avoids carrying exhaustive golden output during heavy development; behavioral tests and product acceptance remain unchanged. Affects only E1's ongoing characterization artifacts and reproduction instructions. |
 | 2026-10-22 | Add Packages E1 (mission controller extraction) and G1 (sensor timing and truth-boundary fixes) instead of folding these prerequisites into F. Keep the existing package letters. | The behavior-preserving refactor, the sensor and configuration fixes, and F's new race behavior are separate concerns; combining them would make a regression hard to attribute. G1 also gates H and I, not only F. Existing commits and PRs refer to packages by letter, so nothing is renumbered. Affects E1, G1, and F–K. |

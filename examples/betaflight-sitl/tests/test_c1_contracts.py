@@ -118,7 +118,8 @@ def shutdown_namespace(*, execution_started=True):
         n
         for n in tree.body
         if isinstance(n, ast.FunctionDef)
-        and n.name in ("emit_race_result", "emit_final_results", "sitl_post_step")
+        and n.name
+        in ("emit_race_result", "emit_final_results", "finish_recording", "sitl_post_step")
     ]
     run_try = next(n for n in tree.body if isinstance(n, ast.Try) and n.finalbody)
     ns = {
@@ -135,6 +136,7 @@ def shutdown_namespace(*, execution_started=True):
         "truth_course_result": [None],
         "truth_course_result_emitted": [False],
         "bridge": [object() if execution_started else None],
+        "recorder_box": [None],
         "simulation_started": [execution_started],
         "callback_execution": CallbackExecution(2),
         "MAX_TICKS": 2,

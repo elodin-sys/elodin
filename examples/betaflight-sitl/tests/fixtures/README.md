@@ -57,6 +57,27 @@ git show 163c052956a15f8d720a93f2e7059f1c52b8ce71:examples/betaflight-sitl/tests
 The large fixtures and supplemental test module were removed from the current
 tree, not rewritten into another trace format.
 
+## Rendered gate frames
+
+`rendered_gate_frames.npz` is the Package H recorded-detector fixture: 10 raw
+RGBA frames (about 560 KB) and the truth pose at each nominal `frame_time`.
+The source run was a Package E truth flight with the camera and recorder:
+
+```bash
+RACE_GUIDANCE=truth RACE_COURSE=single RACE_CAMERA=1 \
+  RACE_RECORD=/tmp/pkg-h-truth \
+  elodin run examples/betaflight-sitl/main.py
+python3 examples/betaflight-sitl/tests/fixtures/make_rendered_gate_fixture.py \
+  /tmp/pkg-h-truth \
+  examples/betaflight-sitl/tests/fixtures/rendered_gate_frames.npz
+```
+
+The working tree was `pkg-h-gate-detector` based on `7bfa4493`. The selector
+keeps up to two fully visible frames in each 2 m range bin. This flight's
+visible approach covers about 4–12 m. The same flight crossed the gate; that
+crossing also happens with `RACE_RECORD` unset, so the fixture is the approach
+imagery rather than a passing hold.
+
 ## Safe original-source digest reproduction
 
 The optional `--capture` mode prints a compact digest map only. It requires the
