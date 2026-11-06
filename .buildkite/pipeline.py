@@ -74,6 +74,10 @@ test_steps = [
                 command="python3 scripts/ci/test_windows_paths.py",
             ),
             nix_step(
+                label="CI cache checks",
+                command="bash -n scripts/ci/prepare_cargo_cache.sh && uv run --no-project python -m unittest discover -s scripts/ci -p test_cargo_cache.py",
+            ),
+            nix_step(
                 label="typos",
                 command="typos -c typos.toml",
             ),
@@ -248,6 +252,10 @@ pipeline(
         "BUILDKITE_PLUGIN_FS_CACHE_FOLDER": "/run/buildkite/cache",
         # Cargo fingerprint inputs; keep identical across steps so each agent's target/ stays warm.
         "RUSTC_BOOTSTRAP": "1",
+        # Keep reusable Cargo artifacts without the large incremental/debug data.
+        "CARGO_INCREMENTAL": "0",
+        "CARGO_PROFILE_DEV_DEBUG": "0",
+        "CARGO_PROFILE_TEST_DEBUG": "0",
         "ELODIN_SHELL_ID": "ci",
         "GIT_HASH": "ci",
         "BUILDKITE_ANALYTICS_TOKEN": "R6hH2MNhtMdbfQWhDd9cvZfo",
