@@ -2,10 +2,9 @@ import json
 
 
 def step(label, command, key=None, depends_on=None, env={}, plugins=[], skip=False, agents={}):
-    commands = command if isinstance(command, list) else [command]
     return {
         "label": label,
-        "command": ["bash scripts/ci/prepare_cargo_cache.sh", *commands],
+        "command": command,
         "key": key,
         "depends_on": depends_on,
         "env": env,

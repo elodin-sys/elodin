@@ -4,14 +4,7 @@ This directory contains the configuration for Elodin's Buildkite CI infrastructu
 
 ## Cargo cache
 
-Agents run `git clean -ffdqx -e target`: other untracked files are removed, but `target/` (including `fsw/sensor-fw/target`) is kept so Cargo can reuse compiled dependencies. One cache per agent, at `/var/lib/buildkite-agent/builds/<agent>/elodin/elodin/target`.
-
-CI disables incremental compilation and debug information for dev/test builds to
-limit disk usage. Before entering Nix, each step checks free space. Below 15 GiB,
-it removes only its checkout's Cargo `debug/` and `release/` directories, including
-the sensor firmware workspace. It leaves other agents, the Nix store and installed
-shells untouched. If that is insufficient, the job fails early with a disk-space
-diagnostic; the host then needs maintenance.
+Agents run `git clean -ffdqx -e target`: other untracked files are removed, but `target/` (including `fsw/sensor-fw/target`) is kept so Cargo rebuilds incrementally. One cache per agent, at `/var/lib/buildkite-agent/builds/<agent>/elodin/elodin/target`.
 
 The flags come from `git-clean-flags` in `/etc/buildkite-agent/buildkite-agent.cfg`, set by [user-data](user-data). The agent overrides `BUILDKITE_GIT_CLEAN_FLAGS` from pipeline or build env. `BUILDKITE_CLEAN_CHECKOUT=true` on a build re-clones and drops the cache.
 
