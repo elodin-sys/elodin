@@ -83,6 +83,17 @@ pub(crate) fn editor_wgpu_settings() -> WgpuSettings {
             for_device_loss: None,
         },
         memory_hints: wgpu::MemoryHints::MemoryUsage,
+        // Safari often has no `navigator.gpu`. A WebGPU-only backend set then
+        // builds an empty wgpu-core instance and panics with
+        // `FailedToCreateSurfaceForAnyBackend({})`. WebGL covers that case;
+        // Chrome still gets WebGPU when `navigator.gpu` exists.
+        // `powerPreference: "high-performance"` also never resolves in Safari.
+        #[cfg(target_arch = "wasm32")]
+        backends: Some(
+            bevy::render::settings::Backends::BROWSER_WEBGPU | bevy::render::settings::Backends::GL,
+        ),
+        #[cfg(target_arch = "wasm32")]
+        power_preference: bevy::render::settings::PowerPreference::None,
         ..default()
     }
 }

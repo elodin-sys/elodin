@@ -17,8 +17,10 @@
         console.log("[elodin-boot]", msg, extra || "");
         const el = document.getElementById("boot");
         if (el) {
+          const line = extra ? msg + " — " + extra : msg;
           el.style.display = "block";
-          el.textContent = extra ? msg + " — " + extra : msg;
+          el.textContent =
+            el.dataset.keep === "1" ? (el.textContent + "\n" + line).slice(-4000) : line;
         }
       }
       ["log", "info", "warn", "error"].forEach((level) => {
@@ -34,14 +36,17 @@
             });
             const el = document.getElementById("boot");
             if (el) {
+              el.dataset.keep = "1";
               el.style.display = "block";
-              el.textContent = extra.slice(0, 800);
+              el.textContent = (el.textContent + "\n" + extra.slice(0, 1500)).slice(-4000);
             }
           }
           orig.apply(console, args);
         };
       });
       window.addEventListener("error", (e) => {
+        const el = document.getElementById("boot");
+        if (el) el.dataset.keep = "1";
         eloBoot(
           "window.error",
           e.message + " " + (e.filename || "") + ":" + e.lineno,
@@ -50,10 +55,12 @@
       window.addEventListener("unhandledrejection", (e) => {
         eloBoot("unhandledrejection", e.reason);
       });
+      let editorReady = false;
       window.addEventListener("TrunkApplicationStarted", () => {
-        eloBoot("wasm started");
+        if (!editorReady) eloBoot("wasm started");
       });
       window.addEventListener("elodin-ready", () => {
+        editorReady = true;
         const el = document.getElementById("boot");
         if (el) el.style.display = "none";
       });
