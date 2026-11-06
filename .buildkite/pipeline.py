@@ -10,6 +10,23 @@ BRANCH_NAME = (
     os.environ["PR_CLOSED_BRANCH"] if GITHUB_ACTION_TRIGGER else os.environ["BUILDKITE_BRANCH"]
 )
 
+if os.getenv("CI_RUNNER_CACHE_MAINTENANCE") == "1":
+    pipeline(
+        steps=[
+            step(
+                label=":broom: x86 runner cache",
+                command=".buildkite/maintain-runner-cache.sh --apply",
+                agents={"queue": "nixos-x86-aws"},
+            ),
+            step(
+                label=":broom: ARM runner cache",
+                command=".buildkite/maintain-runner-cache.sh --apply",
+                agents={"queue": "nixos-arm-aws"},
+            ),
+        ]
+    )
+    raise SystemExit
+
 test_steps = [
     group(
         name=":c: C",

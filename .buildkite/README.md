@@ -14,6 +14,16 @@ A step is only warm on agents that have already run it. To warm one step on ever
 bk build create -p elodin -b main -e CI_PREWARM="cargo test" -m "prewarm cargo test"
 ```
 
+## Runner cache maintenance
+
+Create a nightly Buildkite schedule on `main` with cron `0 10 * * *` (UTC) and:
+
+```text
+CI_RUNNER_CACHE_MAINTENANCE=1
+```
+
+The scheduled build runs one host-wide maintenance step on each runner queue. It starts evicting least-recently-used checkout caches below 500 GiB free and stops at 1 TiB free, while skipping active or Cargo-locked checkouts and retaining at least four caches total and one per repository. Run `.buildkite/maintain-runner-cache.sh --dry-run` on a runner to preview its eviction order.
+
 ## Quick Start
 
 Here's the complete setup in order:
