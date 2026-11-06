@@ -66,7 +66,7 @@ heights = terrain.heightmap(
 ```
 
 Dimensions and spacing are in meters. The grid is cached and reused on later
-runs. Use `offline=True` to read from the cache. No editor is needed.
+runs. No editor is needed.
 
 During the simulation:
 
@@ -80,6 +80,21 @@ after checking `sample.valid`. Heights are above the WGS84 ellipsoid; normals
 are in ECEF. Queries work inside JAX systems.
 
 See [API Reference](#api-reference) for parameters and return values.
+
+## Caching
+
+The native editor and height preparation use a local terrain cache automatically.
+Available tiles are reused; missing or expired data is fetched and cached as you
+explore new areas. Cache misses produce a terminal warning and loading continues.
+Provider cache rules apply to terrain and imagery responses.
+
+Prepared height grids are also saved and reused on subsequent runs. Use
+`offline=True` when preparing heights only if the grid must already exist and
+network access is not allowed.
+
+Tiles are stored in `$XDG_CACHE_HOME/bevy-cesium/terrain`, or
+`~/.cache/bevy-cesium/terrain`. Height grids are stored in
+`$XDG_CACHE_HOME/elodin/terrain-heights`, or `~/.cache/elodin/terrain-heights`.
 
 ## Run Falcon 9
 

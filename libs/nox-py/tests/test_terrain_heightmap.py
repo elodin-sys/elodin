@@ -147,6 +147,24 @@ def test_large_grid_uses_one_cli_request(tmp_path, monkeypatch):
     np.testing.assert_allclose(terrain.heights[:, 0], expected, atol=1e-12)
 
 
+def test_default_cache_reuses_grids_and_adds_new_coverage(tmp_path, monkeypatch, caplog):
+    calls = fake_backend(monkeypatch)
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    args = dict(center_ecef=[6378137, 0, 0], dimensions=(100, 100), spacing=10)
+    first = el.terrain_heightmap(**args)
+    assert len(calls) == 1
+    assert "Cached terrain height grid not found" in caplog.text
+    caplog.clear()
+    assert el.terrain_heightmap(**args).sha256 == first.sha256
+    assert len(calls) == 1
+    assert not caplog.records
+    second = el.terrain_heightmap(**{**args, "dimensions": (200, 200)})
+    assert len(calls) == 2
+    assert second.path != first.path
+    assert el.terrain_heightmap(**args).sha256 == first.sha256
+    assert len(calls) == 2
+
+
 @pytest.mark.parametrize(
     "change",
     [

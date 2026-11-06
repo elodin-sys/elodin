@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import logging
 import math
 import os
 from pathlib import Path
@@ -218,6 +219,9 @@ def terrain_heightmap(
     if not path.exists():
         if offline:
             raise FileNotFoundError(f"Terrain cache missing in offline mode: {path}")
+        logging.getLogger(__name__).warning(
+            "Cached terrain height grid not found; preparing it from terrain data"
+        )
         cache.mkdir(parents=True, exist_ok=True)
         with tempfile.TemporaryDirectory(dir=cache, prefix="prepare-") as temporary:
             input_path = Path(temporary) / "request.json"
