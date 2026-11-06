@@ -22,10 +22,10 @@ use std::{
 };
 
 #[cfg(not(target_os = "windows"))]
-use std::os::fd::{AsFd, FromRawFd};
+use std::os::fd::{AsFd, AsRawFd, FromRawFd};
 
 #[cfg(target_os = "windows")]
-use std::os::windows::io::{AsSocket, FromRawSocket};
+use std::os::windows::io::{AsRawHandle, AsSocket, FromRawSocket};
 
 #[pin_project]
 pub struct Read<'fd, T> {
@@ -47,30 +47,35 @@ impl<'fd, T: IoBufMut> Read<'fd, T> {
                 BorrowedHandle::Fd(fd) => {
                     #[cfg(target_os = "windows")]
                     {
-                        let fd = fd.try_clone_to_owned();
+                        let fd = fd.as_raw_handle() as usize;
                         ReadState::Blocking(unblock(move || {
-                            let res = fd
-                                .and_then(|fd| crate::os::pread(&fd, deref_mut(&mut buf), offset));
+                            let fd = unsafe {
+                                std::os::windows::io::BorrowedHandle::borrow_raw(fd as _)
+                            };
+                            let res =
+                                crate::os::pread(&fd, deref_mut(&mut buf), offset).map_err(|err| {
+                                    if let Some(os_err) = err.raw_os_error() {
+                                        io::Error::from_raw_os_error(os_err)
+                                    } else {
+                                        io::Error::other("")
+                                    }
+                                });
                             (res.map_err(Error::from), buf)
                         }))
                     }
 
                     #[cfg(not(target_os = "windows"))]
                     {
-                        // The blocking operation can outlive its canceled future.
-                        let fd = fd.try_clone_to_owned();
+                        let fd = fd.as_raw_fd();
                         ReadState::Blocking(unblock(move || {
-                            let res = fd.and_then(|fd| {
-                                if let Some(offset) = offset {
-                                    rustix::io::pread(fd, deref_mut(&mut buf), offset).map_err(
-                                        |err| io::Error::from_raw_os_error(err.raw_os_error()),
-                                    )
-                                } else {
-                                    rustix::io::read(fd, deref_mut(&mut buf)).map_err(|err| {
-                                        io::Error::from_raw_os_error(err.raw_os_error())
-                                    })
-                                }
-                            });
+                            let fd = unsafe { std::os::fd::BorrowedFd::borrow_raw(fd) };
+                            let res = if let Some(offset) = offset {
+                                rustix::io::pread(fd, deref_mut(&mut buf), offset)
+                                    .map_err(|err| io::Error::from_raw_os_error(err.raw_os_error()))
+                            } else {
+                                rustix::io::read(fd, deref_mut(&mut buf))
+                                    .map_err(|err| io::Error::from_raw_os_error(err.raw_os_error()))
+                            };
                             (res.map_err(Error::from), buf)
                         }))
                     }
@@ -97,13 +102,6 @@ impl<T: IoBufMut> OpCode for Read<'_, T> {
         match &self.state {
             ReadState::Blocking(_) => OpState::Ready,
             ReadState::NonBlocking { .. } => OpState::Waiting(None),
-        }
-    }
-
-    fn socket(&self) -> Option<&Socket> {
-        match &self.state {
-            ReadState::Blocking(_) => None,
-            ReadState::NonBlocking { sock, .. } => Some(sock),
         }
     }
 
@@ -164,12 +162,12 @@ impl<'fd, T: IoBuf> Write<'fd, T> {
                 BorrowedHandle::Fd(fd) => {
                     #[cfg(target_os = "windows")]
                     {
-                        let fd = fd.try_clone_to_owned();
+                        let fd = fd.as_raw_handle() as usize;
                         WriteState::Blocking(unblock(move || {
-                            let res = fd
-                                .and_then(|fd| {
-                                    crate::os::pwrite(&fd, crate::buf::deref(&buf), offset)
-                                })
+                            let fd = unsafe {
+                                std::os::windows::io::BorrowedHandle::borrow_raw(fd as _)
+                            };
+                            let res = crate::os::pwrite(&fd, crate::buf::deref(&buf), offset)
                                 .map_err(Error::from);
                             (res, buf)
                         }))
@@ -177,20 +175,17 @@ impl<'fd, T: IoBuf> Write<'fd, T> {
 
                     #[cfg(not(target_os = "windows"))]
                     {
-                        // The blocking operation can outlive its canceled future.
-                        let fd = fd.try_clone_to_owned();
+                        let fd = fd.as_raw_fd();
                         WriteState::Blocking(unblock(move || {
-                            let res = fd.and_then(|fd| {
-                                if let Some(offset) = offset {
-                                    rustix::io::pwrite(fd, crate::buf::deref(&buf), offset).map_err(
-                                        |err| io::Error::from_raw_os_error(err.raw_os_error()),
-                                    )
-                                } else {
-                                    rustix::io::write(fd, crate::buf::deref(&buf)).map_err(|err| {
-                                        io::Error::from_raw_os_error(err.raw_os_error())
-                                    })
-                                }
-                            });
+                            let fd = unsafe { std::os::fd::BorrowedFd::borrow_raw(fd) };
+
+                            let res = if let Some(offset) = offset {
+                                rustix::io::pwrite(fd, crate::buf::deref(&buf), offset)
+                                    .map_err(|err| io::Error::from_raw_os_error(err.raw_os_error()))
+                            } else {
+                                rustix::io::write(fd, crate::buf::deref(&buf))
+                                    .map_err(|err| io::Error::from_raw_os_error(err.raw_os_error()))
+                            };
                             (res.map_err(Error::from), buf)
                         }))
                     }
@@ -211,13 +206,6 @@ impl<T: IoBuf> OpCode for Write<'_, T> {
         match &self.state {
             WriteState::Blocking(_) => OpState::Ready,
             WriteState::NonBlocking { .. } => OpState::Waiting(None),
-        }
-    }
-
-    fn socket(&self) -> Option<&Socket> {
-        match &self.state {
-            WriteState::Blocking(_) => None,
-            WriteState::NonBlocking { sock, .. } => Some(sock),
         }
     }
 
@@ -343,10 +331,6 @@ impl<'fd> Connect<'fd> {
 }
 
 impl OpCode for Connect<'_> {
-    fn socket(&self) -> Option<&Socket> {
-        Some(self.fd)
-    }
-
     type Output = Result<(), Error>;
 
     fn event(&self) -> Option<polling::Event> {
@@ -412,10 +396,6 @@ impl<'fd> Accept<'fd> {
 }
 
 impl OpCode for Accept<'_> {
-    fn socket(&self) -> Option<&Socket> {
-        Some(self.fd)
-    }
-
     type Output = BufResult<Socket, Box<SockAddrRaw>>;
 
     fn event(&self) -> Option<polling::Event> {
@@ -542,13 +522,6 @@ impl<T: IoBuf> OpCode for SendTo<'_, T> {
         match &self.state {
             SendToState::Blocking(_) => OpState::Ready,
             SendToState::NonBlocking { .. } => OpState::Waiting(None),
-        }
-    }
-
-    fn socket(&self) -> Option<&Socket> {
-        match &self.state {
-            SendToState::Blocking(_) => None,
-            SendToState::NonBlocking { sock, .. } => Some(sock),
         }
     }
 
