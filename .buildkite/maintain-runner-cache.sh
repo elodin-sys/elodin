@@ -25,6 +25,7 @@ min_retained_per_repo="${CACHE_GC_MIN_RETAINED_PER_REPO:-1}"
     echo "Buildkite builds root not found: $builds_root" >&2
     exit 1
 }
+builds_root="$(realpath -e "$builds_root")"
 (( trigger_gib > 0 && target_gib > trigger_gib && min_retained > 0 && min_retained_per_repo > 0 )) || {
     echo "invalid cache-maintenance thresholds" >&2
     exit 1
@@ -38,6 +39,36 @@ available_kib() {
 available_gib() {
     echo $(( $(available_kib) / 1024 / 1024 ))
 }
+
+if [[ "$mode" == apply ]]; then
+    command -v flock >/dev/null || {
+        echo "flock is required for apply mode" >&2
+        exit 1
+    }
+    exec 9>"$builds_root/.runner-cache-maintenance.lock"
+    flock -n 9 || {
+        echo "another runner cache maintenance process is active" >&2
+        exit 1
+    }
+fi
+
+stale_trash=()
+mapfile -d '' -t stale_trash < <(
+    find "$builds_root" -mindepth 4 \
+        -type d -name .git -prune -o \
+        -type d -name target -prune -o \
+        -type d -name 'target.gc.*' -print0 -prune
+)
+if (( ${#stale_trash[@]} > 0 )); then
+    if [[ "$mode" == dry-run ]]; then
+        echo "Found ${#stale_trash[@]} interrupted eviction(s); apply mode would remove them"
+    else
+        for trash in "${stale_trash[@]}"; do
+            echo "Removing interrupted eviction: $trash"
+            nice -n 19 ionice -c 3 rm -rf --one-file-system -- "$trash"
+        done
+    fi
+fi
 
 declare -A active_checkouts=()
 collect_active_checkouts() {
@@ -65,30 +96,52 @@ is_active() {
 }
 
 last_used_epoch() {
-    local checkout="$1"
+    local checkout="$1" targets="$2"
     local newest=0 candidate timestamp
-    for candidate in \
-        "$checkout/target/.ci-last-used" \
-        "$checkout/.git/index" \
-        "$checkout/target"
-    do
+    for candidate in "$checkout/.git/index"; do
         [[ -e "$candidate" ]] || continue
         timestamp="$(stat -c %Y "$candidate")"
         (( timestamp > newest )) && newest="$timestamp"
     done
+    while IFS= read -r target; do
+        [[ -n "$target" ]] || continue
+        for candidate in "$target/.ci-last-used" "$target"; do
+            [[ -e "$candidate" ]] || continue
+            timestamp="$(stat -c %Y "$candidate")"
+            (( timestamp > newest )) && newest="$timestamp"
+        done
+    done <<< "$targets"
     echo "$newest"
 }
 
-shopt -s nullglob
+declare -A checkout_targets=()
+while IFS= read -r -d '' target; do
+    relative="${target#"$builds_root"/}"
+    IFS=/ read -r agent organization repository _ <<< "$relative"
+    [[ -n "$agent" && -n "$organization" && -n "$repository" ]] || continue
+    checkout="$(realpath -e "$builds_root/$agent/$organization/$repository")"
+    target="$(realpath -e "$target")"
+    checkout_targets["$checkout"]+="$target"$'\n'
+done < <(
+    find "$builds_root" -mindepth 4 \
+        -type d -name .git -prune -o \
+        -type d -name 'target.gc.*' -prune -o \
+        -type d -name target -print0 -prune
+)
+
 records=()
 declare -A repo_counts=()
-for target in "$builds_root"/*/*/*/target; do
-    [[ -d "$target" ]] || continue
-    checkout="${target%/target}"
-    checkout="$(realpath -e "$checkout")"
+declare -A target_counts=()
+for checkout in "${!checkout_targets[@]}"; do
     cache="${checkout#"$builds_root"/}"
     repo="${cache#*/}"
-    records+=("$(last_used_epoch "$checkout")"$'\t'"$cache"$'\t'"$repo"$'\t'"$checkout")
+    targets="${checkout_targets["$checkout"]}"
+    target_count=0
+    while IFS= read -r target; do
+        [[ -n "$target" ]] && (( target_count += 1 ))
+    done <<< "$targets"
+    target_counts["$checkout"]="$target_count"
+    records+=("$(last_used_epoch "$checkout" "$targets")"$'\t'"$cache"$'\t'"$repo"$'\t'"$checkout")
     repo_counts["$repo"]=$(( ${repo_counts["$repo"]:-0} + 1 ))
 done
 
@@ -126,25 +179,14 @@ if [[ "$mode" == dry-run ]]; then
             echo "  skip active: $cache"
             continue
         fi
-        printf '  %s last-used=%s target=%s\n' \
-            "$cache" "$(date -d "@$last_used" --iso-8601=seconds)" "$checkout/target"
+        printf '  %s last-used=%s targets=%s\n' \
+            "$cache" "$(date -d "@$last_used" --iso-8601=seconds)" "${target_counts["$checkout"]}"
         (( remaining -= 1 ))
         remaining_by_repo["$repo"]=$(( remaining_by_repo["$repo"] - 1 ))
     done
     echo "Dry run only; apply mode would evict in this order until ${target_gib}GiB is free"
     exit 0
 fi
-
-command -v flock >/dev/null || {
-    echo "flock is required for apply mode" >&2
-    exit 1
-}
-
-exec 9>"$builds_root/.runner-cache-maintenance.lock"
-flock -n 9 || {
-    echo "another runner cache maintenance process is active" >&2
-    exit 1
-}
 
 LOCK_FDS=()
 release_target_locks() {
@@ -155,19 +197,22 @@ release_target_locks() {
     LOCK_FDS=()
 }
 
-acquire_target_locks() {
-    local target="$1"
+acquire_checkout_locks() {
+    local targets="$1"
     local lock fd
     LOCK_FDS=()
-    while IFS= read -r -d '' lock; do
-        exec {fd}<>"$lock"
-        if ! flock -n "$fd"; then
-            eval "exec ${fd}>&-"
-            release_target_locks
-            return 1
-        fi
-        LOCK_FDS+=("$fd")
-    done < <(find "$target" -xdev -maxdepth 4 -type f -name .cargo-lock -print0)
+    while IFS= read -r target; do
+        [[ -d "$target" ]] || continue
+        while IFS= read -r -d '' lock; do
+            exec {fd}<>"$lock"
+            if ! flock -n "$fd"; then
+                eval "exec ${fd}>&-"
+                release_target_locks
+                return 1
+            fi
+            LOCK_FDS+=("$fd")
+        done < <(find "$target" -xdev -maxdepth 4 -type f -name .cargo-lock -print0)
+    done <<< "$targets"
 }
 
 retained=${#records[@]}
@@ -177,8 +222,12 @@ for record in "${ordered[@]}"; do
     (( retained > min_retained )) || break
 
     IFS=$'\t' read -r last_used cache repo checkout <<< "$record"
-    target="$checkout/target"
-    [[ -d "$target" ]] || continue
+    targets="${checkout_targets["$checkout"]}"
+    has_target=false
+    while IFS= read -r target; do
+        [[ -d "$target" ]] && has_target=true
+    done <<< "$targets"
+    $has_target || continue
 
     if (( repo_counts["$repo"] <= min_retained_per_repo )); then
         echo "Skipping repository retention floor: $cache"
@@ -189,7 +238,7 @@ for record in "${ordered[@]}"; do
         echo "Skipping active cache: $cache"
         continue
     fi
-    if ! acquire_target_locks "$target"; then
+    if ! acquire_checkout_locks "$targets"; then
         echo "Skipping locked cache: $cache"
         continue
     fi
@@ -201,11 +250,19 @@ for record in "${ordered[@]}"; do
         continue
     fi
 
-    trash="$checkout/target.gc.$(date +%s).$$"
-    echo "Evicting $cache (last used $(date -d "@$last_used" --iso-8601=seconds))"
-    mv -- "$target" "$trash"
+    trash_dirs=()
+    stamp="$(date +%s).$$"
+    echo "Evicting $cache (${target_counts["$checkout"]} targets, last used $(date -d "@$last_used" --iso-8601=seconds))"
+    while IFS= read -r target; do
+        [[ -d "$target" ]] || continue
+        trash="$target.gc.$stamp"
+        mv -- "$target" "$trash"
+        trash_dirs+=("$trash")
+    done <<< "$targets"
     release_target_locks
-    nice -n 19 ionice -c 3 rm -rf --one-file-system -- "$trash"
+    for trash in "${trash_dirs[@]}"; do
+        nice -n 19 ionice -c 3 rm -rf --one-file-system -- "$trash"
+    done
     (( retained -= 1 ))
     repo_counts["$repo"]=$(( repo_counts["$repo"] - 1 ))
     echo "Free space after eviction: $(available_gib)GiB"
