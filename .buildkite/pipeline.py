@@ -10,6 +10,17 @@ BRANCH_NAME = (
     os.environ["PR_CLOSED_BRANCH"] if GITHUB_ACTION_TRIGGER else os.environ["BUILDKITE_BRANCH"]
 )
 
+PIPELINE_ENV = {
+    "BUILDKITE_PLUGIN_FS_CACHE_FOLDER": "/run/buildkite/cache",
+    # Cargo fingerprint inputs; keep identical across steps so each agent's target/ stays warm.
+    "RUSTC_BOOTSTRAP": "1",
+    "ELODIN_SHELL_ID": "ci",
+    "GIT_HASH": "ci",
+    "BUILDKITE_ANALYTICS_TOKEN": "R6hH2MNhtMdbfQWhDd9cvZfo",
+    # The default nice 19 starves sensor-camera rendering on a saturated host.
+    "ELODIN_RENDER_SERVER_NICE": "0",
+}
+
 if os.getenv("CI_RUNNER_CACHE_MAINTENANCE") == "1":
     pipeline(
         steps=[
@@ -24,6 +35,51 @@ if os.getenv("CI_RUNNER_CACHE_MAINTENANCE") == "1":
                 agents={"queue": "nixos-arm-aws"},
             ),
         ]
+    )
+    raise SystemExit
+
+if os.getenv("CI_NIGHTLY_PREWARM") == "1":
+    pipeline(
+        steps=[
+            step(
+                label=":nix: x86 closures",
+                key="nightly-nix-x86",
+                command=[
+                    "nix develop --command true",
+                    "nix develop .#run --command true",
+                    "nix develop .#tracy --command true",
+                    "nix build --no-link .#elodin-cli .#elodin-db-protos",
+                ],
+            ),
+            step(
+                label=":nix: ARM Aleph closures",
+                key="nightly-nix-arm",
+                command=[
+                    "cd aleph",
+                    "nix build --no-link --accept-flake-config .#toplevel .#sdimage",
+                ],
+                agents={"queue": "nixos-arm-aws"},
+            ),
+            {
+                **step(
+                    label=":crab: x86 Cargo targets",
+                    key="nightly-cargo-x86",
+                    depends_on="nightly-nix-x86",
+                    command="""nix develop --command bash <<'EOF'
+set -euo pipefail
+cargo test --release --workspace --exclude elodin-db --exclude elodin-db-tests --no-run
+cargo test --release -p elodin-db --lib --bins --no-run
+cargo test --release -p elodin-db-tests --no-run
+cargo build --release -p elodin
+cargo build --release -p elodin-db --bin elodin-db-bench --features grpc,tracy
+cargo build --release -p rc-jet-controller
+EOF""",
+                ),
+                "parallelism": 8,
+            },
+        ],
+        env=PIPELINE_ENV,
+        agents={"queue": "nixos-x86-aws"},
     )
     raise SystemExit
 
@@ -261,16 +317,7 @@ if prewarm := os.getenv("CI_PREWARM"):
 
 pipeline(
     steps=pipeline_steps,
-    env={
-        "BUILDKITE_PLUGIN_FS_CACHE_FOLDER": "/run/buildkite/cache",
-        # Cargo fingerprint inputs; keep identical across steps so each agent's target/ stays warm.
-        "RUSTC_BOOTSTRAP": "1",
-        "ELODIN_SHELL_ID": "ci",
-        "GIT_HASH": "ci",
-        "BUILDKITE_ANALYTICS_TOKEN": "R6hH2MNhtMdbfQWhDd9cvZfo",
-        # The default nice 19 starves sensor-camera rendering on a saturated host.
-        "ELODIN_RENDER_SERVER_NICE": "0",
-    },
+    env=PIPELINE_ENV,
     agents={
         "queue": "nixos-x86-aws",
     },

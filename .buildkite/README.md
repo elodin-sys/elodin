@@ -14,6 +14,26 @@ A step is only warm on agents that have already run it. To warm one step on ever
 bk build create -p elodin -b main -e CI_PREWARM="cargo test" -m "prewarm cargo test"
 ```
 
+## Nightly Nix GC and cache warming
+
+Each runner host runs `nix-collect-garbage --delete-older-than 21d` from the
+`nix-store-gc.timer` in [user-data](user-data) at 11:00 UTC. Schedule an Elodin
+build on `main` at 13:30 UTC (`30 13 * * *`) with:
+
+```text
+CI_NIGHTLY_PREWARM=1
+```
+
+The build realizes the x86 dev shells and packages, builds the Aleph toplevel
+and SD image on ARM, then compiles the main Cargo targets in eight parallel
+jobs so every x86 agent checkout is warm. It does not run tests or deploy.
+
+To invoke the same mode manually:
+
+```bash
+bk build create -p elodin -b main -e CI_NIGHTLY_PREWARM=1 -m "nightly cache prewarm"
+```
+
 ## Runner cache maintenance
 
 Create a nightly Buildkite schedule on `main` with cron `0 10 * * *` (UTC) and:
