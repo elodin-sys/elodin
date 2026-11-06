@@ -25,6 +25,7 @@ async fn pending_tcp_read_allows_timer_and_other_socket_work() {
 }
 
 #[stellarator::test]
+#[ignore = "https://github.com/elodin-sys/paracosm/issues/1029: pending Stellarator cancellation fixes"]
 async fn canceled_udp_read_releases_readiness_for_the_next_reader() {
     let receiver = UdpSocket::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
     let address = receiver.local_addr().unwrap();

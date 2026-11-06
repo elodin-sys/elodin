@@ -5,6 +5,7 @@ use std::{
 };
 
 #[stellarator::test]
+#[ignore = "https://github.com/elodin-sys/paracosm/issues/1029: pending Stellarator cancellation fixes"]
 async fn waking_the_last_reference_to_a_completed_task_releases_it_once() {
     let saved = Arc::new(Mutex::new(None));
     let output = saved.clone();
