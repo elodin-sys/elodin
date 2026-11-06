@@ -37,6 +37,14 @@ use stellarator::util::CancelToken;
 use tracing::{error, info};
 use zerocopy::{FromBytes, TryFromBytes};
 
+// Keep one CPython thread state for the executor's lifetime. Callbacks still
+// acquire/release the GIL normally; allowing threads here leaves it available
+// to the rest of Python between callbacks. Otherwise each callback on this
+// native thread creates and deletes a thread state (and its frame arenas).
+fn on_python_runtime_thread<T: Send>(run: impl FnOnce() -> T + Send) -> T {
+    Python::with_gil(|py| py.allow_threads(run))
+}
+
 fn normalize_log_level(level: &str) -> Result<&'static str, Error> {
     match level.to_ascii_lowercase().as_str() {
         "error" => Ok("error"),
@@ -992,8 +1000,9 @@ impl WorldBuilder {
                         .name("elodin-sim-runtime".into())
                         .stack_size(256 * 1024 * 1024)
                         .spawn(move || {
-                            stellarator::run(|| {
-                                crate::impeller_server::Server::new(db_server, exec)
+                            on_python_runtime_thread(|| {
+                                stellarator::run(|| {
+                                    crate::impeller_server::Server::new(db_server, exec)
                                     .run_with_cancellation(
                                         move || {
                                             let cancelled = if let Some(ref func) = is_canceled {
@@ -1093,6 +1102,7 @@ impl WorldBuilder {
                                         start_timestamp.map(Timestamp),
                                         cancel_token,
                                     )
+                                })
                             })
                         })
                         .expect("failed to spawn elodin-sim-runtime thread");
@@ -2280,6 +2290,74 @@ impl WorldBuilder {
 mod test {
     use super::*;
     use convert_case::Casing;
+
+    #[test]
+    fn runtime_thread_state_retains_python_thread_locals() {
+        pyo3::prepare_freethreaded_python();
+        let counts = |retain_thread_state| {
+            let local = Python::with_gil(|py| {
+                py.import("threading")
+                    .unwrap()
+                    .call_method0("local")
+                    .unwrap()
+                    .unbind()
+            });
+            std::thread::spawn(move || {
+                let callbacks = || {
+                    (0..3)
+                        .map(|_| {
+                            Python::with_gil(|py| {
+                                let local = local.bind(py);
+                                let count = local
+                                    .getattr("count")
+                                    .map(|count| count.extract::<u32>().unwrap())
+                                    .unwrap_or(0)
+                                    + 1;
+                                local.setattr("count", count).unwrap();
+                                count
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                };
+                if retain_thread_state {
+                    on_python_runtime_thread(callbacks)
+                } else {
+                    callbacks()
+                }
+            })
+            .join()
+            .unwrap()
+        };
+        // The old lifecycle recreated the thread state for every callback,
+        // even though all callbacks ran on the same native thread.
+        let without_retention = counts(false);
+        let with_retention = counts(true);
+        eprintln!(
+            "thread-local counts: per-callback={without_retention:?}, runtime={with_retention:?}"
+        );
+        assert_eq!(with_retention, [1, 2, 3]);
+    }
+
+    #[test]
+    fn runtime_thread_state_releases_gil_between_callbacks() {
+        pyo3::prepare_freethreaded_python();
+        let (worker, acquired) = on_python_runtime_thread(|| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                Python::with_gil(|_| {
+                    let _ = tx.send(());
+                });
+            });
+            // Waiting in Rust does not itself release the GIL. The worker
+            // must acquire it before this runtime scope ends.
+            let acquired = rx.recv_timeout(std::time::Duration::from_secs(5));
+            (worker, acquired)
+        });
+        // Join outside the runtime scope so a failed assertion cannot leave
+        // the worker stuck waiting for a GIL held by this test.
+        worker.join().unwrap();
+        acquired.expect("the runtime retained the GIL between Python callbacks");
+    }
 
     #[cfg(not(target_os = "windows"))]
     #[test]

@@ -21,6 +21,7 @@ wired up. Unchecked items are compiled out, stubbed, or still native-only.
 - [x] Display kernels via the StableHLO interpreter (Cranelift JIT stays native)
 - [x] `web_time` instead of `std::time::Instant`
 - [x] Malformed `WorldPos` samples are ignored instead of panicking
+- [x] H.264 video decode via `webcodecs-video` (`attach_webcodecs` / `drive_webcodecs` in `video_stream.rs`)
 
 ## Not finished
 
@@ -28,7 +29,6 @@ wired up. Unchecked items are compiled out, stubbed, or still native-only.
 - [ ] Skyboxes: cache, generation, schematic activation, and DB asset sync (`wasm_cut.rs` stubs)
 - [ ] Skybox status overlay
 - [ ] Lua action tiles (the button renders; `LuaActor::spawn` does not connect)
-- [ ] H.264 video decode (no decoder thread on WASM)
 - [ ] Sensor-camera GPU readback
 - [ ] Unix `sensor_h264`
 - [ ] Thruster particles
