@@ -81,11 +81,13 @@ pub fn resolve_db_asset_url(path: &str, connection_addr: Option<SocketAddr>) -> 
 pub fn resolve_db_endpoint(path: &str, endpoint: Option<&impeller_bevy::DbEndpoint>) -> String {
     if let Some(name) = path.strip_prefix("db:") {
         let name = name.trim_start_matches('/');
-        let base = match endpoint {
-            Some(endpoint) => endpoint.http_base(),
-            None => assets_http_base("127.0.0.1:2240".parse().expect("valid addr")),
-        };
-        format!("{base}/{name}")
+        match endpoint {
+            Some(endpoint) => endpoint.assets_url(name).to_string(),
+            None => {
+                let base = assets_http_base("127.0.0.1:2240".parse().expect("valid addr"));
+                format!("{base}/{name}")
+            }
+        }
     } else {
         path.to_string()
     }
@@ -4204,6 +4206,18 @@ mod db_asset_url_tests {
         assert_eq!(
             super::resolve_db_endpoint("db:rocket.glb", Some(&endpoint)),
             "http://db.local:2241/rocket.glb"
+        );
+    }
+
+    #[test]
+    fn resolve_db_endpoint_uses_assets_override() {
+        let assets: impeller_bevy::HostOrUrl = "https://cdn.example/assets".parse().unwrap();
+        let endpoint = impeller_bevy::DbEndpoint::parse("db.local:2240")
+            .unwrap()
+            .with_assets(assets);
+        assert_eq!(
+            super::resolve_db_endpoint("db:rocket.glb", Some(&endpoint)),
+            "https://cdn.example/assets/rocket.glb"
         );
     }
 }
