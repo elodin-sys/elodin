@@ -432,3 +432,34 @@ async fn a_caller_owner_accepts_thread_local_futures() {
     owner.finish().await;
     assert!(observed.get());
 }
+
+#[stellarator::test]
+async fn built_in_udp_accepts_metadata_with_the_unit_owner() {
+    let (_dir, db) = database();
+    let reserved = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+    let addr = reserved.local_addr().unwrap();
+    drop(reserved);
+    let server_db = db.clone();
+    let server = stellarator::spawn(elodin_db::Server::handle_udp(addr, server_db));
+    let socket = stellarator::net::UdpSocket::bind(([127, 0, 0, 1], 0).into()).unwrap();
+    let id = ComponentId::new("udp.value");
+    bounded(async {
+        while !db.with_state(|state| state.get_component_metadata(id).is_some()) {
+            socket
+                .send_to(
+                    SetComponentMetadata::new(id, "udp.value")
+                        .into_len_packet()
+                        .inner,
+                    addr,
+                )
+                .await
+                .0
+                .unwrap();
+            stellarator::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await;
+    socket.send_to(vec![0; 4], addr).await.0.unwrap();
+    assert!(bounded(server).await.unwrap().is_err());
+    assert_eq!(Arc::strong_count(&db), 1);
+}
