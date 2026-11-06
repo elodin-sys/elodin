@@ -580,6 +580,11 @@
                 </li>
                 
                 <li>
+                    <a href="https://docs.elodin.systems/preview/pr-948/reference/python-api/#terrain">Terrain</a>
+                    
+                </li>
+                
+                <li>
                     <a href="https://docs.elodin.systems/preview/pr-948/reference/python-api/#components">Components</a>
                     
                     <ul>
@@ -1492,6 +1497,9 @@ applied torque. Use <code>Integrator.Rk4</code> or a smaller time step for spinn
 <span class="giallo-l"><span>sys</span><span style="color: light-dark(#859900, #859900);"> =</span><span> el</span><span>.</span><span>six_dof</span><span>(</span><span>time_step</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#CB4B16, #CB4B16);">SIX_DOF_TIME_STEP</span><span>,</span><span> sys</span><span style="color: light-dark(#859900, #859900);">=</span><span>gravity</span><span>)</span></span>
 <span class="giallo-l"><span>sim</span><span style="color: light-dark(#859900, #859900);"> =</span><span> w</span><span>.</span><span>run</span><span>(</span><span>sys</span><span>,</span><span style="color: light-dark(#CB4B16, #CB4B16);"> SIM_TIME_STEP</span><span>)</span></span></code></pre>
 <p><br></br></p>
+<h2 id="terrain">Terrain</h2>
+<p>See <a href="/reference/terrain/#api-reference">Terrain</a> for <code>elodin.Terrain</code>,
+height-grid preparation and JAX height queries.</p>
 <h2 id="components">Components</h2>
 <p>Components are containers of data that is associated with an entity. See <a href="/reference/overview#ecs-data-model">ECS Data Model</a> for more context on entities and components.</p>
 <p>To define a new component, add <a href="https://docs.elodin.systems/preview/pr-948/reference/python-api/#class-elodin-component">elodin.Component</a> as metadata to a base class using <a rel="external" href="https://docs.python.org/3/library/typing.html#typing.Annotated">typing.Annotated</a>. The base class can be <a rel="external" href="https://jax.readthedocs.io/en/latest/_autosummary/jax.Array.html#jax.Array">jax.Array</a> or some other container of array data. This is an example of a component that annotates <a rel="external" href="https://jax.readthedocs.io/en/latest/_autosummary/jax.Array.html#jax.Array">jax.Array</a>:</p>

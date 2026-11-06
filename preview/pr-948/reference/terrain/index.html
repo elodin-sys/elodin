@@ -557,7 +557,7 @@ ground heights. <code>"legacy"</code> uses Falcon 9's original globe. Photo 3D i
 <h3 id="class-elodin-terrain"><em>class</em> <code>elodin.Terrain</code></h3>
 <p><code>Terrain(asset_id=2275207)</code></p>
 <table><thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead><tbody>
-<tr><td><code>asset_id</code></td><td><code>2275207</code></td><td>Positive ion asset ID. The default is Google Photorealistic 3D Tiles; <code>1</code> selects Cesium World Terrain with Bing aerial imagery in the editor.</td></tr>
+<tr><td><code>asset_id</code></td><td><code>2275207</code></td><td>Positive signed 64-bit ion asset ID. The default is Google Photorealistic 3D Tiles; <code>1</code> selects Cesium World Terrain with Bing aerial imagery in the editor.</td></tr>
 </tbody></table>
 <p>Constructing a <code>Terrain</code> performs no network or disk access.</p>
 <ul>
@@ -572,7 +572,7 @@ World Terrain; imagery does not change the surface used for height queries.</p>
 <table><thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead><tbody>
 <tr><td><code>center_ecef</code></td><td>Required</td><td>Three-element WGS84 ECEF position, in meters.</td></tr>
 <tr><td><code>dimensions</code></td><td>Required</td><td><code>(east_west, north_south)</code> coverage in meters; both lengths must be positive.</td></tr>
-<tr><td><code>spacing</code></td><td>Required</td><td>Maximum sample spacing in meters; must be positive.</td></tr>
+<tr><td><code>spacing</code></td><td>Required</td><td>Maximum sample spacing in meters at the grid center; must be positive.</td></tr>
 <tr><td><code>cache_dir</code></td><td><code>None</code></td><td>Directory for saved height grids. Defaults to <code>$XDG_CACHE_HOME/elodin/terrain-heights</code>, or <code>~/.cache/elodin/terrain-heights</code>. Accepts a string or <code>Path</code>.</td></tr>
 <tr><td><code>offline</code></td><td><code>False</code></td><td>Require an existing cached grid; raise <code>FileNotFoundError</code> on a cache miss.</td></tr>
 <tr><td><code>timeout</code></td><td><code>600</code></td><td>Integer seconds per native batch, from <code>1</code> to <code>3600</code>. Failed preparation is retried up to twice.</td></tr>
