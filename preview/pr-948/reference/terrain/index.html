@@ -442,6 +442,11 @@
                 </li>
                 
                 <li>
+                    <a href="https://docs.elodin.systems/preview/pr-948/reference/terrain/#caching">Caching</a>
+                    
+                </li>
+                
+                <li>
                     <a href="https://docs.elodin.systems/preview/pr-948/reference/terrain/#run-falcon-9">Run Falcon 9</a>
                     
                 </li>
@@ -521,7 +526,7 @@ ellipsoid.</p>
 <span class="giallo-l"><span>    location</span><span>,</span><span> dimensions</span><span style="color: light-dark(#859900, #859900);">=</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">200.0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 200.0</span><span>)</span><span>,</span><span> spacing</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">10.0</span><span>,</span></span>
 <span class="giallo-l"><span>)</span></span></code></pre>
 <p>Dimensions and spacing are in meters. The grid is cached and reused on later
-runs. Use <code>offline=True</code> to read from the cache. No editor is needed.</p>
+runs. No editor is needed.</p>
 <p>During the simulation:</p>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>sample</span><span style="color: light-dark(#859900, #859900);"> =</span><span> heights</span><span>.</span><span>sample</span><span>(</span><span>position_ecef</span><span>)</span></span>
 <span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> sample.height_m, sample.normal_ecef, sample.valid</span></span></code></pre>
@@ -529,6 +534,17 @@ runs. Use <code>offline=True</code> to read from the cache. No editor is needed.
 after checking <code>sample.valid</code>. Heights are above the WGS84 ellipsoid; normals
 are in ECEF. Queries work inside JAX systems.</p>
 <p>See <a href="https://docs.elodin.systems/preview/pr-948/reference/terrain/#api-reference">API Reference</a> for parameters and return values.</p>
+<h2 id="caching">Caching</h2>
+<p>The native editor and height preparation use a local terrain cache automatically.
+Available tiles are reused; missing or expired data is fetched and cached as you
+explore new areas. Cache misses produce a terminal warning and loading continues.
+Provider cache rules apply to terrain and imagery responses.</p>
+<p>Prepared height grids are also saved and reused on subsequent runs. Use
+<code>offline=True</code> when preparing heights only if the grid must already exist and
+network access is not allowed.</p>
+<p>Tiles are stored in <code>$XDG_CACHE_HOME/bevy-cesium/terrain</code>, or
+<code>~/.cache/bevy-cesium/terrain</code>. Height grids are stored in
+<code>$XDG_CACHE_HOME/elodin/terrain-heights</code>, or <code>~/.cache/elodin/terrain-heights</code>.</p>
 <h2 id="run-falcon-9">Run Falcon 9</h2>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#2AA198, #2AA198);"> examples/falcon9/main.py</span></span></code></pre>
 <p>Falcon 9 flies from LC-39A to Landing Zone 1 at Cape Canaveral. See its
