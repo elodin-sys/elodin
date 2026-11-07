@@ -8,6 +8,8 @@ Agents run `git clean -ffdqx -e target`: other untracked files are removed, but 
 
 The flags come from `git-clean-flags` in `/etc/buildkite-agent/buildkite-agent.cfg`, set by [user-data](user-data). The agent overrides `BUILDKITE_GIT_CLEAN_FLAGS` from pipeline or build env. `BUILDKITE_CLEAN_CHECKOUT=true` on a build re-clones and drops the cache.
 
+CI also stores commit-keyed Nix development profiles under `target/nix-profiles/`. Each checkout retains three profiles per architecture and flake shell, avoiding repeated flake evaluation and shell realization while allowing old Nix closures to be garbage-collected.
+
 A step is only warm on agents that have already run it. To warm one step on every x86 agent, start a build while the queue is idle:
 
 ```bash
@@ -17,14 +19,15 @@ bk build create -p elodin -b main -e CI_PREWARM="cargo test" -m "prewarm cargo t
 ## Nightly Nix GC and cache warming
 
 Each runner host runs `nix-collect-garbage --delete-older-than 21d` from the
-`nix-store-gc.timer` in [user-data](user-data) at 11:00 UTC. Schedule an Elodin
-build on `main` at 13:30 UTC (`30 13 * * *`) with:
+`nix-store-gc.timer` in [user-data](user-data) at 08:10 UTC, with up to ten
+minutes of randomized delay. Schedule an Elodin
+build on `main` at 08:30 UTC (`30 8 * * *`) with:
 
 ```text
 CI_NIGHTLY_PREWARM=1
 ```
 
-The build realizes the x86 dev shells and packages, builds the Aleph toplevel
+The build creates reusable x86 development profiles and realizes the packages, builds the Aleph toplevel
 and SD image on ARM, then compiles the main Cargo targets in eight parallel
 jobs so every x86 agent checkout is warm. It does not run tests or deploy.
 
@@ -36,13 +39,13 @@ bk build create -p elodin -b main -e CI_NIGHTLY_PREWARM=1 -m "nightly cache prew
 
 ## Runner cache maintenance
 
-Create a nightly Buildkite schedule on `main` with cron `0 10 * * *` (UTC) and:
+Create a nightly Buildkite schedule on `main` with cron `0 8 * * *` (UTC) and:
 
 ```text
 CI_RUNNER_CACHE_MAINTENANCE=1
 ```
 
-The scheduled build runs one host-wide maintenance step on each runner queue. It starts evicting least-recently-used checkout caches below 500 GiB free and stops at 1 TiB free, while skipping active or Cargo-locked checkouts and retaining at least four caches total and one per repository. Run `.buildkite/maintain-runner-cache.sh --dry-run` on a runner to preview its eviction order.
+The scheduled build runs one host-wide maintenance step on each runner queue. It always removes `/tmp/nix-shell.*` scratch trees older than 24 hours, while skipping shells referenced by active processes. It then starts evicting least-recently-used checkout caches below 500 GiB free and stops at 1 TiB free, while skipping active or Cargo-locked checkouts and retaining at least four caches total and one per repository. Run `.buildkite/maintain-runner-cache.sh --dry-run` on a runner to preview both cleanup phases. Override the shell age for testing with `NIX_SHELL_GC_MIN_AGE_MINUTES`.
 
 ## Quick Start
 
