@@ -1,67 +1,53 @@
 # Changelog
 
 ## unreleased
-- **(fix)** `EGM08` gravity includes its top degree (`EGM08(2)` now applies J2) and weights the tesseral and sectoral terms (order m ≥ 1) correctly; they were scaled by m + 1 in all four Pines sums, so order-1 terms were doubled. Trajectories propagated with `EGM08` change.
-- **(fix)** The Cranelift backend computes these lookups correctly: `table[:, idx]` and other indexing along a later axis, `lax.dynamic_slice` in a system mapped over several entities, and indexing into a table that differs per entity. They could return wrong values; the first two only in functions holding an array of more than 64 elements.
-- **(breaking:aleph)** The root flake no longer has an `aleph` input, so flakes that reach Elodin through another flake lock without hoisting `elodin`. Replace `aleph.follows = "elodin/aleph"` with an `aleph` input on the same Elodin revision plus `dir=aleph`, with `inputs.nixpkgs.follows = "elodin/nixpkgs"` and `inputs.rust-overlay.follows = "elodin/rust-overlay"`.
-- **(fix)** The Cranelift backend reads the right entries for `jnp.interp` and `table[idx]` in a system mapped over several entities when the function holds an array of more than 64 elements, and clamps indices outside a table to its ends, as jax-cpu does. Such indices could return arbitrary values.
-- **(fix)** The Cranelift backend computes `jnp.log` of arrays with two or more elements to full precision; it was off by up to about 1e-13 relative error, which also shifted `jnp.log1p` on such arrays. Long simulations that use them can drift slightly from earlier results.
-- **(breaking)** `six_dof` solves Euler's rigid-body equations with the full inertia tensor, including the gyroscopic term `ω × Iω`. Bodies with unequal principal moments now precess and tumble when they spin; trajectories of such bodies change.
-- **(breaking)** `SpatialInertia` and `SpatialInertia.from_array` validate concrete inputs: mass must be finite and > 0, `inertia` and `inertia_off_diag` must have shape (3,), and the tensor must be positive-definite and satisfy the triangle inequality. Ints, lists, and int or float32 arrays are converted to float64; bools and strings raise.
-- **(breaking:rust)** `nox::SpatialInertia` slots 3..6 hold the off-diagonal inertia entries `[Ixy, Ixz, Iyz]` instead of momentum; `SpatialInertia::new` takes them as its second argument, and `momentum()` is replaced by `inertia_off_diag()`.
-- **(feat)** Add `inertia_off_diag` to `SpatialInertia(...)`, plus `inertia_off_diag()` and `inertia_matrix()`, for bodies whose axes are not principal axes. Entries are signed tensor entries (`Ixy = -∫xy dm`); negate CAD products of inertia.
-- **(feat:examples)** Add the `dzhanibekov-effect` example: a body spun about its intermediate axis flips periodically.
-- **(fix)** `six_dof(time_step=...)` with `Integrator.Rk4` uses `time_step` in every RK4 stage; the intermediate stages previously used the world's simulation time step. `six_dof` rejects a non-finite or non-positive `time_step`.
-- **(fix)** `Integrator.Rk4` evaluates each stage at that stage's velocity instead of the initial velocity, restoring fourth-order accuracy for position-dependent forces such as gravity and springs (#933).
-- **(fix)** `Integrator.Rk4` integrates orientation to fourth order; the quaternion update was second order, so attitude error shrank only 4× per halved time step. Trajectories of rotating bodies change slightly.
-- **(feat)** Add `Integrator.Rk2` (Heun's method) and `Integrator.Rk3` (Kutta's third-order method) to `six_dof`.
-- **(breaking:rust)** `nox_py::integrator::Rk4` is replaced by `ExplicitRk`, which takes a `ButcherTableau` (`RK2`, `RK3`, `RK4`, `RK78`, `DP54`); `Integrator::Rk4` becomes `Integrator::ExplicitRk(&RK4)`.
-- **(feat)** Add `Integrator.Verlet` (velocity Verlet) to `six_dof`: second order, and symplectic when forces depend only on position, so energy errors stay bounded over long runs.
-- **(feat:examples)** `n-body` integrates with `Integrator.Verlet`.
-- **(fix:examples)** `n-body` computes its truth positions inside the simulation, relative to the simulated Sun, so `bench` exports include them and the accuracy report measures the integration and the model instead of the Sun's drift: the global RMS error over five years is 2.8e-5 AU, not 7.5e-3 AU.
-- **(feat)** Add `Integrator.Rk78`, the eighth-order solution of Fehlberg's 7(8) Runge-Kutta pair.
-- **(feat)** Add the global `StageTime` component: the seconds past the start of the simulation step at which `six_dof` is evaluating its effectors, so time-dependent effectors keep the integrator's full order. Exports gain `globals.stage_time`.
-- **(fix:examples)** The voyager chapters interpolate Jupiter's position to each integrator stage's time, with a cubic through its SPICE positions and velocities, instead of holding it at the step's midpoint, cutting the integration error over six days from about 650 m to about 2 mm.
-- **(feat:examples)** `voyager` and its chapters integrate with `Integrator.Rk78`.
-- **(feat)** Add `Integrator.Dp54`, the fifth-order solution of the Dormand-Prince 5(4) pair, with a fixed time step.
-- **(feat)** Add the `StepError` component: under `Integrator.Dp54` or `Integrator.Rk78`, bodies that have it receive each step's embedded error estimate (attitude, position, angular velocity, velocity).
-- **(feat:examples)** `dzhanibekov-effect` integrates with `Integrator.Dp54` and graphs its step error, which peaks at each flip.
-- **(fix)** Calling `Exec.run` more than once no longer fails with "db time travel" when the simulation runs faster than real time. Each tick is recorded at its simulation time, continuing from the previous call.
-- **(feat)** `World.build` accepts `start_timestamp`, like `World.run`.
-- **(fix)** `JaxSim.set_state` updates the state instead of discarding the new value, `JaxSim.get_state` and `set_state` return and accept the full value of a component held by a single entity, and `JaxSim.step` keeps the tick an integer.
-- **(fix)** `World.to_jax` accepts systems that read components no system writes, such as parameters or the tick.
-- **(feat)** Add `JaxSim.step_fn`, `JaxSim.get` and `JaxSim.set`, pure functions of a state for `jax.jit`, `jax.vmap` and `jax.lax.scan`. `JaxSim.set_state` with `entity_name=None` writes every entity's value.
-- **(fix)** The Cranelift backend no longer confuses values across `lax.cond`, `lax.switch`, `while_loop`, `fori_loop`, `map` and `sort` bodies. Such programs could return wrong values; in `examples/drone`, all four motors dropped to minimum the first time the mixer saturated.
-- **(fix)** The Cranelift backend reduces over any axis or set of axes. Sums, products, minimums and maximums over a leading or middle axis, over several axes, or of arrays with three or more dimensions could return wrong values, for example `jnp.sum(x, axis=0)` in a system mapped over several entities.
-- **(fix)** The Cranelift backend computes `jnp.prod` instead of a sum, and `jnp.argmax` instead of `jnp.argmin`.
-- **(fix)** The Cranelift backend computes `jax.scipy.special.erfc` accurately; results were off by up to 7%.
-- **(fix)** The Cranelift backend applies `jnp.where` with a scalar condition to every element in large systems; elements after the first could take arbitrary values.
-- **(fix)** The Cranelift backend writes `.at[...]` updates with column, multi-dimensional, slice and per-entity indices to the indexed elements, and `.at[...].add`, `.multiply`, `.min` and `.max` combine with the existing values instead of overwriting them.
-- **(fix)** The Cranelift backend evaluates matrix products with any batch and contracting dimensions and in float32 and integer arithmetic. Batched products such as `M @ v` in a system mapped over several entities could evaluate to zeros or wrong values.
-- **(fix)** The Cranelift backend computes `jnp.argmax` and `jnp.argmin` over any axis and of integer, boolean and float32 arrays, taking the first NaN and the lowest tied index as JAX does. `jnp.select` no longer fails to compile.
-- **(fix)** The Cranelift backend handles boolean, integer and float32 arrays in large systems: boolean comparisons such as a `while_loop` condition `(i < n) & ...` could loop forever, and `lax.clamp`, `jnp.sign` and `jnp.mod` on integers and float32 and int32 arithmetic and reductions returned wrong values or failed to compile. Float-to-integer conversions saturate and turn NaN into 0, as on jax-cpu.
-- **(fix)** The Cranelift backend sorts integer and float32 arrays, along any axis and by several keys (`jnp.sort`, `jnp.argsort`, `lax.sort`), with NaN last as in JAX.
-- **(fix)** The Cranelift backend compiles functions JAX names `<lambda>` (from `jax.jit(lambda ...)` inside a system), float32 constants such as `-inf`, and `lax.cond` branches that all return the same captured value.
-- **(fix)** The Cranelift backend computes `jnp.cumsum`, `lax.reduce_window` and the gradient of a max pool in every system and for integer and float32 arrays; they could fail to compile, ignore their window, or hang. A gradient through tied maxima goes to the first one, as on jax-cpu.
-- **(fix)** The Cranelift backend propagates NaN through `jnp.maximum`, `jnp.minimum`, `jnp.max`, `jnp.min` and `.at[].max` and `.at[].min`, as jax-cpu does. A NaN in the first argument or inside a reduction was dropped, which could hide a simulation that had gone NaN.
-- **(fix)** The Cranelift backend computes a `jnp.dot` or `jnp.sum` inside a `fori_loop` or `while_loop` body exactly as outside it, so comparing the two can no longer flip a branch.
-- **(test:ci)** `regress.sh` also runs every example on jax-cpu against the same baseline, and compares telemetry tick by tick, so a value that changes by an ulp every tick on one backend matches a value that settles on the other.
-- **(fix:examples)** `examples/drone/main.py --telemetry` runs at the configured simulation rate.
-- **(fix:aleph)** The `mekf` service subtracts the gyro bias from `gyro_est` once instead of twice, and keeps estimating attitude from the remaining sensors when the magnetometer or accelerometer reads zero, as sensor-fw sends when the BMM350 is missing. With one sensor left it holds the gyro bias and integrates rotation about that sensor's axis from the gyro alone, so without the magnetometer yaw drifts with the residual gyro bias. `mag_cal` reads zero while the magnetometer is missing.
-- **(breaking)** An `object_3d` ellipsoid with `orientation=absolute` applies `scale` along the frame's x, y, z; it previously swapped y and z.
-- **(feat)** Add `fill=#false` (`ui.icon(fill=False)`) for outline built-in icons, and the `check_box_outline_blank` and `crop_square` icons.
-- **(feat)** Evaluate `sqrt`, `abs`, `sign`, `degrees`, `arccos`, `clip`, `atan2`, and `norm` in viewport and 3D-object EQL, and index integer components there.
-- **(feat)** Add `ELODIN_SCREENSHOT_TIME` and `ELODIN_SCREENSHOT_TAB` to capture a chosen moment and tab.
-- **(fix)** Keep graphs whose components register after the schematic loads; they fill in once the components appear instead of disappearing.
-- **(fix)** Send a component's metadata on real-time streams when it arrives after the component's first table, so live editors learn components that writers register mid-run.
-- **(fix)** Open the tab that holds an `active` split or viewport.
-- **(fix)** Apply a mesh's `visibility_range` without an icon.
-- **(fix)** Draw "±" and other Latin-1 characters in vector-arrow labels.
-- **(fix)** Log a 3D object's pose evaluation error once instead of hiding it silently, and drop the `[]` label on scalar component monitors.
-- **(fix)** Raise `TypeError` when a display kernel is passed to an EQL-only `elodin.ui` field instead of writing its repr into the schematic.
-- **(fix)** Live playback keeps pace with the simulation; the editor no longer falls behind as a recording grows.
-- **(fix)** Plots no longer redraw their whole line for each page of a loading recording, or leave a gap at the window's left edge when the sample before it loads late.
-- **(fix)** Keep pace with faster-than-real-time simulations: live `line_3d` trails no longer re-read their whole history every frame.
+
+## v0.21
+
+### v0.21.0
+
+- **(breaking:aleph)** Remove the root flake's `aleph` input; downstream flakes must declare Aleph separately with `dir=aleph`. (#950)
+- **(breaking)** Include the full inertia tensor and gyroscopic term in `six_dof`, changing trajectories of spinning bodies. (#931)
+- **(breaking)** Validate `SpatialInertia` inputs; invalid masses and inertia tensors now raise errors. (#931)
+- **(breaking:rust)** Replace momentum with off-diagonal inertia entries in `nox::SpatialInertia`; replace `momentum()` with `inertia_off_diag()`. (#931)
+- **(breaking:rust)** Replace the Rust `Rk4` integrator type with `ExplicitRk` and `Integrator::Rk4` with `Integrator::ExplicitRk(&RK4)`. (#935)
+- **(breaking)** Apply ellipsoid scale along X/Y/Z with `orientation=absolute`, correcting the previous Y/Z swap. (#903)
+- **(feat)** Add a WASM browser editor with WebSocket DB connections, 3D views, graphs, point trails, and interpreted display kernels. (#895)
+- **(feat)** Support `video_stream` and sensor-camera views in the WASM editor, with WebCodecs H.264 playback and seeking on Chrome and Safari. (#942)
+- **(feat)** Add Cloud login, logout, identity and project commands, and recording uploads with compacted log transfer. (#947)
+- **(feat)** Make timeline timestamps editable and copyable, including microsecond timestamps for recording alignment. (#877)
+- **(feat)** Support inline Python window layouts and automatic window arrangement across displays. (#887)
+- **(feat)** Add adjustable sensor-camera frustum opacity. (#884)
+- **(feat)** Add off-diagonal inertia support and `inertia_matrix()` to `SpatialInertia`. (#931)
+- **(feat)** Add RK2, RK3, Verlet, RK78, and Dormand–Prince 5(4) integrators, with stage timestamps and embedded step-error estimates. (#935)
+- **(feat)** Add `start_timestamp` to `World.build` and pure `JaxSim.step_fn`, `get`, and `set` functions for JAX transformations. (#936)
+- **(feat)** Add outline icons, additional viewport/3D-object EQL math functions, and screenshot time/tab selection. (#903)
+- **(feat:examples)** Add `dzhanibekov-effect`, with DP54 integration and step-error plots. (#931, #935)
+- **(feat:examples)** Add Voyager Chapters 1 and 2; use RK78 and interpolate Jupiter's position at each integration stage. (#899, #916, #935)
+- **(feat:examples)** Use Verlet in `n-body` and record reference trajectories relative to the simulated Sun, including in benchmark exports. (#935)
+- **(feat:examples)** Add Betaflight truth-guided single-gate hold and a three-gate straight course with ordered crossing checks and race timing. (#894, #913, #943)
+- **(feat:examples)** Add Betaflight gate-pose vision contracts, corner-order ambiguity reporting, and simulation-time FPV sample timestamps. (#891, #928)
+- **(fix)** Correct EGM08's top-degree inclusion and tesseral/sectoral weights; gravity trajectories change. (#939)
+- **(fix)** Honor and validate `six_dof(time_step=...)`; restore RK4's fourth-order position and orientation accuracy. (#931, #934)
+- **(fix)** Prevent DB time-travel errors across repeated `Exec.run` calls and correct `JaxSim` state updates, component shapes, and read-only component handling. (#936)
+- **(fix)** Preserve Python thread-local state between simulation callbacks without holding the GIL between calls. (#949)
+- **(fix)** Correct Cranelift value scoping across branches and loops, and handle reductions over empty inputs. (#936, #949)
+- **(fix)** Correct Cranelift table indexing, interpolation, dynamic slices, batched/per-entity lookups, and out-of-range index clamping. (#938, #944, #946)
+- **(fix)** Correct Cranelift reductions, argmin/argmax, batched matrix products, scatter updates, sorting, cumulative sums, and window operations. (#938)
+- **(fix)** Correct Cranelift boolean/integer/float32 operations, selection, conversions, NaN handling, and `erfc`; restore vector `log`/`log1p` precision. (#938, #940)
+- **(fix)** Fix Cranelift lambda/constant compilation and loop-local dot/sum consistency. (#938)
+- **(fix)** Prevent DB VTable collisions affecting LWIR cameras and stream-layout races when components gain data; update follower stream layouts correctly. (#937, #949)
+- **(fix)** Preserve late-registered playback components, graphs, and metadata in interactive editors. (#884, #903)
+- **(fix)** Keep live playback synchronized and avoid repeated plot-history scans, backfill gaps, and full-history trail reads. (#893, #903)
+- **(fix)** Make viewport arrows inherit the schematic coordinate frame. (#908)
+- **(fix)** Select tabs containing active views, honor mesh visibility ranges, and render Latin-1 vector labels. (#903)
+- **(fix)** Simplify scalar monitor labels, report pose-evaluation errors, and reject display kernels in EQL-only UI fields. (#903)
+- **(fix:examples)** Correct RC-jet FPV body-frame transforms and provide the Mojave terrain mesh by default. (#905, #937)
+- **(fix:examples)** Correct Betaflight FPV tilt, harden GPS/magnetometer initialization settings, and avoid oversized Nix compiler flags during SITL linking. (#891, #904, #928)
+- **(fix:examples)** Honor the configured simulation rate in `drone --telemetry`. (#936)
+- **(fix:aleph)** Correct MEKF gyro-bias subtraction and continue attitude estimation when accelerometer or magnetometer data is missing. (#936)
+- **(chore)** Update dependencies to address compromised certificate trust. (#909)
+- **(chore:examples)** Replace standalone example KDL files with Python schematics, including inline drone window layouts. (#887)
 
 ## v0.20
 
