@@ -103,7 +103,8 @@ fn accept(cache: &mut VideoFrameCache, page: &Page, batch: MsgBatch) -> bool {
         }
         first_loaded.get_or_insert(time);
         last_loaded = Some(time);
-        cache.insert_raw(time, data);
+        let anchor = cache.eviction_pivot.unwrap_or(time);
+        cache.insert_raw(time, data, anchor);
     }
     let state = cache.browser.as_mut().expect("checked browser state");
     if let (Some(first), Some(last)) = (first_loaded, last_loaded) {
@@ -135,9 +136,7 @@ pub(super) fn update(
     commands: &mut Commands,
 ) {
     let Some(scope) = scope.key.as_ref() else {
-        cache.raw_frames.clear();
-        cache.decoded_frames.clear();
-        cache.keyframe_index.clear();
+        cache.clear_raw_keeping(None);
         cache.browser = None;
         return;
     };
@@ -147,9 +146,7 @@ pub(super) fn update(
         .as_ref()
         .is_none_or(|state| &state.scope != scope)
     {
-        cache.raw_frames.clear();
-        cache.decoded_frames.clear();
-        cache.keyframe_index.clear();
+        cache.clear_raw_keeping(None);
         cache.browser = Some(BrowserVideoState::new(scope.clone(), center));
     }
     let state = cache.browser.as_mut().expect("browser state initialized");
@@ -344,12 +341,13 @@ mod tests {
     fn byte_limits_keep_frames_near_the_playhead() {
         let mut cache = VideoFrameCache::for_raw();
         cache.max_raw_bytes = 12;
+        cache.browser = Some(BrowserVideoState::new("recording".into(), 20));
         cache.last_decoded_ts = Some(Timestamp(20));
-        cache.insert_raw(Timestamp(10), vec![1; 8]);
-        cache.insert_raw(Timestamp(20), vec![2; 8]);
+        cache.insert_raw(Timestamp(10), vec![1; 8], Timestamp(20));
+        cache.insert_raw(Timestamp(20), vec![2; 8], Timestamp(20));
         assert_eq!(cache.raw_frames.len(), 1);
         assert!(cache.raw_frames.contains_key(&Timestamp(20)));
-        cache.insert_raw(Timestamp(30), vec![3; 16]);
+        cache.insert_raw(Timestamp(30), vec![3; 16], Timestamp(20));
         assert_eq!(cache.raw_frames.len(), 1);
     }
     #[test]

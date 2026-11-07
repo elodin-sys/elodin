@@ -5271,17 +5271,40 @@ fn lower_instruction_mem(
 
         Instruction::Reduce {
             operand,
-            init: _,
+            init,
             op,
             dimensions,
         } => {
             let src_ty = type_map.get(operand).cloned().unwrap_or(rt.clone());
-            // Empty tensors count as one element throughout, so there is no empty result.
-            if src_ty.shape.contains(&0) {
+            // The ABI reserves at least one element, so an empty result is unsupported.
+            if rt.shape.contains(&0) {
                 return Err(format!(
                     "mem: reduce over the empty tensor {:?}",
                     src_ty.shape
                 ));
+            }
+            if src_ty.shape.contains(&0) {
+                // There are no values to combine: each output is the supplied init.
+                return lower_instruction_mem(
+                    builder,
+                    &Instruction::BroadcastInDim {
+                        operand: *init,
+                        broadcast_dims: Vec::new(),
+                    },
+                    result_types,
+                    ir_module,
+                    func_ids,
+                    libm_ids,
+                    trt_ids,
+                    func_abis,
+                    external_data_ids,
+                    jit_module,
+                    value_map,
+                    type_map,
+                    use_info,
+                    result_vid,
+                    pool,
+                );
             }
             use ElementType::*;
             let func_id = match (op, src_ty.element_type) {
@@ -7785,12 +7808,15 @@ fn lower_instruction(
             op,
             dimensions,
         } => {
-            let vals = get_vals(builder, value_map, operand)?.to_vec();
-            let init_vals = get_vals(builder, value_map, init)?.to_vec();
             let src_ty = type_map.get(operand).cloned().unwrap_or(rt.clone());
-            if src_ty.shape.contains(&0) {
+            if rt.shape.contains(&0) {
                 return Err(format!("reduce over the empty tensor {:?}", src_ty.shape));
             }
+            let init_vals = get_vals(builder, value_map, init)?.to_vec();
+            if src_ty.shape.contains(&0) {
+                return Ok(vec![LaneRepr::scalar(vec![init_vals[0]; rt.num_elements()])]);
+            }
+            let vals = get_vals(builder, value_map, operand)?.to_vec();
             Ok(vec![LaneRepr::scalar(lower_reduce(
                 builder, &vals, &init_vals, &src_ty, &rt, op, dimensions,
             ))])

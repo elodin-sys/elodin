@@ -94,6 +94,22 @@ All I/O operations use zero-copy buffers to minimize allocations:
 
 ## Usage
 
+### Polling on Linux
+
+Linux uses io_uring by default. If a sandbox blocks io_uring, enable the
+`poll` Cargo feature to use the existing readiness polling backend:
+
+```toml
+stellarator = { path = "../stellarator", features = ["poll"] }
+```
+
+This selects polling for every Stellarator executor in the binary, including
+executors on worker threads. Cargo combines features across dependencies.
+TCP and UDP sockets remain nonblocking, and file operations use a blocking
+thread pool. Other platforms retain their existing polling backend.
+
+Run `cargo test -p stellarator --features poll` on Linux to exercise this backend.
+
 ### Basic Example
 
 ```rust

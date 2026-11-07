@@ -642,6 +642,10 @@ impl Plugin for EditorPlugin {
                 plugins.build()
             })
             .add_plugins(plugins::gpu_info::GpuInfoPlugin);
+        // After DefaultPlugins so the render app exists for the external-texture upload.
+        #[cfg(target_family = "wasm")]
+        app.add_plugins(webcodecs_video::bevy::WebcodecsVideoPlugin)
+            .add_systems(Update, ui::video_stream::attach_webcodecs);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::hw_stats::HardwareStatsPlugin);
         app.add_plugins(plugins::display_kernel::DisplayKernelPlugin);
