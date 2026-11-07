@@ -40,8 +40,9 @@ use stellarator::{
     buf::Slice,
     io::{AsyncRead, AsyncWrite, OwnedReader, OwnedWriter, SplitExt},
     net::{TcpListener, TcpStream, UdpSocket},
+    struc_con::Joinable,
     sync::{Mutex, WaitQueue},
-    util::{AtomicCell, CancelToken},
+    util::AtomicCell,
 };
 use time_series::TimeSeries;
 use tracing::{debug, info, trace, warn};
@@ -49,8 +50,6 @@ use vtable_stream::handle_vtable_stream;
 use zerocopy::IntoBytes;
 
 pub use error::Error;
-mod connection;
-use connection::ConnectionTasks;
 
 pub(crate) const COMPONENT_CREATION_INDEX_METADATA_KEY: &str = "_creation_index";
 pub const TX_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -1204,24 +1203,8 @@ impl DB {
         stream_id: StreamId,
         behavior: FixedRateBehavior,
     ) -> Arc<FixedRateStreamState> {
-        let stream_state = self.fixed_rate_state(stream_id, behavior);
-        if !stream_state
-            .driver_spawned
-            .swap(true, atomic::Ordering::SeqCst)
-        {
-            let driver_state = stream_state.clone();
-            stellarator::struc_con::stellar(move || run_tick_driver(driver_state));
-        }
-        stream_state
-    }
-
-    fn fixed_rate_state(
-        &self,
-        stream_id: StreamId,
-        behavior: FixedRateBehavior,
-    ) -> Arc<FixedRateStreamState> {
         let mut state = self.state.write().expect("poisoned lock");
-        state
+        let stream_state = state
             .streams
             .entry(stream_id)
             .or_insert_with(|| {
@@ -1236,7 +1219,16 @@ impl DB {
                     behavior.frequency,
                 ))
             })
-            .clone()
+            .clone();
+        // Spawn a dedicated tick driver if one hasn't been spawned yet
+        if !stream_state
+            .driver_spawned
+            .swap(true, atomic::Ordering::SeqCst)
+        {
+            let driver_state = stream_state.clone();
+            stellarator::struc_con::stellar(move || run_tick_driver(driver_state));
+        }
+        stream_state
     }
 }
 
@@ -1892,7 +1884,11 @@ impl Server {
 
     pub async fn handle_udp(addr: SocketAddr, db: Arc<DB>) -> Result<(), Error> {
         let socket = UdpSocket::bind(addr)?;
-        serve_connection(socket, db, CancelToken::new()).await
+        let (rx, tx) = socket.split();
+        let rx = PacketStream::new(rx).with_max_len(MAX_PACKET_LEN);
+        let tx = Arc::new(Mutex::new(PacketSink::new(tx)));
+        handle_conn_inner(tx, rx, db).await?;
+        Ok(())
     }
 }
 
@@ -1903,7 +1899,10 @@ impl Server {
 const MAX_PACKET_LEN: usize = 256 * 1024 * 1024;
 
 pub async fn handle_conn(stream: TcpStream, db: Arc<DB>) {
-    match serve_connection(stream, db, CancelToken::new()).await {
+    let (rx, tx) = stream.split();
+    let rx = PacketStream::new(rx).with_max_len(MAX_PACKET_LEN);
+    let tx = Arc::new(Mutex::new(PacketSink::new(tx)));
+    match handle_conn_inner(tx, rx, db).await {
         Ok(_) => {}
         Err(err) if err.is_stream_closed() => {}
         Err(err) => {
@@ -1912,47 +1911,10 @@ pub async fn handle_conn(stream: TcpStream, db: Arc<DB>) {
     }
 }
 
-/// Serve Impeller on caller-provided I/O and an existing database.
-///
-/// This function binds no listeners. Poll it on a Stellarator executor.
-/// The transport must implement Stellarator's buffer-owning I/O traits.
-///
-/// To stop the connection, cancel `cancel` and await this function.
-/// Cancellation returns [`Error::Cancelled`]. Transport and framing errors also
-/// return to the caller, including EOF when the peer closes the transport.
-/// On return, all connection tasks release their I/O and DB references.
-/// Shared tick drivers continue while another connection needs them.
-///
-/// Dropping this future requests cancellation but does not wait for cleanup.
-/// Await completion before deleting the database or its storage directory.
-pub async fn serve_connection<A>(stream: A, db: Arc<DB>, cancel: CancelToken) -> Result<(), Error>
-where
-    A: AsyncRead + AsyncWrite + Send + Sync + 'static,
-{
-    let tasks = ConnectionTasks::new();
-    let _cancel_on_drop = tasks.cancel_guard();
-    let result = futures_lite::future::or(
-        async {
-            cancel.wait().await;
-            Err(Error::Cancelled)
-        },
-        async {
-            let (rx, tx) = stream.split();
-            let rx = PacketStream::new(rx).with_max_len(MAX_PACKET_LEN);
-            let tx = Arc::new(Mutex::new(PacketSink::new(tx)));
-            handle_conn_inner(tx, rx, db, &tasks).await
-        },
-    )
-    .await;
-    tasks.finish().await;
-    result
-}
-
 async fn handle_conn_inner<A: AsyncRead + AsyncWrite + Send + Sync + 'static>(
     mut tx: Arc<Mutex<PacketSink<OwnedWriter<A>>>>,
     mut rx: PacketStream<OwnedReader<A>>,
     db: Arc<DB>,
-    tasks: &ConnectionTasks,
 ) -> Result<(), Error> {
     let _conn_span = tracing::info_span!("handle_conn").entered();
     let mut buf = vec![0u8; 8 * 1024 * 1024];
@@ -1969,7 +1931,7 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + Send + Sync + 'static>(
             pkt: Some(resp_pkt),
             silent,
         };
-        let result = handle_packet(&pkt, &db, &mut pkt_tx, silent, tasks).await;
+        let result = handle_packet(&pkt, &db, &mut pkt_tx, silent).await;
         buf = pkt.into_buf().into_inner();
         match result {
             Ok(PacketAction::Continue) => {}
@@ -2185,7 +2147,6 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
     db: &Arc<DB>,
     tx: &mut PacketTx<A>,
     silent: bool,
-    tasks: &ConnectionTasks,
 ) -> Result<PacketAction, Error> {
     let _pkt_span = tracing::info_span!("handle_packet").entered();
     trace!(?pkt, "handling pkt");
@@ -2220,13 +2181,13 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                         "missing socket ip",
                     ))
                 })?;
-            handle_unicast_stream(addr, udp_broadcast.stream, db, tasks.clone());
+            handle_unicast_stream(addr, udp_broadcast.stream, db);
         }
         Packet::Msg(m) if m.id == Stream::ID => {
             let stream = m.parse::<Stream>()?;
             let tx = tx.tx.clone();
             let db = db.clone();
-            handle_stream(tx, stream, db, m.req_id, tasks.clone());
+            handle_stream(tx, stream, db, m.req_id);
         }
         Packet::Msg(m) if m.id == SetStreamFilter::ID => {
             let filter = m.parse::<SetStreamFilter>()?;
@@ -2389,7 +2350,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
         Packet::Msg(m) if m.id == SubscribeLastUpdated::ID => {
             let mut tx = tx.clone();
             let db = db.clone();
-            tasks.spawn(async move {
+            stellarator::spawn(async move {
                 let mut last_config_gen = db.db_config_gen.latest();
                 loop {
                     let last_updated = db.last_updated.latest();
@@ -2499,7 +2460,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             let SQLQuery(query) = m.parse::<SQLQuery>()?;
             let db = db.clone();
             let (tokio_tx, rx) = thingbuf::mpsc::channel::<Vec<u8>>(4);
-            let res = tasks.query(move || async move {
+            let res = stellarator::struc_con::tokio(move |_| async move {
                 let mut ctx = db.as_session_context()?;
                 db.insert_views(&mut ctx).await?;
                 let df = ctx.sql(&query).await?;
@@ -2512,19 +2473,18 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                         ::arrow::ipc::writer::StreamWriter::try_new(&mut buf, batch.schema_ref())?;
                     writer.write(&batch)?;
                     writer.finish()?;
-                    if tokio_tx.send(buf).await.is_err() {
-                        break;
-                    }
+                    let _ = tokio_tx.send(buf).await;
                 }
                 Ok::<_, Error>(())
-            });
+            })
+            .join();
             while let Some(batch) = rx.recv().await {
                 tx.send_msg(&ArrowIPC {
                     batch: Some(Cow::Owned(batch)),
                 })
                 .await?;
             }
-            res.await?.ok_or(Error::Cancelled)??;
+            res.await??;
             tx.send_msg(&ArrowIPC { batch: None }).await?;
         }
         Packet::Msg(m) if m.id == SparklineQuery::ID => {
@@ -2764,18 +2724,18 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             let msg_log =
                 db.with_state_mut(|s| s.get_or_insert_msg_log(msg_id, &db.path).cloned())?;
             let req_id = m.req_id;
-            tasks.spawn(handle_msg_stream(msg_id, req_id, msg_log, tx.tx.clone()));
+            stellarator::spawn(handle_msg_stream(msg_id, req_id, msg_log, tx.tx.clone()));
         }
         Packet::Msg(m) if m.id == FixedRateMsgStream::ID => {
             let FixedRateMsgStream { msg_id, fixed_rate } = m.parse::<FixedRateMsgStream>()?;
             let msg_log =
                 db.with_state_mut(|s| s.get_or_insert_msg_log(msg_id, &db.path).cloned())?;
-            let stream_state = db.fixed_rate_state(fixed_rate.stream_id, fixed_rate.behavior);
-            tasks.drive_ticks(stream_state.clone());
+            let stream_state =
+                db.get_or_insert_fixed_rate_state(fixed_rate.stream_id, fixed_rate.behavior);
             {
                 let req_id = m.req_id;
                 let tx = tx.tx.clone();
-                tasks.stellar(move || {
+                stellarator::struc_con::stellar(move || {
                     handle_fixed_rate_msg_stream(msg_id, req_id, msg_log, tx, stream_state)
                 });
             }
@@ -2819,13 +2779,12 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             let vtable = db
                 .with_state(|state| state.vtable_registry.get(&id).cloned())
                 .ok_or(Error::InvalidMsgId)?;
-            tasks.spawn(handle_vtable_stream(
+            stellarator::spawn(handle_vtable_stream(
                 id,
                 vtable,
                 db.clone(),
                 tx.tx.clone(),
                 m.req_id,
-                tasks.clone(),
             ));
         }
         Packet::Msg(m) if m.id == UdpVTableStream::ID => {
@@ -2848,32 +2807,13 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                     .clone();
                 let db = db.clone();
                 let req_id = m.req_id;
-                let children = tasks.clone();
-                struct UdpStreamGuard {
-                    db: Arc<DB>,
-                    addr: SocketAddr,
-                    id: PacketId,
-                }
-                impl Drop for UdpStreamGuard {
-                    fn drop(&mut self) {
-                        self.db.with_state_mut(|state| {
-                            state.udp_vtable_streams.remove(&(self.addr, self.id));
-                        });
-                    }
-                }
-                let stream_guard = UdpStreamGuard {
-                    db: db.clone(),
-                    addr,
-                    id,
-                };
-                tasks.stellar(move || async move {
-                    let _stream_guard = stream_guard;
+                stellarator::struc_con::stellar(move || async move {
                     info!("VTable streaming to udp://{}", addr);
                     let mut socket = UdpSocket::ephemeral()?;
                     socket.connect(addr);
                     let (_, tx) = socket.split();
                     let tx = Arc::new(Mutex::new(PacketSink::new(tx)));
-                    handle_vtable_stream(id, vtable, db, tx, req_id, children).await
+                    handle_vtable_stream(id, vtable, db, tx, req_id).await
                 });
                 state.udp_vtable_streams.insert((addr, id));
                 Ok::<_, Error>(())
@@ -2891,7 +2831,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             let msg_log =
                 db.with_state_mut(|s| s.get_or_insert_msg_log(stream.msg_id, &db.path).cloned())?;
             let req_id = m.req_id;
-            tasks.spawn(handle_timestamped_msg_stream(
+            stellarator::spawn(handle_timestamped_msg_stream(
                 stream.msg_id,
                 req_id,
                 msg_log,
@@ -3013,7 +2953,6 @@ pub struct FixedRateStreamState {
     playing_cell: PlayingCell,
     tick_notify: WaitQueue,
     driver_spawned: AtomicBool,
-    driver_notify: WaitQueue,
 }
 
 impl FixedRateStreamState {
@@ -3032,7 +2971,6 @@ impl FixedRateStreamState {
             frequency: AtomicU64::new(frequency),
             tick_notify: WaitQueue::new(),
             driver_spawned: AtomicBool::new(false),
-            driver_notify: WaitQueue::new(),
         }
     }
 
@@ -3153,15 +3091,14 @@ async fn run_tick_driver(state: Arc<FixedRateStreamState>) {
     }
 }
 
-fn handle_unicast_stream(addr: SocketAddr, stream: Stream, db: Arc<DB>, tasks: ConnectionTasks) {
-    let children = tasks.clone();
-    tasks.stellar(move || async move {
+fn handle_unicast_stream(addr: SocketAddr, stream: Stream, db: Arc<DB>) {
+    stellarator::struc_con::stellar(move || async move {
         info!("UDP unicasting to {}", addr);
         let mut socket = UdpSocket::ephemeral()?;
         socket.connect(addr);
         let (_, tx) = socket.split();
         let tx = Arc::new(Mutex::new(PacketSink::new(tx)));
-        handle_stream(tx.clone(), stream.clone(), db.clone(), 0, children)
+        handle_stream(tx.clone(), stream.clone(), db.clone(), 0)
             .await
             .unwrap();
         Ok::<_, Error>(())
@@ -3173,21 +3110,17 @@ fn handle_stream<A: AsyncWrite + 'static>(
     stream: Stream,
     db: Arc<DB>,
     req_id: RequestId,
-    tasks: ConnectionTasks,
 ) -> stellarator::JoinHandle<()> {
     match stream.behavior {
-        StreamBehavior::RealTime => {
-            let children = tasks.clone();
-            tasks.spawn(async move {
-                match handle_real_time_stream(tx, req_id, db, children).await {
-                    Ok(_) => {}
-                    Err(err) if err.is_stream_closed() => {}
-                    Err(err) => {
-                        warn!(?err, "error streaming data");
-                    }
+        StreamBehavior::RealTime => stellarator::spawn(async move {
+            match handle_real_time_stream(tx, req_id, db).await {
+                Ok(_) => {}
+                Err(err) if err.is_stream_closed() => {}
+                Err(err) => {
+                    warn!(?err, "error streaming data");
                 }
-            })
-        }
+            }
+        }),
         StreamBehavior::FixedRate(fixed_rate) => {
             let state = Arc::new(FixedRateStreamState::new(
                 stream.id,
@@ -3201,8 +3134,12 @@ fn handle_stream<A: AsyncWrite + 'static>(
             ));
             debug!(stream.id = ?stream.id, "inserting stream");
             db.with_state_mut(|s| s.streams.insert(stream.id, state.clone()));
-            tasks.drive_ticks(state.clone());
-            tasks.spawn(async move {
+            // Spawn a dedicated tick driver for this stream state
+            if !state.driver_spawned.swap(true, atomic::Ordering::SeqCst) {
+                let driver_state = state.clone();
+                stellarator::struc_con::stellar(move || run_tick_driver(driver_state));
+            }
+            stellarator::spawn(async move {
                 match handle_fixed_stream(tx, req_id, state, db).await {
                     Ok(_) => {}
                     Err(err) if err.is_stream_closed() => {}
@@ -3225,33 +3162,17 @@ fn handle_stream<A: AsyncWrite + 'static>(
                     .real_time_stream_filters
                     .insert(stream_id, filter.clone());
             });
-            struct FilterGuard {
-                db: Arc<DB>,
-                stream_id: StreamId,
-                filter: Arc<RealTimeStreamFilter>,
-            }
-            impl Drop for FilterGuard {
-                fn drop(&mut self) {
-                    self.db.with_state_mut(|state| {
-                        if state
-                            .real_time_stream_filters
-                            .get(&self.stream_id)
-                            .is_some_and(|current| Arc::ptr_eq(current, &self.filter))
-                        {
-                            state.real_time_stream_filters.remove(&self.stream_id);
-                        }
-                    });
-                }
-            }
-            let filter_guard = FilterGuard {
-                db: db.clone(),
-                stream_id,
-                filter: filter.clone(),
-            };
-            tasks.spawn(async move {
-                let _filter_guard = filter_guard;
+            stellarator::spawn(async move {
                 let result =
                     handle_real_time_stream_batched(tx, req_id, db.clone(), filter.clone()).await;
+                db.with_state_mut(
+                    |state| match state.real_time_stream_filters.get(&stream_id) {
+                        Some(current) if Arc::ptr_eq(current, &filter) => {
+                            state.real_time_stream_filters.remove(&stream_id);
+                        }
+                        _ => {}
+                    },
+                );
                 match result {
                     Ok(_) => {}
                     Err(err) if err.is_stream_closed() => {}
@@ -3268,7 +3189,6 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
     sink: Arc<Mutex<PacketSink<A>>>,
     req_id: RequestId,
     db: Arc<DB>,
-    tasks: ConnectionTasks,
 ) -> Result<(), Error> {
     let mut visited_ids = HashSet::new();
     loop {
@@ -3310,7 +3230,7 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
             // Spawn the data handler for this component
             let sink_clone = sink.clone();
             let component_clone = component.clone();
-            tasks.spawn(handle_real_time_component(
+            stellarator::spawn(handle_real_time_component(
                 sink_clone,
                 component_clone,
                 req_id,
@@ -3379,8 +3299,7 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
     let mut table = LenPacket::table([0; 2], 2048 - 16);
     let mut all_components = HashMap::new();
     let mut sent_metadata: HashMap<ComponentId, ComponentMetadata> = HashMap::new();
-    let mut stream_components = HashMap::new();
-    let mut stream_layout = Vec::new();
+    let mut stream_layout = DBVisitor::default();
     let mut last_sent = None;
 
     loop {
@@ -3388,7 +3307,13 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
         // from creation, so changes made while this pass sends still wake it.
         let changed = futures_lite::future::race(
             db.last_updated.wait_queue.wait(),
-            futures_lite::future::race(filter.changed.wait(), db.metadata_gen.wait_queue.wait()),
+            futures_lite::future::race(
+                filter.changed.wait(),
+                futures_lite::future::race(
+                    db.metadata_gen.wait_queue.wait(),
+                    db.vtable_gen.wait_queue.wait(),
+                ),
+            ),
         );
         let vtable_gen = db.vtable_gen.latest();
         let filter_gen = filter.generation();
@@ -3457,25 +3382,22 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
         let stream_changed = vtable_gen != current_vtable_gen || filter_gen != current_filter_gen;
         if stream_changed {
             let component_filter = filter.component_ids();
-            let next_components = match &component_filter {
-                Some(filter) => all_components
-                    .iter()
-                    .filter(|(component_id, _)| filter.contains(*component_id))
-                    .map(|(component_id, component)| (*component_id, component.clone()))
-                    .collect(),
-                None => all_components.clone(),
-            };
-            let next_layout: Vec<_> = next_components.keys().copied().collect();
-            // VTable offsets follow map iteration order; reuse only when both
-            // order and schemas are unchanged.
-            let layout_changed = next_layout != stream_layout
-                || next_components.iter().any(|(id, component)| {
-                    stream_components
-                        .get(id)
-                        .is_none_or(|existing: &Component| existing.schema != component.schema)
-                });
-            if layout_changed || filter_gen != current_filter_gen {
-                let vtable_msg = DBVisitor.vtable(&next_components)?;
+            let next_layout = DBVisitor::snapshot(
+                all_components
+                    .values()
+                    .filter(|component| {
+                        component_filter
+                            .as_ref()
+                            .is_none_or(|filter| filter.contains(&component.component_id))
+                    })
+                    .cloned(),
+            );
+            // A new component anywhere in the DB bumps `vtable_gen`. Compare
+            // against the frozen advertised layout, not the old components'
+            // current non-empty state: their first sample or truncation may
+            // have changed membership since the last VTable was sent.
+            if !next_layout.same_layout(&stream_layout) || filter_gen != current_filter_gen {
+                let vtable_msg = next_layout.vtable()?;
                 let id: PacketId = fastrand::u16(..).to_le_bytes();
                 table = LenPacket::table(id, 2048 - 16);
                 let pkt = VTableMsg {
@@ -3484,9 +3406,8 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
                 }
                 .into_len_packet();
                 send_with_timeout(&sink, pkt.with_request_id(req_id)).await?;
-                stream_layout = next_layout;
             }
-            stream_components = next_components;
+            stream_layout = next_layout;
             current_vtable_gen = vtable_gen;
             current_filter_gen = filter_gen;
         }
@@ -3497,9 +3418,9 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
             last_sent
                 .is_none_or(|last: Timestamp| timestamp.0.saturating_sub(last.0) >= interval_us)
         });
-        if stream_changed || (due && !stream_components.is_empty()) {
+        if stream_changed || (due && !stream_layout.components.is_empty()) {
             table.clear();
-            DBVisitor.populate_table_latest(&stream_components, &mut table);
+            stream_layout.populate_table_latest(&mut table);
             table = send_with_timeout(&sink, table.with_request_id(req_id)).await?;
             last_sent = Some(timestamp);
         }
@@ -3515,7 +3436,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
 ) -> Result<(), Error> {
     let mut current_gen = u64::MAX;
     let mut table = LenPacket::table([0; 2], 2048 - 16);
-    let mut components = db.with_state(|state| state.components.clone());
+    let mut stream_layout = DBVisitor::default();
     let mut current_timestamp;
 
     // Lightweight profiling: accumulate timings and log every LOG_INTERVAL frames.
@@ -3545,18 +3466,19 @@ async fn handle_fixed_stream<A: AsyncWrite>(
 
         let vtable_gen = db.vtable_gen.latest();
         if vtable_gen != current_gen {
-            components = db.with_state(|state| state.components.clone());
+            stream_layout =
+                db.with_state(|state| DBVisitor::snapshot(state.components.values().cloned()));
             let id: PacketId = state.stream_id.to_le_bytes()[..2].try_into().unwrap();
             table = LenPacket::table(id, 2048 - 16);
-            let vtable = DBVisitor.vtable(&components)?;
+            let vtable = stream_layout.vtable()?;
             let msg = VTableMsg { id, vtable };
             send_with_timeout(&stream, msg.into_len_packet().with_request_id(req_id)).await?;
             current_gen = vtable_gen;
         }
         table.clear();
         let t0 = Instant::now();
-        if let Err(err) = DBVisitor
-            .populate_table(&components, &mut table, current_timestamp)
+        if let Err(err) = stream_layout
+            .populate_table(&mut table, current_timestamp)
             .await
         {
             warn!(?err, "failed to populate table");
@@ -3596,7 +3518,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
                 work_avg_ms = accum_work_us as f64 / n / 1000.0,
                 wall_avg_ms = accum_wall_us as f64 / n / 1000.0,
                 wall_fps,
-                components = components.len(),
+                components = stream_layout.components.len(),
                 "fixed_stream consumer stats"
             );
             accum_populate_us = 0;
@@ -3620,25 +3542,51 @@ async fn handle_fixed_stream<A: AsyncWrite>(
     }
 }
 
-pub(crate) struct DBVisitor;
+/// One advertised stream layout. Values stay live, but field membership and
+/// order cannot change between VTable publication and any table using it.
+#[derive(Default)]
+pub(crate) struct DBVisitor {
+    components: Vec<Component>,
+}
 
 impl DBVisitor {
-    fn vtable(&self, components: &HashMap<ComponentId, Component>) -> Result<VTable, Error> {
+    fn snapshot(components: impl IntoIterator<Item = Component>) -> Self {
+        let mut components: Vec<_> = components
+            .into_iter()
+            .filter(|component| !component.time_series.index().is_empty())
+            .collect();
+        // Stable ordering lets an unchanged filtered layout reuse its VTable,
+        // regardless of the iteration order of a rebuilt component map.
+        components.sort_by_key(|component| component.component_id);
+        Self { components }
+    }
+
+    fn same_layout(&self, other: &Self) -> bool {
+        self.components
+            .iter()
+            .map(|component| (component.component_id, &component.schema))
+            .eq(other
+                .components
+                .iter()
+                .map(|component| (component.component_id, &component.schema)))
+    }
+
+    fn vtable(&self) -> Result<VTable, Error> {
         let mut fields = vec![];
         let mut offset = 0;
-        self.visit(components, |entity| {
-            if !entity.time_series.index().is_empty() {
-                offset += PrimType::U64.padding(offset);
-                let op = timestamp(builder::raw_table(offset as u16, 8), entity.as_vtable_op());
-                offset += size_of::<Timestamp>();
-                offset += entity.schema.prim_type.padding(offset);
-                let len = entity.schema.size();
-                let size = len as u16;
-                fields.push(raw_field(offset as u16, size, op));
-                offset += len;
-            }
-            Ok(())
-        })?;
+        for component in &self.components {
+            offset += PrimType::U64.padding(offset);
+            let op = timestamp(
+                builder::raw_table(offset as u16, 8),
+                component.as_vtable_op(),
+            );
+            offset += size_of::<Timestamp>();
+            offset += component.schema.prim_type.padding(offset);
+            let len = component.schema.size();
+            let size = len as u16;
+            fields.push(raw_field(offset as u16, size, op));
+            offset += len;
+        }
         Ok(vtable(fields))
     }
 
@@ -3650,17 +3598,11 @@ impl DBVisitor {
     /// starve the tick driver and produce choppy visual updates at ~6-10 FPS.
     async fn populate_table(
         &self,
-        components: &HashMap<ComponentId, Component>,
         table: &mut LenPacket,
         timestamp: Timestamp,
     ) -> Result<(), Error> {
         const YIELD_EVERY: usize = 8;
-        for (i, (_, component)) in components.iter().enumerate() {
-            // Skip components with no data – the VTable builder
-            // (vtable()) excludes them, so we must too.
-            if component.time_series.index().is_empty() {
-                continue;
-            }
+        for (i, component) in self.components.iter().enumerate() {
             let tick = component.time_series.start_timestamp().max(timestamp);
             match component.get_nearest(tick) {
                 Some((ts, buf)) => {
@@ -3669,8 +3611,8 @@ impl DBVisitor {
                     table.extend_from_slice(buf);
                 }
                 None => {
-                    // Component has data but not at this timestamp.
-                    // Write zeros to preserve VTable field offset alignment.
+                    // A selected component may have been truncated since the
+                    // layout was published. Its field must retain its offset.
                     table.push_aligned(Timestamp(0));
                     table.pad_for_type(component.schema.prim_type);
                     for _ in 0..component.schema.size() {
@@ -3690,17 +3632,8 @@ impl DBVisitor {
     /// Used by the `RealTimeBatched` stream handler which always wants the
     /// freshest value, unlike `populate_table` which looks up data at a
     /// specific playback timestamp.
-    fn populate_table_latest(
-        &self,
-        components: &HashMap<ComponentId, Component>,
-        table: &mut LenPacket,
-    ) {
-        for component in components.values() {
-            // Skip components with no data – the VTable builder
-            // (vtable()) excludes them, so we must too.
-            if component.time_series.index().is_empty() {
-                continue;
-            }
+    fn populate_table_latest(&self, table: &mut LenPacket) {
+        for component in &self.components {
             let elem_size = component.schema.size();
             let prim_type = component.schema.prim_type;
             match component.time_series.latest() {
@@ -3710,9 +3643,8 @@ impl DBVisitor {
                     table.extend_from_slice(buf);
                 }
                 None => {
-                    // Component has data in index but latest() returned
-                    // None (e.g. data AppendLog shorter than index).
-                    // Write zeros to preserve VTable field offset alignment.
+                    // Truncation or an incomplete latest sample must not
+                    // remove a field from the already-advertised layout.
                     table.push_aligned(Timestamp(0));
                     table.pad_for_type(prim_type);
                     for _ in 0..elem_size {
@@ -3721,16 +3653,6 @@ impl DBVisitor {
                 }
             }
         }
-    }
-
-    fn visit(
-        &self,
-        components: &HashMap<ComponentId, Component>,
-        mut f: impl for<'a> FnMut(&'a Component) -> Result<(), Error>,
-    ) -> Result<(), Error> {
-        components
-            .iter()
-            .try_for_each(|(_, component)| f(component))
     }
 }
 
@@ -3787,6 +3709,469 @@ impl AtomicTimestampExt for AtomicCell<Timestamp> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn stream_layout_component(
+        path: &Path,
+        name: &str,
+        prim_type: PrimType,
+        shape: &[usize],
+        value: Option<&[u8]>,
+    ) -> Component {
+        let component = Component::create(
+            path,
+            ComponentId::new(name),
+            name.into(),
+            ComponentSchema::new(prim_type, shape),
+            Timestamp(0),
+        )
+        .unwrap();
+        if let Some(value) = value {
+            component
+                .time_series
+                .push_buf(Timestamp(10), value)
+                .unwrap();
+        }
+        component
+    }
+
+    fn assert_stream_layout_packet(
+        vtable: &VTable,
+        packet: &LenPacket,
+        expected: &[(ComponentId, Timestamp, Vec<u8>)],
+    ) {
+        let body = &packet.as_packet().body;
+        let advertised_len = vtable
+            .fields
+            .iter()
+            .map(|field| field.offset.to_index() + usize::from(field.len))
+            .max()
+            .unwrap_or(0);
+        assert_eq!(
+            body.len(),
+            advertised_len,
+            "table must use its advertised field set"
+        );
+        let mut decoded = HashMap::new();
+        let mut sink = |id, value: ComponentView<'_>, timestamp| {
+            assert!(
+                decoded
+                    .insert(id, (timestamp, value.as_bytes().to_vec()))
+                    .is_none()
+            );
+        };
+        vtable.apply(body, &mut sink).unwrap().unwrap();
+        assert_eq!(decoded.len(), expected.len());
+        for (id, timestamp, value) in expected {
+            assert_eq!(decoded.get(id), Some(&(Some(*timestamp), value.clone())));
+        }
+    }
+
+    #[stellarator::test]
+    async fn stream_layout_first_write_cannot_shift_an_advertised_epoch() {
+        for latest in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let late = stream_layout_component(dir.path(), "late", PrimType::U8, &[], None);
+            let epoch = stream_layout_component(
+                dir.path(),
+                "epoch",
+                PrimType::U32,
+                &[],
+                Some(&1_u32.to_le_bytes()),
+            );
+            let wide = stream_layout_component(
+                dir.path(),
+                "wide",
+                PrimType::F64,
+                &[],
+                Some(&1.5_f64.to_le_bytes()),
+            );
+            // Snapshot ordering is deterministic: no randomized HashMap order
+            // or stress scheduling is needed to reproduce the interleaving.
+            let components = [late.clone(), epoch.clone(), wide.clone()];
+            let layout = DBVisitor::snapshot(components.clone());
+            let advertised = layout.vtable().unwrap();
+            assert_eq!(advertised.fields.len(), 2);
+            // The exact interleaving at the stream's VTable-send await: first
+            // data arrives after the layout was built, before population.
+            late.time_series.push_buf(Timestamp(20), &[2]).unwrap();
+            let mut packet = LenPacket::table([1, 0], 128);
+            if latest {
+                layout.populate_table_latest(&mut packet);
+            } else {
+                layout
+                    .populate_table(&mut packet, Timestamp(20))
+                    .await
+                    .unwrap();
+            }
+            let expected = vec![
+                (
+                    epoch.component_id,
+                    Timestamp(10),
+                    1_u32.to_le_bytes().to_vec(),
+                ),
+                (
+                    wide.component_id,
+                    Timestamp(10),
+                    1.5_f64.to_le_bytes().to_vec(),
+                ),
+            ];
+            assert_stream_layout_packet(&advertised, &packet, &expected);
+            // The next schema-generation rebuild adds the first-written field
+            // and its offsets together; excluding it is not permanent.
+            let rebuilt = DBVisitor::snapshot(components);
+            assert!(!rebuilt.same_layout(&layout));
+            let advertised = rebuilt.vtable().unwrap();
+            packet.clear();
+            if latest {
+                rebuilt.populate_table_latest(&mut packet);
+            } else {
+                rebuilt
+                    .populate_table(&mut packet, Timestamp(20))
+                    .await
+                    .unwrap();
+            }
+            let mut expected = expected;
+            expected.push((late.component_id, Timestamp(20), vec![2]));
+            assert_stream_layout_packet(&advertised, &packet, &expected);
+        }
+    }
+
+    #[stellarator::test]
+    async fn stream_layout_truncation_keeps_zero_slots_and_mixed_alignment() {
+        for latest in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let values = [
+                vec![7],
+                0x1234_u16.to_le_bytes().to_vec(),
+                0x12345678_u32.to_le_bytes().to_vec(),
+                0x123456789abcdef0_u64.to_le_bytes().to_vec(),
+                vec![3, 4, 5],
+                42.5_f64.to_le_bytes().to_vec(),
+            ];
+            let types = [
+                PrimType::U8,
+                PrimType::U16,
+                PrimType::U32,
+                PrimType::U64,
+                PrimType::U8,
+                PrimType::F64,
+            ];
+            let components: Vec<_> = types
+                .into_iter()
+                .enumerate()
+                .map(|(index, prim_type)| {
+                    let shape: &[usize] = if index == 4 { &[3] } else { &[] };
+                    stream_layout_component(
+                        dir.path(),
+                        &format!("field{index}"),
+                        prim_type,
+                        shape,
+                        Some(&values[index]),
+                    )
+                })
+                .collect();
+            let layout = DBVisitor::snapshot(components.clone());
+            let advertised = layout.vtable().unwrap();
+            for index in [0, 2, 4] {
+                components[index].time_series.truncate();
+            }
+            // Caching must compare frozen membership too: re-reading both
+            // snapshots' current emptiness would incorrectly call this equal.
+            assert!(!DBVisitor::snapshot(components.clone()).same_layout(&layout));
+            let mut packet = LenPacket::table([2, 0], 256);
+            if latest {
+                layout.populate_table_latest(&mut packet);
+            } else {
+                layout
+                    .populate_table(&mut packet, Timestamp(20))
+                    .await
+                    .unwrap();
+            }
+            let expected: Vec<_> = components
+                .iter()
+                .enumerate()
+                .map(|(index, component)| {
+                    let empty = index % 2 == 0;
+                    (
+                        component.component_id,
+                        Timestamp(if empty { 0 } else { 10 }),
+                        if empty {
+                            vec![0; values[index].len()]
+                        } else {
+                            values[index].clone()
+                        },
+                    )
+                })
+                .collect();
+            assert_stream_layout_packet(&advertised, &packet, &expected);
+        }
+    }
+
+    #[cfg(feature = "axum")]
+    #[stellarator::test]
+    async fn direct_first_write_refreshes_advertised_stream() {
+        for http in [false, true] {
+            for timestamp_source in [false, true] {
+                let dir = tempfile::tempdir().unwrap();
+                let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                let address = listener.local_addr().unwrap();
+                let server = Server::from_listener(listener, dir.path().join("db")).unwrap();
+                let db = server.db.clone();
+                let name = "direct.first";
+                let component_id = ComponentId::new(name);
+                db.with_state_mut(|state| {
+                    state.insert_component_with_timestamp_source_flag(
+                        component_id,
+                        ComponentSchema::new(PrimType::F64, &[]),
+                        timestamp_source,
+                        &db.path,
+                    )
+                })
+                .unwrap();
+                stellarator::struc_con::stellar(move || server.run());
+                let mut client = impeller_stellar::Client::connect(address).await.unwrap();
+                let mut stream = client
+                    .stream(&Stream {
+                        behavior: StreamBehavior::RealTimeBatched,
+                        id: 91,
+                    })
+                    .await
+                    .unwrap();
+                futures_lite::future::race(
+                    async {
+                        loop {
+                            if let StreamReply::VTable(msg) = stream.next().await.unwrap() {
+                                assert!(msg.vtable.fields.is_empty());
+                                break;
+                            }
+                        }
+                    },
+                    async {
+                        stellarator::sleep(Duration::from_secs(3)).await;
+                        panic!("initial empty VTable was not published");
+                    },
+                )
+                .await;
+
+                let generation = db.vtable_gen.latest();
+                let last_updated = db.last_updated.latest();
+                let earliest = db.earliest_timestamp.latest();
+                if http {
+                    assert!(
+                        crate::axum::push_entity_table(
+                            ::axum::extract::Path(name.to_owned()),
+                            ::axum::extract::State(db.clone()),
+                            ::axum::Json(ComponentValue::zeros(&[], PrimType::U32)),
+                        )
+                        .await
+                        .is_err()
+                    );
+                } else {
+                    // Incomplete packets and reconnect dedup must not publish
+                    // a layout or move the clock without an appended sample.
+                    crate::follow::apply_follow_time_series(
+                        &db,
+                        component_id,
+                        &[Timestamp(100)],
+                        &[],
+                        0,
+                    )
+                    .unwrap();
+                    crate::follow::apply_follow_time_series(
+                        &db,
+                        component_id,
+                        &[Timestamp(100)],
+                        &42.5_f64.to_le_bytes(),
+                        1,
+                    )
+                    .unwrap();
+                }
+                assert_eq!(db.vtable_gen.latest(), generation);
+                assert_eq!(db.last_updated.latest(), last_updated);
+                assert_eq!(db.earliest_timestamp.latest(), earliest);
+                if http {
+                    crate::axum::push_entity_table(
+                        ::axum::extract::Path(name.to_owned()),
+                        ::axum::extract::State(db.clone()),
+                        ::axum::Json(ComponentValue::zeros(&[], PrimType::F64)),
+                    )
+                    .await
+                    .unwrap();
+                } else {
+                    crate::follow::apply_follow_time_series(
+                        &db,
+                        component_id,
+                        &[Timestamp(100)],
+                        &42.5_f64.to_le_bytes(),
+                        0,
+                    )
+                    .unwrap();
+                }
+                assert_eq!(db.vtable_gen.latest(), generation + 1);
+                let written_timestamp = db.with_state(|state| {
+                    *state.components[&component_id]
+                        .time_series
+                        .latest()
+                        .unwrap()
+                        .0
+                });
+                if timestamp_source {
+                    assert_eq!(db.last_updated.latest(), last_updated);
+                    assert_eq!(db.earliest_timestamp.latest(), earliest);
+                } else {
+                    assert_eq!(db.last_updated.latest(), written_timestamp);
+                    assert_eq!(
+                        db.earliest_timestamp.latest(),
+                        earliest.min(written_timestamp)
+                    );
+                }
+                futures_lite::future::race(
+                    async {
+                        let mut advertised = None;
+                        loop {
+                            match stream.next().await.unwrap() {
+                                StreamReply::VTable(msg) => {
+                                    assert_eq!(msg.vtable.fields.len(), 1);
+                                    advertised = Some(msg);
+                                }
+                                StreamReply::Table(table) if advertised.is_some() => {
+                                    let advertised = advertised.as_ref().unwrap();
+                                    assert_eq!(table.id, advertised.id);
+                                    let mut decoded = Vec::new();
+                                    advertised
+                                        .vtable
+                                        .apply(
+                                            &table.buf,
+                                            &mut |id, value: ComponentView<'_>, timestamp| {
+                                                decoded.push((
+                                                    id,
+                                                    timestamp,
+                                                    value.as_bytes().to_vec(),
+                                                ));
+                                            },
+                                        )
+                                        .unwrap()
+                                        .unwrap();
+                                    let value = if http { 0.0_f64 } else { 42.5_f64 };
+                                    assert_eq!(
+                                        decoded,
+                                        [(
+                                            component_id,
+                                            Some(written_timestamp),
+                                            value.to_le_bytes().to_vec()
+                                        )]
+                                    );
+                                    break;
+                                }
+                                _ => {}
+                            }
+                        }
+                    },
+                    async {
+                        stellarator::sleep(Duration::from_secs(3)).await;
+                        panic!("direct first write did not publish its layout and value");
+                    },
+                )
+                .await;
+                if http {
+                    crate::axum::push_entity_table(
+                        ::axum::extract::Path(name.to_owned()),
+                        ::axum::extract::State(db.clone()),
+                        ::axum::Json(ComponentValue::zeros(&[], PrimType::F64)),
+                    )
+                    .await
+                    .unwrap();
+                } else {
+                    crate::follow::apply_follow_time_series(
+                        &db,
+                        component_id,
+                        &[Timestamp(90)],
+                        &0.0_f64.to_le_bytes(),
+                        0,
+                    )
+                    .unwrap();
+                    if !timestamp_source {
+                        assert_eq!(db.earliest_timestamp.latest(), Timestamp(100));
+                    }
+                    // Only timestamp 200 has a complete value; 300 must not
+                    // advance the DB clock when its trailing bytes are absent.
+                    crate::follow::apply_follow_time_series(
+                        &db,
+                        component_id,
+                        &[Timestamp(200), Timestamp(300)],
+                        &1.0_f64.to_le_bytes(),
+                        0,
+                    )
+                    .unwrap();
+                    if !timestamp_source {
+                        assert_eq!(db.last_updated.latest(), Timestamp(200));
+                        assert_eq!(db.earliest_timestamp.latest(), Timestamp(100));
+                    }
+                }
+                assert_eq!(db.vtable_gen.latest(), generation + 1);
+                if timestamp_source {
+                    assert_eq!(db.last_updated.latest(), last_updated);
+                    assert_eq!(db.earliest_timestamp.latest(), earliest);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn realtime_vtable_columns_follow_component_id_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        let later = ComponentId::new("zz.later");
+        let earlier = ComponentId::new("aa.earlier");
+        let empty = ComponentId::new("mm.empty");
+        let schema = ComponentSchema::new(PrimType::F64, &[7]);
+        db.with_state_mut(|state| {
+            for id in [later, earlier, empty] {
+                state
+                    .insert_component(id, schema.clone(), &db.path)
+                    .unwrap();
+            }
+        });
+        db.with_state(|state| {
+            let mut sink = DBSink {
+                components: &state.components,
+                component_metadata: &state.component_metadata,
+                last_updated: &db.last_updated,
+                earliest_timestamp: &db.earliest_timestamp,
+                sunk_new_time_series: false,
+                table_received: Timestamp(1),
+                followed_components: &db.followed_components,
+                has_followed_components: false,
+                is_follower: false,
+                batch_max_ts: Timestamp(i64::MIN),
+                batch_min_ts: Timestamp(i64::MAX),
+                batch_has_ts: false,
+            };
+            let sample = [0u8; 56];
+            sink.apply_buf(later, &sample, Some(Timestamp(1))).unwrap();
+            sink.apply_buf(earlier, &sample, Some(Timestamp(1)))
+                .unwrap();
+        });
+
+        let components = db.with_state(|state| state.components.clone());
+        let mut reversed = HashMap::new();
+        for id in [later, empty, earlier] {
+            reversed.insert(id, components.get(&id).unwrap().clone());
+        }
+        let forward_layout = DBVisitor::snapshot(components.into_values());
+        let backward_layout = DBVisitor::snapshot(reversed.into_values());
+        assert!(forward_layout.same_layout(&backward_layout));
+        let forward = forward_layout.vtable().unwrap();
+        let backward = backward_layout.vtable().unwrap();
+        let ids = |vtable: &VTable| {
+            vtable
+                .realize_fields(None)
+                .map(|field| field.unwrap().component_id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(&forward), ids(&backward));
+        assert_eq!(ids(&forward), vec![earlier, later]);
+    }
 
     #[test]
     fn stream_interval_matches_microsecond_timestamps() {
