@@ -136,7 +136,7 @@ while IFS= read -r -d '' shell; do
         continue
     fi
     stale_nix_shells+=("$shell")
-    shell_bytes="$(du -sx -B1 "$shell" 2>/dev/null | awk 'END {print $1 + 0}')"
+    shell_bytes="$(du -sx -B1 "$shell" 2>/dev/null | awk 'END {print $1 + 0}' || true)"
     stale_nix_shell_bytes=$(( stale_nix_shell_bytes + shell_bytes ))
 done < <(
     find "$nix_shell_tmp_root" -xdev -mindepth 1 -maxdepth 1 \
