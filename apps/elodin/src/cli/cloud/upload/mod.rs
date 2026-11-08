@@ -39,7 +39,7 @@ pub struct UploadArgs {
     /// Maximum seconds to wait for publication after acceptance.
     #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..))]
     pub timeout: u64,
-    /// Reuse prepared archives when source metadata is unchanged; must be outside the database.
+    /// Absolute normalized cache path outside the database; reuses unchanged prepared archives.
     #[arg(long, env = "ELODIN_UPLOAD_CACHE_DIR")]
     pub archive_cache: Option<PathBuf>,
     /// Extra cache identity supplied by callers that pin this CLI.
@@ -397,12 +397,16 @@ fn prepare_salted(
 }
 
 fn validate_cache_location(root: &Path, cache: &Path) -> miette::Result<()> {
-    if cache
-        .components()
-        .any(|component| component == std::path::Component::ParentDir)
+    if !cache.is_absolute()
+        || cache.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::CurDir | std::path::Component::ParentDir
+            )
+        })
     {
         return Err(miette::miette!(
-            "upload archive cache path cannot contain '..'"
+            "upload archive cache path must be absolute and normalized"
         ));
     }
     let root = std::fs::canonicalize(root).into_diagnostic()?;
@@ -416,29 +420,14 @@ fn validate_cache_location(root: &Path, cache: &Path) -> miette::Result<()> {
 }
 
 fn prospective_path(path: &Path) -> miette::Result<PathBuf> {
-    let absolute = if path.is_absolute() {
-        path.to_owned()
-    } else {
-        std::env::current_dir().into_diagnostic()?.join(path)
-    };
-    let mut normalized = PathBuf::new();
-    for component in absolute.components() {
-        match component {
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                normalized.pop();
-            }
-            _ => normalized.push(component.as_os_str()),
-        }
-    }
-    let mut ancestor = normalized.as_path();
+    let mut ancestor = path;
     while !ancestor.exists() {
         ancestor = ancestor
             .parent()
             .ok_or_else(|| miette::miette!("archive cache path has no existing ancestor"))?;
     }
     let resolved = std::fs::canonicalize(ancestor).into_diagnostic()?;
-    Ok(resolved.join(normalized.strip_prefix(ancestor).into_diagnostic()?))
+    Ok(resolved.join(path.strip_prefix(ancestor).into_diagnostic()?))
 }
 
 fn remove_cached_file(path: &Path) -> miette::Result<()> {
@@ -1339,15 +1328,55 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().join("db");
         let outside = dir.path().join("outside");
-        std::fs::create_dir_all(root.join("nested")).unwrap();
+        std::fs::create_dir(&root).unwrap();
         std::fs::create_dir(&outside).unwrap();
         std::fs::write(root.join("db_state"), b"abc").unwrap();
-        std::os::unix::fs::symlink(root.join("nested"), outside.join("db-link")).unwrap();
-        let cache = outside.join("db-link/../archive-cache");
+        std::os::unix::fs::symlink(&root, outside.join("db-link")).unwrap();
+        let cache = outside.join("db-link/archive-cache");
         let error = prepare(&root, Some(&cache)).err().unwrap().to_string();
-        assert!(error.contains("cannot contain '..'"));
-        assert!(!dir.path().join("archive-cache").exists());
+        assert!(error.contains("cannot be inside"));
         assert!(!root.join("archive-cache").exists());
+    }
+
+    #[test]
+    fn prepared_archive_cache_allows_normalized_absolute_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("workspace/db");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("db_state"), b"abc").unwrap();
+        let cache = dir.path().join("workspace/archive-cache");
+        let (_, archive, _, hit) = prepare(&root, Some(&cache)).unwrap();
+        assert!(!hit);
+        assert!(archive.path().is_file());
+        assert!(dir.path().join("workspace/archive-cache").is_dir());
+        assert!(!root.join("archive-cache").exists());
+    }
+
+    #[test]
+    fn prepared_archive_cache_rejects_relative_and_parent_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("db");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("db_state"), b"abc").unwrap();
+        for cache in [PathBuf::from("cache"), root.join("../cache")] {
+            let error = prepare(&root, Some(&cache)).err().unwrap().to_string();
+            assert!(error.contains("must be absolute and normalized"));
+        }
+        assert!(!root.join("cache").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn prepared_archive_cache_rejects_drive_relative_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("db");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("db_state"), b"abc").unwrap();
+        let error = prepare(&root, Some(Path::new(r"C:cache")))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("must be absolute and normalized"));
     }
 
     #[test]
