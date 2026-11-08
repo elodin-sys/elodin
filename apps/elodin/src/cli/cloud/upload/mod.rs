@@ -39,7 +39,7 @@ pub struct UploadArgs {
     /// Maximum seconds to wait for publication after acceptance.
     #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..))]
     pub timeout: u64,
-    /// Reuse prepared archives whose source paths, sizes, and modification times are unchanged.
+    /// Reuse prepared archives when source metadata is unchanged; must be outside the database.
     #[arg(long, env = "ELODIN_UPLOAD_CACHE_DIR")]
     pub archive_cache: Option<PathBuf>,
     /// Populate the prepared archive cache without contacting Elodin Cloud.
@@ -328,6 +328,9 @@ fn prepare(
     root: &Path,
     cache: Option<&Path>,
 ) -> miette::Result<(Manifest, ArchiveFile, Archive, bool)> {
+    if let Some(cache) = cache {
+        validate_cache_location(root, cache)?;
+    }
     let paths = upload_paths(root)?;
     let Some(cache) = cache else {
         let output = tempfile::NamedTempFile::new().into_diagnostic()?;
@@ -354,26 +357,58 @@ fn prepare(
     let output = tempfile::NamedTempFile::new_in(cache).into_diagnostic()?;
     let (manifest, output, archive) = package(root, paths, output)?;
     let cached = CachedPackage { manifest, archive };
-    let _ = std::fs::remove_file(&archive_path);
+    remove_cached_file(&archive_path)?;
     output.persist(&archive_path).into_diagnostic()?;
-    let mut permissions = std::fs::metadata(&archive_path)
-        .into_diagnostic()?
-        .permissions();
-    permissions.set_readonly(true);
-    std::fs::set_permissions(&archive_path, permissions).into_diagnostic()?;
     let mut metadata = tempfile::NamedTempFile::new_in(cache).into_diagnostic()?;
     metadata
         .write_all(&serde_json::to_vec(&cached).into_diagnostic()?)
         .into_diagnostic()?;
     metadata.as_file().sync_all().into_diagnostic()?;
-    let _ = std::fs::remove_file(&metadata_path);
+    remove_cached_file(&metadata_path)?;
     metadata.persist(&metadata_path).into_diagnostic()?;
+    let mut permissions = std::fs::metadata(&archive_path)
+        .into_diagnostic()?
+        .permissions();
+    permissions.set_readonly(true);
+    std::fs::set_permissions(&archive_path, permissions).into_diagnostic()?;
     Ok((
         cached.manifest,
         ArchiveFile::Cached(archive_path),
         cached.archive,
         false,
     ))
+}
+
+fn validate_cache_location(root: &Path, cache: &Path) -> miette::Result<()> {
+    let root = std::fs::canonicalize(root).into_diagnostic()?;
+    let existed = cache.exists();
+    std::fs::create_dir_all(cache).into_diagnostic()?;
+    let cache = std::fs::canonicalize(cache).into_diagnostic()?;
+    if cache.starts_with(&root) {
+        if !existed {
+            let _ = std::fs::remove_dir(&cache);
+        }
+        return Err(miette::miette!(
+            "upload archive cache cannot be inside the TelemetryDB"
+        ));
+    }
+    Ok(())
+}
+
+fn remove_cached_file(path: &Path) -> miette::Result<()> {
+    #[cfg(windows)]
+    if let Ok(metadata) = std::fs::metadata(path)
+        && metadata.permissions().readonly()
+    {
+        let mut permissions = metadata.permissions();
+        permissions.set_readonly(false);
+        std::fs::set_permissions(path, permissions).into_diagnostic()?;
+    }
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).into_diagnostic(),
+    }
 }
 
 fn archive_cache_key(root: &Path, paths: &[(String, u64)]) -> miette::Result<String> {
@@ -459,6 +494,11 @@ struct TransferStats {
 }
 
 pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
+    if args.prepare_only && args.archive_cache.is_none() {
+        return Err(miette::miette!(
+            "--prepare-only requires --archive-cache or ELODIN_UPLOAD_CACHE_DIR"
+        ));
+    }
     let root = args.db_path.clone();
     let cache = args.archive_cache.clone();
     let prepare_started = Instant::now();
@@ -622,8 +662,11 @@ async fn transfer(
         .into_diagnostic()?;
     let url = format!("{base}/v1/projects/{project}/run-uploads/{ticket}/archive");
     let mut stats = TransferStats::default();
-    for refresh in 0..3 {
+    let mut failed_rounds = 0;
+    let mut empty_refreshes = 0;
+    loop {
         let session = archive_session(ctx, &url, archive).await?;
+        let signed_at = Instant::now();
         if session.completed {
             return Ok(stats);
         }
@@ -635,7 +678,13 @@ async fn transfer(
             return Err(miette::miette!("invalid storage upload link"));
         }
         let mut failed = None;
+        let mut refresh_urls = false;
+        let parts_before = stats.parts;
         for batch in session.parts.chunks(8) {
+            if signed_at.elapsed() >= Duration::from_secs(600) {
+                refresh_urls = true;
+                break;
+            }
             let uploads = stream::iter(
                 batch
                     .iter()
@@ -647,7 +696,11 @@ async fn transfer(
             let mut receipts = Vec::with_capacity(batch.len());
             while let Some(result) = uploads.next().await {
                 let uploaded = match result {
-                    Ok(uploaded) => uploaded,
+                    Ok(PartUpload::Uploaded(uploaded)) => uploaded,
+                    Ok(PartUpload::Refresh) => {
+                        refresh_urls = true;
+                        continue;
+                    }
                     Err(error) => {
                         failed.get_or_insert(error);
                         continue;
@@ -658,16 +711,34 @@ async fn transfer(
                 receipts.push(uploaded.receipt);
             }
             acknowledge_parts(ctx, &url, &mut receipts).await?;
-            if failed.is_some() {
+            if failed.is_some() || refresh_urls {
                 break;
             }
         }
         if let Some(error) = failed {
-            if refresh < 2 {
-                tokio::time::sleep(Duration::from_secs(1 << refresh)).await;
+            if stats.parts > parts_before {
+                failed_rounds = 0;
+            }
+            failed_rounds += 1;
+            if failed_rounds < 3 {
+                tokio::time::sleep(Duration::from_secs(1 << (failed_rounds - 1))).await;
                 continue;
             }
             return Err(error);
+        }
+        if refresh_urls {
+            failed_rounds = 0;
+            if stats.parts == parts_before {
+                empty_refreshes += 1;
+                if empty_refreshes >= 3 {
+                    return Err(miette::miette!(
+                        "storage upload links repeatedly expired without progress"
+                    ));
+                }
+            } else {
+                empty_refreshes = 0;
+            }
+            continue;
         }
         let creds = tokens::ensure_valid(ctx).await?;
         let resp = ctx
@@ -681,9 +752,6 @@ async fn transfer(
         expect_no_content(resp).await?;
         return Ok(stats);
     }
-    Err(miette::miette!(
-        "storage part upload failed; rerun the same command to resume"
-    ))
 }
 
 struct UploadedPart {
@@ -691,12 +759,17 @@ struct UploadedPart {
     retries: u32,
 }
 
+enum PartUpload {
+    Uploaded(UploadedPart),
+    Refresh,
+}
+
 async fn upload_part(
     client: &reqwest::Client,
     base: &str,
     archive_path: &Path,
     part: PartUrl,
-) -> miette::Result<UploadedPart> {
+) -> miette::Result<PartUpload> {
     let storage_url = reqwest::Url::parse(&part.url).into_diagnostic()?;
     if (storage_url.scheme() != "https"
         && !(base.starts_with("http://") && storage_url.scheme() == "http"))
@@ -731,13 +804,13 @@ async fn upload_part(
                     .and_then(|value| value.to_str().ok())
                     .ok_or_else(|| miette::miette!("storage omitted the part ETag"))?
                     .to_owned();
-                return Ok(UploadedPart {
+                return Ok(PartUpload::Uploaded(UploadedPart {
                     receipt: PartReceipt {
                         number: part.number,
                         etag,
                     },
                     retries: retry,
-                });
+                }));
             }
             Ok(response)
                 if matches!(
@@ -745,7 +818,7 @@ async fn upload_part(
                     reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
                 ) =>
             {
-                break;
+                return Ok(PartUpload::Refresh);
             }
             _ if retry < 2 => tokio::time::sleep(Duration::from_secs(1 << retry)).await,
             _ => break,
@@ -1168,12 +1241,37 @@ mod tests {
         assert!(second_hit);
         assert_eq!(first_path, second.path());
         assert_eq!(first_archive.sha256, second_archive.sha256);
+        let sidecar = std::fs::read_dir(&cache)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "json")
+            })
+            .unwrap();
+        std::fs::remove_file(sidecar).unwrap();
+        let (_, rebuilt, _, rebuilt_hit) = prepare(&root, Some(&cache)).unwrap();
+        assert!(!rebuilt_hit);
+        assert_eq!(first_path, rebuilt.path());
         std::thread::sleep(Duration::from_millis(2));
         std::fs::write(root.join("db_state"), b"xyz").unwrap();
         let (_, changed, changed_archive, changed_hit) = prepare(&root, Some(&cache)).unwrap();
         assert!(!changed_hit);
         assert_ne!(first_path, changed.path());
         assert_ne!(first_archive.sha256, changed_archive.sha256);
+    }
+
+    #[test]
+    fn prepared_archive_cache_rejects_database_subdirectories() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("db");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("db_state"), b"abc").unwrap();
+        let error = prepare(&root, Some(&root.join(".upload-cache")))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("cannot be inside"));
     }
 
     #[test]
@@ -1227,6 +1325,36 @@ mod tests {
         )
         .await
         .unwrap();
+    }
+
+    #[tokio::test]
+    async fn prepare_only_requires_persistent_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("db");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("db_state"), b"abc").unwrap();
+        let ctx = AuthCtx {
+            client: reqwest::Client::new(),
+            issuer: "https://auth.invalid".into(),
+            api_url: "https://api.invalid".into(),
+            creds_path: dir.path().join("credentials.json"),
+        };
+        let error = run(
+            &ctx,
+            &UploadArgs {
+                db_path: root,
+                project: None,
+                json: false,
+                restart: false,
+                timeout: 1,
+                archive_cache: None,
+                prepare_only: true,
+            },
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("requires --archive-cache"));
     }
 
     #[test]

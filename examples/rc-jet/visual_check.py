@@ -238,15 +238,11 @@ def wait_for_renderer(ctx) -> bool:
         if latest is not None:
             timestamp, _, _ = latest
             elapsed = time.monotonic() - started
-            print(
-                f"[VISUAL] render server ready at {timestamp / 1e6:.3f}s "
-                f"after {elapsed:.3f}s"
-            )
+            print(f"[VISUAL] render server ready at {timestamp / 1e6:.3f}s after {elapsed:.3f}s")
             return True
         time.sleep(0.05)
     startup_failure[0] = (
-        f"render server did not produce both camera frames within "
-        f"{RENDER_READY_TIMEOUT_S:.1f}s"
+        f"render server did not produce both camera frames within {RENDER_READY_TIMEOUT_S:.1f}s"
     )
     print(f"[VISUAL] FAIL: {startup_failure[0]}")
     return False
