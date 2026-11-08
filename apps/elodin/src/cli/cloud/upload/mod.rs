@@ -1,11 +1,12 @@
 //! Resumable zstd-compressed tar uploads of a stopped TelemetryDB, followed by publication polling.
 
 use std::collections::HashSet;
-use std::io::{IsTerminal, Read};
+use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use clap::Args;
+use futures_util::{StreamExt, stream};
 use miette::{Context, IntoDiagnostic};
 use ring::digest::{Context as Digest, SHA256};
 use serde::{Deserialize, Serialize};
@@ -16,6 +17,8 @@ use crate::cli::Cli;
 
 use super::AuthCtx;
 use super::auth::{random_token, tokens};
+
+const PART_UPLOAD_CONCURRENCY: usize = 4;
 
 #[derive(Args, Clone)]
 pub struct UploadArgs {
@@ -62,6 +65,39 @@ struct CheckedSource {
     bytes: u64,
 }
 
+struct CheckedOutput<W> {
+    inner: W,
+    hash: Digest,
+    bytes: u64,
+}
+
+impl<W: Write> Write for CheckedOutput<W> {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        let written = self.inner.write(buffer)?;
+        self.hash.update(&buffer[..written]);
+        self.bytes += written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+impl CheckedOutput<std::fs::File> {
+    fn finish(self) -> std::io::Result<(u64, String)> {
+        self.inner.sync_all()?;
+        let sha256 = self
+            .hash
+            .finish()
+            .as_ref()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        Ok((self.bytes, sha256))
+    }
+}
+
 impl Read for CheckedSource {
     fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
         let n = self.file.read(buffer)?;
@@ -85,8 +121,12 @@ fn upload_file_len(path: &Path) -> miette::Result<u64> {
 
 fn archive(root: &Path, manifest: &Manifest) -> miette::Result<(tempfile::NamedTempFile, Archive)> {
     let output = tempfile::NamedTempFile::new().into_diagnostic()?;
-    let mut encoder = zstd::stream::write::Encoder::new(output.reopen().into_diagnostic()?, 3)
-        .into_diagnostic()?;
+    let checked = CheckedOutput {
+        inner: output.reopen().into_diagnostic()?,
+        hash: Digest::new(&SHA256),
+        bytes: 0,
+    };
+    let mut encoder = zstd::stream::write::Encoder::new(checked, 3).into_diagnostic()?;
     encoder.include_checksum(true).into_diagnostic()?;
     let mut builder = tar::Builder::new(encoder);
     for entry in &manifest.files {
@@ -133,31 +173,91 @@ fn archive(root: &Path, manifest: &Manifest) -> miette::Result<(tempfile::NamedT
             ));
         }
     }
-    builder
+    let checked = builder
         .into_inner()
         .into_diagnostic()?
         .finish()
-        .into_diagnostic()?
-        .sync_all()
         .into_diagnostic()?;
-    let mut source = output.reopen().into_diagnostic()?;
-    let size_bytes = source.metadata().into_diagnostic()?.len();
-    let mut hash = Digest::new(&SHA256);
-    let mut buffer = [0; 65536];
-    loop {
-        let n = source.read(&mut buffer).into_diagnostic()?;
-        if n == 0 {
-            break;
-        }
-        hash.update(&buffer[..n]);
-    }
-    let sha256 = hash
-        .finish()
-        .as_ref()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
+    let (size_bytes, sha256) = checked.finish().into_diagnostic()?;
     Ok((output, Archive { size_bytes, sha256 }))
+}
+
+fn package(root: &Path) -> miette::Result<(Manifest, tempfile::NamedTempFile, Archive)> {
+    let paths = upload_paths(root)?;
+    let output = tempfile::NamedTempFile::new().into_diagnostic()?;
+    let checked = CheckedOutput {
+        inner: output.reopen().into_diagnostic()?,
+        hash: Digest::new(&SHA256),
+        bytes: 0,
+    };
+    let mut encoder = zstd::stream::write::Encoder::new(checked, 3).into_diagnostic()?;
+    encoder.include_checksum(true).into_diagnostic()?;
+    let mut builder = tar::Builder::new(encoder);
+    let mut files = Vec::with_capacity(paths.len());
+    for (path, size_bytes) in paths {
+        let part = format!("file_{}", files.len());
+        let disk_path = root.join(&path);
+        let before = std::fs::metadata(&disk_path).into_diagnostic()?;
+        let file = std::fs::File::open(&disk_path).into_diagnostic()?;
+        let mut source = CheckedSource {
+            file: file.take(size_bytes),
+            hash: Digest::new(&SHA256),
+            bytes: 0,
+        };
+        let name = ring::digest::digest(&SHA256, part.as_bytes())
+            .as_ref()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let mut header = tar::Header::new_gnu();
+        header.set_size(size_bytes);
+        header.set_mode(0o600);
+        header.set_uid(0);
+        header.set_gid(0);
+        header.set_mtime(0);
+        header.set_entry_type(tar::EntryType::Regular);
+        builder
+            .append_data(&mut header, name, &mut source)
+            .into_diagnostic()?;
+        let sha256 = source
+            .hash
+            .finish()
+            .as_ref()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        let after = std::fs::metadata(&disk_path).into_diagnostic()?;
+        if upload_file_len(&disk_path)? != size_bytes
+            || source.bytes != size_bytes
+            || before.len() != after.len()
+            || before.modified().ok() != after.modified().ok()
+        {
+            return Err(miette::miette!(
+                "upload source changed; keep the database stopped"
+            ));
+        }
+        files.push(UploadFile {
+            part,
+            path,
+            size_bytes,
+            sha256,
+        });
+    }
+    let checked = builder
+        .into_inner()
+        .into_diagnostic()?
+        .finish()
+        .into_diagnostic()?;
+    let (size_bytes, sha256) = checked.finish().into_diagnostic()?;
+    Ok((
+        Manifest {
+            version: 1,
+            kind: "telemetry_db",
+            files,
+        },
+        output,
+        Archive { size_bytes, sha256 },
+    ))
 }
 
 #[derive(Deserialize)]
@@ -205,16 +305,25 @@ struct PartReceipt {
     etag: String,
 }
 
+#[derive(Default)]
+struct TransferStats {
+    parts: u32,
+    retries: u32,
+}
+
 pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
     tokens::ensure_valid(ctx).await?;
     let root = args.db_path.clone();
-    let (manifest, archive_file, archive) = tokio::task::spawn_blocking(move || {
-        let manifest = manifest(&root)?;
-        let (file, archive) = archive(&root, &manifest)?;
-        Ok::<_, miette::Report>((manifest, file, archive))
-    })
-    .await
-    .into_diagnostic()??;
+    let prepare_started = Instant::now();
+    let (manifest, archive_file, archive) = tokio::task::spawn_blocking(move || package(&root))
+        .await
+        .into_diagnostic()??;
+    eprintln!(
+        "event=upload_performance stage=prepare duration_ms={} files={} archive_bytes={}",
+        prepare_started.elapsed().as_millis(),
+        manifest.files.len(),
+        archive.size_bytes
+    );
     let mut creds = tokens::ensure_valid(ctx).await?;
     let base = creds.api_url.trim_end_matches('/').to_owned();
     let projects: Projects = response(
@@ -251,7 +360,16 @@ pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
     }
     let ticket = accepted.ticket;
     if accepted.state == "uploading" {
-        transfer(ctx, &base, project, ticket, archive_file.path(), &archive).await?;
+        let transfer_started = Instant::now();
+        let stats = transfer(ctx, &base, project, ticket, archive_file.path(), &archive).await?;
+        eprintln!(
+            "event=upload_performance stage=transfer duration_ms={} ticket={} archive_bytes={} parts={} retries={}",
+            transfer_started.elapsed().as_millis(),
+            ticket,
+            archive.size_bytes,
+            stats.parts,
+            stats.retries
+        );
         creds = tokens::ensure_valid(ctx).await?;
         accepted = response(
             ctx.client
@@ -319,13 +437,20 @@ pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
     };
-    tokio::time::timeout(Duration::from_secs(args.timeout), wait)
+    let publication_started = Instant::now();
+    let result = tokio::time::timeout(Duration::from_secs(args.timeout), wait)
         .await
         .map_err(|_| {
             miette::miette!(
                 "timed out waiting for upload {ticket}; it may still publish. Status: {status_url}"
             )
-        })?
+        })?;
+    eprintln!(
+        "event=upload_performance stage=publication_wait duration_ms={} ticket={}",
+        publication_started.elapsed().as_millis(),
+        ticket
+    );
+    result
 }
 
 async fn transfer(
@@ -335,95 +460,62 @@ async fn transfer(
     ticket: uuid::Uuid,
     archive_path: &Path,
     archive: &Archive,
-) -> miette::Result<()> {
+) -> miette::Result<TransferStats> {
     // Never attach the API bearer token or follow redirects on storage requests.
     let storage_client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(180))
         .build()
         .into_diagnostic()?;
-    {
-        let url = format!("{base}/v1/projects/{project}/run-uploads/{ticket}/archive");
-        let mut session = archive_session(ctx, &url, archive).await?;
-        let mut signed_at = std::time::Instant::now();
+    let url = format!("{base}/v1/projects/{project}/run-uploads/{ticket}/archive");
+    let mut stats = TransferStats::default();
+    for refresh in 0..3 {
+        let session = archive_session(ctx, &url, archive).await?;
         if session.completed {
-            return Ok(());
+            return Ok(stats);
         }
-        let mut file = tokio::fs::File::open(archive_path)
-            .await
-            .into_diagnostic()?;
-        let mut receipts = Vec::new();
-        for number in 1..=session.part_count {
-            if session.completed_parts.contains(&number) {
+        if session.parts.iter().any(|part| {
+            let offset = u64::from(part.number - 1) * session.part_bytes;
+            let size = (archive.size_bytes - offset).min(session.part_bytes);
+            part.offset != offset || part.size_bytes != size
+        }) {
+            return Err(miette::miette!("invalid storage upload link"));
+        }
+        let mut failed = None;
+        for batch in session.parts.chunks(8) {
+            let uploads = stream::iter(
+                batch
+                    .iter()
+                    .cloned()
+                    .map(|part| upload_part(&storage_client, base, archive_path, part)),
+            )
+            .buffer_unordered(PART_UPLOAD_CONCURRENCY);
+            tokio::pin!(uploads);
+            let mut receipts = Vec::with_capacity(batch.len());
+            while let Some(result) = uploads.next().await {
+                let uploaded = match result {
+                    Ok(uploaded) => uploaded,
+                    Err(error) => {
+                        failed.get_or_insert(error);
+                        continue;
+                    }
+                };
+                stats.parts += 1;
+                stats.retries += uploaded.retries;
+                receipts.push(uploaded.receipt);
+            }
+            acknowledge_parts(ctx, &url, &mut receipts).await?;
+            if failed.is_some() {
+                break;
+            }
+        }
+        if let Some(error) = failed {
+            if refresh < 2 {
+                tokio::time::sleep(Duration::from_secs(1 << refresh)).await;
                 continue;
             }
-            let offset = u64::from(number - 1) * session.part_bytes;
-            let size = (archive.size_bytes - offset).min(session.part_bytes);
-            file.seek(std::io::SeekFrom::Start(offset))
-                .await
-                .into_diagnostic()?;
-            let mut bytes = vec![0; size as usize];
-            file.read_exact(&mut bytes)
-                .await
-                .into_diagnostic()
-                .wrap_err("upload source changed; keep the database stopped")?;
-            let mut etag = None;
-            for retry in 0..3 {
-                if retry > 0 || signed_at.elapsed() >= Duration::from_secs(600) {
-                    acknowledge_parts(ctx, &url, &mut receipts).await?;
-                    session = archive_session(ctx, &url, archive).await?;
-                    signed_at = std::time::Instant::now();
-                }
-                let signed = session
-                    .parts
-                    .iter()
-                    .find(|part| part.number == number)
-                    .ok_or_else(|| miette::miette!("missing storage upload link"))?;
-                let storage_url = reqwest::Url::parse(&signed.url).into_diagnostic()?;
-                if signed.number != number
-                    || signed.offset != offset
-                    || signed.size_bytes != size
-                    || (storage_url.scheme() != "https"
-                        && !(base.starts_with("http://") && storage_url.scheme() == "http"))
-                    || !storage_url.username().is_empty()
-                    || storage_url.password().is_some()
-                {
-                    return Err(miette::miette!("invalid storage upload link"));
-                }
-                match storage_client
-                    .put(storage_url)
-                    .body(bytes.clone())
-                    .send()
-                    .await
-                {
-                    Ok(resp) if resp.status().is_success() => {
-                        etag = Some(
-                            resp.headers()
-                                .get("etag")
-                                .and_then(|v| v.to_str().ok())
-                                .ok_or_else(|| miette::miette!("storage omitted the part ETag"))?
-                                .to_owned(),
-                        );
-                        break;
-                    }
-                    _ if retry < 2 => tokio::time::sleep(Duration::from_secs(1 << retry)).await,
-                    _ => {
-                        acknowledge_parts(ctx, &url, &mut receipts).await?;
-                        return Err(miette::miette!(
-                            "storage part upload failed; rerun the same command to resume"
-                        ));
-                    }
-                }
-            }
-            receipts.push(PartReceipt {
-                number,
-                etag: etag.ok_or_else(|| miette::miette!("missing part receipt"))?,
-            });
-            if receipts.len() == 8 {
-                acknowledge_parts(ctx, &url, &mut receipts).await?;
-            }
+            return Err(error);
         }
-        acknowledge_parts(ctx, &url, &mut receipts).await?;
         let creds = tokens::ensure_valid(ctx).await?;
         let resp = ctx
             .client
@@ -434,8 +526,81 @@ async fn transfer(
             .await
             .into_diagnostic()?;
         expect_no_content(resp).await?;
+        return Ok(stats);
     }
-    Ok(())
+    Err(miette::miette!(
+        "storage part upload failed; rerun the same command to resume"
+    ))
+}
+
+struct UploadedPart {
+    receipt: PartReceipt,
+    retries: u32,
+}
+
+async fn upload_part(
+    client: &reqwest::Client,
+    base: &str,
+    archive_path: &Path,
+    part: PartUrl,
+) -> miette::Result<UploadedPart> {
+    let storage_url = reqwest::Url::parse(&part.url).into_diagnostic()?;
+    if (storage_url.scheme() != "https"
+        && !(base.starts_with("http://") && storage_url.scheme() == "http"))
+        || !storage_url.username().is_empty()
+        || storage_url.password().is_some()
+    {
+        return Err(miette::miette!("invalid storage upload link"));
+    }
+    let mut file = tokio::fs::File::open(archive_path)
+        .await
+        .into_diagnostic()?;
+    file.seek(std::io::SeekFrom::Start(part.offset))
+        .await
+        .into_diagnostic()?;
+    let mut buffer = vec![0; part.size_bytes as usize];
+    file.read_exact(&mut buffer)
+        .await
+        .into_diagnostic()
+        .wrap_err("upload source changed; keep the database stopped")?;
+    let bytes = bytes::Bytes::from(buffer);
+    for retry in 0..3 {
+        match client
+            .put(storage_url.clone())
+            .body(bytes.clone())
+            .send()
+            .await
+        {
+            Ok(response) if response.status().is_success() => {
+                let etag = response
+                    .headers()
+                    .get("etag")
+                    .and_then(|value| value.to_str().ok())
+                    .ok_or_else(|| miette::miette!("storage omitted the part ETag"))?
+                    .to_owned();
+                return Ok(UploadedPart {
+                    receipt: PartReceipt {
+                        number: part.number,
+                        etag,
+                    },
+                    retries: retry,
+                });
+            }
+            Ok(response)
+                if matches!(
+                    response.status(),
+                    reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
+                ) =>
+            {
+                break;
+            }
+            _ if retry < 2 => tokio::time::sleep(Duration::from_secs(1 << retry)).await,
+            _ => break,
+        }
+    }
+    Err(miette::miette!(
+        "storage part upload failed; rerun the same command to resume"
+    ))
 }
 
 async fn archive_session(
@@ -638,7 +803,7 @@ async fn response<T: serde::de::DeserializeOwned>(resp: reqwest::Response) -> mi
         .wrap_err("invalid API response")
 }
 
-fn manifest(root: &Path) -> miette::Result<Manifest> {
+fn upload_paths(root: &Path) -> miette::Result<Vec<(String, u64)>> {
     if !std::fs::symlink_metadata(root).into_diagnostic()?.is_dir() {
         return Err(miette::miette!(
             "upload requires a TelemetryDB directory, not a file or symlink"
@@ -653,19 +818,29 @@ fn manifest(root: &Path) -> miette::Result<Manifest> {
         ));
     }
     let mut seen = HashSet::new();
+    paths
+        .into_iter()
+        .map(|path| {
+            let path = path
+                .to_str()
+                .ok_or_else(|| miette::miette!("non-UTF-8 upload path"))?
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            if !portable_path(&path) || !seen.insert(path.to_ascii_lowercase()) {
+                return Err(miette::miette!(
+                    "nonportable or colliding upload path: {path}"
+                ));
+            }
+            let compacted_len = upload_file_len(&root.join(&path))?;
+            Ok((path, compacted_len))
+        })
+        .collect()
+}
+
+fn manifest(root: &Path) -> miette::Result<Manifest> {
+    let paths = upload_paths(root)?;
     let mut files = Vec::with_capacity(paths.len());
-    for path in paths {
-        let path = path
-            .to_str()
-            .ok_or_else(|| miette::miette!("non-UTF-8 upload path"))?
-            .replace(std::path::MAIN_SEPARATOR, "/");
-        if !portable_path(&path) || !seen.insert(path.to_ascii_lowercase()) {
-            return Err(miette::miette!(
-                "nonportable or colliding upload path: {path}"
-            ));
-        }
+    for (path, compacted_len) in paths {
         let disk_path = root.join(&path);
-        let compacted_len = upload_file_len(&disk_path)?;
         let mut file = std::fs::File::open(&disk_path)
             .into_diagnostic()?
             .take(compacted_len);
@@ -776,6 +951,11 @@ mod tests {
     use super::*;
 
     #[test]
+    fn upload_concurrency_caps_part_memory() {
+        assert!(PART_UPLOAD_CONCURRENCY * 64 * 1024 * 1024 <= 256 * 1024 * 1024);
+    }
+
+    #[test]
     fn archive_is_deterministic_compressed_and_detects_changed_sources() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("db_state"), b"abc").unwrap();
@@ -784,6 +964,12 @@ mod tests {
         let manifest = manifest(dir.path()).unwrap();
         let (first, declaration) = archive(dir.path(), &manifest).unwrap();
         let (_, repeated) = archive(dir.path(), &manifest).unwrap();
+        let (packaged, _, packaged_archive) = package(dir.path()).unwrap();
+        assert_eq!(
+            serde_json::to_value(&manifest).unwrap(),
+            serde_json::to_value(packaged).unwrap()
+        );
+        assert_eq!(declaration.sha256, packaged_archive.sha256);
         assert_eq!(declaration.sha256, repeated.sha256);
         assert!(declaration.size_bytes < 2560);
         let decoder = zstd::stream::read::Decoder::new(first.reopen().unwrap()).unwrap();
@@ -1239,7 +1425,8 @@ mod tests {
             .unwrap()
             .unwrap();
             let (batches, sessions) = server.await.unwrap();
-            assert_eq!(batches, if retry_link { vec![1, 8] } else { vec![8, 1] });
+            assert_eq!(batches.iter().sum::<usize>(), 9);
+            assert!(batches.iter().all(|batch| *batch <= 8));
             assert_eq!(sessions, if retry_link { 2 } else { 1 });
         }
     }
