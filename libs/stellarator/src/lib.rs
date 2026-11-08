@@ -7,14 +7,14 @@ use std::{
     time::Duration,
 };
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(any(not(target_os = "linux"), feature = "poll"))]
 pub mod poll;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(feature = "poll")))]
 pub mod uring;
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(any(not(target_os = "linux"), feature = "poll"))]
 type DefaultReactor = poll::PollingReactor;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(feature = "poll")))]
 type DefaultReactor = uring::UringReactor;
 
 pub use stellarator_buf as buf;
@@ -31,9 +31,9 @@ mod noop_waker;
 
 use maitake::{scheduler::ExternalWaker, time::Timer};
 use pin_project::pin_project;
-#[cfg(not(target_os = "linux"))]
+#[cfg(any(not(target_os = "linux"), feature = "poll"))]
 pub(crate) use poll as reactor;
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(feature = "poll")))]
 pub(crate) use uring as reactor;
 
 pub use maitake::future::yield_now;

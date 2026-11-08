@@ -19,6 +19,7 @@ license = false
 eula = false
 
 [features]
+poll = ["stellarator/poll"]
 default = ["axum", "grpc", "parquet", "video-export", "mcap-export"]
 axum = [
     "dep:axum",

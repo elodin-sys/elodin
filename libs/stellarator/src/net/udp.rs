@@ -28,7 +28,7 @@ impl UdpSocket {
         socket.set_reuse_address(true)?;
         #[cfg(unix)]
         socket.set_reuse_port(true)?;
-        socket.set_nonblocking(!cfg!(target_os = "linux"))?;
+        socket.set_nonblocking(cfg!(any(not(target_os = "linux"), feature = "poll")))?;
         socket.bind(&addr.into())?;
 
         Ok(UdpSocket {
