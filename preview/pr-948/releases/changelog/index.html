@@ -199,8 +199,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.20.0" selected>
-                        v0.20.0
+                    <option value="v0.21.0" selected>
+                        v0.21.0
                     </option>
                 </select>
             </span>
@@ -320,6 +320,20 @@
         <h3>On this page</h3>
         <nav id="TableOfContents">
             <ul>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-948/releases/changelog/#v0-21">v0.21</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-948/releases/changelog/#v0-21-0">v0.21.0</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
                 
                 <li>
                     <a href="https://docs.elodin.systems/preview/pr-948/releases/changelog/#v0-20">v0.20</a>
@@ -780,7 +794,53 @@
  
               <main class="docs-content col-lg-11 col-xxl-10">
                   <h1>Changelog</h1>
-                   <h2 id="v0-20">v0.20</h2>
+                   <h2 id="v0-21">v0.21</h2>
+<h3 id="v0-21-0">v0.21.0</h3>
+<ul>
+<li><strong>(breaking:aleph)</strong> Remove the root flake's <code>aleph</code> input; downstream flakes must declare Aleph separately with <code>dir=aleph</code>. (#950)</li>
+<li><strong>(breaking)</strong> Include the full inertia tensor and gyroscopic term in <code>six_dof</code>, changing trajectories of spinning bodies. (#931)</li>
+<li><strong>(breaking)</strong> Validate <code>SpatialInertia</code> inputs; invalid masses and inertia tensors now raise errors. (#931)</li>
+<li><strong>(breaking:rust)</strong> Replace momentum with off-diagonal inertia entries in <code>nox::SpatialInertia</code>; replace <code>momentum()</code> with <code>inertia_off_diag()</code>. (#931)</li>
+<li><strong>(breaking:rust)</strong> Replace the Rust <code>Rk4</code> integrator type with <code>ExplicitRk</code> and <code>Integrator::Rk4</code> with <code>Integrator::ExplicitRk(&amp;RK4)</code>. (#935)</li>
+<li><strong>(breaking)</strong> Apply ellipsoid scale along X/Y/Z with <code>orientation=absolute</code>, correcting the previous Y/Z swap. (#903)</li>
+<li><strong>(feat)</strong> Add a WASM browser editor with WebSocket DB connections, 3D views, graphs, point trails, and interpreted display kernels. (#895)</li>
+<li><strong>(feat)</strong> Support <code>video_stream</code> and sensor-camera views in the WASM editor, with WebCodecs H.264 playback and seeking on Chrome and Safari. (#942)</li>
+<li><strong>(feat)</strong> Add Cloud login, logout, identity and project commands, and recording uploads with compacted log transfer. (#947)</li>
+<li><strong>(feat)</strong> Make timeline timestamps editable and copyable, including microsecond timestamps for recording alignment. (#877)</li>
+<li><strong>(feat)</strong> Support inline Python window layouts and automatic window arrangement across displays. (#887)</li>
+<li><strong>(feat)</strong> Add adjustable sensor-camera frustum opacity. (#884)</li>
+<li><strong>(feat)</strong> Add off-diagonal inertia support and <code>inertia_matrix()</code> to <code>SpatialInertia</code>. (#931)</li>
+<li><strong>(feat)</strong> Add RK2, RK3, Verlet, RK78, and Dormand–Prince 5(4) integrators, with stage timestamps and embedded step-error estimates. (#935)</li>
+<li><strong>(feat)</strong> Add <code>start_timestamp</code> to <code>World.build</code> and pure <code>JaxSim.step_fn</code>, <code>get</code>, and <code>set</code> functions for JAX transformations. (#936)</li>
+<li><strong>(feat)</strong> Add outline icons, additional viewport/3D-object EQL math functions, and screenshot time/tab selection. (#903)</li>
+<li><strong>(feat:examples)</strong> Add <code>dzhanibekov-effect</code>, with DP54 integration and step-error plots. (#931, #935)</li>
+<li><strong>(feat:examples)</strong> Add Voyager Chapters 1 and 2; use RK78 and interpolate Jupiter's position at each integration stage. (#899, #916, #935)</li>
+<li><strong>(feat:examples)</strong> Use Verlet in <code>n-body</code> and record reference trajectories relative to the simulated Sun, including in benchmark exports. (#935)</li>
+<li><strong>(feat:examples)</strong> Add Betaflight truth-guided single-gate hold and a three-gate straight course with ordered crossing checks and race timing. (#894, #913, #943)</li>
+<li><strong>(feat:examples)</strong> Add Betaflight gate-pose vision contracts, corner-order ambiguity reporting, and simulation-time FPV sample timestamps. (#891, #928)</li>
+<li><strong>(fix)</strong> Correct EGM08's top-degree inclusion and tesseral/sectoral weights; gravity trajectories change. (#939)</li>
+<li><strong>(fix)</strong> Honor and validate <code>six_dof(time_step=...)</code>; restore RK4's fourth-order position and orientation accuracy. (#931, #934)</li>
+<li><strong>(fix)</strong> Prevent DB time-travel errors across repeated <code>Exec.run</code> calls and correct <code>JaxSim</code> state updates, component shapes, and read-only component handling. (#936)</li>
+<li><strong>(fix)</strong> Preserve Python thread-local state between simulation callbacks without holding the GIL between calls. (#949)</li>
+<li><strong>(fix)</strong> Correct Cranelift value scoping across branches and loops, and handle reductions over empty inputs. (#936, #949)</li>
+<li><strong>(fix)</strong> Correct Cranelift table indexing, interpolation, dynamic slices, batched/per-entity lookups, and out-of-range index clamping. (#938, #944, #946)</li>
+<li><strong>(fix)</strong> Correct Cranelift reductions, argmin/argmax, batched matrix products, scatter updates, sorting, cumulative sums, and window operations. (#938)</li>
+<li><strong>(fix)</strong> Correct Cranelift boolean/integer/float32 operations, selection, conversions, NaN handling, and <code>erfc</code>; restore vector <code>log</code>/<code>log1p</code> precision. (#938, #940)</li>
+<li><strong>(fix)</strong> Fix Cranelift lambda/constant compilation and loop-local dot/sum consistency. (#938)</li>
+<li><strong>(fix)</strong> Prevent DB VTable collisions affecting LWIR cameras and stream-layout races when components gain data; update follower stream layouts correctly. (#937, #949)</li>
+<li><strong>(fix)</strong> Preserve late-registered playback components, graphs, and metadata in interactive editors. (#884, #903)</li>
+<li><strong>(fix)</strong> Keep live playback synchronized and avoid repeated plot-history scans, backfill gaps, and full-history trail reads. (#893, #903)</li>
+<li><strong>(fix)</strong> Make viewport arrows inherit the schematic coordinate frame. (#908)</li>
+<li><strong>(fix)</strong> Select tabs containing active views, honor mesh visibility ranges, and render Latin-1 vector labels. (#903)</li>
+<li><strong>(fix)</strong> Simplify scalar monitor labels, report pose-evaluation errors, and reject display kernels in EQL-only UI fields. (#903)</li>
+<li><strong>(fix:examples)</strong> Correct RC-jet FPV body-frame transforms and provide the Mojave terrain mesh by default. (#905, #937)</li>
+<li><strong>(fix:examples)</strong> Correct Betaflight FPV tilt, harden GPS/magnetometer initialization settings, and avoid oversized Nix compiler flags during SITL linking. (#891, #904, #928)</li>
+<li><strong>(fix:examples)</strong> Honor the configured simulation rate in <code>drone --telemetry</code>. (#936)</li>
+<li><strong>(fix:aleph)</strong> Correct MEKF gyro-bias subtraction and continue attitude estimation when accelerometer or magnetometer data is missing. (#936)</li>
+<li><strong>(chore)</strong> Update dependencies to address compromised certificate trust. (#909)</li>
+<li><strong>(chore:examples)</strong> Replace standalone example KDL files with Python schematics, including inline drone window layouts. (#887)</li>
+</ul>
+<h2 id="v0-20">v0.20</h2>
 <h3 id="v0-20-0">v0.20.0</h3>
 <ul>
 <li><strong>(breaking:rust)</strong> Rename the <code>impeller2</code> Rust crates, imports, and source paths to <code>impeller</code> now that the earlier protocol is gone. Update downstream Cargo dependencies and imports accordingly.</li>
