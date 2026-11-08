@@ -307,7 +307,6 @@ pub struct LoadSchematicParams<'w, 's> {
     /// refetch can tell a window-only remote save apart from an unrelated
     /// asset write (RFD #724, Bug 2). Optional: absent in minimal test apps.
     last_content: Option<ResMut<'w, LastActiveSchematicContent>>,
-    #[cfg(feature = "big_space")]
     big_space_root: Option<Res<'w, crate::spatial::BigSpaceRootEntity>>,
     // Optional: missing/duplicate root must not invalidate schematic load.
     monitor_root: Option<Single<'w, 's, Entity, With<MonitorsRoot>>>,
@@ -1061,7 +1060,6 @@ impl LoadSchematicParams<'_, '_> {
                             max: vr.max,
                         });
                     }
-                    #[cfg(feature = "big_space")]
                     crate::spatial::parent_under_big_space(&mut e, self.big_space_root.as_deref());
                 }
                 if let Some(icon) = &icon {
@@ -1097,10 +1095,8 @@ impl LoadSchematicParams<'_, '_> {
             // sample (visible-window anchor; see sync_line_3d_anchor).
             bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
             bevy_geo_frames::GeoRotation::absolute(frame, bevy::math::DQuat::IDENTITY),
-            #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
         ));
-        #[cfg(feature = "big_space")]
         crate::spatial::parent_under_big_space(&mut spawn, self.big_space_root.as_deref());
         spawn.insert(SchematicSpawned);
     }
@@ -1115,10 +1111,8 @@ impl LoadSchematicParams<'_, '_> {
             Visibility::default(),
             bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
             bevy_geo_frames::GeoRotation::absolute(frame, bevy::math::DQuat::IDENTITY),
-            #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
         ));
-        #[cfg(feature = "big_space")]
         crate::spatial::parent_under_big_space(&mut spawn, self.big_space_root.as_deref());
         spawn.insert(SchematicSpawned);
     }
@@ -1181,7 +1175,6 @@ impl LoadSchematicParams<'_, '_> {
         );
         let mut e = self.commands.entity(entity);
         e.insert((SchematicSpawned, world_mesh));
-        #[cfg(feature = "big_space")]
         crate::spatial::parent_under_big_space(&mut e, self.big_space_root.as_deref());
     }
 
@@ -1217,7 +1210,6 @@ impl LoadSchematicParams<'_, '_> {
                 if let Some(parent) = pane.parent {
                     let mut e = self.commands.entity(parent);
                     e.insert(SchematicSpawned);
-                    #[cfg(feature = "big_space")]
                     crate::spatial::parent_under_big_space(&mut e, self.big_space_root.as_deref());
                 }
                 if let Some(grid) = pane.grid {

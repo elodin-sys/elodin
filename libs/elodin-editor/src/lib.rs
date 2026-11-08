@@ -9,7 +9,6 @@ use impeller_bevy::DbEndpoint;
 use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
 use crate::plugins::{editor_cam_input, editor_cam_touch};
-#[cfg(feature = "big_space")]
 use crate::spatial::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use bevy::material::AlphaMode;
 use bevy::{
@@ -103,10 +102,6 @@ mod sensor_h264;
 mod skybox_db_assets;
 #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 mod skybox_generation;
-#[cfg(feature = "big_space")]
-pub(crate) mod spatial;
-#[cfg(not(feature = "big_space"))]
-#[path = "spatial_fallback.rs"]
 pub(crate) mod spatial;
 pub mod ui;
 pub mod vector_arrow;
@@ -673,7 +668,6 @@ impl Plugin for EditorPlugin {
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::thruster_particles::ThrusterParticlesPlugin);
         app.add_plugins(plugins::scene_environment::SceneEnvironmentPlugin);
-        #[cfg(feature = "big_space")]
         app.add_plugins(plugins::cesium::CesiumPlugin);
         // Cinematic Earth follows the native Hanabi plugin registration.
         #[cfg(not(target_family = "wasm"))]
@@ -715,14 +709,8 @@ impl Plugin for EditorPlugin {
                 PreUpdate,
                 (
                     clamp_current_time,
-                    #[cfg(feature = "big_space")]
                     advance_playback.run_if(plugins::cesium::playback_ready),
-                    #[cfg(not(feature = "big_space"))]
-                    advance_playback,
-                    #[cfg(feature = "big_space")]
                     follow_latest.run_if(plugins::cesium::playback_ready),
-                    #[cfg(not(feature = "big_space"))]
-                    follow_latest,
                     // Update selection after playback advances to keep line_3d and object_3d in sync.
                     set_selected_range,
                     impeller_bevy::apply_cached_data,
@@ -733,12 +721,8 @@ impl Plugin for EditorPlugin {
                     sync_object_3d,
                     set_viewport_pos,
                     sync_pos,
-                    #[cfg(not(feature = "big_space"))]
-                    bevy_geo_frames::apply_transforms,
                     bevy_geo_frames::apply_geo_rotation,
-                    #[cfg(feature = "big_space")]
                     spatial::apply_big_translation,
-                    #[cfg(feature = "big_space")]
                     set_floating_origin,
                 )
                     .chain()
@@ -852,7 +836,6 @@ impl Plugin for EditorPlugin {
             );
 
         app.add_systems(PreUpdate, warn_missing_geo.before(PositionSync));
-        #[cfg(feature = "big_space")]
         app.add_plugins(spatial::FloatingOriginPlugin::new(16_000., 100.));
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
@@ -1132,7 +1115,6 @@ fn set_clear_color(mut clear_color: ResMut<ClearColor>) {
 ///    `(origin_cell, origin_translation)` pair the floating origin must
 ///    take. Cameras spawned without a parent (e.g. tests) fall back to
 ///    the default cell at the origin.
-#[cfg(feature = "big_space")]
 fn select_floating_origin_camera(
     cameras: impl Iterator<Item = (Entity, bool, bool)>,
 ) -> Option<Entity> {
@@ -1149,7 +1131,6 @@ fn select_floating_origin_camera(
         .map(|(entity, ..)| entity)
 }
 
-#[cfg(feature = "big_space")]
 #[allow(clippy::type_complexity)]
 fn set_floating_origin(
     query: Query<
@@ -1469,7 +1450,6 @@ pub fn register_world_pos_components(app: &mut App) {
         GeoRotation::relative(GeoFrame::default(), DQuat::IDENTITY)
     });
     app.register_required_components::<WorldPos, Transform>();
-    #[cfg(feature = "big_space")]
     app.register_required_components::<WorldPos, crate::spatial::GridCell>();
 }
 
@@ -2943,7 +2923,6 @@ mod tests {
     use impeller::types::{ComponentId, Timestamp};
     use impeller_wkt::ComponentValue;
 
-    #[cfg(feature = "big_space")]
     #[test]
     fn floating_origin_prefers_active_cinematic_camera() {
         let mut world = World::new();
@@ -2957,7 +2936,6 @@ mod tests {
         assert_eq!(selected, Some(cinematic));
     }
 
-    #[cfg(feature = "big_space")]
     #[test]
     fn floating_origin_prefers_visible_regular_camera_over_hidden_cinematic() {
         let mut world = World::new();

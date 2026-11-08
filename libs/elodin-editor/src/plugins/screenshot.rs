@@ -128,9 +128,9 @@ fn capture_screenshot(
     time: Res<Time>,
     mut state: Local<ScreenshotState>,
     mut exit: MessageWriter<AppExit>,
-    #[cfg(feature = "big_space")] terrain_capture: Option<Res<super::cesium::TerrainCapture>>,
-    #[cfg(feature = "big_space")] terrain_startup: Option<Res<super::cesium::TerrainStartup>>,
-    #[cfg(feature = "big_space")] terrain_status: Option<Res<bevy_cesium::CesiumStatus>>,
+    terrain_capture: Option<Res<super::cesium::TerrainCapture>>,
+    terrain_startup: Option<Res<super::cesium::TerrainStartup>>,
+    terrain_status: Option<Res<bevy_cesium::CesiumStatus>>,
     windows: Query<&WindowState, With<PrimaryWindow>>,
 ) {
     let Ok(out) = std::env::var("ELODIN_SCREENSHOT") else {
@@ -147,21 +147,18 @@ fn capture_screenshot(
             if time.elapsed_secs() < delay {
                 return;
             }
-            #[cfg(feature = "big_space")]
-            {
-                match super::cesium::capture_readiness(
-                    terrain_startup.as_deref(),
-                    terrain_capture.as_deref(),
-                    terrain_status.as_deref(),
-                ) {
-                    Ok(true) => {}
-                    Ok(false) => return,
-                    Err(message) => {
-                        error!("{message}");
-                        *state = ScreenshotState::Done;
-                        exit.write(AppExit::error());
-                        return;
-                    }
+            match super::cesium::capture_readiness(
+                terrain_startup.as_deref(),
+                terrain_capture.as_deref(),
+                terrain_status.as_deref(),
+            ) {
+                Ok(true) => {}
+                Ok(false) => return,
+                Err(message) => {
+                    error!("{message}");
+                    *state = ScreenshotState::Done;
+                    exit.write(AppExit::error());
+                    return;
                 }
             }
             if let Ok(tab) = std::env::var("ELODIN_SCREENSHOT_TAB")

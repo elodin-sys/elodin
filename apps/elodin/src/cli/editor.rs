@@ -360,6 +360,7 @@ impl Cli {
         rt: Runtime,
         cancel_token: CancelToken,
         execution: elodin_editor::run::RecipeExecution,
+        hold_for_editor: bool,
     ) -> miette::Result<JoinHandle<miette::Result<()>>> {
         let sim = args.sim.clone();
         let sim_addr = args.addr;
@@ -394,6 +395,7 @@ impl Cli {
                                 cancel_token.clone(),
                                 sim_addr,
                                 execution,
+                                hold_for_editor,
                             ));
                         tokio::select! {
                             r = &mut recipe_fut => res = Some(r),
@@ -426,6 +428,7 @@ impl Cli {
         rt: Runtime,
         cancel_token: CancelToken,
         _execution: elodin_editor::run::RecipeExecution,
+        _hold_for_editor: bool,
     ) -> miette::Result<JoinHandle<miette::Result<()>>> {
         Ok(std::thread::spawn(move || {
             rt.block_on(async move {
@@ -454,6 +457,7 @@ impl Cli {
             rt,
             cancel_token.clone(),
             elodin_editor::run::RecipeExecution::Watch,
+            true,
         )?;
         let mut app = self.editor_app()?;
         match &args.sim {
@@ -528,6 +532,7 @@ impl Cli {
             rt,
             cancel_token.clone(),
             elodin_editor::run::RecipeExecution::Once,
+            false,
         )?;
         let result = thread
             .join()

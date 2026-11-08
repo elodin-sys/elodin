@@ -35,12 +35,12 @@ cargo run --bin elodin editor 127.0.0.1:2240
 
 Optional features declared in `libs/elodin-editor/Cargo.toml` (re-exported by `apps/elodin/Cargo.toml`):
 
-- `big_space` (default): upstream `big_space` 0.13 floating-origin layer.
 - `inspector`: adds the `bevy-inspector-egui` runtime entity inspector.
-- `debug`: enables `big_space`'s debug diagnostics.
+- `debug`: enables BigSpace debug diagnostics.
 - `tracy`: enables Tracy profiling (see `.cursor/skills/elodin-tracy/SKILL.md`).
 
 Enable with `cargo run -p elodin --features "<list>" -- editor ...`.
+BigSpace is always enabled; the editor has no fallback spatial mode.
 
 ## Source Layout
 

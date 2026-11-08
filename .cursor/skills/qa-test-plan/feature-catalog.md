@@ -156,7 +156,7 @@
 ### 16.1 Startup & Connectivity
 - **Startup screen** — Connect to IP address, or run a simulation from file.
 - **Connection targets** — Live sim (spawns via s10), running DB (local, remote, Aleph over IPv6), recorded DB, legacy replay dir; `--schematic` preload (KDL or Python).
-- **Editor dev loop** — `cargo run -p elodin -- editor ...`, `cargo watch` hot-reload, cargo features `big_space`, `inspector`, `debug`, `tracy`.
+- **Editor dev loop** — `cargo run -p elodin -- editor ...`, `cargo watch` hot-reload, cargo features `inspector`, `debug`, `tracy`; BigSpace is always enabled.
 
 ### 16.2 Viewport & 3D Rendering
 - **3D viewport** — Bevy 0.19 + big_space floating-origin rendering; per-viewport `fov`, `near`/`far`, fixed `aspect`, `hdr`, `bloom`, grid toggle, EQL-driven camera `pos`/`look_at`/`up` (follow/chase cameras).

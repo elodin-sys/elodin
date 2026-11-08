@@ -32,9 +32,7 @@ impl Default for CurrentFrame {
 
 fn main() {
     let mut app = App::new();
-    let default_plugins = DefaultPlugins.build();
-    #[cfg(feature = "big_space")]
-    let default_plugins = default_plugins.disable::<TransformPlugin>();
+    let default_plugins = DefaultPlugins.build().disable::<TransformPlugin>();
 
     app.add_plugins(default_plugins)
         .add_plugins(DefaultEditorCamPlugins)
@@ -67,9 +65,7 @@ fn main() {
     app.add_plugins(bevy_inspector_egui::bevy_egui::EguiPlugin::default())
         .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new());
 
-    #[cfg(feature = "big_space")]
-    app.add_plugins(::big_space::prelude::BigSpaceDefaultPlugins)
-        .add_plugins(bevy_geo_frames::big_space::plugin);
+    app.add_plugins(::big_space::prelude::BigSpaceDefaultPlugins);
     app.run();
 }
 
@@ -78,7 +74,6 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    #[cfg(feature = "big_space")]
     let big_space_root = commands
         .spawn((
             ::big_space::prelude::BigSpace::default(),
@@ -88,7 +83,7 @@ fn setup(
 
     // Camera with editor controls
     let transform = Transform::from_xyz(30.0, 20.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y);
-    let _camera_id = commands
+    let camera_id = commands
         .spawn((
             transform,
             // GeoPosition::from_transform(GeoFrame::ENU, &transform, &geo_ctx),
@@ -97,8 +92,7 @@ fn setup(
             EditorCam::default(),
         ))
         .id();
-    #[cfg(feature = "big_space")]
-    commands.entity(_camera_id).insert((
+    commands.entity(camera_id).insert((
         ::big_space::prelude::FloatingOrigin,
         ::big_space::prelude::CellCoord::default(),
         ChildOf(big_space_root),
@@ -135,7 +129,7 @@ fn setup(
     // Position in ENU frame to start: 20 m east, 0 m north, 1 m up
     let enu_pos = DVec3::new(20.0, 0.0, 1.0);
 
-    let _cube_id = commands
+    let cube_id = commands
         .spawn((
             Mesh3d(cuboid_mesh),
             MeshMaterial3d(cuboid_mat),
@@ -156,8 +150,7 @@ fn setup(
         ))
         .id();
 
-    #[cfg(feature = "big_space")]
-    commands.entity(_cube_id).insert((
+    commands.entity(cube_id).insert((
         ::big_space::prelude::CellCoord::default(),
         ChildOf(big_space_root),
     ));

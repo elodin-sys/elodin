@@ -842,7 +842,6 @@ fn spawn_trail_anchor(
             GlobalTransform::default(),
             Visibility::default(),
             // The `GridCell` add hook parents this under the big_space root.
-            #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
             geo_pos,
             geo_rot,

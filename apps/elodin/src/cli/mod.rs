@@ -6,7 +6,6 @@ mod editor;
 #[cfg(not(target_os = "windows"))]
 mod monte_carlo;
 mod schematic;
-#[cfg(feature = "big_space")]
 mod terrain;
 #[cfg(not(target_os = "windows"))]
 mod ui;
@@ -75,7 +74,6 @@ enum Commands {
     /// Convert and inspect schematic source
     Schematic(schematic::Args),
     /// Prepare a fixed terrain height grid (used by the Python SDK).
-    #[cfg(feature = "big_space")]
     #[command(hide = true)]
     TerrainHeights(terrain::Args),
 }
@@ -159,7 +157,6 @@ impl Cli {
             #[cfg(not(target_os = "windows"))]
             Some(Commands::Ui(args)) => self.clone().ui(args.clone()),
             Some(Commands::Schematic(args)) => self.clone().schematic(args.clone()),
-            #[cfg(feature = "big_space")]
             Some(Commands::TerrainHeights(args)) => terrain::run(args.clone()),
             None => self.clone().editor(editor::Args::default(), rt),
         }

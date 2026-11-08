@@ -485,7 +485,7 @@ fn sync_cinematic_earth(
     mut effects: ResMut<Assets<EffectAsset>>,
     mut images: ResMut<Assets<Image>>,
     roots: Query<Entity, With<CinematicEarthRoot>>,
-    #[cfg(feature = "big_space")] streamed_surface: Option<Res<super::cesium::TerrainStartup>>,
+    streamed_surface: Option<Res<super::cesium::TerrainStartup>>,
     spawned: Query<Entity, With<CinematicEarthEntity>>,
     skybox_cameras: Query<Entity, With<CinematicSkybox>>,
     mut tune: ResMut<DensityTune>,
@@ -497,12 +497,9 @@ fn sync_cinematic_earth(
         .as_ref()
         .is_some_and(|env| env.earth.is_some());
 
-    #[cfg(feature = "big_space")]
     let streamed_surface = streamed_surface
         .as_ref()
         .is_some_and(|startup| startup.owns_surface());
-    #[cfg(not(feature = "big_space"))]
-    let streamed_surface = false;
     let surface_changed = surface_mode
         .replace(streamed_surface)
         .is_some_and(|previous| previous != streamed_surface);
@@ -562,7 +559,6 @@ fn sync_cinematic_earth(
             Transform::default(),
             GlobalTransform::default(),
             Visibility::default(),
-            #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
             GeoPosition(GeoFrame::ECEF, DVec3::ZERO),
             GeoRotation::absolute(GeoFrame::ECEF, DQuat::from_rotation_x(std::f64::consts::PI)),
@@ -592,7 +588,6 @@ fn sync_cinematic_earth(
             Transform::default(),
             GlobalTransform::default(),
             Visibility::default(),
-            #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
             GeoPosition(GeoFrame::ECEF, DVec3::ZERO),
             sky_geo_rotation(&geo_context),
@@ -1205,7 +1200,6 @@ fn tune_atmosphere(
 mod tests {
     use super::*;
 
-    #[cfg(feature = "big_space")]
     #[test]
     fn globe_returns_when_terrain_fails() {
         let mut app = App::new();

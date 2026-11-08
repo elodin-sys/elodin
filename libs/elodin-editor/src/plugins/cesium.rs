@@ -242,6 +242,35 @@ mod coordinate_tests {
     }
 
     #[test]
+    fn reapplying_failed_terrain_retries_without_an_automatic_loop() {
+        let terrain = impeller_wkt::TerrainConfig { asset_id: 2275207 };
+        let mut app = App::new();
+        app.insert_resource(crate::ui::schematic::CurrentSchematic(
+            impeller_wkt::Schematic {
+                terrain: Some(terrain),
+                ..default()
+            },
+        ))
+        .add_systems(Update, configure_terrain);
+        app.update();
+        app.world_mut().resource_mut::<TerrainStartup>().error = Some("failed");
+
+        app.update();
+        assert_eq!(
+            app.world().resource::<TerrainStartup>().error,
+            Some("failed")
+        );
+
+        app.world_mut()
+            .resource_mut::<crate::ui::schematic::CurrentSchematic>()
+            .terrain = Some(terrain);
+        app.update();
+        let startup = app.world().resource::<TerrainStartup>();
+        assert_eq!(startup.error, None);
+        assert!(!startup.ready);
+    }
+
+    #[test]
     fn interactive_screenshot_waits_for_startup_and_reports_failure() {
         let mut world = World::new();
         assert_eq!(capture_ready(&world), Ok(true));
@@ -552,6 +581,13 @@ impl Plugin for CesiumPlugin {
         )
         .add_systems(
             Update,
+            release_simulation
+                .after(configure_terrain)
+                .after(update_startup)
+                .run_if(resource_exists::<Messages<crate::ui::schematic::DocumentLoaded>>),
+        )
+        .add_systems(
+            Update,
             show_startup
                 .run_if(resource_exists::<TerrainStartup>)
                 .after(update_startup)
@@ -587,11 +623,19 @@ fn configure_terrain(
     world: &mut World,
     mut previous: Local<Option<Option<impeller_wkt::TerrainConfig>>>,
 ) {
-    let Some(schematic) = world.get_resource::<crate::ui::schematic::CurrentSchematic>() else {
-        return;
+    let (terrain, schematic_changed) = {
+        let Some(schematic) = world.get_resource_ref::<crate::ui::schematic::CurrentSchematic>()
+        else {
+            return;
+        };
+        (schematic.terrain, schematic.is_changed())
     };
-    let terrain = schematic.terrain;
-    if previous.as_ref() == Some(&terrain) {
+    let retry_failed = schematic_changed
+        && terrain.is_some()
+        && world
+            .get_resource::<TerrainStartup>()
+            .is_some_and(|startup| startup.error.is_some());
+    if previous.as_ref() == Some(&terrain) && !retry_failed {
         return;
     }
     *previous = Some(terrain);
@@ -637,6 +681,36 @@ fn update_startup(
             "Initial terrain ready"
         );
     }
+}
+
+fn release_simulation(
+    startup: Option<Res<TerrainStartup>>,
+    config: Res<impeller_wkt::DbConfig>,
+    packet_tx: Res<impeller_bevy::PacketTx>,
+    mut loaded: MessageReader<crate::ui::schematic::DocumentLoaded>,
+    mut document_loaded: Local<bool>,
+) {
+    *document_loaded |= loaded.read().next().is_some();
+    if !config
+        .metadata
+        .contains_key(impeller_wkt::EDITOR_STARTUP_GATE_METADATA_KEY)
+    {
+        return;
+    }
+    if config.schematic_active().is_some() && !*document_loaded {
+        return;
+    }
+    if startup.is_some_and(|startup| !startup.ready) {
+        return;
+    }
+    packet_tx.send_msg(impeller_wkt::SetDbConfig {
+        recording: Some(true),
+        metadata: [(
+            impeller_wkt::EDITOR_STARTUP_GATE_METADATA_KEY.to_string(),
+            String::new(),
+        )]
+        .into(),
+    });
 }
 
 fn show_startup(startup: Res<TerrainStartup>, mut contexts: Query<&mut bevy_egui::EguiContext>) {

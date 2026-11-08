@@ -337,7 +337,6 @@ fn sync_sky_dome(
                 })),
                 NotShadowCaster,
                 Transform::default(),
-                #[cfg(feature = "big_space")]
                 crate::spatial::LowPrecisionRoot,
                 RenderLayers::layer(crate::plugins::render_layer_alloc::REGULAR_SKY_RENDER_LAYER),
                 ChildOf(earth),
@@ -388,7 +387,6 @@ fn sync_atmosphere(
             commands.spawn((
                 Transform::from_rotation(atmosphere_local_rotation(earth_transform)),
                 *earth_transform,
-                #[cfg(feature = "big_space")]
                 crate::spatial::LowPrecisionRoot,
                 SchematicAtmosphere(config),
                 Name::new("environment atmosphere"),
@@ -680,7 +678,6 @@ mod tests {
         assert_eq!(parent.parent(), earth);
         assert_eq!(transform.translation(), earth_transform.translation());
         assert!((earth_transform.rotation() * local.rotation).angle_between(Quat::IDENTITY) < 1e-6);
-        #[cfg(feature = "big_space")]
         assert!(
             app.world()
                 .get::<crate::spatial::LowPrecisionRoot>(atmosphere)

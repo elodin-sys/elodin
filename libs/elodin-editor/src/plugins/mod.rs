@@ -1,6 +1,5 @@
 mod asset_cache;
 pub(crate) mod camera_anchor;
-#[cfg(feature = "big_space")]
 pub mod cesium;
 #[cfg(not(target_family = "wasm"))]
 pub mod cinematic_earth;

@@ -123,7 +123,6 @@ impl Plugin for HeadlessEditorPlugin {
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(crate::plugins::world_mesh::EditorWorldMeshPlugin)
             .add_plugins(crate::rim_glow_material::RimGlowMaterialPlugin);
-        #[cfg(feature = "big_space")]
         app.add_plugins(crate::plugins::cesium::CesiumPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(crate::plugins::display_kernel::DisplayKernelPlugin);
@@ -159,10 +158,7 @@ impl Plugin for HeadlessEditorPlugin {
                 // with the sensor camera's pose (which reads the TelemetryCache
                 // directly), preventing one-frame jitter in `sensor_view`.
                 sync_pos,
-                #[cfg(not(feature = "big_space"))]
-                bevy_geo_frames::apply_transforms,
                 bevy_geo_frames::apply_geo_rotation,
-                #[cfg(feature = "big_space")]
                 crate::spatial::apply_big_translation,
             )
                 .chain()
@@ -216,7 +212,6 @@ impl Plugin for HeadlessEditorPlugin {
         .set_runner(render_server_runner);
 
         app.add_systems(PreUpdate, crate::warn_missing_geo.before(PositionSync));
-        #[cfg(feature = "big_space")]
         app.add_plugins(crate::spatial::FloatingOriginPlugin::new(16_000., 100.));
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
@@ -1148,7 +1143,6 @@ fn render_server_runner(mut app: App) -> AppExit {
     let mut encoders = HashMap::new();
     let mut rendered_frames = 0u64;
     let mut render_time = Duration::ZERO;
-    #[cfg(feature = "big_space")]
     let mut terrain_warmup_ts = None;
 
     loop {
@@ -1220,9 +1214,7 @@ fn render_server_runner(mut app: App) -> AppExit {
             .map(|schedule| schedule.name.clone())
             .collect();
 
-        #[cfg(feature = "big_space")]
         let mut render_ts = render_ts;
-        #[cfg(feature = "big_space")]
         match crate::plugins::cesium::capture_ready(app.world()) {
             Ok(true) => {
                 if let Some(warmed_ts) = terrain_warmup_ts.take() {
