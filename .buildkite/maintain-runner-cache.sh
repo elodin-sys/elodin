@@ -20,13 +20,20 @@ trigger_gib="${CACHE_GC_TRIGGER_GIB:-500}"
 target_gib="${CACHE_GC_TARGET_GIB:-1024}"
 min_retained="${CACHE_GC_MIN_RETAINED:-4}"
 min_retained_per_repo="${CACHE_GC_MIN_RETAINED_PER_REPO:-1}"
+nix_shell_tmp_root="${NIX_SHELL_TMP_ROOT:-/tmp}"
+nix_shell_min_age_minutes="${NIX_SHELL_GC_MIN_AGE_MINUTES:-1440}"
 
 [[ -d "$builds_root" ]] || {
     echo "Buildkite builds root not found: $builds_root" >&2
     exit 1
 }
+[[ -d "$nix_shell_tmp_root" ]] || {
+    echo "Nix shell temporary root not found: $nix_shell_tmp_root" >&2
+    exit 1
+}
 builds_root="$(realpath -e "$builds_root")"
-(( trigger_gib > 0 && target_gib > trigger_gib && min_retained > 0 && min_retained_per_repo > 0 )) || {
+nix_shell_tmp_root="$(realpath -e "$nix_shell_tmp_root")"
+(( trigger_gib > 0 && target_gib > trigger_gib && min_retained > 0 && min_retained_per_repo > 0 && nix_shell_min_age_minutes >= 0 )) || {
     echo "invalid cache-maintenance thresholds" >&2
     exit 1
 }
@@ -68,6 +75,93 @@ if (( ${#stale_trash[@]} > 0 )); then
             nice -n 19 ionice -c 3 rm -rf --one-file-system -- "$trash"
         done
     fi
+fi
+
+declare -A active_nix_shells=()
+nix_shell_root_for_path() {
+    local path relative root_name
+    path="$(realpath -m "$1")"
+    [[ "$path" == "$nix_shell_tmp_root"/nix-shell.* ]] || return 1
+    relative="${path#"$nix_shell_tmp_root"/}"
+    root_name="${relative%%/*}"
+    [[ "$root_name" == nix-shell.* ]] || return 1
+    printf '%s/%s\n' "$nix_shell_tmp_root" "$root_name"
+}
+
+collect_active_nix_shells() {
+    active_nix_shells=()
+    local environ value shell
+    for environ in /proc/[0-9]*/environ; do
+        [[ -r "$environ" ]] || continue
+        while IFS= read -r value; do
+            [[ -n "$value" ]] || continue
+            shell="$(nix_shell_root_for_path "$value" || true)"
+            [[ -n "$shell" ]] && active_nix_shells["$shell"]=1
+        done < <(
+            tr '\0' '\n' 2>/dev/null < "$environ" \
+                | awk -F= '$1 ~ /^(TMPDIR|TMP|TEMP|TEMPDIR|NIX_BUILD_TOP)$/ {sub(/^[^=]*=/, ""); print}' \
+                || true
+        )
+    done
+    for value in "${TMPDIR:-}" "${TMP:-}" "${TEMP:-}" "${TEMPDIR:-}" "${NIX_BUILD_TOP:-}"; do
+        [[ -n "$value" ]] || continue
+        shell="$(nix_shell_root_for_path "$value" || true)"
+        [[ -n "$shell" ]] && active_nix_shells["$shell"]=1
+    done
+}
+
+stale_nix_shell_trash=()
+mapfile -d '' -t stale_nix_shell_trash < <(
+    find "$nix_shell_tmp_root" -xdev -mindepth 1 -maxdepth 1 \
+        -type d -name '.nix-shell.gc.*' -print0
+)
+if (( ${#stale_nix_shell_trash[@]} > 0 )); then
+    if [[ "$mode" == dry-run ]]; then
+        echo "Found ${#stale_nix_shell_trash[@]} interrupted Nix shell cleanup(s); apply mode would remove them"
+    else
+        for trash in "${stale_nix_shell_trash[@]}"; do
+            echo "Removing interrupted Nix shell cleanup: $trash"
+            nice -n 19 ionice -c 3 rm -rf --one-file-system -- "$trash"
+        done
+    fi
+fi
+
+collect_active_nix_shells
+stale_nix_shells=()
+stale_nix_shell_bytes=0
+skipped_active_nix_shells=0
+while IFS= read -r -d '' shell; do
+    if [[ -n "${active_nix_shells[$shell]:-}" ]]; then
+        (( skipped_active_nix_shells += 1 ))
+        continue
+    fi
+    stale_nix_shells+=("$shell")
+    shell_bytes="$(du -sx -B1 "$shell" 2>/dev/null | awk 'END {print $1 + 0}' || true)"
+    stale_nix_shell_bytes=$(( stale_nix_shell_bytes + shell_bytes ))
+done < <(
+    find "$nix_shell_tmp_root" -xdev -mindepth 1 -maxdepth 1 \
+        -type d -name 'nix-shell.*' -mmin "+$nix_shell_min_age_minutes" -print0
+)
+stale_nix_shell_size="$(numfmt --to=iec --suffix=B "$stale_nix_shell_bytes")"
+echo "Nix shell cleanup: mode=$mode stale=${#stale_nix_shells[@]} allocated=$stale_nix_shell_size active-skipped=$skipped_active_nix_shells min-age=${nix_shell_min_age_minutes}m"
+
+if [[ "$mode" == apply ]]; then
+    shell_index=0
+    removed_nix_shells=0
+    for shell in "${stale_nix_shells[@]}"; do
+        [[ -d "$shell" ]] || continue
+        collect_active_nix_shells
+        if [[ -n "${active_nix_shells[$shell]:-}" ]]; then
+            echo "Skipping newly active Nix shell: $shell"
+            continue
+        fi
+        trash="$nix_shell_tmp_root/.nix-shell.gc.$(date +%s).$$.$shell_index"
+        (( shell_index += 1 ))
+        mv -- "$shell" "$trash"
+        nice -n 19 ionice -c 3 rm -rf --one-file-system -- "$trash"
+        (( removed_nix_shells += 1 ))
+    done
+    echo "Removed $removed_nix_shells stale Nix shell(s)"
 fi
 
 declare -A active_checkouts=()
@@ -150,7 +244,7 @@ echo "Runner cache maintenance: mode=$mode free=${free_gib}GiB trigger=${trigger
 echo "Found ${#records[@]} caches; retaining at least $min_retained total and $min_retained_per_repo per repository"
 
 if (( free_gib >= trigger_gib )); then
-    echo "No cleanup needed"
+    echo "No checkout cache cleanup needed"
     exit 0
 fi
 
