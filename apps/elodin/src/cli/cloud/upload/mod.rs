@@ -19,6 +19,9 @@ use super::AuthCtx;
 use super::auth::{random_token, tokens};
 
 const PART_UPLOAD_CONCURRENCY: usize = 4;
+const ARCHIVE_CACHE_VERSION: u32 = 1;
+const ZSTD_LEVEL: i32 = 3;
+const ZSTD_THREADS: u32 = 4;
 
 #[derive(Args, Clone)]
 pub struct UploadArgs {
@@ -36,16 +39,22 @@ pub struct UploadArgs {
     /// Maximum seconds to wait for publication after acceptance.
     #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..))]
     pub timeout: u64,
+    /// Reuse prepared archives whose source paths, sizes, and modification times are unchanged.
+    #[arg(long, env = "ELODIN_UPLOAD_CACHE_DIR")]
+    pub archive_cache: Option<PathBuf>,
+    /// Populate the prepared archive cache without contacting Elodin Cloud.
+    #[arg(long, hide = true)]
+    pub prepare_only: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct Manifest {
     version: u32,
-    kind: &'static str,
+    kind: String,
     files: Vec<UploadFile>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct UploadFile {
     part: String,
     path: String,
@@ -53,7 +62,7 @@ struct UploadFile {
     sha256: String,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 struct Archive {
     size_bytes: u64,
     sha256: String,
@@ -119,6 +128,7 @@ fn upload_file_len(path: &Path) -> miette::Result<u64> {
     }
 }
 
+#[cfg(test)]
 fn archive(root: &Path, manifest: &Manifest) -> miette::Result<(tempfile::NamedTempFile, Archive)> {
     let output = tempfile::NamedTempFile::new().into_diagnostic()?;
     let checked = CheckedOutput {
@@ -126,7 +136,8 @@ fn archive(root: &Path, manifest: &Manifest) -> miette::Result<(tempfile::NamedT
         hash: Digest::new(&SHA256),
         bytes: 0,
     };
-    let mut encoder = zstd::stream::write::Encoder::new(checked, 3).into_diagnostic()?;
+    let mut encoder = zstd::stream::write::Encoder::new(checked, ZSTD_LEVEL).into_diagnostic()?;
+    encoder.multithread(ZSTD_THREADS).into_diagnostic()?;
     encoder.include_checksum(true).into_diagnostic()?;
     let mut builder = tar::Builder::new(encoder);
     for entry in &manifest.files {
@@ -182,15 +193,18 @@ fn archive(root: &Path, manifest: &Manifest) -> miette::Result<(tempfile::NamedT
     Ok((output, Archive { size_bytes, sha256 }))
 }
 
-fn package(root: &Path) -> miette::Result<(Manifest, tempfile::NamedTempFile, Archive)> {
-    let paths = upload_paths(root)?;
-    let output = tempfile::NamedTempFile::new().into_diagnostic()?;
+fn package(
+    root: &Path,
+    paths: Vec<(String, u64)>,
+    output: tempfile::NamedTempFile,
+) -> miette::Result<(Manifest, tempfile::NamedTempFile, Archive)> {
     let checked = CheckedOutput {
         inner: output.reopen().into_diagnostic()?,
         hash: Digest::new(&SHA256),
         bytes: 0,
     };
-    let mut encoder = zstd::stream::write::Encoder::new(checked, 3).into_diagnostic()?;
+    let mut encoder = zstd::stream::write::Encoder::new(checked, ZSTD_LEVEL).into_diagnostic()?;
+    encoder.multithread(ZSTD_THREADS).into_diagnostic()?;
     encoder.include_checksum(true).into_diagnostic()?;
     let mut builder = tar::Builder::new(encoder);
     let mut files = Vec::with_capacity(paths.len());
@@ -252,12 +266,145 @@ fn package(root: &Path) -> miette::Result<(Manifest, tempfile::NamedTempFile, Ar
     Ok((
         Manifest {
             version: 1,
-            kind: "telemetry_db",
+            kind: "telemetry_db".into(),
             files,
         },
         output,
         Archive { size_bytes, sha256 },
     ))
+}
+
+enum ArchiveFile {
+    Temporary(tempfile::NamedTempFile),
+    Cached(PathBuf),
+}
+
+struct CacheLock(PathBuf);
+
+impl CacheLock {
+    fn acquire(path: PathBuf) -> miette::Result<Self> {
+        loop {
+            match std::fs::create_dir(&path) {
+                Ok(()) => return Ok(Self(path)),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let stale = std::fs::metadata(&path)
+                        .and_then(|metadata| metadata.modified())
+                        .and_then(|modified| modified.elapsed().map_err(std::io::Error::other))
+                        .is_ok_and(|age| age > Duration::from_secs(7200));
+                    if stale {
+                        let _ = std::fs::remove_dir(&path);
+                    } else {
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
+                }
+                Err(error) => return Err(error).into_diagnostic(),
+            }
+        }
+    }
+}
+
+impl Drop for CacheLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir(&self.0);
+    }
+}
+
+impl ArchiveFile {
+    fn path(&self) -> &Path {
+        match self {
+            Self::Temporary(file) => file.path(),
+            Self::Cached(path) => path,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+struct CachedPackage {
+    manifest: Manifest,
+    archive: Archive,
+}
+
+fn prepare(
+    root: &Path,
+    cache: Option<&Path>,
+) -> miette::Result<(Manifest, ArchiveFile, Archive, bool)> {
+    let paths = upload_paths(root)?;
+    let Some(cache) = cache else {
+        let output = tempfile::NamedTempFile::new().into_diagnostic()?;
+        let (manifest, output, archive) = package(root, paths, output)?;
+        return Ok((manifest, ArchiveFile::Temporary(output), archive, false));
+    };
+    std::fs::create_dir_all(cache).into_diagnostic()?;
+    let key = archive_cache_key(root, &paths)?;
+    let archive_path = cache.join(format!("{key}.tar.zst"));
+    let metadata_path = cache.join(format!("{key}.json"));
+    let _lock = CacheLock::acquire(cache.join(format!("{key}.lock")))?;
+    if let Ok(bytes) = std::fs::read(&metadata_path)
+        && let Ok(cached) = serde_json::from_slice::<CachedPackage>(&bytes)
+        && std::fs::metadata(&archive_path)
+            .is_ok_and(|metadata| metadata.len() == cached.archive.size_bytes)
+    {
+        return Ok((
+            cached.manifest,
+            ArchiveFile::Cached(archive_path),
+            cached.archive,
+            true,
+        ));
+    }
+    let output = tempfile::NamedTempFile::new_in(cache).into_diagnostic()?;
+    let (manifest, output, archive) = package(root, paths, output)?;
+    let cached = CachedPackage { manifest, archive };
+    let _ = std::fs::remove_file(&archive_path);
+    output.persist(&archive_path).into_diagnostic()?;
+    let mut permissions = std::fs::metadata(&archive_path)
+        .into_diagnostic()?
+        .permissions();
+    permissions.set_readonly(true);
+    std::fs::set_permissions(&archive_path, permissions).into_diagnostic()?;
+    let mut metadata = tempfile::NamedTempFile::new_in(cache).into_diagnostic()?;
+    metadata
+        .write_all(&serde_json::to_vec(&cached).into_diagnostic()?)
+        .into_diagnostic()?;
+    metadata.as_file().sync_all().into_diagnostic()?;
+    let _ = std::fs::remove_file(&metadata_path);
+    metadata.persist(&metadata_path).into_diagnostic()?;
+    Ok((
+        cached.manifest,
+        ArchiveFile::Cached(archive_path),
+        cached.archive,
+        false,
+    ))
+}
+
+fn archive_cache_key(root: &Path, paths: &[(String, u64)]) -> miette::Result<String> {
+    let mut hash = Digest::new(&SHA256);
+    hash.update(
+        format!("v{ARCHIVE_CACHE_VERSION}:zstd-{ZSTD_LEVEL}-threads-{ZSTD_THREADS}\0").as_bytes(),
+    );
+    let root = std::fs::canonicalize(root).into_diagnostic()?;
+    let root_bytes = root.as_os_str().as_encoded_bytes();
+    hash.update(&(root_bytes.len() as u64).to_le_bytes());
+    hash.update(root_bytes);
+    for (path, size) in paths {
+        let metadata = std::fs::metadata(root.join(path)).into_diagnostic()?;
+        let modified = metadata
+            .modified()
+            .into_diagnostic()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        hash.update(&(path.len() as u64).to_le_bytes());
+        hash.update(path.as_bytes());
+        hash.update(&size.to_le_bytes());
+        hash.update(&metadata.len().to_le_bytes());
+        hash.update(&modified.to_le_bytes());
+    }
+    Ok(hash
+        .finish()
+        .as_ref()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
 }
 
 #[derive(Deserialize)]
@@ -312,18 +459,24 @@ struct TransferStats {
 }
 
 pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
-    tokens::ensure_valid(ctx).await?;
     let root = args.db_path.clone();
+    let cache = args.archive_cache.clone();
     let prepare_started = Instant::now();
-    let (manifest, archive_file, archive) = tokio::task::spawn_blocking(move || package(&root))
-        .await
-        .into_diagnostic()??;
+    let (manifest, archive_file, archive, cache_hit) =
+        tokio::task::spawn_blocking(move || prepare(&root, cache.as_deref()))
+            .await
+            .into_diagnostic()??;
     eprintln!(
-        "event=upload_performance stage=prepare duration_ms={} files={} archive_bytes={}",
+        "event=upload_performance stage=prepare duration_ms={} files={} archive_bytes={} cache_hit={}",
         prepare_started.elapsed().as_millis(),
         manifest.files.len(),
-        archive.size_bytes
+        archive.size_bytes,
+        cache_hit
     );
+    if args.prepare_only {
+        println!("{}", archive_file.path().display());
+        return Ok(());
+    }
     let mut creds = tokens::ensure_valid(ctx).await?;
     let base = creds.api_url.trim_end_matches('/').to_owned();
     let projects: Projects = response(
@@ -836,6 +989,7 @@ fn upload_paths(root: &Path) -> miette::Result<Vec<(String, u64)>> {
         .collect()
 }
 
+#[cfg(test)]
 fn manifest(root: &Path) -> miette::Result<Manifest> {
     let paths = upload_paths(root)?;
     let mut files = Vec::with_capacity(paths.len());
@@ -877,7 +1031,7 @@ fn manifest(root: &Path) -> miette::Result<Manifest> {
     }
     Ok(Manifest {
         version: 1,
-        kind: "telemetry_db",
+        kind: "telemetry_db".into(),
         files,
     })
 }
@@ -964,7 +1118,12 @@ mod tests {
         let manifest = manifest(dir.path()).unwrap();
         let (first, declaration) = archive(dir.path(), &manifest).unwrap();
         let (_, repeated) = archive(dir.path(), &manifest).unwrap();
-        let (packaged, _, packaged_archive) = package(dir.path()).unwrap();
+        let (packaged, _, packaged_archive) = package(
+            dir.path(),
+            upload_paths(dir.path()).unwrap(),
+            tempfile::NamedTempFile::new().unwrap(),
+        )
+        .unwrap();
         assert_eq!(
             serde_json::to_value(&manifest).unwrap(),
             serde_json::to_value(packaged).unwrap()
@@ -987,6 +1146,87 @@ mod tests {
         );
         std::fs::write(dir.path().join("db_state"), b"bad").unwrap();
         assert!(archive(dir.path(), &manifest).is_err());
+    }
+
+    #[test]
+    fn prepared_archive_cache_reuses_unchanged_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("db");
+        let cache = dir.path().join("cache");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("db_state"), b"abc").unwrap();
+        let (_, first, first_archive, first_hit) = prepare(&root, Some(&cache)).unwrap();
+        let first_path = first.path().to_owned();
+        assert!(!first_hit);
+        assert!(
+            std::fs::metadata(&first_path)
+                .unwrap()
+                .permissions()
+                .readonly()
+        );
+        let (_, second, second_archive, second_hit) = prepare(&root, Some(&cache)).unwrap();
+        assert!(second_hit);
+        assert_eq!(first_path, second.path());
+        assert_eq!(first_archive.sha256, second_archive.sha256);
+        std::thread::sleep(Duration::from_millis(2));
+        std::fs::write(root.join("db_state"), b"xyz").unwrap();
+        let (_, changed, changed_archive, changed_hit) = prepare(&root, Some(&cache)).unwrap();
+        assert!(!changed_hit);
+        assert_ne!(first_path, changed.path());
+        assert_ne!(first_archive.sha256, changed_archive.sha256);
+    }
+
+    #[test]
+    fn prepared_archive_cache_serializes_concurrent_builds() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("db");
+        let cache = dir.path().join("cache");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("db_state"), b"abc").unwrap();
+        let workers: Vec<_> = (0..2)
+            .map(|_| {
+                let root = root.clone();
+                let cache = cache.clone();
+                std::thread::spawn(move || {
+                    let (_, archive, _, hit) = prepare(&root, Some(&cache)).unwrap();
+                    (archive.path().to_owned(), hit)
+                })
+            })
+            .collect();
+        let results: Vec<_> = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect();
+        assert_eq!(results[0].0, results[1].0);
+        assert_eq!(results.iter().filter(|(_, hit)| *hit).count(), 1);
+    }
+
+    #[tokio::test]
+    async fn prepare_only_needs_no_cloud_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("db");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("db_state"), b"abc").unwrap();
+        let ctx = AuthCtx {
+            client: reqwest::Client::new(),
+            issuer: "https://auth.invalid".into(),
+            api_url: "https://api.invalid".into(),
+            creds_path: dir.path().join("credentials.json"),
+        };
+        run(
+            &ctx,
+            &UploadArgs {
+                db_path: root,
+                project: None,
+                json: false,
+                restart: false,
+                timeout: 1,
+                archive_cache: Some(dir.path().join("cache")),
+                prepare_only: true,
+            },
+        )
+        .await
+        .unwrap();
     }
 
     #[test]
@@ -1255,6 +1495,8 @@ mod tests {
                 json: true,
                 restart: false,
                 timeout: 1,
+                archive_cache: None,
+                prepare_only: false,
             },
         )
         .await;
