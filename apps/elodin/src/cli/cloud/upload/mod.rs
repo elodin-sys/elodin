@@ -42,6 +42,14 @@ pub struct UploadArgs {
     /// Reuse prepared archives when source metadata is unchanged; must be outside the database.
     #[arg(long, env = "ELODIN_UPLOAD_CACHE_DIR")]
     pub archive_cache: Option<PathBuf>,
+    /// Extra cache identity supplied by callers that pin this CLI.
+    #[arg(
+        long,
+        env = "ELODIN_UPLOAD_CACHE_SALT",
+        default_value = "",
+        hide = true
+    )]
+    pub archive_cache_salt: String,
     /// Populate the prepared archive cache without contacting Elodin Cloud.
     #[arg(long, hide = true)]
     pub prepare_only: bool,
@@ -324,9 +332,18 @@ struct CachedPackage {
     archive: Archive,
 }
 
+#[cfg(test)]
 fn prepare(
     root: &Path,
     cache: Option<&Path>,
+) -> miette::Result<(Manifest, ArchiveFile, Archive, bool)> {
+    prepare_salted(root, cache, "")
+}
+
+fn prepare_salted(
+    root: &Path,
+    cache: Option<&Path>,
+    cache_salt: &str,
 ) -> miette::Result<(Manifest, ArchiveFile, Archive, bool)> {
     if let Some(cache) = cache {
         validate_cache_location(root, cache)?;
@@ -338,7 +355,7 @@ fn prepare(
         return Ok((manifest, ArchiveFile::Temporary(output), archive, false));
     };
     std::fs::create_dir_all(cache).into_diagnostic()?;
-    let key = archive_cache_key(root, &paths)?;
+    let key = archive_cache_key(root, &paths, cache_salt)?;
     let archive_path = cache.join(format!("{key}.tar.zst"));
     let metadata_path = cache.join(format!("{key}.json"));
     let _lock = CacheLock::acquire(cache.join(format!("{key}.lock")))?;
@@ -381,18 +398,39 @@ fn prepare(
 
 fn validate_cache_location(root: &Path, cache: &Path) -> miette::Result<()> {
     let root = std::fs::canonicalize(root).into_diagnostic()?;
-    let existed = cache.exists();
-    std::fs::create_dir_all(cache).into_diagnostic()?;
-    let cache = std::fs::canonicalize(cache).into_diagnostic()?;
+    let cache = prospective_path(cache)?;
     if cache.starts_with(&root) {
-        if !existed {
-            let _ = std::fs::remove_dir(&cache);
-        }
         return Err(miette::miette!(
             "upload archive cache cannot be inside the TelemetryDB"
         ));
     }
     Ok(())
+}
+
+fn prospective_path(path: &Path) -> miette::Result<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_owned()
+    } else {
+        std::env::current_dir().into_diagnostic()?.join(path)
+    };
+    let mut normalized = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    let mut ancestor = normalized.as_path();
+    while !ancestor.exists() {
+        ancestor = ancestor
+            .parent()
+            .ok_or_else(|| miette::miette!("archive cache path has no existing ancestor"))?;
+    }
+    let resolved = std::fs::canonicalize(ancestor).into_diagnostic()?;
+    Ok(resolved.join(normalized.strip_prefix(ancestor).into_diagnostic()?))
 }
 
 fn remove_cached_file(path: &Path) -> miette::Result<()> {
@@ -411,11 +449,17 @@ fn remove_cached_file(path: &Path) -> miette::Result<()> {
     }
 }
 
-fn archive_cache_key(root: &Path, paths: &[(String, u64)]) -> miette::Result<String> {
+fn archive_cache_key(
+    root: &Path,
+    paths: &[(String, u64)],
+    cache_salt: &str,
+) -> miette::Result<String> {
     let mut hash = Digest::new(&SHA256);
     hash.update(
         format!("v{ARCHIVE_CACHE_VERSION}:zstd-{ZSTD_LEVEL}-threads-{ZSTD_THREADS}\0").as_bytes(),
     );
+    hash.update(&(cache_salt.len() as u64).to_le_bytes());
+    hash.update(cache_salt.as_bytes());
     let root = std::fs::canonicalize(root).into_diagnostic()?;
     let root_bytes = root.as_os_str().as_encoded_bytes();
     hash.update(&(root_bytes.len() as u64).to_le_bytes());
@@ -501,17 +545,21 @@ pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
     }
     let root = args.db_path.clone();
     let cache = args.archive_cache.clone();
+    let cache_salt = args.archive_cache_salt.clone();
     let prepare_started = Instant::now();
     let (manifest, archive_file, archive, cache_hit) =
-        tokio::task::spawn_blocking(move || prepare(&root, cache.as_deref()))
+        tokio::task::spawn_blocking(move || prepare_salted(&root, cache.as_deref(), &cache_salt))
             .await
             .into_diagnostic()??;
     eprintln!(
-        "event=upload_performance stage=prepare duration_ms={} files={} archive_bytes={} cache_hit={}",
+        "event=upload_performance stage=prepare duration_ms={} files={} archive_bytes={} cache_hit={} cache_version={} zstd_level={} zstd_threads={}",
         prepare_started.elapsed().as_millis(),
         manifest.files.len(),
         archive.size_bytes,
-        cache_hit
+        cache_hit,
+        ARCHIVE_CACHE_VERSION,
+        ZSTD_LEVEL,
+        ZSTD_THREADS
     );
     if args.prepare_only {
         println!("{}", archive_file.path().display());
@@ -1253,6 +1301,10 @@ mod tests {
         let (_, rebuilt, _, rebuilt_hit) = prepare(&root, Some(&cache)).unwrap();
         assert!(!rebuilt_hit);
         assert_eq!(first_path, rebuilt.path());
+        let (_, salted, _, salted_hit) =
+            prepare_salted(&root, Some(&cache), "new-cli-revision").unwrap();
+        assert!(!salted_hit);
+        assert_ne!(first_path, salted.path());
         std::thread::sleep(Duration::from_millis(2));
         std::fs::write(root.join("db_state"), b"xyz").unwrap();
         let (_, changed, changed_archive, changed_hit) = prepare(&root, Some(&cache)).unwrap();
@@ -1267,11 +1319,10 @@ mod tests {
         let root = dir.path().join("db");
         std::fs::create_dir(&root).unwrap();
         std::fs::write(root.join("db_state"), b"abc").unwrap();
-        let error = prepare(&root, Some(&root.join(".upload-cache")))
-            .err()
-            .unwrap()
-            .to_string();
+        let cache = root.join(".cache/nested/archive");
+        let error = prepare(&root, Some(&cache)).err().unwrap().to_string();
         assert!(error.contains("cannot be inside"));
+        assert!(!root.join(".cache").exists());
     }
 
     #[test]
@@ -1320,6 +1371,7 @@ mod tests {
                 restart: false,
                 timeout: 1,
                 archive_cache: Some(dir.path().join("cache")),
+                archive_cache_salt: String::new(),
                 prepare_only: true,
             },
         )
@@ -1348,6 +1400,7 @@ mod tests {
                 restart: false,
                 timeout: 1,
                 archive_cache: None,
+                archive_cache_salt: String::new(),
                 prepare_only: true,
             },
         )
@@ -1624,6 +1677,7 @@ mod tests {
                 restart: false,
                 timeout: 1,
                 archive_cache: None,
+                archive_cache_salt: String::new(),
                 prepare_only: false,
             },
         )
