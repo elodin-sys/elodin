@@ -397,6 +397,14 @@ fn prepare_salted(
 }
 
 fn validate_cache_location(root: &Path, cache: &Path) -> miette::Result<()> {
+    if cache
+        .components()
+        .any(|component| component == std::path::Component::ParentDir)
+    {
+        return Err(miette::miette!(
+            "upload archive cache path cannot contain '..'"
+        ));
+    }
     let root = std::fs::canonicalize(root).into_diagnostic()?;
     let cache = prospective_path(cache)?;
     if cache.starts_with(&root) {
@@ -1323,6 +1331,23 @@ mod tests {
         let error = prepare(&root, Some(&cache)).err().unwrap().to_string();
         assert!(error.contains("cannot be inside"));
         assert!(!root.join(".cache").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prepared_archive_cache_rejects_symlink_parent_traversal() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("db");
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(root.join("nested")).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(root.join("db_state"), b"abc").unwrap();
+        std::os::unix::fs::symlink(root.join("nested"), outside.join("db-link")).unwrap();
+        let cache = outside.join("db-link/../archive-cache");
+        let error = prepare(&root, Some(&cache)).err().unwrap().to_string();
+        assert!(error.contains("cannot contain '..'"));
+        assert!(!dir.path().join("archive-cache").exists());
+        assert!(!root.join("archive-cache").exists());
     }
 
     #[test]
