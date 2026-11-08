@@ -1,11 +1,12 @@
 //! Resumable zstd-compressed tar uploads of a stopped TelemetryDB, followed by publication polling.
 
 use std::collections::HashSet;
-use std::io::{IsTerminal, Read};
+use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use clap::Args;
+use futures_util::{StreamExt, stream};
 use miette::{Context, IntoDiagnostic};
 use ring::digest::{Context as Digest, SHA256};
 use serde::{Deserialize, Serialize};
@@ -16,6 +17,11 @@ use crate::cli::Cli;
 
 use super::AuthCtx;
 use super::auth::{random_token, tokens};
+
+const PART_UPLOAD_CONCURRENCY: usize = 4;
+const ARCHIVE_CACHE_VERSION: u32 = 1;
+const ZSTD_LEVEL: i32 = 3;
+const ZSTD_THREADS: u32 = 4;
 
 #[derive(Args, Clone)]
 pub struct UploadArgs {
@@ -33,16 +39,30 @@ pub struct UploadArgs {
     /// Maximum seconds to wait for publication after acceptance.
     #[arg(long, default_value_t = 300, value_parser = clap::value_parser!(u64).range(1..))]
     pub timeout: u64,
+    /// Reuse prepared archives when source metadata is unchanged; must be outside the database.
+    #[arg(long, env = "ELODIN_UPLOAD_CACHE_DIR")]
+    pub archive_cache: Option<PathBuf>,
+    /// Extra cache identity supplied by callers that pin this CLI.
+    #[arg(
+        long,
+        env = "ELODIN_UPLOAD_CACHE_SALT",
+        default_value = "",
+        hide = true
+    )]
+    pub archive_cache_salt: String,
+    /// Populate the prepared archive cache without contacting Elodin Cloud.
+    #[arg(long, hide = true)]
+    pub prepare_only: bool,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct Manifest {
     version: u32,
-    kind: &'static str,
+    kind: String,
     files: Vec<UploadFile>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct UploadFile {
     part: String,
     path: String,
@@ -50,7 +70,7 @@ struct UploadFile {
     sha256: String,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 struct Archive {
     size_bytes: u64,
     sha256: String,
@@ -60,6 +80,39 @@ struct CheckedSource {
     file: std::io::Take<std::fs::File>,
     hash: Digest,
     bytes: u64,
+}
+
+struct CheckedOutput<W> {
+    inner: W,
+    hash: Digest,
+    bytes: u64,
+}
+
+impl<W: Write> Write for CheckedOutput<W> {
+    fn write(&mut self, buffer: &[u8]) -> std::io::Result<usize> {
+        let written = self.inner.write(buffer)?;
+        self.hash.update(&buffer[..written]);
+        self.bytes += written as u64;
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+impl CheckedOutput<std::fs::File> {
+    fn finish(self) -> std::io::Result<(u64, String)> {
+        self.inner.sync_all()?;
+        let sha256 = self
+            .hash
+            .finish()
+            .as_ref()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        Ok((self.bytes, sha256))
+    }
 }
 
 impl Read for CheckedSource {
@@ -83,10 +136,16 @@ fn upload_file_len(path: &Path) -> miette::Result<u64> {
     }
 }
 
+#[cfg(test)]
 fn archive(root: &Path, manifest: &Manifest) -> miette::Result<(tempfile::NamedTempFile, Archive)> {
     let output = tempfile::NamedTempFile::new().into_diagnostic()?;
-    let mut encoder = zstd::stream::write::Encoder::new(output.reopen().into_diagnostic()?, 3)
-        .into_diagnostic()?;
+    let checked = CheckedOutput {
+        inner: output.reopen().into_diagnostic()?,
+        hash: Digest::new(&SHA256),
+        bytes: 0,
+    };
+    let mut encoder = zstd::stream::write::Encoder::new(checked, ZSTD_LEVEL).into_diagnostic()?;
+    encoder.multithread(ZSTD_THREADS).into_diagnostic()?;
     encoder.include_checksum(true).into_diagnostic()?;
     let mut builder = tar::Builder::new(encoder);
     for entry in &manifest.files {
@@ -133,31 +192,306 @@ fn archive(root: &Path, manifest: &Manifest) -> miette::Result<(tempfile::NamedT
             ));
         }
     }
-    builder
+    let checked = builder
         .into_inner()
         .into_diagnostic()?
         .finish()
-        .into_diagnostic()?
-        .sync_all()
         .into_diagnostic()?;
-    let mut source = output.reopen().into_diagnostic()?;
-    let size_bytes = source.metadata().into_diagnostic()?.len();
-    let mut hash = Digest::new(&SHA256);
-    let mut buffer = [0; 65536];
-    loop {
-        let n = source.read(&mut buffer).into_diagnostic()?;
-        if n == 0 {
-            break;
+    let (size_bytes, sha256) = checked.finish().into_diagnostic()?;
+    Ok((output, Archive { size_bytes, sha256 }))
+}
+
+fn package(
+    root: &Path,
+    paths: Vec<(String, u64)>,
+    output: tempfile::NamedTempFile,
+) -> miette::Result<(Manifest, tempfile::NamedTempFile, Archive)> {
+    let checked = CheckedOutput {
+        inner: output.reopen().into_diagnostic()?,
+        hash: Digest::new(&SHA256),
+        bytes: 0,
+    };
+    let mut encoder = zstd::stream::write::Encoder::new(checked, ZSTD_LEVEL).into_diagnostic()?;
+    encoder.multithread(ZSTD_THREADS).into_diagnostic()?;
+    encoder.include_checksum(true).into_diagnostic()?;
+    let mut builder = tar::Builder::new(encoder);
+    let mut files = Vec::with_capacity(paths.len());
+    for (path, size_bytes) in paths {
+        let part = format!("file_{}", files.len());
+        let disk_path = root.join(&path);
+        let before = std::fs::metadata(&disk_path).into_diagnostic()?;
+        let file = std::fs::File::open(&disk_path).into_diagnostic()?;
+        let mut source = CheckedSource {
+            file: file.take(size_bytes),
+            hash: Digest::new(&SHA256),
+            bytes: 0,
+        };
+        let name = ring::digest::digest(&SHA256, part.as_bytes())
+            .as_ref()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        let mut header = tar::Header::new_gnu();
+        header.set_size(size_bytes);
+        header.set_mode(0o600);
+        header.set_uid(0);
+        header.set_gid(0);
+        header.set_mtime(0);
+        header.set_entry_type(tar::EntryType::Regular);
+        builder
+            .append_data(&mut header, name, &mut source)
+            .into_diagnostic()?;
+        let sha256 = source
+            .hash
+            .finish()
+            .as_ref()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        let after = std::fs::metadata(&disk_path).into_diagnostic()?;
+        if upload_file_len(&disk_path)? != size_bytes
+            || source.bytes != size_bytes
+            || before.len() != after.len()
+            || before.modified().ok() != after.modified().ok()
+        {
+            return Err(miette::miette!(
+                "upload source changed; keep the database stopped"
+            ));
         }
-        hash.update(&buffer[..n]);
+        files.push(UploadFile {
+            part,
+            path,
+            size_bytes,
+            sha256,
+        });
     }
-    let sha256 = hash
+    let checked = builder
+        .into_inner()
+        .into_diagnostic()?
+        .finish()
+        .into_diagnostic()?;
+    let (size_bytes, sha256) = checked.finish().into_diagnostic()?;
+    Ok((
+        Manifest {
+            version: 1,
+            kind: "telemetry_db".into(),
+            files,
+        },
+        output,
+        Archive { size_bytes, sha256 },
+    ))
+}
+
+enum ArchiveFile {
+    Temporary(tempfile::NamedTempFile),
+    Cached(PathBuf),
+}
+
+struct CacheLock(PathBuf);
+
+impl CacheLock {
+    fn acquire(path: PathBuf) -> miette::Result<Self> {
+        loop {
+            match std::fs::create_dir(&path) {
+                Ok(()) => return Ok(Self(path)),
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let stale = std::fs::metadata(&path)
+                        .and_then(|metadata| metadata.modified())
+                        .and_then(|modified| modified.elapsed().map_err(std::io::Error::other))
+                        .is_ok_and(|age| age > Duration::from_secs(7200));
+                    if stale {
+                        let _ = std::fs::remove_dir(&path);
+                    } else {
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
+                }
+                Err(error) => return Err(error).into_diagnostic(),
+            }
+        }
+    }
+}
+
+impl Drop for CacheLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir(&self.0);
+    }
+}
+
+impl ArchiveFile {
+    fn path(&self) -> &Path {
+        match self {
+            Self::Temporary(file) => file.path(),
+            Self::Cached(path) => path,
+        }
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+struct CachedPackage {
+    manifest: Manifest,
+    archive: Archive,
+}
+
+#[cfg(test)]
+fn prepare(
+    root: &Path,
+    cache: Option<&Path>,
+) -> miette::Result<(Manifest, ArchiveFile, Archive, bool)> {
+    prepare_salted(root, cache, "")
+}
+
+fn prepare_salted(
+    root: &Path,
+    cache: Option<&Path>,
+    cache_salt: &str,
+) -> miette::Result<(Manifest, ArchiveFile, Archive, bool)> {
+    if let Some(cache) = cache {
+        validate_cache_location(root, cache)?;
+    }
+    let paths = upload_paths(root)?;
+    let Some(cache) = cache else {
+        let output = tempfile::NamedTempFile::new().into_diagnostic()?;
+        let (manifest, output, archive) = package(root, paths, output)?;
+        return Ok((manifest, ArchiveFile::Temporary(output), archive, false));
+    };
+    std::fs::create_dir_all(cache).into_diagnostic()?;
+    let key = archive_cache_key(root, &paths, cache_salt)?;
+    let archive_path = cache.join(format!("{key}.tar.zst"));
+    let metadata_path = cache.join(format!("{key}.json"));
+    let _lock = CacheLock::acquire(cache.join(format!("{key}.lock")))?;
+    if let Ok(bytes) = std::fs::read(&metadata_path)
+        && let Ok(cached) = serde_json::from_slice::<CachedPackage>(&bytes)
+        && std::fs::metadata(&archive_path)
+            .is_ok_and(|metadata| metadata.len() == cached.archive.size_bytes)
+    {
+        return Ok((
+            cached.manifest,
+            ArchiveFile::Cached(archive_path),
+            cached.archive,
+            true,
+        ));
+    }
+    let output = tempfile::NamedTempFile::new_in(cache).into_diagnostic()?;
+    let (manifest, output, archive) = package(root, paths, output)?;
+    let cached = CachedPackage { manifest, archive };
+    remove_cached_file(&archive_path)?;
+    output.persist(&archive_path).into_diagnostic()?;
+    let mut metadata = tempfile::NamedTempFile::new_in(cache).into_diagnostic()?;
+    metadata
+        .write_all(&serde_json::to_vec(&cached).into_diagnostic()?)
+        .into_diagnostic()?;
+    metadata.as_file().sync_all().into_diagnostic()?;
+    remove_cached_file(&metadata_path)?;
+    metadata.persist(&metadata_path).into_diagnostic()?;
+    let mut permissions = std::fs::metadata(&archive_path)
+        .into_diagnostic()?
+        .permissions();
+    permissions.set_readonly(true);
+    std::fs::set_permissions(&archive_path, permissions).into_diagnostic()?;
+    Ok((
+        cached.manifest,
+        ArchiveFile::Cached(archive_path),
+        cached.archive,
+        false,
+    ))
+}
+
+fn validate_cache_location(root: &Path, cache: &Path) -> miette::Result<()> {
+    if cache
+        .components()
+        .any(|component| component == std::path::Component::ParentDir)
+    {
+        return Err(miette::miette!(
+            "upload archive cache path cannot contain '..'"
+        ));
+    }
+    let root = std::fs::canonicalize(root).into_diagnostic()?;
+    let cache = prospective_path(cache)?;
+    if cache.starts_with(&root) {
+        return Err(miette::miette!(
+            "upload archive cache cannot be inside the TelemetryDB"
+        ));
+    }
+    Ok(())
+}
+
+fn prospective_path(path: &Path) -> miette::Result<PathBuf> {
+    let absolute = if path.is_absolute() {
+        path.to_owned()
+    } else {
+        std::env::current_dir().into_diagnostic()?.join(path)
+    };
+    let mut normalized = PathBuf::new();
+    for component in absolute.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    let mut ancestor = normalized.as_path();
+    while !ancestor.exists() {
+        ancestor = ancestor
+            .parent()
+            .ok_or_else(|| miette::miette!("archive cache path has no existing ancestor"))?;
+    }
+    let resolved = std::fs::canonicalize(ancestor).into_diagnostic()?;
+    Ok(resolved.join(normalized.strip_prefix(ancestor).into_diagnostic()?))
+}
+
+fn remove_cached_file(path: &Path) -> miette::Result<()> {
+    #[cfg(windows)]
+    if let Ok(metadata) = std::fs::metadata(path)
+        && metadata.permissions().readonly()
+    {
+        let mut permissions = metadata.permissions();
+        permissions.set_readonly(false);
+        std::fs::set_permissions(path, permissions).into_diagnostic()?;
+    }
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).into_diagnostic(),
+    }
+}
+
+fn archive_cache_key(
+    root: &Path,
+    paths: &[(String, u64)],
+    cache_salt: &str,
+) -> miette::Result<String> {
+    let mut hash = Digest::new(&SHA256);
+    hash.update(
+        format!("v{ARCHIVE_CACHE_VERSION}:zstd-{ZSTD_LEVEL}-threads-{ZSTD_THREADS}\0").as_bytes(),
+    );
+    hash.update(&(cache_salt.len() as u64).to_le_bytes());
+    hash.update(cache_salt.as_bytes());
+    let root = std::fs::canonicalize(root).into_diagnostic()?;
+    let root_bytes = root.as_os_str().as_encoded_bytes();
+    hash.update(&(root_bytes.len() as u64).to_le_bytes());
+    hash.update(root_bytes);
+    for (path, size) in paths {
+        let metadata = std::fs::metadata(root.join(path)).into_diagnostic()?;
+        let modified = metadata
+            .modified()
+            .into_diagnostic()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        hash.update(&(path.len() as u64).to_le_bytes());
+        hash.update(path.as_bytes());
+        hash.update(&size.to_le_bytes());
+        hash.update(&metadata.len().to_le_bytes());
+        hash.update(&modified.to_le_bytes());
+    }
+    Ok(hash
         .finish()
         .as_ref()
         .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
-    Ok((output, Archive { size_bytes, sha256 }))
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
 }
 
 #[derive(Deserialize)]
@@ -205,16 +539,40 @@ struct PartReceipt {
     etag: String,
 }
 
+#[derive(Default)]
+struct TransferStats {
+    parts: u32,
+    retries: u32,
+}
+
 pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
-    tokens::ensure_valid(ctx).await?;
+    if args.prepare_only && args.archive_cache.is_none() {
+        return Err(miette::miette!(
+            "--prepare-only requires --archive-cache or ELODIN_UPLOAD_CACHE_DIR"
+        ));
+    }
     let root = args.db_path.clone();
-    let (manifest, archive_file, archive) = tokio::task::spawn_blocking(move || {
-        let manifest = manifest(&root)?;
-        let (file, archive) = archive(&root, &manifest)?;
-        Ok::<_, miette::Report>((manifest, file, archive))
-    })
-    .await
-    .into_diagnostic()??;
+    let cache = args.archive_cache.clone();
+    let cache_salt = args.archive_cache_salt.clone();
+    let prepare_started = Instant::now();
+    let (manifest, archive_file, archive, cache_hit) =
+        tokio::task::spawn_blocking(move || prepare_salted(&root, cache.as_deref(), &cache_salt))
+            .await
+            .into_diagnostic()??;
+    eprintln!(
+        "event=upload_performance stage=prepare duration_ms={} files={} archive_bytes={} cache_hit={} cache_version={} zstd_level={} zstd_threads={}",
+        prepare_started.elapsed().as_millis(),
+        manifest.files.len(),
+        archive.size_bytes,
+        cache_hit,
+        ARCHIVE_CACHE_VERSION,
+        ZSTD_LEVEL,
+        ZSTD_THREADS
+    );
+    if args.prepare_only {
+        println!("{}", archive_file.path().display());
+        return Ok(());
+    }
     let mut creds = tokens::ensure_valid(ctx).await?;
     let base = creds.api_url.trim_end_matches('/').to_owned();
     let projects: Projects = response(
@@ -251,7 +609,16 @@ pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
     }
     let ticket = accepted.ticket;
     if accepted.state == "uploading" {
-        transfer(ctx, &base, project, ticket, archive_file.path(), &archive).await?;
+        let transfer_started = Instant::now();
+        let stats = transfer(ctx, &base, project, ticket, archive_file.path(), &archive).await?;
+        eprintln!(
+            "event=upload_performance stage=transfer duration_ms={} ticket={} archive_bytes={} parts={} retries={}",
+            transfer_started.elapsed().as_millis(),
+            ticket,
+            archive.size_bytes,
+            stats.parts,
+            stats.retries
+        );
         creds = tokens::ensure_valid(ctx).await?;
         accepted = response(
             ctx.client
@@ -319,13 +686,20 @@ pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
             tokio::time::sleep(Duration::from_secs(2)).await;
         }
     };
-    tokio::time::timeout(Duration::from_secs(args.timeout), wait)
+    let publication_started = Instant::now();
+    let result = tokio::time::timeout(Duration::from_secs(args.timeout), wait)
         .await
         .map_err(|_| {
             miette::miette!(
                 "timed out waiting for upload {ticket}; it may still publish. Status: {status_url}"
             )
-        })?
+        })?;
+    eprintln!(
+        "event=upload_performance stage=publication_wait duration_ms={} ticket={}",
+        publication_started.elapsed().as_millis(),
+        ticket
+    );
+    result
 }
 
 async fn transfer(
@@ -335,95 +709,93 @@ async fn transfer(
     ticket: uuid::Uuid,
     archive_path: &Path,
     archive: &Archive,
-) -> miette::Result<()> {
+) -> miette::Result<TransferStats> {
     // Never attach the API bearer token or follow redirects on storage requests.
     let storage_client = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .timeout(Duration::from_secs(180))
         .build()
         .into_diagnostic()?;
-    {
-        let url = format!("{base}/v1/projects/{project}/run-uploads/{ticket}/archive");
-        let mut session = archive_session(ctx, &url, archive).await?;
-        let mut signed_at = std::time::Instant::now();
+    let url = format!("{base}/v1/projects/{project}/run-uploads/{ticket}/archive");
+    let mut stats = TransferStats::default();
+    let mut failed_rounds = 0;
+    let mut empty_refreshes = 0;
+    loop {
+        let session = archive_session(ctx, &url, archive).await?;
+        let signed_at = Instant::now();
         if session.completed {
-            return Ok(());
+            return Ok(stats);
         }
-        let mut file = tokio::fs::File::open(archive_path)
-            .await
-            .into_diagnostic()?;
-        let mut receipts = Vec::new();
-        for number in 1..=session.part_count {
-            if session.completed_parts.contains(&number) {
+        if session.parts.iter().any(|part| {
+            let offset = u64::from(part.number - 1) * session.part_bytes;
+            let size = (archive.size_bytes - offset).min(session.part_bytes);
+            part.offset != offset || part.size_bytes != size
+        }) {
+            return Err(miette::miette!("invalid storage upload link"));
+        }
+        let mut failed = None;
+        let mut refresh_urls = false;
+        let parts_before = stats.parts;
+        for batch in session.parts.chunks(8) {
+            if signed_at.elapsed() >= Duration::from_secs(600) {
+                refresh_urls = true;
+                break;
+            }
+            let uploads = stream::iter(
+                batch
+                    .iter()
+                    .cloned()
+                    .map(|part| upload_part(&storage_client, base, archive_path, part)),
+            )
+            .buffer_unordered(PART_UPLOAD_CONCURRENCY);
+            tokio::pin!(uploads);
+            let mut receipts = Vec::with_capacity(batch.len());
+            while let Some(result) = uploads.next().await {
+                let uploaded = match result {
+                    Ok(PartUpload::Uploaded(uploaded)) => uploaded,
+                    Ok(PartUpload::Refresh) => {
+                        refresh_urls = true;
+                        continue;
+                    }
+                    Err(error) => {
+                        failed.get_or_insert(error);
+                        continue;
+                    }
+                };
+                stats.parts += 1;
+                stats.retries += uploaded.retries;
+                receipts.push(uploaded.receipt);
+            }
+            acknowledge_parts(ctx, &url, &mut receipts).await?;
+            if failed.is_some() || refresh_urls {
+                break;
+            }
+        }
+        if let Some(error) = failed {
+            if stats.parts > parts_before {
+                failed_rounds = 0;
+            }
+            failed_rounds += 1;
+            if failed_rounds < 3 {
+                tokio::time::sleep(Duration::from_secs(1 << (failed_rounds - 1))).await;
                 continue;
             }
-            let offset = u64::from(number - 1) * session.part_bytes;
-            let size = (archive.size_bytes - offset).min(session.part_bytes);
-            file.seek(std::io::SeekFrom::Start(offset))
-                .await
-                .into_diagnostic()?;
-            let mut bytes = vec![0; size as usize];
-            file.read_exact(&mut bytes)
-                .await
-                .into_diagnostic()
-                .wrap_err("upload source changed; keep the database stopped")?;
-            let mut etag = None;
-            for retry in 0..3 {
-                if retry > 0 || signed_at.elapsed() >= Duration::from_secs(600) {
-                    acknowledge_parts(ctx, &url, &mut receipts).await?;
-                    session = archive_session(ctx, &url, archive).await?;
-                    signed_at = std::time::Instant::now();
-                }
-                let signed = session
-                    .parts
-                    .iter()
-                    .find(|part| part.number == number)
-                    .ok_or_else(|| miette::miette!("missing storage upload link"))?;
-                let storage_url = reqwest::Url::parse(&signed.url).into_diagnostic()?;
-                if signed.number != number
-                    || signed.offset != offset
-                    || signed.size_bytes != size
-                    || (storage_url.scheme() != "https"
-                        && !(base.starts_with("http://") && storage_url.scheme() == "http"))
-                    || !storage_url.username().is_empty()
-                    || storage_url.password().is_some()
-                {
-                    return Err(miette::miette!("invalid storage upload link"));
-                }
-                match storage_client
-                    .put(storage_url)
-                    .body(bytes.clone())
-                    .send()
-                    .await
-                {
-                    Ok(resp) if resp.status().is_success() => {
-                        etag = Some(
-                            resp.headers()
-                                .get("etag")
-                                .and_then(|v| v.to_str().ok())
-                                .ok_or_else(|| miette::miette!("storage omitted the part ETag"))?
-                                .to_owned(),
-                        );
-                        break;
-                    }
-                    _ if retry < 2 => tokio::time::sleep(Duration::from_secs(1 << retry)).await,
-                    _ => {
-                        acknowledge_parts(ctx, &url, &mut receipts).await?;
-                        return Err(miette::miette!(
-                            "storage part upload failed; rerun the same command to resume"
-                        ));
-                    }
-                }
-            }
-            receipts.push(PartReceipt {
-                number,
-                etag: etag.ok_or_else(|| miette::miette!("missing part receipt"))?,
-            });
-            if receipts.len() == 8 {
-                acknowledge_parts(ctx, &url, &mut receipts).await?;
-            }
+            return Err(error);
         }
-        acknowledge_parts(ctx, &url, &mut receipts).await?;
+        if refresh_urls {
+            failed_rounds = 0;
+            if stats.parts == parts_before {
+                empty_refreshes += 1;
+                if empty_refreshes >= 3 {
+                    return Err(miette::miette!(
+                        "storage upload links repeatedly expired without progress"
+                    ));
+                }
+            } else {
+                empty_refreshes = 0;
+            }
+            continue;
+        }
         let creds = tokens::ensure_valid(ctx).await?;
         let resp = ctx
             .client
@@ -434,8 +806,83 @@ async fn transfer(
             .await
             .into_diagnostic()?;
         expect_no_content(resp).await?;
+        return Ok(stats);
     }
-    Ok(())
+}
+
+struct UploadedPart {
+    receipt: PartReceipt,
+    retries: u32,
+}
+
+enum PartUpload {
+    Uploaded(UploadedPart),
+    Refresh,
+}
+
+async fn upload_part(
+    client: &reqwest::Client,
+    base: &str,
+    archive_path: &Path,
+    part: PartUrl,
+) -> miette::Result<PartUpload> {
+    let storage_url = reqwest::Url::parse(&part.url).into_diagnostic()?;
+    if (storage_url.scheme() != "https"
+        && !(base.starts_with("http://") && storage_url.scheme() == "http"))
+        || !storage_url.username().is_empty()
+        || storage_url.password().is_some()
+    {
+        return Err(miette::miette!("invalid storage upload link"));
+    }
+    let mut file = tokio::fs::File::open(archive_path)
+        .await
+        .into_diagnostic()?;
+    file.seek(std::io::SeekFrom::Start(part.offset))
+        .await
+        .into_diagnostic()?;
+    let mut buffer = vec![0; part.size_bytes as usize];
+    file.read_exact(&mut buffer)
+        .await
+        .into_diagnostic()
+        .wrap_err("upload source changed; keep the database stopped")?;
+    let bytes = bytes::Bytes::from(buffer);
+    for retry in 0..3 {
+        match client
+            .put(storage_url.clone())
+            .body(bytes.clone())
+            .send()
+            .await
+        {
+            Ok(response) if response.status().is_success() => {
+                let etag = response
+                    .headers()
+                    .get("etag")
+                    .and_then(|value| value.to_str().ok())
+                    .ok_or_else(|| miette::miette!("storage omitted the part ETag"))?
+                    .to_owned();
+                return Ok(PartUpload::Uploaded(UploadedPart {
+                    receipt: PartReceipt {
+                        number: part.number,
+                        etag,
+                    },
+                    retries: retry,
+                }));
+            }
+            Ok(response)
+                if matches!(
+                    response.status(),
+                    reqwest::StatusCode::UNAUTHORIZED | reqwest::StatusCode::FORBIDDEN
+                ) =>
+            {
+                return Ok(PartUpload::Refresh);
+            }
+            _ if retry < 2 => tokio::time::sleep(Duration::from_secs(1 << retry)).await,
+            _ => break,
+        }
+    }
+    Err(miette::miette!(
+        "storage part upload failed; rerun the same command to resume"
+    ))
 }
 
 async fn archive_session(
@@ -638,7 +1085,7 @@ async fn response<T: serde::de::DeserializeOwned>(resp: reqwest::Response) -> mi
         .wrap_err("invalid API response")
 }
 
-fn manifest(root: &Path) -> miette::Result<Manifest> {
+fn upload_paths(root: &Path) -> miette::Result<Vec<(String, u64)>> {
     if !std::fs::symlink_metadata(root).into_diagnostic()?.is_dir() {
         return Err(miette::miette!(
             "upload requires a TelemetryDB directory, not a file or symlink"
@@ -653,19 +1100,30 @@ fn manifest(root: &Path) -> miette::Result<Manifest> {
         ));
     }
     let mut seen = HashSet::new();
+    paths
+        .into_iter()
+        .map(|path| {
+            let path = path
+                .to_str()
+                .ok_or_else(|| miette::miette!("non-UTF-8 upload path"))?
+                .replace(std::path::MAIN_SEPARATOR, "/");
+            if !portable_path(&path) || !seen.insert(path.to_ascii_lowercase()) {
+                return Err(miette::miette!(
+                    "nonportable or colliding upload path: {path}"
+                ));
+            }
+            let compacted_len = upload_file_len(&root.join(&path))?;
+            Ok((path, compacted_len))
+        })
+        .collect()
+}
+
+#[cfg(test)]
+fn manifest(root: &Path) -> miette::Result<Manifest> {
+    let paths = upload_paths(root)?;
     let mut files = Vec::with_capacity(paths.len());
-    for path in paths {
-        let path = path
-            .to_str()
-            .ok_or_else(|| miette::miette!("non-UTF-8 upload path"))?
-            .replace(std::path::MAIN_SEPARATOR, "/");
-        if !portable_path(&path) || !seen.insert(path.to_ascii_lowercase()) {
-            return Err(miette::miette!(
-                "nonportable or colliding upload path: {path}"
-            ));
-        }
+    for (path, compacted_len) in paths {
         let disk_path = root.join(&path);
-        let compacted_len = upload_file_len(&disk_path)?;
         let mut file = std::fs::File::open(&disk_path)
             .into_diagnostic()?
             .take(compacted_len);
@@ -702,7 +1160,7 @@ fn manifest(root: &Path) -> miette::Result<Manifest> {
     }
     Ok(Manifest {
         version: 1,
-        kind: "telemetry_db",
+        kind: "telemetry_db".into(),
         files,
     })
 }
@@ -776,6 +1234,11 @@ mod tests {
     use super::*;
 
     #[test]
+    fn upload_concurrency_caps_part_memory() {
+        assert!(PART_UPLOAD_CONCURRENCY * 64 * 1024 * 1024 <= 256 * 1024 * 1024);
+    }
+
+    #[test]
     fn archive_is_deterministic_compressed_and_detects_changed_sources() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(dir.path().join("db_state"), b"abc").unwrap();
@@ -784,6 +1247,17 @@ mod tests {
         let manifest = manifest(dir.path()).unwrap();
         let (first, declaration) = archive(dir.path(), &manifest).unwrap();
         let (_, repeated) = archive(dir.path(), &manifest).unwrap();
+        let (packaged, _, packaged_archive) = package(
+            dir.path(),
+            upload_paths(dir.path()).unwrap(),
+            tempfile::NamedTempFile::new().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::to_value(&manifest).unwrap(),
+            serde_json::to_value(packaged).unwrap()
+        );
+        assert_eq!(declaration.sha256, packaged_archive.sha256);
         assert_eq!(declaration.sha256, repeated.sha256);
         assert!(declaration.size_bytes < 2560);
         let decoder = zstd::stream::read::Decoder::new(first.reopen().unwrap()).unwrap();
@@ -801,6 +1275,164 @@ mod tests {
         );
         std::fs::write(dir.path().join("db_state"), b"bad").unwrap();
         assert!(archive(dir.path(), &manifest).is_err());
+    }
+
+    #[test]
+    fn prepared_archive_cache_reuses_unchanged_sources() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("db");
+        let cache = dir.path().join("cache");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("db_state"), b"abc").unwrap();
+        let (_, first, first_archive, first_hit) = prepare(&root, Some(&cache)).unwrap();
+        let first_path = first.path().to_owned();
+        assert!(!first_hit);
+        assert!(
+            std::fs::metadata(&first_path)
+                .unwrap()
+                .permissions()
+                .readonly()
+        );
+        let (_, second, second_archive, second_hit) = prepare(&root, Some(&cache)).unwrap();
+        assert!(second_hit);
+        assert_eq!(first_path, second.path());
+        assert_eq!(first_archive.sha256, second_archive.sha256);
+        let sidecar = std::fs::read_dir(&cache)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.extension()
+                    .is_some_and(|extension| extension == "json")
+            })
+            .unwrap();
+        std::fs::remove_file(sidecar).unwrap();
+        let (_, rebuilt, _, rebuilt_hit) = prepare(&root, Some(&cache)).unwrap();
+        assert!(!rebuilt_hit);
+        assert_eq!(first_path, rebuilt.path());
+        let (_, salted, _, salted_hit) =
+            prepare_salted(&root, Some(&cache), "new-cli-revision").unwrap();
+        assert!(!salted_hit);
+        assert_ne!(first_path, salted.path());
+        std::thread::sleep(Duration::from_millis(2));
+        std::fs::write(root.join("db_state"), b"xyz").unwrap();
+        let (_, changed, changed_archive, changed_hit) = prepare(&root, Some(&cache)).unwrap();
+        assert!(!changed_hit);
+        assert_ne!(first_path, changed.path());
+        assert_ne!(first_archive.sha256, changed_archive.sha256);
+    }
+
+    #[test]
+    fn prepared_archive_cache_rejects_database_subdirectories() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("db");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("db_state"), b"abc").unwrap();
+        let cache = root.join(".cache/nested/archive");
+        let error = prepare(&root, Some(&cache)).err().unwrap().to_string();
+        assert!(error.contains("cannot be inside"));
+        assert!(!root.join(".cache").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prepared_archive_cache_rejects_symlink_parent_traversal() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("db");
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(root.join("nested")).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::write(root.join("db_state"), b"abc").unwrap();
+        std::os::unix::fs::symlink(root.join("nested"), outside.join("db-link")).unwrap();
+        let cache = outside.join("db-link/../archive-cache");
+        let error = prepare(&root, Some(&cache)).err().unwrap().to_string();
+        assert!(error.contains("cannot contain '..'"));
+        assert!(!dir.path().join("archive-cache").exists());
+        assert!(!root.join("archive-cache").exists());
+    }
+
+    #[test]
+    fn prepared_archive_cache_serializes_concurrent_builds() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("db");
+        let cache = dir.path().join("cache");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("db_state"), b"abc").unwrap();
+        let workers: Vec<_> = (0..2)
+            .map(|_| {
+                let root = root.clone();
+                let cache = cache.clone();
+                std::thread::spawn(move || {
+                    let (_, archive, _, hit) = prepare(&root, Some(&cache)).unwrap();
+                    (archive.path().to_owned(), hit)
+                })
+            })
+            .collect();
+        let results: Vec<_> = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect();
+        assert_eq!(results[0].0, results[1].0);
+        assert_eq!(results.iter().filter(|(_, hit)| *hit).count(), 1);
+    }
+
+    #[tokio::test]
+    async fn prepare_only_needs_no_cloud_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("db");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("db_state"), b"abc").unwrap();
+        let ctx = AuthCtx {
+            client: reqwest::Client::new(),
+            issuer: "https://auth.invalid".into(),
+            api_url: "https://api.invalid".into(),
+            creds_path: dir.path().join("credentials.json"),
+        };
+        run(
+            &ctx,
+            &UploadArgs {
+                db_path: root,
+                project: None,
+                json: false,
+                restart: false,
+                timeout: 1,
+                archive_cache: Some(dir.path().join("cache")),
+                archive_cache_salt: String::new(),
+                prepare_only: true,
+            },
+        )
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn prepare_only_requires_persistent_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("db");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("db_state"), b"abc").unwrap();
+        let ctx = AuthCtx {
+            client: reqwest::Client::new(),
+            issuer: "https://auth.invalid".into(),
+            api_url: "https://api.invalid".into(),
+            creds_path: dir.path().join("credentials.json"),
+        };
+        let error = run(
+            &ctx,
+            &UploadArgs {
+                db_path: root,
+                project: None,
+                json: false,
+                restart: false,
+                timeout: 1,
+                archive_cache: None,
+                archive_cache_salt: String::new(),
+                prepare_only: true,
+            },
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("requires --archive-cache"));
     }
 
     #[test]
@@ -1069,6 +1701,9 @@ mod tests {
                 json: true,
                 restart: false,
                 timeout: 1,
+                archive_cache: None,
+                archive_cache_salt: String::new(),
+                prepare_only: false,
             },
         )
         .await;
@@ -1239,7 +1874,8 @@ mod tests {
             .unwrap()
             .unwrap();
             let (batches, sessions) = server.await.unwrap();
-            assert_eq!(batches, if retry_link { vec![1, 8] } else { vec![8, 1] });
+            assert_eq!(batches.iter().sum::<usize>(), 9);
+            assert!(batches.iter().all(|batch| *batch <= 8));
             assert_eq!(sessions, if retry_link { 2 } else { 1 });
         }
     }
