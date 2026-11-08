@@ -493,10 +493,6 @@ from the same terrain when your simulation needs them.</p>
 <p>The editor streams aerial terrain and Photo 3D through Bevy-Cesium.
 Local models are loaded by the schematic, as in
 <a rel="external" href="https://github.com/elodin-sys/elodin/blob/main/examples/rc-jet/terrain_schematic.py">RC-jet's Mojave terrain</a>.</p>
-<p>When <code>elodin editor</code> launches a simulation, it holds the simulation at t=0
-until the initial scene and terrain have loaded. If terrain loading fails,
-choose <strong>Retry</strong> to fetch it again. Connecting to an already running simulation
-does not pause it, and <code>elodin run</code> does not wait for an editor.</p>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> elodin</span><span style="color: light-dark(#859900, #859900);"> as</span><span> el</span></span>
 <span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> elodin</span><span>.</span><span>ui</span><span style="color: light-dark(#859900, #859900);"> as</span><span> ui</span></span>
 <span class="giallo-l"></span>
