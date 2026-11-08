@@ -397,14 +397,6 @@ fn prepare_salted(
 }
 
 fn validate_cache_location(root: &Path, cache: &Path) -> miette::Result<()> {
-    if cache
-        .components()
-        .any(|component| component == std::path::Component::ParentDir)
-    {
-        return Err(miette::miette!(
-            "upload archive cache path cannot contain '..'"
-        ));
-    }
     let root = std::fs::canonicalize(root).into_diagnostic()?;
     let cache = prospective_path(cache)?;
     if cache.starts_with(&root) {
@@ -421,24 +413,27 @@ fn prospective_path(path: &Path) -> miette::Result<PathBuf> {
     } else {
         std::env::current_dir().into_diagnostic()?.join(path)
     };
-    let mut normalized = PathBuf::new();
+    let mut resolved = PathBuf::new();
     for component in absolute.components() {
         match component {
             std::path::Component::CurDir => {}
             std::path::Component::ParentDir => {
-                normalized.pop();
+                resolved.pop();
             }
-            _ => normalized.push(component.as_os_str()),
-        }
+            std::path::Component::Normal(name) => {
+                let candidate = resolved.join(name);
+                match std::fs::symlink_metadata(&candidate) {
+                    Ok(_) => resolved = std::fs::canonicalize(candidate).into_diagnostic()?,
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                        resolved.push(name);
+                    }
+                    Err(error) => return Err(error).into_diagnostic(),
+                }
+            }
+            _ => resolved.push(component.as_os_str()),
+        };
     }
-    let mut ancestor = normalized.as_path();
-    while !ancestor.exists() {
-        ancestor = ancestor
-            .parent()
-            .ok_or_else(|| miette::miette!("archive cache path has no existing ancestor"))?;
-    }
-    let resolved = std::fs::canonicalize(ancestor).into_diagnostic()?;
-    Ok(resolved.join(normalized.strip_prefix(ancestor).into_diagnostic()?))
+    Ok(resolved)
 }
 
 fn remove_cached_file(path: &Path) -> miette::Result<()> {
@@ -1345,8 +1340,22 @@ mod tests {
         std::os::unix::fs::symlink(root.join("nested"), outside.join("db-link")).unwrap();
         let cache = outside.join("db-link/../archive-cache");
         let error = prepare(&root, Some(&cache)).err().unwrap().to_string();
-        assert!(error.contains("cannot contain '..'"));
+        assert!(error.contains("cannot be inside"));
         assert!(!dir.path().join("archive-cache").exists());
+        assert!(!root.join("archive-cache").exists());
+    }
+
+    #[test]
+    fn prepared_archive_cache_allows_safe_parent_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("workspace/db");
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("db_state"), b"abc").unwrap();
+        let cache = root.join("../archive-cache");
+        let (_, archive, _, hit) = prepare(&root, Some(&cache)).unwrap();
+        assert!(!hit);
+        assert!(archive.path().is_file());
+        assert!(dir.path().join("workspace/archive-cache").is_dir());
         assert!(!root.join("archive-cache").exists());
     }
 
