@@ -167,13 +167,16 @@ install target="all":
       install -m 755 target/release/elodin "$ELODIN_SHELL_BIN/"
       install -m 755 target/release/elodin-db "$ELODIN_SHELL_BIN/"
       ;;
+    web)
+      env -u NO_COLOR TRUNK_COLOR=never trunk build --config apps/elodin-web/Trunk.toml
+      ;;
     all)
       just install py
       just install editor
       just install db
       ;;
     *)
-      echo "usage: just install [py|editor|db|tracy|all]" >&2
+      echo "usage: just install [py|editor|db|tracy|web|all]" >&2
       exit 1;;
   esac
 
