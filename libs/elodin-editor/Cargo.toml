@@ -129,8 +129,10 @@ thiserror.version = "2"
 miette.version = "7.2"
 
 [target.'cfg(target_family = "wasm")'.dependencies]
-# Hanabi needs compute shaders, so the wasm editor uses WebGPU.
-bevy = { workspace = true, features = ["webgpu"] }
+# wgpu's webgpu feature lets Chrome create a WebGPU device (Hanabi needs it).
+# Bevy's own webgpu feature switches PBR shadow maps to cube arrays, which the
+# GLES backend creates as a plain cube, so the mesh shader never draws.
+wgpu = { version = "29", default-features = false, features = ["counters", "webgpu"] }
 impeller-bevy.path = "../../libs/impeller/bevy"
 impeller-bevy.default-features = false
 cranelift-mlir.path = "../cranelift-mlir"
@@ -141,6 +143,7 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 webcodecs-video = { path = "../webcodecs-video", features = ["bevy"] }
 web-sys = { version = "0.3", features = [
+  "console",
   "Headers",
   "Request",
   "RequestInit",
