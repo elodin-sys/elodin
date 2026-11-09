@@ -193,6 +193,10 @@ Prefer Bevy's native window screenshot path over OS screen capture. It captures 
 
 The plugin queues `Screenshot::primary_window()`, waits until the PNG is non-empty on disk (async GPU readback), then sends `AppExit::Success` when exit is requested. Do **not** kill the process on a timer alone — that tears down the render thread mid-readback and yields a missing/empty PNG.
 
+Streamed terrain has no timeout during interactive editor startup. Fixed-path
+automation is deliberately stricter: set `ELODIN_CESIUM_CAPTURE_TIMEOUT` to
+bound terrain warm-up; load errors and timeouts exit without a screenshot.
+
 ### One-shot capture (design / verify a change)
 
 ```bash

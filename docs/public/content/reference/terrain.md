@@ -24,6 +24,18 @@ The editor streams aerial terrain and Photo 3D through Bevy-Cesium.
 Local models are loaded by the schematic, as in
 [RC-jet's Mojave terrain](https://github.com/elodin-sys/elodin/blob/main/examples/rc-jet/terrain_schematic.py).
 
+### Startup and outages
+
+When `elodin editor` launches a simulation with streamed terrain, the simulation
+stays at t=0 until the initial terrain is ready. Loading has no interactive
+deadline. If Cesium reports an error, the editor disables streamed terrain,
+restores the schematic's fallback scenery, and starts the simulation. Reload the
+schematic to retry.
+
+Live connections are never paused. Automated fixed-view captures remain strict:
+`ELODIN_CESIUM_CAPTURE_TIMEOUT` bounds terrain loading, and an error or timeout
+exits without writing a terrain screenshot.
+
 ```python
 import elodin as el
 import elodin.ui as ui

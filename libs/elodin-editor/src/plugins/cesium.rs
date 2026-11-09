@@ -13,6 +13,9 @@ use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 
 pub struct CesiumPlugin;
 
+#[derive(Resource, Default)]
+struct RetryTerrain(bool);
+
 fn env_positive(name: &str, default: f64, allow_zero: bool) -> f64 {
     let Ok(value) = std::env::var(name) else {
         return default;
@@ -84,7 +87,9 @@ pub(crate) struct TerrainCapture {
 impl TerrainCapture {
     pub(crate) fn ready(&self, status: Option<&CesiumStatus>) -> Result<bool, &'static str> {
         if status.is_some_and(|s| s.load_failed) {
-            return Err("Terrain capture failed to load");
+            return Err(status
+                .and_then(|s| s.error)
+                .unwrap_or("Terrain capture failed to load"));
         }
         if status.is_some_and(CesiumStatus::ready_for_capture) {
             return Ok(true);
@@ -100,7 +105,7 @@ impl TerrainCapture {
 /// normal flight can refine terrain without repeatedly stopping sensor output.
 #[derive(Resource)]
 pub(crate) struct TerrainStartup {
-    gate: TerrainCapture,
+    started: std::time::Instant,
     ready: bool,
     error: Option<&'static str>,
 }
@@ -108,10 +113,7 @@ pub(crate) struct TerrainStartup {
 impl TerrainStartup {
     pub(crate) fn waiting() -> Self {
         Self {
-            gate: TerrainCapture {
-                started: std::time::Instant::now(),
-                timeout: std::time::Duration::from_secs(120),
-            },
+            started: std::time::Instant::now(),
             ready: false,
             error: None,
         }
@@ -125,9 +127,10 @@ impl TerrainStartup {
         if self.ready || self.error.is_some() {
             return;
         }
-        match self.gate.ready(Some(status)) {
-            Ok(ready) => self.ready = ready,
-            Err(error) => self.error = Some(error),
+        if status.load_failed {
+            self.error = Some(status.error.unwrap_or("Terrain capture failed to load"));
+        } else {
+            self.ready = status.ready_for_capture();
         }
     }
 
@@ -150,11 +153,14 @@ pub(crate) fn capture_readiness(
     status: Option<&CesiumStatus>,
 ) -> Result<bool, &'static str> {
     if let Some(startup) = startup
-        && !startup.result()?
+        && let Err(error) = startup.result()
     {
-        return Ok(false);
+        return Err(error);
     }
-    capture.map_or(Ok(true), |capture| capture.ready(status))
+    if let Some(capture) = capture {
+        return capture.ready(status);
+    }
+    Ok(startup.is_none_or(|startup| startup.ready))
 }
 
 pub(crate) fn playback_ready(world: &World) -> bool {
@@ -206,11 +212,39 @@ mod coordinate_tests {
             .resource_mut::<TerrainStartup>()
             .update(&CesiumStatus {
                 load_failed: true,
+                error: Some("Cesium Ion unavailable"),
                 ..default()
             });
         assert!(playback_ready(&world));
         assert!(!world.resource::<TerrainStartup>().owns_surface());
-        assert_eq!(capture_ready(&world), Err("Terrain capture failed to load"));
+        assert_eq!(capture_ready(&world), Err("Cesium Ion unavailable"));
+    }
+
+    #[test]
+    fn terrain_failure_releases_held_simulation() {
+        let (packet_tx, _packet_rx, outgoing, _incoming) = impeller_bevy::channels::channels();
+        let mut config = impeller_wkt::DbConfig::default();
+        config.metadata.insert(
+            impeller_wkt::EDITOR_STARTUP_GATE_METADATA_KEY.to_string(),
+            "1".to_string(),
+        );
+        let mut app = App::new();
+        app.add_message::<crate::ui::schematic::DocumentLoaded>()
+            .insert_resource(TerrainStartup::waiting())
+            .insert_resource(config)
+            .insert_resource(packet_tx)
+            .add_systems(Update, release_simulation);
+        app.update();
+        assert!(outgoing.try_recv().is_err());
+
+        app.world_mut()
+            .resource_mut::<TerrainStartup>()
+            .update(&CesiumStatus {
+                load_failed: true,
+                ..default()
+            });
+        app.update();
+        assert!(matches!(outgoing.try_recv(), Ok(Some(_))));
     }
 
     #[test]
@@ -242,19 +276,26 @@ mod coordinate_tests {
     }
 
     #[test]
-    fn reapplying_failed_terrain_retries_without_an_automatic_loop() {
+    fn failed_terrain_retries_only_when_requested() {
         let terrain = impeller_wkt::TerrainConfig { asset_id: 2275207 };
         let mut app = App::new();
-        app.insert_resource(crate::ui::schematic::CurrentSchematic(
-            impeller_wkt::Schematic {
-                terrain: Some(terrain),
-                ..default()
-            },
-        ))
-        .add_systems(Update, configure_terrain);
+        app.add_message::<crate::ui::schematic::DocumentLoaded>()
+            .add_message::<crate::ui::schematic::DocumentReloaded>()
+            .init_resource::<RetryTerrain>()
+            .insert_resource(crate::ui::schematic::CurrentSchematic(
+                impeller_wkt::Schematic {
+                    terrain: Some(terrain),
+                    ..default()
+                },
+            ))
+            .add_systems(Update, request_terrain_retry.before(configure_terrain))
+            .add_systems(Update, configure_terrain);
         app.update();
         app.world_mut().resource_mut::<TerrainStartup>().error = Some("failed");
 
+        app.world_mut()
+            .resource_mut::<crate::ui::schematic::CurrentSchematic>()
+            .terrain = Some(terrain);
         app.update();
         assert_eq!(
             app.world().resource::<TerrainStartup>().error,
@@ -262,8 +303,14 @@ mod coordinate_tests {
         );
 
         app.world_mut()
-            .resource_mut::<crate::ui::schematic::CurrentSchematic>()
-            .terrain = Some(terrain);
+            .write_message(crate::ui::schematic::DocumentReloaded {
+                save_path: None,
+                document: crate::ui::schematic::SchematicDocumentAsset {
+                    root: default(),
+                    windows: Vec::new(),
+                },
+                changed_window_indices: Vec::new(),
+            });
         app.update();
         let startup = app.world().resource::<TerrainStartup>();
         assert_eq!(startup.error, None);
@@ -275,10 +322,7 @@ mod coordinate_tests {
         let mut world = World::new();
         assert_eq!(capture_ready(&world), Ok(true));
         world.insert_resource(TerrainStartup {
-            gate: TerrainCapture {
-                started: std::time::Instant::now(),
-                timeout: std::time::Duration::from_secs(120),
-            },
+            started: std::time::Instant::now(),
             ready: false,
             error: None,
         });
@@ -288,10 +332,11 @@ mod coordinate_tests {
         world.resource_mut::<TerrainStartup>().ready = true;
         assert_eq!(capture_ready(&world), Ok(true));
         world.resource_mut::<TerrainStartup>().ready = false;
-        world.resource_mut::<TerrainStartup>().gate.timeout = std::time::Duration::ZERO;
-        world
-            .resource_mut::<TerrainStartup>()
-            .update(&CesiumStatus::default());
+        world.insert_resource(CesiumStatus::default());
+        world.insert_resource(TerrainCapture {
+            started: std::time::Instant::now(),
+            timeout: std::time::Duration::ZERO,
+        });
         assert_eq!(
             capture_ready(&world),
             Err("Terrain capture warm-up timed out")
@@ -303,10 +348,7 @@ mod coordinate_tests {
         let mut world = World::new();
         assert!(playback_ready(&world));
         world.insert_resource(TerrainStartup {
-            gate: TerrainCapture {
-                started: std::time::Instant::now(),
-                timeout: std::time::Duration::from_secs(120),
-            },
+            started: std::time::Instant::now(),
             ready: false,
             error: None,
         });
@@ -318,12 +360,9 @@ mod coordinate_tests {
     }
 
     #[test]
-    fn initial_terrain_wait_is_bounded_and_does_not_restart_during_flight() {
+    fn initial_terrain_wait_has_no_timeout_and_does_not_restart_during_flight() {
         let mut startup = TerrainStartup {
-            gate: TerrainCapture {
-                started: std::time::Instant::now(),
-                timeout: std::time::Duration::from_secs(120),
-            },
+            started: std::time::Instant::now() - std::time::Duration::from_secs(3600),
             ready: false,
             error: None,
         };
@@ -338,10 +377,6 @@ mod coordinate_tests {
         assert_eq!(startup.result(), Ok(true));
         startup.update(&CesiumStatus::default());
         assert_eq!(startup.result(), Ok(true));
-        startup.ready = false;
-        startup.gate.timeout = std::time::Duration::ZERO;
-        startup.update(&CesiumStatus::default());
-        assert!(startup.result().is_err());
     }
 
     #[test]
@@ -414,10 +449,7 @@ mod coordinate_tests {
         .insert_resource(FloatingOriginSettings::new(2000.0, 100.0))
         .insert_resource(SensorCameraConfigs(configs))
         .insert_resource(TerrainStartup {
-            gate: TerrainCapture {
-                started: std::time::Instant::now(),
-                timeout: std::time::Duration::from_secs(120),
-            },
+            started: std::time::Instant::now(),
             ready: false,
             error: None,
         })
@@ -545,6 +577,7 @@ mod coordinate_tests {
 
 impl Plugin for CesiumPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<RetryTerrain>();
         if let Ok(path) = std::env::var("ELODIN_CESIUM_CAPTURE_VIEWS") {
             let bytes = std::fs::read(path).expect("Cannot read ELODIN_CESIUM_CAPTURE_VIEWS");
             let views = parse_capture_views(&bytes).expect("Invalid ECEF capture view file");
@@ -569,6 +602,13 @@ impl Plugin for CesiumPlugin {
                 .with_initial_load_wait()
                 .with_lod_retention_margin(500.0)
                 .with_maximum_screen_error(24.0),
+        )
+        .add_systems(
+            Update,
+            request_terrain_retry.before(configure_terrain).run_if(
+                resource_exists::<Messages<crate::ui::schematic::DocumentLoaded>>
+                    .and_then(resource_exists::<Messages<crate::ui::schematic::DocumentReloaded>>),
+            ),
         )
         .add_systems(Update, configure_terrain.before(CesiumSet::Stream))
         .add_systems(Update, collect_views.in_set(CesiumSet::Views))
@@ -623,14 +663,14 @@ fn configure_terrain(
     world: &mut World,
     mut previous: Local<Option<Option<impeller_wkt::TerrainConfig>>>,
 ) {
-    let (terrain, schematic_changed) = {
-        let Some(schematic) = world.get_resource_ref::<crate::ui::schematic::CurrentSchematic>()
-        else {
-            return;
-        };
-        (schematic.terrain, schematic.is_changed())
+    let retry_requested = world
+        .get_resource_mut::<RetryTerrain>()
+        .is_some_and(|mut retry| std::mem::take(&mut retry.0));
+    let Some(schematic) = world.get_resource::<crate::ui::schematic::CurrentSchematic>() else {
+        return;
     };
-    let retry_failed = schematic_changed
+    let terrain = schematic.terrain;
+    let retry_failed = retry_requested
         && terrain.is_some()
         && world
             .get_resource::<TerrainStartup>()
@@ -647,6 +687,20 @@ fn configure_terrain(
     let startup = TerrainStartup::waiting();
     world.insert_resource(CesiumSourceUpdate(Some(terrain_source(terrain.asset_id))));
     world.insert_resource(startup);
+}
+
+fn request_terrain_retry(
+    mut loaded: MessageReader<crate::ui::schematic::DocumentLoaded>,
+    mut reloaded: MessageReader<crate::ui::schematic::DocumentReloaded>,
+    mut retry: ResMut<RetryTerrain>,
+) {
+    let loaded = loaded.read().count() > 0;
+    let reloaded = reloaded.read().fold(false, |retry, event| {
+        retry || event.changed_window_indices.is_empty()
+    });
+    if loaded || reloaded {
+        retry.0 = true;
+    }
 }
 
 fn update_startup(
@@ -677,7 +731,7 @@ fn update_startup(
     }
     if startup.ready {
         info!(
-            seconds = startup.gate.started.elapsed().as_secs_f64(),
+            seconds = startup.started.elapsed().as_secs_f64(),
             "Initial terrain ready"
         );
     }
@@ -700,7 +754,7 @@ fn release_simulation(
     if config.schematic_active().is_some() && !*document_loaded {
         return;
     }
-    if startup.is_some_and(|startup| !startup.ready) {
+    if startup.is_some_and(|startup| !startup.ready && startup.error.is_none()) {
         return;
     }
     packet_tx.send_msg(impeller_wkt::SetDbConfig {
@@ -725,6 +779,7 @@ fn show_startup(startup: Res<TerrainStartup>, mut contexts: Query<&mut bevy_egui
                 .resizable(false)
                 .show(context, |ui| {
                     ui.label(error);
+                    ui.label("Continuing without streamed terrain. Reload the schematic to retry.");
                 });
         } else {
             egui::Modal::new(egui::Id::new("cesium_startup"))
