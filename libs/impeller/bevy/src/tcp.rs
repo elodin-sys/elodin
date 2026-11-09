@@ -4,7 +4,7 @@ use bevy::app::{Plugin, PreUpdate};
 use impeller::types::LenPacket;
 use impeller_bbq::AsyncArcQueueTx;
 use impeller_stellar::queue::{StreamHandshake, tcp_connect};
-use impeller_wkt::{SetStreamFilter, StreamId};
+use impeller_wkt::StreamId;
 use std::{net::SocketAddr, time::Duration};
 use thingbuf::mpsc;
 
@@ -148,7 +148,7 @@ mod tests {
     use super::*;
     use crate::{component_filtered_stream_handshake, connection_packets};
     use impeller::types::{Msg, PacketId};
-    use impeller_wkt::{DbConfig, GetDbSettings, Stream};
+    use impeller_wkt::{DbConfig, GetDbSettings, SetStreamFilter, Stream};
 
     fn packet_ids(packets: impl IntoIterator<Item = LenPacket>) -> Vec<PacketId> {
         packets
