@@ -1,5 +1,3 @@
-#[cfg(any(target_family = "wasm", test))]
-mod browser_windows;
 mod commands;
 mod loader;
 mod messages;

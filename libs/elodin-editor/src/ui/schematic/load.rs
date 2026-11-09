@@ -863,6 +863,10 @@ impl LoadSchematicParams<'_, '_> {
         theme_scheme: &str,
         log_path: Option<&Path>,
     ) {
+        if cfg!(target_family = "wasm") {
+            warn!("Skipping additional schematic window: multiple windows are unavailable in WASM");
+            return;
+        }
         let id = WindowId::default();
         let state = self.build_window_state(
             id,
