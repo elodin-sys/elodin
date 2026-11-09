@@ -6,6 +6,8 @@
 
 #[cfg(target_family = "wasm")]
 use impeller_bevy::{DbEndpoint, HostOrUrl};
+#[cfg(target_arch = "wasm32")]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
 use crate::plugins::{editor_cam_input, editor_cam_touch};
@@ -70,6 +72,41 @@ use ui::{
 #[reflect(Resource)]
 pub struct Coordinate(pub Option<GeoFrame>);
 
+/// `navigator.gpu` is not a usable adapter. Brave defines the property and
+/// still returns null from `requestAdapter()`, and wgpu then refuses WebGL.
+#[cfg(target_arch = "wasm32")]
+static WASM_WEBGPU_ADAPTER: AtomicBool = AtomicBool::new(false);
+
+/// Probe for a WebGPU adapter before Bevy creates its wgpu instance.
+///
+/// Call this before [`EditorPlugin`] on wasm. The flag defaults to false, so a
+/// missed probe uses WebGL instead of panicking on a null adapter.
+#[cfg(target_arch = "wasm32")]
+pub async fn prepare_wasm_graphics() {
+    let available = wgpu::util::is_browser_webgpu_supported().await;
+    WASM_WEBGPU_ADAPTER.store(available, Ordering::Relaxed);
+    let message: &str = if available {
+        "elodin-web: graphics backends WebGPU | WebGL"
+    } else {
+        "elodin-web: no WebGPU adapter; graphics backend WebGL"
+    };
+    web_sys::console::log_1(&message.into());
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn wasm_webgpu_adapter_available() -> bool {
+    WASM_WEBGPU_ADAPTER.load(Ordering::Relaxed)
+}
+
+#[cfg_attr(not(any(test, target_arch = "wasm32")), allow(dead_code))]
+pub(crate) fn wasm_render_backends(webgpu_adapter: bool) -> wgpu::Backends {
+    if webgpu_adapter {
+        wgpu::Backends::BROWSER_WEBGPU | wgpu::Backends::GL
+    } else {
+        wgpu::Backends::GL
+    }
+}
+
 pub(crate) fn editor_wgpu_settings() -> WgpuSettings {
     WgpuSettings {
         // wgpu's Vulkan preflight cannot determine which device-local heap a
@@ -83,18 +120,35 @@ pub(crate) fn editor_wgpu_settings() -> WgpuSettings {
             for_device_loss: None,
         },
         memory_hints: wgpu::MemoryHints::MemoryUsage,
-        // Safari often has no `navigator.gpu`. A WebGPU-only backend set then
-        // builds an empty wgpu-core instance and panics with
-        // `FailedToCreateSurfaceForAnyBackend({})`. WebGL covers that case;
-        // Chrome still gets WebGPU when `navigator.gpu` exists.
+        // A WebGPU-only backend set builds an empty wgpu-core instance when
+        // `navigator.gpu` is missing and panics with
+        // `FailedToCreateSurfaceForAnyBackend({})`. Keeping GL in the set
+        // covers Safari. When the property exists but `requestAdapter()`
+        // returns null, wgpu commits to WebGPU and never tries GL, so the
+        // probe above drops WebGPU in that case.
         // `powerPreference: "high-performance"` also never resolves in Safari.
         #[cfg(target_arch = "wasm32")]
-        backends: Some(
-            bevy::render::settings::Backends::BROWSER_WEBGPU | bevy::render::settings::Backends::GL,
-        ),
+        backends: Some(wasm_render_backends(wasm_webgpu_adapter_available())),
         #[cfg(target_arch = "wasm32")]
         power_preference: bevy::render::settings::PowerPreference::None,
         ..default()
+    }
+}
+
+#[cfg(test)]
+mod wasm_backend_tests {
+    use super::wasm_render_backends;
+
+    #[test]
+    fn adapter_keeps_webgpu_and_webgl() {
+        let backends = wasm_render_backends(true);
+        assert!(backends.contains(wgpu::Backends::BROWSER_WEBGPU));
+        assert!(backends.contains(wgpu::Backends::GL));
+    }
+
+    #[test]
+    fn missing_adapter_is_webgl_only() {
+        assert_eq!(wasm_render_backends(false), wgpu::Backends::GL);
     }
 }
 

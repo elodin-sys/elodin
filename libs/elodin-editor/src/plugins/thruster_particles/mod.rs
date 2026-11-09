@@ -265,25 +265,12 @@ struct KdlThrusterEval {
 
 pub struct ThrusterParticlesPlugin;
 
-/// Chrome exposes `navigator.gpu`. Safari often does not, and Hanabi's compute
-/// pipelines then fail WebGL validation and abort the editor.
-fn browser_webgpu_available() -> bool {
-    #[cfg(not(target_family = "wasm"))]
-    {
-        true
-    }
-    #[cfg(target_family = "wasm")]
-    {
-        web_sys::window()
-            .and_then(|window| js_sys::Reflect::get(&window, &"navigator".into()).ok())
-            .and_then(|navigator| js_sys::Reflect::get(&navigator, &"gpu".into()).ok())
-            .is_some_and(|gpu| !gpu.is_undefined() && !gpu.is_null())
-    }
-}
 
 impl Plugin for ThrusterParticlesPlugin {
     fn build(&self, app: &mut App) {
-        if !browser_webgpu_available() {
+
+        #[cfg(target_arch = "wasm32")]
+        if !crate::wasm_webgpu_adapter_available() {
             return;
         }
         init_ready_effect_images(app);

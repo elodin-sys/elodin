@@ -4,6 +4,20 @@ use elodin_editor::EditorPlugin;
 fn main() {
     console_error_panic_hook::set_once();
     web_sys::console::log_1(&"elodin-web: main()".into());
+    // The graphics probe is async. Bevy must not build until it finishes,
+    // because wgpu locks in WebGPU as soon as `navigator.gpu` exists.
+    #[cfg(target_arch = "wasm32")]
+    {
+        wasm_bindgen_futures::spawn_local(async {
+            elodin_editor::prepare_wasm_graphics().await;
+            start_app();
+        });
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    start_app();
+}
+
+fn start_app() {
     let plugin = EditorPlugin::default();
     #[cfg(target_family = "wasm")]
     let plugin = apply_page_db(plugin);

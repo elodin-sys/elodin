@@ -6,12 +6,24 @@ use bevy::{
     render::{Render, RenderApp, renderer::RenderAdapterInfo},
 };
 
-const GPU_FAILURE_HELP: &str = "\
+fn gpu_failure_help() -> &'static str {
+    #[cfg(target_arch = "wasm32")]
+    {
+        "\
+elodin: unable to initialize graphics because no GPU was found.
+elodin: this browser blocked WebGPU and WebGL.
+elodin: allow graphics and hardware acceleration for this site."
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        "\
 elodin: unable to initialize graphics because no GPU was found.
 elodin: select a graphics path before entering the development shell:
   ELODIN_GPU=nvidia nix develop
   ELODIN_GPU=mesa nix develop
-  ELODIN_GPU=nvk nix develop";
+  ELODIN_GPU=nvk nix develop"
+    }
+}
 
 pub struct GpuInfoPlugin;
 
@@ -27,7 +39,10 @@ pub fn install_gpu_panic_handler() {
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
             if panic_message(info).is_some_and(is_gpu_init_panic) {
-                eprintln!("{GPU_FAILURE_HELP}");
+                #[cfg(target_arch = "wasm32")]
+                web_sys::console::error_1(&gpu_failure_help().into());
+                #[cfg(not(target_arch = "wasm32"))]
+                eprintln!("{}", gpu_failure_help());
             }
             previous(info);
         }));
@@ -81,6 +96,15 @@ mod tests {
             "Unable to find a GPU! Make sure you have installed required drivers!"
         ));
         assert!(!is_gpu_init_panic("another panic"));
+    }
+
+    #[test]
+    fn gpu_failure_help_matches_this_target() {
+        let help = gpu_failure_help();
+        #[cfg(target_arch = "wasm32")]
+        assert!(help.contains("hardware acceleration"));
+        #[cfg(not(target_arch = "wasm32"))]
+        assert!(help.contains("ELODIN_GPU"));
     }
 
     #[test]

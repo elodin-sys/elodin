@@ -5964,6 +5964,7 @@ dependencies = [
  "elodin-editor",
  "getrandom 0.3.4",
  "impeller-bevy",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 
