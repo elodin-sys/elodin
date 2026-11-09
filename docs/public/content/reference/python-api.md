@@ -651,6 +651,11 @@ sim = w.run(sys, SIM_TIME_STEP)
 ```
 
 <br></br>
+## Terrain
+
+See [Terrain](/reference/terrain/#api-reference) for `elodin.Terrain`,
+height-grid preparation and JAX height queries.
+
 ## Components
 
 Components are containers of data that is associated with an entity. See [ECS Data Model](/reference/overview#ecs-data-model) for more context on entities and components.

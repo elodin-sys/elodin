@@ -60,6 +60,12 @@ pub fn serialize_schematic(schematic: &Schematic) -> String {
                 body: schematic.body,
             }));
     }
+    if let Some(terrain) = schematic.terrain {
+        let mut node = KdlNode::new("terrain");
+        node.entries_mut()
+            .push(KdlEntry::new_prop("asset_id", i128::from(terrain.asset_id)));
+        doc.nodes_mut().push(node);
+    }
     if let Some(theme) = schematic.theme.as_ref() {
         doc.nodes_mut().push(serialize_theme(theme));
     }

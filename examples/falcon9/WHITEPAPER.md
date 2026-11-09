@@ -269,13 +269,18 @@ always means the ellipsoid normal.
 
 ### 4.3 Worked example: the two pads
 
-From [`data/crs12/mission.json`](data/crs12/mission.json), with the formulas
-above:
+The launch coordinate comes from the mission metadata. The landing coordinate
+is the LZ-1 concrete-circle center measured in georeferenced aerial imagery;
+the original metadata used the nearby old launch-complex reference point.
+Both sites and their ground heights are recorded in
+[`data/sites.json`](data/sites.json), shared by the plant and flight software.
+With the demo Photo 3D asset enabled, heights are sampled from that dataset.
+Using the formulas above:
 
 ```text
-LC-39A  (28.60839°N, −80.60433°E, h ≈ 3 m):   r_E ≈ ( 914.8, −5528.6, 3035.9) km
-LZ-1    (28.48580°N, −80.54440°E, h ≈ 5 m):   r_E ≈ ( 921.7, −5534.0, 3023.9) km
-‖Δ‖ ≈ 14.8 km   (the whole mission, pad to pad)
+LC-39A  (28.60839°N, -80.60433°E, h ≈ -7.06 m): r_E ≈ (914.8, -5528.6, 3035.9) km
+LZ-1    (28.485738°N, -80.542948°E, h ≈ -27.12 m): r_E ≈ (921.8, -5534.0, 3023.9) km
+‖Δ‖ ≈ 14.9 km   (the whole mission, pad to pad)
 ```
 
 Surface rotation speed at the pad — the "free" eastward velocity every launch
@@ -937,8 +942,8 @@ a_cmd = 6 ZEM/t_go² − 2 ZEV/t_go − g
 
 Attitude = direction of `a_cmd` (tilt ≤ 0.25 rad); throttle stays on the
 hoverslam vertical channel so the no-hover constraint is not violated.
-**Commit-to-vertical** latches once alt < 50 m (or short t_go) *and* the
-horizontal miss is already < 25 m — freeze lateral ZEM, finish upright.
+Lateral guidance remains active until touchdown: a small position error
+alone does not imply that sideways velocity has been cancelled.
 If min-throttle lofting starts below 100 m, engines cut until descending
 again. Legs are rated **2 m/s** impact (vertical and total contact speed);
 soft-landing gates also require tilt ≤ 2°, |ω| ≤ 1°/s, lateral ≤ 1.5 m/s,
@@ -1010,8 +1015,9 @@ quantization, sample-and-hold at the IMU rate).
   outage window during the high-plasma entry burn (flagged, dispersable).
 - **Radar altimeter** measures the boresight ray from the engine-plane
   antenna to terrain, not CoM altitude:
-  `range = (h_ant − h_terrain)/cosθ_tilt`, with `h_terrain` the 5 m LZ-1
-  deck inside a 5 km gate (else ellipsoid 0). Valid within FOV and a
+  `range = (h_ant − h_terrain)/cosθ_tilt`, using the shared LZ-1 surface
+  height inside a 5 km gate and the launch surface height elsewhere. Heights
+  use the WGS84 ellipsoid, not mean sea level. Valid within FOV and a
   max-range gate of a few hundred meters (Ainstein-class device
   [product family docs](https://ainstein.ai/us-d1-all-weather-radar-altimeter/)),
   at 40 Hz with latency and dropout. It matters only in the last

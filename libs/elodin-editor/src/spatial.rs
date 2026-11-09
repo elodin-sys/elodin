@@ -3,19 +3,7 @@
 //! This module is a thin compatibility shim that the rest of the editor
 //! depends on through a single, stable surface (`GridCell`,
 //! `FloatingOrigin`, `FloatingOriginSettings`, `FloatingOriginPlugin`,
-//! `LowPrecisionRoot`).
-//!
-//! Two implementations live behind the `big_space` cargo feature:
-//!
-//! * `feature = "big_space"` (default, **the only supported product mode**):
-//!   the surface re-exports / wraps types from `big_space` 0.13. The
-//!   wrapper is needed because the 0.12 release reorganised the API:
-//!   `FloatingOriginSettings` is gone, replaced by a `Grid` component
-//!   stored on the `BigSpace` root entity.
-//! * `not(feature = "big_space")`: dummy implementations that compile but
-//!   collapse the grid to a single cell. This path exists purely for
-//!   development ergonomics during the Bevy migration; it is **not
-//!   intended to be shipped**.
+//! `LowPrecisionRoot`). BigSpace is the editor's only supported spatial mode.
 //!
 //! Prefer parenting `GridCell` entities under [`BigSpaceRoot`] at spawn
 //! (via [`BigSpaceRootEntity`]). Insert-time observers cover impeller path

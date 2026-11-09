@@ -44,7 +44,15 @@ pub async fn run_recipe_at(
     cancel_token: CancelToken,
     addr: SocketAddr,
 ) -> miette::Result<()> {
-    run_recipe_at_with_execution(cache_dir, path, cancel_token, addr, RecipeExecution::Watch).await
+    run_recipe_at_with_execution(
+        cache_dir,
+        path,
+        cancel_token,
+        addr,
+        RecipeExecution::Watch,
+        false,
+    )
+    .await
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -54,6 +62,7 @@ pub async fn run_recipe_at_with_execution(
     cancel_token: CancelToken,
     addr: SocketAddr,
     execution: RecipeExecution,
+    hold_for_editor: bool,
 ) -> miette::Result<()> {
     let mut path = if path.is_dir() {
         let toml = path.join("s10.toml");
@@ -105,6 +114,9 @@ pub async fn run_recipe_at_with_execution(
         .with_context(|| format!("failed to parse s10 recipe from file: {}", path.display()))?;
     if let Ok(exe) = std::env::current_exe() {
         pin_render_server_recipe(&mut recipe, &exe);
+    }
+    if hold_for_editor {
+        hold_sim_for_editor(&mut recipe);
     }
 
     // Run the whole sim stack (sim + Betaflight/controller/render-server) inside
@@ -180,6 +192,20 @@ fn pin_render_server_recipe_inner(recipe: &mut s10::Recipe, exe: &str) {
     for recipe in group.recipes.values_mut() {
         pin_render_server_recipe_inner(recipe, exe);
     }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn hold_sim_for_editor(recipe: &mut s10::Recipe) {
+    let s10::Recipe::Group(group) = recipe else {
+        return;
+    };
+    let Some(s10::Recipe::Sim(sim)) = group.recipes.get_mut("sim") else {
+        return;
+    };
+    sim.env.insert(
+        impeller_wkt::EDITOR_STARTUP_GATE_ENV.to_string(),
+        "1".to_string(),
+    );
 }
 
 #[cfg(all(test, not(target_os = "windows")))]

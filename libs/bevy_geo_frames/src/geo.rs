@@ -451,20 +451,7 @@ impl Plugin for GeoFramePlugin {
                 ),
             );
         if self.apply_transforms {
-            // Then convert to Bevy before transform propagation
-            #[cfg(not(feature = "big_space"))]
-            app.add_systems(
-                PostUpdate,
-                (apply_transforms, apply_geo_rotation)
-                    .chain()
-                    .before(TransformSystems::Propagate),
-            );
-
-            // We ought not to do this here because it relies on the generic
-            // parameter.
-
-            // #[cfg(feature = "big_space")]
-            // app.add_plugins(crate::big_space::plugin::<i128>);
+            app.add_plugins(crate::big_space::plugin);
         }
     }
 }

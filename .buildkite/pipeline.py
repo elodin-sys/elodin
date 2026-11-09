@@ -45,9 +45,9 @@ if os.getenv("CI_NIGHTLY_PREWARM") == "1":
                 label=":nix: x86 closures",
                 key="nightly-nix-x86",
                 command=[
-                    "nix develop --command true",
-                    "nix develop .#run --command true",
-                    "nix develop .#tracy --command true",
+                    ".buildkite/nix-develop-profile.sh -- true",
+                    ".buildkite/nix-develop-profile.sh .#run -- true",
+                    ".buildkite/nix-develop-profile.sh .#tracy -- true",
                     "nix build --no-link .#elodin-cli .#elodin-db-protos",
                 ],
             ),
@@ -65,7 +65,10 @@ if os.getenv("CI_NIGHTLY_PREWARM") == "1":
                     label=":crab: x86 Cargo targets",
                     key="nightly-cargo-x86",
                     depends_on="nightly-nix-x86",
-                    command="""nix develop --command bash <<'EOF'
+                    command=[
+                        ".buildkite/nix-develop-profile.sh .#run -- true",
+                        ".buildkite/nix-develop-profile.sh .#tracy -- true",
+                        """.buildkite/nix-develop-profile.sh -- bash <<'EOF'
 set -euo pipefail
 cargo test --release --workspace --exclude elodin-db --exclude elodin-db-tests --no-run
 cargo test --release -p elodin-db --lib --bins --no-run
@@ -74,6 +77,7 @@ cargo build --release -p elodin
 cargo build --release -p elodin-db --bin elodin-db-bench --features grpc,tracy
 cargo build --release -p rc-jet-controller
 EOF""",
+                    ],
                 ),
                 "parallelism": 8,
             },
@@ -226,7 +230,7 @@ test_steps = [
             nix_step(
                 label=":python: elodin-db gRPC full API",
                 flake=".#run",
-                pre_command="nix develop --command bash -c 'cargo build --release -p rc-jet-controller'",
+                pre_command=".buildkite/nix-develop-profile.sh -- bash -c 'cargo build --release -p rc-jet-controller'",
                 command="scripts/ci/db_grpc_full_api_demo.sh",
                 env={
                     "ELODIN_RC_JET_CONTROLLER_BIN": "target/release/rc-jet-controller",

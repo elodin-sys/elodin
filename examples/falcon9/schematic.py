@@ -13,11 +13,19 @@ Typed elodin.ui translation of falcon9.kdl.
 # Keep the exhaust trail world-anchored while thinning it with air density.
 # Cold-gas RCS: falcon9-sized darts (rcs_dart) at interstage station 46 m.
 # World-fixed launch-pad smoke.
-# Landing dust and ASDS visual at LZ-1.
-# Barge floats above the coarse globe until the surface fix.
+# Landing dust at LZ-1; Cesium supplies the real landing-pad surface.
 # CRS-12 truth ghost.
 
+import elodin as el
 import elodin.ui as ui
+
+from constants import PAD_ALT_M, PAD_LAT_DEG, PAD_LON_DEG, TERRAIN_MODE
+
+TERRAIN = {
+    "legacy": None,
+    "aerial": el.Terrain.aerial(),
+    "photo3d": el.Terrain(),
+}[TERRAIN_MODE]
 
 
 def build() -> ui.Schematic:
@@ -40,6 +48,7 @@ def build() -> ui.Schematic:
                     effects=True,
                     hdr=False,
                     cinematic=True,
+                    bloom=ui.bloom(preset="old_school", intensity=0.05),
                     pos="booster.visual_pos.translate(20, 0, 0, true).translate_world(46.740, -100.549, -144.705)",
                     look_at="booster.visual_pos.translate(20, 0, 0, true).translate_world(1.433, -8.661, 4.788)",
                     up="(0.1433, -0.8661, 0.4788)",
@@ -302,14 +311,8 @@ def build() -> ui.Schematic:
         ),
         ui.object_3d(
             "lz1.world_pos",
-            mesh=ui.glb(
-                "spacex_drone_barge.glb",
-                scale=1.0,
-                translate=(0.0, 0.0, 0.0),
-                rotate=(0.0, 0.0, 0.0),
-                emissivity=0.0,
-                glow=0.0,
-            ),
+            # Invisible anchor for landing dust; no duplicate pad geometry.
+            mesh=ui.sphere(radius=0.01, color=ui.color(0, 0, 0, 0)),
             orientation="absolute",
             thrusters=[
                 ui.thruster(
@@ -370,8 +373,12 @@ def build() -> ui.Schematic:
             ),
             perspective=False,
         ),
+        terrain=TERRAIN,
         coordinate=ui.coordinate(
             frame="ECEF",
+            lat=PAD_LAT_DEG,
+            lon=PAD_LON_DEG,
+            alt=PAD_ALT_M,
         ),
         timeline=ui.timeline(
             played_color="yalk",

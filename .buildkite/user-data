@@ -185,7 +185,7 @@ write_files:
       Description=Run Nix store garbage collection nightly
 
       [Timer]
-      OnCalendar=*-*-* 11:00:00 UTC
+      OnCalendar=*-*-* 08:10:00 UTC
       Persistent=true
       RandomizedDelaySec=10m
 

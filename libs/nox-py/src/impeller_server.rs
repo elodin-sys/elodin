@@ -57,6 +57,10 @@ impl Server {
         let elodin_db::Server { listener, db } = db;
         let start_time = start_timestamp.unwrap_or_else(Timestamp::now);
         init_db(&db, world.world_mut(), start_time)?;
+        if std::env::var_os(impeller_wkt::EDITOR_STARTUP_GATE_ENV).is_some() {
+            hold_for_editor_startup(&db);
+            info!("simulation held at tick zero until editor startup completes");
+        }
         let tick_db = db.clone();
         let tick_counter = Arc::new(AtomicU64::new(0));
         let stream: Thread<Option<Result<(), Error>>> =
@@ -85,6 +89,17 @@ impl Server {
         })
         .await
     }
+}
+
+fn hold_for_editor_startup(db: &DB) {
+    db.with_state_mut(|state| {
+        state.db_config.recording = false;
+        state.db_config.metadata.insert(
+            impeller_wkt::EDITOR_STARTUP_GATE_METADATA_KEY.to_string(),
+            "1".to_string(),
+        );
+    });
+    db.recording_cell.set_playing(false);
 }
 
 /// Asset key under `{db}/assets/` for the active schematic the editor loads.

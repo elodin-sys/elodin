@@ -7,10 +7,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-elodin-editor = { path = "../../libs/elodin-editor", default-features = false, features = [
-  "big_space",
-  "wasm-cut",
-] }
+elodin-editor = { path = "../../libs/elodin-editor", default-features = false, features = ["wasm-cut"] }
 bevy.workspace = true
 console_error_panic_hook = "0.1"
 getrandom = { version = "0.3", features = ["wasm_js"] }
