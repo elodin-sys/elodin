@@ -349,6 +349,14 @@
             <li>
                 <a
                     class="docs-link "
+                    href="/reference/terrain/"
+                    >Terrain</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
                     href="/reference/replays/"
                     >Replays</a
                 >
@@ -430,6 +438,11 @@
                         
                         <li>
                             <a href="/reference/schematic/#coordinate">coordinate</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="/reference/schematic/#terrain">terrain</a>
                             
                         </li>
                         
@@ -553,7 +566,7 @@ typed Python builders, see <a href="/reference/migration/kdl-to-python/">Migrate
 Python</a>.</p>
 <h2 id="glossary">Glossary</h2>
 <ul>
-<li>Top-level nodes: <code>coordinate</code>, <code>theme</code>, <code>timeline</code>, <code>telemetry_mode</code>, <code>skybox</code>, <code>environment</code>, <code>panel</code> variants, <code>object_3d</code>, <code>line_3d</code>, <code>point_trails</code>, <code>vector_arrow</code>, <code>world_mesh</code>, <code>window</code>.</li>
+<li>Top-level nodes: <code>coordinate</code>, <code>terrain</code>, <code>theme</code>, <code>timeline</code>, <code>telemetry_mode</code>, <code>skybox</code>, <code>environment</code>, <code>panel</code> variants, <code>object_3d</code>, <code>line_3d</code>, <code>point_trails</code>, <code>vector_arrow</code>, <code>world_mesh</code>, <code>window</code>.</li>
 <li>EQL: expressions are evaluated in the runtime EQL context. Vector-like fields expect 3 components; <code>world_pos</code> is a 7-component array (quat + position).</li>
 <li>Colors: <code>color r g b [a]</code> or named (<code>black</code>, <code>white</code>, <code>blue</code>, <code>red</code>, <code>orange</code>, <code>yellow</code>, <code>yalk</code>, <code>pink</code>, <code>cyan</code>, <code>gray</code>, <code>green</code>, <code>mint</code>, <code>turquoise</code>, <code>slate</code>, <code>pumpkin</code>, <code>yolk</code>, <code>peach</code>, <code>reddish</code>, <code>hyperblue</code>); alpha optional. Colors can be inline or in <code>color</code>/<code>colour</code> child nodes. Defaults to white when omitted unless noted.</li>
 <li>Booleans: KDL booleans are <code>#true</code>/<code>#false</code>. A bare <code>True</code> is a <em>string</em>, not a boolean — most flags silently fall back to their default if given one. Viewport flags (<code>hdr</code>, <code>show_grid</code>, <code>active</code>, ...) leniently accept <code>True</code>/<code>"true"</code> (case-insensitive), but prefer the <code>#</code> forms everywhere.</li>
@@ -565,6 +578,11 @@ Python</a>.</p>
 <li><code>frame</code>: <code>"ENU"</code> (default), <code>"NED"</code>, or <code>"ECEF"</code>.</li>
 <li>Elements (<code>viewport</code>, <code>object_3d</code>, <code>line_3d</code>, <code>point_trails</code>, <code>vector_arrow</code>, <code>world_mesh</code>) that don't specify their own <code>frame</code> attribute inherit this global frame.</li>
 <li>Example: <code>coordinate frame="NED"</code> sets the entire schematic to use North-East-Down coordinates.</li>
+</ul>
+<h3 id="terrain">terrain</h3>
+<ul>
+<li>Optional top-level node selecting streamed scenery, for example <code>terrain asset_id=2275207</code>.</li>
+<li>See <a href="/reference/terrain/">Terrain</a> for the supported presets and Python schematic configuration.</li>
 </ul>
 <h3 id="theme">theme</h3>
 <ul>
