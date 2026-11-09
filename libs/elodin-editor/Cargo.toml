@@ -16,7 +16,6 @@ tracy = ["bevy/trace_tracy", "bevy/debug"]
 wasm-cut = []
 
 [dependencies]
-bevy-cesium.workspace = true
 # math
 hamann-chen-line = { path = "../hamann-chen-line" }
 nox.path = "../nox"
@@ -28,7 +27,6 @@ ab_glyph = "0.2"
 # bevy
 bevy = { workspace = true, features = [
   "bevy_gizmos_render",
-  "file_watcher",
   "bevy_audio",
   "vorbis",
   "jpeg",
@@ -148,6 +146,7 @@ web-sys = { version = "0.3", features = [
 ] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+bevy-cesium.workspace = true
 bevy = { workspace = true, features = [
   "file_watcher",
   "multi_threaded",
