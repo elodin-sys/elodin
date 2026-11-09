@@ -5,7 +5,7 @@ wired up. Unchecked items are compiled out, stubbed, or still native-only.
 
 ## Finished
 
-- [x] Trunk app on `#editor`, `wasm-release` profile (`opt-level = "z"`, fat LTO)
+- [x] Trunk app on `#editor`. `just web` uses `wasm-dev` (`opt-level = 2`, no LTO). `just web-release` uses `wasm-release` (`opt-level = "z"`, fat LTO)
 - [x] Boot log, `console_error_panic_hook`, and Bevy `LogPlugin` so panics reach the browser console
 - [x] `strip = "symbols"` drops the Rust `name` section (bundle ~45 MB; ~3.5 KB of wasm-bindgen closure names remain)
 - [x] Directional shadow maps use 2048 on WASM, same as native (Bevy’s 8192 default is not used)
