@@ -695,10 +695,11 @@ fn request_terrain_retry(
     mut retry: ResMut<RetryTerrain>,
 ) {
     let loaded = loaded.read().count() > 0;
-    let reloaded = reloaded.read().fold(false, |retry, event| {
-        retry || event.changed_window_indices.is_empty()
-    });
-    if loaded || reloaded {
+    let mut reloaded_full = false;
+    for event in reloaded.read() {
+        reloaded_full |= event.changed_window_indices.is_empty();
+    }
+    if loaded || reloaded_full {
         retry.0 = true;
     }
 }
