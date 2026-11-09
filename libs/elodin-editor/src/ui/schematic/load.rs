@@ -307,7 +307,6 @@ pub struct LoadSchematicParams<'w, 's> {
     /// refetch can tell a window-only remote save apart from an unrelated
     /// asset write (RFD #724, Bug 2). Optional: absent in minimal test apps.
     last_content: Option<ResMut<'w, LastActiveSchematicContent>>,
-    #[cfg(feature = "big_space")]
     big_space_root: Option<Res<'w, crate::spatial::BigSpaceRootEntity>>,
     // Optional: missing/duplicate root must not invalidate schematic load.
     monitor_root: Option<Single<'w, 's, Entity, With<MonitorsRoot>>>,
@@ -748,6 +747,7 @@ impl LoadSchematicParams<'_, '_> {
             }
         }
 
+        self.current_schematic.0.terrain = schematic.terrain;
         self.current_schematic.0.skybox = schematic.skybox.clone();
         self.current_schematic.0.environment = schematic.environment.clone();
         if let Some(scene_environment) = self.scene_environment.as_mut() {
@@ -1060,7 +1060,6 @@ impl LoadSchematicParams<'_, '_> {
                             max: vr.max,
                         });
                     }
-                    #[cfg(feature = "big_space")]
                     crate::spatial::parent_under_big_space(&mut e, self.big_space_root.as_deref());
                 }
                 if let Some(icon) = &icon {
@@ -1096,10 +1095,8 @@ impl LoadSchematicParams<'_, '_> {
             // sample (visible-window anchor; see sync_line_3d_anchor).
             bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
             bevy_geo_frames::GeoRotation::absolute(frame, bevy::math::DQuat::IDENTITY),
-            #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
         ));
-        #[cfg(feature = "big_space")]
         crate::spatial::parent_under_big_space(&mut spawn, self.big_space_root.as_deref());
         spawn.insert(SchematicSpawned);
     }
@@ -1114,10 +1111,8 @@ impl LoadSchematicParams<'_, '_> {
             Visibility::default(),
             bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
             bevy_geo_frames::GeoRotation::absolute(frame, bevy::math::DQuat::IDENTITY),
-            #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
         ));
-        #[cfg(feature = "big_space")]
         crate::spatial::parent_under_big_space(&mut spawn, self.big_space_root.as_deref());
         spawn.insert(SchematicSpawned);
     }
@@ -1180,7 +1175,6 @@ impl LoadSchematicParams<'_, '_> {
         );
         let mut e = self.commands.entity(entity);
         e.insert((SchematicSpawned, world_mesh));
-        #[cfg(feature = "big_space")]
         crate::spatial::parent_under_big_space(&mut e, self.big_space_root.as_deref());
     }
 
@@ -1216,7 +1210,6 @@ impl LoadSchematicParams<'_, '_> {
                 if let Some(parent) = pane.parent {
                     let mut e = self.commands.entity(parent);
                     e.insert(SchematicSpawned);
-                    #[cfg(feature = "big_space")]
                     crate::spatial::parent_under_big_space(&mut e, self.big_space_root.as_deref());
                 }
                 if let Some(grid) = pane.grid {
@@ -1880,6 +1873,7 @@ pub fn apply_document_cleared(
     if events.read().next().is_none() {
         return;
     }
+    params.current_schematic.0.terrain = None;
     if !params.load_default_data_overview() {
         pending.0 = true;
     }
@@ -2187,6 +2181,16 @@ mod tests {
             .run_system_cached(crate::ui::schematic::tiles_to_schematic)
             .expect("run tiles_to_schematic");
         app.world().resource::<CurrentSchematic>().0.clone()
+    }
+
+    #[test]
+    fn terrain_survives_loading_and_saving_and_can_be_removed() {
+        let mut app = test_app();
+        let terrain = Schematic::from_kdl("terrain asset_id=2275207\nviewport").unwrap();
+        load_schematic(&mut app, &terrain);
+        assert_eq!(save_schematic(&mut app).terrain, terrain.terrain);
+        load_schematic(&mut app, &Schematic::from_kdl("viewport").unwrap());
+        assert!(save_schematic(&mut app).terrain.is_none());
     }
 
     #[test_case("line_3d \"(0,0,0)\""; "line_3d")]

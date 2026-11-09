@@ -1,0 +1,50 @@
+{
+  "source": "Cesium ion asset 2275207, sampleHeightMostDetailed",
+  "height_reference": "WGS84 ellipsoid, meters",
+  "sampled_on": "2026-11-03",
+  "ion_asset_id": 2275207,
+  "legacy": {
+    "launch_m": 0.0,
+    "landing_m": 5.0,
+    "launch_clearance_m": 3.0
+  },
+  "photo3d": {
+    "launch_m": -7.063374189989003,
+    "landing_m": -27.12141869552742
+  },
+  "aerial": {
+    "source": "Cesium World Terrain, ion asset 1, sampleHeightMostDetailed",
+    "sampled_on": "2026-11-05",
+    "launch_m": -26.628647982777505,
+    "landing_m": -26.769988252819342
+  },
+  "launch": {
+    "name": "LC-39A",
+    "latitude_degrees": 28.60839,
+    "longitude_degrees": -80.60433
+  },
+  "landing": {
+    "name": "LZ-1 concrete pad center",
+    "latitude_degrees": 28.485738,
+    "longitude_degrees": -80.542948,
+    "reference": {
+      "service": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer",
+      "extent_degrees": [
+        -80.547,
+        28.484,
+        -80.54,
+        28.49
+      ],
+      "image_size": [
+        1400,
+        1200
+      ],
+      "center_pixel": [
+        810.5,
+        852.5
+      ],
+      "concrete_radius_m": 42.5,
+      "accuracy_note": "Image-derived center, not a surveyed coordinate; metre-scale uncertainty."
+    }
+  }
+}

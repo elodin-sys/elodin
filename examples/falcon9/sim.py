@@ -37,6 +37,7 @@ from constants import (
     LEG_STROKE_M,
     LOX_LOAD_KG,
     GLB_ORIGIN_STATION_M,
+    LAUNCH_GROUND_ALT_M,
     LZ1_ALT_M,
     LZ1_LAT_DEG,
     LZ1_LON_DEG,
@@ -1105,7 +1106,7 @@ def radar_altimeter_model(
     rng_prev: sn.RadarRange,
     count: sn.RadarCount,
 ) -> tuple[sn.RadarTimer, sn.RadarRange, sn.RadarCount]:
-    """Boresight range from the engine-plane antenna to terrain (deck at LZ-1)."""
+    """Boresight range from the engine-plane antenna to the shared ground surface."""
     t = timer[0] + SIM_TIME_STEP
     fired = t >= sn.RADAR_DT_S
     t = jnp.where(fired, t - sn.RADAR_DT_S, t)
@@ -1118,7 +1119,7 @@ def radar_altimeter_model(
     cos_tilt = jnp.dot(bore_world, -up)
     h_ant = alt - cg[0] * jnp.maximum(cos_tilt, 1e-3)
     near_lz = jnp.linalg.norm(r - lz1_ecef()) < 5_000.0
-    h_terr = jnp.where(near_lz, LZ1_ALT_M, 0.0)
+    h_terr = jnp.where(near_lz, LZ1_ALT_M, LAUNCH_GROUND_ALT_M)
     slant = jnp.maximum(h_ant - h_terr, 0.0) / jnp.maximum(cos_tilt, 1e-3)
     n = count[0] + jnp.where(fired, 1.0, 0.0)
     valid = (cos_tilt > sn.RADAR_FOV_COS) & (slant <= sn.RADAR_MAX_RANGE_M)
@@ -1290,7 +1291,7 @@ def make_truth_playback(ref, display_lag_s: float = 0.0) -> el.System:
     Two-leg ground track (viz aid): the webcast gives only a signed 1-D
     downrange scalar. Ascent is plotted along the ascent azimuth; after the
     boostback reversal the horizontal position lerps from the reversal
-    ground point to LZ-1 so the ghost touches down on the barge.
+    ground point to LZ-1 so the ghost touches down at the landing target.
     """
     lag = float(display_lag_s)
     ref_t = jnp.asarray(ref.time_s)

@@ -123,6 +123,7 @@ impl Plugin for HeadlessEditorPlugin {
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(crate::plugins::world_mesh::EditorWorldMeshPlugin)
             .add_plugins(crate::rim_glow_material::RimGlowMaterialPlugin);
+        app.add_plugins(crate::plugins::cesium::CesiumPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(crate::plugins::display_kernel::DisplayKernelPlugin);
         app.add_plugins(crate::plugins::scene_environment::SceneEnvironmentPlugin);
@@ -157,10 +158,7 @@ impl Plugin for HeadlessEditorPlugin {
                 // with the sensor camera's pose (which reads the TelemetryCache
                 // directly), preventing one-frame jitter in `sensor_view`.
                 sync_pos,
-                #[cfg(not(feature = "big_space"))]
-                bevy_geo_frames::apply_transforms,
                 bevy_geo_frames::apply_geo_rotation,
-                #[cfg(feature = "big_space")]
                 crate::spatial::apply_big_translation,
             )
                 .chain()
@@ -180,6 +178,7 @@ impl Plugin for HeadlessEditorPlugin {
         .init_resource::<crate::EqlContext>()
         .init_resource::<crate::Coordinate>()
         .init_resource::<crate::SyncedObject3d>()
+        .insert_resource(crate::ui::schematic::CurrentSchematic(Default::default()))
         .init_resource::<HeadlessSchematicSkybox>()
         .init_resource::<HeadlessSkyboxRenderGate>()
         .insert_resource(crate::stream_filter::StreamFilterRate::CameraMaxFps)
@@ -213,7 +212,6 @@ impl Plugin for HeadlessEditorPlugin {
         .set_runner(render_server_runner);
 
         app.add_systems(PreUpdate, crate::warn_missing_geo.before(PositionSync));
-        #[cfg(feature = "big_space")]
         app.add_plugins(crate::spatial::FloatingOriginPlugin::new(16_000., 100.));
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
@@ -382,6 +380,7 @@ fn load_headless_scene(
     config: Res<DbConfig>,
     mut pending: Local<HeadlessSchematicLoad>,
     mut schematic_skybox: ResMut<HeadlessSchematicSkybox>,
+    mut current_schematic: ResMut<crate::ui::schematic::CurrentSchematic>,
     mut commands: Commands,
     eql: Res<EqlContext>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -427,6 +426,7 @@ fn load_headless_scene(
             // The active pointer was cleared: tear down the loaded scene so the
             // renderer doesn't keep a schematic the DB no longer designates.
             scene_environment.0 = None;
+            current_schematic.0 = Default::default();
             if let Some(previous) = pending.loaded.take() {
                 despawn_headless_scene(&mut commands, &previous);
                 schematic_skybox.0 = None;
@@ -483,6 +483,7 @@ fn load_headless_scene(
     }
     let connection_addr = connection_addr.as_ref().map(|addr| addr.endpoint());
     schematic_skybox.0 = Some(schematic.skybox.as_ref().map(|skybox| skybox.name.clone()));
+    current_schematic.0 = schematic.clone();
     let fallback_frame = schematic.frame;
     coordinate.0 = schematic.frame;
     scene_environment.0 = schematic.environment.clone().map(|mut environment| {
@@ -1142,6 +1143,7 @@ fn render_server_runner(mut app: App) -> AppExit {
     let mut encoders = HashMap::new();
     let mut rendered_frames = 0u64;
     let mut render_time = Duration::ZERO;
+    let mut terrain_warmup_ts = None;
 
     loop {
         if let Some(exit) = app.should_exit() {
@@ -1211,6 +1213,28 @@ fn render_server_runner(mut app: App) -> AppExit {
             })
             .map(|schedule| schedule.name.clone())
             .collect();
+
+        let mut render_ts = render_ts;
+        match crate::plugins::cesium::capture_ready(app.world()) {
+            Ok(true) => {
+                if let Some(warmed_ts) = terrain_warmup_ts.take() {
+                    render_ts = warmed_ts;
+                }
+            }
+            Ok(false) => {
+                // Warm one camera pose before following the moving simulation.
+                // Otherwise each update requests new terrain before the initial
+                // selection has finished downloading.
+                let warmup_ts = *terrain_warmup_ts.get_or_insert(render_ts);
+                render_without_emit(&mut app, warmup_ts, &due_names);
+                std::thread::sleep(Duration::from_millis(5));
+                continue;
+            }
+            Err(message) => {
+                tracing::error!("{message}");
+                return AppExit::error();
+            }
+        }
 
         match consume_skybox_emission_gate(&mut app) {
             SkyboxEmissionGate::Ready => {}

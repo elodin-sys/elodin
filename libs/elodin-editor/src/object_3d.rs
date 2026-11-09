@@ -2082,7 +2082,6 @@ pub fn create_object_3d_entity(
             Visibility::default(),
             InheritedVisibility::default(),
             ViewVisibility::default(),
-            #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
             impeller_wkt::WorldPos::default(),
             Name::new(format!("object_3d {}", data.mesh)),

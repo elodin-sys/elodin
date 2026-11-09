@@ -6,6 +6,7 @@ mod editor;
 #[cfg(not(target_os = "windows"))]
 mod monte_carlo;
 mod schematic;
+mod terrain;
 #[cfg(not(target_os = "windows"))]
 mod ui;
 
@@ -72,6 +73,9 @@ enum Commands {
     Ui(ui::Args),
     /// Convert and inspect schematic source
     Schematic(schematic::Args),
+    /// Prepare a fixed terrain height grid (used by the Python SDK).
+    #[command(hide = true)]
+    TerrainHeights(terrain::Args),
 }
 
 impl Cli {
@@ -107,7 +111,7 @@ impl Cli {
         let filter = EnvFilter::try_from_default_env()
             .or_else(|_| {
                 EnvFilter::try_new(
-                    "s10=info,elodin=info,elodin_db=info,impeller=info,impeller::bevy=error,error",
+                    "s10=info,elodin=info,elodin_db=info,impeller=info,impeller::bevy=error,bevy_cesium=warn,error",
                 )
             })
             .unwrap_or_else(|_| EnvFilter::new("info"));
@@ -153,6 +157,7 @@ impl Cli {
             #[cfg(not(target_os = "windows"))]
             Some(Commands::Ui(args)) => self.clone().ui(args.clone()),
             Some(Commands::Schematic(args)) => self.clone().schematic(args.clone()),
+            Some(Commands::TerrainHeights(args)) => terrain::run(args.clone()),
             None => self.clone().editor(editor::Args::default(), rt),
         }
     }

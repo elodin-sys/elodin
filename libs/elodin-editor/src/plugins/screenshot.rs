@@ -36,7 +36,12 @@ pub struct EnvScreenshotPlugin;
 impl Plugin for EnvScreenshotPlugin {
     fn build(&self, app: &mut App) {
         if std::env::var("ELODIN_SCREENSHOT").is_ok() {
-            app.add_systems(Update, (stage_screenshot, capture_screenshot).chain());
+            app.add_systems(
+                Update,
+                (stage_screenshot, capture_screenshot)
+                    .chain()
+                    .after(bevy_cesium::CesiumSet::Publish),
+            );
         }
     }
 }
@@ -117,11 +122,15 @@ fn select_tab(tile_state: &mut TileState, name: &str) -> bool {
     true
 }
 
+#[allow(clippy::too_many_arguments)]
 fn capture_screenshot(
     mut commands: Commands,
     time: Res<Time>,
     mut state: Local<ScreenshotState>,
     mut exit: MessageWriter<AppExit>,
+    terrain_capture: Option<Res<super::cesium::TerrainCapture>>,
+    terrain_startup: Option<Res<super::cesium::TerrainStartup>>,
+    terrain_status: Option<Res<bevy_cesium::CesiumStatus>>,
     windows: Query<&WindowState, With<PrimaryWindow>>,
 ) {
     let Ok(out) = std::env::var("ELODIN_SCREENSHOT") else {
@@ -137,6 +146,20 @@ fn capture_screenshot(
                 .unwrap_or(8.0);
             if time.elapsed_secs() < delay {
                 return;
+            }
+            match super::cesium::capture_readiness(
+                terrain_startup.as_deref(),
+                terrain_capture.as_deref(),
+                terrain_status.as_deref(),
+            ) {
+                Ok(true) => {}
+                Ok(false) => return,
+                Err(message) => {
+                    error!("{message}");
+                    *state = ScreenshotState::Done;
+                    exit.write(AppExit::error());
+                    return;
+                }
             }
             if let Ok(tab) = std::env::var("ELODIN_SCREENSHOT_TAB")
                 && !windows

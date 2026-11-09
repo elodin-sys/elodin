@@ -148,13 +148,10 @@ pub(crate) fn plugin(app: &mut App) {
         .add_systems(Startup, setup_primary_window_state);
     // Must run after the BigSpace root exists; otherwise grids stay parentless
     // and shimmer from float-origin precision loss.
-    #[cfg(feature = "big_space")]
     app.add_systems(
         Startup,
         spawn_viewport_grids.after(crate::spatial::setup_floating_origin),
     );
-    #[cfg(not(feature = "big_space"))]
-    app.add_systems(Startup, spawn_viewport_grids);
 }
 
 fn spawn_viewport_grids(
@@ -162,7 +159,7 @@ fn spawn_viewport_grids(
     // Optional so headless/test apps without the spatial plugin don't panic;
     // grids simply stay parentless there. In the editor the root always exists
     // because this runs after `setup_floating_origin`.
-    #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
+    root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
 ) {
     for (frame, layer) in GRID_RENDER_LAYERS {
         let mut entity = commands.spawn((
@@ -170,7 +167,6 @@ fn spawn_viewport_grids(
             viewport_grid_settings(frame, 10.0, DEFAULT_VIEWPORT_FAR),
             Visibility::Visible,
             RenderLayers::layer(layer),
-            #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
             Name::new(format!("infinite grid {frame:?}")),
             bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
@@ -179,7 +175,6 @@ fn spawn_viewport_grids(
                 bevy::math::DQuat::from_rotation_x(std::f64::consts::FRAC_PI_2),
             ),
         ));
-        #[cfg(feature = "big_space")]
         crate::spatial::parent_under_big_space(&mut entity, root.as_deref());
     }
 }
@@ -1733,7 +1728,9 @@ impl ViewportPane {
         viewport: &Viewport,
         name: PaneName,
     ) -> Self {
-        let mut main_camera_layers = RenderLayers::default().with(GIZMO_RENDER_LAYER);
+        let mut main_camera_layers = RenderLayers::default()
+            .with(GIZMO_RENDER_LAYER)
+            .with(crate::plugins::render_layer_alloc::SCENE_LINE_RENDER_LAYER);
         if viewport.effects {
             main_camera_layers = main_camera_layers.with(THRUSTER_PARTICLES_RENDER_LAYER);
         }
@@ -1761,7 +1758,6 @@ impl ViewportPane {
         let mut parent_cmd = commands.spawn((
             GlobalTransform::default(),
             transform,
-            #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
             impeller_wkt::WorldPos::default(),
             Name::new("viewport"),
@@ -1889,7 +1885,6 @@ impl ViewportPane {
             },
             main_camera_layers,
             MainCamera,
-            #[cfg(feature = "big_space")]
             crate::spatial::LowPrecisionRoot,
             editor_cam,
             GridHandle { layer: grid_layer },
