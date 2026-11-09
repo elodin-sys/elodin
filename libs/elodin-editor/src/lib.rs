@@ -670,6 +670,12 @@ impl Plugin for EditorPlugin {
         app.add_plugins(plugins::scene_environment::SceneEnvironmentPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::cesium::CesiumPlugin);
+        #[cfg(target_family = "wasm")]
+        app.add_systems(
+            Update,
+            plugins::simulation_startup::release_simulation
+                .run_if(resource_exists::<Messages<ui::schematic::DocumentLoaded>>),
+        );
         // Cinematic Earth follows the native Hanabi plugin registration.
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::cinematic_earth::earth_night_material::EarthNightMaterialPlugin);

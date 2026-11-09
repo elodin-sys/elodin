@@ -1,4 +1,5 @@
 //! Editor adapter for the independently maintained bevy-cesium plugin.
+use super::simulation_startup::release_simulation;
 use crate::{
     MainCamera,
     sensor_camera::{SensorCamera, SensorCameraConfig, SensorCameraConfigs},
@@ -134,7 +135,7 @@ impl TerrainStartup {
         }
     }
 
-    fn result(&self) -> Result<bool, &'static str> {
+    pub(super) fn result(&self) -> Result<bool, &'static str> {
         self.error.map_or(Ok(self.ready), Err)
     }
 }
@@ -736,36 +737,6 @@ fn update_startup(
             "Initial terrain ready"
         );
     }
-}
-
-fn release_simulation(
-    startup: Option<Res<TerrainStartup>>,
-    config: Res<impeller_wkt::DbConfig>,
-    packet_tx: Res<impeller_bevy::PacketTx>,
-    mut loaded: MessageReader<crate::ui::schematic::DocumentLoaded>,
-    mut document_loaded: Local<bool>,
-) {
-    *document_loaded |= loaded.read().next().is_some();
-    if !config
-        .metadata
-        .contains_key(impeller_wkt::EDITOR_STARTUP_GATE_METADATA_KEY)
-    {
-        return;
-    }
-    if config.schematic_active().is_some() && !*document_loaded {
-        return;
-    }
-    if startup.is_some_and(|startup| !startup.ready && startup.error.is_none()) {
-        return;
-    }
-    packet_tx.send_msg(impeller_wkt::SetDbConfig {
-        recording: Some(true),
-        metadata: [(
-            impeller_wkt::EDITOR_STARTUP_GATE_METADATA_KEY.to_string(),
-            String::new(),
-        )]
-        .into(),
-    });
 }
 
 fn show_startup(startup: Res<TerrainStartup>, mut contexts: Query<&mut bevy_egui::EguiContext>) {
