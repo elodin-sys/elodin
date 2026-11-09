@@ -72,6 +72,14 @@ version = "0.21.1-alpha.0"
 edition = "2024"
 repository = "https://github.com/elodin-sys/elodin"
 
+[profile.wasm-dev]
+inherits = "release"
+opt-level = 2
+lto = false
+codegen-units = 16
+incremental = true
+strip = "none"
+
 [profile.wasm-release]
 inherits = "release"
 opt-level = "z"

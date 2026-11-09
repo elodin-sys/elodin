@@ -1,8 +1,9 @@
 [build]
 target = "index.html"
 dist = "dist"
-# Debug wasm is ~500MB and never finishes compiling in the browser.
-cargo_profile = "wasm-release"
+# Local iteration. `just web-release` overrides this with wasm-release.
+# The dev profile is ~500MB and never finishes compiling in the browser.
+cargo_profile = "wasm-dev"
 
 [watch]
 watch = [

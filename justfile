@@ -180,7 +180,11 @@ install target="all":
       exit 1;;
   esac
 
-# Serve the wasm editor locally (Trunk). Requires `nix develop`.
+# Serve the wasm editor locally (Trunk, wasm-dev). Requires `nix develop`.
 # Some agent shells set NO_COLOR=1; Trunk 0.21 treats that as --no-color=1 and exits.
 web:
-  TRUNK_COLOR=never trunk serve --config apps/elodin-web/Trunk.toml
+  TRUNK_COLOR=never trunk serve --config apps/elodin-web/Trunk.toml --cargo-profile wasm-dev
+
+# Size-optimized wasm bundle in apps/elodin-web/dist/. Requires `nix develop`.
+web-release:
+  TRUNK_COLOR=never trunk build --config apps/elodin-web/Trunk.toml --cargo-profile wasm-release
