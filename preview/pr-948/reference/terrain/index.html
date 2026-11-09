@@ -434,6 +434,15 @@
                 <li>
                     <a href="https://docs.elodin.systems/preview/pr-948/reference/terrain/#scenery">Scenery</a>
                     
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-948/reference/terrain/#startup-and-outages">Startup and outages</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
                 </li>
                 
                 <li>
@@ -493,6 +502,15 @@ from the same terrain when your simulation needs them.</p>
 <p>The editor streams aerial terrain and Photo 3D through Bevy-Cesium.
 Local models are loaded by the schematic, as in
 <a rel="external" href="https://github.com/elodin-sys/elodin/blob/main/examples/rc-jet/terrain_schematic.py">RC-jet's Mojave terrain</a>.</p>
+<h3 id="startup-and-outages">Startup and outages</h3>
+<p>When <code>elodin editor</code> launches a simulation with streamed terrain, the simulation
+stays at t=0 until the initial terrain is ready. Loading has no interactive
+deadline. If Cesium reports an error, the editor disables streamed terrain,
+restores the schematic's fallback scenery, and starts the simulation. Reload the
+schematic to retry.</p>
+<p>Live connections are never paused. Automated fixed-view captures remain strict:
+<code>ELODIN_CESIUM_CAPTURE_TIMEOUT</code> bounds terrain loading, and an error or timeout
+exits without writing a terrain screenshot.</p>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> elodin</span><span style="color: light-dark(#859900, #859900);"> as</span><span> el</span></span>
 <span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> elodin</span><span>.</span><span>ui</span><span style="color: light-dark(#859900, #859900);"> as</span><span> ui</span></span>
 <span class="giallo-l"></span>
