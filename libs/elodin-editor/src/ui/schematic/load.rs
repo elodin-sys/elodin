@@ -669,6 +669,12 @@ impl LoadSchematicParams<'_, '_> {
 
         let mut loaded_windows = window_assets.unwrap_or(&[]).iter();
         for descriptor in descriptors.windows {
+            if cfg!(target_family = "wasm") {
+                warn!(
+                    "Skipping additional schematic window: multiple windows are unavailable in WASM"
+                );
+                continue;
+            }
             if let Some(inline) = descriptor.inline_content.clone() {
                 self.spawn_window(
                     &inline,
