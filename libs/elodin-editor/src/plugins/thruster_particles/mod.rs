@@ -265,10 +265,8 @@ struct KdlThrusterEval {
 
 pub struct ThrusterParticlesPlugin;
 
-
 impl Plugin for ThrusterParticlesPlugin {
     fn build(&self, app: &mut App) {
-
         #[cfg(target_arch = "wasm32")]
         if !crate::wasm_webgpu_adapter_available() {
             return;

@@ -21,6 +21,10 @@ are served from a different address or path prefix. This changes HTTP asset
 requests, including nested effect files and prepared terrain; it does not change
 the database WebSocket address. The asset server must allow the editor's origin.
 
+Thruster particles use WebGPU when a compatible adapter is available. The WebGL
+fallback displays the scene without particles. Cinematic Earth and its atmosphere
+integration remain separate from terrain streaming and are not enabled here.
+
 ## Run an example
 
 The browser editor does not launch a simulation. Start the example so its
