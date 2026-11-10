@@ -753,7 +753,7 @@ impl LoadSchematicParams<'_, '_> {
             }
         }
 
-        self.current_schematic.0.terrain = schematic.terrain;
+        self.current_schematic.0.terrain = schematic.terrain.clone();
         self.current_schematic.0.skybox = schematic.skybox.clone();
         self.current_schematic.0.environment = schematic.environment.clone();
         if let Some(scene_environment) = self.scene_environment.as_mut() {

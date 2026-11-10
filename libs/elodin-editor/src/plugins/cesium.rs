@@ -82,7 +82,7 @@ fn parse_capture_views(bytes: &[u8]) -> Result<Vec<CesiumView>, &'static str> {
 /// Fixed-path captures wait for terrain rather than silently emitting coarse frames.
 #[derive(Resource)]
 pub(crate) struct TerrainCapture {
-    started: std::time::Instant,
+    started: web_time::Instant,
     timeout: std::time::Duration,
 }
 impl TerrainCapture {
@@ -106,7 +106,7 @@ impl TerrainCapture {
 /// normal flight can refine terrain without repeatedly stopping sensor output.
 #[derive(Resource)]
 pub(crate) struct TerrainStartup {
-    started: std::time::Instant,
+    started: web_time::Instant,
     ready: bool,
     error: Option<&'static str>,
 }
@@ -114,7 +114,7 @@ pub(crate) struct TerrainStartup {
 impl TerrainStartup {
     pub(crate) fn waiting() -> Self {
         Self {
-            started: std::time::Instant::now(),
+            started: web_time::Instant::now(),
             ready: false,
             error: None,
         }
@@ -186,6 +186,67 @@ mod coordinate_tests {
     use bevy_geo_frames::{GeoOrigin, Present};
 
     #[test]
+    fn terrain_asset_waits_for_the_db_and_tracks_connection_changes() {
+        let mut app = App::new();
+        app.insert_resource(crate::ui::schematic::CurrentSchematic(
+            impeller_wkt::Schematic {
+                terrain: Some(impeller_wkt::TerrainConfig::Asset {
+                    path: "db:terrain/Falcon9/tileset.json".into(),
+                }),
+                ..default()
+            },
+        ))
+        .add_systems(Update, configure_terrain);
+        app.update();
+        assert!(!playback_ready(app.world()));
+        assert!(app.world().resource::<CesiumSourceUpdate>().0.is_none());
+
+        for (address, expected) in [
+            (
+                "assets.example:2240",
+                "http://assets.example:2241/terrain/Falcon9/tileset.json",
+            ),
+            (
+                "127.0.0.1:2260",
+                "http://127.0.0.1:2261/terrain/Falcon9/tileset.json",
+            ),
+        ] {
+            app.insert_resource(impeller_bevy::ConnectionAddr::from_endpoint(
+                address.parse().unwrap(),
+            ));
+            app.update();
+            let Some(CesiumSource::Url(url)) = &app.world().resource::<CesiumSourceUpdate>().0
+            else {
+                panic!("terrain asset was not resolved through the DB endpoint");
+            };
+            assert_eq!(url, expected);
+        }
+
+        // The assets host and prefix may change independently of the DB.
+        for base in [
+            "https://cdn.example/recordings/f9/assets",
+            "https://cdn.example/recordings/other/assets/",
+        ] {
+            let endpoint = impeller_bevy::DbEndpoint::parse("db.example:2240")
+                .unwrap()
+                .with_assets(base.parse().unwrap());
+            app.insert_resource(impeller_bevy::ConnectionAddr::from_endpoint(endpoint));
+            app.update();
+            let Some(CesiumSource::Url(url)) = &app.world().resource::<CesiumSourceUpdate>().0
+            else {
+                panic!("terrain asset did not use the assets override");
+            };
+            assert_eq!(
+                url,
+                &format!(
+                    "{}/terrain/Falcon9/tileset.json",
+                    base.trim_end_matches('/')
+                )
+            );
+        }
+    }
+
+    #[test]
     fn aerial_and_photo3d_select_their_matching_sources() {
         assert!(matches!(
             terrain_source(1),
@@ -251,7 +312,7 @@ mod coordinate_tests {
     #[test]
     fn removing_terrain_from_the_schematic_disables_streaming() {
         let mut app = App::new();
-        let terrain = Some(impeller_wkt::TerrainConfig { asset_id: 2275207 });
+        let terrain = Some(impeller_wkt::TerrainConfig::Ion { asset_id: 2275207 });
         app.insert_resource(crate::ui::schematic::CurrentSchematic(
             impeller_wkt::Schematic {
                 terrain,
@@ -278,14 +339,14 @@ mod coordinate_tests {
 
     #[test]
     fn failed_terrain_retries_only_when_requested() {
-        let terrain = impeller_wkt::TerrainConfig { asset_id: 2275207 };
+        let terrain = impeller_wkt::TerrainConfig::Ion { asset_id: 2275207 };
         let mut app = App::new();
         app.add_message::<crate::ui::schematic::DocumentLoaded>()
             .add_message::<crate::ui::schematic::DocumentReloaded>()
             .init_resource::<RetryTerrain>()
             .insert_resource(crate::ui::schematic::CurrentSchematic(
                 impeller_wkt::Schematic {
-                    terrain: Some(terrain),
+                    terrain: Some(terrain.clone()),
                     ..default()
                 },
             ))
@@ -323,7 +384,7 @@ mod coordinate_tests {
         let mut world = World::new();
         assert_eq!(capture_ready(&world), Ok(true));
         world.insert_resource(TerrainStartup {
-            started: std::time::Instant::now(),
+            started: web_time::Instant::now(),
             ready: false,
             error: None,
         });
@@ -335,7 +396,7 @@ mod coordinate_tests {
         world.resource_mut::<TerrainStartup>().ready = false;
         world.insert_resource(CesiumStatus::default());
         world.insert_resource(TerrainCapture {
-            started: std::time::Instant::now(),
+            started: web_time::Instant::now(),
             timeout: std::time::Duration::ZERO,
         });
         assert_eq!(
@@ -349,7 +410,7 @@ mod coordinate_tests {
         let mut world = World::new();
         assert!(playback_ready(&world));
         world.insert_resource(TerrainStartup {
-            started: std::time::Instant::now(),
+            started: web_time::Instant::now(),
             ready: false,
             error: None,
         });
@@ -363,7 +424,7 @@ mod coordinate_tests {
     #[test]
     fn initial_terrain_wait_has_no_timeout_and_does_not_restart_during_flight() {
         let mut startup = TerrainStartup {
-            started: std::time::Instant::now() - std::time::Duration::from_secs(3600),
+            started: web_time::Instant::now() - std::time::Duration::from_secs(3600),
             ready: false,
             error: None,
         };
@@ -450,7 +511,7 @@ mod coordinate_tests {
         .insert_resource(FloatingOriginSettings::new(2000.0, 100.0))
         .insert_resource(SensorCameraConfigs(configs))
         .insert_resource(TerrainStartup {
-            started: std::time::Instant::now(),
+            started: web_time::Instant::now(),
             ready: false,
             error: None,
         })
@@ -486,7 +547,7 @@ mod coordinate_tests {
         let invalid = String::from_utf8_lossy(valid).replace("\"width\":1280", "\"width\":0");
         assert!(parse_capture_views(invalid.as_bytes()).is_err());
         let capture = TerrainCapture {
-            started: std::time::Instant::now(),
+            started: web_time::Instant::now(),
             timeout: std::time::Duration::ZERO,
         };
         assert!(capture.ready(None).is_err());
@@ -589,7 +650,7 @@ impl Plugin for CesiumPlugin {
             app.insert_resource(CesiumDetailViews(views))
                 .insert_resource(CesiumSelectionMode::Fixed)
                 .insert_resource(TerrainCapture {
-                    started: std::time::Instant::now(),
+                    started: web_time::Instant::now(),
                     timeout: std::time::Duration::from_secs_f64(env_positive(
                         "ELODIN_CESIUM_CAPTURE_TIMEOUT",
                         120.0,
@@ -601,7 +662,11 @@ impl Plugin for CesiumPlugin {
             StreamingPlugin::deferred()
                 .with_external_coordinates()
                 .with_initial_load_wait()
-                .with_lod_retention_margin(500.0)
+                .with_lod_retention_margin(if cfg!(target_family = "wasm") {
+                    0.0
+                } else {
+                    500.0
+                })
                 .with_maximum_screen_error(24.0),
         )
         .add_systems(
@@ -662,7 +727,12 @@ fn terrain_source(asset_id: i64) -> CesiumSource {
 
 fn configure_terrain(
     world: &mut World,
-    mut previous: Local<Option<Option<impeller_wkt::TerrainConfig>>>,
+    mut previous: Local<
+        Option<(
+            Option<impeller_wkt::TerrainConfig>,
+            Option<impeller_bevy::DbEndpoint>,
+        )>,
+    >,
 ) {
     let retry_requested = world
         .get_resource_mut::<RetryTerrain>()
@@ -670,23 +740,42 @@ fn configure_terrain(
     let Some(schematic) = world.get_resource::<crate::ui::schematic::CurrentSchematic>() else {
         return;
     };
-    let terrain = schematic.terrain;
+    let endpoint = world
+        .get_resource::<impeller_bevy::ConnectionAddr>()
+        .map(|connection| connection.endpoint());
     let retry_failed = retry_requested
-        && terrain.is_some()
+        && schematic.terrain.is_some()
         && world
             .get_resource::<TerrainStartup>()
             .is_some_and(|startup| startup.error.is_some());
-    if previous.as_ref() == Some(&terrain) && !retry_failed {
+    if previous.as_ref().is_some_and(|(old, old_endpoint)| {
+        old == &schematic.terrain && old_endpoint.as_ref() == endpoint
+    }) && !retry_failed
+    {
         return;
     }
-    *previous = Some(terrain);
+    let terrain = schematic.terrain.clone();
+    let endpoint = endpoint.cloned();
+    *previous = Some((terrain.clone(), endpoint.clone()));
     let Some(terrain) = terrain else {
         world.insert_resource(CesiumSourceUpdate(None));
         world.remove_resource::<TerrainStartup>();
         return;
     };
-    let startup = TerrainStartup::waiting();
-    world.insert_resource(CesiumSourceUpdate(Some(terrain_source(terrain.asset_id))));
+    let mut startup = TerrainStartup::waiting();
+    let source = if !terrain.is_valid() {
+        startup.error = Some("Invalid terrain source configuration");
+        None
+    } else {
+        match terrain {
+            impeller_wkt::TerrainConfig::Ion { asset_id } => Some(terrain_source(asset_id)),
+            impeller_wkt::TerrainConfig::Asset { path } => endpoint.as_ref().map(|endpoint| {
+                let key = path.strip_prefix("db:").unwrap_or(&path);
+                CesiumSource::Url(endpoint.assets_url(key).to_string())
+            }),
+        }
+    };
+    world.insert_resource(CesiumSourceUpdate(source));
     world.insert_resource(startup);
 }
 

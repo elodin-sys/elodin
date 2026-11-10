@@ -161,13 +161,27 @@ fn schematic(
         inner.skybox = Some(impeller_wkt::SkyboxConfig { name });
     }
     if let Some(terrain) = terrain {
-        let asset_id: i64 = terrain.getattr("asset_id")?.extract()?;
-        if asset_id <= 0 {
+        let asset_id: Option<i64> = terrain.getattr("asset_id")?.extract()?;
+        let path: Option<String> = if terrain.hasattr("path")? {
+            terrain.getattr("path")?.extract()?
+        } else {
+            None
+        };
+        let config = match (asset_id, path) {
+            (Some(asset_id), None) => impeller_wkt::TerrainConfig::Ion { asset_id },
+            (None, Some(path)) => impeller_wkt::TerrainConfig::Asset { path },
+            _ => {
+                return Err(pyo3::exceptions::PyValueError::new_err(
+                    "terrain requires exactly one asset_id or asset path",
+                ));
+            }
+        };
+        if !config.is_valid() {
             return Err(pyo3::exceptions::PyValueError::new_err(
-                "terrain asset_id must be positive",
+                "terrain requires a positive asset_id or a relative asset path",
             ));
         }
-        inner.terrain = Some(impeller_wkt::TerrainConfig { asset_id });
+        inner.terrain = Some(config);
     }
     if let Some(environment) = environment {
         inner.environment = Some(builders::extract_environment(&environment)?);

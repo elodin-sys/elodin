@@ -19,10 +19,37 @@ from the same terrain when your simulation needs them.
 | Legacy | `None` | The existing GLB or world mesh defined in your schematic. |
 | Aerial | `el.Terrain.aerial()` | Streamed terrain with aerial images. |
 | Photo 3D | `el.Terrain()` | Streamed photogrammetry, including buildings where covered. |
+| Prepared assets | `el.Terrain.from_asset("terrain/Falcon9/tileset.json")` | Scenery served with the DB, in native and WASM editors. |
 
 The editor streams aerial terrain and Photo 3D through Bevy-Cesium.
 Local models are loaded by the schematic, as in
 [RC-jet's Mojave terrain](https://github.com/elodin-sys/elodin/blob/main/examples/rc-jet/terrain_schematic.py).
+
+### Scenery stored with the DB
+
+Place the complete prepared tileset under your simulation's `assets/` directory.
+Use relative links inside its JSON/glTF files so child tiles, buffers and textures
+move with the folder. Select its entry point with `Terrain.from_asset(path)`;
+the recorded schematic stores a `db:` key and the editor resolves it against the
+connected DB's asset server. No machine-local path or ion credential is stored.
+
+```python
+terrain = el.Terrain.from_asset("terrain/Falcon9/tileset.json")
+```
+
+This loads existing data; it does not download or prepare a geographic region.
+Google Photorealistic 3D Tiles, used by `Terrain()` by default, are streamed
+online by default. This integration records the dataset selection in the DB schematic,
+not an archive of the streamed tiles.
+The DB ingests its source asset tree on first creation. Use a fresh DB when adding
+a prepared folder, or explicitly upload the new assets to an existing DB.
+See [DB Asset Server](/reference/db-asset-server/) for storage and replication.
+
+The browser supports explicit 3D Tiles and bounded EPSG:4326/TMS quantized-mesh
+layers with static availability. Photo 3D ion sources also work; `Terrain.aerial()`
+with ion imagery is currently native-only. Browser detail retention is disabled.
+Heightmaps remain independent: load a prepared grid with `TerrainHeightmap.load()`;
+`Terrain.from_asset(...).heightmap()` does not prepare one from scenery.
 
 ### Startup and outages
 

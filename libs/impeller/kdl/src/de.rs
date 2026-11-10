@@ -210,17 +210,24 @@ fn validate_cinematic_earth(schematic: &Schematic, src: &str) -> Result<(), KdlS
 }
 
 fn parse_terrain(node: &KdlNode, src: &str) -> Result<TerrainConfig, KdlSchematicError> {
-    let asset_id = node
-        .get("asset_id")
-        .and_then(|v| v.as_integer())
-        .and_then(|id| i64::try_from(id).ok())
-        .filter(|id| *id > 0);
-    asset_id
-        .map(|asset_id| TerrainConfig { asset_id })
+    let terrain = match (node.get("asset_id"), node.get("path")) {
+        (Some(id), None) => id
+            .as_integer()
+            .and_then(|id| i64::try_from(id).ok())
+            .map(|asset_id| TerrainConfig::Ion { asset_id }),
+        (None, Some(path)) => path.as_string().map(|path| TerrainConfig::Asset {
+            path: path.to_string(),
+        }),
+        _ => None,
+    };
+    terrain
+        .filter(TerrainConfig::is_valid)
         .ok_or_else(|| KdlSchematicError::InvalidValue {
-            property: "asset_id".to_string(),
+            property: "asset_id/path".to_string(),
             node: "terrain".to_string(),
-            expected: "a positive integer".to_string(),
+            expected:
+                "exactly one positive asset_id or relative asset path (optionally prefixed db:)"
+                    .to_string(),
             src: src.to_string(),
             span: node.span(),
         })
@@ -5243,9 +5250,47 @@ mod terrain_tests {
     use super::*;
 
     #[test]
+    fn terrain_asset_roundtrips_and_rewrites_for_the_db() {
+        let mut scene = parse_schematic("terrain path=\"terrain/Falcon9/tileset.json\"").unwrap();
+        assert_eq!(
+            crate::collect_local_asset_paths(&scene),
+            ["terrain/Falcon9/tileset.json"]
+        );
+        crate::rewrite_asset_paths(&mut scene, |path| Some(format!("db:{path}")));
+        assert!(crate::collect_local_asset_paths(&scene).is_empty());
+        assert_eq!(
+            crate::collect_db_asset_names(&scene),
+            ["terrain/Falcon9/tileset.json"]
+        );
+        let kdl = crate::serialize_schematic(&scene);
+        assert_eq!(parse_schematic(&kdl).unwrap(), scene);
+        let python = crate::schematic_to_python(&kdl, None).unwrap();
+        assert!(python.contains("ui.terrain.from_asset("));
+        assert!(python.contains("db:terrain/Falcon9/tileset.json"));
+    }
+
+    #[test]
+    fn terrain_rejects_ambiguous_or_nonportable_paths() {
+        for invalid in [
+            "terrain asset_id=1 path=\"terrain/a.json\"",
+            "terrain path=\"\"",
+            "terrain path=\"/tmp/a.json\"",
+            "terrain path=\"../a.json\"",
+            "terrain path=\"db:terrain/../a.json\"",
+            "terrain path=\"https://example.com/a.json?token=secret\"",
+            "terrain path=\"db:terrain/%2e%2e/a.json\"",
+        ] {
+            assert!(parse_schematic(invalid).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
     fn terrain_and_origin_are_independent_and_roundtrip() {
         let terrain = parse_schematic("terrain asset_id=2275207").unwrap();
-        assert_eq!(terrain.terrain.unwrap().asset_id, 2275207);
+        assert_eq!(
+            terrain.terrain,
+            Some(TerrainConfig::Ion { asset_id: 2275207 })
+        );
         assert!(terrain.origin.is_none());
         assert_eq!(
             parse_schematic(&crate::ser::serialize_schematic(&terrain)).unwrap(),

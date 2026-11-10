@@ -33,6 +33,9 @@ Python](@/reference/migration/kdl-to-python.md).
 ### terrain
 
 - Optional top-level node selecting streamed scenery, for example `terrain asset_id=2275207`.
+- Use `terrain path="db:terrain/Falcon9/tileset.json"` for prepared scenery served
+  by the connected DB. Specify exactly one of `asset_id` and `path`; local paths
+  are relative to the asset root and must not contain `..`.
 - See [Terrain](/reference/terrain/) for the supported presets and Python schematic configuration.
 
 ### theme

@@ -116,11 +116,25 @@ pub struct Schematic {
     pub telemetry_mode: bool,
 }
 
-/// One ion dataset supplies both displayed scenery and prepared heights.
-/// Credentials are read at runtime; never serialized into a schematic.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TerrainConfig {
-    pub asset_id: i64,
+/// Streamed scenery from ion or a portable DB asset. Credentials are not stored.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum TerrainConfig {
+    Ion { asset_id: i64 },
+    Asset { path: String },
+}
+
+impl TerrainConfig {
+    pub fn is_valid(&self) -> bool {
+        match self {
+            Self::Ion { asset_id } => *asset_id > 0,
+            Self::Asset { path } => {
+                let key = path.strip_prefix("db:").unwrap_or(path);
+                !key.chars().any(|c| c.is_control() || ":\\?#%".contains(c))
+                    && key.split('/').all(|part| !matches!(part, "" | "." | ".."))
+            }
+        }
+    }
 }
 
 /// Contents of the top-level `environment` schematic node

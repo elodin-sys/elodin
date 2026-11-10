@@ -727,14 +727,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(GizmoPlugin);
         app.add_plugins(plugins::thruster_particles::ThrusterParticlesPlugin);
         app.add_plugins(plugins::scene_environment::SceneEnvironmentPlugin);
-        #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::cesium::CesiumPlugin);
-        #[cfg(target_family = "wasm")]
-        app.add_systems(
-            Update,
-            plugins::simulation_startup::release_simulation
-                .run_if(resource_exists::<Messages<ui::schematic::DocumentLoaded>>),
-        );
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::cinematic_earth::earth_night_material::EarthNightMaterialPlugin);
         #[cfg(not(target_family = "wasm"))]
@@ -774,14 +767,8 @@ impl Plugin for EditorPlugin {
                 PreUpdate,
                 (
                     clamp_current_time,
-                    #[cfg(not(target_family = "wasm"))]
                     advance_playback.run_if(plugins::cesium::playback_ready),
-                    #[cfg(target_family = "wasm")]
-                    advance_playback,
-                    #[cfg(not(target_family = "wasm"))]
                     follow_latest.run_if(plugins::cesium::playback_ready),
-                    #[cfg(target_family = "wasm")]
-                    follow_latest,
                     // Update selection after playback advances to keep line_3d and object_3d in sync.
                     set_selected_range,
                     impeller_bevy::apply_cached_data,

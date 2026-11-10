@@ -291,7 +291,10 @@ def test_terrain_rejects_invalid_dataset(asset_id):
         el.Terrain(asset_id=asset_id)
 
 
-@pytest.mark.parametrize("terrain", [el.Terrain(), el.Terrain.aerial()])
+@pytest.mark.parametrize(
+    "terrain",
+    [el.Terrain(), el.Terrain.aerial(), el.Terrain.from_asset("db:terrain/Falcon9/tileset.json")],
+)
 def test_terrain_schematic_survives_kdl_and_python_roundtrip(terrain):
     scene = el.ui.schematic(
         el.ui.viewport(name="Flight"),
@@ -305,3 +308,27 @@ def test_terrain_schematic_survives_kdl_and_python_roundtrip(terrain):
     namespace = {"__name__": "terrain_roundtrip"}
     exec(python, namespace)
     assert el.ui.from_kdl(namespace["build"]().emit_kdl()) == restored
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "",
+        "/tmp/a.json",
+        "../a.json",
+        "db:../a.json",
+        "https://example.com/a.json",
+        "terrain/a.json?token=x",
+    ],
+)
+def test_terrain_asset_rejects_nonportable_paths(path):
+    with pytest.raises(ValueError):
+        el.Terrain.from_asset(path)
+
+
+def test_terrain_asset_does_not_reuse_an_ion_heightmap():
+    scenery = el.Terrain.from_asset("terrain/Falcon9/tileset.json")
+    assert scenery.asset_id is None
+    with pytest.raises(ValueError, match="separate TerrainHeightmap"):
+        scenery.heightmap([6378137.0, 0, 0], (20, 20), 10)
+    assert el.TerrainHeightmap(grid()).asset_id == 1

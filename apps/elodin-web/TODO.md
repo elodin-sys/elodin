@@ -27,9 +27,10 @@ wired up. Unchecked items are compiled out, stubbed, or still native-only.
 - [x] Status bar (connection, schematic build error, FPS, TPS, plot-buffer usage, command palette)
 - [x] Saved built-in color scheme (preset and mode in `localStorage`)
 
+- [x] 3D Tiles streaming through the browser backend (online ion Photo 3D or prepared DB assets)
+
 ## Not finished
 
-- [ ] Cesium Native terrain streaming (native platforms only)
 - [ ] Skyboxes: cache, generation, schematic activation, and DB asset sync (`wasm_cut.rs` stubs)
 - [ ] Skybox status overlay
 - [ ] Sensor-camera GPU readback

@@ -723,6 +723,37 @@ mod tests {
     }
 
     #[test]
+    fn terrain_assets_keep_relative_children_when_the_db_moves() {
+        let dir = tempdir().unwrap();
+        let source = dir.path().join("source");
+        let tileset = br#"{"asset":{"version":"1.1"},"root":{"content":{"uri":"tiles/tile.glb"}}}"#;
+        write(&source.join("terrain/Falcon9/tileset.json"), tileset);
+        write(
+            &source.join("terrain/Falcon9/tiles/tile.glb"),
+            b"tile fixture",
+        );
+        write(
+            &source.join("schematics/main.kdl"),
+            b"terrain path=\"terrain/Falcon9/tileset.json\"",
+        );
+        let db = dir.path().join("db");
+        ingest_asset_dir(&db, &source).unwrap();
+        let moved = dir.path().join("moved-db");
+        std::fs::rename(&db, &moved).unwrap();
+        let assets = assets_dir(&moved);
+        let schematic = std::fs::read_to_string(assets.join("schematics/main.kdl")).unwrap();
+        assert!(schematic.contains("db:terrain/Falcon9/tileset.json"));
+        assert_eq!(
+            std::fs::read(assets.join("terrain/Falcon9/tileset.json")).unwrap(),
+            tileset
+        );
+        assert_eq!(
+            std::fs::read(assets.join("terrain/Falcon9/tiles/tile.glb")).unwrap(),
+            b"tile fixture"
+        );
+    }
+
+    #[test]
     fn ingest_copies_whole_tree_preserving_paths() {
         let dir = tempdir().unwrap();
         let src = dir.path().join("src_assets");

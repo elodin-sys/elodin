@@ -355,7 +355,24 @@ Run inside `nix develop`:
 elodin editor examples/falcon9/main.py
 ```
 
-The streamed modes use Bevy-Cesium and keep the existing atmosphere and
+Photo 3D is streamed online by default in both the native and WASM editors. The DB stores
+its dataset selection in the schematic, not the Google tiles; replaying the DB
+with Photo 3D requires an internet connection.
+
+To use prepared scenery stored with the DB, place the complete terrain folder
+under `examples/falcon9/assets/terrain/Falcon9/`, with relative child URLs, then run:
+
+```sh
+FALCON9_TERRAIN_ASSET=terrain/Falcon9/tileset.json \
+  elodin editor examples/falcon9/main.py
+```
+
+The native and WASM editors fetch that scenery from the DB asset server. This
+overrides scenery only; the simulation's ground heights still follow `TERRAIN_MODE`.
+Use a prepared dataset matching those heights. Preparing a geographic region is
+separate from loading its assets.
+
+In the native editor, the streamed modes keep the existing atmosphere and
 cinematic lighting. Legacy uses the original globe.
 See [Terrain](../../docs/public/content/reference/terrain.md)
 for schematic configuration and height queries without the editor.

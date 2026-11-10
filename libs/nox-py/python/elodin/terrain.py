@@ -2,38 +2,63 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
 import logging
 import math
 import os
-from pathlib import Path
 import subprocess
 import tempfile
 import time
+from dataclasses import dataclass
+from pathlib import Path
 from typing import NamedTuple
 
 import jax.numpy as jnp
-from jax import Array
 import numpy as np
+from jax import Array
 
 from .geodesy import WGS84_A_M, WGS84_E2, ecef_to_geodetic, enu_basis
 
 
 @dataclass(frozen=True)
 class Terrain:
-    """One dataset for schematic scenery and simulation height preparation.
+    """Schematic scenery from ion or a prepared asset in the simulation's DB.
 
     The default is Google Photorealistic 3D Tiles. Constructing this object
     performs no I/O and does not require an editor or a geographic origin.
     """
 
-    asset_id: int = 2275207
+    asset_id: int | None = 2275207
+    path: str | None = None
 
     def __post_init__(self):
+        if self.path is not None:
+            if self.asset_id is not None:
+                raise ValueError("terrain requires exactly one asset_id or asset path")
+            if not isinstance(self.path, str):
+                raise ValueError("terrain path must be a string")
+            key = self.path.removeprefix("db:")
+            if (
+                any(c in key for c in ":\\?#%")
+                or any(ord(c) < 32 or ord(c) == 127 for c in key)
+                or any(part in ("", ".", "..") for part in key.split("/"))
+            ):
+                raise ValueError(
+                    "terrain path must be a relative asset key, optionally prefixed db:"
+                )
+            return
         if type(self.asset_id) is not int or not 0 < self.asset_id <= 2**63 - 1:
             raise ValueError("asset_id must be a positive 64-bit integer")
+
+    @classmethod
+    def from_asset(cls, path: str | os.PathLike[str]) -> Terrain:
+        """Load a prepared tileset/layer from assets, keeping child paths relative.
+
+        The asset folder is stored and served with the DB. This selects scenery;
+        simulation heightmaps remain independent.
+        """
+        return cls(asset_id=None, path=os.fspath(path))
 
     @classmethod
     def aerial(cls) -> Terrain:
@@ -44,6 +69,10 @@ class Terrain:
         self, center_ecef, dimensions, spacing, *, cache_dir=None, offline=False, timeout=600
     ):
         """Prepare a cached height grid from this same dataset, without the editor."""
+        if self.path is not None:
+            raise ValueError(
+                "Asset scenery does not prepare heights; load a separate TerrainHeightmap"
+            )
         return terrain_heightmap(
             center_ecef,
             dimensions,

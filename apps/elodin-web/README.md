@@ -55,16 +55,20 @@ The editor keeps the connection it opened with the document until then.
 Big Space is required on both native and WASM targets. It provides the coordinate
 conversion used by the editor and is independent of terrain streaming.
 
-The current `bevy-cesium` integration uses Cesium Native through a C++ bridge.
-It is included only on native targets, along with its terrain-readiness playback
-condition. Selecting an example such as Falcon9 does not select Cargo dependencies:
-without this target boundary, even a browser editor that never requests terrain
-tries to build the native dependency.
+`bevy-cesium` selects its backend by target: Cesium Native and its C++ bridge on
+native platforms, a Rust/Fetch loader in the browser. Browser builds do not link
+the native SDK. Both backends share rendering and initial terrain readiness.
 
-WASM therefore runs without this terrain integration. Supporting Cesium terrain
-in the browser requires a browser-compatible implementation; removing the target
-boundary is not sufficient. Data backends and transport adapters are a separate
-concern and must not require Cesium merely to build or connect the editor.
+Use `el.Terrain.from_asset("terrain/Falcon9/tileset.json")` to load a prepared
+3D Tiles package from the DB asset server, including its relative child files.
+The server must be browser-accessible and allow CORS when served from another
+origin. Preparing the package and simulation ground heights are separate steps.
+Ion 3D Tiles are also supported; ion aerial terrain (`asset_id=1`) and native
+height queries are unavailable in the browser.
+
+For Falcon 9's default Photo 3D mode, the DB schematic selects the ion dataset
+and the browser streams its tiles online. Google tiles are not archived in the
+DB. Models and other recorded assets still come from the DB asset server.
 
 See [TODO.md](TODO.md) for other browser limitations. CI checks compilation of
 `elodin-web` for `wasm32-unknown-unknown`; rendering and backend connectivity also

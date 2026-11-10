@@ -199,8 +199,13 @@ fn schematic_expr(schematic: &Schematic) -> PyExpr {
         )
         .kw_opt(
             "terrain",
-            schematic.terrain.map(|terrain| {
-                PyExpr::call("terrain").kw("asset_id", PyExpr::Atom(terrain.asset_id.to_string()))
+            schematic.terrain.as_ref().map(|terrain| match terrain {
+                TerrainConfig::Ion { asset_id } => {
+                    PyExpr::call("terrain").kw("asset_id", PyExpr::Atom(asset_id.to_string()))
+                }
+                TerrainConfig::Asset { path } => {
+                    PyExpr::call("terrain.from_asset").arg(py_str(path))
+                }
             }),
         )
         .kw_opt("theme", schematic.theme.as_ref().map(theme_expr))
