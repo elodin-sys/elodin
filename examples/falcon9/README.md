@@ -372,6 +372,11 @@ overrides scenery only; the simulation's ground heights still follow `TERRAIN_MO
 Use a prepared dataset matching those heights. Preparing a geographic region is
 separate from loading its assets.
 
+For an offline prototype, `scripts/export_photo3d_cache.py` can export the reachable
+Photo 3D tiles already cached by the native editor into this folder. It preserves
+attribution and reports missing branches; it does not guarantee full flight
+coverage. See [cached snapshots](../../docs/public/content/reference/terrain.md#exporting-a-cached-photo-3d-snapshot).
+
 In the native editor, the streamed modes keep the existing atmosphere and
 cinematic lighting. Legacy uses the original globe.
 See [Terrain](../../docs/public/content/reference/terrain.md)
