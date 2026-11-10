@@ -16,6 +16,11 @@ dev page. An HTTPS deployment needs a browser-accessible secure WebSocket
 endpoint. A successful browser build does not by itself validate a Cloud data
 source or its authentication.
 
+Use `&assets=https://assets.example/recordings/f9/assets/` when the DB's assets
+are served from a different address or path prefix. This changes HTTP asset
+requests, including nested effect files and prepared terrain; it does not change
+the database WebSocket address. The asset server must allow the editor's origin.
+
 ## Run an example
 
 The browser editor does not launch a simulation. Start the example so its
