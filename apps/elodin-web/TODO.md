@@ -26,6 +26,7 @@ wired up. Unchecked items are compiled out, stubbed, or still native-only.
 ## Not finished
 
 
+- [ ] Cesium Native terrain streaming (native platforms only)
 - [ ] Skyboxes: cache, generation, schematic activation, and DB asset sync (`wasm_cut.rs` stubs)
 - [ ] Skybox status overlay
 - [ ] Lua action tiles (the button renders; `LuaActor::spawn` does not connect)
