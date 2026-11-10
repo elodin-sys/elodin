@@ -86,7 +86,7 @@ from fpv_camera import (
     sensor_rot_offset,
     FpvCamera,
 )
-from replay import ReplayRecorder
+from replay import RecordingFailed, ReplayRecorder
 from sim import Drone, create_physics_system
 from sensors import IMU, create_sensor_system, SensorDataBuffer
 from comms import (
@@ -415,6 +415,7 @@ referee_audit_collector = (
 fpv = FpvCamera() if CAMERA_ENABLED else None
 fpv_report = [None]
 recorder_box: list[ReplayRecorder | None] = [None]
+recording_failed = [False]
 
 
 def _recorder() -> ReplayRecorder | None:
@@ -448,8 +449,17 @@ def _recorder() -> ReplayRecorder | None:
 
 def finish_recording() -> None:
     recorder = recorder_box[0]
-    if recorder is not None:
+    if recorder is None:
+        return
+    try:
         recorder.finish()
+    except RecordingFailed as error:
+        recording_failed[0] = True
+        cause = error.__cause__ if isinstance(error.__cause__, BaseException) else error
+        print(
+            f"[RACE_RECORD] FAILED path={error.directory} "
+            f"error={type(cause).__name__}: {cause} (bundle incomplete; rerun)"
+        )
 
 
 def emit_race_result() -> None:
@@ -890,7 +900,6 @@ def _sitl_post_step(tick: int, ctx: el.StepContext):
             fpv_report[0] = fpv.finish(ctx.read_msg_at, ctx.timestamp)
             print(fpv_report[0].format())
             print()
-        finish_recording()
 
         if guidance_mode is GuidanceMode.SCRIPTED and not referee_audit_requested:
             result = evaluate_c0(
@@ -1011,6 +1020,7 @@ else:
         referee_exit_code=referee_audit_result[0].exit_code if referee_audit_result[0] else None,
         axis_passed=axis_audit.passed if axis_audit is not None else None,
         camera_accepted=fpv_report[0].accepted if fpv_report[0] is not None else None,
+        recording_failed=recording_failed[0] if RECORD_DIR is not None else None,
     )
     if exit_code:
         sys.exit(exit_code)

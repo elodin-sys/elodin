@@ -22,6 +22,14 @@ _MAX_PENDING_CHUNKS = 2
 _TRUTH_RING_S = 0.5
 
 
+class RecordingFailed(RuntimeError):
+    """The replay bundle is incomplete. Record the run again; nothing is repaired."""
+
+    def __init__(self, directory: Path, error: BaseException):
+        self.directory = Path(directory)
+        super().__init__(f"{self.directory}: {type(error).__name__}: {error}")
+
+
 @dataclass(frozen=True, slots=True)
 class SensorBundle:
     """Sensor history only. Gate poses are not in this object."""
@@ -107,6 +115,7 @@ class ReplayRecorder:
         self._pending: deque[Future] = deque()
         self._prepared = False
         self._finished = False
+        self._failure: BaseException | None = None
 
     def observe(
         self,
@@ -125,54 +134,69 @@ class ReplayRecorder:
         frame_time: float | None,
         frame_fresh: bool,
     ) -> None:
-        """Append one physics tick. Incomplete trailing IMU blocks are dropped."""
+        """Append one physics tick. Incomplete trailing IMU blocks are dropped.
 
-        if self._finished or not np.isfinite(sim_time):
+        A write error is remembered and stops further recording. It is raised
+        from ``finish``, not from the physics tick, so grading still runs.
+        """
+
+        if self._finished or self._failure is not None or not np.isfinite(sim_time):
             return
-        self._prepare()
-        position = np.array(world_pos, dtype=np.float64, copy=True).reshape(-1)
-        velocity = np.array(world_vel, dtype=np.float64, copy=True).reshape(-1)
-        if position.shape[0] < 7 or velocity.shape[0] < 6:
-            return
-        self._push_truth(float(sim_time), position[:7], velocity[:6])
-        self._push_imu(tick, float(sim_time), gyro, accel)
-        if barometer_fresh and barometer is not None and np.isfinite(barometer):
-            self._baro_time.append(float(sim_time))
-            self._baro.append(float(barometer))
-        if magnetometer_fresh and magnetometer is not None:
-            field = np.array(magnetometer, dtype=np.float64, copy=True).reshape(-1)
-            if field.shape[0] >= 3 and np.all(np.isfinite(field[:3])):
-                self._mag_time.append(float(sim_time))
-                self._mag.append(field[:3].copy())
-        if frame_fresh and frame is not None and frame_time is not None and np.isfinite(frame_time):
-            self._store_frame(np.asarray(frame), float(frame_time))
+        try:
+            self._prepare()
+            position = np.array(world_pos, dtype=np.float64, copy=True).reshape(-1)
+            velocity = np.array(world_vel, dtype=np.float64, copy=True).reshape(-1)
+            if position.shape[0] < 7 or velocity.shape[0] < 6:
+                return
+            self._push_truth(float(sim_time), position[:7], velocity[:6])
+            self._push_imu(tick, float(sim_time), gyro, accel)
+            if barometer_fresh and barometer is not None and np.isfinite(barometer):
+                self._baro_time.append(float(sim_time))
+                self._baro.append(float(barometer))
+            if magnetometer_fresh and magnetometer is not None:
+                field = np.array(magnetometer, dtype=np.float64, copy=True).reshape(-1)
+                if field.shape[0] >= 3 and np.all(np.isfinite(field[:3])):
+                    self._mag_time.append(float(sim_time))
+                    self._mag.append(field[:3].copy())
+            if (
+                frame_fresh
+                and frame is not None
+                and frame_time is not None
+                and np.isfinite(frame_time)
+            ):
+                self._store_frame(np.asarray(frame), float(frame_time))
+        except Exception as error:
+            self._remember(error)
 
     def finish(self) -> None:
-        """Write the bundle. A second call does nothing."""
+        """Write the bundle. A second call does nothing.
+
+        Raises ``RecordingFailed`` when any frame or bundle write failed. The
+        bundle is left without ``meta.json`` so it cannot be read as complete.
+        """
 
         if self._finished:
             return
         self._finished = True
-        self._prepare()
-        self._flush_frames()
         try:
-            while self._pending:
-                self._pending.popleft().result()
-        finally:
-            if self._writer is not None:
-                self._writer.shutdown(wait=True)
-        meta = {
-            "format_version": FORMAT_VERSION,
-            "simulation_rate_hz": self.simulation_rate_hz,
-            "imu_block_ticks": self.block_ticks,
-            "imu_rate_hz": self.simulation_rate_hz / self.block_ticks,
-            "frame_shape": list(self.frame_shape),
-            "intrinsics": self.intrinsics,
-            "mount_position_body": [float(value) for value in self.mount_position_body],
-            "tilt_deg": self.tilt_deg,
-            "inner_size_m": self.inner_size_m,
-        }
-        (self.directory / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
+            self._prepare()
+            self._flush_frames()
+            try:
+                while self._pending:
+                    self._take_pending()
+            finally:
+                if self._writer is not None:
+                    self._writer.shutdown(wait=True)
+            if self._failure is not None:
+                raise RecordingFailed(self.directory, self._failure) from self._failure
+            self._write_bundle()
+        except RecordingFailed:
+            raise
+        except Exception as error:
+            self._remember(error)
+            raise RecordingFailed(self.directory, self._failure) from error
+
+    def _write_bundle(self) -> None:
         np.savez_compressed(
             self.directory / "sensors.npz",
             imu_time=_column(self._imu_time),
@@ -199,10 +223,32 @@ class ReplayRecorder:
             gate_yaw=np.asarray([gate[2] for gate in gates], dtype=np.float64),
             gate_inner_size=np.asarray([gate[3] for gate in gates], dtype=np.float64),
         )
+        meta = {
+            "format_version": FORMAT_VERSION,
+            "simulation_rate_hz": self.simulation_rate_hz,
+            "imu_block_ticks": self.block_ticks,
+            "imu_rate_hz": self.simulation_rate_hz / self.block_ticks,
+            "frame_shape": list(self.frame_shape),
+            "intrinsics": self.intrinsics,
+            "mount_position_body": [float(value) for value in self.mount_position_body],
+            "tilt_deg": self.tilt_deg,
+            "inner_size_m": self.inner_size_m,
+        }
+        (self.directory / "meta.json").write_text(json.dumps(meta, indent=2) + "\n")
         print(
             f"[RACE_RECORD] wrote {self.directory} "
             f"imu={len(self._imu_time)} frames={len(self._frame_time)}"
         )
+
+    def _remember(self, error: BaseException) -> None:
+        if self._failure is None:
+            self._failure = error
+
+    def _take_pending(self) -> None:
+        try:
+            self._pending.popleft().result()
+        except Exception as error:
+            self._remember(error)
 
     def _prepare(self) -> None:
         if self._prepared:
@@ -275,12 +321,14 @@ class ReplayRecorder:
             self._flush_frames()
 
     def _flush_frames(self) -> None:
-        if not self._frames:
+        if self._failure is not None or not self._frames:
             return
         if self._writer is None:
             self._writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="race-record")
         while len(self._pending) >= _MAX_PENDING_CHUNKS:
-            self._pending.popleft().result()
+            self._take_pending()
+            if self._failure is not None:
+                return
         path = self.directory / "frames" / f"chunk_{self._chunk:05d}.npz"
         self._pending.append(
             self._writer.submit(

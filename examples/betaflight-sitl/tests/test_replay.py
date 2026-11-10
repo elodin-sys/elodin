@@ -1,8 +1,11 @@
 """Replay bundle contents and RACE_RECORD startup checks."""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
-from replay import ReplayRecorder, load_sensor_bundle, load_truth
+import replay as replay_mod
+from replay import RecordingFailed, ReplayRecorder, load_sensor_bundle, load_truth
 
 
 def _recorder(tmp_path, block_ticks: int = 4):
@@ -173,3 +176,61 @@ def test_record_directory_rules(tmp_path) -> None:
     for env, message in cases:
         with pytest.raises(ValueError, match=message):
             race_options_from_env(env)
+
+
+def _frame() -> np.ndarray:
+    return np.zeros((2, 3, 4), dtype=np.uint8)
+
+
+def test_chunk_write_error_is_sticky_and_finish_names_the_directory(tmp_path, monkeypatch) -> None:
+    def fail_write(*args, **kwargs):
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(replay_mod.np, "savez_compressed", fail_write)
+    recorder = _recorder(tmp_path)
+    for tick in range(90):
+        _observe(
+            recorder,
+            tick,
+            gyro=[0, 0, 0],
+            accel=[0, 0, 1],
+            fresh=True,
+            frame=_frame(),
+            frame_time=tick / 8.0,
+        )
+    assert recorder._failure is not None
+    stored = len(recorder._frame_time)
+    _observe(
+        recorder,
+        90,
+        gyro=[0, 0, 0],
+        accel=[0, 0, 1],
+        fresh=True,
+        frame=_frame(),
+        frame_time=90 / 8.0,
+    )
+    assert len(recorder._frame_time) == stored
+    with pytest.raises(RecordingFailed, match="No space left on device") as error:
+        recorder.finish()
+    assert error.value.directory == Path(tmp_path)
+    assert error.value.__cause__ is recorder._failure
+    assert not (tmp_path / "meta.json").exists()
+    recorder.finish()
+
+
+def test_bundle_write_error_raises_without_meta(tmp_path, monkeypatch) -> None:
+    real = replay_mod.np.savez_compressed
+
+    def fail_sensors(path, *args, **kwargs):
+        if Path(path).name == "sensors.npz":
+            raise OSError("No space left on device")
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(replay_mod.np, "savez_compressed", fail_sensors)
+    recorder = _recorder(tmp_path)
+    _observe(recorder, 0, gyro=[0, 0, 0], accel=[0, 0, 1])
+    with pytest.raises(RecordingFailed, match=str(tmp_path)) as error:
+        recorder.finish()
+    assert isinstance(error.value.__cause__, OSError)
+    assert not (tmp_path / "meta.json").exists()
+    assert not (tmp_path / "truth.npz").exists()

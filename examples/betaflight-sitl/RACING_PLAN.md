@@ -1752,11 +1752,19 @@ bundle format, and known failure ranges.
 main `95f53257` (after F) on 2026-11-06:**
 
 - `PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 python3 -m pytest examples/betaflight-sitl/tests -q`
-  → 478 passed after the rebase (297 before F). The detector, replay, and
-  isolation tests also pass on nixpkgs OpenCV 4.13, the `.#run` version.
-  `ruff format`, `ruff check`, `typos`, and `alejandra -c nix/run.nix` passed.
+  → 492 passed on 2026-11-10 (478 after the rebase, 297 before F). The detector,
+  replay, and isolation tests also pass on nixpkgs OpenCV 4.13, the `.#run`
+  version. `ruff format`, `ruff check`, `typos`, and `alejandra -c nix/run.nix`
+  passed.
 - F's shutdown contract holds: `[RACE]`/`[F-COURSE]` are emitted before the
-  recorder finishes, so a bundle write error cannot suppress the result line.
+  recorder finishes. `finish_recording()` runs only from the outer `finally`,
+  after those lines. A bundle write error is printed as
+  `[RACE_RECORD] FAILED` with the directory and the cause, and the process
+  exits 1. The bundle is left without `meta.json`. There is no retry or repair.
+  A live scripted camera run with an unwritable record directory still printed
+  `[C0] ... status=PASS` and then
+  `[RACE_RECORD] FAILED path=/tmp/h-fix-deny error=PermissionError: ...`, and
+  exited 1.
 - `gate_detector.py` is the only OpenCV importer. CI gets `opencv4` from the
   `.#run` shell. Local uv environments install `opencv-python-headless`. 8-bit
   hue stays 0–180. Thresholds: hue 5–25, saturation ≥ 120, value ≥ 50.
@@ -1766,9 +1774,10 @@ main `95f53257` (after F) on 2026-11-06:**
   synthetic corners stay within 0.5 px.
 - Synthetic core course, 4–20 m and bearings −10° to 10°: 45/45 detected,
   median bearing 0.0007°, p95 0.015°. Recorded fixture: 10/10 detected, median
-  bearing 0.094°. On the full truth-run bundle, 844/856 fully visible frames
-  detected (98.6%), median bearing 0.075°. The 2–4 m bin on that bundle was
-  about 2.8° and is outside the 4–20 m acceptance window.
+  bearing 0.094°. On the 2026-11-10 truth-run bundle, 835/857 fully visible
+  frames matched the nearest gate (97.4%; 99.4% of the 4–20 m frames), median
+  bearing 0.075°. `first_candidate_is_target` was 0.974. The 2–4 m bin on the
+  earlier bundle was about 2.8° and is outside the 4–20 m acceptance window.
 - Package G leftovers: holes under 200 px² and ranges outside 1–40 m are
   rejected; `sample_time` must be finite; a rotation within 1e-6° of 180° still
   yields no pose; `bearing_body` remains the body-origin direction.
@@ -1778,8 +1787,12 @@ main `95f53257` (after F) on 2026-11-06:**
   compressed 30 per chunk on one writer thread, with at most two chunks
   queued, so held frame memory stays near 80 MB for any run length.
   `RACE_RECORD` without `RACE_CAMERA=1` exits 2.
-- `evaluate_detector.py --bundle` scores each frame against the nearest course
-  gate whose inner opening is fully in view and skips the rest; `--check` uses
+- `evaluate_detector.py --bundle` rebuilds the camera from the bundle's
+  intrinsics, mount, and tilt. It projects every fully visible gate with that
+  camera, matches detections one-to-one by corner centroid (within a quarter of
+  the opening's side), and scores the nearest gate against its match. A frame
+  with no match is a miss. `first_candidate_is_target` reports how often the
+  largest detection is that gate and does not affect `--check`. `--check` uses
   only 4–20 m frames. Recorded truth frames cover about 4–12 m; 12–20 m is
   covered by the synthetic set until a C1 recording is added.
 - `evaluate_detector.py --synthetic --check` and `--fixture --check` exited 0.

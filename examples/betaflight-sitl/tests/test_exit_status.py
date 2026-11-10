@@ -27,6 +27,12 @@ from exit_status import CallbackExecution, scenario_exit_code
         ({"hold_exit_code": 0}, 0),  # E deliberately does not require a complete race.
         ({"c0_passed": True}, 0),  # Scripted course incompletion is observational.
         ({"axis_passed": True, "camera_accepted": False}, 1),
+        ({"recording_failed": True}, 1),
+        ({"recording_failed": False}, 0),
+        ({"recording_failed": None}, 0),
+        ({"c0_passed": False, "recording_failed": True}, 1),
+        ({"c0_passed": True, "recording_failed": True}, 1),
+        ({"course_exit_code": 2, "recording_failed": True}, 2),
     ],
 )
 def test_scenario_exit_code_preserves_each_contract_and_combined_failures(

@@ -19,6 +19,7 @@ from course import Gate
 from gate_detector import GateDetector
 from replay import load_sensor_bundle, load_truth
 from synthetic_vision import _world_rotation, project_gate_corners
+from vision import CameraIntrinsics, CameraMount, GateCandidate
 
 _EXAMPLE = Path(__file__).resolve().parent
 DEFAULT_FIXTURE = _EXAMPLE / "tests" / "fixtures" / "rendered_gate_frames.npz"
@@ -92,7 +93,7 @@ def _fixture_results(path: Path, inner_size: float | None) -> list[SampleResult]
 
 
 def _bundle_results(path: Path, inner_size: float | None) -> list[SampleResult]:
-    """Score frames whose nearest fully visible gate is the truth target."""
+    """Score each frame's nearest fully visible gate against its matched detection."""
 
     sensors = load_sensor_bundle(path)
     truth = load_truth(path)
@@ -103,6 +104,7 @@ def _bundle_results(path: Path, inner_size: float | None) -> list[SampleResult]:
         raise SystemExit("bundle has no inner_size_m; pass --inner-size")
     if truth.gate_center.shape[0] < 1:
         raise SystemExit("bundle truth has no gate")
+    intrinsics, mount = _recorded_camera(sensors.meta)
     gates = [
         Gate(int(index), tuple(float(v) for v in center), float(yaw), float(gate_size))
         for index, center, yaw, gate_size in zip(
@@ -113,31 +115,127 @@ def _bundle_results(path: Path, inner_size: float | None) -> list[SampleResult]:
             strict=True,
         )
     ]
-    detector = GateDetector()
+    detector = GateDetector(intrinsics=intrinsics, mount=mount)
     results = []
     skipped = 0
+    selection_hits = 0
+    selection_frames = 0
     for frame, world_pos in zip(sensors.frames, truth.frame_world_pos, strict=True):
-        target = _nearest_visible_gate(gates, world_pos)
-        if target is None:
+        visible = _visible_openings(gates, world_pos, intrinsics, mount)
+        if not visible:
             skipped += 1
             continue
+        target, _target_corners = min(
+            visible,
+            key=lambda item: float(np.linalg.norm(world_pos[4:7] - np.asarray(item[0].center))),
+        )
         truth_range = float(np.linalg.norm(world_pos[4:7] - np.asarray(target.center)))
+        started = time.perf_counter()
+        found = detector.detect(frame, 0.0, float(size))
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+        matched = _match_candidates(found, visible)
+        candidate = matched.get(target.index)
+        selection_frames += 1
+        if found and candidate is found[0]:
+            selection_hits += 1
+        if candidate is None or candidate.pose is None:
+            results.append(SampleResult(truth_range, False, None, None, elapsed_ms))
+            continue
         results.append(
-            _measure(
-                detector, frame, truth_range, float(size), _body_bearing(target.center, world_pos)
+            SampleResult(
+                truth_range,
+                True,
+                _angle_deg(candidate.pose.bearing_body, _body_bearing(target.center, world_pos)),
+                candidate.reprojection_error_px,
+                elapsed_ms,
             )
         )
     print(f"skipped {skipped} frames without a fully visible gate or finite truth")
+    rate = "n/a" if selection_frames == 0 else f"{selection_hits / selection_frames:.3f}"
+    print(f"first_candidate_is_target {rate}")
     return results
 
 
-def _nearest_visible_gate(gates: list[Gate], world_pos: np.ndarray) -> Gate | None:
-    if not np.all(np.isfinite(world_pos)):
-        return None
-    visible = [gate for gate in gates if project_gate_corners(gate, world_pos) is not None]
-    if not visible:
-        return None
-    return min(visible, key=lambda gate: np.linalg.norm(world_pos[4:7] - np.asarray(gate.center)))
+def _recorded_camera(meta: dict) -> tuple[CameraIntrinsics, CameraMount]:
+    """Rebuild the camera that produced the bundle. Defaults are not a fallback."""
+
+    raw = meta.get("intrinsics")
+    shape = meta.get("frame_shape")
+    try:
+        intrinsics = CameraIntrinsics(
+            fx=float(raw["fx"]),
+            fy=float(raw["fy"]),
+            cx=float(raw["cx"]),
+            cy=float(raw["cy"]),
+            width=int(raw["width"]),
+            height=int(raw["height"]),
+        )
+        mount = CameraMount(
+            position_body=np.asarray(meta["mount_position_body"], dtype=np.float64),
+            tilt_deg=float(meta["tilt_deg"]),
+        )
+        if [int(shape[0]), int(shape[1]), int(shape[2])] != [
+            intrinsics.height,
+            intrinsics.width,
+            4,
+        ]:
+            raise ValueError(
+                f"frame_shape {list(shape)} does not match intrinsics "
+                f"{intrinsics.width}x{intrinsics.height}"
+            )
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError) as error:
+        raise SystemExit(f"bundle calibration is invalid: {error}") from error
+    return intrinsics, mount
+
+
+def _visible_openings(
+    gates: list[Gate],
+    world_pos: np.ndarray,
+    intrinsics: CameraIntrinsics,
+    mount: CameraMount,
+) -> list[tuple[Gate, np.ndarray]]:
+    pose = np.asarray(world_pos, dtype=np.float64)
+    if pose.shape != (7,) or not np.all(np.isfinite(pose)):
+        return []
+    visible = []
+    for gate in gates:
+        corners = project_gate_corners(gate, pose, intrinsics, mount)
+        if corners is not None:
+            visible.append((gate, corners))
+    return visible
+
+
+def _match_candidates(
+    candidates: tuple[GateCandidate, ...],
+    references: list[tuple[Gate, np.ndarray]],
+) -> dict[int, GateCandidate]:
+    """Greedy one-to-one match on corner centroids. Ground truth stays here."""
+
+    pairs: list[tuple[float, int, int, GateCandidate]] = []
+    for candidate_index, candidate in enumerate(candidates):
+        centroid = candidate.corners_px.mean(axis=0)
+        for gate, corners in references:
+            side = _mean_side(corners)
+            if side <= 0.0:
+                continue
+            distance = float(np.linalg.norm(centroid - corners.mean(axis=0)))
+            if distance <= 0.25 * side:
+                pairs.append((distance, candidate_index, gate.index, candidate))
+    pairs.sort(key=lambda item: item[0])
+    used_candidates: set[int] = set()
+    used_gates: set[int] = set()
+    matched: dict[int, GateCandidate] = {}
+    for _distance, candidate_index, gate_index, candidate in pairs:
+        if candidate_index in used_candidates or gate_index in used_gates:
+            continue
+        used_candidates.add(candidate_index)
+        used_gates.add(gate_index)
+        matched[gate_index] = candidate
+    return matched
+
+
+def _mean_side(corners: np.ndarray) -> float:
+    return float(np.linalg.norm(corners - np.roll(corners, -1, axis=0), axis=1).mean())
 
 
 def _measure(detector, frame, range_m, inner_size, truth_bearing) -> SampleResult:

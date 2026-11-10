@@ -14,6 +14,7 @@ from course import course_from_name
 from course_referee import TruthCourseReferee
 from exit_status import CallbackExecution, scenario_exit_code
 from referee import Referee
+from replay import RecordingFailed
 from schematic import build_schematic
 
 MAIN = Path(__file__).parents[1] / "main.py"
@@ -137,6 +138,9 @@ def shutdown_namespace(*, execution_started=True):
         "truth_course_result_emitted": [False],
         "bridge": [object() if execution_started else None],
         "recorder_box": [None],
+        "recording_failed": [False],
+        "RECORD_DIR": None,
+        "RecordingFailed": RecordingFailed,
         "simulation_started": [execution_started],
         "callback_execution": CallbackExecution(2),
         "MAX_TICKS": 2,
@@ -155,15 +159,19 @@ def assert_actual_entrypoint_exit(ns, expected_exit):
     tree = ast.parse(MAIN.read_text())
     final_exit = tree.body[-1]
     assert isinstance(final_exit, ast.If)
-    ns.update(
-        sys=sys,
-        scenario_exit_code=scenario_exit_code,
-        c0_result=[None],
-        truth_hold_result=[None],
-        referee_audit_result=[None],
-        axis_audit=None,
-        fpv_report=[None],
-    )
+    defaults = {
+        "sys": sys,
+        "scenario_exit_code": scenario_exit_code,
+        "c0_result": [None],
+        "truth_hold_result": [None],
+        "referee_audit_result": [None],
+        "axis_audit": None,
+        "fpv_report": [None],
+        "recording_failed": [False],
+        "RECORD_DIR": None,
+    }
+    for key, value in defaults.items():
+        ns.setdefault(key, value)
     code = compile(ast.Module(body=[final_exit], type_ignores=[]), str(MAIN), "exec")
     if expected_exit:
         with pytest.raises(SystemExit) as error:
@@ -327,3 +335,67 @@ def test_actual_adapter_checks_expected_normal_end_not_only_last_physical_sample
     assert output.count("[RACE]") == output.count("[F-COURSE]") == 1
     if ticks == (0,):
         assert "callback_sequence_incomplete" in output
+
+
+def test_last_tick_does_not_finish_the_recorder():
+    tree = ast.parse(MAIN.read_text())
+    post_step = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_sitl_post_step"
+    )
+    calls = {
+        node.func.id
+        for node in ast.walk(post_step)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "finish_recording" not in calls
+
+
+def test_recorder_failure_prints_results_first_and_exits_nonzero(capsys):
+    ns, run = qualifying_shutdown_namespace()
+    ns["_sitl_post_step"] = lambda *_args: None
+    ns["RECORD_DIR"] = Path("/tmp/race-record")
+
+    def fail():
+        print("[RACE_RECORD] finishing")
+        raise RecordingFailed(Path("/tmp/race-record"), OSError("No space left on device"))
+
+    ns["recorder_box"] = [SimpleNamespace(finish=fail)]
+
+    def sdk_run(*_args, **kwargs):
+        for tick in (0, 1):
+            kwargs["post_step"](tick, None)
+
+    ns["world"] = SimpleNamespace(run=sdk_run)
+    exec(run, ns)
+    output = capsys.readouterr().out
+    assert output.count("[RACE]") == output.count("[F-COURSE]") == 1
+    assert output.index("[F-COURSE]") < output.index("[RACE_RECORD] FAILED")
+    assert "No space left on device" in output
+    assert ns["callback_execution"].failure_reason is None
+    assert ns["truth_course_result"][0].exit_code == 0
+    assert ns["recording_failed"] == [True]
+    assert_actual_entrypoint_exit(ns, 1)
+
+
+def test_recording_failure_keeps_a_failing_scripted_run_nonzero():
+    ns, _run = shutdown_namespace()
+    ns["callback_execution"] = None
+    ns["truth_course_referee"] = None
+    ns["truth_course_result"] = [None]
+    ns["RECORD_DIR"] = Path("/tmp/race-record")
+    ns["recording_failed"] = [True]
+    ns["c0_result"] = [SimpleNamespace(passed=False)]
+    assert_actual_entrypoint_exit(ns, 1)
+
+
+def test_recording_failure_exits_nonzero_when_scripted_grading_never_ran():
+    ns, _run = shutdown_namespace()
+    ns["callback_execution"] = None
+    ns["truth_course_referee"] = None
+    ns["truth_course_result"] = [None]
+    ns["RECORD_DIR"] = Path("/tmp/race-record")
+    ns["recording_failed"] = [True]
+    ns["c0_result"] = [None]
+    assert_actual_entrypoint_exit(ns, 1)

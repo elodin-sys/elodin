@@ -280,7 +280,10 @@ saturation at least 120, and value at least 50, for gate RGB `(255, 128, 0)`.
 
 `RACE_RECORD=<directory>` on a camera run writes a replay bundle and does not
 change the command sent to Betaflight. The directory must be missing or empty.
-Without `RACE_CAMERA=1` the process exits 2. The bundle is:
+Without `RACE_CAMERA=1` the process exits 2. If a frame or bundle write fails,
+the run prints `[RACE_RECORD] FAILED` with the directory and the error, then
+exits 1. The bundle is incomplete and is not repaired; record the run again.
+Result lines are printed before that failure line. The bundle is:
 
 - `meta.json` — rates, intrinsics, mount, tilt, and the public inner size
 - `sensors.npz` — 500 Hz means of gyro and specific force, plus barometer and
@@ -299,8 +302,11 @@ python3 examples/betaflight-sitl/evaluate_detector.py --bundle /tmp/race-record
 ```
 
 `--check` requires at least 90% detection and a median bearing error of 2° on
-frames from 4–20 m. Bundle mode scores each frame against the nearest gate whose
-inner opening is fully in view and skips frames with none. Processing time is
+frames from 4–20 m. Bundle mode reads the camera intrinsics, mount, and tilt
+from `meta.json`. It scores the nearest fully visible gate against the
+detection matched to that gate's projected opening, and skips frames with no
+visible gate. `first_candidate_is_target` reports how often the largest
+detection is that gate; it does not affect `--check`. Processing time is
 printed against a 5 ms target and does not fail the command. `bearing_body` is the direction from the body origin;
 navigation should use `position_body`.
 
