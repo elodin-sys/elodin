@@ -5,6 +5,7 @@ weight = 105
 
 [extra]
 toc = true
+order = 5
 +++
 
 Store geographic JSON files in the simulation's `assets/` folder and declare them
