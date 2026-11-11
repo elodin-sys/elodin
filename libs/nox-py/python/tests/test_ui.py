@@ -413,7 +413,7 @@ def test_push_to_embedded_server(tmp_path):
         assert "drone.thrust" in body
 
         # Editor loads the active schematic from the Asset Server on N+1.
-        url = "http://127.0.0.1:23552/schematics/main.kdl"
+        url = "http://127.0.0.1:23552/assets/schematics/main.kdl"
         http_deadline = time.time() + 5
         last_err: Exception | None = None
         while time.time() < http_deadline:

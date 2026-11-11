@@ -404,16 +404,18 @@ mod tests {
 
         let mut buf = Vec::new();
         bevy::tasks::block_on(async {
-            let mut reader = AssetReader::read(&client, Path::new("127.0.0.1:1/textures/x.png"))
-                .await
-                .expect("local fallback should serve the file");
+            let mut reader =
+                AssetReader::read(&client, Path::new("127.0.0.1:1/assets/textures/x.png"))
+                    .await
+                    .expect("local fallback should serve the file");
             reader.read_to_end(&mut buf).await.unwrap();
         });
         assert_eq!(buf, b"png-bytes");
 
         // A URL outside the DB endpoint must not fall back.
         bevy::tasks::block_on(async {
-            let result = AssetReader::read(&client, Path::new("127.0.0.1:2/textures/x.png")).await;
+            let result =
+                AssetReader::read(&client, Path::new("127.0.0.1:2/assets/textures/x.png")).await;
             assert!(result.is_err(), "non-DB URLs must not serve local files");
         });
 
