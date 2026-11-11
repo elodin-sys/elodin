@@ -428,9 +428,13 @@ impl VideoFrameCache {
             .map(|(t, d)| (*t, d.as_slice()))
     }
 
+    fn raw_frame_fits(&self, data: &[u8]) -> bool {
+        !cfg!(target_family = "wasm") || data.len() <= self.max_raw_bytes
+    }
+
     /// Insert a raw frame, mark that instant covered, and evict away from `anchor`.
     pub fn insert_raw(&mut self, timestamp: Timestamp, data: Vec<u8>, anchor: Timestamp) {
-        if cfg!(target_family = "wasm") && data.len() > self.max_raw_bytes {
+        if !self.raw_frame_fits(&data) {
             return;
         }
         self.store_raw(timestamp, data);
@@ -613,13 +617,15 @@ impl VideoFrameCache {
     }
 
     fn evict_raw_if_needed(&mut self, anchor: Timestamp) {
-        while self.raw_bytes > self.max_raw_bytes
-            && (self.raw_frames.len() > 1 || cfg!(target_family = "wasm"))
-        {
+        self.evict_raw_frames(anchor, cfg!(target_family = "wasm"));
+    }
+
+    fn evict_raw_frames(&mut self, anchor: Timestamp, evict_last: bool) {
+        while self.raw_bytes > self.max_raw_bytes && (self.raw_frames.len() > 1 || evict_last) {
             let first = *self.raw_frames.keys().next().unwrap();
             let last = *self.raw_frames.keys().next_back().unwrap();
             let drop_last = anchor.0.abs_diff(last.0) >= anchor.0.abs_diff(first.0);
-            let Some((evicted_ts, data)) = (if drop_last {
+            let Some((_, data)) = (if drop_last {
                 self.raw_frames.pop_last()
             } else {
                 self.raw_frames.pop_first()
@@ -627,13 +633,27 @@ impl VideoFrameCache {
                 break;
             };
             self.raw_bytes = self.raw_bytes.saturating_sub(data.len());
-            if drop_last {
-                self.uncover_from(evicted_ts);
-            } else if let Some(&new_first) = self.raw_frames.keys().next() {
-                self.uncover_before(new_first);
-            }
+            self.uncover_evicted_frame(drop_last);
         }
         self.trim_to_raw_span();
+    }
+
+    /// A dropped tail frame also covers the span back to the previous sample.
+    /// Uncovering only from the dropped timestamp leaves that earlier span
+    /// marked fetched after the pixels are gone.
+    fn uncover_evicted_frame(&mut self, drop_last: bool) {
+        if self.raw_frames.is_empty() {
+            self.coverage.clear();
+            return;
+        }
+        if drop_last {
+            let Some(&prev) = self.raw_frames.keys().next_back() else {
+                return;
+            };
+            self.uncover_from(Timestamp(prev.0.saturating_add(1)));
+        } else if let Some(&new_first) = self.raw_frames.keys().next() {
+            self.uncover_before(new_first);
+        }
     }
 
     fn trim_to_raw_span(&mut self) {
@@ -1090,6 +1110,56 @@ fn backfill_frame_limit(raw_dims: Option<(u32, u32, RawPixelFormat)>, is_h264: b
     (BACKFILL_MAX_BATCH_BYTES / frame_bytes).max(1)
 }
 
+/// Store a backfill page. Coverage follows frames still resident after eviction.
+/// A page of frames that cannot fit is marked covered so playback does not retry it.
+fn apply_backfill_page(
+    cache: &mut VideoFrameCache,
+    frames: Vec<(Timestamp, Vec<u8>)>,
+    range: Range<Timestamp>,
+    limit: usize,
+    anchor: Timestamp,
+) -> Option<Range<Timestamp>> {
+    let mut count = 0usize;
+    let mut stored = 0usize;
+    let mut first_ts = range.start;
+    let mut last_ts = range.start;
+    for (timestamp, data) in frames {
+        if count == 0 {
+            first_ts = timestamp;
+        }
+        last_ts = timestamp;
+        count += 1;
+        if !cache.raw_frame_fits(&data) {
+            continue;
+        }
+        cache.store_raw(timestamp, data);
+        stored += 1;
+    }
+    // `GetMsgs` snaps the start to the message at or before it, so the
+    // first sample can sit just outside `range`.
+    let covered_start = if count == 0 {
+        range.start
+    } else {
+        Timestamp(first_ts.0.min(range.start.0))
+    };
+    let covered_end = if count >= limit {
+        Timestamp(last_ts.0.saturating_add(1))
+    } else {
+        range.end
+    };
+    if count == 0 || stored > 0 {
+        cache.note_covered(covered_start..covered_end);
+    }
+    if stored > 0 {
+        cache.evict_raw_if_needed(anchor);
+    } else if count > 0 {
+        // Nothing fit. Cover the page so playback does not refetch a frame
+        // the cache has to reject.
+        cache.note_covered(covered_start..covered_end);
+    }
+    (count >= limit && covered_end.0 < range.end.0).then_some(covered_end..range.end)
+}
+
 /// Fetch one page of `range`. A full page continues from the last timestamp;
 /// a short page marks the whole range covered, including stretches with no frames.
 fn send_window_request(
@@ -1125,36 +1195,18 @@ fn send_window_request(
             let Ok(batch) = result else {
                 return true;
             };
-            let mut count = 0usize;
-            let mut first_ts = range.start;
-            let mut last_ts = range.start;
-            for (timestamp, data) in batch.data {
-                if count == 0 {
-                    first_ts = timestamp;
-                }
-                last_ts = timestamp;
-                count += 1;
-                cache.store_raw(timestamp, data);
-            }
-            // `GetMsgs` snaps the start to the message at or before it, so the
-            // first sample can sit just outside `range`.
-            let covered_start = if count == 0 {
-                range.start
-            } else {
-                Timestamp(first_ts.0.min(range.start.0))
-            };
-            let covered_end = if count >= limit {
-                Timestamp(last_ts.0.saturating_add(1))
-            } else {
-                range_end
-            };
-            cache.note_covered(covered_start..covered_end);
-            cache.evict_raw_if_needed(current_ts.0);
+            let next = apply_backfill_page(
+                &mut cache,
+                batch.data,
+                range.start..range_end,
+                limit,
+                current_ts.0,
+            );
             cache.consider_keyframe_extend(current_ts.0, earliest.0);
-            if count >= limit && covered_end.0 < range_end.0 {
+            if let Some(next) = next {
                 cache.backfill_in_flight = true;
                 cache.backfill_started_at = Some(Instant::now());
-                send_window_request(&mut cmds, entity, msg_id, covered_end..range_end, limit);
+                send_window_request(&mut cmds, entity, msg_id, next, limit);
             }
             true
         },
@@ -2050,6 +2102,63 @@ mod tests {
         cache.insert_raw(Timestamp(2_000), vec![0; 6], Timestamp(2_000));
         assert!(!cache.raw_frames.contains_key(&Timestamp(1_000)));
         assert!(cache.raw_frames.contains_key(&Timestamp(2_000)));
+    }
+
+    #[test]
+    fn evicting_a_tail_frame_reopens_coverage_to_the_previous_frame() {
+        let mut cache = VideoFrameCache::for_raw();
+        cache.max_raw_bytes = 10;
+        cache.store_raw(Timestamp(1_000), vec![0; 6]);
+        cache.store_raw(Timestamp(2_000), vec![0; 6]);
+        cache.note_covered(Timestamp(0)..Timestamp(3_000));
+        cache.evict_raw_if_needed(Timestamp(1_000));
+        assert!(cache.raw_frames.contains_key(&Timestamp(1_000)));
+        assert!(!cache.raw_frames.contains_key(&Timestamp(2_000)));
+        let gap = cache
+            .first_uncovered(&(Timestamp(0)..Timestamp(3_000)))
+            .expect("dropped tail is fetched again");
+        assert_eq!(gap.start.0, 1_001);
+        assert_eq!(gap.end.0, 3_000);
+    }
+
+    #[test]
+    fn evicting_the_only_raw_frame_clears_earlier_coverage() {
+        let mut cache = VideoFrameCache::for_raw();
+        cache.max_raw_bytes = 4;
+        cache.store_raw(Timestamp(1_000), vec![0; 8]);
+        cache.note_covered(Timestamp(0)..Timestamp(2_000));
+        cache.evict_raw_frames(Timestamp(1_000), true);
+        assert!(cache.raw_frames.is_empty());
+        assert!(cache.coverage.is_empty());
+        assert!(
+            cache
+                .first_uncovered(&(Timestamp(0)..Timestamp(2_000)))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn backfill_page_does_not_keep_a_frame_the_budget_rejects() {
+        let mut cache = VideoFrameCache::for_raw();
+        cache.max_raw_bytes = 4;
+        let next = apply_backfill_page(
+            &mut cache,
+            vec![(Timestamp(1_000), vec![0; 8])],
+            Timestamp(0)..Timestamp(2_000),
+            8,
+            Timestamp(1_000),
+        );
+        assert!(next.is_none());
+        if cfg!(target_family = "wasm") {
+            assert!(cache.raw_frames.is_empty());
+            assert!(
+                cache
+                    .first_uncovered(&(Timestamp(0)..Timestamp(2_000)))
+                    .is_none()
+            );
+        } else {
+            assert!(cache.raw_frames.contains_key(&Timestamp(1_000)));
+        }
     }
 
     #[test]
