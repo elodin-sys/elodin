@@ -879,8 +879,17 @@ fn apply_hold_anchor_payload(
     ) else {
         return false;
     };
-    series_store.insert(component_id, timestamp, ComponentValue::from_view(view));
-    true
+    // Admit against the playhead block. The sample's own block is often too
+    // far to keep, and a dropped insert must not count as confirmed.
+    series_store.insert_predecessor(
+        component_id,
+        timestamp,
+        impeller_bevy::block_start(start.0),
+        ComponentValue::from_view(view),
+    );
+    series_store
+        .get_at_or_before(&component_id, start)
+        .is_some()
 }
 
 fn apply_hold_anchor_reply(
@@ -4829,6 +4838,73 @@ mod tests {
                 .map(|value| value.as_f64()),
             Some(1.0)
         );
+    }
+
+    #[test]
+    fn hold_anchor_admits_sparse_predecessor_against_playhead_block() {
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
+
+        let id = ComponentId::new("test.anchor.playhead");
+        let mut schemas = ComponentSchemaRegistry::default();
+        schemas.0.insert(
+            id,
+            Schema::new(PrimType::F64, Vec::<u64>::new()).expect("valid schema"),
+        );
+        let mut cache = TelemetryCache::default();
+        cache.insert(
+            id,
+            Timestamp(30_000_000),
+            ComponentValue::F64(nox::array![9.0f64].to_dyn()),
+        );
+        let cost = cache.resident_bytes();
+        cache.set_playback_budget(cost, Timestamp(0));
+        assert!(apply_hold_anchor_payload(
+            &[Timestamp(-120_000_000)],
+            &1.0f64.to_le_bytes(),
+            id,
+            Timestamp(0),
+            &mut cache,
+            &schemas,
+        ));
+        assert_eq!(
+            cache
+                .get_at_or_before(&id, Timestamp(0))
+                .and_then(|value| value.get(0))
+                .map(|value| value.as_f64()),
+            Some(1.0)
+        );
+        assert!(
+            cache
+                .series(&id)
+                .is_some_and(|series| !series.contains_key(&Timestamp(30_000_000)))
+        );
+        assert!(!cache.is_covered(&id, &(Timestamp(i64::MIN)..Timestamp(1))));
+    }
+
+    #[test]
+    fn dropped_hold_anchor_is_not_a_confirmed_miss() {
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
+
+        let id = ComponentId::new("test.anchor.dropped");
+        let mut schemas = ComponentSchemaRegistry::default();
+        schemas.0.insert(
+            id,
+            Schema::new(PrimType::F64, Vec::<u64>::new()).expect("valid schema"),
+        );
+        let mut cache = TelemetryCache::default();
+        cache.set_playback_budget(1, Timestamp(0));
+        assert!(!apply_hold_anchor_payload(
+            &[Timestamp(-120_000_000)],
+            &1.0f64.to_le_bytes(),
+            id,
+            Timestamp(0),
+            &mut cache,
+            &schemas,
+        ));
+        assert!(cache.get_at_or_before(&id, Timestamp(0)).is_none());
+        assert!(!cache.is_covered(&id, &(Timestamp(i64::MIN)..Timestamp(1))));
     }
 
     #[test]
