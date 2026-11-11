@@ -29,6 +29,8 @@ pub(crate) mod screenshot;
 pub(crate) mod simulation_startup;
 pub mod thruster_particles;
 pub mod view_cube;
+#[cfg(any(target_arch = "wasm32", test))]
+pub(crate) mod wasm_shadows;
 mod web_asset;
 pub(crate) mod world_mesh;
 
