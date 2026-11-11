@@ -482,7 +482,7 @@ pub struct EditorPlugin {
     window_resolution: WindowResolution,
     #[cfg(target_family = "wasm")]
     connection: Option<DbEndpoint>,
-    /// Parsed `&assets=` base. Applied to every wasm DB connection.
+    /// Page database URL. Applied to every wasm connection that does not set its own.
     #[cfg(target_family = "wasm")]
     assets: Option<HostOrUrl>,
 }
@@ -502,45 +502,12 @@ impl EditorPlugin {
         }
     }
 
+    /// Asset-server URL the browser connects through. `host:port` or `http(s)://…`.
     #[cfg(target_family = "wasm")]
-    pub fn with_connection_addr(mut self, addr: std::net::SocketAddr) -> Self {
-        self.connection = Some(DbEndpoint::from_socket(addr));
+    pub fn with_connection_url(mut self, url: HostOrUrl) -> Self {
+        self.connection = Some(DbEndpoint::from_assets(url.clone()));
+        self.assets = Some(url);
         self
-    }
-
-    /// `host:port`, where `host` may be an IP literal or a DNS name.
-    /// On failure the plugin is returned unchanged.
-    #[cfg(target_family = "wasm")]
-    pub fn with_connection_str(
-        self,
-        addr: &str,
-    ) -> Result<Self, (Self, impeller_bevy::address::ParseError)> {
-        match DbEndpoint::parse(addr) {
-            Ok(endpoint) => Ok(self.with_db_endpoint(endpoint)),
-            Err(err) => Err((self, err)),
-        }
-    }
-
-    #[cfg(target_family = "wasm")]
-    pub fn with_db_endpoint(mut self, endpoint: DbEndpoint) -> Self {
-        self.connection = Some(endpoint);
-        self
-    }
-
-    /// HTTP base for `db:` assets. `host:port` or `http(s)://…`.
-    /// On failure the plugin is returned unchanged.
-    #[cfg(target_family = "wasm")]
-    pub fn with_assets(
-        mut self,
-        assets: &str,
-    ) -> Result<Self, (Self, impeller_bevy::HostOrUrlError)> {
-        match assets.parse() {
-            Ok(assets) => {
-                self.assets = Some(assets);
-                Ok(self)
-            }
-            Err(err) => Err((self, err)),
-        }
     }
 }
 

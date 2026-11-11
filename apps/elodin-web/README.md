@@ -7,11 +7,13 @@ just install web
 just web
 ```
 
-Open the URL printed by Trunk. To connect to an Elodin DB, append
-`?db=127.0.0.1:2240` (use the DB's TCP port; its WebSocket endpoint uses the
-following port). An HTTPS deployment needs a browser-accessible secure WebSocket
-endpoint. A successful browser build does not by itself validate a Cloud data
-source or its authentication.
+Open the URL printed by Trunk. The editor connects to the page origin, unless
+`<meta name="elodin-web-db" content="…">` names a database. That value is the
+asset server (`tcp_port + 1`): `http://127.0.0.1:2241`, or `https://…` when the
+page is served over TLS. `just web http://127.0.0.1:2241` (or
+`ELODIN_WEB_DB=http://127.0.0.1:2241 just web`) writes the meta tag for a Trunk
+dev page. An empty meta tag keeps same-origin. A successful browser build does
+not by itself validate a Cloud data source or its authentication.
 
 ## Platform boundary
 

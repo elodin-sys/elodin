@@ -1,19 +1,12 @@
 use bevy::prelude::*;
 use elodin_editor::EditorPlugin;
-use web_sys::UrlSearchParams;
 
 fn main() {
     console_error_panic_hook::set_once();
     web_sys::console::log_1(&"elodin-web: main()".into());
-    let mut plugin = EditorPlugin::default();
-    if let Some(db) = query_value("db") {
-        plugin = apply_db_query(plugin, &db);
-    } else {
-        web_sys::console::log_1(&"elodin-web: no db query param".into());
-    }
-    if let Some(assets) = query_value("assets") {
-        plugin = apply_assets_query(plugin, &assets);
-    }
+    let plugin = EditorPlugin::default();
+    #[cfg(target_family = "wasm")]
+    let plugin = apply_page_db(plugin);
     App::new()
         .add_plugins(plugin)
         .add_systems(Startup, log_startup)
@@ -21,57 +14,40 @@ fn main() {
         .run();
 }
 
+/// `<meta name="elodin-web-db">` when it has a value, otherwise the page origin.
 #[cfg(target_family = "wasm")]
-fn apply_db_query(plugin: EditorPlugin, db: &str) -> EditorPlugin {
-    match plugin.with_connection_str(db) {
-        Ok(next) => {
-            web_sys::console::log_1(&format!("elodin-web: db={db}").into());
-            next
-        }
-        Err((plugin, err)) => {
-            web_sys::console::warn_1(&format!("elodin-web: ignoring db={db:?}: {err}").into());
-            plugin
-        }
-    }
-}
-
-/// Host `cargo clippy` typechecks this bin. The connection API is wasm-only.
-#[cfg(not(target_family = "wasm"))]
-fn apply_db_query(plugin: EditorPlugin, db: &str) -> EditorPlugin {
-    let _ = db;
-    plugin
-}
-
-/// `?db=host:port` connects immediately. `host` may be an IP or a DNS name.
-/// `&assets=host:port` or `&assets=http(s)://…` overrides where `db:` assets are fetched.
-fn query_value(key: &str) -> Option<String> {
+fn page_db_url() -> Option<String> {
     let window = web_sys::window()?;
-    let search = window.location().search().ok()?;
-    let params = UrlSearchParams::new_with_str(&search).ok()?;
-    params.get(key)
+    let document = window.document()?;
+    let content = document
+        .query_selector("meta[name='elodin-web-db']")
+        .ok()
+        .flatten()
+        .and_then(|el| el.get_attribute("content"))
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    if let Some(content) = content {
+        return Some(content);
+    }
+    window.location().origin().ok()
 }
 
 #[cfg(target_family = "wasm")]
-fn apply_assets_query(plugin: EditorPlugin, assets: &str) -> EditorPlugin {
-    match plugin.with_assets(assets) {
-        Ok(next) => {
-            web_sys::console::log_1(&format!("elodin-web: assets={assets}").into());
-            next
+fn apply_page_db(plugin: EditorPlugin) -> EditorPlugin {
+    let Some(raw) = page_db_url() else {
+        web_sys::console::log_1(&"elodin-web: no page database".into());
+        return plugin;
+    };
+    match raw.parse::<impeller_bevy::HostOrUrl>() {
+        Ok(url) => {
+            web_sys::console::log_1(&format!("elodin-web: db={url}").into());
+            plugin.with_connection_url(url)
         }
-        Err((plugin, err)) => {
-            web_sys::console::warn_1(
-                &format!("elodin-web: ignoring assets={assets:?}: {err}").into(),
-            );
+        Err(err) => {
+            web_sys::console::warn_1(&format!("elodin-web: ignoring db={raw:?}: {err}").into());
             plugin
         }
     }
-}
-
-/// Host `cargo clippy` typechecks this bin. The assets API is wasm-only.
-#[cfg(not(target_family = "wasm"))]
-fn apply_assets_query(plugin: EditorPlugin, assets: &str) -> EditorPlugin {
-    let _ = assets;
-    plugin
 }
 
 fn log_startup() {
