@@ -78,22 +78,37 @@ pub fn update(
             };
             start
         };
-        let bytes = schema
+        let sample_bytes = schema
             .0
             .get(&id)
             .map_or(8, |schema| schema.size().saturating_add(8));
-        if !cache.admit_block(
-            start,
-            bytes.saturating_mul(if anchor { 1 } else { PAGE_LIMIT }),
-        ) {
+        let max_limit = if anchor { 1 } else { PAGE_LIMIT };
+        let Some(limit) = cache.fitting_page_limit(sample_bytes, max_limit) else {
+            continue;
+        };
+        if !cache.admit_block(start, sample_bytes.saturating_mul(limit)) {
             continue;
         }
         pager.pending.insert(id);
-        send(id, start, start.saturating_add(BLOCK_US), anchor, commands);
+        send(
+            id,
+            start,
+            start.saturating_add(BLOCK_US),
+            anchor,
+            limit,
+            commands,
+        );
     }
 }
 
-fn send(id: ComponentId, start: i64, end: i64, anchor: bool, commands: &mut Commands) {
+fn send(
+    id: ComponentId,
+    start: i64,
+    end: i64,
+    anchor: bool,
+    limit: usize,
+    commands: &mut Commands,
+) {
     let callback = move |packet: InRef<OwnedPacket<PacketGrantR>>,
                          mut pager: ResMut<PlaybackPager>,
                          mut cache: ResMut<TelemetryCache>,
@@ -146,7 +161,7 @@ fn send(id: ComponentId, start: i64, end: i64, anchor: bool, commands: &mut Comm
         if anchor {
             pager.anchors.insert((id, block), times.first().copied());
         } else {
-            let covered_end = if times.len() < PAGE_LIMIT {
+            let covered_end = if times.len() < limit {
                 end
             } else {
                 times.last().map_or(start, |last| last.0.saturating_add(1))
@@ -154,7 +169,7 @@ fn send(id: ComponentId, start: i64, end: i64, anchor: bool, commands: &mut Comm
             cache.mark_page_covered(id, Timestamp(start), Timestamp(covered_end), times);
             if covered_end < end {
                 pager.pending.insert(id);
-                send(id, covered_end, end, false, &mut commands);
+                send(id, covered_end, end, false, limit, &mut commands);
             }
         }
         true
@@ -174,7 +189,7 @@ fn send(id: ComponentId, start: i64, end: i64, anchor: bool, commands: &mut Comm
                 id: PacketId::default(),
                 range: Timestamp(start)..Timestamp(end.saturating_sub(1)),
                 component_id: id,
-                limit: Some(PAGE_LIMIT),
+                limit: Some(limit),
             },
             callback,
         );
@@ -223,5 +238,28 @@ mod tests {
         assert!(!cache.admit_block(-2_000_000, cost));
         cache.drop_block(id, 2_000_000);
         assert_eq!(cache.resident_bytes(), 0);
+    }
+
+    #[test]
+    fn large_components_request_a_page_that_fits() {
+        let mut cache = TelemetryCache::default();
+        assert_eq!(
+            cache.fitting_page_limit(10_000, PAGE_LIMIT),
+            Some(PAGE_LIMIT)
+        );
+        cache.set_playback_budget(64 * 1024, Timestamp(0));
+        let sample = 64usize;
+        let limit = cache
+            .fitting_page_limit(sample, PAGE_LIMIT)
+            .expect("one sample fits");
+        assert!(limit < PAGE_LIMIT);
+        assert!(cache.admit_block(0, sample.saturating_mul(limit)));
+        assert!(!cache.admit_block(1_000_000, sample.saturating_mul(PAGE_LIMIT)));
+        assert_eq!(cache.fitting_page_limit(sample, 4), Some(4));
+        assert!(
+            cache
+                .fitting_page_limit(64 * 1024 + 1, PAGE_LIMIT)
+                .is_none()
+        );
     }
 }

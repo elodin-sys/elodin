@@ -1113,6 +1113,7 @@ fn apply_visible_prefetch_page(
     component_id: ComponentId,
     req_start: Timestamp,
     req_end: Timestamp,
+    limit: usize,
     series_store: &mut TelemetryCache,
     schema_reg: &ComponentSchemaRegistry,
 ) -> VisiblePageOutcome {
@@ -1128,17 +1129,20 @@ fn apply_visible_prefetch_page(
         component_id,
         req_start,
         req_end,
+        limit,
         series_store,
         schema_reg,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_visible_prefetch_payload(
     timestamps: &[Timestamp],
     buf: &[u8],
     component_id: ComponentId,
     req_start: Timestamp,
     req_end: Timestamp,
+    limit: usize,
     series_store: &mut TelemetryCache,
     schema_reg: &ComponentSchemaRegistry,
 ) -> VisiblePageOutcome {
@@ -1168,7 +1172,7 @@ fn apply_visible_prefetch_payload(
         };
         series_store.insert(component_id, timestamp, ComponentValue::from_view(view));
     }
-    if timestamps.len() < VISIBLE_PREFETCH_LIMIT {
+    if timestamps.len() < limit {
         series_store.mark_page_covered(component_id, req_start, req_end, timestamps);
         return VisiblePageOutcome::Complete;
     }
@@ -1194,15 +1198,26 @@ fn send_visible_prefetch_page(
     commands: &mut Commands,
 ) {
     commands.queue(move |world: &mut bevy::prelude::World| {
+        let mut limit = VISIBLE_PREFETCH_LIMIT;
         if cfg!(target_family = "wasm") {
             let size = world
                 .resource::<ComponentSchemaRegistry>()
                 .0
                 .get(&component_id)
                 .map_or(8, |schema| schema.size().saturating_add(8));
+            let Some(fit) = world
+                .resource::<TelemetryCache>()
+                .fitting_page_limit(size, VISIBLE_PREFETCH_LIMIT)
+            else {
+                world
+                    .resource_mut::<VisiblePrefetchState>()
+                    .finish(key, attempt, false);
+                return;
+            };
+            limit = fit;
             if !world.resource_mut::<TelemetryCache>().admit_block(
                 impeller_bevy::block_start(req_start.0),
-                size.saturating_mul(VISIBLE_PREFETCH_LIMIT),
+                size.saturating_mul(limit),
             ) {
                 world
                     .resource_mut::<VisiblePrefetchState>()
@@ -1216,6 +1231,7 @@ fn send_visible_prefetch_page(
             component_id,
             req_start,
             req_end,
+            limit,
             &mut world.commands(),
         );
     });
@@ -1227,6 +1243,7 @@ fn send_visible_admitted_page(
     component_id: ComponentId,
     req_start: Timestamp,
     req_end: Timestamp,
+    limit: usize,
     commands: &mut Commands,
 ) {
     commands.send_req_reply_raw(
@@ -1234,7 +1251,7 @@ fn send_visible_admitted_page(
             id: PacketId::default(),
             range: req_start..req_end,
             component_id,
-            limit: Some(VISIBLE_PREFETCH_LIMIT),
+            limit: Some(limit),
         },
         move |pkt: InRef<OwnedPacket<PacketGrantR>>,
               mut series_store: ResMut<TelemetryCache>,
@@ -1255,6 +1272,7 @@ fn send_visible_admitted_page(
                 component_id,
                 req_start,
                 req_end,
+                limit,
                 &mut series_store,
                 &schema_reg,
             ) {
@@ -4644,6 +4662,7 @@ mod tests {
                 id,
                 range.start,
                 range.end,
+                VISIBLE_PREFETCH_LIMIT,
                 &mut cache,
                 &schemas,
             ),
@@ -4681,6 +4700,7 @@ mod tests {
                     id,
                     Timestamp(start),
                     Timestamp(end),
+                    VISIBLE_PREFETCH_LIMIT,
                     &mut cache,
                     &schemas,
                 ),
@@ -4722,6 +4742,7 @@ mod tests {
                 id,
                 Timestamp(0),
                 Timestamp(10_000),
+                VISIBLE_PREFETCH_LIMIT,
                 &mut cache,
                 &schemas,
             ),
@@ -4737,6 +4758,7 @@ mod tests {
                 id,
                 Timestamp(next),
                 Timestamp(10_000),
+                VISIBLE_PREFETCH_LIMIT,
                 &mut cache,
                 &schemas,
             ),
@@ -4745,6 +4767,47 @@ mod tests {
         prefetch.finish(key, attempt, true);
         assert!(prefetch.requests.is_empty());
         assert!(cache.is_covered(&id, &(Timestamp(0)..Timestamp(10_000))));
+    }
+
+    #[test]
+    fn reduced_page_limit_continues_until_the_window_is_covered() {
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
+
+        let id = ComponentId::new("test.visible.small_page");
+        let mut schemas = ComponentSchemaRegistry::default();
+        schemas.0.insert(
+            id,
+            Schema::new(PrimType::U8, Vec::<u64>::new()).expect("valid schema"),
+        );
+        let mut cache = TelemetryCache::default();
+        assert_eq!(
+            apply_visible_prefetch_payload(
+                &[Timestamp(0), Timestamp(1)],
+                &[0, 0],
+                id,
+                Timestamp(0),
+                Timestamp(10),
+                2,
+                &mut cache,
+                &schemas,
+            ),
+            VisiblePageOutcome::Next(Timestamp(2))
+        );
+        assert_eq!(
+            apply_visible_prefetch_payload(
+                &[Timestamp(2)],
+                &[0],
+                id,
+                Timestamp(2),
+                Timestamp(10),
+                2,
+                &mut cache,
+                &schemas,
+            ),
+            VisiblePageOutcome::Complete
+        );
+        assert!(cache.is_covered(&id, &(Timestamp(0)..Timestamp(10))));
     }
 
     #[test]
@@ -4773,6 +4836,7 @@ mod tests {
                 id,
                 Timestamp(10),
                 Timestamp(20),
+                VISIBLE_PREFETCH_LIMIT,
                 &mut cache,
                 &schemas,
             ),

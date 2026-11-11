@@ -213,6 +213,24 @@ impl TelemetryCache {
         self.pivot = pivot;
     }
 
+    /// Largest page in `1..=max_limit` whose worst case fits in the budget.
+    /// Unlimited caches use `max_limit`. `None` when one sample cannot fit.
+    pub fn fitting_page_limit(&self, sample_bytes: usize, max_limit: usize) -> Option<usize> {
+        if max_limit == 0 {
+            return None;
+        }
+        if self.byte_limit == 0 {
+            return Some(max_limit);
+        }
+        if sample_bytes > self.byte_limit {
+            return None;
+        }
+        if sample_bytes == 0 {
+            return Some(max_limit);
+        }
+        Some((self.byte_limit / sample_bytes).min(max_limit))
+    }
+
     /// Admission only evicts blocks strictly farther away than the wanted block.
     pub fn admit_block(&mut self, start: i64, bytes: usize) -> bool {
         if self.byte_limit == 0 {
