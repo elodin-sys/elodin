@@ -44,7 +44,7 @@ pub struct StartupWindow;
 pub struct StartupActive;
 
 /// Initial page-database attempt. While this exists the editor chrome stays
-/// hidden and a connecting or failure dialog is shown instead.
+/// hidden. Failure offers another attempt at the same database.
 #[derive(Resource, Clone)]
 #[cfg_attr(not(target_family = "wasm"), allow(dead_code))]
 pub struct UrlConnect {
@@ -178,66 +178,48 @@ fn url_connect_feedback(world: &mut World) {
         _ => {}
     }
 
+    if !prompt.failed {
+        world.egui_context_scope::<_, With<PrimaryWindow>>(|_, ctx| ctx.request_repaint());
+        return;
+    }
     world.egui_context_scope::<_, With<PrimaryWindow>>(|world, ctx| {
-        if !prompt.failed {
-            ctx.request_repaint();
-        }
-        let dismissed = egui::Modal::new(egui::Id::new("url_connect"))
+        let retry = egui::Modal::new(egui::Id::new("url_connect"))
             .frame(connect_dialog_frame())
             .backdrop_color(get_scheme().bg_secondary.opacity(0.85))
             .show(&ctx, |ui| {
-                if prompt.failed {
-                    ui.add(
-                        egui::Label::new(RichText::new("Couldn't connect").size(18.))
-                            .selectable(false),
-                    );
-                    ui.add_space(8.);
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(format!("No database is reachable at {}.", prompt.addr))
-                                .color(colors::REDDISH_DEFAULT)
-                                .size(12.),
-                        )
-                        .selectable(false),
-                    );
-                    ui.add_space(24.);
-                    ui.add(EButton::green("OK").width(280.)).clicked()
-                } else {
-                    ui.add(
-                        egui::Label::new(RichText::new("Connecting").size(18.)).selectable(false),
-                    );
-                    ui.add_space(8.);
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(format!("Trying to reach {}.", prompt.addr))
-                                .color(get_scheme().text_tertiary)
-                                .size(12.),
-                        )
-                        .selectable(false),
-                    );
-                    ui.add_space(24.);
-                    ui.add(EButton::gray("CANCEL").width(280.)).clicked()
-                }
+                ui.add(
+                    egui::Label::new(RichText::new("Couldn't connect").size(18.)).selectable(false),
+                );
+                ui.add_space(8.);
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(format!("No database is reachable at {}.", prompt.addr))
+                            .color(colors::REDDISH_DEFAULT)
+                            .size(12.),
+                    )
+                    .selectable(false),
+                );
+                ui.add_space(24.);
+                ui.add(EButton::green("RETRY").width(280.)).clicked()
             });
-        if dismissed.inner {
-            return_to_connection_screen(world, &prompt.addr);
+        if retry.inner {
+            retry_fixed_connection(world);
         }
     });
 }
 
 #[cfg(target_family = "wasm")]
-fn return_to_connection_screen(world: &mut World, addr: &str) {
-    impeller_bevy::suspend_ws_reconnect(world);
-    if let Some(status) = world.get_resource::<ThreadConnectionStatus>() {
-        status.set_status(ConnectionStatus::NoConnection);
+fn retry_fixed_connection(world: &mut World) {
+    let Some(endpoint) = world
+        .get_resource::<ConnectionAddr>()
+        .map(|addr| addr.endpoint().clone())
+    else {
+        return;
+    };
+    if let Some(mut prompt) = world.get_resource_mut::<UrlConnect>() {
+        prompt.failed = false;
     }
-    if let Some(mut recent) = world.get_resource_mut::<RecentItems>()
-        && let Ok(now) = Epoch::now()
-    {
-        recent.push(now, RecentItem::Addr(addr.to_string()));
-    }
-    world.remove_resource::<UrlConnect>();
-    world.insert_resource(StartupActive);
+    world.write_message(impeller_bevy::WsConnect(endpoint));
 }
 
 #[cfg(target_family = "wasm")]

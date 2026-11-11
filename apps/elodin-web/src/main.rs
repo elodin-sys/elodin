@@ -14,22 +14,18 @@ fn main() {
         .run();
 }
 
-/// `<meta name="elodin-web-db">` when it has a value, otherwise the page origin.
+/// `<meta name="elodin-web-db">` when it has a value. Empty content leaves the
+/// editor on the connect screen.
 #[cfg(target_family = "wasm")]
 fn page_db_url() -> Option<String> {
-    let window = web_sys::window()?;
-    let document = window.document()?;
-    let content = document
+    let document = web_sys::window()?.document()?;
+    document
         .query_selector("meta[name='elodin-web-db']")
         .ok()
         .flatten()
         .and_then(|el| el.get_attribute("content"))
         .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
-    if let Some(content) = content {
-        return Some(content);
-    }
-    window.location().origin().ok()
+        .filter(|value| !value.is_empty())
 }
 
 #[cfg(target_family = "wasm")]
