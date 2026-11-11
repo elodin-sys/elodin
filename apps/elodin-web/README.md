@@ -19,6 +19,11 @@ WebGPU enables Hanabi particles. The editor adapts Bevy's shadow comparison
 sampling for WebGPU while retaining the WebGL shaders for browsers that use
 the fallback renderer.
 
+With WebGPU, `atmosphere` or `earth` inside the schematic's `environment`
+also enables the shared atmosphere renderer on the active viewport. This does
+not include Cinematic Earth's globe or night-side material. WebGL retains
+the schematic lighting and clear color without atmosphere rendering.
+
 Big Space is required on both native and WASM targets. It provides the coordinate
 conversion used by the editor and is independent of terrain streaming.
 
