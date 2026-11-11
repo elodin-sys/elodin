@@ -23,7 +23,6 @@ wired up. Unchecked items are compiled out, stubbed, or still native-only.
 - [x] Malformed `WorldPos` samples are ignored instead of panicking
 - [x] H.264 video decode via `webcodecs-video` (`attach_webcodecs` / `drive_webcodecs` in `video_stream.rs`)
 - [x] Thruster particles (Hanabi). The wasm editor requests the WebGPU backend so compute shaders are available
-- [x] Schematic atmosphere on WebGPU, using the shared renderer without Cinematic Earth's globe or night-side material
 - [x] Component stream filter (`SetStreamFilter` on the WebSocket client, same handshake as TCP)
 - [x] Status bar (connection, schematic build error, FPS, TPS, plot-buffer usage, command palette)
 - [x] Saved built-in color scheme (preset and mode in `localStorage`)

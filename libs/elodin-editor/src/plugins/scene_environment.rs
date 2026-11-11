@@ -17,8 +17,6 @@ use impeller::types::Timestamp;
 use impeller_wkt::{AtmosphereConfig, CurrentTimestamp, EnvironmentConfig, SunConfig};
 
 use crate::MainCamera;
-#[cfg(any(target_arch = "wasm32", test))]
-use crate::plugins::gpu_info::GpuInfo;
 use crate::plugins::render_layer_alloc::CINEMATIC_EARTH_RENDER_LAYER;
 
 /// Globe root: ECEF origin, model→ECEF alignment rotation, no scale.
@@ -103,49 +101,6 @@ impl Plugin for SceneEnvironmentPlugin {
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app.add_systems(ExtractSchedule, clear_inactive_extracted_atmosphere);
         }
-        #[cfg(target_arch = "wasm32")]
-        app.add_systems(
-            Update,
-            sync_standalone_atmosphere_root.before(sync_atmosphere),
-        );
-    }
-}
-
-/// Earth-centered atmosphere without the native cinematic globe and materials.
-#[cfg(any(target_arch = "wasm32", test))]
-#[derive(Component)]
-struct StandaloneAtmosphereRoot;
-
-#[cfg(any(target_arch = "wasm32", test))]
-fn sync_standalone_atmosphere_root(
-    mut commands: Commands,
-    gpu: Option<Res<GpuInfo>>,
-    environment: Res<SceneEnvironment>,
-    roots: Query<Entity, With<StandaloneAtmosphereRoot>>,
-    cinematic_roots: Query<(), (With<CinematicEarthRoot>, Without<StandaloneAtmosphereRoot>)>,
-) {
-    let needed = gpu.is_some_and(|gpu| gpu.0.backend == wgpu::Backend::BrowserWebGpu)
-        && environment
-            .0
-            .as_ref()
-            .and_then(effective_atmosphere)
-            .is_some()
-        && cinematic_roots.is_empty();
-    if !needed {
-        for entity in &roots {
-            commands.entity(entity).despawn();
-        }
-    } else if roots.is_empty() {
-        commands.spawn((
-            StandaloneAtmosphereRoot,
-            CinematicEarthRoot,
-            Name::new("atmosphere Earth origin"),
-            Transform::default(),
-            GlobalTransform::default(),
-            crate::spatial::GridCell::default(),
-            bevy_geo_frames::GeoPosition(GeoFrame::ECEF, DVec3::ZERO),
-            bevy_geo_frames::GeoRotation::absolute(GeoFrame::ECEF, bevy::math::DQuat::IDENTITY),
-        ));
     }
 }
 
@@ -544,7 +499,6 @@ type EnvironmentCameraQuery<'w, 's> = Query<
 
 fn sync_camera_environment(
     mut commands: Commands,
-    #[cfg(target_arch = "wasm32")] gpu: Option<Res<GpuInfo>>,
     environment: Res<SceneEnvironment>,
     space_visibility: Res<SpaceVisibility>,
     cinematic: Query<Entity, With<CinematicViewport>>,
@@ -559,13 +513,6 @@ fn sync_camera_environment(
         ),
         None => (1.0, None, None, false),
     };
-    // WebGL lacks the compute pipeline used by Bevy's atmosphere. Keep its
-    // clear color and lighting without attaching unsupported view settings.
-    #[cfg(target_arch = "wasm32")]
-    let atmosphere = atmosphere.filter(|_| {
-        gpu.as_ref()
-            .is_some_and(|gpu| gpu.0.backend == wgpu::Backend::BrowserWebGpu)
-    });
     let intensity = BASE_ENVIRONMENT_MAP_INTENSITY * ambient_scale;
     let (environment_clear, regular_clear) = clear_colors(sky_color, earth);
     // Bevy 0.19 permits AtmosphereSettings on only one active view, and
@@ -630,80 +577,6 @@ fn sync_camera_environment(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn browser_atmosphere_waits_for_webgpu_and_follows_the_schematic() {
-        use crate::plugins::gpu_info::tests::backend;
-
-        let mut app = App::new();
-        app.insert_resource(SceneEnvironment(Some(EnvironmentConfig {
-            earth: Some(impeller_wkt::EarthConfig::default()),
-            ..default()
-        })))
-        .add_systems(Update, sync_standalone_atmosphere_root);
-        app.update();
-        assert_eq!(
-            app.world_mut()
-                .query::<&StandaloneAtmosphereRoot>()
-                .iter(app.world())
-                .count(),
-            0
-        );
-        app.insert_resource(backend(wgpu::Backend::Gl, wgpu::DeviceType::IntegratedGpu));
-        app.update();
-        assert_eq!(
-            app.world_mut()
-                .query::<&StandaloneAtmosphereRoot>()
-                .iter(app.world())
-                .count(),
-            0
-        );
-        app.insert_resource(backend(
-            wgpu::Backend::BrowserWebGpu,
-            wgpu::DeviceType::Other,
-        ));
-        app.update();
-        app.update();
-        let root = app
-            .world_mut()
-            .query_filtered::<Entity, With<StandaloneAtmosphereRoot>>()
-            .single(app.world())
-            .unwrap();
-        assert!(
-            app.world()
-                .get::<bevy_geo_frames::GeoPosition>(root)
-                .is_some()
-        );
-        app.world_mut().resource_mut::<SceneEnvironment>().0 = None;
-        app.update();
-        assert!(app.world().get_entity(root).is_err());
-    }
-
-    #[test]
-    fn browser_atmosphere_defers_to_an_existing_cinematic_root() {
-        use crate::plugins::gpu_info::tests::backend;
-
-        let mut app = App::new();
-        app.insert_resource(backend(
-            wgpu::Backend::BrowserWebGpu,
-            wgpu::DeviceType::Other,
-        ))
-        .insert_resource(SceneEnvironment(Some(EnvironmentConfig {
-            earth: Some(impeller_wkt::EarthConfig::default()),
-            ..default()
-        })))
-        .add_systems(Update, sync_standalone_atmosphere_root);
-        app.update();
-        let cinematic = app.world_mut().spawn(CinematicEarthRoot).id();
-        app.update();
-        assert_eq!(
-            app.world_mut()
-                .query_filtered::<Entity, With<CinematicEarthRoot>>()
-                .single(app.world())
-                .unwrap(),
-            cinematic,
-        );
-    }
 
     #[test]
     fn earth_atmosphere_settings_skip_inactive_cinematic_camera() {
