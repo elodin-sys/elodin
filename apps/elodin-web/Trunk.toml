@@ -24,7 +24,7 @@ command_arguments = ["-c", """
 # Portable in-place edit: BSD sed (macOS) requires a backup suffix; GNU sed
 # accepts `-i.bak` too. Matches scripts/test-quickstart.sh.
 [ -z "$ELODIN_WEB_DB" ] || {
-  sed -i.bak "s|name=\\"elodin-web-db\\" content=\\"\\"|name=\\"elodin-web-db\\" content=\\"$ELODIN_WEB_DB\\"|" "$TRUNK_STAGING_DIR/index.html"
+  sed -i.bak "s|name=\\"elodin-web-db\\" content=\\"\\"|name=\\"elodin-web-db\\" content=\\"$ELODIN_WEB_DB\\"|" "$TRUNK_STAGING_DIR/index.html" && \
   rm -f "$TRUNK_STAGING_DIR/index.html.bak"
 }
 """]
