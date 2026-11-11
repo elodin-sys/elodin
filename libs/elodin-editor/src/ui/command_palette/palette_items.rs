@@ -1102,25 +1102,25 @@ fn connect_database() -> PaletteItem {
         SIMULATION_LABEL,
         |_: In<String>| {
             PalettePage::new(vec![PaletteItem::new(
-                LabelSource::placeholder("127.0.0.1:2240"),
+                LabelSource::placeholder("http://127.0.0.1:2241"),
                 "",
                 |In(addr): In<String>, mut connect: MessageWriter<WsConnect>| {
                     let trimmed = addr.trim();
-                    let parsed = impeller_bevy::DbEndpoint::parse(if trimmed.is_empty() {
-                        "127.0.0.1:2240"
+                    let parsed = if trimmed.is_empty() {
+                        "http://127.0.0.1:2241".parse::<impeller_bevy::HostOrUrl>()
                     } else {
-                        trimmed
-                    });
+                        trimmed.parse()
+                    };
                     match parsed {
-                        Ok(addr) => {
-                            connect.write(WsConnect(addr));
+                        Ok(url) => {
+                            connect.write(WsConnect(impeller_bevy::DbEndpoint::from_assets(url)));
                             PaletteEvent::Exit
                         }
                         Err(err) => PaletteEvent::Error(format!("Invalid address: {err}")),
                     }
                 },
             )])
-            .prompt("Database address (host:port)")
+            .prompt("Database URL")
             .into_event()
         },
     )

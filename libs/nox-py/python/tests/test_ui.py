@@ -308,21 +308,21 @@ def test_assets_http_url_brackets_ipv6():
 
     url = _assets_http_url("[fde1:2240:a1ef::1]:2240", "schematics/main.overlay.kdl")
     parts = urlsplit(url)
-    assert url == "http://[fde1:2240:a1ef::1]:2241/schematics/main.overlay.kdl"
+    assert url == "http://[fde1:2240:a1ef::1]:2241/assets/schematics/main.overlay.kdl"
     assert parts.hostname == "fde1:2240:a1ef::1"
     assert parts.port == 2241
 
     assert (
         _assets_http_url("[::1]:2240", "schematics/main.overlay.kdl")
-        == "http://[::1]:2241/schematics/main.overlay.kdl"
+        == "http://[::1]:2241/assets/schematics/main.overlay.kdl"
     )
     assert (
         _assets_http_url("127.0.0.1:2240", "schematics/main.overlay.kdl")
-        == "http://127.0.0.1:2241/schematics/main.overlay.kdl"
+        == "http://127.0.0.1:2241/assets/schematics/main.overlay.kdl"
     )
-    assert _assets_http_url("localhost:2240", "k") == "http://localhost:2241/k"
-    assert _assets_http_url("0.0.0.0:2240", "k") == "http://127.0.0.1:2241/k"
-    assert _assets_http_url("[::]:2240", "k") == "http://127.0.0.1:2241/k"
+    assert _assets_http_url("localhost:2240", "k") == "http://localhost:2241/assets/k"
+    assert _assets_http_url("0.0.0.0:2240", "k") == "http://127.0.0.1:2241/assets/k"
+    assert _assets_http_url("[::]:2240", "k") == "http://127.0.0.1:2241/assets/k"
 
 
 def test_watch_follows_active_schematic_and_overlay(tmp_path):
@@ -413,7 +413,7 @@ def test_push_to_embedded_server(tmp_path):
         assert "drone.thrust" in body
 
         # Editor loads the active schematic from the Asset Server on N+1.
-        url = "http://127.0.0.1:23552/schematics/main.kdl"
+        url = "http://127.0.0.1:23552/assets/schematics/main.kdl"
         http_deadline = time.time() + 5
         last_err: Exception | None = None
         while time.time() < http_deadline:

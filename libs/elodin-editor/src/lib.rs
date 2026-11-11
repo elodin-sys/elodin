@@ -5,7 +5,7 @@
 )]
 
 #[cfg(target_family = "wasm")]
-use impeller_bevy::DbEndpoint;
+use impeller_bevy::{DbEndpoint, HostOrUrl};
 use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
 use crate::plugins::{editor_cam_input, editor_cam_touch};
@@ -482,6 +482,9 @@ pub struct EditorPlugin {
     window_resolution: WindowResolution,
     #[cfg(target_family = "wasm")]
     connection: Option<DbEndpoint>,
+    /// Page database URL. Applied to every wasm connection that does not set its own.
+    #[cfg(target_family = "wasm")]
+    assets: Option<HostOrUrl>,
 }
 
 /// The positions of camera of object_3d are sync'd in `PreUpdate`.
@@ -494,31 +497,16 @@ impl EditorPlugin {
             window_resolution: WindowResolution::new(width as u32, height as u32),
             #[cfg(target_family = "wasm")]
             connection: None,
+            #[cfg(target_family = "wasm")]
+            assets: None,
         }
     }
 
+    /// Asset-server URL the browser connects through. `host:port` or `http(s)://…`.
     #[cfg(target_family = "wasm")]
-    pub fn with_connection_addr(mut self, addr: std::net::SocketAddr) -> Self {
-        self.connection = Some(DbEndpoint::from_socket(addr));
-        self
-    }
-
-    /// `host:port`, where `host` may be an IP literal or a DNS name.
-    /// On failure the plugin is returned unchanged.
-    #[cfg(target_family = "wasm")]
-    pub fn with_connection_str(
-        self,
-        addr: &str,
-    ) -> Result<Self, (Self, impeller_bevy::address::ParseError)> {
-        match DbEndpoint::parse(addr) {
-            Ok(endpoint) => Ok(self.with_db_endpoint(endpoint)),
-            Err(err) => Err((self, err)),
-        }
-    }
-
-    #[cfg(target_family = "wasm")]
-    pub fn with_db_endpoint(mut self, endpoint: DbEndpoint) -> Self {
-        self.connection = Some(endpoint);
+    pub fn with_connection_url(mut self, url: HostOrUrl) -> Self {
+        self.connection = Some(DbEndpoint::from_assets(url.clone()));
+        self.assets = Some(url);
         self
     }
 }
@@ -661,6 +649,7 @@ impl Plugin for EditorPlugin {
         #[cfg(target_family = "wasm")]
         app.add_plugins(impeller_bevy::WsImpellerPlugin::new(
             self.connection.clone(),
+            self.assets.clone(),
         ));
         app.add_plugins(FrustumPlugin)
             .add_plugins(FrustumIntersectionPlugin)

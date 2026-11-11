@@ -13,8 +13,11 @@ console_error_panic_hook = "0.1"
 getrandom = { version = "0.3", features = ["wasm_js"] }
 web-sys = { version = "0.3", features = [
   "console",
+  "Document",
+  "Element",
   "Window",
   "Event",
-  "Location",
-  "UrlSearchParams",
 ] }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+impeller-bevy = { path = "../../libs/impeller/bevy", default-features = false }
