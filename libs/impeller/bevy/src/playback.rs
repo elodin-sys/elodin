@@ -138,12 +138,8 @@ fn send(id: ComponentId, start: i64, end: i64, anchor: bool, commands: &mut Comm
             else {
                 return true;
             };
-            // Predecessors are admitted for the playhead block rather than their old sample block.
             if anchor {
-                let limit = cache.byte_limit;
-                cache.byte_limit = 0;
-                cache.insert(id, time, ComponentValue::from_view(view));
-                cache.byte_limit = limit;
+                cache.insert_predecessor(id, time, block, ComponentValue::from_view(view));
             } else {
                 cache.insert(id, time, ComponentValue::from_view(view));
             }
@@ -195,6 +191,20 @@ mod tests {
         assert_eq!(block_start(1_250_001), 1_000_000);
         assert_eq!(block_start(-1), -1_000_000);
     }
+    #[test]
+    fn sparse_predecessors_do_not_trade_places_with_far_plot_blocks() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId(7);
+        let value = ComponentValue::F64(nox::array![1f64].to_dyn());
+        let cost = TelemetryCache::value_bytes(&value);
+        cache.set_playback_budget(cost, Timestamp(0));
+        cache.insert_predecessor(id, Timestamp(-60_000_000), 0, value);
+        assert!(!cache.admit_block(5_000_000, cost));
+        assert!(cache.get_at_or_before(&id, Timestamp(0)).is_some());
+        cache.drop_block(id, 0);
+        assert_eq!(cache.resident_bytes(), 0);
+    }
+
     #[test]
     fn admission_only_replaces_strictly_farther_blocks() {
         let id = ComponentId(7);

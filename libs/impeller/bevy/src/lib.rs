@@ -96,6 +96,7 @@ pub struct TelemetryCache {
     resident_bytes: usize,
     byte_limit: usize,
     pivot: Timestamp,
+    predecessors: HashMap<ComponentId, (Timestamp, i64)>,
     components: HashMap<ComponentId, BTreeMap<Timestamp, ComponentValue>>,
     /// Merged half-open coverage intervals `[start, end)` per component (micros).
     coverage: HashMap<ComponentId, Vec<(i64, i64)>>,
@@ -232,10 +233,20 @@ impl TelemetryCache {
                 .components
                 .iter()
                 .flat_map(|(&id, series)| {
-                    [series.first_key_value(), series.last_key_value()]
-                        .into_iter()
-                        .flatten()
-                        .map(move |(&time, _)| (id, block_start(time.0)))
+                    let anchor = self.predecessors.get(&id).copied();
+                    let mut ordinary = series
+                        .keys()
+                        .filter(|time| anchor.is_none_or(|(timestamp, _)| **time != timestamp));
+                    let first = ordinary.next().copied();
+                    let last = ordinary.next_back().copied();
+                    [
+                        first.map(|time| block_start(time.0)),
+                        last.map(|time| block_start(time.0)),
+                        anchor.map(|(_, block)| block),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .map(move |block| (id, block))
                 })
                 .max_by_key(|(_, time)| time.abs_diff(self.pivot.0));
             let Some((id, time)) = candidate else {
@@ -249,11 +260,45 @@ impl TelemetryCache {
         true
     }
 
+    /// A sparse predecessor belongs to its wanted block, regardless of its sample time.
+    pub fn insert_predecessor(
+        &mut self,
+        id: ComponentId,
+        time: Timestamp,
+        block: i64,
+        value: ComponentValue,
+    ) {
+        let bytes = if self
+            .components
+            .get(&id)
+            .is_some_and(|series| series.contains_key(&time))
+        {
+            0
+        } else {
+            Self::value_bytes(&value)
+        };
+        if !self.admit_block(block, bytes) {
+            return;
+        }
+        let limit = self.byte_limit;
+        self.byte_limit = 0;
+        self.insert(id, time, value);
+        self.byte_limit = limit;
+        self.predecessors.insert(id, (time, block));
+    }
+
     pub fn drop_block(&mut self, id: ComponentId, start: i64) {
         let end = start.saturating_add(1_000_000);
+        let anchor = self.predecessors.get(&id).copied();
         if let Some(series) = self.components.get_mut(&id) {
             series.retain(|time, value| {
-                if time.0 >= start && time.0 < end {
+                let remove =
+                    if let Some((_, block)) = anchor.filter(|(timestamp, _)| timestamp == time) {
+                        block == start
+                    } else {
+                        time.0 >= start && time.0 < end
+                    };
+                if remove {
                     self.resident_bytes =
                         self.resident_bytes.saturating_sub(Self::value_bytes(value));
                     false
@@ -261,6 +306,9 @@ impl TelemetryCache {
                     true
                 }
             });
+        }
+        if anchor.is_some_and(|(_, block)| block == start) {
+            self.predecessors.remove(&id);
         }
         if let Some(coverage) = self.coverage.get_mut(&id) {
             let mut kept = Vec::new();
@@ -279,7 +327,10 @@ impl TelemetryCache {
             *coverage = kept;
         }
         self.generation = self.generation.wrapping_add(1);
-        self.bump_revision(id, Timestamp(start));
+        let changed = anchor
+            .filter(|(_, block)| *block == start)
+            .map_or(start, |(timestamp, _)| timestamp.0.min(start));
+        self.bump_revision(id, Timestamp(changed));
     }
 
     fn bump_revision(&mut self, component_id: ComponentId, from: Timestamp) {
@@ -377,6 +428,7 @@ impl TelemetryCache {
 
     /// Drop all samples and coverage for a component (unsubscribe / reclaim RAM).
     pub fn remove_series(&mut self, component_id: &ComponentId) {
+        self.predecessors.remove(component_id);
         let removed = self.components.remove(component_id);
         if let Some(series) = &removed {
             self.resident_bytes = self
