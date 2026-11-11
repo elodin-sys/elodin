@@ -12,8 +12,43 @@ connect screen. A value names the database to open on load. That value is the
 asset server (`tcp_port + 1`): `http://127.0.0.1:2241`, or `https://…` when the
 page is served over TLS. `just web http://127.0.0.1:2241` (or
 `ELODIN_WEB_DB=http://127.0.0.1:2241 just web`) writes the meta tag for a Trunk
-dev page. A successful browser build does not by itself validate a Cloud data
+dev page. An HTTPS deployment needs a browser-accessible secure WebSocket
+endpoint. A successful browser build does not by itself validate a Cloud data
 source or its authentication.
+
+## Run an example
+
+The browser editor does not launch a simulation. Start the example so its
+database is listening, then serve the editor with that database's asset URL.
+`just install` provides the `elodin` binary and the Python package; `just web`
+only serves the editor.
+
+In one shell, inside `nix develop`:
+
+```sh
+elodin run examples/three-body/main.py
+```
+
+In another shell, inside `nix develop`:
+
+```sh
+just web http://127.0.0.1:2241
+```
+
+Open the URL Trunk prints. The default listen address is `[::]:2240`. The
+asset server, and the editor's WebSocket, are the next port (2240 → 2241).
+Use another `--addr` when 2240 is taken, and pass the next port to `just web`:
+
+```sh
+elodin run --addr 127.0.0.1:3240 examples/ball/main.py
+```
+
+```sh
+just web http://127.0.0.1:3241
+```
+
+Stop `elodin run` before starting a different example, and reload the page.
+The editor keeps the connection it opened with the document until then.
 
 ## Platform boundary
 

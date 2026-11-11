@@ -60,9 +60,20 @@ nix develop --command "cargo build"      # One-off command
 ```bash
 just install
 
-# Run an example
+# Run an example in the native editor
 elodin editor examples/three-body/main.py
 ```
+
+To run that example in the browser editor, start the simulation and the wasm
+server in separate shells, then open the printed URL. The meta tag names the
+asset server (`tcp_port + 1`); the editor uses that same port for its WebSocket.
+
+```bash
+elodin run examples/three-body/main.py
+just web http://127.0.0.1:2241
+```
+
+Details and a non-default port are in `apps/elodin-web/README.md`.
 
 ## CI Checks
 
