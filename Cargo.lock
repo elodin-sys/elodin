@@ -1257,7 +1257,7 @@ dependencies = [
 [[package]]
 name = "bevy-cesium"
 version = "0.4.0"
-source = "git+https://github.com/elodin-sys/bevy-cesium?rev=dffe463dfd9bc9493a688f857f8e930f07b024a3#dffe463dfd9bc9493a688f857f8e930f07b024a3"
+source = "git+https://github.com/elodin-sys/bevy-cesium?rev=1627010585a69a8e5291318d9770b7d4f15a8e8e#1627010585a69a8e5291318d9770b7d4f15a8e8e"
 dependencies = [
  "bevy",
  "cxx",
@@ -14712,7 +14712,7 @@ dependencies = [
 [[package]]
 name = "tiles-core"
 version = "0.2.0"
-source = "git+https://github.com/elodin-sys/bevy-cesium?rev=dffe463dfd9bc9493a688f857f8e930f07b024a3#dffe463dfd9bc9493a688f857f8e930f07b024a3"
+source = "git+https://github.com/elodin-sys/bevy-cesium?rev=1627010585a69a8e5291318d9770b7d4f15a8e8e#1627010585a69a8e5291318d9770b7d4f15a8e8e"
 dependencies = [
  "base64 0.22.1",
  "draco-core",

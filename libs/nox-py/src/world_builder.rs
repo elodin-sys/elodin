@@ -115,6 +115,10 @@ pub enum Args {
         #[arg(default_value = "[::]:2240")]
         addr: SocketAddr,
     },
+    #[clap(hide = true)]
+    TerrainPrepare {
+        output: PathBuf,
+    },
     Params,
     Components,
     #[clap(hide = true)]
@@ -133,6 +137,7 @@ pub enum Args {
 pub struct WorldBuilder {
     pub world: World,
     pub recipes: HashMap<String, ::s10::Recipe>,
+    pub terrain_preparation: Option<serde_json::Value>,
 }
 
 fn py_json_value(obj: &Bound<'_, PyAny>) -> Result<serde_json::Value, Error> {
@@ -208,7 +213,13 @@ impl WorldBuilder {
             .chain(iter::once(("sim".to_string(), ::s10::Recipe::Sim(sim))))
             .collect();
 
-        if !self.world.metadata.sensor_cameras.is_empty() {
+        if self
+            .world
+            .metadata
+            .sensor_cameras
+            .iter()
+            .any(|camera| !camera.render_local)
+        {
             #[cfg(target_family = "unix")]
             let (cmd, args) = (
                 "nice",
@@ -533,6 +544,7 @@ impl WorldBuilder {
         bloom = None,
         environment = None,
         frustums_face_alpha = impeller_wkt::default_frustums_face_alpha(),
+        render_local = false,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn sensor_camera(
@@ -564,6 +576,7 @@ impl WorldBuilder {
         bloom: Option<&Bound<'_, PyAny>>,
         environment: Option<&Bound<'_, PyAny>>,
         frustums_face_alpha: f32,
+        render_local: bool,
     ) -> Result<(), crate::error::Error> {
         if name.chars().any(|c| c.is_whitespace()) {
             return Err(crate::error::Error::PyO3(
@@ -746,6 +759,11 @@ impl WorldBuilder {
         let environment = environment
             .map(parse_sensor_camera_environment)
             .transpose()?;
+        if render_local && environment.is_some() {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "render_local sensor cameras share the schematic environment; configure it there",
+            )));
+        }
 
         let color_from_vec = |value: Option<Vec<f32>>,
                               default_color: impeller_wkt::Color,
@@ -773,6 +791,7 @@ impl WorldBuilder {
             .metadata
             .sensor_cameras
             .push(crate::world::SensorCameraConfig {
+                render_local,
                 entity_name: entity_meta.name.clone(),
                 camera_name: pair_name,
                 width,
@@ -1142,6 +1161,19 @@ impl WorldBuilder {
                     }
                     Err(err) => Err(err),
                 }
+            }
+            Args::TerrainPrepare { output } => {
+                let request = self.terrain_preparation.as_ref().ok_or_else(|| {
+                    PyValueError::new_err(
+                        "Declare terrain regions in the Python schematic before preparation",
+                    )
+                })?;
+                std::fs::write(
+                    output,
+                    serde_json::to_vec_pretty(request)
+                        .map_err(|e| PyValueError::new_err(e.to_string()))?,
+                )?;
+                Ok(None)
             }
             Args::Plan { addr, out_dir } => {
                 // Canonicalize the path to ensure s10 can find the file regardless of working directory
@@ -1878,6 +1910,9 @@ impl WorldBuilder {
         default_content: Option<&Bound<'_, PyAny>>,
         path: Option<String>,
     ) -> Result<(), Error> {
+        let terrain_preparation = default_content
+            .and_then(|obj| obj.extract::<PyRef<'_, crate::ui::PySchematic>>().ok())
+            .and_then(|schematic| schematic.terrain_preparation.clone());
         let (default_content, kernel_assets) = match default_content {
             None => (None, HashMap::new()),
             Some(obj) => {
@@ -1917,6 +1952,7 @@ impl WorldBuilder {
             });
         let previous = self.world.metadata.schematic.clone();
         let previous_kernels = self.world.metadata.schematic_kernels.clone();
+        let use_python_terrain = file_contents.is_none();
         self.world.metadata.schematic = file_contents.or(default_content);
         self.world.metadata.schematic_kernels = kernel_assets;
         if let Err(err) = self.validate_cinematic_owners() {
@@ -1924,6 +1960,7 @@ impl WorldBuilder {
             self.world.metadata.schematic_kernels = previous_kernels;
             return Err(err);
         }
+        self.terrain_preparation = use_python_terrain.then_some(terrain_preparation).flatten();
         Ok(())
     }
 

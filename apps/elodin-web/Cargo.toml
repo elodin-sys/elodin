@@ -17,6 +17,8 @@ web-sys = { version = "0.3", features = [
   "Element",
   "Window",
   "Event",
+  "Location",
+  "UrlSearchParams",
 ] }
 
 [target.'cfg(target_family = "wasm")'.dependencies]

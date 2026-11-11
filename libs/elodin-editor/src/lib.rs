@@ -729,6 +729,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(GizmoPlugin);
         app.add_plugins(plugins::thruster_particles::ThrusterParticlesPlugin);
         app.add_plugins(plugins::scene_environment::SceneEnvironmentPlugin);
+        app.add_plugins(plugins::map_overlay::MapOverlayPlugin);
         app.add_plugins(plugins::cesium::CesiumPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::cinematic_earth::earth_night_material::EarthNightMaterialPlugin);
@@ -874,7 +875,7 @@ impl Plugin for EditorPlugin {
         .init_resource::<sensor_camera::SensorCameraConfigs>()
         .init_resource::<sensor_camera::SensorCamerasSpawned>()
         .init_resource::<sensor_camera::SensorCameraFrustumSourcesSpawned>()
-        .add_systems(PreUpdate, sensor_camera::load_sensor_configs_from_db)
+        .add_plugins(sensor_camera::LocalSensorCameraPlugin)
         .add_systems(
             PreUpdate,
             sensor_camera::spawn_sensor_camera_frustum_sources
@@ -974,6 +975,9 @@ fn throttle_for_sensor_cameras(
     if *applied {
         return;
     }
+    if !configs.0.is_empty() && configs.0.iter().all(|camera| camera.render_local) {
+        return;
+    }
     let detected = !configs.0.is_empty()
         || db_config.metadata.contains_key("sensor_cameras")
         || has_sensor_view_pane(&windows);
@@ -1001,6 +1005,9 @@ fn throttle_for_sensor_cameras(
     mut applied: Local<bool>,
 ) {
     if *applied {
+        return;
+    }
+    if !configs.0.is_empty() && configs.0.iter().all(|camera| camera.render_local) {
         return;
     }
     let detected = !configs.0.is_empty()

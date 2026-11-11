@@ -1524,7 +1524,7 @@ def build_powered(
     on_pad = float(jnp.linalg.norm(jnp.asarray(init_pos_ecef) - pad_ecef())) < 100.0
     vis_off = init_attitude @ jnp.array([GLB_ORIGIN_STATION_M - float(cg0), 0.0, 0.0])
     vis_lin = jnp.asarray(init_pos_ecef, dtype=jnp.float64) + vis_off
-    world.spawn(
+    booster = world.spawn(
         [
             el.Body(
                 world_pos=el.SpatialTransform(
@@ -1545,6 +1545,28 @@ def build_powered(
             *booster_propulsion_components(lox_kg, rp1_kg),
         ],
         name="booster",
+    )
+    # Body-mounted IR camera looks aft along the booster toward its engines.
+    # The local preview shares the scene's particles and terrain.
+    world.sensor_camera(
+        entity=booster,
+        name="ir_cam",
+        width=640,
+        height=480,
+        fov=75.0,
+        near=0.1,
+        far=1_000_000.0,
+        pos_offset=[12.0, 2.05, 0.0],
+        rot_offset=[0.0, 0.0, 170.0],
+        fps=20.0,
+        cinematic=True,
+        render_local=True,
+        effect="thermal",
+        effect_params={
+            "palette": "white_hot",
+            "contrast": 1.3,
+            "noise_sigma": 0.008,
+        },
     )
     effectors = gravity_and_frame_forces | apply_body_wrenches
     plant = (

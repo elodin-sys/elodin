@@ -87,6 +87,10 @@ pub fn parse_schematic(input: &str) -> Result<Schematic, KdlSchematicError> {
     let mut schematic = Schematic::default();
 
     for node in doc.nodes() {
+        if node.name().value() == "map_overlay" {
+            schematic.map_overlays.push(parse_map_overlay(node, input)?);
+            continue;
+        }
         if node.name().value() == "terrain" {
             schematic.terrain = Some(parse_terrain(node, input)?);
             continue;
@@ -207,6 +211,31 @@ fn validate_cinematic_earth(schematic: &Schematic, src: &str) -> Result<(), KdlS
         });
     }
     Ok(())
+}
+
+fn parse_map_overlay(node: &KdlNode, src: &str) -> Result<MapOverlayConfig, KdlSchematicError> {
+    let invalid = || KdlSchematicError::InvalidValue {
+        property: "path/visible".into(),
+        node: "map_overlay".into(),
+        expected: "relative JSON asset path and optional boolean visible".into(),
+        src: src.into(),
+        span: node.span(),
+    };
+    let config = MapOverlayConfig {
+        path: node
+            .get("path")
+            .and_then(|v| v.as_string())
+            .ok_or_else(invalid)?
+            .to_owned(),
+        visible: match node.get("visible") {
+            Some(v) => v.as_bool().ok_or_else(invalid)?,
+            None => true,
+        },
+    };
+    if !config.is_valid() {
+        return Err(invalid());
+    }
+    Ok(config)
 }
 
 fn parse_terrain(node: &KdlNode, src: &str) -> Result<TerrainConfig, KdlSchematicError> {
@@ -467,6 +496,10 @@ fn push_parsed_schematic_node(
     node: &KdlNode,
     src: &str,
 ) -> Result<(), KdlSchematicError> {
+    if node.name().value() == "map_overlay" {
+        schematic.map_overlays.push(parse_map_overlay(node, src)?);
+        return Ok(());
+    }
     if node.name().value() == "terrain" {
         schematic.terrain = Some(parse_terrain(node, src)?);
         return Ok(());

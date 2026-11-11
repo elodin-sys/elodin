@@ -215,11 +215,27 @@ mod coordinate_tests {
                 address.parse().unwrap(),
             ));
             app.update();
-            let Some(CesiumSource::Url(url)) = &app.world().resource::<CesiumSourceUpdate>().0
+            let Some(CesiumSource::Prepared { url, .. }) =
+                &app.world().resource::<CesiumSourceUpdate>().0
             else {
                 panic!("terrain asset was not resolved through the DB endpoint");
             };
             assert_eq!(url, expected);
+            assert!(
+                playback_ready(app.world()),
+                "prepared replay must not wait for refinement"
+            );
+            app.world_mut()
+                .resource_mut::<TerrainStartup>()
+                .update(&CesiumStatus {
+                    load_failed: true,
+                    error: Some("HTTP request failed"),
+                    ..default()
+                });
+            assert!(
+                playback_ready(app.world()),
+                "a missing tile must not stop replay"
+            );
         }
 
         // The assets host and prefix may change independently of the DB.
@@ -232,7 +248,8 @@ mod coordinate_tests {
                 .with_assets(base.parse().unwrap());
             app.insert_resource(impeller_bevy::ConnectionAddr::from_endpoint(endpoint));
             app.update();
-            let Some(CesiumSource::Url(url)) = &app.world().resource::<CesiumSourceUpdate>().0
+            let Some(CesiumSource::Prepared { url, .. }) =
+                &app.world().resource::<CesiumSourceUpdate>().0
             else {
                 panic!("terrain asset did not use the assets override");
             };
@@ -244,6 +261,88 @@ mod coordinate_tests {
                 )
             );
         }
+    }
+
+    #[test]
+    fn prepared_sensor_capture_waits_for_initial_terrain() {
+        let mut app = App::new();
+        app.init_resource::<crate::sensor_camera::HeadlessMode>()
+            .insert_resource(crate::ui::schematic::CurrentSchematic(
+                impeller_wkt::Schematic {
+                    terrain: Some(impeller_wkt::TerrainConfig::Asset {
+                        path: "terrain/Falcon9/tileset.json".into(),
+                    }),
+                    ..default()
+                },
+            ))
+            .insert_resource(impeller_bevy::ConnectionAddr::from_endpoint(
+                "127.0.0.1:2240".parse().unwrap(),
+            ))
+            .add_systems(Update, configure_terrain);
+        app.update();
+        assert_eq!(capture_ready(app.world()), Ok(false));
+    }
+
+    #[test]
+    fn prepared_terrain_streams_by_default_but_offline_has_no_provider_credentials() {
+        use super::super::terrain_playback::{TerrainMode, TerrainPlayback};
+        let mut app = App::new();
+        app.insert_resource(crate::ui::schematic::CurrentSchematic(
+            impeller_wkt::Schematic {
+                terrain: Some(impeller_wkt::TerrainConfig::Asset {
+                    path: "terrain/Falcon9/tileset.json".into(),
+                }),
+                ..default()
+            },
+        ))
+        .insert_resource(impeller_bevy::ConnectionAddr::from_endpoint(
+            "127.0.0.1:2240".parse().unwrap(),
+        ))
+        .add_systems(Update, configure_terrain);
+        for mode in [None, Some(TerrainMode::Offline), Some(TerrainMode::Hybrid)] {
+            app.insert_resource(TerrainPlayback {
+                mode,
+                basemap: None,
+            });
+            app.update();
+            let Some(CesiumSource::Prepared {
+                ion_access_token, ..
+            }) = &app.world().resource::<CesiumSourceUpdate>().0
+            else {
+                panic!("expected prepared terrain")
+            };
+            assert_eq!(
+                ion_access_token.is_some(),
+                mode != Some(TerrainMode::Offline)
+            );
+        }
+    }
+
+    #[test]
+    fn offline_mode_rejects_unprepared_sources_before_creating_a_provider() {
+        use super::super::terrain_playback::{TerrainMode, TerrainPlayback};
+        let mut app = App::new();
+        app.insert_resource(TerrainPlayback {
+            mode: Some(TerrainMode::Offline),
+            basemap: None,
+        })
+        .insert_resource(crate::ui::schematic::CurrentSchematic(
+            impeller_wkt::Schematic {
+                terrain: Some(impeller_wkt::TerrainConfig::Ion { asset_id: 2275207 }),
+                ..default()
+            },
+        ))
+        .add_systems(Update, configure_terrain);
+        app.update();
+        assert!(app.world().resource::<CesiumSourceUpdate>().0.is_none());
+        assert!(
+            app.world()
+                .resource::<TerrainStartup>()
+                .result()
+                .unwrap_err()
+                .contains("prepare")
+        );
+        assert!(playback_ready(app.world()));
     }
 
     #[test]
@@ -639,6 +738,7 @@ mod coordinate_tests {
 
 impl Plugin for CesiumPlugin {
     fn build(&self, app: &mut App) {
+        super::terrain_playback::install(app);
         app.init_resource::<RetryTerrain>();
         if let Ok(path) = std::env::var("ELODIN_CESIUM_CAPTURE_VIEWS") {
             let bytes = std::fs::read(path).expect("Cannot read ELODIN_CESIUM_CAPTURE_VIEWS");
@@ -731,9 +831,15 @@ fn configure_terrain(
         Option<(
             Option<impeller_wkt::TerrainConfig>,
             Option<impeller_bevy::DbEndpoint>,
+            super::terrain_playback::TerrainPlayback,
         )>,
     >,
 ) {
+    use super::terrain_playback::{TerrainMode, TerrainPlayback};
+    let policy = world
+        .get_resource::<TerrainPlayback>()
+        .cloned()
+        .unwrap_or_default();
     let retry_requested = world
         .get_resource_mut::<RetryTerrain>()
         .is_some_and(|mut retry| std::mem::take(&mut retry.0));
@@ -748,15 +854,18 @@ fn configure_terrain(
         && world
             .get_resource::<TerrainStartup>()
             .is_some_and(|startup| startup.error.is_some());
-    if previous.as_ref().is_some_and(|(old, old_endpoint)| {
-        old == &schematic.terrain && old_endpoint.as_ref() == endpoint
-    }) && !retry_failed
+    if previous
+        .as_ref()
+        .is_some_and(|(old, old_endpoint, old_policy)| {
+            old == &schematic.terrain && old_endpoint.as_ref() == endpoint && old_policy == &policy
+        })
+        && !retry_failed
     {
         return;
     }
     let terrain = schematic.terrain.clone();
     let endpoint = endpoint.cloned();
-    *previous = Some((terrain.clone(), endpoint.clone()));
+    *previous = Some((terrain.clone(), endpoint.clone(), policy.clone()));
     let Some(terrain) = terrain else {
         world.insert_resource(CesiumSourceUpdate(None));
         world.remove_resource::<TerrainStartup>();
@@ -768,13 +877,37 @@ fn configure_terrain(
         None
     } else {
         match terrain {
+            impeller_wkt::TerrainConfig::Ion { .. }
+                if policy.mode == Some(TerrainMode::Offline) =>
+            {
+                startup.error = Some(
+                    "Offline mode requires prepared terrain: run elodin terrain prepare on the recording",
+                );
+                None
+            }
             impeller_wkt::TerrainConfig::Ion { asset_id } => Some(terrain_source(asset_id)),
             impeller_wkt::TerrainConfig::Asset { path } => endpoint.as_ref().map(|endpoint| {
                 let key = path.strip_prefix("db:").unwrap_or(&path);
-                CesiumSource::Url(endpoint.assets_url(key).to_string())
+                CesiumSource::Prepared {
+                    url: endpoint.assets_url(key).to_string(),
+                    ion_access_token: (policy.mode != Some(TerrainMode::Offline))
+                        .then(|| ion_access_token().to_owned()),
+                }
             }),
         }
     };
+    let simulation_held = world
+        .get_resource::<impeller_wkt::DbConfig>()
+        .is_some_and(|c| {
+            c.metadata
+                .contains_key(impeller_wkt::EDITOR_STARTUP_GATE_METADATA_KEY)
+        });
+    if matches!(source, Some(CesiumSource::Prepared { .. }))
+        && !simulation_held
+        && !world.contains_resource::<crate::sensor_camera::HeadlessMode>()
+    {
+        startup.ready = true;
+    }
     world.insert_resource(CesiumSourceUpdate(source));
     world.insert_resource(startup);
 }

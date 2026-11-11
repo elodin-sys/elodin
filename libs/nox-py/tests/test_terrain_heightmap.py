@@ -21,6 +21,18 @@ def grid():
     )
 
 
+def test_cli_offline_policy_prevents_height_download(tmp_path, monkeypatch):
+    monkeypatch.setenv("ELODIN_TERRAIN_OFFLINE", "1")
+
+    def unexpected_download(*args, **kwargs):
+        pytest.fail("offline terrain attempted to start a download")
+
+    monkeypatch.setattr(subprocess, "run", unexpected_download)
+    with pytest.raises(FileNotFoundError, match="offline"):
+        el.terrain_heightmap([6378137, 0, 0], (100, 100), 10, cache_dir=tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_ecef_lookup_jit_vmap_and_invalid_positions():
     terrain = el.TerrainHeightmap(grid())
     position = jnp.array([6378137.0 + 200, 0, 0])

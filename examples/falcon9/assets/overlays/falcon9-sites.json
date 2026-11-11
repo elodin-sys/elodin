@@ -1,0 +1,18 @@
+{
+  "source": "Elodin Terrain Demo — launch and landing sites",
+  "source_url": "https://github.com/elodin-sys/elodin-terrain-demo/blob/main/overlay/terrain_demo.kdl",
+  "labels": [
+    [
+      "LC-39A",
+      28.60839,
+      -80.60433,
+      -7.063374189989003
+    ],
+    [
+      "Landing Zone 1",
+      28.485738,
+      -80.542948,
+      -27.12141869552742
+    ]
+  ]
+}

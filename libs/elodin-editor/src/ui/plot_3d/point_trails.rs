@@ -7,6 +7,8 @@
 use std::collections::{BTreeMap, HashMap};
 use std::ops::{Bound, Range};
 
+#[cfg(target_family = "wasm")]
+use bevy::render::renderer::RenderQueue;
 use bevy::{
     camera::visibility::RenderLayers,
     ecs::system::SystemState,
@@ -463,6 +465,7 @@ fn extract_point_trails(
     mut commands: Commands,
     mut cache: ResMut<PointTrailsGpuCache>,
     render_device: Res<RenderDevice>,
+    #[cfg(target_family = "wasm")] render_queue: Res<RenderQueue>,
     #[cfg(not(target_family = "wasm"))] values_layout: Res<LineValuesLayout>,
     #[cfg(not(target_family = "wasm"))] index_layout: Res<LineIndexLayout>,
 ) {
@@ -484,6 +487,10 @@ fn extract_point_trails(
                             &group.strip_ends,
                             strips.anchor,
                             &render_device,
+                            #[cfg(target_family = "wasm")]
+                            &render_queue,
+                            #[cfg(target_family = "wasm")]
+                            cache.0.get(&key).map(|(_, line)| line),
                             #[cfg(not(target_family = "wasm"))]
                             &values_layout,
                             #[cfg(not(target_family = "wasm"))]

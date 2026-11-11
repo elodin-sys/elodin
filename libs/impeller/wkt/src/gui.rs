@@ -107,6 +107,9 @@ pub struct Schematic {
     /// Streamed scenery, independent of the coordinate origin.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terrain: Option<TerrainConfig>,
+    /// Geographic overlays loaded from portable JSON assets.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub map_overlays: Vec<MapOverlayConfig>,
     /// Cinematic scene environment: sun light + shadows, ambient scaling, sky
     /// color. Absent = the editor's default look.
     #[serde(default)]
@@ -114,6 +117,30 @@ pub struct Schematic {
     /// When true, enable dense telemetry presentation (locked graphs, compact chrome).
     #[serde(default)]
     pub telemetry_mode: bool,
+}
+
+/// Geographic data asset; independent of the terrain provider.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct MapOverlayConfig {
+    pub path: String,
+    #[serde(default = "map_overlay_visible")]
+    pub visible: bool,
+}
+
+fn map_overlay_visible() -> bool {
+    true
+}
+
+impl MapOverlayConfig {
+    pub fn is_valid(&self) -> bool {
+        self.path.ends_with(".json") && portable_asset_path(&self.path)
+    }
+}
+
+fn portable_asset_path(path: &str) -> bool {
+    let key = path.strip_prefix("db:").unwrap_or(path);
+    !key.chars().any(|c| c.is_control() || ":\\?#%".contains(c))
+        && key.split('/').all(|part| !matches!(part, "" | "." | ".."))
 }
 
 /// Streamed scenery from ion or a portable DB asset. Credentials are not stored.
@@ -128,11 +155,7 @@ impl TerrainConfig {
     pub fn is_valid(&self) -> bool {
         match self {
             Self::Ion { asset_id } => *asset_id > 0,
-            Self::Asset { path } => {
-                let key = path.strip_prefix("db:").unwrap_or(path);
-                !key.chars().any(|c| c.is_control() || ":\\?#%".contains(c))
-                    && key.split('/').all(|part| !matches!(part, "" | "." | ".."))
-            }
+            Self::Asset { path } => portable_asset_path(path),
         }
     }
 }
@@ -837,7 +860,11 @@ pub fn validate_single_cinematic_environment(
             owners.push(format!("viewport \"{name}\" (cinematic=#true)"));
         }
     }
-    for camera in cameras.iter().filter(|camera| camera.cinematic) {
+    // Local previews borrow the editor's existing scene environment.
+    for camera in cameras
+        .iter()
+        .filter(|camera| camera.cinematic && !camera.render_local)
+    {
         owners.push(format!(
             "sensor camera \"{}\" (world.sensor_camera(cinematic=True))",
             camera.camera_name
@@ -2206,11 +2233,16 @@ pub struct SensorCameraConfig {
     /// default the newly appended field.
     #[serde(default = "default_frustums_face_alpha")]
     pub frustums_face_alpha: f32,
+    /// Render from the replayed scene in the editor instead of recording frames
+    /// through the native render server. Supported on desktop and WebGPU.
+    #[serde(default)]
+    pub render_local: bool,
 }
 
 impl Default for SensorCameraConfig {
     fn default() -> Self {
         Self {
+            render_local: false,
             entity_name: String::new(),
             camera_name: String::new(),
             width: 0,
@@ -2375,6 +2407,29 @@ mod tests {
     #[test]
     fn one_cinematic_sensor_camera_ok() {
         validate_single_cinematic_environment(None, &[cinematic_camera("bdx.fpv_cam")]).unwrap();
+    }
+
+    #[test]
+    fn local_sensor_borrows_cinematic_viewport_environment() {
+        let schematic = Schematic {
+            elems: vec![SchematicElem::Panel(Panel::Viewport(cinematic_viewport(
+                "Chase",
+            )))],
+            ..Default::default()
+        };
+        let camera = SensorCameraConfig {
+            render_local: true,
+            ..cinematic_camera("booster.ir_cam")
+        };
+        validate_single_cinematic_environment(Some(&schematic), &[camera]).unwrap();
+    }
+
+    #[test]
+    fn old_sensor_metadata_still_selects_recorded_frames() {
+        let mut value = serde_json::to_value(SensorCameraConfig::default()).unwrap();
+        value.as_object_mut().unwrap().remove("render_local");
+        let config: SensorCameraConfig = serde_json::from_value(value).unwrap();
+        assert!(!config.render_local);
     }
 
     #[test]

@@ -77,7 +77,11 @@ def test_real_bytes_and_nested_hierarchy_move_without_credentials(tmp_path):
     output.rename(moved)
     root = json.loads((moved / "tileset.json").read_bytes())
     children = root["root"]["children"]
-    assert len(children) == 1
+    assert len(children) == 2
+    assert children[1] == {
+        "boundingVolume": {"sphere": [1, 2, 3, 2]},
+        "geometricError": 0,
+    }
     child_file = moved / children[0]["content"]["uri"]
     child = json.loads(child_file.read_bytes())
     tile_file = child_file.parent / child["root"]["children"][0]["content"]["uri"]
@@ -87,7 +91,17 @@ def test_real_bytes_and_nested_hierarchy_move_without_credentials(tmp_path):
             content = file.read_bytes()
             assert b"PRIVATE" not in content
             assert b"SESSION" not in content
-            assert b"tile.googleapis.com" not in content
+            assert b"key=" not in content
+            assert b"session=" not in content
+            if file.name != "package.json" and file.parent.name != "source":
+                assert b"tile.googleapis.com" not in content
+    package = json.loads((moved / "package.json").read_bytes())
+    source_root = json.loads((moved / package["resources"][package["root"]]).read_bytes())
+    assert source_root["root"]["children"][1]["content"]["uri"] == (
+        "https://tile.googleapis.com/v1/3dtiles/missing.json"
+    )
+    assert package["ion_asset_id"] == 2275207
+    assert len(package["resources"]) == 3
 
 
 @pytest.mark.parametrize("bad", [b"glTF", glb(external=True)])

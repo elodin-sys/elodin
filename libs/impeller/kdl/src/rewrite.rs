@@ -134,6 +134,11 @@ fn rewrite_schematic_assets<F>(schematic: &mut Schematic, map: &mut F)
 where
     F: FnMut(&str) -> Option<String>,
 {
+    for overlay in &mut schematic.map_overlays {
+        if let Some(path) = map(&overlay.path) {
+            overlay.path = path;
+        }
+    }
     if let Some(TerrainConfig::Asset { path }) = &mut schematic.terrain
         && let Some(rewritten) = map(path)
     {
@@ -309,6 +314,12 @@ fn collect_elem_db_asset_names(elem: &SchematicElem, names: &mut Vec<String>) {
 }
 
 fn collect_schematic_db_asset_names(schematic: &Schematic, names: &mut Vec<String>) {
+    names.extend(
+        schematic
+            .map_overlays
+            .iter()
+            .filter_map(|o| db_asset_name(&o.path)),
+    );
     if let Some(TerrainConfig::Asset { path }) = &schematic.terrain
         && let Some(name) = db_asset_name(path)
     {
@@ -374,6 +385,13 @@ fn collect_elem_paths(elem: &SchematicElem, paths: &mut Vec<String>) {
 }
 
 fn collect_schematic_paths(schematic: &Schematic, paths: &mut Vec<String>) {
+    paths.extend(
+        schematic
+            .map_overlays
+            .iter()
+            .filter(|o| is_local_asset_path(&o.path))
+            .map(|o| o.path.clone()),
+    );
     if let Some(TerrainConfig::Asset { path }) = &schematic.terrain
         && is_local_asset_path(path)
     {

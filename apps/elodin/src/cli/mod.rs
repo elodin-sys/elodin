@@ -7,6 +7,7 @@ mod editor;
 mod monte_carlo;
 mod schematic;
 mod terrain;
+mod terrain_prepare;
 #[cfg(not(target_os = "windows"))]
 mod ui;
 
@@ -47,6 +48,8 @@ pub struct Cli {
 
 #[derive(Subcommand, Clone)]
 enum Commands {
+    /// Prepare portable terrain before simulation.
+    Terrain(terrain_prepare::Args),
     /// Log in to Elodin Cloud through your browser (OIDC + PKCE)
     Login(cloud::auth::LoginArgs),
     /// Remove stored Elodin Cloud credentials and end the session
@@ -157,6 +160,7 @@ impl Cli {
             #[cfg(not(target_os = "windows"))]
             Some(Commands::Ui(args)) => self.clone().ui(args.clone()),
             Some(Commands::Schematic(args)) => self.clone().schematic(args.clone()),
+            Some(Commands::Terrain(args)) => terrain_prepare::run(args.clone()),
             Some(Commands::TerrainHeights(args)) => terrain::run(args.clone()),
             None => self.clone().editor(editor::Args::default(), rt),
         }

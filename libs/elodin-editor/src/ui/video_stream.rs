@@ -75,6 +75,7 @@ impl RawPixelFormat {
 
 #[derive(Component)]
 pub struct VideoStream {
+    pub render_local: bool,
     pub msg_id: [u8; 2],
     pub msg_name: String,
     pub current_frame: Option<Image>,
@@ -91,6 +92,7 @@ impl Default for VideoStream {
     fn default() -> Self {
         Self {
             msg_id: [0, 0],
+            render_local: false,
             msg_name: String::new(),
             current_frame: None,
             size: Vec2::ZERO,
@@ -1010,6 +1012,7 @@ pub struct VideoStreamWidget<'w, 's> {
     images: ResMut<'w, Assets<Image>>,
     window_settings: Query<'w, 's, &'static bevy_egui::EguiContextSettings>,
     sensor_camera_configs: Option<Res<'w, SensorCameraConfigs>>,
+    local_sensor_images: Option<Res<'w, crate::sensor_camera::LocalSensorImages>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1271,14 +1274,17 @@ fn copy_raw_frame_to_rgba(src: &[u8], dst: &mut [u8], format: RawPixelFormat) ->
 pub fn attach_webcodecs(
     mut commands: Commands,
     query: Query<
-        Entity,
+        (Entity, &VideoStream),
         (
             With<VideoDecoderHandle>,
             Without<webcodecs_video::bevy::VideoStream>,
         ),
     >,
 ) {
-    for entity in &query {
+    for (entity, stream) in &query {
+        if stream.render_local {
+            continue;
+        }
         commands
             .entity(entity)
             .insert(webcodecs_video::bevy::VideoStream::new());
@@ -1527,37 +1533,49 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
         };
 
         let current_ts = state.current_time.0;
+        if stream.render_local
+            && let Some(handle) = state
+                .local_sensor_images
+                .as_ref()
+                .and_then(|images| images.0.get(&stream.msg_name))
+        {
+            image_node.image = handle.clone();
+            stream.state = StreamState::Active;
+        }
 
         // ---------------------------------------------------------------
         // State machine
         // ---------------------------------------------------------------
-        match &mut stream.state {
-            StreamState::WaitingToConnect { .. } => {
-                // Connection + drain handled by `connect_streams` system.
-            }
-            StreamState::Active => {
-                if let Some((w, h, format)) = stream.raw_dims {
-                    if let Some((found_ts, data)) =
-                        cache.raw_frames.range(..=current_ts).next_back()
-                    {
-                        let found_ts = *found_ts;
-                        if cache.last_displayed_ts != Some(found_ts) {
-                            let expected = w as usize * h as usize * format.bytes_per_pixel();
-                            if data.len() == expected {
-                                let data = Arc::clone(data);
-                                let mut wrote_direct = false;
-                                if let Some(mut existing) = state.images.get_mut(&image_node.image)
-                                    && existing.width() == w
-                                    && existing.height() == h
-                                    && let Some(dst) = &mut existing.data
-                                {
-                                    wrote_direct = copy_raw_frame_to_rgba(&data, dst, format);
-                                }
-                                if !wrote_direct {
-                                    let mut rgba = vec![0; w as usize * h as usize * 4];
-                                    let copied = copy_raw_frame_to_rgba(&data, &mut rgba, format);
-                                    debug_assert!(copied);
-                                    let img = Image::new(
+        if !stream.render_local {
+            match &mut stream.state {
+                StreamState::WaitingToConnect { .. } => {
+                    // Connection + drain handled by `connect_streams` system.
+                }
+                StreamState::Active => {
+                    if let Some((w, h, format)) = stream.raw_dims {
+                        if let Some((found_ts, data)) =
+                            cache.raw_frames.range(..=current_ts).next_back()
+                        {
+                            let found_ts = *found_ts;
+                            if cache.last_displayed_ts != Some(found_ts) {
+                                let expected = w as usize * h as usize * format.bytes_per_pixel();
+                                if data.len() == expected {
+                                    let data = Arc::clone(data);
+                                    let mut wrote_direct = false;
+                                    if let Some(mut existing) =
+                                        state.images.get_mut(&image_node.image)
+                                        && existing.width() == w
+                                        && existing.height() == h
+                                        && let Some(dst) = &mut existing.data
+                                    {
+                                        wrote_direct = copy_raw_frame_to_rgba(&data, dst, format);
+                                    }
+                                    if !wrote_direct {
+                                        let mut rgba = vec![0; w as usize * h as usize * 4];
+                                        let copied =
+                                            copy_raw_frame_to_rgba(&data, &mut rgba, format);
+                                        debug_assert!(copied);
+                                        let img = Image::new(
                                         Extent3d {
                                             width: w,
                                             height: h,
@@ -1569,62 +1587,63 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                                         RenderAssetUsages::MAIN_WORLD
                                             | RenderAssetUsages::RENDER_WORLD,
                                     );
-                                    image_node.image = state.images.add(img);
+                                        image_node.image = state.images.add(img);
+                                    }
+                                    if stream.size == Vec2::ZERO {
+                                        stream.size = Vec2::new(w as f32, h as f32);
+                                    }
+                                    cache.last_displayed_ts = Some(found_ts);
                                 }
-                                if stream.size == Vec2::ZERO {
-                                    stream.size = Vec2::new(w as f32, h as f32);
-                                }
-                                cache.last_displayed_ts = Some(found_ts);
                             }
                         }
-                    }
-                } else {
-                    #[cfg(not(target_family = "wasm"))]
-                    {
-                        // H.264 decoded video: existing decode pipeline.
-                        let seek_done = decoder.drain_into_cache(&mut cache);
-                        if seek_done {
-                            cache.seeking = false;
-                        }
-
-                        if let Some((ts, img)) = cache.decoded_at_or_before(current_ts)
-                            && ((current_ts.0 - ts.0).abs() <= NO_DATA_THRESHOLD_US
-                                || (current_ts.0 >= ts.0
-                                    && current_ts.0 - ts.0 <= LIVE_HOLD_THRESHOLD_US))
+                    } else {
+                        #[cfg(not(target_family = "wasm"))]
                         {
-                            stream.current_frame = Some(img.clone());
-                        } else if let Some((ts, img)) = cache.decoded_at_or_after(current_ts)
-                            && (ts.0 - current_ts.0).abs() <= NO_DATA_THRESHOLD_US
-                        {
-                            stream.current_frame = Some(img.clone());
-                        }
+                            // H.264 decoded video: existing decode pipeline.
+                            let seek_done = decoder.drain_into_cache(&mut cache);
+                            if seek_done {
+                                cache.seeking = false;
+                            }
 
-                        let decoder_near = if let Some(last) = cache.last_decoded_ts {
-                            (current_ts.0 - last.0).abs() < DECODER_NEAR_THRESHOLD_US
-                        } else {
-                            false
-                        };
-
-                        let is_sequential = if let Some(last) = cache.last_decoded_ts {
-                            current_ts.0 >= last.0
-                                && (current_ts.0 - last.0) < DECODER_NEAR_THRESHOLD_US
-                        } else {
-                            false
-                        };
-
-                        let has_raw = cache.has_video_at(current_ts);
-
-                        if is_sequential && !cache.seeking {
-                            if let Some((ts, data)) =
-                                cache.next_raw_frame_after(cache.last_decoded_ts.unwrap())
-                                && ts.0 <= current_ts.0 + DECODER_NEAR_THRESHOLD_US
-                                && decoder.process_frame(ts, data)
+                            if let Some((ts, img)) = cache.decoded_at_or_before(current_ts)
+                                && ((current_ts.0 - ts.0).abs() <= NO_DATA_THRESHOLD_US
+                                    || (current_ts.0 >= ts.0
+                                        && current_ts.0 - ts.0 <= LIVE_HOLD_THRESHOLD_US))
                             {
-                                cache.last_decoded_ts = Some(ts);
+                                stream.current_frame = Some(img.clone());
+                            } else if let Some((ts, img)) = cache.decoded_at_or_after(current_ts)
+                                && (ts.0 - current_ts.0).abs() <= NO_DATA_THRESHOLD_US
+                            {
+                                stream.current_frame = Some(img.clone());
                             }
-                        } else if !decoder_near && has_raw {
-                            let (seek_start, seek_end) =
-                                if let Some(kf) = cache.nearest_keyframe_before(current_ts) {
+
+                            let decoder_near = if let Some(last) = cache.last_decoded_ts {
+                                (current_ts.0 - last.0).abs() < DECODER_NEAR_THRESHOLD_US
+                            } else {
+                                false
+                            };
+
+                            let is_sequential = if let Some(last) = cache.last_decoded_ts {
+                                current_ts.0 >= last.0
+                                    && (current_ts.0 - last.0) < DECODER_NEAR_THRESHOLD_US
+                            } else {
+                                false
+                            };
+
+                            let has_raw = cache.has_video_at(current_ts);
+
+                            if is_sequential && !cache.seeking {
+                                if let Some((ts, data)) =
+                                    cache.next_raw_frame_after(cache.last_decoded_ts.unwrap())
+                                    && ts.0 <= current_ts.0 + DECODER_NEAR_THRESHOLD_US
+                                    && decoder.process_frame(ts, data)
+                                {
+                                    cache.last_decoded_ts = Some(ts);
+                                }
+                            } else if !decoder_near && has_raw {
+                                let (seek_start, seek_end) = if let Some(kf) =
+                                    cache.nearest_keyframe_before(current_ts)
+                                {
                                     (kf, current_ts)
                                 } else if let Some(kf) = cache.first_keyframe_after(current_ts) {
                                     let end = cache
@@ -1638,26 +1657,26 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                                     (current_ts, current_ts)
                                 };
 
-                            let frames = cache.get_raw_sequence(seek_start, seek_end);
-                            if !frames.is_empty() {
-                                cache.seek_generation += 1;
-                                if decoder.send_seek_batch(frames, cache.seek_generation) {
-                                    cache.seeking = true;
+                                let frames = cache.get_raw_sequence(seek_start, seek_end);
+                                if !frames.is_empty() {
+                                    cache.seek_generation += 1;
+                                    if decoder.send_seek_batch(frames, cache.seek_generation) {
+                                        cache.seeking = true;
+                                    }
                                 }
                             }
                         }
-                    }
-                    #[cfg(target_family = "wasm")]
-                    {
-                        if let Some(wc) = wc.as_deref_mut() {
-                            drive_webcodecs(current_ts, !state.paused.0, &mut cache, wc);
+                        #[cfg(target_family = "wasm")]
+                        {
+                            if let Some(wc) = wc.as_deref_mut() {
+                                drive_webcodecs(current_ts, !state.paused.0, &mut cache, wc);
+                            }
                         }
                     }
                 }
+                StreamState::Error(_) => {}
             }
-            StreamState::Error(_) => {}
         }
-
         // ---------------------------------------------------------------
         // Layout
         // ---------------------------------------------------------------
@@ -1732,7 +1751,8 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                     upload_frame(frame, &mut image_node, &mut state.images);
                 }
                 #[cfg(target_family = "wasm")]
-                if stream.raw_dims.is_none()
+                if !stream.render_local
+                    && stream.raw_dims.is_none()
                     && let Some(wc) = wc.as_ref()
                     && let Some(handle) = wc.image.as_ref()
                 {
@@ -1748,7 +1768,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
 
                 // "No video at this time" overlay when there is no raw data
                 // near the current playback position.
-                if !cache.has_video_at(current_ts) {
+                if !stream.render_local && !cache.has_video_at(current_ts) {
                     ui.painter()
                         .rect_filled(max_rect, 0, Color32::BLACK.opacity(0.75));
                     ui.put(
@@ -1827,6 +1847,17 @@ pub fn connect_streams(
 ) {
     let count = query.iter().count().max(1);
     for (entity, mut stream, decoder, mut cache) in &mut query {
+        if stream.render_local
+            || sensor_configs.as_ref().is_some_and(|configs| {
+                configs
+                    .0
+                    .iter()
+                    .any(|c| c.camera_name == stream.msg_name && c.render_local)
+            })
+        {
+            stream.render_local = true;
+            continue;
+        }
         if cfg!(target_family = "wasm") {
             cache.max_raw_bytes = limits.video_bytes / count;
             cache.max_decoded_bytes = limits.decoded_bytes / count;

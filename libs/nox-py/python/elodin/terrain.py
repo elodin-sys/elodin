@@ -10,7 +10,7 @@ import os
 import subprocess
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import NamedTuple
 
@@ -19,6 +19,25 @@ import numpy as np
 from jax import Array
 
 from .geodesy import WGS84_A_M, WGS84_E2, ecef_to_geodetic, enu_basis
+
+
+@dataclass(frozen=True)
+class TerrainRegion:
+    """WGS84 bounds and target geometric error in meters; provider leaves bound available detail."""
+
+    bounds: tuple[float, float, float, float]
+    max_error: float = 16.0
+
+    def __post_init__(self):
+        if len(self.bounds) != 4 or not all(math.isfinite(v) for v in self.bounds):
+            raise ValueError("terrain bounds require four finite coordinates")
+        west, south, east, north = self.bounds
+        if not (-180 <= west < east <= 180 and -90 < south < north < 90):
+            raise ValueError(
+                "terrain bounds must be west < east, south < north, without crossing a pole or the antimeridian"
+            )
+        if not math.isfinite(self.max_error) or self.max_error <= 0:
+            raise ValueError("terrain max_error must be positive finite meters")
 
 
 @dataclass(frozen=True)
@@ -31,8 +50,21 @@ class Terrain:
 
     asset_id: int | None = 2275207
     path: str | None = None
+    regions: tuple[TerrainRegion, ...] = field(default=(), kw_only=True)
+    directory: str = field(default="terrain", kw_only=True)
 
     def __post_init__(self):
+        if self.regions:
+            if self.asset_id != 2275207 or self.path is not None:
+                raise ValueError("region preparation currently requires Google Photo 3D")
+            if not all(isinstance(region, TerrainRegion) for region in self.regions):
+                raise ValueError("regions must contain TerrainRegion objects")
+            if (
+                any(c in self.directory for c in ":\\?#%")
+                or any(part in ("", ".", "..") for part in self.directory.split("/"))
+                or any(ord(c) < 32 or ord(c) == 127 for c in self.directory)
+            ):
+                raise ValueError("terrain directory must be a relative asset directory")
         if self.path is not None:
             if self.asset_id is not None:
                 raise ValueError("terrain requires exactly one asset_id or asset path")
@@ -50,6 +82,38 @@ class Terrain:
             return
         if type(self.asset_id) is not int or not 0 < self.asset_id <= 2**63 - 1:
             raise ValueError("asset_id must be a positive 64-bit integer")
+
+    def _preparation_request(self, source_path):
+        if not self.regions:
+            return None
+        if not source_path:
+            raise ValueError("terrain preparation requires a schematic defined in a Python file")
+        assets = os.environ.get("ELODIN_ASSETS")
+        asset_root = (
+            Path(assets).resolve() if assets else Path(source_path).resolve().parent / "assets"
+        )
+        return {
+            "version": 1,
+            "asset_id": self.asset_id,
+            "regions": [asdict(region) for region in self.regions],
+            "output": str(asset_root / self.directory),
+        }
+
+    def _render_source(self, source_path):
+        request = self._preparation_request(source_path)
+        if request is None or os.environ.get("ELODIN_TERRAIN_PREPARE") == "1":
+            return self.asset_id, self.path
+        from .terrain_prepare import validate_package
+
+        try:
+            validate_package(Path(request["output"]), request)
+        except (FileNotFoundError, ValueError) as error:
+            if os.environ.get("ELODIN_TERRAIN_OFFLINE") == "1":
+                raise ValueError(
+                    "Prepared terrain is missing, incomplete or does not cover the declared regions; run elodin terrain prepare first"
+                ) from error
+            return self.asset_id, self.path
+        return None, f"{self.directory}/tileset.json"
 
     @classmethod
     def from_asset(cls, path: str | os.PathLike[str]) -> Terrain:
@@ -204,6 +268,7 @@ def terrain_heightmap(
     ``timeout`` applies to each native batch of up to one million positions.
     A failed preparation is retried up to twice with a fresh native session.
     """
+    offline = offline or os.environ.get("ELODIN_TERRAIN_OFFLINE") == "1"
     center = np.asarray(center_ecef, dtype=np.float64)
     size = np.asarray(dimensions, dtype=np.float64)
     if center.shape != (3,) or not np.all(np.isfinite(center)) or np.linalg.norm(center) < 1:

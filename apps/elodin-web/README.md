@@ -16,14 +16,26 @@ dev page. An HTTPS deployment needs a browser-accessible secure WebSocket
 endpoint. A successful browser build does not by itself validate a Cloud data
 source or its authentication.
 
-Use `&assets=https://assets.example/recordings/f9/assets/` when the DB's assets
-are served from a different address or path prefix. This changes HTTP asset
-requests, including nested effect files and prepared terrain; it does not change
-the database WebSocket address. The asset server must allow the editor's origin.
+Assets are loaded from the connected DB automatically. Terrain uses available
+assets and cached data first, then streams missing Photo 3D tiles. No terrain
+option is needed for normal use. Append `&offline=1` to disable terrain-provider
+requests; the DB and its assets remain accessible.
 
-Thruster particles use WebGPU when a compatible adapter is available. The WebGL
-fallback displays the scene without particles. Cinematic Earth and its atmosphere
-integration remain separate from terrain streaming and are not enabled here.
+To prepare a recording for offline use, run `elodin terrain prepare sim.py` before
+recording the simulation. The resulting terrain package travels with the DB.
+See the [terrain guide](../../docs/public/content/reference/terrain.md).
+
+Thruster particles and the schematic atmosphere use WebGPU when a compatible
+adapter is available. The WebGL fallback displays the scene without these effects.
+The atmosphere uses an Earth-centered rig; the native Cinematic Earth globe,
+star field and night material are not loaded in the browser.
+
+## Separate asset server
+
+Only when assets use a different address or path prefix, append
+`&assets=https://assets.example/recordings/f9/assets/`. This changes HTTP asset
+requests, including nested effects and terrain, without changing the DB WebSocket
+address. The asset server must allow the editor's origin through CORS.
 
 ## Run an example
 
@@ -66,7 +78,8 @@ conversion used by the editor and is independent of terrain streaming.
 
 `bevy-cesium` selects its backend by target: Cesium Native and its C++ bridge on
 native platforms, a Rust/Fetch loader in the browser. Browser builds do not link
-the native SDK. Both backends share rendering and initial terrain readiness.
+the native SDK. Prepared packages use the Rust loader on both platforms.
+Both backends share rendering; prepared replay does not wait for tile refinement.
 
 Use `el.Terrain.from_asset("terrain/Falcon9/tileset.json")` to load a prepared
 3D Tiles package from the DB asset server, including its relative child files.
@@ -75,9 +88,10 @@ origin. Preparing the package and simulation ground heights are separate steps.
 Ion 3D Tiles are also supported; ion aerial terrain (`asset_id=1`) and native
 height queries are unavailable in the browser.
 
-For Falcon 9's default Photo 3D mode, the DB schematic selects the ion dataset
-and the browser streams its tiles online. Google tiles are not archived in the
-DB. Models and other recorded assets still come from the DB asset server.
+Falcon 9 selects its prepared Photo 3D package automatically when available;
+otherwise it streams the ion dataset. Runtime streaming does not archive tiles
+in the DB. Extend the declared coverage and rerun preparation to add terrain
+to a new recording.
 
 See [TODO.md](TODO.md) for other browser limitations. CI checks compilation of
 `elodin-web` for `wasm32-unknown-unknown`; rendering and backend connectivity also

@@ -20,12 +20,14 @@ pub(crate) mod hw_stats;
 pub(crate) mod kdl_asset_source;
 pub(crate) mod kdl_document;
 mod logical_key;
+pub mod map_overlay;
 pub mod navigation_gizmo;
 pub mod render_layer_alloc;
 pub mod scene_environment;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod screenshot;
 pub(crate) mod simulation_startup;
+pub mod terrain_playback;
 pub mod thruster_particles;
 pub mod view_cube;
 #[cfg(target_arch = "wasm32")]

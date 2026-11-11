@@ -218,6 +218,22 @@ fn schematic_expr(schematic: &Schematic) -> PyExpr {
             "environment",
             schematic.environment.as_ref().map(environment_expr),
         );
+    if !schematic.map_overlays.is_empty() {
+        call = call.kw(
+            "map_overlays",
+            PyExpr::List(
+                schematic
+                    .map_overlays
+                    .iter()
+                    .map(|o| {
+                        PyExpr::call("map_overlay")
+                            .arg(py_str(&o.path))
+                            .kw("visible", py_bool(o.visible))
+                    })
+                    .collect(),
+            ),
+        );
+    }
     if schematic.telemetry_mode {
         call = call.kw("telemetry_mode", py_bool(true));
     }

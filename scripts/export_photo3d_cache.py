@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Export the Google Photo 3D subset already held in Cesium Native's cache.
 
-This prototype makes no network requests. Missing branches are pruned and
+This prototype makes no network requests. Missing content is omitted and
 reported, so the result is a snapshot of cached coverage, not a complete region.
 Run from the repository root with `uv run python scripts/export_photo3d_cache.py`.
 """
@@ -63,7 +63,8 @@ class Exporter:
             if urlsplit(url).hostname == "tile.googleapis.com":
                 self.rows.setdefault(cache_key(url), rowid)
         self.root = cache_key("https://tile.googleapis.com/v1/3dtiles/root.json")
-        self.exported: dict[str, str | None] = {}
+        self.exported: dict[str, str] = {}
+        self.source_resources: dict[str, str] = {}
         self.visiting: set[str] = set()
         self.missing: set[str] = set()
         self.tiles = 0
@@ -98,27 +99,51 @@ class Exporter:
                 validate_glb(data)
                 filename = f"tiles/{name}.glb"
                 self.write(filename, data)
+                self.source_resources[key] = filename
                 self.tiles += 1
             else:
                 document = json.loads(data)
                 if not isinstance(document, dict) or "root" not in document:
                     raise ExportError("Cached JSON is not a 3D Tiles tileset")
+                source_document = copy.deepcopy(document)
+                self.source_node(source_document["root"], key)
                 filename = "tileset.json" if key == self.root else f"tiles/{name}.json"
-                root = self.node(document["root"], key, filename)
-                if root is None:
-                    self.exported[key] = None
-                    return None
-                document["root"] = root
+                document["root"] = self.node(document["root"], key, filename)
                 self.check_references(document, self.directory / filename)
                 payload = json.dumps(document, separators=(",", ":"), allow_nan=False).encode()
                 self.write(filename, payload)
+                source_name = f"source/{name}.json"
+                self.write(
+                    source_name,
+                    json.dumps(source_document, separators=(",", ":"), allow_nan=False).encode(),
+                )
+                self.source_resources[key] = source_name
                 self.tilesets += 1
             self.exported[key] = filename
             return filename
         finally:
             self.visiting.remove(key)
 
-    def node(self, original: dict, base: str, filename: str) -> dict | None:
+    def source_node(self, node: dict, base: str) -> None:
+        """Retain missing content identity for hybrid replay, without access grants."""
+        for content in [node["content"]] if "content" in node else node.get("contents", []):
+            uri = content.get("uri", content.get("url"))
+            if not isinstance(uri, str):
+                raise ExportError("Tile content has no URI")
+            remote = cache_key(urljoin(base, uri))
+            parts = urlsplit(remote)
+            if (
+                parts.scheme != "https"
+                or parts.netloc != "tile.googleapis.com"
+                or not parts.path.startswith("/v1/3dtiles/")
+            ):
+                raise ExportError("Unsupported hybrid terrain resource origin")
+            content.pop("url", None)
+            content["uri"] = remote
+        for child in node.get("children", []):
+            self.source_node(child, base)
+
+    def node(self, original: dict, base: str, filename: str) -> dict:
         if "implicitTiling" in original:
             raise ExportError("Implicit tilesets are not supported by this prototype")
         node = copy.deepcopy(original)
@@ -138,14 +163,13 @@ class Exporter:
             node["content"] = contents[0]
         elif contents:
             node["contents"] = contents
-        children = []
-        for child in node.pop("children", []):
-            exported = self.node(child, base, filename)
-            if exported is not None:
-                children.append(exported)
+        children = [self.node(child, base, filename) for child in node.pop("children", [])]
         if children:
             node["children"] = children
-        return node if contents or children else None
+        # Empty children still participate in native refinement and culling.
+        # Dropping their bounds changes which cached parent/child tiles render,
+        # even for views whose geometry was fully downloaded.
+        return node
 
     def check_references(self, value: object, source: Path) -> None:
         """Reject resource references we did not localize, including extensions."""
@@ -180,6 +204,18 @@ def export_cache(cache: Path, output: Path) -> dict:
                 raise ExportError("Google root tileset is not present in the cache")
             if exporter.resource(exporter.root) is None or exporter.tiles == 0:
                 raise ExportError("The cache contains no reachable Google geometry")
+            exporter.write(
+                "package.json",
+                json.dumps(
+                    {
+                        "version": 1,
+                        "ion_asset_id": 2275207,
+                        "root": exporter.root,
+                        "resources": exporter.source_resources,
+                    },
+                    separators=(",", ":"),
+                ).encode(),
+            )
             report = {
                 "version": 1,
                 "source": "Google Photorealistic 3D Tiles via Cesium Native cache",

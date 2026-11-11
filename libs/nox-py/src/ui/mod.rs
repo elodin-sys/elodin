@@ -30,6 +30,7 @@ const ACTIVE_SCHEMATIC_KEY: &str = "schematics/main.kdl";
 #[derive(Clone, Debug)]
 pub struct PySchematic {
     pub(crate) inner: Schematic,
+    pub(crate) terrain_preparation: Option<serde_json::Value>,
     pub(crate) kernel_assets: HashMap<String, Vec<u8>>,
     /// Python file that called `ui.schematic`, when this object was built in Python.
     source_path: Option<String>,
@@ -39,6 +40,7 @@ impl PySchematic {
     pub fn from_inner(inner: Schematic) -> Self {
         Self {
             inner,
+            terrain_preparation: None,
             kernel_assets: HashMap::new(),
             source_path: None,
         }
@@ -47,6 +49,7 @@ impl PySchematic {
     pub fn from_parts(inner: Schematic, kernel_assets: HashMap<String, Vec<u8>>) -> Self {
         Self {
             inner,
+            terrain_preparation: None,
             kernel_assets,
             source_path: None,
         }
@@ -74,6 +77,7 @@ impl PySchematic {
         let inner = parse_schematic(text).map_err(|e| PyValueError::new_err(e.to_string()))?;
         Ok(Self {
             inner,
+            terrain_preparation: None,
             kernel_assets: HashMap::new(),
             source_path: None,
         })
@@ -116,6 +120,24 @@ impl PySchematic {
     }
 }
 
+#[pyclass(name = "MapOverlay", module = "elodin.ui")]
+#[derive(Clone)]
+struct PyMapOverlay {
+    inner: impeller_wkt::MapOverlayConfig,
+}
+
+#[pyfunction]
+#[pyo3(signature = (path, *, visible=true))]
+fn map_overlay(path: String, visible: bool) -> PyResult<PyMapOverlay> {
+    let inner = impeller_wkt::MapOverlayConfig { path, visible };
+    if !inner.is_valid() {
+        return Err(pyo3::exceptions::PyValueError::new_err(
+            "map overlay requires a relative JSON asset path, optionally prefixed db:",
+        ));
+    }
+    Ok(PyMapOverlay { inner })
+}
+
 /// Build a schematic from panels/objects plus optional globals.
 #[pyfunction]
 #[allow(clippy::too_many_arguments)]
@@ -126,6 +148,7 @@ impl PySchematic {
     timeline=None,
     skybox=None,
     terrain=None,
+    map_overlays=None,
     environment=None,
     telemetry_mode=false,
 ))]
@@ -137,11 +160,19 @@ fn schematic(
     timeline: Option<Bound<'_, PyAny>>,
     skybox: Option<String>,
     terrain: Option<Bound<'_, PyAny>>,
+    map_overlays: Option<Vec<PyRef<'_, PyMapOverlay>>>,
     environment: Option<Bound<'_, PyAny>>,
     telemetry_mode: bool,
 ) -> PyResult<PySchematic> {
+    let source_path = python_schematic_source(py);
+    let mut terrain_preparation = None;
     let mut inner = Schematic {
         telemetry_mode,
+        map_overlays: map_overlays
+            .unwrap_or_default()
+            .iter()
+            .map(|o| o.inner.clone())
+            .collect(),
         ..Schematic::default()
     };
 
@@ -161,12 +192,33 @@ fn schematic(
         inner.skybox = Some(impeller_wkt::SkyboxConfig { name });
     }
     if let Some(terrain) = terrain {
-        let asset_id: Option<i64> = terrain.getattr("asset_id")?.extract()?;
-        let path: Option<String> = if terrain.hasattr("path")? {
-            terrain.getattr("path")?.extract()?
-        } else {
-            None
-        };
+        let (asset_id, path): (Option<i64>, Option<String>) =
+            if terrain.hasattr("_render_source")? {
+                let request =
+                    terrain.call_method1("_preparation_request", (source_path.as_deref(),))?;
+                if !request.is_none() {
+                    let json: String = py
+                        .import("json")?
+                        .call_method1("dumps", (request,))?
+                        .extract()?;
+                    terrain_preparation = Some(
+                        serde_json::from_str(&json)
+                            .map_err(|e| PyValueError::new_err(e.to_string()))?,
+                    );
+                }
+                terrain
+                    .call_method1("_render_source", (source_path.as_deref(),))?
+                    .extract()?
+            } else {
+                (
+                    terrain.getattr("asset_id")?.extract()?,
+                    if terrain.hasattr("path")? {
+                        terrain.getattr("path")?.extract()?
+                    } else {
+                        None
+                    },
+                )
+            };
         let config = match (asset_id, path) {
             (Some(asset_id), None) => impeller_wkt::TerrainConfig::Ion { asset_id },
             (None, Some(path)) => impeller_wkt::TerrainConfig::Asset { path },
@@ -193,8 +245,9 @@ fn schematic(
 
     Ok(PySchematic {
         inner,
+        terrain_preparation,
         kernel_assets: builders::take_kernel_assets(),
-        source_path: python_schematic_source(py),
+        source_path,
     })
 }
 
@@ -479,6 +532,8 @@ pub fn extract_schematic_content(
 pub fn register(parent_module: &Bound<'_, PyModule>) -> PyResult<()> {
     let child = PyModule::new(parent_module.py(), "ui")?;
     child.add_class::<PySchematic>()?;
+    child.add_class::<PyMapOverlay>()?;
+    child.add_function(wrap_pyfunction!(map_overlay, &child)?)?;
     child.add_class::<PyPanel>()?;
     child.add_class::<PyObject3D>()?;
     child.add_class::<PyLine3d>()?;
