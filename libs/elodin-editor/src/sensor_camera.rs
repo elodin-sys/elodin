@@ -671,6 +671,7 @@ fn sensor_output_settings(config: &SensorCameraConfig) -> SensorOutputSettings {
     }
 }
 
+#[expect(clippy::too_many_arguments, reason = "Bevy system parameters")]
 fn spawn_sensor_cameras(
     mut commands: Commands,
     configs: Res<SensorCameraConfigs>,
@@ -1434,10 +1435,10 @@ impl SensorReadbackWorker {
         #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
         {
             let _ = (index, render_device, frame_sender);
-            return Ok(Self {
+            Ok(Self {
                 sender: None,
                 handle: None,
-            });
+            })
         }
         #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
         {

@@ -61,6 +61,7 @@ pub(super) fn install(app: &mut App) {
         .add_observer(basemap_ready);
 }
 
+#[expect(clippy::too_many_arguments, reason = "Bevy system parameters")]
 fn sync_basemap(
     mut commands: Commands,
     options: Res<TerrainPlayback>,

@@ -329,7 +329,7 @@ fn prettify_label(name: &str) -> String {
 fn color_scheme_dirs() -> Vec<PathBuf> {
     #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
     {
-        return Vec::new();
+        Vec::new()
     }
     #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
     {
@@ -585,7 +585,7 @@ fn load_color_scheme() -> Option<StoredColorScheme> {
     {
         let storage = web_sys::window()?.local_storage().ok()??;
         let json = storage.get_item(COLOR_SCHEME_FILE).ok()??;
-        return serde_json::from_str(&json).ok();
+        serde_json::from_str(&json).ok()
     }
     #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
     {

@@ -803,11 +803,11 @@ fn segment_endpoint_floats(values: &[Vec<f32>; 3], indices: &[u32]) -> Vec<f32> 
         if ia >= n || ib >= n {
             continue;
         }
-        for axis in 0..3 {
-            segments.push(values[axis][ia]);
+        for axis in values {
+            segments.push(axis[ia]);
         }
-        for axis in 0..3 {
-            segments.push(values[axis][ib]);
+        for axis in values {
+            segments.push(axis[ib]);
         }
     }
     segments
@@ -858,7 +858,7 @@ pub(super) fn build_gpu_line(
                 })
             });
         render_queue.write_buffer(&segment_buffer, 0, segments.as_bytes());
-        return Some((
+        Some((
             GpuLine {
                 segment_buffer,
                 count,
@@ -866,7 +866,7 @@ pub(super) fn build_gpu_line(
                 strip_values: Default::default(),
             },
             residual_too_large,
-        ));
+        ))
     }
 
     #[cfg(not(target_family = "wasm"))]

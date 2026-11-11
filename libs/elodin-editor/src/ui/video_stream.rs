@@ -1268,18 +1268,18 @@ fn copy_raw_frame_to_rgba(src: &[u8], dst: &mut [u8], format: RawPixelFormat) ->
     }
 }
 
+#[cfg(target_family = "wasm")]
+type PendingWebcodecs = (
+    With<VideoDecoderHandle>,
+    Without<webcodecs_video::bevy::VideoStream>,
+);
+
 /// Insert the library decoder beside a video tile. Spawn sites stay shared
 /// with native; this runs once per entity on wasm.
 #[cfg(target_family = "wasm")]
 pub fn attach_webcodecs(
     mut commands: Commands,
-    query: Query<
-        (Entity, &VideoStream),
-        (
-            With<VideoDecoderHandle>,
-            Without<webcodecs_video::bevy::VideoStream>,
-        ),
-    >,
+    query: Query<(Entity, &VideoStream), PendingWebcodecs>,
 ) {
     for (entity, stream) in &query {
         if stream.render_local {

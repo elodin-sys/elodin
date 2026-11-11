@@ -825,16 +825,13 @@ fn terrain_source(asset_id: i64) -> CesiumSource {
     }
 }
 
-fn configure_terrain(
-    world: &mut World,
-    mut previous: Local<
-        Option<(
-            Option<impeller_wkt::TerrainConfig>,
-            Option<impeller_bevy::DbEndpoint>,
-            super::terrain_playback::TerrainPlayback,
-        )>,
-    >,
-) {
+type TerrainConfiguration = (
+    Option<impeller_wkt::TerrainConfig>,
+    Option<impeller_bevy::DbEndpoint>,
+    super::terrain_playback::TerrainPlayback,
+);
+
+fn configure_terrain(world: &mut World, mut previous: Local<Option<TerrainConfiguration>>) {
     use super::terrain_playback::{TerrainMode, TerrainPlayback};
     let policy = world
         .get_resource::<TerrainPlayback>()
