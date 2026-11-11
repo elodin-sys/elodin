@@ -25,10 +25,10 @@ To prepare a recording for offline use, run `elodin terrain prepare sim.py` befo
 recording the simulation. The resulting terrain package travels with the DB.
 See the [terrain guide](../../docs/public/content/reference/terrain.md).
 
-Thruster particles and the schematic atmosphere use WebGPU when a compatible
-adapter is available. The WebGL fallback displays the scene without these effects.
-The atmosphere uses an Earth-centered rig; the native Cinematic Earth globe,
-star field and night material are not loaded in the browser.
+Thruster particles (Hanabi) require WebGPU. With WebGPU, `atmosphere` or `earth`
+inside the schematic's `environment` enables atmosphere rendering on the active
+cinematic view. WebGL displays the scene without these effects. The native
+Cinematic Earth globe, star field and night material are not loaded in the browser.
 
 ## Separate asset server
 
@@ -73,9 +73,8 @@ The editor keeps the connection it opened with the document until then.
 
 ## Platform boundary
 
-WebGPU enables Hanabi particles. The editor adapts Bevy's shadow comparison
-sampling for WebGPU while retaining the WebGL shaders for browsers that use
-the fallback renderer.
+The editor adapts Bevy's shadow comparison sampling for WebGPU while keeping
+the original WebGL shaders for the fallback renderer.
 
 Big Space is required on both native and WASM targets. It provides the coordinate
 conversion used by the editor and is independent of terrain streaming.
