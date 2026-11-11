@@ -87,7 +87,8 @@ pub enum DbMessage {
 #[derive(Resource, Default)]
 pub struct TelemetryCache {
     resident_bytes: usize,
-    byte_limit: usize,
+    /// `None` is no byte budget. `Some(0)` admits nothing.
+    byte_limit: Option<usize>,
     pivot: Timestamp,
     predecessors: HashMap<ComponentId, (Timestamp, i64)>,
     components: HashMap<ComponentId, BTreeMap<Timestamp, ComponentValue>>,
@@ -179,7 +180,7 @@ impl TelemetryCache {
         {
             return false;
         }
-        if self.byte_limit > 0 && !self.admit_block(block_start(ts.0), bytes) {
+        if self.byte_limit.is_some() && !self.admit_block(block_start(ts.0), bytes) {
             return false;
         }
         let series = self.components.entry(component_id).or_default();
@@ -209,37 +210,41 @@ impl TelemetryCache {
     }
 
     pub fn set_playback_budget(&mut self, bytes: usize, pivot: Timestamp) {
-        self.byte_limit = bytes.max(1);
+        self.byte_limit = Some(bytes);
         self.pivot = pivot;
     }
 
-    /// Largest page in `1..=max_limit` whose worst case fits in the budget.
-    /// Unlimited caches use `max_limit`. `None` when one sample cannot fit.
-    pub fn fitting_page_limit(&self, sample_bytes: usize, max_limit: usize) -> Option<usize> {
-        if max_limit == 0 {
-            return None;
-        }
-        if self.byte_limit == 0 {
-            return Some(max_limit);
-        }
-        if sample_bytes > self.byte_limit {
-            return None;
-        }
+    /// Largest page that fits in the budget.
+    ///
+    /// `max_limit` of `None` is no page-count cap. `Some(0)` is a cap of zero.
+    /// Returns `None` when one sample cannot fit, or when the cache and `max_limit` are both uncapped.
+    pub fn fitting_page_limit(
+        &self,
+        sample_bytes: usize,
+        max_limit: Option<usize>,
+    ) -> Option<usize> {
+        let Some(budget) = self.byte_limit else {
+            return max_limit;
+        };
         if sample_bytes == 0 {
-            return Some(max_limit);
+            return max_limit;
         }
-        Some((self.byte_limit / sample_bytes).min(max_limit))
+        if sample_bytes > budget {
+            return None;
+        }
+        let fit = budget / sample_bytes;
+        Some(max_limit.map_or(fit, |limit| fit.min(limit)))
     }
 
     /// Admission only evicts blocks strictly farther away than the wanted block.
     pub fn admit_block(&mut self, start: i64, bytes: usize) -> bool {
-        if self.byte_limit == 0 {
+        let Some(limit) = self.byte_limit else {
             return true;
-        }
-        if bytes > self.byte_limit {
+        };
+        if bytes > limit {
             return false;
         }
-        while self.resident_bytes.saturating_add(bytes) > self.byte_limit {
+        while self.resident_bytes.saturating_add(bytes) > limit {
             let candidate = self
                 .components
                 .iter()
@@ -292,7 +297,7 @@ impl TelemetryCache {
             return;
         }
         let limit = self.byte_limit;
-        self.byte_limit = 0;
+        self.byte_limit = None;
         self.insert(id, time, value);
         self.byte_limit = limit;
         self.predecessors.insert(id, (time, block));

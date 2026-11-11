@@ -1207,7 +1207,7 @@ fn send_visible_prefetch_page(
                 .map_or(8, |schema| schema.size().saturating_add(8));
             let Some(fit) = world
                 .resource::<TelemetryCache>()
-                .fitting_page_limit(size, VISIBLE_PREFETCH_LIMIT)
+                .fitting_page_limit(size, Some(VISIBLE_PREFETCH_LIMIT))
             else {
                 world
                     .resource_mut::<VisiblePrefetchState>()
