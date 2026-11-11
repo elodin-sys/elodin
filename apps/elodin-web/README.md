@@ -15,10 +15,6 @@ source or its authentication.
 
 ## Platform boundary
 
-WebGPU enables Hanabi particles. The editor adapts Bevy's shadow comparison
-sampling for WebGPU while retaining the WebGL shaders for browsers that use
-the fallback renderer.
-
 Big Space is required on both native and WASM targets. It provides the coordinate
 conversion used by the editor and is independent of terrain streaming.
 
