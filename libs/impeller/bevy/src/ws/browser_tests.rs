@@ -98,3 +98,89 @@ async fn browser_routes_cookies_assets_reconnect_and_session_switch() {
     assert!(requests.contains("e2_session=test"));
     suspend_ws_reconnect(&mut world);
 }
+
+#[wasm_bindgen(inline_js = "
+export function replayHost(mode) {
+  globalThis.replayMode = mode;
+  globalThis.replayStores = 0;
+  globalThis.elodinReplayCache = {
+    async lookup(scope, request) {
+      if (request[7] !== 0) throw Error('noncanonical request');
+      if (globalThis.replayMode === 'reject') throw Error('private mode');
+      if (globalThis.replayMode === 'timeout') return new Promise(() => {});
+      if (globalThis.replayMode === 'miss') return undefined;
+      return request.slice();
+    },
+    store(scope, request, reply) {
+      if (request[7] !== 0 || reply[7] !== 0) throw Error('noncanonical store');
+      globalThis.replayStores++;
+    }
+  };
+}
+export function storedReplies() { return globalThis.replayStores; }
+")]
+extern "C" {
+    #[wasm_bindgen(js_name = replayHost)]
+    fn replay_host(mode: &str);
+    #[wasm_bindgen(js_name = storedReplies)]
+    fn stored_replies() -> u32;
+}
+
+#[wasm_bindgen_test(async)]
+async fn replay_patches_ids_falls_back_and_discards_old_generations() {
+    set_cookie();
+    replay_host("hit");
+    let mut world = World::new();
+    install_connection(&mut world, Some(endpoint("replay")), true);
+    wait_connected(&world).await;
+    while world
+        .resource_mut::<crate::PacketRx>()
+        .try_recv_pkt()
+        .is_some()
+    {}
+    let (socket, hook) = {
+        let sockets = world.non_send_resource::<WsSockets>();
+        let live = sockets.main.as_ref().unwrap();
+        (live.ws.clone(), live.replay.clone())
+    };
+    let frame = LenPacket::new(PacketTy::Msg, impeller_wkt::GetMsgs::ID, 0)
+        .with_request_id(42)
+        .inner;
+    hook.state.borrow_mut().enabled = true;
+    hook.send(&socket, frame.clone());
+    delay(50).await;
+    assert_eq!(
+        world
+            .resource_mut::<crate::PacketRx>()
+            .try_recv_pkt()
+            .unwrap()
+            .req_id(),
+        42
+    );
+    assert!(hook.state.borrow().pending.is_empty());
+
+    for mode in ["miss", "reject", "timeout"] {
+        replay_host(mode);
+        hook.send(&socket, frame.clone());
+        delay(if mode == "timeout" { 2100 } else { 50 }).await;
+        assert!(hook.state.borrow().pending.contains_key(&42));
+        hook.receive(&socket, &frame);
+        assert_eq!(stored_replies(), 1);
+        assert!(hook.state.borrow().pending.is_empty());
+    }
+    replay_host("hit");
+    hook.send(&socket, frame);
+    hook.generation.fetch_add(1, Ordering::SeqCst);
+    delay(50).await;
+    assert!(
+        world
+            .resource_mut::<crate::PacketRx>()
+            .try_recv_pkt()
+            .is_none()
+    );
+    suspend_ws_reconnect(&mut world);
+    let _ = js_sys::Reflect::delete_property(
+        &js_sys::global(),
+        &JsValue::from_str("elodinReplayCache"),
+    );
+}

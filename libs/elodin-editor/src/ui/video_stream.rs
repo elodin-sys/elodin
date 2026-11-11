@@ -38,8 +38,6 @@ use crate::ui::up_marker::paint_up_marker;
 use crate::ui::widgets::SystemStateExt;
 use impeller_wkt::FrustumUpMarker;
 
-mod browser;
-
 // ---------------------------------------------------------------------------
 // Public pane types (unchanged API)
 // ---------------------------------------------------------------------------
@@ -112,6 +110,7 @@ const FRAMES_BEFORE_CONNECT: u32 = 5;
 
 /// Maximum number of decoded RGBA frames to keep in the LRU cache.
 /// At 640×512 RGBA each frame is ~1.3 MB, so 300 frames ≈ 390 MB.
+#[cfg(not(target_family = "wasm"))]
 const MAX_CACHED_FRAMES: usize = 300;
 
 /// If no raw frame exists within this many microseconds of `CurrentTimestamp`,
@@ -244,7 +243,6 @@ impl Default for StreamState {
 /// the decoder thread.
 #[derive(Component)]
 pub struct VideoFrameCache {
-    browser: Option<browser::BrowserVideoState>,
     max_decoded_bytes: usize,
     /// All raw frame data (H.264 NAL or raw RGBA), keyed by timestamp.
     /// Wrapped in Arc to avoid cloning large frame buffers on access.
@@ -254,6 +252,7 @@ pub struct VideoFrameCache {
     /// Sorted timestamps of known keyframes (IDR NAL units).
     keyframe_index: Vec<Timestamp>,
     /// Maximum number of decoded frames to retain.
+    #[cfg(not(target_family = "wasm"))]
     max_frames: usize,
     /// Cap on [`Self::raw_bytes`].
     max_raw_bytes: usize,
@@ -298,11 +297,11 @@ pub struct VideoFrameCache {
 impl Default for VideoFrameCache {
     fn default() -> Self {
         Self {
-            browser: None,
             max_decoded_bytes: usize::MAX,
             raw_frames: BTreeMap::new(),
             decoded_frames: BTreeMap::new(),
             keyframe_index: Vec::new(),
+            #[cfg(not(target_family = "wasm"))]
             max_frames: MAX_CACHED_FRAMES,
             max_raw_bytes: MAX_RAW_BYTES,
             raw_bytes: 0,
@@ -431,7 +430,7 @@ impl VideoFrameCache {
 
     /// Insert a raw frame, mark that instant covered, and evict away from `anchor`.
     pub fn insert_raw(&mut self, timestamp: Timestamp, data: Vec<u8>, anchor: Timestamp) {
-        if self.browser.is_some() && data.len() > self.max_raw_bytes {
+        if cfg!(target_family = "wasm") && data.len() > self.max_raw_bytes {
             return;
         }
         self.store_raw(timestamp, data);
@@ -566,8 +565,19 @@ impl VideoFrameCache {
         }
     }
 
+    fn decoded_over_budget(&self) -> bool {
+        #[cfg(not(target_family = "wasm"))]
+        {
+            self.decoded_frames.len() > self.max_frames
+        }
+        #[cfg(target_family = "wasm")]
+        {
+            false
+        }
+    }
+
     fn evict_if_needed(&mut self) {
-        while self.decoded_frames.len() > self.max_frames
+        while self.decoded_over_budget()
             || (self.max_decoded_bytes != usize::MAX
                 && self
                     .decoded_frames
@@ -604,7 +614,7 @@ impl VideoFrameCache {
 
     fn evict_raw_if_needed(&mut self, anchor: Timestamp) {
         while self.raw_bytes > self.max_raw_bytes
-            && (self.raw_frames.len() > 1 || self.browser.is_some())
+            && (self.raw_frames.len() > 1 || cfg!(target_family = "wasm"))
         {
             let first = *self.raw_frames.keys().next().unwrap();
             let last = *self.raw_frames.keys().next_back().unwrap();
@@ -1748,81 +1758,20 @@ pub fn connect_streams(
     )>,
     mut commands: Commands,
     last_updated: Res<impeller_wkt::LastUpdated>,
-    connection: Option<Res<impeller_bevy::ConnectionAddr>>,
-    scope: Res<impeller_bevy::browser_cache::BrowserCacheScope>,
-    limits: Res<impeller_bevy::browser_cache::PlaybackCacheLimits>,
+    limits: Res<impeller_bevy::PlaybackCacheLimits>,
     current_ts: Res<CurrentTimestamp>,
     earliest: Res<impeller_wkt::EarliestTimestamp>,
     sensor_configs: Option<Res<SensorCameraConfigs>>,
 ) {
-    let bounded = connection
-        .as_ref()
-        .is_some_and(|c| matches!(c.endpoint(), impeller_bevy::DbEndpoint::Browser(_)));
-    if bounded {
-        let count = query.iter().count().max(1);
-        let mut slots = 4usize.saturating_sub(
-            query
-                .iter()
-                .filter(|(_, _, _, cache)| {
-                    cache
-                        .browser
-                        .as_ref()
-                        .is_some_and(browser::BrowserVideoState::busy)
-                })
-                .count(),
-        );
-        for (entity, mut stream, decoder, mut cache) in &mut query {
-            if let StreamState::WaitingToConnect { frames_waited } = &mut stream.state {
-                *frames_waited += 1;
-                if *frames_waited < FRAMES_BEFORE_CONNECT {
-                    continue;
-                }
-                stream.state = StreamState::Active;
-            }
+    let count = query.iter().count().max(1);
+    for (entity, mut stream, decoder, mut cache) in &mut query {
+        if cfg!(target_family = "wasm") {
             cache.max_raw_bytes = limits.video_bytes / count;
             cache.max_decoded_bytes = limits.decoded_bytes / count;
-            if matches!(stream.state, StreamState::Error(_)) {
-                continue;
-            }
             cache.eviction_pivot = Some(current_ts.0);
             cache.evict_raw_if_needed(current_ts.0);
             cache.evict_if_needed();
-            decoder.drain_into_cache(&mut cache);
-            browser::update(
-                entity,
-                &mut stream,
-                &mut cache,
-                current_ts.0,
-                &scope,
-                &mut slots,
-                &mut commands,
-            );
         }
-        let raw = query
-            .iter()
-            .map(|(_, _, _, cache)| {
-                cache
-                    .raw_frames
-                    .values()
-                    .map(|bytes| bytes.len())
-                    .sum::<usize>()
-            })
-            .sum();
-        let decoded = query
-            .iter()
-            .map(|(_, _, _, cache)| {
-                cache
-                    .decoded_frames
-                    .values()
-                    .map(|frame| frame.data.as_ref().map_or(0, Vec::len))
-                    .sum::<usize>()
-            })
-            .sum();
-        impeller_bevy::browser_cache::report_resident("videoBytes", raw);
-        impeller_bevy::browser_cache::report_resident("decodedBytes", decoded);
-        return;
-    }
-    for (entity, mut stream, decoder, mut cache) in &mut query {
         match &mut stream.state {
             StreamState::WaitingToConnect { frames_waited } => {
                 *frames_waited += 1;
@@ -1899,6 +1848,11 @@ fn request_playhead_window(
     };
     let Some(gap) = cache.first_uncovered(&want) else {
         return;
+    };
+    #[cfg(target_family = "wasm")]
+    let gap = {
+        let start = impeller_bevy::block_start(gap.start.0);
+        Timestamp(start)..Timestamp(start.saturating_add(1_000_000))
     };
     let limit = backfill_frame_limit(stream.raw_dims, cache.is_h264);
     cache.backfill_in_flight = true;
@@ -1983,6 +1937,36 @@ fn clear_sensor_raw_frame_caches(caches: &mut Query<&mut VideoFrameCache>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decoded_budget_counts_pixels_instead_of_frames() {
+        let mut cache = VideoFrameCache::default();
+        cache.max_decoded_bytes = 20;
+        cache.eviction_pivot = Some(Timestamp(0));
+        let image = |width| {
+            Image::new_fill(
+                Extent3d {
+                    width,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D2,
+                &[0, 0, 0, 255],
+                bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+                RenderAssetUsages::default(),
+            )
+        };
+        cache.decoded_frames.insert(Timestamp(0), image(1));
+        cache.decoded_frames.insert(Timestamp(1_000_000), image(4));
+        cache.decoded_frames.insert(Timestamp(60_000_000), image(2));
+        cache.evict_if_needed();
+        assert_eq!(cache.decoded_frames.len(), 2);
+        assert!(!cache.decoded_frames.contains_key(&Timestamp(60_000_000)));
+        cache.max_decoded_bytes = 4;
+        cache.evict_if_needed();
+        assert_eq!(cache.decoded_frames.len(), 1);
+        assert!(cache.decoded_frames.contains_key(&Timestamp(0)));
+    }
 
     #[test]
     fn gray8_expands_to_opaque_rgba() {

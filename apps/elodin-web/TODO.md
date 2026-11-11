@@ -37,7 +37,7 @@ wired up. Unchecked items are compiled out, stubbed, or still native-only.
 - [ ] Hardware stats, system-information diagnostics, and the status bar
 - [ ] Component stream filter (native sends `SetStreamFilter`; WASM does not)
 - [ ] Saved and on-disk color schemes (built-in presets still apply; nothing is written)
-- [ ] Disk asset cache and asset-directory watching (WASM uses `NoCache`)
+WASM uses the browser HTTP cache for assets and a host-provided replay cache for replies.
 - [ ] Local display-kernel files (WASM fetches kernels over HTTP only)
 - [ ] Interpreter coverage for every StableHLO op (`erfinv`, batched `dot_general`, and other ops still return errors)
 - [ ] `wasm-opt` (`data-wasm-opt="0"` in `index.html`)

@@ -78,37 +78,30 @@ The browser palette omits desktop window creation and screen arrangement command
 This experiment covers schematic windows in the browser viewer.
 The dedicated Elodin PR must also review full-editor window creation, tab navigation, scene sharing, and reconnect behavior.
 
-## Experimental playback cache
+## Playback cache
 
-Browser connections fetch camera frames and telemetry near the playhead.
-Seeks keep the full recording available through new range requests.
-Late responses cannot replace data for a newer seek or session.
-The native connection retains its existing playback path.
+WASM keeps telemetry in aligned one-second blocks near the playhead and in visible plot ranges.
+The RAM limits are configured through `impeller_bevy::PlaybackCacheLimits` and
+`EditorPlugin::with_cache_limits`. Native backfill and frame limits stay unchanged.
+A plot wider than the RAM budget fills only the region nearest the playhead.
+Assets use the browser HTTP cache; downloads larger than 64 MiB are rejected.
 
-The Cache API stores disposable chunks for the active viewer session.
-The cache does not store cookies, authentication headers, or credential-bearing keys.
-Storage failures fall back to bounded memory and authorized network requests.
-The same adapter caches static GLB and glTF files, external buffers, and textures.
-This experiment does not enable the native `world_mesh` terrain renderer.
+A host page can install `globalThis.elodinReplayCache` before loading the editor:
 
-Default limits are 192 MiB for camera payloads, 32 MiB for decoded camera images, and 64 MiB for telemetry.
-Each browser transport queue has a 64 MiB capacity.
-The disk payload limit is 512 MiB, with 8 MiB chunks and at most 4096 index entries.
-An asset has a 64 MiB download limit. This limit does not bound total decoded scene or graphics memory.
-The regenerated static terrain still needs separate graphics and memory qualification.
-H.264 decoding remains unavailable in the existing WASM build. Native H.264 decoding retains its existing implementation.
-
-Rust callers can supply `impeller_bevy::browser_cache::PlaybackCacheLimits` through `EditorPlugin::with_cache_limits`.
-Set `disk_bytes` to zero to disable persistence.
-For browser tests, set `globalThis.__elodinDisableDiskCache` before startup.
-`globalThis.__elodinCacheStats` exposes cache counters and resident payload estimates for this experiment.
-WASM linear memory needs a separate measurement because these counters do not include allocator capacity.
-
-Run the cache adapter tests inside the Nix shell:
-
-```sh
-node --test tests/browser-cache/cache.test.mjs
+```ts
+interface ElodinReplayCache {
+  lookup(scope: string, request: Uint8Array): Promise<Uint8Array | undefined>;
+  store(scope: string, request: Uint8Array, reply: Uint8Array): void;
+}
 ```
+
+The scope is the socket URL. Requests and replies are full Impeller frames with
+request-id byte 7 set to zero. Only time-series, predecessor and message queries
+are replayed, and only after a stopped database reports `DbConfig.recording == false`.
+The host owns storage, quotas and session cleanup. Missing storage, errors and
+lookups slower than two seconds fall back to the server. Replies from an old
+socket generation are discarded. Seeks retain outstanding requests; late replies
+reach disk before RAM admission decides whether to retain them.
 
 ## Tests
 

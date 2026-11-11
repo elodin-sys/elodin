@@ -9,7 +9,9 @@ use bevy::{
 use bevy::{ecs::system::SystemParam, prelude::World};
 use bevy::{
     ecs::system::SystemState,
-    prelude::{Commands, Component, Deref, DerefMut, Entity, Name, Query, ResMut, Resource, debug},
+    prelude::{
+        Commands, Component, Deref, DerefMut, Entity, Name, Query, Res, ResMut, Resource, debug,
+    },
 };
 use impeller::types::IntoLenPacket;
 use impeller::types::RequestId;
@@ -30,7 +32,7 @@ use impeller_wkt::{
 };
 use serde::de::DeserializeOwned;
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
     convert::Infallible,
     marker::PhantomData,
     ops::Bound,
@@ -45,8 +47,14 @@ pub use impeller_wkt::ElementValueMut;
 pub use impeller_wkt::{ComponentPart, ComponentPath};
 
 pub use address;
-pub mod browser_cache;
-pub mod browser_series;
+pub mod playback;
+pub mod replay;
+pub use playback::{PlaybackCacheLimits, block_start};
+
+#[derive(Resource, Default)]
+pub struct ReplayCachePolicy {
+    pub enabled: bool,
+}
 pub mod channels;
 pub use channels::{
     BrowserEndpoints, ConnectionAddr, ConnectionStatus, DbEndpoint, MsgPacketRx, MsgPacketTx,
@@ -177,15 +185,8 @@ impl TelemetryCache {
         {
             return false;
         }
-        if self.byte_limit > 0 {
-            if bytes > self.byte_limit {
-                return false;
-            }
-            while self.resident_bytes.saturating_add(bytes) > self.byte_limit {
-                if !self.evict_farthest() {
-                    break;
-                }
-            }
+        if self.byte_limit > 0 && !self.admit_block(block_start(ts.0), bytes) {
+            return false;
         }
         let series = self.components.entry(component_id).or_default();
         // Keep the first value seen for a timestamp. In mixed backfill+live
@@ -202,53 +203,83 @@ impl TelemetryCache {
     }
 
     fn value_bytes(value: &ComponentValue) -> usize {
-        value
-            .as_view()
-            .as_bytes()
-            .len()
-            .saturating_add(std::mem::size_of::<ComponentValue>() + 128)
+        value.as_view().as_bytes().len().saturating_add(8)
     }
 
     pub fn resident_bytes(&self) -> usize {
         self.resident_bytes
     }
 
-    fn evict_farthest(&mut self) -> bool {
-        let candidate = self
-            .components
-            .iter()
-            .flat_map(|(&id, series)| {
-                [series.first_key_value(), series.last_key_value()]
-                    .into_iter()
-                    .flatten()
-                    .map(move |(&time, _)| (id, time))
-            })
-            .max_by_key(|(_, time)| time.0.abs_diff(self.pivot.0));
-        let Some((id, time)) = candidate else {
+    pub fn playback_pivot(&self) -> Timestamp {
+        self.pivot
+    }
+
+    pub fn set_playback_budget(&mut self, bytes: usize, pivot: Timestamp) {
+        self.byte_limit = bytes.max(1);
+        self.pivot = pivot;
+    }
+
+    /// Admission only evicts blocks strictly farther away than the wanted block.
+    pub fn admit_block(&mut self, start: i64, bytes: usize) -> bool {
+        if self.byte_limit == 0 {
+            return true;
+        }
+        if bytes > self.byte_limit {
             return false;
-        };
-        let series = self.components.get_mut(&id).expect("selected cache series");
-        if let Some(value) = series.remove(&time) {
-            self.resident_bytes = self
-                .resident_bytes
-                .saturating_sub(Self::value_bytes(&value));
+        }
+        while self.resident_bytes.saturating_add(bytes) > self.byte_limit {
+            let candidate = self
+                .components
+                .iter()
+                .flat_map(|(&id, series)| {
+                    [series.first_key_value(), series.last_key_value()]
+                        .into_iter()
+                        .flatten()
+                        .map(move |(&time, _)| (id, block_start(time.0)))
+                })
+                .max_by_key(|(_, time)| time.abs_diff(self.pivot.0));
+            let Some((id, time)) = candidate else {
+                return false;
+            };
+            if time.abs_diff(self.pivot.0) <= start.abs_diff(self.pivot.0) {
+                return false;
+            }
+            self.drop_block(id, time);
+        }
+        true
+    }
+
+    pub fn drop_block(&mut self, id: ComponentId, start: i64) {
+        let end = start.saturating_add(1_000_000);
+        if let Some(series) = self.components.get_mut(&id) {
+            series.retain(|time, value| {
+                if time.0 >= start && time.0 < end {
+                    self.resident_bytes =
+                        self.resident_bytes.saturating_sub(Self::value_bytes(value));
+                    false
+                } else {
+                    true
+                }
+            });
         }
         if let Some(coverage) = self.coverage.get_mut(&id) {
-            if let (Some((&first, _)), Some((&last, _))) =
-                (series.first_key_value(), series.last_key_value())
-            {
-                for (start, end) in coverage.iter_mut() {
-                    *start = (*start).max(first.0);
-                    *end = (*end).min(last.0.saturating_add(1));
+            let mut kept = Vec::new();
+            for &(a, b) in coverage.iter() {
+                if b <= start || a >= end {
+                    kept.push((a, b));
+                } else {
+                    if a < start {
+                        kept.push((a, start));
+                    }
+                    if b > end {
+                        kept.push((end, b));
+                    }
                 }
-                coverage.retain(|(start, end)| start < end);
-            } else {
-                coverage.clear();
             }
+            *coverage = kept;
         }
         self.generation = self.generation.wrapping_add(1);
-        self.bump_revision(id, time);
-        true
+        self.bump_revision(id, Timestamp(start));
     }
 
     fn bump_revision(&mut self, component_id: ComponentId, from: Timestamp) {
@@ -725,27 +756,19 @@ pub fn backfill_cache(
     priority: bevy::prelude::Res<SeriesFetchPriority>,
     mut load_state: ResMut<SeriesStoreLoadState>,
     mut commands: Commands,
-    connection: Option<bevy::prelude::Res<ConnectionAddr>>,
-    scope: Option<bevy::prelude::Res<browser_cache::BrowserCacheScope>>,
-    limits: Option<bevy::prelude::Res<browser_cache::PlaybackCacheLimits>>,
     current: Option<bevy::prelude::Res<CurrentTimestamp>>,
-    browser: Option<ResMut<browser_series::BrowserSeriesState>>,
-    cache: Option<ResMut<TelemetryCache>>,
+    limits: Res<PlaybackCacheLimits>,
+    mut pager: ResMut<playback::PlaybackPager>,
+    mut cache: ResMut<TelemetryCache>,
 ) {
-    if connection
-        .as_ref()
-        .is_some_and(|c| matches!(c.endpoint(), DbEndpoint::Browser(_)))
-    {
-        if let (Some(scope), Some(limits), Some(current), Some(mut browser), Some(mut cache)) =
-            (scope, limits, current, browser, cache)
-        {
-            browser_series::update(
-                &scope,
-                &limits,
+    if cfg!(target_family = "wasm") {
+        if let Some(current) = current {
+            playback::update(
                 current.0,
+                &limits,
                 &priority,
                 &schema_reg,
-                &mut browser,
+                &mut pager,
                 &mut cache,
                 &mut backfill,
                 &mut commands,
@@ -1289,6 +1312,7 @@ fn sink_inner(
             OwnedPacket::Msg(m) if m.id == DbConfig::ID => {
                 let config = m.parse::<DbConfig>()?;
                 world_sink.recording.0 = config.recording;
+                world_sink.replay_policy.enabled = !config.recording;
                 *world_sink.db_config = config;
                 world_sink.commands.write_message(DbMessage::UpdateConfig);
             }
@@ -1546,6 +1570,7 @@ pub struct WorldSink<'w, 's> {
     max_tick: ResMut<'w, LastUpdated>,
     earliest_timestamp: ResMut<'w, EarliestTimestamp>,
     recording: ResMut<'w, IsRecording>,
+    replay_policy: ResMut<'w, ReplayCachePolicy>,
     current_timestamp: ResMut<'w, CurrentTimestamp>,
     schema_reg: ResMut<'w, ComponentSchemaRegistry>,
     path_reg: ResMut<'w, ComponentPathRegistry>,
@@ -1838,10 +1863,9 @@ pub struct ImpellerPlugin;
 impl Plugin for ImpellerPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_message::<DbMessage>()
-            .init_resource::<browser_cache::PlaybackCacheLimits>()
-            .init_resource::<browser_cache::BrowserCacheScope>()
-            .init_resource::<browser_series::BrowserSeriesState>()
-            .add_systems(bevy::prelude::PreUpdate, browser_cache::sync_scope)
+            .init_resource::<PlaybackCacheLimits>()
+            .init_resource::<ReplayCachePolicy>()
+            .init_resource::<playback::PlaybackPager>()
             .add_plugins(DefaultAdaptersPlugin)
             .add_systems(bevy::prelude::Startup, ensure_db_components_root)
             .add_systems(

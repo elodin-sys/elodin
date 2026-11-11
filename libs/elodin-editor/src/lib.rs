@@ -488,7 +488,7 @@ pub(crate) fn register_ibl_embedded_assets(app: &mut App) {
 pub struct EditorPlugin {
     window_resolution: WindowResolution,
     capabilities: viewer::ViewerCapabilities,
-    cache_limits: impeller_bevy::browser_cache::PlaybackCacheLimits,
+    cache_limits: impeller_bevy::PlaybackCacheLimits,
     #[cfg(target_family = "wasm")]
     connection: Option<DbEndpoint>,
 }
@@ -498,10 +498,7 @@ pub struct EditorPlugin {
 pub struct PositionSync;
 
 impl EditorPlugin {
-    pub fn with_cache_limits(
-        mut self,
-        limits: impeller_bevy::browser_cache::PlaybackCacheLimits,
-    ) -> Self {
+    pub fn with_cache_limits(mut self, limits: impeller_bevy::PlaybackCacheLimits) -> Self {
         self.cache_limits = limits;
         self
     }
@@ -518,7 +515,7 @@ impl EditorPlugin {
         Self {
             window_resolution: WindowResolution::new(width as u32, height as u32),
             capabilities: viewer::ViewerCapabilities::default(),
-            cache_limits: impeller_bevy::browser_cache::PlaybackCacheLimits::default(),
+            cache_limits: impeller_bevy::PlaybackCacheLimits::default(),
             #[cfg(target_family = "wasm")]
             connection: None,
         }
