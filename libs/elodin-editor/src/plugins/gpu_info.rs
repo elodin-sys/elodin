@@ -2,8 +2,8 @@ use std::{env, ffi::OsStr, sync::Once};
 
 use bevy::{
     app::Plugin,
-    prelude::{App, Local, Res},
-    render::{Render, RenderApp, renderer::RenderAdapterInfo},
+    prelude::{App, Res, ResMut, Resource},
+    render::{ExtractSchedule, MainWorld, RenderApp, renderer::RenderAdapterInfo},
 };
 
 fn gpu_failure_help() -> &'static str {
@@ -29,7 +29,8 @@ pub struct GpuInfoPlugin;
 
 impl Plugin for GpuInfoPlugin {
     fn build(&self, app: &mut App) {
-        app.sub_app_mut(RenderApp).add_systems(Render, log_gpu_info);
+        app.sub_app_mut(RenderApp)
+            .add_systems(ExtractSchedule, copy_adapter_info);
     }
 }
 
@@ -68,90 +69,87 @@ fn should_force_gpu_panic(value: Option<&OsStr>) -> bool {
     value == Some(OsStr::new("true"))
 }
 
-pub(crate) struct GraphicsBackendStatus {
-    pub label: &'static str,
-    pub accelerated: bool,
-}
+#[derive(Resource)]
+pub(crate) struct GpuInfo(RenderAdapterInfo);
 
-pub(crate) fn graphics_backend_status(
-    backend: wgpu::Backend,
-    device_type: wgpu::DeviceType,
-    wasm: bool,
-) -> GraphicsBackendStatus {
-    let software = device_type == wgpu::DeviceType::Cpu;
-    let label = match backend {
-        wgpu::Backend::Noop => "No GPU",
-        wgpu::Backend::BrowserWebGpu => {
-            if software {
-                "WebGPU software"
-            } else {
-                "WebGPU"
-            }
-        }
-        wgpu::Backend::Gl => match (wasm, software) {
-            (true, false) => "WebGL",
-            (true, true) => "WebGL software",
-            (false, false) => "OpenGL",
-            (false, true) => "OpenGL software",
-        },
-        wgpu::Backend::Vulkan => {
-            if software {
-                "Vulkan software"
-            } else {
-                "Vulkan"
-            }
-        }
-        wgpu::Backend::Metal => {
-            if software {
-                "Metal software"
-            } else {
-                "Metal"
-            }
-        }
-        wgpu::Backend::Dx12 => {
-            if software {
-                "D3D12 software"
-            } else {
-                "D3D12"
-            }
-        }
-    };
-    let accelerated = !software
-        && backend != wgpu::Backend::Noop
-        && matches!(
-            device_type,
-            wgpu::DeviceType::IntegratedGpu
-                | wgpu::DeviceType::DiscreteGpu
-                | wgpu::DeviceType::VirtualGpu
-        );
-    GraphicsBackendStatus { label, accelerated }
-}
-
-pub(crate) fn graphics_backend_hover(
-    accelerated: bool,
-    name: &str,
-    driver: &str,
-    driver_info: &str,
-) -> String {
-    let mut lines = vec![
-        if accelerated {
-            "GPU accelerated"
-        } else {
-            "Not GPU accelerated"
-        },
-        name,
-    ];
-    if !driver.is_empty() {
-        lines.push(driver);
+impl GpuInfo {
+    pub(crate) fn label(&self) -> &'static str {
+        self.label_for(cfg!(target_arch = "wasm32"))
     }
-    if !driver_info.is_empty() && driver_info != driver {
-        lines.push(driver_info);
+
+    fn label_for(&self, wasm: bool) -> &'static str {
+        let software = self.0.device_type == wgpu::DeviceType::Cpu;
+        match self.0.backend {
+            wgpu::Backend::Noop => "No GPU",
+            wgpu::Backend::BrowserWebGpu => {
+                if software {
+                    "WebGPU software"
+                } else {
+                    "WebGPU"
+                }
+            }
+            wgpu::Backend::Gl => match (wasm, software) {
+                (true, false) => "WebGL",
+                (true, true) => "WebGL software",
+                (false, false) => "OpenGL",
+                (false, true) => "OpenGL software",
+            },
+            wgpu::Backend::Vulkan => {
+                if software {
+                    "Vulkan software"
+                } else {
+                    "Vulkan"
+                }
+            }
+            wgpu::Backend::Metal => {
+                if software {
+                    "Metal software"
+                } else {
+                    "Metal"
+                }
+            }
+            wgpu::Backend::Dx12 => {
+                if software {
+                    "D3D12 software"
+                } else {
+                    "D3D12"
+                }
+            }
+        }
     }
-    lines.join("\n")
+
+    pub(crate) fn accelerated(&self) -> bool {
+        self.0.device_type != wgpu::DeviceType::Cpu
+            && self.0.backend != wgpu::Backend::Noop
+            && matches!(
+                self.0.device_type,
+                wgpu::DeviceType::IntegratedGpu
+                    | wgpu::DeviceType::DiscreteGpu
+                    | wgpu::DeviceType::VirtualGpu
+            )
+    }
+
+    pub(crate) fn hover(&self) -> String {
+        let mut lines = vec![
+            if self.accelerated() {
+                "GPU accelerated"
+            } else {
+                "Not GPU accelerated"
+            },
+            self.0.name.as_str(),
+        ];
+        if !self.0.driver.is_empty() {
+            lines.push(self.0.driver.as_str());
+        }
+        if !self.0.driver_info.is_empty() && self.0.driver_info != self.0.driver {
+            lines.push(self.0.driver_info.as_str());
+        }
+        lines.join("\n")
+    }
 }
 
-fn log_gpu_info(adapter: Res<RenderAdapterInfo>, mut logged: Local<bool>) {
-    if *logged {
+fn copy_adapter_info(adapter: Res<RenderAdapterInfo>, mut main_world: ResMut<MainWorld>) {
+    if main_world.contains_resource::<GpuInfo>() {
         return;
     }
     tracing::info!(
@@ -165,12 +163,40 @@ fn log_gpu_info(adapter: Res<RenderAdapterInfo>, mut logged: Local<bool>) {
         pci_bus = %adapter.device_pci_bus_id,
         "Graphics adapter initialized"
     );
-    *logged = true;
+    main_world.insert_resource(GpuInfo(adapter.clone()));
 }
 
 #[cfg(test)]
 mod tests {
+    use bevy::render::renderer::WgpuWrapper;
+
     use super::*;
+
+    fn graphics_backend(
+        api: wgpu::Backend,
+        device_type: wgpu::DeviceType,
+        name: &str,
+        driver: &str,
+        driver_info: &str,
+    ) -> GpuInfo {
+        GpuInfo(RenderAdapterInfo(WgpuWrapper::new(wgpu::AdapterInfo {
+            name: name.to_owned(),
+            vendor: 0,
+            device: 0,
+            device_type,
+            device_pci_bus_id: String::new(),
+            driver: driver.to_owned(),
+            driver_info: driver_info.to_owned(),
+            backend: api,
+            subgroup_min_size: 0,
+            subgroup_max_size: 0,
+            transient_saves_memory: false,
+        })))
+    }
+
+    fn backend(api: wgpu::Backend, device_type: wgpu::DeviceType) -> GpuInfo {
+        graphics_backend(api, device_type, "", "", "")
+    }
 
     #[test]
     fn identifies_gpu_initialization_panic() {
@@ -191,80 +217,92 @@ mod tests {
 
     #[test]
     fn wasm_webgpu_on_a_real_gpu_is_accelerated() {
-        let status = graphics_backend_status(
+        let status = backend(
             wgpu::Backend::BrowserWebGpu,
             wgpu::DeviceType::IntegratedGpu,
-            true,
         );
-        assert_eq!(status.label, "WebGPU");
-        assert!(status.accelerated);
+        assert_eq!(status.label_for(true), "WebGPU");
+        assert!(status.accelerated());
     }
 
     #[test]
     fn wasm_gl_is_webgl() {
-        let status =
-            graphics_backend_status(wgpu::Backend::Gl, wgpu::DeviceType::DiscreteGpu, true);
-        assert_eq!(status.label, "WebGL");
-        assert!(status.accelerated);
+        let status = backend(wgpu::Backend::Gl, wgpu::DeviceType::DiscreteGpu);
+        assert_eq!(status.label_for(true), "WebGL");
+        assert!(status.accelerated());
     }
 
     #[test]
     fn native_backends_name_the_api() {
         assert_eq!(
-            graphics_backend_status(wgpu::Backend::Vulkan, wgpu::DeviceType::DiscreteGpu, false)
-                .label,
+            backend(wgpu::Backend::Vulkan, wgpu::DeviceType::DiscreteGpu).label_for(false),
             "Vulkan"
         );
         assert_eq!(
-            graphics_backend_status(wgpu::Backend::Metal, wgpu::DeviceType::IntegratedGpu, false)
-                .label,
+            backend(wgpu::Backend::Metal, wgpu::DeviceType::IntegratedGpu).label_for(false),
             "Metal"
         );
         assert_eq!(
-            graphics_backend_status(wgpu::Backend::Dx12, wgpu::DeviceType::DiscreteGpu, false)
-                .label,
+            backend(wgpu::Backend::Dx12, wgpu::DeviceType::DiscreteGpu).label_for(false),
             "D3D12"
         );
         assert_eq!(
-            graphics_backend_status(wgpu::Backend::Gl, wgpu::DeviceType::IntegratedGpu, false)
-                .label,
+            backend(wgpu::Backend::Gl, wgpu::DeviceType::IntegratedGpu).label_for(false),
             "OpenGL"
         );
-        assert!(
-            graphics_backend_status(wgpu::Backend::Vulkan, wgpu::DeviceType::VirtualGpu, false)
-                .accelerated
-        );
+        assert!(backend(wgpu::Backend::Vulkan, wgpu::DeviceType::VirtualGpu).accelerated());
+    }
+
+    #[test]
+    fn label_uses_this_targets_api_name() {
+        let status = backend(wgpu::Backend::Gl, wgpu::DeviceType::DiscreteGpu);
+        #[cfg(target_arch = "wasm32")]
+        assert_eq!(status.label(), "WebGL");
+        #[cfg(not(target_arch = "wasm32"))]
+        assert_eq!(status.label(), "OpenGL");
     }
 
     #[test]
     fn cpu_and_noop_are_not_gpu_accelerated() {
-        let software = graphics_backend_status(wgpu::Backend::Vulkan, wgpu::DeviceType::Cpu, false);
-        assert_eq!(software.label, "Vulkan software");
-        assert!(!software.accelerated);
+        let software = backend(wgpu::Backend::Vulkan, wgpu::DeviceType::Cpu);
+        assert_eq!(software.label_for(false), "Vulkan software");
+        assert!(!software.accelerated());
 
-        let webgl_software =
-            graphics_backend_status(wgpu::Backend::Gl, wgpu::DeviceType::Cpu, true);
-        assert_eq!(webgl_software.label, "WebGL software");
-        assert!(!webgl_software.accelerated);
+        let webgl_software = backend(wgpu::Backend::Gl, wgpu::DeviceType::Cpu);
+        assert_eq!(webgl_software.label_for(true), "WebGL software");
+        assert!(!webgl_software.accelerated());
 
-        let noop = graphics_backend_status(wgpu::Backend::Noop, wgpu::DeviceType::Other, false);
-        assert_eq!(noop.label, "No GPU");
-        assert!(!noop.accelerated);
+        let noop = backend(wgpu::Backend::Noop, wgpu::DeviceType::Other);
+        assert_eq!(noop.label_for(false), "No GPU");
+        assert!(!noop.accelerated());
 
-        let unknown =
-            graphics_backend_status(wgpu::Backend::Vulkan, wgpu::DeviceType::Other, false);
-        assert_eq!(unknown.label, "Vulkan");
-        assert!(!unknown.accelerated);
+        let unknown = backend(wgpu::Backend::Vulkan, wgpu::DeviceType::Other);
+        assert_eq!(unknown.label_for(false), "Vulkan");
+        assert!(!unknown.accelerated());
     }
 
     #[test]
     fn hover_says_whether_the_adapter_is_accelerated() {
-        let accelerated = graphics_backend_hover(true, "Arc Graphics", "", "WebGL 2.0");
+        let accelerated = graphics_backend(
+            wgpu::Backend::Gl,
+            wgpu::DeviceType::IntegratedGpu,
+            "Arc Graphics",
+            "",
+            "WebGL 2.0",
+        )
+        .hover();
         assert!(accelerated.starts_with("GPU accelerated"));
         assert!(accelerated.contains("Arc Graphics"));
         assert!(accelerated.contains("WebGL 2.0"));
 
-        let software = graphics_backend_hover(false, "llvmpipe", "llvmpipe", "llvmpipe");
+        let software = graphics_backend(
+            wgpu::Backend::Vulkan,
+            wgpu::DeviceType::Cpu,
+            "llvmpipe",
+            "llvmpipe",
+            "llvmpipe",
+        )
+        .hover();
         assert!(software.starts_with("Not GPU accelerated"));
         assert!(software.contains("llvmpipe"));
         assert_eq!(software.matches("llvmpipe").count(), 2);

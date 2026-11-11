@@ -8,7 +8,6 @@ use bevy::{
         world::World,
     },
     prelude::Entity,
-    render::renderer::RenderAdapterInfo,
     window::PrimaryWindow,
 };
 #[cfg(not(target_family = "wasm"))]
@@ -22,6 +21,7 @@ use std::time::Duration;
 #[cfg(not(target_family = "wasm"))]
 use web_time::Instant;
 
+use crate::plugins::gpu_info::GpuInfo;
 #[cfg(not(target_family = "wasm"))]
 use crate::plugins::hw_stats::HardwareStats;
 #[cfg(not(target_family = "wasm"))]
@@ -53,7 +53,7 @@ pub struct StatusBar<'w, 's> {
     plot_gpu_pool: Res<'w, PlotGpuBufferPool>,
     command_palette_state: ResMut<'w, CommandPaletteState>,
     db_config: Res<'w, DbConfig>,
-    adapter_info: Option<Res<'w, RenderAdapterInfo>>,
+    gpu_info: Option<Res<'w, GpuInfo>>,
 }
 
 impl RootWidgetSystem for StatusBar<'_, '_> {
@@ -126,27 +126,16 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
                             .color(get_scheme().text_secondary),
                     ));
 
-                    if let Some(adapter) = state_mut.adapter_info.as_deref() {
-                        let status = crate::plugins::gpu_info::graphics_backend_status(
-                            adapter.backend,
-                            adapter.device_type,
-                            cfg!(target_arch = "wasm32"),
-                        );
-                        let hover = crate::plugins::gpu_info::graphics_backend_hover(
-                            status.accelerated,
-                            &adapter.name,
-                            &adapter.driver,
-                            &adapter.driver_info,
-                        );
+                    if let Some(gpu) = state_mut.gpu_info.as_deref() {
                         ui.add(
                             egui::Label::new(
-                                egui::RichText::new(status.label)
+                                egui::RichText::new(gpu.label())
                                     .text_style(egui::TextStyle::Small)
                                     .color(get_scheme().text_secondary),
                             )
                             .sense(egui::Sense::hover()),
                         )
-                        .on_hover_text(hover);
+                        .on_hover_text(gpu.hover());
                     }
 
                     // Simulator TPS
