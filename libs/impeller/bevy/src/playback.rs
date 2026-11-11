@@ -198,11 +198,14 @@ mod tests {
         let value = ComponentValue::F64(nox::array![1f64].to_dyn());
         let cost = TelemetryCache::value_bytes(&value);
         cache.set_playback_budget(cost, Timestamp(0));
+        cache.insert(id, Timestamp(-60_000_000), value.clone());
+        cache.mark_covered(id, Timestamp(-60_000_000), Timestamp(-59_000_000));
         cache.insert_predecessor(id, Timestamp(-60_000_000), 0, value);
         assert!(!cache.admit_block(5_000_000, cost));
         assert!(cache.get_at_or_before(&id, Timestamp(0)).is_some());
         cache.drop_block(id, 0);
         assert_eq!(cache.resident_bytes(), 0);
+        assert!(!cache.is_covered(&id, &(Timestamp(-60_000_000)..Timestamp(-59_000_000))));
     }
 
     #[test]

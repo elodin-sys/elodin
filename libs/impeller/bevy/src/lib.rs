@@ -310,6 +310,18 @@ impl TelemetryCache {
         if anchor.is_some_and(|(_, block)| block == start) {
             self.predecessors.remove(&id);
         }
+        self.drop_coverage(id, start, end);
+        if let Some((timestamp, _)) = anchor.filter(|(_, block)| *block == start) {
+            self.drop_coverage(id, timestamp.0, timestamp.0.saturating_add(1));
+        }
+        self.generation = self.generation.wrapping_add(1);
+        let changed = anchor
+            .filter(|(_, block)| *block == start)
+            .map_or(start, |(timestamp, _)| timestamp.0.min(start));
+        self.bump_revision(id, Timestamp(changed));
+    }
+
+    fn drop_coverage(&mut self, id: ComponentId, start: i64, end: i64) {
         if let Some(coverage) = self.coverage.get_mut(&id) {
             let mut kept = Vec::new();
             for &(a, b) in coverage.iter() {
@@ -326,11 +338,6 @@ impl TelemetryCache {
             }
             *coverage = kept;
         }
-        self.generation = self.generation.wrapping_add(1);
-        let changed = anchor
-            .filter(|(_, block)| *block == start)
-            .map_or(start, |(timestamp, _)| timestamp.0.min(start));
-        self.bump_revision(id, Timestamp(changed));
     }
 
     fn bump_revision(&mut self, component_id: ComponentId, from: Timestamp) {
