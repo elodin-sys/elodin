@@ -2263,9 +2263,9 @@ pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPa
     connection_packets_with_behavior(stream_id, StreamBehavior::RealTimeBatched)
 }
 
-/// Browser clients use a paced stream instead of an unbounded live stream.
+/// Browser and desktop clients use the same live batched stream.
 pub fn browser_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPacket> {
-    connection_packets_with_behavior(stream_id, StreamBehavior::FixedRate(Default::default()))
+    new_connection_packets(stream_id)
 }
 
 fn connection_packets_with_behavior(
@@ -2273,8 +2273,7 @@ fn connection_packets_with_behavior(
     behavior: StreamBehavior,
 ) -> impl Iterator<Item = LenPacket> {
     [
-        // Desktop clients receive live batches. Browser clients receive paced
-        // values. Both load historical data through GetTimeSeries backfill.
+        // Historical data loads through GetTimeSeries backfill.
         Stream {
             behavior,
             id: stream_id,
@@ -2614,18 +2613,16 @@ mod series_store_allowlist_tests {
     }
 
     #[test]
-    fn browser_handshake_paces_the_stream_without_changing_desktop_behavior() {
+    fn browser_handshake_uses_the_same_live_batches_as_desktop() {
         let browser: Vec<_> = browser_connection_packets(42).collect();
         let desktop: Vec<_> = new_connection_packets(42).collect();
         let stream: Stream = postcard::from_bytes(&browser[0].inner[8..]).unwrap();
         assert_eq!(stream.id, 42);
-        assert!(
-            matches!(stream.behavior, StreamBehavior::FixedRate(rate) if rate.frequency == 60 && rate.timestep > 0)
-        );
+        assert!(matches!(stream.behavior, StreamBehavior::RealTimeBatched));
         let stream: Stream = postcard::from_bytes(&desktop[0].inner[8..]).unwrap();
         assert!(matches!(stream.behavior, StreamBehavior::RealTimeBatched));
         assert_eq!(browser.len(), desktop.len());
-        for (browser, desktop) in browser[1..].iter().zip(&desktop[1..]) {
+        for (browser, desktop) in browser.iter().zip(&desktop) {
             assert_eq!(browser.inner, desktop.inner);
         }
     }
