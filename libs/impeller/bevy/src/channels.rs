@@ -297,18 +297,19 @@ impl DbEndpoint {
         authority_base_url(&self.assets_authority())
     }
 
-    /// URL of one `db:` asset key under [`Self::http_base`].
+    /// URL of one `db:` asset key: `{http_base}/assets/{key}`.
     pub fn assets_url(&self, key: &str) -> url::Url {
         let key = key.trim_start_matches('/');
         let base = self.http_base();
-        match base.join(key) {
+        let rel = format!("{}/{key}", impeller::ASSETS_HTTP_PREFIX);
+        match base.join(&rel) {
             Ok(url) => url,
             Err(_) => {
                 let mut fallback = base.to_string();
                 if !fallback.ends_with('/') {
                     fallback.push('/');
                 }
-                fallback.push_str(key);
+                fallback.push_str(&rel);
                 url::Url::parse(&fallback).unwrap_or(base)
             }
         }
@@ -613,11 +614,11 @@ mod tests {
         assert_eq!(endpoint.http_base().as_str(), "http://10.0.0.5:9000/");
         assert_eq!(
             endpoint.assets_url("rocket.glb").as_str(),
-            "http://10.0.0.5:9000/rocket.glb"
+            "http://10.0.0.5:9000/assets/rocket.glb"
         );
         assert_eq!(
             endpoint.assets_url("icons/marker.png").as_str(),
-            "http://10.0.0.5:9000/icons/marker.png"
+            "http://10.0.0.5:9000/assets/icons/marker.png"
         );
         assert_eq!(endpoint.ws_urls().0, "ws://10.0.0.5:9000/impeller");
         assert_eq!(endpoint.ws_urls().1, "ws://10.0.0.5:9000/impeller/msg");
@@ -634,7 +635,11 @@ mod tests {
         assert_eq!(endpoint.ws_urls().1, "wss://db.local/runs/a/impeller/msg");
         assert_eq!(
             endpoint.assets_url("rocket.glb").as_str(),
-            "https://db.local/runs/a/rocket.glb"
+            "https://db.local/runs/a/assets/rocket.glb"
+        );
+        assert_eq!(
+            endpoint.assets_url("__index__/schematics/").as_str(),
+            "https://db.local/runs/a/assets/__index__/schematics/"
         );
         assert_eq!(endpoint.to_string(), "db.local:443");
 

@@ -220,12 +220,14 @@ impl Client {
     }
 }
 
-/// `host:port/key` reader path -> `key`, when `host:port` is the DB assets
-/// endpoint. Rejects parent-dir components so a malformed key cannot escape
-/// the assets root.
+/// `host:port/assets/key` reader path -> `key`, when `host:port` is the DB
+/// assets endpoint. Rejects parent-dir components so a malformed key cannot
+/// escape the assets root.
 fn db_asset_key(path: &str, endpoint: SocketAddr) -> Option<&str> {
     let key = path
         .strip_prefix(&endpoint.to_string())?
+        .strip_prefix('/')?
+        .strip_prefix(impeller::ASSETS_HTTP_PREFIX)?
         .strip_prefix('/')?;
     if key.is_empty() || key.split('/').any(|part| part == "..") {
         return None;
@@ -334,18 +336,33 @@ mod tests {
     fn db_asset_key_extracts_key_only_for_matching_endpoint() {
         let endpoint: SocketAddr = "127.0.0.1:2241".parse().unwrap();
         assert_eq!(
-            db_asset_key("127.0.0.1:2241/textures/x.png", endpoint),
+            db_asset_key("127.0.0.1:2241/assets/textures/x.png", endpoint),
             Some("textures/x.png")
         );
-        // Different host or port: not a DB asset.
-        assert_eq!(db_asset_key("10.0.0.5:2241/textures/x.png", endpoint), None);
         assert_eq!(
-            db_asset_key("127.0.0.1:8080/textures/x.png", endpoint),
+            db_asset_key("127.0.0.1:2241/assets/impeller/widget.glb", endpoint),
+            Some("impeller/widget.glb")
+        );
+        assert_eq!(
+            db_asset_key("127.0.0.1:2241/textures/x.png", endpoint),
+            None
+        );
+        // Different host or port: not a DB asset.
+        assert_eq!(
+            db_asset_key("10.0.0.5:2241/assets/textures/x.png", endpoint),
+            None
+        );
+        assert_eq!(
+            db_asset_key("127.0.0.1:8080/assets/textures/x.png", endpoint),
             None
         );
         // Parent-dir escapes rejected.
-        assert_eq!(db_asset_key("127.0.0.1:2241/../secrets", endpoint), None);
+        assert_eq!(
+            db_asset_key("127.0.0.1:2241/assets/../secrets", endpoint),
+            None
+        );
         // Empty key rejected.
+        assert_eq!(db_asset_key("127.0.0.1:2241/assets/", endpoint), None);
         assert_eq!(db_asset_key("127.0.0.1:2241/", endpoint), None);
     }
 
@@ -353,7 +370,7 @@ mod tests {
     fn db_asset_key_handles_ipv6_endpoints() {
         let endpoint: SocketAddr = "[::1]:2241".parse().unwrap();
         assert_eq!(
-            db_asset_key("[::1]:2241/models/a.glb", endpoint),
+            db_asset_key("[::1]:2241/assets/models/a.glb", endpoint),
             Some("models/a.glb")
         );
     }
