@@ -2,8 +2,8 @@ use std::{env, ffi::OsStr, sync::Once};
 
 use bevy::{
     app::Plugin,
-    prelude::{App, Res, ResMut, Resource},
-    render::{ExtractSchedule, MainWorld, RenderApp, renderer::RenderAdapterInfo},
+    prelude::{App, Commands, First, Res, Resource},
+    render::renderer::RenderAdapterInfo,
 };
 
 fn gpu_failure_help() -> &'static str {
@@ -29,8 +29,9 @@ pub struct GpuInfoPlugin;
 
 impl Plugin for GpuInfoPlugin {
     fn build(&self, app: &mut App) {
-        app.sub_app_mut(RenderApp)
-            .add_systems(ExtractSchedule, copy_adapter_info);
+        // RenderPlugin installs the adapter before the first update. Publish
+        // GpuInfo before shader assets are extracted on that first frame.
+        app.add_systems(First, copy_adapter_info);
     }
 }
 
@@ -70,7 +71,7 @@ fn should_force_gpu_panic(value: Option<&OsStr>) -> bool {
 }
 
 #[derive(Resource)]
-pub(crate) struct GpuInfo(RenderAdapterInfo);
+pub(crate) struct GpuInfo(pub(crate) RenderAdapterInfo);
 
 impl GpuInfo {
     pub(crate) fn label(&self) -> &'static str {
@@ -148,8 +149,12 @@ impl GpuInfo {
     }
 }
 
-fn copy_adapter_info(adapter: Res<RenderAdapterInfo>, mut main_world: ResMut<MainWorld>) {
-    if main_world.contains_resource::<GpuInfo>() {
+fn copy_adapter_info(
+    adapter: Res<RenderAdapterInfo>,
+    existing: Option<Res<GpuInfo>>,
+    mut commands: Commands,
+) {
+    if existing.is_some() {
         return;
     }
     tracing::info!(
@@ -163,11 +168,11 @@ fn copy_adapter_info(adapter: Res<RenderAdapterInfo>, mut main_world: ResMut<Mai
         pci_bus = %adapter.device_pci_bus_id,
         "Graphics adapter initialized"
     );
-    main_world.insert_resource(GpuInfo(adapter.clone()));
+    commands.insert_resource(GpuInfo(adapter.clone()));
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use bevy::render::renderer::WgpuWrapper;
 
     use super::*;
@@ -194,8 +199,21 @@ mod tests {
         })))
     }
 
-    fn backend(api: wgpu::Backend, device_type: wgpu::DeviceType) -> GpuInfo {
+    pub(crate) fn backend(api: wgpu::Backend, device_type: wgpu::DeviceType) -> GpuInfo {
         graphics_backend(api, device_type, "", "", "")
+    }
+
+    #[test]
+    fn adapter_info_is_available_before_the_first_update() {
+        use bevy::prelude::Update;
+
+        let mut app = App::new();
+        app.insert_resource(backend(wgpu::Backend::BrowserWebGpu, wgpu::DeviceType::Other).0)
+            .add_plugins(GpuInfoPlugin)
+            .add_systems(Update, |gpu: Res<GpuInfo>| {
+                assert_eq!(gpu.0.backend, wgpu::Backend::BrowserWebGpu);
+            });
+        app.update();
     }
 
     #[test]

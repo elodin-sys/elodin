@@ -30,7 +30,7 @@ pub(crate) mod simulation_startup;
 pub mod terrain_playback;
 pub mod thruster_particles;
 pub mod view_cube;
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(target_arch = "wasm32", test))]
 pub(crate) mod wasm_shadows;
 mod web_asset;
 pub(crate) mod world_mesh;
