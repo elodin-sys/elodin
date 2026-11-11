@@ -778,6 +778,7 @@ pub fn series_store_backfill_candidates(
 /// Starts from the beginning of each series so early timeline scrubbing works
 /// as soon as the first pages land. Playback never waits for
 /// `SeriesStoreLoadState.complete`. Empty allowlist ⇒ no backfill.
+#[allow(clippy::too_many_arguments)]
 pub fn backfill_cache(
     schema_reg: bevy::prelude::Res<ComponentSchemaRegistry>,
     msg_request_handlers: bevy::prelude::Res<MsgRequestIdHandlers>,
