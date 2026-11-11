@@ -1077,8 +1077,13 @@ fn stream_fps(configs: Option<&SensorCameraConfigs>, camera_name: &str) -> f32 {
 
 /// `2 * window * frame_bytes * fps <= budget / 2`, and never more than
 /// [`FETCH_WINDOW_US`]. Keeps a fetched window from being evicted on arrival.
-fn fetch_window_us(frame_bytes: usize, fps: f32, budget: usize) -> i64 {
-    if frame_bytes == 0 || fps <= 0.0 || budget == 0 {
+///
+/// `budget` of `None` is no byte budget. `Some(0)` is a budget of zero.
+fn fetch_window_us(frame_bytes: usize, fps: f32, budget: Option<usize>) -> i64 {
+    let Some(budget) = budget else {
+        return FETCH_WINDOW_US;
+    };
+    if frame_bytes == 0 || fps <= 0.0 {
         return FETCH_WINDOW_US;
     }
     let denom = 4.0 * frame_bytes as f64 * f64::from(fps);
@@ -1893,7 +1898,7 @@ fn request_playhead_window(
 ) {
     let frame_bytes = stream_frame_bytes(stream.raw_dims, cache.is_h264);
     let fps = stream_fps(sensor_configs, &stream.msg_name);
-    let ahead_us = fetch_window_us(frame_bytes, fps, cache.max_raw_bytes);
+    let ahead_us = fetch_window_us(frame_bytes, fps, Some(cache.max_raw_bytes));
     let behind_us = if cache.is_h264 {
         ahead_us.saturating_mul(1 + i64::from(cache.keyframe_extend_steps))
     } else {
@@ -2208,10 +2213,12 @@ mod tests {
         assert!(cache.first_uncovered(&want).is_none());
 
         let rgba = stream_frame_bytes(Some((640, 480, RawPixelFormat::Rgba8)), false);
-        let window = fetch_window_us(rgba, 30.0, 256 * 1024 * 1024);
+        let window = fetch_window_us(rgba, 30.0, Some(256 * 1024 * 1024));
         assert!(window < FETCH_WINDOW_US);
-        let h264 = fetch_window_us(BACKFILL_ASSUMED_H264_FRAME, 30.0, 256 * 1024 * 1024);
+        let h264 = fetch_window_us(BACKFILL_ASSUMED_H264_FRAME, 30.0, Some(256 * 1024 * 1024));
         assert_eq!(h264, FETCH_WINDOW_US);
+        assert_eq!(fetch_window_us(rgba, 30.0, None), FETCH_WINDOW_US);
+        assert_eq!(fetch_window_us(rgba, 30.0, Some(0)), 1);
     }
 
     fn seek_query() -> WasmSeekQuery {
