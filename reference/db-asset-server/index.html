@@ -603,7 +603,7 @@
 <span class="giallo-l"><span>  HTTP --&gt; Follow</span></span></code></pre><h3 id="layers">Layers</h3>
 <table><thead><tr><th>Layer</th><th>Role</th></tr></thead><tbody>
 <tr><td><strong>Blob store</strong></td><td><code>{db_path}/assets/{relative_key}</code> — opaque bytes, any file type</td></tr>
-<tr><td><strong>DB Asset Server</strong></td><td><code>GET http://host:(tcp_port+1)/{relative_key}</code> while <code>elodin-db run</code> is active</td></tr>
+<tr><td><strong>DB Asset Server</strong></td><td><code>GET http://host:(tcp_port+1)/assets/{relative_key}</code> while <code>elodin-db run</code> is active</td></tr>
 <tr><td><strong>KDL rewrite</strong></td><td>Local paths at record time become <code>db:{relative_key}</code> in the stored active schematic asset</td></tr>
 <tr><td><strong>Consumers</strong></td><td>Editor loads the active schematic and all assets over HTTP</td></tr>
 </tbody></table>
@@ -612,6 +612,7 @@
 <li><strong>Impeller TCP</strong> on port <code>N</code> (default <code>2240</code>)</li>
 <li><strong>DB Asset Server</strong> on port <code>N + 1</code> (default <code>2241</code>) — <code>ASSETS_HTTP_PORT_OFFSET = 1</code></li>
 </ul>
+<p>Asset files are <code>GET</code> and <code>PUT</code> at <code>/assets/{key}</code> (<code>ASSETS_HTTP_PREFIX</code>). <code>/impeller</code> and <code>/impeller/msg</code> on that same port are the browser Impeller WebSocket proxy, so an asset directory named <code>impeller</code> is fetched at <code>/assets/impeller/…</code>.</p>
 <p>Do not run a follower Impeller server on <code>N+1</code>; that port is reserved for the DB Asset Server on the source.</p>
 <h3 id="browser-origins">Browser origins</h3>
 <p>The asset server is what a browser talks to, including the <code>/impeller</code> WebSocket proxy. It always answers allowed browser origins with <code>Access-Control-Allow-Origin</code>. A client that sends no <code>Origin</code> (the native editor, follower sync, <code>curl</code>) is allowed.</p>
@@ -677,7 +678,7 @@ and the editor loads schematic and meshes from the DB itself.</p>
 <p>When a follower connects to a source <code>elodin-db</code> on port <code>N</code>, it replicates telemetry over Impeller TCP. Schematic assets are <strong>not</strong> streamed on that socket — they are fetched separately from the source <strong>DB Asset Server</strong> on port <code>N+1</code>.</p>
 <p>On connect (and when DB config updates), the follower:</p>
 <ol>
-<li><code>GET</code>s <code>http://source:(N+1)/__index__</code> to list the source asset tree</li>
+<li><code>GET</code>s <code>http://source:(N+1)/assets/__index__</code> to list the source asset tree</li>
 <li>Copies each key that is missing or size-different into <code>{follower_db}/assets/</code></li>
 <li>Serves the mirrored tree from its own DB Asset Server on <code>(follower_port + 1)</code></li>
 </ol>
@@ -697,7 +698,7 @@ and the editor loads schematic and meshes from the DB itself.</p>
 <tr><td><strong>Local path</strong></td><td>Resolved via <code>$ELODIN_ASSETS</code> (default <code>./assets</code>), simulation entry directory, or cwd</td></tr>
 <tr><td><strong>On disk in DB</strong></td><td><code>assets/{key}.glb</code> (key preserves subdirectories, e.g. <code>models/rocket.glb</code>)</td></tr>
 <tr><td><strong>Stored KDL</strong></td><td><code>path="db:models/rocket.glb"</code></td></tr>
-<tr><td><strong>Editor</strong></td><td><code>db:…</code> → <code>http://127.0.0.1:2241/…</code> via Bevy <code>AssetServer</code> + <code>WebAssetPlugin</code> (non-blocking)</td></tr>
+<tr><td><strong>Editor</strong></td><td><code>db:…</code> → <code>http://127.0.0.1:2241/assets/…</code> via Bevy <code>AssetServer</code> + <code>WebAssetPlugin</code> (non-blocking)</td></tr>
 </tbody></table>
 <h3 id="png-icons-object-3d-icon-path"><code>.png</code> icons (<code>object_3d</code> → <code>icon path=…</code>)</h3>
 <p>Same pipeline as GLB: persist, rewrite, HTTP load.</p>
@@ -734,16 +735,16 @@ and the editor loads schematic and meshes from the DB itself.</p>
 <h2 id="verification">Verification</h2>
 <p>With <code>elodin-db run</code> listening on <code>2240</code>:</p>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">export</span><span style="color: light-dark(#268BD2, #268BD2);"> DB_PATH</span><span style="color: light-dark(#859900, #859900);">=</span><span>./</span><span style="color: light-dark(#268BD2, #268BD2);">my-db</span></span>
-<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">curl</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">sf</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">o</span><span style="color: light-dark(#2AA198, #2AA198);"> /dev/null</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">w</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">%{http_code}\n</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);"> http://127.0.0.1:2241/f22.glb</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">curl</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">sf</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">o</span><span style="color: light-dark(#2AA198, #2AA198);"> /dev/null</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">w</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">%{http_code}\n</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);"> http://127.0.0.1:2241/assets/f22.glb</span></span>
 <span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">ls</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">lh</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#268BD2, #268BD2);">$</span><span style="color: light-dark(#268BD2, #268BD2);">DB_PATH</span><span style="color: light-dark(#2AA198, #2AA198);">/assets/</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span></code></pre>
 <p>Expect HTTP <code>200</code> and non-empty files under <code>assets/</code> after a sim that references those assets.</p>
 <h2 id="troubleshooting">Troubleshooting</h2>
 <table><thead><tr><th>Symptom</th><th>Check</th></tr></thead><tbody>
-<tr><td>Icon only, no mesh</td><td><code>curl http://127.0.0.1:2241/…</code> → <code>404</code> means assets were not persisted; set <code>ELODIN_DB_PATH</code> / <code>db_path</code> and re-run</td></tr>
+<tr><td>Icon only, no mesh</td><td><code>curl http://127.0.0.1:2241/assets/…</code> → <code>404</code> means assets were not persisted; set <code>ELODIN_DB_PATH</code> / <code>db_path</code> and re-run</td></tr>
 <tr><td>Port in use</td><td><code>2240</code> = Impeller, <code>2241</code> = DB Asset Server; do not bind follower Impeller on <code>2241</code></td></tr>
 <tr><td>Skybox missing on replay</td><td><code>ls "$DB_PATH/assets/skyboxes/"</code> for <code>manifest.ron</code> and the <code>.ktx2</code></td></tr>
 <tr><td>Empty <code>assets/</code> after sim</td><td><code>world.run</code> without <code>db_path</code> or <code>ELODIN_DB_PATH</code> uses a temp DB</td></tr>
-<tr><td>Follower missing meshes</td><td>Confirm source DB Asset Server responds: <code>curl http://SOURCE:2241/models/rocket.glb</code></td></tr>
+<tr><td>Follower missing meshes</td><td>Confirm source DB Asset Server responds: <code>curl http://SOURCE:2241/assets/models/rocket.glb</code></td></tr>
 </tbody></table>
 <h2 id="adding-a-new-asset-type">Adding a new asset type</h2>
 <h3 id="a-simple-file-referenced-by-path-in-kdl">A — Simple file referenced by <code>path=</code> in KDL</h3>
@@ -758,7 +759,7 @@ and the editor loads schematic and meshes from the DB itself.</p>
 </ul>
 </li>
 <li><strong>Persist</strong> — no change if the path appears in collect; <code>persist_schematic_assets</code> in <code>libs/nox-py/src/impeller_server.rs</code> is generic.</li>
-<li><strong>Follow</strong> — no change if the path appears in <code>collect_db_asset_names</code>; full-tree mirror via <code>GET /__index__</code> copies all assets.</li>
+<li><strong>Follow</strong> — no change if the path appears in <code>collect_db_asset_names</code>; full-tree mirror via <code>GET /assets/__index__</code> copies all assets.</li>
 <li><strong>Editor</strong> — if Bevy can load the format: resolve with <code>resolve_db_asset_url</code> and <code>AssetServer.load(url)</code>. No blocking HTTP in Bevy systems.</li>
 <li><strong>Tests</strong> — unit tests in <code>impeller-kdl</code> (collect/rewrite) and <code>nox-py</code> (persist).</li>
 </ol>
