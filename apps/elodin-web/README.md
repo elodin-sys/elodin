@@ -34,3 +34,38 @@ concern and must not require Cesium merely to build or connect the editor.
 See [TODO.md](TODO.md) for other browser limitations. CI checks compilation of
 `elodin-web` for `wasm32-unknown-unknown`; rendering and backend connectivity also
 need a browser smoke test.
+
+## Playback cache
+
+WASM keeps telemetry in aligned one-second blocks near the playhead and in visible plot ranges.
+The RAM limits are configured through `impeller_bevy::PlaybackCacheLimits` and
+`EditorPlugin::with_cache_limits`. Native backfill and frame limits stay unchanged.
+A plot wider than the RAM budget fills only the region nearest the playhead.
+Assets use the browser HTTP cache; downloads larger than 64 MiB are rejected.
+
+A host page can install `globalThis.elodinReplayCache` before loading the editor:
+
+```ts
+interface ElodinReplayCache {
+  lookup(scope: string, request: Uint8Array): Promise<Uint8Array | undefined>;
+  store(scope: string, request: Uint8Array, reply: Uint8Array): void;
+}
+```
+
+The scope is the socket URL. Requests and replies are full Impeller frames with
+request-id byte 7 set to zero. Only time-series, predecessor and message queries
+are replayed, and only after a stopped database reports `DbConfig.recording == false`.
+The host owns storage, quotas and session cleanup. Missing storage, errors and
+lookups slower than two seconds fall back to the server. Replies from an old
+socket generation are discarded. Seeks retain outstanding requests; late replies
+reach disk before RAM admission decides whether to retain them.
+
+The browser replay regression test uses the local fixture:
+
+```sh
+node libs/impeller/bevy/tests/browser_server.mjs
+CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
+  cargo test -p impeller-bevy --no-default-features --target wasm32-unknown-unknown --lib
+```
+
+Use `wasm-bindgen-test-runner` matching `Cargo.lock`, with Chrome and ChromeDriver available.

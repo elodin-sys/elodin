@@ -110,6 +110,7 @@ const FRAMES_BEFORE_CONNECT: u32 = 5;
 
 /// Maximum number of decoded RGBA frames to keep in the LRU cache.
 /// At 640×512 RGBA each frame is ~1.3 MB, so 300 frames ≈ 390 MB.
+#[cfg(not(target_family = "wasm"))]
 const MAX_CACHED_FRAMES: usize = 300;
 
 /// If no raw frame exists within this many microseconds of `CurrentTimestamp`,
@@ -242,6 +243,7 @@ impl Default for StreamState {
 /// the decoder thread.
 #[derive(Component)]
 pub struct VideoFrameCache {
+    max_decoded_bytes: usize,
     /// All raw frame data (H.264 NAL or raw RGBA), keyed by timestamp.
     /// Wrapped in Arc to avoid cloning large frame buffers on access.
     raw_frames: BTreeMap<Timestamp, Arc<Vec<u8>>>,
@@ -250,6 +252,7 @@ pub struct VideoFrameCache {
     /// Sorted timestamps of known keyframes (IDR NAL units).
     keyframe_index: Vec<Timestamp>,
     /// Maximum number of decoded frames to retain.
+    #[cfg(not(target_family = "wasm"))]
     max_frames: usize,
     /// Cap on [`Self::raw_bytes`].
     max_raw_bytes: usize,
@@ -262,6 +265,7 @@ pub struct VideoFrameCache {
     keyframe_extend_steps: u8,
     /// Timestamp of the last frame fed to the decoder (for sequential opt).
     last_decoded_ts: Option<Timestamp>,
+    eviction_pivot: Option<Timestamp>,
     /// `true` while a `SeekBatch` is in-flight on the decoder thread.
     seeking: bool,
     /// Generation counter for `SeekBatch` coalescing.
@@ -293,15 +297,18 @@ pub struct VideoFrameCache {
 impl Default for VideoFrameCache {
     fn default() -> Self {
         Self {
+            max_decoded_bytes: usize::MAX,
             raw_frames: BTreeMap::new(),
             decoded_frames: BTreeMap::new(),
             keyframe_index: Vec::new(),
+            #[cfg(not(target_family = "wasm"))]
             max_frames: MAX_CACHED_FRAMES,
             max_raw_bytes: MAX_RAW_BYTES,
             raw_bytes: 0,
             coverage: Vec::new(),
             keyframe_extend_steps: 0,
             last_decoded_ts: None,
+            eviction_pivot: None,
             seeking: false,
             seek_generation: 0,
             last_stream_activity: None,
@@ -423,6 +430,9 @@ impl VideoFrameCache {
 
     /// Insert a raw frame, mark that instant covered, and evict away from `anchor`.
     pub fn insert_raw(&mut self, timestamp: Timestamp, data: Vec<u8>, anchor: Timestamp) {
+        if cfg!(target_family = "wasm") && data.len() > self.max_raw_bytes {
+            return;
+        }
         self.store_raw(timestamp, data);
         let end = Timestamp(timestamp.0.saturating_add(1));
         self.note_covered(timestamp..end);
@@ -555,13 +565,36 @@ impl VideoFrameCache {
         }
     }
 
+    fn decoded_over_budget(&self) -> bool {
+        #[cfg(not(target_family = "wasm"))]
+        {
+            self.decoded_frames.len() > self.max_frames
+        }
+        #[cfg(target_family = "wasm")]
+        {
+            false
+        }
+    }
+
     fn evict_if_needed(&mut self) {
-        while self.decoded_frames.len() > self.max_frames {
+        while self.decoded_over_budget()
+            || (self.max_decoded_bytes != usize::MAX
+                && self
+                    .decoded_frames
+                    .values()
+                    .map(|image| image.data.as_ref().map_or(0, Vec::len))
+                    .sum::<usize>()
+                    > self.max_decoded_bytes)
+        {
             // Evict the frame farthest from where the decoder is currently
             // working.  This prevents freshly-decoded frames from being
             // immediately evicted when scrubbing backward (where new frames
             // have lower timestamps than old cached frames).
-            let pivot = self.last_decoded_ts.map(|t| t.0).unwrap_or(0);
+            let pivot = self
+                .eviction_pivot
+                .or(self.last_decoded_ts)
+                .map(|t| t.0)
+                .unwrap_or(0);
             let first_ts = self.decoded_frames.keys().next().map(|t| t.0);
             let last_ts = self.decoded_frames.keys().next_back().map(|t| t.0);
             match (first_ts, last_ts) {
@@ -580,7 +613,9 @@ impl VideoFrameCache {
     }
 
     fn evict_raw_if_needed(&mut self, anchor: Timestamp) {
-        while self.raw_bytes > self.max_raw_bytes && self.raw_frames.len() > 1 {
+        while self.raw_bytes > self.max_raw_bytes
+            && (self.raw_frames.len() > 1 || cfg!(target_family = "wasm"))
+        {
             let first = *self.raw_frames.keys().next().unwrap();
             let last = *self.raw_frames.keys().next_back().unwrap();
             let drop_last = anchor.0.abs_diff(last.0) >= anchor.0.abs_diff(first.0);
@@ -1065,10 +1100,16 @@ fn send_window_request(
     limit: usize,
 ) {
     let range_end = range.end;
+    // GetMsgs uses an inclusive end; WASM blocks are half-open.
+    let query_end = if cfg!(target_family = "wasm") {
+        Timestamp(range_end.0.saturating_sub(1))
+    } else {
+        range_end
+    };
     commands.send_msg_req_reply(
         GetMsgs {
             msg_id,
-            range: range.start..range_end,
+            range: range.start..query_end,
             limit: Some(limit),
         },
         move |In(result): In<Result<MsgBatch, ErrorResponse>>,
@@ -1722,11 +1763,20 @@ pub fn connect_streams(
     )>,
     mut commands: Commands,
     last_updated: Res<impeller_wkt::LastUpdated>,
+    limits: Res<impeller_bevy::PlaybackCacheLimits>,
     current_ts: Res<CurrentTimestamp>,
     earliest: Res<impeller_wkt::EarliestTimestamp>,
     sensor_configs: Option<Res<SensorCameraConfigs>>,
 ) {
+    let count = query.iter().count().max(1);
     for (entity, mut stream, decoder, mut cache) in &mut query {
+        if cfg!(target_family = "wasm") {
+            cache.max_raw_bytes = limits.video_bytes / count;
+            cache.max_decoded_bytes = limits.decoded_bytes / count;
+            cache.eviction_pivot = Some(current_ts.0);
+            cache.evict_raw_if_needed(current_ts.0);
+            cache.evict_if_needed();
+        }
         match &mut stream.state {
             StreamState::WaitingToConnect { frames_waited } => {
                 *frames_waited += 1;
@@ -1803,6 +1853,11 @@ fn request_playhead_window(
     };
     let Some(gap) = cache.first_uncovered(&want) else {
         return;
+    };
+    #[cfg(target_family = "wasm")]
+    let gap = {
+        let start = impeller_bevy::block_start(gap.start.0);
+        Timestamp(start)..Timestamp(start.saturating_add(1_000_000))
     };
     let limit = backfill_frame_limit(stream.raw_dims, cache.is_h264);
     cache.backfill_in_flight = true;
@@ -1887,6 +1942,36 @@ fn clear_sensor_raw_frame_caches(caches: &mut Query<&mut VideoFrameCache>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn decoded_budget_counts_pixels_instead_of_frames() {
+        let mut cache = VideoFrameCache::default();
+        cache.max_decoded_bytes = 20;
+        cache.eviction_pivot = Some(Timestamp(0));
+        let image = |width| {
+            Image::new_fill(
+                Extent3d {
+                    width,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                TextureDimension::D2,
+                &[0, 0, 0, 255],
+                bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+                RenderAssetUsages::default(),
+            )
+        };
+        cache.decoded_frames.insert(Timestamp(0), image(1));
+        cache.decoded_frames.insert(Timestamp(1_000_000), image(4));
+        cache.decoded_frames.insert(Timestamp(60_000_000), image(2));
+        cache.evict_if_needed();
+        assert_eq!(cache.decoded_frames.len(), 2);
+        assert!(!cache.decoded_frames.contains_key(&Timestamp(60_000_000)));
+        cache.max_decoded_bytes = 4;
+        cache.evict_if_needed();
+        assert_eq!(cache.decoded_frames.len(), 1);
+        assert!(cache.decoded_frames.contains_key(&Timestamp(0)));
+    }
 
     #[test]
     fn gray8_expands_to_opaque_rgba() {

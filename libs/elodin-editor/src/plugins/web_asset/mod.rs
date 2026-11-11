@@ -176,6 +176,28 @@ impl Client {
                     .and_then(|v| v.to_str().ok())
                     .map(|s| s.to_owned());
 
+                #[cfg(target_family = "wasm")]
+                let data = {
+                    use bevy::tasks::futures_lite::StreamExt;
+                    let maximum = 64 * 1024 * 1024;
+                    let mut data = Vec::new();
+                    let mut chunks = response.bytes_stream();
+                    while let Some(chunk) = chunks.next().await {
+                        let chunk = chunk.map_err(|err| http_err(&url, err))?;
+                        if data.len().saturating_add(chunk.len()) > maximum {
+                            return Err(AssetReaderError::Io(
+                                io::Error::new(
+                                    io::ErrorKind::InvalidData,
+                                    "Recording asset exceeds the configured byte budget",
+                                )
+                                .into(),
+                            ));
+                        }
+                        data.extend_from_slice(&chunk);
+                    }
+                    data
+                };
+                #[cfg(not(target_family = "wasm"))]
                 let data = response
                     .bytes()
                     .await
