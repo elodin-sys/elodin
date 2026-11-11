@@ -2330,7 +2330,7 @@ mod tests {
         use super::is_remote_asset_path;
         assert!(is_remote_asset_path("db:schematics/window.kdl"));
         assert!(is_remote_asset_path(
-            "http://127.0.0.1:2241/schematics/w.kdl"
+            "http://127.0.0.1:2241/assets/schematics/w.kdl"
         ));
         assert!(is_remote_asset_path("https://example.com/w.kdl"));
         assert!(!is_remote_asset_path("schematics/window.kdl"));

@@ -128,7 +128,7 @@ pub async fn fetch_active_schematic_kdl(
 }
 
 /// List the schematic asset keys (`schematics/*.kdl`) the DB Asset Server holds,
-/// via its `GET /__index__/<prefix>` listing (RFD #724). Sorted for a stable
+/// via its `GET /assets/__index__/<prefix>` listing (RFD #724). Sorted for a stable
 /// picker; the request is bounded so an unreachable DB cannot hang the UI.
 pub(crate) async fn fetch_schematic_index(
     endpoint: Option<impeller_bevy::DbEndpoint>,
