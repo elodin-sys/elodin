@@ -56,6 +56,9 @@ serde.version = "1.0"
 postcard.version = "1.0.8"
 postcard.features = ["alloc"]
 
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+bevy = { workspace = true, features = ["x11", "wayland"] }
+
 [target.'cfg(target_family = "wasm")'.dependencies]
 js-sys = "0.3"
 wasm-bindgen = "0.2"

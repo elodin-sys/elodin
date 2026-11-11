@@ -204,8 +204,8 @@ fn authority_base_url(authority: &Authority) -> url::Url {
 /// Database address typed by a client: an IP literal or DNS name plus port.
 /// DNS names are kept so wasm can hand them to the browser.
 ///
-/// `assets`, when set, is the HTTP base for `db:` assets. WebSocket URLs still
-/// come from this address.
+/// `assets`, when set, is the DB the browser actually reaches: `db:` fetches
+/// and the Impeller WebSockets are both paths under it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct DbEndpoint {
     authority: Authority,
@@ -225,6 +225,19 @@ impl DbEndpoint {
     pub fn with_assets(mut self, assets: HostOrUrl) -> Self {
         self.assets = Some(assets);
         self
+    }
+
+    /// A browser connection. `authority` is only the display identity; both
+    /// WebSockets and `db:` assets are served from `assets`.
+    pub fn from_assets(assets: HostOrUrl) -> Self {
+        let authority = match &assets {
+            HostOrUrl::Host(authority) => authority.clone(),
+            HostOrUrl::Url(url) => authority_from_base_url(url),
+        };
+        Self {
+            authority,
+            assets: Some(assets),
+        }
     }
 
     pub fn assets(&self) -> Option<&HostOrUrl> {
@@ -302,12 +315,45 @@ impl DbEndpoint {
     }
 
     pub fn ws_urls(&self) -> (String, String) {
+        if let Some(assets) = &self.assets {
+            return ws_urls_under(assets.base_url());
+        }
         let host = self.assets_authority();
         (
             format!("ws://{host}/impeller"),
             format!("ws://{host}/impeller/msg"),
         )
     }
+}
+
+/// Host and default port of an assets base, for [`DbEndpoint`]'s display identity.
+fn authority_from_base_url(url: &url::Url) -> Authority {
+    let host = url.host_str().unwrap_or("127.0.0.1");
+    let port = url.port_or_known_default().unwrap_or(80);
+    let text = if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    };
+    text.parse()
+        .expect("an http(s) URL host is a valid authority")
+}
+
+/// `http` becomes `ws` and `https` becomes `wss`. Paths stay under the base.
+fn ws_urls_under(mut base: url::Url) -> (String, String) {
+    let scheme = if base.scheme() == "https" {
+        "wss"
+    } else {
+        "ws"
+    };
+    base.set_scheme(scheme)
+        .expect("http(s) can switch to ws(s)");
+    let msg = base
+        .join("impeller/msg")
+        .unwrap_or_else(|_| base.clone())
+        .to_string();
+    let main = base.join("impeller").unwrap_or(base).to_string();
+    (main, msg)
 }
 
 /// Authority for client URLs. Unspecified bind addresses become loopback.
@@ -556,7 +602,7 @@ mod tests {
     }
 
     #[test]
-    fn assets_override_replaces_http_base_only() {
+    fn assets_override_is_the_connection() {
         use super::HostOrUrl;
 
         let assets: HostOrUrl = "10.0.0.5:9000".parse().unwrap();
@@ -573,8 +619,29 @@ mod tests {
             endpoint.assets_url("icons/marker.png").as_str(),
             "http://10.0.0.5:9000/icons/marker.png"
         );
-        assert_eq!(endpoint.ws_urls().0, "ws://127.0.0.1:2241/impeller");
-        assert_eq!(endpoint.ws_urls().1, "ws://127.0.0.1:2241/impeller/msg");
+        assert_eq!(endpoint.ws_urls().0, "ws://10.0.0.5:9000/impeller");
+        assert_eq!(endpoint.ws_urls().1, "ws://10.0.0.5:9000/impeller/msg");
         assert_eq!(endpoint.to_string(), "127.0.0.1:2240");
+    }
+
+    #[test]
+    fn from_assets_is_the_websocket_and_the_asset_base() {
+        use super::HostOrUrl;
+
+        let secure: HostOrUrl = "https://db.local/runs/a".parse().unwrap();
+        let endpoint = DbEndpoint::from_assets(secure);
+        assert_eq!(endpoint.ws_urls().0, "wss://db.local/runs/a/impeller");
+        assert_eq!(endpoint.ws_urls().1, "wss://db.local/runs/a/impeller/msg");
+        assert_eq!(
+            endpoint.assets_url("rocket.glb").as_str(),
+            "https://db.local/runs/a/rocket.glb"
+        );
+        assert_eq!(endpoint.to_string(), "db.local:443");
+
+        let bare: HostOrUrl = "10.0.0.5:2241".parse().unwrap();
+        let endpoint = DbEndpoint::from_assets(bare);
+        assert_eq!(endpoint.ws_urls().1, "ws://10.0.0.5:2241/impeller/msg");
+        assert_eq!(endpoint.http_base().as_str(), "http://10.0.0.5:2241/");
+        assert_eq!(endpoint.to_string(), "10.0.0.5:2241");
     }
 }

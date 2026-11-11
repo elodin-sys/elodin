@@ -43,8 +43,8 @@ pub struct StartupWindow;
 #[derive(Resource)]
 pub struct StartupActive;
 
-/// Initial `?db=` attempt. While this exists the editor chrome stays hidden and
-/// a connecting or failure dialog is shown instead.
+/// Initial page-database attempt. While this exists the editor chrome stays
+/// hidden and a connecting or failure dialog is shown instead.
 #[derive(Resource, Clone)]
 #[cfg_attr(not(target_family = "wasm"), allow(dead_code))]
 pub struct UrlConnect {
@@ -114,11 +114,13 @@ fn create_startup_window(
         queue_main_window_reveal(&mut commands);
     }
     #[cfg(target_family = "wasm")]
-    if status.status() == ConnectionStatus::Connecting
-        && let Some(addr) = connection_addr.as_ref()
+    if matches!(
+        status.status(),
+        ConnectionStatus::Connecting | ConnectionStatus::Error
+    ) && let Some(addr) = connection_addr.as_ref()
     {
         commands.insert_resource(UrlConnect {
-            addr: addr.endpoint().authority().to_string(),
+            addr: addr.endpoint().http_base().to_string(),
             failed: false,
         });
     }
@@ -413,8 +415,8 @@ impl StartupLayout<'_, '_> {
     fn start_connect(&mut self, addr: String) {
         #[cfg(target_family = "wasm")]
         {
-            let endpoint = match impeller_bevy::DbEndpoint::parse(&addr) {
-                Ok(endpoint) => endpoint,
+            let endpoint = match addr.parse::<impeller_bevy::HostOrUrl>() {
+                Ok(url) => impeller_bevy::DbEndpoint::from_assets(url),
                 Err(err) => {
                     *self.modal_state = ModalState::ConnectToIp {
                         addr,
@@ -437,7 +439,6 @@ impl StartupLayout<'_, '_> {
                 error: None,
                 connecting: true,
             };
-            return;
         }
         #[cfg(not(target_family = "wasm"))]
         let socket_addr = match addr.to_socket_addrs().map(|mut x| x.next()) {
@@ -482,7 +483,9 @@ impl StartupLayout<'_, '_> {
         if let Some(RecentItem::Addr(addr)) = self.recent_files.recent_files.values().next_back() {
             return addr.clone();
         }
-        if cfg!(target_family = "wasm") || cfg!(target_os = "windows") {
+        if cfg!(target_family = "wasm") {
+            "http://127.0.0.1:2241".to_string()
+        } else if cfg!(target_os = "windows") {
             "127.0.0.1:2240".to_string()
         } else {
             "[::]:2240".to_string()
@@ -521,7 +524,7 @@ impl StartupLayout<'_, '_> {
             {
                 ui.add_space(24.0);
                 ui.label(
-                    RichText::new("Open with ?db=host:port, or connect below.")
+                    RichText::new("Enter a database URL below, or open a page bound to one.")
                         .color(get_scheme().text_secondary)
                         .size(12.),
                 );
@@ -698,14 +701,20 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                     })
                     .backdrop_color(get_scheme().bg_secondary.opacity(0.85))
                     .show(ctx, |ui| {
-                        ui.add(
-                            egui::Label::new(RichText::new("Connect to IP Address").size(18.))
-                                .selectable(false),
-                        );
+                        let (title, hint, field) = if cfg!(target_family = "wasm") {
+                            ("Connect to Database", "Enter the database URL", "URL")
+                        } else {
+                            (
+                                "Connect to IP Address",
+                                "Enter the IP address of a DB or Sim",
+                                "IP:PORT",
+                            )
+                        };
+                        ui.add(egui::Label::new(RichText::new(title).size(18.)).selectable(false));
                         ui.add_space(5.);
                         ui.add(
                             egui::Label::new(
-                                RichText::new("Enter the IP address of a DB or Sim")
+                                RichText::new(hint)
                                     .color(get_scheme().text_tertiary)
                                     .size(12.),
                             )
@@ -739,7 +748,7 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                         style.visuals.widgets.hovered.bg_fill = get_scheme().bg_secondary;
                         ui.add(
                             egui::Label::new(
-                                RichText::new("IP:PORT")
+                                RichText::new(field)
                                     .color(get_scheme().text_tertiary)
                                     .size(12.),
                             )

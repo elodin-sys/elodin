@@ -16,3 +16,10 @@ watch = [
 port = 8080
 addresses = ["127.0.0.1"]
 no_autoreload = true
+
+[[hooks]]
+stage = "post_build"
+command = "sh"
+command_arguments = ["-c", """
+[ -z "$ELODIN_WEB_DB" ] || sed -i "s|name=\\"elodin-web-db\\" content=\\"\\"|name=\\"elodin-web-db\\" content=\\"$ELODIN_WEB_DB\\"|" "$TRUNK_STAGING_DIR/index.html"
+"""]
