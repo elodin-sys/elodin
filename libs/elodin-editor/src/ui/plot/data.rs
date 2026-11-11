@@ -985,6 +985,15 @@ fn prefetch_visible_window(
     if cfg!(target_family = "wasm") {
         let first = impeller_bevy::block_start(sync_range.start.0);
         let last = impeller_bevy::block_start(sync_range.end.0.saturating_sub(1));
+        for component_id in fetch_ids.iter().copied() {
+            prefetch_hold_anchor(
+                component_id,
+                Timestamp(first),
+                series_store,
+                prefetch,
+                commands,
+            );
+        }
         // Walk outward from the playhead so nearby blocks win admission first.
         let center = impeller_bevy::block_start(series_store.playback_pivot().0)
             .clamp(first, last.max(first));

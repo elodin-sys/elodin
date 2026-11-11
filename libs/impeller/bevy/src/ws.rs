@@ -59,10 +59,8 @@ impl Plugin for WsImpellerPlugin {
 struct PendingWsConnect(Option<DbEndpoint>);
 
 fn install_connection(world: &mut World, endpoint: Option<DbEndpoint>, initial: bool) {
-    if !initial {
-        if let Some(mut cache) = world.get_resource_mut::<crate::TelemetryCache>() {
-            cache.reset();
-        }
+    if !initial && let Some(mut cache) = world.get_resource_mut::<crate::TelemetryCache>() {
+        cache.reset();
     }
     world.insert_resource(crate::playback::PlaybackPager::default());
     let (packet_tx, packet_rx, outgoing_packet_rx, incoming_packet_tx) = channels();
