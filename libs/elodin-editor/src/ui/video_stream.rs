@@ -1100,10 +1100,16 @@ fn send_window_request(
     limit: usize,
 ) {
     let range_end = range.end;
+    // GetMsgs uses an inclusive end; WASM blocks are half-open.
+    let query_end = if cfg!(target_family = "wasm") {
+        Timestamp(range_end.0.saturating_sub(1))
+    } else {
+        range_end
+    };
     commands.send_msg_req_reply(
         GetMsgs {
             msg_id,
-            range: range.start..range_end,
+            range: range.start..query_end,
             limit: Some(limit),
         },
         move |In(result): In<Result<MsgBatch, ErrorResponse>>,

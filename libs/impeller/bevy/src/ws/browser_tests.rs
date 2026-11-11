@@ -139,7 +139,7 @@ async fn replay_patches_ids_falls_back_and_discards_old_generations() {
         .is_some()
     {}
     let (socket, hook) = {
-        let sockets = world.non_send_resource::<WsSockets>();
+        let sockets = world.get_non_send::<WsSockets>().unwrap();
         let live = sockets.main.as_ref().unwrap();
         (live.ws.clone(), live.replay.clone())
     };

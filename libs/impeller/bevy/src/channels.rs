@@ -12,11 +12,8 @@ use std::{
     },
 };
 
-/// Native SQL replies need 256 MiB. Browser queues hold several bounded replies.
-#[cfg(not(target_family = "wasm"))]
+/// Each inbound queue must hold a maximum-size reply plus framing overhead.
 pub const QUEUE_LEN: usize = 256 * 1024 * 1024;
-#[cfg(target_family = "wasm")]
-pub const QUEUE_LEN: usize = 64 * 1024 * 1024;
 
 #[derive(Resource)]
 pub struct PacketRx(AsyncArcQueueRx);
