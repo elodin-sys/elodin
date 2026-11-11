@@ -943,45 +943,17 @@ impl Plugin for EditorPlugin {
 ///
 /// On Linux/Windows a discrete GPU is typical, so we apply a lighter
 /// policy: ~30 fps with reduced (but not disabled) shadows.
-/// True when any loaded window has a `sensor_view` panel in its tile tree.
-///
-/// The active schematic is no longer mirrored in DB metadata (RFD #724, Phase 4
-/// dropped `schematic.content`), so scanning the KDL text for `"sensor_view"` is
-/// gone. A `sensor_view` panel becomes a `Pane::SensorView` tile at load time,
-/// so inspecting the live tile trees is the metadata-free equivalent: a
-/// sensor-view schematic is treated as sensor-camera work even when
-/// `SensorCameraConfigs` is empty and the `sensor_cameras` metadata is absent.
-fn has_sensor_view_pane(windows: &Query<&crate::ui::tiles::WindowState>) -> bool {
-    windows.iter().any(|window| {
-        window.tile_state.tree.tiles.iter().any(|(_, tile)| {
-            matches!(
-                tile,
-                egui_tiles::Tile::Pane(crate::ui::tiles::Pane::SensorView(_))
-            )
-        })
-    })
-}
-
+/// Wait for loaded configs: panes and metadata can arrive first and do not
+/// tell us whether a camera uses a separate render server or a local preview.
 #[cfg(target_os = "macos")]
 fn throttle_for_sensor_cameras(
     configs: Res<sensor_camera::SensorCameraConfigs>,
-    db_config: Res<impeller_wkt::DbConfig>,
     mut settings: ResMut<bevy_framepace::FramepaceSettings>,
     mut shadow_map: ResMut<DirectionalLightShadowMap>,
     mut dir_lights: Query<&mut DirectionalLight>,
-    windows: Query<&crate::ui::tiles::WindowState>,
     mut applied: Local<bool>,
 ) {
-    if *applied {
-        return;
-    }
-    if !configs.0.is_empty() && configs.0.iter().all(|camera| camera.render_local) {
-        return;
-    }
-    let detected = !configs.0.is_empty()
-        || db_config.metadata.contains_key("sensor_cameras")
-        || has_sensor_view_pane(&windows);
-    if !detected {
+    if *applied || !configs.0.iter().any(|camera| !camera.render_local) {
         return;
     }
     settings.limiter = bevy_framepace::Limiter::Manual(Duration::from_millis(42));
@@ -998,22 +970,11 @@ fn throttle_for_sensor_cameras(
 #[cfg(not(target_os = "macos"))]
 fn throttle_for_sensor_cameras(
     configs: Res<sensor_camera::SensorCameraConfigs>,
-    db_config: Res<impeller_wkt::DbConfig>,
     mut settings: ResMut<bevy_framepace::FramepaceSettings>,
     mut shadow_map: ResMut<DirectionalLightShadowMap>,
-    windows: Query<&crate::ui::tiles::WindowState>,
     mut applied: Local<bool>,
 ) {
-    if *applied {
-        return;
-    }
-    if !configs.0.is_empty() && configs.0.iter().all(|camera| camera.render_local) {
-        return;
-    }
-    let detected = !configs.0.is_empty()
-        || db_config.metadata.contains_key("sensor_cameras")
-        || has_sensor_view_pane(&windows);
-    if !detected {
+    if *applied || !configs.0.iter().any(|camera| !camera.render_local) {
         return;
     }
     settings.limiter = bevy_framepace::Limiter::Manual(Duration::from_millis(33));
@@ -1022,6 +983,117 @@ fn throttle_for_sensor_cameras(
         "Sensor cameras detected — editor throttled to ~30 fps, shadow map reduced (GPU sharing)"
     );
     *applied = true;
+}
+
+#[cfg(test)]
+mod sensor_throttle_tests {
+    use super::*;
+    use impeller_wkt::{DbConfig, SensorCameraConfig};
+    use sensor_camera::SensorCameraConfigs;
+
+    fn app() -> App {
+        let mut app = App::new();
+        app.init_resource::<SensorCameraConfigs>()
+            .init_resource::<DbConfig>()
+            .insert_resource(bevy_framepace::FramepaceSettings {
+                limiter: bevy_framepace::Limiter::Off,
+                ..default()
+            })
+            .insert_resource(DirectionalLightShadowMap { size: 2048 })
+            .add_systems(Update, throttle_for_sensor_cameras);
+        app.world_mut().spawn(DirectionalLight {
+            shadow_maps_enabled: true,
+            ..default()
+        });
+        app
+    }
+
+    fn assert_unthrottled(app: &mut App) {
+        assert!(matches!(
+            app.world()
+                .resource::<bevy_framepace::FramepaceSettings>()
+                .limiter,
+            bevy_framepace::Limiter::Off
+        ));
+        assert_eq!(
+            app.world().resource::<DirectionalLightShadowMap>().size,
+            2048
+        );
+        let world = app.world_mut();
+        assert!(
+            world
+                .query::<&DirectionalLight>()
+                .iter(world)
+                .all(|light| light.shadow_maps_enabled)
+        );
+    }
+
+    #[test]
+    fn early_metadata_does_not_throttle_local_previews() {
+        let mut app = app();
+        let local = SensorCameraConfig {
+            render_local: true,
+            ..default()
+        };
+        app.world_mut().resource_mut::<DbConfig>().metadata.insert(
+            "sensor_cameras".into(),
+            serde_json::to_string(&vec![local.clone()]).unwrap(),
+        );
+        // Metadata arrives before the camera loader has populated configs.
+        app.update();
+        assert_unthrottled(&mut app);
+        app.world_mut()
+            .resource_mut::<SensorCameraConfigs>()
+            .0
+            .push(local);
+        app.update();
+        app.update();
+        assert_unthrottled(&mut app);
+    }
+
+    #[test]
+    fn remote_camera_loaded_after_local_preview_still_throttles() {
+        let mut app = app();
+        app.world_mut()
+            .resource_mut::<SensorCameraConfigs>()
+            .0
+            .push(SensorCameraConfig {
+                render_local: true,
+                ..default()
+            });
+        app.update();
+        assert_unthrottled(&mut app);
+        app.world_mut()
+            .resource_mut::<SensorCameraConfigs>()
+            .0
+            .push(SensorCameraConfig {
+                render_local: false,
+                ..default()
+            });
+        app.update();
+        #[cfg(target_os = "macos")]
+        let (millis, size) = (42, 256);
+        #[cfg(not(target_os = "macos"))]
+        let (millis, size) = (33, 1024);
+        assert!(matches!(
+            app.world().resource::<bevy_framepace::FramepaceSettings>().limiter,
+            bevy_framepace::Limiter::Manual(period) if period == Duration::from_millis(millis)
+        ));
+        assert_eq!(
+            app.world().resource::<DirectionalLightShadowMap>().size,
+            size
+        );
+        #[cfg(target_os = "macos")]
+        {
+            let world = app.world_mut();
+            assert!(
+                world
+                    .query::<&DirectionalLight>()
+                    .iter(world)
+                    .all(|light| !light.shadow_maps_enabled)
+            );
+        }
+    }
 }
 
 #[cfg(feature = "inspector")]
