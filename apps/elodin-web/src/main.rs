@@ -1,25 +1,16 @@
-mod launch;
-
 use bevy::prelude::*;
-use elodin_editor::{EditorPlugin, ViewerEvent};
+use elodin_editor::EditorPlugin;
 
 fn main() {
     console_error_panic_hook::set_once();
     web_sys::console::log_1(&"elodin-web: main()".into());
-    let capabilities = match page_capabilities() {
-        Ok(capabilities) => capabilities,
-        Err(error) => {
-            dispatch("elodin-error", Some(&error));
-            return;
-        }
-    };
-    let plugin = EditorPlugin::default().with_viewer_capabilities(capabilities);
+    let plugin = EditorPlugin::default();
     #[cfg(target_family = "wasm")]
     let plugin = apply_page_db(plugin);
     App::new()
         .add_plugins(plugin)
         .add_systems(Startup, log_startup)
-        .add_systems(Last, publish_events)
+        .add_systems(Update, log_first_update)
         .run();
 }
 
@@ -59,44 +50,13 @@ fn log_startup() {
     web_sys::console::log_1(&"elodin-web: Startup".into());
 }
 
-fn publish_events(mut events: MessageReader<ViewerEvent>) {
-    for event in events.read() {
-        match event {
-            ViewerEvent::Connecting => dispatch("elodin-connecting", None),
-            ViewerEvent::Ready => dispatch("elodin-ready", None),
-            ViewerEvent::Failed(error) => dispatch("elodin-error", Some(error)),
-        }
+fn log_first_update(mut done: Local<bool>) {
+    if *done {
+        return;
     }
-}
-
-fn dispatch(name: &str, error: Option<&str>) {
-    let init = web_sys::CustomEventInit::new();
-    if let Some(error) = error {
-        init.set_detail(&error.into());
-    }
-    if let (Some(window), Ok(event)) = (
-        web_sys::window(),
-        web_sys::CustomEvent::new_with_event_init_dict(name, &init),
-    ) {
+    *done = true;
+    web_sys::console::log_1(&"elodin-web: first Update".into());
+    if let (Some(window), Ok(event)) = (web_sys::window(), web_sys::Event::new("elodin-ready")) {
         let _ = window.dispatch_event(&event);
     }
-}
-
-fn page_capabilities() -> Result<elodin_editor::ViewerCapabilities, String> {
-    let window = web_sys::window().ok_or("No browser window")?;
-    let search = window
-        .location()
-        .search()
-        .map_err(|_| "Cannot read browser location")?;
-    let params =
-        web_sys::UrlSearchParams::new_with_str(&search).map_err(|_| "Invalid launch parameters")?;
-    let all = params.get_all("read_only");
-    let values = (0..all.length())
-        .map(|index| {
-            all.get(index)
-                .as_string()
-                .ok_or_else(|| "Invalid launch parameter".to_string())
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    launch::capabilities(&values)
 }

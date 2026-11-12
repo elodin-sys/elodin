@@ -84,7 +84,6 @@ fn accept(
     state: &mut BrowserSeriesState,
     cache: &mut TelemetryCache,
     schema: &ComponentSchemaRegistry,
-    backfill: &mut BackfillState,
 ) -> bool {
     if state.scope != page.scope || state.generation != page.generation {
         return false;
@@ -107,7 +106,6 @@ fn accept(
             Timestamp(page.start.saturating_add(1)),
             &value.timestamps,
         );
-        backfill.initial.insert(page.component);
         return true;
     }
     if value
@@ -118,7 +116,6 @@ fn accept(
     {
         return false;
     }
-    backfill.initial.insert(page.component);
     let end = if value.timestamps.len() < PAGE_LIMIT {
         page.end
     } else {
@@ -215,7 +212,7 @@ pub fn update(
             .flatten()
             .as_deref()
             .and_then(browser_cache::decode::<SeriesPage>)
-            .is_some_and(|value| accept(&pending.page, value, state, cache, schema, backfill));
+            .is_some_and(|value| accept(&pending.page, value, state, cache, schema));
         if !accepted {
             send(pending.page, state, commands);
         }
@@ -302,7 +299,6 @@ fn send(page: Page, state: &mut BrowserSeriesState, commands: &mut Commands) {
                          mut state: ResMut<BrowserSeriesState>,
                          mut cache: ResMut<TelemetryCache>,
                          schema: Res<ComponentSchemaRegistry>,
-                         mut backfill: ResMut<BackfillState>,
                          priority: Res<SeriesFetchPriority>,
                          active_scope: Res<BrowserCacheScope>| {
         if state
@@ -321,7 +317,7 @@ fn send(page: Page, state: &mut BrowserSeriesState, commands: &mut Commands) {
         }
         if let Some(value) = SeriesPage::from_packet(&packet) {
             browser_cache::store(&page.scope, &page.key, &value);
-            accept(&page, value, &mut state, &mut cache, &schema, &mut backfill);
+            accept(&page, value, &mut state, &mut cache, &schema);
         }
         true
     };
@@ -387,14 +383,7 @@ mod tests {
         let encoded = postcard::to_allocvec(&payload(&[0, 10, 20])).unwrap();
         let decoded = browser_cache::decode::<SeriesPage>(&encoded).unwrap();
         let mut cache = TelemetryCache::default();
-        accept(
-            &page,
-            decoded,
-            &mut state,
-            &mut cache,
-            &schema,
-            &mut BackfillState::default(),
-        );
+        accept(&page, decoded, &mut state, &mut cache, &schema);
         assert_eq!(cache.total_sample_count(), 3);
         assert!(cache.is_covered(&page.component, &(Timestamp(0)..Timestamp(WINDOW_US))));
         assert_eq!(
@@ -410,37 +399,15 @@ mod tests {
     fn late_pages_and_malformed_payloads_cannot_populate_the_cache() {
         let (page, mut state, schema) = setup();
         let mut cache = TelemetryCache::default();
-        let mut backfill = BackfillState::default();
         state.generation += 1;
-        accept(
-            &page,
-            payload(&[10]),
-            &mut state,
-            &mut cache,
-            &schema,
-            &mut backfill,
-        );
+        accept(&page, payload(&[10]), &mut state, &mut cache, &schema);
         assert_eq!(cache.total_sample_count(), 0);
         state.generation = 0;
-        accept(
-            &page,
-            payload(&[-1]),
-            &mut state,
-            &mut cache,
-            &schema,
-            &mut backfill,
-        );
+        accept(&page, payload(&[-1]), &mut state, &mut cache, &schema);
         assert_eq!(cache.total_sample_count(), 0);
         let mut malformed = payload(&[10]);
         malformed.data.pop();
-        accept(
-            &page,
-            malformed,
-            &mut state,
-            &mut cache,
-            &schema,
-            &mut backfill,
-        );
+        accept(&page, malformed, &mut state, &mut cache, &schema);
         assert_eq!(cache.total_sample_count(), 0);
         assert!(!cache.is_covered(&page.component, &(Timestamp(0)..Timestamp(WINDOW_US))));
     }
@@ -456,7 +423,6 @@ mod tests {
             &mut state,
             &mut cache,
             &schema,
-            &mut BackfillState::default(),
         );
         assert!(
             cache
@@ -505,7 +471,6 @@ mod tests {
             &mut state,
             &mut cache,
             &schema,
-            &mut BackfillState::default()
         ));
         assert!(!cache.is_covered(&page.component, &(Timestamp(0)..Timestamp(21))));
         assert!(cache.is_covered(&page.component, &(Timestamp(10)..Timestamp(21))));

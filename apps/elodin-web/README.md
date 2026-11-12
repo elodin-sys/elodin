@@ -37,17 +37,9 @@ need a browser smoke test.
 
 ## Lifecycle events
 
-The editor emits `ViewerEvent` messages in Rust and custom events on its browser window.
-The host can listen on the frame window when both pages share an origin.
-
-`elodin-connecting` marks a connection or recording change.
-`elodin-ready` follows the database handshake, schematic load, and initial telemetry backfill.
-If the recording contains no requested telemetry, the editor does not wait for a backfill.
-The event can repeat after a reconnect or recording change.
-`elodin-error` reports connection, schematic, and asset failures. Its `detail` field contains an error string.
-
-The host owns its loading screen and event handlers.
-The read-only controls govern editor actions. The server must enforce its own access rules.
+`elodin-ready` fires on the first editor update, as on main. Connection,
+schematic, and query errors remain in the editor. The server enforces access
+and rejects unsupported operations with Impeller errors.
 
 ## Experimental playback cache
 
@@ -81,8 +73,6 @@ Run the cache adapter tests inside the Nix shell:
 node --test tests/browser-cache/cache.test.mjs
 ```
 
-
-The host can opt into read-only capabilities with `?read_only=true`. Invalid or duplicate capability parameters stop startup with `elodin-error`.
 
 ## Tests
 

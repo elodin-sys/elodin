@@ -69,14 +69,6 @@ pub enum DbMessage {
     UpdateConfig,
 }
 
-/// Handshake evidence for the current connection, reset by `NewConnection`.
-#[derive(Resource, Default)]
-pub struct InitialConnectionState {
-    pub generation: u64,
-    pub config_received: bool,
-    pub schema_received: bool,
-}
-
 /// Per-component time-series cache. Stores raw component values keyed by
 /// timestamp so the Editor can display data at any `CurrentTimestamp` without
 /// a DB round-trip.
@@ -661,36 +653,14 @@ pub fn apply_cached_data(
 /// Tracks which components have had their backfill requests sent.
 #[derive(Resource, Default)]
 pub struct BackfillState {
-    initial: std::collections::HashSet<ComponentId>,
     requested: std::collections::HashSet<ComponentId>,
     complete: std::collections::HashSet<ComponentId>,
 }
 
 impl BackfillState {
-    /// Whether a first valid page or an empty response arrived.
-    pub fn has_initial_data(&self, component_id: ComponentId) -> bool {
-        self.initial.contains(&component_id)
-    }
-
-    fn record_page(&mut self, component_id: ComponentId, count: usize, loaded: usize) {
-        if count == 0 || loaded > 0 {
-            self.initial.insert(component_id);
-        }
-        if count < BACKFILL_CHUNK_SIZE && loaded == count {
-            self.complete.insert(component_id);
-        }
-    }
-
-    /// Whether the server completed historical data for this component.
-    /// Persistent message subscriptions do not affect this result.
-    pub fn is_complete(&self, component_id: ComponentId) -> bool {
-        self.complete.contains(&component_id)
-    }
-
     /// Clear backfill bookkeeping for a component so it can be re-fetched if
     /// re-subscribed.
     pub fn clear_component(&mut self, component_id: ComponentId) {
-        self.initial.remove(&component_id);
         self.requested.remove(&component_id);
         self.complete.remove(&component_id);
     }
@@ -833,7 +803,6 @@ fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start:
             let elem_size = schema.size();
             let count = timestamps.len();
             let mut last_ts = start;
-            let mut loaded = 0;
 
             for (i, &timestamp) in timestamps.iter().enumerate() {
                 let offset = i * elem_size;
@@ -848,7 +817,6 @@ fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start:
                 ) {
                     let value = ComponentValue::from_view(view);
                     cache.insert(component_id, timestamp, value);
-                    loaded += 1;
                     last_ts = timestamp;
                 }
             }
@@ -865,11 +833,12 @@ fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start:
                 return true;
             }
 
-            backfill.record_page(component_id, count, loaded);
-            load_state.components_complete = backfill.complete.len();
             if count >= BACKFILL_CHUNK_SIZE {
                 // Continue from the beginning forward — usable incrementally.
                 send_backfill_page(&mut cmds, component_id, Timestamp(last_ts.0 + 1));
+            } else {
+                backfill.complete.insert(component_id);
+                load_state.components_complete = backfill.complete.len();
             }
             true
         },
@@ -1200,31 +1169,6 @@ fn sink_inner(
             }
         }
         track_component_filter_support(world, &pkt)?;
-        if let OwnedPacket::Msg(m) = &pkt
-            && let Some(mut state) = world.get_resource_mut::<InitialConnectionState>()
-        {
-            match m.id {
-                NewConnection::ID => {
-                    *state = InitialConnectionState {
-                        generation: state.generation.wrapping_add(1),
-                        ..Default::default()
-                    };
-                }
-                DbConfig::ID => {
-                    m.parse::<DbConfig>()?;
-                    state.config_received = true;
-                }
-                DumpMetadataResp::ID => {
-                    m.parse::<DumpMetadataResp>()?;
-                    state.config_received = true;
-                }
-                DumpSchemaResp::ID => {
-                    m.parse::<DumpSchemaResp>()?;
-                    state.schema_received = true;
-                }
-                _ => {}
-            }
-        }
         let mut world_sink = world_sink_state
             .get_mut(world)
             .expect("WorldSink params invalid");
@@ -1872,7 +1816,6 @@ impl Plugin for ImpellerPlugin {
             .init_resource::<MsgRequestIdAlloc>()
             .init_resource::<MsgRequestQueue>()
             .init_resource::<DbConfig>()
-            .init_resource::<InitialConnectionState>()
             .init_resource::<TelemetryCache>()
             .init_resource::<BackfillState>()
             .init_resource::<SeriesStoreLoadState>()
@@ -2602,39 +2545,6 @@ mod series_store_allowlist_tests {
     fn default_connection_opens_stream_without_a_filter() {
         let packets: Vec<_> = new_connection_packets(42).collect();
         assert_eq!(packets[0].as_packet().header.id, Stream::ID);
-    }
-
-    #[test]
-    fn initial_data_arrives_before_complete_history_and_resets_on_refetch() {
-        let mut state = BackfillState::default();
-        let first = ComponentId(1);
-        let empty = ComponentId(2);
-        state.requested.insert(first);
-        assert!(!state.has_initial_data(first));
-        state.record_page(first, BACKFILL_CHUNK_SIZE, BACKFILL_CHUNK_SIZE);
-        assert!(state.has_initial_data(first));
-        assert!(!state.is_complete(first));
-        state.record_page(empty, 0, 0);
-        assert!(state.has_initial_data(empty));
-        assert!(state.is_complete(empty));
-        state.record_page(first, 3, 3);
-        assert!(state.is_complete(first));
-        state.clear_component(first);
-        assert!(!state.has_initial_data(first));
-        assert!(!state.is_complete(first));
-        assert!(state.has_initial_data(empty));
-    }
-
-    #[test]
-    fn malformed_pages_do_not_report_initial_data() {
-        let mut state = BackfillState::default();
-        let id = ComponentId(1);
-        state.record_page(id, 1, 0);
-        assert!(!state.has_initial_data(id));
-        assert!(!state.is_complete(id));
-        state.record_page(id, 1, 1);
-        assert!(state.has_initial_data(id));
-        assert!(state.is_complete(id));
     }
 
     #[test]

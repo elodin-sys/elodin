@@ -7,9 +7,7 @@
 pub use impeller_bevy::DbEndpoint;
 #[cfg(target_family = "wasm")]
 use impeller_bevy::HostOrUrl;
-pub mod viewer;
 use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
-pub use viewer::{ViewerCapabilities, ViewerEvent};
 
 use crate::plugins::{editor_cam_input, editor_cam_touch};
 use crate::spatial::{FloatingOrigin, FloatingOriginSettings, GridCell};
@@ -483,7 +481,6 @@ pub(crate) fn register_ibl_embedded_assets(app: &mut App) {
 #[derive(Default)]
 pub struct EditorPlugin {
     window_resolution: WindowResolution,
-    capabilities: viewer::ViewerCapabilities,
     cache_limits: impeller_bevy::browser_cache::PlaybackCacheLimits,
     #[cfg(target_family = "wasm")]
     connection: Option<DbEndpoint>,
@@ -504,15 +501,9 @@ impl EditorPlugin {
         self.cache_limits = limits;
         self
     }
-    pub fn with_viewer_capabilities(mut self, capabilities: ViewerCapabilities) -> Self {
-        self.capabilities = capabilities;
-        self
-    }
-
     pub fn new(width: f32, height: f32) -> Self {
         Self {
             window_resolution: WindowResolution::new(width as u32, height as u32),
-            capabilities: viewer::ViewerCapabilities::default(),
             cache_limits: impeller_bevy::browser_cache::PlaybackCacheLimits::default(),
             #[cfg(target_family = "wasm")]
             connection: None,
@@ -532,7 +523,6 @@ impl EditorPlugin {
 
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(self.capabilities);
         app.insert_resource(self.cache_limits.clone());
         // Must run before anything can spawn a `WorldPos` entity.
         register_world_pos_components(app);
@@ -673,7 +663,6 @@ impl Plugin for EditorPlugin {
             self.assets.clone(),
         ));
         app.add_plugins(FrustumPlugin)
-            .add_plugins(viewer::plugin)
             .add_plugins(FrustumIntersectionPlugin)
             .add_plugins(GizmoPlugin);
         #[cfg(not(target_family = "wasm"))]
@@ -789,19 +778,11 @@ impl Plugin for EditorPlugin {
             app.init_resource::<skybox_generation::LocallyPushedSkyboxActive>()
                 .add_systems(
                     Update,
-                    skybox_generation::sync_generated_skybox_to_schematic
-                        .run_if(viewer::recording_write_enabled),
+                    skybox_generation::sync_generated_skybox_to_schematic,
                 )
-                .add_systems(
-                    Update,
-                    skybox_generation::on_document_loaded.run_if(viewer::recording_write_enabled),
-                )
+                .add_systems(Update, skybox_generation::on_document_loaded)
                 .add_systems(Update, skybox_generation::record_reloaded_schematic_key)
-                .add_systems(
-                    Update,
-                    skybox_generation::push_skybox_active_on_pending
-                        .run_if(viewer::recording_write_enabled),
-                )
+                .add_systems(Update, skybox_generation::push_skybox_active_on_pending)
                 .add_systems(Update, skybox_generation::decay_skybox_status_message)
                 .add_systems(
                     Update,
@@ -814,8 +795,7 @@ impl Plugin for EditorPlugin {
                 )
                 .add_systems(
                     PostUpdate,
-                    skybox_db_assets::upload_active_skybox_assets_to_db
-                        .run_if(viewer::recording_write_enabled),
+                    skybox_db_assets::upload_active_skybox_assets_to_db,
                 );
         }
         app.add_systems(Update, ui::log_stream::connect_streams)
@@ -1981,14 +1961,10 @@ struct EditorUiHardClear<'w, 's> {
     graph_data: ResMut<'w, CollectedGraphData>,
     last_synced_key: ResMut<'w, plugins::kdl_document::LastSyncedActiveKey>,
     last_synced_revision: ResMut<'w, plugins::kdl_document::LastSyncedAssetsRevision>,
-    pending_windows: Option<ResMut<'w, ui::schematic::PendingWindowSchematics>>,
 }
 
 impl EditorUiHardClear<'_, '_> {
     fn clear_ui_and_invalidate_schematic_sync(&mut self) {
-        if let Some(windows) = self.pending_windows.as_deref_mut() {
-            *windows = default();
-        }
         let primary = self.primary_window.as_ref().map(|p| **p);
         let line_entities: Vec<Entity> = self.lines.iter().collect();
         hard_clear_editor_ui(
@@ -2010,7 +1986,6 @@ impl EditorUiHardClear<'_, '_> {
 #[derive(SystemParam)]
 struct SeriesStoreReconnect<'w> {
     session: ResMut<'w, SeriesStoreSession>,
-    schema: Option<ResMut<'w, impeller_bevy::ComponentSchemaRegistry>>,
     connection_addr: Option<Res<'w, ConnectionAddr>>,
     msg_handlers: ResMut<'w, MsgRequestIdHandlers>,
     req_handlers: ResMut<'w, RequestIdHandlers>,
@@ -2100,9 +2075,6 @@ fn clear_state_new_connection(
 
     let addr = series.connection_addr.as_ref().map(|a| a.socket);
     let soft = series_store_soft_reconnect(&series.session, addr);
-    if !soft && let Some(schema) = series.schema.as_deref_mut() {
-        schema.0.clear();
-    }
     apply_series_store_on_reconnect(
         soft,
         addr,

@@ -175,7 +175,7 @@ pub(super) fn update(
         if state.timeouts >= 3 {
             let error = "Camera requests timed out. Reopen the recording.".to_owned();
             stream.state = StreamState::Error(error.clone());
-            commands.write_message(crate::viewer::ViewerEvent::Failed(error));
+            bevy::log::warn!("{error}");
             return;
         }
     }
@@ -302,7 +302,7 @@ fn send(
             }
             let error = "Camera data could not load. Reopen the recording.".to_owned();
             stream.state = StreamState::Error(error.clone());
-            commands.write_message(crate::viewer::ViewerEvent::Failed(error));
+            bevy::log::warn!("{error}");
             true
         },
     );
