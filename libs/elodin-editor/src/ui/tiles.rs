@@ -1715,6 +1715,59 @@ pub struct ViewportPane {
     pub view_cube_layer: Option<usize>,
 }
 
+fn initial_viewport_geo_pose(
+    frame: GeoFrame,
+    has_explicit_pose: bool,
+    transform: &Transform,
+    context: &bevy_geo_frames::GeoContext,
+) -> (
+    bevy_geo_frames::GeoPosition,
+    bevy_geo_frames::GeoRotation,
+    impeller_wkt::WorldPos,
+) {
+    use bevy_geo_frames::{GeoPosition, GeoRotation, RotationKind};
+    let offset = transform.translation.as_dvec3();
+    let site_default = frame == GeoFrame::ECEF && !has_explicit_pose;
+    let (position, rotation) = if site_default {
+        // An unposed geographic viewport starts above the declared site, not
+        // a few metres from Earth's centre. Keep the conversion in f64.
+        let rotation = frame._R_(&GeoFrame::ENU, context);
+        (
+            GeoPosition(
+                frame,
+                frame._M_(&GeoFrame::ENU, context).transform_point3(offset),
+            ),
+            GeoRotation::look_at(
+                frame,
+                rotation * -offset,
+                Some(rotation * bevy::math::DVec3::Z),
+                context,
+            ),
+        )
+    } else {
+        (
+            GeoPosition(frame, offset),
+            GeoRotation::from_bevy_kind(
+                frame,
+                transform.rotation.as_dquat(),
+                context,
+                RotationKind::Absolute,
+            ),
+        )
+    };
+    // sync_pos consumes newly inserted WorldPos on the first frame. Seed it
+    // too, or it would replace the geographic site pose with zero.
+    let world_pos = if site_default {
+        impeller_wkt::WorldPos {
+            pos: position.1.into(),
+            att: rotation.1.into(),
+        }
+    } else {
+        impeller_wkt::WorldPos::default()
+    };
+    (position, rotation, world_pos)
+}
+
 impl ViewportPane {
     #[allow(clippy::too_many_arguments)]
     pub fn spawn(
@@ -1755,6 +1808,14 @@ impl ViewportPane {
 
         let transform =
             Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)).looking_at(Vec3::ZERO, Vec3::Y);
+        let has_kdl_pose = viewport
+            .pos
+            .as_ref()
+            .is_some_and(|eql| !eql.trim().is_empty())
+            || viewport
+                .look_at
+                .as_ref()
+                .is_some_and(|eql| !eql.trim().is_empty());
         let mut parent_cmd = commands.spawn((
             GlobalTransform::default(),
             transform,
@@ -1765,14 +1826,11 @@ impl ViewportPane {
 
         // Add GeoPosition and GeoRotation; use ENU if no frame is specified.
         if let Some(frame) = viewport.frame.or_default() {
-            parent_cmd.insert((
-                bevy_geo_frames::GeoPosition(frame, transform.translation.as_dvec3()),
-                bevy_geo_frames::GeoRotation::from_bevy_kind(
-                    frame,
-                    transform.rotation.as_dquat(),
-                    geo_context,
-                    bevy_geo_frames::RotationKind::Absolute,
-                ),
+            parent_cmd.insert(initial_viewport_geo_pose(
+                frame,
+                has_kdl_pose,
+                &transform,
+                geo_context,
             ));
         }
 
@@ -1986,14 +2044,6 @@ impl ViewportPane {
         };
 
         commands.entity(camera).insert(ViewCubeTargetCamera);
-        let has_kdl_pose = viewport
-            .pos
-            .as_ref()
-            .is_some_and(|eql| !eql.trim().is_empty())
-            || viewport
-                .look_at
-                .as_ref()
-                .is_some_and(|eql| !eql.trim().is_empty());
         if !has_kdl_pose {
             commands.entity(camera).insert(NeedsInitialSnap);
         }
@@ -3947,6 +3997,65 @@ pub fn shortcuts(
             return;
         };
         tabs.set_active(*new_active_id);
+    }
+}
+
+#[cfg(test)]
+mod initial_viewport_tests {
+    use super::*;
+    use bevy::math::DVec3;
+    use bevy_geo_frames::{GeoContext, GeoOrigin, Present};
+
+    #[test]
+    fn unposed_ecef_viewport_starts_above_site_and_looks_at_it() {
+        for present in [Present::Plane, Present::Sphere] {
+            let context = GeoContext::from(GeoOrigin::new_from_degrees(45.0, 30.0, 100.0))
+                .with_present(present);
+            let transform = Transform::from_translation(Vec3::new(5.0, 5.0, 10.0))
+                .looking_at(Vec3::ZERO, Vec3::Y);
+            let mut app = App::new();
+            app.add_systems(Update, crate::sync_pos);
+            let entity = app
+                .world_mut()
+                .spawn(initial_viewport_geo_pose(
+                    GeoFrame::ECEF,
+                    false,
+                    &transform,
+                    &context,
+                ))
+                .id();
+            app.update();
+            let position = app
+                .world()
+                .get::<bevy_geo_frames::GeoPosition>(entity)
+                .unwrap();
+            let rotation = app
+                .world()
+                .get::<bevy_geo_frames::GeoRotation>(entity)
+                .unwrap();
+            let local = GeoFrame::ENU
+                ._M_(&GeoFrame::ECEF, &context)
+                .transform_point3(position.1);
+            assert!((local - DVec3::new(5.0, 5.0, 10.0)).length() < 1e-8);
+            let site = bevy_geo_frames::GeoPosition(GeoFrame::ENU, DVec3::ZERO).to_bevy(&context);
+            let direction = (site - position.to_bevy(&context)).normalize();
+            assert!((rotation.to_bevy(&context) * DVec3::NEG_Z).dot(direction) > 0.999999);
+        }
+    }
+
+    #[test]
+    fn explicit_ecef_and_local_frames_keep_existing_initial_pose() {
+        let context = GeoContext::default();
+        let transform = Transform::from_xyz(5.0, 5.0, 10.0);
+        for (frame, explicit) in [
+            (GeoFrame::ECEF, true),
+            (GeoFrame::ENU, false),
+            (GeoFrame::NED, false),
+        ] {
+            let (position, _, _) = initial_viewport_geo_pose(frame, explicit, &transform, &context);
+            assert_eq!(position.0, frame);
+            assert_eq!(position.1, transform.translation.as_dvec3());
+        }
     }
 }
 
