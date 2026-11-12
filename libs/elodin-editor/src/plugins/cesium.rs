@@ -1063,7 +1063,9 @@ fn show_startup(
     headless: Option<Res<crate::sensor_camera::HeadlessMode>>,
     mut contexts: Query<&mut bevy_egui::EguiContext>,
 ) {
-    if startup.ready || startup.replay_can_stream(config.as_deref(), headless.is_some()) {
+    if startup.error.is_none()
+        && (startup.ready || startup.replay_can_stream(config.as_deref(), headless.is_some()))
+    {
         return;
     }
     for mut context in &mut contexts {
