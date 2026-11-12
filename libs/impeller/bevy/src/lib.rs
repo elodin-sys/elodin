@@ -90,7 +90,8 @@ pub struct TelemetryCache {
     /// `None` is no byte budget. `Some(0)` admits nothing.
     byte_limit: Option<usize>,
     pivot: Timestamp,
-    predecessors: HashMap<ComponentId, (Timestamp, i64)>,
+    /// Block a sparse sample is kept for, and that sample's timestamp.
+    predecessors: HashMap<ComponentId, BTreeMap<i64, Timestamp>>,
     components: HashMap<ComponentId, BTreeMap<Timestamp, ComponentValue>>,
     /// Merged half-open coverage intervals `[start, end)` per component (micros).
     coverage: HashMap<ComponentId, Vec<(i64, i64)>>,
@@ -247,16 +248,19 @@ impl TelemetryCache {
         self.components
             .iter()
             .flat_map(|(id, series)| {
-                let anchor = self.predecessors.get(id).copied();
-                series.iter().map(move |(time, value)| {
-                    let block = anchor
-                        .filter(|(timestamp, _)| timestamp == time)
-                        .map_or_else(|| block_start(time.0), |(_, block)| block);
-                    (block, value)
+                let claims = self.predecessors.get(id);
+                series.iter().filter_map(move |(time, value)| {
+                    let kept = match claims {
+                        Some(claims) if claims.values().any(|claimed| claimed == time) => {
+                            claims.iter().any(|(block, claimed)| {
+                                claimed == time && block.abs_diff(self.pivot.0) <= wanted
+                            })
+                        }
+                        _ => block_start(time.0).abs_diff(self.pivot.0) <= wanted,
+                    };
+                    kept.then_some(Self::value_bytes(value))
                 })
             })
-            .filter(|(block, _)| block.abs_diff(self.pivot.0) <= wanted)
-            .map(|(_, value)| Self::value_bytes(value))
             .fold(0, usize::saturating_add)
     }
 
@@ -273,20 +277,18 @@ impl TelemetryCache {
                 .components
                 .iter()
                 .flat_map(|(&id, series)| {
-                    let anchor = self.predecessors.get(&id).copied();
-                    let mut ordinary = series
-                        .keys()
-                        .filter(|time| anchor.is_none_or(|(timestamp, _)| **time != timestamp));
+                    let claims = self.predecessors.get(&id);
+                    let mut ordinary = series.keys().filter(|time| {
+                        claims.is_none_or(|claims| claims.values().all(|claimed| claimed != *time))
+                    });
                     let first = ordinary.next().copied();
                     let last = ordinary.next_back().copied();
-                    [
-                        first.map(|time| block_start(time.0)),
-                        last.map(|time| block_start(time.0)),
-                        anchor.map(|(_, block)| block),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .map(move |block| (id, block))
+                    [first, last]
+                        .into_iter()
+                        .flatten()
+                        .map(|time| block_start(time.0))
+                        .chain(claims.into_iter().flat_map(|claims| claims.keys().copied()))
+                        .map(move |block| (id, block))
                 })
                 .max_by_key(|(_, time)| time.abs_diff(self.pivot.0));
             let Some((id, time)) = candidate else {
@@ -324,20 +326,37 @@ impl TelemetryCache {
         self.byte_limit = None;
         self.insert(id, time, value);
         self.byte_limit = limit;
-        self.predecessors.insert(id, (time, block));
+        self.predecessors.entry(id).or_default().insert(block, time);
     }
 
     pub fn drop_block(&mut self, id: ComponentId, start: i64) {
         let end = start.saturating_add(1_000_000);
-        let anchor = self.predecessors.get(&id).copied();
+        let dropped_anchor = self
+            .predecessors
+            .get_mut(&id)
+            .and_then(|claims| claims.remove(&start));
+        if self
+            .predecessors
+            .get(&id)
+            .is_some_and(|claims| claims.is_empty())
+        {
+            self.predecessors.remove(&id);
+        }
+        let still_claimed: Vec<Timestamp> = self
+            .predecessors
+            .get(&id)
+            .map(|claims| claims.values().copied().collect())
+            .unwrap_or_default();
         if let Some(series) = self.components.get_mut(&id) {
             series.retain(|time, value| {
-                let remove =
-                    if let Some((_, block)) = anchor.filter(|(timestamp, _)| timestamp == time) {
-                        block == start
-                    } else {
-                        time.0 >= start && time.0 < end
-                    };
+                let claimed = still_claimed.contains(time);
+                let remove = if dropped_anchor == Some(*time) {
+                    !claimed
+                } else if claimed {
+                    false
+                } else {
+                    time.0 >= start && time.0 < end
+                };
                 if remove {
                     self.resident_bytes =
                         self.resident_bytes.saturating_sub(Self::value_bytes(value));
@@ -347,17 +366,14 @@ impl TelemetryCache {
                 }
             });
         }
-        if anchor.is_some_and(|(_, block)| block == start) {
-            self.predecessors.remove(&id);
-        }
         self.drop_coverage(id, start, end);
-        if let Some((timestamp, _)) = anchor.filter(|(_, block)| *block == start) {
+        if let Some(timestamp) =
+            dropped_anchor.filter(|timestamp| !still_claimed.contains(timestamp))
+        {
             self.drop_coverage(id, timestamp.0, timestamp.0.saturating_add(1));
         }
         self.generation = self.generation.wrapping_add(1);
-        let changed = anchor
-            .filter(|(_, block)| *block == start)
-            .map_or(start, |(timestamp, _)| timestamp.0.min(start));
+        let changed = dropped_anchor.map_or(start, |timestamp| timestamp.0.min(start));
         self.bump_revision(id, Timestamp(changed));
     }
 

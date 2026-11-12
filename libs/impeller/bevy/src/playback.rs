@@ -271,6 +271,29 @@ mod tests {
     }
 
     #[test]
+    fn plot_and_playback_predecessors_stay_independent() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId(7);
+        let playhead = ComponentValue::F64(nox::array![1f64].to_dyn());
+        let plot = ComponentValue::F64(nox::array![2f64].to_dyn());
+        let sample = TelemetryCache::value_bytes(&playhead);
+        cache.set_playback_budget(sample * 2, Timestamp(0));
+        cache.insert_predecessor(id, Timestamp(-120_000_000), 0, playhead.clone());
+        cache.insert_predecessor(id, Timestamp(-120_000_000), 5_000_000, playhead);
+        cache.drop_block(id, 5_000_000);
+        assert!(
+            cache
+                .series(&id)
+                .is_some_and(|series| series.contains_key(&Timestamp(-120_000_000)))
+        );
+        cache.insert_predecessor(id, Timestamp(-30_000_000), 5_000_000, plot);
+        assert!(cache.admit_block(1_000_000, sample));
+        let series = cache.series(&id).expect("both holds were stored");
+        assert!(series.contains_key(&Timestamp(-120_000_000)));
+        assert!(!series.contains_key(&Timestamp(-30_000_000)));
+    }
+
+    #[test]
     fn page_after_predecessor_leaves_room_for_the_block() {
         let mut cache = TelemetryCache::default();
         let id = ComponentId(7);
