@@ -106,3 +106,56 @@ def test_scoring_matches_the_nearest_gate_not_the_largest_opening(tmp_path, caps
     output = capsys.readouterr().out
     assert _bearing_median(output) < 0.1
     assert "first_candidate_is_target 0.000" in output
+
+
+def _lined_up_gates():
+    """Near and far gates on the optical axis. Their image centers coincide."""
+
+    near = Gate(0, (10.0, 0.0, 1.8), 0.0, 2.5)
+    pose = camera_pose_for_range(near, 6.0)
+    camera = pose[4:] + np.asarray(FPV_MOUNT.position_body)
+    far = Gate(1, tuple(camera + np.array([12.0, 0.0, 0.0])), 0.0, 2.5)
+    return near, far, pose
+
+
+def test_lined_up_gates_match_by_opening_size_not_shared_center(tmp_path, capsys):
+    near, far, pose = _lined_up_gates()
+    image, corners = render_gates([near, far], pose)
+    assert len(corners) == 2
+    center_gap = float(np.linalg.norm(corners[0].mean(axis=0) - corners[1].mean(axis=0)))
+    assert center_gap < 0.25 * evaluate_detector._mean_side(corners[0])
+    found = GateDetector().detect(image, 0.0, near.inner_size)
+    assert len(found) == 2
+
+    visible = [(near, corners[0]), (far, corners[1])]
+    matched = evaluate_detector._match_candidates(found, visible)
+    assert set(matched) == {near.index, far.index}
+    assert _corner_gap(matched[near.index].corners_px, corners[0]) <= 0.5
+    assert _corner_gap(matched[far.index].corners_px, corners[1]) <= 0.5
+
+    _record(tmp_path, [image], [pose], [near, far], FPV_INTRINSICS, FPV_MOUNT)
+    assert evaluate_detector.main(["--bundle", str(tmp_path), "--check"]) == 0
+    assert _bearing_median(capsys.readouterr().out) < 0.1
+
+
+def test_missing_near_gate_is_not_filled_by_the_far_opening(tmp_path, capsys):
+    near, far, pose = _lined_up_gates()
+    image, corners = render_gates([far], pose)
+    assert len(corners) == 1
+    found = GateDetector().detect(image, 0.0, near.inner_size)
+    assert len(found) == 1
+
+    near_corners = evaluate_detector.project_gate_corners(near, pose)
+    assert near_corners is not None
+    matched = evaluate_detector._match_candidates(found, [(near, near_corners), (far, corners[0])])
+    assert near.index not in matched
+    assert far.index in matched
+
+    _record(tmp_path, [image], [pose], [near, far], FPV_INTRINSICS, FPV_MOUNT)
+    assert evaluate_detector.main(["--bundle", str(tmp_path), "--check"]) == 1
+    output = capsys.readouterr().out
+    assert "frames 1 detected 0" in output
+
+
+def _corner_gap(detected: np.ndarray, truth: np.ndarray) -> float:
+    return float(np.linalg.norm(detected - truth, axis=1).max())

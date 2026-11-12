@@ -1789,9 +1789,11 @@ main `95f53257` (after F) on 2026-11-06:**
   `RACE_RECORD` without `RACE_CAMERA=1` exits 2.
 - `evaluate_detector.py --bundle` rebuilds the camera from the bundle's
   intrinsics, mount, and tilt. It projects every fully visible gate with that
-  camera, matches detections one-to-one by corner centroid (within a quarter of
-  the opening's side), and scores the nearest gate against its match. A frame
-  with no match is a miss. `first_candidate_is_target` reports how often the
+  camera, matches detections one-to-one by aligned opening corners (within a
+  quarter of the opening's side), and scores the nearest gate against its
+  match. A shared image center is not enough, so a smaller gate seen through
+  a nearer one does not count as that nearer gate. A frame with no match is a
+  miss. `first_candidate_is_target` reports how often the
   largest detection is that gate and does not affect `--check`. `--check` uses
   only 4–20 m frames. Recorded truth frames cover about 4–12 m; 12–20 m is
   covered by the synthetic set until a C1 recording is added.

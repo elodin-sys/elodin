@@ -209,16 +209,19 @@ def _match_candidates(
     candidates: tuple[GateCandidate, ...],
     references: list[tuple[Gate, np.ndarray]],
 ) -> dict[int, GateCandidate]:
-    """Greedy one-to-one match on corner centroids. Ground truth stays here."""
+    """Greedy one-to-one match on aligned corners. Ground truth stays here.
+
+    Gates seen through each other share an image center. Corner distance
+    rejects that smaller opening, which a center check would accept.
+    """
 
     pairs: list[tuple[float, int, int, GateCandidate]] = []
     for candidate_index, candidate in enumerate(candidates):
-        centroid = candidate.corners_px.mean(axis=0)
         for gate, corners in references:
             side = _mean_side(corners)
             if side <= 0.0:
                 continue
-            distance = float(np.linalg.norm(centroid - corners.mean(axis=0)))
+            distance = _aligned_corner_distance(candidate.corners_px, corners)
             if distance <= 0.25 * side:
                 pairs.append((distance, candidate_index, gate.index, candidate))
     pairs.sort(key=lambda item: item[0])
@@ -232,6 +235,19 @@ def _match_candidates(
         used_gates.add(gate_index)
         matched[gate_index] = candidate
     return matched
+
+
+def _aligned_corner_distance(candidate: np.ndarray, reference: np.ndarray) -> float:
+    """Mean corner gap after the closest cyclic labelling, either winding."""
+
+    best = math.inf
+    for corners in (candidate, candidate[::-1]):
+        for shift in range(4):
+            rolled = np.roll(corners, shift, axis=0)
+            gap = float(np.linalg.norm(rolled - reference, axis=1).mean())
+            if gap < best:
+                best = gap
+    return best
 
 
 def _mean_side(corners: np.ndarray) -> float:
