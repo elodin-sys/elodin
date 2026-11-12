@@ -18,7 +18,7 @@ source or its authentication.
 
 Assets are loaded from the connected DB automatically. Terrain uses available
 assets and cached data first, then streams missing Photo 3D tiles. No terrain
-option is needed for normal use. Append `&offline=1` to disable terrain-provider
+option is needed for normal use. Add `?offline=1` to disable terrain-provider
 requests; the DB and its assets remain accessible.
 
 To prepare a recording for offline use, run `elodin terrain prepare sim.py` before
@@ -30,12 +30,13 @@ inside the schematic's `environment` enables atmosphere rendering on the active
 cinematic view. WebGL displays the scene without these effects. The native
 Cinematic Earth globe, star field and night material are not loaded in the browser.
 
-## Separate asset server
+## Hosted database
 
-Only when assets use a different address or path prefix, append
-`&assets=https://assets.example/recordings/f9/assets/`. This changes HTTP asset
-requests, including nested effects and terrain, without changing the DB WebSocket
-address. The asset server must allow the editor's origin through CORS.
+Set `elodin-web-db` to the database's HTTP base URL, for example
+`https://db.example/recordings/f9/`. Assets, including nested effects and terrain,
+load from `assets/` under that base; WebSockets use `impeller` and `impeller/msg`.
+The server must allow the editor's origin through CORS. The former `?db=` and
+`&assets=` connection parameters are no longer used.
 
 ## Run an example
 

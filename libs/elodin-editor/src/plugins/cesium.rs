@@ -204,11 +204,11 @@ mod coordinate_tests {
         for (address, expected) in [
             (
                 "assets.example:2240",
-                "http://assets.example:2241/terrain/Falcon9/tileset.json",
+                "http://assets.example:2241/assets/terrain/Falcon9/tileset.json",
             ),
             (
                 "127.0.0.1:2260",
-                "http://127.0.0.1:2261/terrain/Falcon9/tileset.json",
+                "http://127.0.0.1:2261/assets/terrain/Falcon9/tileset.json",
             ),
         ] {
             app.insert_resource(impeller_bevy::ConnectionAddr::from_endpoint(
@@ -238,14 +238,20 @@ mod coordinate_tests {
             );
         }
 
-        // The assets host and prefix may change independently of the DB.
+        // Browser DB URLs can include a recording prefix; assets and sockets
+        // share that base, and the asset route is appended exactly once.
         for base in [
-            "https://cdn.example/recordings/f9/assets",
-            "https://cdn.example/recordings/other/assets/",
+            "https://db.example/recordings/f9",
+            "https://db.example/recordings/other/",
         ] {
-            let endpoint = impeller_bevy::DbEndpoint::parse("db.example:2240")
-                .unwrap()
-                .with_assets(base.parse().unwrap());
+            let endpoint = impeller_bevy::DbEndpoint::from_assets(base.parse().unwrap());
+            assert_eq!(
+                endpoint.ws_urls().0,
+                format!(
+                    "{}/impeller",
+                    base.trim_end_matches('/').replacen("https:", "wss:", 1)
+                )
+            );
             app.insert_resource(impeller_bevy::ConnectionAddr::from_endpoint(endpoint));
             app.update();
             let Some(CesiumSource::Prepared { url, .. }) =
@@ -256,7 +262,7 @@ mod coordinate_tests {
             assert_eq!(
                 url,
                 &format!(
-                    "{}/terrain/Falcon9/tileset.json",
+                    "{}/assets/terrain/Falcon9/tileset.json",
                     base.trim_end_matches('/')
                 )
             );

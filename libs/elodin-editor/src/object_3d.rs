@@ -4086,10 +4086,10 @@ mod db_asset_url_tests {
     use std::net::SocketAddr;
 
     #[test]
-    fn nested_effects_and_textures_use_the_assets_override() {
-        let endpoint = impeller_bevy::DbEndpoint::parse("db.example:2240")
-            .unwrap()
-            .with_assets("https://cdn.example/recordings/f9/assets".parse().unwrap());
+    fn nested_effects_and_textures_use_the_page_database() {
+        let endpoint = impeller_bevy::DbEndpoint::from_assets(
+            "https://db.example/recordings/f9/".parse().unwrap(),
+        );
         for key in [
             "effects/falcon9/merlin_flame.effect",
             "textures/smoke_puff.png",
@@ -4100,10 +4100,13 @@ mod db_asset_url_tests {
                     Some(&endpoint),
                     None,
                 ),
-                format!("https://cdn.example/recordings/f9/assets/{key}")
+                format!("https://db.example/recordings/f9/assets/{key}")
             );
         }
-        assert_eq!(endpoint.ws_urls().0, "ws://db.example:2241/impeller");
+        assert_eq!(
+            endpoint.ws_urls().0,
+            "wss://db.example/recordings/f9/impeller"
+        );
     }
 
     #[test]

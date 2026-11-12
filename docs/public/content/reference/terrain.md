@@ -126,13 +126,15 @@ Heightmaps remain independent: load a prepared grid with `TerrainHeightmap.load(
 
 ## Browser replay
 
-Connect the browser editor with `?db=HOST:PORT`. Terrain assets come from the DB
-automatically; missing Photo 3D tiles stream as needed. Add `&offline=1` to disable
+Run `just web http://127.0.0.1:2241` to connect to the local DB asset server
+(the simulation's TCP port plus one). Hosted pages set the `elodin-web-db` meta
+tag to the DB's HTTP base URL. Terrain assets come from the DB automatically;
+missing Photo 3D tiles stream as needed. Add `?offline=1` to disable
 terrain-provider requests while retaining access to the DB and its assets.
 
 Particles and atmosphere require WebGPU. See the
 [browser editor README](https://github.com/elodin-sys/elodin/tree/main/apps/elodin-web)
-for deployment and a separate asset-server address.
+for deployment and database URL configuration.
 
 ## Startup and outages
 

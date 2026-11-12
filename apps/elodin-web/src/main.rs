@@ -77,7 +77,9 @@ fn apply_page_db(plugin: EditorPlugin) -> EditorPlugin {
 #[cfg(target_family = "wasm")]
 fn query_value(name: &str) -> Option<String> {
     let search = web_sys::window()?.location().search().ok()?;
-    web_sys::UrlSearchParams::new_with_str(&search).ok()?.get(name)
+    web_sys::UrlSearchParams::new_with_str(&search)
+        .ok()?
+        .get(name)
 }
 
 #[cfg(not(target_family = "wasm"))]
