@@ -109,6 +109,7 @@ pub(crate) struct TerrainStartup {
     started: web_time::Instant,
     ready: bool,
     error: Option<&'static str>,
+    prepared: bool,
 }
 
 impl TerrainStartup {
@@ -117,7 +118,21 @@ impl TerrainStartup {
             started: web_time::Instant::now(),
             ready: false,
             error: None,
+            prepared: false,
         }
+    }
+
+    // Prepared replay may stream while playing, but that is not evidence that
+    // terrain is ready for a held simulation or a sensor capture. Read the gate
+    // from the current DB config: it can arrive after the schematic.
+    fn replay_can_stream(&self, config: Option<&impeller_wkt::DbConfig>, headless: bool) -> bool {
+        self.prepared
+            && !headless
+            && !config.is_some_and(|config| {
+                config
+                    .metadata
+                    .contains_key(impeller_wkt::EDITOR_STARTUP_GATE_METADATA_KEY)
+            })
     }
 
     pub(crate) fn owns_surface(&self) -> bool {
@@ -167,7 +182,14 @@ pub(crate) fn capture_readiness(
 pub(crate) fn playback_ready(world: &World) -> bool {
     world
         .get_resource::<TerrainStartup>()
-        .is_none_or(|startup| startup.ready || startup.error.is_some())
+        .is_none_or(|startup| {
+            startup.ready
+                || startup.error.is_some()
+                || startup.replay_can_stream(
+                    world.get_resource::<impeller_wkt::DbConfig>(),
+                    world.contains_resource::<crate::sensor_camera::HeadlessMode>(),
+                )
+        })
 }
 
 fn camera_position_ecef(
@@ -266,6 +288,84 @@ mod coordinate_tests {
                     base.trim_end_matches('/')
                 )
             );
+        }
+    }
+
+    #[test]
+    fn prepared_terrain_holds_simulation_even_when_gate_metadata_arrives_late() {
+        for gate_present_initially in [false, true] {
+            let (packet_tx, _packet_rx, outgoing, _incoming) = impeller_bevy::channels::channels();
+            let mut config = impeller_wkt::DbConfig::default();
+            if gate_present_initially {
+                config.metadata.insert(
+                    impeller_wkt::EDITOR_STARTUP_GATE_METADATA_KEY.into(),
+                    "1".into(),
+                );
+            }
+            let mut app = App::new();
+            app.add_message::<crate::ui::schematic::DocumentLoaded>()
+                .insert_resource(config)
+                .insert_resource(packet_tx)
+                .init_resource::<CesiumStatus>()
+                .insert_resource(crate::ui::schematic::CurrentSchematic(
+                    impeller_wkt::Schematic {
+                        terrain: Some(impeller_wkt::TerrainConfig::Asset {
+                            path: "terrain/Falcon9/tileset.json".into(),
+                        }),
+                        ..default()
+                    },
+                ))
+                .insert_resource(impeller_bevy::ConnectionAddr::from_endpoint(
+                    "127.0.0.1:2240".parse().unwrap(),
+                ))
+                .add_systems(
+                    Update,
+                    (configure_terrain, update_startup, release_simulation).chain(),
+                );
+            app.update();
+            assert_eq!(playback_ready(app.world()), !gate_present_initially);
+            assert!(outgoing.try_recv().is_err());
+
+            // The schematic and endpoint stay unchanged when the DB config arrives.
+            app.world_mut()
+                .resource_mut::<impeller_wkt::DbConfig>()
+                .metadata
+                .insert(
+                    impeller_wkt::EDITOR_STARTUP_GATE_METADATA_KEY.into(),
+                    "1".into(),
+                );
+            app.world_mut().remove_resource::<CesiumSourceUpdate>();
+            app.update();
+            assert!(
+                outgoing.try_recv().is_err(),
+                "simulation released before terrain loaded"
+            );
+            assert!(!playback_ready(app.world()));
+            assert!(
+                !app.world().contains_resource::<CesiumSourceUpdate>(),
+                "gate metadata must not restart terrain streaming"
+            );
+
+            app.insert_resource(CesiumStatus {
+                selection_complete: true,
+                visible_tiles: 1,
+                stable_frames: 8,
+                ..default()
+            });
+            app.update();
+            assert!(matches!(outgoing.try_recv(), Ok(Some(_))));
+            assert!(playback_ready(app.world()));
+
+            // Acknowledging the release must not reset the ready terrain either.
+            app.world_mut()
+                .resource_mut::<impeller_wkt::DbConfig>()
+                .metadata
+                .remove(impeller_wkt::EDITOR_STARTUP_GATE_METADATA_KEY);
+            app.insert_resource(CesiumStatus::default());
+            app.update();
+            assert_eq!(capture_ready(app.world()), Ok(true));
+            assert!(outgoing.try_recv().is_err());
+            assert!(!app.world().contains_resource::<CesiumSourceUpdate>());
         }
     }
 
@@ -492,6 +592,7 @@ mod coordinate_tests {
             started: web_time::Instant::now(),
             ready: false,
             error: None,
+            prepared: false,
         });
         // Interactive streaming has no fixed-path TerrainCapture resource.
         assert!(!world.contains_resource::<TerrainCapture>());
@@ -518,6 +619,7 @@ mod coordinate_tests {
             started: web_time::Instant::now(),
             ready: false,
             error: None,
+            prepared: false,
         });
         assert!(!playback_ready(&world));
         world.resource_mut::<TerrainStartup>().ready = true;
@@ -532,6 +634,7 @@ mod coordinate_tests {
             started: web_time::Instant::now() - std::time::Duration::from_secs(3600),
             ready: false,
             error: None,
+            prepared: false,
         };
         startup.update(&CesiumStatus::default());
         assert_eq!(startup.result(), Ok(false));
@@ -619,6 +722,7 @@ mod coordinate_tests {
             started: web_time::Instant::now(),
             ready: false,
             error: None,
+            prepared: false,
         })
         .init_resource::<CesiumViews>()
         .add_systems(Update, collect_views);
@@ -899,18 +1003,7 @@ fn configure_terrain(world: &mut World, mut previous: Local<Option<TerrainConfig
             }),
         }
     };
-    let simulation_held = world
-        .get_resource::<impeller_wkt::DbConfig>()
-        .is_some_and(|c| {
-            c.metadata
-                .contains_key(impeller_wkt::EDITOR_STARTUP_GATE_METADATA_KEY)
-        });
-    if matches!(source, Some(CesiumSource::Prepared { .. }))
-        && !simulation_held
-        && !world.contains_resource::<crate::sensor_camera::HeadlessMode>()
-    {
-        startup.ready = true;
-    }
+    startup.prepared = matches!(source, Some(CesiumSource::Prepared { .. }));
     world.insert_resource(CesiumSourceUpdate(source));
     world.insert_resource(startup);
 }
@@ -964,8 +1057,13 @@ fn update_startup(
     }
 }
 
-fn show_startup(startup: Res<TerrainStartup>, mut contexts: Query<&mut bevy_egui::EguiContext>) {
-    if startup.ready {
+fn show_startup(
+    startup: Res<TerrainStartup>,
+    config: Option<Res<impeller_wkt::DbConfig>>,
+    headless: Option<Res<crate::sensor_camera::HeadlessMode>>,
+    mut contexts: Query<&mut bevy_egui::EguiContext>,
+) {
+    if startup.ready || startup.replay_can_stream(config.as_deref(), headless.is_some()) {
         return;
     }
     for mut context in &mut contexts {
