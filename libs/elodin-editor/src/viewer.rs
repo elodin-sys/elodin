@@ -243,13 +243,7 @@ mod tests {
     }
     fn identity(session: &str) -> Option<(DbEndpoint, Option<i64>, Option<String>)> {
         Some((
-            impeller_bevy::BrowserEndpoints::new(
-                &format!("wss://example.com/{session}/main"),
-                &format!("wss://example.com/{session}/messages"),
-                &format!("https://example.com/{session}/assets"),
-            )
-            .unwrap()
-            .into(),
+            DbEndpoint::from_assets(format!("https://example.com/{session}/").parse().unwrap()),
             Some(10),
             Some("schematics/main.kdl".into()),
         ))

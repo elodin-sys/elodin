@@ -48,7 +48,7 @@ flowchart LR
 | Layer | Role |
 |-------|------|
 | **Blob store** | `{db_path}/assets/{relative_key}` — opaque bytes, any file type |
-| **DB Asset Server** | `GET http://host:(tcp_port+1)/{relative_key}` while `elodin-db run` is active |
+| **DB Asset Server** | `GET http://host:(tcp_port+1)/assets/{relative_key}` while `elodin-db run` is active |
 | **KDL rewrite** | Local paths at record time become `db:{relative_key}` in the stored active schematic asset |
 | **Consumers** | Editor loads the active schematic and all assets over HTTP |
 
@@ -56,6 +56,8 @@ flowchart LR
 
 - **Impeller TCP** on port `N` (default `2240`)
 - **DB Asset Server** on port `N + 1` (default `2241`) — `ASSETS_HTTP_PORT_OFFSET = 1`
+
+Asset files are `GET` and `PUT` at `/assets/{key}` (`ASSETS_HTTP_PREFIX`). `/impeller` and `/impeller/msg` on that same port are the browser Impeller WebSocket proxy, so an asset directory named `impeller` is fetched at `/assets/impeller/…`.
 
 Do not run a follower Impeller server on `N+1`; that port is reserved for the DB Asset Server on the source.
 
@@ -149,7 +151,7 @@ When a follower connects to a source `elodin-db` on port `N`, it replicates tele
 
 On connect (and when DB config updates), the follower:
 
-1. `GET`s `http://source:(N+1)/__index__` to list the source asset tree
+1. `GET`s `http://source:(N+1)/assets/__index__` to list the source asset tree
 2. Copies each key that is missing or size-different into `{follower_db}/assets/`
 3. Serves the mirrored tree from its own DB Asset Server on `(follower_port + 1)`
 
@@ -177,7 +179,7 @@ Point `--follows` at the source **Impeller** port (`N`), not the asset port (`N+
 | **Local path** | Resolved via `$ELODIN_ASSETS` (default `./assets`), simulation entry directory, or cwd |
 | **On disk in DB** | `assets/{key}.glb` (key preserves subdirectories, e.g. `models/rocket.glb`) |
 | **Stored KDL** | `path="db:models/rocket.glb"` |
-| **Editor** | `db:…` → `http://127.0.0.1:2241/…` via Bevy `AssetServer` + `WebAssetPlugin` (non-blocking) |
+| **Editor** | `db:…` → `http://127.0.0.1:2241/assets/…` via Bevy `AssetServer` + `WebAssetPlugin` (non-blocking) |
 
 ### `.png` icons (`object_3d` → `icon path=…`)
 
@@ -228,7 +230,7 @@ With `elodin-db run` listening on `2240`:
 
 ```bash
 export DB_PATH=./my-db
-curl -sf -o /dev/null -w "%{http_code}\n" http://127.0.0.1:2241/f22.glb
+curl -sf -o /dev/null -w "%{http_code}\n" http://127.0.0.1:2241/assets/f22.glb
 ls -lh "$DB_PATH/assets/"
 ```
 
@@ -238,11 +240,11 @@ Expect HTTP `200` and non-empty files under `assets/` after a sim that reference
 
 | Symptom | Check |
 |---------|--------|
-| Icon only, no mesh | `curl http://127.0.0.1:2241/…` → `404` means assets were not persisted; set `ELODIN_DB_PATH` / `db_path` and re-run |
+| Icon only, no mesh | `curl http://127.0.0.1:2241/assets/…` → `404` means assets were not persisted; set `ELODIN_DB_PATH` / `db_path` and re-run |
 | Port in use | `2240` = Impeller, `2241` = DB Asset Server; do not bind follower Impeller on `2241` |
 | Skybox missing on replay | `ls "$DB_PATH/assets/skyboxes/"` for `manifest.ron` and the `.ktx2` |
 | Empty `assets/` after sim | `world.run` without `db_path` or `ELODIN_DB_PATH` uses a temp DB |
-| Follower missing meshes | Confirm source DB Asset Server responds: `curl http://SOURCE:2241/models/rocket.glb` |
+| Follower missing meshes | Confirm source DB Asset Server responds: `curl http://SOURCE:2241/assets/models/rocket.glb` |
 
 ## Adding a new asset type
 
@@ -256,7 +258,7 @@ Use this when the schematic stores a **direct relative path** (like a `.glb` mes
    - `collect_db_asset_names` — include `db:` keys (for [follow](/reference/elodin-cli) sync)
    - `rewrite_asset_paths` — rewrite local → `db:…` on record
 3. **Persist** — no change if the path appears in collect; `persist_schematic_assets` in `libs/nox-py/src/impeller_server.rs` is generic.
-4. **Follow** — no change if the path appears in `collect_db_asset_names`; full-tree mirror via `GET /__index__` copies all assets.
+4. **Follow** — no change if the path appears in `collect_db_asset_names`; full-tree mirror via `GET /assets/__index__` copies all assets.
 5. **Editor** — if Bevy can load the format: resolve with `resolve_db_asset_url` and `AssetServer.load(url)`. No blocking HTTP in Bevy systems.
 6. **Tests** — unit tests in `impeller-kdl` (collect/rewrite) and `nox-py` (persist).
 

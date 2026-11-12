@@ -15,7 +15,7 @@ order = 1
 
 ## Simulation Architecture
 
-An Elodin simulation consists of Entities are spawned with a list of archetypes rather than individual components.
+An Elodin simulation contains entities, components and systems.
 
 ### Systems
 Systems are reusable functions that operate on a set of components. Composing different systems allows for the creation of custom physics engines. Some examples of systems include gravity, aerodynamics, collision detection.
@@ -44,3 +44,7 @@ Systems are simply functions that operate on component data.
 [Systems]: /reference/python-api#systems
 [Components]: /reference/python-api#components
 [Archetypes]: /reference/python-api#archetypes
+
+## Terrain
+
+See [Terrain](/reference/terrain/) to define a location, display scenery and query ground heights from Python.

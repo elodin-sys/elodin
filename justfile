@@ -1,6 +1,8 @@
 #! /usr/bin/env nix
 #! nix develop --command just --justfile
 
+export CESIUM_NATIVE_DIR := env_var_or_default("CESIUM_NATIVE_DIR", env_var_or_default("CESIUM_BUILD_ROOT", env_var_or_default("XDG_CACHE_HOME", env_var("HOME") + "/.cache") + "/elodin/cesium-0.65.0") + "/install")
+
 # Use `DRY_RUN=1` to do a dry run of any command.
 #
 # ```sh
@@ -95,6 +97,7 @@ build-windows-gnu:
 
 [private]
 _install-bin crate dest:
+  {{ if crate == "elodin" { "just prepare-cesium" } else { "true" } }}
   cargo build --release -p {{crate}}
   mkdir -p "{{dest}}"
   install -m 755 "target/release/{{crate}}" "{{dest}}/"
@@ -119,6 +122,11 @@ _install-py extra_maturin_args="":
   PATH="$VIRTUAL_ENV/bin:$PATH"
   uvx maturin@1.12.6 develop --uv --release --manifest-path=libs/nox-py/Cargo.toml {{extra_maturin_args}}
   echo "Venv ready at $VIRTUAL_ENV (active in the nix shell; no source needed)."
+
+# Cesium is a standard Editor dependency. Build the pinned native SDK once.
+prepare-cesium:
+  # The pinned builder checks the SDK revision as well as its installed files.
+  bash scripts/build_cesium_native.sh
 
 install target="all":
   #!/usr/bin/env sh
@@ -154,9 +162,13 @@ install target="all":
         exit 1
       fi
       just _install-py "-F tracy"
+      just prepare-cesium
       cargo build --release -p elodin -p elodin-db --features tracy
       install -m 755 target/release/elodin "$ELODIN_SHELL_BIN/"
       install -m 755 target/release/elodin-db "$ELODIN_SHELL_BIN/"
+      ;;
+    web)
+      env -u NO_COLOR TRUNK_COLOR=never trunk build --config apps/elodin-web/Trunk.toml
       ;;
     all)
       just install py
@@ -164,11 +176,17 @@ install target="all":
       just install db
       ;;
     *)
-      echo "usage: just install [py|editor|db|tracy|all]" >&2
+      echo "usage: just install [py|editor|db|tracy|web|all]" >&2
       exit 1;;
   esac
 
 # Serve the wasm editor locally (Trunk). Requires `nix develop`.
 # Some agent shells set NO_COLOR=1; Trunk 0.21 treats that as --no-color=1 and exits.
-web:
-  TRUNK_COLOR=never trunk serve --config apps/elodin-web/Trunk.toml
+# `db_url` is the asset server (`tcp_port + 1`), written into `<meta name="elodin-web-db">`.
+# An omitted argument keeps a pre-set `ELODIN_WEB_DB`.
+web db_url="":
+  if [ -n "{{db_url}}" ]; then export ELODIN_WEB_DB="{{db_url}}"; fi; TRUNK_COLOR=never trunk serve --config apps/elodin-web/Trunk.toml
+
+# Build the wasm editor into apps/elodin-web/dist. Same `db_url` as `just web`.
+web-release db_url="":
+  if [ -n "{{db_url}}" ]; then export ELODIN_WEB_DB="{{db_url}}"; fi; TRUNK_COLOR=never trunk build --config apps/elodin-web/Trunk.toml

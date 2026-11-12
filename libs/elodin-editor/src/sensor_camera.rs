@@ -471,7 +471,7 @@ pub fn spawn_sensor_camera_frustum_sources(
     mut commands: Commands,
     configs: Res<SensorCameraConfigs>,
     mut spawned: ResMut<SensorCameraFrustumSourcesSpawned>,
-    #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
+    root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
 ) {
     for (i, config) in configs.0.iter().enumerate() {
         let mut perspective = PerspectiveProjection {
@@ -489,12 +489,10 @@ pub fn spawn_sensor_camera_frustum_sources(
             Transform::default(),
             GlobalTransform::default(),
             Projection::Perspective(perspective),
-            #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
             SensorCameraFrustumSource { config_index: i },
             Name::new(format!("sensor_camera_frustum_{}", config.camera_name)),
         ));
-        #[cfg(feature = "big_space")]
         crate::spatial::parent_under_big_space(&mut entity, root.as_deref());
     }
 
@@ -654,7 +652,7 @@ fn spawn_sensor_cameras(
     render_device: Res<RenderDevice>,
     asset_server: Res<AssetServer>,
     mut spawned: ResMut<SensorCamerasSpawned>,
-    #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
+    root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
 ) {
     for (i, config) in configs.0.iter().enumerate() {
         // LDR clipping erases the radiance variation used for LWIR terrain contrast.
@@ -792,7 +790,6 @@ fn spawn_sensor_cameras(
             ),
             Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
             GlobalTransform::default(),
-            #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
             SensorCamera { config_index: i },
             output_settings,
@@ -802,7 +799,6 @@ fn spawn_sensor_cameras(
             sensor_camera_render_layers(config),
             Name::new(format!("sensor_camera_{}", config.camera_name)),
         ));
-        #[cfg(feature = "big_space")]
         crate::spatial::parent_under_big_space(&mut entity, root.as_deref());
         if let Some(temp_map_copier) = temp_map_copier {
             entity.insert(temp_map_copier);
@@ -992,7 +988,6 @@ fn spawn_thermal_mask_proxies(
 /// the absolute value back the next frame while leaving the cell where it
 /// landed makes the two add up, and the entity walks a further cell out on
 /// every frame after that.
-#[cfg(feature = "big_space")]
 fn place_on_grid(
     settings: &crate::spatial::FloatingOriginSettings,
     cell: &mut crate::spatial::GridCell,
@@ -1113,8 +1108,8 @@ fn update_sensor_camera_transforms(
         &mut Transform,
         &mut SensorOutputSettings,
     )>,
-    #[cfg(feature = "big_space")] mut cells: Query<&mut crate::spatial::GridCell>,
-    #[cfg(feature = "big_space")] settings: Res<crate::spatial::FloatingOriginSettings>,
+    mut cells: Query<&mut crate::spatial::GridCell>,
+    settings: Res<crate::spatial::FloatingOriginSettings>,
     cache: Res<impeller_bevy::TelemetryCache>,
     current_ts: Res<impeller_wkt::CurrentTimestamp>,
     coordinate: Res<crate::Coordinate>,
@@ -1145,13 +1140,8 @@ fn update_sensor_camera_transforms(
         transform.rotation = pose.rotation;
         output.view_rotation = Vec4::from_array(pose.rotation.to_array());
 
-        #[cfg(feature = "big_space")]
         if let Ok(mut cell) = cells.get_mut(_entity) {
             place_on_grid(&settings, &mut cell, &mut transform, pose.translation);
-        }
-        #[cfg(not(feature = "big_space"))]
-        {
-            transform.translation = pose.translation.as_vec3();
         }
     }
 }
@@ -1165,8 +1155,8 @@ pub fn update_sensor_camera_frustum_source_transforms(
         &mut Transform,
         &mut Projection,
     )>,
-    #[cfg(feature = "big_space")] mut cells: Query<&mut crate::spatial::GridCell>,
-    #[cfg(feature = "big_space")] settings: Res<crate::spatial::FloatingOriginSettings>,
+    mut cells: Query<&mut crate::spatial::GridCell>,
+    settings: Res<crate::spatial::FloatingOriginSettings>,
     cache: Res<impeller_bevy::TelemetryCache>,
     current_ts: Res<impeller_wkt::CurrentTimestamp>,
     coordinate: Res<crate::Coordinate>,
@@ -1181,13 +1171,8 @@ pub fn update_sensor_camera_frustum_source_transforms(
 
         if let Some(pose) = sensor_camera_transform(config, &cache, ts, frame, &geo_context) {
             transform.rotation = pose.rotation;
-            #[cfg(feature = "big_space")]
             if let Ok(mut cell) = cells.get_mut(_entity) {
                 place_on_grid(&settings, &mut cell, &mut transform, pose.translation);
-            }
-            #[cfg(not(feature = "big_space"))]
-            {
-                transform.translation = pose.translation.as_vec3();
             }
         }
 

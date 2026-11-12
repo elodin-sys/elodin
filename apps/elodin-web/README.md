@@ -1,52 +1,39 @@
-# Browser connections
+# Browser editor
 
-This branch, `feat/wasm-parascom`, is experimental and will not merge as it stands.
-Its changes require dedicated Elodin PRs with separate review and tests.
+From the repository root, inside `nix develop`:
 
-The editor accepts complete browser routes through three query parameters: `impeller`, `messages`, and `assets`.
-Supply all three parameters together. Encode each parameter value with `URLSearchParams`.
-
-```js
-const query = new URLSearchParams({
-  impeller: "wss://example.com/sessions/123/impeller?route=one",
-  messages: "wss://example.com/sessions/123/impeller/msg?route=two",
-  assets: "https://example.com/sessions/123/assets?route=three",
-});
-frame.src = `/editor/?${query}`;
+```sh
+just install web
+just web
 ```
 
-Each endpoint must be an absolute URL without credentials or a fragment.
-The asset base can include a path and routing parameters.
-The editor preserves those parameters for DB assets and their relative dependencies, such as glTF textures.
-Use percent escapes for encoded asset names. The editor also encodes spaces, query characters, and fragment characters in DB keys.
+Open the URL printed by Trunk. An empty `<meta name="elodin-web-db">` opens the
+connect screen. A value names the database to open on load. That value is the
+asset server (`tcp_port + 1`): `http://127.0.0.1:2241`, or `https://…` when the
+page is served over TLS. `just web http://127.0.0.1:2241` (or
+`ELODIN_WEB_DB=http://127.0.0.1:2241 just web`) writes the meta tag for a Trunk
+dev page. A successful browser build does not by itself validate a Cloud data
+source or its authentication.
 
-The browser supplies cookies for these requests. The host controls authentication and server permissions.
-Elodin does not add authorization headers.
+## Platform boundary
 
-Browser routes select a read-only viewer by default.
-This viewer blocks recording changes and uploads of schematics or layouts.
-It also disables SQL panels and exact SQL statistics in Data Overview.
-Typed telemetry and sparkline queries remain available.
-Camera controls, local layout edits, and timeline navigation remain available.
-Use `read_only=false` only when the server supports the full editor interface.
+Big Space is required on both native and WASM targets. It provides the coordinate
+conversion used by the editor and is independent of terrain streaming.
 
-The standalone `?db=host:port` interface remains available.
-It derives HTTP and WebSocket addresses from the database port and retains the full editor interface.
-Do not combine `db` with browser routes.
-Invalid, duplicate, or incomplete parameters produce `elodin-error` and stop startup.
+The current `bevy-cesium` integration uses Cesium Native through a C++ bridge.
+It is included only on native targets, along with its terrain-readiness playback
+condition. Selecting an example such as Falcon9 does not select Cargo dependencies:
+without this target boundary, even a browser editor that never requests terrain
+tries to build the native dependency.
 
-## Rust interface
+WASM therefore runs without this terrain integration. Supporting Cesium terrain
+in the browser requires a browser-compatible implementation; removing the target
+boundary is not sufficient. Data backends and transport adapters are a separate
+concern and must not require Cesium merely to build or connect the editor.
 
-```rust,ignore
-let endpoints = elodin_editor::BrowserEndpoints::new(main_ws, messages_ws, assets_http)?;
-let plugin = elodin_editor::EditorPlugin::default()
-    .with_browser_endpoints(endpoints)
-    .with_viewer_capabilities(elodin_editor::ViewerCapabilities::READ_ONLY);
-```
-
-`BrowserEndpoints` validates the supplied routes. `DbEndpoint` identifies the connection with the complete routes, including their paths and routing parameters.
-WASM callers can send `impeller_bevy::WsConnect(endpoints.into())` to replace the connection.
-This operation replaces both channels and clears their packet queues.
+See [TODO.md](TODO.md) for other browser limitations. CI checks compilation of
+`elodin-web` for `wasm32-unknown-unknown`; rendering and backend connectivity also
+need a browser smoke test.
 
 ## Lifecycle events
 
@@ -61,22 +48,6 @@ The event can repeat after a reconnect or recording change.
 
 The host owns its loading screen and event handlers.
 The read-only controls govern editor actions. The server must enforce its own access rules.
-
-## Experimental schematic windows
-
-Browser schematics show additional windows as named tabs inside the existing canvas.
-WebGL cannot share the first canvas context with another window surface.
-The tabs share the root scene and timeline. Desktop screen placement does not apply.
-
-Window paths accept `db:` keys and paths relative to the containing schematic.
-The resolver loads external, nested, and inline window layouts before it reports readiness.
-Circular references, missing files, invalid KDL, excessive nesting, and excessive window counts produce load errors.
-Paths must stay within the recording. Separate HTTP origins are outside this experiment.
-The desktop loader retains its native windows.
-The browser palette omits desktop window creation and screen arrangement commands.
-
-This experiment covers schematic windows in the browser viewer.
-The dedicated Elodin PR must also review full-editor window creation, tab navigation, scene sharing, and reconnect behavior.
 
 ## Experimental playback cache
 
@@ -96,7 +67,7 @@ Each browser transport queue has a 64 MiB capacity.
 The disk payload limit is 512 MiB, with 8 MiB chunks and at most 4096 index entries.
 An asset has a 64 MiB download limit. This limit does not bound total decoded scene or graphics memory.
 The regenerated static terrain still needs separate graphics and memory qualification.
-H.264 decoding remains unavailable in the existing WASM build. Native H.264 decoding retains its existing implementation.
+H.264 decoding uses WebCodecs in the WASM build.
 
 Rust callers can supply `impeller_bevy::browser_cache::PlaybackCacheLimits` through `EditorPlugin::with_cache_limits`.
 Set `disk_bytes` to zero to disable persistence.
@@ -109,6 +80,9 @@ Run the cache adapter tests inside the Nix shell:
 ```sh
 node --test tests/browser-cache/cache.test.mjs
 ```
+
+
+The host can opt into read-only capabilities with `?read_only=true`. Invalid or duplicate capability parameters stop startup with `elodin-error`.
 
 ## Tests
 
@@ -136,4 +110,4 @@ CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
   cargo test -p impeller-bevy --no-default-features --target wasm32-unknown-unknown --lib
 ```
 
-The test covers custom routes, cookies, encoded asset names, reconnects after either channel closes, and session replacement on the same host.
+The test covers derived session routes, cookies, encoded asset names, reconnects after either channel closes, and session replacement on the same host.

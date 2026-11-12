@@ -1,5 +1,4 @@
 use super::*;
-use crate::BrowserEndpoints;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_test::*;
 
@@ -20,13 +19,11 @@ extern "C" {
 }
 
 fn endpoint(session: &str) -> DbEndpoint {
-    BrowserEndpoints::new(
-        &format!("ws://127.0.0.1:18766/{session}/main?route=one"),
-        &format!("ws://127.0.0.1:18766/{session}/messages?route=two"),
-        &format!("http://127.0.0.1:18766/{session}/assets?route=three"),
+    DbEndpoint::from_assets(
+        format!("http://127.0.0.1:18766/{session}/")
+            .parse()
+            .unwrap(),
     )
-    .unwrap()
-    .into()
 }
 
 async fn wait_connected(world: &World) {
@@ -48,16 +45,15 @@ async fn browser_routes_cookies_assets_reconnect_and_session_switch() {
     install_connection(&mut world, Some(first.clone()), true);
     wait_connected(&world).await;
     assert_eq!(world.resource::<ConnectionAddr>().endpoint(), &first);
-    assert!(first.socket_addr().is_none());
-    let asset = first.asset_url("models/rocket%20one.glb").unwrap();
+    let asset = first.assets_url("models/rocket%20one.glb").to_string();
     let path = asset.strip_prefix("http://127.0.0.1:18766").unwrap();
     assert_eq!(
         request(path).await.as_string().unwrap(),
-        "/first/assets/models/rocket%20one.glb?route=three"
+        "/first/assets/models/rocket%20one.glb"
     );
 
     // Losing either channel invalidates the pair and reconnects both channels.
-    for channel in ["messages", "main"] {
+    for channel in ["impeller/msg", "impeller"] {
         let stream = world.resource::<CurrentStreamId>().0;
         request(&format!("/control/close?channel={channel}")).await;
         delay(50).await;
@@ -85,10 +81,10 @@ async fn browser_routes_cookies_assets_reconnect_and_session_switch() {
     assert_ne!(world.resource::<CurrentStreamId>().0, stream);
     let requests = request("/control/requests").await.as_string().unwrap();
     for path in [
-        "/first/main?route=one",
-        "/first/messages?route=two",
-        "/second/main?route=one",
-        "/second/messages?route=two",
+        "/first/impeller",
+        "/first/impeller/msg",
+        "/second/impeller",
+        "/second/impeller/msg",
     ] {
         assert!(
             requests.contains(path),

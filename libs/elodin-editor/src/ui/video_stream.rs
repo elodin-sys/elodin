@@ -1757,7 +1757,7 @@ pub fn connect_streams(
 ) {
     let bounded = connection
         .as_ref()
-        .is_some_and(|c| matches!(c.endpoint(), impeller_bevy::DbEndpoint::Browser(_)));
+        .is_some_and(|c| c.endpoint().assets().is_some());
     if bounded {
         let count = query.iter().count().max(1);
         let mut slots = 4usize.saturating_sub(

@@ -18,7 +18,7 @@ Python](@/reference/migration/kdl-to-python.md).
 
 ## Glossary
 
-- Top-level nodes: `coordinate`, `theme`, `timeline`, `telemetry_mode`, `skybox`, `environment`, `panel` variants, `object_3d`, `line_3d`, `point_trails`, `vector_arrow`, `world_mesh`, `window`.
+- Top-level nodes: `coordinate`, `terrain`, `theme`, `timeline`, `telemetry_mode`, `skybox`, `environment`, `panel` variants, `object_3d`, `line_3d`, `point_trails`, `vector_arrow`, `world_mesh`, `window`.
 - EQL: expressions are evaluated in the runtime EQL context. Vector-like fields expect 3 components; `world_pos` is a 7-component array (quat + position).
 - Colors: `color r g b [a]` or named (`black`, `white`, `blue`, `red`, `orange`, `yellow`, `yalk`, `pink`, `cyan`, `gray`, `green`, `mint`, `turquoise`, `slate`, `pumpkin`, `yolk`, `peach`, `reddish`, `hyperblue`); alpha optional. Colors can be inline or in `color`/`colour` child nodes. Defaults to white when omitted unless noted.
 - Booleans: KDL booleans are `#true`/`#false`. A bare `True` is a *string*, not a boolean — most flags silently fall back to their default if given one. Viewport flags (`hdr`, `show_grid`, `active`, ...) leniently accept `True`/`"true"` (case-insensitive), but prefer the `#` forms everywhere.
@@ -29,6 +29,11 @@ Python](@/reference/migration/kdl-to-python.md).
 - `frame`: `"ENU"` (default), `"NED"`, or `"ECEF"`.
 - Elements (`viewport`, `object_3d`, `line_3d`, `point_trails`, `vector_arrow`, `world_mesh`) that don't specify their own `frame` attribute inherit this global frame.
 - Example: `coordinate frame="NED"` sets the entire schematic to use North-East-Down coordinates.
+
+### terrain
+
+- Optional top-level node selecting streamed scenery, for example `terrain asset_id=2275207`.
+- See [Terrain](/reference/terrain/) for the supported presets and Python schematic configuration.
 
 ### theme
 - Optional top-level node that sets the session UI appearance.

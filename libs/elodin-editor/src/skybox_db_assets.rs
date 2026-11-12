@@ -72,11 +72,7 @@ fn skybox_still_desired(
     connection_addr: Option<&ConnectionAddr>,
     key: &MirrorKey,
 ) -> bool {
-    let Some(addr) = connection_addr.map(|addr| {
-        addr.endpoint()
-            .socket_addr()
-            .expect("TCP connection required")
-    }) else {
+    let Some(addr) = connection_addr.map(|addr| addr.socket) else {
         return false;
     };
     matches!(
@@ -256,10 +252,7 @@ pub fn sync_db_skybox_assets_from_config(
         return;
     }
     let key = MirrorKey {
-        addr: connection_addr
-            .endpoint()
-            .socket_addr()
-            .expect("TCP connection required"),
+        addr: connection_addr.socket,
         skybox: desired.clone(),
     };
     if mirror.synced.as_ref() == Some(&key) {
@@ -287,10 +280,7 @@ pub fn sync_db_skybox_assets_from_config(
     }
 
     in_flight.key = Some(key);
-    let connection_addr = connection_addr
-        .endpoint()
-        .socket_addr()
-        .expect("TCP connection required");
+    let connection_addr = connection_addr.socket;
     in_flight.task = Some(IoTaskPool::get().spawn(async move {
         tokio::runtime::Runtime::new()
             .map_err(|err| err.to_string())?
@@ -436,10 +426,7 @@ pub fn upload_active_skybox_assets_to_db(
         None => return,
     };
 
-    let addr = connection_addr
-        .endpoint()
-        .socket_addr()
-        .expect("TCP connection required");
+    let addr = connection_addr.socket;
     let key = MirrorKey {
         addr,
         skybox: desired.clone(),
@@ -610,7 +597,7 @@ async fn fetch_db_skybox_manifest(connection_addr: SocketAddr) -> Result<SkyboxM
         .build()
         .map_err(|err| err.to_string())?;
     let base = assets_http_base(connection_addr);
-    let url = format!("{base}/{}", impeller_kdl::SKYBOX_MANIFEST_ASSET_NAME);
+    let url = impeller::asset_http_url(&base, impeller_kdl::SKYBOX_MANIFEST_ASSET_NAME);
     let response = client
         .get(&url)
         .send()
@@ -653,7 +640,7 @@ async fn download_db_skybox_assets(
         .build()
         .map_err(|err| err.to_string())?;
     let base = assets_http_base(connection_addr);
-    let manifest_url = format!("{base}/{}", impeller_kdl::SKYBOX_MANIFEST_ASSET_NAME);
+    let manifest_url = impeller::asset_http_url(&base, impeller_kdl::SKYBOX_MANIFEST_ASSET_NAME);
     let manifest_bytes = fetch_asset(&client, &manifest_url).await?;
     let manifest = std::str::from_utf8(&manifest_bytes).map_err(|err| err.to_string())?;
     let manifest = SkyboxManifest::from_ron_str(manifest).map_err(|err| err.to_string())?;
@@ -664,7 +651,7 @@ async fn download_db_skybox_assets(
 
     let cubemap_name = impeller_kdl::skybox_cubemap_asset_name(&entry.cubemap_file)
         .ok_or_else(|| format!("invalid skybox cubemap file path `{}`", entry.cubemap_file))?;
-    let cubemap_url = format!("{base}/{cubemap_name}");
+    let cubemap_url = impeller::asset_http_url(&base, &cubemap_name);
     let cubemap_bytes = fetch_asset(&client, &cubemap_url).await?;
     Ok(SkyboxDownloadPayload {
         entry,
@@ -688,7 +675,7 @@ async fn verify_db_skybox_assets(
         .map_err(|err| err.to_string())?;
     let base = assets_http_base(connection_addr);
 
-    let manifest_url = format!("{base}/{}", impeller_kdl::SKYBOX_MANIFEST_ASSET_NAME);
+    let manifest_url = impeller::asset_http_url(&base, impeller_kdl::SKYBOX_MANIFEST_ASSET_NAME);
     let manifest_resp = client
         .get(&manifest_url)
         .send()
@@ -711,7 +698,7 @@ async fn verify_db_skybox_assets(
 
     let cubemap_name = impeller_kdl::skybox_cubemap_asset_name(&entry.cubemap_file)
         .ok_or_else(|| format!("invalid skybox cubemap file path `{}`", entry.cubemap_file))?;
-    let cubemap_url = format!("{base}/{cubemap_name}");
+    let cubemap_url = impeller::asset_http_url(&base, &cubemap_name);
 
     // Do not use HEAD for length: axum's auto-HEAD for `get` handlers that
     // return an owned body reports `Content-Length: 0` to reqwest, which made

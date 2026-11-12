@@ -125,6 +125,7 @@ impl PySchematic {
     theme=None,
     timeline=None,
     skybox=None,
+    terrain=None,
     environment=None,
     telemetry_mode=false,
 ))]
@@ -135,6 +136,7 @@ fn schematic(
     theme: Option<Bound<'_, PyAny>>,
     timeline: Option<Bound<'_, PyAny>>,
     skybox: Option<String>,
+    terrain: Option<Bound<'_, PyAny>>,
     environment: Option<Bound<'_, PyAny>>,
     telemetry_mode: bool,
 ) -> PyResult<PySchematic> {
@@ -157,6 +159,15 @@ fn schematic(
     }
     if let Some(name) = skybox {
         inner.skybox = Some(impeller_wkt::SkyboxConfig { name });
+    }
+    if let Some(terrain) = terrain {
+        let asset_id: i64 = terrain.getattr("asset_id")?.extract()?;
+        if asset_id <= 0 {
+            return Err(pyo3::exceptions::PyValueError::new_err(
+                "terrain asset_id must be positive",
+            ));
+        }
+        inner.terrain = Some(impeller_wkt::TerrainConfig { asset_id });
     }
     if let Some(environment) = environment {
         inner.environment = Some(builders::extract_environment(&environment)?);

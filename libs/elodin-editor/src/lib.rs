@@ -5,13 +5,13 @@
 )]
 
 pub use impeller_bevy::DbEndpoint;
+#[cfg(target_family = "wasm")]
+use impeller_bevy::HostOrUrl;
 pub mod viewer;
-pub use impeller_bevy::BrowserEndpoints;
 use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 pub use viewer::{ViewerCapabilities, ViewerEvent};
 
 use crate::plugins::{editor_cam_input, editor_cam_touch};
-#[cfg(feature = "big_space")]
 use crate::spatial::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use bevy::material::AlphaMode;
 use bevy::{
@@ -105,10 +105,6 @@ mod sensor_h264;
 mod skybox_db_assets;
 #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 mod skybox_generation;
-#[cfg(feature = "big_space")]
-pub(crate) mod spatial;
-#[cfg(not(feature = "big_space"))]
-#[path = "spatial_fallback.rs"]
 pub(crate) mod spatial;
 pub mod ui;
 pub mod vector_arrow;
@@ -491,6 +487,9 @@ pub struct EditorPlugin {
     cache_limits: impeller_bevy::browser_cache::PlaybackCacheLimits,
     #[cfg(target_family = "wasm")]
     connection: Option<DbEndpoint>,
+    /// Page database URL. Applied to every wasm connection that does not set its own.
+    #[cfg(target_family = "wasm")]
+    assets: Option<HostOrUrl>,
 }
 
 /// The positions of camera of object_3d are sync'd in `PreUpdate`.
@@ -510,10 +509,6 @@ impl EditorPlugin {
         self
     }
 
-    #[cfg(target_family = "wasm")]
-    pub fn with_browser_endpoints(self, endpoints: BrowserEndpoints) -> Self {
-        self.with_db_endpoint(endpoints.into())
-    }
     pub fn new(width: f32, height: f32) -> Self {
         Self {
             window_resolution: WindowResolution::new(width as u32, height as u32),
@@ -521,31 +516,16 @@ impl EditorPlugin {
             cache_limits: impeller_bevy::browser_cache::PlaybackCacheLimits::default(),
             #[cfg(target_family = "wasm")]
             connection: None,
+            #[cfg(target_family = "wasm")]
+            assets: None,
         }
     }
 
+    /// Asset-server URL the browser connects through. `host:port` or `http(s)://…`.
     #[cfg(target_family = "wasm")]
-    pub fn with_connection_addr(mut self, addr: std::net::SocketAddr) -> Self {
-        self.connection = Some(DbEndpoint::from_socket(addr));
-        self
-    }
-
-    /// `host:port`, where `host` may be an IP literal or a DNS name.
-    /// On failure the plugin is returned unchanged.
-    #[cfg(target_family = "wasm")]
-    pub fn with_connection_str(
-        self,
-        addr: &str,
-    ) -> Result<Self, (Self, impeller_bevy::address::ParseError)> {
-        match DbEndpoint::parse(addr) {
-            Ok(endpoint) => Ok(self.with_db_endpoint(endpoint)),
-            Err(err) => Err((self, err)),
-        }
-    }
-
-    #[cfg(target_family = "wasm")]
-    pub fn with_db_endpoint(mut self, endpoint: DbEndpoint) -> Self {
-        self.connection = Some(endpoint);
+    pub fn with_connection_url(mut self, url: HostOrUrl) -> Self {
+        self.connection = Some(DbEndpoint::from_assets(url.clone()));
+        self.assets = Some(url);
         self
     }
 }
@@ -690,6 +670,7 @@ impl Plugin for EditorPlugin {
         #[cfg(target_family = "wasm")]
         app.add_plugins(impeller_bevy::WsImpellerPlugin::new(
             self.connection.clone(),
+            self.assets.clone(),
         ));
         app.add_plugins(FrustumPlugin)
             .add_plugins(viewer::plugin)
@@ -698,6 +679,14 @@ impl Plugin for EditorPlugin {
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::thruster_particles::ThrusterParticlesPlugin);
         app.add_plugins(plugins::scene_environment::SceneEnvironmentPlugin);
+        #[cfg(not(target_family = "wasm"))]
+        app.add_plugins(plugins::cesium::CesiumPlugin);
+        #[cfg(target_family = "wasm")]
+        app.add_systems(
+            Update,
+            plugins::simulation_startup::release_simulation
+                .run_if(resource_exists::<Messages<ui::schematic::DocumentLoaded>>),
+        );
         // Cinematic Earth follows the native Hanabi plugin registration.
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::cinematic_earth::earth_night_material::EarthNightMaterialPlugin);
@@ -738,7 +727,13 @@ impl Plugin for EditorPlugin {
                 PreUpdate,
                 (
                     clamp_current_time,
+                    #[cfg(not(target_family = "wasm"))]
+                    advance_playback.run_if(plugins::cesium::playback_ready),
+                    #[cfg(target_family = "wasm")]
                     advance_playback,
+                    #[cfg(not(target_family = "wasm"))]
+                    follow_latest.run_if(plugins::cesium::playback_ready),
+                    #[cfg(target_family = "wasm")]
                     follow_latest,
                     // Update selection after playback advances to keep line_3d and object_3d in sync.
                     set_selected_range,
@@ -750,12 +745,8 @@ impl Plugin for EditorPlugin {
                     sync_object_3d,
                     set_viewport_pos,
                     sync_pos,
-                    #[cfg(not(feature = "big_space"))]
-                    bevy_geo_frames::apply_transforms,
                     bevy_geo_frames::apply_geo_rotation,
-                    #[cfg(feature = "big_space")]
                     spatial::apply_big_translation,
-                    #[cfg(feature = "big_space")]
                     set_floating_origin,
                 )
                     .chain()
@@ -878,7 +869,6 @@ impl Plugin for EditorPlugin {
             );
 
         app.add_systems(PreUpdate, warn_missing_geo.before(PositionSync));
-        #[cfg(feature = "big_space")]
         app.add_plugins(spatial::FloatingOriginPlugin::new(16_000., 100.));
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
@@ -1158,7 +1148,6 @@ fn set_clear_color(mut clear_color: ResMut<ClearColor>) {
 ///    `(origin_cell, origin_translation)` pair the floating origin must
 ///    take. Cameras spawned without a parent (e.g. tests) fall back to
 ///    the default cell at the origin.
-#[cfg(feature = "big_space")]
 fn select_floating_origin_camera(
     cameras: impl Iterator<Item = (Entity, bool, bool)>,
 ) -> Option<Entity> {
@@ -1175,7 +1164,6 @@ fn select_floating_origin_camera(
         .map(|(entity, ..)| entity)
 }
 
-#[cfg(feature = "big_space")]
 #[allow(clippy::type_complexity)]
 fn set_floating_origin(
     query: Query<
@@ -1495,7 +1483,6 @@ pub fn register_world_pos_components(app: &mut App) {
         GeoRotation::relative(GeoFrame::default(), DQuat::IDENTITY)
     });
     app.register_required_components::<WorldPos, Transform>();
-    #[cfg(feature = "big_space")]
     app.register_required_components::<WorldPos, crate::spatial::GridCell>();
 }
 
@@ -1823,16 +1810,16 @@ pub fn setup_clear_state(mut packet_handlers: ResMut<PacketHandlers>, mut comman
 /// Tracks which DB the SeriesStore currently mirrors (addr + recording start).
 #[derive(Resource, Debug, Clone, Default, PartialEq, Eq)]
 pub struct SeriesStoreSession {
-    pub addr: Option<impeller_bevy::DbEndpoint>,
+    pub addr: Option<std::net::SocketAddr>,
     pub start_ts: Option<i64>,
 }
 
 impl SeriesStoreSession {
-    pub fn identity(addr: Option<impeller_bevy::DbEndpoint>, start_ts: Option<i64>) -> Self {
+    pub fn identity(addr: Option<std::net::SocketAddr>, start_ts: Option<i64>) -> Self {
         Self { addr, start_ts }
     }
 
-    pub fn matches(&self, addr: Option<impeller_bevy::DbEndpoint>, start_ts: Option<i64>) -> bool {
+    pub fn matches(&self, addr: Option<std::net::SocketAddr>, start_ts: Option<i64>) -> bool {
         self.addr == addr && self.start_ts == start_ts
     }
 }
@@ -1894,11 +1881,11 @@ fn soft_rearm_series_store_catchup(
 
 fn series_store_soft_reconnect(
     session: &SeriesStoreSession,
-    addr: Option<impeller_bevy::DbEndpoint>,
+    addr: Option<std::net::SocketAddr>,
 ) -> bool {
-    match &session.addr {
+    match session.addr {
         None => true,
-        Some(prev) => Some(prev) == addr.as_ref(),
+        Some(prev) => Some(prev) == addr,
     }
 }
 
@@ -1911,7 +1898,7 @@ fn should_hard_clear_ui(soft: bool) -> bool {
 #[allow(clippy::too_many_arguments)]
 fn apply_series_store_on_reconnect(
     soft: bool,
-    addr: Option<impeller_bevy::DbEndpoint>,
+    addr: Option<std::net::SocketAddr>,
     session: &mut SeriesStoreSession,
     telemetry_cache: &mut impeller_bevy::TelemetryCache,
     backfill_state: &mut impeller_bevy::BackfillState,
@@ -2048,17 +2035,14 @@ pub(crate) fn sync_series_store_session_from_db_config(
     if !config.is_changed() {
         return;
     }
-    let addr = series
-        .connection_addr
-        .as_ref()
-        .map(|a| a.endpoint().clone());
+    let addr = series.connection_addr.as_ref().map(|a| a.socket);
     let start_ts = config.time_start_timestamp_micros();
     // start_ts not confirmed yet for this connection — adopt without wiping soft-preserved store.
     if series.session.start_ts.is_none() {
         *series.session = SeriesStoreSession::identity(addr, start_ts);
         return;
     }
-    if series.session.matches(addr.clone(), start_ts) {
+    if series.session.matches(addr, start_ts) {
         return;
     }
     // A different recording may run at a different rate, measured from ranges
@@ -2114,11 +2098,8 @@ fn clear_state_new_connection(
         &mut series.visible_prefetch,
     );
 
-    let addr = series
-        .connection_addr
-        .as_ref()
-        .map(|a| a.endpoint().clone());
-    let soft = series_store_soft_reconnect(&series.session, addr.clone());
+    let addr = series.connection_addr.as_ref().map(|a| a.socket);
+    let soft = series_store_soft_reconnect(&series.session, addr);
     if !soft && let Some(schema) = series.schema.as_deref_mut() {
         schema.0.clear();
     }
@@ -2184,7 +2165,7 @@ fn reset_timestamps_on_new_connection(
         OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
         _ => return,
     }
-    let addr = connection_addr.as_ref().map(|a| a.endpoint().clone());
+    let addr = connection_addr.as_ref().map(|a| a.socket);
     let soft = series_store_soft_reconnect(&session, addr);
     apply_timestamp_bounds_reset_on_reconnect(soft, &mut earliest, &mut latest, &mut current);
 }
@@ -2983,7 +2964,6 @@ mod tests {
     use impeller::types::{ComponentId, Timestamp};
     use impeller_wkt::ComponentValue;
 
-    #[cfg(feature = "big_space")]
     #[test]
     fn floating_origin_prefers_active_cinematic_camera() {
         let mut world = World::new();
@@ -2997,7 +2977,6 @@ mod tests {
         assert_eq!(selected, Some(cinematic));
     }
 
-    #[cfg(feature = "big_space")]
     #[test]
     fn floating_origin_prefers_visible_regular_camera_over_hidden_cinematic() {
         let mut world = World::new();
@@ -3078,29 +3057,8 @@ mod tests {
         }
     }
 
-    fn sample_addr(port: u16) -> impeller_bevy::DbEndpoint {
-        std::net::SocketAddr::from(([127, 0, 0, 1], port)).into()
-    }
-
-    #[test]
-    fn browser_sessions_on_one_host_never_share_recording_identity() {
-        let endpoint = |session: &str| -> DbEndpoint {
-            BrowserEndpoints::new(
-                &format!("wss://example.com/{session}/main"),
-                &format!("wss://example.com/{session}/messages"),
-                &format!("https://example.com/{session}/assets"),
-            )
-            .unwrap()
-            .into()
-        };
-        let first = endpoint("first");
-        let session = SeriesStoreSession::identity(Some(first.clone()), Some(100));
-        assert!(series_store_soft_reconnect(&session, Some(first)));
-        assert!(!series_store_soft_reconnect(
-            &session,
-            Some(endpoint("second"))
-        ));
-        assert!(!session.matches(Some(endpoint("first")), Some(200)));
+    fn sample_addr(port: u16) -> std::net::SocketAddr {
+        std::net::SocketAddr::from(([127, 0, 0, 1], port))
     }
 
     fn populated_cache() -> impeller_bevy::TelemetryCache {
@@ -3116,7 +3074,7 @@ mod tests {
     #[test]
     fn soft_reconnect_preserves_telemetry_cache() {
         let addr = sample_addr(2240);
-        let mut session = SeriesStoreSession::identity(Some(addr.clone()), Some(100));
+        let mut session = SeriesStoreSession::identity(Some(addr), Some(100));
         let mut cache = populated_cache();
         let gen_before = cache.generation();
         let mut backfill = impeller_bevy::BackfillState::default();
@@ -3129,10 +3087,10 @@ mod tests {
         let mut plot_sync = crate::ui::plot::data::PlotSyncState::default();
         let mut prefetch = crate::ui::plot::data::VisiblePrefetchState::default();
 
-        assert!(series_store_soft_reconnect(&session, Some(addr.clone())));
+        assert!(series_store_soft_reconnect(&session, Some(addr)));
         apply_series_store_on_reconnect(
             true,
-            Some(addr.clone()),
+            Some(addr),
             &mut session,
             &mut cache,
             &mut backfill,
@@ -3145,7 +3103,7 @@ mod tests {
         assert!(cache.has_series(&ComponentId(42)));
         assert!(!series_load.complete);
         assert_eq!(series_load.samples_loaded, 10);
-        assert_eq!(session.addr, Some(addr.clone()));
+        assert_eq!(session.addr, Some(addr));
         assert_eq!(session.start_ts, Some(100));
     }
 
@@ -3251,7 +3209,7 @@ mod tests {
         // Mirrors clear_state_new_connection ordering: SeriesStore soft path
         // completes before the primary-window early return.
         let addr = sample_addr(2240);
-        let mut session = SeriesStoreSession::identity(Some(addr.clone()), Some(50));
+        let mut session = SeriesStoreSession::identity(Some(addr), Some(50));
         let mut cache = populated_cache();
         let mut backfill = impeller_bevy::BackfillState::default();
         let mut series_load = impeller_bevy::SeriesStoreLoadState::default();
@@ -3266,10 +3224,10 @@ mod tests {
             .unwrap();
         prefetch.clear_in_flight();
 
-        let soft = series_store_soft_reconnect(&session, Some(addr.clone()));
+        let soft = series_store_soft_reconnect(&session, Some(addr));
         apply_series_store_on_reconnect(
             soft,
-            Some(addr.clone()),
+            Some(addr),
             &mut session,
             &mut cache,
             &mut backfill,
@@ -3290,7 +3248,7 @@ mod tests {
     fn hard_clear_on_addr_change() {
         let old = sample_addr(2240);
         let new = sample_addr(2241);
-        let mut session = SeriesStoreSession::identity(Some(old.clone()), Some(100));
+        let mut session = SeriesStoreSession::identity(Some(old), Some(100));
         let mut cache = populated_cache();
         let mut backfill = impeller_bevy::BackfillState::default();
         let mut series_load = impeller_bevy::SeriesStoreLoadState {
@@ -3301,10 +3259,10 @@ mod tests {
         let mut plot_sync = crate::ui::plot::data::PlotSyncState::default();
         let mut prefetch = crate::ui::plot::data::VisiblePrefetchState::default();
 
-        assert!(!series_store_soft_reconnect(&session, Some(new.clone())));
+        assert!(!series_store_soft_reconnect(&session, Some(new)));
         apply_series_store_on_reconnect(
             false,
-            Some(new.clone()),
+            Some(new),
             &mut session,
             &mut cache,
             &mut backfill,
@@ -3315,13 +3273,10 @@ mod tests {
 
         assert!(!cache.has_series(&ComponentId(42)));
         assert_eq!(series_load.samples_loaded, 0);
-        assert_eq!(
-            session,
-            SeriesStoreSession::identity(Some(new.clone()), None)
-        );
+        assert_eq!(session, SeriesStoreSession::identity(Some(new), None));
     }
 
-    fn sync_app(addr: impeller_bevy::DbEndpoint) -> App {
+    fn sync_app(addr: std::net::SocketAddr) -> App {
         let mut app = App::new();
         app.init_resource::<impeller_wkt::DbConfig>()
             .init_resource::<SeriesStoreSession>()
@@ -3341,7 +3296,7 @@ mod tests {
             .init_resource::<plugins::kdl_document::LastSyncedActiveKey>()
             .init_resource::<plugins::kdl_document::LastSyncedAssetsRevision>()
             .insert_resource(CurrentTimestamp(Timestamp(9_000)))
-            .insert_resource(ConnectionAddr::from_endpoint(addr))
+            .insert_resource(ConnectionAddr::new(addr))
             .add_systems(bevy::app::Update, sync_series_store_session_from_db_config);
         app
     }
@@ -3374,7 +3329,7 @@ mod tests {
         use impeller_bevy::PacketGrantR;
 
         let addr = sample_addr(2240);
-        let mut app = sync_app(addr.clone());
+        let mut app = sync_app(addr);
 
         let msg_sys = app
             .world_mut()
@@ -3387,7 +3342,7 @@ mod tests {
             .register_system(|_: InRef<OwnedPacket<PacketGrantR>>| {});
         {
             let mut session = app.world_mut().resource_mut::<SeriesStoreSession>();
-            *session = SeriesStoreSession::identity(Some(addr.clone()), Some(100));
+            *session = SeriesStoreSession::identity(Some(addr), Some(100));
             let mut cache = app
                 .world_mut()
                 .resource_mut::<impeller_bevy::TelemetryCache>();
@@ -3489,12 +3444,12 @@ mod tests {
     #[test]
     fn db_config_adopts_start_ts_without_clearing_soft_store() {
         let addr = sample_addr(2240);
-        let mut app = sync_app(addr.clone());
+        let mut app = sync_app(addr);
 
         {
             let mut session = app.world_mut().resource_mut::<SeriesStoreSession>();
             // Soft reconnect left start_ts unconfirmed.
-            *session = SeriesStoreSession::identity(Some(addr.clone()), None);
+            *session = SeriesStoreSession::identity(Some(addr), None);
             let mut cache = app
                 .world_mut()
                 .resource_mut::<impeller_bevy::TelemetryCache>();

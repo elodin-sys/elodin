@@ -175,13 +175,13 @@ pub fn sync_scope(
 ) {
     let assets = connection
         .as_ref()
-        .filter(|c| matches!(c.endpoint(), crate::DbEndpoint::Browser(_)))
+        .filter(|c| c.endpoint().assets().is_some())
         .filter(|_| {
             status
                 .as_ref()
                 .is_some_and(|s| s.status() == crate::ConnectionStatus::Success)
         })
-        .map(|c| c.endpoint().http_base());
+        .map(|c| c.endpoint().http_base().to_string());
     let key = assets.as_ref().map(|base| {
         format!(
             "{base}#{}",

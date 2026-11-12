@@ -8,26 +8,24 @@ use std::sync::{Arc, RwLock};
 
 use bevy::asset::io::*;
 use bevy::prelude::*;
-use impeller_bevy::{ConnectionAddr, DbEndpoint};
+use impeller_bevy::ConnectionAddr;
 use reqwest::StatusCode;
 
 use super::asset_cache::{self, CachedAsset};
 use crate::object_3d::assets_http_addr;
 
-mod gltf;
-
 #[derive(Default)]
 pub struct WebAssetPlugin;
 
-/// Live DB routes shared with both HTTP readers. Browser dependencies inherit
-/// session routing parameters. Native DB assets can fall back to local files.
+/// Live `ip:port` of the DB assets HTTP server, shared with the `http` asset
+/// reader so failed fetches of DB assets can fall back to local files.
 #[derive(Resource, Clone)]
-pub struct DbAssetsEndpoint(Arc<RwLock<Option<DbEndpoint>>>);
+pub struct DbAssetsEndpoint(Arc<RwLock<SocketAddr>>);
 
 impl Default for DbAssetsEndpoint {
     fn default() -> Self {
         let default_db: SocketAddr = "127.0.0.1:2240".parse().expect("valid addr");
-        Self(Arc::new(RwLock::new(Some(default_db.into()))))
+        Self(Arc::new(RwLock::new(assets_http_addr(default_db))))
     }
 }
 
@@ -43,7 +41,7 @@ fn sync_db_assets_endpoint(
         return;
     }
     if let Ok(mut current) = endpoint.0.write() {
-        *current = Some(connection.endpoint().clone());
+        *current = assets_http_addr(connection.socket);
     }
 }
 
@@ -53,7 +51,7 @@ struct Client {
     source: Source,
     cache: Box<dyn asset_cache::AssetCache>,
     /// URLs under this endpoint are DB assets eligible for local fallback.
-    db_endpoint: Option<Arc<RwLock<Option<DbEndpoint>>>>,
+    db_endpoint: Option<Arc<RwLock<SocketAddr>>>,
     /// Local assets root searched when a DB asset fetch fails.
     local_root: Option<PathBuf>,
 }
@@ -122,17 +120,12 @@ impl Plugin for WebAssetPlugin {
                 rt.clone(),
                 Source::Http,
                 Some(endpoint.0.clone()),
-                local_root.clone(),
+                local_root,
             ),
         );
         app.register_asset_source(
             "https",
-            Client::asset_source(
-                rt.clone(),
-                Source::Https,
-                Some(endpoint.0.clone()),
-                local_root,
-            ),
+            Client::asset_source(rt.clone(), Source::Https, None, None),
         );
     }
 }
@@ -150,20 +143,6 @@ impl Client {
             Source::Http => format!("http://{}", path),
             Source::Https => format!("https://{}", path),
         };
-        if let Some(endpoint) = self.db_endpoint.as_ref().and_then(|e| e.read().ok())
-            && let Some(endpoint) = endpoint.as_ref()
-        {
-            return endpoint.asset_request_url(&url).map_err(|err| {
-                AssetReaderError::Io(io::Error::new(io::ErrorKind::InvalidInput, err).into())
-            });
-        }
-        if let Some(endpoint) = self.db_endpoint.as_ref().and_then(|e| e.read().ok())
-            && let Some(endpoint) = endpoint.as_ref()
-        {
-            return endpoint.asset_request_url(&url).map_err(|err| {
-                AssetReaderError::Io(io::Error::new(io::ErrorKind::InvalidInput, err).into())
-            });
-        }
         Ok(url)
     }
 
@@ -204,10 +183,7 @@ impl Client {
         self.rt
             .spawn(async move {
                 let client = reqwest::Client::new();
-                let request = client.get(&url);
-                #[cfg(target_family = "wasm")]
-                let request = request.fetch_credentials_include();
-                let mut request = request;
+                let mut request = client.get(&url);
                 if let Some(CachedAsset { etag, .. }) = &cached_asset {
                     request = request.header("If-None-Match", etag);
                 }
@@ -288,7 +264,7 @@ impl Client {
     fn asset_source(
         rt: Runtime,
         source: Source,
-        db_endpoint: Option<Arc<RwLock<Option<DbEndpoint>>>>,
+        db_endpoint: Option<Arc<RwLock<SocketAddr>>>,
         local_root: Option<PathBuf>,
     ) -> AssetSourceBuilder {
         AssetSourceBuilder::new(move || {
@@ -306,14 +282,7 @@ impl Client {
     /// local iteration (`--kdl`) works without injecting every asset into the
     /// DB. Only URLs under the DB assets endpoint are eligible.
     fn local_fallback(&self, path: &Path, url: &str) -> Option<Box<dyn Reader>> {
-        let endpoint = self
-            .db_endpoint
-            .as_ref()?
-            .read()
-            .ok()?
-            .as_ref()?
-            .socket_addr()
-            .map(assets_http_addr)?;
+        let endpoint = *self.db_endpoint.as_ref()?.read().ok()?;
         let key = db_asset_key(path.to_str()?, endpoint)?;
         let file = self.local_root.as_ref()?.join(key);
         let bytes = std::fs::read(&file).ok()?;
@@ -326,12 +295,14 @@ impl Client {
     }
 }
 
-/// `host:port/key` reader path -> `key`, when `host:port` is the DB assets
-/// endpoint. Rejects parent-dir components so a malformed key cannot escape
-/// the assets root.
+/// `host:port/assets/key` reader path -> `key`, when `host:port` is the DB
+/// assets endpoint. Rejects parent-dir components so a malformed key cannot
+/// escape the assets root.
 fn db_asset_key(path: &str, endpoint: SocketAddr) -> Option<&str> {
     let key = path
         .strip_prefix(&endpoint.to_string())?
+        .strip_prefix('/')?
+        .strip_prefix(impeller::ASSETS_HTTP_PREFIX)?
         .strip_prefix('/')?;
     if key.is_empty() || key.split('/').any(|part| part == "..") {
         return None;
@@ -355,17 +326,17 @@ impl AssetReader for Client {
 
         match self.get(url.clone(), cached_asset.clone()).await {
             Ok((bytes, etag)) => {
-                let endpoint = self
-                    .db_endpoint
-                    .as_ref()
-                    .and_then(|e| e.read().ok())
-                    .and_then(|e| e.clone());
-                let prepared = gltf::prepare(bytes.clone(), &url, endpoint.as_ref())?;
                 // Always persist: synthesize a weak tag when the server sends none
                 // so the next load can short-circuit / revalidate.
                 let etag = etag.unwrap_or_else(|| weak_etag(&bytes));
-                self.cache.put(&url, CachedAsset { data: bytes, etag });
-                let reader = VecReader::new(prepared);
+                self.cache.put(
+                    &url,
+                    CachedAsset {
+                        data: bytes.clone(),
+                        etag,
+                    },
+                );
+                let reader = VecReader::new(bytes);
                 Ok(Box::new(reader) as Box<dyn Reader>)
             }
             Err(err) => {
@@ -380,12 +351,7 @@ impl AssetReader for Client {
                 // Stale-while-error: if the DB asset HTTP port is already down
                 // (sim teardown) or briefly unreachable, keep using the last
                 // good copy instead of spamming failed fetches.
-                let session_asset = self
-                    .db_endpoint
-                    .as_ref()
-                    .and_then(|e| e.read().ok())
-                    .is_some_and(|e| matches!(e.as_ref(), Some(DbEndpoint::Browser(_))));
-                if !session_asset && let Some(CachedAsset { data, .. }) = cached_asset {
+                if let Some(CachedAsset { data, .. }) = cached_asset {
                     tracing::warn!(
                         url = %url,
                         error = %err,
@@ -431,62 +397,6 @@ fn http_err(url: &str, err: reqwest::Error) -> AssetReaderError {
 mod tests {
     use super::*;
 
-    struct StaleCache;
-    impl asset_cache::AssetCache for StaleCache {
-        fn get(&self, _: &str) -> Option<CachedAsset> {
-            Some(CachedAsset {
-                data: b"old recording".to_vec(),
-                etag: "old".into(),
-            })
-        }
-        fn put(&self, _: &str, _: CachedAsset) {}
-    }
-
-    #[test]
-    fn expired_browser_session_never_serves_a_cached_recording_asset() {
-        use std::io::{Read, Write};
-        for browser in [true, false] {
-            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            let addr = listener.local_addr().unwrap();
-            let server = std::thread::spawn(move || {
-                let (mut socket, _) = listener.accept().unwrap();
-                let mut request = [0; 2048];
-                let received = socket.read(&mut request).unwrap();
-                assert!(received > 0);
-                socket.write_all(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
-            });
-            let endpoint = if browser {
-                impeller_bevy::BrowserEndpoints::new(
-                    "ws://example.com/main",
-                    "ws://example.com/messages",
-                    &format!("http://{addr}/sessions/one/assets?route=one"),
-                )
-                .unwrap()
-                .into()
-            } else {
-                DbEndpoint::from_socket(SocketAddr::new(addr.ip(), addr.port() - 1))
-            };
-            let client = Client {
-                rt: Runtime::new(),
-                source: Source::Http,
-                cache: Box::new(StaleCache),
-                db_endpoint: Some(Arc::new(RwLock::new(Some(endpoint)))),
-                local_root: None,
-            };
-            let path = PathBuf::from(format!("{addr}/sessions/one/assets/a.glb"));
-            let result = bevy::tasks::block_on(AssetReader::read(&client, &path));
-            if browser {
-                assert!(matches!(result, Err(AssetReaderError::HttpError(401))));
-            } else {
-                assert!(
-                    result.is_ok(),
-                    "desktop stale-cache behavior stays available"
-                );
-            }
-            server.join().unwrap();
-        }
-    }
-
     #[test]
     fn weak_etag_is_stable_for_same_bytes() {
         let a = weak_etag(b"hello");
@@ -501,18 +411,33 @@ mod tests {
     fn db_asset_key_extracts_key_only_for_matching_endpoint() {
         let endpoint: SocketAddr = "127.0.0.1:2241".parse().unwrap();
         assert_eq!(
-            db_asset_key("127.0.0.1:2241/textures/x.png", endpoint),
+            db_asset_key("127.0.0.1:2241/assets/textures/x.png", endpoint),
             Some("textures/x.png")
         );
-        // Different host or port: not a DB asset.
-        assert_eq!(db_asset_key("10.0.0.5:2241/textures/x.png", endpoint), None);
         assert_eq!(
-            db_asset_key("127.0.0.1:8080/textures/x.png", endpoint),
+            db_asset_key("127.0.0.1:2241/assets/impeller/widget.glb", endpoint),
+            Some("impeller/widget.glb")
+        );
+        assert_eq!(
+            db_asset_key("127.0.0.1:2241/textures/x.png", endpoint),
+            None
+        );
+        // Different host or port: not a DB asset.
+        assert_eq!(
+            db_asset_key("10.0.0.5:2241/assets/textures/x.png", endpoint),
+            None
+        );
+        assert_eq!(
+            db_asset_key("127.0.0.1:8080/assets/textures/x.png", endpoint),
             None
         );
         // Parent-dir escapes rejected.
-        assert_eq!(db_asset_key("127.0.0.1:2241/../secrets", endpoint), None);
+        assert_eq!(
+            db_asset_key("127.0.0.1:2241/assets/../secrets", endpoint),
+            None
+        );
         // Empty key rejected.
+        assert_eq!(db_asset_key("127.0.0.1:2241/assets/", endpoint), None);
         assert_eq!(db_asset_key("127.0.0.1:2241/", endpoint), None);
     }
 
@@ -520,7 +445,7 @@ mod tests {
     fn db_asset_key_handles_ipv6_endpoints() {
         let endpoint: SocketAddr = "[::1]:2241".parse().unwrap();
         assert_eq!(
-            db_asset_key("[::1]:2241/models/a.glb", endpoint),
+            db_asset_key("[::1]:2241/assets/models/a.glb", endpoint),
             Some("models/a.glb")
         );
     }
@@ -548,24 +473,24 @@ mod tests {
             rt: Runtime::new(),
             source: Source::Http,
             cache: Box::new(NoopCache),
-            db_endpoint: Some(Arc::new(RwLock::new(Some(DbEndpoint::from_socket(
-                SocketAddr::new(endpoint.ip(), endpoint.port() - 1),
-            ))))),
+            db_endpoint: Some(Arc::new(RwLock::new(endpoint))),
             local_root: Some(root.clone()),
         };
 
         let mut buf = Vec::new();
         bevy::tasks::block_on(async {
-            let mut reader = AssetReader::read(&client, Path::new("127.0.0.1:1/textures/x.png"))
-                .await
-                .expect("local fallback should serve the file");
+            let mut reader =
+                AssetReader::read(&client, Path::new("127.0.0.1:1/assets/textures/x.png"))
+                    .await
+                    .expect("local fallback should serve the file");
             reader.read_to_end(&mut buf).await.unwrap();
         });
         assert_eq!(buf, b"png-bytes");
 
         // A URL outside the DB endpoint must not fall back.
         bevy::tasks::block_on(async {
-            let result = AssetReader::read(&client, Path::new("127.0.0.1:2/textures/x.png")).await;
+            let result =
+                AssetReader::read(&client, Path::new("127.0.0.1:2/assets/textures/x.png")).await;
             assert!(result.is_err(), "non-DB URLs must not serve local files");
         });
 

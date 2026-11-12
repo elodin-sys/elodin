@@ -97,7 +97,7 @@ pub fn sync_line_plot_3d(
     mut collected_graph_data: ResMut<CollectedGraphData>,
     mut line_assets: ResMut<Assets<Line>>,
     metadata_store: Res<ComponentMetadataRegistry>,
-    #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
+    root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
 ) {
     for (entity, line_plot) in line_plot_3d_query.iter() {
         // Parse and compile the EQL expression
@@ -166,14 +166,14 @@ pub fn sync_line_plot_3d(
                 },
                 trail,
                 LineConfig {
-                    render_layers: RenderLayers::layer(crate::plugins::gizmos::GIZMO_RENDER_LAYER),
+                    render_layers: RenderLayers::layer(
+                        crate::plugins::render_layer_alloc::SCENE_LINE_RENDER_LAYER,
+                    ),
                 },
                 Transform::default(),
                 GlobalTransform::default(),
-                #[cfg(feature = "big_space")]
                 crate::spatial::GridCell::default(),
             ));
-            #[cfg(feature = "big_space")]
             crate::spatial::parent_under_big_space(&mut entity, root.as_deref());
         }
     }
@@ -216,10 +216,7 @@ impl bevy::app::Plugin for LinePlot3dPlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    #[cfg(not(feature = "big_space"))]
-                    bevy_geo_frames::apply_transforms,
                     bevy_geo_frames::apply_geo_rotation,
-                    #[cfg(feature = "big_space")]
                     crate::spatial::apply_big_translation,
                 )
                     .chain()

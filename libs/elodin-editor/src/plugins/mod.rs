@@ -1,6 +1,8 @@
 mod asset_cache;
 pub(crate) mod camera_anchor;
 #[cfg(not(target_family = "wasm"))]
+pub mod cesium;
+#[cfg(not(target_family = "wasm"))]
 pub mod cinematic_earth;
 pub(crate) mod display_kernel;
 pub mod editor_cam_input;
@@ -24,6 +26,7 @@ pub mod render_layer_alloc;
 pub mod scene_environment;
 #[cfg(not(target_family = "wasm"))]
 pub(crate) mod screenshot;
+pub(crate) mod simulation_startup;
 #[cfg(not(target_family = "wasm"))]
 pub mod thruster_particles;
 pub mod view_cube;

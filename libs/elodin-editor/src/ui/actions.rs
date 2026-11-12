@@ -208,11 +208,7 @@ pub fn spawn_lua_actor(
             && lua.is_none()
             && status == ConnectionStatus::Success
         {
-            commands.insert_resource(LuaActor::spawn(
-                addr.endpoint()
-                    .socket_addr()
-                    .expect("TCP connection required"),
-            ));
+            commands.insert_resource(LuaActor::spawn(addr.socket));
         }
         if lua.is_some() {
             match status {

@@ -68,7 +68,7 @@ members = [
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 
 [workspace.package]
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 edition = "2024"
 repository = "https://github.com/elodin-sys/elodin"
 
@@ -92,6 +92,7 @@ inherits = "release"
 lto = "thin"
 
 [workspace.dependencies]
+bevy-cesium = { git = "https://github.com/elodin-sys/bevy-cesium", rev = "b0e4339fdc93c057b43569db78c203190cec4e09" }
 db-macros.path = "libs/db/macros"
 roci.path = "fsw/roci"
 roci.default-features = false

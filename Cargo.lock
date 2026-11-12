@@ -143,7 +143,7 @@ dependencies = [
 
 [[package]]
 name = "aleph-serial-bridge"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "anyhow",
  "blackbox",
@@ -163,7 +163,7 @@ dependencies = [
 
 [[package]]
 name = "aleph-setup"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "anyhow",
  "fastrand 1.9.0",
@@ -177,7 +177,7 @@ dependencies = [
 
 [[package]]
 name = "aleph-status"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "anyhow",
  "db-macros",
@@ -1230,7 +1230,7 @@ dependencies = [
 
 [[package]]
 name = "betaflight-sitl-controller"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "anyhow",
  "clap 4.6.7",
@@ -1252,6 +1252,16 @@ checksum = "4bfadbebfc6599aa59289b754ac30023959854304f3d393da2cf62bb3cd5df8f"
 dependencies = [
  "bevy_internal",
  "tracing",
+]
+
+[[package]]
+name = "bevy-cesium"
+version = "0.3.0"
+source = "git+https://github.com/elodin-sys/bevy-cesium?rev=b0e4339fdc93c057b43569db78c203190cec4e09#b0e4339fdc93c057b43569db78c203190cec4e09"
+dependencies = [
+ "bevy",
+ "cxx",
+ "cxx-build",
 ]
 
 [[package]]
@@ -1320,7 +1330,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_ai_skybox"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "bevy",
  "chrono",
@@ -3200,7 +3210,7 @@ dependencies = [
 
 [[package]]
 name = "blackbox"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "zerocopy",
 ]
@@ -4313,7 +4323,7 @@ dependencies = [
 
 [[package]]
 name = "cranelift-mlir"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "blake3",
  "bytemuck",
@@ -4547,6 +4557,68 @@ name = "cursor-icon"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
+
+[[package]]
+name = "cxx"
+version = "1.0.205"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c8a02bfeba9074b2bbb39492c9b0908ec854f455a3cccdcde7a1de55e2315e40"
+dependencies = [
+ "cc",
+ "cxx-build",
+ "cxxbridge-cmd",
+ "cxxbridge-flags",
+ "cxxbridge-macro",
+ "foldhash 0.2.0",
+ "link-cplusplus",
+]
+
+[[package]]
+name = "cxx-build"
+version = "1.0.205"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbc2ac76997619d2d888b58ad79488f1c835de41ca4dd3dd7082acf4ecb0a50f"
+dependencies = [
+ "cc",
+ "codespan-reporting 0.13.1",
+ "indexmap 2.14.2",
+ "proc-macro2",
+ "quote",
+ "scratch",
+ "syn 3.0.9",
+]
+
+[[package]]
+name = "cxxbridge-cmd"
+version = "1.0.205"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "54a486ed16a3f2a053fe7f5b98db4c1a59846a23e8cb9e49f9d1bd48830d51a2"
+dependencies = [
+ "clap 4.6.7",
+ "codespan-reporting 0.13.1",
+ "indexmap 2.14.2",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.9",
+]
+
+[[package]]
+name = "cxxbridge-flags"
+version = "1.0.205"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c72569be94e2283764d334cd285980b747dbe221e27e315484eb6bcd93fa808a"
+
+[[package]]
+name = "cxxbridge-macro"
+version = "1.0.205"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "423e795284a7f7b3f843c956a5322c4bc497b60c2dd1a6339da10313cb18d575"
+dependencies = [
+ "indexmap 2.14.2",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.9",
+]
 
 [[package]]
 name = "darling"
@@ -5283,7 +5355,7 @@ dependencies = [
 
 [[package]]
 name = "db-macros"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "convert_case 0.6.0",
  "darling 0.20.11",
@@ -5617,10 +5689,12 @@ checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
 
 [[package]]
 name = "elodin"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "base64 0.22.1",
  "bevy",
+ "bevy-cesium",
+ "bytes",
  "chrono",
  "clap 4.6.7",
  "clap-markdown",
@@ -5656,7 +5730,7 @@ dependencies = [
 
 [[package]]
 name = "elodin-db"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "arrow",
  "arrow-schema",
@@ -5753,7 +5827,7 @@ dependencies = [
 
 [[package]]
 name = "elodin-db-tests"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "arrow",
  "elodin-db",
@@ -5776,12 +5850,13 @@ dependencies = [
 
 [[package]]
 name = "elodin-editor"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "ab_glyph",
  "arc-swap",
  "arrow",
  "bevy",
+ "bevy-cesium",
  "bevy-inspector-egui",
  "bevy_ai_skybox",
  "bevy_color",
@@ -5870,7 +5945,7 @@ dependencies = [
 
 [[package]]
 name = "elodin-macros"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "convert_case 0.6.0",
  "darling 0.20.11",
@@ -5882,12 +5957,13 @@ dependencies = [
 
 [[package]]
 name = "elodin-web"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "bevy",
  "console_error_panic_hook",
  "elodin-editor",
  "getrandom 0.3.4",
+ "impeller-bevy",
  "web-sys",
 ]
 
@@ -6101,7 +6177,7 @@ checksum = "f8970033a4282a7bcf899b38b5ed3a58b732fe093d03785d58648515d8d309da"
 
 [[package]]
 name = "eql"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "bevy_geo_frames",
  "bevy_math",
@@ -7223,7 +7299,7 @@ checksum = "b40ca9252762c466af32d0b1002e91e4e1bc5398f77455e55474deb466355ff5"
 
 [[package]]
 name = "gst-elodin-plugin"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "anyhow",
  "gst-plugin-version-helper",
@@ -7417,7 +7493,7 @@ dependencies = [
 
 [[package]]
 name = "hamann-chen-line"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "anyhow",
  "clap 4.6.7",
@@ -8082,7 +8158,7 @@ checksum = "6e44b0a4eaa4c82f441d50a963f2d5f05a787240aeee097597033e72accfd22f"
 
 [[package]]
 name = "impeller"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "bevy",
  "const-fnv1a-hash",
@@ -8106,7 +8182,7 @@ dependencies = [
 
 [[package]]
 name = "impeller-bbq"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "bbqueue",
  "impeller",
@@ -8115,7 +8191,7 @@ dependencies = [
 
 [[package]]
 name = "impeller-bevy"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "address",
  "bbqueue",
@@ -8147,7 +8223,7 @@ dependencies = [
 
 [[package]]
 name = "impeller-cli"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "anyhow",
  "arrow",
@@ -8176,7 +8252,7 @@ dependencies = [
 
 [[package]]
 name = "impeller-frame"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "cobs 0.2.3",
  "impeller",
@@ -8184,7 +8260,7 @@ dependencies = [
 
 [[package]]
 name = "impeller-kdl"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "bevy_geo_frames",
  "impeller",
@@ -8200,7 +8276,7 @@ dependencies = [
 
 [[package]]
 name = "impeller-stellar"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "bbqueue",
  "fastrand 2.5.0",
@@ -8221,7 +8297,7 @@ dependencies = [
 
 [[package]]
 name = "impeller-wkt"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "bevy",
  "bevy_geo_frames",
@@ -8379,7 +8455,7 @@ checksum = "d57a1694cff80cdd6c8a4cae63984578e2617528d3c266e53f56dfd3e279e9f7"
 
 [[package]]
 name = "inscriber"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "anyhow",
  "clap 4.6.7",
@@ -8996,6 +9072,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d4a5ff6bcca6c4867b1c4fd4ef63e4db7436ef363e0ad7531d1558856bae64f4"
 
 [[package]]
+name = "link-cplusplus"
+version = "1.0.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7f78c730aaa7d0b9336a299029ea49f9ee53b0ed06e9202e8cb7db9bae7b8c82"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9061,7 +9146,7 @@ dependencies = [
 
 [[package]]
 name = "lqr"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "anyhow",
  "clap 4.6.7",
@@ -9372,7 +9457,7 @@ dependencies = [
 
 [[package]]
 name = "mekf"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "anyhow",
  "clap 4.6.7",
@@ -9603,7 +9688,7 @@ dependencies = [
 
 [[package]]
 name = "monte-carlo"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "chrono",
  "csv",
@@ -10137,7 +10222,7 @@ dependencies = [
 
 [[package]]
 name = "nox"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "approx",
  "bevy_math",
@@ -10166,14 +10251,14 @@ dependencies = [
 
 [[package]]
 name = "nox-array"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "zerocopy",
 ]
 
 [[package]]
 name = "nox-frames"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "approx",
  "hifitime",
@@ -10183,7 +10268,7 @@ dependencies = [
 
 [[package]]
 name = "nox-py"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "approx",
  "arrow",
@@ -11570,7 +11655,7 @@ dependencies = [
 
 [[package]]
 name = "postcard-c-codegen"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "clap 4.6.7",
  "convert_case 0.6.0",
@@ -12476,7 +12561,7 @@ dependencies = [
 
 [[package]]
 name = "rc-jet-controller"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "anyhow",
  "clap 4.6.7",
@@ -12858,7 +12943,7 @@ dependencies = [
 
 [[package]]
 name = "roci"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "anyhow",
  "bbqueue",
@@ -12884,7 +12969,7 @@ dependencies = [
 
 [[package]]
 name = "roci-adcs"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "approx",
  "nox",
@@ -12957,14 +13042,14 @@ dependencies = [
 
 [[package]]
 name = "rtsp-ingest"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "thiserror 2.0.21",
 ]
 
 [[package]]
 name = "rtsp-streamer"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "anyhow",
  "clap 4.6.7",
@@ -13152,7 +13237,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "s10"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "async-watcher",
  "cargo_metadata",
@@ -13242,6 +13327,12 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+
+[[package]]
+name = "scratch"
+version = "1.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d68f2ec51b097e4c1a75b681a8bec621909b5e91f15bb7b840c4f2f7b01148b2"
 
 [[package]]
 name = "sctk-adwaita"
@@ -13934,7 +14025,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stellarator"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "blocking",
  "futures",
@@ -13962,11 +14053,11 @@ dependencies = [
 
 [[package]]
 name = "stellarator-buf"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 
 [[package]]
 name = "stellarator-macros"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -14402,7 +14493,7 @@ checksum = "adb6935a6f5c20170eeceb1a3835a49e12e19d792f6dd344ccc76a985ca5a6ca"
 
 [[package]]
 name = "tegrastats-bridge"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "anyhow",
  "db-macros",
@@ -15625,7 +15716,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "video-streamer"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "anyhow",
  "byteorder",
@@ -15644,7 +15735,7 @@ dependencies = [
 
 [[package]]
 name = "video-toolbox"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "bitflags 2.13.2",
  "block2 0.6.2",
@@ -16050,7 +16141,7 @@ dependencies = [
 
 [[package]]
 name = "webcodecs-video"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "bevy",
  "bevy_egui",
@@ -16933,7 +17024,7 @@ dependencies = [
 
 [[package]]
 name = "wmm"
-version = "0.20.1-alpha.0"
+version = "0.21.1-alpha.0"
 dependencies = [
  "approx",
  "bindgen 0.70.1",

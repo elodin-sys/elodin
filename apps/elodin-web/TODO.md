@@ -9,7 +9,7 @@ wired up. Unchecked items are compiled out, stubbed, or still native-only.
 - [x] Boot log, `console_error_panic_hook`, and Bevy `LogPlugin` so panics reach the browser console
 - [x] `strip = "symbols"` drops the Rust `name` section (bundle ~45 MB; ~3.5 KB of wasm-bindgen closure names remain)
 - [x] Directional shadow maps use 2048 on WASM, same as native (Bevy’s 8192 default is not used)
-- [x] WebSocket Impeller client (`?db=host:port`), connection screen, and connection-failure UI
+- [x] WebSocket Impeller client (`<meta name="elodin-web-db">`, otherwise the connect screen), connection screen, and connection-failure UI
 - [x] Schematics, tiles, timeline, graphs, and EQL-backed gauges
 - [x] Timeseries graph lines (x uploaded in seconds; triangle lists instead of line strips)
 - [x] 3D viewports: camera, touch input, ViewCube, navigation gizmo
@@ -26,6 +26,7 @@ wired up. Unchecked items are compiled out, stubbed, or still native-only.
 ## Not finished
 
 
+- [ ] Cesium Native terrain streaming (native platforms only)
 - [ ] Skyboxes: cache, generation, schematic activation, and DB asset sync (`wasm_cut.rs` stubs)
 - [ ] Skybox status overlay
 - [ ] Lua action tiles (the button renders; `LuaActor::spawn` does not connect)

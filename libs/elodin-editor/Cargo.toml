@@ -7,11 +7,9 @@ edition = "2024"
 publish = false
 
 [features]
-default = ["big_space"]
 cargo-clippy = []
-big_space = ["dep:big_space", "bevy_geo_frames/big_space"]
 inspector = ["dep:bevy-inspector-egui", "bevy_geo_frames/inspector"]
-debug = ["big_space", "big_space/debug"]
+debug = ["big_space/debug"]
 tracy = ["bevy/trace_tracy", "bevy/debug"]
 # Temporarily drop code that does not compile for wasm. Search `feature = "wasm-cut"`
 # for remaining work. Only takes effect on wasm32 so native workspace builds stay complete.
@@ -28,6 +26,7 @@ ab_glyph = "0.2"
 
 # bevy
 bevy = { workspace = true, features = [
+  "bevy_gizmos_render",
   "bevy_audio",
   "vorbis",
   "jpeg",
@@ -52,7 +51,6 @@ winit = { version = "0.30.12", default-features = false, features = [
 ] }
 raw-window-handle = "0.5"
 big_space.workspace = true
-big_space.optional = true
 bevy_editor_cam.workspace = true
 bevy_framepace.workspace = true
 # 3D text for ViewCube labels
@@ -144,12 +142,12 @@ web-sys = { version = "0.3", features = [
   "Request",
   "RequestInit",
   "RequestMode",
-  "RequestCredentials",
   "Response",
   "Window",
 ] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
+bevy-cesium.workspace = true
 bevy = { workspace = true, features = [
   "file_watcher",
   "multi_threaded",

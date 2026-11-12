@@ -52,6 +52,7 @@
 
     doCheck = false;
 
+    CESIUM_NATIVE_DIR = pkgs.callPackage ./cesium-native.nix {};
     LIBCLANG_PATH = "${pkgs.buildPackages.libclang.lib}/lib";
 
     # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+

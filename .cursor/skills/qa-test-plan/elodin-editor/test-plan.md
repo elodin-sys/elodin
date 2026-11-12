@@ -55,6 +55,7 @@ Coverage map (feature-catalog §16–17 → cases):
 6. **Vision criteria.** Pass criteria that say “screenshot shows …” require the executor to Read the PNG (or equivalent vision/OCR) — file existence alone is not enough.
 7. **RAM gauge.** Expect `RAM Usage: X.Y GB` with X.Y > 0 (not `N/A`, not stuck at `0.0`). Bevy's `SystemInformationDiagnosticsPlugin` is **not** the source of truth on macOS.
 8. **Recorded DB CLI.** `elodin-db run` takes positional `ADDR` then `PATH` (`elodin-db run "[::]:2250" /tmp/db`). Direct `elodin editor <db-dir>` hits an unfinished `ReplayDir` stub and panics — serve + connect by address instead (EDITOR-102).
+9. **Cesium startup.** Interactive terrain loading has no timeout. An explicit load error must restore fallback scenery and release an editor-owned simulation; fixed-view screenshots remain bounded by `ELODIN_CESIUM_CAPTURE_TIMEOUT` and fail closed.
 
 ## Execution Rules
 

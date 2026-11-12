@@ -40,6 +40,12 @@ import elodin.jaxsim
 from .elodin import *
 from . import monte_carlo as monte_carlo
 from . import ui as ui
+from .terrain import (
+    Terrain as Terrain,
+    TerrainHeightmap as TerrainHeightmap,
+    TerrainSample as TerrainSample,
+    terrain_heightmap as terrain_heightmap,
+)
 
 __doc__ = elodin.__doc__
 

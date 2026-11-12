@@ -25,7 +25,6 @@ use crate::{MainCamera, sensor_camera::SensorCamera, ui::tiles::ViewportConfig};
 type WorldMeshViewFilter = Or<((With<MainCamera>, With<ViewportConfig>), With<SensorCamera>)>;
 type WorldMeshTerrainQuery<'w, 's> =
     Query<'w, 's, (Entity, &'static ChildOf), (With<WorldMeshTerrain>, With<TileAtlas>)>;
-#[cfg(feature = "big_space")]
 type WorldMeshViewPositionQuery<'w, 's> = Query<
     'w,
     's,
@@ -183,13 +182,9 @@ fn world_mesh_visibility(world_mesh: &impeller_wkt::WorldMesh) -> Visibility {
 }
 
 fn insert_big_space_cell(commands: &mut Commands, entity: Entity) {
-    #[cfg(feature = "big_space")]
     commands
         .entity(entity)
         .insert(crate::spatial::GridCell::default());
-
-    #[cfg(not(feature = "big_space"))]
-    let _ = (commands, entity);
 }
 
 fn planar_terrain_config(region: &str, lod_count: Option<u32>) -> WorldMeshConfig {
@@ -522,7 +517,6 @@ fn terrain_model_view_position(
     anchor_rotation.inverse() * (view_absolute - anchor_translation)
 }
 
-#[cfg(feature = "big_space")]
 fn sync_terrain_view_positions(
     terrains: WorldMeshTerrainQuery,
     anchors: Query<(&Transform, Option<&crate::spatial::GridCell>), With<WorldMeshTerrainAnchor>>,
@@ -553,31 +547,6 @@ fn sync_terrain_view_positions(
                 .unwrap_or_else(|| anchor_transform.translation.as_dvec3());
             let local = terrain_model_view_position(
                 anchor_translation,
-                anchor_transform.rotation.as_dquat(),
-                absolute,
-            );
-            view_positions.insert((terrain, camera), TerrainViewPosition(local));
-        }
-    }
-}
-
-#[cfg(not(feature = "big_space"))]
-fn sync_terrain_view_positions(
-    terrains: WorldMeshTerrainQuery,
-    anchors: Query<&Transform, With<WorldMeshTerrainAnchor>>,
-    cameras: Query<(Entity, &Transform), WorldMeshViewFilter>,
-    mut view_positions: ResMut<TerrainViewComponents<TerrainViewPosition>>,
-) {
-    view_positions
-        .retain(|(terrain, view), _| terrains.get(*terrain).is_ok() && cameras.get(*view).is_ok());
-    for (camera, transform) in &cameras {
-        let absolute = transform.translation.as_dvec3();
-        for (terrain, anchor) in &terrains {
-            let Ok(anchor_transform) = anchors.get(anchor.parent()) else {
-                continue;
-            };
-            let local = terrain_model_view_position(
-                anchor_transform.translation.as_dvec3(),
                 anchor_transform.rotation.as_dquat(),
                 absolute,
             );
@@ -633,7 +602,6 @@ mod tests {
         apply_geo_transforms(&mut app);
 
         app.init_resource::<TerrainViewComponents<TerrainViewPosition>>();
-        #[cfg(feature = "big_space")]
         app.insert_resource(crate::spatial::FloatingOriginSettings::new(10_000.0, 100.0));
 
         let anchor_transform = *app.world().get::<Transform>(anchor).unwrap();
@@ -646,7 +614,6 @@ mod tests {
                 test_viewport_config(),
             ))
             .id();
-        #[cfg(feature = "big_space")]
         app.world_mut()
             .entity_mut(camera)
             .insert(crate::spatial::GridCell::default());
@@ -793,19 +760,16 @@ mod tests {
         assert!(app.world().get::<GeoRotation>(renderer).is_none());
         assert!(app.world().get::<GeoPosition>(anchor).is_some());
         assert!(app.world().get::<TileAtlas>(renderer).is_some());
-        #[cfg(feature = "big_space")]
-        {
-            assert!(
-                app.world()
-                    .get::<crate::spatial::GridCell>(anchor)
-                    .is_some()
-            );
-            assert!(
-                app.world()
-                    .get::<crate::spatial::GridCell>(renderer)
-                    .is_none()
-            );
-        }
+        assert!(
+            app.world()
+                .get::<crate::spatial::GridCell>(anchor)
+                .is_some()
+        );
+        assert!(
+            app.world()
+                .get::<crate::spatial::GridCell>(renderer)
+                .is_none()
+        );
 
         assert!(app.world_mut().despawn(anchor));
         assert!(

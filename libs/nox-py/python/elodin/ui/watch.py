@@ -57,7 +57,8 @@ def _assets_http_url(db: str, key: str) -> str:
     elif ":" in host:
         # HTTP URLs require brackets around IPv6 literals.
         host = f"[{host}]"
-    return f"http://{host}:{int(port) + 1}/{key}"
+    # Same segment as `impeller::ASSETS_HTTP_PREFIX`.
+    return f"http://{host}:{int(port) + 1}/assets/{key}"
 
 
 _DEFAULT_SCHEMATIC_KEY = "schematics/main.kdl"

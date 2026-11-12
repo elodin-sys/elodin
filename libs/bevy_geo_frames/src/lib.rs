@@ -131,7 +131,7 @@ impl OrDefault for Option<GeoFrame> {
     }
 }
 
-#[cfg(feature = "big_space")]
+#[cfg(feature = "bevy")]
 pub mod big_space;
 
 #[cfg(feature = "bevy")]

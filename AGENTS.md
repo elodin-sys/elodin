@@ -9,6 +9,7 @@ Elodin is an open-source platform for rapid design, testing, and simulation of a
 - Agents build with `just install`.
 - Don't commit changes to git — that's for the developer to do
 - When suggesting new dependencies, check they are well supported and maintained.
+- Avoid Cargo features. Prefer one supported configuration; add a feature only for a demonstrated platform or dependency boundary, never for speculative optionality or fallback modes.
 - Never use unsafe Rust code.
 - Run all activities from the repository root.
 - When running cargo test -p elodin-db, prevent crashing with flags: "CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 RAYON_NUM_THREADS=1"
