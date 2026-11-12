@@ -214,7 +214,7 @@ impl TelemetryCache {
         self.pivot = pivot;
     }
 
-    /// Largest page that fits in the budget.
+    /// Largest page that fits beside samples `block` cannot evict.
     ///
     /// `max_limit` of `None` is no page-count cap. `Some(0)` is a cap of zero.
     /// Returns `None` when one sample cannot fit, or when the cache and `max_limit` are both uncapped.
@@ -222,6 +222,7 @@ impl TelemetryCache {
         &self,
         sample_bytes: usize,
         max_limit: Option<usize>,
+        block: i64,
     ) -> Option<usize> {
         let Some(budget) = self.byte_limit else {
             return max_limit;
@@ -232,8 +233,31 @@ impl TelemetryCache {
         if sample_bytes > budget {
             return None;
         }
-        let fit = budget / sample_bytes;
+        let available = budget.saturating_sub(self.retained_bytes(block));
+        if sample_bytes > available {
+            return None;
+        }
+        let fit = available / sample_bytes;
         Some(max_limit.map_or(fit, |limit| fit.min(limit)))
+    }
+
+    /// Bytes in blocks at least as close to the pivot as `start`. Admission will not evict them.
+    fn retained_bytes(&self, start: i64) -> usize {
+        let wanted = start.abs_diff(self.pivot.0);
+        self.components
+            .iter()
+            .flat_map(|(id, series)| {
+                let anchor = self.predecessors.get(id).copied();
+                series.iter().map(move |(time, value)| {
+                    let block = anchor
+                        .filter(|(timestamp, _)| timestamp == time)
+                        .map_or_else(|| block_start(time.0), |(_, block)| block);
+                    (block, value)
+                })
+            })
+            .filter(|(block, _)| block.abs_diff(self.pivot.0) <= wanted)
+            .map(|(_, value)| Self::value_bytes(value))
+            .fold(0, usize::saturating_add)
     }
 
     /// Admission only evicts blocks strictly farther away than the wanted block.

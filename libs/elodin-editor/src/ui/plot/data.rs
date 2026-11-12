@@ -1205,10 +1205,12 @@ fn send_visible_prefetch_page(
                 .0
                 .get(&component_id)
                 .map_or(8, |schema| schema.size().saturating_add(8));
-            let Some(fit) = world
-                .resource::<TelemetryCache>()
-                .fitting_page_limit(size, Some(VISIBLE_PREFETCH_LIMIT))
-            else {
+            let block = impeller_bevy::block_start(req_start.0);
+            let Some(fit) = world.resource::<TelemetryCache>().fitting_page_limit(
+                size,
+                Some(VISIBLE_PREFETCH_LIMIT),
+                block,
+            ) else {
                 world
                     .resource_mut::<VisiblePrefetchState>()
                     .finish(key, attempt, false);

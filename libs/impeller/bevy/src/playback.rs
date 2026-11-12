@@ -83,7 +83,7 @@ pub fn update(
             .get(&id)
             .map_or(8, |schema| schema.size().saturating_add(8));
         let max_limit = if anchor { 1 } else { PAGE_LIMIT };
-        let Some(limit) = cache.fitting_page_limit(sample_bytes, Some(max_limit)) else {
+        let Some(limit) = cache.fitting_page_limit(sample_bytes, Some(max_limit), start) else {
             continue;
         };
         if !cache.admit_block(start, sample_bytes.saturating_mul(limit)) {
@@ -244,29 +244,51 @@ mod tests {
     fn large_components_request_a_page_that_fits() {
         let mut cache = TelemetryCache::default();
         assert_eq!(
-            cache.fitting_page_limit(10_000, Some(PAGE_LIMIT)),
+            cache.fitting_page_limit(10_000, Some(PAGE_LIMIT), 0),
             Some(PAGE_LIMIT)
         );
-        assert_eq!(cache.fitting_page_limit(10_000, None), None);
-        assert_eq!(cache.fitting_page_limit(10_000, Some(0)), Some(0));
+        assert_eq!(cache.fitting_page_limit(10_000, None, 0), None);
+        assert_eq!(cache.fitting_page_limit(10_000, Some(0), 0), Some(0));
         cache.set_playback_budget(64 * 1024, Timestamp(0));
         let sample = 64usize;
         let limit = cache
-            .fitting_page_limit(sample, Some(PAGE_LIMIT))
+            .fitting_page_limit(sample, Some(PAGE_LIMIT), 0)
             .expect("one sample fits");
         assert!(limit < PAGE_LIMIT);
         assert!(cache.admit_block(0, sample.saturating_mul(limit)));
         assert!(!cache.admit_block(1_000_000, sample.saturating_mul(PAGE_LIMIT)));
-        assert_eq!(cache.fitting_page_limit(sample, Some(4)), Some(4));
-        assert_eq!(cache.fitting_page_limit(sample, Some(0)), Some(0));
+        assert_eq!(cache.fitting_page_limit(sample, Some(4), 0), Some(4));
+        assert_eq!(cache.fitting_page_limit(sample, Some(0), 0), Some(0));
         assert_eq!(
-            cache.fitting_page_limit(sample, None),
+            cache.fitting_page_limit(sample, None, 0),
             Some(64 * 1024 / sample)
         );
         assert!(
             cache
-                .fitting_page_limit(64 * 1024 + 1, Some(PAGE_LIMIT))
+                .fitting_page_limit(64 * 1024 + 1, Some(PAGE_LIMIT), 0)
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn page_after_predecessor_leaves_room_for_the_block() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId(7);
+        let value = ComponentValue::F64(nox::array![1f64].to_dyn());
+        let sample = TelemetryCache::value_bytes(&value);
+        cache.set_playback_budget(sample * 4, Timestamp(0));
+        cache.insert_predecessor(id, Timestamp(-120_000_000), 0, value);
+        let limit = cache
+            .fitting_page_limit(sample, Some(PAGE_LIMIT), 0)
+            .expect("remaining budget fits a page");
+        assert_eq!(limit, 3);
+        assert!(cache.admit_block(0, sample * limit));
+        assert!(cache.admit_block(5_000_000, sample * limit));
+        assert!(!cache.admit_block(0, sample * 4));
+        assert!(
+            cache
+                .series(&id)
+                .is_some_and(|series| series.contains_key(&Timestamp(-120_000_000)))
         );
     }
 }
