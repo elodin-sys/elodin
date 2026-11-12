@@ -1,12 +1,30 @@
 //! Fixed recording blocks; disk replay belongs to the transport.
+use std::ops::Range;
+
+use super::prefetch::{self, VisiblePrefetchState};
 use super::*;
-use impeller_wkt::GetTimeSeriesPredecessor;
+use impeller_wkt::GetTimeSeries;
 
 pub const BLOCK_US: i64 = 1_000_000;
 pub const PAGE_LIMIT: usize = 4096;
 
 pub fn block_start(timestamp: i64) -> i64 {
     timestamp.div_euclid(BLOCK_US).saturating_mul(BLOCK_US)
+}
+
+/// Inclusive DB range for one block. The range end is inclusive.
+pub fn block_query_range(start: i64) -> Range<Timestamp> {
+    let end = start.saturating_add(BLOCK_US).saturating_sub(1);
+    Timestamp(start)..Timestamp(end)
+}
+
+pub fn block_query(component_id: ComponentId, start: i64, limit: usize) -> GetTimeSeries {
+    GetTimeSeries {
+        id: PacketId::default(),
+        range: block_query_range(start),
+        component_id,
+        limit: Some(limit),
+    }
 }
 
 #[derive(Resource, Clone, Debug)]
@@ -25,180 +43,39 @@ impl Default for PlaybackCacheLimits {
     }
 }
 
-#[derive(Resource, Default)]
-pub struct PlaybackPager {
-    pending: HashSet<ComponentId>,
-    anchors: HashMap<(ComponentId, i64), Option<Timestamp>>,
-}
+/// The playhead block, one second behind, and three seconds ahead.
+const PLAYHEAD_OFFSETS: [i64; 5] = [0, 1, -1, 2, 3];
 
-#[allow(clippy::too_many_arguments)]
 pub fn update(
     current: Timestamp,
     limits: &PlaybackCacheLimits,
     priority: &SeriesFetchPriority,
     schema: &ComponentSchemaRegistry,
-    pager: &mut PlaybackPager,
+    prefetch: &mut VisiblePrefetchState,
     cache: &mut TelemetryCache,
-    _backfill: &mut BackfillState,
     commands: &mut Commands,
 ) {
     cache.set_playback_budget(limits.telemetry_bytes, current);
     let center = block_start(current.0);
-    pager.anchors.retain(|(id, block), time| {
-        priority.high.contains(id)
-            && *block == center
-            && time.is_none_or(|time| {
-                cache
-                    .series(id)
-                    .is_some_and(|series| series.contains_key(&time))
-            })
-    });
     for id in series_store_backfill_candidates(&priority.high, schema) {
-        if pager.pending.len() >= 4 {
-            break;
-        }
-        if pager.pending.contains(&id) {
+        if !schema.0.contains_key(&id) {
             continue;
         }
-        let anchor = !pager.anchors.contains_key(&(id, center));
-        let start = if anchor {
-            center
-        } else {
-            let Some(start) = [0, 1, -1, 2, 3]
-                .into_iter()
-                .map(|offset| center.saturating_add(offset * BLOCK_US))
-                .find(|start| {
-                    !cache.is_covered(
-                        &id,
-                        &(Timestamp(*start)..Timestamp(start.saturating_add(BLOCK_US))),
-                    )
-                })
-            else {
-                continue;
-            };
-            start
-        };
-        let sample_bytes = schema
-            .0
-            .get(&id)
-            .map_or(8, |schema| schema.size().saturating_add(8));
-        let max_limit = if anchor { 1 } else { PAGE_LIMIT };
-        let Some(limit) = cache.fitting_page_limit(sample_bytes, Some(max_limit), start) else {
-            continue;
-        };
-        if !cache.admit_block(start, sample_bytes.saturating_mul(limit)) {
-            continue;
-        }
-        pager.pending.insert(id);
-        send(
-            id,
-            start,
-            start.saturating_add(BLOCK_US),
-            anchor,
-            limit,
-            commands,
-        );
-    }
-}
-
-fn send(
-    id: ComponentId,
-    start: i64,
-    end: i64,
-    anchor: bool,
-    limit: usize,
-    commands: &mut Commands,
-) {
-    let callback = move |packet: InRef<OwnedPacket<PacketGrantR>>,
-                         mut pager: ResMut<PlaybackPager>,
-                         mut cache: ResMut<TelemetryCache>,
-                         schema: Res<ComponentSchemaRegistry>,
-                         priority: Res<SeriesFetchPriority>,
-                         mut commands: Commands| {
-        pager.pending.remove(&id);
-        if !priority.high.contains(&id) {
-            return true;
-        }
-        let OwnedPacket::TimeSeries(series) = &*packet else {
-            return true;
-        };
-        let Some(schema) = schema.0.get(&id) else {
-            return true;
-        };
-        let (Ok(times), Ok(data)) = (series.timestamps(), series.data()) else {
-            return true;
-        };
-        let size = schema.size();
-        if size == 0
-            || data.len() != times.len().saturating_mul(size)
-            || times.windows(2).any(|pair| pair[0] >= pair[1])
-            || times.iter().any(|time| {
-                if anchor {
-                    time.0 > start
-                } else {
-                    time.0 < start || time.0 >= end
-                }
-            })
-        {
-            return true;
-        }
-        let block = block_start(start);
-        if !cache.admit_block(block, times.len().saturating_mul(size.saturating_add(8))) {
-            return true;
-        }
-        for (&time, bytes) in times.iter().zip(data.chunks_exact(size)) {
-            let Ok(view) =
-                ComponentView::try_from_bytes_shape(bytes, schema.shape(), schema.prim_type())
-            else {
-                return true;
-            };
-            if anchor {
-                cache.insert_predecessor(id, time, block, ComponentValue::from_view(view));
-            } else {
-                cache.insert(id, time, ComponentValue::from_view(view));
+        prefetch::prefetch_hold_anchor(id, Timestamp(center), cache, prefetch, commands);
+        for offset in PLAYHEAD_OFFSETS {
+            if !prefetch.has_capacity() {
+                return;
             }
+            let start = center.saturating_add(offset.saturating_mul(BLOCK_US));
+            prefetch::request_block(id, start, cache, prefetch, commands);
         }
-        if anchor {
-            pager.anchors.insert((id, block), times.first().copied());
-        } else {
-            let covered_end = if times.len() < limit {
-                end
-            } else {
-                times.last().map_or(start, |last| last.0.saturating_add(1))
-            };
-            cache.mark_page_covered(id, Timestamp(start), Timestamp(covered_end), times);
-            if covered_end < end {
-                pager.pending.insert(id);
-                send(id, covered_end, end, false, limit, &mut commands);
-            }
-        }
-        true
-    };
-    if anchor {
-        commands.send_req_reply_raw(
-            GetTimeSeriesPredecessor {
-                id: PacketId::default(),
-                timestamp: Timestamp(start),
-                component_id: id,
-            },
-            callback,
-        );
-    } else {
-        commands.send_req_reply_raw(
-            GetTimeSeries {
-                id: PacketId::default(),
-                range: Timestamp(start)..Timestamp(end.saturating_sub(1)),
-                component_id: id,
-                limit: Some(limit),
-            },
-            callback,
-        );
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use impeller::types::IntoLenPacket;
     #[test]
     fn blocks_use_euclidean_seconds() {
         assert_eq!(block_start(1_250_001), 1_000_000);
@@ -304,7 +181,8 @@ mod tests {
         let limit = cache
             .fitting_page_limit(sample, Some(PAGE_LIMIT), 0)
             .expect("remaining budget fits a page");
-        assert_eq!(limit, 3);
+        assert_eq!(limit, 2);
+        assert!(limit.is_power_of_two());
         assert!(cache.admit_block(0, sample * limit));
         assert!(cache.admit_block(5_000_000, sample * limit));
         assert!(!cache.admit_block(0, sample * 4));
@@ -313,5 +191,100 @@ mod tests {
                 .series(&id)
                 .is_some_and(|series| series.contains_key(&Timestamp(-120_000_000)))
         );
+    }
+
+    #[test]
+    fn cleared_prefetch_does_not_stick_a_component() {
+        let mut prefetch = VisiblePrefetchState::default();
+        let key = prefetch::PrefetchKey::Window {
+            component_id: ComponentId(7),
+            start: 0,
+            end: BLOCK_US,
+        };
+        assert!(prefetch.begin(key).is_some());
+        assert!(prefetch.begin(key).is_none());
+        prefetch.clear_in_flight();
+        assert!(prefetch.begin(key).is_some());
+    }
+
+    #[test]
+    fn playback_and_plot_blocks_share_one_request() {
+        let id = ComponentId(7);
+        let limit = 256;
+        let playback = block_query(id, BLOCK_US, limit);
+        let plot = block_query(id, BLOCK_US, limit);
+        assert_eq!(
+            (&playback).into_len_packet().inner,
+            (&plot).into_len_packet().inner
+        );
+        let again = block_query(id, BLOCK_US, limit);
+        assert_eq!(
+            again.range,
+            Timestamp(BLOCK_US)..Timestamp(BLOCK_US * 2 - 1)
+        );
+        assert_eq!(again.limit, Some(limit));
+    }
+
+    #[test]
+    fn retained_bytes_match_a_recount() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId(7);
+        let near = ComponentValue::F64(nox::array![1f64].to_dyn());
+        let far = ComponentValue::F64(nox::array![2f64].to_dyn());
+        let hold = ComponentValue::F64(nox::array![3f64].to_dyn());
+        let sample = TelemetryCache::value_bytes(&near);
+        cache.set_playback_budget(sample * 8, Timestamp(0));
+        cache.insert(id, Timestamp(0), near);
+        cache.insert(id, Timestamp(5_000_000), far);
+        assert_eq!(cache.retained_bytes(0), sample);
+        assert_eq!(cache.retained_bytes(5_000_000), sample * 2);
+        cache.insert_predecessor(id, Timestamp(-120_000_000), 0, hold.clone());
+        cache.insert_predecessor(id, Timestamp(-120_000_000), 5_000_000, hold);
+        assert_eq!(cache.retained_bytes(0), sample * 2);
+        assert_eq!(recount(&cache, 0), cache.retained_bytes(0));
+        cache.drop_block(id, 5_000_000);
+        assert!(
+            cache
+                .series(&id)
+                .is_some_and(|series| series.contains_key(&Timestamp(-120_000_000)))
+        );
+        assert!(
+            cache
+                .series(&id)
+                .is_some_and(|series| !series.contains_key(&Timestamp(5_000_000)))
+        );
+        assert_eq!(cache.retained_bytes(0), sample * 2);
+        assert_eq!(recount(&cache, 0), cache.retained_bytes(0));
+        cache.drop_block(id, 0);
+        assert!(
+            cache
+                .series(&id)
+                .is_none_or(|series| !series.contains_key(&Timestamp(0)))
+        );
+        assert_eq!(recount(&cache, 0), cache.retained_bytes(0));
+        assert_eq!(cache.retained_bytes(0), 0);
+    }
+
+    fn recount(cache: &TelemetryCache, start: i64) -> usize {
+        let wanted = start.abs_diff(cache.playback_pivot().0);
+        cache
+            .components
+            .iter()
+            .flat_map(|(id, series)| {
+                let claims = cache.predecessors.get(id);
+                series.iter().filter_map(move |(time, value)| {
+                    let kept = match claims {
+                        Some(claims) if claims.values().any(|claimed| claimed == time) => {
+                            claims.iter().any(|(block, claimed)| {
+                                claimed == time
+                                    && block.abs_diff(cache.playback_pivot().0) <= wanted
+                            })
+                        }
+                        _ => block_start(time.0).abs_diff(cache.playback_pivot().0) <= wanted,
+                    };
+                    kept.then_some(TelemetryCache::value_bytes(value))
+                })
+            })
+            .fold(0, usize::saturating_add)
     }
 }

@@ -69,7 +69,9 @@ fn install_connection(world: &mut World, endpoint: Option<DbEndpoint>, initial: 
     if !initial && let Some(mut cache) = world.get_resource_mut::<crate::TelemetryCache>() {
         cache.reset();
     }
-    world.insert_resource(crate::playback::PlaybackPager::default());
+    if let Some(mut prefetch) = world.get_resource_mut::<crate::VisiblePrefetchState>() {
+        prefetch.clear_in_flight();
+    }
     let endpoint = endpoint.map(|endpoint| attach_assets(world, endpoint));
     let (packet_tx, packet_rx, outgoing_packet_rx, incoming_packet_tx) = channels();
     let (msg_tx, msg_rx, msg_outgoing_rx, msg_incoming_tx) = msg_channels();
@@ -313,7 +315,9 @@ fn open_sockets(world: &mut World) {
     };
     world.remove_non_send::<WsSockets>();
     world.insert_resource(crate::ReplayCachePolicy::default());
-    world.insert_resource(crate::playback::PlaybackPager::default());
+    if let Some(mut prefetch) = world.get_resource_mut::<crate::VisiblePrefetchState>() {
+        prefetch.clear_in_flight();
+    }
     world.insert_resource(CurrentStreamId(stream_id));
     // Requests and responses from a closed connection cannot cross a reconnect.
     if let Some(mut rx) = world.get_resource_mut::<crate::PacketRx>() {

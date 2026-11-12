@@ -32,7 +32,7 @@ use impeller_wkt::{
 };
 use serde::de::DeserializeOwned;
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque},
+    collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     convert::Infallible,
     marker::PhantomData,
     ops::Bound,
@@ -49,8 +49,14 @@ pub use impeller_wkt::{ComponentPart, ComponentPath};
 pub use address;
 pub use url;
 pub mod playback;
+pub mod prefetch;
 pub mod replay;
 pub use playback::{PlaybackCacheLimits, block_start};
+pub use prefetch::{
+    HoldAnchorDecision, PrefetchKey, PrefetchRequestState, VISIBLE_PREFETCH_LIMIT,
+    VisiblePageOutcome, VisiblePrefetchState, apply_hold_anchor_payload,
+    apply_visible_prefetch_payload, hold_anchor_decision, prefetch_visible_window,
+};
 
 #[derive(Resource, Default)]
 pub struct ReplayCachePolicy {
@@ -92,6 +98,8 @@ pub struct TelemetryCache {
     pivot: Timestamp,
     /// Block a sparse sample is kept for, and that sample's timestamp.
     predecessors: HashMap<ComponentId, BTreeMap<i64, Timestamp>>,
+    /// Bytes charged to each one-second block. A predecessor is charged to its closest claim.
+    block_bytes: HashMap<ComponentId, BTreeMap<i64, usize>>,
     components: HashMap<ComponentId, BTreeMap<Timestamp, ComponentValue>>,
     /// Merged half-open coverage intervals `[start, end)` per component (micros).
     coverage: HashMap<ComponentId, Vec<(i64, i64)>>,
@@ -129,6 +137,13 @@ pub struct SeriesStoreLoadState {
     pub components_complete: usize,
     pub samples_loaded: u64,
     pub complete: bool,
+}
+
+fn floor_pow2(value: usize) -> usize {
+    if value == 0 {
+        return 0;
+    }
+    1usize << (usize::BITS - 1 - value.leading_zeros())
 }
 
 impl TelemetryCache {
@@ -188,14 +203,18 @@ impl TelemetryCache {
         // Keep the first value seen for a timestamp. In mixed backfill+live
         // streaming, the same timestamp can be replayed; replacing it can make
         // rendered poses jump between two states for the same tick.
-        if let std::collections::btree_map::Entry::Vacant(entry) = series.entry(ts) {
+        let inserted = if let std::collections::btree_map::Entry::Vacant(entry) = series.entry(ts) {
             entry.insert(value);
             self.resident_bytes = self.resident_bytes.saturating_add(bytes);
             self.generation = self.generation.wrapping_add(1);
             true
         } else {
             false
+        };
+        if inserted {
+            self.add_block_bytes(component_id, block_start(ts.0), bytes);
         }
+        inserted
     }
 
     fn value_bytes(value: &ComponentValue) -> usize {
@@ -212,7 +231,12 @@ impl TelemetryCache {
 
     pub fn set_playback_budget(&mut self, bytes: usize, pivot: Timestamp) {
         self.byte_limit = Some(bytes);
+        if self.pivot == pivot {
+            return;
+        }
+        let old_pivot = self.pivot;
         self.pivot = pivot;
+        self.rebucket_predecessors(old_pivot);
     }
 
     /// Largest page that fits beside samples `block` cannot evict.
@@ -239,29 +263,115 @@ impl TelemetryCache {
             return None;
         }
         let fit = available / sample_bytes;
-        Some(max_limit.map_or(fit, |limit| fit.min(limit)))
+        let fit = max_limit.map_or(fit, |limit| fit.min(limit));
+        Some(floor_pow2(fit))
     }
 
     /// Bytes in blocks at least as close to the pivot as `start`. Admission will not evict them.
     fn retained_bytes(&self, start: i64) -> usize {
         let wanted = start.abs_diff(self.pivot.0);
-        self.components
-            .iter()
-            .flat_map(|(id, series)| {
-                let claims = self.predecessors.get(id);
-                series.iter().filter_map(move |(time, value)| {
-                    let kept = match claims {
-                        Some(claims) if claims.values().any(|claimed| claimed == time) => {
-                            claims.iter().any(|(block, claimed)| {
-                                claimed == time && block.abs_diff(self.pivot.0) <= wanted
-                            })
-                        }
-                        _ => block_start(time.0).abs_diff(self.pivot.0) <= wanted,
-                    };
-                    kept.then_some(Self::value_bytes(value))
-                })
+        self.block_bytes
+            .values()
+            .flat_map(|blocks| blocks.iter())
+            .filter(|(block, _)| block.abs_diff(self.pivot.0) <= wanted)
+            .fold(0, |sum, (_, bytes)| sum.saturating_add(*bytes))
+    }
+
+    fn add_block_bytes(&mut self, id: ComponentId, block: i64, bytes: usize) {
+        if bytes == 0 {
+            return;
+        }
+        let total = self
+            .block_bytes
+            .entry(id)
+            .or_default()
+            .entry(block)
+            .or_default();
+        *total = total.saturating_add(bytes);
+    }
+
+    fn sub_block_bytes(&mut self, id: ComponentId, block: i64, bytes: usize) {
+        let Some(blocks) = self.block_bytes.get_mut(&id) else {
+            return;
+        };
+        let Some(total) = blocks.get_mut(&block) else {
+            return;
+        };
+        *total = total.saturating_sub(bytes);
+        if *total == 0 {
+            blocks.remove(&block);
+        }
+        if blocks.is_empty() {
+            self.block_bytes.remove(&id);
+        }
+    }
+
+    fn relocate_block_bytes(&mut self, id: ComponentId, from: i64, to: i64, bytes: usize) {
+        if bytes == 0 || from == to {
+            return;
+        }
+        self.sub_block_bytes(id, from, bytes);
+        self.add_block_bytes(id, to, bytes);
+    }
+
+    /// Closest block that claims `time`, or the sample's own block when nothing does.
+    fn accounting_block(&self, id: ComponentId, time: Timestamp) -> i64 {
+        self.predecessors
+            .get(&id)
+            .and_then(|claims| {
+                claims
+                    .iter()
+                    .filter(|(_, claimed)| **claimed == time)
+                    .map(|(block, _)| *block)
+                    .min_by_key(|block| block.abs_diff(self.pivot.0))
             })
-            .fold(0, usize::saturating_add)
+            .unwrap_or_else(|| block_start(time.0))
+    }
+
+    fn closest_claim(
+        claims: &BTreeMap<i64, Timestamp>,
+        time: Timestamp,
+        pivot: i64,
+    ) -> Option<i64> {
+        claims
+            .iter()
+            .filter(|(_, claimed)| **claimed == time)
+            .map(|(block, _)| *block)
+            .min_by_key(|block| block.abs_diff(pivot))
+    }
+
+    fn rebucket_predecessors(&mut self, old_pivot: Timestamp) {
+        let mut moves = Vec::new();
+        for (&id, claims) in &self.predecessors {
+            let mut seen = Vec::new();
+            for &time in claims.values() {
+                if seen.contains(&time) {
+                    continue;
+                }
+                seen.push(time);
+                let Some(from) = Self::closest_claim(claims, time, old_pivot.0) else {
+                    continue;
+                };
+                let Some(to) = Self::closest_claim(claims, time, self.pivot.0) else {
+                    continue;
+                };
+                if from == to {
+                    continue;
+                }
+                let Some(bytes) = self
+                    .components
+                    .get(&id)
+                    .and_then(|series| series.get(&time))
+                    .map(Self::value_bytes)
+                else {
+                    continue;
+                };
+                moves.push((id, from, to, bytes));
+            }
+        }
+        for (id, from, to, bytes) in moves {
+            self.relocate_block_bytes(id, from, to, bytes);
+        }
     }
 
     /// Admission only evicts blocks strictly farther away than the wanted block.
@@ -319,22 +429,34 @@ impl TelemetryCache {
         } else {
             Self::value_bytes(&value)
         };
+        let sample_bytes = Self::value_bytes(&value);
         if !self.admit_block(block, bytes) {
             return;
         }
+        let from = if bytes == 0 {
+            self.accounting_block(id, time)
+        } else {
+            block_start(time.0)
+        };
         let limit = self.byte_limit;
         self.byte_limit = None;
         self.insert(id, time, value);
         self.byte_limit = limit;
         self.predecessors.entry(id).or_default().insert(block, time);
+        let to = self.accounting_block(id, time);
+        self.relocate_block_bytes(id, from, to, sample_bytes);
     }
 
     pub fn drop_block(&mut self, id: ComponentId, start: i64) {
         let end = start.saturating_add(1_000_000);
         let dropped_anchor = self
             .predecessors
-            .get_mut(&id)
-            .and_then(|claims| claims.remove(&start));
+            .get(&id)
+            .and_then(|claims| claims.get(&start).copied());
+        let before = dropped_anchor.map(|time| self.accounting_block(id, time));
+        if let Some(claims) = self.predecessors.get_mut(&id) {
+            claims.remove(&start);
+        }
         if self
             .predecessors
             .get(&id)
@@ -342,13 +464,15 @@ impl TelemetryCache {
         {
             self.predecessors.remove(&id);
         }
+        let after = dropped_anchor.map(|time| self.accounting_block(id, time));
         let still_claimed: Vec<Timestamp> = self
             .predecessors
             .get(&id)
             .map(|claims| claims.values().copied().collect())
             .unwrap_or_default();
-        if let Some(series) = self.components.get_mut(&id) {
-            series.retain(|time, value| {
+        let mut removed = Vec::new();
+        if let Some(series) = self.components.get(&id) {
+            for (time, value) in series {
                 let claimed = still_claimed.contains(time);
                 let remove = if dropped_anchor == Some(*time) {
                     !claimed
@@ -358,13 +482,39 @@ impl TelemetryCache {
                     time.0 >= start && time.0 < end
                 };
                 if remove {
-                    self.resident_bytes =
-                        self.resident_bytes.saturating_sub(Self::value_bytes(value));
-                    false
-                } else {
-                    true
+                    let block = if dropped_anchor == Some(*time) {
+                        before.unwrap_or_else(|| block_start(time.0))
+                    } else {
+                        block_start(time.0)
+                    };
+                    removed.push((*time, block, Self::value_bytes(value)));
                 }
+            }
+        }
+        if let Some(series) = self.components.get_mut(&id) {
+            series.retain(|time, _| {
+                !removed
+                    .iter()
+                    .any(|(removed_time, _, _)| removed_time == time)
             });
+        }
+        for (_, block, bytes) in &removed {
+            self.resident_bytes = self.resident_bytes.saturating_sub(*bytes);
+            self.sub_block_bytes(id, *block, *bytes);
+        }
+        if let (Some(time), Some(from), Some(to)) = (dropped_anchor, before, after)
+            && from != to
+            && self
+                .components
+                .get(&id)
+                .is_some_and(|series| series.contains_key(&time))
+            && let Some(bytes) = self
+                .components
+                .get(&id)
+                .and_then(|series| series.get(&time))
+                .map(Self::value_bytes)
+        {
+            self.relocate_block_bytes(id, from, to, bytes);
         }
         self.drop_coverage(id, start, end);
         if let Some(timestamp) =
@@ -492,6 +642,7 @@ impl TelemetryCache {
     /// Drop all samples and coverage for a component (unsubscribe / reclaim RAM).
     pub fn remove_series(&mut self, component_id: &ComponentId) {
         self.predecessors.remove(component_id);
+        self.block_bytes.remove(component_id);
         let removed = self.components.remove(component_id);
         if let Some(series) = &removed {
             self.resident_bytes = self
@@ -851,7 +1002,7 @@ pub fn backfill_cache(
     mut commands: Commands,
     current: Option<bevy::prelude::Res<CurrentTimestamp>>,
     limits: Res<PlaybackCacheLimits>,
-    mut pager: ResMut<playback::PlaybackPager>,
+    mut prefetch: ResMut<VisiblePrefetchState>,
     mut cache: ResMut<TelemetryCache>,
 ) {
     if cfg!(target_family = "wasm") {
@@ -861,9 +1012,8 @@ pub fn backfill_cache(
                 &limits,
                 &priority,
                 &schema_reg,
-                &mut pager,
+                &mut prefetch,
                 &mut cache,
-                &mut backfill,
                 &mut commands,
             );
         }
@@ -1932,7 +2082,7 @@ impl Plugin for ImpellerPlugin {
         app.add_message::<DbMessage>()
             .init_resource::<PlaybackCacheLimits>()
             .init_resource::<ReplayCachePolicy>()
-            .init_resource::<playback::PlaybackPager>()
+            .init_resource::<VisiblePrefetchState>()
             .add_plugins(DefaultAdaptersPlugin)
             .add_systems(bevy::prelude::Startup, ensure_db_components_root)
             .add_systems(
