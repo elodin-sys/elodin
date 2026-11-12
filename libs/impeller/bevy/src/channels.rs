@@ -86,38 +86,182 @@ impl ThreadConnectionStatus {
     }
 }
 
+/// Why [`HostOrUrl`] rejected an `&assets=` value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HostOrUrlError {
+    /// Blank, or only slashes.
+    Empty,
+    /// A URL scheme other than `http` or `https`, or a query or fragment.
+    UnsupportedScheme,
+    /// An `http`/`https` URL with no host.
+    MissingHost,
+    /// A full URL did not parse.
+    Url(url::ParseError),
+    /// `host:port` did not parse.
+    Host(ParseError),
+}
+
+impl fmt::Display for HostOrUrlError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Empty => f.write_str("empty assets URL"),
+            Self::UnsupportedScheme => {
+                f.write_str("assets URL scheme must be http or https, without a query or fragment")
+            }
+            Self::MissingHost => f.write_str("assets URL is missing a host"),
+            Self::Url(err) => write!(f, "invalid assets URL: {err}"),
+            Self::Host(err) => write!(f, "invalid assets address: {err}"),
+        }
+    }
+}
+
+impl std::error::Error for HostOrUrlError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Url(err) => Some(err),
+            Self::Host(err) => Some(err),
+            _ => None,
+        }
+    }
+}
+
+/// `&assets=` value: a `host:port` or an `http`/`https` URL.
+///
+/// The host form keeps the authority the user typed. Loopback mapping happens
+/// in [`Self::base_url`].
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum HostOrUrl {
+    Host(Authority),
+    Url(url::Url),
+}
+
+impl HostOrUrl {
+    /// HTTP base for asset fetches. The path ends with `/` so [`url::Url::join`] appends.
+    pub fn base_url(&self) -> url::Url {
+        match self {
+            Self::Host(authority) => {
+                authority_base_url(&client_host_authority(authority.host(), authority.port()))
+            }
+            Self::Url(url) => url.clone(),
+        }
+    }
+}
+
+impl FromStr for HostOrUrl {
+    type Err = HostOrUrlError;
+
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        let input = input.trim();
+        if input.is_empty() {
+            return Err(HostOrUrlError::Empty);
+        }
+        if input.contains("://") {
+            return parse_assets_url(input);
+        }
+        let authority_text = input.trim_end_matches('/');
+        if authority_text.is_empty() {
+            return Err(HostOrUrlError::Empty);
+        }
+        authority_text
+            .parse()
+            .map(Self::Host)
+            .map_err(HostOrUrlError::Host)
+    }
+}
+
+impl fmt::Display for HostOrUrl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Host(authority) => fmt::Display::fmt(authority, f),
+            Self::Url(url) => fmt::Display::fmt(url, f),
+        }
+    }
+}
+
+fn parse_assets_url(input: &str) -> Result<HostOrUrl, HostOrUrlError> {
+    let mut url = url::Url::parse(input).map_err(HostOrUrlError::Url)?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(HostOrUrlError::UnsupportedScheme);
+    }
+    if url.host().is_none() {
+        return Err(HostOrUrlError::MissingHost);
+    }
+    if url.query().is_some() || url.fragment().is_some() {
+        return Err(HostOrUrlError::UnsupportedScheme);
+    }
+    if !url.path().ends_with('/') {
+        url.path_segments_mut()
+            .map_err(|_| HostOrUrlError::MissingHost)?
+            .push("");
+    }
+    Ok(HostOrUrl::Url(url))
+}
+
+fn authority_base_url(authority: &Authority) -> url::Url {
+    url::Url::parse(&format!("http://{authority}/")).expect("authority is a valid http URL")
+}
+
 /// Database address typed by a client: an IP literal or DNS name plus port.
 /// DNS names are kept so wasm can hand them to the browser.
+///
+/// `assets`, when set, is the DB the browser actually reaches: `db:` fetches
+/// and the Impeller WebSockets are both paths under it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct DbEndpoint(Authority);
+pub struct DbEndpoint {
+    authority: Authority,
+    assets: Option<HostOrUrl>,
+}
 
 impl DbEndpoint {
     pub fn parse(input: &str) -> Result<Self, ParseError> {
-        input.trim().parse::<Authority>().map(Self)
+        input.trim().parse::<Authority>().map(Self::from)
     }
 
     pub fn from_socket(addr: SocketAddr) -> Self {
-        Self(addr.into())
+        let authority: Authority = addr.into();
+        Self::from(authority)
+    }
+
+    pub fn with_assets(mut self, assets: HostOrUrl) -> Self {
+        self.assets = Some(assets);
+        self
+    }
+
+    /// A browser connection. `authority` is only the display identity; both
+    /// WebSockets and `db:` assets are served from `assets`.
+    pub fn from_assets(assets: HostOrUrl) -> Self {
+        let authority = match &assets {
+            HostOrUrl::Host(authority) => authority.clone(),
+            HostOrUrl::Url(url) => authority_from_base_url(url),
+        };
+        Self {
+            authority,
+            assets: Some(assets),
+        }
+    }
+
+    pub fn assets(&self) -> Option<&HostOrUrl> {
+        self.assets.as_ref()
     }
 
     pub fn port(&self) -> u16 {
-        self.0.port()
+        self.authority.port()
     }
 
     pub fn host(&self) -> HostRef<'_> {
-        self.0.host()
+        self.authority.host()
     }
 
     /// DNS name when `host` is not an IP literal.
     pub fn dns_host(&self) -> Option<&str> {
-        match self.0.host() {
+        match self.authority.host() {
             HostRef::Domain(domain) => Some(domain.name()),
             HostRef::IPAddress(_) => None,
         }
     }
 
     pub fn socket_addr(&self) -> Option<SocketAddr> {
-        match self.0.host() {
+        match self.authority.host() {
             HostRef::IPAddress(ip) => Some(SocketAddr::new(ip.to_std(), self.port())),
             HostRef::Domain(_) => None,
         }
@@ -132,17 +276,7 @@ impl DbEndpoint {
 
     /// Authority for http/ws URLs at `port`. Unspecified bind addresses become loopback.
     fn client_authority(&self, port: u16) -> Authority {
-        match self.0.host() {
-            HostRef::IPAddress(ip) => {
-                let ip = match ip.to_std() {
-                    IpAddr::V4(v4) if v4.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
-                    IpAddr::V6(v6) if v6.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
-                    other => other,
-                };
-                Authority::new(IPAddress::from(ip).to_host(), port)
-            }
-            host @ HostRef::Domain(_) => Authority::new(host.into(), port),
-        }
+        client_host_authority(self.authority.host(), port)
     }
 
     pub fn authority(&self) -> Authority {
@@ -156,16 +290,85 @@ impl DbEndpoint {
         )
     }
 
-    pub fn http_base(&self) -> String {
-        format!("http://{}", self.assets_authority())
+    pub fn http_base(&self) -> url::Url {
+        if let Some(assets) = &self.assets {
+            return assets.base_url();
+        }
+        authority_base_url(&self.assets_authority())
+    }
+
+    /// URL of one `db:` asset key: `{http_base}/assets/{key}`.
+    pub fn assets_url(&self, key: &str) -> url::Url {
+        let key = key.trim_start_matches('/');
+        let base = self.http_base();
+        let rel = format!("{}/{key}", impeller::ASSETS_HTTP_PREFIX);
+        match base.join(&rel) {
+            Ok(url) => url,
+            Err(_) => {
+                let mut fallback = base.to_string();
+                if !fallback.ends_with('/') {
+                    fallback.push('/');
+                }
+                fallback.push_str(&rel);
+                url::Url::parse(&fallback).unwrap_or(base)
+            }
+        }
     }
 
     pub fn ws_urls(&self) -> (String, String) {
+        if let Some(assets) = &self.assets {
+            return ws_urls_under(assets.base_url());
+        }
         let host = self.assets_authority();
         (
             format!("ws://{host}/impeller"),
             format!("ws://{host}/impeller/msg"),
         )
+    }
+}
+
+/// Host and default port of an assets base, for [`DbEndpoint`]'s display identity.
+fn authority_from_base_url(url: &url::Url) -> Authority {
+    let host = url.host_str().unwrap_or("127.0.0.1");
+    let port = url.port_or_known_default().unwrap_or(80);
+    let text = if host.contains(':') {
+        format!("[{host}]:{port}")
+    } else {
+        format!("{host}:{port}")
+    };
+    text.parse()
+        .expect("an http(s) URL host is a valid authority")
+}
+
+/// `http` becomes `ws` and `https` becomes `wss`. Paths stay under the base.
+fn ws_urls_under(mut base: url::Url) -> (String, String) {
+    let scheme = if base.scheme() == "https" {
+        "wss"
+    } else {
+        "ws"
+    };
+    base.set_scheme(scheme)
+        .expect("http(s) can switch to ws(s)");
+    let msg = base
+        .join("impeller/msg")
+        .unwrap_or_else(|_| base.clone())
+        .to_string();
+    let main = base.join("impeller").unwrap_or(base).to_string();
+    (main, msg)
+}
+
+/// Authority for client URLs. Unspecified bind addresses become loopback.
+fn client_host_authority(host: HostRef<'_>, port: u16) -> Authority {
+    match host {
+        HostRef::IPAddress(ip) => {
+            let ip = match ip.to_std() {
+                IpAddr::V4(v4) if v4.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+                IpAddr::V6(v6) if v6.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
+                other => other,
+            };
+            Authority::new(IPAddress::from(ip).to_host(), port)
+        }
+        host @ HostRef::Domain(_) => Authority::new(host.into(), port),
     }
 }
 
@@ -185,13 +388,16 @@ impl From<SocketAddr> for DbEndpoint {
 
 impl From<Authority> for DbEndpoint {
     fn from(authority: Authority) -> Self {
-        Self(authority)
+        Self {
+            authority,
+            assets: None,
+        }
     }
 }
 
 impl fmt::Display for DbEndpoint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Display::fmt(&self.0, f)
+        fmt::Display::fmt(&self.authority, f)
     }
 }
 
@@ -308,7 +514,7 @@ mod tests {
 
         let local = DbEndpoint::parse(" localhost:2240 ").unwrap();
         assert_eq!(local.to_string(), "localhost:2240");
-        assert_eq!(local.http_base(), "http://localhost:2241");
+        assert_eq!(local.http_base().as_str(), "http://localhost:2241/");
         assert_eq!(local.dns_host(), Some("localhost"));
         assert!(local.socket_addr().is_none());
 
@@ -341,10 +547,106 @@ mod tests {
     #[test]
     fn unspecified_ip_becomes_loopback_in_urls() {
         let v4 = DbEndpoint::parse("0.0.0.0:2240").unwrap();
-        assert_eq!(v4.http_base(), "http://127.0.0.1:2241");
+        assert_eq!(v4.http_base().as_str(), "http://127.0.0.1:2241/");
         assert_eq!(v4.to_string(), "0.0.0.0:2240");
         let v6 = DbEndpoint::parse("[::]:2240").unwrap();
         assert_eq!(v6.authority().to_string(), "[::1]:2240");
         assert_eq!(v6.ws_urls().1, "ws://[::1]:2241/impeller/msg");
+    }
+
+    #[test]
+    fn host_or_url_accepts_authority_and_urls() {
+        use super::HostOrUrl;
+
+        let host: HostOrUrl = "127.0.0.1:2241".parse().unwrap();
+        assert_eq!(host.base_url().as_str(), "http://127.0.0.1:2241/");
+        assert_eq!(host.to_string(), "127.0.0.1:2241");
+        assert_eq!(host.to_string().parse::<HostOrUrl>().unwrap(), host);
+
+        let unspecified: HostOrUrl = " 0.0.0.0:2241 ".parse().unwrap();
+        assert_eq!(unspecified.to_string(), "0.0.0.0:2241");
+        assert_eq!(unspecified.base_url().as_str(), "http://127.0.0.1:2241/");
+        assert_eq!(
+            unspecified.to_string().parse::<HostOrUrl>().unwrap(),
+            unspecified
+        );
+
+        let v6: HostOrUrl = "[::]:2241".parse().unwrap();
+        assert_eq!(v6.to_string(), "[::]:2241");
+        assert_eq!(v6.base_url().as_str(), "http://[::1]:2241/");
+
+        let named: HostOrUrl = "localhost:2241/".parse().unwrap();
+        assert_eq!(named.to_string(), "localhost:2241");
+        assert_eq!(named.base_url().as_str(), "http://localhost:2241/");
+
+        let cdn: HostOrUrl = "https://cdn.example/assets".parse().unwrap();
+        assert_eq!(cdn.to_string(), "https://cdn.example/assets/");
+        assert_eq!(cdn.to_string().parse::<HostOrUrl>().unwrap(), cdn);
+        assert_eq!(
+            cdn.base_url().join("rocket.glb").unwrap().as_str(),
+            "https://cdn.example/assets/rocket.glb"
+        );
+
+        let upper: HostOrUrl = "HTTP://127.0.0.1:2241/".parse().unwrap();
+        assert_eq!(upper.to_string(), "http://127.0.0.1:2241/");
+
+        assert!("".parse::<HostOrUrl>().is_err());
+        assert!("http://".parse::<HostOrUrl>().is_err());
+        assert!("https:///".parse::<HostOrUrl>().is_err());
+        assert!("ftp://files/a".parse::<HostOrUrl>().is_err());
+        assert!("not a host".parse::<HostOrUrl>().is_err());
+        assert!(
+            "https://cdn.example/assets?x=1"
+                .parse::<HostOrUrl>()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn assets_override_is_the_connection() {
+        use super::HostOrUrl;
+
+        let assets: HostOrUrl = "10.0.0.5:9000".parse().unwrap();
+        let endpoint = DbEndpoint::parse("127.0.0.1:2240")
+            .unwrap()
+            .with_assets(assets.clone());
+        assert_eq!(endpoint.assets(), Some(&assets));
+        assert_eq!(endpoint.http_base().as_str(), "http://10.0.0.5:9000/");
+        assert_eq!(
+            endpoint.assets_url("rocket.glb").as_str(),
+            "http://10.0.0.5:9000/assets/rocket.glb"
+        );
+        assert_eq!(
+            endpoint.assets_url("icons/marker.png").as_str(),
+            "http://10.0.0.5:9000/assets/icons/marker.png"
+        );
+        assert_eq!(endpoint.ws_urls().0, "ws://10.0.0.5:9000/impeller");
+        assert_eq!(endpoint.ws_urls().1, "ws://10.0.0.5:9000/impeller/msg");
+        assert_eq!(endpoint.to_string(), "127.0.0.1:2240");
+    }
+
+    #[test]
+    fn from_assets_is_the_websocket_and_the_asset_base() {
+        use super::HostOrUrl;
+
+        let secure: HostOrUrl = "https://db.local/runs/a".parse().unwrap();
+        let endpoint = DbEndpoint::from_assets(secure);
+        assert_eq!(endpoint.ws_urls().0, "wss://db.local/runs/a/impeller");
+        assert_eq!(endpoint.ws_urls().1, "wss://db.local/runs/a/impeller/msg");
+        assert_eq!(
+            endpoint.assets_url("rocket.glb").as_str(),
+            "https://db.local/runs/a/assets/rocket.glb"
+        );
+        assert_eq!(
+            endpoint.assets_url("__index__/schematics/").as_str(),
+            "https://db.local/runs/a/assets/__index__/schematics/"
+        );
+        assert_eq!(endpoint.to_string(), "db.local:443");
+
+        let bare: HostOrUrl = "10.0.0.5:2241".parse().unwrap();
+        let endpoint = DbEndpoint::from_assets(bare);
+        assert_eq!(endpoint.ws_urls().1, "ws://10.0.0.5:2241/impeller/msg");
+        assert_eq!(endpoint.http_base().as_str(), "http://10.0.0.5:2241/");
+        assert_eq!(endpoint.to_string(), "10.0.0.5:2241");
     }
 }

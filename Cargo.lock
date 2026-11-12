@@ -5957,6 +5957,7 @@ dependencies = [
  "console_error_panic_hook",
  "elodin-editor",
  "getrandom 0.3.4",
+ "impeller-bevy",
  "web-sys",
 ]
 
@@ -8206,6 +8207,7 @@ dependencies = [
  "stellarator-buf",
  "thingbuf",
  "tracing",
+ "url",
  "wasm-bindgen",
  "web-sys",
  "web-time",

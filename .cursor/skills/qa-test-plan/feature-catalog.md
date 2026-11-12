@@ -132,7 +132,7 @@
 
 - **Follow mode (`--follows <addr>`)** — TCP replication: schema/metadata sync on connect, full historical backfill, then live streaming; follower still accepts local writers (dual-source pattern, e.g. remote sim + local video); duplicate-component write warnings; `--follow-packet-size` tuning (default ~1500, jumbo 9000).
 - **Replay mode (`elodin editor <db> --replay`)** — Editor-side flag: play a recorded DB as if live with progressive timeline reveal (not an `elodin-db run` flag).
-- **Asset server** — During `run`, HTTP server on port N+1 serves `{db}/assets/`; local schematic asset paths (GLB, PNG icons, skybox cubemaps) rewritten to `db:` scheme at record time; followers mirror assets via `GET /__index__`; enables fully portable recordings (Aleph HITL DBs replay anywhere).
+- **Asset server** — During `run`, HTTP server on port N+1 serves `{db}/assets/`; local schematic asset paths (GLB, PNG icons, skybox cubemaps) rewritten to `db:` scheme at record time; followers mirror assets via `GET /assets/__index__`; enables fully portable recordings (Aleph HITL DBs replay anywhere).
 - **Legacy replay directories** — `metadata.json`, `assets.bin` (internal format, not for external consumption), per-archetype Parquet files; opened via `elodin editor <dir>`; well-known archetypes `body`, `shape`, `asset_handle_panel`, `asset_handle_entity_metadata`.
 
 ## 14. Elodin DB — Data Management CLI
