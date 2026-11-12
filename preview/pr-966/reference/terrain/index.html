@@ -596,12 +596,14 @@ with ion imagery is currently native-only. Browser detail retention is disabled.
 Heightmaps remain independent: load a prepared grid with <code>TerrainHeightmap.load()</code>;
 <code>Terrain.from_asset(...).heightmap()</code> does not prepare one from scenery.</p>
 <h2 id="browser-replay">Browser replay</h2>
-<p>Connect the browser editor with <code>?db=HOST:PORT</code>. Terrain assets come from the DB
-automatically; missing Photo 3D tiles stream as needed. Add <code>&amp;offline=1</code> to disable
+<p>Run <code>just web http://127.0.0.1:2241</code> to connect to the local DB asset server
+(the simulation's TCP port plus one). Hosted pages set the <code>elodin-web-db</code> meta
+tag to the DB's HTTP base URL. Terrain assets come from the DB automatically;
+missing Photo 3D tiles stream as needed. Add <code>?offline=1</code> to disable
 terrain-provider requests while retaining access to the DB and its assets.</p>
 <p>Particles and atmosphere require WebGPU. See the
 <a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/apps/elodin-web">browser editor README</a>
-for deployment and a separate asset-server address.</p>
+for deployment and database URL configuration.</p>
 <h2 id="startup-and-outages">Startup and outages</h2>
 <p>When <code>elodin editor</code> launches a simulation with streamed terrain, the simulation
 stays at t=0 until the initial terrain is ready. Loading has no interactive
