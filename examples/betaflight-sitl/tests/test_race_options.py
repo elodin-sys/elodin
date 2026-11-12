@@ -37,6 +37,7 @@ def test_default_startup_is_scripted_camera_off_without_course() -> None:
     assert options.guidance is GuidanceMode.SCRIPTED
     assert options.course.name == "none"
     assert not options.camera_enabled
+    assert options.record_dir is None
 
 
 @pytest.mark.parametrize("camera", ("0", "1"))

@@ -65,11 +65,13 @@ def scenario_exit_code(
     referee_exit_code: int | None = None,
     axis_passed: bool | None = None,
     camera_accepted: bool | None = None,
+    recording_failed: bool | None = None,
 ) -> int:
     """Preserve each scenario's nonzero failure, including simultaneous B + E failures.
 
     An unselected check is ``None``, not a pass. The ordered result lines are
-    printed separately before this function is called.
+    printed separately before this function is called. A failed recording loses
+    to an earlier nonzero code and otherwise exits 1.
     """
     if execution_exit_code:
         return execution_exit_code
@@ -82,5 +84,7 @@ def scenario_exit_code(
     if referee_exit_code:
         return referee_exit_code
     if axis_passed is False or camera_accepted is False:
+        return 1
+    if recording_failed:
         return 1
     return 0

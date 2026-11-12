@@ -264,6 +264,53 @@ The fixture command prints the canonical centered, translated, yawed, and ranged
 poses as JSON. `synthetic_vision.py` is for tests and offline fixtures.
 Production vision code does not import it.
 
+### Gate detector
+
+`gate_detector.py` is the classical orange-gate detector and the only module
+that imports OpenCV. It returns `GateCandidate` values from `vision.py`. It is
+not wired into live guidance. CI installs OpenCV through the `.#run` Nix shell
+(`python3Packages.opencv4`). A local uv environment needs the matching wheel:
+
+```bash
+uv pip install opencv-python-headless
+```
+
+8-bit HSV hue stays on OpenCV's 0–180 scale. The default threshold is hue 5–25,
+saturation at least 120, and value at least 50, for gate RGB `(255, 128, 0)`.
+
+`RACE_RECORD=<directory>` on a camera run writes a replay bundle and does not
+change the command sent to Betaflight. The directory must be missing or empty.
+Without `RACE_CAMERA=1` the process exits 2. If a frame or bundle write fails,
+the run prints `[RACE_RECORD] FAILED` with the directory and the error, then
+exits 1. The bundle is incomplete and is not repaired; record the run again.
+Result lines are printed before that failure line. The bundle is:
+
+- `meta.json` — rates, intrinsics, mount, tilt, and the public inner size
+- `sensors.npz` — 500 Hz means of gyro and specific force, plus barometer and
+  magnetometer samples
+- `frames/chunk_NNNNN.npz` — fresh RGBA frames and their nominal `frame_time`,
+  30 per chunk, compressed on a writer thread during the run
+- `truth.npz` — `world_pos` / `world_vel` at the 500 Hz times and at
+  `frame_time`, plus the course gates. The sensor loader never opens this file.
+
+```bash
+RACE_CAMERA=1 RACE_RECORD=/tmp/race-record \
+  elodin run examples/betaflight-sitl/main.py
+python3 examples/betaflight-sitl/evaluate_detector.py --synthetic --check
+python3 examples/betaflight-sitl/evaluate_detector.py --fixture --check
+python3 examples/betaflight-sitl/evaluate_detector.py --bundle /tmp/race-record
+```
+
+`--check` requires at least 90% detection and a median bearing error of 2° on
+frames from 4–20 m. Bundle mode reads the camera intrinsics, mount, and tilt
+from `meta.json`. It scores the nearest fully visible gate against the
+detection whose corners match that gate's projected opening, so a smaller gate
+seen through a nearer one is not counted as the nearer gate. Frames with no
+visible gate are skipped. `first_candidate_is_target` reports how often the largest
+detection is that gate; it does not affect `--check`. Processing time is
+printed against a 5 ms target and does not fail the command. `bearing_body` is the direction from the body origin;
+navigation should use `position_body`.
+
 ### Race Course and Referee
 
 Course selection is independent of the command source:

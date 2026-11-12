@@ -118,6 +118,14 @@ def test_perspective_quad_keeps_gate_order_and_flags_ambiguity() -> None:
     assert reshuffled_flag
 
 
+def test_candidate_rejects_non_finite_sample_time() -> None:
+    corners = np.zeros((4, 2))
+    with pytest.raises(ValueError, match="sample_time"):
+        GateCandidate(math.nan, corners, 1.0, None, None, False)
+    with pytest.raises(ValueError, match="sample_time"):
+        GateCandidate(math.inf, corners, 1.0, None, None, False)
+
+
 def test_candidate_validation_rejects_bad_corners_and_confidence() -> None:
     corners = np.zeros((4, 2))
     GateCandidate(0.0, corners, 0.0, None, None, False)
