@@ -294,8 +294,9 @@ Use **Overlays on/off** in the viewport to toggle them; the button's tooltip lin
 to their sources. These overlays are independent of the terrain provider.
 
 The **Infrared** pane follows the booster beside the color Chase view. It renders
-the scene and its particles locally on desktop or WebGPU. This is a grayscale IR-style
-visualization, not a calibrated plume-temperature measurement. The DB stores
+the scene locally, including in WebGL browsers; its particles need desktop or
+WebGPU. This is a grayscale IR-style visualization, not a calibrated
+plume-temperature measurement. The DB stores
 the camera configuration; this preview does not add recorded video frames.
 
 ```text

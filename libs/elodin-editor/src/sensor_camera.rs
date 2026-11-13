@@ -315,8 +315,8 @@ fn init_sensor_output_pipeline(
         ShaderStages::FRAGMENT,
         (
             texture_2d(TextureSampleType::Float { filterable: true }),
-            texture_2d(TextureSampleType::Depth),
-            sampler(SamplerBindingType::Filtering),
+            texture_2d(TextureSampleType::Float { filterable: false }),
+            sampler(SamplerBindingType::NonFiltering),
             uniform_buffer::<SensorOutputSettings>(true),
             texture_2d(TextureSampleType::Float { filterable: true }),
             texture_2d(TextureSampleType::Float { filterable: false }),
@@ -2085,6 +2085,44 @@ mod tests {
             pose.translation.distance(legacy_unrebased) > 1.0e6,
             "ECEF pose still looks like an unrebased flat swizzle"
         );
+    }
+
+    #[test]
+    fn sensor_output_shader_translates_to_webgl2() {
+        let source = include_str!("assets/shaders/sensor_output.wgsl").replace(
+            "#import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput",
+            "struct FullscreenVertexOutput { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f32> }",
+        );
+        let module = naga::front::wgsl::parse_str(&source).expect("valid WGSL");
+        let info = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::default(),
+        )
+        .validate(&module)
+        .expect("valid module");
+        let options = naga::back::glsl::Options {
+            version: naga::back::glsl::Version::Embedded {
+                version: 300,
+                is_webgl: true,
+            },
+            ..Default::default()
+        };
+        let pipeline = naga::back::glsl::PipelineOptions {
+            shader_stage: naga::ShaderStage::Fragment,
+            entry_point: "fragment".into(),
+            multiview: None,
+        };
+        let mut glsl = String::new();
+        naga::back::glsl::Writer::new(
+            &mut glsl,
+            &module,
+            &info,
+            &options,
+            &pipeline,
+            naga::proc::BoundsCheckPolicies::default(),
+        )
+        .and_then(|mut writer| writer.write())
+        .expect("WebGL2 GLSL");
     }
 
     #[test]

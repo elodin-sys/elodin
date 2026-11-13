@@ -5912,6 +5912,7 @@ dependencies = [
  "jiff",
  "js-sys",
  "miette 7.6.0",
+ "naga",
  "nodit",
  "nox",
  "nvml-wrapper",
