@@ -634,16 +634,33 @@ pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
     let wait = async {
         loop {
             creds = tokens::ensure_valid(ctx).await?;
-            let status: Status = response(
-                ctx.client
-                    .get(&status_url)
-                    .bearer_auth(&creds.access_token)
-                    .timeout(Duration::from_secs(30))
-                    .send()
-                    .await
-                    .into_diagnostic()?,
-            )
-            .await?;
+            // Status reads are idempotent; ride out network blips and API restarts until the timeout.
+            let resp = match ctx
+                .client
+                .get(&status_url)
+                .bearer_auth(&creds.access_token)
+                .timeout(Duration::from_secs(30))
+                .send()
+                .await
+            {
+                Ok(resp)
+                    if !matches!(
+                        resp.status(),
+                        reqwest::StatusCode::BAD_GATEWAY
+                            | reqwest::StatusCode::SERVICE_UNAVAILABLE
+                            | reqwest::StatusCode::GATEWAY_TIMEOUT
+                    ) =>
+                {
+                    resp
+                }
+                result => {
+                    let reason = result.map_or_else(|e| e.to_string(), |r| r.status().to_string());
+                    eprintln!("Upload status check failed ({reason}); retrying");
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    continue;
+                }
+            };
+            let status: Status = response(resp).await?;
             if status.ticket != ticket || status.project_id != project {
                 return Err(miette::miette!("upload status identity changed"));
             }
@@ -1617,6 +1634,7 @@ mod tests {
     async fn mock_upload(
         state: &str,
         run_id: Option<uuid::Uuid>,
+        status_blips: bool,
     ) -> (miette::Result<()>, Vec<Vec<u8>>) {
         use tokio::io::AsyncWriteExt;
 
@@ -1646,6 +1664,10 @@ mod tests {
             202,
             serde_json::json!({"ticket":project,"project_id":project,"state":"queued"}),
         ));
+        if status_blips {
+            // Status 0 closes the connection without a response.
+            replies.extend([(0, serde_json::Value::Null), (503, serde_json::Value::Null)]);
+        }
         replies.push((200, status));
         let server = tokio::spawn(async move {
             let mut requests: Vec<Vec<u8>> = Vec::new();
@@ -1671,6 +1693,10 @@ mod tests {
                             break;
                         }
                     }
+                }
+                if status == 0 {
+                    requests.push(request);
+                    continue;
                 }
                 if body.get("parts").is_some() {
                     let declaration = &request;
@@ -1729,7 +1755,7 @@ mod tests {
                 project: None,
                 json: true,
                 restart: false,
-                timeout: 1,
+                timeout: if status_blips { 10 } else { 1 },
                 archive_cache: None,
                 archive_cache_salt: String::new(),
                 prepare_only: false,
@@ -1745,7 +1771,7 @@ mod tests {
 
     #[tokio::test]
     async fn uploads_only_compacted_bytes_to_storage_without_bearer_token() {
-        let (result, requests) = mock_upload("succeeded", Some(uuid::Uuid::nil())).await;
+        let (result, requests) = mock_upload("succeeded", Some(uuid::Uuid::nil()), false).await;
         result.unwrap();
         let upload = String::from_utf8_lossy(&requests[1]);
         assert!(upload.starts_with("POST /v1/projects/00000000-0000-0000-0000-000000000000/runs "));
@@ -1916,8 +1942,23 @@ mod tests {
             ("succeeded", None, "omitted its run ID"),
             ("queued", None, "timed out waiting"),
         ] {
-            let (result, _) = mock_upload(state, run_id).await;
+            let (result, _) = mock_upload(state, run_id, false).await;
             assert!(result.unwrap_err().to_string().contains(error));
         }
+    }
+
+    #[tokio::test]
+    async fn status_polling_survives_dropped_connections_and_gateway_errors() {
+        let (result, requests) = mock_upload("succeeded", Some(uuid::Uuid::nil()), true).await;
+        result.unwrap();
+        let polls = requests
+            .iter()
+            .filter(|request| {
+                String::from_utf8_lossy(request).starts_with(
+                    "GET /v1/projects/00000000-0000-0000-0000-000000000000/run-uploads/",
+                )
+            })
+            .count();
+        assert_eq!(polls, 3);
     }
 }
