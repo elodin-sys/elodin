@@ -297,17 +297,16 @@ fn drive(mut images: ResMut<Assets<Image>>, mut streams: Query<&mut VideoStream>
         let id = stream.id;
         let published = REGISTRY.with(|registry| {
             let mut registry = registry.borrow_mut();
-            let Some(slot) = registry.get_mut(&id) else {
-                return None;
-            };
+            let slot = registry.get_mut(&id)?;
             feed_seek(slot);
             // A paused seek, and a seek with no sample after its target, must
             // flush or the last picture stays in the decoder. High-profile
             // streams do this on Chrome as well as Safari.
-            if seek_submitted(slot) && (!slot.playing || seek_needs_flush(slot)) {
-                if let Some(decoder) = slot.decoder.as_ref() {
-                    let _ = decoder.flush();
-                }
+            if seek_submitted(slot)
+                && (!slot.playing || seek_needs_flush(slot))
+                && let Some(decoder) = slot.decoder.as_ref()
+            {
+                let _ = decoder.flush();
             }
             apply_copy(slot, &mut images);
             present(id, slot, &mut images);

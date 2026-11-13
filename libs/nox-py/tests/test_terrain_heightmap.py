@@ -21,6 +21,18 @@ def grid():
     )
 
 
+def test_cli_offline_policy_prevents_height_download(tmp_path, monkeypatch):
+    monkeypatch.setenv("ELODIN_TERRAIN_OFFLINE", "1")
+
+    def unexpected_download(*args, **kwargs):
+        pytest.fail("offline terrain attempted to start a download")
+
+    monkeypatch.setattr(subprocess, "run", unexpected_download)
+    with pytest.raises(FileNotFoundError, match="offline"):
+        el.terrain_heightmap([6378137, 0, 0], (100, 100), 10, cache_dir=tmp_path)
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_ecef_lookup_jit_vmap_and_invalid_positions():
     terrain = el.TerrainHeightmap(grid())
     position = jnp.array([6378137.0 + 200, 0, 0])
@@ -291,7 +303,10 @@ def test_terrain_rejects_invalid_dataset(asset_id):
         el.Terrain(asset_id=asset_id)
 
 
-@pytest.mark.parametrize("terrain", [el.Terrain(), el.Terrain.aerial()])
+@pytest.mark.parametrize(
+    "terrain",
+    [el.Terrain(), el.Terrain.aerial(), el.Terrain.from_asset("db:terrain/Falcon9/tileset.json")],
+)
 def test_terrain_schematic_survives_kdl_and_python_roundtrip(terrain):
     scene = el.ui.schematic(
         el.ui.viewport(name="Flight"),
@@ -305,3 +320,27 @@ def test_terrain_schematic_survives_kdl_and_python_roundtrip(terrain):
     namespace = {"__name__": "terrain_roundtrip"}
     exec(python, namespace)
     assert el.ui.from_kdl(namespace["build"]().emit_kdl()) == restored
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "",
+        "/tmp/a.json",
+        "../a.json",
+        "db:../a.json",
+        "https://example.com/a.json",
+        "terrain/a.json?token=x",
+    ],
+)
+def test_terrain_asset_rejects_nonportable_paths(path):
+    with pytest.raises(ValueError):
+        el.Terrain.from_asset(path)
+
+
+def test_terrain_asset_does_not_reuse_an_ion_heightmap():
+    scenery = el.Terrain.from_asset("terrain/Falcon9/tileset.json")
+    assert scenery.asset_id is None
+    with pytest.raises(ValueError, match="separate TerrainHeightmap"):
+        scenery.heightmap([6378137.0, 0, 0], (20, 20), 10)
+    assert el.TerrainHeightmap(grid()).asset_id == 1

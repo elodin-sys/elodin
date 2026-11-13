@@ -17,7 +17,10 @@ web-sys = { version = "0.3", features = [
   "Element",
   "Window",
   "Event",
+  "Location",
+  "UrlSearchParams",
 ] }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 impeller-bevy = { path = "../../libs/impeller/bevy", default-features = false }
+wasm-bindgen-futures = "0.4"

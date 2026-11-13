@@ -60,10 +60,22 @@ pub fn serialize_schematic(schematic: &Schematic) -> String {
                 body: schematic.body,
             }));
     }
-    if let Some(terrain) = schematic.terrain {
-        let mut node = KdlNode::new("terrain");
+    for overlay in &schematic.map_overlays {
+        let mut node = KdlNode::new("map_overlay");
         node.entries_mut()
-            .push(KdlEntry::new_prop("asset_id", i128::from(terrain.asset_id)));
+            .push(KdlEntry::new_prop("path", overlay.path.clone()));
+        node.entries_mut()
+            .push(KdlEntry::new_prop("visible", overlay.visible));
+        doc.nodes_mut().push(node);
+    }
+    if let Some(terrain) = &schematic.terrain {
+        let mut node = KdlNode::new("terrain");
+        node.entries_mut().push(match terrain {
+            TerrainConfig::Ion { asset_id } => {
+                KdlEntry::new_prop("asset_id", i128::from(*asset_id))
+            }
+            TerrainConfig::Asset { path } => KdlEntry::new_prop("path", path.clone()),
+        });
         doc.nodes_mut().push(node);
     }
     if let Some(theme) = schematic.theme.as_ref() {

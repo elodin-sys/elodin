@@ -42,6 +42,7 @@ from . import monte_carlo as monte_carlo
 from . import ui as ui
 from .terrain import (
     Terrain as Terrain,
+    TerrainRegion as TerrainRegion,
     TerrainHeightmap as TerrainHeightmap,
     TerrainSample as TerrainSample,
     terrain_heightmap as terrain_heightmap,

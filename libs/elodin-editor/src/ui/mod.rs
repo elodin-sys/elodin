@@ -112,7 +112,6 @@ pub use window::{
     window_theme_for_mode,
 };
 
-#[cfg(not(target_family = "wasm"))]
 pub mod status_bar;
 
 #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
@@ -468,7 +467,6 @@ impl RootWidgetSystem for MainLayout<'_> {
         // Update theme every frame to reflect color scheme changes
         theme::set_theme(ctx);
 
-        #[cfg(not(target_family = "wasm"))]
         world.add_root_widget::<status_bar::StatusBar>("status_bar");
 
         #[cfg(target_os = "macos")]

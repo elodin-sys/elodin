@@ -1657,7 +1657,7 @@ fn refresh_schematic_index(
 pub fn clear_schematic() -> PaletteItem {
     #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
     {
-        return PaletteItem::new(
+        PaletteItem::new(
             "Clear Schematic",
             SCHEMATIC_LABEL,
             |_: In<String>, mut params: LoadSchematicParams| {
@@ -1666,7 +1666,7 @@ pub fn clear_schematic() -> PaletteItem {
                 params.load_schematic(&impeller_wkt::Schematic::default(), None, None);
                 PaletteEvent::Exit
             },
-        );
+        )
     }
     #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
     PaletteItem::new(
@@ -1974,9 +1974,9 @@ fn revert_previous_skybox_item(name: String) -> PaletteItem {
 fn skybox_menu() -> PaletteItem {
     #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
     {
-        return PaletteItem::new("Skybox...", SKYBOX_LABEL, |_: In<String>| {
+        PaletteItem::new("Skybox...", SKYBOX_LABEL, |_: In<String>| {
             PaletteEvent::Error("Skybox is not available in the wasm build".into())
-        });
+        })
     }
     #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
     PaletteItem::new(

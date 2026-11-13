@@ -2,7 +2,7 @@
 use bevy::prelude::*;
 
 pub(crate) fn release_simulation(
-    #[cfg(not(target_family = "wasm"))] startup: Option<Res<super::cesium::TerrainStartup>>,
+    startup: Option<Res<super::cesium::TerrainStartup>>,
     config: Res<impeller_wkt::DbConfig>,
     packet_tx: Res<impeller_bevy::PacketTx>,
     mut loaded: MessageReader<crate::ui::schematic::DocumentLoaded>,
@@ -18,7 +18,6 @@ pub(crate) fn release_simulation(
     if config.schematic_active().is_some() && !*document_loaded {
         return;
     }
-    #[cfg(not(target_family = "wasm"))]
     if startup.is_some_and(|startup| startup.result() == Ok(false)) {
         return;
     }

@@ -16,6 +16,28 @@ dev page. An HTTPS deployment needs a browser-accessible secure WebSocket
 endpoint. A successful browser build does not by itself validate a Cloud data
 source or its authentication.
 
+Assets are loaded from the connected DB automatically. Terrain uses available
+assets and cached data first, then streams missing Photo 3D tiles. No terrain
+option is needed for normal use. Add `?offline=1` to disable terrain-provider
+requests; the DB and its assets remain accessible.
+
+To prepare a recording for offline use, run `elodin terrain prepare sim.py` before
+recording the simulation. The resulting terrain package travels with the DB.
+See the [terrain guide](../../docs/public/content/reference/terrain.md).
+
+Thruster particles (Hanabi) require WebGPU. With WebGPU, `atmosphere` or `earth`
+inside the schematic's `environment` enables atmosphere rendering on the active
+cinematic view. WebGL displays the scene without these effects. The native
+Cinematic Earth globe, star field and night material are not loaded in the browser.
+
+## Hosted database
+
+Set `elodin-web-db` to the database's HTTP base URL, for example
+`https://db.example/recordings/f9/`. Assets, including nested effects and terrain,
+load from `assets/` under that base; WebSockets use `impeller` and `impeller/msg`.
+The server must allow the editor's origin through CORS. The former `?db=` and
+`&assets=` connection parameters are no longer used.
+
 ## Run an example
 
 The browser editor does not launch a simulation. Start the example so its
@@ -52,19 +74,28 @@ The editor keeps the connection it opened with the document until then.
 
 ## Platform boundary
 
+The editor adapts Bevy's shadow comparison sampling for WebGPU while keeping
+the original WebGL shaders for the fallback renderer.
+
 Big Space is required on both native and WASM targets. It provides the coordinate
 conversion used by the editor and is independent of terrain streaming.
 
-The current `bevy-cesium` integration uses Cesium Native through a C++ bridge.
-It is included only on native targets, along with its terrain-readiness playback
-condition. Selecting an example such as Falcon9 does not select Cargo dependencies:
-without this target boundary, even a browser editor that never requests terrain
-tries to build the native dependency.
+`bevy-cesium` selects its backend by target: Cesium Native and its C++ bridge on
+native platforms, a Rust/Fetch loader in the browser. Browser builds do not link
+the native SDK. Prepared packages use the Rust loader on both platforms.
+Both backends share rendering; prepared replay does not wait for tile refinement.
 
-WASM therefore runs without this terrain integration. Supporting Cesium terrain
-in the browser requires a browser-compatible implementation; removing the target
-boundary is not sufficient. Data backends and transport adapters are a separate
-concern and must not require Cesium merely to build or connect the editor.
+Use `el.Terrain.from_asset("terrain/Falcon9/tileset.json")` to load a prepared
+3D Tiles package from the DB asset server, including its relative child files.
+The server must be browser-accessible and allow CORS when served from another
+origin. Preparing the package and simulation ground heights are separate steps.
+Ion 3D Tiles are also supported; ion aerial terrain (`asset_id=1`) and native
+height queries are unavailable in the browser.
+
+Falcon 9 selects its prepared Photo 3D package automatically when available;
+otherwise it streams the ion dataset. Runtime streaming does not archive tiles
+in the DB. Extend the declared coverage and rerun preparation to add terrain
+to a new recording.
 
 See [TODO.md](TODO.md) for other browser limitations. CI checks compilation of
 `elodin-web` for `wasm32-unknown-unknown`; rendering and backend connectivity also

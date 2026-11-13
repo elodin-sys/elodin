@@ -72,6 +72,15 @@ version = "0.21.1-alpha.0"
 edition = "2024"
 repository = "https://github.com/elodin-sys/elodin"
 
+[profile.wasm-dev]
+inherits = "dev"
+debug = false
+opt-level = 1
+#lto = false
+#codegen-units = 16
+#incremental = true
+# strip = "none"
+
 [profile.wasm-release]
 inherits = "release"
 opt-level = "z"
@@ -92,7 +101,8 @@ inherits = "release"
 lto = "thin"
 
 [workspace.dependencies]
-bevy-cesium = { git = "https://github.com/elodin-sys/bevy-cesium", rev = "b0e4339fdc93c057b43569db78c203190cec4e09" }
+# v0.5.0
+bevy-cesium = { git = "https://github.com/elodin-sys/bevy-cesium", rev = "d1cec48a6710f3b4f4f1677d9e54c8b4b7cb6f35" }
 db-macros.path = "libs/db/macros"
 roci.path = "fsw/roci"
 roci.default-features = false

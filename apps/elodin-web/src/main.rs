@@ -4,10 +4,38 @@ use elodin_editor::EditorPlugin;
 fn main() {
     console_error_panic_hook::set_once();
     web_sys::console::log_1(&"elodin-web: main()".into());
+    // The graphics probe is async. Bevy must not build until it finishes,
+    // because wgpu locks in WebGPU as soon as `navigator.gpu` exists.
+    #[cfg(target_arch = "wasm32")]
+    {
+        wasm_bindgen_futures::spawn_local(async {
+            elodin_editor::prepare_wasm_graphics().await;
+            start_app();
+        });
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    start_app();
+}
+
+fn start_app() {
     let plugin = EditorPlugin::default();
     #[cfg(target_family = "wasm")]
     let plugin = apply_page_db(plugin);
+    let mut policy = match elodin_editor::plugins::terrain_playback::TerrainPlayback::parse(
+        query_value("terrain-mode").as_deref(),
+        query_value("terrain-basemap").as_deref(),
+    ) {
+        Ok(policy) => policy,
+        Err(error) => {
+            web_sys::console::error_1(&error.to_string().into());
+            return;
+        }
+    };
+    if query_value("offline").as_deref() == Some("1") {
+        policy.mode = Some(elodin_editor::plugins::terrain_playback::TerrainMode::Offline);
+    }
     App::new()
+        .insert_resource(policy)
         .add_plugins(plugin)
         .add_systems(Startup, log_startup)
         .add_systems(Update, log_first_update)
@@ -44,6 +72,19 @@ fn apply_page_db(plugin: EditorPlugin) -> EditorPlugin {
             plugin
         }
     }
+}
+
+#[cfg(target_family = "wasm")]
+fn query_value(name: &str) -> Option<String> {
+    let search = web_sys::window()?.location().search().ok()?;
+    web_sys::UrlSearchParams::new_with_str(&search)
+        .ok()?
+        .get(name)
+}
+
+#[cfg(not(target_family = "wasm"))]
+fn query_value(_name: &str) -> Option<String> {
+    None
 }
 
 fn log_startup() {

@@ -189,7 +189,6 @@ pub fn spawn_lua_actor(
     #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
     {
         let _ = (lua, addr, status, last_status, commands);
-        return;
     }
     #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
     {

@@ -237,12 +237,18 @@ class WorldBuilder:
         bloom: Optional[dict[str, object]] = None,
         environment: Optional[dict[str, object]] = None,
         frustums_face_alpha: float = 45.0 / 255.0,
+        render_local: bool = False,
     ) -> None:
         """Register a virtual sensor camera on an entity.
 
         The headless render server emits frames into the DB at ``fps`` frames per
         second of simulation time. Frames can be read with
         ``StepContext.read_msg("entity.camera_name", timestamp=...)``.
+
+        ``render_local=True`` instead renders the current replayed scene in a
+        ``ui.sensor_view`` on desktop or WebGPU. It includes scene particles,
+        shares the schematic environment, and does not record video in the DB.
+        ``fps`` caps this preview's wall-clock refresh rate.
 
         ``pos_offset`` is a body-frame translation in metres. ``rot_offset`` is
         ``[roll, pitch, yaw]`` in degrees, applied around the camera's body axes
@@ -265,7 +271,9 @@ class WorldBuilder:
         ``bloom``, and ``environment`` match the schematic and require
         ``cinematic=True``. Omitted ``environment`` uses the house look
         (Earth, 100 klx sun, ambient 0.05). At most one cinematic owner is
-        allowed: a cinematic viewport or a cinematic sensor camera, never both.
+        allowed: a cinematic viewport or a recorded cinematic sensor camera.
+        Local previews borrow that environment and do not claim ownership of
+        the atmosphere pass, which remains on the primary cinematic view.
 
         ``camera_model="boson640p"`` supplies 640×512, 60 Hz, the Boson+ sensor
         defaults, and an 18 degree horizontal lens. ``lens_hfov`` is converted

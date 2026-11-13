@@ -5,7 +5,7 @@ wired up. Unchecked items are compiled out, stubbed, or still native-only.
 
 ## Finished
 
-- [x] Trunk app on `#editor`, `wasm-release` profile (`opt-level = "z"`, fat LTO)
+- [x] Trunk app on `#editor`. `just web` uses `wasm-dev` (`opt-level = 2`, no LTO). `just web-release` uses `wasm-release` (`opt-level = "z"`, fat LTO)
 - [x] Boot log, `console_error_panic_hook`, and Bevy `LogPlugin` so panics reach the browser console
 - [x] `strip = "symbols"` drops the Rust `name` section (bundle ~45 MB; ~3.5 KB of wasm-bindgen closure names remain)
 - [x] Directional shadow maps use 2048 on WASM, same as native (Bevy’s 8192 default is not used)
@@ -22,25 +22,30 @@ wired up. Unchecked items are compiled out, stubbed, or still native-only.
 - [x] `web_time` instead of `std::time::Instant`
 - [x] Malformed `WorldPos` samples are ignored instead of panicking
 - [x] H.264 video decode via `webcodecs-video` (`attach_webcodecs` / `drive_webcodecs` in `video_stream.rs`)
+- [x] Thruster particles (Hanabi). The wasm editor requests the WebGPU backend so compute shaders are available
+- [x] Schematic atmosphere on WebGPU, using the shared renderer without Cinematic Earth's globe or night-side material
+- [x] Component stream filter (`SetStreamFilter` on the WebSocket client, same handshake as TCP)
+- [x] Status bar (connection, schematic build error, FPS, TPS, plot-buffer usage, command palette)
+- [x] Saved built-in color scheme (preset and mode in `localStorage`)
+
+- [x] 3D Tiles streaming through the browser backend (online ion Photo 3D or prepared DB assets)
 
 ## Not finished
 
-
-- [ ] Cesium Native terrain streaming (native platforms only)
 - [ ] Skyboxes: cache, generation, schematic activation, and DB asset sync (`wasm_cut.rs` stubs)
 - [ ] Skybox status overlay
-- [ ] Lua action tiles (the button renders; `LuaActor::spawn` does not connect)
 - [ ] Sensor-camera GPU readback
 - [ ] Unix `sensor_h264`
-- [ ] Thruster particles
 - [ ] Cinematic Earth and the night-side material
 - [ ] Screenshots and the FPS log
-- [ ] Hardware stats, system-information diagnostics, and the status bar
-- [ ] Component stream filter (native sends `SetStreamFilter`; WASM does not)
-- [ ] Saved and on-disk color schemes (built-in presets still apply; nothing is written)
+- [ ] Hardware stats and system-information diagnostics (NVML, RAM/CPU)
+- [ ] On-disk color scheme files (WASM does not scan scheme directories)
 - [ ] Asset-directory watching (WASM uses the browser HTTP cache for assets)
 - [ ] Local display-kernel files (WASM fetches kernels over HTTP only)
 - [ ] Interpreter coverage for every StableHLO op (`erfinv`, batched `dot_general`, and other ops still return errors)
 - [ ] `wasm-opt` (`data-wasm-opt="0"` in `index.html`)
-- [ ] Rust symbol names in browser stack traces (`strip = "symbols"` replaces them with `wasm-function[N]`)
 - [ ] Click-through check of the ViewCube fix in a running browser session
+
+## Not planned
+- [ ] Lua action tiles (the button renders; `LuaActor::spawn` does not connect)
+- [ ] Rust symbol names in browser stack traces (`strip = "symbols"` replaces them with `wasm-function[N]`)

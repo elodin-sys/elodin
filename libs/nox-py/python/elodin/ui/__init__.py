@@ -56,6 +56,8 @@ apply_overlay = _native.apply_overlay
 extract_overlay = _native.extract_overlay
 
 terrain = Terrain
+MapOverlay = _native.MapOverlay
+map_overlay = _native.map_overlay
 coordinate = _native.coordinate
 theme = _native.theme
 timeline = _native.timeline
@@ -105,6 +107,8 @@ window = _native.window
 __all__ = [
     "Terrain",
     "terrain",
+    "MapOverlay",
+    "map_overlay",
     "Schematic",
     "Panel",
     "Object3D",

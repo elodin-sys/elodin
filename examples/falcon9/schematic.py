@@ -16,16 +16,20 @@ Typed elodin.ui translation of falcon9.kdl.
 # Landing dust at LZ-1; Cesium supplies the real landing-pad surface.
 # CRS-12 truth ghost.
 
-import elodin as el
-import elodin.ui as ui
+import os
 
+import elodin as el
 from constants import PAD_ALT_M, PAD_LAT_DEG, PAD_LON_DEG, TERRAIN_MODE
+from elodin import ui
+from terrain_coverage import regions as terrain_regions
 
 TERRAIN = {
     "legacy": None,
     "aerial": el.Terrain.aerial(),
-    "photo3d": el.Terrain(),
+    "photo3d": el.Terrain(regions=terrain_regions(), directory="terrain/Falcon9"),
 }[TERRAIN_MODE]
+if terrain_asset := os.environ.get("FALCON9_TERRAIN_ASSET"):
+    TERRAIN = el.Terrain.from_asset(terrain_asset)
 
 
 def build() -> ui.Schematic:
@@ -53,9 +57,10 @@ def build() -> ui.Schematic:
                     look_at="booster.visual_pos.translate(20, 0, 0, true).translate_world(1.433, -8.661, 4.788)",
                     up="(0.1433, -0.8661, 0.4788)",
                     smoothing=0.0,
-                    share=0.72,
+                    share=0.60,
                 ),
                 ui.vsplit(
+                    ui.sensor_view("booster.ir_cam", name="Infrared", share=0.70),
                     ui.hsplit(
                         ui.graph(
                             "booster.ground_speed[0], booster_truth.ground_speed[0]",
@@ -72,6 +77,7 @@ def build() -> ui.Schematic:
                                 "white",
                             ],
                         ),
+                        share=0.10,
                     ),
                     ui.hsplit(
                         ui.graph(
@@ -92,6 +98,7 @@ def build() -> ui.Schematic:
                                 "red",
                             ],
                         ),
+                        share=0.10,
                     ),
                     ui.hsplit(
                         ui.graph(
@@ -109,8 +116,9 @@ def build() -> ui.Schematic:
                                 "white",
                             ],
                         ),
+                        share=0.10,
                     ),
-                    share=0.28,
+                    share=0.40,
                 ),
                 share=0.75,
             ),
@@ -374,6 +382,11 @@ def build() -> ui.Schematic:
             perspective=False,
         ),
         terrain=TERRAIN,
+        map_overlays=[
+            ui.map_overlay("overlays/falcon9-sites.json"),
+            ui.map_overlay("overlays/cape-canaveral.json"),
+            ui.map_overlay("overlays/orbital-context.json"),
+        ],
         coordinate=ui.coordinate(
             frame="ECEF",
             lat=PAD_LAT_DEG,

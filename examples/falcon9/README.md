@@ -288,6 +288,16 @@ ELODIN_VIZCHECK_SCENARIO=night-sky-sunrise ELODIN_SCREENSHOT_DELAY=12 \
 
 ## Layout
 
+The schematic also declares the geographic JSON files in `assets/overlays/`.
+They travel with the recording and display place names, roads and airport surfaces.
+Use **Overlays on/off** in the viewport to toggle them; the button's tooltip links
+to their sources. These overlays are independent of the terrain provider.
+
+The **Infrared** pane follows the booster beside the color Chase view. It renders
+the scene and its particles locally on desktop or WebGPU. This is a grayscale IR-style
+visualization, not a calibrated plume-temperature measurement. The DB stores
+the camera configuration; this preview does not add recorded video frames.
+
 ```text
 examples/falcon9/
   README.md          # this file
@@ -355,7 +365,32 @@ Run inside `nix develop`:
 elodin editor examples/falcon9/main.py
 ```
 
-The streamed modes use Bevy-Cesium and keep the existing atmosphere and
+The editor uses prepared assets and cached tiles first, then streams missing
+Photo 3D tiles. No terrain option is needed for normal use.
+
+For a recording that can replay without a terrain-provider connection:
+
+```sh
+elodin terrain prepare examples/falcon9/main.py
+ELODIN_DB_PATH=dbs/f9 elodin run --offline examples/falcon9/main.py
+elodin editor --offline dbs/f9
+```
+
+- `terrain prepare` downloads the declared region without starting the simulation or flight software.
+- `run --offline` records the flight and its prepared assets to a new DB.
+- `editor --offline` opens that recording without terrain-provider requests.
+
+[`terrain_coverage.py`](terrain_coverage.py) declares the full nominal corridor
+with a 40 km margin and finer detail around launch and landing. The package is
+written to `assets/terrain/Falcon9/` and selected automatically. Provider detail
+limits are reported during preparation.
+
+The same DB assets are used by native and WASM editors. Ground heights still
+follow `TERRAIN_MODE`; preparing scenery does not change the flight model.
+See the [terrain guide](../../docs/public/content/reference/terrain.md) for
+coverage declarations, versioning and replay.
+
+In the native editor, the streamed modes keep the existing atmosphere and
 cinematic lighting. Legacy uses the original globe.
 See [Terrain](../../docs/public/content/reference/terrain.md)
 for schematic configuration and height queries without the editor.
@@ -363,7 +398,7 @@ The vehicle model, reference data, graphs and particle effects are retained.
 The landing target is the measured center of the LZ-1 concrete circle.
 The previous coordinate identified the old launch-complex slab, about 140 m west
 of the pad. The launch location is unchanged. Cesium supplies the real
-landing-pad surface; no offshore barge or overlay is added.
+landing-pad surface; no offshore barge or synthetic landing-pad surface is added.
 
 The launch and landing coordinates and ground heights for each mode are stored
 in [`data/sites.json`](data/sites.json), shared by the plant and flight software.
