@@ -1,7 +1,17 @@
 import json
 
 
-def step(label, command, key=None, depends_on=None, env={}, plugins=[], skip=False, agents={}, if_condition=None):
+def step(
+    label,
+    command,
+    key=None,
+    depends_on=None,
+    env={},
+    plugins=[],
+    skip=False,
+    agents={},
+    if_condition=None,
+):
     result = {
         "label": label,
         "command": command,
