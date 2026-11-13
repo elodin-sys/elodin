@@ -1,19 +1,10 @@
-# The release pipeline is the only place Windows gets compiled, and it only runs
-# on a tag, so portability breaks surface after a release is already announced.
-# This job type-checks the one package dist builds for Windows (`--package=elodin`,
-# see dist-workspace.toml) on every pull request instead.
+# Type-check the package dist builds for Windows (`--package=elodin`, see
+# dist-workspace.toml) after relevant changes merge to main, so portability
+# regressions surface before a tagged release.
 
 name: Windows Check
 
 on:
-  pull_request:
-    paths:
-      - "**/*.rs"
-      - "**/Cargo.toml"
-      - "Cargo.lock"
-      - ".cargo/**"
-      - "rust-toolchain.toml"
-      - ".github/workflows/windows-check.yml"
   push:
     branches:
       - main

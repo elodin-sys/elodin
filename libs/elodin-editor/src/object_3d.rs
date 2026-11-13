@@ -4086,6 +4086,30 @@ mod db_asset_url_tests {
     use std::net::SocketAddr;
 
     #[test]
+    fn nested_effects_and_textures_use_the_page_database() {
+        let endpoint = impeller_bevy::DbEndpoint::from_assets(
+            "https://db.example/recordings/f9/".parse().unwrap(),
+        );
+        for key in [
+            "effects/falcon9/merlin_flame.effect",
+            "textures/smoke_puff.png",
+        ] {
+            assert_eq!(
+                super::resolve_db_asset_url_prefer_local(
+                    &format!("db:{key}"),
+                    Some(&endpoint),
+                    None,
+                ),
+                format!("https://db.example/recordings/f9/assets/{key}")
+            );
+        }
+        assert_eq!(
+            endpoint.ws_urls().0,
+            "wss://db.example/recordings/f9/impeller"
+        );
+    }
+
+    #[test]
     fn resolve_db_asset_url_uses_connection_host_and_offset_port() {
         let conn: SocketAddr = "127.0.0.1:2240".parse().unwrap();
         assert_eq!(

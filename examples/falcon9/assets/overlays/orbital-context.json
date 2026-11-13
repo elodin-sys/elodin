@@ -1,0 +1,151 @@
+{
+  "description": "Representative cartographic anchors for the orbital view. Marine labels sit on the ocean imagery at sea level; city labels are raised 500 m to clear buildings. These are not measured bathymetric depths.",
+  "sources": [
+    "https://www.openstreetmap.org/",
+    "https://www.ngdc.noaa.gov/gazetteer/",
+    "https://www.marineregions.org/gazetteer.php?p=details&id=4572",
+    "https://www.marineregions.org/gazetteer.php?p=details&id=4579",
+    "https://www.gebco.net/sites/default/files/documents/ibcca_gulf_names.pdf",
+    "https://www.nhc.noaa.gov/breakpoints/2026_Breakpoints.pdf",
+    "https://www.nps.gov/caha/planyourvisit/chls.htm",
+    "https://www.nps.gov/calo/"
+  ],
+  "water_names": [
+    "Atlantic Ocean",
+    "Blake Plateau",
+    "Blake Escarpment",
+    "Blake Ridge",
+    "Hatteras Abyssal Plain",
+    "Chesapeake Bay",
+    "Pamlico Sound"
+  ],
+  "places": [
+    {
+      "name": "Cape Canaveral",
+      "latitude": 28.3881442,
+      "longitude": -80.6056464,
+      "altitude": 500.0
+    },
+    {
+      "name": "Orlando",
+      "latitude": 28.5421218,
+      "longitude": -81.379045,
+      "altitude": 500.0
+    },
+    {
+      "name": "Miami",
+      "latitude": 25.775,
+      "longitude": -80.194,
+      "altitude": 500.0
+    },
+    {
+      "name": "Tampa",
+      "latitude": 27.9506,
+      "longitude": -82.4572,
+      "altitude": 500.0
+    },
+    {
+      "name": "Jacksonville",
+      "latitude": 30.3322,
+      "longitude": -81.6557,
+      "altitude": 500.0
+    },
+    {
+      "name": "Charleston",
+      "latitude": 32.7765,
+      "longitude": -79.9311,
+      "altitude": 500.0
+    },
+    {
+      "name": "Wilmington",
+      "latitude": 34.2257,
+      "longitude": -77.9447,
+      "altitude": 500.0
+    },
+    {
+      "name": "Nassau",
+      "latitude": 25.0443,
+      "longitude": -77.3504,
+      "altitude": 500.0
+    },
+    {
+      "name": "Bermuda",
+      "latitude": 32.3078,
+      "longitude": -64.7505,
+      "altitude": 500.0
+    },
+    {
+      "name": "Atlantic Ocean",
+      "latitude": 33.0,
+      "longitude": -72.0,
+      "altitude": 0.0
+    },
+    {
+      "name": "Blake Plateau",
+      "latitude": 29.5,
+      "longitude": -78.5,
+      "altitude": 0.0
+    },
+    {
+      "name": "Blake Escarpment",
+      "latitude": 28.5,
+      "longitude": -76.666667,
+      "altitude": 0.0
+    },
+    {
+      "name": "Blake Ridge",
+      "latitude": 31.25,
+      "longitude": -74.75,
+      "altitude": 0.0
+    },
+    {
+      "name": "Hatteras Abyssal Plain",
+      "latitude": 29.0,
+      "longitude": -70.5,
+      "altitude": 0.0
+    },
+    {
+      "name": "Cape Fear",
+      "latitude": 33.84,
+      "longitude": -77.96,
+      "altitude": 500.0
+    },
+    {
+      "name": "Cape Lookout",
+      "latitude": 34.58,
+      "longitude": -76.53,
+      "altitude": 500.0
+    },
+    {
+      "name": "Cape Hatteras",
+      "latitude": 35.23,
+      "longitude": -75.53,
+      "altitude": 500.0
+    },
+    {
+      "name": "Outer Banks",
+      "latitude": 35.6,
+      "longitude": -75.5,
+      "altitude": 500.0
+    },
+    {
+      "name": "Chesapeake Bay",
+      "latitude": 36.95,
+      "longitude": -76.1,
+      "altitude": 0.0
+    },
+    {
+      "name": "Pamlico Sound",
+      "latitude": 35.35,
+      "longitude": -75.8,
+      "altitude": 0.0
+    }
+  ],
+  "excluded_names": [
+    "Gulf of Mexico",
+    "Gulf of America",
+    "Golfe du Mexique",
+    "Golfe de l'Am\u00e9rique",
+    "Golfe d'Am\u00e9rique"
+  ]
+}

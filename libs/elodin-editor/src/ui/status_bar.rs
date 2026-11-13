@@ -1,7 +1,7 @@
+#[cfg(not(target_family = "wasm"))]
+use bevy::diagnostic::SystemInformationDiagnosticsPlugin;
 use bevy::{
-    diagnostic::{
-        DiagnosticsStore, FrameTimeDiagnosticsPlugin, SystemInformationDiagnosticsPlugin,
-    },
+    diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
     ecs::{
         query::With,
         system::{Query, Res, ResMut, SystemParam, SystemState},
@@ -10,25 +10,27 @@ use bevy::{
     prelude::Entity,
     window::PrimaryWindow,
 };
+#[cfg(not(target_family = "wasm"))]
 use bevy_ai_skybox::prelude::{SkyboxCacheHealth, SkyboxGenerationUi};
 use impeller_bevy::{
     ConnectionStatus, SimTimeStepFetch, SimTimeStepSource, ThreadConnectionStatus,
 };
 use impeller_wkt::SimulationTimeStep;
+#[cfg(not(target_family = "wasm"))]
 use std::time::Duration;
+#[cfg(not(target_family = "wasm"))]
 use web_time::Instant;
 
+use crate::plugins::gpu_info::GpuInfo;
+#[cfg(not(target_family = "wasm"))]
+use crate::plugins::hw_stats::HardwareStats;
+#[cfg(not(target_family = "wasm"))]
+use crate::ui::colors::PUMPKIN_DEFAULT;
+use crate::ui::{colors::get_scheme, plot::PlotGpuBufferPool};
 use crate::ui::{
     command_palette::CommandPaletteState,
     input_owner::{PointerOwnerPriority, UiBlocker},
     register_window_input_blocker,
-};
-use crate::{
-    plugins::hw_stats::HardwareStats,
-    ui::{
-        colors::{PUMPKIN_DEFAULT, get_scheme},
-        plot::PlotGpuBufferPool,
-    },
 };
 
 use super::RootWidgetSystem;
@@ -42,12 +44,16 @@ pub struct StatusBar<'w, 's> {
     diagnostics: Res<'w, DiagnosticsStore>,
     connection_status: Res<'w, ThreadConnectionStatus>,
     primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
+    #[cfg(not(target_family = "wasm"))]
     skybox_ui: Res<'w, SkyboxGenerationUi>,
+    #[cfg(not(target_family = "wasm"))]
     skybox_cache: Res<'w, SkyboxCacheHealth>,
+    #[cfg(not(target_family = "wasm"))]
     hardware_stats: Res<'w, HardwareStats>,
     plot_gpu_pool: Res<'w, PlotGpuBufferPool>,
     command_palette_state: ResMut<'w, CommandPaletteState>,
     db_config: Res<'w, DbConfig>,
+    gpu_info: Option<Res<'w, GpuInfo>>,
 }
 
 impl RootWidgetSystem for StatusBar<'_, '_> {
@@ -68,8 +74,11 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
         let tick_time = state_mut.tick_time;
         let sim_time_step = state_mut.sim_time_step;
         let diagnostics = state_mut.diagnostics;
+        #[cfg(not(target_family = "wasm"))]
         let skybox_ui = &state_mut.skybox_ui;
+        #[cfg(not(target_family = "wasm"))]
         let skybox_cache = &state_mut.skybox_cache;
+        #[cfg(not(target_family = "wasm"))]
         let hardware_stats = &state_mut.hardware_stats;
         let plot_gpu_pool = &state_mut.plot_gpu_pool;
         let mut command_palette_state = state_mut.command_palette_state;
@@ -117,6 +126,18 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
                             .color(get_scheme().text_secondary),
                     ));
 
+                    if let Some(gpu) = state_mut.gpu_info.as_deref() {
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(gpu.label())
+                                    .text_style(egui::TextStyle::Small)
+                                    .color(get_scheme().text_secondary),
+                            )
+                            .sense(egui::Sense::hover()),
+                        )
+                        .on_hover_text(gpu.hover());
+                    }
+
                     // Simulator TPS
 
                     let sim_fps = if tick_time.0 > 0.0 {
@@ -146,84 +167,25 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
                     )
                     .on_hover_text(provenance);
 
-                    let ram_str = process_resident_memory_gb()
-                        .map(|gb| format!("{gb:.1}"))
-                        .unwrap_or_else(|| "N/A".to_string());
-                    let system_memory_percent = diagnostics
-                        .get(&SystemInformationDiagnosticsPlugin::SYSTEM_MEM_USAGE)
-                        .and_then(|diagnostic| diagnostic.smoothed());
-                    ui.add(egui::Label::new(
-                        egui::RichText::new(format!("RAM Usage: {ram_str} GB"))
-                            .text_style(egui::TextStyle::Small)
-                            .color(pressure_color(system_memory_percent)),
-                    ))
-                    .on_hover_text(format!(
-                        "Editor resident memory: {ram_str} GiB\nSystem memory used: {}",
-                        format_percent(system_memory_percent)
-                    ));
+                    let pool = plot_gpu_pool.snapshot();
+                    let plot_label = match pool.shard_occupancy_percent() {
+                        Some(percent) => {
+                            format!(
+                                "{} · {percent:.0}% shards",
+                                format_plot_bytes(pool.resident_bytes())
+                            )
+                        }
+                        None => format_plot_bytes(pool.resident_bytes()),
+                    };
 
-                    let process_cpu = diagnostics
-                        .get(&SystemInformationDiagnosticsPlugin::PROCESS_CPU_USAGE)
-                        .and_then(|diagnostic| diagnostic.smoothed());
-                    let system_cpu = diagnostics
-                        .get(&SystemInformationDiagnosticsPlugin::SYSTEM_CPU_USAGE)
-                        .and_then(|diagnostic| diagnostic.smoothed());
+                    #[cfg(target_family = "wasm")]
                     ui.add(egui::Label::new(
-                        egui::RichText::new(format!("CPU {}", format_percent(process_cpu)))
+                        egui::RichText::new(plot_label)
                             .text_style(egui::TextStyle::Small)
                             .color(get_scheme().text_secondary),
                     ))
                     .on_hover_text(format!(
-                        "Editor CPU: {}\nSystem CPU: {}",
-                        format_percent(process_cpu),
-                        format_percent(system_cpu)
-                    ));
-
-                    let pool = plot_gpu_pool.snapshot();
-                    let plot_label = match pool.shard_occupancy_percent() {
-                        Some(percent) => {
-                            format!("{} · {percent:.0}% shards", format_plot_bytes(pool.resident_bytes()))
-                        }
-                        None => format_plot_bytes(pool.resident_bytes()),
-                    };
-                    let (gpu_label, gpu_pressure) =
-                        if let Some(memory) = hardware_stats.device_memory {
-                            let pressure = if memory.total_bytes > 0 {
-                                Some(memory.used_bytes as f64 / memory.total_bytes as f64 * 100.0)
-                            } else {
-                                None
-                            };
-                            (
-                                format!(
-                                    "GPU {:.1}/{:.1} GB · {} · {plot_label}",
-                                    bytes_to_gib(memory.used_bytes),
-                                    bytes_to_gib(memory.total_bytes),
-                                    format_percent(
-                                        hardware_stats.gpu_utilization_percent.map(f64::from)
-                                    )
-                                ),
-                                pressure,
-                            )
-                        } else {
-                            (
-                                format!(
-                                    "GPU app {:.1} GB · {plot_label}",
-                                    bytes_to_gib(hardware_stats.app_gpu_bytes()),
-                                ),
-                                None,
-                            )
-                        };
-                    ui.add(egui::Label::new(
-                        egui::RichText::new(gpu_label)
-                            .text_style(egui::TextStyle::Small)
-                            .color(pressure_color(gpu_pressure)),
-                    ))
-                    .on_hover_text(format!(
-                        "App GPU allocations\nBuffers: {:.2} GiB ({} objects)\nTextures: {:.2} GiB ({} objects)\n\nPlot buffers\nResident: {:.2} GiB ({} value, {} index)\nPooled: {:.2} GiB\nShard occupancy: {} / {} ({})\nReady: {} value, {} index\nQuarantined: {} value, {} index\nCumulative: {} value alloc / {} reuse / {} destroyed, {} index alloc / {} reuse / {} destroyed",
-                        bytes_to_gib(hardware_stats.app_buffer_bytes),
-                        format_object_count(hardware_stats.app_buffer_count),
-                        bytes_to_gib(hardware_stats.app_texture_bytes),
-                        format_object_count(hardware_stats.app_texture_count),
+                        "Plot buffers\nResident: {:.2} GiB ({} value, {} index)\nPooled: {:.2} GiB\nShard occupancy: {} / {} ({})",
                         bytes_to_gib(pool.resident_bytes()),
                         pool.value_live,
                         pool.index_live,
@@ -231,19 +193,102 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
                         pool.value_shards_used,
                         pool.value_shards_capacity,
                         format_percent(pool.shard_occupancy_percent()),
-                        pool.value_ready,
-                        pool.index_ready,
-                        pool.value_quarantined,
-                        pool.index_quarantined,
-                        pool.value_allocations,
-                        pool.value_reuses,
-                        pool.value_destroyed,
-                        pool.index_allocations,
-                        pool.index_reuses,
-                        pool.index_destroyed,
                     ));
 
-                    super::skybox_status::draw_skybox_status_bar(ui, skybox_ui, skybox_cache);
+                    #[cfg(not(target_family = "wasm"))]
+                    {
+                        let ram_str = process_resident_memory_gb()
+                            .map(|gb| format!("{gb:.1}"))
+                            .unwrap_or_else(|| "N/A".to_string());
+                        let system_memory_percent = diagnostics
+                            .get(&SystemInformationDiagnosticsPlugin::SYSTEM_MEM_USAGE)
+                            .and_then(|diagnostic| diagnostic.smoothed());
+                        ui.add(egui::Label::new(
+                            egui::RichText::new(format!("RAM Usage: {ram_str} GB"))
+                                .text_style(egui::TextStyle::Small)
+                                .color(pressure_color(system_memory_percent)),
+                        ))
+                        .on_hover_text(format!(
+                            "Editor resident memory: {ram_str} GiB\nSystem memory used: {}",
+                            format_percent(system_memory_percent)
+                        ));
+
+                        let process_cpu = diagnostics
+                            .get(&SystemInformationDiagnosticsPlugin::PROCESS_CPU_USAGE)
+                            .and_then(|diagnostic| diagnostic.smoothed());
+                        let system_cpu = diagnostics
+                            .get(&SystemInformationDiagnosticsPlugin::SYSTEM_CPU_USAGE)
+                            .and_then(|diagnostic| diagnostic.smoothed());
+                        ui.add(egui::Label::new(
+                            egui::RichText::new(format!("CPU {}", format_percent(process_cpu)))
+                                .text_style(egui::TextStyle::Small)
+                                .color(get_scheme().text_secondary),
+                        ))
+                        .on_hover_text(format!(
+                            "Editor CPU: {}\nSystem CPU: {}",
+                            format_percent(process_cpu),
+                            format_percent(system_cpu)
+                        ));
+
+                        let (gpu_label, gpu_pressure) =
+                            if let Some(memory) = hardware_stats.device_memory {
+                                let pressure = if memory.total_bytes > 0 {
+                                    Some(memory.used_bytes as f64 / memory.total_bytes as f64 * 100.0)
+                                } else {
+                                    None
+                                };
+                                (
+                                    format!(
+                                        "GPU {:.1}/{:.1} GB · {} · {plot_label}",
+                                        bytes_to_gib(memory.used_bytes),
+                                        bytes_to_gib(memory.total_bytes),
+                                        format_percent(
+                                            hardware_stats.gpu_utilization_percent.map(f64::from)
+                                        )
+                                    ),
+                                    pressure,
+                                )
+                            } else {
+                                (
+                                    format!(
+                                        "GPU app {:.1} GB · {plot_label}",
+                                        bytes_to_gib(hardware_stats.app_gpu_bytes()),
+                                    ),
+                                    None,
+                                )
+                            };
+                        ui.add(egui::Label::new(
+                            egui::RichText::new(gpu_label)
+                                .text_style(egui::TextStyle::Small)
+                                .color(pressure_color(gpu_pressure)),
+                        ))
+                        .on_hover_text(format!(
+                            "App GPU allocations\nBuffers: {:.2} GiB ({} objects)\nTextures: {:.2} GiB ({} objects)\n\nPlot buffers\nResident: {:.2} GiB ({} value, {} index)\nPooled: {:.2} GiB\nShard occupancy: {} / {} ({})\nReady: {} value, {} index\nQuarantined: {} value, {} index\nCumulative: {} value alloc / {} reuse / {} destroyed, {} index alloc / {} reuse / {} destroyed",
+                            bytes_to_gib(hardware_stats.app_buffer_bytes),
+                            format_object_count(hardware_stats.app_buffer_count),
+                            bytes_to_gib(hardware_stats.app_texture_bytes),
+                            format_object_count(hardware_stats.app_texture_count),
+                            bytes_to_gib(pool.resident_bytes()),
+                            pool.value_live,
+                            pool.index_live,
+                            bytes_to_gib(pool.pooled_bytes()),
+                            pool.value_shards_used,
+                            pool.value_shards_capacity,
+                            format_percent(pool.shard_occupancy_percent()),
+                            pool.value_ready,
+                            pool.index_ready,
+                            pool.value_quarantined,
+                            pool.index_quarantined,
+                            pool.value_allocations,
+                            pool.value_reuses,
+                            pool.value_destroyed,
+                            pool.index_allocations,
+                            pool.index_reuses,
+                            pool.index_destroyed,
+                        ));
+
+                        super::skybox_status::draw_skybox_status_bar(ui, skybox_ui, skybox_cache);
+                        }
 
                     let shortcut = if cfg!(target_os = "macos") {
                         "\u{2318}P"
@@ -288,6 +333,7 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
 /// Intentionally does **not** use Bevy's `SystemInformationDiagnosticsPlugin`:
 /// on macOS that plugin's `sysinfo` build enables `apple-app-store`, which
 /// cannot observe the current process and always reports 0 GiB.
+#[cfg(not(target_family = "wasm"))]
 fn process_resident_memory_gb() -> Option<f64> {
     use std::sync::Mutex;
     static CACHE: Mutex<Option<(Instant, f64)>> = Mutex::new(None);
@@ -397,7 +443,10 @@ fn process_resident_memory_bytes() -> Option<u64> {
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+#[cfg(all(
+    not(any(target_os = "linux", target_os = "macos", target_os = "windows")),
+    not(target_family = "wasm"),
+))]
 fn process_resident_memory_bytes() -> Option<u64> {
     None
 }
@@ -420,12 +469,14 @@ fn format_percent(value: Option<f64>) -> String {
         .unwrap_or_else(|| "N/A".to_string())
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn format_object_count(value: Option<u64>) -> String {
     value
         .map(|count| count.to_string())
         .unwrap_or_else(|| "N/A".to_string())
 }
 
+#[cfg(not(target_family = "wasm"))]
 fn pressure_color(percent: Option<f64>) -> egui::Color32 {
     match percent {
         Some(percent) if percent >= 90.0 => get_scheme().error,

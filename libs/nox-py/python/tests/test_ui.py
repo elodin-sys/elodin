@@ -250,6 +250,36 @@ def test_sensor_camera_accepts_frustum_face_alpha():
     )
 
 
+def test_local_sensor_camera_shares_cinematic_viewport():
+    world = el.World()
+    host = world.spawn(el.Body(), "camera_host")
+    world.sensor_camera(
+        host,
+        "ir",
+        width=16,
+        height=16,
+        render_local=True,
+        cinematic=True,
+        effect="thermal",
+    )
+    world.schematic(ui.schematic(ui.viewport(cinematic=True)).emit_kdl())
+
+
+def test_local_sensor_rejects_an_independent_environment():
+    world = el.World()
+    host = world.spawn(el.Body(), "camera_host")
+    with pytest.raises(ValueError, match="share the schematic environment"):
+        world.sensor_camera(
+            host,
+            "ir",
+            width=16,
+            height=16,
+            render_local=True,
+            cinematic=True,
+            environment={"earth": True},
+        )
+
+
 def test_sensor_camera_keeps_positional_parameter_order():
     world = el.World()
     host = world.spawn(el.Body(), "camera_host")

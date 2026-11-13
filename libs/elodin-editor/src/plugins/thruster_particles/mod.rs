@@ -27,6 +27,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use web_time::Instant;
+
 use bevy::asset::{AssetId, LoadState, RenderAssetUsages};
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::math::{DQuat, DVec3, Quat, Vec4};
@@ -265,6 +267,10 @@ pub struct ThrusterParticlesPlugin;
 
 impl Plugin for ThrusterParticlesPlugin {
     fn build(&self, app: &mut App) {
+        #[cfg(target_arch = "wasm32")]
+        if !crate::wasm_webgpu_adapter_available() {
+            return;
+        }
         init_ready_effect_images(app);
         app.add_plugins(HanabiPlugin)
             .init_resource::<EffectPlayheadClock>()
@@ -304,8 +310,8 @@ impl Plugin for ThrusterParticlesPlugin {
 #[derive(Resource, Default)]
 struct EffectPlayheadClock {
     last_playhead_us: Option<i64>,
-    last_wall: Option<std::time::Instant>,
-    last_seek_wall: Option<std::time::Instant>,
+    last_wall: Option<Instant>,
+    last_seek_wall: Option<Instant>,
 }
 
 /// Max sim-time advance applied to particles in one render frame (avoids
@@ -335,7 +341,7 @@ fn sync_effect_simulation_clock(
     mut clock: ResMut<EffectPlayheadClock>,
     mut seek_reset: ResMut<SeekParticleReset>,
 ) {
-    let now = std::time::Instant::now();
+    let now = Instant::now();
     let playhead = current.0.0;
     let (Some(last_ph), Some(last_wall)) = (clock.last_playhead_us, clock.last_wall) else {
         clock.last_playhead_us = Some(playhead);

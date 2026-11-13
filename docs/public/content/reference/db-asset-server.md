@@ -176,7 +176,7 @@ Point `--follows` at the source **Impeller** port (`N`), not the asset port (`N+
 
 | Stage | Behavior |
 |-------|----------|
-| **Local path** | Resolved via `$ELODIN_ASSETS` (default `./assets`), simulation entry directory, or cwd |
+| **Local path** | Resolved in `$ELODIN_ASSETS` when set; otherwise in `./assets`, the simulation's `assets/`, then the nearest `assets/` above it (first match wins) |
 | **On disk in DB** | `assets/{key}.glb` (key preserves subdirectories, e.g. `models/rocket.glb`) |
 | **Stored KDL** | `path="db:models/rocket.glb"` |
 | **Editor** | `db:…` → `http://127.0.0.1:2241/assets/…` via Bevy `AssetServer` + `WebAssetPlugin` (non-blocking) |
@@ -222,7 +222,7 @@ The skybox plugin today reads from a **local cache directory**; the editor mirro
 | Variable | Purpose |
 |----------|---------|
 | `ELODIN_DB_PATH` | Directory for the simulation database (record) |
-| `ELODIN_ASSETS` | Root for resolving local asset paths at record (default `./assets`) |
+| `ELODIN_ASSETS` | Root for resolving local asset paths at record; replaces the default search |
 
 ## Verification
 

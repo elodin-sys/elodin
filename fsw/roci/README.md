@@ -217,28 +217,28 @@ Roci has evolved significantly since its initial implementation. Here are some m
 
 ### Evolution Timeline
 
-1. **Initial Implementation** ([#469](https://github.com/elodin-sys/paracosm/pull/469)) - May 2024
+1. **Initial Implementation** - May 2024
    - Core framework with World/Handler pattern
    - Basic Conduit (now Impeller) integration
    - Entity-Component mapping with derive macros
 
-2. **Combinator Refactor** ([#508](https://github.com/elodin-sys/paracosm/pull/508))
+2. **Combinator Refactor**
    - Introduced pipe combinators for system composition
    - Simplified system chaining and data flow
 
-4. **System Functions** ([#634](https://github.com/elodin-sys/paracosm/pull/634))
+3. **System Functions**
    - Added support for regular functions as systems
    - Reduced boilerplate for simple control logic
 
-5. **UKF Implementation** ([#663](https://github.com/elodin-sys/paracosm/pull/663))
+4. **UKF Implementation**
    - Dynamic dimension support for Unscented Kalman Filter
    - Foundation for advanced estimation algorithms
 
-6. **Python UKF Wrapper** ([#668](https://github.com/elodin-sys/paracosm/pull/668))
+5. **Python UKF Wrapper**
    - Cross-language support for filter algorithms
    - Enabled prototyping in Python
 
-7. **Impeller Protocol** ([#763](https://github.com/elodin-sys/paracosm/pull/763))
+6. **Impeller Protocol**
    - Migration from Conduit to Impeller
    - Improved performance and flexibility
 

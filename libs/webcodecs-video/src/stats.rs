@@ -36,6 +36,12 @@ pub struct Stats {
     pub status: String,
 }
 
+impl Default for Stats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Stats {
     pub fn new() -> Self {
         Self {
@@ -92,6 +98,10 @@ impl Stats {
         self.window_decoded = decoded_total;
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Snapshot collects stream metadata"
+    )]
     pub fn snapshot(
         &self,
         codec: &str,

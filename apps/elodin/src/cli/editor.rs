@@ -58,6 +58,18 @@ pub struct Args {
     /// a live session.
     #[clap(long)]
     pub replay: bool,
+
+    /// Use available terrain only; never contact terrain providers.
+    #[arg(long)]
+    pub offline: bool,
+
+    /// Compatibility with earlier terrain previews. Cache-first streaming is the default.
+    #[arg(long, hide = true, conflicts_with = "offline")]
+    pub terrain_mode: Option<elodin_editor::plugins::terrain_playback::TerrainMode>,
+
+    /// Override the automatic global background with a georeferenced GLB (path relative to DB assets).
+    #[arg(long, hide = true)]
+    pub terrain_basemap: Option<String>,
 }
 
 #[derive(clap::Args, Clone)]
@@ -86,6 +98,9 @@ impl Default for Args {
             schematic: None,
             kdl: None,
             replay: false,
+            offline: false,
+            terrain_mode: None,
+            terrain_basemap: None,
         }
     }
 }
@@ -139,7 +154,7 @@ fn resolve_schematic_path(path: &Path, sim: &Simulator) -> miette::Result<PathBu
     Err(miette!("schematic not found: {}", path.display()))
 }
 
-fn python_bin() -> miette::Result<String> {
+pub(super) fn python_bin() -> miette::Result<String> {
     std::env::var("ELODIN_PYTHON")
         .ok()
         .or_else(|| which_bin("python3"))
@@ -364,6 +379,9 @@ impl Cli {
     ) -> miette::Result<JoinHandle<miette::Result<()>>> {
         let sim = args.sim.clone();
         let sim_addr = args.addr;
+        let terrain_offline = args.offline
+            || args.terrain_mode
+                == Some(elodin_editor::plugins::terrain_playback::TerrainMode::Offline);
         let dirs = self.dirs().into_diagnostic()?;
         let cache_dir = dirs.cache_dir().to_owned();
         let thread = std::thread::spawn(move || {
@@ -396,6 +414,7 @@ impl Cli {
                                 sim_addr,
                                 execution,
                                 hold_for_editor,
+                                terrain_offline,
                             ));
                         tokio::select! {
                             r = &mut recipe_fut => res = Some(r),
@@ -440,6 +459,16 @@ impl Cli {
 
     #[cfg_attr(target_os = "windows", allow(unused_mut))]
     pub fn editor(self, mut args: Args, rt: Runtime) -> miette::Result<()> {
+        let mut policy = elodin_editor::plugins::terrain_playback::TerrainPlayback::parse(
+            None,
+            args.terrain_basemap.as_deref(),
+        )
+        .into_diagnostic()?;
+        policy.mode = if args.offline {
+            Some(elodin_editor::plugins::terrain_playback::TerrainMode::Offline)
+        } else {
+            args.terrain_mode
+        };
         #[cfg(not(target_os = "windows"))]
         use_plan_addr(&mut args)?;
 
@@ -460,6 +489,7 @@ impl Cli {
             true,
         )?;
         let mut app = self.editor_app()?;
+        app.insert_resource(policy);
         match &args.sim {
             Simulator::None => {
                 app.add_plugins(
@@ -656,8 +686,48 @@ fn on_window_resize(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use clap::Parser;
     use std::ffi::OsString;
     use std::str::FromStr;
+
+    #[test]
+    #[cfg(not(target_os = "windows"))]
+    fn offline_is_available_for_both_editor_and_run() {
+        for command in ["editor", "run"] {
+            let parsed =
+                Cli::try_parse_from(["elodin", command, "--offline", "examples/falcon9/main.py"])
+                    .unwrap();
+            let args = match parsed.command {
+                Some(super::super::Commands::Editor(args)) => args,
+                #[cfg(not(target_os = "windows"))]
+                Some(super::super::Commands::Run(args)) => args,
+                _ => panic!("expected editor or run"),
+            };
+            assert!(args.offline);
+            assert_eq!(args.terrain_mode, None);
+        }
+    }
+
+    #[test]
+    fn terrain_access_defaults_to_cache_first_streaming() {
+        let parsed = Cli::try_parse_from(["elodin", "editor", "dbs/f9"]).unwrap();
+        let Some(super::super::Commands::Editor(args)) = parsed.command else {
+            panic!("expected editor");
+        };
+        assert!(!args.offline);
+        assert_eq!(args.terrain_mode, None);
+        assert!(
+            Cli::try_parse_from([
+                "elodin",
+                "editor",
+                "--offline",
+                "--terrain-mode",
+                "hybrid",
+                "dbs/f9",
+            ])
+            .is_err()
+        );
+    }
 
     #[test]
     fn parses_socket_address() {

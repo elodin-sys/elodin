@@ -44,7 +44,7 @@ fn wire_two_field_write() {
                 schema(
                     PrimType::F64,
                     dims,
-                    timestamp(time_field.clone(), component(ComponentId::new(*name))),
+                    timestamp(time_field.clone(), component(ComponentId::new(name))),
                 ),
             )
         }));

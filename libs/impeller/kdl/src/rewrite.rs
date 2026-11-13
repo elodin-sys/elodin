@@ -1,5 +1,6 @@
 use impeller_wkt::{
-    Object3DIcon, Object3DIconSource, Object3DMesh, Panel, Schematic, SchematicElem, Thruster,
+    Object3DIcon, Object3DIconSource, Object3DMesh, Panel, Schematic, SchematicElem, TerrainConfig,
+    Thruster,
 };
 use serde::Deserialize;
 use std::path::{Component, Path};
@@ -126,8 +127,25 @@ pub fn rewrite_asset_paths<F>(schematic: &mut Schematic, mut map: F)
 where
     F: FnMut(&str) -> Option<String>,
 {
+    rewrite_schematic_assets(schematic, &mut map);
+}
+
+fn rewrite_schematic_assets<F>(schematic: &mut Schematic, map: &mut F)
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    for overlay in &mut schematic.map_overlays {
+        if let Some(path) = map(&overlay.path) {
+            overlay.path = path;
+        }
+    }
+    if let Some(TerrainConfig::Asset { path }) = &mut schematic.terrain
+        && let Some(rewritten) = map(path)
+    {
+        *path = rewritten;
+    }
     for elem in &mut schematic.elems {
-        rewrite_elem(elem, &mut map);
+        rewrite_elem(elem, map);
     }
 }
 
@@ -171,9 +189,7 @@ where
                 *path = new_path;
             }
             if let Some(content) = &mut window.content {
-                for elem in &mut content.elems {
-                    rewrite_elem(elem, map);
-                }
+                rewrite_schematic_assets(content, map);
             }
         }
         _ => {}
@@ -230,9 +246,7 @@ pub fn collect_local_asset_paths(schematic: &Schematic) -> Vec<String> {
     if schematic.skybox.is_some() {
         paths.push(SKYBOX_MANIFEST_ASSET_NAME.to_string());
     }
-    for elem in &schematic.elems {
-        collect_elem_paths(elem, &mut paths);
-    }
+    collect_schematic_paths(schematic, &mut paths);
     paths.sort();
     paths.dedup();
     paths
@@ -247,9 +261,7 @@ pub fn collect_db_asset_names(schematic: &Schematic) -> Vec<String> {
     if schematic.skybox.is_some() {
         names.push(SKYBOX_MANIFEST_ASSET_NAME.to_string());
     }
-    for elem in &schematic.elems {
-        collect_elem_db_asset_names(elem, &mut names);
-    }
+    collect_schematic_db_asset_names(schematic, &mut names);
     names.sort();
     names.dedup();
     names
@@ -302,6 +314,17 @@ fn collect_elem_db_asset_names(elem: &SchematicElem, names: &mut Vec<String>) {
 }
 
 fn collect_schematic_db_asset_names(schematic: &Schematic, names: &mut Vec<String>) {
+    names.extend(
+        schematic
+            .map_overlays
+            .iter()
+            .filter_map(|o| db_asset_name(&o.path)),
+    );
+    if let Some(TerrainConfig::Asset { path }) = &schematic.terrain
+        && let Some(name) = db_asset_name(path)
+    {
+        names.push(name);
+    }
     for elem in &schematic.elems {
         collect_elem_db_asset_names(elem, names);
     }
@@ -362,6 +385,18 @@ fn collect_elem_paths(elem: &SchematicElem, paths: &mut Vec<String>) {
 }
 
 fn collect_schematic_paths(schematic: &Schematic, paths: &mut Vec<String>) {
+    paths.extend(
+        schematic
+            .map_overlays
+            .iter()
+            .filter(|o| is_local_asset_path(&o.path))
+            .map(|o| o.path.clone()),
+    );
+    if let Some(TerrainConfig::Asset { path }) = &schematic.terrain
+        && is_local_asset_path(path)
+    {
+        paths.push(path.clone());
+    }
     for elem in &schematic.elems {
         collect_elem_paths(elem, paths);
     }

@@ -203,6 +203,21 @@ pub(super) fn internal(error: impl std::fmt::Display) -> Status {
     Status::internal(error.to_string())
 }
 
+pub(super) fn db_error(error: Error) -> Status {
+    match error {
+        Error::ComponentNotFound(_) => {
+            status_with_reason(Code::NotFound, error.to_string(), "COMPONENT_NOT_FOUND")
+        }
+        Error::MsgNotFound(_) => {
+            status_with_reason(Code::NotFound, error.to_string(), "MESSAGE_NOT_FOUND")
+        }
+        Error::Io(ref io) if io.kind() == std::io::ErrorKind::PermissionDenied => {
+            Status::permission_denied(error.to_string())
+        }
+        _ => internal(error),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,20 +236,5 @@ mod tests {
         store.persist(&key, 5).unwrap();
         let fresh = SessionResume::new(directory.path().to_path_buf(), ".test-session-");
         assert_eq!(fresh.get(&key), 10);
-    }
-}
-
-pub(super) fn db_error(error: Error) -> Status {
-    match error {
-        Error::ComponentNotFound(_) => {
-            status_with_reason(Code::NotFound, error.to_string(), "COMPONENT_NOT_FOUND")
-        }
-        Error::MsgNotFound(_) => {
-            status_with_reason(Code::NotFound, error.to_string(), "MESSAGE_NOT_FOUND")
-        }
-        Error::Io(ref io) if io.kind() == std::io::ErrorKind::PermissionDenied => {
-            Status::permission_denied(error.to_string())
-        }
-        _ => internal(error),
     }
 }

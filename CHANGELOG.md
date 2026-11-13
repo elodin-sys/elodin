@@ -1,6 +1,7 @@
 # Changelog
 
 ## unreleased
+- **(fix)** Recording looks for assets in `./assets`, then the simulation's own `assets/`, then the nearest `assets/` above it, so assets such as the Falcon 9 map overlays load when the simulation runs from the repository root. Earlier folders win when a file exists in several.
 
 ## v0.21
 

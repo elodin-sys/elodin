@@ -272,7 +272,7 @@ When contributing to Stellarator:
 
 ## History
 
-Stellarator was created to solve specific challenges in flight software development where existing async runtimes fell short. The initial implementation ([PR #775](https://github.com/elodin-sys/paracosm/pull/775)) focused on:
+Stellarator was created to solve specific challenges in flight software development where existing async runtimes fell short. The initial implementation focused on:
 
 - Creating a minimal async executor for deterministic behavior
 - Using io_uring on Linux for maximum I/O performance

@@ -25,6 +25,7 @@ egui_material_icons = "0.6"
 ab_glyph = "0.2"
 
 # bevy
+bevy-cesium.workspace = true
 bevy = { workspace = true, features = [
   "bevy_gizmos_render",
   "bevy_audio",
@@ -97,6 +98,8 @@ nodit.rev = "cd284cd0f16d475786dae8629cebda4e14177ee1"
 heapless.version = "0.8"
 arc-swap = "1.7.1"
 
+bevy_hanabi = { version = "0.20.0-dev", default-features = false, features = ["3d"] }
+
 # helpers
 itertools = "0.12.1"
 hex = "0.4.3"
@@ -128,6 +131,11 @@ thiserror.version = "2"
 miette.version = "7.2"
 
 [target.'cfg(target_family = "wasm")'.dependencies]
+# wgpu's webgpu feature lets Chrome create a WebGPU device (Hanabi needs it).
+# Bevy's own webgpu feature switches PBR shadow maps to cube arrays, which the
+# GLES backend creates as a plain cube, so the mesh shader never draws.
+# wasm_shadows adapts comparison sampling when the selected backend is WebGPU.
+wgpu = { version = "29", default-features = false, features = ["counters", "webgpu"] }
 impeller-bevy.path = "../../libs/impeller/bevy"
 impeller-bevy.default-features = false
 cranelift-mlir.path = "../cranelift-mlir"
@@ -138,16 +146,17 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 webcodecs-video = { path = "../webcodecs-video", features = ["bevy"] }
 web-sys = { version = "0.3", features = [
+  "console",
   "Headers",
   "Request",
   "RequestInit",
   "RequestMode",
   "Response",
+  "Storage",
   "Window",
 ] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-bevy-cesium.workspace = true
 bevy = { workspace = true, features = [
   "file_watcher",
   "multi_threaded",
@@ -167,7 +176,6 @@ reqwest = { version = "0.12", features = [
   "gzip",
   "blocking",
 ], default-features = false }
-bevy_hanabi = { version = "0.20.0-dev", default-features = false, features = ["3d"] }
 bevy_ai_skybox.path = "../bevy_ai_skybox"
 tokio = { version = "1.34", features = ["rt-multi-thread", "net"] }
 # os
@@ -222,3 +230,4 @@ pic-scale = "0.6"
 [dev-dependencies]
 test-case = "*"
 tempfile = "3"
+naga = { version = "29", features = ["wgsl-in", "glsl-out"] }
