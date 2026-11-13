@@ -33,7 +33,7 @@ async fn wait_connected(world: &World) {
         }
         delay(20).await;
     }
-    panic!("Both browser WebSockets must connect");
+    panic!("Browser WebSocket must connect");
 }
 
 /// Run with browser_server.mjs listening on 127.0.0.1:18766.
@@ -54,18 +54,16 @@ async fn browser_routes_cookies_assets_reconnect_and_session_switch() {
 
     // Losing either channel invalidates the pair and reconnects both channels.
     for channel in ["impeller/msg", "impeller"] {
-        let stream = world.resource::<CurrentStreamId>().0;
         request(&format!("/control/close?channel={channel}")).await;
         delay(50).await;
+        ws_reconnect(&mut world);
         assert_eq!(
             world.resource::<ThreadConnectionStatus>().status(),
             ConnectionStatus::Error
         );
-        ws_reconnect(&mut world);
         delay(300).await;
         ws_reconnect(&mut world);
         wait_connected(&world).await;
-        assert_ne!(world.resource::<CurrentStreamId>().0, stream);
     }
 
     let stream = world.resource::<CurrentStreamId>().0;

@@ -55,7 +55,7 @@ The same adapter caches static GLB and glTF files, external buffers, and texture
 This experiment does not enable the native `world_mesh` terrain renderer.
 
 Default limits are 192 MiB for camera payloads, 32 MiB for decoded camera images, and 64 MiB for telemetry.
-Each browser transport queue has a 64 MiB capacity.
+Browser transport queues use the upstream capacity defined in `libs/impeller/bevy/src/channels.rs`.
 The disk payload limit is 512 MiB, with 8 MiB chunks and at most 4096 index entries.
 An asset has a 64 MiB download limit. This limit does not bound total decoded scene or graphics memory.
 The regenerated static terrain still needs separate graphics and memory qualification.

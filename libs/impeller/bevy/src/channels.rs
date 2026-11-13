@@ -12,11 +12,12 @@ use std::{
     },
 };
 
-/// Native SQL replies need 256 MiB. Browser queues hold bounded playback replies.
-#[cfg(not(target_family = "wasm"))]
+/// Incoming BBQ queue capacity.
+///
+/// Raised from 64 MiB to 256 MiB so a large Arrow IPC SQL reply fits alongside
+/// other in-flight packets. WASM uses the same size: a 2 MiB queue makes
+/// `push_incoming` drop those frames while the socket still looks connected.
 pub const QUEUE_LEN: usize = 256 * 1024 * 1024;
-#[cfg(target_family = "wasm")]
-pub const QUEUE_LEN: usize = 64 * 1024 * 1024;
 
 #[derive(Resource)]
 pub struct PacketRx(AsyncArcQueueRx);
@@ -526,7 +527,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_family = "wasm"))]
     fn incoming_queue_holds_large_arrow_ipc_frames() {
         // Websocket proxy body cap (`MAX_IMPELLER_PACKET_BYTES`) plus the u32
         // length prefix, the 16-byte alignment reserve in `push_incoming`, and
