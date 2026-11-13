@@ -20,6 +20,9 @@ use wasm_bindgen::{JsCast, JsValue, prelude::Closure};
 use web_sys::{BinaryType, MessageEvent, WebSocket};
 use web_time::{Duration, Instant};
 
+#[cfg(test)]
+mod browser_tests;
+
 const RECONNECT_DELAY: Duration = Duration::from_millis(250);
 
 /// Rebuild the two Impeller WebSockets against `endpoint`.
@@ -63,6 +66,12 @@ struct WsAssets(Option<HostOrUrl>);
 struct PendingWsConnect(Option<DbEndpoint>);
 
 fn install_connection(world: &mut World, endpoint: Option<DbEndpoint>, initial: bool) {
+    if !initial && let Some(mut cache) = world.get_resource_mut::<crate::TelemetryCache>() {
+        cache.reset();
+    }
+    if let Some(mut prefetch) = world.get_resource_mut::<crate::VisiblePrefetchState>() {
+        prefetch.clear_in_flight();
+    }
     let endpoint = endpoint.map(|endpoint| attach_assets(world, endpoint));
     let (packet_tx, packet_rx, outgoing_packet_rx, incoming_packet_tx) = channels();
     let (msg_tx, msg_rx, msg_outgoing_rx, msg_incoming_tx) = msg_channels();
@@ -122,6 +131,7 @@ struct WsSockets {
 
 struct LiveSocket {
     ws: WebSocket,
+    replay: ReplayHook,
     // Held so the JS callbacks stay alive until Drop clears them.
     #[allow(dead_code)]
     on_open: Closure<dyn FnMut()>,
@@ -231,36 +241,49 @@ fn ws_reconnect(world: &mut World) {
 }
 
 fn ws_flush(world: &mut World) {
+    if world.resource::<WsIo>().status.status() != ConnectionStatus::Success {
+        return;
+    }
+    let enabled = world
+        .get_resource::<crate::ReplayCachePolicy>()
+        .is_some_and(|policy| policy.enabled);
     let (main, msg) = {
         let Some(sockets) = world.get_non_send::<WsSockets>() else {
             return;
         };
         (
-            sockets.main.as_ref().map(|sock| sock.ws.clone()),
-            sockets.msg.as_ref().map(|sock| sock.ws.clone()),
+            sockets
+                .main
+                .as_ref()
+                .map(|socket| (socket.ws.clone(), socket.replay.clone())),
+            sockets
+                .msg
+                .as_ref()
+                .map(|socket| (socket.ws.clone(), socket.replay.clone())),
         )
     };
     let Some(mut io) = world.get_resource_mut::<WsIo>() else {
         return;
     };
-    flush_outgoing(&mut io.main_outgoing, main.as_ref());
-    flush_outgoing(&mut io.msg_outgoing, msg.as_ref());
+    flush_outgoing(&mut io.main_outgoing, main, enabled);
+    flush_outgoing(&mut io.msg_outgoing, msg, enabled);
 }
 
-fn flush_outgoing(rx: &mut mpsc::Receiver<Option<LenPacket>>, socket: Option<&WebSocket>) {
-    let Some(socket) = socket else {
+fn flush_outgoing(
+    rx: &mut mpsc::Receiver<Option<LenPacket>>,
+    socket: Option<(WebSocket, ReplayHook)>,
+    enabled: bool,
+) {
+    let Some((socket, hook)) = socket else {
         return;
     };
     if socket.ready_state() != WebSocket::OPEN {
         return;
     }
+    hook.state.borrow_mut().enabled = enabled;
     loop {
         match rx.try_recv() {
-            Ok(Some(pkt)) => {
-                if socket.send_with_u8_array(&pkt.inner).is_err() {
-                    break;
-                }
-            }
+            Ok(Some(packet)) => hook.send(&socket, packet.inner),
             Ok(None) => {}
             Err(_) => break,
         }
@@ -291,6 +314,18 @@ fn open_sockets(world: &mut World) {
         )
     };
     world.remove_non_send::<WsSockets>();
+    world.insert_resource(crate::ReplayCachePolicy::default());
+    if let Some(mut prefetch) = world.get_resource_mut::<crate::VisiblePrefetchState>() {
+        prefetch.clear_in_flight();
+    }
+    world.insert_resource(CurrentStreamId(stream_id));
+    // Requests and responses from a closed connection cannot cross a reconnect.
+    if let Some(mut rx) = world.get_resource_mut::<crate::PacketRx>() {
+        while rx.try_recv_pkt().is_some() {}
+    }
+    if let Some(mut rx) = world.get_resource_mut::<crate::MsgPacketRx>() {
+        while rx.try_recv_pkt().is_some() {}
+    }
     status.set_status(ConnectionStatus::Connecting);
     if let Some(mut io) = world.get_resource_mut::<WsIo>() {
         io.retry_at = None;
@@ -341,15 +376,27 @@ fn open_socket(
         }
     };
     ws.set_binary_type(BinaryType::Arraybuffer);
+    let replay = ReplayHook {
+        state: Default::default(),
+        scope: url.to_owned(),
+        host: std::rc::Rc::new(std::cell::RefCell::new(JsValue::UNDEFINED)),
+        incoming: incoming.clone(),
+        generation: generation.clone(),
+        my_gen,
+    };
 
     let ws_open = ws.clone();
     let incoming_open = incoming.clone();
     let generation_open = generation.clone();
     let status_open = status.clone();
+    let replay_open = replay.clone();
     let on_open = Closure::wrap(Box::new(move || {
         if generation_open.load(Ordering::SeqCst) != my_gen {
             return;
         }
+        *replay_open.host.borrow_mut() =
+            js_sys::Reflect::get(&js_sys::global(), &JsValue::from_str("elodinReplayCache"))
+                .unwrap_or(JsValue::UNDEFINED);
         if inject_new_connection {
             push_incoming(
                 &incoming_open,
@@ -367,6 +414,8 @@ fn open_socket(
 
     let incoming_msg = incoming;
     let generation_msg = generation.clone();
+    let ws_msg = ws.clone();
+    let replay_msg = replay.clone();
     let on_message = Closure::wrap(Box::new(move |event: MessageEvent| {
         if generation_msg.load(Ordering::SeqCst) != my_gen {
             return;
@@ -380,6 +429,7 @@ fn open_socket(
         if bytes.len() < 4 {
             return;
         }
+        replay_msg.receive(&ws_msg, &bytes);
         push_incoming(&incoming_msg, LenPacket { inner: bytes });
     }) as Box<dyn FnMut(_)>);
     ws.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
@@ -409,11 +459,142 @@ fn open_socket(
 
     Some(LiveSocket {
         ws,
+        replay,
         on_open,
         on_message,
         on_error,
         on_close,
     })
+}
+
+#[derive(Clone)]
+struct ReplayHook {
+    state: std::rc::Rc<std::cell::RefCell<ReplayState>>,
+    scope: String,
+    host: std::rc::Rc<std::cell::RefCell<JsValue>>,
+    incoming: Arc<AsyncArcQueueTx>,
+    generation: Arc<AtomicU64>,
+    my_gen: u64,
+}
+#[derive(Default)]
+struct ReplayState {
+    enabled: bool,
+    pending: std::collections::HashMap<u8, Vec<u8>>,
+    lookups: usize,
+    serial: u64,
+    requests: std::collections::HashMap<u8, u64>,
+}
+impl ReplayHook {
+    fn active(&self, socket: &WebSocket) -> bool {
+        socket.ready_state() == WebSocket::OPEN
+            && self.generation.load(Ordering::SeqCst) == self.my_gen
+    }
+    fn method(&self, name: &str) -> Option<js_sys::Function> {
+        js_sys::Reflect::get(&self.host.borrow(), &JsValue::from_str(name))
+            .ok()?
+            .dyn_into()
+            .ok()
+    }
+    fn send(&self, socket: &WebSocket, frame: Vec<u8>) {
+        if frame.len() < 8 {
+            let _ = socket.send_with_u8_array(&frame);
+            return;
+        }
+        let id = frame[7];
+        let serial = {
+            let mut state = self.state.borrow_mut();
+            state.pending.remove(&id);
+            state.serial = state.serial.wrapping_add(1);
+            let serial = state.serial;
+            state.requests.insert(id, serial);
+            serial
+        };
+        let lookup = self.method("lookup");
+        if !self.state.borrow().enabled
+            || !crate::replay::cacheable(&frame)
+            || self.state.borrow().lookups >= 8
+            || lookup.is_none()
+        {
+            let _ = socket.send_with_u8_array(&frame);
+            return;
+        }
+        let canonical = crate::replay::canonical(&frame);
+        let result = lookup.expect("checked method").call2(
+            &self.host.borrow(),
+            &JsValue::from_str(&self.scope),
+            &Uint8Array::from(canonical.as_slice()),
+        );
+        self.state.borrow_mut().lookups += 1;
+        let hook = self.clone();
+        let socket = socket.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let reply = match result {
+                Ok(value) => {
+                    let timeout = js_sys::Promise::new(&mut |resolve, _| {
+                        if let Ok(timer) = js_sys::Reflect::get(
+                            &js_sys::global(),
+                            &JsValue::from_str("setTimeout"),
+                        ) && let Ok(timer) = timer.dyn_into::<js_sys::Function>()
+                        {
+                            let _ = timer.call2(
+                                &js_sys::global(),
+                                &resolve,
+                                &JsValue::from_f64(2000.0),
+                            );
+                        } else {
+                            let _ = resolve.call0(&JsValue::UNDEFINED);
+                        }
+                    });
+                    let promises = js_sys::Array::new();
+                    promises.push(&js_sys::Promise::resolve(&value));
+                    promises.push(&timeout);
+                    wasm_bindgen_futures::JsFuture::from(js_sys::Promise::race(&promises))
+                        .await
+                        .ok()
+                        .and_then(|value| value.dyn_into::<Uint8Array>().ok())
+                        .and_then(|bytes| crate::replay::patch(&bytes.to_vec(), id))
+                }
+                Err(_) => None,
+            };
+            {
+                let mut state = hook.state.borrow_mut();
+                state.lookups = state.lookups.saturating_sub(1);
+                if state.requests.get(&id) != Some(&serial) {
+                    return;
+                }
+            }
+            if !hook.active(&socket) {
+                return;
+            }
+            if hook.state.borrow().enabled {
+                if let Some(reply) = reply {
+                    push_incoming(&hook.incoming, LenPacket { inner: reply });
+                    return;
+                }
+                hook.state.borrow_mut().pending.insert(id, canonical);
+            }
+            let _ = socket.send_with_u8_array(&frame);
+        });
+    }
+    fn receive(&self, socket: &WebSocket, frame: &[u8]) {
+        if !self.active(socket) || frame.len() < 8 {
+            return;
+        }
+        let pending = self.state.borrow_mut().pending.remove(&frame[7]);
+        if self.state.borrow().enabled
+            && crate::replay::storable(frame)
+            && let Some(request) = pending
+            && let Some(store) = self.method("store")
+        {
+            let reply = crate::replay::canonical(frame);
+            let _ = store.call3(
+                &self.host.borrow(),
+                &JsValue::from_str(&self.scope),
+                &Uint8Array::from(request.as_slice()),
+                &Uint8Array::from(reply.as_slice()),
+            );
+        }
+    }
 }
 
 fn push_incoming(incoming: &AsyncArcQueueTx, pkt: LenPacket) {
