@@ -963,6 +963,10 @@ impl WorldBuilder {
                     stellarator::struc_con::stellar(move || ::s10::liveness::monitor(port));
                 }
 
+                // Only a persistent DB keeps a snapshot of the simulation source.
+                let source_capture_entrypoint = db_path
+                    .as_ref()
+                    .and(simulation_source_entrypoint.as_deref());
                 let db_path = match db_path {
                     Some(p) => PathBuf::from(p),
                     None => tempfile::tempdir()?.keep().join("db"),
@@ -1007,7 +1011,7 @@ impl WorldBuilder {
                     true,
                     Some(db_server.db.clone()),
                 )?;
-                capture_simulation_source(py, &db_path, simulation_source_entrypoint.as_deref())?;
+                capture_simulation_source(py, &db_path, source_capture_entrypoint)?;
                 let run_result = py.allow_threads(|| {
                     // Run the async executor (and therefore the JIT tick_fn) on a
                     // dedicated thread with a 256 MB stack. Large customer simulations
@@ -1152,11 +1156,7 @@ impl WorldBuilder {
                 });
                 match run_result {
                     Ok(value) => {
-                        capture_simulation_source(
-                            py,
-                            &db_path,
-                            simulation_source_entrypoint.as_deref(),
-                        )?;
+                        capture_simulation_source(py, &db_path, source_capture_entrypoint)?;
                         Ok(value)
                     }
                     Err(err) => Err(err),

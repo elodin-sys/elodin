@@ -4199,23 +4199,21 @@ mod tests {
     struct ReadyWrite;
 
     impl AsyncWrite for PendingWrite {
-        fn write<B: stellarator::buf::IoBuf>(
+        async fn write<B: stellarator::buf::IoBuf>(
             &self,
             buf: B,
-        ) -> impl std::future::Future<Output = stellarator::BufResult<usize, B>> {
-            async move {
-                stellarator::sleep(TX_WRITE_TIMEOUT + Duration::from_secs(30)).await;
-                (Ok(buf.init_len()), buf)
-            }
+        ) -> stellarator::BufResult<usize, B> {
+            stellarator::sleep(TX_WRITE_TIMEOUT + Duration::from_secs(30)).await;
+            (Ok(buf.init_len()), buf)
         }
     }
 
     impl AsyncWrite for ReadyWrite {
-        fn write<B: stellarator::buf::IoBuf>(
+        async fn write<B: stellarator::buf::IoBuf>(
             &self,
             buf: B,
-        ) -> impl std::future::Future<Output = stellarator::BufResult<usize, B>> {
-            async move { (Ok(buf.init_len()), buf) }
+        ) -> stellarator::BufResult<usize, B> {
+            (Ok(buf.init_len()), buf)
         }
     }
 

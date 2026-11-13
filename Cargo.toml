@@ -72,6 +72,11 @@ version = "0.21.1-alpha.0"
 edition = "2024"
 repository = "https://github.com/elodin-sys/elodin"
 
+# At -O0 its C++ objects carry weak libstdc++ members that make the linker pull
+# them in beside bevy-cesium's own basisu, duplicating its symbols.
+[profile.dev.package.basis-universal-sys]
+opt-level = 3
+
 [profile.wasm-dev]
 inherits = "dev"
 debug = false

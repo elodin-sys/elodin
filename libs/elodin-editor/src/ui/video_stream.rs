@@ -2033,9 +2033,11 @@ mod tests {
 
     #[test]
     fn decoded_budget_counts_pixels_instead_of_frames() {
-        let mut cache = VideoFrameCache::default();
-        cache.max_decoded_bytes = 20;
-        cache.eviction_pivot = Some(Timestamp(0));
+        let mut cache = VideoFrameCache {
+            max_decoded_bytes: 20,
+            eviction_pivot: Some(Timestamp(0)),
+            ..Default::default()
+        };
         let image = |width| {
             Image::new_fill(
                 Extent3d {

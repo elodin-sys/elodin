@@ -534,10 +534,12 @@ mod tests {
         // a SQL reply still fits when other packets are in flight.
         const MAX_WS_BODY: usize = 64 * 1024 * 1024;
         let one_frame = 4 + MAX_WS_BODY + 16 + size_of::<usize>();
-        assert!(
-            QUEUE_LEN >= 256 * 1024 * 1024,
-            "incoming queue {QUEUE_LEN} is below the 256 MiB Arrow IPC sizing"
-        );
+        const {
+            assert!(
+                QUEUE_LEN >= 256 * 1024 * 1024,
+                "incoming queue is below the 256 MiB Arrow IPC sizing"
+            )
+        };
         assert!(
             QUEUE_LEN > one_frame,
             "incoming queue {QUEUE_LEN} cannot hold a {one_frame}-byte Arrow IPC frame"
