@@ -48,7 +48,8 @@ owning component stream. Common failures carry `google.rpc.ErrorInfo` reasons
 The server is unauthenticated by default. Add `--grpc-auth-token TOKEN` to
 require `authorization: Bearer TOKEN` on application RPCs and reflection; the
 standard health endpoint remains unauthenticated for load balancers. Transport
-remains insecure, so bind only on a trusted network. Ingest and message publish
+remains insecure, so bind only on a trusted network, or pass `--no-grpc` to skip
+the server and its port. Ingest and message publish
 resume positions persist across server restarts (ingest periodically at ack
 time), so delivery is at-least-once: acknowledged sequences are skipped during
 normal reconnects, while a crash may cause recent complete rows to appear twice.

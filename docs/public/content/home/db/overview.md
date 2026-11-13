@@ -42,7 +42,8 @@ elodin-db run [::]:2240 ./db
 See `libs/db/proto/elodin/db/v1`, the `elodin-db-protos` CMake package, and
 `libs/db/examples/grpc-client-batched.cpp` (16 MiB max message). Health and
 reflection are enabled. Use `--grpc-auth-token TOKEN` to require bearer-token
-metadata; without it the API is unauthenticated.
+metadata; without it the API is unauthenticated. `--no-grpc` skips the server and
+its port.
 
 ### Lua REPL
 

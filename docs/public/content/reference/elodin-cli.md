@@ -449,6 +449,9 @@ and reflection share the endpoint. See `libs/db/proto/elodin/db/v1` and
 * `--grpc-auth-token <TOKEN>` — Require `authorization: Bearer TOKEN` metadata
   on the gRPC endpoint; omitted means unauthenticated.
 
+* `--no-grpc` — Don't start the gRPC server or bind `<ADDR> + 2`, for hosts that
+  run many databases on adjacent ports or must not expose the API.
+
 * `--follows <ADDR>` — Follow another elodin-db instance, replicating all components, messages, and metadata over a single TCP connection. The local instance still accepts its own connections and data writers.
 
 * `--follow-packet-size <BYTES>` — Target packet size for follow streaming. Small updates are buffered to this size before sending, reducing network overhead when the source has many components.

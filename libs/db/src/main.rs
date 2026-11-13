@@ -99,6 +99,13 @@ struct RunArgs {
         help = "Bearer token required by the gRPC server"
     )]
     grpc_auth_token: Option<String>,
+    #[cfg(feature = "grpc")]
+    #[clap(
+        long,
+        conflicts_with = "grpc_auth_token",
+        help = "Don't start the gRPC server or bind its port"
+    )]
+    no_grpc: bool,
     #[clap(long, hide = true)]
     reset: bool,
     #[clap(
@@ -434,6 +441,8 @@ async fn main() -> miette::Result<()> {
             http_addr,
             #[cfg(feature = "grpc")]
             grpc_auth_token,
+            #[cfg(feature = "grpc")]
+            no_grpc,
             path,
             config,
             reset,
@@ -533,11 +542,13 @@ async fn main() -> miette::Result<()> {
             )
             .into_diagnostic()?;
             #[cfg(feature = "grpc")]
-            let grpc_listener = {
+            let grpc_listener = if no_grpc {
+                None
+            } else {
                 let grpc_addr = elodin_db::grpc::grpc_addr(addr);
-                std::net::TcpListener::bind(grpc_addr).map_err(|e| {
+                Some(std::net::TcpListener::bind(grpc_addr).map_err(|e| {
                     miette::miette!("failed to bind gRPC server at {grpc_addr}: {e}")
-                })?
+                })?)
             };
             if let Some(start_timestamp) = start_timestamp {
                 server
@@ -563,17 +574,19 @@ async fn main() -> miette::Result<()> {
                 });
             }
             #[cfg(feature = "grpc")]
-            stellarator::struc_con::tokio(move |_| async move {
-                if let Err(error) = elodin_db::grpc::serve_listener_with_auth(
-                    grpc_listener,
-                    grpc_db,
-                    grpc_auth_token,
-                )
-                .await
-                {
-                    tracing::error!(?error, "gRPC server exited");
-                }
-            });
+            if let Some(grpc_listener) = grpc_listener {
+                stellarator::struc_con::tokio(move |_| async move {
+                    if let Err(error) = elodin_db::grpc::serve_listener_with_auth(
+                        grpc_listener,
+                        grpc_db,
+                        grpc_auth_token,
+                    )
+                    .await
+                    {
+                        tracing::error!(?error, "gRPC server exited");
+                    }
+                });
+            }
             if let Some(lua_config) = config {
                 let args = impeller_cli::Args {
                     config: Some(lua_config),
@@ -1104,5 +1117,34 @@ mod tests {
             panic!("expected run command");
         };
         assert_eq!(args.grpc_auth_token.as_deref(), Some("secret"));
+        assert!(!args.no_grpc);
+    }
+
+    #[test]
+    fn no_grpc_disables_the_server_and_rejects_a_token() {
+        let cli = Cli::try_parse_from([
+            "elodin-db",
+            "run",
+            "127.0.0.1:2240",
+            "/tmp/elodin-db-grpc-cli-test",
+            "--no-grpc",
+        ])
+        .unwrap();
+        let Commands::Run(args) = cli.command else {
+            panic!("expected run command");
+        };
+        assert!(args.no_grpc);
+        assert!(
+            Cli::try_parse_from([
+                "elodin-db",
+                "run",
+                "127.0.0.1:2240",
+                "/tmp/elodin-db-grpc-cli-test",
+                "--no-grpc",
+                "--grpc-auth-token",
+                "secret",
+            ])
+            .is_err()
+        );
     }
 }
