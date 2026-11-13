@@ -91,6 +91,9 @@
         <loc>/reference/grpc-client/</loc>
     </url>
     <url>
+        <loc>/reference/map-overlays/</loc>
+    </url>
+    <url>
         <loc>/reference/migration/</loc>
     </url>
     <url>

@@ -68,7 +68,7 @@
 	
 
 <title>Terrain | Elodin</title>
-<meta name="description" content="Place your simulation, display scenery and query ground heights.">
+<meta name="description" content="Run with cached terrain and streaming; prepare assets for offline simulations and replays.">
 <link rel="canonical" href="/reference/terrain/">
 
 
@@ -77,12 +77,12 @@
     <meta name="twitter:image" content="//logo.png">
   
   <meta name="twitter:title" content="Terrain">
-  <meta name="twitter:description" content="Place your simulation, display scenery and query ground heights.">
+  <meta name="twitter:description" content="Run with cached terrain and streaming; prepare assets for offline simulations and replays.">
   <meta name="twitter:site" content="@elodinsystems">
   <meta name="twitter:creator" content="@elodinsystems">
 
   <meta property="og:title" content="Terrain">
-  <meta property="og:description" content="Place your simulation, display scenery and query ground heights.">
+  <meta property="og:description" content="Run with cached terrain and streaming; prepare assets for offline simulations and replays.">
   <meta property="og:type" content="article">
   <meta property="og:url" content="/reference/terrain/">
 
@@ -357,6 +357,14 @@
             <li>
                 <a
                     class="docs-link "
+                    href="/reference/map-overlays/"
+                    >Geographic overlays</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
                     href="/reference/replays/"
                     >Replays</a
                 >
@@ -432,16 +440,32 @@
             <ul>
                 
                 <li>
+                    <a href="/reference/terrain/#run-and-view">Run and view</a>
+                    
+                </li>
+                
+                <li>
                     <a href="/reference/terrain/#scenery">Scenery</a>
                     
-                    <ul>
-                        
-                        <li>
-                            <a href="/reference/terrain/#startup-and-outages">Startup and outages</a>
-                            
-                        </li>
-                        
-                    </ul>
+                </li>
+                
+                <li>
+                    <a href="/reference/terrain/#prepare-for-offline-runs-and-sitl">Prepare for offline runs and SITL</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="/reference/terrain/#record-and-replay">Record and replay</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="/reference/terrain/#browser-replay">Browser replay</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="/reference/terrain/#startup-and-outages">Startup and outages</a>
                     
                 </li>
                 
@@ -491,18 +515,96 @@
  
               <main class="docs-content col-lg-11 col-xxl-10">
                   <h1>Terrain</h1>
-                   <p>Choose the scenery and location in your Python schematic. Prepare ground heights
-from the same terrain when your simulation needs them.</p>
+                   <p>Choose terrain in your Python schematic, then use the usual commands.
+Available terrain assets and cached data are reused; missing tiles stream as needed.
+No terrain flag or preparation step is required for normal online use.</p>
+<h2 id="run-and-view">Run and view</h2>
+<table><thead><tr><th>Command</th><th>Result</th></tr></thead><tbody>
+<tr><td><code>elodin run sim.py</code></td><td>Run the simulation and its sensor renderer, if configured.</td></tr>
+<tr><td><code>elodin editor sim.py</code></td><td>Run the simulation with the desktop editor.</td></tr>
+<tr><td><code>elodin editor dbs/flight</code></td><td>Open a recorded run without rerunning the simulation.</td></tr>
+</tbody></table>
+<p>All three use cached terrain first and stream missing data by default.
+Add <code>--offline</code> to disable terrain-provider requests. DB and SITL connections
+remain available.</p>
 <h2 id="scenery">Scenery</h2>
 <table><thead><tr><th>Mode</th><th><code>terrain</code></th><th>Display</th></tr></thead><tbody>
 <tr><td>Legacy</td><td><code>None</code></td><td>The existing GLB or world mesh defined in your schematic.</td></tr>
 <tr><td>Aerial</td><td><code>el.Terrain.aerial()</code></td><td>Streamed terrain with aerial images.</td></tr>
 <tr><td>Photo 3D</td><td><code>el.Terrain()</code></td><td>Streamed photogrammetry, including buildings where covered.</td></tr>
+<tr><td>Prepared assets</td><td><code>el.Terrain.from_asset("terrain/Falcon9/tileset.json")</code></td><td>Scenery served with the DB, in native and WASM editors.</td></tr>
 </tbody></table>
 <p>The editor streams aerial terrain and Photo 3D through Bevy-Cesium.
+Add <a href="/reference/map-overlays/">geographic overlays</a> for place names, roads and
+surfaces stored with the DB, independently of the terrain provider.
 Local models are loaded by the schematic, as in
 <a rel="external" href="https://github.com/elodin-sys/elodin/blob/main/examples/rc-jet/terrain_schematic.py">RC-jet's Mojave terrain</a>.</p>
-<h3 id="startup-and-outages">Startup and outages</h3>
+<h2 id="prepare-for-offline-runs-and-sitl">Prepare for offline runs and SITL</h2>
+<p>Prepare terrain once when a run needs reproducible, versioned scenery or must
+work without a terrain-provider connection. Declare the operating regions in
+the Python schematic. Bounds are west, south,
+east and north in degrees; <code>max_error</code> is the target geometric error in meters.</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>terrain</span><span style="color: light-dark(#859900, #859900);"> =</span><span> el</span><span>.</span><span>Terrain</span><span>(</span></span>
+<span class="giallo-l"><span>    regions</span><span style="color: light-dark(#859900, #859900);">=</span><span>(</span><span>el</span><span>.</span><span>TerrainRegion</span><span>(</span><span>(</span><span style="color: light-dark(#859900, #859900);">-</span><span style="color: light-dark(#D33682, #D33682);">80.7</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 28.4</span><span>,</span><span style="color: light-dark(#859900, #859900);"> -</span><span style="color: light-dark(#D33682, #D33682);">80.5</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 28.7</span><span>)</span><span>,</span><span> max_error</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">16.0</span><span>)</span><span>,</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    directory</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">terrain/Flight</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>)</span></span>
+<span class="giallo-l"><span>world</span><span>.</span><span>schematic</span><span>(</span><span>ui</span><span>.</span><span>schematic</span><span>(</span><span>ui</span><span>.</span><span>viewport</span><span>(</span><span>)</span><span>,</span><span> terrain</span><span style="color: light-dark(#859900, #859900);">=</span><span>terrain</span><span>)</span><span>)</span></span></code></pre><pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> terrain</span><span style="color: light-dark(#2AA198, #2AA198);"> prepare</span><span style="color: light-dark(#2AA198, #2AA198);"> sim.py</span></span></code></pre>
+<ul>
+<li>Preparation reads the script configuration without running simulation steps or starting its recipes.</li>
+<li>It writes <code>assets/terrain/Flight/</code> beside the Python schematic, or uses the existing <code>ELODIN_ASSETS</code> override. Keep the schematic and simulation in the same asset root.</li>
+<li>The package is selected automatically when it covers the declared regions and passes its file checks.</li>
+<li>Repeating preparation reuses a valid package. Extending the regions reuses downloaded geometry and fetches missing resources.</li>
+<li>Overlapping regions use the finer target. Where the provider has no finer tile, its best available geometry is retained and the limitation is reported.</li>
+<li>The declared regions must include the operating area and terrain visible to the sensors. Camera resolution and FOV stay in the existing camera definitions.</li>
+<li>Offline startup rejects a missing, corrupt or insufficiently prepared package.</li>
+</ul>
+<p>Test the prepared simulation, with or without the editor:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> run</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-offline</span><span style="color: light-dark(#2AA198, #2AA198);"> sim.py</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-offline</span><span style="color: light-dark(#2AA198, #2AA198);"> sim.py</span></span></code></pre>
+<p>The first command runs without the editor; the second opens it. Recorded sensor
+cameras wait for initial terrain loading before emitting images; their frames remain
+asynchronous. Preparation does not add simulation lockstep.</p>
+<p>After validation, version the package with the simulation:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">git</span><span style="color: light-dark(#2AA198, #2AA198);"> lfs</span><span style="color: light-dark(#2AA198, #2AA198);"> track</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">assets/terrain/**</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">git</span><span style="color: light-dark(#2AA198, #2AA198);"> add</span><span style="color: light-dark(#2AA198, #2AA198);"> .gitattributes</span><span style="color: light-dark(#2AA198, #2AA198);"> assets/terrain</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">git</span><span style="color: light-dark(#2AA198, #2AA198);"> commit</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">m</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">Prepare terrain for simulation</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span></code></pre>
+<p>Use the asset path relative to your repository. Colleagues and CI can reuse the
+checked-out package without preparing it again.</p>
+<p>Region preparation currently supports Google Photo 3D explicit tilesets with
+self-contained GLB content. It does not prepare Cesium aerial imagery or heightmaps.
+The regions describe the intended operating area; they do not cover arbitrary
+camera movement beyond it.</p>
+<h2 id="record-and-replay">Record and replay</h2>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">ELODIN_DB_PATH</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">d</span><span style="color: light-dark(#2AA198, #2AA198);">b</span><span style="color: light-dark(#2AA198, #2AA198);">s</span><span style="color: light-dark(#2AA198, #2AA198);">/</span><span style="color: light-dark(#2AA198, #2AA198);">f</span><span style="color: light-dark(#2AA198, #2AA198);">l</span><span style="color: light-dark(#2AA198, #2AA198);">i</span><span style="color: light-dark(#2AA198, #2AA198);">g</span><span style="color: light-dark(#2AA198, #2AA198);">h</span><span style="color: light-dark(#2AA198, #2AA198);">t</span><span style="color: light-dark(#268BD2, #268BD2);"> elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> run</span><span style="color: light-dark(#2AA198, #2AA198);"> sim.py</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#2AA198, #2AA198);"> dbs/flight</span></span></code></pre>
+<ul>
+<li>The first command creates a recording and includes the simulation's asset tree.</li>
+<li>The second opens that recording, including its prepared terrain and overlays.</li>
+<li>Both retain the normal cache-and-streaming behavior. Add <code>--offline</code> to either command when required.</li>
+<li>Runtime streaming does not add tiles to the DB's assets. Rerun preparation to extend the versioned package.</li>
+<li>Assets are ingested when a DB is first created. Use a fresh DB after changing the source assets.</li>
+</ul>
+<p>To select an existing package explicitly, put the complete tileset under <code>assets/</code>
+and use relative child references:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>terrain</span><span style="color: light-dark(#859900, #859900);"> =</span><span> el</span><span>.</span><span>Terrain</span><span>.</span><span>from_asset</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">terrain/Flight/tileset.json</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span></span></code></pre>
+<p>The editor resolves this path through the connected DB's asset server. The package
+travels with the recording; provider credentials are not included.
+See <a href="/reference/db-asset-server/">DB Asset Server</a> for storage and replication.</p>
+<p>The browser supports explicit 3D Tiles and bounded EPSG:4326/TMS quantized-mesh
+layers with static availability. Photo 3D ion sources also work; <code>Terrain.aerial()</code>
+with ion imagery is currently native-only. Browser detail retention is disabled.
+Heightmaps remain independent: load a prepared grid with <code>TerrainHeightmap.load()</code>;
+<code>Terrain.from_asset(...).heightmap()</code> does not prepare one from scenery.</p>
+<h2 id="browser-replay">Browser replay</h2>
+<p>Run <code>just web http://127.0.0.1:2241</code> to connect to the local DB asset server
+(the simulation's TCP port plus one). Hosted pages set the <code>elodin-web-db</code> meta
+tag to the DB's HTTP base URL. Terrain assets come from the DB automatically;
+missing Photo 3D tiles stream as needed. Add <code>?offline=1</code> to disable
+terrain-provider requests while retaining access to the DB and its assets.</p>
+<p>Particles and atmosphere require WebGPU. See the
+<a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/apps/elodin-web">browser editor README</a>
+for deployment and database URL configuration.</p>
+<h2 id="startup-and-outages">Startup and outages</h2>
 <p>When <code>elodin editor</code> launches a simulation with streamed terrain, the simulation
 stays at t=0 until the initial terrain is ready. Loading has no interactive
 deadline. If Cesium reports an error, the editor disables streamed terrain,
@@ -560,9 +662,13 @@ Provider cache rules apply to terrain and imagery responses.</p>
 <p>Prepared height grids are also saved and reused on subsequent runs. Use
 <code>offline=True</code> when preparing heights only if the grid must already exist and
 network access is not allowed.</p>
-<p>Tiles are stored in <code>$XDG_CACHE_HOME/bevy-cesium/terrain</code>, or
-<code>~/.cache/bevy-cesium/terrain</code>. Height grids are stored in
-<code>$XDG_CACHE_HOME/elodin/terrain-heights</code>, or <code>~/.cache/elodin/terrain-heights</code>.</p>
+<p>Cache locations, relative to <code>$XDG_CACHE_HOME</code> (default <code>~/.cache</code>):</p>
+<table><thead><tr><th>Data</th><th>Directory</th></tr></thead><tbody>
+<tr><td>Native streamed terrain</td><td><code>bevy-cesium/terrain</code></td></tr>
+<tr><td>Geometry reused by <code>terrain prepare</code></td><td><code>elodin/terrain-photo3d</code></td></tr>
+<tr><td>Prepared height grids</td><td><code>elodin/terrain-heights</code></td></tr>
+</tbody></table>
+<p>The reusable download cache and the versioned package under <code>assets/</code> are separate.</p>
 <h2 id="run-falcon-9">Run Falcon 9</h2>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#2AA198, #2AA198);"> examples/falcon9/main.py</span></span></code></pre>
 <p>Falcon 9 flies from LC-39A to Landing Zone 1 at Cape Canaveral. See its
@@ -573,9 +679,11 @@ or <code>"photo3d"</code>. This selects both the scenery and the matching launch
 ground heights. <code>"legacy"</code> uses Falcon 9's original globe. Photo 3D is the default.</p>
 <h2 id="api-reference">API Reference</h2>
 <h3 id="class-elodin-terrain"><em>class</em> <code>elodin.Terrain</code></h3>
-<p><code>Terrain(asset_id=2275207)</code></p>
+<p><code>Terrain(asset_id=2275207, *, regions=(), directory="terrain")</code></p>
 <table><thead><tr><th>Parameter</th><th>Default</th><th>Description</th></tr></thead><tbody>
 <tr><td><code>asset_id</code></td><td><code>2275207</code></td><td>Positive signed 64-bit ion asset ID. The default is Google Photorealistic 3D Tiles; <code>1</code> selects Cesium World Terrain with Bing aerial imagery in the editor.</td></tr>
+<tr><td><code>regions</code></td><td><code>()</code></td><td><code>TerrainRegion(bounds, max_error=16.0)</code> declarations for preparation. Empty means streamed scenery.</td></tr>
+<tr><td><code>directory</code></td><td><code>"terrain"</code></td><td>Prepared package directory relative to the source asset root.</td></tr>
 </tbody></table>
 <p>Constructing a <code>Terrain</code> performs no network or disk access.</p>
 <ul>
