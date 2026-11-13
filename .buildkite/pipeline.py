@@ -48,7 +48,7 @@ if os.getenv("CI_NIGHTLY_PREWARM") == "1":
                     ".buildkite/nix-develop-profile.sh -- true",
                     ".buildkite/nix-develop-profile.sh .#run -- true",
                     ".buildkite/nix-develop-profile.sh .#tracy -- true",
-                    "nix build --no-link .#elodin-cli .#elodin-db-protos",
+                    "nix build --no-link .#elodin-cli .#elodin-db-protos .#elodin-web",
                 ],
             ),
             step(
@@ -279,6 +279,12 @@ test_steps = [
     step(
         label=":nix: elodin-db-protos",
         command="nix build .#elodin-db-protos",
+    ),
+    # Elodin Cloud pins main and substitutes the editor from the shared cache instead of building it.
+    step(
+        label=":nix: elodin-web",
+        command="nix build --no-link .#elodin-web",
+        if_condition='build.branch == "main"',
     ),
     group(
         name=":nix: aleph-os",

@@ -1,8 +1,8 @@
 import json
 
 
-def step(label, command, key=None, depends_on=None, env={}, plugins=[], skip=False, agents={}):
-    return {
+def step(label, command, key=None, depends_on=None, env={}, plugins=[], skip=False, agents={}, if_condition=None):
+    result = {
         "label": label,
         "command": command,
         "key": key,
@@ -12,6 +12,9 @@ def step(label, command, key=None, depends_on=None, env={}, plugins=[], skip=Fal
         "skip": skip,
         "agents": agents,
     }
+    if if_condition:
+        result["if"] = if_condition
+    return result
 
 
 def group(name, is_gha=False, key=None, depends_on=None, steps=[]):
