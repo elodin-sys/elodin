@@ -539,7 +539,8 @@ queries, live playback, message logs, metadata, config, and assets.</p>
 <p>See <code>libs/db/proto/elodin/db/v1</code>, the <code>elodin-db-protos</code> CMake package, and
 <code>libs/db/examples/grpc-client-batched.cpp</code> (16 MiB max message). Health and
 reflection are enabled. Use <code>--grpc-auth-token TOKEN</code> to require bearer-token
-metadata; without it the API is unauthenticated.</p>
+metadata; without it the API is unauthenticated. <code>--no-grpc</code> skips the server and
+its port.</p>
 <h3 id="lua-repl">Lua REPL</h3>
 <p>The easiest way to interact with Elodin DB is through its Lua REPL. To start the REPL, run the following command:</p>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin-db</span><span style="color: light-dark(#2AA198, #2AA198);"> lua</span></span></code></pre>

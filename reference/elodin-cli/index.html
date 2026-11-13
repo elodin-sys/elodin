@@ -1320,6 +1320,10 @@ and reflection share the endpoint. See <code>libs/db/proto/elodin/db/v1</code> a
 on the gRPC endpoint; omitted means unauthenticated.</p>
 </li>
 <li>
+<p><code>--no-grpc</code> — Don't start the gRPC server or bind <code>&lt;ADDR&gt; + 2</code>, for hosts that
+run many databases on adjacent ports or must not expose the API.</p>
+</li>
+<li>
 <p><code>--follows &lt;ADDR&gt;</code> — Follow another elodin-db instance, replicating all components, messages, and metadata over a single TCP connection. The local instance still accepts its own connections and data writers.</p>
 </li>
 <li>
