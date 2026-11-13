@@ -246,8 +246,9 @@ class WorldBuilder:
         ``StepContext.read_msg("entity.camera_name", timestamp=...)``.
 
         ``render_local=True`` instead renders the current replayed scene in a
-        ``ui.sensor_view`` on desktop or WebGPU. It includes scene particles,
-        shares the schematic environment, and does not record video in the DB.
+        ``ui.sensor_view``, including in WebGL browsers. It includes scene
+        particles on desktop and WebGPU, shares the schematic environment, and
+        does not record video in the DB.
         ``fps`` caps this preview's wall-clock refresh rate.
 
         ``pos_offset`` is a body-frame translation in metres. ``rot_offset`` is
