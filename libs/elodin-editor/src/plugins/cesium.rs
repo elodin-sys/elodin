@@ -201,6 +201,400 @@ fn camera_position_ecef(
     ecef_from_bevy.transform_point3(grid.grid_position_double(cell, transform))
 }
 
+impl Plugin for CesiumPlugin {
+    fn build(&self, app: &mut App) {
+        super::terrain_playback::install(app);
+        app.init_resource::<RetryTerrain>();
+        if let Ok(path) = std::env::var("ELODIN_CESIUM_CAPTURE_VIEWS") {
+            let bytes = std::fs::read(path).expect("Cannot read ELODIN_CESIUM_CAPTURE_VIEWS");
+            let views = parse_capture_views(&bytes).expect("Invalid ECEF capture view file");
+            info!(
+                reference_views = views.len(),
+                "Cesium fixed capture selection enabled"
+            );
+            app.insert_resource(CesiumDetailViews(views))
+                .insert_resource(CesiumSelectionMode::Fixed)
+                .insert_resource(TerrainCapture {
+                    started: web_time::Instant::now(),
+                    timeout: std::time::Duration::from_secs_f64(env_positive(
+                        "ELODIN_CESIUM_CAPTURE_TIMEOUT",
+                        120.0,
+                        false,
+                    )),
+                });
+        }
+        app.add_plugins(
+            StreamingPlugin::deferred()
+                .with_external_coordinates()
+                .with_initial_load_wait()
+                .with_lod_retention_margin(if cfg!(target_family = "wasm") {
+                    0.0
+                } else {
+                    500.0
+                })
+                .with_maximum_screen_error(24.0),
+        )
+        .add_systems(
+            Update,
+            request_terrain_retry.before(configure_terrain).run_if(
+                resource_exists::<Messages<crate::ui::schematic::DocumentLoaded>>
+                    .and_then(resource_exists::<Messages<crate::ui::schematic::DocumentReloaded>>),
+            ),
+        )
+        .add_systems(Update, configure_terrain.before(CesiumSet::Stream))
+        .add_systems(Update, collect_views.in_set(CesiumSet::Views))
+        .add_systems(Update, place_tiles.in_set(CesiumSet::Placement))
+        .add_systems(
+            Update,
+            update_startup
+                .after(CesiumSet::Publish)
+                .run_if(resource_exists::<TerrainStartup>),
+        )
+        .add_systems(
+            Update,
+            release_simulation
+                .after(configure_terrain)
+                .after(update_startup)
+                .run_if(resource_exists::<Messages<crate::ui::schematic::DocumentLoaded>>),
+        )
+        .add_systems(
+            Update,
+            show_startup
+                .run_if(resource_exists::<TerrainStartup>)
+                .after(update_startup)
+                .after(crate::ui::render_layout),
+        );
+        app.add_systems(Update, log_streaming_status.after(CesiumSet::Publish));
+    }
+}
+
+/// The V1 demo account is shared by scenery and height preparation.
+/// This read-only token is intentionally distributed with the application.
+pub fn ion_access_token() -> &'static str {
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6Ii1XcElsai05enF6U2lUTEQiLCJqdGkiOiJhMGEyMjBlNy00ZjFjLTQ2YTctYWNkYi0wZWNlZWJmYjc3NzciLCJpZCI6NTMyMjI0LCJzdWIiOiJ6eHE4MmxtIiwiaXNzIjoiaHR0cHM6Ly9hcGkuY2VzaXVtLmNvbSIsImF1ZCI6IkVsb2RpbiBUZXJyYWluIGRlbW8gwrcgZGVza3RvcCIsImlhdCI6MTc5MzY2NDI0OX0.0aUiiGh55YtAMAe3hUrBLqlasel0qXoALs_zzSyrzpE"
+}
+
+fn terrain_source(asset_id: i64) -> CesiumSource {
+    let access_token = ion_access_token().to_string();
+    if asset_id == 1 {
+        CesiumSource::IonTerrain {
+            asset_id,
+            imagery_asset_id: 2,
+            access_token,
+        }
+    } else {
+        CesiumSource::Ion {
+            asset_id,
+            access_token,
+        }
+    }
+}
+
+type TerrainConfiguration = (
+    Option<impeller_wkt::TerrainConfig>,
+    Option<impeller_bevy::DbEndpoint>,
+    super::terrain_playback::TerrainPlayback,
+);
+
+fn configure_terrain(world: &mut World, mut previous: Local<Option<TerrainConfiguration>>) {
+    use super::terrain_playback::{TerrainMode, TerrainPlayback};
+    let policy = world
+        .get_resource::<TerrainPlayback>()
+        .cloned()
+        .unwrap_or_default();
+    let retry_requested = world
+        .get_resource_mut::<RetryTerrain>()
+        .is_some_and(|mut retry| std::mem::take(&mut retry.0));
+    let Some(schematic) = world.get_resource::<crate::ui::schematic::CurrentSchematic>() else {
+        return;
+    };
+    let endpoint = world
+        .get_resource::<impeller_bevy::ConnectionAddr>()
+        .map(|connection| connection.endpoint());
+    let retry_failed = retry_requested
+        && schematic.terrain.is_some()
+        && world
+            .get_resource::<TerrainStartup>()
+            .is_some_and(|startup| startup.error.is_some());
+    if previous
+        .as_ref()
+        .is_some_and(|(old, old_endpoint, old_policy)| {
+            old == &schematic.terrain && old_endpoint.as_ref() == endpoint && old_policy == &policy
+        })
+        && !retry_failed
+    {
+        return;
+    }
+    let terrain = schematic.terrain.clone();
+    let endpoint = endpoint.cloned();
+    *previous = Some((terrain.clone(), endpoint.clone(), policy.clone()));
+    let Some(terrain) = terrain else {
+        world.insert_resource(CesiumSourceUpdate(None));
+        world.remove_resource::<TerrainStartup>();
+        return;
+    };
+    let mut startup = TerrainStartup::waiting();
+    let source = if !terrain.is_valid() {
+        startup.error = Some("Invalid terrain source configuration");
+        None
+    } else {
+        match terrain {
+            impeller_wkt::TerrainConfig::Ion { .. }
+                if policy.mode == Some(TerrainMode::Offline) =>
+            {
+                startup.error = Some(
+                    "Offline mode requires prepared terrain: run elodin terrain prepare on the recording",
+                );
+                None
+            }
+            impeller_wkt::TerrainConfig::Ion { asset_id } => Some(terrain_source(asset_id)),
+            impeller_wkt::TerrainConfig::Asset { path } => endpoint.as_ref().map(|endpoint| {
+                let key = path.strip_prefix("db:").unwrap_or(&path);
+                CesiumSource::Prepared {
+                    url: endpoint.assets_url(key).to_string(),
+                    ion_access_token: (policy.mode != Some(TerrainMode::Offline))
+                        .then(|| ion_access_token().to_owned()),
+                }
+            }),
+        }
+    };
+    startup.prepared = matches!(source, Some(CesiumSource::Prepared { .. }));
+    world.insert_resource(CesiumSourceUpdate(source));
+    world.insert_resource(startup);
+}
+
+fn request_terrain_retry(
+    mut loaded: MessageReader<crate::ui::schematic::DocumentLoaded>,
+    mut reloaded: MessageReader<crate::ui::schematic::DocumentReloaded>,
+    mut retry: ResMut<RetryTerrain>,
+) {
+    let loaded = loaded.read().count() > 0;
+    let mut reloaded_full = false;
+    for event in reloaded.read() {
+        reloaded_full |= event.changed_window_indices.is_empty();
+    }
+    if loaded || reloaded_full {
+        retry.0 = true;
+    }
+}
+
+fn update_startup(
+    status: Res<CesiumStatus>,
+    mut startup: ResMut<TerrainStartup>,
+    mut updates: Local<u32>,
+    mut commands: Commands,
+) {
+    if startup.ready || startup.error.is_some() {
+        return;
+    }
+    if (*updates).is_multiple_of(120) {
+        debug!(
+            pending = status.pending,
+            preparing = status.pending_render_tiles,
+            visible = status.visible_tiles,
+            resident = status.resident_tiles,
+            retained = status.retained_tiles,
+            complete = status.selection_complete,
+            stable = status.stable_frames,
+            "Waiting for initial terrain"
+        );
+    }
+    *updates = updates.wrapping_add(1);
+    startup.update(&status);
+    if startup.error.is_some() {
+        commands.insert_resource(CesiumSourceUpdate(None));
+    }
+    if startup.ready {
+        info!(
+            seconds = startup.started.elapsed().as_secs_f64(),
+            "Initial terrain ready"
+        );
+    }
+}
+
+fn show_startup(
+    startup: Res<TerrainStartup>,
+    config: Option<Res<impeller_wkt::DbConfig>>,
+    headless: Option<Res<crate::sensor_camera::HeadlessMode>>,
+    mut contexts: Query<&mut bevy_egui::EguiContext>,
+) {
+    if startup.error.is_none()
+        && (startup.ready || startup.replay_can_stream(config.as_deref(), headless.is_some()))
+    {
+        return;
+    }
+    for mut context in &mut contexts {
+        let context = context.get_mut();
+        if let Some(error) = startup.error {
+            egui::Window::new("Terrain unavailable")
+                .collapsible(false)
+                .resizable(false)
+                .show(context, |ui| {
+                    ui.label(error);
+                    ui.label("Continuing without streamed terrain. Reload the schematic to retry.");
+                });
+        } else {
+            egui::Modal::new(egui::Id::new("cesium_startup"))
+                .backdrop_color(context.global_style().visuals.panel_fill.to_opaque())
+                .show(context, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label("Loading terrain and aerial images…");
+                    });
+                });
+        }
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn collect_views(
+    geo: Res<GeoContext>,
+    grid: Res<FloatingOriginSettings>,
+    sensor_configs: Option<Res<SensorCameraConfigs>>,
+    cameras: Query<
+        (
+            &Camera,
+            &Projection,
+            &Transform,
+            Option<&GridCell>,
+            Option<&ChildOf>,
+            Option<&SensorCamera>,
+        ),
+        Or<(With<MainCamera>, With<SensorCamera>)>,
+    >,
+    parents: Query<(&Transform, &GridCell)>,
+    mut output: ResMut<CesiumViews>,
+) {
+    let ecef_from_bevy = GeoFrame::bevy_M_(&GeoFrame::ECEF, &geo).inverse();
+    let views: Vec<_> = cameras
+        .iter()
+        .filter_map(|(camera, projection, transform, cell, parent, sensor)| {
+            // Headless scheduling disables sensors between emissions. Their terrain
+            // requirements must survive those gaps and include every sensor.
+            if !camera.is_active && sensor.is_none() {
+                return None;
+            }
+            if let Some(configs) = sensor_configs.as_ref()
+                && let Some(config) = sensor.and_then(|sensor| configs.0.get(sensor.config_index))
+                && has_wider_sensor_view(config, &configs.0)
+            {
+                // Co-located, aligned sensors share the wider view's terrain.
+                // Independent zoom refinement continuously changes the GPU-ready
+                // selection during flight and can strand both streams on old tiles.
+                // This trades zoomed terrain detail for stable preview coverage;
+                // cameras at different poses still contribute their own views.
+                return None;
+            }
+            let Projection::Perspective(p) = projection else {
+                return None;
+            };
+            let size = camera.physical_viewport_size().or_else(|| {
+                let config = sensor_configs.as_ref()?.0.get(sensor?.config_index)?;
+                Some(UVec2::new(config.width, config.height))
+            })?;
+            if size.x == 0 || size.y == 0 {
+                return None;
+            }
+            // Sensor cameras own their grid cell; Editor cameras inherit the
+            // viewport anchor's cell and compose their local transform with it.
+            let (transform, cell) = cell
+                .map(|cell| (*transform, *cell))
+                .or_else(|| {
+                    parent
+                        .and_then(|p| parents.get(p.parent()).ok())
+                        .map(|(t, c)| (t.mul_transform(*transform), *c))
+                })
+                .unwrap_or((*transform, GridCell::default()));
+            Some(CesiumView {
+                position: camera_position_ecef(ecef_from_bevy, &grid, &cell, &transform).to_array(),
+                direction: ecef_from_bevy
+                    .transform_vector3(transform.forward().as_dvec3())
+                    .normalize()
+                    .to_array(),
+                up: ecef_from_bevy
+                    .transform_vector3(transform.up().as_dvec3())
+                    .normalize()
+                    .to_array(),
+                width: f64::from(size.x),
+                height: f64::from(size.y),
+                vertical_fov: f64::from(p.fov),
+                horizontal_fov: 2.0
+                    * ((f64::from(p.fov) * 0.5).tan() * f64::from(size.x) / f64::from(size.y))
+                        .atan(),
+            })
+        })
+        .collect();
+    output.0 = views;
+}
+
+fn has_wider_sensor_view(config: &SensorCameraConfig, configs: &[SensorCameraConfig]) -> bool {
+    let horizontal_scale = |c: &SensorCameraConfig| {
+        (f64::from(c.fov_degrees).to_radians() * 0.5).tan() * f64::from(c.width)
+            / f64::from(c.height.max(1))
+    };
+    configs.iter().any(|other| {
+        other.entity_name == config.entity_name
+            && other.pos_offset == config.pos_offset
+            && other.rot_offset == config.rot_offset
+            && other.near <= config.near
+            && other.far >= config.far
+            && other.fov_degrees > config.fov_degrees
+            && horizontal_scale(other) >= horizontal_scale(config)
+    })
+}
+
+fn place_tiles(
+    mut commands: Commands,
+    root: Res<BigSpaceRootEntity>,
+    geo: Res<GeoContext>,
+    grid: Res<FloatingOriginSettings>,
+    tiles: Query<(Entity, &CesiumPrimitive), Added<CesiumPrimitive>>,
+) {
+    for (entity, tile) in &tiles {
+        let (scale, rotation, translation) = tile.ecef_from_mesh.to_scale_rotation_translation();
+        // Streaming happens after PreUpdate's geographic synchronization. Set
+        // the local pose now so the first visible frame is already georeferenced.
+        let local = GeoFrame::bevy_M_(&GeoFrame::ECEF, &geo) * tile.ecef_from_mesh;
+        let (_, local_rotation, local_position) = local.to_scale_rotation_translation();
+        let (cell, local_translation) = grid.translation_to_grid(local_position);
+        commands.entity(entity).insert((
+            Transform {
+                translation: local_translation,
+                rotation: local_rotation.as_quat(),
+                scale: scale.as_vec3(),
+            },
+            // Cinematic sunlight uses its own layer; streamed scenery must
+            // receive it just like the existing object_3d meshes.
+            bevy::camera::visibility::RenderLayers::default()
+                .with(crate::plugins::render_layer_alloc::CINEMATIC_EARTH_RENDER_LAYER),
+            GeoPosition(GeoFrame::ECEF, translation),
+            GeoRotation::absolute(GeoFrame::ECEF, rotation),
+            cell,
+            ChildOf(root.0),
+            // Mesh picking is opt-in in the editor. Without this marker, zoom
+            // falls back to the aircraft anchor instead of the ground hit.
+            Pickable::default(),
+        ));
+    }
+}
+
+fn log_streaming_status(status: Res<CesiumStatus>, time: Res<Time>, mut last: Local<f64>) {
+    let now = time.elapsed_secs_f64();
+    if now - *last < 10.0 {
+        return;
+    }
+    *last = now;
+    debug!(
+        visible = status.visible_tiles,
+        resident = status.resident_tiles,
+        preparing = status.pending_render_tiles,
+        pending = status.pending,
+        complete = status.selection_complete,
+        failed = status.load_failed,
+        "Cesium streaming status"
+    );
+}
+
 #[cfg(test)]
 mod coordinate_tests {
     use super::*;
@@ -819,7 +1213,7 @@ mod coordinate_tests {
             GeoOrigin::new_from_degrees(40.03879587543084, -75.59670696255716, 297.25783960334957);
         let grid = FloatingOriginSettings::new(2000.0, 100.0);
         for presentation in [Present::Plane, Present::Sphere] {
-            let geo = GeoContext::from(origin.clone()).with_present(presentation);
+            let geo = GeoContext::from(origin).with_present(presentation);
             let bevy_from_ecef = GeoFrame::bevy_M_(&GeoFrame::ECEF, &geo);
             let ecef_from_enu = GeoFrame::ECEF._M_(&GeoFrame::ENU, &geo);
             for local in [
@@ -844,398 +1238,4 @@ mod coordinate_tests {
             }
         }
     }
-}
-
-impl Plugin for CesiumPlugin {
-    fn build(&self, app: &mut App) {
-        super::terrain_playback::install(app);
-        app.init_resource::<RetryTerrain>();
-        if let Ok(path) = std::env::var("ELODIN_CESIUM_CAPTURE_VIEWS") {
-            let bytes = std::fs::read(path).expect("Cannot read ELODIN_CESIUM_CAPTURE_VIEWS");
-            let views = parse_capture_views(&bytes).expect("Invalid ECEF capture view file");
-            info!(
-                reference_views = views.len(),
-                "Cesium fixed capture selection enabled"
-            );
-            app.insert_resource(CesiumDetailViews(views))
-                .insert_resource(CesiumSelectionMode::Fixed)
-                .insert_resource(TerrainCapture {
-                    started: web_time::Instant::now(),
-                    timeout: std::time::Duration::from_secs_f64(env_positive(
-                        "ELODIN_CESIUM_CAPTURE_TIMEOUT",
-                        120.0,
-                        false,
-                    )),
-                });
-        }
-        app.add_plugins(
-            StreamingPlugin::deferred()
-                .with_external_coordinates()
-                .with_initial_load_wait()
-                .with_lod_retention_margin(if cfg!(target_family = "wasm") {
-                    0.0
-                } else {
-                    500.0
-                })
-                .with_maximum_screen_error(24.0),
-        )
-        .add_systems(
-            Update,
-            request_terrain_retry.before(configure_terrain).run_if(
-                resource_exists::<Messages<crate::ui::schematic::DocumentLoaded>>
-                    .and_then(resource_exists::<Messages<crate::ui::schematic::DocumentReloaded>>),
-            ),
-        )
-        .add_systems(Update, configure_terrain.before(CesiumSet::Stream))
-        .add_systems(Update, collect_views.in_set(CesiumSet::Views))
-        .add_systems(Update, place_tiles.in_set(CesiumSet::Placement))
-        .add_systems(
-            Update,
-            update_startup
-                .after(CesiumSet::Publish)
-                .run_if(resource_exists::<TerrainStartup>),
-        )
-        .add_systems(
-            Update,
-            release_simulation
-                .after(configure_terrain)
-                .after(update_startup)
-                .run_if(resource_exists::<Messages<crate::ui::schematic::DocumentLoaded>>),
-        )
-        .add_systems(
-            Update,
-            show_startup
-                .run_if(resource_exists::<TerrainStartup>)
-                .after(update_startup)
-                .after(crate::ui::render_layout),
-        );
-        app.add_systems(Update, log_streaming_status.after(CesiumSet::Publish));
-    }
-}
-
-/// The V1 demo account is shared by scenery and height preparation.
-/// This read-only token is intentionally distributed with the application.
-pub fn ion_access_token() -> &'static str {
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJub25jZSI6Ii1XcElsai05enF6U2lUTEQiLCJqdGkiOiJhMGEyMjBlNy00ZjFjLTQ2YTctYWNkYi0wZWNlZWJmYjc3NzciLCJpZCI6NTMyMjI0LCJzdWIiOiJ6eHE4MmxtIiwiaXNzIjoiaHR0cHM6Ly9hcGkuY2VzaXVtLmNvbSIsImF1ZCI6IkVsb2RpbiBUZXJyYWluIGRlbW8gwrcgZGVza3RvcCIsImlhdCI6MTc5MzY2NDI0OX0.0aUiiGh55YtAMAe3hUrBLqlasel0qXoALs_zzSyrzpE"
-}
-
-fn terrain_source(asset_id: i64) -> CesiumSource {
-    let access_token = ion_access_token().to_string();
-    if asset_id == 1 {
-        CesiumSource::IonTerrain {
-            asset_id,
-            imagery_asset_id: 2,
-            access_token,
-        }
-    } else {
-        CesiumSource::Ion {
-            asset_id,
-            access_token,
-        }
-    }
-}
-
-type TerrainConfiguration = (
-    Option<impeller_wkt::TerrainConfig>,
-    Option<impeller_bevy::DbEndpoint>,
-    super::terrain_playback::TerrainPlayback,
-);
-
-fn configure_terrain(world: &mut World, mut previous: Local<Option<TerrainConfiguration>>) {
-    use super::terrain_playback::{TerrainMode, TerrainPlayback};
-    let policy = world
-        .get_resource::<TerrainPlayback>()
-        .cloned()
-        .unwrap_or_default();
-    let retry_requested = world
-        .get_resource_mut::<RetryTerrain>()
-        .is_some_and(|mut retry| std::mem::take(&mut retry.0));
-    let Some(schematic) = world.get_resource::<crate::ui::schematic::CurrentSchematic>() else {
-        return;
-    };
-    let endpoint = world
-        .get_resource::<impeller_bevy::ConnectionAddr>()
-        .map(|connection| connection.endpoint());
-    let retry_failed = retry_requested
-        && schematic.terrain.is_some()
-        && world
-            .get_resource::<TerrainStartup>()
-            .is_some_and(|startup| startup.error.is_some());
-    if previous
-        .as_ref()
-        .is_some_and(|(old, old_endpoint, old_policy)| {
-            old == &schematic.terrain && old_endpoint.as_ref() == endpoint && old_policy == &policy
-        })
-        && !retry_failed
-    {
-        return;
-    }
-    let terrain = schematic.terrain.clone();
-    let endpoint = endpoint.cloned();
-    *previous = Some((terrain.clone(), endpoint.clone(), policy.clone()));
-    let Some(terrain) = terrain else {
-        world.insert_resource(CesiumSourceUpdate(None));
-        world.remove_resource::<TerrainStartup>();
-        return;
-    };
-    let mut startup = TerrainStartup::waiting();
-    let source = if !terrain.is_valid() {
-        startup.error = Some("Invalid terrain source configuration");
-        None
-    } else {
-        match terrain {
-            impeller_wkt::TerrainConfig::Ion { .. }
-                if policy.mode == Some(TerrainMode::Offline) =>
-            {
-                startup.error = Some(
-                    "Offline mode requires prepared terrain: run elodin terrain prepare on the recording",
-                );
-                None
-            }
-            impeller_wkt::TerrainConfig::Ion { asset_id } => Some(terrain_source(asset_id)),
-            impeller_wkt::TerrainConfig::Asset { path } => endpoint.as_ref().map(|endpoint| {
-                let key = path.strip_prefix("db:").unwrap_or(&path);
-                CesiumSource::Prepared {
-                    url: endpoint.assets_url(key).to_string(),
-                    ion_access_token: (policy.mode != Some(TerrainMode::Offline))
-                        .then(|| ion_access_token().to_owned()),
-                }
-            }),
-        }
-    };
-    startup.prepared = matches!(source, Some(CesiumSource::Prepared { .. }));
-    world.insert_resource(CesiumSourceUpdate(source));
-    world.insert_resource(startup);
-}
-
-fn request_terrain_retry(
-    mut loaded: MessageReader<crate::ui::schematic::DocumentLoaded>,
-    mut reloaded: MessageReader<crate::ui::schematic::DocumentReloaded>,
-    mut retry: ResMut<RetryTerrain>,
-) {
-    let loaded = loaded.read().count() > 0;
-    let mut reloaded_full = false;
-    for event in reloaded.read() {
-        reloaded_full |= event.changed_window_indices.is_empty();
-    }
-    if loaded || reloaded_full {
-        retry.0 = true;
-    }
-}
-
-fn update_startup(
-    status: Res<CesiumStatus>,
-    mut startup: ResMut<TerrainStartup>,
-    mut updates: Local<u32>,
-    mut commands: Commands,
-) {
-    if startup.ready || startup.error.is_some() {
-        return;
-    }
-    if (*updates).is_multiple_of(120) {
-        debug!(
-            pending = status.pending,
-            preparing = status.pending_render_tiles,
-            visible = status.visible_tiles,
-            resident = status.resident_tiles,
-            retained = status.retained_tiles,
-            complete = status.selection_complete,
-            stable = status.stable_frames,
-            "Waiting for initial terrain"
-        );
-    }
-    *updates = updates.wrapping_add(1);
-    startup.update(&status);
-    if startup.error.is_some() {
-        commands.insert_resource(CesiumSourceUpdate(None));
-    }
-    if startup.ready {
-        info!(
-            seconds = startup.started.elapsed().as_secs_f64(),
-            "Initial terrain ready"
-        );
-    }
-}
-
-fn show_startup(
-    startup: Res<TerrainStartup>,
-    config: Option<Res<impeller_wkt::DbConfig>>,
-    headless: Option<Res<crate::sensor_camera::HeadlessMode>>,
-    mut contexts: Query<&mut bevy_egui::EguiContext>,
-) {
-    if startup.error.is_none()
-        && (startup.ready || startup.replay_can_stream(config.as_deref(), headless.is_some()))
-    {
-        return;
-    }
-    for mut context in &mut contexts {
-        let context = context.get_mut();
-        if let Some(error) = startup.error {
-            egui::Window::new("Terrain unavailable")
-                .collapsible(false)
-                .resizable(false)
-                .show(context, |ui| {
-                    ui.label(error);
-                    ui.label("Continuing without streamed terrain. Reload the schematic to retry.");
-                });
-        } else {
-            egui::Modal::new(egui::Id::new("cesium_startup"))
-                .backdrop_color(context.global_style().visuals.panel_fill.to_opaque())
-                .show(context, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label("Loading terrain and aerial images…");
-                    });
-                });
-        }
-    }
-}
-
-#[allow(clippy::type_complexity)]
-fn collect_views(
-    geo: Res<GeoContext>,
-    grid: Res<FloatingOriginSettings>,
-    sensor_configs: Option<Res<SensorCameraConfigs>>,
-    cameras: Query<
-        (
-            &Camera,
-            &Projection,
-            &Transform,
-            Option<&GridCell>,
-            Option<&ChildOf>,
-            Option<&SensorCamera>,
-        ),
-        Or<(With<MainCamera>, With<SensorCamera>)>,
-    >,
-    parents: Query<(&Transform, &GridCell)>,
-    mut output: ResMut<CesiumViews>,
-) {
-    let ecef_from_bevy = GeoFrame::bevy_M_(&GeoFrame::ECEF, &geo).inverse();
-    let views: Vec<_> = cameras
-        .iter()
-        .filter_map(|(camera, projection, transform, cell, parent, sensor)| {
-            // Headless scheduling disables sensors between emissions. Their terrain
-            // requirements must survive those gaps and include every sensor.
-            if !camera.is_active && sensor.is_none() {
-                return None;
-            }
-            if let Some(configs) = sensor_configs.as_ref()
-                && let Some(config) = sensor.and_then(|sensor| configs.0.get(sensor.config_index))
-                && has_wider_sensor_view(config, &configs.0)
-            {
-                // Co-located, aligned sensors share the wider view's terrain.
-                // Independent zoom refinement continuously changes the GPU-ready
-                // selection during flight and can strand both streams on old tiles.
-                // This trades zoomed terrain detail for stable preview coverage;
-                // cameras at different poses still contribute their own views.
-                return None;
-            }
-            let Projection::Perspective(p) = projection else {
-                return None;
-            };
-            let size = camera.physical_viewport_size().or_else(|| {
-                let config = sensor_configs.as_ref()?.0.get(sensor?.config_index)?;
-                Some(UVec2::new(config.width, config.height))
-            })?;
-            if size.x == 0 || size.y == 0 {
-                return None;
-            }
-            // Sensor cameras own their grid cell; Editor cameras inherit the
-            // viewport anchor's cell and compose their local transform with it.
-            let (transform, cell) = cell
-                .map(|cell| (*transform, *cell))
-                .or_else(|| {
-                    parent
-                        .and_then(|p| parents.get(p.parent()).ok())
-                        .map(|(t, c)| (t.mul_transform(*transform), *c))
-                })
-                .unwrap_or((*transform, GridCell::default()));
-            Some(CesiumView {
-                position: camera_position_ecef(ecef_from_bevy, &grid, &cell, &transform).to_array(),
-                direction: ecef_from_bevy
-                    .transform_vector3(transform.forward().as_dvec3())
-                    .normalize()
-                    .to_array(),
-                up: ecef_from_bevy
-                    .transform_vector3(transform.up().as_dvec3())
-                    .normalize()
-                    .to_array(),
-                width: f64::from(size.x),
-                height: f64::from(size.y),
-                vertical_fov: f64::from(p.fov),
-                horizontal_fov: 2.0
-                    * ((f64::from(p.fov) * 0.5).tan() * f64::from(size.x) / f64::from(size.y))
-                        .atan(),
-            })
-        })
-        .collect();
-    output.0 = views;
-}
-
-fn has_wider_sensor_view(config: &SensorCameraConfig, configs: &[SensorCameraConfig]) -> bool {
-    let horizontal_scale = |c: &SensorCameraConfig| {
-        (f64::from(c.fov_degrees).to_radians() * 0.5).tan() * f64::from(c.width)
-            / f64::from(c.height.max(1))
-    };
-    configs.iter().any(|other| {
-        other.entity_name == config.entity_name
-            && other.pos_offset == config.pos_offset
-            && other.rot_offset == config.rot_offset
-            && other.near <= config.near
-            && other.far >= config.far
-            && other.fov_degrees > config.fov_degrees
-            && horizontal_scale(other) >= horizontal_scale(config)
-    })
-}
-
-fn place_tiles(
-    mut commands: Commands,
-    root: Res<BigSpaceRootEntity>,
-    geo: Res<GeoContext>,
-    grid: Res<FloatingOriginSettings>,
-    tiles: Query<(Entity, &CesiumPrimitive), Added<CesiumPrimitive>>,
-) {
-    for (entity, tile) in &tiles {
-        let (scale, rotation, translation) = tile.ecef_from_mesh.to_scale_rotation_translation();
-        // Streaming happens after PreUpdate's geographic synchronization. Set
-        // the local pose now so the first visible frame is already georeferenced.
-        let local = GeoFrame::bevy_M_(&GeoFrame::ECEF, &geo) * tile.ecef_from_mesh;
-        let (_, local_rotation, local_position) = local.to_scale_rotation_translation();
-        let (cell, local_translation) = grid.translation_to_grid(local_position);
-        commands.entity(entity).insert((
-            Transform {
-                translation: local_translation,
-                rotation: local_rotation.as_quat(),
-                scale: scale.as_vec3(),
-            },
-            // Cinematic sunlight uses its own layer; streamed scenery must
-            // receive it just like the existing object_3d meshes.
-            bevy::camera::visibility::RenderLayers::default()
-                .with(crate::plugins::render_layer_alloc::CINEMATIC_EARTH_RENDER_LAYER),
-            GeoPosition(GeoFrame::ECEF, translation),
-            GeoRotation::absolute(GeoFrame::ECEF, rotation),
-            cell,
-            ChildOf(root.0),
-            // Mesh picking is opt-in in the editor. Without this marker, zoom
-            // falls back to the aircraft anchor instead of the ground hit.
-            Pickable::default(),
-        ));
-    }
-}
-
-fn log_streaming_status(status: Res<CesiumStatus>, time: Res<Time>, mut last: Local<f64>) {
-    let now = time.elapsed_secs_f64();
-    if now - *last < 10.0 {
-        return;
-    }
-    *last = now;
-    debug!(
-        visible = status.visible_tiles,
-        resident = status.resident_tiles,
-        preparing = status.pending_render_tiles,
-        pending = status.pending,
-        complete = status.selection_complete,
-        failed = status.load_failed,
-        "Cesium streaming status"
-    );
 }

@@ -5,7 +5,7 @@ use impeller::types::{ComponentId, Timestamp};
 use impeller_wkt::{ComponentMetadata, EntityMetadata};
 use std::{
     collections::HashSet,
-    path::{Path, PathBuf},
+    path::Path,
     sync::{
         Arc,
         atomic::{self, AtomicU64, Ordering},
@@ -105,10 +105,10 @@ fn hold_for_editor_startup(db: &DB) {
 /// Asset key under `{db}/assets/` for the active schematic the editor loads.
 const ACTIVE_SCHEMATIC_KEY: &str = "schematics/main.kdl";
 
-/// Ingest the source `assets/` tree into `{db}/assets/` once and register the
+/// Ingest the source `assets/` trees into `{db}/assets/` once and register the
 /// generated schematic as a stored asset (RFD #724).
 ///
-/// The DB owns all KDL handling: `ingest_asset_dir` copies the whole tree and
+/// The DB owns all KDL handling: `ingest_asset_dirs` copies the trees and
 /// rewrites local asset paths to `db:`, and `store_asset` rewrites the active
 /// schematic the same way. This producer does no KDL parsing or rewriting and
 /// never mutates `world.metadata.schematic`. Call once before starting the DB
@@ -120,10 +120,10 @@ const ACTIVE_SCHEMATIC_KEY: &str = "schematics/main.kdl";
 /// editor edit (or follower mirror) must not be clobbered by stale in-memory
 /// metadata just because the sim was re-run against an existing DB (RFD #724).
 ///
-/// `entry` is the simulation entrypoint (e.g. the `main.py` path), used to
-/// resolve the source `assets/` tree relative to the sim folder and its
-/// ancestors when `ELODIN_ASSETS` is unset — so a run whose cwd is not the sim
-/// directory still ingests the right tree instead of the wrong one or none.
+/// `entry` is the simulation entrypoint (e.g. the `main.py` path). When
+/// `ELODIN_ASSETS` is unset, the sim folder's `assets/` and the nearest
+/// `assets/` above it are ingested after the cwd's, so a run from the repo
+/// root still carries the sim's own assets.
 pub fn prime_schematic_assets(
     db: &elodin_db::DB,
     world: &World,
@@ -137,19 +137,20 @@ pub fn prime_schematic_assets(
         .join(ACTIVE_SCHEMATIC_KEY)
         .is_file();
 
-    if let Some(source) = resolve_source_assets_root(entry) {
-        match elodin_db::assets::ingest_asset_dir(&db.path, &source) {
+    let sources = elodin_db::assets::resolve_assets_roots(entry);
+    if !sources.is_empty() {
+        match elodin_db::assets::ingest_asset_dirs(&db.path, &sources) {
             Ok(report) if report.skipped => {
-                tracing::info!(source = %source.display(), "assets already ingested; skipping")
+                tracing::info!(?sources, "assets already ingested; skipping")
             }
             Ok(report) => tracing::info!(
-                source = %source.display(),
+                ?sources,
                 files = report.file_count,
                 bytes = report.byte_count,
                 "ingested assets into db"
             ),
             Err(err) => {
-                tracing::warn!(?err, source = %source.display(), "failed to ingest assets into db")
+                tracing::warn!(?err, ?sources, "failed to ingest assets into db")
             }
         }
     }
@@ -353,13 +354,6 @@ pub fn init_db(
     let _ = db.save_db_state();
 
     Ok(())
-}
-
-/// Resolve the source `assets/` tree to ingest via [`elodin_db::assets::resolve_assets_root`],
-/// passing the simulation `entry` so ingest can find `assets/` next to the sim
-/// (or an ancestor) rather than only `$ELODIN_ASSETS` / cwd.
-fn resolve_source_assets_root(entry: Option<&Path>) -> Option<PathBuf> {
-    elodin_db::assets::resolve_assets_root(entry)
 }
 
 pub fn copy_db_to_world(state: &State, world: &mut WorldExec) {
@@ -1458,5 +1452,42 @@ mod asset_tests {
             "ingest should copy assets found next to the sim entry"
         );
         assert!(elodin_db::assets::assets_ingested(&db.path));
+    }
+
+    #[test]
+    fn prime_merges_sim_assets_with_parent_assets() {
+        let _lock = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _no_env = EnvVarGuard::unset("ELODIN_ASSETS");
+
+        // Falcon 9 layout: shared meshes in the repo's `assets/`, map overlays
+        // in the sim's own `assets/`.
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        let sim = repo.join("examples/falcon9");
+        std::fs::create_dir_all(repo.join("assets")).unwrap();
+        std::fs::write(repo.join("assets/falcon9.glb"), b"glb-bytes").unwrap();
+        std::fs::create_dir_all(sim.join("assets/overlays")).unwrap();
+        std::fs::write(sim.join("assets/overlays/sites.json"), b"{}").unwrap();
+        let entry = sim.join("main.py");
+        std::fs::write(&entry, b"# sim").unwrap();
+
+        let db = elodin_db::DB::create(dir.path().join("db")).unwrap();
+        let mut world = World::default();
+        world.metadata.schematic = Some(
+            "object_3d \"booster.world_pos\" {\n    glb path=\"falcon9.glb\"\n}\nmap_overlay path=\"overlays/sites.json\"\n"
+                .to_string(),
+        );
+        prime_schematic_assets(&db, &world, Some(&entry)).unwrap();
+
+        let stored = elodin_db::assets_http::assets_dir(&db.path);
+        let active_kdl = std::fs::read_to_string(stored.join("schematics/main.kdl")).unwrap();
+        assert!(
+            active_kdl.contains("db:falcon9.glb"),
+            "the parent assets mesh should be stored, got:\n{active_kdl}"
+        );
+        assert!(
+            active_kdl.contains("db:overlays/sites.json"),
+            "the sim's own overlay should be stored, got:\n{active_kdl}"
+        );
     }
 }

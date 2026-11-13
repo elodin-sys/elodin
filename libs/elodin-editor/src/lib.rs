@@ -997,7 +997,6 @@ mod sensor_throttle_tests {
             .init_resource::<DbConfig>()
             .insert_resource(bevy_framepace::FramepaceSettings {
                 limiter: bevy_framepace::Limiter::Off,
-                ..default()
             })
             .insert_resource(DirectionalLightShadowMap { size: 2048 })
             .add_systems(Update, throttle_for_sensor_cameras);

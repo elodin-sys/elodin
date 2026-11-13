@@ -1851,7 +1851,7 @@ mod tests {
             ViewCubeLink { main_camera },
         ));
 
-        let mut system_state: SystemState<(
+        type InteractionParams = (
             Query<'static, 'static, &'static Window>,
             Query<
                 'static,
@@ -1859,7 +1859,8 @@ mod tests {
                 (Entity, &'static Camera, &'static ViewCubeLink),
                 With<ViewCubeCamera>,
             >,
-        )> = SystemState::new(app.world_mut());
+        );
+        let mut system_state: SystemState<InteractionParams> = SystemState::new(app.world_mut());
         let (windows, overlay_cameras) = system_state.params(app.world());
         let owners = UiInputOwners::default();
 

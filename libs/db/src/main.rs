@@ -479,29 +479,28 @@ async fn main() -> miette::Result<()> {
             }
             #[cfg(feature = "axum")]
             if follow_config.is_none() {
-                let source = assets
-                    .clone()
-                    .or_else(|| elodin_db::assets::resolve_assets_root(None));
-                if let Some(source) = source {
-                    if !source.is_dir() {
-                        tracing::warn!(
-                            source = %source.display(),
-                            "asset source path does not exist; starting without asset ingest"
-                        );
-                    } else {
-                        match elodin_db::assets::ingest_asset_dir(&path, &source) {
-                            Ok(report) if report.skipped => {
-                                info!(source = %source.display(), "assets already ingested; skipping")
-                            }
-                            Ok(report) => info!(
-                                source = %source.display(),
-                                files = report.file_count,
-                                bytes = report.byte_count,
-                                "ingested assets into db"
-                            ),
-                            Err(err) => {
-                                tracing::warn!(?err, source = %source.display(), "failed to ingest assets")
-                            }
+                let sources = assets.clone().map_or_else(
+                    || elodin_db::assets::resolve_assets_roots(None),
+                    |assets| vec![assets],
+                );
+                if let Some(missing) = sources.iter().find(|source| !source.is_dir()) {
+                    tracing::warn!(
+                        source = %missing.display(),
+                        "asset source path does not exist; starting without asset ingest"
+                    );
+                } else if !sources.is_empty() {
+                    match elodin_db::assets::ingest_asset_dirs(&path, &sources) {
+                        Ok(report) if report.skipped => {
+                            info!(?sources, "assets already ingested; skipping")
+                        }
+                        Ok(report) => info!(
+                            ?sources,
+                            files = report.file_count,
+                            bytes = report.byte_count,
+                            "ingested assets into db"
+                        ),
+                        Err(err) => {
+                            tracing::warn!(?err, ?sources, "failed to ingest assets")
                         }
                     }
                 }

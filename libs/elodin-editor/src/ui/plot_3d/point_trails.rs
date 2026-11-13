@@ -594,7 +594,7 @@ mod tests {
         let budget = trail_sample_budget(n);
         assert_eq!(budget, 187);
         // Leading NaN slot + (samples + break) per trail.
-        assert!(1 + n * (budget + 1) <= INDEX_BUFFER_LEN);
+        assert!(n * (budget + 1) < INDEX_BUFFER_LEN);
     }
 
     #[test]

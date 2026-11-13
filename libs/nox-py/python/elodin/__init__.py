@@ -715,9 +715,7 @@ class World(WorldBuilder):
         if frame is None:
             raise Exception("No previous frame")
         db_path = db_path if db_path is not None else os.environ.get("ELODIN_DB_PATH")
-        simulation_source_entrypoint = (
-            _simulation_source_entrypoint(frame.f_code.co_filename) if db_path is not None else None
-        )
+        simulation_source_entrypoint = _simulation_source_entrypoint(frame.f_code.co_filename)
         addr = super().run(
             system,
             simulation_rate,

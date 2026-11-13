@@ -61,28 +61,27 @@ pub fn serve(
         }
     })?;
 
-    if let Some(source) = elodin_db::assets::resolve_assets_root(None) {
-        if !source.is_dir() {
-            warn!(
-                source = %source.display(),
-                "asset source path does not exist; starting without asset ingest"
-            );
-        } else {
-            match elodin_db::assets::ingest_asset_dir(&path, &source) {
-                Ok(report) if report.skipped => {
-                    info!(source = %source.display(), "assets already ingested; skipping");
-                }
-                Ok(report) => {
-                    info!(
-                        source = %source.display(),
-                        files = report.file_count,
-                        bytes = report.byte_count,
-                        "ingested assets into db"
-                    );
-                }
-                Err(err) => {
-                    warn!(?err, source = %source.display(), "failed to ingest assets");
-                }
+    let sources = elodin_db::assets::resolve_assets_roots(None);
+    if let Some(missing) = sources.iter().find(|source| !source.is_dir()) {
+        warn!(
+            source = %missing.display(),
+            "asset source path does not exist; starting without asset ingest"
+        );
+    } else if !sources.is_empty() {
+        match elodin_db::assets::ingest_asset_dirs(&path, &sources) {
+            Ok(report) if report.skipped => {
+                info!(?sources, "assets already ingested; skipping");
+            }
+            Ok(report) => {
+                info!(
+                    ?sources,
+                    files = report.file_count,
+                    bytes = report.byte_count,
+                    "ingested assets into db"
+                );
+            }
+            Err(err) => {
+                warn!(?err, ?sources, "failed to ingest assets");
             }
         }
     }

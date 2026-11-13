@@ -15,11 +15,11 @@ use crate::assets_http::{assets_dir, write_asset_file};
 /// the copy-once guard and carries provenance for `elodin-db info`.
 pub const INGEST_MARKER: &str = ".elodin-ingested";
 
-/// Result of an [`ingest_asset_dir`] call.
+/// Result of an [`ingest_asset_dirs`] call.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IngestReport {
-    /// Source tree that was copied in.
-    pub source_root: PathBuf,
+    /// Source trees that were copied in, highest precedence first.
+    pub source_roots: Vec<PathBuf>,
     /// Number of files copied (0 when skipped).
     pub file_count: usize,
     /// Total bytes copied (0 when skipped).
@@ -37,57 +37,59 @@ pub struct AssetEntry {
     pub size: u64,
 }
 
-/// Resolve the source assets root to ingest, in priority order:
-///   1. `$ELODIN_ASSETS` (explicit; absolute or cwd-relative)
-///   2. `<entry_dir>/assets` (next to the sim entry / `main.py`, when known)
-///   3. `<cwd>/assets`
+/// Resolve the source assets roots to ingest, highest precedence first:
+///   1. `$ELODIN_ASSETS` alone, when set (explicit; absolute or cwd-relative)
+///   2. `<cwd>/assets`
+///   3. `<entry_dir>/assets` (next to the sim entry / `main.py`, when known)
 ///   4. nearest ancestor of `entry_dir` containing an `assets/` directory
 ///
 /// `entry` is the simulation entrypoint (a file or directory). An explicit
 /// `$ELODIN_ASSETS` is trusted and returned even if it does not exist yet; the
 /// other candidates are only returned when they exist.
-pub fn resolve_assets_root(entry: Option<&Path>) -> Option<PathBuf> {
+pub fn resolve_assets_roots(entry: Option<&Path>) -> Vec<PathBuf> {
     if let Some(explicit) = std::env::var_os("ELODIN_ASSETS") {
         let path = PathBuf::from(explicit);
-        return Some(if path.is_absolute() {
+        return vec![if path.is_absolute() {
             path
         } else {
             std::env::current_dir().unwrap_or_default().join(path)
-        });
+        }];
     }
+    candidate_assets_roots(std::env::current_dir().ok().as_deref(), entry)
+}
 
+fn candidate_assets_roots(cwd: Option<&Path>, entry: Option<&Path>) -> Vec<PathBuf> {
     let entry_dir = entry.and_then(|entry| {
         if entry.is_dir() {
-            Some(entry.to_path_buf())
+            Some(entry)
         } else {
-            entry.parent().map(Path::to_path_buf)
+            entry.parent()
         }
     });
 
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Some(dir) = &entry_dir {
+    let mut candidates: Vec<PathBuf> = cwd.map(|cwd| cwd.join("assets")).into_iter().collect();
+    if let Some(dir) = entry_dir {
         candidates.push(dir.join("assets"));
-    }
-    if let Ok(cwd) = std::env::current_dir() {
-        let cwd_assets = cwd.join("assets");
-        if !candidates.contains(&cwd_assets) {
-            candidates.push(cwd_assets);
-        }
-    }
-    if let Some(dir) = &entry_dir {
-        for ancestor in dir.ancestors() {
-            let candidate = ancestor.join("assets");
-            if !candidates.contains(&candidate) {
-                candidates.push(candidate);
-            }
-        }
+        candidates.extend(
+            dir.ancestors()
+                .skip(1)
+                .map(|ancestor| ancestor.join("assets"))
+                .find(|candidate| candidate.is_dir()),
+        );
     }
 
-    candidates.into_iter().find(|candidate| candidate.is_dir())
+    let mut roots = Vec::new();
+    for candidate in candidates {
+        if candidate.is_dir() && !roots.contains(&candidate) {
+            roots.push(candidate);
+        }
+    }
+    roots
 }
 
-/// Copy every file under `source_root` into `{db}/assets/`, preserving relative
-/// paths. Path traversal is rejected by the shared `write_asset_file` sanitizer.
+/// Copy every file under `source_roots` into `{db}/assets/`, preserving relative
+/// paths; a key present in several roots is taken from the first. Path traversal
+/// is rejected by the shared `write_asset_file` sanitizer.
 ///
 /// Ingest is a *one-time bootstrap into an empty DB*, not a per-run sync: it
 /// seeds a brand-new DB from a local `assets/` tree and is then a no-op forever.
@@ -111,11 +113,11 @@ pub fn resolve_assets_root(entry: Option<&Path>) -> Option<PathBuf> {
 /// not) is treated as "already populated" and left as-is rather than wiped and
 /// retried; recovering a partial seed is a `--reset`, which is far preferable to
 /// silently deleting a user's recorded assets.
-pub fn ingest_asset_dir(db_path: &Path, source_root: &Path) -> io::Result<IngestReport> {
+pub fn ingest_asset_dirs(db_path: &Path, source_roots: &[PathBuf]) -> io::Result<IngestReport> {
     let dest = assets_dir(db_path);
     let skipped = || {
         Ok(IngestReport {
-            source_root: source_root.to_path_buf(),
+            source_roots: source_roots.to_vec(),
             file_count: 0,
             byte_count: 0,
             skipped: true,
@@ -132,29 +134,35 @@ pub fn ingest_asset_dir(db_path: &Path, source_root: &Path) -> io::Result<Ingest
         return skipped();
     }
 
-    if !source_root.is_dir() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!(
-                "assets source root does not exist: {}",
-                source_root.display()
-            ),
-        ));
+    let mut sources: HashMap<String, &Path> = HashMap::new();
+    for source_root in source_roots {
+        if !source_root.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!(
+                    "assets source root does not exist: {}",
+                    source_root.display()
+                ),
+            ));
+        }
+        let mut keys = Vec::new();
+        collect_relative_keys(source_root, source_root, &mut keys)?;
+        // Skip keys reserved by the asset layer (the `.elodin-ingested` marker and
+        // the `__index__` listing namespace). Copying them would either trip the
+        // copy-once guard on a partial tree or shadow a stored asset behind the
+        // index route; `write_asset_file` rejects them anyway, so they must be
+        // filtered here to avoid aborting the whole ingest.
+        for key in keys {
+            if !crate::assets_http::is_reserved_asset_key(&key) {
+                sources.entry(key).or_insert(source_root);
+            }
+        }
     }
-
-    let mut keys = Vec::new();
-    collect_relative_keys(source_root, source_root, &mut keys)?;
-    // Skip keys reserved by the asset layer (the `.elodin-ingested` marker and
-    // the `__index__` listing namespace). Copying them would either trip the
-    // copy-once guard on a partial tree or shadow a stored asset behind the
-    // index route; `write_asset_file` rejects them anyway, so they must be
-    // filtered here to avoid aborting the whole ingest.
-    keys.retain(|key| !crate::assets_http::is_reserved_asset_key(key));
 
     // Nothing to seed from: do NOT commit the marker. An initially empty source
     // (e.g. Aleph's shared asset root before it is populated) must leave the DB
     // eligible for ingest on a later run, once the host tree has content.
-    if keys.is_empty() {
+    if sources.is_empty() {
         return skipped();
     }
 
@@ -168,7 +176,7 @@ pub fn ingest_asset_dir(db_path: &Path, source_root: &Path) -> io::Result<Ingest
     std::fs::create_dir_all(&dest)?;
 
     let mut byte_count = 0u64;
-    for key in &keys {
+    for (key, source_root) in &sources {
         let data = std::fs::read(source_root.join(key))?;
         byte_count += data.len() as u64;
         write_asset_file(&dest, key, &data)?;
@@ -180,11 +188,11 @@ pub fn ingest_asset_dir(db_path: &Path, source_root: &Path) -> io::Result<Ingest
     // Done before the marker so a genuine I/O failure aborts without committing
     // copy-once. The partial tree it leaves behind is then preserved (not wiped)
     // by the "already populated" guard on the next run; recover with `--reset`.
-    rewrite_stored_schematics(&dest, source_root)?;
+    rewrite_stored_schematics(&dest, &sources, source_roots)?;
 
     let report = IngestReport {
-        source_root: source_root.to_path_buf(),
-        file_count: keys.len(),
+        source_roots: source_roots.to_vec(),
+        file_count: sources.len(),
         byte_count,
         skipped: false,
     };
@@ -259,21 +267,29 @@ fn resolve_stored_asset_key(assets_dir: &Path, name: &str) -> Option<String> {
 /// gives the active schematic in `prime_schematic_assets` — so a CLI-ingested
 /// DB (`elodin-db run --assets`, including Aleph's service) is an equally
 /// portable record instead of keeping machine-local paths that 404 elsewhere.
-/// References are resolved against the schematic's original directory in the
-/// source tree, then the source root and its ancestors (covering
+/// References are resolved against the schematic's original directory in its
+/// source tree, then the source roots and their ancestors (covering
 /// repo-root-relative references).
 ///
 /// A `.kdl` that is not a valid schematic is intentionally left untouched (a
 /// non-schematic file is not an error). Genuine I/O failures (read/write) are
 /// propagated so the caller does not commit the copy-once marker over a tree
 /// whose schematics were only partially rewritten.
-fn rewrite_stored_schematics(dir: &Path, source_root: &Path) -> io::Result<()> {
+fn rewrite_stored_schematics(
+    dir: &Path,
+    sources: &HashMap<String, &Path>,
+    source_roots: &[PathBuf],
+) -> io::Result<()> {
     let mut keys = Vec::new();
     collect_relative_keys(dir, dir, &mut keys)?;
     // Repo-root-relative references like `examples/drone/panel.kdl` resolve
-    // against the source root and its ancestors (the repo root is an ancestor
-    // of the `assets/` tree).
-    let search_dirs: Vec<PathBuf> = source_root.ancestors().map(Path::to_path_buf).collect();
+    // against the source roots and their ancestors (the repo root is an
+    // ancestor of the `assets/` tree).
+    let search_dirs: Vec<PathBuf> = source_roots
+        .iter()
+        .flat_map(|root| root.ancestors())
+        .map(Path::to_path_buf)
+        .collect();
     // One ingest state across the whole tree, so an external window referenced
     // by several stored schematics is pulled in once under a single key.
     let mut ingest = WindowIngest {
@@ -287,8 +303,10 @@ fn rewrite_stored_schematics(dir: &Path, source_root: &Path) -> io::Result<()> {
             continue;
         }
         // Sibling references resolve against the schematic's original
-        // directory in the source tree first.
-        let base_dir = source_root.join(&key).parent().map(Path::to_path_buf);
+        // directory in its source tree first.
+        let base_dir = sources
+            .get(&key)
+            .and_then(|source_root| source_root.join(&key).parent().map(Path::to_path_buf));
         let mut content = std::fs::read_to_string(dir.join(&key))?;
         let mut changed = false;
         if let Some(pulled) = ingest.rewrite_content(&content, base_dir.as_deref())? {
@@ -306,11 +324,10 @@ fn rewrite_stored_schematics(dir: &Path, source_root: &Path) -> io::Result<()> {
     Ok(())
 }
 
-/// Search directories for resolving `window path=` references at record time,
-/// mirroring [`resolve_assets_root`]: the sim entry directory, the cwd, then
-/// the entry's ancestors — so a reference like `examples/drone/panel.kdl`
-/// (repo-root-relative) resolves whether the sim runs from the repo root or
-/// from its own directory.
+/// Search directories for resolving `window path=` references at record time:
+/// the sim entry directory, the cwd, then the entry's ancestors — so a
+/// reference like `examples/drone/panel.kdl` (repo-root-relative) resolves
+/// whether the sim runs from the repo root or from its own directory.
 pub fn schematic_window_search_dirs(entry: Option<&Path>) -> Vec<PathBuf> {
     let entry_dir = entry.and_then(|entry| {
         if entry.is_dir() {
@@ -720,6 +737,34 @@ mod tests {
     fn write(path: &Path, data: &[u8]) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, data).unwrap();
+    }
+
+    fn ingest_asset_dir(db_path: &Path, source_root: &Path) -> io::Result<IngestReport> {
+        ingest_asset_dirs(db_path, &[source_root.to_path_buf()])
+    }
+
+    #[test]
+    fn ingest_merges_roots_with_earlier_roots_winning() {
+        let dir = tempdir().unwrap();
+        let cwd_assets = dir.path().join("assets");
+        let sim_assets = dir.path().join("examples/sim/assets");
+        write(&cwd_assets.join("meshes/rocket.glb"), b"cwd");
+        write(&sim_assets.join("meshes/rocket.glb"), b"sim");
+        write(&sim_assets.join("overlays/sites.json"), b"{}");
+
+        let db = dir.path().join("db");
+        let report = ingest_asset_dirs(&db, &[cwd_assets, sim_assets]).unwrap();
+
+        assert_eq!(report.file_count, 2);
+        let assets = assets_dir(&db);
+        assert_eq!(
+            std::fs::read(assets.join("meshes/rocket.glb")).unwrap(),
+            b"cwd"
+        );
+        assert_eq!(
+            std::fs::read(assets.join("overlays/sites.json")).unwrap(),
+            b"{}"
+        );
     }
 
     #[test]
@@ -1168,8 +1213,8 @@ mod tests {
     fn resolve_prefers_explicit_env() {
         temp_env_assets(Some("/tmp/explicit-assets"), || {
             assert_eq!(
-                resolve_assets_root(None),
-                Some(PathBuf::from("/tmp/explicit-assets"))
+                resolve_assets_roots(None),
+                vec![PathBuf::from("/tmp/explicit-assets")]
             );
         });
     }
@@ -1183,8 +1228,28 @@ mod tests {
         std::fs::write(&main, b"# sim").unwrap();
 
         temp_env_assets(None, || {
-            assert_eq!(resolve_assets_root(Some(&main)), Some(sim.join("assets")));
+            assert!(resolve_assets_roots(Some(&main)).contains(&sim.join("assets")));
         });
+    }
+
+    #[test]
+    fn resolve_starts_with_cwd_then_entry_then_nearest_parent() {
+        let dir = tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        let sim = repo.join("examples/sim");
+        std::fs::create_dir_all(repo.join("assets")).unwrap();
+        std::fs::create_dir_all(sim.join("assets")).unwrap();
+        let main = sim.join("main.py");
+        std::fs::write(&main, b"# sim").unwrap();
+
+        assert_eq!(
+            candidate_assets_roots(Some(&repo), Some(&main)),
+            vec![repo.join("assets"), sim.join("assets")]
+        );
+        assert_eq!(
+            candidate_assets_roots(Some(&sim), Some(&main)),
+            vec![sim.join("assets"), repo.join("assets")]
+        );
     }
 
     #[test]
