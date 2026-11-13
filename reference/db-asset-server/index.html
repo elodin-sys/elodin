@@ -703,7 +703,7 @@ and the editor loads schematic and meshes from the DB itself.</p>
 <h2 id="supported-asset-types">Supported asset types</h2>
 <h3 id="glb-meshes-object-3d-glb-path">GLB meshes (<code>object_3d</code> → <code>glb path=…</code>)</h3>
 <table><thead><tr><th>Stage</th><th>Behavior</th></tr></thead><tbody>
-<tr><td><strong>Local path</strong></td><td>Resolved via <code>$ELODIN_ASSETS</code> (default <code>./assets</code>), simulation entry directory, or cwd</td></tr>
+<tr><td><strong>Local path</strong></td><td>Resolved in <code>$ELODIN_ASSETS</code> when set; otherwise in <code>./assets</code>, the simulation's <code>assets/</code>, then the nearest <code>assets/</code> above it (first match wins)</td></tr>
 <tr><td><strong>On disk in DB</strong></td><td><code>assets/{key}.glb</code> (key preserves subdirectories, e.g. <code>models/rocket.glb</code>)</td></tr>
 <tr><td><strong>Stored KDL</strong></td><td><code>path="db:models/rocket.glb"</code></td></tr>
 <tr><td><strong>Editor</strong></td><td><code>db:…</code> → <code>http://127.0.0.1:2241/assets/…</code> via Bevy <code>AssetServer</code> + <code>WebAssetPlugin</code> (non-blocking)</td></tr>
@@ -738,7 +738,7 @@ and the editor loads schematic and meshes from the DB itself.</p>
 <h2 id="environment-variables">Environment variables</h2>
 <table><thead><tr><th>Variable</th><th>Purpose</th></tr></thead><tbody>
 <tr><td><code>ELODIN_DB_PATH</code></td><td>Directory for the simulation database (record)</td></tr>
-<tr><td><code>ELODIN_ASSETS</code></td><td>Root for resolving local asset paths at record (default <code>./assets</code>)</td></tr>
+<tr><td><code>ELODIN_ASSETS</code></td><td>Root for resolving local asset paths at record; replaces the default search</td></tr>
 </tbody></table>
 <h2 id="verification">Verification</h2>
 <p>With <code>elodin-db run</code> listening on <code>2240</code>:</p>
