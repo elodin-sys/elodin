@@ -1,0 +1,55 @@
+{
+  "ppo": {
+    "num_envs": 1024,
+    "num_steps": 32,
+    "total_iters": 8000,
+    "epochs": 4,
+    "minibatches": 4,
+    "lr": 0.00015,
+    "lr_end": 3e-05,
+    "max_grad_norm": 0.5,
+    "clip": 0.2,
+    "gamma": 0.995,
+    "gae_lambda": 0.95,
+    "vf_coef": 0.5,
+    "ent_coef": 0.001,
+    "target_kl": 0.02,
+    "obs_clip": 5.0,
+    "init_log_std": [
+      -2.3025850929940455,
+      -2.3025850929940455,
+      -2.3025850929940455,
+      -1.6094379124341003
+    ],
+    "actor_hidden": [
+      64,
+      64
+    ],
+    "critic_hidden": [
+      128,
+      128
+    ],
+    "actor_head_gain": 0.01,
+    "critic_head_gain": 0.01,
+    "actor_warmup": 20,
+    "scale_rewards": true,
+    "devices": 8
+  },
+  "seed": 2,
+  "obs_dim": 19,
+  "critic_dim": 61,
+  "act_dim": 4,
+  "episode_steps": 500,
+  "estimator": "mekf6",
+  "nominal": false,
+  "dr": "curriculum",
+  "throw": "curriculum",
+  "curriculum_iters": 300,
+  "quick": false,
+  "in_tol_weight": 0.25,
+  "residual": null,
+  "iter": 8000,
+  "env_steps": 262144000,
+  "dr_scale": 1.0,
+  "throw_scale": 1.0
+}
