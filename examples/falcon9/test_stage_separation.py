@@ -4,7 +4,9 @@ import jax.numpy as jnp
 import numpy as np
 
 import elodin as el
+import sim
 from frames import frame_accel, gravity_accel
+from reference import build_reference
 from sim import SIM_TIME_STEP, rebase_separation_center, upper_stage_visual_step
 
 
@@ -79,3 +81,34 @@ def test_separation_center_change_preserves_material_positions_and_velocities():
     unchanged, unchanged_velocity = rebase_separation_center(pose, velocity, old_cg, new_cg, False)
     np.testing.assert_array_equal(unchanged.linear(), pose.linear())
     np.testing.assert_array_equal(unchanged_velocity.linear(), velocity.linear())
+
+
+def test_zero_mass_missions_do_not_draw_an_upper_stage(monkeypatch):
+    emitted = []
+    original = sim.build_schematic
+
+    def capture(**kwargs):
+        schematic = original(**kwargs)
+        emitted.append(schematic.emit_kdl())
+        return schematic
+
+    monkeypatch.setattr(sim, "build_schematic", capture)
+    reference = build_reference("crs12")
+    for mass in [0.0, 118_600.0]:
+        sim.build_mission(reference, upper_kg=mass)
+        assert ("falcon9-upper-stage.glb" in emitted[-1]) == (mass > 0.0)
+        assert "falcon9-booster.glb" in emitted[-1]
+
+
+def test_zero_mass_powered_world_has_no_upper_stage_visual_state():
+    for mass in [0.0, 118_600.0]:
+        world, system = sim.build_powered(
+            sim.pad_ecef() + jnp.array([0.0, 0.0, 100.0]), jnp.zeros(3), upper_kg=mass
+        )
+        simulation = world.to_jax(system, simulation_rate=1000.0)
+        for name in [
+            "upper_stage_visual_pos",
+            "upper_stage_visual_velocity",
+            "upper_stage_detached",
+        ]:
+            assert (name in simulation.component_entity_dict) == (mass > 0.0)

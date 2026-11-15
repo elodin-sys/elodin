@@ -53,7 +53,16 @@ if terrain_asset := os.environ.get("FALCON9_TERRAIN_ASSET"):
     TERRAIN = el.Terrain.from_asset(terrain_asset)
 
 
-def build() -> ui.Schematic:
+def build(*, include_upper_stage: bool = True) -> ui.Schematic:
+    upper_stage_objects = []
+    if include_upper_stage:
+        upper_stage_objects.append(
+            ui.object_3d(
+                "booster.upper_stage_visual_pos",
+                mesh=ui.glb("falcon9-upper-stage.glb", scale=0.9944, rotate=(0.0, 0.0, -90.0)),
+                orientation="absolute",
+            )
+        )
     return ui.schematic(
         ui.vsplit(
             ui.hsplit(
@@ -359,11 +368,7 @@ def build() -> ui.Schematic:
         ),
         # The booster remains the camera/effects anchor throughout the flight.
         # The upper stage has its own recorded visual pose after separation.
-        ui.object_3d(
-            "booster.upper_stage_visual_pos",
-            mesh=ui.glb("falcon9-upper-stage.glb", scale=0.9944, rotate=(0.0, 0.0, -90.0)),
-            orientation="absolute",
-        ),
+        *upper_stage_objects,
         ui.object_3d(
             "booster_truth.world_pos",
             mesh=ui.sphere(

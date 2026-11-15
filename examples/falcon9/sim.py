@@ -1633,6 +1633,13 @@ def build_powered(
     on_pad = float(jnp.linalg.norm(jnp.asarray(init_pos_ecef) - pad_ecef())) < 100.0
     vis_off = init_attitude @ jnp.array([GLB_ORIGIN_STATION_M - float(cg0), 0.0, 0.0])
     vis_lin = jnp.asarray(init_pos_ecef, dtype=jnp.float64) + vis_off
+    upper_stage_visual_components = []
+    if upper_kg > 0.0:
+        upper_stage_visual_components = [
+            el.C(UpperStageVisualPos, el.SpatialTransform(angular=init_attitude, linear=vis_lin)),
+            el.C(UpperStageVisualVelocity, jnp.asarray(init_vel_ecef, dtype=jnp.float64)),
+            el.C(UpperStageDetached, jnp.zeros(1)),
+        ]
     booster = world.spawn(
         [
             el.Body(
@@ -1643,9 +1650,7 @@ def build_powered(
                 inertia=el.SpatialInertia(float(mass0), inertia0),
             ),
             el.C(VisualPos, el.SpatialTransform(angular=init_attitude, linear=vis_lin)),
-            el.C(UpperStageVisualPos, el.SpatialTransform(angular=init_attitude, linear=vis_lin)),
-            el.C(UpperStageVisualVelocity, jnp.asarray(init_vel_ecef, dtype=jnp.float64)),
-            el.C(UpperStageDetached, jnp.zeros(1)),
+            *upper_stage_visual_components,
             el.C(AltitudeGeodetic, jnp.array([0.0])),
             el.C(GroundSpeed, jnp.array([0.0])),
             el.C(ScoreState, jnp.zeros(3)),
@@ -1697,9 +1702,10 @@ def build_powered(
         | pad_clamp
         | ground_contact
         | booster_visual_pose
-        | upper_stage_visual_pose
-        | descent_metrics_latch
     )
+    if upper_kg > 0.0:
+        plant = plant | upper_stage_visual_pose
+    plant = plant | descent_metrics_latch
     system = (extra_systems | plant) if extra_systems is not None else plant
     return world, system | derive_geodetic_telemetry | effect_visualization | sensor_systems()
 
@@ -1758,7 +1764,7 @@ def build_mission(
         StaticSceneObject(el.WorldPos(angular=lz1_att, linear=lz1_ecef())),
         name="lz1",
     )
-    world.schematic(build_schematic(), "falcon9.kdl")
+    world.schematic(build_schematic(include_upper_stage=upper_kg > 0.0), "falcon9.kdl")
     return world, system | make_truth_playback(ref, display_lag_s) | make_display_scoring(
         ref, display_lag_s
     )
