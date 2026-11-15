@@ -1295,7 +1295,8 @@ type JetSpawnerQuery<'w, 's> = Query<
 >;
 
 fn sync_kdl_thruster_particles(
-    rig_objects: Query<(&KdlThrusterRig, &WorldPos)>,
+    rig_objects: Query<(Entity, &KdlThrusterRig, &WorldPos)>,
+    object_visibility: Query<(&Visibility, Option<&ChildOf>), Without<KdlThrusterJet>>,
     mut jets: JetSpawnerQuery,
     mut lights: Query<(
         &KdlThrusterLight,
@@ -1306,7 +1307,12 @@ fn sync_kdl_thruster_particles(
     component_values: Query<&'static WktComponentValue>,
     geo_context: Res<GeoContext>,
 ) {
-    for (rig, world_pos) in &rig_objects {
+    for (owner, rig, world_pos) in &rig_objects {
+        // Anchored trails no longer descend from the object, so explicitly
+        // apply its visibility to emission, rendering, and light power.
+        // Read local visibility along the hierarchy, rather than the previous
+        // propagation result: visibility gates may have changed this frame.
+        let owner_visible = thruster_owner_visible(owner, &object_visibility);
         for &entity in &rig.jets {
             let Ok((jet, mut spawner, mut visibility, children, properties)) = jets.get_mut(entity)
             else {
@@ -1322,7 +1328,8 @@ fn sync_kdl_thruster_particles(
             )
             .map(|eval| eval.intensity)
             .unwrap_or(0.0);
-            apply_kdl_spawner(&mut spawner, &mut visibility, intensity, jet);
+            let intensity = if owner_visible { intensity } else { 0.0 };
+            apply_kdl_spawner(&mut spawner, &mut visibility, intensity, jet, owner_visible);
             if jet.has_intensity_property
                 && let Some(mut properties) = properties
             {
@@ -1351,6 +1358,23 @@ fn sync_kdl_thruster_particles(
     }
 }
 
+fn thruster_owner_visible(
+    mut entity: Entity,
+    visibility: &Query<(&Visibility, Option<&ChildOf>), Without<KdlThrusterJet>>,
+) -> bool {
+    while let Ok((visibility, parent)) = visibility.get(entity) {
+        match visibility {
+            Visibility::Hidden => return false,
+            Visibility::Visible => return true,
+            Visibility::Inherited => match parent {
+                Some(parent) => entity = parent.parent(),
+                None => return true,
+            },
+        }
+    }
+    true
+}
+
 /// Scales a spawner count by `factor`, preserving `Uniform` ranges (the same
 /// formula pyrotechnique uses, so intensity semantics match the authoring
 /// tool).
@@ -1367,9 +1391,20 @@ fn apply_kdl_spawner(
     visibility: &mut Visibility,
     intensity: f32,
     jet: &KdlThrusterJet,
+    owner_visible: bool,
 ) {
+    if !owner_visible {
+        spawner.active = false;
+        *visibility = Visibility::Hidden;
+        return;
+    }
+    // Restore inheritance after the owner reappears, including at zero
+    // throttle so already emitted particles can finish their lifetime.
+    if jet.base_rate.is_some() || jet.authored_settings.is_some() {
+        *visibility = Visibility::Inherited;
+    }
     if intensity <= jet.cutoff {
-        // Stop spawning only — keep Visible so trails/smoke already emitted can age out.
+        // Stop spawning only; existing trails/smoke can age out.
         spawner.active = false;
         return;
     }
@@ -1389,7 +1424,7 @@ fn apply_kdl_spawner(
             return;
         }
     };
-    *visibility = Visibility::Visible;
+    *visibility = Visibility::Inherited;
     spawner.active = true;
     spawner.settings = settings;
 }
@@ -1638,6 +1673,112 @@ mod tests {
             has_intensity_property: false,
             cutoff: 0.0,
         }
+    }
+
+    #[test]
+    fn hidden_owner_stops_attached_and_anchored_effects_and_lights() {
+        for anchored in [false, true] {
+            let mut app = App::new();
+            app.init_resource::<EntityMap>()
+                .insert_resource(GeoContext::default())
+                .add_systems(Update, sync_kdl_thruster_particles);
+            let ancestor = app.world_mut().spawn(Visibility::Inherited).id();
+            let owner = app
+                .world_mut()
+                .spawn((
+                    WorldPos::default(),
+                    Visibility::Inherited,
+                    ChildOf(ancestor),
+                ))
+                .id();
+            let parent = if anchored {
+                app.world_mut().spawn(Visibility::Inherited).id()
+            } else {
+                owner
+            };
+            let mut config = test_jet(None);
+            config.intensity =
+                Some(compile_eql_expr(eql::Context::default().parse_str("1.0").unwrap()).unwrap());
+            let jet = app
+                .world_mut()
+                .spawn((
+                    config,
+                    EffectSpawner::default(),
+                    Visibility::Hidden,
+                    ChildOf(parent),
+                ))
+                .id();
+            let point = app
+                .world_mut()
+                .spawn((
+                    KdlThrusterLight { peak_lm: 100.0 },
+                    PointLight::default(),
+                    ChildOf(jet),
+                ))
+                .id();
+            let spot = app
+                .world_mut()
+                .spawn((
+                    KdlThrusterLight { peak_lm: 200.0 },
+                    SpotLight::default(),
+                    ChildOf(jet),
+                ))
+                .id();
+            app.world_mut().entity_mut(owner).insert(KdlThrusterRig {
+                jets: vec![jet],
+                configs: Vec::new(),
+            });
+            for (local, ancestor_hidden, visible) in [
+                (Visibility::Inherited, false, true),
+                (Visibility::Hidden, false, false),
+                (Visibility::Inherited, true, false),
+                (Visibility::Inherited, false, true),
+                (Visibility::Visible, true, true),
+            ] {
+                *app.world_mut().get_mut::<Visibility>(owner).unwrap() = local;
+                *app.world_mut().get_mut::<Visibility>(ancestor).unwrap() = if ancestor_hidden {
+                    Visibility::Hidden
+                } else {
+                    Visibility::Inherited
+                };
+                app.update();
+                assert_eq!(
+                    app.world().get::<EffectSpawner>(jet).unwrap().active,
+                    visible
+                );
+                assert_eq!(
+                    *app.world().get::<Visibility>(jet).unwrap(),
+                    if visible {
+                        Visibility::Inherited
+                    } else {
+                        Visibility::Hidden
+                    },
+                );
+                assert_eq!(
+                    app.world().get::<PointLight>(point).unwrap().intensity,
+                    if visible { 100.0 } else { 0.0 },
+                );
+                assert_eq!(
+                    app.world().get::<SpotLight>(spot).unwrap().intensity,
+                    if visible { 200.0 } else { 0.0 },
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn zero_throttle_preserves_trails_without_revealing_unbound_effects() {
+        let mut jet = test_jet(None);
+        let mut spawner = EffectSpawner::default();
+        let mut visibility = Visibility::Hidden;
+        apply_kdl_spawner(&mut spawner, &mut visibility, 0.0, &jet, true);
+        assert!(!spawner.active);
+        assert_eq!(visibility, Visibility::Inherited);
+        jet.base_rate = None;
+        visibility = Visibility::Hidden;
+        apply_kdl_spawner(&mut spawner, &mut visibility, 0.0, &jet, true);
+        assert!(!spawner.active);
+        assert_eq!(visibility, Visibility::Hidden);
     }
 
     #[test]
