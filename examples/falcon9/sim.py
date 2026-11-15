@@ -951,13 +951,7 @@ def ground_contact(
         jnp.array([jnp.abs(v_up), v_lat, tilt_deg, impact, omega, tvc_mag]),
         metrics,
     )
-    # After the legs absorb the slap, the settled pin is upright and still —
-    # score tilt/rate at settle, not the first-pad strike transient.
-    latched = jnp.where(
-        settle & ~was_landed,
-        latched.at[2].set(0.0).at[4].set(0.0),
-        latched,
-    )
+    # Preserve first-contact tilt/rate even after the settled body is pinned.
 
     x = jnp.array([1.0, 0.0, 0.0])
     axis = jnp.cross(x, up)
