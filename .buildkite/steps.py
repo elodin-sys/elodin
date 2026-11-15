@@ -39,7 +39,7 @@ def nix_step(
     agents={},
 ):
     flake_arg = f" {flake}" if flake else ""
-    heredoc_command = f"""nix develop{flake_arg} --command bash <<'EOF'
+    heredoc_command = f""".buildkite/nix-develop-profile.sh{flake_arg} -- bash <<'EOF'
 set -o pipefail
 {command}
 EOF"""

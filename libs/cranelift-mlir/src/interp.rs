@@ -1489,6 +1489,7 @@ fn reduce(
         element_type: et,
     };
     let shape: Vec<usize> = src.ty.shape.iter().map(|&d| d as usize).collect();
+    let n_src: usize = shape.iter().product();
     let kept: Vec<usize> = (0..shape.len())
         .filter(|&a| !dimensions.contains(&(a as i64)))
         .collect();
@@ -1508,7 +1509,7 @@ fn reduce(
         };
         let init = read_f64(&init_tensor.bytes, init_tensor.ty.element_type, 0);
         let mut acc = vec![init; n_out];
-        for flat in 0..src.elem_count() {
+        for flat in 0..n_src {
             let o = out_index(flat);
             acc[o] = fold(acc[o], read_f64(&src.bytes, et, flat));
         }
@@ -1529,7 +1530,7 @@ fn reduce(
         };
         let init = read_int(&init_tensor.bytes, init_tensor.ty.element_type, 0);
         let mut acc = vec![init; n_out];
-        for flat in 0..src.elem_count() {
+        for flat in 0..n_src {
             let o = out_index(flat);
             acc[o] = fold(acc[o], read_int(&src.bytes, et, flat));
         }
@@ -1798,7 +1799,15 @@ fn gather(
         .iter()
         .map(|&d| d as usize)
         .collect();
-    let slice_dims_kept: Vec<usize> = (0..src_rank).filter(|d| !collapsed.contains(d)).collect();
+    let batching: Vec<(usize, usize)> = dims
+        .operand_batching_dims
+        .iter()
+        .zip(&dims.start_indices_batching_dims)
+        .map(|(&o, &i)| (o as usize, i as usize))
+        .collect();
+    let slice_dims_kept: Vec<usize> = (0..src_rank)
+        .filter(|d| !collapsed.contains(d) && !batching.iter().any(|&(o, _)| o == *d))
+        .collect();
     let out_strides = shape_strides(&result_ty.shape);
     let src_strides = shape_strides(&src.ty.shape);
     let idx_strides = shape_strides(&idx.ty.shape);
@@ -1847,6 +1856,9 @@ fn gather(
             }
         }
         let mut op_coord = start;
+        for &(op_dim, idx_dim) in &batching {
+            op_coord[op_dim] += idx_coords[idx_dim] as i64;
+        }
         for (k, &op_dim) in slice_dims_kept.iter().enumerate() {
             let off = offset_dims.get(k).map(|&d| coords[d] as i64).unwrap_or(0);
             op_coord[op_dim] += off;

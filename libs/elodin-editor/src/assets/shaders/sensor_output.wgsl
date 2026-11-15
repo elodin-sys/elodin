@@ -1,7 +1,8 @@
 #import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput
 
 @group(0) @binding(0) var screen_texture: texture_2d<f32>;
-@group(0) @binding(1) var depth_texture: texture_depth_2d;
+// Float, not texture_depth_2d: WebGL2 can only compare against a depth sampler.
+@group(0) @binding(1) var depth_texture: texture_2d<f32>;
 @group(0) @binding(2) var texture_sampler: sampler;
 
 struct SensorOutputSettings {
@@ -53,17 +54,9 @@ fn frame_noise(pixel: vec2<f32>) -> f32 {
     return sqrt(-2.0 * log(first)) * cos(2.0 * PI * second);
 }
 
-fn texture_coord(uv: vec2<f32>) -> vec2<i32> {
-    let dimensions = vec2<i32>(textureDimensions(depth_texture));
-    return clamp(
-        vec2<i32>(uv * vec2<f32>(dimensions)),
-        vec2<i32>(0),
-        dimensions - vec2<i32>(1),
-    );
-}
-
 fn raw_depth_at(uv: vec2<f32>) -> f32 {
-    return textureLoad(depth_texture, texture_coord(uv), 0);
+    // Sampled, not loaded: WebGL2 reads depth only through a nearest sampler.
+    return textureSampleLevel(depth_texture, texture_sampler, uv, 0.0).x;
 }
 
 fn view_distance(raw_depth: f32) -> f32 {

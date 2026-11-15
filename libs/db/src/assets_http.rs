@@ -200,7 +200,7 @@ async fn sync_one_schematic_asset(
     assets_dir: &Path,
     name: &str,
 ) -> Option<Vec<u8>> {
-    let url = format!("{base}/{name}");
+    let url = impeller::asset_http_url(base, name);
     let bytes = fetch_source_asset(client, &url, name).await?;
     if let Err(err) = write_asset_file(assets_dir, name, &bytes) {
         tracing::warn!(
@@ -335,7 +335,7 @@ async fn fetch_source_index(
     client: &reqwest::Client,
     base: &str,
 ) -> Result<Vec<crate::assets::AssetEntry>, SyncAssetsError> {
-    let url = format!("{base}/{INDEX_KEY}");
+    let url = impeller::asset_http_url(base, INDEX_KEY);
     let response = client.get(&url).send().await?;
     if !response.status().is_success() {
         return Err(SyncAssetsError::IndexStatus(response.status()));
@@ -357,7 +357,7 @@ async fn mirror_asset_from_source(
     assets_dir: &Path,
     key: &str,
 ) -> bool {
-    let url = format!("{base}/{key}");
+    let url = impeller::asset_http_url(base, key);
     let Some(remote) = fetch_source_asset(client, &url, key).await else {
         return false;
     };
@@ -394,7 +394,7 @@ fn prune_stale_local_assets(assets_dir: &Path, source_keys: &HashSet<String>) {
     }
 }
 
-/// Mirrors the source DB's full asset tree into `db_path/assets/` via `GET /__index__`.
+/// Mirrors the source DB's full asset tree into `db_path/assets/` via `GET /assets/__index__`.
 ///
 /// Assets absent from the source index are pruned locally so the follower never
 /// serves files deleted upstream. Returns [`SyncAssetsError::PartialMirror`] when
@@ -578,12 +578,12 @@ pub fn remove_asset_file(assets_dir: &Path, name: &str) -> io::Result<()> {
 }
 
 /// Reserved key prefix for the asset index listing (network replacement for a
-/// filesystem `read_dir`): `GET /__index__` or `GET /__index__/<prefix>`.
+/// filesystem `read_dir`): `GET /assets/__index__` or `GET /assets/__index__/<prefix>`.
 pub(crate) const INDEX_KEY: &str = "__index__";
 
 /// Keys reserved by the DB asset layer that must never be stored as real
 /// assets. Storing them would be unservable: the index namespace (`__index__`,
-/// `__index__/…`) is shadowed by the listing route, and the ingest marker
+/// `__index__/…`) is shadowed by the listing route under `/assets`, and the ingest marker
 /// (`.elodin-ingested`) would forge the copy-once guard. Enforced at every write
 /// path (uploads, skybox sync, ingest) and skipped when copying a source tree.
 pub(crate) fn is_reserved_asset_key(key: &str) -> bool {
@@ -988,11 +988,13 @@ fn assets_router_with_origins(state: Arc<AssetsState>, origins: OriginPolicy) ->
         .with_state(state)
 }
 
+const ASSETS_ROUTE: &str = "/assets/{*path}";
+
 fn base_assets_router() -> Router<Arc<AssetsState>> {
     Router::new()
         .route("/impeller", get(ws_impeller))
         .route("/impeller/msg", get(ws_impeller))
-        .route("/{*path}", get(get_asset).put(put_asset))
+        .route(ASSETS_ROUTE, get(get_asset).put(put_asset))
         .layer(DefaultBodyLimit::max(MAX_ASSET_UPLOAD_BYTES))
 }
 
@@ -1120,6 +1122,14 @@ mod tests {
     }
 
     #[test]
+    fn assets_route_uses_the_http_prefix() {
+        assert_eq!(
+            ASSETS_ROUTE,
+            format!("/{}/{{*path}}", impeller::ASSETS_HTTP_PREFIX)
+        );
+    }
+
+    #[test]
     fn sanitize_rejects_traversal_and_empty() {
         assert_eq!(
             sanitize_asset_path("rocket.glb").unwrap(),
@@ -1188,7 +1198,10 @@ mod tests {
 
         let client = reqwest::Client::new();
         let response = client
-            .get(format!("http://{assets_addr}/rocket.glb"))
+            .get(impeller::asset_http_url(
+                &format!("http://{assets_addr}"),
+                "rocket.glb",
+            ))
             .send()
             .await
             .unwrap();
@@ -1202,7 +1215,10 @@ mod tests {
         assert_eq!(response.bytes().await.unwrap().as_ref(), b"spawned-payload");
 
         let not_modified = client
-            .get(format!("http://{assets_addr}/rocket.glb"))
+            .get(impeller::asset_http_url(
+                &format!("http://{assets_addr}"),
+                "rocket.glb",
+            ))
             .header(header::IF_NONE_MATCH, &etag)
             .send()
             .await
@@ -1210,7 +1226,10 @@ mod tests {
         assert_eq!(not_modified.status(), StatusCode::NOT_MODIFIED);
 
         let cors = client
-            .get(format!("http://{assets_addr}/rocket.glb"))
+            .get(impeller::asset_http_url(
+                &format!("http://{assets_addr}"),
+                "rocket.glb",
+            ))
             .header(header::ORIGIN, "http://127.0.0.1:8080")
             .send()
             .await
@@ -1224,7 +1243,10 @@ mod tests {
         );
 
         let foreign = client
-            .get(format!("http://{assets_addr}/rocket.glb"))
+            .get(impeller::asset_http_url(
+                &format!("http://{assets_addr}"),
+                "rocket.glb",
+            ))
             .header(header::ORIGIN, "http://evil.example")
             .send()
             .await
@@ -1480,7 +1502,7 @@ mod tests {
             impeller_addr: "127.0.0.1:0".parse().unwrap(),
         });
         let app = Router::new()
-            .route("/{*path}", get(get_asset))
+            .route(ASSETS_ROUTE, get(get_asset))
             .with_state(state);
 
         tokio::spawn(async move {
@@ -1491,7 +1513,10 @@ mod tests {
 
         let client = reqwest::Client::new();
         let get_response = client
-            .get(format!("http://{bound}/model..v2.glb"))
+            .get(impeller::asset_http_url(
+                &format!("http://{bound}"),
+                "model..v2.glb",
+            ))
             .send()
             .await
             .unwrap();
@@ -1517,7 +1542,7 @@ mod tests {
             impeller_addr: "127.0.0.1:0".parse().unwrap(),
         });
         let app = Router::new()
-            .route("/{*path}", get(get_asset))
+            .route(ASSETS_ROUTE, get(get_asset))
             .with_state(state);
 
         tokio::spawn(async move {
@@ -1527,11 +1552,59 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         let response = reqwest::Client::new()
-            .get(format!("http://{bound}/missing.glb"))
+            .get(impeller::asset_http_url(
+                &format!("http://{bound}"),
+                "missing.glb",
+            ))
             .send()
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn assets_are_served_only_under_assets_prefix() {
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("assets");
+        write_asset_file(&assets, "impeller/widget.glb", b"widget").unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        let state = Arc::new(AssetsState {
+            assets_dir: assets,
+            writable: true,
+            db: None,
+            impeller_addr: "127.0.0.1:0".parse().unwrap(),
+        });
+        let app = assets_router(state);
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let client = reqwest::Client::new();
+        let ok = client
+            .get(impeller::asset_http_url(
+                &format!("http://{bound}"),
+                "impeller/widget.glb",
+            ))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(ok.status(), StatusCode::OK);
+        assert_eq!(ok.bytes().await.unwrap().as_ref(), b"widget");
+
+        for path in ["widget.glb", "impeller/widget.glb", "rocket.glb"] {
+            let response = client
+                .get(format!("http://{bound}/{path}"))
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::NOT_FOUND,
+                "{path} must not be served at the server root"
+            );
+        }
     }
 
     /// Builds an in-process asset server and returns its bound address.
@@ -1546,7 +1619,7 @@ mod tests {
             impeller_addr: "127.0.0.1:0".parse().unwrap(),
         });
         let app = Router::new()
-            .route("/{*path}", get(get_asset).put(put_asset))
+            .route(ASSETS_ROUTE, get(get_asset).put(put_asset))
             .layer(DefaultBodyLimit::max(MAX_ASSET_UPLOAD_BYTES))
             .with_state(state);
         tokio::spawn(async move {
@@ -1564,7 +1637,10 @@ mod tests {
 
         let client = reqwest::Client::new();
         let put = client
-            .put(format!("http://{bound}/models/rocket.glb"))
+            .put(impeller::asset_http_url(
+                &format!("http://{bound}"),
+                "models/rocket.glb",
+            ))
             .body(b"glb-bytes".to_vec())
             .send()
             .await
@@ -1572,7 +1648,10 @@ mod tests {
         assert_eq!(put.status(), StatusCode::NO_CONTENT);
 
         let get = client
-            .get(format!("http://{bound}/models/rocket.glb"))
+            .get(impeller::asset_http_url(
+                &format!("http://{bound}"),
+                "models/rocket.glb",
+            ))
             .send()
             .await
             .unwrap();
@@ -1592,7 +1671,10 @@ mod tests {
         // followers resolve `meshes/drone.glb` as a relative URL and fail.
         let client = reqwest::Client::new();
         let put = client
-            .put(format!("http://{bound}/schematics/main.kdl"))
+            .put(impeller::asset_http_url(
+                &format!("http://{bound}"),
+                "schematics/main.kdl",
+            ))
             .body(
                 b"object_3d \"drone.world_pos\" {\n    glb path=\"meshes/drone.glb\"\n}\n".to_vec(),
             )
@@ -1602,7 +1684,10 @@ mod tests {
         assert_eq!(put.status(), StatusCode::NO_CONTENT);
 
         let stored = client
-            .get(format!("http://{bound}/schematics/main.kdl"))
+            .get(impeller::asset_http_url(
+                &format!("http://{bound}"),
+                "schematics/main.kdl",
+            ))
             .send()
             .await
             .unwrap()
@@ -1622,7 +1707,10 @@ mod tests {
         let bound = spawn_test_asset_server(assets.clone(), false).await;
 
         let put = reqwest::Client::new()
-            .put(format!("http://{bound}/models/rocket.glb"))
+            .put(impeller::asset_http_url(
+                &format!("http://{bound}"),
+                "models/rocket.glb",
+            ))
             .body(b"glb-bytes".to_vec())
             .send()
             .await
@@ -1638,7 +1726,10 @@ mod tests {
         let bound = spawn_test_asset_server(assets, true).await;
 
         let put = reqwest::Client::new()
-            .put(format!("http://{bound}/{INDEX_KEY}"))
+            .put(impeller::asset_http_url(
+                &format!("http://{bound}"),
+                INDEX_KEY,
+            ))
             .body(b"forged-index".to_vec())
             .send()
             .await
@@ -1705,7 +1796,7 @@ mod tests {
             impeller_addr: "127.0.0.1:0".parse().unwrap(),
         });
         let app = Router::new()
-            .route("/{*path}", get(get_asset))
+            .route(ASSETS_ROUTE, get(get_asset))
             .with_state(state);
 
         tokio::spawn(async move {
@@ -1800,7 +1891,7 @@ object_3d "rocket.world_pos" {
             impeller_addr: "127.0.0.1:0".parse().unwrap(),
         });
         let app = Router::new()
-            .route("/{*path}", get(get_asset))
+            .route(ASSETS_ROUTE, get(get_asset))
             .with_state(state);
 
         tokio::spawn(async move {
@@ -1896,7 +1987,7 @@ object_3d "rocket.world_pos" {
             impeller_addr: "127.0.0.1:0".parse().unwrap(),
         });
         let app = Router::new()
-            .route("/{*path}", get(get_asset))
+            .route(ASSETS_ROUTE, get(get_asset))
             .with_state(state);
 
         let reserved = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -1996,7 +2087,7 @@ object_3d "rocket.world_pos" {
             impeller_addr: "127.0.0.1:0".parse().unwrap(),
         });
         let app = Router::new()
-            .route("/{*path}", get(get_asset))
+            .route(ASSETS_ROUTE, get(get_asset))
             .with_state(state);
 
         tokio::spawn(async move {
@@ -2043,7 +2134,7 @@ viewport "main" { }
             impeller_addr: "127.0.0.1:0".parse().unwrap(),
         });
         let app = Router::new()
-            .route("/{*path}", get(get_asset))
+            .route(ASSETS_ROUTE, get(get_asset))
             .with_state(state);
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
@@ -2052,7 +2143,10 @@ viewport "main" { }
 
         let client = reqwest::Client::new();
         let all_bytes = client
-            .get(format!("http://{bound}/__index__"))
+            .get(impeller::asset_http_url(
+                &format!("http://{bound}"),
+                INDEX_KEY,
+            ))
             .send()
             .await
             .unwrap()
@@ -2064,7 +2158,10 @@ viewport "main" { }
         assert_eq!(keys, vec!["meshes/rocket.glb", "schematics/main.kdl"]);
 
         let schematics_bytes = client
-            .get(format!("http://{bound}/__index__/schematics/"))
+            .get(impeller::asset_http_url(
+                &format!("http://{bound}"),
+                "__index__/schematics/",
+            ))
             .send()
             .await
             .unwrap()
@@ -2113,7 +2210,7 @@ viewport "main" { }
             impeller_addr: "127.0.0.1:0".parse().unwrap(),
         });
         let app = Router::new()
-            .route("/{*path}", get(get_asset))
+            .route(ASSETS_ROUTE, get(get_asset))
             .with_state(state);
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
@@ -2182,7 +2279,10 @@ viewport "main" { }
             StatusCode::NOT_FOUND.into_response()
         }
         let app = Router::new()
-            .route(&format!("/{INDEX_KEY}"), get(index))
+            .route(
+                &format!("/{}/{INDEX_KEY}", impeller::ASSETS_HTTP_PREFIX),
+                get(index),
+            )
             .route("/{*path}", get(missing));
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -2227,7 +2327,10 @@ viewport "main" { }
             StatusCode::NOT_FOUND.into_response()
         }
         let app = Router::new()
-            .route(&format!("/{INDEX_KEY}"), get(index))
+            .route(
+                &format!("/{}/{INDEX_KEY}", impeller::ASSETS_HTTP_PREFIX),
+                get(index),
+            )
             .route("/{*path}", get(missing));
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -2265,7 +2368,10 @@ viewport "main" { }
         async fn index() -> Response {
             Json(Vec::<crate::assets::AssetEntry>::new()).into_response()
         }
-        let app = Router::new().route(&format!("/{INDEX_KEY}"), get(index));
+        let app = Router::new().route(
+            &format!("/{}/{INDEX_KEY}", impeller::ASSETS_HTTP_PREFIX),
+            get(index),
+        );
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let bound = listener.local_addr().unwrap();
@@ -2300,7 +2406,10 @@ viewport "main" { }
         async fn index() -> Response {
             Json(Vec::<crate::assets::AssetEntry>::new()).into_response()
         }
-        let app = Router::new().route(&format!("/{INDEX_KEY}"), get(index));
+        let app = Router::new().route(
+            &format!("/{}/{INDEX_KEY}", impeller::ASSETS_HTTP_PREFIX),
+            get(index),
+        );
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let bound = listener.local_addr().unwrap();
@@ -2341,7 +2450,10 @@ viewport "main" { }
         }
         let hits = Arc::new(AtomicUsize::new(0));
         let app = Router::new()
-            .route(&format!("/{INDEX_KEY}"), get(index))
+            .route(
+                &format!("/{}/{INDEX_KEY}", impeller::ASSETS_HTTP_PREFIX),
+                get(index),
+            )
             .route("/{*path}", get(flaky_asset))
             .with_state(hits.clone());
 

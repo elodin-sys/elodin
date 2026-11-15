@@ -1,14 +1,17 @@
 ---
 name: branch-regression
-description: Compare two git branches (usually the current branch vs main) by running every example on each, capturing exit codes, logs, and editor screenshots, then diffing the results. Use when the user asks to regression-test a branch, compare branches, check a branch for example breakage, or A/B the editor output before merging.
+description: Compare two git branches (usually the current branch vs main) by running every example on each, in the native editor and in the wasm browser editor, capturing exit codes, logs, and screenshots, then diffing the results. Use when the user asks to regression-test a branch, compare branches, check a branch for example breakage, or A/B the editor output before merging.
 ---
 
 # Branch Regression
 
 Runs the same example suite on a base branch (usually `main`) and the current
 branch, then compares run results, exit codes, new WARN/ERROR log lines, and
-screenshots. Screenshots are not expected to match 100% (sims are
-non-deterministic) — they should be *close* barring an issue.
+screenshots. Do this twice per branch: once in the native editor, then again in
+the wasm browser editor. Screenshots are not expected to match 100% (sims are
+non-deterministic) — they should be *close* barring an issue. Pair by target:
+native base with native head, and wasm base with wasm head. Don't score a native
+screenshot against a wasm screenshot.
 
 Requires: Linux host with display + GPU (editor screenshots), `nix develop`,
 repo root as cwd.
@@ -17,9 +20,9 @@ repo root as cwd.
 
 ```
 - [ ] 0. Preflight: clean tree, record current branch
-- [ ] 1. Base pass: checkout base, build, capture
-- [ ] 2. Head pass: checkout original branch, build, capture
-- [ ] 3. Compare + visually inspect flagged screenshots
+- [ ] 1. Base pass: checkout base, build, capture native, then wasm
+- [ ] 2. Head pass: checkout original branch, build, capture native, then wasm
+- [ ] 3. Compare + visually inspect flagged screenshots (native and wasm)
 - [ ] 4. Report (and confirm you are back on the original branch)
 ```
 
@@ -92,6 +95,89 @@ Rules baked into the script (do not work around them):
   failure, not proof of a regression — retry once before flagging.
 
 **Always `git switch` back to `$HEAD_BRANCH` when done or on any error.**
+Stop the wasm server before switching branches.
+
+### WASM pass
+
+Run this on the branch just captured, in the same `nix develop` session and
+before `git switch`. The browser editor does not launch a simulation. Trunk
+serves the editor, and `elodin run` serves the database. See
+`apps/elodin-web/README.md`.
+
+Wasm has no `ELODIN_SCREENSHOT` path. Capture with the browser tools. Skip
+headless-only examples (`frames`, `linalg`, `stablehlo`, `cube-sat-pysim`);
+they have no scene. Use the same gallery as the native pass otherwise.
+
+```bash
+# still inside the nix develop used for this branch; OUT is base or head
+mkdir -p "$OUT/wasm"
+git rev-parse HEAD >"$OUT/wasm/commit.txt"
+git branch --show-current >>"$OUT/wasm/commit.txt"
+# Builds the wasm-release profile and serves http://127.0.0.1:8080.
+# The asset URL is written into <meta name="elodin-web-db">.
+# Trunk 0.21 treats NO_COLOR=1 as --no-color=1 and exits.
+ELODIN_WEB_DB=http://127.0.0.1:2241 TRUNK_COLOR=never trunk serve --config apps/elodin-web/Trunk.toml
+```
+
+Leave Trunk running for every example on this branch. Wait until it is
+actually serving before opening a page. The first response is slow: this
+profile is fat LTO. A Trunk process left over from the other branch is the
+wrong editor; stop it and serve again after `just install`.
+
+For each example, with nothing else bound to TCP 2240:
+
+```bash
+example=ball   # then the rest of the gallery
+case "$example" in
+  video-stream) rm -rf video-stream-db ;;
+  voyager) rm -rf examples/voyager/dbs/voyager dbs/voyager ;;
+esac
+setsid elodin run "examples/$example/main.py" >"$OUT/wasm/$example.sim.log" 2>&1 &
+echo $! >"$OUT/wasm/$example.pid"
+# wait until ss shows :2240, or the sim log exits
+```
+
+Then, in the browser:
+
+- Viewport 1280×720 on both branches. A size mismatch makes the RMSE meaningless.
+- Open `http://127.0.0.1:8080/?example=<example>`. The extra parameter is
+  ignored by the editor; it forces a new document so the next example does not
+  reuse the previous connection. The page reads `<meta name="elodin-web-db">`
+  (`http://127.0.0.1:2241`, the asset server on the port after Impeller TCP)
+  and opens its WebSocket there.
+- Wait until the boot overlay is hidden (`elodin-ready`) and then the same
+  settle delay as the native pass (`ELODIN_SCREENSHOT_DELAY`, default 20s).
+  The first example also waits for the wasm module to compile; allow several
+  minutes once per branch before calling it a hang.
+- Save the screenshot to `$OUT/wasm/<example>.png`.
+- Read `window.__eloLogs`. Write each `warn` and `error` entry to
+  `$OUT/wasm/<example>.log` as a line beginning with `WARN` or `ERROR`, so
+  `compare_runs.py` can see it. A panic string is an `ERROR`.
+- Write `$OUT/wasm/<example>.exit`: `0` when the canvas is non-empty, the boot
+  overlay is hidden, and the sim process is still running. `1` when the sim
+  died, the overlay shows a panic, or the canvas is blank. A blank canvas is a
+  capture failure — retry that example once before flagging it.
+
+Stop the sim before the next example. `s10` children respawn after a plain
+kill, so signal the process group:
+
+```bash
+pid=$(cat "$OUT/wasm/$example.pid")
+kill -TERM -- -"$pid" 2>/dev/null
+sleep 2
+kill -KILL -- -"$pid" 2>/dev/null
+# wait until :2240 is free
+```
+
+After the gallery, stop Trunk. Port 8080 has to be free for the other branch.
+
+Judge wasm against the other branch's wasm capture. These gaps are compiled
+out of the browser editor today, so the same gap on both branches is
+pre-existing: Cesium terrain, skyboxes, sensor-camera GPU readback, thruster
+particles, cinematic Earth, and the native status-bar hardware stats. A panic,
+a failed connection, or missing geometry that the other branch still draws is
+a regression. Do not require the native status-bar RAM reading on a wasm
+screenshot.
 
 ### 3. Compare
 
@@ -105,10 +191,18 @@ Prints a markdown table (exit codes, new WARN/ERROR count, screenshot RMSE,
 verdict), writes `report.html`, and exits 1 if anything is flagged. The HTML
 report must include base/head screenshot thumbnails for every example; each
 thumbnail links to the full-size image. Always generate both report formats.
+Run it again for the wasm captures:
+
+```bash
+nix develop --command uv run python .cursor/skills/branch-regression/compare_runs.py \
+  "$OUT/base/wasm" "$OUT/head/wasm" --rmse-threshold 0.05 \
+  --html "$OUT/wasm-report.html" > "$OUT/wasm-report.md"
+```
 
 Then, for every flagged example, **Read both PNGs** and judge visually:
 - Same scene composition (objects, trails, view cube, graph panels populated)?
-- Status bar healthy (RAM > 0, ticks advancing)?
+- Native status bar healthy (RAM > 0, ticks advancing)? Wasm has no hardware
+  stats; judge the scene and the console log instead.
 - Is the pixel delta explained by sim phase (a ball mid-bounce vs apex) or is
   content actually missing/broken?
 
@@ -117,10 +211,12 @@ Missing geometry, blank viewport, dead graphs, or a new panic = regression.
 
 ### 4. Report
 
-Summarize per example: base vs head exit code, new WARN/ERROR lines (quote
-them), RMSE, visual verdict. State the two commits compared (from
-`commit.txt`). Distinguish **regressions** (head worse than base) from
-**pre-existing issues** (present in both).
+Summarize per example, native and wasm separately: base vs head exit code,
+new WARN/ERROR lines (quote them), RMSE, visual verdict. State the two
+commits compared (from `commit.txt` and `wasm/commit.txt`). Distinguish
+**regressions** (head worse than base) from **pre-existing issues** (present
+in both). A wasm-only failure is still a regression when the base wasm capture
+was healthy.
 
 ## Interpreting log diffs
 
@@ -143,3 +239,8 @@ through; use judgment.
 - Output lives under gitignored `ai-context/`; never commit captures.
 - When resuming after a crash, locate the existing output directory and restore
   `ELODIN_SHELL_ID` from `shell-id.txt` before entering `nix develop`.
+- The wasm editor is a separate build (`trunk serve` / `just web`). Native
+  `target/release/elodin` does not exercise it. Stop Trunk before
+  `git switch`, then serve again on the next branch.
+- Reload between wasm examples. The gallery all uses port 2240, and a reused
+  document keeps the previous database connection.

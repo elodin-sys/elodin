@@ -35,12 +35,12 @@ cargo run --bin elodin editor 127.0.0.1:2240
 
 Optional features declared in `libs/elodin-editor/Cargo.toml` (re-exported by `apps/elodin/Cargo.toml`):
 
-- `big_space` (default): upstream `big_space` 0.13 floating-origin layer.
 - `inspector`: adds the `bevy-inspector-egui` runtime entity inspector.
-- `debug`: enables `big_space`'s debug diagnostics.
+- `debug`: enables BigSpace debug diagnostics.
 - `tracy`: enables Tracy profiling (see `.cursor/skills/elodin-tracy/SKILL.md`).
 
 Enable with `cargo run -p elodin --features "<list>" -- editor ...`.
+BigSpace is always enabled; the editor has no fallback spatial mode.
 
 ## Source Layout
 
@@ -192,6 +192,10 @@ Prefer Bevy's native window screenshot path over OS screen capture. It captures 
 | Tab | `ELODIN_SCREENSHOT_TAB` (a named split's title; warns at capture when no tab has it) |
 
 The plugin queues `Screenshot::primary_window()`, waits until the PNG is non-empty on disk (async GPU readback), then sends `AppExit::Success` when exit is requested. Do **not** kill the process on a timer alone — that tears down the render thread mid-readback and yields a missing/empty PNG.
+
+Streamed terrain has no timeout during interactive editor startup. Fixed-path
+automation is deliberately stricter: set `ELODIN_CESIUM_CAPTURE_TIMEOUT` to
+bound terrain warm-up; load errors and timeouts exit without a screenshot.
 
 ### One-shot capture (design / verify a change)
 

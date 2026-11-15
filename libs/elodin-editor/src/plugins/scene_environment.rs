@@ -17,6 +17,8 @@ use impeller::types::Timestamp;
 use impeller_wkt::{AtmosphereConfig, CurrentTimestamp, EnvironmentConfig, SunConfig};
 
 use crate::MainCamera;
+#[cfg(any(target_arch = "wasm32", test))]
+use crate::plugins::gpu_info::GpuInfo;
 use crate::plugins::render_layer_alloc::CINEMATIC_EARTH_RENDER_LAYER;
 
 /// Globe root: ECEF origin, model→ECEF alignment rotation, no scale.
@@ -101,6 +103,49 @@ impl Plugin for SceneEnvironmentPlugin {
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app.add_systems(ExtractSchedule, clear_inactive_extracted_atmosphere);
         }
+        #[cfg(target_arch = "wasm32")]
+        app.add_systems(
+            Update,
+            sync_standalone_atmosphere_root.before(sync_atmosphere),
+        );
+    }
+}
+
+/// Earth-centered atmosphere without the native cinematic globe and materials.
+#[cfg(any(target_arch = "wasm32", test))]
+#[derive(Component)]
+struct StandaloneAtmosphereRoot;
+
+#[cfg(any(target_arch = "wasm32", test))]
+fn sync_standalone_atmosphere_root(
+    mut commands: Commands,
+    gpu: Option<Res<GpuInfo>>,
+    environment: Res<SceneEnvironment>,
+    roots: Query<Entity, With<StandaloneAtmosphereRoot>>,
+    cinematic_roots: Query<(), (With<CinematicEarthRoot>, Without<StandaloneAtmosphereRoot>)>,
+) {
+    let needed = gpu.is_some_and(|gpu| gpu.0.backend == wgpu::Backend::BrowserWebGpu)
+        && environment
+            .0
+            .as_ref()
+            .and_then(effective_atmosphere)
+            .is_some()
+        && cinematic_roots.is_empty();
+    if !needed {
+        for entity in &roots {
+            commands.entity(entity).despawn();
+        }
+    } else if roots.is_empty() {
+        commands.spawn((
+            StandaloneAtmosphereRoot,
+            CinematicEarthRoot,
+            Name::new("atmosphere Earth origin"),
+            Transform::default(),
+            GlobalTransform::default(),
+            crate::spatial::GridCell::default(),
+            bevy_geo_frames::GeoPosition(GeoFrame::ECEF, DVec3::ZERO),
+            bevy_geo_frames::GeoRotation::absolute(GeoFrame::ECEF, bevy::math::DQuat::IDENTITY),
+        ));
     }
 }
 
@@ -337,7 +382,6 @@ fn sync_sky_dome(
                 })),
                 NotShadowCaster,
                 Transform::default(),
-                #[cfg(feature = "big_space")]
                 crate::spatial::LowPrecisionRoot,
                 RenderLayers::layer(crate::plugins::render_layer_alloc::REGULAR_SKY_RENDER_LAYER),
                 ChildOf(earth),
@@ -356,7 +400,12 @@ fn sync_atmosphere(
     environment: Res<SceneEnvironment>,
     earth: Option<Single<(Entity, &GlobalTransform), With<CinematicEarthRoot>>>,
     mut media: ResMut<Assets<ScatteringMedium>>,
-    mut existing: Query<(Entity, &SchematicAtmosphere, &mut Transform)>,
+    mut existing: Query<(
+        Entity,
+        &SchematicAtmosphere,
+        &mut Transform,
+        Option<&ChildOf>,
+    )>,
 ) {
     let Some((earth, earth_transform)) = earth.map(|x| *x) else {
         return;
@@ -364,8 +413,11 @@ fn sync_atmosphere(
     let config = environment.0.as_ref().and_then(effective_atmosphere);
     let current = existing.iter_mut().next();
     match (config, current) {
-        (Some(config), Some((entity, spawned, mut transform))) if spawned.0 == config => {
-            let _ = entity;
+        (Some(config), Some((entity, spawned, mut transform, parent))) if spawned.0 == config => {
+            if parent.is_none_or(|parent| parent.parent() != earth) {
+                debug!(?entity, ?earth, "Reattaching schematic atmosphere to Earth");
+                commands.entity(entity).insert(ChildOf(earth));
+            }
             let rotation = atmosphere_local_rotation(earth_transform);
             if transform.rotation.angle_between(rotation) > 1e-6 {
                 transform.rotation = rotation;
@@ -380,7 +432,6 @@ fn sync_atmosphere(
             commands.spawn((
                 Transform::from_rotation(atmosphere_local_rotation(earth_transform)),
                 *earth_transform,
-                #[cfg(feature = "big_space")]
                 crate::spatial::LowPrecisionRoot,
                 SchematicAtmosphere(config),
                 Name::new("environment atmosphere"),
@@ -493,6 +544,7 @@ type EnvironmentCameraQuery<'w, 's> = Query<
 
 fn sync_camera_environment(
     mut commands: Commands,
+    #[cfg(target_arch = "wasm32")] gpu: Option<Res<GpuInfo>>,
     environment: Res<SceneEnvironment>,
     space_visibility: Res<SpaceVisibility>,
     cinematic: Query<Entity, With<CinematicViewport>>,
@@ -507,6 +559,13 @@ fn sync_camera_environment(
         ),
         None => (1.0, None, None, false),
     };
+    // WebGL lacks the compute pipeline used by Bevy's atmosphere. Keep its
+    // clear color and lighting without attaching unsupported view settings.
+    #[cfg(target_arch = "wasm32")]
+    let atmosphere = atmosphere.filter(|_| {
+        gpu.as_ref()
+            .is_some_and(|gpu| gpu.0.backend == wgpu::Backend::BrowserWebGpu)
+    });
     let intensity = BASE_ENVIRONMENT_MAP_INTENSITY * ambient_scale;
     let (environment_clear, regular_clear) = clear_colors(sky_color, earth);
     // Bevy 0.19 permits AtmosphereSettings on only one active view, and
@@ -571,6 +630,80 @@ fn sync_camera_environment(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn browser_atmosphere_waits_for_webgpu_and_follows_the_schematic() {
+        use crate::plugins::gpu_info::tests::backend;
+
+        let mut app = App::new();
+        app.insert_resource(SceneEnvironment(Some(EnvironmentConfig {
+            earth: Some(impeller_wkt::EarthConfig::default()),
+            ..default()
+        })))
+        .add_systems(Update, sync_standalone_atmosphere_root);
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .query::<&StandaloneAtmosphereRoot>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        app.insert_resource(backend(wgpu::Backend::Gl, wgpu::DeviceType::IntegratedGpu));
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .query::<&StandaloneAtmosphereRoot>()
+                .iter(app.world())
+                .count(),
+            0
+        );
+        app.insert_resource(backend(
+            wgpu::Backend::BrowserWebGpu,
+            wgpu::DeviceType::Other,
+        ));
+        app.update();
+        app.update();
+        let root = app
+            .world_mut()
+            .query_filtered::<Entity, With<StandaloneAtmosphereRoot>>()
+            .single(app.world())
+            .unwrap();
+        assert!(
+            app.world()
+                .get::<bevy_geo_frames::GeoPosition>(root)
+                .is_some()
+        );
+        app.world_mut().resource_mut::<SceneEnvironment>().0 = None;
+        app.update();
+        assert!(app.world().get_entity(root).is_err());
+    }
+
+    #[test]
+    fn browser_atmosphere_defers_to_an_existing_cinematic_root() {
+        use crate::plugins::gpu_info::tests::backend;
+
+        let mut app = App::new();
+        app.insert_resource(backend(
+            wgpu::Backend::BrowserWebGpu,
+            wgpu::DeviceType::Other,
+        ))
+        .insert_resource(SceneEnvironment(Some(EnvironmentConfig {
+            earth: Some(impeller_wkt::EarthConfig::default()),
+            ..default()
+        })))
+        .add_systems(Update, sync_standalone_atmosphere_root);
+        app.update();
+        let cinematic = app.world_mut().spawn(CinematicEarthRoot).id();
+        app.update();
+        assert_eq!(
+            app.world_mut()
+                .query_filtered::<Entity, With<CinematicEarthRoot>>()
+                .single(app.world())
+                .unwrap(),
+            cinematic,
+        );
+    }
 
     #[test]
     fn earth_atmosphere_settings_skip_inactive_cinematic_camera() {
@@ -672,12 +805,51 @@ mod tests {
         assert_eq!(parent.parent(), earth);
         assert_eq!(transform.translation(), earth_transform.translation());
         assert!((earth_transform.rotation() * local.rotation).angle_between(Quat::IDENTITY) < 1e-6);
-        #[cfg(feature = "big_space")]
         assert!(
             app.world()
                 .get::<crate::spatial::LowPrecisionRoot>(atmosphere)
                 .is_some()
         );
+    }
+
+    #[test]
+    fn atmosphere_rejoins_earth_after_its_parent_is_replaced() {
+        let mut app = App::new();
+        app.add_plugins(TransformPlugin)
+            .insert_resource(SceneEnvironment(Some(EnvironmentConfig {
+                earth: Some(Default::default()),
+                ..default()
+            })))
+            .init_resource::<Assets<ScatteringMedium>>()
+            .add_systems(Update, sync_atmosphere);
+        let old_earth = app
+            .world_mut()
+            .spawn((CinematicEarthRoot, Transform::default()))
+            .id();
+        app.update();
+        let atmosphere = app
+            .world_mut()
+            .query_filtered::<Entity, With<SchematicAtmosphere>>()
+            .single(app.world())
+            .unwrap();
+
+        // A deferred spawn can outlive the root being replaced for streamed terrain.
+        app.world_mut().entity_mut(atmosphere).remove::<ChildOf>();
+        app.world_mut().entity_mut(old_earth).despawn();
+        app.update();
+        let transform = Transform::from_translation(Vec3::new(-100.0, -6_371_000.0, 50.0))
+            .with_rotation(Quat::from_rotation_x(std::f32::consts::PI));
+        let new_earth = app.world_mut().spawn((CinematicEarthRoot, transform)).id();
+        app.update();
+        app.update();
+
+        assert_eq!(
+            app.world().get::<ChildOf>(atmosphere).map(ChildOf::parent),
+            Some(new_earth)
+        );
+        let actual = app.world().get::<GlobalTransform>(atmosphere).unwrap();
+        assert_eq!(actual.translation(), transform.translation);
+        assert!(actual.rotation().angle_between(Quat::IDENTITY) < 1e-6);
     }
 
     #[test]

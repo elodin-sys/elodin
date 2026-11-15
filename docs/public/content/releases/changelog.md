@@ -13,6 +13,53 @@ order = 1
 +++
 
 
+## v0.21
+
+### v0.21.0
+
+- **(breaking:aleph)** Remove the root flake's `aleph` input; downstream flakes must declare Aleph separately with `dir=aleph`. (#950)
+- **(breaking)** Include the full inertia tensor and gyroscopic term in `six_dof`, changing trajectories of spinning bodies. (#931)
+- **(breaking)** Validate `SpatialInertia` inputs; invalid masses and inertia tensors now raise errors. (#931)
+- **(breaking:rust)** Replace momentum with off-diagonal inertia entries in `nox::SpatialInertia`; replace `momentum()` with `inertia_off_diag()`. (#931)
+- **(breaking:rust)** Replace the Rust `Rk4` integrator type with `ExplicitRk` and `Integrator::Rk4` with `Integrator::ExplicitRk(&RK4)`. (#935)
+- **(breaking)** Apply ellipsoid scale along X/Y/Z with `orientation=absolute`, correcting the previous Y/Z swap. (#903)
+- **(feat)** Add a WASM browser editor with WebSocket DB connections, 3D views, graphs, point trails, and interpreted display kernels. (#895)
+- **(feat)** Support `video_stream` and sensor-camera views in the WASM editor, with WebCodecs H.264 playback and seeking on Chrome and Safari. (#942)
+- **(feat)** Add Cloud login, logout, identity and project commands, and recording uploads with compacted log transfer. (#947)
+- **(feat)** Make timeline timestamps editable and copyable, including microsecond timestamps for recording alignment. (#877)
+- **(feat)** Support inline Python window layouts and automatic window arrangement across displays. (#887)
+- **(feat)** Add adjustable sensor-camera frustum opacity. (#884)
+- **(feat)** Add off-diagonal inertia support and `inertia_matrix()` to `SpatialInertia`. (#931)
+- **(feat)** Add RK2, RK3, Verlet, RK78, and Dormand–Prince 5(4) integrators, with stage timestamps and embedded step-error estimates. (#935)
+- **(feat)** Add `start_timestamp` to `World.build` and pure `JaxSim.step_fn`, `get`, and `set` functions for JAX transformations. (#936)
+- **(feat)** Add outline icons, additional viewport/3D-object EQL math functions, and screenshot time/tab selection. (#903)
+- **(feat:examples)** Add `dzhanibekov-effect`, with DP54 integration and step-error plots. (#931, #935)
+- **(feat:examples)** Add Voyager Chapters 1 and 2; use RK78 and interpolate Jupiter's position at each integration stage. (#899, #916, #935)
+- **(feat:examples)** Use Verlet in `n-body` and record reference trajectories relative to the simulated Sun, including in benchmark exports. (#935)
+- **(feat:examples)** Add Betaflight truth-guided single-gate hold and a three-gate straight course with ordered crossing checks and race timing. (#894, #913, #943)
+- **(feat:examples)** Add Betaflight gate-pose vision contracts, corner-order ambiguity reporting, and simulation-time FPV sample timestamps. (#891, #928)
+- **(fix)** Correct EGM08's top-degree inclusion and tesseral/sectoral weights; gravity trajectories change. (#939)
+- **(fix)** Honor and validate `six_dof(time_step=...)`; restore RK4's fourth-order position and orientation accuracy. (#931, #934)
+- **(fix)** Prevent DB time-travel errors across repeated `Exec.run` calls and correct `JaxSim` state updates, component shapes, and read-only component handling. (#936)
+- **(fix)** Preserve Python thread-local state between simulation callbacks without holding the GIL between calls. (#949)
+- **(fix)** Correct Cranelift value scoping across branches and loops, and handle reductions over empty inputs. (#936, #949)
+- **(fix)** Correct Cranelift table indexing, interpolation, dynamic slices, batched/per-entity lookups, and out-of-range index clamping. (#938, #944, #946)
+- **(fix)** Correct Cranelift reductions, argmin/argmax, batched matrix products, scatter updates, sorting, cumulative sums, and window operations. (#938)
+- **(fix)** Correct Cranelift boolean/integer/float32 operations, selection, conversions, NaN handling, and `erfc`; restore vector `log`/`log1p` precision. (#938, #940)
+- **(fix)** Fix Cranelift lambda/constant compilation and loop-local dot/sum consistency. (#938)
+- **(fix)** Prevent DB VTable collisions affecting LWIR cameras and stream-layout races when components gain data; update follower stream layouts correctly. (#937, #949)
+- **(fix)** Preserve late-registered playback components, graphs, and metadata in interactive editors. (#884, #903)
+- **(fix)** Keep live playback synchronized and avoid repeated plot-history scans, backfill gaps, and full-history trail reads. (#893, #903)
+- **(fix)** Make viewport arrows inherit the schematic coordinate frame. (#908)
+- **(fix)** Select tabs containing active views, honor mesh visibility ranges, and render Latin-1 vector labels. (#903)
+- **(fix)** Simplify scalar monitor labels, report pose-evaluation errors, and reject display kernels in EQL-only UI fields. (#903)
+- **(fix:examples)** Correct RC-jet FPV body-frame transforms and provide the Mojave terrain mesh by default. (#905, #937)
+- **(fix:examples)** Correct Betaflight FPV tilt, harden GPS/magnetometer initialization settings, and avoid oversized Nix compiler flags during SITL linking. (#891, #904, #928)
+- **(fix:examples)** Honor the configured simulation rate in `drone --telemetry`. (#936)
+- **(fix:aleph)** Correct MEKF gyro-bias subtraction and continue attitude estimation when accelerometer or magnetometer data is missing. (#936)
+- **(chore)** Update dependencies to address compromised certificate trust. (#909)
+- **(chore:examples)** Replace standalone example KDL files with Python schematics, including inline drone window layouts. (#887)
+
 ## v0.20
 
 ### v0.20.0

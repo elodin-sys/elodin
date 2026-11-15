@@ -9,6 +9,7 @@ Elodin is an open-source platform for rapid design, testing, and simulation of a
 - Agents build with `just install`.
 - Don't commit changes to git — that's for the developer to do
 - When suggesting new dependencies, check they are well supported and maintained.
+- Avoid Cargo features. Prefer one supported configuration; add a feature only for a demonstrated platform or dependency boundary, never for speculative optionality or fallback modes.
 - Never use unsafe Rust code.
 - Run all activities from the repository root.
 - When running cargo test -p elodin-db, prevent crashing with flags: "CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 RAYON_NUM_THREADS=1"
@@ -37,6 +38,7 @@ For in-depth instructions, read the relevant skill file below when working in th
 - **Creating simulations** (Python SDK, components, systems, 6DOF, visualization, SITL/HITL): `.cursor/skills/elodin-simulation/SKILL.md`
 - **Monte Carlo + truth data** (calibrating sims against experimental data, campaign specs/hooks, truth-replay ghosts, run scoring, reconstruction): `.cursor/skills/elodin-monte-carlo/SKILL.md`
 - **Contributing to the codebase** (building from source, architecture, workspace structure, testing): `.cursor/skills/elodin-dev/SKILL.md`
+- **Rust style** (error types, API design don'ts): `.cursor/skills/rust/SKILL.md`
 - **Aleph flight computer** (AlephOS deployment, NixOS modules, flight software services, firmware): `.cursor/skills/elodin-aleph/SKILL.md`
 - **Elodin DB** (running the database, client integrations, replication/follow mode, Lua REPL): `.cursor/skills/elodin-db/SKILL.md`
 - **Elodin Editor** (Bevy/Egui architecture, hot-reload, viewport, telemetry graphs, KDL schematics): `.cursor/skills/elodin-editor-dev/SKILL.md`

@@ -15,6 +15,10 @@ from race_options import race_options_from_env
         ("manual", "single", "1"),
         ("truth", "single", "0"),
         ("truth", "single", "1"),
+        ("truth", "c1_straight", "0"),
+        ("truth", "c1_straight", "1"),
+        ("scripted", "c1_straight", "0"),
+        ("manual", "c1_straight", "0"),
     ],
 )
 def test_camera_is_independent_of_command_source_and_course(
@@ -33,6 +37,7 @@ def test_default_startup_is_scripted_camera_off_without_course() -> None:
     assert options.guidance is GuidanceMode.SCRIPTED
     assert options.course.name == "none"
     assert not options.camera_enabled
+    assert options.record_dir is None
 
 
 @pytest.mark.parametrize("camera", ("0", "1"))
@@ -47,7 +52,6 @@ def test_truth_without_single_course_fails_with_or_without_camera(camera: str) -
         ({"RACE_GUIDANCE": "vision", "RACE_COURSE": "single", "RACE_CAMERA": "1"}, "reserved"),
         ({"RACE_GUIDANCE": "unknown"}, "unknown RACE_GUIDANCE"),
         ({"RACE_COURSE": "unknown"}, "unknown RACE_COURSE"),
-        ({"RACE_COURSE": "c1_straight"}, "reserved for Package F"),
         ({"RACE_CAMERA": "yes"}, "RACE_CAMERA must be '0' or '1'"),
     ],
 )

@@ -44,7 +44,16 @@ pub async fn run_recipe_at(
     cancel_token: CancelToken,
     addr: SocketAddr,
 ) -> miette::Result<()> {
-    run_recipe_at_with_execution(cache_dir, path, cancel_token, addr, RecipeExecution::Watch).await
+    run_recipe_at_with_execution(
+        cache_dir,
+        path,
+        cancel_token,
+        addr,
+        RecipeExecution::Watch,
+        false,
+        false,
+    )
+    .await
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -54,6 +63,8 @@ pub async fn run_recipe_at_with_execution(
     cancel_token: CancelToken,
     addr: SocketAddr,
     execution: RecipeExecution,
+    hold_for_editor: bool,
+    terrain_offline: bool,
 ) -> miette::Result<()> {
     let mut path = if path.is_dir() {
         let toml = path.join("s10.toml");
@@ -77,6 +88,10 @@ pub async fn run_recipe_at_with_execution(
         let out_dir = cache_dir.join(date_time);
         std::fs::create_dir_all(&out_dir).into_diagnostic()?;
         let output = s10::python_command()?
+            .env(
+                "ELODIN_TERRAIN_OFFLINE",
+                if terrain_offline { "1" } else { "0" },
+            )
             .arg(path.clone())
             .arg("plan")
             .arg(&out_dir)
@@ -106,6 +121,10 @@ pub async fn run_recipe_at_with_execution(
     if let Ok(exe) = std::env::current_exe() {
         pin_render_server_recipe(&mut recipe, &exe);
     }
+    if hold_for_editor {
+        hold_sim_for_editor(&mut recipe);
+    }
+    set_terrain_access(&mut recipe, terrain_offline);
 
     // Run the whole sim stack (sim + Betaflight/controller/render-server) inside
     // one prioritized cgroup so it is scheduled promptly under contention
@@ -182,6 +201,48 @@ fn pin_render_server_recipe_inner(recipe: &mut s10::Recipe, exe: &str) {
     }
 }
 
+#[cfg(not(target_os = "windows"))]
+fn set_terrain_access(recipe: &mut s10::Recipe, offline: bool) {
+    let value = if offline { "1" } else { "0" };
+    match recipe {
+        s10::Recipe::Group(group) => {
+            for child in group.recipes.values_mut() {
+                set_terrain_access(child, offline);
+            }
+        }
+        s10::Recipe::Sim(sim) => {
+            sim.env
+                .insert("ELODIN_TERRAIN_OFFLINE".into(), value.into());
+        }
+        s10::Recipe::Process(process) => {
+            process
+                .process_args
+                .env
+                .insert("ELODIN_TERRAIN_OFFLINE".into(), value.into());
+        }
+        s10::Recipe::Cargo(cargo) => {
+            cargo
+                .process_args
+                .env
+                .insert("ELODIN_TERRAIN_OFFLINE".into(), value.into());
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn hold_sim_for_editor(recipe: &mut s10::Recipe) {
+    let s10::Recipe::Group(group) = recipe else {
+        return;
+    };
+    let Some(s10::Recipe::Sim(sim)) = group.recipes.get_mut("sim") else {
+        return;
+    };
+    sim.env.insert(
+        impeller_wkt::EDITOR_STARTUP_GATE_ENV.to_string(),
+        "1".to_string(),
+    );
+}
+
 #[cfg(all(test, not(target_os = "windows")))]
 mod tests {
     use std::collections::HashMap;
@@ -189,7 +250,32 @@ mod tests {
 
     use s10::{GroupRecipe, ProcessArgs, ProcessRecipe, Recipe, RestartPolicy};
 
-    use super::pin_render_server_recipe;
+    use super::{pin_render_server_recipe, set_terrain_access};
+
+    #[test]
+    fn terrain_offline_reaches_nested_render_processes_and_can_be_disabled() {
+        let mut recipe = Recipe::Group(GroupRecipe {
+            refs: vec!["render-server".into()],
+            recipes: HashMap::from([(
+                "render-server".into(),
+                Recipe::Process(ProcessRecipe {
+                    cmd: "elodin".into(),
+                    process_args: process_args(["render-server"]),
+                    no_watch: true,
+                }),
+            )]),
+        });
+        for (offline, expected) in [(true, "1"), (false, "0")] {
+            set_terrain_access(&mut recipe, offline);
+            let Recipe::Group(group) = &recipe else {
+                panic!("expected group")
+            };
+            let Recipe::Process(process) = &group.recipes["render-server"] else {
+                panic!("expected process")
+            };
+            assert_eq!(process.process_args.env["ELODIN_TERRAIN_OFFLINE"], expected);
+        }
+    }
 
     #[test]
     fn pins_render_server_recipe_to_current_binary() {

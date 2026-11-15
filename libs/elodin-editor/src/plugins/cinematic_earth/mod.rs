@@ -26,7 +26,9 @@ use crate::plugins::render_layer_alloc::CINEMATIC_EARTH_RENDER_LAYER;
 use crate::plugins::scene_environment::{
     CinematicViewport, SceneEnvironment, SchematicAtmosphere, SchematicSun, SpaceVisibility,
 };
-use crate::plugins::thruster_particles::images_ready;
+use crate::plugins::thruster_particles::{
+    ReadyEffectImages, images_ready, init_ready_effect_images,
+};
 
 use earth_night_material::{EarthNightExt, EarthNightMaterial, EarthNightParams};
 
@@ -186,7 +188,7 @@ struct NightGlobeFill;
 pub(crate) struct CinematicSkybox;
 
 /// Strong handles retained across Earth activation cycles.
-#[derive(Resource, Clone)]
+#[derive(Resource, Clone, Default)]
 struct CinematicEarthAssets {
     globe_scene: Handle<WorldAsset>,
     skybox: Handle<Image>,
@@ -283,6 +285,7 @@ pub struct CinematicEarthPlugin;
 
 impl Plugin for CinematicEarthPlugin {
     fn build(&self, app: &mut App) {
+        init_ready_effect_images(app);
         app.init_resource::<ViewerFrame>()
             .init_resource::<DensityTune>()
             .init_resource::<EarthLookTune>()
@@ -450,11 +453,12 @@ fn sky_emitter_bundle(
 
 fn bind_ready_emitters(
     mut commands: Commands,
+    ready_images: Res<ReadyEffectImages>,
     pending: Query<(Entity, &PendingEffectMaterial)>,
     asset_server: Res<AssetServer>,
 ) {
     for (entity, pending) in &pending {
-        if !images_ready(&pending.images, &asset_server) {
+        if !images_ready(&pending.images, &asset_server, &ready_images) {
             continue;
         }
         commands
@@ -481,17 +485,26 @@ fn sync_cinematic_earth(
     mut effects: ResMut<Assets<EffectAsset>>,
     mut images: ResMut<Assets<Image>>,
     roots: Query<Entity, With<CinematicEarthRoot>>,
+    streamed_surface: Option<Res<super::cesium::TerrainStartup>>,
     spawned: Query<Entity, With<CinematicEarthEntity>>,
     skybox_cameras: Query<Entity, With<CinematicSkybox>>,
     mut tune: ResMut<DensityTune>,
     mut look: ResMut<EarthLookTune>,
+    mut surface_mode: Local<Option<bool>>,
 ) {
     let active = environment
         .0
         .as_ref()
         .is_some_and(|env| env.earth.is_some());
 
-    if !active {
+    let streamed_surface = streamed_surface
+        .as_ref()
+        .is_some_and(|startup| startup.owns_surface());
+    let surface_changed = surface_mode
+        .replace(streamed_surface)
+        .is_some_and(|previous| previous != streamed_surface);
+
+    if !active || surface_changed {
         if !spawned.is_empty() || !skybox_cameras.is_empty() {
             for entity in &spawned {
                 commands.entity(entity).despawn();
@@ -507,7 +520,9 @@ fn sync_cinematic_earth(
             look.seen = None;
             look.idle_s = 0.0;
         }
-        return;
+        if !active || !roots.is_empty() {
+            return;
+        }
     }
 
     if !roots.is_empty() {
@@ -544,7 +559,6 @@ fn sync_cinematic_earth(
             Transform::default(),
             GlobalTransform::default(),
             Visibility::default(),
-            #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
             GeoPosition(GeoFrame::ECEF, DVec3::ZERO),
             GeoRotation::absolute(GeoFrame::ECEF, DQuat::from_rotation_x(std::f64::consts::PI)),
@@ -555,12 +569,15 @@ fn sync_cinematic_earth(
                 .spawn((
                     CinematicEarthEllipsoid,
                     Name::new("earth model"),
-                    WorldAssetRoot(assets.globe_scene.clone()),
                     // Scale the model and Earth-attached effects together.
                     Transform::from_scale(Vec3::new(1.0, 1.0, WGS84_POLAR_SCALE)),
                     Visibility::default(),
                 ))
-                .with_children(|parent| spawn_earth_emitters(parent, &assets));
+                .with_children(|parent| spawn_earth_emitters(parent, &assets))
+                // Keep the atmosphere's Earth-centered rig; streaming owns the surface.
+                .insert_if(WorldAssetRoot(assets.globe_scene.clone()), || {
+                    !streamed_surface
+                });
         });
 
     commands
@@ -571,7 +588,6 @@ fn sync_cinematic_earth(
             Transform::default(),
             GlobalTransform::default(),
             Visibility::default(),
-            #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
             GeoPosition(GeoFrame::ECEF, DVec3::ZERO),
             sky_geo_rotation(&geo_context),
@@ -1183,6 +1199,51 @@ fn tune_atmosphere(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn globe_returns_when_terrain_fails() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Image>()
+            .init_asset::<EffectAsset>()
+            .init_resource::<DensityTune>()
+            .init_resource::<EarthLookTune>()
+            .insert_resource(CinematicEarthAssets::default())
+            .insert_resource(bevy_cesium::CesiumStatus::default())
+            .insert_resource(SceneEnvironment(Some(impeller_wkt::EnvironmentConfig {
+                earth: Some(Default::default()),
+                ..Default::default()
+            })))
+            .insert_resource(crate::Coordinate(Some(GeoFrame::ECEF)))
+            .insert_resource(GeoContext::default())
+            .add_systems(Update, sync_cinematic_earth);
+        let globe_count = |app: &mut App| {
+            let world = app.world_mut();
+            world
+                .query_filtered::<Entity, With<WorldAssetRoot>>()
+                .iter(world)
+                .count()
+        };
+        app.update();
+        assert_eq!(globe_count(&mut app), 1);
+        app.insert_resource(super::super::cesium::TerrainStartup::waiting());
+        app.update();
+        app.update();
+        assert_eq!(globe_count(&mut app), 0);
+        app.world_mut()
+            .resource_mut::<super::super::cesium::TerrainStartup>()
+            .update(&bevy_cesium::CesiumStatus {
+                load_failed: true,
+                ..default()
+            });
+        app.update();
+        app.update();
+        assert_eq!(globe_count(&mut app), 1);
+        app.world_mut()
+            .remove_resource::<super::super::cesium::TerrainStartup>();
+        app.update();
+        assert_eq!(globe_count(&mut app), 1);
+    }
 
     fn assert_dir_near(got: DVec3, expect: DVec3, label: &str) {
         assert!(

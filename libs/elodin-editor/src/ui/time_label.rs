@@ -194,6 +194,17 @@ pub fn time_label(time: Epoch) -> impl for<'a> FnOnce(&'a mut Ui) -> Response {
 #[derive(Clone, Copy)]
 pub struct PrettyDuration(pub hifitime::Duration);
 
+impl Display for PrettyDuration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let nanos = self.0.total_nanoseconds();
+        if nanos == 0 {
+            write!(f, "0")
+        } else {
+            write!(f, "{}", self.0)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{format_seconds, format_time_input, is_wall_clock, parse_time_input};
@@ -291,17 +302,6 @@ mod tests {
             "1..2s",
         ] {
             assert_eq!(parse_time_input(value), None, "{value}");
-        }
-    }
-}
-
-impl Display for PrettyDuration {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let nanos = self.0.total_nanoseconds();
-        if nanos == 0 {
-            write!(f, "0")
-        } else {
-            write!(f, "{}", self.0)
         }
     }
 }

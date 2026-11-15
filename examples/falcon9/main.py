@@ -29,6 +29,7 @@ from constants import (
     SIM_RATE_HZ,
     STAGE2_WET_KG,
     START_TIMESTAMP_US,
+    TERRAIN_MODE,
     TOUCHDOWN_SOFT_IMPACT_MPS,
     TOUCHDOWN_SOFT_LATERAL_MPS,
     TOUCHDOWN_SOFT_POS_ERR_M,
@@ -207,6 +208,7 @@ if os.environ.get("ELODIN_MONTE_CARLO_PLANNING") == "1":
     recipe = el.s10.PyRecipe.process(
         name="Falcon9 FSW",
         cmd=str(binary),
+        args=["--terrain-mode", TERRAIN_MODE],
         env=fsw_env,
         ready=el.s10.Ready.delay(100),
         ready_timeout="2s",
@@ -215,6 +217,7 @@ else:
     recipe = el.s10.PyRecipe.cargo(
         name="Falcon9 FSW",
         path=str(controller_dir),
+        args=["--terrain-mode", TERRAIN_MODE],
         env=fsw_env,
         ready=el.s10.Ready.delay(100),
         ready_timeout="2s",

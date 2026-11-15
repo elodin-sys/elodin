@@ -190,6 +190,8 @@ pub struct DotDims {
 pub struct GatherDims {
     pub offset_dims: Vec<i64>,
     pub collapsed_slice_dims: Vec<i64>,
+    pub operand_batching_dims: Vec<i64>,
+    pub start_indices_batching_dims: Vec<i64>,
     pub start_index_map: Vec<i64>,
     pub index_vector_dim: i64,
 }

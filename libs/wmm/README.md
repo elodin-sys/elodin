@@ -15,9 +15,9 @@ The World Magnetic Model (WMM) is the standard model used by the U.S. Department
 
 The wmm library was developed to support spacecraft attitude determination and control systems (ADCS):
 
-- **[PR #529](https://github.com/elodin-sys/paracosm/pull/529)** (June 2024) - Initial implementation wrapping NOAA's WMM C library as part of adding ADCS simulation capabilities. Integrated with TRIAD algorithm for attitude determination using magnetometer data.
+- **Initial implementation** (June 2024) - Wrapped NOAA's WMM C library as part of adding ADCS simulation capabilities. Integrated with TRIAD algorithm for attitude determination using magnetometer data.
 
-- **[PR #531](https://github.com/elodin-sys/paracosm/pull/531)** (June 2024) - Added integration with `nox-frames` for coordinate transformations between NED, ECEF, and ECI frames. Added `hifitime` support for precise time conversions when calculating reference magnetic field values.
+- **Coordinate frames** (June 2024) - Added integration with `nox-frames` for coordinate transformations between NED, ECEF, and ECI frames. Added `hifitime` support for precise time conversions when calculating reference magnetic field values.
 
 *note*: since this was developed, and better documented and supported [WMM crate](https://docs.rs/world_magnetic_model/latest/world_magnetic_model/) is now available. We may migrate to using this in the future.
 

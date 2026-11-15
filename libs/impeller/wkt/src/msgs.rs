@@ -291,6 +291,9 @@ pub struct SetDbConfig {
     pub metadata: HashMap<String, String>,
 }
 
+pub const EDITOR_STARTUP_GATE_ENV: &str = "ELODIN_EDITOR_STARTUP_GATE";
+pub const EDITOR_STARTUP_GATE_METADATA_KEY: &str = "editor.startup_gate";
+
 impl Msg for SetDbConfig {
     const ID: PacketId = [224, 19];
 }

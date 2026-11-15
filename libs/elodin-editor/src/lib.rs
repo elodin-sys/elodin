@@ -5,11 +5,12 @@
 )]
 
 #[cfg(target_family = "wasm")]
-use impeller_bevy::DbEndpoint;
+use impeller_bevy::{DbEndpoint, HostOrUrl};
+#[cfg(target_arch = "wasm32")]
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
 use crate::plugins::{editor_cam_input, editor_cam_touch};
-#[cfg(feature = "big_space")]
 use crate::spatial::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use bevy::material::AlphaMode;
 use bevy::{
@@ -71,6 +72,41 @@ use ui::{
 #[reflect(Resource)]
 pub struct Coordinate(pub Option<GeoFrame>);
 
+/// `navigator.gpu` is not a usable adapter. Brave defines the property and
+/// still returns null from `requestAdapter()`, and wgpu then refuses WebGL.
+#[cfg(target_arch = "wasm32")]
+static WASM_WEBGPU_ADAPTER: AtomicBool = AtomicBool::new(false);
+
+/// Probe for a WebGPU adapter before Bevy creates its wgpu instance.
+///
+/// Call this before [`EditorPlugin`] on wasm. The flag defaults to false, so a
+/// missed probe uses WebGL instead of panicking on a null adapter.
+#[cfg(target_arch = "wasm32")]
+pub async fn prepare_wasm_graphics() {
+    let available = wgpu::util::is_browser_webgpu_supported().await;
+    WASM_WEBGPU_ADAPTER.store(available, Ordering::Relaxed);
+    let message: &str = if available {
+        "elodin-web: graphics backends WebGPU | WebGL"
+    } else {
+        "elodin-web: no WebGPU adapter; graphics backend WebGL"
+    };
+    web_sys::console::log_1(&message.into());
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn wasm_webgpu_adapter_available() -> bool {
+    WASM_WEBGPU_ADAPTER.load(Ordering::Relaxed)
+}
+
+#[cfg_attr(not(any(test, target_arch = "wasm32")), allow(dead_code))]
+pub(crate) fn wasm_render_backends(webgpu_adapter: bool) -> wgpu::Backends {
+    if webgpu_adapter {
+        wgpu::Backends::BROWSER_WEBGPU | wgpu::Backends::GL
+    } else {
+        wgpu::Backends::GL
+    }
+}
+
 pub(crate) fn editor_wgpu_settings() -> WgpuSettings {
     WgpuSettings {
         // wgpu's Vulkan preflight cannot determine which device-local heap a
@@ -84,7 +120,35 @@ pub(crate) fn editor_wgpu_settings() -> WgpuSettings {
             for_device_loss: None,
         },
         memory_hints: wgpu::MemoryHints::MemoryUsage,
+        // A WebGPU-only backend set builds an empty wgpu-core instance when
+        // `navigator.gpu` is missing and panics with
+        // `FailedToCreateSurfaceForAnyBackend({})`. Keeping GL in the set
+        // covers Safari. When the property exists but `requestAdapter()`
+        // returns null, wgpu commits to WebGPU and never tries GL, so the
+        // probe above drops WebGPU in that case.
+        // `powerPreference: "high-performance"` also never resolves in Safari.
+        #[cfg(target_arch = "wasm32")]
+        backends: Some(wasm_render_backends(wasm_webgpu_adapter_available())),
+        #[cfg(target_arch = "wasm32")]
+        power_preference: bevy::render::settings::PowerPreference::None,
         ..default()
+    }
+}
+
+#[cfg(test)]
+mod wasm_backend_tests {
+    use super::wasm_render_backends;
+
+    #[test]
+    fn adapter_keeps_webgpu_and_webgl() {
+        let backends = wasm_render_backends(true);
+        assert!(backends.contains(wgpu::Backends::BROWSER_WEBGPU));
+        assert!(backends.contains(wgpu::Backends::GL));
+    }
+
+    #[test]
+    fn missing_adapter_is_webgl_only() {
+        assert_eq!(wasm_render_backends(false), wgpu::Backends::GL);
     }
 }
 
@@ -103,10 +167,6 @@ mod sensor_h264;
 mod skybox_db_assets;
 #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
 mod skybox_generation;
-#[cfg(feature = "big_space")]
-pub(crate) mod spatial;
-#[cfg(not(feature = "big_space"))]
-#[path = "spatial_fallback.rs"]
 pub(crate) mod spatial;
 pub mod ui;
 pub mod vector_arrow;
@@ -120,7 +180,6 @@ pub mod run;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[cfg(not(target_family = "wasm"))]
 mod stream_filter {
     use std::collections::HashSet;
 
@@ -485,8 +544,12 @@ pub(crate) fn register_ibl_embedded_assets(app: &mut App) {
 #[derive(Default)]
 pub struct EditorPlugin {
     window_resolution: WindowResolution,
+    cache_limits: impeller_bevy::PlaybackCacheLimits,
     #[cfg(target_family = "wasm")]
     connection: Option<DbEndpoint>,
+    /// Page database URL. Applied to every wasm connection that does not set its own.
+    #[cfg(target_family = "wasm")]
+    assets: Option<HostOrUrl>,
 }
 
 /// The positions of camera of object_3d are sync'd in `PreUpdate`.
@@ -494,42 +557,33 @@ pub struct EditorPlugin {
 pub struct PositionSync;
 
 impl EditorPlugin {
+    pub fn with_cache_limits(mut self, limits: impeller_bevy::PlaybackCacheLimits) -> Self {
+        self.cache_limits = limits;
+        self
+    }
     pub fn new(width: f32, height: f32) -> Self {
         Self {
             window_resolution: WindowResolution::new(width as u32, height as u32),
+            cache_limits: impeller_bevy::PlaybackCacheLimits::default(),
             #[cfg(target_family = "wasm")]
             connection: None,
+            #[cfg(target_family = "wasm")]
+            assets: None,
         }
     }
 
+    /// Asset-server URL the browser connects through. `host:port` or `http(s)://…`.
     #[cfg(target_family = "wasm")]
-    pub fn with_connection_addr(mut self, addr: std::net::SocketAddr) -> Self {
-        self.connection = Some(DbEndpoint::from_socket(addr));
-        self
-    }
-
-    /// `host:port`, where `host` may be an IP literal or a DNS name.
-    /// On failure the plugin is returned unchanged.
-    #[cfg(target_family = "wasm")]
-    pub fn with_connection_str(
-        self,
-        addr: &str,
-    ) -> Result<Self, (Self, impeller_bevy::address::ParseError)> {
-        match DbEndpoint::parse(addr) {
-            Ok(endpoint) => Ok(self.with_db_endpoint(endpoint)),
-            Err(err) => Err((self, err)),
-        }
-    }
-
-    #[cfg(target_family = "wasm")]
-    pub fn with_db_endpoint(mut self, endpoint: DbEndpoint) -> Self {
-        self.connection = Some(endpoint);
+    pub fn with_connection_url(mut self, url: HostOrUrl) -> Self {
+        self.connection = Some(DbEndpoint::from_assets(url.clone()));
+        self.assets = Some(url);
         self
     }
 }
 
 impl Plugin for EditorPlugin {
     fn build(&self, app: &mut App) {
+        app.insert_resource(self.cache_limits.clone());
         // Must run before anything can spawn a `WorldPos` entity.
         register_world_pos_components(app);
         let composite_alpha_mode = if cfg!(target_os = "macos") {
@@ -618,6 +672,12 @@ impl Plugin for EditorPlugin {
                 plugins.build()
             })
             .add_plugins(plugins::gpu_info::GpuInfoPlugin);
+        #[cfg(target_arch = "wasm32")]
+        app.add_plugins(plugins::wasm_shadows::plugin);
+        // After DefaultPlugins so the render app exists for the external-texture upload.
+        #[cfg(target_family = "wasm")]
+        app.add_plugins(webcodecs_video::bevy::WebcodecsVideoPlugin)
+            .add_systems(Update, ui::video_stream::attach_webcodecs);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::hw_stats::HardwareStatsPlugin);
         app.add_plugins(plugins::display_kernel::DisplayKernelPlugin);
@@ -662,14 +722,15 @@ impl Plugin for EditorPlugin {
         #[cfg(target_family = "wasm")]
         app.add_plugins(impeller_bevy::WsImpellerPlugin::new(
             self.connection.clone(),
+            self.assets.clone(),
         ));
         app.add_plugins(FrustumPlugin)
             .add_plugins(FrustumIntersectionPlugin)
             .add_plugins(GizmoPlugin);
-        #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::thruster_particles::ThrusterParticlesPlugin);
         app.add_plugins(plugins::scene_environment::SceneEnvironmentPlugin);
-        // Cinematic Earth follows the native Hanabi plugin registration.
+        app.add_plugins(plugins::map_overlay::MapOverlayPlugin);
+        app.add_plugins(plugins::cesium::CesiumPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::cinematic_earth::earth_night_material::EarthNightMaterialPlugin);
         #[cfg(not(target_family = "wasm"))]
@@ -709,8 +770,8 @@ impl Plugin for EditorPlugin {
                 PreUpdate,
                 (
                     clamp_current_time,
-                    advance_playback,
-                    follow_latest,
+                    advance_playback.run_if(plugins::cesium::playback_ready),
+                    follow_latest.run_if(plugins::cesium::playback_ready),
                     // Update selection after playback advances to keep line_3d and object_3d in sync.
                     set_selected_range,
                     impeller_bevy::apply_cached_data,
@@ -721,12 +782,8 @@ impl Plugin for EditorPlugin {
                     sync_object_3d,
                     set_viewport_pos,
                     sync_pos,
-                    #[cfg(not(feature = "big_space"))]
-                    bevy_geo_frames::apply_transforms,
                     bevy_geo_frames::apply_geo_rotation,
-                    #[cfg(feature = "big_space")]
                     spatial::apply_big_translation,
-                    #[cfg(feature = "big_space")]
                     set_floating_origin,
                 )
                     .chain()
@@ -818,7 +875,7 @@ impl Plugin for EditorPlugin {
         .init_resource::<sensor_camera::SensorCameraConfigs>()
         .init_resource::<sensor_camera::SensorCamerasSpawned>()
         .init_resource::<sensor_camera::SensorCameraFrustumSourcesSpawned>()
-        .add_systems(PreUpdate, sensor_camera::load_sensor_configs_from_db)
+        .add_plugins(sensor_camera::LocalSensorCameraPlugin)
         .add_systems(
             PreUpdate,
             sensor_camera::spawn_sensor_camera_frustum_sources
@@ -831,7 +888,6 @@ impl Plugin for EditorPlugin {
         .add_systems(Update, sensor_camera::patch_sensor_view_dims)
         .add_systems(Update, throttle_for_sensor_cameras);
 
-        #[cfg(not(target_family = "wasm"))]
         app.insert_resource(stream_filter::StreamFilterRate::FullResolution)
             .add_systems(
                 Update,
@@ -840,7 +896,6 @@ impl Plugin for EditorPlugin {
             );
 
         app.add_systems(PreUpdate, warn_missing_geo.before(PositionSync));
-        #[cfg(feature = "big_space")]
         app.add_plugins(spatial::FloatingOriginPlugin::new(16_000., 100.));
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
@@ -888,42 +943,17 @@ impl Plugin for EditorPlugin {
 ///
 /// On Linux/Windows a discrete GPU is typical, so we apply a lighter
 /// policy: ~30 fps with reduced (but not disabled) shadows.
-/// True when any loaded window has a `sensor_view` panel in its tile tree.
-///
-/// The active schematic is no longer mirrored in DB metadata (RFD #724, Phase 4
-/// dropped `schematic.content`), so scanning the KDL text for `"sensor_view"` is
-/// gone. A `sensor_view` panel becomes a `Pane::SensorView` tile at load time,
-/// so inspecting the live tile trees is the metadata-free equivalent: a
-/// sensor-view schematic is treated as sensor-camera work even when
-/// `SensorCameraConfigs` is empty and the `sensor_cameras` metadata is absent.
-fn has_sensor_view_pane(windows: &Query<&crate::ui::tiles::WindowState>) -> bool {
-    windows.iter().any(|window| {
-        window.tile_state.tree.tiles.iter().any(|(_, tile)| {
-            matches!(
-                tile,
-                egui_tiles::Tile::Pane(crate::ui::tiles::Pane::SensorView(_))
-            )
-        })
-    })
-}
-
+/// Wait for loaded configs: panes and metadata can arrive first and do not
+/// tell us whether a camera uses a separate render server or a local preview.
 #[cfg(target_os = "macos")]
 fn throttle_for_sensor_cameras(
     configs: Res<sensor_camera::SensorCameraConfigs>,
-    db_config: Res<impeller_wkt::DbConfig>,
     mut settings: ResMut<bevy_framepace::FramepaceSettings>,
     mut shadow_map: ResMut<DirectionalLightShadowMap>,
     mut dir_lights: Query<&mut DirectionalLight>,
-    windows: Query<&crate::ui::tiles::WindowState>,
     mut applied: Local<bool>,
 ) {
-    if *applied {
-        return;
-    }
-    let detected = !configs.0.is_empty()
-        || db_config.metadata.contains_key("sensor_cameras")
-        || has_sensor_view_pane(&windows);
-    if !detected {
+    if *applied || !configs.0.iter().any(|camera| !camera.render_local) {
         return;
     }
     settings.limiter = bevy_framepace::Limiter::Manual(Duration::from_millis(42));
@@ -940,19 +970,11 @@ fn throttle_for_sensor_cameras(
 #[cfg(not(target_os = "macos"))]
 fn throttle_for_sensor_cameras(
     configs: Res<sensor_camera::SensorCameraConfigs>,
-    db_config: Res<impeller_wkt::DbConfig>,
     mut settings: ResMut<bevy_framepace::FramepaceSettings>,
     mut shadow_map: ResMut<DirectionalLightShadowMap>,
-    windows: Query<&crate::ui::tiles::WindowState>,
     mut applied: Local<bool>,
 ) {
-    if *applied {
-        return;
-    }
-    let detected = !configs.0.is_empty()
-        || db_config.metadata.contains_key("sensor_cameras")
-        || has_sensor_view_pane(&windows);
-    if !detected {
+    if *applied || !configs.0.iter().any(|camera| !camera.render_local) {
         return;
     }
     settings.limiter = bevy_framepace::Limiter::Manual(Duration::from_millis(33));
@@ -961,6 +983,116 @@ fn throttle_for_sensor_cameras(
         "Sensor cameras detected — editor throttled to ~30 fps, shadow map reduced (GPU sharing)"
     );
     *applied = true;
+}
+
+#[cfg(test)]
+mod sensor_throttle_tests {
+    use super::*;
+    use impeller_wkt::{DbConfig, SensorCameraConfig};
+    use sensor_camera::SensorCameraConfigs;
+
+    fn app() -> App {
+        let mut app = App::new();
+        app.init_resource::<SensorCameraConfigs>()
+            .init_resource::<DbConfig>()
+            .insert_resource(bevy_framepace::FramepaceSettings {
+                limiter: bevy_framepace::Limiter::Off,
+            })
+            .insert_resource(DirectionalLightShadowMap { size: 2048 })
+            .add_systems(Update, throttle_for_sensor_cameras);
+        app.world_mut().spawn(DirectionalLight {
+            shadow_maps_enabled: true,
+            ..default()
+        });
+        app
+    }
+
+    fn assert_unthrottled(app: &mut App) {
+        assert!(matches!(
+            app.world()
+                .resource::<bevy_framepace::FramepaceSettings>()
+                .limiter,
+            bevy_framepace::Limiter::Off
+        ));
+        assert_eq!(
+            app.world().resource::<DirectionalLightShadowMap>().size,
+            2048
+        );
+        let world = app.world_mut();
+        assert!(
+            world
+                .query::<&DirectionalLight>()
+                .iter(world)
+                .all(|light| light.shadow_maps_enabled)
+        );
+    }
+
+    #[test]
+    fn early_metadata_does_not_throttle_local_previews() {
+        let mut app = app();
+        let local = SensorCameraConfig {
+            render_local: true,
+            ..default()
+        };
+        app.world_mut().resource_mut::<DbConfig>().metadata.insert(
+            "sensor_cameras".into(),
+            serde_json::to_string(&vec![local.clone()]).unwrap(),
+        );
+        // Metadata arrives before the camera loader has populated configs.
+        app.update();
+        assert_unthrottled(&mut app);
+        app.world_mut()
+            .resource_mut::<SensorCameraConfigs>()
+            .0
+            .push(local);
+        app.update();
+        app.update();
+        assert_unthrottled(&mut app);
+    }
+
+    #[test]
+    fn remote_camera_loaded_after_local_preview_still_throttles() {
+        let mut app = app();
+        app.world_mut()
+            .resource_mut::<SensorCameraConfigs>()
+            .0
+            .push(SensorCameraConfig {
+                render_local: true,
+                ..default()
+            });
+        app.update();
+        assert_unthrottled(&mut app);
+        app.world_mut()
+            .resource_mut::<SensorCameraConfigs>()
+            .0
+            .push(SensorCameraConfig {
+                render_local: false,
+                ..default()
+            });
+        app.update();
+        #[cfg(target_os = "macos")]
+        let (millis, size) = (42, 256);
+        #[cfg(not(target_os = "macos"))]
+        let (millis, size) = (33, 1024);
+        assert!(matches!(
+            app.world().resource::<bevy_framepace::FramepaceSettings>().limiter,
+            bevy_framepace::Limiter::Manual(period) if period == Duration::from_millis(millis)
+        ));
+        assert_eq!(
+            app.world().resource::<DirectionalLightShadowMap>().size,
+            size
+        );
+        #[cfg(target_os = "macos")]
+        {
+            let world = app.world_mut();
+            assert!(
+                world
+                    .query::<&DirectionalLight>()
+                    .iter(world)
+                    .all(|light| !light.shadow_maps_enabled)
+            );
+        }
+    }
 }
 
 #[cfg(feature = "inspector")]
@@ -1120,7 +1252,6 @@ fn set_clear_color(mut clear_color: ResMut<ClearColor>) {
 ///    `(origin_cell, origin_translation)` pair the floating origin must
 ///    take. Cameras spawned without a parent (e.g. tests) fall back to
 ///    the default cell at the origin.
-#[cfg(feature = "big_space")]
 fn select_floating_origin_camera(
     cameras: impl Iterator<Item = (Entity, bool, bool)>,
 ) -> Option<Entity> {
@@ -1137,7 +1268,6 @@ fn select_floating_origin_camera(
         .map(|(entity, ..)| entity)
 }
 
-#[cfg(feature = "big_space")]
 #[allow(clippy::type_complexity)]
 fn set_floating_origin(
     query: Query<
@@ -1457,7 +1587,6 @@ pub fn register_world_pos_components(app: &mut App) {
         GeoRotation::relative(GeoFrame::default(), DQuat::IDENTITY)
     });
     app.register_required_components::<WorldPos, Transform>();
-    #[cfg(feature = "big_space")]
     app.register_required_components::<WorldPos, crate::spatial::GridCell>();
 }
 
@@ -2931,7 +3060,6 @@ mod tests {
     use impeller::types::{ComponentId, Timestamp};
     use impeller_wkt::ComponentValue;
 
-    #[cfg(feature = "big_space")]
     #[test]
     fn floating_origin_prefers_active_cinematic_camera() {
         let mut world = World::new();
@@ -2945,7 +3073,6 @@ mod tests {
         assert_eq!(selected, Some(cinematic));
     }
 
-    #[cfg(feature = "big_space")]
     #[test]
     fn floating_origin_prefers_visible_regular_camera_over_hidden_cinematic() {
         let mut world = World::new();

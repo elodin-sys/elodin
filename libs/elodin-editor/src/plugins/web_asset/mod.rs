@@ -176,6 +176,28 @@ impl Client {
                     .and_then(|v| v.to_str().ok())
                     .map(|s| s.to_owned());
 
+                #[cfg(target_family = "wasm")]
+                let data = {
+                    use bevy::tasks::futures_lite::StreamExt;
+                    let maximum = 64 * 1024 * 1024;
+                    let mut data = Vec::new();
+                    let mut chunks = response.bytes_stream();
+                    while let Some(chunk) = chunks.next().await {
+                        let chunk = chunk.map_err(|err| http_err(&url, err))?;
+                        if data.len().saturating_add(chunk.len()) > maximum {
+                            return Err(AssetReaderError::Io(
+                                io::Error::new(
+                                    io::ErrorKind::InvalidData,
+                                    "Recording asset exceeds the configured byte budget",
+                                )
+                                .into(),
+                            ));
+                        }
+                        data.extend_from_slice(&chunk);
+                    }
+                    data
+                };
+                #[cfg(not(target_family = "wasm"))]
                 let data = response
                     .bytes()
                     .await
@@ -220,12 +242,14 @@ impl Client {
     }
 }
 
-/// `host:port/key` reader path -> `key`, when `host:port` is the DB assets
-/// endpoint. Rejects parent-dir components so a malformed key cannot escape
-/// the assets root.
+/// `host:port/assets/key` reader path -> `key`, when `host:port` is the DB
+/// assets endpoint. Rejects parent-dir components so a malformed key cannot
+/// escape the assets root.
 fn db_asset_key(path: &str, endpoint: SocketAddr) -> Option<&str> {
     let key = path
         .strip_prefix(&endpoint.to_string())?
+        .strip_prefix('/')?
+        .strip_prefix(impeller::ASSETS_HTTP_PREFIX)?
         .strip_prefix('/')?;
     if key.is_empty() || key.split('/').any(|part| part == "..") {
         return None;
@@ -334,18 +358,33 @@ mod tests {
     fn db_asset_key_extracts_key_only_for_matching_endpoint() {
         let endpoint: SocketAddr = "127.0.0.1:2241".parse().unwrap();
         assert_eq!(
-            db_asset_key("127.0.0.1:2241/textures/x.png", endpoint),
+            db_asset_key("127.0.0.1:2241/assets/textures/x.png", endpoint),
             Some("textures/x.png")
         );
-        // Different host or port: not a DB asset.
-        assert_eq!(db_asset_key("10.0.0.5:2241/textures/x.png", endpoint), None);
         assert_eq!(
-            db_asset_key("127.0.0.1:8080/textures/x.png", endpoint),
+            db_asset_key("127.0.0.1:2241/assets/impeller/widget.glb", endpoint),
+            Some("impeller/widget.glb")
+        );
+        assert_eq!(
+            db_asset_key("127.0.0.1:2241/textures/x.png", endpoint),
+            None
+        );
+        // Different host or port: not a DB asset.
+        assert_eq!(
+            db_asset_key("10.0.0.5:2241/assets/textures/x.png", endpoint),
+            None
+        );
+        assert_eq!(
+            db_asset_key("127.0.0.1:8080/assets/textures/x.png", endpoint),
             None
         );
         // Parent-dir escapes rejected.
-        assert_eq!(db_asset_key("127.0.0.1:2241/../secrets", endpoint), None);
+        assert_eq!(
+            db_asset_key("127.0.0.1:2241/assets/../secrets", endpoint),
+            None
+        );
         // Empty key rejected.
+        assert_eq!(db_asset_key("127.0.0.1:2241/assets/", endpoint), None);
         assert_eq!(db_asset_key("127.0.0.1:2241/", endpoint), None);
     }
 
@@ -353,7 +392,7 @@ mod tests {
     fn db_asset_key_handles_ipv6_endpoints() {
         let endpoint: SocketAddr = "[::1]:2241".parse().unwrap();
         assert_eq!(
-            db_asset_key("[::1]:2241/models/a.glb", endpoint),
+            db_asset_key("[::1]:2241/assets/models/a.glb", endpoint),
             Some("models/a.glb")
         );
     }
@@ -387,16 +426,18 @@ mod tests {
 
         let mut buf = Vec::new();
         bevy::tasks::block_on(async {
-            let mut reader = AssetReader::read(&client, Path::new("127.0.0.1:1/textures/x.png"))
-                .await
-                .expect("local fallback should serve the file");
+            let mut reader =
+                AssetReader::read(&client, Path::new("127.0.0.1:1/assets/textures/x.png"))
+                    .await
+                    .expect("local fallback should serve the file");
             reader.read_to_end(&mut buf).await.unwrap();
         });
         assert_eq!(buf, b"png-bytes");
 
         // A URL outside the DB endpoint must not fall back.
         bevy::tasks::block_on(async {
-            let result = AssetReader::read(&client, Path::new("127.0.0.1:2/textures/x.png")).await;
+            let result =
+                AssetReader::read(&client, Path::new("127.0.0.1:2/assets/textures/x.png")).await;
             assert!(result.is_err(), "non-DB URLs must not serve local files");
         });
 

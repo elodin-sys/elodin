@@ -6,6 +6,8 @@ use crate::{
     ui::timeline::TimelineSettings,
 };
 use bevy::camera::visibility::RenderLayers;
+#[cfg(target_family = "wasm")]
+use bevy::render::renderer::RenderQueue;
 use bevy::shader::Shader;
 use bevy::{
     app::{Plugin, PostUpdate},
@@ -801,11 +803,11 @@ fn segment_endpoint_floats(values: &[Vec<f32>; 3], indices: &[u32]) -> Vec<f32> 
         if ia >= n || ib >= n {
             continue;
         }
-        for axis in 0..3 {
-            segments.push(values[axis][ia]);
+        for axis in values {
+            segments.push(axis[ia]);
         }
-        for axis in 0..3 {
-            segments.push(values[axis][ib]);
+        for axis in values {
+            segments.push(axis[ib]);
         }
     }
     segments
@@ -818,6 +820,8 @@ pub(super) fn build_gpu_line(
     strip_ends: &[usize],
     anchor: DVec3,
     render_device: &RenderDevice,
+    #[cfg(target_family = "wasm")] render_queue: &RenderQueue,
+    #[cfg(target_family = "wasm")] previous: Option<&GpuLine>,
     #[cfg(not(target_family = "wasm"))] values_layout: &LineValuesLayout,
     #[cfg(not(target_family = "wasm"))] index_layout: &LineIndexLayout,
 ) -> Option<(GpuLine, bool)> {
@@ -838,12 +842,23 @@ pub(super) fn build_gpu_line(
         if count == 0 {
             return None;
         }
-        let segment_buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
-            label: Some("line_3d segments"),
-            contents: segments.as_bytes(),
-            usage: BufferUsages::VERTEX,
-        });
-        return Some((
+        let required = segments.as_bytes().len() as u64;
+        // Replaying a moving window updates these segments every frame. Reuse
+        // the allocation: mapped-at-creation buffers otherwise accumulate in
+        // the browser faster than its garbage collector releases them.
+        let segment_buffer = previous
+            .filter(|line| line.segment_buffer.size() >= required)
+            .map(|line| line.segment_buffer.clone())
+            .unwrap_or_else(|| {
+                render_device.create_buffer(&BufferDescriptor {
+                    label: Some("line_3d segments"),
+                    size: required.next_power_of_two(),
+                    usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+                    mapped_at_creation: false,
+                })
+            });
+        render_queue.write_buffer(&segment_buffer, 0, segments.as_bytes());
+        Some((
             GpuLine {
                 segment_buffer,
                 count,
@@ -851,7 +866,7 @@ pub(super) fn build_gpu_line(
                 strip_values: Default::default(),
             },
             residual_too_large,
-        ));
+        ))
     }
 
     #[cfg(not(target_family = "wasm"))]
@@ -922,6 +937,7 @@ fn extract_lines(
     mut main_world: ResMut<MainWorld>,
     mut commands: Commands,
     render_device: Res<RenderDevice>,
+    #[cfg(target_family = "wasm")] render_queue: Res<RenderQueue>,
     #[cfg(not(target_family = "wasm"))] values_layout: Res<LineValuesLayout>,
     #[cfg(not(target_family = "wasm"))] index_layout: Res<LineIndexLayout>,
 ) {
@@ -1099,6 +1115,10 @@ fn extract_lines(
                     &[xs.values.len()],
                     line_anchor,
                     &render_device,
+                    #[cfg(target_family = "wasm")]
+                    &render_queue,
+                    #[cfg(target_family = "wasm")]
+                    cached,
                     #[cfg(not(target_family = "wasm"))]
                     &values_layout,
                     #[cfg(not(target_family = "wasm"))]

@@ -41,7 +41,7 @@ Impeller TCP listens on port `N` (e.g. `2240`). The **DB Asset Server** always b
 
 ## Assets and the DB Asset Server
 
-Visual files for schematics live under `{db}/assets/{relative_key}` and are served at `http://host:(tcp_port+1)/{relative_key}` while the DB runs. Record once, copy the DB directory, replay anywhere — no separate `assets/` tree required on the consumer.
+Visual files for schematics live under `{db}/assets/{relative_key}` and are served at `http://host:(tcp_port+1)/assets/{relative_key}` while the DB runs. Record once, copy the DB directory, replay anywhere — no separate `assets/` tree required on the consumer.
 
 ### Source asset root (ingest)
 
@@ -79,7 +79,7 @@ At record/ingest, local paths like `models/jet.glb` become `db:models/jet.glb` i
 
 ### Follow mode and assets
 
-Telemetry replicates over Impeller TCP. Assets do **not** — the follower `GET`s `http://source:(N+1)/__index__` and mirrors missing/changed keys into its own `{db}/assets/`, then serves them on `(follower_port+1)`.
+Telemetry replicates over Impeller TCP. Assets do **not** — the follower `GET`s `http://source:(N+1)/assets/__index__` and mirrors missing/changed keys into its own `{db}/assets/`, then serves them on `(follower_port+1)`.
 
 ```bash
 elodin-db run 127.0.0.1:2240 ./source-db
@@ -92,7 +92,7 @@ Point `--follows` at the source **Impeller** port (`N`), not the asset port.
 ### Verify
 
 ```bash
-curl -sf -o /dev/null -w "%{http_code}\n" http://127.0.0.1:2241/schematics/main.kdl
+curl -sf -o /dev/null -w "%{http_code}\n" http://127.0.0.1:2241/assets/schematics/main.kdl
 ls -lh "$DB_PATH/assets/"
 ```
 

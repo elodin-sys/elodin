@@ -597,7 +597,7 @@ async fn fetch_db_skybox_manifest(connection_addr: SocketAddr) -> Result<SkyboxM
         .build()
         .map_err(|err| err.to_string())?;
     let base = assets_http_base(connection_addr);
-    let url = format!("{base}/{}", impeller_kdl::SKYBOX_MANIFEST_ASSET_NAME);
+    let url = impeller::asset_http_url(&base, impeller_kdl::SKYBOX_MANIFEST_ASSET_NAME);
     let response = client
         .get(&url)
         .send()
@@ -640,7 +640,7 @@ async fn download_db_skybox_assets(
         .build()
         .map_err(|err| err.to_string())?;
     let base = assets_http_base(connection_addr);
-    let manifest_url = format!("{base}/{}", impeller_kdl::SKYBOX_MANIFEST_ASSET_NAME);
+    let manifest_url = impeller::asset_http_url(&base, impeller_kdl::SKYBOX_MANIFEST_ASSET_NAME);
     let manifest_bytes = fetch_asset(&client, &manifest_url).await?;
     let manifest = std::str::from_utf8(&manifest_bytes).map_err(|err| err.to_string())?;
     let manifest = SkyboxManifest::from_ron_str(manifest).map_err(|err| err.to_string())?;
@@ -651,7 +651,7 @@ async fn download_db_skybox_assets(
 
     let cubemap_name = impeller_kdl::skybox_cubemap_asset_name(&entry.cubemap_file)
         .ok_or_else(|| format!("invalid skybox cubemap file path `{}`", entry.cubemap_file))?;
-    let cubemap_url = format!("{base}/{cubemap_name}");
+    let cubemap_url = impeller::asset_http_url(&base, &cubemap_name);
     let cubemap_bytes = fetch_asset(&client, &cubemap_url).await?;
     Ok(SkyboxDownloadPayload {
         entry,
@@ -675,7 +675,7 @@ async fn verify_db_skybox_assets(
         .map_err(|err| err.to_string())?;
     let base = assets_http_base(connection_addr);
 
-    let manifest_url = format!("{base}/{}", impeller_kdl::SKYBOX_MANIFEST_ASSET_NAME);
+    let manifest_url = impeller::asset_http_url(&base, impeller_kdl::SKYBOX_MANIFEST_ASSET_NAME);
     let manifest_resp = client
         .get(&manifest_url)
         .send()
@@ -698,7 +698,7 @@ async fn verify_db_skybox_assets(
 
     let cubemap_name = impeller_kdl::skybox_cubemap_asset_name(&entry.cubemap_file)
         .ok_or_else(|| format!("invalid skybox cubemap file path `{}`", entry.cubemap_file))?;
-    let cubemap_url = format!("{base}/{cubemap_name}");
+    let cubemap_url = impeller::asset_http_url(&base, &cubemap_name);
 
     // Do not use HEAD for length: axum's auto-HEAD for `get` handlers that
     // return an owned body reports `Content-Length: 0` to reqwest, which made

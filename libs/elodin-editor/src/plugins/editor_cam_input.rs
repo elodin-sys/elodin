@@ -73,7 +73,11 @@ pub fn gated_camera_inputs(
                     .map(|inputs| inputs.zoom_velocity_abs(editor_cam.smoothing.zoom.mul_f32(2.0)))
             })
             .unwrap_or(0.0);
-        let should_zoom_end = is_in_zoom_mode && zoom_amount_abs <= zoom_stop;
+        // New wheel input may arrive before the zoom queue is populated.
+        // Keep that gesture alive instead of ending it and replacing its anchor.
+        let should_zoom_end = is_in_zoom_mode
+            && zoom_amount_abs <= zoom_stop
+            && !wheel_windows.contains_key(&window_entity);
 
         if !owner_allows_camera
             || mouse_input.any_just_released([orbit_start, pan_start])
@@ -88,7 +92,7 @@ pub fn gated_camera_inputs(
     };
     let pointer_pos = bevy_egui::egui::pos2(cursor.x, cursor.y);
 
-    let Some((camera, _camera_component, render_target, _)) =
+    let Some((camera, _camera_component, render_target, editor_cam)) =
         cameras.iter().find(|(entity, camera, _, _)| {
             cursor_in_camera_view(camera, cursor)
                 && input_owners.permits_viewport_at(window_entity, *entity, pointer_pos)
@@ -115,7 +119,9 @@ pub fn gated_camera_inputs(
             camera,
             pointer,
         });
-    } else if wheel_windows.contains_key(&render_window_entity) {
+    } else if wheel_windows.contains_key(&render_window_entity)
+        && !editor_cam.current_motion.is_zooming_only()
+    {
         controller.write(EditorCamInputMessage::Start {
             kind: MotionKind::Zoom,
             camera,

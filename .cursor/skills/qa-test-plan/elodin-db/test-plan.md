@@ -35,8 +35,8 @@ then runs the **whole `elodin-db` command surface** over them. Coverage map (eve
 |---------|------|
 | `run` (serve a recorded DB) | DB-140–143 (and every generator implicitly) |
 | `run --follows`, `--follow-packet-size` (replication) | DB-142 |
-| `run --http-addr` (HTTP JSON API) + asset server (`tcp+1`, `/__index__`) | DB-141 |
-| `run --assets` / auto asset ingest | implicit in generators; verified via `/__index__` in DB-141 |
+| `run --http-addr` (HTTP JSON API) + asset server (`tcp+1`, `/assets/__index__`) | DB-141 |
+| `run --assets` / auto asset ingest | implicit in generators; verified via `/assets/__index__` in DB-141 |
 | `info`, `list-components [--long]` | DB-120 |
 | `query --eql/--sql` + `--format/--flatten/--row-index/--offset/--limit/--time-format/--precision` | DB-121 |
 | `export` (parquet / arrow-ipc / csv) + `--pattern/--flatten/--join/--mono-us/--mono-ns/--csv-fast-floats/--include-private` | DB-130 |
@@ -496,7 +496,7 @@ nix develop --command bash -c '
 #### - [ ] DB-141 — HTTP JSON API + asset server
 
 - **Priority:** P1 | **Mode:** agent | **Requires:** DB-100
-- **Description:** `run --http-addr` exposes the JSON API (`GET /component/stream/{name}` newline-JSON live stream, `GET /msg/stream/{id}`, POST push endpoints); the asset server on `tcp+1` serves `GET /__index__`. The component stream only emits on **new** writes, so the case writes live heartbeats while curl is attached.
+- **Description:** `run --http-addr` exposes the JSON API (`GET /component/stream/{name}` newline-JSON live stream, `GET /msg/stream/{id}`, POST push endpoints); the asset server on `tcp+1` serves `GET /assets/__index__`. The component stream only emits on **new** writes, so the case writes live heartbeats while curl is attached.
 - **Expected duration:** < 2 min
 
 **Steps**
@@ -508,7 +508,7 @@ nix develop --command bash -c '
   P=$!
   sleep 3
   RC=0
-  curl -s --max-time 5 http://127.0.0.1:2241/__index__ > /tmp/qa-db/assets-index.json || RC=$?
+  curl -s --max-time 5 http://127.0.0.1:2241/assets/__index__ > /tmp/qa-db/assets-index.json || RC=$?
   head -c 200 /tmp/qa-db/assets-index.json 2>/dev/null; echo
   uv run python .cursor/skills/qa-test-plan/elodin-db/serve_probe.py live 127.0.0.1:2240 || RC=$?
   curl -s --max-time 4 "http://127.0.0.1:2360/component/stream/qa.heartbeat" > /tmp/qa-db/http-stream.jsonl &
@@ -527,7 +527,7 @@ nix develop --command bash -c '
 
 **Pass criteria**
 
-- [ ] `/__index__` on port **2241** (= tcp 2240 + 1) returns a JSON asset list (GLBs, color schemes — the auto-ingested `assets/` tree)
+- [ ] `/assets/__index__` on port **2241** (= tcp 2240 + 1) returns a JSON asset list (GLBs, color schemes — the auto-ingested `assets/` tree)
 - [ ] `HTTP_LINES` ≥ 5 and the first line is a JSON value like `{"data":[…],"shape":[],"timestamp":…}` (live newline-JSON component stream)
 - [ ] The unknown-msg endpoint returns a structured error (`{"description":"msg not found …"}`), not a hang or crash
 - [ ] Port 2240 freed after teardown

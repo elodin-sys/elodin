@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
 use crate::object_3d::create_object_3d_entity;
@@ -42,12 +42,12 @@ use bevy_ai_skybox::prelude::{
 use bevy_geo_frames::GeoContext;
 use bevy_geo_frames::GeoFramePlugin;
 use bevy_mat3_material::Mat3Material;
-use impeller::types::{LenPacket, Timestamp, msg_id};
-use impeller_bevy::{ConnectionAddr, MsgPacketTx, PacketTx};
+use impeller::types::{ComponentId, LenPacket, PacketId, Timestamp, msg_id};
+use impeller_bevy::{CommandsExt, ConnectionAddr, MsgPacketTx, PacketTx};
 use impeller_kdl::FromKdl;
 use impeller_wkt::{
-    CurrentTimestamp, DbConfig, DumpMetadata, LastUpdated, MsgMetadata, SchematicElem,
-    SetMsgMetadata, opaque_bytes_msg_schema,
+    CurrentTimestamp, DbConfig, DumpMetadata, GetTimeSeriesPredecessor, LastUpdated, MsgMetadata,
+    SchematicElem, SetMsgMetadata, opaque_bytes_msg_schema,
 };
 
 const SENSOR_CAMERA_CONFIG_WARMUP_CYCLES: usize = 600;
@@ -68,6 +68,12 @@ impl Plugin for HeadlessEditorPlugin {
     fn build(&self, app: &mut App) {
         // Must run before anything can spawn a `WorldPos` entity.
         crate::register_world_pos_components(app);
+        if std::env::var("ELODIN_TERRAIN_OFFLINE").as_deref() == Ok("1") {
+            app.insert_resource(crate::plugins::terrain_playback::TerrainPlayback {
+                mode: Some(crate::plugins::terrain_playback::TerrainMode::Offline),
+                basemap: None,
+            });
+        }
         crate::plugins::gpu_info::install_gpu_panic_handler();
         app.add_plugins(crate::plugins::WebAssetPlugin)
             .add_plugins(crate::plugins::env_asset_source::plugin)
@@ -123,6 +129,7 @@ impl Plugin for HeadlessEditorPlugin {
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(crate::plugins::world_mesh::EditorWorldMeshPlugin)
             .add_plugins(crate::rim_glow_material::RimGlowMaterialPlugin);
+        app.add_plugins(crate::plugins::cesium::CesiumPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(crate::plugins::display_kernel::DisplayKernelPlugin);
         app.add_plugins(crate::plugins::scene_environment::SceneEnvironmentPlugin);
@@ -157,10 +164,7 @@ impl Plugin for HeadlessEditorPlugin {
                 // with the sensor camera's pose (which reads the TelemetryCache
                 // directly), preventing one-frame jitter in `sensor_view`.
                 sync_pos,
-                #[cfg(not(feature = "big_space"))]
-                bevy_geo_frames::apply_transforms,
                 bevy_geo_frames::apply_geo_rotation,
-                #[cfg(feature = "big_space")]
                 crate::spatial::apply_big_translation,
             )
                 .chain()
@@ -180,6 +184,7 @@ impl Plugin for HeadlessEditorPlugin {
         .init_resource::<crate::EqlContext>()
         .init_resource::<crate::Coordinate>()
         .init_resource::<crate::SyncedObject3d>()
+        .insert_resource(crate::ui::schematic::CurrentSchematic(Default::default()))
         .init_resource::<HeadlessSchematicSkybox>()
         .init_resource::<HeadlessSkyboxRenderGate>()
         .insert_resource(crate::stream_filter::StreamFilterRate::CameraMaxFps)
@@ -198,6 +203,10 @@ impl Plugin for HeadlessEditorPlugin {
             Update,
             impeller_bevy::backfill_cache.after(crate::ui::plot::update_series_fetch_priority),
         )
+        .add_systems(
+            Update,
+            refresh_sensor_world_pos.after(impeller_bevy::backfill_cache),
+        )
         .add_systems(Update, crate::update_eql_context)
         .add_systems(Update, poll_headless_db_config)
         .add_systems(
@@ -209,7 +218,6 @@ impl Plugin for HeadlessEditorPlugin {
         .set_runner(render_server_runner);
 
         app.add_systems(PreUpdate, crate::warn_missing_geo.before(PositionSync));
-        #[cfg(feature = "big_space")]
         app.add_plugins(crate::spatial::FloatingOriginPlugin::new(16_000., 100.));
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
@@ -264,6 +272,95 @@ fn disable_lwir_shadows(
     }
 }
 
+/// Backfill stops on the first short page, and the live table can keep
+/// resending that same sample. Ask for the newest pose so a camera is not
+/// stuck on the attitude from startup.
+///
+/// This has to ride the data connection. The msg connection is the one the
+/// render server fills with camera frames, and a pose request queued behind
+/// those frames never lands before the next render.
+fn refresh_sensor_world_pos(
+    configs: Res<SensorCameraConfigs>,
+    last_updated: Res<LastUpdated>,
+    mut commands: Commands,
+    mut requested: Local<HashSet<ComponentId>>,
+    mut last_sent: Local<Option<Instant>>,
+) {
+    if last_updated.0.0 == i64::MIN || configs.0.is_empty() {
+        return;
+    }
+    if last_sent.is_some_and(|sent| sent.elapsed() < Duration::from_millis(50)) {
+        return;
+    }
+    *last_sent = Some(Instant::now());
+    requested.clear();
+    for config in &configs.0 {
+        let component_id = ComponentId::new(&format!("{}.world_pos", config.entity_name));
+        if !requested.insert(component_id) {
+            continue;
+        }
+        let timestamp = last_updated.0;
+        commands.send_req_reply_raw::<_, GetTimeSeriesPredecessor, _>(
+            GetTimeSeriesPredecessor {
+                id: PacketId::default(),
+                timestamp,
+                component_id,
+            },
+            move |pkt: InRef<impeller::types::OwnedPacket<impeller_bevy::PacketGrantR>>,
+                  mut cache: ResMut<impeller_bevy::TelemetryCache>,
+                  schema_reg: Res<impeller_bevy::ComponentSchemaRegistry>| {
+                // A live table can share this request id. Completing on it
+                // drops the handler before the pose reply arrives.
+                if !matches!(&*pkt, impeller::types::OwnedPacket::TimeSeries(_)) {
+                    return false;
+                }
+                insert_world_pos_reply(&pkt, &mut cache, &schema_reg, component_id);
+                true
+            },
+        );
+    }
+}
+
+fn insert_world_pos_reply(
+    pkt: &impeller::types::OwnedPacket<impeller_bevy::PacketGrantR>,
+    cache: &mut impeller_bevy::TelemetryCache,
+    schema_reg: &impeller_bevy::ComponentSchemaRegistry,
+    component_id: ComponentId,
+) {
+    let impeller::types::OwnedPacket::TimeSeries(series) = pkt else {
+        return;
+    };
+    let Ok(timestamps) = series.timestamps() else {
+        return;
+    };
+    let Ok(data) = series.data() else {
+        return;
+    };
+    let Some(schema) = schema_reg.0.get(&component_id) else {
+        return;
+    };
+    let elem_size = schema.size();
+    for (i, &timestamp) in timestamps.iter().enumerate() {
+        let offset = i * elem_size;
+        if offset + elem_size > data.len() {
+            break;
+        }
+        let bytes = &data[offset..offset + elem_size];
+        let Ok(view) = impeller::types::ComponentView::try_from_bytes_shape(
+            bytes,
+            schema.shape(),
+            schema.prim_type(),
+        ) else {
+            continue;
+        };
+        cache.insert(
+            component_id,
+            timestamp,
+            impeller_bevy::ComponentValue::from_view(view),
+        );
+    }
+}
+
 fn apply_cinematic_sensor_environment(
     configs: Res<SensorCameraConfigs>,
     mut scene_environment: ResMut<crate::plugins::scene_environment::SceneEnvironment>,
@@ -289,6 +386,7 @@ fn load_headless_scene(
     config: Res<DbConfig>,
     mut pending: Local<HeadlessSchematicLoad>,
     mut schematic_skybox: ResMut<HeadlessSchematicSkybox>,
+    mut current_schematic: ResMut<crate::ui::schematic::CurrentSchematic>,
     mut commands: Commands,
     eql: Res<EqlContext>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -334,6 +432,7 @@ fn load_headless_scene(
             // The active pointer was cleared: tear down the loaded scene so the
             // renderer doesn't keep a schematic the DB no longer designates.
             scene_environment.0 = None;
+            current_schematic.0 = Default::default();
             if let Some(previous) = pending.loaded.take() {
                 despawn_headless_scene(&mut commands, &previous);
                 schematic_skybox.0 = None;
@@ -390,6 +489,7 @@ fn load_headless_scene(
     }
     let connection_addr = connection_addr.as_ref().map(|addr| addr.endpoint());
     schematic_skybox.0 = Some(schematic.skybox.as_ref().map(|skybox| skybox.name.clone()));
+    current_schematic.0 = schematic.clone();
     let fallback_frame = schematic.frame;
     coordinate.0 = schematic.frame;
     scene_environment.0 = schematic.environment.clone().map(|mut environment| {
@@ -1049,6 +1149,7 @@ fn render_server_runner(mut app: App) -> AppExit {
     let mut encoders = HashMap::new();
     let mut rendered_frames = 0u64;
     let mut render_time = Duration::ZERO;
+    let mut terrain_warmup_ts = None;
 
     loop {
         if let Some(exit) = app.should_exit() {
@@ -1118,6 +1219,28 @@ fn render_server_runner(mut app: App) -> AppExit {
             })
             .map(|schedule| schedule.name.clone())
             .collect();
+
+        let mut render_ts = render_ts;
+        match crate::plugins::cesium::capture_ready(app.world()) {
+            Ok(true) => {
+                if let Some(warmed_ts) = terrain_warmup_ts.take() {
+                    render_ts = warmed_ts;
+                }
+            }
+            Ok(false) => {
+                // Warm one camera pose before following the moving simulation.
+                // Otherwise each update requests new terrain before the initial
+                // selection has finished downloading.
+                let warmup_ts = *terrain_warmup_ts.get_or_insert(render_ts);
+                render_without_emit(&mut app, warmup_ts, &due_names);
+                std::thread::sleep(Duration::from_millis(5));
+                continue;
+            }
+            Err(message) => {
+                tracing::error!("{message}");
+                return AppExit::error();
+            }
+        }
 
         match consume_skybox_emission_gate(&mut app) {
             SkyboxEmissionGate::Ready => {}

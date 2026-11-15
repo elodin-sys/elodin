@@ -132,7 +132,7 @@
 
 - **Follow mode (`--follows <addr>`)** — TCP replication: schema/metadata sync on connect, full historical backfill, then live streaming; follower still accepts local writers (dual-source pattern, e.g. remote sim + local video); duplicate-component write warnings; `--follow-packet-size` tuning (default ~1500, jumbo 9000).
 - **Replay mode (`elodin editor <db> --replay`)** — Editor-side flag: play a recorded DB as if live with progressive timeline reveal (not an `elodin-db run` flag).
-- **Asset server** — During `run`, HTTP server on port N+1 serves `{db}/assets/`; local schematic asset paths (GLB, PNG icons, skybox cubemaps) rewritten to `db:` scheme at record time; followers mirror assets via `GET /__index__`; enables fully portable recordings (Aleph HITL DBs replay anywhere).
+- **Asset server** — During `run`, HTTP server on port N+1 serves `{db}/assets/`; local schematic asset paths (GLB, PNG icons, skybox cubemaps) rewritten to `db:` scheme at record time; followers mirror assets via `GET /assets/__index__`; enables fully portable recordings (Aleph HITL DBs replay anywhere).
 - **Legacy replay directories** — `metadata.json`, `assets.bin` (internal format, not for external consumption), per-archetype Parquet files; opened via `elodin editor <dir>`; well-known archetypes `body`, `shape`, `asset_handle_panel`, `asset_handle_entity_metadata`.
 
 ## 14. Elodin DB — Data Management CLI
@@ -156,7 +156,8 @@
 ### 16.1 Startup & Connectivity
 - **Startup screen** — Connect to IP address, or run a simulation from file.
 - **Connection targets** — Live sim (spawns via s10), running DB (local, remote, Aleph over IPv6), recorded DB, legacy replay dir; `--schematic` preload (KDL or Python).
-- **Editor dev loop** — `cargo run -p elodin -- editor ...`, `cargo watch` hot-reload, cargo features `big_space`, `inspector`, `debug`, `tracy`.
+- **Editor-owned simulation startup** — File-launched simulations stay at t=0 while initial streamed terrain is unresolved; success or explicit Cesium failure releases them. Live attaches and `elodin run` are never paused.
+- **Editor dev loop** — `cargo run -p elodin -- editor ...`, `cargo watch` hot-reload, cargo features `inspector`, `debug`, `tracy`; BigSpace is always enabled.
 
 ### 16.2 Viewport & 3D Rendering
 - **3D viewport** — Bevy 0.19 + big_space floating-origin rendering; per-viewport `fov`, `near`/`far`, fixed `aspect`, `hdr`, `bloom`, grid toggle, EQL-driven camera `pos`/`look_at`/`up` (follow/chase cameras).
@@ -166,6 +167,7 @@
 - **3D objects** — `object_3d` bound to EQL pose expressions with `frame`/`frame_orientation`/`orientation=relative|absolute`; meshes: `glb`, `sphere`, `box`, `cylinder`, `plane`, `ellipsoid` with `emissivity`, `glow`, `visibility_range`; `animate joint` drives GLB joints from telemetry (e.g. spinning rotors).
 - **Icons & effects** — `icon` (built-in Material Icons or custom PNG, distance-fade); `thruster` GPU exhaust particles (scalar/vector intensity, `plume`/`cold_gas`) — experimental, native-only.
 - **Terrain & globes** — `world_mesh` regions (`death_valley`, `globe`) with `lod_count`, `translate`, `visible`; backed by bevy_world_mesh UDLOD/clipmap engine streaming AWS Terrain Tiles + EOX Sentinel-2 imagery with on-disk tile cache.
+- **Cesium terrain** — Schematic `terrain` streams Cesium ion aerial/Photo 3D data; interactive loading has no deadline, explicit failure restores fallback scenery, and fixed captures remain bounded/fail-closed.
 - **Frustum overlays** — Per-viewport `create_frustum` publishing camera frusta rendered in other viewports (`show_frustums`), with per-source color/thickness, persistence across hidden tabs; frustum∩ellipsoid volume coverage (writes `{ellipsoid}.frustum_coverage` F32 component queryable via EQL) and 2D far-plane projection meshes, gated by inspector toggles.
 - **Skybox** — Blockade Labs AI skybox generation (needs `BLOCKADE_API_KEY`), cached presets in manifest, clear/revert; skybox copied into DB on record.
 - **Video in viewport** — Live H.264 (and AV1) stream tiles; loss-of-signal overlay and auto-reconnect.

@@ -50,6 +50,24 @@ use crate::plugins::render_layer_alloc::{CINEMATIC_EARTH_RENDER_LAYER, THERMAL_M
 use crate::plugins::scene_environment::CinematicViewport;
 use crate::ui::tiles::bloom_from_config;
 
+/// GPU images for sensor panes rendered from the current replay position.
+#[derive(Resource, Default)]
+pub(crate) struct LocalSensorImages(pub HashMap<String, Handle<Image>>);
+
+#[derive(Resource)]
+struct LocalSensorPreview;
+
+pub struct LocalSensorCameraPlugin;
+
+impl Plugin for LocalSensorCameraPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(LocalSensorPreview)
+            .init_resource::<LocalSensorImages>()
+            .add_plugins(SensorCameraPlugin)
+            .add_systems(Update, update_local_sensor_activity);
+    }
+}
+
 #[derive(Resource, Default, Debug, Clone)]
 pub struct SensorCameraConfigs(pub Vec<SensorCameraConfig>);
 
@@ -297,8 +315,8 @@ fn init_sensor_output_pipeline(
         ShaderStages::FRAGMENT,
         (
             texture_2d(TextureSampleType::Float { filterable: true }),
-            texture_2d(TextureSampleType::Depth),
-            sampler(SamplerBindingType::Filtering),
+            texture_2d(TextureSampleType::Float { filterable: false }),
+            sampler(SamplerBindingType::NonFiltering),
             uniform_buffer::<SensorOutputSettings>(true),
             texture_2d(TextureSampleType::Float { filterable: true }),
             texture_2d(TextureSampleType::Float { filterable: false }),
@@ -354,6 +372,7 @@ pub struct SensorCameraPlugin;
 
 impl Plugin for SensorCameraPlugin {
     fn build(&self, app: &mut App) {
+        let local = app.world().contains_resource::<LocalSensorPreview>();
         let (tx, rx) = flume::unbounded();
         let readback_status = SensorReadbackStatus::default();
 
@@ -397,8 +416,6 @@ impl Plugin for SensorCameraPlugin {
                 .insert_resource(readback_status)
                 .init_resource::<BufferToggle>()
                 .init_resource::<SensorCameraRenderMetrics>()
-                .add_systems(ExtractSchedule, image_copy_extract)
-                .add_systems(Render, image_copy_driver.after(RenderSystems::Render))
                 .add_systems(RenderStartup, init_sensor_output_pipeline)
                 .add_systems(
                     Core3d,
@@ -406,6 +423,11 @@ impl Plugin for SensorCameraPlugin {
                         .in_set(Core3dSystems::PostProcess)
                         .after(tonemapping),
                 );
+            if !local {
+                render_app
+                    .add_systems(ExtractSchedule, image_copy_extract)
+                    .add_systems(Render, image_copy_driver.after(RenderSystems::Render));
+            }
         }
     }
 }
@@ -418,6 +440,7 @@ pub fn load_sensor_configs_from_db(
     db_config: Res<DbConfig>,
     mut configs: ResMut<SensorCameraConfigs>,
     spawned: Res<SensorCamerasSpawned>,
+    headless: Option<Res<HeadlessMode>>,
 ) {
     if spawned.0 || !configs.0.is_empty() {
         return;
@@ -425,7 +448,10 @@ pub fn load_sensor_configs_from_db(
 
     if let Some(json) = db_config.metadata.get("sensor_cameras") {
         match serde_json::from_str::<Vec<SensorCameraConfig>>(json) {
-            Ok(camera_configs) if !camera_configs.is_empty() => {
+            Ok(mut camera_configs) if !camera_configs.is_empty() => {
+                if headless.is_some() {
+                    camera_configs.retain(|camera| !camera.render_local);
+                }
                 bevy::log::debug!(
                     "Loaded {} sensor camera configs from DB metadata",
                     camera_configs.len()
@@ -471,7 +497,7 @@ pub fn spawn_sensor_camera_frustum_sources(
     mut commands: Commands,
     configs: Res<SensorCameraConfigs>,
     mut spawned: ResMut<SensorCameraFrustumSourcesSpawned>,
-    #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
+    root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
 ) {
     for (i, config) in configs.0.iter().enumerate() {
         let mut perspective = PerspectiveProjection {
@@ -489,12 +515,10 @@ pub fn spawn_sensor_camera_frustum_sources(
             Transform::default(),
             GlobalTransform::default(),
             Projection::Perspective(perspective),
-            #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
             SensorCameraFrustumSource { config_index: i },
             Name::new(format!("sensor_camera_frustum_{}", config.camera_name)),
         ));
-        #[cfg(feature = "big_space")]
         crate::spatial::parent_under_big_space(&mut entity, root.as_deref());
     }
 
@@ -647,6 +671,7 @@ fn sensor_output_settings(config: &SensorCameraConfig) -> SensorOutputSettings {
     }
 }
 
+#[expect(clippy::too_many_arguments, reason = "Bevy system parameters")]
 fn spawn_sensor_cameras(
     mut commands: Commands,
     configs: Res<SensorCameraConfigs>,
@@ -654,9 +679,14 @@ fn spawn_sensor_cameras(
     render_device: Res<RenderDevice>,
     asset_server: Res<AssetServer>,
     mut spawned: ResMut<SensorCamerasSpawned>,
-    #[cfg(feature = "big_space")] root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
+    root: Option<Res<crate::spatial::BigSpaceRootEntity>>,
+    local: Option<Res<LocalSensorPreview>>,
+    mut local_images: Option<ResMut<LocalSensorImages>>,
 ) {
     for (i, config) in configs.0.iter().enumerate() {
+        if config.render_local != local.is_some() {
+            continue;
+        }
         // LDR clipping erases the radiance variation used for LWIR terrain contrast.
         let hdr_input = config.cinematic || config.effect == "lwir";
         let size = Extent3d {
@@ -689,6 +719,11 @@ fn spawn_sensor_cameras(
             Image::new_target_texture(size.width, size.height, TextureFormat::Rgba8UnormSrgb, None);
         output_image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
         let output_image = images.add(output_image);
+        if let Some(local_images) = local_images.as_mut() {
+            local_images
+                .0
+                .insert(config.camera_name.clone(), output_image.clone());
+        }
         let mut output_settings = sensor_output_settings(config);
         let palette = match output_settings.mode.y {
             1 => SensorPalette::BlackHot,
@@ -727,7 +762,7 @@ fn spawn_sensor_cameras(
             })
         };
 
-        let copier = ImageCopier {
+        let copier = (!config.render_local).then(|| ImageCopier {
             buffers: (0..READBACK_BUFFER_COUNT)
                 .map(|_| readback_buffer("sensor_camera_readback"))
                 .collect(),
@@ -739,8 +774,8 @@ fn spawn_sensor_cameras(
             width: config.width,
             height: config.height,
             is_active: false,
-        };
-        let temp_map_copier = (config.effect == "lwir").then(|| {
+        });
+        let temp_map_copier = (!config.render_local && config.effect == "lwir").then(|| {
             TempMapCopier(ImageCopier {
                 buffers: (0..READBACK_BUFFER_COUNT)
                     .map(|_| readback_buffer("sensor_camera_temp_readback"))
@@ -792,18 +827,18 @@ fn spawn_sensor_cameras(
             ),
             Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
             GlobalTransform::default(),
-            #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
             SensorCamera { config_index: i },
             output_settings,
             output_target,
-            copier,
             ReadbackArmed(false),
             sensor_camera_render_layers(config),
             Name::new(format!("sensor_camera_{}", config.camera_name)),
         ));
-        #[cfg(feature = "big_space")]
         crate::spatial::parent_under_big_space(&mut entity, root.as_deref());
+        if let Some(copier) = copier {
+            entity.insert(copier);
+        }
         if let Some(temp_map_copier) = temp_map_copier {
             entity.insert(temp_map_copier);
         }
@@ -827,7 +862,6 @@ fn spawn_sensor_cameras(
 
         if config.cinematic {
             entity.insert((
-                CinematicViewport,
                 AmbientLight {
                     brightness: 0.0,
                     ..default()
@@ -840,6 +874,9 @@ fn spawn_sensor_cameras(
                     ..Default::default()
                 },
             ));
+            if !config.render_local {
+                entity.insert(CinematicViewport);
+            }
             if config.effect != "lwir" {
                 entity.insert(bloom_from_config(config.bloom.as_ref(), true));
             }
@@ -881,8 +918,45 @@ fn spawn_sensor_cameras(
     spawned.0 = true;
 }
 
+/// Local previews render only visible panes, at the configured wall-clock rate.
+/// No GPU readback or decoder is involved; UI samples the output texture.
+fn update_local_sensor_activity(
+    configs: Res<SensorCameraConfigs>,
+    streams: Query<(
+        &crate::ui::video_stream::VideoStream,
+        &crate::ui::video_stream::IsTileVisible,
+    )>,
+    mut cameras: Query<(&SensorCamera, &mut Camera), Without<ThermalMaskCamera>>,
+    mut mask_cameras: Query<(&ThermalMaskCamera, &mut Camera), Without<SensorCamera>>,
+    mut last_frames: Local<HashMap<usize, Instant>>,
+) {
+    let now = Instant::now();
+    for (sensor, mut camera) in &mut cameras {
+        let Some(config) = configs.0.get(sensor.config_index) else {
+            continue;
+        };
+        let visible = streams.iter().any(|(stream, visible)| {
+            visible.0 && stream.render_local && stream.msg_name == config.camera_name
+        });
+        let interval = Duration::from_secs_f32(1.0 / config.fps.clamp(1.0, 60.0));
+        camera.is_active = visible
+            && last_frames
+                .get(&sensor.config_index)
+                .is_none_or(|last| now.duration_since(*last) >= interval);
+        if camera.is_active {
+            last_frames.insert(sensor.config_index, now);
+        }
+        for (mask, mut mask_camera) in &mut mask_cameras {
+            if mask.config_index == sensor.config_index {
+                mask_camera.is_active = camera.is_active;
+            }
+        }
+    }
+}
+
 fn sensor_camera_render_layers(config: &SensorCameraConfig) -> RenderLayers {
-    let mut layers = RenderLayers::default();
+    let mut layers = RenderLayers::default()
+        .with(crate::plugins::render_layer_alloc::THRUSTER_PARTICLES_RENDER_LAYER);
     if config.cinematic {
         layers = layers.with(CINEMATIC_EARTH_RENDER_LAYER);
     }
@@ -992,7 +1066,6 @@ fn spawn_thermal_mask_proxies(
 /// the absolute value back the next frame while leaving the cell where it
 /// landed makes the two add up, and the entity walks a further cell out on
 /// every frame after that.
-#[cfg(feature = "big_space")]
 fn place_on_grid(
     settings: &crate::spatial::FloatingOriginSettings,
     cell: &mut crate::spatial::GridCell,
@@ -1004,6 +1077,106 @@ fn place_on_grid(
     transform.translation = local_translation;
 }
 
+const WORLD_POS_STALE_US: i64 = 1_000_000;
+
+#[derive(Default)]
+struct WorldPosLog {
+    missing_since: Vec<Option<Instant>>,
+    last_emit: Vec<Option<Instant>>,
+}
+
+struct CachedWorldPos {
+    len: usize,
+    newest: Option<impeller::types::Timestamp>,
+    sample_ts: Option<impeller::types::Timestamp>,
+    world_pos: Option<impeller_wkt::WorldPos>,
+}
+
+fn cached_world_pos(
+    cache: &impeller_bevy::TelemetryCache,
+    id: &ComponentId,
+    ts: impeller::types::Timestamp,
+) -> CachedWorldPos {
+    let Some(series) = cache.series(id) else {
+        return CachedWorldPos {
+            len: 0,
+            newest: None,
+            sample_ts: None,
+            world_pos: None,
+        };
+    };
+    let newest = series.last_key_value().map(|(timestamp, _)| *timestamp);
+    let (sample_ts, world_pos) = match series.range(..=ts).next_back() {
+        Some((timestamp, value)) => (Some(*timestamp), value.as_world_pos()),
+        None => (None, None),
+    };
+    CachedWorldPos {
+        len: series.len(),
+        newest,
+        sample_ts,
+        world_pos,
+    }
+}
+
+fn log_world_pos(
+    log: &mut WorldPosLog,
+    index: usize,
+    camera: &str,
+    render_ts: i64,
+    cached: &CachedWorldPos,
+) {
+    if log.missing_since.len() <= index {
+        log.missing_since.resize(index + 1, None);
+        log.last_emit.resize(index + 1, None);
+    }
+    let now = Instant::now();
+    let stale = match cached.sample_ts {
+        None => {
+            let since = *log.missing_since[index].get_or_insert(now);
+            now.duration_since(since) >= Duration::from_secs(1)
+        }
+        Some(sample_ts) => {
+            log.missing_since[index] = None;
+            render_ts.saturating_sub(sample_ts.0) >= WORLD_POS_STALE_US
+        }
+    };
+    let due =
+        log.last_emit[index].is_none_or(|at| now.duration_since(at) >= Duration::from_secs(1));
+    if !due {
+        return;
+    }
+    log.last_emit[index] = Some(now);
+    let sample_age_ms = cached
+        .sample_ts
+        .map(|timestamp| render_ts.saturating_sub(timestamp.0) / 1_000);
+    let newest_age_ms = cached
+        .newest
+        .map(|timestamp| render_ts.saturating_sub(timestamp.0) / 1_000);
+    let quat = cached.world_pos.map(|world_pos| {
+        let [x, y, z, w] = world_pos.att.parts().map(nox::Tensor::into_buf);
+        (x, y, z, w)
+    });
+    if stale {
+        tracing::warn!(
+            camera,
+            series_len = cached.len,
+            sample_age_ms,
+            newest_age_ms,
+            ?quat,
+            "sensor camera world_pos is missing or more than 1s behind the render time"
+        );
+    } else {
+        tracing::debug!(
+            camera,
+            series_len = cached.len,
+            sample_age_ms,
+            newest_age_ms,
+            ?quat,
+            "sensor camera world_pos"
+        );
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn update_sensor_camera_transforms(
     configs: Res<SensorCameraConfigs>,
@@ -1013,12 +1186,13 @@ fn update_sensor_camera_transforms(
         &mut Transform,
         &mut SensorOutputSettings,
     )>,
-    #[cfg(feature = "big_space")] mut cells: Query<&mut crate::spatial::GridCell>,
-    #[cfg(feature = "big_space")] settings: Res<crate::spatial::FloatingOriginSettings>,
+    mut cells: Query<&mut crate::spatial::GridCell>,
+    settings: Res<crate::spatial::FloatingOriginSettings>,
     cache: Res<impeller_bevy::TelemetryCache>,
     current_ts: Res<impeller_wkt::CurrentTimestamp>,
     coordinate: Res<crate::Coordinate>,
     geo_context: Res<GeoContext>,
+    mut pose_log: Local<WorldPosLog>,
 ) {
     let ts = current_ts.0;
     let frame = coordinate.0.unwrap_or_default();
@@ -1026,20 +1200,26 @@ fn update_sensor_camera_transforms(
         let Some(config) = configs.0.get(sensor_cam.config_index) else {
             continue;
         };
-
-        let Some(pose) = sensor_camera_transform(config, &cache, ts, frame, &geo_context) else {
+        let world_pos_id = ComponentId::new(&format!("{}.world_pos", config.entity_name));
+        let cached = cached_world_pos(&cache, &world_pos_id, ts);
+        log_world_pos(
+            &mut pose_log,
+            sensor_cam.config_index,
+            &config.camera_name,
+            ts.0,
+            &cached,
+        );
+        let Some(world_pos) = cached.world_pos else {
+            continue;
+        };
+        let Some(pose) = sensor_camera_pose(config, world_pos, frame, &geo_context) else {
             continue;
         };
         transform.rotation = pose.rotation;
         output.view_rotation = Vec4::from_array(pose.rotation.to_array());
 
-        #[cfg(feature = "big_space")]
         if let Ok(mut cell) = cells.get_mut(_entity) {
             place_on_grid(&settings, &mut cell, &mut transform, pose.translation);
-        }
-        #[cfg(not(feature = "big_space"))]
-        {
-            transform.translation = pose.translation.as_vec3();
         }
     }
 }
@@ -1053,8 +1233,8 @@ pub fn update_sensor_camera_frustum_source_transforms(
         &mut Transform,
         &mut Projection,
     )>,
-    #[cfg(feature = "big_space")] mut cells: Query<&mut crate::spatial::GridCell>,
-    #[cfg(feature = "big_space")] settings: Res<crate::spatial::FloatingOriginSettings>,
+    mut cells: Query<&mut crate::spatial::GridCell>,
+    settings: Res<crate::spatial::FloatingOriginSettings>,
     cache: Res<impeller_bevy::TelemetryCache>,
     current_ts: Res<impeller_wkt::CurrentTimestamp>,
     coordinate: Res<crate::Coordinate>,
@@ -1069,13 +1249,8 @@ pub fn update_sensor_camera_frustum_source_transforms(
 
         if let Some(pose) = sensor_camera_transform(config, &cache, ts, frame, &geo_context) {
             transform.rotation = pose.rotation;
-            #[cfg(feature = "big_space")]
             if let Ok(mut cell) = cells.get_mut(_entity) {
                 place_on_grid(&settings, &mut cell, &mut transform, pose.translation);
-            }
-            #[cfg(not(feature = "big_space"))]
-            {
-                transform.translation = pose.translation.as_vec3();
             }
         }
 
@@ -1260,10 +1435,10 @@ impl SensorReadbackWorker {
         #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
         {
             let _ = (index, render_device, frame_sender);
-            return Ok(Self {
+            Ok(Self {
                 sender: None,
                 handle: None,
-            });
+            })
         }
         #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
         {
@@ -1538,6 +1713,7 @@ pub fn patch_sensor_view_dims(
     }
     for (mut stream, mut cache) in streams.iter_mut() {
         if let Some(config) = configs.0.iter().find(|c| c.camera_name == stream.msg_name) {
+            stream.render_local = config.render_local;
             if config.format == "h264" {
                 if stream.raw_dims.take().is_some() || !cache.is_h264 {
                     *cache = crate::ui::video_stream::VideoFrameCache::default();
@@ -1909,6 +2085,44 @@ mod tests {
             pose.translation.distance(legacy_unrebased) > 1.0e6,
             "ECEF pose still looks like an unrebased flat swizzle"
         );
+    }
+
+    #[test]
+    fn sensor_output_shader_translates_to_webgl2() {
+        let source = include_str!("assets/shaders/sensor_output.wgsl").replace(
+            "#import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput",
+            "struct FullscreenVertexOutput { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f32> }",
+        );
+        let module = naga::front::wgsl::parse_str(&source).expect("valid WGSL");
+        let info = naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::default(),
+        )
+        .validate(&module)
+        .expect("valid module");
+        let options = naga::back::glsl::Options {
+            version: naga::back::glsl::Version::Embedded {
+                version: 300,
+                is_webgl: true,
+            },
+            ..Default::default()
+        };
+        let pipeline = naga::back::glsl::PipelineOptions {
+            shader_stage: naga::ShaderStage::Fragment,
+            entry_point: "fragment".into(),
+            multiview: None,
+        };
+        let mut glsl = String::new();
+        naga::back::glsl::Writer::new(
+            &mut glsl,
+            &module,
+            &info,
+            &options,
+            &pipeline,
+            naga::proc::BoundsCheckPolicies::default(),
+        )
+        .and_then(|mut writer| writer.write())
+        .expect("WebGL2 GLSL");
     }
 
     #[test]

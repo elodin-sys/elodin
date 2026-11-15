@@ -44,6 +44,10 @@ in
       # Submodule contents differ between a checkout and a `git+file?rev=` export.
       if under "/examples/betaflight-sitl/betaflight"
       then false
+      # `elodin terrain prepare` embeds this basemap at compile time. Keep only
+      # that root asset; unrelated simulation assets must not enter the source.
+      else if under "/assets"
+      then editorAssets && lib.elem relPath ["/assets" "/assets/earth.glb"]
       else if !(lib.any under workspaceDirs)
       then lib.elem relPath rootFiles
       else

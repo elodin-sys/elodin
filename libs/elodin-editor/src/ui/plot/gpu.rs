@@ -1499,6 +1499,7 @@ fn extract_plot_lines_wasm(
     mut main_world: ResMut<MainWorld>,
     mut commands: Commands,
     render_device: Res<RenderDevice>,
+    render_queue: Res<RenderQueue>,
 ) {
     main_world.resource_scope(
         |world, mut cached_state: bevy::prelude::Mut<ExtractLinesState>| {
@@ -1651,12 +1652,22 @@ fn extract_plot_lines_wasm(
                         empty_upload += 1;
                         None
                     } else {
-                        let segment_buffer =
-                            render_device.create_buffer_with_data(&BufferInitDescriptor {
-                                label: Some("plot line segments"),
-                                contents: floats.as_bytes(),
-                                usage: BufferUsages::VERTEX,
+                        let required = floats.as_bytes().len() as u64;
+                        // Moving plot windows rewrite these vertices frequently.
+                        // Keep the allocation instead of creating mapped buffers
+                        // faster than the browser can reclaim them.
+                        let segment_buffer = cached
+                            .filter(|line| line.segment_buffer.size() >= required)
+                            .map(|line| line.segment_buffer.clone())
+                            .unwrap_or_else(|| {
+                                render_device.create_buffer(&BufferDescriptor {
+                                    label: Some("plot line segments"),
+                                    size: required.next_power_of_two(),
+                                    usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
+                                    mapped_at_creation: false,
+                                })
                             });
+                        render_queue.write_buffer(&segment_buffer, 0, floats.as_bytes());
                         Some(GpuLine {
                             segment_buffer,
                             count: (floats.len() / stride) as u32,

@@ -62,7 +62,8 @@ pub fn compact(db_path: &Path, dry_run: bool) -> Result<CompactStats, Error> {
     Ok(stats)
 }
 
-fn is_append_log_file(name: &str) -> bool {
+/// Return whether the filename identifies an append log.
+pub fn is_append_log_file(name: &str) -> bool {
     APPEND_LOG_FILE_NAMES.contains(&name)
         || name
             .strip_prefix("data_log.")
@@ -71,18 +72,7 @@ fn is_append_log_file(name: &str) -> bool {
 
 fn compact_file(path: &PathBuf, dry_run: bool, stats: &mut CompactStats) -> Result<(), Error> {
     let file_len = fs::metadata(path)?.len();
-    let mut header = [0u8; 8];
-    {
-        let mut file = fs::File::open(path)?;
-        if file.read(&mut header)? < 8 {
-            return Ok(());
-        }
-    }
-    let committed_len = u64::from_le_bytes(header);
-    if committed_len < MIN_HEADER_SIZE || committed_len > file_len {
-        // Corrupt or already shorter than its own header claims; leave it.
-        return Ok(());
-    }
+    let committed_len = compacted_file_len(path)?;
     if committed_len >= file_len {
         return Ok(());
     }
@@ -95,6 +85,25 @@ fn compact_file(path: &PathBuf, dry_run: bool, stats: &mut CompactStats) -> Resu
         file.sync_all()?;
     }
     Ok(())
+}
+
+/// Return the length after compaction without modifying the append log.
+/// Callers must filter filenames with `is_append_log_file` first.
+pub fn compacted_file_len(path: &Path) -> Result<u64, Error> {
+    let file_len = fs::metadata(path)?.len();
+    let mut header = [0u8; 8];
+    {
+        let mut file = fs::File::open(path)?;
+        if file.read(&mut header)? < 8 {
+            return Ok(file_len);
+        }
+    }
+    let committed_len = u64::from_le_bytes(header);
+    if committed_len < MIN_HEADER_SIZE || committed_len > file_len {
+        // Corrupt or already shorter than its own header claims; leave it.
+        return Ok(file_len);
+    }
+    Ok(committed_len)
 }
 
 /// CLI entry point: compact with progress output.

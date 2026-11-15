@@ -16,11 +16,6 @@
       url = "github:numtide/flake-utils";
       inputs.systems.follows = "systems";
     };
-    aleph = {
-      url = "path:./aleph";
-      inputs.nixpkgs.follows = "nixpkgs";
-      inputs.rust-overlay.follows = "rust-overlay";
-    };
   };
 
   outputs = {
@@ -60,6 +55,7 @@
         elodin-db = final.callPackage ./aleph/pkgs/elodin-db.nix {
           inherit rustToolchain;
         };
+        elodin-web = final.callPackage ./nix/pkgs/elodin-web.nix {inherit rustToolchain;};
         elodin-db-protos = final.callPackage ./nix/pkgs/elodin-db-protos.nix {};
         elodinsink = final.callPackage ./nix/pkgs/elodinsink.nix {inherit rustToolchain;};
         rtsp-streamer = final.callPackage ./nix/pkgs/rtsp-streamer.nix {inherit rustToolchain;};
@@ -86,7 +82,7 @@
         shells = pkgs.callPackage ./nix/shell.nix {inherit config rustToolchain;};
       in {
         packages = with pkgs.elodin; {
-          inherit elodin-cli elodin-db elodin-db-protos elodinsink rtsp-streamer;
+          inherit elodin-cli elodin-db elodin-db-protos elodin-web elodinsink rtsp-streamer;
           elodin-py = elodin-py.py;
           elodin = elodin-cli;
           default = elodin-cli;

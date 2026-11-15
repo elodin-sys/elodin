@@ -22,9 +22,12 @@ fi
 [[ ${#tracy_pids[@]} -gt 0 ]] && sleep 1
 
 # ── Run ──────────────────────────────────────────────────────────────────────
+source scripts/ci/free_ports.sh
+pick_ports
 set +e
 env ELODIN_SENSOR_CAMERA_MAX_TICKS=600 \
-  timeout --signal=INT 60 elodin run examples/sensor-camera/main.py 2>&1 | tee "${log_file}"
+  timeout --signal=INT 60 elodin run examples/sensor-camera/main.py --addr "127.0.0.1:${db_port}" \
+  2>&1 | tee "${log_file}"
 rc="${PIPESTATUS[0]}"
 set -e
 

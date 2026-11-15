@@ -12,7 +12,7 @@ use std::sync::Arc;
 use zerocopy::{Immutable, TryFromBytes};
 
 use crate::msg_log::MsgLog;
-use crate::{Component, DB, Error};
+use crate::{AtomicTimestampExt, Component, DB, Error};
 
 pub async fn serve(addr: SocketAddr, db: Arc<DB>) -> miette::Result<()> {
     let app = Router::new()
@@ -78,11 +78,28 @@ pub async fn push_entity_table(
             description: "incorrect shape for value".to_string(),
         }));
     }
+    let was_empty = component.time_series.index().is_empty();
+    let timestamp = Timestamp::now();
     component
         .time_series
-        .push_buf(Timestamp::now(), body.as_bytes())
+        .push_buf(timestamp, body.as_bytes())
         .map_err(ErrorResponse::from)
         .map_err(Json)?;
+    if was_empty {
+        db.vtable_gen
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+    let is_timestamp_source = db.with_state(|state| {
+        state
+            .get_component_metadata(component_id)
+            .is_some_and(|metadata| metadata.is_timestamp_source())
+    });
+    if !is_timestamp_source {
+        db.last_updated.update_max(timestamp);
+        if timestamp.0 != 0 {
+            db.earliest_timestamp.update_min(timestamp);
+        }
+    }
     Ok(())
 }
 

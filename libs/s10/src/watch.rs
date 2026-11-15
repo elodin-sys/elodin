@@ -8,6 +8,20 @@ use tracing::error;
 
 use crate::error::Error;
 
+/// Simulation outputs can live beside the script. Only source edits should
+/// restart Python, not database writes or generated capture metadata.
+pub fn python_source_changed(event: &async_watcher::notify::Event) -> bool {
+    !event.kind.is_access()
+        && event.paths.iter().any(|path| {
+            path.extension().is_some_and(|extension| extension == "py")
+                    // DB source snapshots are outputs too, including removal
+                    // events when the next run replaces an existing recording.
+                    && !path.ancestors().any(|ancestor| {
+                        ancestor.ends_with("simulation_source/files")
+                    })
+        })
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WatchExitPolicy {
     ReturnOnSuccess,
@@ -20,6 +34,20 @@ pub async fn watch<F>(
     cancel_token: CancelToken,
     dirs: impl Iterator<Item = PathBuf>,
     exit_policy: WatchExitPolicy,
+) -> Result<(), Error>
+where
+    F: Future<Output = Result<(), Error>> + Send + Sync + 'static,
+{
+    watch_filtered(timeout, builder, cancel_token, dirs, exit_policy, |_| true).await
+}
+
+pub async fn watch_filtered<F>(
+    timeout: Duration,
+    builder: impl Fn(CancelToken) -> F,
+    cancel_token: CancelToken,
+    dirs: impl Iterator<Item = PathBuf>,
+    exit_policy: WatchExitPolicy,
+    accepts: impl Fn(&async_watcher::notify::Event) -> bool,
 ) -> Result<(), Error>
 where
     F: Future<Output = Result<(), Error>> + Send + Sync + 'static,
@@ -61,7 +89,7 @@ where
                         }
                         tokio::select! {
                             _ = cancel_token.wait() => break,
-                            res = file_events.recv() => {
+                            res = next_change(&mut file_events, &accepts) => {
                                 let Some(event) = res else {
                                     break;
                                 };
@@ -75,7 +103,7 @@ where
                     None => break,
                 }
             }
-            res = file_events.recv() => {
+            res = next_change(&mut file_events, &accepts) => {
                 let Some(event) = res else {
                     break;
                 };
@@ -91,11 +119,120 @@ where
     Ok(())
 }
 
+type FileEvents = Result<Vec<async_watcher::DebouncedEvent>, Vec<async_watcher::notify::Error>>;
+
+async fn next_change(
+    events: &mut tokio::sync::mpsc::Receiver<FileEvents>,
+    accepts: &impl Fn(&async_watcher::notify::Event) -> bool,
+) -> Option<FileEvents> {
+    while let Some(event) = events.recv().await {
+        match &event {
+            Ok(changes) if !changes.iter().any(|change| accepts(&change.event)) => continue,
+            _ => return Some(event),
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::time::Duration;
     use stellarator::util::CancelToken;
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn python_outputs_do_not_restart_but_source_edits_do() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let dir = std::env::temp_dir().join(format!("s10-source-watch-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("db")).unwrap();
+        std::fs::create_dir_all(dir.join("db/simulation_source/files")).unwrap();
+        std::fs::write(
+            dir.join("db/simulation_source/files/sim.py"),
+            "# old snapshot",
+        )
+        .unwrap();
+        std::fs::write(dir.join("sim.py"), "# initial\n").unwrap();
+        let runs = Arc::new(AtomicUsize::new(0));
+        let cancel = CancelToken::new();
+        let task = tokio::spawn({
+            let dir = dir.clone();
+            let runs = runs.clone();
+            let cancel = cancel.clone();
+            async move {
+                watch_filtered(
+                    Duration::from_millis(50),
+                    |token| {
+                        let dir = dir.clone();
+                        let runs = runs.clone();
+                        async move {
+                            std::fs::write(dir.join("capture_view.json"), "{}").unwrap();
+                            std::fs::write(dir.join("db/telemetry"), "frame").unwrap();
+                            std::fs::remove_file(dir.join("db/simulation_source/files/sim.py"))
+                                .unwrap();
+                            std::fs::write(
+                                dir.join("db/simulation_source/files/sim.py"),
+                                "# snapshot",
+                            )
+                            .unwrap();
+                            runs.fetch_add(1, Ordering::SeqCst);
+                            token.wait().await;
+                            Ok(())
+                        }
+                    },
+                    cancel,
+                    std::iter::once(dir.clone()),
+                    WatchExitPolicy::ReturnOnSuccess,
+                    python_source_changed,
+                )
+                .await
+            }
+        });
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while runs.load(Ordering::SeqCst) == 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            assert_eq!(
+                runs.load(Ordering::SeqCst),
+                1,
+                "generated files restarted Python"
+            );
+            std::fs::write(dir.join("sim.py"), "# edited\n").unwrap();
+            while runs.load(Ordering::SeqCst) < 2 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("Python source edit did not restart the simulation");
+        cancel.cancel();
+        tokio::time::timeout(Duration::from_secs(2), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn python_filter_accepts_atomic_saves_and_deletions() {
+        use async_watcher::notify::{
+            Event, EventKind,
+            event::{ModifyKind, RemoveKind, RenameMode},
+        };
+        let renamed = Event::new(EventKind::Modify(ModifyKind::Name(RenameMode::Both)))
+            .add_path("sim.tmp".into())
+            .add_path("sim.py".into());
+        assert!(python_source_changed(&renamed));
+        assert!(python_source_changed(
+            &Event::new(EventKind::Remove(RemoveKind::File)).add_path("helper.py".into())
+        ));
+        assert!(!python_source_changed(
+            &Event::new(EventKind::Any).add_path("__pycache__/sim.pyc".into())
+        ));
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn returns_when_builder_completes_ok() {

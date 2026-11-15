@@ -37,6 +37,14 @@ use stellarator::util::CancelToken;
 use tracing::{error, info};
 use zerocopy::{FromBytes, TryFromBytes};
 
+// Keep one CPython thread state for the executor's lifetime. Callbacks still
+// acquire/release the GIL normally; allowing threads here leaves it available
+// to the rest of Python between callbacks. Otherwise each callback on this
+// native thread creates and deletes a thread state (and its frame arenas).
+fn on_python_runtime_thread<T: Send>(run: impl FnOnce() -> T + Send) -> T {
+    Python::with_gil(|py| py.allow_threads(run))
+}
+
 fn normalize_log_level(level: &str) -> Result<&'static str, Error> {
     match level.to_ascii_lowercase().as_str() {
         "error" => Ok("error"),
@@ -107,6 +115,10 @@ pub enum Args {
         #[arg(default_value = "[::]:2240")]
         addr: SocketAddr,
     },
+    #[clap(hide = true)]
+    TerrainPrepare {
+        output: PathBuf,
+    },
     Params,
     Components,
     #[clap(hide = true)]
@@ -125,6 +137,7 @@ pub enum Args {
 pub struct WorldBuilder {
     pub world: World,
     pub recipes: HashMap<String, ::s10::Recipe>,
+    pub terrain_preparation: Option<serde_json::Value>,
 }
 
 fn py_json_value(obj: &Bound<'_, PyAny>) -> Result<serde_json::Value, Error> {
@@ -200,7 +213,13 @@ impl WorldBuilder {
             .chain(iter::once(("sim".to_string(), ::s10::Recipe::Sim(sim))))
             .collect();
 
-        if !self.world.metadata.sensor_cameras.is_empty() {
+        if self
+            .world
+            .metadata
+            .sensor_cameras
+            .iter()
+            .any(|camera| !camera.render_local)
+        {
             #[cfg(target_family = "unix")]
             let (cmd, args) = (
                 "nice",
@@ -525,6 +544,7 @@ impl WorldBuilder {
         bloom = None,
         environment = None,
         frustums_face_alpha = impeller_wkt::default_frustums_face_alpha(),
+        render_local = false,
     ))]
     #[allow(clippy::too_many_arguments)]
     fn sensor_camera(
@@ -556,6 +576,7 @@ impl WorldBuilder {
         bloom: Option<&Bound<'_, PyAny>>,
         environment: Option<&Bound<'_, PyAny>>,
         frustums_face_alpha: f32,
+        render_local: bool,
     ) -> Result<(), crate::error::Error> {
         if name.chars().any(|c| c.is_whitespace()) {
             return Err(crate::error::Error::PyO3(
@@ -738,6 +759,11 @@ impl WorldBuilder {
         let environment = environment
             .map(parse_sensor_camera_environment)
             .transpose()?;
+        if render_local && environment.is_some() {
+            return Err(Error::PyO3(PyValueError::new_err(
+                "render_local sensor cameras share the schematic environment; configure it there",
+            )));
+        }
 
         let color_from_vec = |value: Option<Vec<f32>>,
                               default_color: impeller_wkt::Color,
@@ -765,6 +791,7 @@ impl WorldBuilder {
             .metadata
             .sensor_cameras
             .push(crate::world::SensorCameraConfig {
+                render_local,
                 entity_name: entity_meta.name.clone(),
                 camera_name: pair_name,
                 width,
@@ -936,6 +963,10 @@ impl WorldBuilder {
                     stellarator::struc_con::stellar(move || ::s10::liveness::monitor(port));
                 }
 
+                // Only a persistent DB keeps a snapshot of the simulation source.
+                let source_capture_entrypoint = db_path
+                    .as_ref()
+                    .and(simulation_source_entrypoint.as_deref());
                 let db_path = match db_path {
                     Some(p) => PathBuf::from(p),
                     None => tempfile::tempdir()?.keep().join("db"),
@@ -980,7 +1011,7 @@ impl WorldBuilder {
                     true,
                     Some(db_server.db.clone()),
                 )?;
-                capture_simulation_source(py, &db_path, simulation_source_entrypoint.as_deref())?;
+                capture_simulation_source(py, &db_path, source_capture_entrypoint)?;
                 let run_result = py.allow_threads(|| {
                     // Run the async executor (and therefore the JIT tick_fn) on a
                     // dedicated thread with a 256 MB stack. Large customer simulations
@@ -992,8 +1023,9 @@ impl WorldBuilder {
                         .name("elodin-sim-runtime".into())
                         .stack_size(256 * 1024 * 1024)
                         .spawn(move || {
-                            stellarator::run(|| {
-                                crate::impeller_server::Server::new(db_server, exec)
+                            on_python_runtime_thread(|| {
+                                stellarator::run(|| {
+                                    crate::impeller_server::Server::new(db_server, exec)
                                     .run_with_cancellation(
                                         move || {
                                             let cancelled = if let Some(ref func) = is_canceled {
@@ -1093,6 +1125,7 @@ impl WorldBuilder {
                                         start_timestamp.map(Timestamp),
                                         cancel_token,
                                     )
+                                })
                             })
                         })
                         .expect("failed to spawn elodin-sim-runtime thread");
@@ -1123,15 +1156,24 @@ impl WorldBuilder {
                 });
                 match run_result {
                     Ok(value) => {
-                        capture_simulation_source(
-                            py,
-                            &db_path,
-                            simulation_source_entrypoint.as_deref(),
-                        )?;
+                        capture_simulation_source(py, &db_path, source_capture_entrypoint)?;
                         Ok(value)
                     }
                     Err(err) => Err(err),
                 }
+            }
+            Args::TerrainPrepare { output } => {
+                let request = self.terrain_preparation.as_ref().ok_or_else(|| {
+                    PyValueError::new_err(
+                        "Declare terrain regions in the Python schematic before preparation",
+                    )
+                })?;
+                std::fs::write(
+                    output,
+                    serde_json::to_vec_pretty(request)
+                        .map_err(|e| PyValueError::new_err(e.to_string()))?,
+                )?;
+                Ok(None)
             }
             Args::Plan { addr, out_dir } => {
                 // Canonicalize the path to ensure s10 can find the file regardless of working directory
@@ -1868,6 +1910,9 @@ impl WorldBuilder {
         default_content: Option<&Bound<'_, PyAny>>,
         path: Option<String>,
     ) -> Result<(), Error> {
+        let terrain_preparation = default_content
+            .and_then(|obj| obj.extract::<PyRef<'_, crate::ui::PySchematic>>().ok())
+            .and_then(|schematic| schematic.terrain_preparation.clone());
         let (default_content, kernel_assets) = match default_content {
             None => (None, HashMap::new()),
             Some(obj) => {
@@ -1907,6 +1952,7 @@ impl WorldBuilder {
             });
         let previous = self.world.metadata.schematic.clone();
         let previous_kernels = self.world.metadata.schematic_kernels.clone();
+        let use_python_terrain = file_contents.is_none();
         self.world.metadata.schematic = file_contents.or(default_content);
         self.world.metadata.schematic_kernels = kernel_assets;
         if let Err(err) = self.validate_cinematic_owners() {
@@ -1914,6 +1960,7 @@ impl WorldBuilder {
             self.world.metadata.schematic_kernels = previous_kernels;
             return Err(err);
         }
+        self.terrain_preparation = use_python_terrain.then_some(terrain_preparation).flatten();
         Ok(())
     }
 
@@ -2280,6 +2327,74 @@ impl WorldBuilder {
 mod test {
     use super::*;
     use convert_case::Casing;
+
+    #[test]
+    fn runtime_thread_state_retains_python_thread_locals() {
+        pyo3::prepare_freethreaded_python();
+        let counts = |retain_thread_state| {
+            let local = Python::with_gil(|py| {
+                py.import("threading")
+                    .unwrap()
+                    .call_method0("local")
+                    .unwrap()
+                    .unbind()
+            });
+            std::thread::spawn(move || {
+                let callbacks = || {
+                    (0..3)
+                        .map(|_| {
+                            Python::with_gil(|py| {
+                                let local = local.bind(py);
+                                let count = local
+                                    .getattr("count")
+                                    .map(|count| count.extract::<u32>().unwrap())
+                                    .unwrap_or(0)
+                                    + 1;
+                                local.setattr("count", count).unwrap();
+                                count
+                            })
+                        })
+                        .collect::<Vec<_>>()
+                };
+                if retain_thread_state {
+                    on_python_runtime_thread(callbacks)
+                } else {
+                    callbacks()
+                }
+            })
+            .join()
+            .unwrap()
+        };
+        // The old lifecycle recreated the thread state for every callback,
+        // even though all callbacks ran on the same native thread.
+        let without_retention = counts(false);
+        let with_retention = counts(true);
+        eprintln!(
+            "thread-local counts: per-callback={without_retention:?}, runtime={with_retention:?}"
+        );
+        assert_eq!(with_retention, [1, 2, 3]);
+    }
+
+    #[test]
+    fn runtime_thread_state_releases_gil_between_callbacks() {
+        pyo3::prepare_freethreaded_python();
+        let (worker, acquired) = on_python_runtime_thread(|| {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let worker = std::thread::spawn(move || {
+                Python::with_gil(|_| {
+                    let _ = tx.send(());
+                });
+            });
+            // Waiting in Rust does not itself release the GIL. The worker
+            // must acquire it before this runtime scope ends.
+            let acquired = rx.recv_timeout(std::time::Duration::from_secs(5));
+            (worker, acquired)
+        });
+        // Join outside the runtime scope so a failed assertion cannot leave
+        // the worker stuck waiting for a GIL held by this test.
+        worker.join().unwrap();
+        acquired.expect("the runtime retained the GIL between Python callbacks");
+    }
 
     #[cfg(not(target_os = "windows"))]
     #[test]

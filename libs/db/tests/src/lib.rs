@@ -516,7 +516,7 @@ mod tests {
     }
 
     #[test]
-    async fn test_batched_stream_republishes_reordered_filtered_layout() {
+    async fn test_batched_stream_republishes_when_filtered_columns_change() {
         let (addr, _db) = setup_test_db().await.unwrap();
         let mut writer = Client::connect(addr).await.unwrap();
         let mut selected = Vec::new();
@@ -533,6 +533,10 @@ mod tests {
             .await;
             selected.push(component_id);
         }
+        // In the filter before it has samples, so its arrival changes the
+        // sorted column list without a filter update.
+        let late = ComponentId::new("layout.selected.late");
+        selected.push(late);
         flush(&mut writer).await;
 
         let stream_id = 46;
@@ -553,13 +557,13 @@ mod tests {
             })
             .await
             .unwrap();
-        loop {
-            if matches!(stream.next().await.unwrap(), StreamReply::VTable(_)) {
-                break;
+        let initial = loop {
+            if let StreamReply::VTable(vtable) = stream.next().await.unwrap() {
+                break vtable;
             }
-        }
+        };
+        assert_eq!(initial.vtable.fields.len(), 8);
 
-        let mut republished = false;
         for index in 0_u16..8 {
             let name = format!("layout.unselected.{index}");
             send_f64_samples(
@@ -571,7 +575,7 @@ mod tests {
             )
             .await;
             flush(&mut writer).await;
-            republished = futures_lite::future::race(
+            let republished = futures_lite::future::race(
                 async {
                     loop {
                         if matches!(stream.next().await.unwrap(), StreamReply::VTable(_)) {
@@ -585,14 +589,37 @@ mod tests {
                 },
             )
             .await;
-            if republished {
-                break;
-            }
+            assert!(
+                !republished,
+                "unselected component republished the filtered VTable"
+            );
         }
-        assert!(
-            republished,
-            "filtered layout order changed without a new VTable"
-        );
+
+        send_f64_samples(
+            &mut writer,
+            late,
+            "layout.selected.late",
+            [220, 0],
+            &[(Timestamp(20), 9.0)],
+        )
+        .await;
+        flush(&mut writer).await;
+        let updated = futures_lite::future::race(
+            async {
+                loop {
+                    if let StreamReply::VTable(vtable) = stream.next().await.unwrap() {
+                        break Some(vtable);
+                    }
+                }
+            },
+            async {
+                sleep(Duration::from_millis(250)).await;
+                None
+            },
+        )
+        .await;
+        let updated = updated.expect("selected column arrived without a new VTable");
+        assert_eq!(updated.vtable.fields.len(), 9);
     }
 
     #[test]

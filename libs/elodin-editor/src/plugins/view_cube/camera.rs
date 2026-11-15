@@ -1,7 +1,6 @@
 //! Camera systems for the ViewCube plugin.
 
 use crate::spatial::WithoutFloatingOrigin;
-#[cfg(feature = "big_space")]
 use crate::spatial::{FloatingOriginSettings, GridCell, WithFloatingOrigin};
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::hierarchy::ChildOf;
@@ -424,7 +423,6 @@ fn apply_layers_recursive(
         }
     }
 }
-#[cfg(feature = "big_space")]
 type FloatingOriginQuery<'w, 's> = Query<
     'w,
     's,
@@ -444,17 +442,12 @@ type ViewCubeCameraQuery<'w, 's> = Query<
     (With<ViewCubeTargetCamera>, WithoutFloatingOrigin),
 >;
 
-#[cfg(feature = "big_space")]
 type CameraParentQuery<'w, 's> = Query<
     'w,
     's,
     (&'static Transform, &'static GridCell),
     (Without<ViewCubeTargetCamera>, WithoutFloatingOrigin),
 >;
-
-#[cfg(not(feature = "big_space"))]
-type CameraParentQuery<'w, 's> =
-    Query<'w, 's, &'static Transform, (Without<ViewCubeTargetCamera>, WithoutFloatingOrigin)>;
 
 #[derive(Clone, Copy)]
 struct CurrentCameraPose {
@@ -478,25 +471,17 @@ pub(super) struct ViewCubeEditorLookup<'w, 's> {
     arrow_cache: ResMut<'w, ViewCubeArrowTargetCache>,
     orbit_cache: ResMut<'w, ViewCubeOrbitTargetCache>,
     camera_parents: CameraParentQuery<'w, 's>,
-    #[cfg(feature = "big_space")]
     floating_origin: FloatingOriginQuery<'w, 's>,
-    #[cfg(feature = "big_space")]
     floating_origin_settings: Res<'w, FloatingOriginSettings>,
 }
 
 impl<'w, 's> ViewCubeEditorLookup<'w, 's> {
-    #[cfg(feature = "big_space")]
     fn origin(&self) -> DVec3 {
         self.floating_origin
             .iter()
             .next()
             .map(|(t, c)| self.floating_origin_settings.grid_position_double(c, t))
             .unwrap_or(DVec3::ZERO)
-    }
-
-    #[cfg(not(feature = "big_space"))]
-    fn origin(&self) -> DVec3 {
-        DVec3::ZERO
     }
 
     /// Compose the active camera's world pose by hand instead of trusting
@@ -508,7 +493,6 @@ impl<'w, 's> ViewCubeEditorLookup<'w, 's> {
     /// in `camera_pose.rotation`. `parent_rotation` lets the snap math
     /// convert between world and parent frames when emitting the
     /// `LookToTrigger`.
-    #[cfg(feature = "big_space")]
     fn current_camera_pose(
         &self,
         transform: &Transform,
@@ -535,31 +519,6 @@ impl<'w, 's> ViewCubeEditorLookup<'w, 's> {
         CurrentCameraPose {
             translation: (absolute_translation - origin_world).as_vec3(),
             rotation: parent_transform.rotation * transform.rotation,
-            parent_rotation: parent_transform.rotation,
-        }
-    }
-
-    #[cfg(not(feature = "big_space"))]
-    fn current_camera_pose(
-        &self,
-        transform: &Transform,
-        parent: Option<&ChildOf>,
-        _origin_world: DVec3,
-    ) -> CurrentCameraPose {
-        let Some(parent_transform) =
-            parent.and_then(|parent| self.camera_parents.get(parent.parent()).ok())
-        else {
-            return CurrentCameraPose {
-                translation: transform.translation,
-                rotation: transform.rotation,
-                parent_rotation: Quat::IDENTITY,
-            };
-        };
-
-        let absolute_transform = parent_transform.mul_transform(*transform);
-        CurrentCameraPose {
-            translation: absolute_transform.translation,
-            rotation: absolute_transform.rotation,
             parent_rotation: parent_transform.rotation,
         }
     }

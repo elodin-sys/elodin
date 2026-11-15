@@ -18,7 +18,7 @@ use crate::cgroup::CgroupScope;
 use crate::probe::ReadyProbe;
 use crate::{
     error::Error,
-    watch::{WatchExitPolicy, watch},
+    watch::{WatchExitPolicy, python_source_changed, watch_filtered},
 };
 use std::time::Duration;
 #[cfg(target_os = "linux")]
@@ -259,7 +259,7 @@ impl SimRecipe {
                 .expect("path does not have a parent directory")
                 .to_path_buf()
         };
-        watch(
+        watch_filtered(
             DEFAULT_WATCH_TIMEOUT,
             |token| {
                 let this = self.clone();
@@ -269,6 +269,7 @@ impl SimRecipe {
             cancel_token,
             iter::once(dir),
             WatchExitPolicy::ReturnOnSuccess,
+            python_source_changed,
         )
         .await
     }

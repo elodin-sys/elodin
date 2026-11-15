@@ -329,7 +329,7 @@ fn prettify_label(name: &str) -> String {
 fn color_scheme_dirs() -> Vec<PathBuf> {
     #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
     {
-        return Vec::new();
+        Vec::new()
     }
     #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
     {
@@ -569,39 +569,51 @@ enum StoredColorScheme {
     Legacy(ColorScheme),
 }
 
+const COLOR_SCHEME_FILE: &str = "color_scheme.json";
+
+fn stored_named_json(scheme: &str, mode: &str, colors: &ColorScheme) -> Option<String> {
+    serde_json::to_string(&StoredColorScheme::Named {
+        scheme: scheme.to_string(),
+        mode: Some(mode.to_string()),
+        colors: colors.clone(),
+    })
+    .ok()
+}
+
 fn load_color_scheme() -> Option<StoredColorScheme> {
     #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
     {
-        return None;
+        let storage = web_sys::window()?.local_storage().ok()??;
+        let json = storage.get_item(COLOR_SCHEME_FILE).ok()??;
+        serde_json::from_str(&json).ok()
     }
     #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
     {
-        let color_scheme_path = dirs().data_dir().join("color_scheme.json");
+        let color_scheme_path = dirs().data_dir().join(COLOR_SCHEME_FILE);
         let json = fs::read_to_string(color_scheme_path).ok()?;
         serde_json::from_str(&json).ok()
     }
 }
 
 fn persist_selection(scheme: &str, mode: &str, colors: &ColorScheme) {
+    let Some(json) = stored_named_json(scheme, mode, colors) else {
+        return;
+    };
     #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
     {
-        let _ = (scheme, mode, colors);
-        return;
+        if let Some(storage) =
+            web_sys::window().and_then(|window| window.local_storage().ok().flatten())
+        {
+            let _ = storage.set_item(COLOR_SCHEME_FILE, &json);
+        }
     }
     #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
     {
-        let payload = StoredColorScheme::Named {
-            scheme: scheme.to_string(),
-            mode: Some(mode.to_string()),
-            colors: colors.clone(),
-        };
-        let color_scheme_path = dirs().data_dir().join("color_scheme.json");
-        if let Ok(json) = serde_json::to_string(&payload) {
-            if let Some(parent) = color_scheme_path.parent() {
-                let _ = fs::create_dir_all(parent);
-            }
-            let _ = fs::write(color_scheme_path, json);
+        let color_scheme_path = dirs().data_dir().join(COLOR_SCHEME_FILE);
+        if let Some(parent) = color_scheme_path.parent() {
+            let _ = fs::create_dir_all(parent);
         }
+        let _ = fs::write(color_scheme_path, json);
     }
 }
 

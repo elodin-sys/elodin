@@ -10,6 +10,7 @@
     ps.grpcio-tools
     ps.grpcio-health-checking
     ps.grpcio-reflection
+    ps.opencv4
   ]);
   basePackages = [
     python

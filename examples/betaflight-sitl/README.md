@@ -16,6 +16,7 @@ The simulation provides:
 - **Multi-Rate Sensors**: Requested sensor rates are capped by the simulation rate
 - **Opt-in FPV**: `RACE_CAMERA=1` records a 640×360 forward camera independently of guidance
 - **Opt-in Truth Hold**: `RACE_GUIDANCE=truth RACE_COURSE=single` holds 4 m before one gate
+- **Opt-in Truth Course**: `RACE_GUIDANCE=truth RACE_COURSE=c1_straight` runs the qualified headless three-gate race profile
 
 ```
 ┌─────────────────────┐        UDP        ┌─────────────────────┐
@@ -263,6 +264,53 @@ The fixture command prints the canonical centered, translated, yawed, and ranged
 poses as JSON. `synthetic_vision.py` is for tests and offline fixtures.
 Production vision code does not import it.
 
+### Gate detector
+
+`gate_detector.py` is the classical orange-gate detector and the only module
+that imports OpenCV. It returns `GateCandidate` values from `vision.py`. It is
+not wired into live guidance. CI installs OpenCV through the `.#run` Nix shell
+(`python3Packages.opencv4`). A local uv environment needs the matching wheel:
+
+```bash
+uv pip install opencv-python-headless
+```
+
+8-bit HSV hue stays on OpenCV's 0–180 scale. The default threshold is hue 5–25,
+saturation at least 120, and value at least 50, for gate RGB `(255, 128, 0)`.
+
+`RACE_RECORD=<directory>` on a camera run writes a replay bundle and does not
+change the command sent to Betaflight. The directory must be missing or empty.
+Without `RACE_CAMERA=1` the process exits 2. If a frame or bundle write fails,
+the run prints `[RACE_RECORD] FAILED` with the directory and the error, then
+exits 1. The bundle is incomplete and is not repaired; record the run again.
+Result lines are printed before that failure line. The bundle is:
+
+- `meta.json` — rates, intrinsics, mount, tilt, and the public inner size
+- `sensors.npz` — 500 Hz means of gyro and specific force, plus barometer and
+  magnetometer samples
+- `frames/chunk_NNNNN.npz` — fresh RGBA frames and their nominal `frame_time`,
+  30 per chunk, compressed on a writer thread during the run
+- `truth.npz` — `world_pos` / `world_vel` at the 500 Hz times and at
+  `frame_time`, plus the course gates. The sensor loader never opens this file.
+
+```bash
+RACE_CAMERA=1 RACE_RECORD=/tmp/race-record \
+  elodin run examples/betaflight-sitl/main.py
+python3 examples/betaflight-sitl/evaluate_detector.py --synthetic --check
+python3 examples/betaflight-sitl/evaluate_detector.py --fixture --check
+python3 examples/betaflight-sitl/evaluate_detector.py --bundle /tmp/race-record
+```
+
+`--check` requires at least 90% detection and a median bearing error of 2° on
+frames from 4–20 m. Bundle mode reads the camera intrinsics, mount, and tilt
+from `meta.json`. It scores the nearest fully visible gate against the
+detection whose corners match that gate's projected opening, so a smaller gate
+seen through a nearer one is not counted as the nearer gate. Frames with no
+visible gate are skipped. `first_candidate_is_target` reports how often the largest
+detection is that gate; it does not affect `--check`. Processing time is
+printed against a 5 ms target and does not fail the command. `bearing_body` is the direction from the body origin;
+navigation should use `position_body`.
+
 ### Race Course and Referee
 
 Course selection is independent of the command source:
@@ -278,9 +326,8 @@ RACE_COURSE=single elodin run examples/betaflight-sitl/main.py
 RACE_COURSE=single elodin editor examples/betaflight-sitl/main.py
 ```
 
-`RACE_COURSE` accepts `none` (default) and `single`. `c1_straight` is a
-reserved value and fails clearly until Package F implements it; every other
-value is also rejected at startup. Course parsing does not select or alter
+`RACE_COURSE` accepts `none` (default), `single`, and `c1_straight`; every other
+value is rejected at startup. Course parsing does not select or alter
 `RACE_GUIDANCE`, so the no-environment default remains the scripted C0 run.
 
 The single gate is centered at ENU `(10, 0, 1.8)` metres with yaw `0` and an
@@ -288,7 +335,10 @@ exact `2.5 m` square inner opening. Yaw is about world +Z; yaw zero gives a
 plane normal along world +X. A pass approaches from negative gate-local X and
 crosses toward positive local X. Four static `0.2 m` saturated-orange matte
 bars render the frame; they carry only `WorldPos` and do not participate in
-rigid-body integration or collision physics.
+rigid-body integration or collision physics. `c1_straight` uses three gates
+at `(10, 0, 1.8)`, `(20, 0, 1.8)`, and `(30, 0, 1.8)` m with that same yaw
+and opening. With the camera enabled, its observational ground plane is
+80 × 80 m so the ground extends past the last gate; other courses keep 40 × 40 m.
 
 The referee scores simulation truth after command selection, independently of
 guidance mode. It interpolates each sampled segment at the next ordered gate
@@ -352,6 +402,54 @@ PASS still accompanies one **expected** incomplete `[RACE]` result with
 `course=single`, `gates_passed=0/1`, and `status=INCOMPLETE`; incomplete race
 status does not fail Package E. See [RACING_PLAN.md](RACING_PLAN.md) for the
 controller design, operating envelope, and acceptance criteria.
+
+#### Truth-guided straight course (Package F)
+
+**Headless truth qualification passed on 2026-11-02** with E1's shared
+controller and G1's GPS-disabled/`trust_mag = OFF` configuration: three consecutive flights
+completed all gates in 41.28–41.32 simulated seconds, then maintained over
+9 s of independently verified terminal safety inside the 60 s cap. Historical
+pre-E1/G1 F runs used a different controller/configuration and FINISH code 8;
+they are not acceptance evidence for this implementation. The current codes
+are `7` COMMIT, `8` reserved SEARCH (vision only), and `9` FINISH.
+
+```bash
+RACE_GUIDANCE=truth RACE_COURSE=c1_straight \
+  elodin run examples/betaflight-sitl/main.py
+```
+
+The course selects the shared mission controller's race profile via
+`TruthGuidanceConfig.for_course`, leaving `single` hold gains and behavior
+unchanged. Repeated ACQUIRE/HOLD/COMMIT cycles advance only on the independent
+referee's ordered pass events. The explicitly approved FINISH policy is to brake
+and descend at 0.4 m/s **under power through touchdown before disarming**, not
+to drop from a suspended pad+0.15 m hover. It freezes the settled pre-arm
+navigation altitude as the pad reference, permits a below-pad control target
+without changing ground physics, and requests disarm only after altitude
+≤pad+0.01 m and total speed ≤0.18 m/s persist for 0.5 s. A broken low/slow dwell
+resets the timer. The shared controller uses unchanged frame-neutral inputs;
+it makes no tilt guarantee. The independent physical grader retains all its
+tilt and flight-safety checks; see the current three-run qualification and
+unchanged-grader evidence in [RACING_PLAN.md](RACING_PLAN.md).
+Truth guidance never uses camera pixels; no camera or GPU is required. The cap
+is **60 simulated seconds** at the unchanged 8 kHz physics/PID rate. The six
+PWM values retain the same one-tick command latch.
+
+One final `[RACE]` line reports ordered progress. An independent host grader
+also emits `[F-COURSE] status=PASS|FAIL ... reason=...`; `[F-GUIDANCE]` reports
+final phase and failure reason. COMPLETE alone cannot pass: the grader uses
+physical truth and the command actually exchanged with Betaflight, not a
+controller completion flag. It requires healthy post-boot lockstep/truth/motor
+samples, a bounded whole-flight envelope, and at least one continuous final
+second after completion at altitude ≤0.15 m, speed ≤0.20 m/s, tilt ≤10°, with
+centered, minimum-throttle, disarmed exchanged RC and all motors ≤0.02.
+Callback failures are sticky even if the SDK logs and swallows them; skipped,
+truncated, or unsuccessfully cleaned-up callback sequences cannot pass.
+Incomplete, interrupted, unsafe, or faulted truth C1 runs fail nonzero. Ordinary
+scripted/manual course incompletion remains observational; E hold retains its
+separate acceptance. Camera acceptance, if enabled, is an additional check.
+See [RACING_PLAN.md](RACING_PLAN.md) for the current qualification status and
+remaining limitations; no vision-guided racing is implemented.
 
 #### Package C referee qualification
 
@@ -476,10 +574,11 @@ examples/betaflight-sitl/
 ├── course.py          # Pure gate/course geometry and KDL bar generation
 ├── fpv_camera.py      # FPV sampling, freshness, frame accounting, and acceptance
 ├── race_options.py    # Pure guidance/course/camera startup selection
-├── exit_status.py     # Independent scenario failure exit-code aggregation
+├── exit_status.py     # Independent scenario exits and sticky callback evidence
 ├── referee.py         # Pure ordered crossing scorer and race result
 ├── hold_referee.py    # Independent truth-based single-gate hold grader
-├── guidance.py        # Pure truth-guided single-gate standoff controller
+├── course_referee.py  # Independent physical truth-course completion/safety grader
+├── guidance.py        # Shared frame-neutral hold/race controller and truth adapter
 ├── referee_audit.py   # Pure opt-in live-audit config and acceptance evaluator
 ├── race_runtime.py    # Static scene entities and referee telemetry adapters
 ├── controller/        # s10-managed Rust gamepad/keyboard input provider

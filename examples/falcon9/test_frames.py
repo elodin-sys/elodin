@@ -13,6 +13,7 @@ from constants import (
     PAD_ALT_M,
     PAD_LAT_DEG,
     PAD_LON_DEG,
+    SITES,
 )
 from frames import (
     OMEGA_E_VEC,
@@ -38,8 +39,8 @@ def test_pad_ecef_matches_whitepaper():
     lz1 = np.asarray(
         geodetic_to_ecef(math.radians(LZ1_LAT_DEG), math.radians(LZ1_LON_DEG), LZ1_ALT_M)
     )
-    np.testing.assert_allclose(lz1 / 1000.0, [921.7, -5534.0, 3023.9], atol=0.1)
-    assert abs(np.linalg.norm(pad - lz1) / 1000.0 - 14.8) < 0.1
+    np.testing.assert_allclose(lz1 / 1000.0, [921.8, -5534.0, 3023.9], atol=0.1)
+    assert abs(np.linalg.norm(pad - lz1) / 1000.0 - 14.9) < 0.1
 
 
 def test_geodetic_roundtrip():
@@ -95,3 +96,21 @@ def test_plumb_line_is_geodetic_vertical():
     # the ellipsoid is an equipotential of the *real* field, not the point-mass one.
     assert misalign_deg < 0.2
     assert abs(float(jnp.linalg.norm(g_app)) - 9.79) < 0.02
+
+
+def test_landing_target_is_inside_the_georeferenced_concrete_circle():
+    reference = SITES["landing"]["reference"]
+    west, south, east, north = reference["extent_degrees"]
+    width, height = reference["image_size"]
+    x, y = reference["center_pixel"]
+    lat = math.radians(north - y / height * (north - south))
+    lon = math.radians(west + x / width * (east - west))
+    center = geodetic_to_ecef(lat, lon, LZ1_ALT_M)
+    basis = ned_basis(lat, lon)
+    target = geodetic_to_ecef(math.radians(LZ1_LAT_DEG), math.radians(LZ1_LON_DEG), LZ1_ALT_M)
+    distance = float(jnp.linalg.norm((basis @ (target - center))[:2]))
+    assert distance < 2.0, "guidance must target the measured concrete-circle center"
+    # The previous coordinate was the old complex reference, between the pads.
+    old_target = geodetic_to_ecef(math.radians(28.48580), math.radians(-80.54440), LZ1_ALT_M)
+    old_distance = float(jnp.linalg.norm((basis @ (old_target - center))[:2]))
+    assert old_distance > reference["concrete_radius_m"]

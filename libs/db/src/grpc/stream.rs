@@ -1444,12 +1444,7 @@ mod tests {
         drop(component_tx);
         drop(component_responses);
         tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                match message_responses.message().await {
-                    Ok(Some(_)) => continue,
-                    Ok(None) | Err(_) => break,
-                }
-            }
+            while let Ok(Some(_)) = message_responses.message().await {}
         })
         .await
         .expect("shared follower did not end with its owner");

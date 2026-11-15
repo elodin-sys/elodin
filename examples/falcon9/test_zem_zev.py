@@ -3,6 +3,9 @@
 Seeds the recorded bad landing-ignition state (~391 m miss, ~47 m/s lateral
 at ~3 km) and integrates the accel-vector law with hoverslam-derived t_go.
 Gate: terminal position err < 2 m and velocity err < 0.5 m/s vs soft target.
+This is an idealized reference algorithm, including a vertical-only terminal
+phase, not a replay of the Rust controller. The controller's terminal braking
+regression is tested directly in controller/src/main.rs and in full SITL runs.
 """
 
 from __future__ import annotations

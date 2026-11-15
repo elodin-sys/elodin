@@ -121,11 +121,7 @@ class GateBar:
 
 
 def course_from_name(name: str) -> Course:
-    """Resolve a supported Package C course name.
-
-    ``c1_straight`` is a stable reserved configuration value, but its geometry
-    intentionally does not land until Package F.
-    """
+    """Resolve a supported core course name with exact contract geometry."""
 
     if name == "none":
         return Course(name="none", gates=())
@@ -142,12 +138,19 @@ def course_from_name(name: str) -> Course:
             ),
         )
     if name == "c1_straight":
-        raise ValueError(
-            "RACE_COURSE='c1_straight' is reserved for Package F and is not implemented"
+        return Course(
+            name="c1_straight",
+            gates=tuple(
+                Gate(
+                    index=index,
+                    center=(x, 0.0, 1.8),
+                    yaw=0.0,
+                    inner_size=SINGLE_GATE_INNER_SIZE_M,
+                )
+                for index, x in enumerate((10.0, 20.0, 30.0))
+            ),
         )
-    raise ValueError(
-        f"unknown RACE_COURSE={name!r}; expected 'none', 'single', or reserved 'c1_straight'"
-    )
+    raise ValueError(f"unknown RACE_COURSE={name!r}; expected 'none', 'single', or 'c1_straight'")
 
 
 def course_from_env(env: Mapping[str, str] | None = None) -> Course:

@@ -33,6 +33,8 @@ pub const ECEF_VIEW_CUBE_RENDER_LAYER: usize = 36;
 pub const REGULAR_SKY_RENDER_LAYER: usize = 37;
 /// Temperature-encoding proxy meshes rendered only by LWIR mask cameras.
 pub const THERMAL_MASK_RENDER_LAYER: usize = 38;
+/// Shared trajectories in scene viewports, excluded from cube/gizmo cameras.
+pub const SCENE_LINE_RENDER_LAYER: usize = 39;
 pub const GRID_RENDER_LAYERS: [(GeoFrame, usize); 3] = [
     (GeoFrame::ENU, ENU_GRID_RENDER_LAYER),
     (GeoFrame::NED, NED_GRID_RENDER_LAYER),
@@ -193,7 +195,8 @@ impl Default for RenderLayerAllocator {
             .with(NED_VIEW_CUBE_RENDER_LAYER)
             .with(ECEF_VIEW_CUBE_RENDER_LAYER)
             .with(REGULAR_SKY_RENDER_LAYER)
-            .with(THERMAL_MASK_RENDER_LAYER);
+            .with(THERMAL_MASK_RENDER_LAYER)
+            .with(SCENE_LINE_RENDER_LAYER);
         Self {
             in_use: reserved.clone(),
             reserved,

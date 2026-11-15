@@ -56,6 +56,19 @@ pub mod nox_impls;
 /// `{impeller_tcp_port} + ASSETS_HTTP_PORT_OFFSET` (default Impeller 2240 → assets 2241).
 pub const ASSETS_HTTP_PORT_OFFSET: u16 = 1;
 
+/// URL path segment in front of every asset key. Files are `/{prefix}/{key}`
+/// so protocol routes such as `/impeller` can share this server.
+pub const ASSETS_HTTP_PREFIX: &str = "assets";
+
+/// `{origin}/assets/{key}`. `origin` is `http://host:port` with no extra path.
+pub fn asset_http_url(origin: &str, key: &str) -> String {
+    let key = key.trim_start_matches('/');
+    format!(
+        "{}/{ASSETS_HTTP_PREFIX}/{key}",
+        origin.trim_end_matches('/')
+    )
+}
+
 /// Port offset for the always-on gRPC server: gRPC listens on
 /// `{impeller_tcp_port} + GRPC_PORT_OFFSET` (default Impeller 2240 → gRPC 2242).
 pub const GRPC_PORT_OFFSET: u16 = 2;

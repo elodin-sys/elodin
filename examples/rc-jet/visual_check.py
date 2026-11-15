@@ -4,6 +4,7 @@
 import json
 import os
 import sys
+import time
 import typing as ty
 from dataclasses import field
 from pathlib import Path
@@ -60,6 +61,7 @@ TARGET_CONTRAST_MIN_DN = 15.0
 DYNAMIC_RANGE_MIN_DN = 50
 TARGET_CHIP_HALF_PX = 16
 TARGET_BACKGROUND_HALF_PX = 48
+RENDER_READY_TIMEOUT_S = float(os.environ.get("ELODIN_LWIR_RENDER_READY_TIMEOUT", "30"))
 
 RigMarker = ty.Annotated[
     jax.Array,
@@ -201,6 +203,8 @@ OUT_DIR.mkdir(parents=True, exist_ok=True)
 pending = list(CAPTURES)
 captures: list[dict] = []
 finished = [False]
+renderer_ready = [False]
+startup_failure: list[str | None] = [None]
 
 
 def frames_at(ctx, timestamp: int):
@@ -224,6 +228,24 @@ def frames_at(ctx, timestamp: int):
         return None
     rgba_r = np.ascontiguousarray(rgba.reshape(-1, 4)[:, 0])
     return min(rgba_ts, gray8_ts), rgba_r, gray8
+
+
+def wait_for_renderer(ctx) -> bool:
+    started = time.monotonic()
+    deadline = started + RENDER_READY_TIMEOUT_S
+    while time.monotonic() < deadline:
+        latest = frames_at(ctx, ctx.timestamp)
+        if latest is not None:
+            timestamp, _, _ = latest
+            elapsed = time.monotonic() - started
+            print(f"[VISUAL] render server ready at {timestamp / 1e6:.3f}s after {elapsed:.3f}s")
+            return True
+        time.sleep(0.05)
+    startup_failure[0] = (
+        f"render server did not produce both camera frames within {RENDER_READY_TIMEOUT_S:.1f}s"
+    )
+    print(f"[VISUAL] FAIL: {startup_failure[0]}")
+    return False
 
 
 def target_contrast(gray: np.ndarray) -> float:
@@ -316,6 +338,10 @@ def finish() -> list[str]:
 
 
 def post_step(tick: int, ctx) -> None:
+    if not renderer_ready[0]:
+        renderer_ready[0] = wait_for_renderer(ctx)
+        return
+
     t = tick * DT
     if pending and t >= pending[0][1]:
         latest = frames_at(ctx, round(pending[0][1] * 1_000_000))
@@ -358,9 +384,12 @@ world.run(
     simulation_rate=1.0 / DT,
     generate_real_time=True,
     max_ticks=int(TOTAL_S / DT),
+    is_canceled=lambda: startup_failure[0] is not None,
     post_step=post_step,
     interactive=False,
     db_path=os.environ.get("ELODIN_DB_PATH", str(OUT_DIR / "db")),
     start_timestamp=0,
 )
+if startup_failure[0] is not None:
+    raise RuntimeError(startup_failure[0])
 print(f"[VISUAL] captured {len(captures)}/{len(CAPTURES)} phases")

@@ -590,7 +590,7 @@ mod tests {
 
     fn hashed_artifact(batch_size: u32) -> DisplayKernelArtifact {
         let mut artifact = sample_artifact("", batch_size);
-        let digest = hex::encode(Sha256::digest(&artifact.hash_payload().unwrap()));
+        let digest = hex::encode(Sha256::digest(artifact.hash_payload().unwrap()));
         artifact.hash = digest;
         artifact
     }

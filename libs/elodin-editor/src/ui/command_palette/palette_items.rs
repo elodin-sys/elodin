@@ -1102,25 +1102,25 @@ fn connect_database() -> PaletteItem {
         SIMULATION_LABEL,
         |_: In<String>| {
             PalettePage::new(vec![PaletteItem::new(
-                LabelSource::placeholder("127.0.0.1:2240"),
+                LabelSource::placeholder("http://127.0.0.1:2241"),
                 "",
                 |In(addr): In<String>, mut connect: MessageWriter<WsConnect>| {
                     let trimmed = addr.trim();
-                    let parsed = impeller_bevy::DbEndpoint::parse(if trimmed.is_empty() {
-                        "127.0.0.1:2240"
+                    let parsed = if trimmed.is_empty() {
+                        "http://127.0.0.1:2241".parse::<impeller_bevy::HostOrUrl>()
                     } else {
-                        trimmed
-                    });
+                        trimmed.parse()
+                    };
                     match parsed {
-                        Ok(addr) => {
-                            connect.write(WsConnect(addr));
+                        Ok(url) => {
+                            connect.write(WsConnect(impeller_bevy::DbEndpoint::from_assets(url)));
                             PaletteEvent::Exit
                         }
                         Err(err) => PaletteEvent::Error(format!("Invalid address: {err}")),
                     }
                 },
             )])
-            .prompt("Database address (host:port)")
+            .prompt("Database URL")
             .into_event()
         },
     )
@@ -1657,7 +1657,7 @@ fn refresh_schematic_index(
 pub fn clear_schematic() -> PaletteItem {
     #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
     {
-        return PaletteItem::new(
+        PaletteItem::new(
             "Clear Schematic",
             SCHEMATIC_LABEL,
             |_: In<String>, mut params: LoadSchematicParams| {
@@ -1666,7 +1666,7 @@ pub fn clear_schematic() -> PaletteItem {
                 params.load_schematic(&impeller_wkt::Schematic::default(), None, None);
                 PaletteEvent::Exit
             },
-        );
+        )
     }
     #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
     PaletteItem::new(
@@ -1974,9 +1974,9 @@ fn revert_previous_skybox_item(name: String) -> PaletteItem {
 fn skybox_menu() -> PaletteItem {
     #[cfg(all(feature = "wasm-cut", target_family = "wasm"))]
     {
-        return PaletteItem::new("Skybox...", SKYBOX_LABEL, |_: In<String>| {
+        PaletteItem::new("Skybox...", SKYBOX_LABEL, |_: In<String>| {
             PaletteEvent::Error("Skybox is not available in the wasm build".into())
-        });
+        })
     }
     #[cfg(not(all(feature = "wasm-cut", target_family = "wasm")))]
     PaletteItem::new(

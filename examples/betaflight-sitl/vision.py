@@ -117,7 +117,11 @@ FPV_MOUNT = CameraMount(position_body=np.asarray(MOUNT, dtype=np.float64), tilt_
 
 @dataclass(frozen=True, slots=True)
 class GatePose:
-    """Gate center and opening frame recovered from image corners."""
+    """Gate center and opening frame recovered from image corners.
+
+    ``bearing_body`` is the unit direction from the body origin to the gate
+    center, not from the camera. Navigation uses ``position_body``.
+    """
 
     rotation_cam_gate: np.ndarray
     translation_cam: np.ndarray
@@ -152,6 +156,8 @@ class GateCandidate:
     corner_order_ambiguous: bool
 
     def __post_init__(self) -> None:
+        if not math.isfinite(self.sample_time):
+            raise ValueError("sample_time must be finite")
         corners = np.asarray(self.corners_px, dtype=np.float64)
         if corners.shape != (4, 2) or not np.all(np.isfinite(corners)):
             raise ValueError("corners must be four finite pixel positions")
@@ -236,6 +242,12 @@ def _rodrigues(rotation: np.ndarray) -> np.ndarray:
 
 
 def _rotation_vector(rotation: np.ndarray) -> np.ndarray:
+    """Rodrigues vector of a rotation matrix.
+
+    Within about 1e-6° of 180° the skew-axis extraction is numerically
+    unreliable. ``solve_square_pnp`` then returns no pose instead of a wrong one.
+    """
+
     cosine = float(np.clip((np.trace(rotation) - 1.0) * 0.5, -1.0, 1.0))
     theta = math.acos(cosine)
     if theta < 1e-12:

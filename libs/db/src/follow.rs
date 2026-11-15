@@ -18,7 +18,9 @@
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use impeller::types::{IntoLenPacket, Msg, OwnedPacket as Packet, PacketId, Timestamp};
+use impeller::types::{
+    ComponentId, IntoLenPacket, Msg, OwnedPacket as Packet, PacketId, Timestamp,
+};
 use impeller_stellar::{PacketSink, PacketStream};
 use impeller_wkt::*;
 #[cfg(feature = "axum")]
@@ -296,6 +298,59 @@ fn apply_db_config_update(
     Ok(())
 }
 
+// Apply the bulk follow ingress without per-sample VTable decomposition.
+// Notify readers only for samples that were actually appended.
+pub(super) fn apply_follow_time_series(
+    db: &DB,
+    component_id: ComponentId,
+    timestamps: &[Timestamp],
+    data_buf: &[u8],
+    skip: usize,
+) -> Result<(), Error> {
+    db.with_state(|state| {
+        let Some(component) = state.components.get(&component_id) else {
+            return Ok(());
+        };
+        let was_empty = component.time_series.index().is_empty();
+        let elem_size = component.schema.size();
+        let mut latest = None;
+        let mut earliest = None;
+        for (i, &timestamp) in timestamps.iter().enumerate().skip(skip) {
+            let start = i * elem_size;
+            let end = start + elem_size;
+            if end > data_buf.len() {
+                break;
+            }
+            if component
+                .time_series
+                .push_buf(timestamp, &data_buf[start..end])
+                .is_ok()
+            {
+                latest = Some(timestamp);
+                if timestamp.0 > 0 && earliest.is_none() {
+                    earliest = Some(timestamp);
+                }
+            }
+        }
+        if let Some(latest) = latest {
+            if was_empty {
+                db.vtable_gen
+                    .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }
+            let is_timestamp_source = state
+                .get_component_metadata(component_id)
+                .is_some_and(|metadata| metadata.is_timestamp_source());
+            if !is_timestamp_source {
+                db.last_updated.update_max(latest);
+                if let Some(earliest) = earliest {
+                    db.earliest_timestamp.update_min(earliest);
+                }
+            }
+        }
+        Ok(())
+    })
+}
+
 async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), Error> {
     let (session, metadata_resp, schema_resp) = request_source_snapshot(config, true).await?;
     apply_source_snapshot(
@@ -449,38 +504,7 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                     *skip_remaining.entry(component_id).or_insert(0) -= skip;
                 }
 
-                db.with_state(|state| -> Result<(), Error> {
-                    let Some(component) = state.components.get(&component_id) else {
-                        return Ok(());
-                    };
-                    let elem_size = component.schema.size();
-                    for (i, &timestamp) in timestamps.iter().enumerate().skip(skip) {
-                        let start = i * elem_size;
-                        let end = start + elem_size;
-                        if end > data_buf.len() {
-                            break;
-                        }
-                        let _ = component
-                            .time_series
-                            .push_buf(timestamp, &data_buf[start..end]);
-                    }
-                    if timestamps.len() > skip {
-                        let is_ts_source = state
-                            .component_metadata
-                            .get(&component_id)
-                            .map(|m| m.is_timestamp_source())
-                            .unwrap_or(false);
-                        if !is_ts_source {
-                            db.last_updated.update_max(*timestamps.last().unwrap());
-                            if let Some(&first_valid) =
-                                timestamps[skip..].iter().find(|ts| ts.0 > 0)
-                            {
-                                db.earliest_timestamp.update_min(first_valid);
-                            }
-                        }
-                    }
-                    Ok(())
-                })?;
+                apply_follow_time_series(db, component_id, timestamps, data_buf, skip)?;
             }
 
             // Table – decomponentize and write to local DB.

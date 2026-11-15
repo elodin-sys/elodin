@@ -1,0 +1,52 @@
+[package]
+name = "webcodecs-video"
+version.workspace = true
+edition = "2024"
+publish = false
+description = "WebCodecs H.264 decoder and a Bevy component that uploads frames to one GPU texture"
+
+[lib]
+name = "webcodecs_video"
+
+[features]
+default = []
+bevy = ["dep:bevy", "dep:wgpu"]
+egui = ["bevy", "dep:bevy_egui", "dep:egui"]
+
+[dependencies]
+bevy = { version = "0.19", default-features = false, optional = true, features = [
+  "std",
+  "bevy_asset",
+  "bevy_image",
+  "bevy_log",
+  "bevy_render",
+  "webgl2",
+] }
+bevy_egui = { version = "0.40", default-features = false, optional = true, features = [
+  "render",
+] }
+egui = { version = "0.34", default-features = false, optional = true }
+wgpu = { version = "29", default-features = false, optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys = "0.3"
+thiserror = "2"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3.106", features = [
+  "CodecState",
+  "DomException",
+  "EncodedVideoChunk",
+  "EncodedVideoChunkInit",
+  "EncodedVideoChunkType",
+  "Navigator",
+  "Performance",
+  "PlaneLayout",
+  "VideoDecoder",
+  "VideoDecoderConfig",
+  "VideoDecoderInit",
+  "VideoFrame",
+  "VideoFrameCopyToOptions",
+  "VideoPixelFormat",
+  "Window",
+] }

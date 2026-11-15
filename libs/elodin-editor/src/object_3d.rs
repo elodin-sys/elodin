@@ -81,11 +81,13 @@ pub fn resolve_db_asset_url(path: &str, connection_addr: Option<SocketAddr>) -> 
 pub fn resolve_db_endpoint(path: &str, endpoint: Option<&impeller_bevy::DbEndpoint>) -> String {
     if let Some(name) = path.strip_prefix("db:") {
         let name = name.trim_start_matches('/');
-        let base = match endpoint {
-            Some(endpoint) => endpoint.http_base(),
-            None => assets_http_base("127.0.0.1:2240".parse().expect("valid addr")),
-        };
-        format!("{base}/{name}")
+        match endpoint {
+            Some(endpoint) => endpoint.assets_url(name).to_string(),
+            None => {
+                let base = assets_http_base("127.0.0.1:2240".parse().expect("valid addr"));
+                impeller::asset_http_url(&base, name)
+            }
+        }
     } else {
         path.to_string()
     }
@@ -2082,7 +2084,6 @@ pub fn create_object_3d_entity(
             Visibility::default(),
             InheritedVisibility::default(),
             ViewVisibility::default(),
-            #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
             impeller_wkt::WorldPos::default(),
             Name::new(format!("object_3d {}", data.mesh)),
@@ -4085,17 +4086,41 @@ mod db_asset_url_tests {
     use std::net::SocketAddr;
 
     #[test]
+    fn nested_effects_and_textures_use_the_page_database() {
+        let endpoint = impeller_bevy::DbEndpoint::from_assets(
+            "https://db.example/recordings/f9/".parse().unwrap(),
+        );
+        for key in [
+            "effects/falcon9/merlin_flame.effect",
+            "textures/smoke_puff.png",
+        ] {
+            assert_eq!(
+                super::resolve_db_asset_url_prefer_local(
+                    &format!("db:{key}"),
+                    Some(&endpoint),
+                    None,
+                ),
+                format!("https://db.example/recordings/f9/assets/{key}")
+            );
+        }
+        assert_eq!(
+            endpoint.ws_urls().0,
+            "wss://db.example/recordings/f9/impeller"
+        );
+    }
+
+    #[test]
     fn resolve_db_asset_url_uses_connection_host_and_offset_port() {
         let conn: SocketAddr = "127.0.0.1:2240".parse().unwrap();
         assert_eq!(
             resolve_db_asset_url("db:rocket.glb", Some(conn)),
-            "http://127.0.0.1:2241/rocket.glb"
+            "http://127.0.0.1:2241/assets/rocket.glb"
         );
     }
 
     #[test]
     fn resolve_http_asset_url_is_unchanged() {
-        let url = "http://127.0.0.1:2241/rocket.glb";
+        let url = "http://127.0.0.1:2241/assets/rocket.glb";
         assert_eq!(resolve_db_asset_url(url, None), url);
     }
 
@@ -4104,7 +4129,7 @@ mod db_asset_url_tests {
         let conn: SocketAddr = "[::1]:2240".parse().unwrap();
         assert_eq!(
             resolve_db_asset_url("db:rocket.glb", Some(conn)),
-            "http://[::1]:2241/rocket.glb"
+            "http://[::1]:2241/assets/rocket.glb"
         );
     }
 
@@ -4113,7 +4138,7 @@ mod db_asset_url_tests {
         let conn: SocketAddr = "[::]:2240".parse().unwrap();
         assert_eq!(
             resolve_db_asset_url("db:rocket.glb", Some(conn)),
-            "http://[::1]:2241/rocket.glb"
+            "http://[::1]:2241/assets/rocket.glb"
         );
     }
 
@@ -4122,7 +4147,7 @@ mod db_asset_url_tests {
         let conn: SocketAddr = "0.0.0.0:2240".parse().unwrap();
         assert_eq!(
             resolve_db_asset_url("db:rocket.glb", Some(conn)),
-            "http://127.0.0.1:2241/rocket.glb"
+            "http://127.0.0.1:2241/assets/rocket.glb"
         );
     }
 
@@ -4130,7 +4155,7 @@ mod db_asset_url_tests {
     fn resolve_db_asset_url_defaults_to_localhost_when_disconnected() {
         assert_eq!(
             resolve_db_asset_url("db:rocket.glb", None),
-            "http://127.0.0.1:2241/rocket.glb"
+            "http://127.0.0.1:2241/assets/rocket.glb"
         );
     }
 
@@ -4139,7 +4164,7 @@ mod db_asset_url_tests {
         let conn: SocketAddr = "127.0.0.1:2240".parse().unwrap();
         assert_eq!(
             resolve_db_asset_url("db:icons/marker.png", Some(conn)),
-            "http://127.0.0.1:2241/icons/marker.png"
+            "http://127.0.0.1:2241/assets/icons/marker.png"
         );
     }
 
@@ -4178,7 +4203,7 @@ mod db_asset_url_tests {
                 Some(&conn),
                 Some(&root)
             ),
-            "http://10.0.0.5:2241/textures/missing.png"
+            "http://10.0.0.5:2241/assets/textures/missing.png"
         );
         // Bare (non-db:) paths pass through untouched.
         assert_eq!(
@@ -4192,7 +4217,7 @@ mod db_asset_url_tests {
                 Some(&conn),
                 None
             ),
-            "http://10.0.0.5:2241/textures/soft_circle.png"
+            "http://10.0.0.5:2241/assets/textures/soft_circle.png"
         );
 
         std::fs::remove_dir_all(&root).ok();
@@ -4203,7 +4228,19 @@ mod db_asset_url_tests {
         let endpoint = impeller_bevy::DbEndpoint::parse("db.local:2240").unwrap();
         assert_eq!(
             super::resolve_db_endpoint("db:rocket.glb", Some(&endpoint)),
-            "http://db.local:2241/rocket.glb"
+            "http://db.local:2241/assets/rocket.glb"
+        );
+    }
+
+    #[test]
+    fn resolve_db_endpoint_uses_assets_override() {
+        let assets: impeller_bevy::HostOrUrl = "https://cdn.example/runs/a".parse().unwrap();
+        let endpoint = impeller_bevy::DbEndpoint::parse("db.local:2240")
+            .unwrap()
+            .with_assets(assets);
+        assert_eq!(
+            super::resolve_db_endpoint("db:rocket.glb", Some(&endpoint)),
+            "https://cdn.example/runs/a/assets/rocket.glb"
         );
     }
 }
