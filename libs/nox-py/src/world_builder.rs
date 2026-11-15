@@ -280,10 +280,13 @@ fn is_snake_case(s: &str) -> bool {
     // TODO: Don't allocate a string to test a string.
     //
     // [1]: https://github.com/rutrum/convert-case/blob/b9dd92b4394745e15943a604890cdc57fa6bd289/src/lib.rs#L366
-    let b = s
-        .without_boundaries(&convert_case::Boundary::digits())
-        .to_case(convert_case::Case::Snake);
-    b == s
+    s.split('.').all(|segment| {
+        !segment.is_empty()
+            && segment
+                .without_boundaries(&convert_case::Boundary::digits())
+                .to_case(convert_case::Case::Snake)
+                == segment
+    })
 }
 
 #[derive(Clone, Copy)]
@@ -2453,7 +2456,10 @@ mod test {
     fn test_our_snake_case() {
         assert!(is_snake_case("e1"));
         assert!(is_snake_case("e_1"));
+        assert!(is_snake_case("vehicle_1.rocket"));
         assert!(!is_snake_case("E1"));
+        assert!(!is_snake_case("vehicle_1.Rocket"));
+        assert!(!is_snake_case("vehicle_1..rocket"));
     }
 
     #[test]
