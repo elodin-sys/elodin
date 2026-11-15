@@ -162,6 +162,11 @@ def matvec(x):
     return outer(x) @ jnp.arange(1.0, 5.0) + jnp.arange(4.0, 0.0, -1.0) @ outer(x)
 
 
+def solve(x):
+    # Under vmap, the LU factorization and triangular solves are batched LAPACK calls.
+    return jnp.linalg.solve(3.0 * jnp.eye(4) + jnp.outer(x, x), x)
+
+
 def reduce_window(x):
     pairs = jax.lax.reduce_window(outer(x), 0.0, jax.lax.add, (1, 2), (1, 2), "VALID")
     peaks = jax.lax.reduce_window(x, -jnp.inf, jax.lax.max, (3,), (1,), "SAME")
@@ -208,8 +213,8 @@ def window_lookup(x):
     return jnp.concatenate(windows)
 
 
-def history(fn, backend: str, entities: int = 1) -> np.ndarray:
-    @el.map
+def history(fn, backend: str, entities: int = 1, mapper=el.map) -> np.ndarray:
+    @mapper
     def step(x: X) -> tuple[X, Y]:
         return jnp.array([-1.3, -0.9, -0.6, 1.2]) * jnp.roll(x, 1), fn(x)
 
@@ -249,6 +254,7 @@ CASES = [
     mekf_matmul,
     motor_thrust,
     matvec,
+    solve,
     reduce_window,
     max_pool_grad,
     table_lookup,
@@ -270,6 +276,15 @@ def test_cranelift_matches_jax_cpu_batched(fn):
     expected = history(fn, "jax-cpu", entities=3)
     np.testing.assert_allclose(
         history(fn, "cranelift", entities=3), expected, rtol=1e-12, atol=1e-12
+    )
+
+
+# Cranelift calls one per-entity function for each entity; jax-cpu runs a `lax.scan`.
+@pytest.mark.parametrize("fn", CASES, ids=lambda fn: fn.__name__)
+def test_cranelift_matches_jax_cpu_map_seq(fn):
+    expected = history(fn, "jax-cpu", entities=3, mapper=el.map_seq)
+    np.testing.assert_allclose(
+        history(fn, "cranelift", entities=3, mapper=el.map_seq), expected, rtol=1e-12, atol=1e-12
     )
 
 

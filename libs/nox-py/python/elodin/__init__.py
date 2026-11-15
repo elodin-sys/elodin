@@ -210,12 +210,14 @@ class Query(Generic[Unpack[A]]):
         inner: QueryInner,
         component_data: list[Component],
         component_classes: list[type[Any]],
+        cranelift: bool = False,
     ):
         self.bufs = inner.arrays()
         self.inner = inner
         self.component_data = component_data
         self.component_classes = component_classes
         self.batch1 = getattr(inner, "batch1", False)
+        self.cranelift = cranelift
 
     def map(
         self,
@@ -226,7 +228,8 @@ class Query(Generic[Unpack[A]]):
 
         It will convert `jax.lax.cond` which only evaluates one consequent to
         `jax.lax.select` which always evaluates both consequents. If one of the
-        consequents is seldom needed and expensive, consider using `map_seq`.
+        consequents is seldom needed and expensive, or `f` is large, consider
+        using `map_seq`.
         """
         out_tps_tuple: Tuple[Annotated[Any, Component], ...] = (
             (out_tps,) if not isinstance(out_tps, tuple) else out_tps
@@ -258,7 +261,7 @@ class Query(Generic[Unpack[A]]):
             component_classes += [out_tp]
         if inner is None:
             raise Exception("query returned no components")
-        return Query(inner, component_data, component_classes)
+        return Query(inner, component_data, component_classes, self.cranelift)
 
     def map_seq(
         self,
@@ -268,8 +271,9 @@ class Query(Generic[Unpack[A]]):
         """This maps a query to another query via a given function f sequentially.
 
         It will not convert `jax.lax.cond` which only evaluates one consequent
-        to `jax.lax.select` which always evaluates both consequents. Only use
-        this if one of your consequents is very expensive to compute.
+        to `jax.lax.select` which always evaluates both consequents. On Cranelift
+        `f` compiles once and runs for each entity, which is faster than `map`
+        when `f` is large, such as a filter update.
         """
         out_tps_tuple: Tuple[Annotated[Any, Component], ...] = (
             (out_tps,) if not isinstance(out_tps, tuple) else out_tps
@@ -293,6 +297,23 @@ class Query(Generic[Unpack[A]]):
                 result = call_single(0)
                 flat, _ = tree_flatten(result)
                 bufs = [jax.numpy.expand_dims(b, axis=0) for b in flat]
+            elif self.cranelift:
+
+                def per_entity(*entity_inputs):
+                    return f(
+                        *[
+                            from_array(cls, x)
+                            for (x, cls) in zip(entity_inputs, self.component_classes)
+                        ]
+                    )
+
+                # Names the one compiled per-entity function after `f` in profiles.
+                per_entity.__name__ = getattr(f, "__name__", "per_entity")
+                call = jax.jit(per_entity)
+                rows = [
+                    tree_flatten(call(*[b[i] for b in self.bufs]))[0] for i in range(batch_size)
+                ]
+                bufs = [jax.numpy.stack(leaves) for leaves in zip(*rows)]
             else:
 
                 def scan_body(carry, entity_inputs):
@@ -319,13 +340,14 @@ class Query(Generic[Unpack[A]]):
             component_classes += [out_tp]
         if inner is None:
             raise Exception("query returned no components")
-        return Query(inner, component_data, component_classes)
+        return Query(inner, component_data, component_classes, self.cranelift)
 
     def join(self, other: "Query[Unpack[A]]") -> "Query[Any]":
         return Query(
             self.inner.join_query(other.inner),
             self.component_data + other.component_data,
             self.component_classes + other.component_classes,
+            self.cranelift,
         )
 
     @staticmethod
@@ -350,6 +372,7 @@ class Query(Generic[Unpack[A]]):
             QueryInner.from_builder(builder, ids, args),
             component_data,
             component_classes,
+            builder.cranelift,
         )
 
     def output(self, builder: SystemBuilder, args: list[Any]) -> Any:
@@ -388,7 +411,9 @@ def map_seq(
     """Like @map but uses sequential execution instead of vmap.
 
     This preserves jax.lax.cond semantics (only one branch executes).
-    Use when one branch of a conditional is expensive and rarely needed.
+    Use when one branch of a conditional is expensive and rarely needed, or
+    when the function is large: on Cranelift it compiles once and runs for
+    each entity.
     """
     sig = inspect.signature(func)
     tys = list(sig.parameters.values())

@@ -2116,6 +2116,7 @@ impl WorldBuilder {
         self.world.metadata.generate_real_time = generate_real_time;
         self.world.metadata.ticks_per_telemetry = ticks_per_telemetry;
         self.world.metadata.default_playback_speed = default_playback_speed;
+        self.world.metadata.cranelift = matches!(engine, BackendEngine::Cranelift);
         if let Some(max_ticks) = max_ticks {
             self.world.metadata.max_tick = max_ticks;
         }

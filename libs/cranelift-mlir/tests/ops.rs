@@ -2209,6 +2209,27 @@ fn test_reduce_rejects_empty_result() {
     }
 }
 
+/// A pointer-ABI intermediate too large for the tick stack fails to compile instead of
+/// exhausting memory while its lanes are emitted.
+#[test]
+fn test_oversized_intermediate_fails_to_compile() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<f64>) -> tensor<f64> {
+    %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f64>) -> tensor<3000x3000xf64>
+    %1 = stablehlo.slice %0 [0:1, 0:1] : (tensor<3000x3000xf64>) -> tensor<1x1xf64>
+    %2 = stablehlo.reshape %1 : (tensor<1x1xf64>) -> tensor<f64>
+    return %2 : tensor<f64>
+  }
+}
+"#;
+    let module = cranelift_mlir::parser::parse_module(mlir).unwrap();
+    let Err(err) = cranelift_mlir::lower::compile_module(&module) else {
+        panic!("a 72 MB broadcast compiled");
+    };
+    assert!(err.contains("stack slot"), "{err}");
+}
+
 #[test]
 fn test_reduce_any_axes_i64() {
     let shape = [2, 3, 4];
@@ -2638,6 +2659,19 @@ module @module {{
             vec![3, 10, -5, 7, 11, 0],
             vec![3.0, 10.0, 0.0, 7.0, 10.0, 0.0],
         ),
+        (
+            "index_vector_dim omitted means 0",
+            gather(
+                "2x3",
+                "1",
+                "2x1",
+                "offset_dims = [0, 1], start_index_map = [1]",
+                "2, 1",
+            ),
+            (0..6).map(f64::from).collect(),
+            vec![2],
+            vec![2.0, 5.0],
+        ),
     ];
     for (name, mlir, data, indices, want) in cases {
         let (data, indices) = (f64_buf(&data), i32_buf(&indices));
@@ -2647,6 +2681,35 @@ module @module {{
         ] {
             assert_eq!(read_f64s(&out[0])[..], want[..], "{name}");
         }
+    }
+}
+
+#[test]
+fn test_gather_from_vmapped_cond_table() {
+    // `jax.vmap` of a `lax.cond` over a table: the table is broadcast to the batch,
+    // passed through `select(pred, x, x)` and gathered per entity.
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<2xf64>, %arg1: tensor<2x2xi32>) -> tensor<2x2x2xf64> {
+    %cst = stablehlo.constant dense<[[0.0, 1.0, 2.0], [10.0, 11.0, 12.0], [20.0, 21.0, 22.0], [30.0, 31.0, 32.0]]> : tensor<4x3xf64>
+    %0 = stablehlo.broadcast_in_dim %cst, dims = [1, 2] : (tensor<4x3xf64>) -> tensor<2x4x3xf64>
+    %cst_0 = stablehlo.constant dense<0.000000e+00> : tensor<f64>
+    %1 = stablehlo.broadcast_in_dim %cst_0, dims = [] : (tensor<f64>) -> tensor<2xf64>
+    %2 = stablehlo.compare GT, %arg0, %1, FLOAT : (tensor<2xf64>, tensor<2xf64>) -> tensor<2xi1>
+    %3 = stablehlo.broadcast_in_dim %2, dims = [0] : (tensor<2xi1>) -> tensor<2x4x3xi1>
+    %4 = stablehlo.select %3, %0, %0 : tensor<2x4x3xi1>, tensor<2x4x3xf64>
+    %5 = "stablehlo.gather"(%4, %arg1) <{dimension_numbers = #stablehlo.gather<offset_dims = [1, 2], operand_batching_dims = [0], start_indices_batching_dims = [0], start_index_map = [1, 2], index_vector_dim = 1>, indices_are_sorted = true, slice_sizes = array<i64: 1, 2, 2>}> : (tensor<2x4x3xf64>, tensor<2x2xi32>) -> tensor<2x2x2xf64>
+    return %5 : tensor<2x2x2xf64>
+  }
+}
+"#;
+    let (mode, corners) = (f64_buf(&[1.0, -1.0]), i32_buf(&[2, 1, 0, 0]));
+    for pointer_abi in [false, true] {
+        let out = run_mlir_folded(mlir, &[&mode, &corners], &[64], pointer_abi);
+        assert_eq!(
+            read_f64s(&out[0])[..],
+            [21.0, 22.0, 31.0, 32.0, 0.0, 1.0, 10.0, 11.0]
+        );
     }
 }
 
@@ -6077,6 +6140,45 @@ module @module {
     assert_f64s_close(
         &reconstruct(l1),
         &[9.0, 3.0, 1.0, 3.0, 6.0, 2.0, 1.0, 2.0, 5.0],
+    );
+}
+
+#[test]
+fn test_lapack_dgetrf_batched() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<2x2x2xf64>) -> (tensor<2x2x2xf64>, tensor<2x2xi32>, tensor<2xi32>) {
+    %0:3 = stablehlo.custom_call @lapack_dgetrf_ffi(%arg0) {backend_config = "", mhlo.backend_config = {}} -> (tensor<2x2x2xf64>, tensor<2x2xi32>, tensor<2xi32>)
+    return %0#0, %0#1, %0#2 : tensor<2x2x2xf64>, tensor<2x2xi32>, tensor<2xi32>
+  }
+}
+"#;
+    let a = f64_buf(&[4.0, 3.0, 6.0, 3.0, 2.0, 1.0, 1.0, 3.0]);
+    let out = run_mlir(mlir, &[&a], &[64, 16, 8]);
+    assert_f64s_close(
+        &read_f64s(&out[0]),
+        &[6.0, 3.0, 2.0 / 3.0, 1.0, 2.0, 1.0, 0.5, 2.5],
+    );
+    assert_eq!(read_i32s(&out[1]), [2, 2, 1, 2]);
+    assert_eq!(read_i32s(&out[2]), [0, 0]);
+}
+
+#[test]
+fn test_lapack_dtrsm_batched() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<2x2x2xf64>, %arg1: tensor<2x2x2xf64>) -> tensor<2x2x2xf64> {
+    %0 = stablehlo.custom_call @lapack_dtrsm_ffi(%arg0, %arg1) {backend_config = "", mhlo.backend_config = {diag = 85 : ui8, side = 76 : ui8, trans_x = 78 : ui8, uplo = 76 : ui8}} -> tensor<2x2x2xf64>
+    return %0 : tensor<2x2x2xf64>
+  }
+}
+"#;
+    let a = f64_buf(&[1.0, 0.0, 2.0, 1.0, 1.0, 0.0, 3.0, 1.0]);
+    let b = f64_buf(&[5.0, 1.0, 8.0, 4.0, 1.0, 2.0, 4.0, 9.0]);
+    let out = run_mlir(mlir, &[&a, &b], &[64]);
+    assert_f64s_close(
+        &read_f64s(&out[0]),
+        &[5.0, 1.0, -2.0, 2.0, 1.0, 2.0, 1.0, 3.0],
     );
 }
 

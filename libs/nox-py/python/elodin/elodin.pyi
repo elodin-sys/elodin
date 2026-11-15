@@ -198,6 +198,7 @@ class ComponentType:
     SpatialMotionF64: ClassVar[ComponentType]
 
 class SystemBuilder:
+    cranelift: bool
     def init_var(self, name: str, ty: ComponentType): ...
     def var_arrays(self) -> list[jax.typing.ArrayLike]: ...
 

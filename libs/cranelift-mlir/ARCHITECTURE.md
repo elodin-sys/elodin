@@ -158,9 +158,18 @@ families cooperate under a bounded cascade loop per function:
    `Slice` / `Pad` / `Concatenate` / `DynamicSlice` on `DenseArray` /
    `DenseSplat` constants — each gated by a 1 KB byte-size cap so folding
    cannot explode compile-time memory. Identities (`x*1`, `x+0`, `x-0`,
-   `x/1`, constant-cond `Select`, no-op `Convert` / `Reshape` /
-   `BroadcastInDim`) rewrite downstream operand references through a
-   `ValueId` alias table; the now-unused instruction is removed by DCE.
+   `x/1`, constant-cond `Select`, `select(c, x, x)`, no-op `Convert` /
+   `Reshape` / `BroadcastInDim`) rewrite downstream operand references
+   through a `ValueId` alias table; the now-unused instruction is removed
+   by DCE.
+
+After the identities, a `gather` whose operand is a `broadcast_in_dim` that
+only inserts the gather's `operand_batching_dims` reads the broadcast's
+source instead, with the batching dims dropped and the other operand dims
+renumbered. `jax.vmap` emits that pattern for a lookup table shared by every
+entity, usually behind the `select(pred, x, x)` of a vmapped `lax.cond`;
+without the rewrite the pointer ABI would build one copy of the table per
+entity.
 
 A conservative DCE pass runs after each fold iteration, removing pure
 instructions whose result `ValueId`s are no longer referenced anywhere in
@@ -570,6 +579,10 @@ Each LAPACK handler follows the same pattern:
 3. **Store** input values into the stack slot
 4. **Emit** a call to the registered host function symbol
 5. **Load** output values from the stack slot back into SSA values
+
+Cholesky, LU (`dgetrf`) and triangular solve (`dtrsm`) also take a stack of
+matrices, as `jax.vmap` emits them (`num_batch_dims = "1"`): steps 3–5 repeat
+for each matrix through the same slot.
 
 The host functions (`extern "C"`) handle:
 - Row-major (IR convention) to column-major (faer convention) conversion
@@ -1000,14 +1013,17 @@ improvement ideas live in [Opportunities](#opportunities).
   unconditionally spawns a 256 MB-stack worker thread to run `tick_fn`, and
   [`tests/checkpoint_test.rs`](tests/checkpoint_test.rs)'s `verify_checkpoint`
   uses the same 256 MB for parity. Bisection helpers run on 64 MB, adequate for
-  their scope.
+  their scope. Lowering rejects any pointer-ABI result over `MAX_SLOT_BYTES`
+  (64 MB, a quarter of that stack), so an oversized intermediate is a compile
+  error instead of an out-of-memory compile or a stack overflow.
 
 - **Pointer-ABI threshold sensitivity.** Any single tensor > 64 elements
   classifies the whole function to pointer ABI. Simulations with many entities
   (e.g. `WorldPos` as `[N×7]` once `N ≥ 10`) therefore exercise the pointer
   paths for ops like `dot_general` and `concatenate` even when most per-entity
   math is small. Regress with `run_mlir_mem` / `_mem` golden tests when touching
-  those lowerings.
+  those lowerings. An `@el.map_seq` system avoids this: on Cranelift its function
+  is lowered once with per-entity shapes and called for each entity.
 
 - **CPU-only by design.** There is no GPU execution path. Elodin simulations are
   single-threaded, small-tensor physics ticks where kernel launch and

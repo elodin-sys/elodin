@@ -372,6 +372,8 @@ fn max_reg_returns() -> usize {
 /// on x86 (`movapd`) and ARM NEON. Costs up to 8 bytes of padding
 /// per non-f64 slot — in the noise against an arena-backed frame.
 const SLOT_ALIGN: u8 = 4;
+/// Largest stack slot a pointer-ABI result may take: a quarter of the 256 MB tick-thread stack.
+const MAX_SLOT_BYTES: usize = 64 << 20;
 const MIN_RETURN_SLOT: usize = 8;
 const LU_PIVOT_EPSILON: f64 = 1e-300;
 
@@ -2656,6 +2658,19 @@ fn is_elision_aware_mem(instr: &Instruction) -> bool {
     )
 }
 
+/// Pointer-ABI arms that may hand back an operand's or a constant's memory instead of a new slot.
+fn may_reuse_memory(instr: &Instruction) -> bool {
+    matches!(
+        instr,
+        Instruction::Reshape { .. }
+            | Instruction::Convert { .. }
+            | Instruction::BitcastConvert { .. }
+            | Instruction::Constant {
+                value: ConstantValue::DenseArray(_) | ConstantValue::DenseExternal { .. },
+            }
+    )
+}
+
 /// Whether the pointer-ABI arm for `instr` has a kernel for its element types and
 /// operand shapes. The rest are lowered lane by lane by `lower_mem_lanes`.
 fn mem_has_kernel(
@@ -4028,6 +4043,19 @@ fn lower_instruction_mem(
         .unwrap_or(TensorType::scalar(ElementType::F64));
     let n = rt.num_elements();
     let elem_sz = rt.element_type.byte_size();
+
+    if !may_reuse_memory(instr)
+        && let Some(ty) = result_types
+            .iter()
+            .find(|ty| ty.byte_size() > MAX_SLOT_BYTES)
+    {
+        return Err(format!(
+            "{} result {ty} needs a {} MB stack slot, over the {} MB limit",
+            crate::useinfo::instr_kind(instr),
+            ty.byte_size() >> 20,
+            MAX_SLOT_BYTES >> 20
+        ));
+    }
 
     // Defensive consumer-side spill. Elision-aware match arms below
     // go through `emit_ptr_*_f64`, which handles `PtrChunksF64`
@@ -10851,21 +10879,39 @@ fn lower_svd_custom_call(
     Ok(result_groups)
 }
 
+/// `(batch, rows, cols)` of a stack of matrices: the last two dims of `ty` and the product of the rest.
+fn matrix_stack(name: &str, ty: &TensorType) -> Result<(usize, usize, usize), String> {
+    match ty.shape.as_slice() {
+        [batch @ .., rows, cols] => Ok((
+            batch.iter().product::<i64>() as usize,
+            *rows as usize,
+            *cols as usize,
+        )),
+        _ => Err(format!("{name}: expected a stack of matrices, got {ty}")),
+    }
+}
+
 fn lower_lu_custom_call(
     builder: &mut FunctionBuilder,
     operands: &[ValueId],
-    _result_types: &[TensorType],
+    result_types: &[TensorType],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     _type_map: &HashMap<ValueId, TensorType>,
     jit_module: &mut JITModule,
 ) -> Result<Vec<LaneRepr>, String> {
     let a_vals = get_vals(builder, value_map, &operands[0])?;
-    let n = require_square("LU", a_vals)?;
-    let (m, f8) = (n, 8);
+    let (batch, m, n) = matrix_stack("LU", &result_types[0])?;
+    if a_vals.len() != batch * m * n {
+        return Err(format!(
+            "LU: operand has {} elements, expected {}",
+            a_vals.len(),
+            result_types[0]
+        ));
+    }
+    let f8 = 8;
 
     let (lu_b, ipiv_b, info_b) = (m * n * f8, m.min(n) * 4, 4);
     let (_, base) = lapack_slot(builder, lu_b + lu_b + ipiv_b + info_b);
-    store_f64_vals(builder, a_vals, base, 0);
 
     let lu_off = lu_b as i32;
     let ipiv_off = (lu_b + lu_b) as i32;
@@ -10877,18 +10923,25 @@ fn lower_lu_custom_call(
     let m_val = builder.ins().iconst(types::I64, m as i64);
     let n_val = builder.ins().iconst(types::I64, n as i64);
     let pt = ptr_type();
-    lapack_call(
-        builder,
-        jit_module,
-        "__cranelift_lu",
-        &[pt, types::I64, types::I64, pt, pt, pt],
-        &[base, m_val, n_val, lu_ptr, ipiv_ptr, info_ptr],
-    )?;
+    let (mut lu, mut ipiv, mut info) = (Vec::new(), Vec::new(), Vec::new());
+    for b in 0..batch {
+        store_f64_vals(builder, &a_vals[b * m * n..(b + 1) * m * n], base, 0);
+        lapack_call(
+            builder,
+            jit_module,
+            "__cranelift_lu",
+            &[pt, types::I64, types::I64, pt, pt, pt],
+            &[base, m_val, n_val, lu_ptr, ipiv_ptr, info_ptr],
+        )?;
+        lu.extend(load_f64_vals(builder, m * n, base, lu_off));
+        ipiv.extend(load_i32_vals(builder, m.min(n), base, ipiv_off));
+        info.push(load_info_i32(builder, base, info_off));
+    }
 
     Ok(vec![
-        load_f64_scalar_lane(builder, m * n, base, lu_off),
-        LaneRepr::scalar(load_i32_vals(builder, m.min(n), base, ipiv_off)),
-        LaneRepr::scalar(vec![load_info_i32(builder, base, info_off)]),
+        LaneRepr::scalar(lu),
+        LaneRepr::scalar(ipiv),
+        LaneRepr::scalar(info),
     ])
 }
 
@@ -10904,20 +10957,22 @@ fn lower_trsm_custom_call(
     let a_vals = get_vals(builder, value_map, &operands[0])?.to_vec();
     let b_vals = get_vals(builder, value_map, &operands[1])?.to_vec();
 
-    let rt = &result_types[0];
-    let (m, nrhs) = if rt.shape.len() == 2 {
-        (rt.shape[0] as usize, rt.shape[1] as usize)
-    } else {
-        return Err("TRSM: expected 2D result".to_string());
-    };
-    let n = (a_vals.len() as f64).sqrt() as usize;
+    let (batch, m, nrhs) = matrix_stack("TRSM", &result_types[0])?;
+    let (a_len, b_len) = (a_vals.len() / batch.max(1), m * nrhs);
+    if a_vals.len() != batch * a_len || b_vals.len() != batch * b_len {
+        return Err(format!(
+            "TRSM: operands of {} and {} elements do not batch to {}",
+            a_vals.len(),
+            b_vals.len(),
+            result_types[0]
+        ));
+    }
+    let n = (a_len as f64).sqrt() as usize;
     let f8 = 8;
 
-    let (a_b, b_b, out_b) = (a_vals.len() * f8, b_vals.len() * f8, m * nrhs * f8);
-    let (_, base) = lapack_slot(builder, a_b + b_b + out_b);
-    store_f64_vals(builder, &a_vals, base, 0);
+    let (a_b, b_b) = (a_len * f8, b_len * f8);
+    let (_, base) = lapack_slot(builder, a_b + b_b + b_b);
     let b_off = a_b as i32;
-    store_f64_vals(builder, &b_vals, base, b_off);
     let out_off = (a_b + b_b) as i32;
     let b_ptr = builder.ins().iadd_imm(base, b_off as i64);
     let out_ptr = builder.ins().iadd_imm(base, out_off as i64);
@@ -10930,26 +10985,32 @@ fn lower_trsm_custom_call(
     let uplo_val = builder.ins().iconst(types::I8, uplo as i64);
     let diag_val = builder.ins().iconst(types::I8, diag as i64);
     let pt = ptr_type();
-    lapack_call(
-        builder,
-        jit_module,
-        "__cranelift_trsm",
-        &[
-            pt,
-            pt,
-            types::I64,
-            types::I64,
-            types::I64,
-            types::I8,
-            types::I8,
-            pt,
-        ],
-        &[
-            base, b_ptr, m_val, n_imm, nrhs_val, uplo_val, diag_val, out_ptr,
-        ],
-    )?;
+    let mut out = Vec::with_capacity(batch * b_len);
+    for b in 0..batch {
+        store_f64_vals(builder, &a_vals[b * a_len..(b + 1) * a_len], base, 0);
+        store_f64_vals(builder, &b_vals[b * b_len..(b + 1) * b_len], base, b_off);
+        lapack_call(
+            builder,
+            jit_module,
+            "__cranelift_trsm",
+            &[
+                pt,
+                pt,
+                types::I64,
+                types::I64,
+                types::I64,
+                types::I8,
+                types::I8,
+                pt,
+            ],
+            &[
+                base, b_ptr, m_val, n_imm, nrhs_val, uplo_val, diag_val, out_ptr,
+            ],
+        )?;
+        out.extend(load_f64_vals(builder, b_len, base, out_off));
+    }
 
-    Ok(vec![load_f64_scalar_lane(builder, m * nrhs, base, out_off)])
+    Ok(vec![LaneRepr::scalar(out)])
 }
 
 fn lower_cholesky_custom_call(

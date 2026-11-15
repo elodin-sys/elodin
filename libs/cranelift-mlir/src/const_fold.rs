@@ -183,6 +183,8 @@ fn fold_func(func: &mut FuncDef, report: &mut FoldReport) {
             rewrite_aliases_body(&mut func.body, &aliases);
         }
 
+        gather_through_broadcast(&mut func.body, &type_of, &mut local);
+
         dce_body(&mut func.body, &mut local);
 
         for (k, v) in &local.counts_by_rule {
@@ -194,6 +196,74 @@ fn fold_func(func: &mut FuncDef, report: &mut FoldReport) {
         if !changed {
             break;
         }
+    }
+}
+
+/// Gathers whose operand is a `broadcast_in_dim` adding exactly their operand batching dims read
+/// the broadcast's source instead, so `jax.vmap`'s per-entity copy of a table is never built.
+fn gather_through_broadcast(
+    body: &mut [InstrResult],
+    type_of: &HashMap<ValueId, TensorType>,
+    report: &mut FoldReport,
+) {
+    let broadcasts: HashMap<ValueId, (ValueId, Vec<i64>, usize)> = body
+        .iter()
+        .filter_map(|ir| {
+            let Instruction::BroadcastInDim {
+                operand,
+                broadcast_dims,
+            } = &ir.instr
+            else {
+                return None;
+            };
+            let (vid, ty) = ir.values.first()?;
+            let src = type_of.get(operand)?;
+            let inserts_dims_only = broadcast_dims.len() == src.rank()
+                && broadcast_dims.windows(2).all(|w| w[0] < w[1])
+                && broadcast_dims
+                    .iter()
+                    .zip(&src.shape)
+                    .all(|(&d, &n)| ty.shape.get(d as usize) == Some(&n));
+            inserts_dims_only.then(|| (*vid, (*operand, broadcast_dims.clone(), ty.rank())))
+        })
+        .collect();
+    for ir in body.iter_mut() {
+        let Instruction::Gather {
+            operand,
+            dims,
+            slice_sizes,
+            ..
+        } = &mut ir.instr
+        else {
+            continue;
+        };
+        let Some((src, kept, rank)) = broadcasts.get(operand) else {
+            continue;
+        };
+        let inserted: Vec<i64> = (0..*rank as i64).filter(|d| !kept.contains(d)).collect();
+        let mut batching = dims.operand_batching_dims.clone();
+        batching.sort_unstable();
+        if slice_sizes.len() != *rank || inserted != batching {
+            continue;
+        }
+        let renumber = |list: &[i64]| -> Option<Vec<i64>> {
+            list.iter()
+                .map(|d| kept.iter().position(|k| k == d).map(|p| p as i64))
+                .collect()
+        };
+        let (Some(start_index_map), Some(collapsed_slice_dims)) = (
+            renumber(&dims.start_index_map),
+            renumber(&dims.collapsed_slice_dims),
+        ) else {
+            continue;
+        };
+        *slice_sizes = kept.iter().map(|&d| slice_sizes[d as usize]).collect();
+        dims.start_index_map = start_index_map;
+        dims.collapsed_slice_dims = collapsed_slice_dims;
+        dims.operand_batching_dims.clear();
+        dims.start_indices_batching_dims.clear();
+        *operand = *src;
+        report.bump("gather_through_broadcast");
     }
 }
 
@@ -1459,6 +1529,9 @@ fn try_identity(
             on_true,
             on_false,
         } => {
+            if on_true == on_false {
+                return Some((*on_true, "identity_select_same"));
+            }
             let cond_v = env.get(cond)?;
             let cond_bool = match cond_v {
                 ConstantValue::DenseScalar(ScalarValue::I1(b))
@@ -2177,7 +2250,7 @@ fn log_report(report: &FoldReport) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{ConstantValue, ElementType, ScalarValue, TensorType, ValueId};
+    use crate::ir::{ConstantValue, ElementType, GatherDims, ScalarValue, TensorType, ValueId};
 
     fn f64_scalar_ty() -> TensorType {
         TensorType::scalar(ElementType::F64)
@@ -3062,6 +3135,142 @@ mod tests {
             ValueId(100) => {}
             other => panic!("expected Return to reference on_true, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn identity_select_same_arms_aliases_operand() {
+        let f64_ty = f64_tensor(vec![2]);
+        let i1_ty = TensorType {
+            shape: vec![2],
+            element_type: ElementType::I1,
+        };
+        let mut m = Module::new(vec![FuncDef {
+            name: "main".into(),
+            is_public: true,
+            params: vec![(ValueId(100), i1_ty), (ValueId(101), f64_ty.clone())],
+            result_types: vec![f64_ty.clone()],
+            body: vec![
+                mk_instr(
+                    0,
+                    f64_ty,
+                    Instruction::Select {
+                        cond: ValueId(100),
+                        on_true: ValueId(101),
+                        on_false: ValueId(101),
+                    },
+                ),
+                InstrResult {
+                    values: vec![],
+                    instr: Instruction::Return {
+                        operands: vec![ValueId(0)],
+                    },
+                },
+            ],
+            source_line: None,
+        }]);
+        let r = fold_module(&mut m);
+        assert_eq!(
+            r.counts_by_rule.get("identity_select_same").copied(),
+            Some(1)
+        );
+        let body = &m.functions[0].body;
+        assert_eq!(body.len(), 1);
+        assert!(
+            matches!(&body[0].instr, Instruction::Return { operands } if operands == &[ValueId(101)])
+        );
+    }
+
+    /// A per-entity row lookup into a table broadcast to `[2, 3, 4]`, as `jax.vmap` emits it.
+    fn row_lookup_through_broadcast(table_shape: Vec<i64>) -> Module {
+        let idx_ty = TensorType {
+            shape: vec![2, 1],
+            element_type: ElementType::I32,
+        };
+        Module::new(vec![FuncDef {
+            name: "main".into(),
+            is_public: true,
+            params: vec![
+                (ValueId(100), f64_tensor(table_shape)),
+                (ValueId(101), idx_ty),
+            ],
+            result_types: vec![f64_tensor(vec![2, 4])],
+            body: vec![
+                mk_instr(
+                    0,
+                    f64_tensor(vec![2, 3, 4]),
+                    Instruction::BroadcastInDim {
+                        operand: ValueId(100),
+                        broadcast_dims: vec![1, 2],
+                    },
+                ),
+                mk_instr(
+                    1,
+                    f64_tensor(vec![2, 4]),
+                    Instruction::Gather {
+                        operand: ValueId(0),
+                        indices: ValueId(101),
+                        dims: GatherDims {
+                            offset_dims: vec![1],
+                            collapsed_slice_dims: vec![1],
+                            operand_batching_dims: vec![0],
+                            start_indices_batching_dims: vec![0],
+                            start_index_map: vec![1],
+                            index_vector_dim: 1,
+                        },
+                        slice_sizes: vec![1, 1, 4],
+                    },
+                ),
+                InstrResult {
+                    values: vec![],
+                    instr: Instruction::Return {
+                        operands: vec![ValueId(1)],
+                    },
+                },
+            ],
+            source_line: None,
+        }])
+    }
+
+    #[test]
+    fn gather_through_broadcast_reads_the_source() {
+        let mut m = row_lookup_through_broadcast(vec![3, 4]);
+        let r = fold_module(&mut m);
+        assert_eq!(
+            r.counts_by_rule.get("gather_through_broadcast").copied(),
+            Some(1)
+        );
+        let body = &m.functions[0].body;
+        assert_eq!(body.len(), 2, "the broadcast is dead");
+        let Instruction::Gather {
+            operand,
+            dims,
+            slice_sizes,
+            ..
+        } = &body[0].instr
+        else {
+            panic!("expected Gather, got {:?}", body[0].instr);
+        };
+        assert_eq!(*operand, ValueId(100));
+        assert_eq!(dims.offset_dims, vec![1]);
+        assert_eq!(dims.collapsed_slice_dims, vec![0]);
+        assert_eq!(dims.start_index_map, vec![0]);
+        assert!(dims.operand_batching_dims.is_empty());
+        assert!(dims.start_indices_batching_dims.is_empty());
+        assert_eq!(*slice_sizes, vec![1, 4]);
+    }
+
+    #[test]
+    fn gather_through_broadcast_skips_expanding_broadcasts() {
+        let mut m = row_lookup_through_broadcast(vec![1, 4]);
+        let r = fold_module(&mut m);
+        assert_eq!(r.counts_by_rule.get("gather_through_broadcast"), None);
+        assert!(matches!(
+            m.functions[0].body[1].instr,
+            Instruction::Gather {
+                operand: ValueId(0),
+                ..
+            }
+        ));
     }
 
     #[test]

@@ -1,6 +1,9 @@
 # Changelog
 
 ## unreleased
+- **(perf)** Speed up multi-entity Cranelift simulations by copying slices, broadcasts and concatenations in contiguous runs, without allocating.
+- **(perf)** On Cranelift, `@el.map_seq` compiles its function once and calls it for each entity, which is faster than `@el.map` for large per-entity systems such as filter updates.
+- **(fix)** Compile multi-entity Cranelift simulations that use `lax.cond` around a large lookup table, which exhausted memory, or `jnp.linalg.solve`, which failed to compile. An intermediate too large for the simulation thread's stack is now a compile error.
 - **(fix)** Recording looks for assets in `./assets`, then the simulation's own `assets/`, then the nearest `assets/` above it, so assets such as the Falcon 9 map overlays load when the simulation runs from the repository root. Earlier folders win when a file exists in several.
 
 ## v0.21
