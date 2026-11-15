@@ -1169,6 +1169,9 @@ fn plot_fetch_component_ids(
         } else {
             eql_ids.collect(&obj.data.eql, eql_ctx, &mut ids);
         }
+        if let Some(visible) = &obj.data.visible {
+            eql_ids.collect(visible, eql_ctx, &mut ids);
+        }
         collect_object_3d_mesh_component_ids(&obj.data.mesh, eql_ctx, eql_ids, &mut ids);
         // Thruster particle intensity EQL (plume / cold_gas / motor smoke).
         for thruster in &obj.data.thrusters {

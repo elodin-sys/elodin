@@ -1503,6 +1503,7 @@ mod tests {
     fn test_object_state(thrusters: Vec<Thruster>) -> Object3DState {
         Object3DState {
             compiled_expr: None,
+            visible_expr: None,
             scale_expr: None,
             scale_error: None,
             error_covariance_cholesky_expr: None,
@@ -1517,6 +1518,7 @@ mod tests {
                 frame_orientation: None,
                 orientation: Default::default(),
                 sensor_visible: true,
+                visible: None,
                 icon: None,
                 thrusters,
                 mesh_visibility_range: None,

@@ -3260,6 +3260,7 @@ mod tests {
             frame_orientation: None,
             orientation: Default::default(),
             sensor_visible: true,
+            visible: None,
             icon: None,
             thrusters: vec![],
             mesh_visibility_range: None,

@@ -233,13 +233,14 @@ recorded flight is reproduced within thresholds.
 - Engine transient model (ignition ramp, shutdown, throttle response)
 - Flight-computer interface definition (message set, rates, units)
 - Launch-day atmosphere (standard atmosphere vs. sounding data)
-- Second-stage representation after separation (mass event vs. ghost entity —
-  the booster GLB renders as a full stack throughout; a visual split at MECO
-  is future work)
+- Independent second-stage trajectory after separation
 - Touchdown envelope thresholds (derive from truth-data uncertainty)
 - Booster GLB is included; Cesium provides the launch and landing scenery.
 
 ## Cinematic Visuals (pyrotechnique port)
+
+The upper-stage model is hidden at recorded stage separation. Chase and infrared
+views remain attached to the booster through landing, including during replay.
 
 The scene renders the pyrotechnique-authored falcon9 effects live from sim
 telemetry (design record: `docs/design-thruster-effects-port.md` §10):

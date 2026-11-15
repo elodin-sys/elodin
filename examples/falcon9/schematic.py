@@ -166,7 +166,7 @@ def build() -> ui.Schematic:
         ui.object_3d(
             "booster.visual_pos",
             mesh=ui.glb(
-                "falcon9.glb",
+                "falcon9-booster.glb",
                 scale=0.9944,
                 translate=(0.0, 0.0, 0.0),
                 rotate=(0.0, 0.0, -90.0),
@@ -334,6 +334,14 @@ def build() -> ui.Schematic:
                     scale=1.0,
                 ),
             ],
+        ),
+        # The booster remains the camera/effects anchor throughout the flight.
+        # Use recorded separation state, so scrubbing restores either configuration.
+        ui.object_3d(
+            "booster.visual_pos",
+            mesh=ui.glb("falcon9-upper-stage.glb", scale=0.9944, rotate=(0.0, 0.0, -90.0)),
+            orientation="absolute",
+            visible="booster.upper_mass[0]",
         ),
         ui.object_3d(
             "booster_truth.world_pos",
