@@ -382,9 +382,13 @@ elodin editor --offline dbs/f9
 - `editor --offline` opens that recording without terrain-provider requests.
 
 [`terrain_coverage.py`](terrain_coverage.py) declares the full nominal corridor
-with a 40 km margin and finer detail around launch and landing. The package is
-written to `assets/terrain/Falcon9/` and selected automatically. Provider detail
-limits are reported during preparation.
+with a 20 km margin and finer detail around launch and landing. Large zoom-outs
+can show gaps outside the prepared region. Assets are written to
+`examples/falcon9/assets/terrain/Falcon9/` and selected automatically.
+
+Unchanged coverage is reused; changed coverage replaces the package. Record to
+a new DB after preparation. Temporary download failures are retried; rerunning
+the command reuses cached geometry. Provider detail limits are reported.
 
 The same DB assets are used by native and WASM editors. Ground heights still
 follow `TERRAIN_MODE`; preparing scenery does not change the flight model.

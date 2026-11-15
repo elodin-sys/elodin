@@ -4,7 +4,10 @@ import struct
 import os
 import subprocess
 import sys
+from io import BytesIO
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request
 
 import numpy as np
 import pytest
@@ -123,6 +126,23 @@ def test_missing_or_changed_tile_fails_package_validation(tmp_path):
         validate_package(directory, spec)
 
 
+def test_smaller_preparation_replaces_a_larger_package(tmp_path):
+    source = Source()
+    expanded = request(tmp_path, (-0.02, -0.02, 1.02, 1.02))
+    larger = prepare(expanded, source)
+    smaller = request(tmp_path)
+    # The larger package is sufficient for replay, but preparation must trim it.
+    validate_package(Path(smaller["output"]), smaller)
+    with pytest.raises(ValueError, match="regions changed"):
+        validate_package(Path(smaller["output"]), smaller, exact=True)
+    report = prepare(smaller, source)
+    assert report["tiles"] < larger["tiles"]
+    obsolete = set(larger["files"]) - set(report["files"])
+    assert obsolete
+    assert all(not (Path(smaller["output"]) / name).exists() for name in obsolete)
+    validate_package(Path(smaller["output"]), smaller, exact=True)
+
+
 def test_failed_extension_preserves_the_previous_package(tmp_path):
     source = Source()
     spec = request(tmp_path)
@@ -151,6 +171,58 @@ def test_existing_geometry_is_reused_when_the_download_cache_is_empty(tmp_path, 
     assert source.get(ROOT.replace("root.json", "child.glb")) == glb()
     assert len(downloads) == 1
     assert source.hits == 1
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        TimeoutError(),
+        URLError("temporary"),
+        ConnectionResetError(),
+        HTTPError(ROOT, 503, "", {}, None),
+    ],
+)
+def test_download_recovers_from_temporary_failure(monkeypatch, error):
+    from elodin import terrain_prepare
+
+    calls = []
+
+    def fetch(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise error
+        return BytesIO(b"tile")
+
+    monkeypatch.setattr(terrain_prepare, "urlopen", fetch)
+    monkeypatch.setattr(terrain_prepare.time, "sleep", lambda delay: None)
+    source = GoogleSource.__new__(GoogleSource)
+    source.bytes = source.downloads = 0
+    assert source.download(Request(ROOT)) == b"tile"
+    assert len(calls) == 2
+    assert source.bytes == 4
+    assert source.downloads == 1
+
+
+@pytest.mark.parametrize("status, attempts", [(503, 3), (403, 1)])
+def test_download_retries_are_bounded_and_auth_failures_are_immediate(
+    monkeypatch, status, attempts
+):
+    from elodin import terrain_prepare
+
+    calls = []
+
+    def fetch(*args, **kwargs):
+        calls.append(1)
+        raise HTTPError(ROOT, status, "", {}, None)
+
+    monkeypatch.setattr(terrain_prepare, "urlopen", fetch)
+    monkeypatch.setattr(terrain_prepare.time, "sleep", lambda delay: None)
+    source = GoogleSource.__new__(GoogleSource)
+    source.bytes = source.downloads = 0
+    with pytest.raises(ValueError, match=f"HTTP {status}"):
+        source.download(Request(ROOT))
+    assert len(calls) == attempts
+    assert source.downloads == 0
 
 
 def test_valid_package_preparation_needs_no_provider_connection_or_token(tmp_path, monkeypatch):
