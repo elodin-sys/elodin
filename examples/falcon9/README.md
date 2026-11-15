@@ -241,6 +241,9 @@ recorded flight is reproduced within thresholds.
 
 The upper-stage model is hidden at recorded stage separation. Chase and infrared
 views remain attached to the booster through landing, including during replay.
+Grid fins open over two seconds after boostback (a visual timing assumption),
+then follow the simulated actuator positions. Deployment is recorded as
+`booster.fin_deploy`; the aerodynamic model is unchanged.
 
 The scene renders the pyrotechnique-authored falcon9 effects live from sim
 telemetry (design record: `docs/design-thruster-effects-port.md` §10):

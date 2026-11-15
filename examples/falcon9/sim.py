@@ -228,6 +228,14 @@ FinState = ty.Annotated[
     jax.Array,
     el.Component("fin_state", el.ComponentType(el.PrimitiveType.F64, (4,))),
 ]
+FinDeploy = ty.Annotated[
+    jax.Array,
+    el.Component("fin_deploy", el.ComponentType(el.PrimitiveType.F64, (1,))),
+]
+# Visual deployment prior, not a measured actuator history. Coast follows boostback.
+FIN_DEPLOY_DURATION_S = 2.0
+
+
 # Desired body torque for the RCS (from the in-sim attitude loop).
 RcsTorqueCmd = ty.Annotated[
     jax.Array,
@@ -548,6 +556,19 @@ def tvc_actuators(tvc_state: TvcState, tvc_cmd: TvcCmd) -> TvcState:
         lo=-TVC_MAX_RAD,
         hi=TVC_MAX_RAD,
     )
+
+
+def fin_deployment_step(angle, phase):
+    return jnp.minimum(
+        jnp.pi / 2.0,
+        angle
+        + jnp.where(phase[0] >= 7.0, SIM_TIME_STEP * jnp.pi / (2.0 * FIN_DEPLOY_DURATION_S), 0.0),
+    )
+
+
+@el.map
+def fin_deployment(angle: FinDeploy, phase: FswPhase) -> FinDeploy:
+    return fin_deployment_step(angle, phase)
 
 
 @el.map
@@ -1442,6 +1463,7 @@ def booster_propulsion_components(lox_kg: float = LOX_LOAD_KG, rp1_kg: float = R
         el.C(TvcState, jnp.zeros(2)),
         el.C(FinCmd, jnp.zeros(3)),
         el.C(FinState, jnp.zeros(4)),
+        el.C(FinDeploy, jnp.zeros(1)),
         el.C(RcsTorqueCmd, jnp.zeros(3)),
         el.C(RcsLevels, jnp.zeros(rcs.N_RCS)),
         el.C(NitrogenKg, jnp.array([N2_INITIAL_KG])),
@@ -1481,6 +1503,7 @@ def propulsion_systems(
         | valve_dynamics
         | tvc_actuators
         | fin_actuators
+        | fin_deployment
         | make_engine_dynamics(thrust_scale, isp_scale)
         | mass_props
         | tank_dynamics

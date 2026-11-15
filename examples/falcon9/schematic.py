@@ -23,6 +23,27 @@ from constants import PAD_ALT_M, PAD_LAT_DEG, PAD_LON_DEG, TERRAIN_MODE
 from elodin import ui
 from terrain_coverage import regions as terrain_regions
 
+
+def grid_fin_animations():
+    # GLB azimuth order is 315, 225, 135, 45 degrees; aero order is reversed.
+    # Negative local X opens each hinge outward. Local Y is the radial steering axis.
+    joints = []
+    for suffix, index in [("", 3), (".001", 2), (".002", 1), (".003", 0)]:
+        joints.extend(
+            [
+                ui.joint(
+                    f"grid_fin_deploy{suffix}_f9-v1.2_rig",
+                    "(booster.fin_deploy[0] * -57.29577951308232, 0, 0)",
+                ),
+                ui.joint(
+                    f"grid_fin_tilt{suffix}_f9-v1.2_rig",
+                    f"(0, booster.fin_state[{index}] * 57.29577951308232, 0)",
+                ),
+            ]
+        )
+    return joints
+
+
 TERRAIN = {
     "legacy": None,
     "aerial": el.Terrain.aerial(),
@@ -174,6 +195,7 @@ def build() -> ui.Schematic:
                 glow=0.0,
             ),
             orientation="absolute",
+            animate=grid_fin_animations(),
             icon=ui.icon(
                 builtin="rocket_launch",
                 color=ui.color(
