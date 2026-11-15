@@ -968,19 +968,40 @@ pub extern "C" fn tensor_gather(
     let dst = unsafe { slice::from_raw_parts_mut(dst, n_dst * elem_sz) };
     let indices = unsafe { slice::from_raw_parts(indices, n_idx) };
     let run = inner * elem_sz;
-    for (p, out) in dst.chunks_exact_mut(run).enumerate() {
-        let (mut from, mut idx, mut rem) = (0, 0, p);
-        for &[size, operand_stride, indices_stride] in dims.iter().rev() {
-            let c = rem % size as usize;
-            rem /= size as usize;
-            from += c * operand_stride as usize;
-            idx += c * indices_stride as usize;
+    // Positions advance the walked dims like an odometer, last dim fastest; the start offset
+    // only changes with the index position, which many windows share.
+    let mut counters = vec![0; dims.len()];
+    let (mut from, mut idx) = (0, 0);
+    let mut start: Option<(usize, usize)> = None;
+    for out in dst.chunks_exact_mut(run) {
+        let offset = match start {
+            Some((at, offset)) if at == idx => offset,
+            _ => {
+                let offset = starts
+                    .iter()
+                    .enumerate()
+                    .map(|(k, &[operand_stride, max_start])| {
+                        let s = indices[idx + k * vector_stride].clamp(0, max_start);
+                        s as usize * operand_stride as usize
+                    })
+                    .sum();
+                start = Some((idx, offset));
+                offset
+            }
+        };
+        let at = (from + offset) * elem_sz;
+        out.copy_from_slice(&src[at..at + run]);
+        for (c, &[size, operand_stride, indices_stride]) in counters.iter_mut().zip(dims).rev() {
+            *c += 1;
+            from += operand_stride as usize;
+            idx += indices_stride as usize;
+            if *c < size as usize {
+                break;
+            }
+            *c = 0;
+            from -= size as usize * operand_stride as usize;
+            idx -= size as usize * indices_stride as usize;
         }
-        for (k, &[operand_stride, max_start]) in starts.iter().enumerate() {
-            let start = indices[idx + k * vector_stride].clamp(0, max_start);
-            from += start as usize * operand_stride as usize;
-        }
-        out.copy_from_slice(&src[from * elem_sz..from * elem_sz + run]);
     }
 }
 
@@ -1336,13 +1357,20 @@ pub extern "C" fn tensor_broadcast_nd_generic(
         dst.copy_from_slice(&src[..elem_sz]);
         return;
     };
-    let row = elem_sz * dst_shape[last] as usize;
-    let step = elem_sz * src_step(last);
-    for r in 0..dst_shape[..last].iter().product::<i64>() as usize {
+    let steps: Vec<usize> = (0..dst_rank).map(src_step).collect();
+    // Trailing dims that `src` does not advance along repeat one element, so they fill one row.
+    let row_start = steps
+        .iter()
+        .rposition(|&s| s != 0)
+        .map_or(0, |d| d + 1)
+        .min(last);
+    let row = elem_sz * dst_shape[row_start..].iter().product::<i64>() as usize;
+    let step = elem_sz * steps[last];
+    for r in 0..dst_shape[..row_start].iter().product::<i64>() as usize {
         let (mut rem, mut at) = (r, 0);
-        for d in (0..last).rev() {
+        for d in (0..row_start).rev() {
             let n = dst_shape[d] as usize;
-            at += rem % n * src_step(d);
+            at += rem % n * steps[d];
             rem /= n;
         }
         copy_strided(
@@ -1521,27 +1549,29 @@ pub extern "C" fn tensor_dynamic_update_slice_generic(
     let start_indices = unsafe { slice::from_raw_parts(start_indices, rank) };
     let update_shape = unsafe { slice::from_raw_parts(update_shape, rank) };
     dst.copy_from_slice(src);
+    if n_update == 0 {
+        return;
+    }
     let mut src_s = vec![1usize; rank];
     for i in (0..rank.saturating_sub(1)).rev() {
         src_s[i] = src_s[i + 1] * shape[i + 1] as usize;
     }
-    let mut upd_s = vec![1usize; rank];
-    for i in (0..rank.saturating_sub(1)).rev() {
-        upd_s[i] = upd_s[i + 1] * update_shape[i + 1] as usize;
-    }
-    for fu in 0..n_update {
-        let mut df = 0usize;
-        let mut rem = fu;
-        for d in 0..rank {
-            let c = rem / upd_s[d];
-            rem %= upd_s[d];
-            let start = clamped_start(start_indices[d], shape[d] - update_shape[d]);
-            df += (start + c) * src_s[d];
+    let starts: Vec<usize> = (0..rank)
+        .map(|d| clamped_start(start_indices[d], shape[d] - update_shape[d]))
+        .collect();
+    // Each row along the last dim lands contiguously in `dst`.
+    let row = rank
+        .checked_sub(1)
+        .map_or(1, |last| update_shape[last] as usize);
+    for (r, upd_row) in update.chunks_exact(row * elem_sz).enumerate() {
+        let (mut rem, mut df) = (r, starts.last().copied().unwrap_or(0));
+        for d in (0..rank.saturating_sub(1)).rev() {
+            let n = update_shape[d] as usize;
+            df += (starts[d] + rem % n) * src_s[d];
+            rem /= n;
         }
-        if df < n_src {
-            let db = df * elem_sz;
-            let ub = fu * elem_sz;
-            dst[db..db + elem_sz].copy_from_slice(&update[ub..ub + elem_sz]);
+        if let Some(out) = dst.get_mut(df * elem_sz..(df + row) * elem_sz) {
+            out.copy_from_slice(upd_row);
         }
     }
 }

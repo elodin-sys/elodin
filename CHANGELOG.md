@@ -1,8 +1,11 @@
 # Changelog
 
 ## unreleased
+- **(perf)** Run Cranelift simulations faster and compile large ones sooner: repeated expressions, tiny helper functions and redundant copies are removed at compile time, small data moves run inline, and large elementwise operations, gathers and broadcasts use faster kernels.
+- **(perf)** Cut the per-tick cost of exchanging components between the simulation and its database, which grew with the number of components per entity: components that did not change are no longer copied or compared, and tick outputs are no longer copied into the world.
 - **(perf)** Speed up multi-entity Cranelift simulations by copying slices, broadcasts and concatenations in contiguous runs, without allocating.
 - **(perf)** On Cranelift, `@el.map_seq` compiles its function once and calls it for each entity, which is faster than `@el.map` for large per-entity systems such as filter updates.
+- **(fix)** Correct Cranelift loops in functions that use a tensor of more than 64 elements when the body passes one loop variable on to a later one, as in `x, x_prev = f(x), x`: `x_prev` received the updated `x`.
 - **(fix)** Compile multi-entity Cranelift simulations that use `lax.cond` around a large lookup table, which exhausted memory, or `jnp.linalg.solve`, which failed to compile. An intermediate too large for the simulation thread's stack is now a compile error.
 - **(fix)** Recording looks for assets in `./assets`, then the simulation's own `assets/`, then the nearest `assets/` above it, so assets such as the Falcon 9 map overlays load when the simulation runs from the repository root. Earlier folders win when a file exists in several.
 

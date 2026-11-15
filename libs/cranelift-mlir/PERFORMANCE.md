@@ -27,6 +27,10 @@ banner.
 6. [Tracy deep-dive workflow](#6-tracy-deep-dive-workflow)
 7. [Known limits](#7-known-limits)
 8. [Manual validation checklist](#8-manual-validation-checklist)
+9. [Measuring a change without instrumentation](#9-measuring-a-change-without-instrumentation)
+
+The probes roughly double tick time on call-heavy models, so use this layer to find *where*
+time goes and section 9 to decide whether a change made ticks *faster*.
 
 ---
 
@@ -280,8 +284,10 @@ the sim faster overall?
 
 `regress.sh` benches a build against the base commit's cached
 `elodin-py` (the merge-base with `origin/main`, or `REGRESSION_BASE`)
-in interleaved runs, as CI does. CI's 100 ticks leave fast examples a
-few percent of noise, so raise the tick count; the CSV checks then
+in interleaved runs, as CI does. At CI's 100 ticks the printed factors
+are noise for the fast examples: on builds whose ticks a replay measured
+10 to 25% faster, the summary printed anything from −25% to +62%. Raise
+the tick count; the CSV checks then
 report mismatches after tick 100, which you can ignore here. The base
 is a Nix build, so build the candidate the same way: a `maturin
 develop` build of the same source can run up to ~9% faster or slower.
@@ -289,9 +295,14 @@ develop` build of the same source can run up to ~9% faster or slower.
 ```bash
 cand=$(nix build --no-link --print-out-paths .#elodin-py)
 PYTHONPATH=$(echo "$cand"/lib/python3.*/site-packages) \
-REGRESSION_TICKS=20000 REGRESSION_RUNS=5 \
+ELODIN_BACKEND=cranelift REGRESSION_TICKS=20000 REGRESSION_RUNS=5 \
     bash scripts/ci/regress.sh rocket examples/rocket/main.py
 ```
+
+Set `ELODIN_BACKEND=cranelift`. The first of an example's two runs uses the
+backend its script asks for, and cube-sat's asks for `jax-cpu`, so without the
+variable both of its runs are jax-cpu and the comparison says nothing about
+this crate.
 
 ---
 
@@ -360,6 +371,12 @@ line-level attribution inside that function.
 x86). Sampled op-category probes add ~0.5% on top. For a sim
 running at 1 kHz × 200 fn-calls/tick that's ~8 ms/sec of
 overhead — tolerable for profiling but disable for production.
+Call-heavy models pay far more. A two-vehicle customer model with
+about 900 JIT calls and 1,500 kernel calls per tick ran at 650 µs
+per tick under the probes and 270 to 330 µs without; cube-sat runs
+at 1.87 ms against 0.88 ms. Read this layer's shares as indicative,
+and take absolute times and before/after comparisons from the plain
+build ([section 9](#9-measuring-a-change-without-instrumentation)).
 
 **Compile-time overhead**: enabling debug mode adds one enter / one
 exit probe per function. Compile time grows 2-5 %; not measurable on
@@ -409,24 +426,32 @@ cargo build -p nox-py --release --features tracy
 
 ### 8.2 Correctness gate (debug mode off = zero behavior change)
 
+The checkpoint directory is git-ignored, so generate it first. cube-sat's
+script asks for `jax-cpu`; without `ELODIN_BACKEND=cranelift` nothing is
+captured.
+
 ```bash
+ELODIN_BACKEND=cranelift \
+ELODIN_CRANELIFT_DEBUG_DIR=$(pwd)/libs/cranelift-mlir/testdata/checkpoints/cube-sat \
+    python examples/cube-sat/main.py bench --ticks 2
+
 ELODIN_CRANELIFT_DEBUG_DIR=$(pwd)/libs/cranelift-mlir/testdata/checkpoints/cube-sat \
     cargo test -p cranelift-mlir --test checkpoint_test --release \
     -- verify_checkpoint --ignored --nocapture 2>&1 | tail -3
 ```
 
-Wait — the checkpoint test reads from `$ELODIN_CRANELIFT_DEBUG_DIR`.
-If debug mode is unset in a production run, the backend is silent
-and emits bit-identical code. The easiest way to confirm that
-separately is:
+The checkpoint test reads from `$ELODIN_CRANELIFT_DEBUG_DIR`, which also
+turns debug mode on. If debug mode is unset in a production run, the
+backend is silent and emits bit-identical code. The easiest way to
+confirm that separately is:
 
 ```bash
 ELODIN_BACKEND=cranelift python examples/cube-sat/main.py bench
 ```
 
 No `[elodin-cranelift]` stderr chatter should appear beyond the
-standard compile banner (`fold: N -> M instr`). No files are
-written.
+standard compile banner (`fold: N -> M instr` and the
+`lower=… total=…` timing line). No files are written.
 
 ### 8.3 Correctness gate (debug mode on = still bit-for-bit)
 
@@ -439,7 +464,7 @@ ELODIN_CRANELIFT_DEBUG_DIR=$(pwd)/libs/cranelift-mlir/testdata/checkpoints/cube-
 Expected (abbreviated):
 
 ```
-ALL 205 outputs match XLA reference
+ALL 28 outputs match XLA reference
 [elodin-cranelift] profile report
   probe overhead: XX ns/probe-pair  (calibrated via 100000 iterations)
   wall (raw): 0.00 s   wall (corrected): 0.00 s   ticks: 1
@@ -458,7 +483,7 @@ ALL 205 outputs match XLA reference
 test verify_checkpoint ... ok
 ```
 
-Still 205/205 bit-for-bit. All report sections present.
+Still 28/28. All report sections present.
 
 ### 8.4 Verify JSON shape
 
@@ -510,15 +535,22 @@ ELODIN_BACKEND=cranelift bash scripts/ci/regress.sh --all
 
 Expected: every example matches its CSV baseline, within
 `scripts/ci/baseline/tolerances.json`, once on Cranelift and once on
-jax-cpu; no `FAIL` lines. Full-system correctness gate.
+jax-cpu; no `FAIL` lines. Full-system correctness gate. Set
+`ELODIN_BACKEND=cranelift` on this local command so cube-sat, whose
+script asks for `jax-cpu`, runs on this backend.
+
+CI leaves the variable unset on purpose. The Buildkite step is
+`bash ./scripts/ci/regress.sh --all`, and cube-sat's own `backend="jax-cpu"`
+then stands, which keeps a jax-cpu regression in the suite. `regress.sh`
+also repeats every example with `ELODIN_BACKEND=jax-cpu`. Leave the CI
+command as it is.
 
 ### 8.7 Spot-check on a real sim
 
 ```bash
-source .venv/bin/activate
 ELODIN_BACKEND=cranelift \
 ELODIN_CRANELIFT_DEBUG_DIR=/tmp/real_sim \
-    python examples/rocket/main.py --ticks 500 2>&1 | tail -30
+    python examples/rocket/main.py bench --ticks 500 2>&1 | tail -30
 ```
 
 Expected: non-trivial `wall:` line, `ticks: 500` matches, top-N
@@ -534,7 +566,7 @@ just install tracy
 tracy -a 127.0.0.1 -p 8089 &
 # Terminal 2:
 ELODIN_BACKEND=cranelift ELODIN_CRANELIFT_DEBUG_DIR=/tmp/dbg \
-    python examples/rocket/main.py --ticks 500
+    python examples/rocket/main.py bench --ticks 500
 ```
 
 Expected: Tracy GUI shows per-function zones (`main`, named inners)
@@ -545,3 +577,158 @@ in the sim subprocess timeline. Zone counts should roughly match
 
 If all gates pass, the profiling layer is ready for customer use.
 If any one fails, stop and triage before shipping.
+
+---
+
+## 9. Measuring a change without instrumentation
+
+The probes change what they measure (section 7), so decide whether a
+compiler change made ticks faster on a plain build: replay a checkpoint.
+
+### 9.1 Replay a checkpoint
+
+Capture a checkpoint once from any simulation. The replay needs only the
+MLIR and the first tick's inputs and outputs. Then run the ignored
+`bench_checkpoint` test on it:
+
+```bash
+ELODIN_BACKEND=cranelift ELODIN_CRANELIFT_DEBUG_DIR=/tmp/ckpt \
+    python examples/rocket/main.py bench --ticks 2
+
+ELODIN_BENCH_DIR=/tmp/ckpt ELODIN_BENCH_TICKS=20000 ELODIN_BENCH_THRASH_MB=0,32 \
+    cargo test -p cranelift-mlir --test checkpoint_test --release \
+    -- bench_checkpoint --ignored --nocapture --exact
+```
+
+It compiles the module without probes, then calls the tick function in a
+closed loop, copying each output into the input with the same component
+id, and prints one line per cache mode:
+
+```
+BENCH {"compile_ms":64,"ticks":20000,"thrash_mb":0,"first_tick_mismatches":0,"median_ns":199905,"mean_ns":203073,"p10_ns":199006,"p90_ns":206163,"max_bucket20_ns":204339,"hash":"a202ec4f14d83c1a"}
+BENCH {"compile_ms":64,"ticks":20000,"thrash_mb":32,"first_tick_mismatches":0,"median_ns":298614,"mean_ns":300842,"p10_ns":278379,"p90_ns":321503,"max_bucket20_ns":302213,"hash":"a202ec4f14d83c1a"}
+```
+
+| Field | Meaning |
+|---|---|
+| `compile_ms` | Parse, fold and compile, wall time |
+| `thrash_mb` | Megabytes written between ticks to evict the caches; `0` is a warm loop |
+| `first_tick_mismatches` | Outputs whose first tick differs from the checkpoint's `cranelift_output_<i>.bin`; must be 0 |
+| `median_ns`, `mean_ns`, `p10_ns`, `p90_ns` | Tick time, first tick excluded |
+| `max_bucket20_ns` | Ticks are grouped by index modulo 20 and the slowest group's mean is reported. At 1 kHz that isolates work that runs at 50 Hz, such as a sensor branch behind `lax.cond` |
+| `hash` | Hash of every output, taken every 100 ticks. Equal hashes from two builds mean bit-identical trajectories |
+
+The replay is a benchmark, not the mission. Nothing else writes the world,
+so components that flight software or a client would set stay as the tick
+leaves them. It needs one output slot per component (`num_output_slots`
+equal to the number of outputs in `checkpoint.json`) and fails otherwise.
+
+### 9.2 Decide on the cold number
+
+A production tick does not run in a warm loop. Between ticks the
+simulation exchanges components with the database, flight software and
+renderers run, and the tick's code and data leave the caches. A
+two-vehicle customer model ticks in 108 µs in a warm loop and in 270 to
+330 µs in production; writing 32 MB between ticks
+(`ELODIN_BENCH_THRASH_MB=32`) reproduces the production figure.
+
+The two modes reward different things. One set of changes cut that model's
+warm tick by 63% and its cold tick by 45%. A faster broadcast kernel took
+14% off the warm tick and nothing off the cold one. JIT code size matters
+when cold: megabytes of straight-line code do not stay in cache. Record
+both modes and decide on the cold one.
+
+### 9.3 Compare two builds
+
+Cargo prints the test binary's path
+(`target/release/deps/checkpoint_test-<hash>`). Copy it aside for each
+variant and run the copies alternately, A B B A, pinned to performance
+cores (CPUs 0-11 on a Core Ultra 7 155H):
+
+```bash
+ELODIN_BENCH_DIR=/tmp/ckpt ELODIN_BENCH_TICKS=3000 ELODIN_BENCH_THRASH_MB=0,32 \
+    taskset -c 0-11 ./base bench_checkpoint --ignored --nocapture --exact
+```
+
+- Two copies of the same binary differ by 0.2 to 0.5% in median. Treat
+  less than 1% as noise.
+- The warm median can move by 2% for reasons other than the work removed:
+  one change that only deleted copies made it 2.4% slower and the cold
+  median 2.4% faster. A real gain should also show in the cold median or
+  in instructions per tick: run `perf stat -e instructions:u` at two tick
+  counts and divide the difference by the difference in ticks, so that
+  compilation cancels out.
+- The `hash` must not change (section 9.6). Compare `compile_ms` and code
+  size (section 9.4) too.
+- Run the examples as well as the model you are tuning for. A kernel
+  cut-over at 64 lanes was neutral on a customer model and slowed cube-sat
+  by 2.6%.
+
+### 9.4 Profile the plain build with perf
+
+```bash
+PERF_BUILDID_DIR=/tmp/perfbuild perf record -F 15000 --delay=9000 -- \
+    env ELODIN_BENCH_DIR=/tmp/ckpt ELODIN_BENCH_TICKS=8000 ELODIN_BENCH_THRASH_MB=32 \
+    ./candidate bench_checkpoint --ignored --nocapture --exact
+perf report --no-children --sort dso,sym
+```
+
+With `PERF_BUILDID_DIR` set, cranelift-jit writes `/tmp/perf-<pid>.map`,
+which lets `perf` name the JIT functions. `perf` reads that file when it
+reports, so keep it until you are done. Its second column is each
+function's size in hex: summed, it is the JIT code size, and sorted, it
+shows which functions hold it. `--delay` (milliseconds) skips compilation.
+
+Runtime kernels and `memmove` show up under their own names, with no hint
+of which JIT function called them. Add `--call-graph lbr` to the recording
+and aggregate the stacks from `perf script` by the nearest JIT frame.
+
+### 9.5 Confirm on the real run
+
+The replay runs the tick function alone. To confirm through Python:
+
+```bash
+ELODIN_BACKEND=cranelift python examples/cube-sat/main.py bench --ticks 3000
+```
+
+prints the median tick time and real-time factor. Set
+`ELODIN_BACKEND=cranelift` and look for the
+`[elodin-cranelift] lower=… total=…` banner. A script can ask for another
+backend, and cube-sat's asks for `jax-cpu`; two builds of this crate then
+compare equal because neither is running.
+
+The tick is one phase of the simulation loop. `ELODIN_SIM_SUMMARY_JSON=<file>`
+makes `World.run` write per-phase totals when it exits (`copy_db_to_world`,
+`world_run`, `commit`, `total_cycle`), which shows how much of a cycle the
+tick is.
+
+### 9.6 Bits must not change
+
+An optimization leaves every output bit as it was: the same replay `hash`,
+`first_tick_mismatches` 0, and the same `verify_checkpoint` result against
+XLA as before the change. Simulations run for millions of ticks against
+recorded baselines, so a last-bit difference is a behavior change.
+Folding, CSE, layout and copies are free. Reassociating float arithmetic,
+contracting to FMA or swapping a transcendental's implementation is a
+numerics change: it needs its own justification and a CHANGELOG entry.
+
+### 9.7 Gates before keeping a change
+
+```bash
+cargo test -p cranelift-mlir --release
+cargo clippy -p cranelift-mlir -p nox-py --all-targets -- -Dwarnings
+just install py
+python -m pytest libs/nox-py -o 'pythonpath=' -m parity
+ELODIN_BACKEND=cranelift bash scripts/ci/regress.sh --all
+```
+
+That variable is for a local check of this crate. CI runs the same
+script with `ELODIN_BACKEND` unset so cube-sat still exercises jax-cpu;
+see §8.6.
+
+The pytest suites build hundreds of worlds, and each copies `./assets`
+into a temp database that is kept. With the terrain set in `./assets`
+that is about 1 GB per world, enough to fill a disk in one run. Point
+`ELODIN_ASSETS` at an empty directory for those suites; two tests in
+`test_terrain_prepare.py` assert the default path and need to run
+without the override.

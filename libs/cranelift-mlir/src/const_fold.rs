@@ -152,6 +152,17 @@ pub fn fold_module(module: &mut Module) -> FoldReport {
     report
 }
 
+/// Folds the named functions again, for passes after `fold_module` that leave new
+/// opportunities in them, as inlining does.
+pub(crate) fn refold(module: &mut Module, names: &HashSet<String>) {
+    let mut report = FoldReport::default();
+    for func in module.functions.iter_mut() {
+        if names.contains(&func.name) {
+            fold_func(func, &mut report);
+        }
+    }
+}
+
 /// Maximum number of fold+DCE iterations per function. Caps pathological
 /// cascades; in practice, 2-3 iterations reach a fixed point on every MLIR
 /// we have measured.
@@ -184,6 +195,17 @@ fn fold_func(func: &mut FuncDef, report: &mut FoldReport) {
         }
 
         gather_through_broadcast(&mut func.body, &type_of, &mut local);
+
+        let mut duplicates = HashMap::new();
+        eliminate_common_subexpressions(
+            &func.body,
+            &mut HashMap::new(),
+            &mut duplicates,
+            &mut local,
+        );
+        if !duplicates.is_empty() {
+            rewrite_aliases_body(&mut func.body, &duplicates);
+        }
 
         dce_body(&mut func.body, &mut local);
 
@@ -267,6 +289,185 @@ fn gather_through_broadcast(
     }
 }
 
+/// Earlier pure instructions in scope by `shallow_hash`, each with its `full_key` once built.
+type Scope<'a> = HashMap<u64, Vec<(&'a InstrResult, Option<String>)>>;
+
+/// Aliases each pure instruction to an identical one earlier in its scope. A `case` branch sees
+/// its enclosing scope; the other regions are lowered without access to outer values, so their
+/// scopes start empty.
+fn eliminate_common_subexpressions<'a>(
+    body: &'a [InstrResult],
+    seen: &mut Scope<'a>,
+    duplicates: &mut HashMap<ValueId, ValueId>,
+    report: &mut FoldReport,
+) {
+    let mut added = Vec::new();
+    for ir in body {
+        if let Instruction::Case { branches, .. } = &ir.instr {
+            for branch in branches {
+                eliminate_common_subexpressions(branch, seen, duplicates, report);
+            }
+        } else {
+            for region in nested_bodies(&ir.instr) {
+                eliminate_common_subexpressions(region, &mut HashMap::new(), duplicates, report);
+            }
+        }
+        let Some(hash) = shallow_hash(ir, duplicates) else {
+            continue;
+        };
+        let bucket = seen.entry(hash).or_default();
+        let mut key = None;
+        let first = bucket.iter_mut().find_map(|(prev, prev_key)| {
+            interchangeable(prev, prev_key, ir, &mut key, duplicates).then_some(*prev)
+        });
+        match first {
+            Some(prev) => {
+                for ((vid, _), (first, _)) in ir.values.iter().zip(&prev.values) {
+                    duplicates.insert(*vid, *first);
+                }
+                report.bump("cse");
+            }
+            None => {
+                bucket.push((ir, key));
+                added.push(hash);
+            }
+        }
+    }
+    for hash in added.into_iter().rev() {
+        if let Some(bucket) = seen.get_mut(&hash) {
+            bucket.pop();
+        }
+    }
+}
+
+/// Hashes the kind, the operands after earlier aliases, constant bits and the result types,
+/// which interchangeable instructions share. Large array constants are left alone.
+fn shallow_hash(ir: &InstrResult, aliases: &HashMap<ValueId, ValueId>) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    if !is_removable(&ir.instr) || ir.values.is_empty() {
+        return None;
+    }
+    let mut h = std::hash::DefaultHasher::new();
+    std::mem::discriminant(&ir.instr).hash(&mut h);
+    match &ir.instr {
+        Instruction::Constant { value } => match value {
+            ConstantValue::DenseScalar(v) | ConstantValue::DenseSplat(v, _) => {
+                scalar_bits(v).hash(&mut h)
+            }
+            ConstantValue::DenseArray(values) if values.len() <= 4096 => {
+                values.iter().for_each(|v| scalar_bits(v).hash(&mut h))
+            }
+            ConstantValue::DenseArray(_) => return None,
+            ConstantValue::DenseExternal { data, .. } => data.symbol.hash(&mut h),
+        },
+        instr => operand_ids(instr)
+            .into_iter()
+            .for_each(|vid| resolve_alias(vid, aliases).hash(&mut h)),
+    }
+    ir.values.iter().for_each(|(_, ty)| ty.hash(&mut h));
+    Some(h.finish())
+}
+
+/// Whether `b` computes what `a` does. Constants compare by bit pattern, which `Debug` would not
+/// do for NaN payloads; the rest by `full_key`, cached in `a_key` and `b_key`.
+fn interchangeable(
+    a: &InstrResult,
+    a_key: &mut Option<String>,
+    b: &InstrResult,
+    b_key: &mut Option<String>,
+    aliases: &HashMap<ValueId, ValueId>,
+) -> bool {
+    if std::mem::discriminant(&a.instr) != std::mem::discriminant(&b.instr)
+        || !a
+            .values
+            .iter()
+            .map(|(_, ty)| ty)
+            .eq(b.values.iter().map(|(_, ty)| ty))
+    {
+        return false;
+    }
+    match (&a.instr, &b.instr) {
+        (Instruction::Constant { value: x }, Instruction::Constant { value: y }) => match (x, y) {
+            (ConstantValue::DenseScalar(x), ConstantValue::DenseScalar(y))
+            | (ConstantValue::DenseSplat(x, _), ConstantValue::DenseSplat(y, _)) => {
+                scalar_bits(x) == scalar_bits(y)
+            }
+            (ConstantValue::DenseArray(x), ConstantValue::DenseArray(y)) => {
+                x.len() == y.len()
+                    && x.iter()
+                        .zip(y)
+                        .all(|(x, y)| scalar_bits(x) == scalar_bits(y))
+            }
+            (
+                ConstantValue::DenseExternal { data: x, .. },
+                ConstantValue::DenseExternal { data: y, .. },
+            ) => x.symbol == y.symbol,
+            _ => false,
+        },
+        _ => {
+            *a_key.get_or_insert_with(|| full_key(a, aliases))
+                == *b_key.get_or_insert_with(|| full_key(b, aliases))
+        }
+    }
+}
+
+fn scalar_bits(v: &ScalarValue) -> (u8, u64) {
+    match *v {
+        ScalarValue::F64(x) => (0, x.to_bits()),
+        ScalarValue::F32(x) => (1, x.to_bits().into()),
+        ScalarValue::I1(x) => (2, x.into()),
+        ScalarValue::I32(x) => (3, x as u64),
+        ScalarValue::I64(x) => (4, x as u64),
+        ScalarValue::UI32(x) => (5, x.into()),
+        ScalarValue::UI64(x) => (6, x),
+    }
+}
+
+/// The instruction with its operands after earlier aliases, attributes included.
+fn full_key(ir: &InstrResult, aliases: &HashMap<ValueId, ValueId>) -> String {
+    let mut instr = ir.instr.clone();
+    rewrite_aliases_instr(&mut instr, aliases);
+    format!("{instr:?}")
+}
+
+fn nested_bodies(instr: &Instruction) -> Vec<&[InstrResult]> {
+    match instr {
+        Instruction::While {
+            cond_body,
+            loop_body,
+            ..
+        } => vec![cond_body, loop_body],
+        Instruction::Case { branches, .. } => branches.iter().map(Vec::as_slice).collect(),
+        Instruction::Map { body, .. } | Instruction::ReduceWindow { body, .. } => vec![body],
+        Instruction::SelectAndScatter {
+            select_body,
+            scatter_body,
+            ..
+        } => vec![select_body, scatter_body],
+        Instruction::Sort { comparator, .. } => vec![comparator],
+        _ => vec![],
+    }
+}
+
+fn nested_bodies_mut(instr: &mut Instruction) -> Vec<&mut Vec<InstrResult>> {
+    match instr {
+        Instruction::While {
+            cond_body,
+            loop_body,
+            ..
+        } => vec![cond_body, loop_body],
+        Instruction::Case { branches, .. } => branches.iter_mut().collect(),
+        Instruction::Map { body, .. } | Instruction::ReduceWindow { body, .. } => vec![body],
+        Instruction::SelectAndScatter {
+            select_body,
+            scatter_body,
+            ..
+        } => vec![select_body, scatter_body],
+        Instruction::Sort { comparator, .. } => vec![comparator],
+        _ => vec![],
+    }
+}
+
 /// Walk a body in program order, folding each instruction where possible and
 /// recording result `ValueId`s that are known constants so downstream ops can
 /// fold against them.
@@ -310,6 +511,12 @@ fn fold_body(
                     env.insert(*result_vid, cv);
                 }
             }
+            continue;
+        }
+
+        if let Some((rewritten, rule)) = try_rewrite(&ir.instr, env, type_of, &ir.values) {
+            report.bump(rule);
+            ir.instr = rewritten;
             continue;
         }
 
@@ -1570,6 +1777,96 @@ fn try_identity(
                 None
             }
         }
+        Instruction::Slice {
+            operand,
+            start_indices,
+            limit_indices,
+        } => {
+            let src_ty = type_of.get(operand)?;
+            (start_indices.iter().all(|&s| s == 0) && *limit_indices == src_ty.shape)
+                .then_some((*operand, "identity_slice_full"))
+        }
+        _ => None,
+    }
+}
+
+/// Rewrites an instruction into a cheaper equivalent one.
+fn try_rewrite(
+    instr: &Instruction,
+    env: &HashMap<ValueId, ConstantValue>,
+    type_of: &HashMap<ValueId, TensorType>,
+    results: &[(ValueId, TensorType)],
+) -> Option<(Instruction, &'static str)> {
+    let result_ty = &results.first()?.1;
+    match instr {
+        // Increasing dims and an unchanged element count only insert size-1 dims.
+        Instruction::BroadcastInDim {
+            operand,
+            broadcast_dims,
+        } => {
+            let src_ty = type_of.get(operand)?;
+            (src_ty.shape != result_ty.shape
+                && src_ty.num_elements() == result_ty.num_elements()
+                && result_ty.shape.iter().all(|&d| d > 0)
+                && broadcast_dims.windows(2).all(|w| w[0] < w[1]))
+            .then_some((
+                Instruction::Reshape { operand: *operand },
+                "broadcast_as_reshape",
+            ))
+        }
+        // Whole rows picked by constant indices that run consecutively form a slice.
+        Instruction::Gather {
+            operand,
+            indices,
+            dims,
+            slice_sizes,
+        } => {
+            let src_ty = type_of.get(operand)?;
+            let idx_ty = type_of.get(indices)?;
+            let (&rows, row_shape) = src_ty.shape.split_first()?;
+            let (&k, out_row_shape) = result_ty.shape.split_first()?;
+            let row_gather = rows > 0
+                && dims.collapsed_slice_dims == [0]
+                && dims.start_index_map == [0]
+                && dims.operand_batching_dims.is_empty()
+                && dims.start_indices_batching_dims.is_empty()
+                && dims
+                    .offset_dims
+                    .iter()
+                    .copied()
+                    .eq(1..result_ty.rank() as i64)
+                && dims.index_vector_dim == 1
+                && (idx_ty.shape == [k] || idx_ty.shape == [k, 1])
+                && slice_sizes.split_first() == Some((&1, row_shape))
+                && out_row_shape == row_shape;
+            if !row_gather {
+                return None;
+            }
+            let starts: Vec<i64> = match env.get(indices)? {
+                ConstantValue::DenseArray(values) => values.iter().map(|v| v.as_i64()).collect(),
+                ConstantValue::DenseScalar(v) => vec![v.as_i64()],
+                ConstantValue::DenseSplat(v, ty) => vec![v.as_i64(); ty.num_elements()],
+                ConstantValue::DenseExternal { .. } => return None,
+            };
+            let first = starts.first()?.clamp(&0, &(rows - 1)).to_owned();
+            let consecutive = starts.len() == k as usize
+                && (starts.iter().enumerate())
+                    .all(|(i, s)| *s.clamp(&0, &(rows - 1)) == first + i as i64);
+            consecutive.then(|| {
+                let mut start_indices = vec![first];
+                start_indices.extend(row_shape.iter().map(|_| 0));
+                let mut limit_indices = vec![first + k];
+                limit_indices.extend_from_slice(row_shape);
+                (
+                    Instruction::Slice {
+                        operand: *operand,
+                        start_indices,
+                        limit_indices,
+                    },
+                    "gather_rows_as_slice",
+                )
+            })
+        }
         _ => None,
     }
 }
@@ -1903,14 +2200,17 @@ fn rewrite_aliases_instr(instr: &mut Instruction, aliases: &HashMap<ValueId, Val
 // Dead-code elimination (conservative)
 // ---------------------------------------------------------------------------
 
-/// Drop instructions whose result `ValueId`s are not referenced anywhere in
-/// the surrounding function (including nested bodies). Only pure instructions
+/// Drop instructions, at any nesting depth, whose result `ValueId`s are not
+/// referenced anywhere in the surrounding function. Only pure instructions
 /// are dropped; anything terminator-like, call-like, or containing an
 /// embedded region stays.
 fn dce_body(body: &mut Vec<InstrResult>, report: &mut FoldReport) {
     let mut used: HashSet<ValueId> = HashSet::new();
     collect_used_value_ids(body, &mut used);
+    remove_unused(body, &used, report);
+}
 
+fn remove_unused(body: &mut Vec<InstrResult>, used: &HashSet<ValueId>, report: &mut FoldReport) {
     body.retain(|ir| {
         if !is_removable(&ir.instr) {
             return true;
@@ -1923,6 +2223,11 @@ fn dce_body(body: &mut Vec<InstrResult>, report: &mut FoldReport) {
             false
         }
     });
+    for ir in body.iter_mut() {
+        for region in nested_bodies_mut(&mut ir.instr) {
+            remove_unused(region, used, report);
+        }
+    }
 }
 
 /// Collect every `ValueId` that appears as an operand anywhere in `body`,
@@ -2555,15 +2860,23 @@ mod tests {
                 InstrResult {
                     values: vec![(ValueId(10), f64_scalar_ty())],
                     instr: Instruction::While {
-                        cond_body: vec![InstrResult {
-                            values: vec![(ValueId(11), TensorType::scalar(ElementType::I1))],
-                            instr: Instruction::Compare {
-                                lhs: ValueId(0),
-                                rhs: ValueId(100),
-                                direction: CompareDirection::Eq,
-                                compare_type: CompareType::Float,
+                        cond_body: vec![
+                            InstrResult {
+                                values: vec![(ValueId(11), TensorType::scalar(ElementType::I1))],
+                                instr: Instruction::Compare {
+                                    lhs: ValueId(0),
+                                    rhs: ValueId(100),
+                                    direction: CompareDirection::Eq,
+                                    compare_type: CompareType::Float,
+                                },
                             },
-                        }],
+                            InstrResult {
+                                values: vec![],
+                                instr: Instruction::Return {
+                                    operands: vec![ValueId(11)],
+                                },
+                            },
+                        ],
                         loop_body: vec![],
                         init_values: vec![],
                         iter_arg_ids: vec![],
@@ -2688,10 +3001,12 @@ mod tests {
             },
         ]);
         fold_module(&mut m);
-        assert!(matches!(
-            m.functions[0].body[2].instr,
-            Instruction::Divide { .. }
-        ));
+        assert!(
+            m.functions[0]
+                .body
+                .iter()
+                .any(|ir| matches!(ir.instr, Instruction::Divide { .. }))
+        );
     }
 
     #[test]
@@ -2841,10 +3156,13 @@ mod tests {
         ]);
         fold_module(&mut m);
         let body = &m.functions[0].body;
+        let Instruction::Return { operands } = &body.last().unwrap().instr else {
+            panic!("expected Return");
+        };
         // Should fold to constant 10.0.
         match body
             .iter()
-            .find(|ir| ir.values.iter().any(|(id, _)| *id == ValueId(3)))
+            .find(|ir| ir.values.iter().any(|(id, _)| *id == operands[0]))
             .expect("result value present")
             .instr
             .clone()
@@ -3425,5 +3743,235 @@ mod tests {
             }
             other => panic!("expected DenseArray constant, got {other:?}"),
         }
+    }
+
+    fn ret(ids: &[u32]) -> InstrResult {
+        InstrResult {
+            values: vec![],
+            instr: Instruction::Return {
+                operands: ids.iter().copied().map(ValueId).collect(),
+            },
+        }
+    }
+
+    fn returned(body: &[InstrResult]) -> Vec<u32> {
+        match &body.last().unwrap().instr {
+            Instruction::Return { operands } => operands.iter().map(|v| v.0).collect(),
+            other => panic!("expected Return, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cse_reaches_enclosing_scopes_but_not_sibling_branches() {
+        let f = f64_scalar_ty();
+        let add = |vid| {
+            mk_instr(
+                vid,
+                f64_scalar_ty(),
+                Instruction::Add {
+                    lhs: ValueId(100),
+                    rhs: ValueId(101),
+                },
+            )
+        };
+        let mul = |vid| {
+            mk_instr(
+                vid,
+                f64_scalar_ty(),
+                Instruction::Multiply {
+                    lhs: ValueId(100),
+                    rhs: ValueId(101),
+                },
+            )
+        };
+        let case = |vid, branches| InstrResult {
+            values: vec![(ValueId(vid), f64_scalar_ty())],
+            instr: Instruction::Case {
+                index: ValueId(102),
+                branches,
+            },
+        };
+        let mut m = Module::new(vec![FuncDef {
+            name: "main".into(),
+            is_public: true,
+            params: vec![
+                (ValueId(100), f.clone()),
+                (ValueId(101), f.clone()),
+                (ValueId(102), TensorType::scalar(ElementType::I32)),
+            ],
+            result_types: vec![f.clone(); 4],
+            body: vec![
+                add(0),
+                add(1),
+                case(
+                    2,
+                    vec![vec![add(10), ret(&[10])], vec![mul(20), ret(&[20])]],
+                ),
+                case(
+                    3,
+                    vec![vec![mul(30), ret(&[30])], vec![add(40), ret(&[40])]],
+                ),
+                ret(&[0, 1, 2, 3]),
+            ],
+            source_line: None,
+        }]);
+        let r = fold_module(&mut m);
+        assert_eq!(r.counts_by_rule.get("cse").copied(), Some(3));
+        let body = &m.functions[0].body;
+        assert_eq!(returned(body), [0, 0, 2, 3]);
+        let Instruction::Case { branches, .. } = &body[1].instr else {
+            panic!("expected Case, got {:?}", body[1].instr);
+        };
+        assert_eq!(returned(&branches[0]), [0]);
+        assert_eq!(branches[0].len(), 1);
+        let Instruction::Case { branches, .. } = &body[2].instr else {
+            panic!("expected Case, got {:?}", body[2].instr);
+        };
+        assert_eq!(returned(&branches[0]), [30]);
+        assert_eq!(returned(&branches[1]), [0]);
+    }
+
+    #[test]
+    fn cse_keeps_while_bodies_self_contained() {
+        let f = f64_scalar_ty();
+        let mut m = Module::new(vec![FuncDef {
+            name: "main".into(),
+            is_public: true,
+            params: vec![(ValueId(100), f.clone())],
+            result_types: vec![f.clone(), f.clone()],
+            body: vec![
+                mk_constant(0, 2.0),
+                InstrResult {
+                    values: vec![(ValueId(9), f.clone())],
+                    instr: Instruction::While {
+                        cond_body: vec![
+                            mk_constant(51, 10.0),
+                            mk_instr(
+                                52,
+                                TensorType::scalar(ElementType::I1),
+                                Instruction::Compare {
+                                    lhs: ValueId(50),
+                                    rhs: ValueId(51),
+                                    direction: CompareDirection::Lt,
+                                    compare_type: CompareType::Float,
+                                },
+                            ),
+                            ret(&[52]),
+                        ],
+                        loop_body: vec![
+                            mk_constant(53, 2.0),
+                            mk_instr(
+                                54,
+                                f.clone(),
+                                Instruction::Multiply {
+                                    lhs: ValueId(50),
+                                    rhs: ValueId(53),
+                                },
+                            ),
+                            ret(&[54]),
+                        ],
+                        init_values: vec![ValueId(100)],
+                        iter_arg_ids: vec![ValueId(50)],
+                    },
+                },
+                ret(&[0, 9]),
+            ],
+            source_line: None,
+        }]);
+        let r = fold_module(&mut m);
+        assert_eq!(r.counts_by_rule.get("cse"), None);
+        let Instruction::While { loop_body, .. } = &m.functions[0].body[1].instr else {
+            panic!("expected While");
+        };
+        assert!(matches!(
+            loop_body[1].instr,
+            Instruction::Multiply {
+                rhs: ValueId(53),
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn row_gathers_and_rank_only_broadcasts_fold() {
+        let i32_ty = |shape| TensorType {
+            shape,
+            element_type: ElementType::UI32,
+        };
+        let rows = |vid, values: &[i64]| InstrResult {
+            values: vec![(ValueId(vid), i32_ty(vec![values.len() as i64]))],
+            instr: Instruction::Constant {
+                value: ConstantValue::DenseArray(
+                    values
+                        .iter()
+                        .map(|&v| ScalarValue::UI32(v as u32))
+                        .collect(),
+                ),
+            },
+        };
+        let column = |vid, src, k| {
+            mk_instr(
+                vid,
+                i32_ty(vec![k, 1]),
+                Instruction::BroadcastInDim {
+                    operand: ValueId(src),
+                    broadcast_dims: vec![0],
+                },
+            )
+        };
+        let gather = |vid, src, idx, k| {
+            mk_instr(
+                vid,
+                f64_tensor(vec![k, 2]),
+                Instruction::Gather {
+                    operand: ValueId(src),
+                    indices: ValueId(idx),
+                    dims: GatherDims {
+                        offset_dims: vec![1],
+                        collapsed_slice_dims: vec![0],
+                        operand_batching_dims: vec![],
+                        start_indices_batching_dims: vec![],
+                        start_index_map: vec![0],
+                        index_vector_dim: 1,
+                    },
+                    slice_sizes: vec![1, 2],
+                },
+            )
+        };
+        let mut m = Module::new(vec![FuncDef {
+            name: "main".into(),
+            is_public: true,
+            params: vec![(ValueId(100), f64_tensor(vec![3, 2]))],
+            result_types: vec![],
+            body: vec![
+                rows(0, &[0, 1, 2]),
+                column(1, 0, 3),
+                gather(2, 100, 1, 3),
+                rows(3, &[1, 2]),
+                column(4, 3, 2),
+                gather(5, 100, 4, 2),
+                rows(6, &[2, 0]),
+                column(7, 6, 2),
+                gather(8, 100, 7, 2),
+                ret(&[2, 5, 8]),
+            ],
+            source_line: None,
+        }]);
+        let r = fold_module(&mut m);
+        assert_eq!(
+            r.counts_by_rule.get("gather_rows_as_slice").copied(),
+            Some(2)
+        );
+        let body = &m.functions[0].body;
+        assert_eq!(returned(body)[..2], [100, 5]);
+        assert!(body.iter().any(|ir| matches!(
+            &ir.instr,
+            Instruction::Slice { operand: ValueId(100), start_indices, limit_indices }
+                if start_indices == &[1, 0] && limit_indices == &[3, 2]
+        )));
+        assert!(
+            body.iter()
+                .any(|ir| matches!(ir.instr, Instruction::Gather { .. }))
+        );
     }
 }
