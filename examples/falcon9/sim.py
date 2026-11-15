@@ -179,6 +179,18 @@ VisualPos = ty.Annotated[
         metadata={"element_names": "q0,q1,q2,q3,x,y,z"},
     ),
 ]
+UpperStageVisualPos = ty.Annotated[
+    el.SpatialTransform,
+    el.Component("upper_stage_visual_pos", el.ComponentType.SpatialPosF64),
+]
+UpperStageVisualVelocity = ty.Annotated[
+    jax.Array,
+    el.Component("upper_stage_visual_velocity", el.ComponentType(el.PrimitiveType.F64, (3,))),
+]
+UpperStageDetached = ty.Annotated[
+    jax.Array,
+    el.Component("upper_stage_detached", el.ComponentType(el.PrimitiveType.F64, (1,))),
+]
 AxialSpecificForce = ty.Annotated[
     jax.Array,
     el.Component("axial_specific_force", el.ComponentType(el.PrimitiveType.F64, (1,))),
@@ -314,6 +326,10 @@ UpperMass = ty.Annotated[
         el.ComponentType(el.PrimitiveType.F64, (1,)),
         metadata={"external_control": "true"},
     ),
+]
+PreviousUpperMass = ty.Annotated[
+    jax.Array,
+    el.Component("previous_upper_mass", el.ComponentType(el.PrimitiveType.F64, (1,))),
 ]
 # Launch clamp latch: 0 until cluster thrust first exceeds weight, then 1.
 Lifted = ty.Annotated[
@@ -465,7 +481,20 @@ def mass_props(
     rp1: PropellantRp1,
     thrust: ThrustTotal,
     upper: UpperMass,
-) -> tuple[PropellantLox, PropellantRp1, el.Inertia, CgStation, AxialSpecificForce]:
+    previous_upper: PreviousUpperMass,
+    previous_cg: CgStation,
+    pos: el.WorldPos,
+    vel: el.WorldVel,
+) -> tuple[
+    PropellantLox,
+    PropellantRp1,
+    el.Inertia,
+    CgStation,
+    AxialSpecificForce,
+    PreviousUpperMass,
+    el.WorldPos,
+    el.WorldVel,
+]:
     """Deplete propellant and rebuild mass/CG/inertia from the cylinder stack
     (including the attached stage 2 + payload until separation)."""
     mdot_lox, mdot_rp1 = propulsion.split_mdot(mdot[0])
@@ -474,12 +503,28 @@ def mass_props(
     mass, cg, inertia_diag = propulsion.stack_mass_props(
         lox_next, rp1_next, jnp.maximum(upper[0], 0.0)
     )
+    separating = (previous_upper[0] > 0.0) & (upper[0] <= 0.0)
+    pos, vel = rebase_separation_center(pos, vel, previous_cg[0], cg, separating)
     return (
         jnp.array([lox_next]),
         jnp.array([rp1_next]),
         el.SpatialInertia(mass, inertia_diag),
         jnp.array([cg]),
         jnp.array([thrust[0] / mass]),
+        upper,
+        pos,
+        vel,
+    )
+
+
+def rebase_separation_center(pos, vel, old_cg, new_cg, separating):
+    """Changing the CoM reference must not teleport rigid-body material points."""
+    shift = pos.angular() @ jnp.array([jnp.where(separating, new_cg - old_cg, 0.0), 0.0, 0.0])
+    return (
+        el.SpatialTransform(angular=pos.angular(), linear=pos.linear() + shift),
+        el.SpatialMotion(
+            angular=vel.angular(), linear=vel.linear() + jnp.cross(vel.angular(), shift)
+        ),
     )
 
 
@@ -980,6 +1025,53 @@ def booster_visual_pose(pos: el.WorldPos, cg: CgStation) -> VisualPos:
     q = pos.angular()
     offset = q @ jnp.array([GLB_ORIGIN_STATION_M - cg[0], 0.0, 0.0])
     return el.SpatialTransform(angular=q, linear=r + offset)
+
+
+def upper_stage_visual_step(pose, velocity, upper_mass, previous, drift, detached):
+    """Scenery only: ballistic drift with a 1 m/s axial separation push.
+
+    This is not second-stage flight dynamics or reconstructed telemetry.
+    Freeze the last attached orientation; never follow the booster flip.
+    """
+    attached = upper_mass[0] > 0.0
+    first = (~attached) & (detached[0] < 0.5)
+    push = previous.angular() @ jnp.array([1.0, 0.0, 0.0])
+    released_drift = drift + jnp.where(first, push, 0.0)
+    acceleration = gravity_accel(previous.linear()) + frame_accel(previous.linear(), released_drift)
+    drift_next = jnp.where(
+        attached, velocity.linear(), released_drift + acceleration * SIM_TIME_STEP
+    )
+    position = jnp.where(
+        attached,
+        pose.linear(),
+        previous.linear() + 0.5 * (released_drift + drift_next) * SIM_TIME_STEP,
+    )
+    attitude = el.Quaternion.from_array(
+        jnp.where(attached, pose.angular().vector(), previous.angular().vector())
+    )
+    return (
+        el.SpatialTransform(angular=attitude, linear=position),
+        drift_next,
+        jnp.where(attached, jnp.zeros(1), jnp.ones(1)),
+    )
+
+
+@el.map
+def upper_stage_visual_pose(
+    pose: VisualPos,
+    world_pos: el.WorldPos,
+    velocity: el.WorldVel,
+    upper_mass: UpperMass,
+    previous: UpperStageVisualPos,
+    drift: UpperStageVisualVelocity,
+    detached: UpperStageDetached,
+) -> tuple[UpperStageVisualPos, UpperStageVisualVelocity, UpperStageDetached]:
+    origin_velocity = el.SpatialMotion(
+        angular=velocity.angular(),
+        linear=velocity.linear()
+        + jnp.cross(velocity.angular(), pose.linear() - world_pos.linear()),
+    )
+    return upper_stage_visual_step(pose, origin_velocity, upper_mass, previous, drift, detached)
 
 
 @el.map
@@ -1551,10 +1643,14 @@ def build_powered(
                 inertia=el.SpatialInertia(float(mass0), inertia0),
             ),
             el.C(VisualPos, el.SpatialTransform(angular=init_attitude, linear=vis_lin)),
+            el.C(UpperStageVisualPos, el.SpatialTransform(angular=init_attitude, linear=vis_lin)),
+            el.C(UpperStageVisualVelocity, jnp.asarray(init_vel_ecef, dtype=jnp.float64)),
+            el.C(UpperStageDetached, jnp.zeros(1)),
             el.C(AltitudeGeodetic, jnp.array([0.0])),
             el.C(GroundSpeed, jnp.array([0.0])),
             el.C(ScoreState, jnp.zeros(3)),
             el.C(UpperMass, jnp.array([upper_kg])),
+            el.C(PreviousUpperMass, jnp.array([upper_kg])),
             el.C(Lifted, jnp.array([0.0 if on_pad else 1.0])),
             el.C(LiftoffTime, jnp.array([0.0])),
             el.C(TouchdownMetrics, jnp.zeros(6)),
@@ -1601,6 +1697,7 @@ def build_powered(
         | pad_clamp
         | ground_contact
         | booster_visual_pose
+        | upper_stage_visual_pose
         | descent_metrics_latch
     )
     system = (extra_systems | plant) if extra_systems is not None else plant

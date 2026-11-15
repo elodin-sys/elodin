@@ -2555,7 +2555,6 @@ mod tests {
         use impeller_wkt::{Object3D, Object3DMesh};
         Object3DState {
             compiled_expr: None,
-            visible_expr: None,
             scale_expr: None,
             scale_error: None,
             error_covariance_cholesky_expr: None,
@@ -2570,7 +2569,6 @@ mod tests {
                 frame_orientation: None,
                 orientation: Default::default(),
                 sensor_visible: true,
-                visible: None,
                 icon: None,
                 thrusters: Vec::new(),
                 mesh_visibility_range: None,

@@ -134,7 +134,6 @@ pub fn local_assets_root(
 #[derive(Component)]
 pub struct Object3DState {
     pub compiled_expr: Option<CompiledExpr>,
-    pub visible_expr: Option<CompiledExpr>,
     pub scale_expr: Option<CompiledExpr>,
     pub scale_error: Option<CompileError>,
     /// When set, ellipsoid shape is driven by error covariance (Mat3 path); evaluated each frame.
@@ -1295,7 +1294,6 @@ pub fn update_object_3d_system(
         Entity,
         &mut Object3DState,
         &mut impeller_wkt::WorldPos,
-        &mut Visibility,
         Option<&mut EllipsoidVisual>,
         Has<WorldPosReceived>,
         Option<&Children>,
@@ -1311,7 +1309,7 @@ pub fn update_object_3d_system(
     mut logged_pose_errors: Local<HashSet<Entity>>,
 ) {
     let eql_ctx_changed = eql_ctx.is_changed();
-    for (entity, mut object_3d, mut pos, mut visibility, ellipse, has_received, children_maybe) in
+    for (entity, mut object_3d, mut pos, ellipse, has_received, children_maybe) in
         objects_query.iter_mut()
     {
         if let Some(compiled_expr) = &object_3d.compiled_expr {
@@ -1332,31 +1330,6 @@ pub fn update_object_3d_system(
                     }
                 }
             }
-        }
-
-        if let Some(source) = &object_3d.data.visible {
-            if object_3d.visible_expr.is_none() || eql_ctx_changed {
-                let compile = || -> Result<CompiledExpr, CompileError> {
-                    compile_eql_expr(eql_ctx.0.parse_str(source)?)
-                };
-                object_3d.visible_expr = match compile() {
-                    Ok(expr) => Some(expr),
-                    Err(err) => {
-                        warn_once!(visible = %source, %err, "object_3d visibility failed to compile");
-                        None
-                    }
-                };
-            }
-            let shown = object_3d
-                .visible_expr
-                .as_ref()
-                .and_then(|expr| expr.execute(&entity_map, &component_value_maps).ok())
-                .is_some_and(|value| object_visibility_value(&value));
-            visibility.set_if_neq(if shown {
-                Visibility::Inherited
-            } else {
-                Visibility::Hidden
-            });
         }
 
         let Some(mut ellipse) = ellipse else {
@@ -1490,10 +1463,6 @@ pub fn update_object_3d_system(
             }
         }
     }
-}
-
-fn object_visibility_value(value: &ComponentValue) -> bool {
-    component_buf_as_f64_vec(value).is_ok_and(|v| v.len() == 1 && v[0].is_finite() && v[0] > 0.0)
 }
 
 /// Converts a ComponentValue to an angle-axis rotation (axis Vec3, angle f32 in radians).
@@ -2101,7 +2070,6 @@ pub fn create_object_3d_entity(
                         &EqlCompileCtx::new(geo_context).with_frame(geo_frame),
                     )?)
                 },
-                visible_expr: None,
                 scale_expr,
                 scale_error,
                 error_covariance_cholesky_expr,
@@ -2113,11 +2081,7 @@ pub fn create_object_3d_entity(
             },
             Transform::default(),
             GlobalTransform::default(),
-            if data.visible.is_some() {
-                Visibility::Hidden
-            } else {
-                Visibility::default()
-            },
+            Visibility::default(),
             InheritedVisibility::default(),
             ViewVisibility::default(),
             crate::spatial::GridCell::default(),
@@ -2992,55 +2956,6 @@ fn floats_to_cholesky_6(values: &[f64]) -> Option<[f32; 6]> {
     }
 }
 
-#[cfg(test)]
-mod object_visibility_tests {
-    use super::*;
-    use crate::ui::widgets::SystemStateExt;
-    use bevy::ecs::system::SystemState;
-    use impeller::schema::Schema;
-    use impeller::types::{ComponentId, PrimType, Timestamp};
-
-    #[test]
-    fn recorded_separation_visibility_supports_reverse_scrubbing() {
-        let id = ComponentId::new("booster.upper_mass");
-        let component = Arc::new(eql::Component::new(
-            "booster.upper_mass".into(),
-            id,
-            Schema::new(PrimType::F64, [1usize]).unwrap(),
-        ));
-        let ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
-        let expr = compile_eql_expr(ctx.parse_str("booster.upper_mass[0]").unwrap()).unwrap();
-        let mut world = World::new();
-        let entity = world
-            .spawn(ComponentValue::F64(nox::array![118600.0f64].to_dyn()))
-            .id();
-        let entity_map = EntityMap(HashMap::from([(id, entity)]));
-        for (mass, expected) in [(118600.0, true), (0.0, false), (118600.0, true)] {
-            *world.get_mut::<ComponentValue>(entity).unwrap() =
-                ComponentValue::F64(nox::array![mass].to_dyn());
-            let mut state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
-                SystemState::new(&mut world);
-            let (values,) = state.params(&world);
-            assert_eq!(
-                object_visibility_value(&expr.execute(&entity_map, &values).unwrap()),
-                expected
-            );
-        }
-    }
-
-    #[test]
-    fn invalid_or_nonpositive_visibility_is_hidden() {
-        for value in [0.0, -1.0, f64::NAN, f64::INFINITY] {
-            assert!(!object_visibility_value(&ComponentValue::F64(
-                nox::array![value].to_dyn()
-            )));
-        }
-        assert!(!object_visibility_value(&ComponentValue::F64(
-            nox::array![1.0f64, 2.0].to_dyn()
-        )));
-    }
-}
-
 pub struct Object3DPlugin;
 
 /// Scene-joint animations shared by editor viewports and headless sensor cameras.
@@ -3639,7 +3554,6 @@ mod ellipsoid_covariance_tests {
             frame_orientation: Some(GeoFrame::ECEF),
             orientation: Default::default(),
             sensor_visible: true,
-            visible: None,
             icon: None,
             thrusters: Vec::new(),
             mesh_visibility_range: None,

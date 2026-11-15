@@ -358,12 +358,11 @@ def build() -> ui.Schematic:
             ],
         ),
         # The booster remains the camera/effects anchor throughout the flight.
-        # Use recorded separation state, so scrubbing restores either configuration.
+        # The upper stage has its own recorded visual pose after separation.
         ui.object_3d(
-            "booster.visual_pos",
+            "booster.upper_stage_visual_pos",
             mesh=ui.glb("falcon9-upper-stage.glb", scale=0.9944, rotate=(0.0, 0.0, -90.0)),
             orientation="absolute",
-            visible="booster.upper_mass[0]",
         ),
         ui.object_3d(
             "booster_truth.world_pos",

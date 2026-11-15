@@ -47,19 +47,6 @@ def test_graph_builder_roundtrip():
     assert ui.from_kdl(built.emit_kdl()) == built
 
 
-def test_object_recorded_visibility_roundtrip():
-    built = ui.schematic(
-        ui.object_3d(
-            "booster.visual_pos", mesh=ui.glb("upper.glb"), visible="booster.upper_mass[0]"
-        )
-    )
-    assert ui.from_kdl(built.emit_kdl()) == built
-    generated = ui.to_python(built.emit_kdl())
-    namespace = {}
-    exec(generated, namespace)
-    assert namespace["build"]() == built
-
-
 def test_tabs_hsplit_vsplit_roundtrip():
     built = ui.schematic(
         ui.tabs(

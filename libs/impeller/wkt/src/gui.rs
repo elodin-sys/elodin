@@ -1868,9 +1868,6 @@ pub struct Object3D {
     pub orientation: bevy_geo_frames::RotationKind,
     #[serde(default = "default_true")]
     pub sensor_visible: bool,
-    /// Optional scalar EQL: positive finite values show this object and its children.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub visible: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kernel: Option<DisplayKernelBinding>,
     pub icon: Option<Object3DIcon>,

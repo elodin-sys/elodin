@@ -1794,22 +1794,6 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         .and_then(|s| GeoFrame::from_str(s).ok());
     let frame_orientation = parse_optional_geo_frame(node, "frame_orientation", "object_3d", src)?;
     let orientation = parse_rotation_kind(node, src)?;
-    let visible = node
-        .get("visible")
-        .map(|value| {
-            value
-                .as_string()
-                .filter(|value| !value.trim().is_empty())
-                .map(str::to_owned)
-                .ok_or_else(|| KdlSchematicError::InvalidValue {
-                    property: "visible".into(),
-                    node: "object_3d".into(),
-                    expected: "nonempty scalar EQL string".into(),
-                    src: src.into(),
-                    span: node.span(),
-                })
-        })
-        .transpose()?;
     let sensor_visible = node
         .get("sensor_visible")
         .and_then(|value| value.as_bool())
@@ -1907,7 +1891,6 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         frame_orientation,
         orientation,
         sensor_visible,
-        visible,
         kernel,
         icon,
         thrusters,

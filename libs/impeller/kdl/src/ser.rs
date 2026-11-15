@@ -1086,10 +1086,6 @@ fn serialize_object_3d(obj: &Object3D) -> KdlNode {
             .push(KdlEntry::new_prop("sensor_visible", false));
     }
 
-    if let Some(visible) = &obj.visible {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("visible", visible.as_str()));
-    }
     let mut children = KdlDocument::new();
     if let Some(kernel) = &obj.kernel {
         for input in &kernel.inputs {
@@ -2383,7 +2379,6 @@ graph "value" {
             frame_orientation: None,
             orientation: Default::default(),
             sensor_visible: true,
-            visible: None,
             node_id: NodeId::default(),
             kernel: None,
         }));
@@ -2430,7 +2425,6 @@ graph "value" {
             frame_orientation: None,
             orientation: Default::default(),
             sensor_visible: true,
-            visible: None,
             node_id: NodeId::default(),
             kernel: None,
         }));
@@ -2616,7 +2610,6 @@ object_3d lander.world_pos {
             frame_orientation: None,
             orientation: Default::default(),
             sensor_visible: true,
-            visible: None,
             node_id: NodeId::default(),
             kernel: None,
         }));
@@ -2660,7 +2653,6 @@ object_3d lander.world_pos {
             frame_orientation: None,
             orientation: Default::default(),
             sensor_visible: true,
-            visible: None,
             node_id: NodeId::default(),
             kernel: None,
         }));
@@ -2705,7 +2697,6 @@ object_3d lander.world_pos {
             frame_orientation: None,
             orientation: Default::default(),
             sensor_visible: true,
-            visible: None,
             mesh_visibility_range: None,
             icon: None,
             thrusters: Vec::new(),
@@ -2742,7 +2733,6 @@ object_3d lander.world_pos {
             frame_orientation: None,
             orientation: RotationKind::Absolute,
             sensor_visible: false,
-            visible: None,
             mesh_visibility_range: None,
             icon: None,
             thrusters: Vec::new(),
@@ -2779,7 +2769,6 @@ object_3d lander.world_pos {
             frame_orientation: None,
             orientation: RotationKind::Relative,
             sensor_visible: true,
-            visible: None,
             mesh_visibility_range: None,
             icon: None,
             thrusters: Vec::new(),
@@ -2807,7 +2796,6 @@ object_3d lander.world_pos {
             frame_orientation: Some(GeoFrame::NED),
             orientation: RotationKind::Absolute,
             sensor_visible: true,
-            visible: None,
             mesh_visibility_range: None,
             icon: None,
             thrusters: Vec::new(),
@@ -2844,7 +2832,6 @@ object_3d lander.world_pos {
             frame_orientation: None, // Default (no frame)
             orientation: Default::default(),
             sensor_visible: true,
-            visible: None,
             icon: None,
             thrusters: Vec::new(),
             mesh_visibility_range: None,

@@ -239,8 +239,13 @@ recorded flight is reproduced within thresholds.
 
 ## Cinematic Visuals (pyrotechnique port)
 
-The upper-stage model is hidden at recorded stage separation. Chase and infrared
-views remain attached to the booster through landing, including during replay.
+The upper stage detaches visually with a 1 m/s axial push and follows a simple
+ballistic drift, retaining its orientation. Gravity and rotating-frame terms
+keep the motion continuous; propulsion and drag are not modeled. This is scenery,
+not reconstructed second-stage telemetry. Its pose is recorded for replay;
+chase and infrared views stay attached to the booster.
+At separation the booster CoM reference is rebased to preserve the positions
+and velocities of its material points when the attached upper-stage mass is removed.
 Grid fins open over two seconds after boostback (a visual timing assumption),
 then follow the simulated actuator positions. Deployment is recorded as
 `booster.fin_deploy`; the aerodynamic model is unchanged.
