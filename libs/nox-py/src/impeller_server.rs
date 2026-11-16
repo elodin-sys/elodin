@@ -537,6 +537,10 @@ fn should_record_component(record_every_tick: bool, latest: Option<&[u8]>, value
     record_every_tick || latest != Some(value)
 }
 
+fn reanchored_deadline(now: Instant, pacing_lead: Duration) -> Instant {
+    now.checked_add(pacing_lead).unwrap_or(now)
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn tick(
     db: Arc<DB>,
@@ -839,7 +843,7 @@ async fn tick(
                 }
             }
             if was_reset {
-                *deadline = now;
+                *deadline = reanchored_deadline(now, pacing_lead);
             }
             // Pace to `deadline - lead` (run slightly ahead) rather than to the
             // deadline itself, so a transient slow cycle spends the lead buffer
@@ -970,6 +974,18 @@ pub fn timestamps_changed(db: &DB, components: &mut [(PairId, Timestamp)]) -> Op
         }
         changed
     })
+}
+
+#[cfg(test)]
+mod pacing_tests {
+    use super::*;
+
+    #[test]
+    fn drift_reset_restores_the_configured_lead() {
+        let now = Instant::now();
+        let lead = Duration::from_millis(20);
+        assert_eq!(reanchored_deadline(now, lead), now + lead);
+    }
 }
 
 #[cfg(test)]
