@@ -867,6 +867,8 @@ def gravity(query: el.Query[el.Force, el.Inertia]) -> el.Query[el.Force]:
 
 `@elodin.map_seq` maps over items sequentially, so it does lose some parallelism, but it also preserves `jax.lax.cond()`'s behavior, which only evaluates one of its consequents. `@elodin.map` translates all `jax.lax.cond()`s to `jax.lax.select()`s, which always evaluates both of its consequents. So in cases where one of your consequents is both expensive and seldom, `@elodin.map_seq` can be faster than `@elodin.map`.
 
+On the Cranelift backend, `@elodin.map_seq` compiles the function once and calls it for each entity. For a large per-entity function, such as a filter update over a covariance matrix, this is faster than `@elodin.map`; for small functions `@elodin.map` remains faster.
+
 ```python
 import elodin as el
 

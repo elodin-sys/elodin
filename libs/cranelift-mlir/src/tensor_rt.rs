@@ -968,19 +968,40 @@ pub extern "C" fn tensor_gather(
     let dst = unsafe { slice::from_raw_parts_mut(dst, n_dst * elem_sz) };
     let indices = unsafe { slice::from_raw_parts(indices, n_idx) };
     let run = inner * elem_sz;
-    for (p, out) in dst.chunks_exact_mut(run).enumerate() {
-        let (mut from, mut idx, mut rem) = (0, 0, p);
-        for &[size, operand_stride, indices_stride] in dims.iter().rev() {
-            let c = rem % size as usize;
-            rem /= size as usize;
-            from += c * operand_stride as usize;
-            idx += c * indices_stride as usize;
+    // Positions advance the walked dims like an odometer, last dim fastest; the start offset
+    // only changes with the index position, which many windows share.
+    let mut counters = vec![0; dims.len()];
+    let (mut from, mut idx) = (0, 0);
+    let mut start: Option<(usize, usize)> = None;
+    for out in dst.chunks_exact_mut(run) {
+        let offset = match start {
+            Some((at, offset)) if at == idx => offset,
+            _ => {
+                let offset = starts
+                    .iter()
+                    .enumerate()
+                    .map(|(k, &[operand_stride, max_start])| {
+                        let s = indices[idx + k * vector_stride].clamp(0, max_start);
+                        s as usize * operand_stride as usize
+                    })
+                    .sum();
+                start = Some((idx, offset));
+                offset
+            }
+        };
+        let at = (from + offset) * elem_sz;
+        out.copy_from_slice(&src[at..at + run]);
+        for (c, &[size, operand_stride, indices_stride]) in counters.iter_mut().zip(dims).rev() {
+            *c += 1;
+            from += operand_stride as usize;
+            idx += indices_stride as usize;
+            if *c < size as usize {
+                break;
+            }
+            *c = 0;
+            from -= size as usize * operand_stride as usize;
+            idx -= size as usize * indices_stride as usize;
         }
-        for (k, &[operand_stride, max_start]) in starts.iter().enumerate() {
-            let start = indices[idx + k * vector_stride].clamp(0, max_start);
-            from += start as usize * operand_stride as usize;
-        }
-        out.copy_from_slice(&src[from * elem_sz..from * elem_sz + run]);
     }
 }
 
@@ -1240,56 +1261,15 @@ pub extern "C" fn tensor_concat_nd_f64(
     let dst_shape = unsafe { slice::from_raw_parts(dst_shape, rank) };
     let a_shape = unsafe { slice::from_raw_parts(a_shape, rank) };
 
-    let mut dst_strides = vec![1usize; rank];
-    for i in (0..rank.saturating_sub(1)).rev() {
-        dst_strides[i] = dst_strides[i + 1] * dst_shape[i + 1] as usize;
-    }
-
-    let a_dim_size = a_shape[dim] as usize;
-
-    for flat_dst in 0..n_dst {
-        let mut remaining = flat_dst;
-        let mut coords = vec![0usize; rank];
-        for d in 0..rank {
-            coords[d] = remaining / dst_strides[d];
-            remaining %= dst_strides[d];
-        }
-
-        if coords[dim] < a_dim_size {
-            let mut a_strides = vec![1usize; rank];
-            for i in (0..rank.saturating_sub(1)).rev() {
-                a_strides[i] = a_strides[i + 1] * a_shape[i + 1] as usize;
-            }
-            let mut src_flat = 0usize;
-            for d in 0..rank {
-                src_flat += coords[d] * a_strides[d];
-            }
-            let idx = src_flat.min(n_a.saturating_sub(1));
-            dst[flat_dst * elem_sz..(flat_dst + 1) * elem_sz]
-                .copy_from_slice(&a[idx * elem_sz..(idx + 1) * elem_sz]);
-        } else {
-            let mut b_shape = vec![0i64; rank];
-            for d in 0..rank {
-                b_shape[d] = if d == dim {
-                    dst_shape[d] - a_shape[d]
-                } else {
-                    dst_shape[d]
-                };
-            }
-            let mut b_strides = vec![1usize; rank];
-            for i in (0..rank.saturating_sub(1)).rev() {
-                b_strides[i] = b_strides[i + 1] * b_shape[i + 1] as usize;
-            }
-            let mut b_coords = coords.clone();
-            b_coords[dim] -= a_dim_size;
-            let mut src_flat = 0usize;
-            for d in 0..rank {
-                src_flat += b_coords[d] * b_strides[d];
-            }
-            let idx = src_flat.min(n_b.saturating_sub(1));
-            dst[flat_dst * elem_sz..(flat_dst + 1) * elem_sz]
-                .copy_from_slice(&b[idx * elem_sz..(idx + 1) * elem_sz]);
-        }
+    // Each index of the dims before `dim` takes one contiguous run of `a`, then one of `b`.
+    let inner = elem_sz * dst_shape[dim + 1..].iter().product::<i64>() as usize;
+    let a_run = inner * a_shape[dim] as usize;
+    let b_run = inner * (dst_shape[dim] - a_shape[dim]) as usize;
+    let outer = dst_shape[..dim].iter().product::<i64>() as usize;
+    for o in 0..outer {
+        let out = &mut dst[o * (a_run + b_run)..(o + 1) * (a_run + b_run)];
+        out[..a_run].copy_from_slice(&a[o * a_run..(o + 1) * a_run]);
+        out[a_run..].copy_from_slice(&b[o * b_run..(o + 1) * b_run]);
     }
 }
 
@@ -1362,30 +1342,62 @@ pub extern "C" fn tensor_broadcast_nd_generic(
     let dst_shape = unsafe { slice::from_raw_parts(dst_shape, dst_rank) };
     let src_shape = unsafe { slice::from_raw_parts(src_shape, src_rank) };
     let broadcast_dims = unsafe { slice::from_raw_parts(broadcast_dims, src_rank) };
-    let mut ds = vec![1usize; dst_rank];
-    for i in (0..dst_rank.saturating_sub(1)).rev() {
-        ds[i] = ds[i + 1] * dst_shape[i + 1] as usize;
-    }
-    let mut ss = vec![1usize; src_rank];
-    for i in (0..src_rank.saturating_sub(1)).rev() {
-        ss[i] = ss[i + 1] * src_shape[i + 1] as usize;
-    }
-    for fd in 0..n_dst {
-        let mut si = 0usize;
-        let mut rem = fd;
-        for d in 0..dst_rank {
-            let coord = rem / ds[d];
-            rem %= ds[d];
-            for (s, &bd) in broadcast_dims.iter().enumerate() {
-                if bd as usize == d {
-                    si += (if src_shape[s] == 1 { 0 } else { coord }) * ss[s];
-                }
+    // Elements `src` advances per index of dst dim `d`: zero for new and expanded dims.
+    let src_step = |d: usize| {
+        let mut step = 1;
+        for s in (0..src_rank).rev() {
+            if broadcast_dims[s] as usize == d {
+                return if src_shape[s] == 1 { 0 } else { step };
             }
+            step *= src_shape[s] as usize;
         }
-        si = si.min(n_src.saturating_sub(1));
-        let db = fd * elem_sz;
-        let sb = si * elem_sz;
-        dst[db..db + elem_sz].copy_from_slice(&src[sb..sb + elem_sz]);
+        0
+    };
+    let Some(last) = dst_rank.checked_sub(1) else {
+        dst.copy_from_slice(&src[..elem_sz]);
+        return;
+    };
+    let steps: Vec<usize> = (0..dst_rank).map(src_step).collect();
+    // Trailing dims that `src` does not advance along repeat one element, so they fill one row.
+    let row_start = steps
+        .iter()
+        .rposition(|&s| s != 0)
+        .map_or(0, |d| d + 1)
+        .min(last);
+    let row = elem_sz * dst_shape[row_start..].iter().product::<i64>() as usize;
+    let step = elem_sz * steps[last];
+    for r in 0..dst_shape[..row_start].iter().product::<i64>() as usize {
+        let (mut rem, mut at) = (r, 0);
+        for d in (0..row_start).rev() {
+            let n = dst_shape[d] as usize;
+            at += rem % n * steps[d];
+            rem /= n;
+        }
+        copy_strided(
+            &mut dst[r * row..(r + 1) * row],
+            src,
+            at * elem_sz,
+            step,
+            elem_sz,
+        );
+    }
+}
+
+/// Fills `out` with `elem_sz`-byte elements of `src` taken `step` bytes apart from byte `at`.
+fn copy_strided(out: &mut [u8], src: &[u8], mut at: usize, step: usize, elem_sz: usize) {
+    if step == elem_sz {
+        out.copy_from_slice(&src[at..at + out.len()]);
+    } else {
+        // Fixed-size copies compile to single moves instead of `memcpy` calls.
+        for chunk in out.chunks_exact_mut(elem_sz) {
+            match elem_sz {
+                8 => chunk.copy_from_slice(&src[at..at + 8]),
+                4 => chunk.copy_from_slice(&src[at..at + 4]),
+                1 => chunk[0] = src[at],
+                _ => chunk.copy_from_slice(&src[at..at + elem_sz]),
+            }
+            at += step;
+        }
     }
 }
 
@@ -1405,28 +1417,27 @@ pub extern "C" fn tensor_slice_generic(
     let shape = unsafe { slice::from_raw_parts(shape, rank) };
     let starts = unsafe { slice::from_raw_parts(starts, rank) };
     let limits = unsafe { slice::from_raw_parts(limits, rank) };
-    let mut src_s = vec![1usize; rank];
-    for i in (0..rank.saturating_sub(1)).rev() {
-        src_s[i] = src_s[i + 1] * shape[i + 1] as usize;
+    let Some(mut k) = rank.checked_sub(1) else {
+        dst.copy_from_slice(&src[..elem_sz]);
+        return;
+    };
+    // The slice covers the dims after `k` in full, so each index of the dims before `k`
+    // copies one contiguous run.
+    while k > 0 && starts[k] == 0 && limits[k] == shape[k] {
+        k -= 1;
     }
-    let dst_shape: Vec<usize> = (0..rank)
-        .map(|d| (limits[d] - starts[d]) as usize)
-        .collect();
-    let mut dst_s = vec![1usize; rank];
-    for i in (0..rank.saturating_sub(1)).rev() {
-        dst_s[i] = dst_s[i + 1] * dst_shape[i + 1];
-    }
-    for fd in 0..n_dst {
-        let mut sf = 0usize;
-        let mut rem = fd;
-        for d in 0..rank {
-            let c = rem / dst_s[d];
-            rem %= dst_s[d];
-            sf += (starts[d] as usize + c) * src_s[d];
+    let extent = |d: usize| (limits[d] - starts[d]) as usize;
+    let inner = shape[k + 1..].iter().product::<i64>() as usize;
+    let run = elem_sz * extent(k) * inner;
+    for r in 0..(0..k).map(extent).product() {
+        let (mut rem, mut at, mut stride) =
+            (r, starts[k] as usize * inner, shape[k] as usize * inner);
+        for d in (0..k).rev() {
+            at += (starts[d] as usize + rem % extent(d)) * stride;
+            rem /= extent(d);
+            stride *= shape[d] as usize;
         }
-        let db = fd * elem_sz;
-        let sb = sf * elem_sz;
-        dst[db..db + elem_sz].copy_from_slice(&src[sb..sb + elem_sz]);
+        dst[r * run..(r + 1) * run].copy_from_slice(&src[at * elem_sz..at * elem_sz + run]);
     }
 }
 
@@ -1538,27 +1549,29 @@ pub extern "C" fn tensor_dynamic_update_slice_generic(
     let start_indices = unsafe { slice::from_raw_parts(start_indices, rank) };
     let update_shape = unsafe { slice::from_raw_parts(update_shape, rank) };
     dst.copy_from_slice(src);
+    if n_update == 0 {
+        return;
+    }
     let mut src_s = vec![1usize; rank];
     for i in (0..rank.saturating_sub(1)).rev() {
         src_s[i] = src_s[i + 1] * shape[i + 1] as usize;
     }
-    let mut upd_s = vec![1usize; rank];
-    for i in (0..rank.saturating_sub(1)).rev() {
-        upd_s[i] = upd_s[i + 1] * update_shape[i + 1] as usize;
-    }
-    for fu in 0..n_update {
-        let mut df = 0usize;
-        let mut rem = fu;
-        for d in 0..rank {
-            let c = rem / upd_s[d];
-            rem %= upd_s[d];
-            let start = clamped_start(start_indices[d], shape[d] - update_shape[d]);
-            df += (start + c) * src_s[d];
+    let starts: Vec<usize> = (0..rank)
+        .map(|d| clamped_start(start_indices[d], shape[d] - update_shape[d]))
+        .collect();
+    // Each row along the last dim lands contiguously in `dst`.
+    let row = rank
+        .checked_sub(1)
+        .map_or(1, |last| update_shape[last] as usize);
+    for (r, upd_row) in update.chunks_exact(row * elem_sz).enumerate() {
+        let (mut rem, mut df) = (r, starts.last().copied().unwrap_or(0));
+        for d in (0..rank.saturating_sub(1)).rev() {
+            let n = update_shape[d] as usize;
+            df += (starts[d] + rem % n) * src_s[d];
+            rem /= n;
         }
-        if df < n_src {
-            let db = df * elem_sz;
-            let ub = fu * elem_sz;
-            dst[db..db + elem_sz].copy_from_slice(&update[ub..ub + elem_sz]);
+        if let Some(out) = dst.get_mut(df * elem_sz..(df + row) * elem_sz) {
+            out.copy_from_slice(upd_row);
         }
     }
 }
@@ -2308,4 +2321,142 @@ pub extern "C" fn tensor_sort(data: *const *mut u8, meta: *const i64) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn unravel(mut i: usize, shape: &[i64]) -> Vec<usize> {
+        let mut idx = vec![0; shape.len()];
+        for d in (0..shape.len()).rev() {
+            idx[d] = i % shape[d] as usize;
+            i /= shape[d] as usize;
+        }
+        idx
+    }
+
+    fn ravel(idx: &[usize], shape: &[i64]) -> usize {
+        idx.iter()
+            .zip(shape)
+            .fold(0, |flat, (&i, &n)| flat * n as usize + i)
+    }
+
+    /// Slices, broadcasts and concatenations of a `[2, 3, 4]` tensor against index arithmetic,
+    /// for every element size. The interpreter calls these kernels too, so it cannot check them.
+    #[test]
+    fn layout_kernels_match_index_arithmetic() {
+        let shape = [2i64, 3, 4];
+        for sz in [8, 4, 1] {
+            // Element `i` holds the value `i`, so an output names the elements it copied.
+            let src: Vec<u8> = (0..24u64)
+                .flat_map(|i| i.to_le_bytes()[..sz].to_vec())
+                .collect();
+            let picked = |picks: Vec<usize>| -> Vec<u8> {
+                picks
+                    .iter()
+                    .flat_map(|&i| src[i * sz..(i + 1) * sz].to_vec())
+                    .collect()
+            };
+
+            for (starts, limits) in [
+                ([0i64, 1, 0], [2i64, 3, 4]),
+                ([1, 0, 1], [2, 3, 3]),
+                ([1, 0, 0], [2, 3, 4]),
+                ([0, 2, 1], [1, 3, 2]),
+            ] {
+                let ext: Vec<i64> = (0..3).map(|d| limits[d] - starts[d]).collect();
+                let n = ext.iter().product::<i64>() as usize;
+                let picks = (0..n).map(|i| {
+                    let idx = unravel(i, &ext);
+                    let at: Vec<usize> = (0..3).map(|d| idx[d] + starts[d] as usize).collect();
+                    ravel(&at, &shape)
+                });
+                let mut dst = vec![0u8; n * sz];
+                tensor_slice_generic(
+                    dst.as_mut_ptr(),
+                    src.as_ptr(),
+                    n,
+                    24,
+                    shape.as_ptr(),
+                    3,
+                    starts.as_ptr(),
+                    limits.as_ptr(),
+                    sz,
+                );
+                assert_eq!(
+                    dst,
+                    picked(picks.collect()),
+                    "slice {starts:?}..{limits:?} ({sz} B)"
+                );
+            }
+
+            for (src_shape, dims) in [
+                (vec![3i64], vec![1i64]),
+                (vec![4], vec![2]),
+                (vec![2, 1, 4], vec![0, 1, 2]),
+                (vec![2, 4], vec![0, 2]),
+            ] {
+                let picks = (0..24).map(|i| {
+                    let idx = unravel(i, &shape);
+                    let at: Vec<usize> = dims
+                        .iter()
+                        .zip(&src_shape)
+                        .map(|(&d, &n)| if n == 1 { 0 } else { idx[d as usize] })
+                        .collect();
+                    ravel(&at, &src_shape)
+                });
+                let mut dst = vec![0u8; 24 * sz];
+                tensor_broadcast_nd_generic(
+                    dst.as_mut_ptr(),
+                    src.as_ptr(),
+                    24,
+                    src_shape.iter().product::<i64>() as usize,
+                    shape.as_ptr(),
+                    3,
+                    src_shape.as_ptr(),
+                    src_shape.len(),
+                    dims.as_ptr(),
+                    sz,
+                );
+                assert_eq!(
+                    dst,
+                    picked(picks.collect()),
+                    "broadcast {src_shape:?} along {dims:?} ({sz} B)"
+                );
+            }
+
+            for dim in 0..3 {
+                // `a` takes one index along `dim` and `b` the rest; `b` starts after `a` in `src`.
+                let (mut a_shape, mut b_shape) = (shape, shape);
+                a_shape[dim] = 1;
+                b_shape[dim] -= 1;
+                let n_a = a_shape.iter().product::<i64>() as usize;
+                let picks = (0..24).map(|i| {
+                    let mut idx = unravel(i, &shape);
+                    if idx[dim] == 0 {
+                        ravel(&idx, &a_shape)
+                    } else {
+                        idx[dim] -= 1;
+                        n_a + ravel(&idx, &b_shape)
+                    }
+                });
+                let mut dst = vec![0u8; 24 * sz];
+                tensor_concat_nd_f64(
+                    dst.as_mut_ptr(),
+                    24,
+                    src.as_ptr(),
+                    n_a,
+                    src[n_a * sz..].as_ptr(),
+                    24 - n_a,
+                    shape.as_ptr(),
+                    a_shape.as_ptr(),
+                    3,
+                    dim,
+                    sz,
+                );
+                assert_eq!(dst, picked(picks.collect()), "concat along {dim} ({sz} B)");
+            }
+        }
+    }
 }

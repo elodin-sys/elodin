@@ -804,6 +804,7 @@ impl System for PyFnSystem {
         let builder = SystemBuilder::new(world);
         let mut py_builder = PySystemBuilder {
             total_edges: GraphQuery::<TotalEdge>::param(&builder)?.edges,
+            cranelift: world.metadata.cranelift,
             ..Default::default()
         };
         for id in output_ids.iter() {
@@ -967,6 +968,8 @@ pub struct PySystemBuilder {
     arg_map: HashMap<ComponentId, (ArgMetadata, usize)>,
     pub edge_map: HashMap<ComponentId, Vec<crate::graph::Edge>>,
     pub total_edges: Vec<crate::graph::Edge>,
+    #[pyo3(get)]
+    pub cranelift: bool,
 }
 
 #[derive(Clone)]

@@ -68,6 +68,9 @@ pub struct WorldMetadata {
     pub sensor_cameras: Vec<SensorCameraConfig>,
     #[serde(default)]
     pub thermal_tags: Vec<ThermalTagConfig>,
+    /// The systems are being compiled for the Cranelift backend.
+    #[serde(skip)]
+    pub cranelift: bool,
 }
 
 impl MetadataExt for World {}
@@ -88,6 +91,7 @@ impl Default for WorldMetadata {
             schematic_kernels: HashMap::new(),
             sensor_cameras: Vec::new(),
             thermal_tags: Vec::new(),
+            cranelift: false,
         }
     }
 }

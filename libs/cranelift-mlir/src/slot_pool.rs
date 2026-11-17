@@ -28,10 +28,23 @@
 
 use std::collections::{HashMap, HashSet};
 
-use cranelift_codegen::ir::{InstBuilder, StackSlot, StackSlotData, StackSlotKind, Value};
+use cranelift_codegen::ir::{
+    InstBuilder, MemFlags, StackSlot, StackSlotData, StackSlotKind, Value,
+};
 use cranelift_frontend::FunctionBuilder;
 
 use crate::ir::ValueId;
+
+/// Where a returned value is written instead of a slot: output `output`, whose `bytes` sit at
+/// `base + offset`, or at the pointer stored there when `indirect`.
+#[derive(Clone, Copy)]
+pub(crate) struct Destination {
+    pub output: usize,
+    pub base: Value,
+    pub offset: i32,
+    pub bytes: u32,
+    pub indirect: bool,
+}
 
 /// Per-function stack-slot pool. Lives for one `lower_body_mem` call.
 ///
@@ -72,6 +85,10 @@ pub(crate) struct SlotPool {
     free: HashMap<(u32, u8), Vec<StackSlot>>,
     vid_to_slot: HashMap<ValueId, StackSlot>,
     slot_holders: HashMap<StackSlot, (u32, u8, HashSet<ValueId>)>,
+    /// Outputs of the values the body returns, which their producers write in place of a slot.
+    destinations: HashMap<ValueId, Destination>,
+    /// Values written straight into an output, with the pointer used and the output index.
+    placed: HashMap<ValueId, (Value, usize)>,
     /// Total number of `alloc` calls that reused a pooled slot.
     pub hits: u64,
     /// Total number of `alloc` calls that fell back to
@@ -82,8 +99,37 @@ pub(crate) struct SlotPool {
 }
 
 impl SlotPool {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn with_destinations(destinations: HashMap<ValueId, Destination>) -> Self {
+        Self {
+            destinations,
+            ..Self::default()
+        }
+    }
+
+    /// A pointer to the output `vid` is returned in, the first time it is asked for with that
+    /// output's size.
+    pub fn take_destination(
+        &mut self,
+        builder: &mut FunctionBuilder,
+        vid: ValueId,
+        bytes: u32,
+    ) -> Option<Value> {
+        let d = *self.destinations.get(&vid).filter(|d| d.bytes == bytes)?;
+        self.destinations.remove(&vid);
+        let ptr = if d.indirect {
+            let ptr_ty = crate::lower::ptr_type();
+            builder
+                .ins()
+                .load(ptr_ty, MemFlags::trusted(), d.base, d.offset)
+        } else {
+            builder.ins().iadd_imm(d.base, i64::from(d.offset))
+        };
+        self.placed.insert(vid, (ptr, d.output));
+        Some(ptr)
+    }
+
+    pub fn into_placed(self) -> HashMap<ValueId, (Value, usize)> {
+        self.placed
     }
 
     /// Reserve a slot of `bytes` × `2^align_shift` alignment. Prefers
@@ -200,7 +246,7 @@ mod tests {
 
     #[test]
     fn record_then_release_moves_to_free_list() {
-        let mut pool = SlotPool::new();
+        let mut pool = SlotPool::default();
         let ss = synth_ss(0);
         pool.record_owner(ValueId(42), ss, 24, 4);
         assert_eq!(pool.vid_to_slot.len(), 1);
@@ -211,7 +257,7 @@ mod tests {
 
     #[test]
     fn release_for_unknown_vid_is_noop() {
-        let mut pool = SlotPool::new();
+        let mut pool = SlotPool::default();
         pool.release_for_vid(ValueId(999)); // never recorded
         assert!(pool.vid_to_slot.is_empty());
         assert!(pool.free.is_empty());
@@ -219,7 +265,7 @@ mod tests {
 
     #[test]
     fn free_list_buckets_by_size_align() {
-        let mut pool = SlotPool::new();
+        let mut pool = SlotPool::default();
         pool.record_owner(ValueId(1), synth_ss(1), 24, 4);
         pool.record_owner(ValueId(2), synth_ss(2), 48, 4);
         pool.record_owner(ValueId(3), synth_ss(3), 24, 3);
@@ -236,7 +282,7 @@ mod tests {
         // Reshape-style scenario: %10 owns slot S; Reshape forwards
         // ptr(S) to %11, which we mark as a shared holder. Releasing
         // %10 must NOT yet release S; releasing %11 then does.
-        let mut pool = SlotPool::new();
+        let mut pool = SlotPool::default();
         let ss = synth_ss(7);
         pool.record_owner(ValueId(10), ss, 24, 4);
         pool.share_owner(ValueId(10), ValueId(11));
@@ -252,7 +298,7 @@ mod tests {
 
     #[test]
     fn share_owner_on_unknown_source_is_noop() {
-        let mut pool = SlotPool::new();
+        let mut pool = SlotPool::default();
         pool.share_owner(ValueId(10), ValueId(11));
         assert!(pool.vid_to_slot.is_empty());
     }
@@ -261,7 +307,7 @@ mod tests {
     fn release_order_independent_for_shared_slot() {
         // Same as shared_owner test but release %11 first. The slot
         // must stay live until both are released.
-        let mut pool = SlotPool::new();
+        let mut pool = SlotPool::default();
         let ss = synth_ss(8);
         pool.record_owner(ValueId(20), ss, 16, 3);
         pool.share_owner(ValueId(20), ValueId(21));
@@ -273,7 +319,7 @@ mod tests {
 
     #[test]
     fn hit_rate_and_counters() {
-        let mut pool = SlotPool::new();
+        let mut pool = SlotPool::default();
         assert_eq!(pool.hit_rate_pct(), 0.0);
         pool.hits = 3;
         pool.misses = 7;

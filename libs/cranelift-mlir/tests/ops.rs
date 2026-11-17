@@ -1967,6 +1967,30 @@ module @module {
     assert_f64s_close(&read_f64s(&out[0]), &[1.0, 2.0, 3.0, 1.0, 2.0, 3.0]);
 }
 
+/// Broadcasts too large to lower lane by lane, repeating trailing runs and middle dims.
+#[test]
+fn test_broadcast_in_dim_kernel_mem() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<2x1x1xf64>, %arg1: tensor<2x3xf64>) -> (tensor<2x4x12xf64>, tensor<2x8x3xf64>, tensor<2x3x16xf64>) {
+    %0 = stablehlo.broadcast_in_dim %arg0, dims = [0, 1, 2] : (tensor<2x1x1xf64>) -> tensor<2x4x12xf64>
+    %1 = stablehlo.broadcast_in_dim %arg1, dims = [0, 2] : (tensor<2x3xf64>) -> tensor<2x8x3xf64>
+    %2 = stablehlo.broadcast_in_dim %arg1, dims = [0, 1] : (tensor<2x3xf64>) -> tensor<2x3x16xf64>
+    return %0, %1, %2 : tensor<2x4x12xf64>, tensor<2x8x3xf64>, tensor<2x3x16xf64>
+  }
+}
+"#;
+    let a = [5.0, 7.0];
+    let b = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+    let out = run_mlir_mem(mlir, &[&f64_buf(&a), &f64_buf(&b)], &[768, 384, 768]);
+    let want0: Vec<f64> = (0..96).map(|i| a[i / 48]).collect();
+    let want1: Vec<f64> = (0..48).map(|i| b[i / 24 * 3 + i % 3]).collect();
+    let want2: Vec<f64> = (0..96).map(|i| b[i / 16]).collect();
+    assert_eq!(read_f64s(&out[0])[..], want0[..]);
+    assert_eq!(read_f64s(&out[1])[..], want1[..]);
+    assert_eq!(read_f64s(&out[2])[..], want2[..]);
+}
+
 #[test]
 fn test_transpose_2d_mem() {
     let mlir = r#"
@@ -2207,6 +2231,27 @@ fn test_reduce_rejects_empty_result() {
         };
         assert!(err.contains("reduce over the empty tensor"), "{err}");
     }
+}
+
+/// A pointer-ABI intermediate too large for the tick stack fails to compile instead of
+/// exhausting memory while its lanes are emitted.
+#[test]
+fn test_oversized_intermediate_fails_to_compile() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<f64>) -> tensor<f64> {
+    %0 = stablehlo.broadcast_in_dim %arg0, dims = [] : (tensor<f64>) -> tensor<3000x3000xf64>
+    %1 = stablehlo.slice %0 [0:1, 0:1] : (tensor<3000x3000xf64>) -> tensor<1x1xf64>
+    %2 = stablehlo.reshape %1 : (tensor<1x1xf64>) -> tensor<f64>
+    return %2 : tensor<f64>
+  }
+}
+"#;
+    let module = cranelift_mlir::parser::parse_module(mlir).unwrap();
+    let Err(err) = cranelift_mlir::lower::compile_module(&module) else {
+        panic!("a 72 MB broadcast compiled");
+    };
+    assert!(err.contains("stack slot"), "{err}");
 }
 
 #[test]
@@ -2638,6 +2683,19 @@ module @module {{
             vec![3, 10, -5, 7, 11, 0],
             vec![3.0, 10.0, 0.0, 7.0, 10.0, 0.0],
         ),
+        (
+            "index_vector_dim omitted means 0",
+            gather(
+                "2x3",
+                "1",
+                "2x1",
+                "offset_dims = [0, 1], start_index_map = [1]",
+                "2, 1",
+            ),
+            (0..6).map(f64::from).collect(),
+            vec![2],
+            vec![2.0, 5.0],
+        ),
     ];
     for (name, mlir, data, indices, want) in cases {
         let (data, indices) = (f64_buf(&data), i32_buf(&indices));
@@ -2647,6 +2705,35 @@ module @module {{
         ] {
             assert_eq!(read_f64s(&out[0])[..], want[..], "{name}");
         }
+    }
+}
+
+#[test]
+fn test_gather_from_vmapped_cond_table() {
+    // `jax.vmap` of a `lax.cond` over a table: the table is broadcast to the batch,
+    // passed through `select(pred, x, x)` and gathered per entity.
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<2xf64>, %arg1: tensor<2x2xi32>) -> tensor<2x2x2xf64> {
+    %cst = stablehlo.constant dense<[[0.0, 1.0, 2.0], [10.0, 11.0, 12.0], [20.0, 21.0, 22.0], [30.0, 31.0, 32.0]]> : tensor<4x3xf64>
+    %0 = stablehlo.broadcast_in_dim %cst, dims = [1, 2] : (tensor<4x3xf64>) -> tensor<2x4x3xf64>
+    %cst_0 = stablehlo.constant dense<0.000000e+00> : tensor<f64>
+    %1 = stablehlo.broadcast_in_dim %cst_0, dims = [] : (tensor<f64>) -> tensor<2xf64>
+    %2 = stablehlo.compare GT, %arg0, %1, FLOAT : (tensor<2xf64>, tensor<2xf64>) -> tensor<2xi1>
+    %3 = stablehlo.broadcast_in_dim %2, dims = [0] : (tensor<2xi1>) -> tensor<2x4x3xi1>
+    %4 = stablehlo.select %3, %0, %0 : tensor<2x4x3xi1>, tensor<2x4x3xf64>
+    %5 = "stablehlo.gather"(%4, %arg1) <{dimension_numbers = #stablehlo.gather<offset_dims = [1, 2], operand_batching_dims = [0], start_indices_batching_dims = [0], start_index_map = [1, 2], index_vector_dim = 1>, indices_are_sorted = true, slice_sizes = array<i64: 1, 2, 2>}> : (tensor<2x4x3xf64>, tensor<2x2xi32>) -> tensor<2x2x2xf64>
+    return %5 : tensor<2x2x2xf64>
+  }
+}
+"#;
+    let (mode, corners) = (f64_buf(&[1.0, -1.0]), i32_buf(&[2, 1, 0, 0]));
+    for pointer_abi in [false, true] {
+        let out = run_mlir_folded(mlir, &[&mode, &corners], &[64], pointer_abi);
+        assert_eq!(
+            read_f64s(&out[0])[..],
+            [21.0, 22.0, 31.0, 32.0, 0.0, 1.0, 10.0, 11.0]
+        );
     }
 }
 
@@ -6080,6 +6167,45 @@ module @module {
     );
 }
 
+#[test]
+fn test_lapack_dgetrf_batched() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<2x2x2xf64>) -> (tensor<2x2x2xf64>, tensor<2x2xi32>, tensor<2xi32>) {
+    %0:3 = stablehlo.custom_call @lapack_dgetrf_ffi(%arg0) {backend_config = "", mhlo.backend_config = {}} -> (tensor<2x2x2xf64>, tensor<2x2xi32>, tensor<2xi32>)
+    return %0#0, %0#1, %0#2 : tensor<2x2x2xf64>, tensor<2x2xi32>, tensor<2xi32>
+  }
+}
+"#;
+    let a = f64_buf(&[4.0, 3.0, 6.0, 3.0, 2.0, 1.0, 1.0, 3.0]);
+    let out = run_mlir(mlir, &[&a], &[64, 16, 8]);
+    assert_f64s_close(
+        &read_f64s(&out[0]),
+        &[6.0, 3.0, 2.0 / 3.0, 1.0, 2.0, 1.0, 0.5, 2.5],
+    );
+    assert_eq!(read_i32s(&out[1]), [2, 2, 1, 2]);
+    assert_eq!(read_i32s(&out[2]), [0, 0]);
+}
+
+#[test]
+fn test_lapack_dtrsm_batched() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<2x2x2xf64>, %arg1: tensor<2x2x2xf64>) -> tensor<2x2x2xf64> {
+    %0 = stablehlo.custom_call @lapack_dtrsm_ffi(%arg0, %arg1) {backend_config = "", mhlo.backend_config = {diag = 85 : ui8, side = 76 : ui8, trans_x = 78 : ui8, uplo = 76 : ui8}} -> tensor<2x2x2xf64>
+    return %0 : tensor<2x2x2xf64>
+  }
+}
+"#;
+    let a = f64_buf(&[1.0, 0.0, 2.0, 1.0, 1.0, 0.0, 3.0, 1.0]);
+    let b = f64_buf(&[5.0, 1.0, 8.0, 4.0, 1.0, 2.0, 4.0, 9.0]);
+    let out = run_mlir(mlir, &[&a, &b], &[64]);
+    assert_f64s_close(
+        &read_f64s(&out[0]),
+        &[5.0, 1.0, -2.0, 2.0, 1.0, 2.0, 1.0, 3.0],
+    );
+}
+
 // ---- Triangular solve tests ----
 
 #[test]
@@ -6271,4 +6397,245 @@ module @module {
     let out = run_mlir_mem(mlir, &[&input], &[4]);
     let result = read_u32s(&out[0]);
     assert_eq!(result[0], 0, "1 >> 32 should be 0 for ui32 (mem path)");
+}
+
+/// Repeated subexpressions, at the top level and inside `case` branches that reuse them, fold
+/// to one instruction without changing results on either ABI.
+#[test]
+fn test_common_subexpressions_folded() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<3xf64>, %arg1: tensor<3xf64>, %arg2: tensor<i32>) -> (tensor<3xf64>, tensor<3xf64>) {
+    %0 = stablehlo.multiply %arg0, %arg1 : tensor<3xf64>
+    %1 = stablehlo.multiply %arg0, %arg1 : tensor<3xf64>
+    %2 = stablehlo.add %0, %1 : tensor<3xf64>
+    %3 = "stablehlo.case"(%arg2) ({
+      %4 = stablehlo.multiply %arg0, %arg1 : tensor<3xf64>
+      %5 = stablehlo.subtract %4, %arg0 : tensor<3xf64>
+      stablehlo.return %5 : tensor<3xf64>
+    }, {
+      %4 = stablehlo.multiply %arg0, %arg1 : tensor<3xf64>
+      %5 = stablehlo.add %4, %2 : tensor<3xf64>
+      stablehlo.return %5 : tensor<3xf64>
+    }) : (tensor<i32>) -> tensor<3xf64>
+    return %2, %3 : tensor<3xf64>, tensor<3xf64>
+  }
+}
+"#;
+    let (a, b) = (f64_buf(&[1.0, 2.0, 3.0]), f64_buf(&[4.0, 5.0, 6.0]));
+    for pointer_abi in [false, true] {
+        for (index, expected) in [(0, [3.0, 8.0, 15.0]), (1, [12.0, 30.0, 54.0])] {
+            let out = run_mlir_folded(mlir, &[&a, &b, &i32_buf(&[index])], &[24, 24], pointer_abi);
+            assert_eq!(read_f64s(&out[0])[..], [8.0, 20.0, 36.0]);
+            assert_eq!(read_f64s(&out[1])[..], expected);
+        }
+    }
+}
+
+/// Row gathers by constant indices and rank-only broadcasts, as joins across archetypes emit
+/// them, fold to slices and reshapes without changing results on either ABI.
+#[test]
+fn test_constant_row_gathers_folded() {
+    let gather = |src: &str, out: &str, idx: &str, n: usize, cols: usize| {
+        format!(
+            r#"    %{out}_i = stablehlo.constant dense<{idx}> : tensor<{n}xui32>
+    %{out}_b = stablehlo.broadcast_in_dim %{out}_i, dims = [0] : (tensor<{n}xui32>) -> tensor<{n}x1xui32>
+    %{out} = "stablehlo.gather"(%{src}, %{out}_b) <{{dimension_numbers = #stablehlo.gather<offset_dims = [1], collapsed_slice_dims = [0], start_index_map = [0], index_vector_dim = 1>, indices_are_sorted = false, slice_sizes = array<i64: 1, {cols}>}}> : (tensor<3x{cols}xf64>, tensor<{n}x1xui32>) -> tensor<{n}x{cols}xf64>
+"#
+        )
+    };
+    let mlir = format!(
+        r#"
+module @module {{
+  func.func public @main(%arg0: tensor<3x2xf64>) -> (tensor<3x2xf64>, tensor<2x2xf64>, tensor<2x2xf64>, tensor<1x3x2xf64>) {{
+{}{}{}    %r = stablehlo.broadcast_in_dim %g0, dims = [1, 2] : (tensor<3x2xf64>) -> tensor<1x3x2xf64>
+    return %g0, %g1, %g2, %r : tensor<3x2xf64>, tensor<2x2xf64>, tensor<2x2xf64>, tensor<1x3x2xf64>
+  }}
+}}
+"#,
+        gather("arg0", "g0", "[0, 1, 2]", 3, 2),
+        gather("g0", "g1", "[1, 2]", 2, 2),
+        gather("arg0", "g2", "[2, 0]", 2, 2),
+    );
+    let input = f64_buf(&[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+    for pointer_abi in [false, true] {
+        let out = run_mlir_folded(&mlir, &[&input], &[48, 32, 32, 48], pointer_abi);
+        assert_eq!(read_f64s(&out[0])[..], [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        assert_eq!(read_f64s(&out[1])[..], [3.0, 4.0, 5.0, 6.0]);
+        assert_eq!(read_f64s(&out[2])[..], [5.0, 6.0, 1.0, 2.0]);
+        assert_eq!(read_f64s(&out[3])[..], [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+    }
+}
+
+/// Tiny callees inlined at every call site, one inside a `case` branch and one returning a
+/// parameter, keep their results on both ABIs.
+#[test]
+fn test_tiny_callees_inlined() {
+    let mlir = r#"
+module @module {
+  func.func private @_where(%arg0: tensor<i1>, %arg1: tensor<f64>, %arg2: tensor<f64>) -> tensor<f64> {
+    %0 = stablehlo.select %arg0, %arg1, %arg2 : tensor<i1>, tensor<f64>
+    return %0 : tensor<f64>
+  }
+  func.func private @first(%arg0: tensor<f64>, %arg1: tensor<f64>) -> (tensor<f64>, tensor<f64>) {
+    return %arg0, %arg0 : tensor<f64>, tensor<f64>
+  }
+  func.func public @main(%arg0: tensor<f64>, %arg1: tensor<f64>, %arg2: tensor<i32>) -> (tensor<f64>, tensor<f64>, tensor<f64>) {
+    %c = stablehlo.compare GT, %arg0, %arg1, FLOAT : (tensor<f64>, tensor<f64>) -> tensor<i1>
+    %0 = call @_where(%c, %arg0, %arg1) : (tensor<i1>, tensor<f64>, tensor<f64>) -> tensor<f64>
+    %1:2 = call @first(%arg1, %arg0) : (tensor<f64>, tensor<f64>) -> (tensor<f64>, tensor<f64>)
+    %2 = "stablehlo.case"(%arg2) ({
+      %3 = call @_where(%c, %arg1, %arg0) : (tensor<i1>, tensor<f64>, tensor<f64>) -> tensor<f64>
+      stablehlo.return %3 : tensor<f64>
+    }, {
+      %3 = stablehlo.add %1#0, %1#1 : tensor<f64>
+      stablehlo.return %3 : tensor<f64>
+    }) : (tensor<i32>) -> tensor<f64>
+    return %0, %1#1, %2 : tensor<f64>, tensor<f64>, tensor<f64>
+  }
+}
+"#;
+    let (a, b) = (f64_buf(&[3.0]), f64_buf(&[5.0]));
+    for run in [run_mlir, run_mlir_mem] {
+        for (index, expected) in [(0, 3.0), (1, 10.0)] {
+            let out = run(mlir, &[&a, &b, &i32_buf(&[index])], &[8, 8, 8]);
+            let got: Vec<f64> = out.iter().map(|o| read_f64s(o)[0]).collect();
+            assert_eq!(got, [5.0, 5.0, expected]);
+        }
+    }
+}
+
+/// A loop body returning one carry into a later position reads it before the back-edge
+/// overwrites its slot.
+#[test]
+fn test_while_carry_moves_to_later_position() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<4xf64>) -> (tensor<4xf64>, tensor<4xf64>) {
+    %c = stablehlo.constant dense<0> : tensor<i64>
+    %0:3 = stablehlo.while(%iterArg = %arg0, %iterArg_0 = %arg0, %iterArg_1 = %c) : tensor<4xf64>, tensor<4xf64>, tensor<i64>
+    cond {
+      %c_2 = stablehlo.constant dense<3> : tensor<i64>
+      %1 = stablehlo.compare LT, %iterArg_1, %c_2, SIGNED : (tensor<i64>, tensor<i64>) -> tensor<i1>
+      stablehlo.return %1 : tensor<i1>
+    } do {
+      %1 = stablehlo.add %iterArg, %iterArg : tensor<4xf64>
+      %2 = stablehlo.reshape %iterArg : (tensor<4xf64>) -> tensor<4xf64>
+      %c_2 = stablehlo.constant dense<1> : tensor<i64>
+      %3 = stablehlo.add %iterArg_1, %c_2 : tensor<i64>
+      stablehlo.return %1, %2, %3 : tensor<4xf64>, tensor<4xf64>, tensor<i64>
+    }
+    return %0#0, %0#1 : tensor<4xf64>, tensor<4xf64>
+  }
+}
+"#;
+    let input = f64_buf(&[1.0, 2.0, 3.0, 4.0]);
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&input], &[32, 32]);
+        assert_eq!(read_f64s(&out[0])[..], [8.0, 16.0, 24.0, 32.0]);
+        assert_eq!(read_f64s(&out[1])[..], [4.0, 8.0, 12.0, 16.0]);
+    }
+}
+
+/// Results computed straight into their outputs: one returned twice, one also read later,
+/// a parameter passed through, and a two-result callee writing into the caller's buffer.
+#[test]
+fn test_results_written_in_place() {
+    let mlir = r#"
+module @module {
+  func.func private @pair(%arg0: tensor<80xf64>) -> (tensor<80xf64>, tensor<80xf64>) {
+    %0 = stablehlo.add %arg0, %arg0 : tensor<80xf64>
+    %1 = stablehlo.multiply %0, %arg0 : tensor<80xf64>
+    return %1, %0 : tensor<80xf64>, tensor<80xf64>
+  }
+  func.func public @main(%arg0: tensor<80xf64>) -> (tensor<80xf64>, tensor<80xf64>, tensor<80xf64>, tensor<80xf64>, tensor<80xf64>) {
+    %0 = stablehlo.add %arg0, %arg0 : tensor<80xf64>
+    %1:2 = call @pair(%0) : (tensor<80xf64>) -> (tensor<80xf64>, tensor<80xf64>)
+    %2 = stablehlo.subtract %1#0, %0 : tensor<80xf64>
+    return %0, %2, %0, %arg0, %1#1 : tensor<80xf64>, tensor<80xf64>, tensor<80xf64>, tensor<80xf64>, tensor<80xf64>
+  }
+}
+"#;
+    let x: Vec<f64> = (0..80).map(|i| i as f64 * 0.5 - 7.0).collect();
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&f64_buf(&x)], &[640; 5]);
+        let twice: Vec<f64> = x.iter().map(|v| v + v).collect();
+        let quad: Vec<f64> = twice.iter().map(|d| d + d).collect();
+        let diff: Vec<f64> = (quad.iter().zip(&twice)).map(|(q, d)| q * d - d).collect();
+        assert_eq!(read_f64s(&out[0])[..], twice[..]);
+        assert_eq!(read_f64s(&out[1])[..], diff[..]);
+        assert_eq!(read_f64s(&out[2])[..], twice[..]);
+        assert_eq!(read_f64s(&out[3])[..], x[..]);
+        assert_eq!(read_f64s(&out[4])[..], quad[..]);
+    }
+}
+
+/// A carry the loop body hands back unchanged keeps its value through every iteration.
+#[test]
+fn test_while_invariant_carry() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<4xf64>) -> (tensor<4xf64>, tensor<4xf64>) {
+    %c = stablehlo.constant dense<0> : tensor<i64>
+    %cst = stablehlo.constant dense<0.000000e+00> : tensor<4xf64>
+    %0:3 = stablehlo.while(%iterArg = %arg0, %iterArg_0 = %cst, %iterArg_1 = %c) : tensor<4xf64>, tensor<4xf64>, tensor<i64>
+    cond {
+      %c_2 = stablehlo.constant dense<3> : tensor<i64>
+      %1 = stablehlo.compare LT, %iterArg_1, %c_2, SIGNED : (tensor<i64>, tensor<i64>) -> tensor<i1>
+      stablehlo.return %1 : tensor<i1>
+    } do {
+      %1 = stablehlo.add %iterArg_0, %iterArg : tensor<4xf64>
+      %c_2 = stablehlo.constant dense<1> : tensor<i64>
+      %2 = stablehlo.add %iterArg_1, %c_2 : tensor<i64>
+      stablehlo.return %iterArg, %1, %2 : tensor<4xf64>, tensor<4xf64>, tensor<i64>
+    }
+    return %0#0, %0#1 : tensor<4xf64>, tensor<4xf64>
+  }
+}
+"#;
+    let input = f64_buf(&[1.0, 2.0, 3.0, 4.0]);
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&input], &[32, 32]);
+        assert_eq!(read_f64s(&out[0])[..], [1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(read_f64s(&out[1])[..], [3.0, 6.0, 9.0, 12.0]);
+    }
+}
+
+/// Contiguous slices read their operand in place, including at offsets that are not 16-byte
+/// aligned and inside a loop that moves a slice of one carry into another.
+#[test]
+fn test_contiguous_slice_views() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<5x3xf64>) -> (tensor<2x3xf64>, tensor<3xf64>, tensor<2x3xf64>, tensor<3xf64>) {
+    %0 = stablehlo.slice %arg0 [1:3, 0:3] : (tensor<5x3xf64>) -> tensor<2x3xf64>
+    %1 = stablehlo.add %0, %0 : tensor<2x3xf64>
+    %2 = stablehlo.slice %arg0 [4:5, 0:3] : (tensor<5x3xf64>) -> tensor<1x3xf64>
+    %3 = stablehlo.reshape %2 : (tensor<1x3xf64>) -> tensor<3xf64>
+    %c = stablehlo.constant dense<0> : tensor<i64>
+    %4:3 = stablehlo.while(%iterArg = %0, %iterArg_0 = %3, %iterArg_1 = %c) : tensor<2x3xf64>, tensor<3xf64>, tensor<i64>
+    cond {
+      %c_2 = stablehlo.constant dense<3> : tensor<i64>
+      %5 = stablehlo.compare LT, %iterArg_1, %c_2, SIGNED : (tensor<i64>, tensor<i64>) -> tensor<i1>
+      stablehlo.return %5 : tensor<i1>
+    } do {
+      %5 = stablehlo.add %iterArg, %iterArg : tensor<2x3xf64>
+      %6 = stablehlo.slice %iterArg [1:2, 0:3] : (tensor<2x3xf64>) -> tensor<1x3xf64>
+      %7 = stablehlo.reshape %6 : (tensor<1x3xf64>) -> tensor<3xf64>
+      %c_2 = stablehlo.constant dense<1> : tensor<i64>
+      %8 = stablehlo.add %iterArg_1, %c_2 : tensor<i64>
+      stablehlo.return %5, %7, %8 : tensor<2x3xf64>, tensor<3xf64>, tensor<i64>
+    }
+    return %1, %3, %4#0, %4#1 : tensor<2x3xf64>, tensor<3xf64>, tensor<2x3xf64>, tensor<3xf64>
+  }
+}
+"#;
+    let input = f64_buf(&(0..15).map(f64::from).collect::<Vec<_>>());
+    for run in [run_mlir, run_mlir_mem] {
+        let out = run(mlir, &[&input], &[48, 24, 48, 24]);
+        assert_eq!(read_f64s(&out[0])[..], [6.0, 8.0, 10.0, 12.0, 14.0, 16.0]);
+        assert_eq!(read_f64s(&out[1])[..], [12.0, 13.0, 14.0]);
+        assert_eq!(read_f64s(&out[2])[..], [24.0, 32.0, 40.0, 48.0, 56.0, 64.0]);
+        assert_eq!(read_f64s(&out[3])[..], [24.0, 28.0, 32.0]);
+    }
 }

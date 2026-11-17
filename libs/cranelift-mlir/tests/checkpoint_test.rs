@@ -169,6 +169,143 @@ fn verify_checkpoint_impl() {
     eprintln!("ALL {n_compare} outputs match XLA reference");
 }
 
+/// Replays a checkpoint closed-loop, feeding each output into the input with the same component
+/// id, and prints a `BENCH {json}` line of tick timings per cache mode: `ELODIN_BENCH_THRASH_MB`
+/// lists the megabytes written between ticks, `0` for hot caches. Reads `ELODIN_BENCH_DIR` rather
+/// than the debug dir so the module compiles without profile probes.
+#[test]
+#[ignore = "requires ELODIN_BENCH_DIR pointing to a generated checkpoint"]
+fn bench_checkpoint() {
+    let builder = std::thread::Builder::new().stack_size(256 * 1024 * 1024);
+    let handle = builder
+        .spawn(bench_checkpoint_impl)
+        .expect("failed to spawn thread");
+    handle.join().expect("bench thread panicked");
+}
+
+fn bench_checkpoint_impl() {
+    use std::hash::{DefaultHasher, Hasher};
+    use std::time::Instant;
+
+    let dir = std::env::var("ELODIN_BENCH_DIR").expect("set ELODIN_BENCH_DIR");
+    let env_usize = |key: &str, default: usize| {
+        std::env::var(key).map_or(default, |v| v.parse().expect("integer env var"))
+    };
+    let ticks = env_usize("ELODIN_BENCH_TICKS", 4000);
+    let thrash_modes: Vec<usize> = std::env::var("ELODIN_BENCH_THRASH_MB")
+        .unwrap_or_else(|_| "0".to_string())
+        .split(',')
+        .map(|mb| mb.trim().parse().expect("ELODIN_BENCH_THRASH_MB"))
+        .collect();
+
+    let start = Instant::now();
+    let mlir = std::fs::read_to_string(format!("{dir}/stablehlo.mlir")).expect("read MLIR");
+    let mut module = parse_module(&mlir).expect("MLIR parse failed");
+    drop(mlir);
+    cranelift_mlir::const_fold::fold_module(&mut module);
+    let compiled = cranelift_mlir::lower::compile_module_with_config(
+        &module,
+        cranelift_mlir::lower::CompileConfig::default(),
+    )
+    .expect("Cranelift compile failed");
+    let compile_ms = start.elapsed().as_secs_f64() * 1e3;
+    let tick_fn: TickFn = unsafe { std::mem::transmute(compiled.get_main_fn()) };
+
+    let meta: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(format!("{dir}/checkpoint.json")).expect("read checkpoint.json"),
+    )
+    .expect("invalid checkpoint.json");
+    let column = |key: &str, field: &str| -> Vec<u64> {
+        meta[key]
+            .as_array()
+            .expect("checkpoint.json entry")
+            .iter()
+            .map(|e| e[field].as_u64().unwrap())
+            .collect()
+    };
+    let (input_ids, output_ids) = (
+        column("inputs", "component_id"),
+        column("outputs", "component_id"),
+    );
+    let initial_inputs = load_bins(&dir, "input_");
+    let expected = load_bins(&dir, "cranelift_output_");
+    let mut outputs: Vec<Vec<u8>> = column("outputs", "byte_size")
+        .iter()
+        .map(|&n| vec![0u8; (n as usize).max(8)])
+        .collect();
+    // The tick writes one pointer per slot; a component returned twice has an extra slot.
+    assert_eq!(
+        meta["num_output_slots"]
+            .as_u64()
+            .unwrap_or(outputs.len() as u64),
+        outputs.len() as u64,
+        "bench_checkpoint needs one output slot per component"
+    );
+    let feedback: Vec<(usize, usize)> = output_ids
+        .iter()
+        .enumerate()
+        .filter_map(|(o, id)| input_ids.iter().position(|i| i == id).map(|i| (o, i)))
+        .collect();
+
+    for thrash_mb in thrash_modes {
+        let mut inputs = initial_inputs.clone();
+        let mut thrash = vec![0u8; thrash_mb << 20];
+        let mut hasher = DefaultHasher::new();
+        let mut times = Vec::with_capacity(ticks);
+        let mut first_tick_mismatches = 0;
+        for tick in 0..=ticks {
+            for line in thrash.chunks_mut(64) {
+                line[0] = line[0].wrapping_add(1);
+            }
+            std::hint::black_box(&thrash);
+            let input_ptrs: Vec<*const u8> = inputs.iter().map(|b| b.as_ptr()).collect();
+            let mut output_ptrs: Vec<*mut u8> =
+                outputs.iter_mut().map(|b| b.as_mut_ptr()).collect();
+            let t0 = Instant::now();
+            unsafe { tick_fn(input_ptrs.as_ptr(), output_ptrs.as_mut_ptr()) };
+            let ns = t0.elapsed().as_nanos() as u64;
+            if tick == 0 {
+                first_tick_mismatches = expected
+                    .iter()
+                    .zip(&outputs)
+                    .filter(|(want, got)| got[..want.len()] != want[..])
+                    .count();
+            } else {
+                times.push(ns);
+            }
+            if tick % 100 == 0 {
+                outputs.iter().for_each(|o| hasher.write(o));
+            }
+            for &(o, i) in &feedback {
+                let n = inputs[i].len();
+                inputs[i].copy_from_slice(&outputs[o][..n]);
+            }
+        }
+
+        let mean = times.iter().sum::<u64>() as f64 / times.len() as f64;
+        let mut buckets = [(0u64, 0u64); 20];
+        for (t, &ns) in times.iter().enumerate() {
+            buckets[(t + 1) % 20].0 += ns;
+            buckets[(t + 1) % 20].1 += 1;
+        }
+        let max_bucket = buckets
+            .iter()
+            .map(|&(sum, n)| sum as f64 / n.max(1) as f64)
+            .fold(0.0, f64::max);
+        times.sort_unstable();
+        let pct = |q: f64| times[((times.len() - 1) as f64 * q) as usize];
+        println!(
+            "BENCH {{\"compile_ms\":{compile_ms:.0},\"ticks\":{ticks},\"thrash_mb\":{thrash_mb},\
+             \"first_tick_mismatches\":{first_tick_mismatches},\"median_ns\":{},\"mean_ns\":{mean:.0},\
+             \"p10_ns\":{},\"p90_ns\":{},\"max_bucket20_ns\":{max_bucket:.0},\"hash\":\"{:016x}\"}}",
+            pct(0.5),
+            pct(0.1),
+            pct(0.9),
+            hasher.finish()
+        );
+    }
+}
+
 #[test]
 #[ignore = "requires inner_375_standalone.mlir in testdata/checkpoints/cube-sat/"]
 fn bisect_inner_375_standalone() {

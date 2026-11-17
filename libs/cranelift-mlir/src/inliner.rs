@@ -45,6 +45,152 @@ const INLINE_MAX_BODY_INSTRS: usize = 200;
 /// while excluding multi-thousand-IR hot functions.
 const INLINE_MAX_CALLER_BODY_INSTRS: usize = 1200;
 
+/// Callees no larger than this are inlined at every call site.
+const TINY_CALLEE_INSTRS: usize = 12;
+
+/// Inlines callees of at most `TINY_CALLEE_INSTRS` instructions, free of regions and calls, at
+/// every call site in the functions `can_take` accepts, including sites inside `while` and `case`
+/// bodies, and drops the callees left without callers. `can_take` must also accept every callee
+/// it is offered. Returns the names of the functions that changed.
+pub fn inline_tiny_callees(
+    module: &mut Module,
+    can_take: impl Fn(&FuncDef) -> bool,
+) -> HashSet<String> {
+    let tiny: HashMap<String, FuncDef> = module
+        .functions
+        .iter()
+        .filter(|f| {
+            !f.is_public
+                && f.name != "main"
+                && body_ends_with_return(&f.body)
+                && count_body_instructions(&f.body) <= TINY_CALLEE_INSTRS
+                && !body_has_nested_region(&f.body)
+                && !body_has_scalar_abi_only_ops(&f.body)
+                && !f
+                    .body
+                    .iter()
+                    .any(|ir| matches!(ir.instr, Instruction::Call { .. }))
+                && can_take(f)
+        })
+        .map(|f| (f.name.clone(), f.clone()))
+        .collect();
+    let mut changed = HashSet::new();
+    if tiny.is_empty() {
+        return changed;
+    }
+    let mut next_value_id = max_value_id_in_module(module) + 1;
+    for func in &mut module.functions {
+        if tiny.contains_key(&func.name) || !can_take(func) {
+            continue;
+        }
+        let mut results = HashMap::new();
+        if inline_calls_in_body(&mut func.body, &tiny, &mut next_value_id, &mut results) > 0 {
+            rewrite_aliases_body(&mut func.body, &results);
+            changed.insert(func.name.clone());
+        }
+    }
+    let mut callers = HashMap::new();
+    for f in &module.functions {
+        collect_callees(&f.body, &f.name, &mut callers);
+    }
+    if tiny.keys().any(|name| !callers.contains_key(name)) {
+        let functions = std::mem::take(&mut module.functions)
+            .into_iter()
+            .filter(|f| !tiny.contains_key(&f.name) || callers.contains_key(&f.name))
+            .collect();
+        *module = Module::new(functions);
+    }
+    changed
+}
+
+/// Replaces calls to `tiny` callees in `body`, `case` branches and `while` bodies with the
+/// callee's instructions, recording in `results` what each call result now names.
+fn inline_calls_in_body(
+    body: &mut Vec<InstrResult>,
+    tiny: &HashMap<String, FuncDef>,
+    next_value_id: &mut u32,
+    results: &mut HashMap<ValueId, ValueId>,
+) -> usize {
+    let mut inlined = 0;
+    let mut out = Vec::with_capacity(body.len());
+    for mut ir in std::mem::take(body) {
+        match &mut ir.instr {
+            Instruction::Case { branches, .. } => {
+                for branch in branches {
+                    inlined += inline_calls_in_body(branch, tiny, next_value_id, results);
+                }
+            }
+            Instruction::While {
+                cond_body,
+                loop_body,
+                ..
+            } => {
+                inlined += inline_calls_in_body(cond_body, tiny, next_value_id, results);
+                inlined += inline_calls_in_body(loop_body, tiny, next_value_id, results);
+            }
+            _ => {}
+        }
+        if let Instruction::Call { callee, args } = &ir.instr
+            && let Some(def) = tiny.get(callee)
+            && let Some((instrs, returned)) = instantiate(def, args, next_value_id)
+            && returned.len() == ir.values.len()
+        {
+            for ((result, _), value) in ir.values.iter().zip(returned) {
+                results.insert(*result, value);
+            }
+            out.extend(instrs);
+            inlined += 1;
+            continue;
+        }
+        out.push(ir);
+    }
+    *body = out;
+    inlined
+}
+
+/// `def`'s instructions with fresh value ids and its parameters bound to `args`, and the values
+/// it returns.
+fn instantiate(
+    def: &FuncDef,
+    args: &[ValueId],
+    next_value_id: &mut u32,
+) -> Option<(Vec<InstrResult>, Vec<ValueId>)> {
+    let (ret, body) = def.body.split_last()?;
+    let Instruction::Return { operands } = &ret.instr else {
+        return None;
+    };
+    if args.len() != def.params.len() {
+        return None;
+    }
+    // Fresh ids first, then arguments: callee and caller ids overlap, and the alias rewrite
+    // follows chains.
+    let mut fresh = HashMap::new();
+    for (param, _) in &def.params {
+        fresh.insert(*param, ValueId(*next_value_id));
+        *next_value_id += 1;
+    }
+    collect_body_value_defs_into_subst(body, &mut fresh, next_value_id);
+    let bound: HashMap<ValueId, ValueId> = def
+        .params
+        .iter()
+        .zip(args)
+        .map(|((param, _), arg)| (fresh[param], *arg))
+        .collect();
+    let mut instrs = body.to_vec();
+    for ir in &mut instrs {
+        for (vid, _) in &mut ir.values {
+            *vid = fresh[vid];
+        }
+    }
+    rewrite_aliases_body(&mut instrs, &fresh);
+    rewrite_aliases_body(&mut instrs, &bound);
+    let returned = operands
+        .iter()
+        .map(|v| fresh.get(v).map(|f| bound.get(f).copied().unwrap_or(*f)))
+        .collect::<Option<_>>()?;
+    Some((instrs, returned))
+}
+
 /// Return value: number of Call sites that were inlined. Useful for
 /// logging and tests.
 pub fn inline_single_caller_callees(module: &mut Module) -> usize {
@@ -570,6 +716,51 @@ fn rewrite_block_param_ids_instr(instr: &mut Instruction, subst: &HashMap<ValueI
 mod tests {
     use super::*;
     use crate::ir::{ConstantValue, ScalarValue, TensorType};
+
+    /// `@_where` and `@first` (which returns a parameter twice) are called from `main`, once from
+    /// inside a `case` branch.
+    pub(crate) const TINY_CALLEES_MLIR: &str = r#"
+module @module {
+  func.func private @_where(%arg0: tensor<i1>, %arg1: tensor<f64>, %arg2: tensor<f64>) -> tensor<f64> {
+    %0 = stablehlo.select %arg0, %arg1, %arg2 : tensor<i1>, tensor<f64>
+    return %0 : tensor<f64>
+  }
+  func.func private @first(%arg0: tensor<f64>, %arg1: tensor<f64>) -> (tensor<f64>, tensor<f64>) {
+    return %arg0, %arg0 : tensor<f64>, tensor<f64>
+  }
+  func.func public @main(%arg0: tensor<f64>, %arg1: tensor<f64>, %arg2: tensor<i32>) -> (tensor<f64>, tensor<f64>, tensor<f64>) {
+    %c = stablehlo.compare GT, %arg0, %arg1, FLOAT : (tensor<f64>, tensor<f64>) -> tensor<i1>
+    %0 = call @_where(%c, %arg0, %arg1) : (tensor<i1>, tensor<f64>, tensor<f64>) -> tensor<f64>
+    %1:2 = call @first(%arg1, %arg0) : (tensor<f64>, tensor<f64>) -> (tensor<f64>, tensor<f64>)
+    %2 = "stablehlo.case"(%arg2) ({
+      %3 = call @_where(%c, %arg1, %arg0) : (tensor<i1>, tensor<f64>, tensor<f64>) -> tensor<f64>
+      stablehlo.return %3 : tensor<f64>
+    }, {
+      %3 = stablehlo.add %1#0, %1#1 : tensor<f64>
+      stablehlo.return %3 : tensor<f64>
+    }) : (tensor<i32>) -> tensor<f64>
+    return %0, %1#1, %2 : tensor<f64>, tensor<f64>, tensor<f64>
+  }
+}
+"#;
+
+    #[test]
+    fn inlines_tiny_callees_at_every_site() {
+        fn has_call(body: &[InstrResult]) -> bool {
+            body.iter().any(|ir| match &ir.instr {
+                Instruction::Call { .. } => true,
+                Instruction::Case { branches, .. } => branches.iter().any(|b| has_call(b)),
+                _ => false,
+            })
+        }
+        let mut module = crate::parser::parse_module(TINY_CALLEES_MLIR).unwrap();
+        let changed = inline_tiny_callees(&mut module, |_| true);
+        assert_eq!(changed, HashSet::from(["main".to_string()]));
+        assert_eq!(module.functions.len(), 1);
+        let main = module.main_func().unwrap();
+        assert!(!has_call(&main.body));
+        assert_eq!(main.duplicate_value_def(), None);
+    }
 
     fn ty_f64() -> TensorType {
         TensorType::scalar(crate::ir::ElementType::F64)

@@ -1346,7 +1346,7 @@ fn parse_gather_op(
     let start_indices_batching_dims = extract_bracket_ints(rest, "start_indices_batching_dims = [");
     let start_index_map = extract_bracket_ints(rest, "start_index_map = [");
 
-    let mut index_vector_dim: i64 = 1;
+    let mut index_vector_dim: i64 = 0;
     if let Some(idx) = rest.find("index_vector_dim = ") {
         let after = &rest[idx + 19..];
         let end = after

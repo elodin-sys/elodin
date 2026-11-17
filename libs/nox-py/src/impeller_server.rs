@@ -356,49 +356,154 @@ pub fn init_db(
     Ok(())
 }
 
-pub fn copy_db_to_world(state: &State, world: &mut WorldExec) {
-    copy_db_to_world_for_world(state, world.world_mut());
+/// The DB component behind each (entity, component) pair of the world, resolved once after
+/// `init_db`, with a copy of each pair's latest DB sample. A pair's sample count tells whether
+/// anyone appended since that copy was taken, so the per-cycle copy and commit only read the DB
+/// for pairs that changed.
+pub struct DbSync {
+    /// One entry per `world.host` column, in its order.
+    columns: Vec<SyncColumn>,
+    /// `DB::vtable_gen` when the shadows were last checked; truncating the DB bumps it.
+    vtable_gen: u64,
 }
 
-fn copy_db_to_world_for_world(state: &State, world: &mut World) {
-    for (component_id, (schema, component_metadata)) in world.metadata.component_map.iter() {
-        if component_metadata.is_transient() {
-            continue;
+struct SyncColumn {
+    component_id: ComponentId,
+    size: usize,
+    record_every_tick: bool,
+    excluded: bool,
+    rows: Vec<SyncRow>,
+    /// Each row's latest DB sample as of `SyncRow::samples`, laid out like the world column.
+    shadow: Vec<u8>,
+}
+
+struct SyncRow {
+    /// Byte offset of the entity's row in the column.
+    offset: usize,
+    component: elodin_db::Component,
+    /// The pair's sample count when its shadow was last read or written; `usize::MAX` if never.
+    samples: usize,
+}
+
+impl SyncRow {
+    /// Re-reads `shadow` if the pair gained samples since; false if the pair has none.
+    fn refresh(&mut self, shadow: &mut [u8]) -> bool {
+        let samples = self.component.time_series.sample_count();
+        if samples != self.samples {
+            self.samples = match self.component.time_series.latest() {
+                Some((_, head)) => {
+                    shadow.copy_from_slice(head);
+                    samples
+                }
+                None => 0,
+            };
         }
-        let Some(column) = world.host.get_mut(component_id) else {
-            continue;
-        };
-        let entity_ids = bytemuck::try_cast_slice::<_, u64>(column.entity_ids.as_slice()).unwrap();
-        let size = schema.size();
+        self.samples > 0
+    }
+}
 
-        let mut component_changed = false;
+impl DbSync {
+    /// Transient components get no rows; `exclusions` are copied in but never committed.
+    pub fn new(state: &State, world: &World, exclusions: &HashSet<ComponentId>) -> Self {
+        let columns = world
+            .host
+            .iter()
+            .map(|(component_id, column)| {
+                let mut sync = SyncColumn {
+                    component_id: *component_id,
+                    size: 0,
+                    record_every_tick: false,
+                    excluded: exclusions.contains(component_id),
+                    rows: Vec::new(),
+                    shadow: column.buffer.clone(),
+                };
+                let Some((schema, metadata)) = world.metadata.component_map.get(component_id)
+                else {
+                    return sync;
+                };
+                if metadata.is_transient() {
+                    return sync;
+                }
+                let size = schema.size();
+                let entity_ids =
+                    bytemuck::try_cast_slice::<_, u64>(column.entity_ids.as_slice()).unwrap();
+                sync.rows = entity_ids
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, entity_id)| {
+                        let entity_id = impeller::types::EntityId(*entity_id);
+                        let entity = world.metadata.entity_metadata.get(&entity_id)?;
+                        let pair_id = ComponentId::from_pair(&entity.name, &metadata.name);
+                        Some(SyncRow {
+                            offset: i * size,
+                            component: state.get_component(pair_id)?.clone(),
+                            samples: usize::MAX,
+                        })
+                    })
+                    .collect();
+                sync.size = size;
+                sync.record_every_tick = metadata.record_every_tick();
+                sync
+            })
+            .collect();
+        Self {
+            columns,
+            vtable_gen: u64::MAX,
+        }
+    }
 
-        for (i, entity_id) in entity_ids.iter().enumerate() {
-            let offset = i * size;
-            let entity_id = impeller::types::EntityId(*entity_id);
-            let Some(entity_metadata) = world.metadata.entity_metadata.get(&entity_id) else {
-                continue;
-            };
-
-            let pair_id = ComponentId::from_pair(&entity_metadata.name, &component_metadata.name);
-            let Some(component) = state.get_component(pair_id) else {
-                continue;
-            };
-            let Some((_, head)) = component.time_series.latest() else {
-                continue;
-            };
-
-            let current_value = &column.buffer[offset..offset + size];
-            if current_value != head {
-                component_changed = true;
+    /// Forgets every shadow when `vtable_gen` moved, since a truncate can leave a pair with as
+    /// many samples as before but different values.
+    fn check_vtable_gen(&mut self, vtable_gen: u64) {
+        if vtable_gen != self.vtable_gen {
+            self.vtable_gen = vtable_gen;
+            for row in self.columns.iter_mut().flat_map(|c| &mut c.rows) {
+                row.samples = usize::MAX;
             }
-
-            column.buffer[offset..offset + size].copy_from_slice(head);
         }
+    }
 
-        if component_changed {
-            world.dirty_components.insert(*component_id);
+    /// Copies each pair's latest DB sample into the world.
+    pub fn copy_db_to_world(&mut self, world: &mut World, vtable_gen: u64) {
+        self.check_vtable_gen(vtable_gen);
+        for ((id, column), sync) in world.host.iter_mut().zip(&mut self.columns) {
+            debug_assert_eq!(*id, sync.component_id);
+            for row in &mut sync.rows {
+                let range = row.offset..row.offset + sync.size;
+                if row.refresh(&mut sync.shadow[range.clone()]) {
+                    column.buffer[range.clone()].copy_from_slice(&sync.shadow[range]);
+                }
+            }
         }
+    }
+
+    /// Appends every pair whose world value differs from its latest DB sample, or that records
+    /// every tick.
+    pub fn commit_world(
+        &mut self,
+        world: &World,
+        timestamp: Timestamp,
+        vtable_gen: u64,
+    ) -> Result<(), Error> {
+        self.check_vtable_gen(vtable_gen);
+        for ((id, column), sync) in world.host.iter().zip(&mut self.columns) {
+            debug_assert_eq!(*id, sync.component_id);
+            if sync.excluded {
+                continue;
+            }
+            for row in &mut sync.rows {
+                let range = row.offset..row.offset + sync.size;
+                let has_sample = row.refresh(&mut sync.shadow[range.clone()]);
+                let buf = &column.buffer[range.clone()];
+                let latest = has_sample.then_some(&sync.shadow[range.clone()]);
+                if should_record_component(sync.record_every_tick, latest, buf) {
+                    row.component.time_series.push_buf(timestamp, buf)?;
+                    sync.shadow[range].copy_from_slice(buf);
+                    row.samples += 1;
+                }
+            }
+        }
+        Ok(())
     }
 }
 
@@ -428,64 +533,12 @@ pub fn get_pair_ids(world: &WorldExec, components: &[ComponentId]) -> Result<Vec
     Ok(results)
 }
 
-pub fn commit_world_head_unified(
-    state: &State,
-    exec: &mut crate::exec::WorldExec,
-    timestamp: Timestamp,
-    exclusions: Option<&HashSet<ComponentId>>,
-) -> Result<(), Error> {
-    commit_world_head_for_world(state, exec.world_mut(), timestamp, exclusions)
+fn should_record_component(record_every_tick: bool, latest: Option<&[u8]>, value: &[u8]) -> bool {
+    record_every_tick || latest != Some(value)
 }
 
-fn should_record_component(
-    metadata: &ComponentMetadata,
-    latest: Option<&[u8]>,
-    value: &[u8],
-) -> bool {
-    metadata.record_every_tick() || latest != Some(value)
-}
-
-fn commit_world_head_for_world(
-    state: &State,
-    world: &mut crate::world::World,
-    timestamp: Timestamp,
-    exclusions: Option<&HashSet<ComponentId>>,
-) -> Result<(), Error> {
-    for (component_id, (schema, component_metadata)) in world.metadata.component_map.iter() {
-        if component_metadata.is_transient() {
-            continue;
-        }
-        let Some(column) = world.host.get_mut(component_id) else {
-            continue;
-        };
-        let entity_ids = bytemuck::try_cast_slice::<_, u64>(column.entity_ids.as_slice()).unwrap();
-        let size = schema.size();
-        for (i, entity_id) in entity_ids.iter().enumerate() {
-            let offset = i * size;
-            let entity_id = impeller::types::EntityId(*entity_id);
-            let Some(entity_metadata) = world.metadata.entity_metadata.get(&entity_id) else {
-                continue;
-            };
-
-            if let Some(exclusions) = exclusions
-                && exclusions.contains(component_id)
-            {
-                continue;
-            }
-
-            let pair_id = ComponentId::from_pair(&entity_metadata.name, &component_metadata.name);
-            let Some(component) = state.get_component(pair_id) else {
-                continue;
-            };
-            let buf = &column.buffer[offset..offset + size];
-            let latest = component.time_series.latest().map(|(_, head)| head);
-            if !should_record_component(component_metadata, latest, buf) {
-                continue;
-            }
-            component.time_series.push_buf(timestamp, buf)?;
-        }
-    }
-    Ok(())
+fn reanchored_deadline(now: Instant, pacing_lead: Duration) -> Instant {
+    now.checked_add(pacing_lead).unwrap_or(now)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -501,6 +554,7 @@ async fn tick(
     cancel_token: CancelToken,
 ) {
     let external_controls: HashSet<ComponentId> = external_controls(&world).collect();
+    let mut sync = db.with_state(|state| DbSync::new(state, world.world(), &external_controls));
     let wait_for_write: Vec<ComponentId> = wait_for_write(&world).collect();
     let wait_for_write_pair_ids: Vec<PairId> = get_pair_ids(&world, &wait_for_write).unwrap();
     let mut wait_for_write_pair_ids = collect_timestamps(&db, &wait_for_write_pair_ids);
@@ -655,7 +709,8 @@ async fn tick(
         }
 
         let copy_in_start = Instant::now();
-        db.with_state(|state| copy_db_to_world(state, &mut world));
+        // Holding the state lock keeps rows that gRPC ingest applies under the write lock whole.
+        db.with_state(|_| sync.copy_db_to_world(world.world_mut(), db.vtable_gen.latest()));
         let copy_in_elapsed = copy_in_start.elapsed();
         metrics.observe_copy_db_to_world(copy_in_elapsed);
         let copy_in_ms = if detailed_timing {
@@ -678,13 +733,10 @@ async fn tick(
         };
         world.world_mut().metadata.ticks_per_telemetry = configured_ticks_per_telemetry;
         let commit_start = Instant::now();
-        db.with_state(|state| {
-            if let Err(err) = commit_world_head_unified(
-                state,
-                &mut world,
-                batch_end_timestamp,
-                Some(&external_controls),
-            ) {
+        db.with_state(|_| {
+            if let Err(err) =
+                sync.commit_world(world.world(), batch_end_timestamp, db.vtable_gen.latest())
+            {
                 warn!(?err, "error committing head");
             }
         });
@@ -791,7 +843,7 @@ async fn tick(
                 }
             }
             if was_reset {
-                *deadline = now;
+                *deadline = reanchored_deadline(now, pacing_lead);
             }
             // Pace to `deadline - lead` (run slightly ahead) rather than to the
             // deadline itself, so a transient slow cycle spends the lead buffer
@@ -925,43 +977,31 @@ pub fn timestamps_changed(db: &DB, components: &mut [(PairId, Timestamp)]) -> Op
 }
 
 #[cfg(test)]
+mod pacing_tests {
+    use super::*;
+
+    #[test]
+    fn drift_reset_restores_the_configured_lead() {
+        let now = Instant::now();
+        let lead = Duration::from_millis(20);
+        assert_eq!(reanchored_deadline(now, lead), now + lead);
+    }
+}
+
+#[cfg(test)]
 mod commit_tests {
     use super::*;
     use std::collections::HashMap;
     use tempfile::tempdir;
 
-    fn metadata(record_every_tick: bool) -> ComponentMetadata {
-        let mut values = HashMap::new();
-        if record_every_tick {
-            values.insert("record_every_tick".into(), "true".into());
-        }
-        ComponentMetadata {
-            component_id: ComponentId::new("value"),
-            name: "value".into(),
-            metadata: values,
-        }
-    }
-
     #[test]
     fn sparse_by_default_with_dense_opt_in() {
         let value = [1, 2, 3];
         let changed = [1, 2, 4];
-        assert!(!should_record_component(
-            &metadata(false),
-            Some(&value),
-            &value,
-        ));
-        assert!(should_record_component(
-            &metadata(false),
-            Some(&value),
-            &changed,
-        ));
-        assert!(should_record_component(&metadata(false), None, &value,));
-        assert!(should_record_component(
-            &metadata(true),
-            Some(&value),
-            &value,
-        ));
+        assert!(!should_record_component(false, Some(&value), &value));
+        assert!(should_record_component(false, Some(&value), &changed));
+        assert!(should_record_component(false, None, &value));
+        assert!(should_record_component(true, Some(&value), &value));
     }
 
     #[test]
@@ -1022,12 +1062,259 @@ mod commit_tests {
             },
         );
 
-        db.with_state(|state| copy_db_to_world_for_world(state, &mut world));
+        db.with_state(|state| {
+            DbSync::new(state, &world, &HashSet::new()).copy_db_to_world(&mut world, 0)
+        });
 
         assert_eq!(
             world.host.get(&component_id).unwrap().buffer,
             1.0f64.to_le_bytes()
         );
+    }
+
+    /// A one-entity world of f64 components `(name, metadata flag)`, recorded into a new DB.
+    fn scalar_world(path: &Path, components: &[(&str, Option<&str>)]) -> (DB, World) {
+        let db = DB::create(path.to_path_buf()).unwrap();
+        let mut world = World::default();
+        let entity_id = impeller::types::EntityId(0);
+        world.metadata.entity_metadata.insert(
+            entity_id,
+            EntityMetadata {
+                entity_id,
+                name: "e".into(),
+                metadata: HashMap::new(),
+            },
+        );
+        for (name, flag) in components {
+            let component_id = ComponentId::new(name);
+            let metadata = flag
+                .map(|flag| HashMap::from([(flag.to_string(), "true".to_string())]))
+                .unwrap_or_default();
+            world.metadata.component_map.insert(
+                component_id,
+                (
+                    elodin_db::ComponentSchema {
+                        prim_type: impeller::types::PrimType::F64,
+                        dim: [1].into_iter().collect(),
+                    },
+                    ComponentMetadata {
+                        component_id,
+                        name: name.to_string(),
+                        metadata,
+                    },
+                ),
+            );
+            world.host.insert(
+                component_id,
+                crate::world::Column {
+                    buffer: 0.0f64.to_le_bytes().to_vec(),
+                    entity_ids: entity_id.0.to_le_bytes().to_vec(),
+                },
+            );
+        }
+        init_db(&db, &mut world, Timestamp(0)).unwrap();
+        (db, world)
+    }
+
+    fn series(db: &DB, name: &str) -> elodin_db::Component {
+        db.with_state(|state| {
+            state
+                .get_component(ComponentId::from_pair("e", name))
+                .unwrap()
+                .clone()
+        })
+    }
+
+    fn push(db: &DB, name: &str, at: i64, value: f64) {
+        series(db, name)
+            .time_series
+            .push_buf(Timestamp(at), &value.to_le_bytes())
+            .unwrap();
+    }
+
+    fn latest(db: &DB, name: &str) -> f64 {
+        let component = series(db, name);
+        f64::from_le_bytes(
+            component
+                .time_series
+                .latest()
+                .unwrap()
+                .1
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    fn value(world: &World, name: &str) -> f64 {
+        f64::from_le_bytes(
+            world.host[&ComponentId::new(name)].buffer[..]
+                .try_into()
+                .unwrap(),
+        )
+    }
+
+    fn set(world: &mut World, name: &str, value: f64) {
+        let buffer = &mut world.host.get_mut(&ComponentId::new(name)).unwrap().buffer;
+        buffer.copy_from_slice(&value.to_le_bytes());
+    }
+
+    #[test]
+    fn db_sync_commit_sees_writes_after_the_copy() {
+        let temp = tempdir().unwrap();
+        let (db, mut world) = scalar_world(
+            &temp.path().join("db"),
+            &[("a", None), ("b", Some("external_control"))],
+        );
+        let exclusions = HashSet::from([ComponentId::new("b")]);
+        let mut sync = db.with_state(|state| DbSync::new(state, &world, &exclusions));
+
+        push(&db, "a", 500, 5.0);
+        sync.copy_db_to_world(&mut world, db.vtable_gen.latest());
+        assert_eq!(value(&world, "a"), 5.0);
+
+        // A write landing after the copy is what the world's unchanged value is compared to.
+        push(&db, "a", 800, 7.0);
+        set(&mut world, "b", 3.0);
+        sync.commit_world(&world, Timestamp(1000), db.vtable_gen.latest())
+            .unwrap();
+        assert_eq!(latest(&db, "a"), 5.0);
+        assert_eq!(series(&db, "b").time_series.sample_count(), 1);
+
+        sync.copy_db_to_world(&mut world, db.vtable_gen.latest());
+        assert_eq!(value(&world, "b"), 0.0);
+        sync.commit_world(&world, Timestamp(2000), db.vtable_gen.latest())
+            .unwrap();
+        assert_eq!(series(&db, "a").time_series.sample_count(), 4);
+    }
+
+    #[test]
+    fn db_sync_rereads_every_pair_after_truncate() {
+        let temp = tempdir().unwrap();
+        let (db, mut world) = scalar_world(&temp.path().join("db"), &[("a", None), ("c", None)]);
+        let mut sync = db.with_state(|state| DbSync::new(state, &world, &HashSet::new()));
+        sync.copy_db_to_world(&mut world, db.vtable_gen.latest());
+
+        // As many samples as before the truncate, but a different value.
+        db.truncate();
+        push(&db, "a", 500, 9.0);
+        set(&mut world, "c", 2.0);
+        sync.copy_db_to_world(&mut world, db.vtable_gen.latest());
+        assert_eq!(value(&world, "a"), 9.0);
+        assert_eq!(value(&world, "c"), 2.0);
+
+        sync.commit_world(&world, Timestamp(1000), db.vtable_gen.latest())
+            .unwrap();
+        assert_eq!(series(&db, "a").time_series.sample_count(), 1);
+        assert_eq!(latest(&db, "c"), 2.0);
+    }
+
+    /// Times both DB sync phases on a two-entity world of 276 components, a fifth of which change
+    /// each cycle, with two external writes per cycle. Prints one `DBBENCH {json}` line per cache
+    /// mode, with 32 MB written between phases in the cold mode.
+    #[test]
+    #[ignore = "benchmark"]
+    fn bench_db_sync() {
+        const COMPONENTS: usize = 276;
+        const CYCLES: usize = 3000;
+        let temp = tempdir().unwrap();
+        let db = DB::create(temp.path().join("db")).unwrap();
+        let mut world = World::default();
+        for e in 0..2u64 {
+            let entity_id = impeller::types::EntityId(e);
+            world.metadata.entity_metadata.insert(
+                entity_id,
+                EntityMetadata {
+                    entity_id,
+                    name: format!("vehicle_{e}"),
+                    metadata: HashMap::new(),
+                },
+            );
+        }
+        let sizes = [1usize, 3, 4, 6, 7, 36];
+        for c in 0..COMPONENTS {
+            let name = format!("component_{c}");
+            let component_id = ComponentId::new(&name);
+            let n = sizes[c % sizes.len()];
+            let schema = elodin_db::ComponentSchema {
+                prim_type: impeller::types::PrimType::F64,
+                dim: [n].into_iter().collect(),
+            };
+            world.metadata.component_map.insert(
+                component_id,
+                (
+                    schema,
+                    ComponentMetadata {
+                        component_id,
+                        name,
+                        metadata: HashMap::new(),
+                    },
+                ),
+            );
+            world.host.insert(
+                component_id,
+                crate::world::Column {
+                    buffer: vec![0u8; 2 * n * 8],
+                    entity_ids: [0u64, 1].iter().flat_map(|e| e.to_le_bytes()).collect(),
+                },
+            );
+        }
+        init_db(&db, &mut world, Timestamp(0)).unwrap();
+        let external: Vec<ComponentId> = (0..COMPONENTS)
+            .map(|c| ComponentId::from_pair("vehicle_1", &format!("component_{c}")))
+            .collect();
+        let ids: Vec<ComponentId> = world.host.keys().copied().collect();
+        let mut sync = db.with_state(|state| DbSync::new(state, &world, &HashSet::new()));
+
+        let mut cycle = 0i64;
+        for thrash_mb in [0usize, 32] {
+            let mut thrash = vec![0u8; thrash_mb << 20];
+            let evict = |thrash: &mut Vec<u8>| {
+                for line in thrash.chunks_mut(64) {
+                    line[0] = line[0].wrapping_add(1);
+                }
+                std::hint::black_box(&thrash);
+            };
+            let (mut copy_ns, mut commit_ns) = (Vec::new(), Vec::new());
+            for _ in 0..CYCLES {
+                cycle += 1;
+                evict(&mut thrash);
+                let t0 = Instant::now();
+                db.with_state(|_| sync.copy_db_to_world(&mut world, db.vtable_gen.latest()));
+                copy_ns.push(t0.elapsed().as_nanos() as u64);
+
+                for id in ids.iter().skip(cycle as usize % 5).step_by(5) {
+                    let buffer = &mut world.host.get_mut(id).unwrap().buffer;
+                    buffer[0] = buffer[0].wrapping_add(1);
+                }
+                evict(&mut thrash);
+                let t0 = Instant::now();
+                db.with_state(|_| {
+                    sync.commit_world(&world, Timestamp(cycle * 1000), db.vtable_gen.latest())
+                })
+                .unwrap();
+                commit_ns.push(t0.elapsed().as_nanos() as u64);
+
+                db.with_state(|state| {
+                    for k in 0..2 {
+                        let pair = external[(cycle as usize * 7 + k) % COMPONENTS];
+                        let component = state.get_component(pair).unwrap();
+                        let mut value = component.time_series.latest().unwrap().1.to_vec();
+                        value[1] = value[1].wrapping_add(1);
+                        component
+                            .time_series
+                            .push_buf(Timestamp(cycle * 1000 + 500), &value)
+                            .unwrap();
+                    }
+                });
+            }
+            copy_ns.sort_unstable();
+            commit_ns.sort_unstable();
+            println!(
+                "DBBENCH {{\"thrash_mb\":{thrash_mb},\"copy_ns\":{},\"commit_ns\":{}}}",
+                copy_ns[CYCLES / 2],
+                commit_ns[CYCLES / 2]
+            );
+        }
     }
 }
 

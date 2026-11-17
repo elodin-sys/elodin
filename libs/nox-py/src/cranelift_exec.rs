@@ -18,7 +18,7 @@ pub struct CraneliftExec {
     output_keep_mask: Vec<bool>,
     mutable_overlap: Vec<(usize, usize)>,
     output_buffers: Vec<Vec<u8>>,
-    dup_scratch: Vec<u8>,
+    dup_scratch: Vec<Vec<u8>>,
     // Preallocated pointer scratch reused every tick to avoid per-tick
     // `Vec` allocations in the hot loop. Contents are rewritten every
     // invocation, but the allocations themselves are stable.
@@ -98,14 +98,16 @@ impl CraneliftExec {
             })
             .collect();
 
-        let mut output_buffers = Vec::new();
-        let mut max_buf_size = 0usize;
-        for id in &output_ids {
+        let buffer = |id: &ComponentId| -> Result<Vec<u8>, Error> {
             let col = world.column_by_id(*id).ok_or(Error::ComponentNotFound)?;
-            max_buf_size = max_buf_size.max(col.column.len());
-            output_buffers.push(vec![0u8; col.column.len()]);
-        }
-        let dup_scratch = vec![0u8; max_buf_size.max(1024)];
+            Ok(vec![0u8; col.column.len()])
+        };
+        let output_buffers = output_ids.iter().map(buffer).collect::<Result<_, _>>()?;
+        // The tick writes results straight into its output buffers, so no two may share one.
+        let dup_scratch = (metadata.ret_ids.iter().zip(&output_keep_mask))
+            .filter(|(_, keep)| !**keep)
+            .map(|(id, _)| buffer(id))
+            .collect::<Result<_, _>>()?;
 
         let input_ptrs = vec![std::ptr::null(); input_ids.len()];
         let output_ptrs = vec![std::ptr::null_mut(); output_keep_mask.len()];
@@ -143,13 +145,14 @@ impl CraneliftExec {
                     .as_ptr();
             }
 
-            let mut dedup_idx = 0usize;
+            let (mut dedup_idx, mut dup_idx) = (0usize, 0usize);
             for (slot, keep) in self.output_keep_mask.iter().enumerate() {
                 if *keep {
                     self.output_ptrs[slot] = self.output_buffers[dedup_idx].as_mut_ptr();
                     dedup_idx += 1;
                 } else {
-                    self.output_ptrs[slot] = self.dup_scratch.as_mut_ptr();
+                    self.output_ptrs[slot] = self.dup_scratch[dup_idx].as_mut_ptr();
+                    dup_idx += 1;
                 }
             }
 
@@ -184,11 +187,12 @@ impl CraneliftExec {
 
         for (slot, id) in self.output_ids.iter().enumerate() {
             let host = world.host.get_mut(id).ok_or(Error::ComponentNotFound)?;
-            let src = &self.output_buffers[slot];
-            if host.buffer.len() != src.len() {
+            let out = &mut self.output_buffers[slot];
+            if host.buffer.len() != out.len() {
                 return Err(Error::ValueSizeMismatch);
             }
-            host.buffer.copy_from_slice(src);
+            // Every tick writes each output in full, so the old column can take the next one.
+            std::mem::swap(&mut host.buffer, out);
         }
 
         Ok(TickTimings::default())

@@ -103,6 +103,7 @@ use pyo3::types::PyDict;
 pub struct PyExec {
     pub exec: WorldExec,
     pub db: Box<elodin_db::DB>,
+    sync: crate::impeller_server::DbSync,
     /// Timestamp `init_db` recorded the initial state at.
     start: Timestamp,
     /// Ticks run so far, across `run` calls.
@@ -110,10 +111,15 @@ pub struct PyExec {
 }
 
 impl PyExec {
+    /// `db` must already hold the world's pairs, as `init_db` leaves it.
     pub fn new(exec: WorldExec, db: elodin_db::DB, start: Timestamp) -> Self {
+        let sync = db.with_state(|state| {
+            crate::impeller_server::DbSync::new(state, exec.world(), &Default::default())
+        });
         Self {
             exec,
             db: Box::new(db),
+            sync,
             start,
             ticks: 0,
         }
@@ -162,13 +168,10 @@ impl PyExec {
             }
             self.ticks += this_batch as u64;
             let commit_timestamp = self.tick_timestamp(self.ticks);
-            self.db.with_state(|state| {
-                crate::impeller_server::commit_world_head_unified(
-                    state,
-                    &mut self.exec,
-                    commit_timestamp,
-                    None,
-                )
+            let vtable_gen = self.db.vtable_gen.latest();
+            self.db.with_state(|_| {
+                self.sync
+                    .commit_world(self.exec.world(), commit_timestamp, vtable_gen)
             })?;
             remaining -= this_batch;
 

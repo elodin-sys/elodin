@@ -5,7 +5,7 @@
 #![allow(clippy::too_many_arguments)]
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
@@ -306,7 +306,7 @@ impl LaneRepr {
                 let ptr = *v.first().expect("LaneRepr::get_chunks on empty Scalar");
                 let full_chunks = n / 2;
                 let tail_n = n % 2;
-                let flags = MemFlags::trusted();
+                let flags = MemFlags::new().with_notrap();
                 let mut chunks = Vec::with_capacity(full_chunks);
                 for i in 0..full_chunks {
                     let off = (i * 16) as i32;
@@ -372,6 +372,8 @@ fn max_reg_returns() -> usize {
 /// on x86 (`movapd`) and ARM NEON. Costs up to 8 bytes of padding
 /// per non-f64 slot — in the noise against an arena-backed frame.
 const SLOT_ALIGN: u8 = 4;
+/// Largest stack slot a pointer-ABI result may take: a quarter of the 256 MB tick-thread stack.
+const MAX_SLOT_BYTES: usize = 64 << 20;
 const MIN_RETURN_SLOT: usize = 8;
 const LU_PIVOT_EPSILON: f64 = 1e-300;
 
@@ -1569,6 +1571,10 @@ pub fn compile_module_with_config(
     let ir_module_storage;
     let ir_module = {
         let mut mut_module = ir_module.clone();
+        let changed = crate::inliner::inline_tiny_callees(&mut mut_module, |f| {
+            classify_function(f) == FuncAbi::Scalar
+        });
+        crate::const_fold::refold(&mut mut_module, &changed);
         let inlined = crate::inliner::inline_single_caller_callees(&mut mut_module);
         if inlined > 0 && crate::debug::enabled() {
             eprintln!(
@@ -2214,6 +2220,7 @@ fn compile_case_branch_as_function_mem(
             jit_module,
             &mut value_map,
             &mut type_map,
+            HashMap::new(),
         )?;
 
         // Memcpy each Return operand's slot into the caller-provided
@@ -2400,6 +2407,7 @@ fn build_function_ir(
     // Track the current function for `lower_while` loop registration.
     // Restored to `None` on scope exit.
     set_current_function_fid(Some(fid.as_u32()));
+    SPILLED_LANES.with(|c| c.borrow_mut().clear());
 
     {
         let mut builder = FunctionBuilder::new(&mut ctx.func, &mut func_ctx);
@@ -2597,9 +2605,92 @@ fn alloc_slot_for_vid(
     let Some(vid) = result_vid else {
         return alloc_slot(builder, byte_size);
     };
+    if let Some(ptr) = pool.take_destination(builder, vid, byte_size as u32) {
+        return ptr;
+    }
     let (ss, ptr) = pool.alloc(builder, byte_size as u32, SLOT_ALIGN);
     pool.record_owner(vid, ss, byte_size as u32, SLOT_ALIGN);
     ptr
+}
+
+/// Destinations for the values `body` computes and returns, given each output's offset from
+/// `base` and size; a value returned twice goes to its first output. Outputs must not overlap
+/// each other or any input.
+fn returned_in_place(
+    body: &[InstrResult],
+    base: Value,
+    indirect: bool,
+    layout: impl Iterator<Item = (i32, usize)>,
+) -> HashMap<ValueId, crate::slot_pool::Destination> {
+    let Some(Instruction::Return { operands }) = body.last().map(|ir| &ir.instr) else {
+        return HashMap::new();
+    };
+    let computed: HashSet<ValueId> = body
+        .iter()
+        .flat_map(|ir| ir.values.iter().map(|(vid, _)| *vid))
+        .collect();
+    let mut destinations = HashMap::new();
+    for (output, (vid, (offset, bytes))) in operands.iter().zip(layout).enumerate() {
+        if computed.contains(vid) {
+            destinations
+                .entry(*vid)
+                .or_insert(crate::slot_pool::Destination {
+                    output,
+                    base,
+                    offset,
+                    bytes: bytes as u32,
+                    indirect,
+                });
+        }
+    }
+    destinations
+}
+
+/// Values of a pointer-ABI loop body that may point into a carried slot, with the carry's
+/// index: the iteration arguments and what the arms that can hand back their operand's memory
+/// derive from them.
+fn carry_aliases(body: &[InstrResult], iter_arg_ids: &[ValueId]) -> HashMap<ValueId, usize> {
+    let mut aliases: HashMap<ValueId, usize> = iter_arg_ids
+        .iter()
+        .enumerate()
+        .map(|(i, vid)| (*vid, i))
+        .collect();
+    for ir in body {
+        let (Instruction::Reshape { operand }
+        | Instruction::Convert { operand }
+        | Instruction::BitcastConvert { operand }
+        | Instruction::Slice { operand, .. }) = &ir.instr
+        else {
+            continue;
+        };
+        if let (Some(&carry), Some((vid, _))) = (aliases.get(operand), ir.values.first()) {
+            aliases.insert(*vid, carry);
+        }
+    }
+    aliases
+}
+
+/// The element offset of a slice that is one contiguous run of its operand: every dim after
+/// some dim `k` taken whole and every dim before it a single index.
+fn contiguous_slice_offset(shape: &[i64], starts: &[i64], limits: &[i64]) -> Option<usize> {
+    if starts.len() != shape.len() || limits.len() != shape.len() {
+        return None;
+    }
+    if starts.iter().zip(limits).any(|(s, l)| l <= s) {
+        return None;
+    }
+    let whole = |d: usize| starts[d] == 0 && limits[d] == shape[d];
+    let k = (0..shape.len()).rev().find(|&d| !whole(d)).unwrap_or(0);
+    if (0..k).any(|d| limits[d] - starts[d] != 1) {
+        return None;
+    }
+    let mut offset = 0;
+    let mut stride = 1;
+    for d in (0..shape.len()).rev() {
+        offset += starts[d] * stride;
+        stride *= shape[d];
+    }
+    Some(offset as usize)
 }
 
 // ---------------------------------------------------------------------------
@@ -2622,6 +2713,11 @@ fn alloc_slot_for_vid(
 /// Depth 6 × 7-chunk p95 = 42 live F64X2 in the worst case — the
 /// crossover where NEON avoids spills while x86-16-xmm starts spilling.
 const ELISION_MAX_CHAIN: u32 = 6;
+
+/// Above this many lanes, pointer-ABI f64 ops whose kernels round identically call them instead
+/// of unrolling a chunk loop, and results are never kept in SSA: unrolled code grows with the
+/// tensor and so does the register allocator's work.
+const MAX_UNROLLED_LANES: usize = 128;
 
 /// Consumer instruction kinds (from `useinfo::instr_kind`) that accept
 /// `LaneRepr::PtrChunksF64` directly via `get_chunks`. Every other
@@ -2653,6 +2749,19 @@ fn is_elision_aware_mem(instr: &Instruction) -> bool {
             | Instruction::RoundNearestEven { .. }
             | Instruction::Rsqrt { .. }
             | Instruction::Sign { .. }
+    )
+}
+
+/// Pointer-ABI arms that may hand back an operand's or a constant's memory instead of a new slot.
+fn may_reuse_memory(instr: &Instruction) -> bool {
+    matches!(
+        instr,
+        Instruction::Reshape { .. }
+            | Instruction::Convert { .. }
+            | Instruction::BitcastConvert { .. }
+            | Instruction::Constant {
+                value: ConstantValue::DenseArray(_) | ConstantValue::DenseExternal { .. },
+            }
     )
 }
 
@@ -2741,6 +2850,42 @@ fn mem_has_kernel(
         | Instruction::Cbrt { .. } => et == F64,
         _ => true,
     }
+}
+
+/// Up to this many elements per tensor, loading and storing every lane costs less than a
+/// layout kernel's call and index arithmetic.
+const MAX_INLINE_MOVE_LANES: usize = 32;
+
+/// Whether `instr` only moves elements, every tensor it touches is small enough for
+/// `lower_mem_lanes`, and its arm would not already hand back a view.
+fn is_small_move(
+    instr: &Instruction,
+    rt: &TensorType,
+    type_map: &HashMap<ValueId, TensorType>,
+) -> bool {
+    let moves = match instr {
+        Instruction::Slice {
+            operand,
+            start_indices,
+            limit_indices,
+        } => type_map.get(operand).is_some_and(|ty| {
+            contiguous_slice_offset(&ty.shape, start_indices, limit_indices).is_none()
+        }),
+        Instruction::Concatenate { .. }
+        | Instruction::BroadcastInDim { .. }
+        | Instruction::Transpose { .. }
+        | Instruction::Reverse { .. }
+        | Instruction::Pad { .. }
+        | Instruction::Select { .. } => true,
+        _ => false,
+    };
+    moves
+        && rt.num_elements() <= MAX_INLINE_MOVE_LANES
+        && crate::const_fold::operand_ids(instr).iter().all(|vid| {
+            type_map
+                .get(vid)
+                .is_some_and(|ty| ty.num_elements() <= MAX_INLINE_MOVE_LANES)
+        })
 }
 
 /// Pointer-ABI ops whose runtime kernels exist for f64 only.
@@ -2880,7 +3025,9 @@ fn lower_ptr_binop_elision_or_spill(
 ) -> LaneRepr {
     let l_depth = lhs_repr.ptr_chain_depth();
     let r_depth = rhs_repr.ptr_chain_depth();
-    if let Some(new_depth) = should_elide(use_info, result_vid, &[l_depth, r_depth]) {
+    if n <= MAX_UNROLLED_LANES
+        && let Some(new_depth) = should_elide(use_info, result_vid, &[l_depth, r_depth])
+    {
         // Green: keep the result in SSA. Pull operand chunks (from
         // register if already PtrChunksF64, otherwise load from slot)
         // and emit the op chunk-by-chunk without storing.
@@ -2998,7 +3145,9 @@ fn lower_ptr_unop_elision_or_spill(
     result_vid: Option<ValueId>,
 ) -> LaneRepr {
     let src_depth = src_repr.ptr_chain_depth();
-    if let Some(new_depth) = should_elide(use_info, result_vid, &[src_depth]) {
+    if n <= MAX_UNROLLED_LANES
+        && let Some(new_depth) = should_elide(use_info, result_vid, &[src_depth])
+    {
         let (s_chunks, s_tail) = src_repr.get_chunks(builder, n);
         let out_chunks: Vec<Value> = s_chunks.iter().map(|&c| emit_op(builder, c)).collect();
         let out_tail = s_tail.map(|t| emit_op(builder, t));
@@ -3094,10 +3243,8 @@ fn emit_ptr_minmax_f64(
 /// arith IR is polymorphic over F64 and F64X2 so the same closure
 /// serves both paths.
 ///
-/// `MemFlags::trusted()` is safe: stack slots are 16-byte-aligned
-/// via `SLOT_ALIGN = 4`, chunk and tail offsets are multiples of 16,
-/// and dst/lhs/rhs pointers come from `stack_addr` (never traps).
-/// This unlocks `movapd` on x86 and aligned NEON on AArch64.
+/// Operand loads only assume element alignment, since an operand can be a view into a larger
+/// tensor; `dst` is a fresh 16-byte-aligned slot.
 fn lower_ptr_binop_simd_f64(
     builder: &mut FunctionBuilder,
     jit_module: &mut JITModule,
@@ -3109,19 +3256,20 @@ fn lower_ptr_binop_simd_f64(
 ) {
     let chunks = n / 2;
     let flags = MemFlags::trusted();
+    let load_flags = MemFlags::new().with_notrap();
     for i in 0..chunks {
         let off = (i * 16) as i32;
         let a = bracket_sampled_inner(
             builder,
             jit_module,
             crate::op_sampler::OpCategory::Load,
-            |b| b.ins().load(types::F64X2, flags, lhs, off),
+            |b| b.ins().load(types::F64X2, load_flags, lhs, off),
         );
         let b_v = bracket_sampled_inner(
             builder,
             jit_module,
             crate::op_sampler::OpCategory::Load,
-            |b| b.ins().load(types::F64X2, flags, rhs, off),
+            |b| b.ins().load(types::F64X2, load_flags, rhs, off),
         );
         let r = emit_op(builder, a, b_v);
         bracket_sampled_inner(
@@ -3176,13 +3324,14 @@ fn lower_ptr_unop_simd_f64(
 ) {
     let chunks = n / 2;
     let flags = MemFlags::trusted();
+    let load_flags = MemFlags::new().with_notrap();
     for i in 0..chunks {
         let off = (i * 16) as i32;
         let a = bracket_sampled_inner(
             builder,
             jit_module,
             crate::op_sampler::OpCategory::Load,
-            |b| b.ins().load(types::F64X2, flags, src, off),
+            |b| b.ins().load(types::F64X2, load_flags, src, off),
         );
         let r = emit_op(builder, a);
         bracket_sampled_inner(
@@ -3278,15 +3427,23 @@ fn lower_ptr_splat_simd_f64(builder: &mut FunctionBuilder, dst: Value, scalar: V
     }
 }
 
-fn store_i64_array(builder: &mut FunctionBuilder, vals: &[i64]) -> Value {
-    let ptr = alloc_slot(builder, vals.len() * 8);
-    for (i, &v) in vals.iter().enumerate() {
-        let cv = builder.ins().iconst(types::I64, v);
-        builder
-            .ins()
-            .store(MemFlags::trusted(), cv, ptr, (i * 8) as i32);
-    }
-    ptr
+/// A pointer to `vals` in the module's read-only data.
+fn store_i64_array(
+    builder: &mut FunctionBuilder,
+    jit_module: &mut JITModule,
+    vals: &[i64],
+) -> Value {
+    let data_id = jit_module
+        .declare_anonymous_data(false, false)
+        .expect("declare anonymous data");
+    let mut desc = DataDescription::new();
+    desc.define(vals.iter().flat_map(|v| v.to_ne_bytes()).collect());
+    desc.set_align(8);
+    jit_module
+        .define_data(data_id, &desc)
+        .expect("define anonymous data");
+    let gv = jit_module.declare_data_in_func(data_id, builder.func);
+    builder.ins().global_value(ptr_type(), gv)
 }
 
 /// Number of windows along each axis of a padded, base-dilated operand.
@@ -3402,7 +3559,7 @@ fn emit_reduce_window(
         &pad_flat,
         &src_ty.shape,
     ];
-    let [wd, ws, bd, wdil, pad, shape] = arrays.map(|a| store_i64_array(builder, a));
+    let [wd, ws, bd, wdil, pad, shape] = arrays.map(|a| store_i64_array(builder, jit_module, a));
     let rank_val = builder.ins().iconst(types::I64, rank as i64);
     let n_out = builder
         .ins()
@@ -3517,7 +3674,7 @@ fn emit_select_and_scatter(
     let init_scalar = builder.ins().load(ct, MemFlags::trusted(), init, 0);
     let pad_flat: Vec<i64> = padding.iter().flat_map(|&(l, h)| [l, h]).collect();
     let arrays: [&[i64]; 4] = [window_dimensions, window_strides, &pad_flat, &op_ty.shape];
-    let [wd, ws, pad, shape] = arrays.map(|a| store_i64_array(builder, a));
+    let [wd, ws, pad, shape] = arrays.map(|a| store_i64_array(builder, jit_module, a));
     let rank_val = builder.ins().iconst(types::I64, rank as i64);
     let n_op = builder
         .ins()
@@ -3572,6 +3729,29 @@ fn load_lanes(builder: &mut FunctionBuilder, ptr: Value, n: usize, et: ElementTy
                 .load(ct, MemFlags::trusted(), ptr, (i * sz) as i32)
         })
         .collect()
+}
+
+/// The function, block and lanes of a scalar-ABI spill.
+type SpillKey = (Option<u32>, Block, Vec<Value>);
+
+thread_local! {
+    /// Slots already holding a function's scalar-ABI lanes.
+    static SPILLED_LANES: RefCell<HashMap<SpillKey, Value>> = RefCell::new(HashMap::new());
+}
+
+/// `spill_lanes` for a read-only use, reusing the slot an earlier spill of the same lanes
+/// filled in this block: dynamic indexing into one table stores it once, not per lookup.
+fn spill_lanes_shared(builder: &mut FunctionBuilder, vals: &[Value], elem_sz: usize) -> Value {
+    let Some(block) = builder.current_block() else {
+        return spill_lanes(builder, vals, elem_sz);
+    };
+    let key = (with_current_function_fid(|f| f), block, vals.to_vec());
+    if let Some(ptr) = SPILLED_LANES.with(|c| c.borrow().get(&key).copied()) {
+        return ptr;
+    }
+    let ptr = spill_lanes(builder, vals, elem_sz);
+    SPILLED_LANES.with(|c| c.borrow_mut().insert(key, ptr));
+    ptr
 }
 
 /// Stores scalar-ABI lanes of `elem_sz` bytes each into a fresh stack slot.
@@ -3652,7 +3832,7 @@ fn emit_sort(
             .ins()
             .store(MemFlags::trusted(), p, ptr_array, (i * 8) as i32);
     }
-    let meta_ptr = store_i64_array(builder, &meta);
+    let meta_ptr = store_i64_array(builder, jit_module, &meta);
     let func_ref = jit_module.declare_func_in_func(trt_ids.sort, builder.func);
     builder.ins().call(func_ref, &[ptr_array, meta_ptr]);
 }
@@ -3689,7 +3869,7 @@ fn emit_argminmax(
         shape[axis],
         shape[axis + 1..].iter().product(),
     ];
-    let meta_ptr = store_i64_array(builder, &meta);
+    let meta_ptr = store_i64_array(builder, jit_module, &meta);
     let func_ref = jit_module.declare_func_in_func(trt_ids.argminmax, builder.func);
     let [dst_v, dst_i, src_v, src_i] = ptrs;
     builder
@@ -3763,7 +3943,7 @@ fn emit_scatter(
     for &d in &dims.scatter_dims_to_operand_dims {
         meta.extend([os_st[d as usize], os[d as usize] - window[d as usize]]);
     }
-    let meta_ptr = store_i64_array(builder, &meta);
+    let meta_ptr = store_i64_array(builder, jit_module, &meta);
     let n_meta = builder.ins().iconst(types::I64, meta.len() as i64);
     let func_ref = jit_module.declare_func_in_func(trt_ids.scatter, builder.func);
     builder
@@ -3827,8 +4007,21 @@ fn lower_pointer_body(
     }
 
     let out_ptr = block_params[func_def.params.len()];
+    let offsets: Vec<usize> = func_def
+        .result_types
+        .iter()
+        .scan(0, |at, ty| {
+            *at += ty.byte_size();
+            Some(*at - ty.byte_size())
+        })
+        .collect();
+    let layout = offsets
+        .iter()
+        .zip(&func_def.result_types)
+        .map(|(&at, ty)| (at as i32, ty.byte_size()));
+    let destinations = returned_in_place(&func_def.body, out_ptr, false, layout);
 
-    lower_body_mem(
+    let placed = lower_body_mem(
         builder,
         &func_def.body,
         ir_module,
@@ -3840,23 +4033,30 @@ fn lower_pointer_body(
         jit_module,
         value_map,
         type_map,
+        destinations,
     )?;
 
     if let Some(ret_instr) = func_def.body.last()
         && let Instruction::Return { operands } = &ret_instr.instr
     {
         let memcpy_ref = jit_module.declare_func_in_func(trt_ids.memcpy, builder.func);
-        let mut byte_offset = 0i64;
-        for (vid, ty) in operands.iter().zip(func_def.result_types.iter()) {
+        for (i, ((vid, ty), &at)) in operands
+            .iter()
+            .zip(func_def.result_types.iter())
+            .zip(&offsets)
+            .enumerate()
+        {
             let lr = value_map
                 .get_mut(vid)
                 .ok_or_else(|| format!("ptr body: missing return {:?}", vid))?;
             lr.unpack_in(builder);
             let vals = lr.as_scalar().to_vec();
-            let dst = builder.ins().iadd_imm(out_ptr, byte_offset);
+            if placed.get(vid) == Some(&(vals[0], i)) {
+                continue;
+            }
+            let dst = builder.ins().iadd_imm(out_ptr, at as i64);
             let nb = builder.ins().iconst(types::I64, ty.byte_size() as i64);
             builder.ins().call(memcpy_ref, &[dst, vals[0], nb]);
-            byte_offset += ty.byte_size() as i64;
         }
     }
     builder.ins().return_(&[]);
@@ -3892,7 +4092,10 @@ fn lower_main_body_mem(
         type_map.insert(*vid, ty.clone());
     }
 
-    lower_body_mem(
+    let layout =
+        (func_def.result_types.iter().enumerate()).map(|(i, ty)| ((i * 8) as i32, ty.byte_size()));
+    let destinations = returned_in_place(&func_def.body, outputs_ptr, true, layout);
+    let placed = lower_body_mem(
         builder,
         &func_def.body,
         ir_module,
@@ -3904,6 +4107,7 @@ fn lower_main_body_mem(
         jit_module,
         value_map,
         type_map,
+        destinations,
     )?;
 
     if let Some(ret_instr) = func_def.body.last()
@@ -3920,6 +4124,9 @@ fn lower_main_body_mem(
                 .ok_or_else(|| format!("main_mem: missing return {:?}", vid))?;
             lr.unpack_in(builder);
             let vals = lr.as_scalar().to_vec();
+            if placed.get(vid) == Some(&(vals[0], i)) {
+                continue;
+            }
             let buf_ptr =
                 builder
                     .ins()
@@ -3944,7 +4151,8 @@ fn lower_body_mem(
     jit_module: &mut JITModule,
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &mut HashMap<ValueId, TensorType>,
-) -> Result<(), String> {
+    destinations: HashMap<ValueId, crate::slot_pool::Destination>,
+) -> Result<HashMap<ValueId, (Value, usize)>, String> {
     // Use-info pass so producers can query single-use + consumer-kind
     // to decide between elision (`PtrChunksF64`) and spill
     // (`Scalar([ptr])`).
@@ -3952,7 +4160,7 @@ fn lower_body_mem(
     // Per-body slot pool. Scoped to this `lower_body_mem` call;
     // nested While/Case recursions get their own pool because the
     // recursive call allocates a fresh `SlotPool::default()`.
-    let mut pool = crate::slot_pool::SlotPool::new();
+    let mut pool = crate::slot_pool::SlotPool::with_destinations(destinations);
     for (pos, ir) in body.iter().enumerate() {
         if matches!(ir.instr, Instruction::Return { .. }) {
             break;
@@ -4002,7 +4210,7 @@ fn lower_body_mem(
             pool.hit_rate_pct(),
         );
     }
-    Ok(())
+    Ok(pool.into_placed())
 }
 
 fn lower_instruction_mem(
@@ -4028,6 +4236,19 @@ fn lower_instruction_mem(
         .unwrap_or(TensorType::scalar(ElementType::F64));
     let n = rt.num_elements();
     let elem_sz = rt.element_type.byte_size();
+
+    if !may_reuse_memory(instr)
+        && let Some(ty) = result_types
+            .iter()
+            .find(|ty| ty.byte_size() > MAX_SLOT_BYTES)
+    {
+        return Err(format!(
+            "{} result {ty} needs a {} MB stack slot, over the {} MB limit",
+            crate::useinfo::instr_kind(instr),
+            ty.byte_size() >> 20,
+            MAX_SLOT_BYTES >> 20
+        ));
+    }
 
     // Defensive consumer-side spill. Elision-aware match arms below
     // go through `emit_ptr_*_f64`, which handles `PtrChunksF64`
@@ -4056,7 +4277,7 @@ fn lower_instruction_mem(
             rt.element_type
         ));
     }
-    if !mem_has_kernel(instr, &rt, type_map) {
+    if !mem_has_kernel(instr, &rt, type_map) || is_small_move(instr, &rt, type_map) {
         return lower_mem_lanes(
             builder,
             instr,
@@ -4104,7 +4325,7 @@ fn lower_instruction_mem(
                 let scalar = scalar_to_cranelift(builder, sv, rt.element_type);
                 // Inline splat for F64 instead of a trt_call
                 // round-trip. F32 / integer types still use tensor_rt.
-                if rt.element_type == ElementType::F64 && n >= 2 {
+                if rt.element_type == ElementType::F64 && (2..=MAX_UNROLLED_LANES).contains(&n) {
                     lower_ptr_splat_simd_f64(builder, dst, scalar, n);
                     return Ok(vec![LaneRepr::scalar(vec![dst])]);
                 }
@@ -4139,28 +4360,19 @@ fn lower_instruction_mem(
                         ElementType::I1 => bytes.push(if sv.as_i64() != 0 { 1 } else { 0 }),
                     }
                 }
-                let actual_bytes = bytes.len();
                 let data_id = jit_module
                     .declare_anonymous_data(false, false)
                     .map_err(|e| format!("declare data: {e}"))?;
                 let mut desc = DataDescription::new();
                 desc.define(bytes.into_boxed_slice());
-                desc.set_align(8);
+                desc.set_align(1 << SLOT_ALIGN);
                 jit_module
                     .define_data(data_id, &desc)
                     .map_err(|e| format!("define data: {e}"))?;
                 let gv = jit_module.declare_data_in_func(data_id, builder.func);
-                let data_ptr = builder.ins().global_value(ptr_type(), gv);
-
-                if actual_bytes > 1_000_000 {
-                    Ok(vec![LaneRepr::scalar(vec![data_ptr])])
-                } else {
-                    let dst = alloc_slot_for_vid(builder, pool, result_vid, actual_bytes);
-                    let memcpy_ref = jit_module.declare_func_in_func(trt_ids.memcpy, builder.func);
-                    let nb = builder.ins().iconst(types::I64, actual_bytes as i64);
-                    builder.ins().call(memcpy_ref, &[dst, data_ptr, nb]);
-                    Ok(vec![LaneRepr::scalar(vec![dst])])
-                }
+                Ok(vec![LaneRepr::scalar(vec![
+                    builder.ins().global_value(ptr_type(), gv),
+                ])])
             }
             ConstantValue::DenseExternal {
                 elem_type,
@@ -4194,7 +4406,7 @@ fn lower_instruction_mem(
             // between keeping result chunks in SSA (PtrChunksF64) and
             // storing to a fresh stack slot. Fall back to tensor_rt for
             // F32 / ints — those still go through the scalar-pointer path.
-            if rt.element_type == ElementType::F64 && n >= 2 {
+            if rt.element_type == ElementType::F64 && (2..=MAX_UNROLLED_LANES).contains(&n) {
                 let out = emit_ptr_binop_f64(
                     builder,
                     jit_module,
@@ -4227,7 +4439,7 @@ fn lower_instruction_mem(
             Ok(vec![LaneRepr::scalar(vec![dst])])
         }
         Instruction::Subtract { lhs, rhs } => {
-            if rt.element_type == ElementType::F64 && n >= 2 {
+            if rt.element_type == ElementType::F64 && (2..=MAX_UNROLLED_LANES).contains(&n) {
                 let out = emit_ptr_binop_f64(
                     builder,
                     jit_module,
@@ -4260,7 +4472,7 @@ fn lower_instruction_mem(
             Ok(vec![LaneRepr::scalar(vec![dst])])
         }
         Instruction::Multiply { lhs, rhs } => {
-            if rt.element_type == ElementType::F64 && n >= 2 {
+            if rt.element_type == ElementType::F64 && (2..=MAX_UNROLLED_LANES).contains(&n) {
                 let out = emit_ptr_binop_f64(
                     builder,
                     jit_module,
@@ -4293,7 +4505,7 @@ fn lower_instruction_mem(
             Ok(vec![LaneRepr::scalar(vec![dst])])
         }
         Instruction::Divide { lhs, rhs } => {
-            if rt.element_type == ElementType::F64 && n >= 2 {
+            if rt.element_type == ElementType::F64 && (2..=MAX_UNROLLED_LANES).contains(&n) {
                 let out = emit_ptr_binop_f64(
                     builder,
                     jit_module,
@@ -4426,7 +4638,7 @@ fn lower_instruction_mem(
 
         Instruction::Negate { operand } => {
             // Elision-aware SIMD unary for F64 on ptr-ABI.
-            if rt.element_type == ElementType::F64 && n >= 2 {
+            if rt.element_type == ElementType::F64 && (2..=MAX_UNROLLED_LANES).contains(&n) {
                 let out = emit_ptr_unop_f64(
                     builder,
                     jit_module,
@@ -4452,7 +4664,7 @@ fn lower_instruction_mem(
             Ok(vec![LaneRepr::scalar(vec![dst])])
         }
         Instruction::Sqrt { operand } => {
-            if rt.element_type == ElementType::F64 && n >= 2 {
+            if rt.element_type == ElementType::F64 && (2..=MAX_UNROLLED_LANES).contains(&n) {
                 let out = emit_ptr_unop_f64(
                     builder,
                     jit_module,
@@ -4478,7 +4690,7 @@ fn lower_instruction_mem(
             Ok(vec![LaneRepr::scalar(vec![dst])])
         }
         Instruction::Abs { operand } => {
-            if rt.element_type == ElementType::F64 && n >= 2 {
+            if rt.element_type == ElementType::F64 && (2..=MAX_UNROLLED_LANES).contains(&n) {
                 let out = emit_ptr_unop_f64(
                     builder,
                     jit_module,
@@ -4504,7 +4716,7 @@ fn lower_instruction_mem(
             Ok(vec![LaneRepr::scalar(vec![dst])])
         }
         Instruction::Floor { operand } => {
-            if rt.element_type == ElementType::F64 && n >= 2 {
+            if rt.element_type == ElementType::F64 && (2..=MAX_UNROLLED_LANES).contains(&n) {
                 let out = emit_ptr_unop_f64(
                     builder,
                     jit_module,
@@ -4654,7 +4866,7 @@ fn lower_instruction_mem(
             // on_false)`. No SIMD benefit (cond is u8, mask
             // materialization costs too much), but the tight scalar
             // loop still beats the FFI hop.
-            if rt.element_type == ElementType::F64 {
+            if rt.element_type == ElementType::F64 && n <= MAX_UNROLLED_LANES {
                 let cond_ptr = get(cond)?;
                 let t_ptr = get(on_true)?;
                 let f_ptr = get(on_false)?;
@@ -4781,7 +4993,10 @@ fn lower_instruction_mem(
                 let scalar = builder.ins().load(ct, MemFlags::trusted(), src_ptr, 0);
                 // Inline F64 scalar splat, skipping the trt_call
                 // round-trip. F32 / integer types still dispatch.
-                if src_et == ElementType::F64 && n >= 2 && rt.element_type == ElementType::F64 {
+                if src_et == ElementType::F64
+                    && (2..=MAX_UNROLLED_LANES).contains(&n)
+                    && rt.element_type == ElementType::F64
+                {
                     lower_ptr_splat_simd_f64(builder, dst, scalar, n);
                 } else {
                     let fid = match src_et {
@@ -4803,11 +5018,11 @@ fn lower_instruction_mem(
             } else {
                 let n_dst_v = builder.ins().iconst(types::I64, n as i64);
                 let n_src_v = builder.ins().iconst(types::I64, src_n as i64);
-                let dst_shape_ptr = store_i64_array(builder, &rt.shape);
+                let dst_shape_ptr = store_i64_array(builder, jit_module, &rt.shape);
                 let dst_rank_v = builder.ins().iconst(types::I64, rt.rank() as i64);
-                let src_shape_ptr = store_i64_array(builder, &src_ty.shape);
+                let src_shape_ptr = store_i64_array(builder, jit_module, &src_ty.shape);
                 let src_rank_v = builder.ins().iconst(types::I64, src_ty.rank() as i64);
-                let bd_ptr = store_i64_array(builder, broadcast_dims);
+                let bd_ptr = store_i64_array(builder, jit_module, broadcast_dims);
                 let esz = builder.ins().iconst(types::I64, elem_sz as i64);
                 let func_ref =
                     jit_module.declare_func_in_func(trt_ids.broadcast_nd_generic, builder.func);
@@ -4845,8 +5060,8 @@ fn lower_instruction_mem(
                     .call(func_ref, &[dst, get(operand)?, rows_v, cols_v]);
             } else {
                 let n_val = builder.ins().iconst(types::I64, n as i64);
-                let shape_ptr = store_i64_array(builder, &src_ty.shape);
-                let perm_ptr = store_i64_array(builder, permutation);
+                let shape_ptr = store_i64_array(builder, jit_module, &src_ty.shape);
+                let perm_ptr = store_i64_array(builder, jit_module, permutation);
                 let rank_v = builder.ins().iconst(types::I64, src_ty.rank() as i64);
                 let esz = builder.ins().iconst(types::I64, elem_sz as i64);
                 let func_ref =
@@ -4865,14 +5080,25 @@ fn lower_instruction_mem(
             limit_indices,
         } => {
             let src_ty = type_map.get(operand).cloned().unwrap_or(rt.clone());
+            if let Some(offset) =
+                contiguous_slice_offset(&src_ty.shape, start_indices, limit_indices)
+            {
+                if let Some(rv) = result_vid {
+                    pool.share_owner(*operand, rv);
+                }
+                let view = builder
+                    .ins()
+                    .iadd_imm(get(operand)?, (offset * elem_sz) as i64);
+                return Ok(vec![LaneRepr::scalar(vec![view])]);
+            }
             let n_src = src_ty.num_elements();
             let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
             let n_dst_v = builder.ins().iconst(types::I64, n as i64);
             let n_src_v = builder.ins().iconst(types::I64, n_src as i64);
-            let shape_ptr = store_i64_array(builder, &src_ty.shape);
+            let shape_ptr = store_i64_array(builder, jit_module, &src_ty.shape);
             let rank_v = builder.ins().iconst(types::I64, src_ty.rank() as i64);
-            let starts_ptr = store_i64_array(builder, start_indices);
-            let limits_ptr = store_i64_array(builder, limit_indices);
+            let starts_ptr = store_i64_array(builder, jit_module, start_indices);
+            let limits_ptr = store_i64_array(builder, jit_module, limit_indices);
             let esz = builder.ins().iconst(types::I64, elem_sz as i64);
             let func_ref = jit_module.declare_func_in_func(trt_ids.slice_generic, builder.func);
             builder.ins().call(
@@ -4935,8 +5161,8 @@ fn lower_instruction_mem(
                     let n_dst_v = builder.ins().iconst(types::I64, new_n as i64);
                     let n_a_v = builder.ins().iconst(types::I64, acc_n as i64);
                     let n_b_v = builder.ins().iconst(types::I64, b_n as i64);
-                    let dst_shape_ptr = store_i64_array(builder, &new_shape);
-                    let a_shape_ptr = store_i64_array(builder, &acc_shape);
+                    let dst_shape_ptr = store_i64_array(builder, jit_module, &new_shape);
+                    let a_shape_ptr = store_i64_array(builder, jit_module, &acc_shape);
                     builder.ins().call(
                         func_ref,
                         &[
@@ -4977,10 +5203,10 @@ fn lower_instruction_mem(
             let func_ref = jit_module.declare_func_in_func(trt_ids.pad_f64, builder.func);
             let n_dst_v = builder.ins().iconst(types::I64, n as i64);
             let n_src_v = builder.ins().iconst(types::I64, n_src as i64);
-            let dst_shape_ptr = store_i64_array(builder, &rt.shape);
-            let src_shape_ptr = store_i64_array(builder, &src_ty.shape);
+            let dst_shape_ptr = store_i64_array(builder, jit_module, &rt.shape);
+            let src_shape_ptr = store_i64_array(builder, jit_module, &src_ty.shape);
             let rank_v = builder.ins().iconst(types::I64, rt.rank() as i64);
-            let low_ptr = store_i64_array(builder, low);
+            let low_ptr = store_i64_array(builder, jit_module, low);
             builder.ins().call(
                 func_ref,
                 &[
@@ -5008,9 +5234,9 @@ fn lower_instruction_mem(
             let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
             let n_dst_v = builder.ins().iconst(types::I64, n as i64);
             let n_src_v = builder.ins().iconst(types::I64, n_src as i64);
-            let shape_ptr = store_i64_array(builder, &src_ty.shape);
+            let shape_ptr = store_i64_array(builder, jit_module, &src_ty.shape);
             let rank_v = builder.ins().iconst(types::I64, src_ty.rank() as i64);
-            let sizes_ptr = store_i64_array(builder, slice_sizes);
+            let sizes_ptr = store_i64_array(builder, jit_module, slice_sizes);
 
             let starts_ss = alloc_slot(builder, start_indices.len() * 8);
             for (i, idx_vid) in start_indices.iter().enumerate() {
@@ -5063,9 +5289,9 @@ fn lower_instruction_mem(
             let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
             let n_src_v = builder.ins().iconst(types::I64, n_src as i64);
             let n_upd_v = builder.ins().iconst(types::I64, n_upd as i64);
-            let shape_ptr = store_i64_array(builder, &src_ty.shape);
+            let shape_ptr = store_i64_array(builder, jit_module, &src_ty.shape);
             let rank_v = builder.ins().iconst(types::I64, src_ty.rank() as i64);
-            let upd_shape_ptr = store_i64_array(builder, &upd_ty.shape);
+            let upd_shape_ptr = store_i64_array(builder, jit_module, &upd_ty.shape);
 
             let starts_ss = alloc_slot(builder, start_indices.len() * 8);
             for (i, idx_vid) in start_indices.iter().enumerate() {
@@ -5158,7 +5384,7 @@ fn lower_instruction_mem(
             ];
             meta.extend(axes.dims.iter().flatten());
             meta.extend(axes.starts.iter().flatten());
-            let meta_ptr = store_i64_array(builder, &meta);
+            let meta_ptr = store_i64_array(builder, jit_module, &meta);
             let n_meta = builder.ins().iconst(types::I64, meta.len() as i64);
             let func_ref = jit_module.declare_func_in_func(trt_ids.gather, builder.func);
             builder
@@ -5260,7 +5486,7 @@ fn lower_instruction_mem(
                         .chain(&k_axes)
                         .flat_map(|&(size, l, r)| [size as i64, l as i64, r as i64]),
                 );
-                let meta_ptr = store_i64_array(builder, &meta);
+                let meta_ptr = store_i64_array(builder, jit_module, &meta);
                 let func_ref = jit_module.declare_func_in_func(trt_ids.dot_general, builder.func);
                 builder
                     .ins()
@@ -5438,6 +5664,7 @@ fn lower_instruction_mem(
                 jit_module,
                 &mut cond_vm,
                 &mut cond_tm,
+                HashMap::new(),
             )?;
 
             let cond_val = {
@@ -5481,6 +5708,7 @@ fn lower_instruction_mem(
                 jit_module,
                 &mut body_vm,
                 &mut body_tm,
+                HashMap::new(),
             )?;
 
             if let Some(ret_ir) = loop_body
@@ -5490,13 +5718,35 @@ fn lower_instruction_mem(
                 && let Instruction::Return { operands } = &ret_ir.instr
             {
                 let memcpy_ref = jit_module.declare_func_in_func(trt_ids.memcpy, builder.func);
-                for (vid, (ss, ty)) in operands.iter().zip(slots.iter()) {
-                    if let Some(lr) = body_vm.get_mut(vid) {
-                        lr.unpack_in(builder);
-                        let vals = lr.as_scalar().to_vec();
+                // The slots are written in order, so a carry that may still point into an
+                // earlier slot is copied out before any slot is overwritten.
+                let in_slots = carry_aliases(loop_body, iter_arg_ids);
+                let mut sources = Vec::with_capacity(operands.len());
+                for (j, (vid, (_, ty))) in operands.iter().zip(slots.iter()).enumerate() {
+                    // A carry handed back unchanged is already in its slot.
+                    if iter_arg_ids.get(j) == Some(vid) {
+                        sources.push(None);
+                        continue;
+                    }
+                    let Some(lr) = body_vm.get_mut(vid) else {
+                        sources.push(None);
+                        continue;
+                    };
+                    lr.unpack_in(builder);
+                    let mut src = lr.as_scalar()[0];
+                    if in_slots.get(vid).is_some_and(|&k| k < j) {
+                        let staged = alloc_slot(builder, ty.byte_size());
+                        let nb = builder.ins().iconst(types::I64, ty.byte_size() as i64);
+                        builder.ins().call(memcpy_ref, &[staged, src, nb]);
+                        src = staged;
+                    }
+                    sources.push(Some(src));
+                }
+                for (src, (ss, ty)) in sources.into_iter().zip(slots.iter()) {
+                    if let Some(src) = src {
                         let addr = builder.ins().stack_addr(ptr_type(), *ss, 0);
                         let nb = builder.ins().iconst(types::I64, ty.byte_size() as i64);
-                        builder.ins().call(memcpy_ref, &[addr, vals[0], nb]);
+                        builder.ins().call(memcpy_ref, &[addr, src, nb]);
                     }
                 }
             }
@@ -5526,7 +5776,7 @@ fn lower_instruction_mem(
             };
             let func_ref = jit_module.declare_func_in_func(fid, builder.func);
             let n_val = builder.ins().iconst(types::I64, n as i64);
-            let shape_ptr = store_i64_array(builder, &rt.shape);
+            let shape_ptr = store_i64_array(builder, jit_module, &rt.shape);
             let rank_v = builder.ins().iconst(types::I64, rt.rank() as i64);
             let dim_v = builder.ins().iconst(types::I64, *dimension);
             builder
@@ -5719,7 +5969,7 @@ fn lower_instruction_mem(
         }
         Instruction::RoundNearestEven { operand } => {
             // Elision-aware SIMD nearest for F64 on ptr-ABI.
-            if rt.element_type == ElementType::F64 && n >= 2 {
+            if rt.element_type == ElementType::F64 && (2..=MAX_UNROLLED_LANES).contains(&n) {
                 let out = emit_ptr_unop_f64(
                     builder,
                     jit_module,
@@ -5751,9 +6001,9 @@ fn lower_instruction_mem(
             let src_ty = type_map.get(operand).cloned().unwrap_or(rt.clone());
             let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
             let n_val = builder.ins().iconst(types::I64, n as i64);
-            let shape_ptr = store_i64_array(builder, &src_ty.shape);
+            let shape_ptr = store_i64_array(builder, jit_module, &src_ty.shape);
             let rank_val = builder.ins().iconst(types::I64, src_ty.rank() as i64);
-            let dims_ptr = store_i64_array(builder, dimensions);
+            let dims_ptr = store_i64_array(builder, jit_module, dimensions);
             let n_dims_val = builder.ins().iconst(types::I64, dimensions.len() as i64);
             let func_ref = jit_module.declare_func_in_func(trt_ids.reverse_f64, builder.func);
             builder.ins().call(
@@ -5780,12 +6030,13 @@ fn lower_instruction_mem(
                 let min_ptr = get(min)?;
                 let max_ptr = get(max)?;
                 let flags = MemFlags::trusted();
+                let load_flags = MemFlags::new().with_notrap();
                 let chunks = n / 2;
                 for i in 0..chunks {
                     let off = (i * 16) as i32;
-                    let s = builder.ins().load(types::F64X2, flags, src_ptr, off);
-                    let mn = builder.ins().load(types::F64X2, flags, min_ptr, off);
-                    let mx = builder.ins().load(types::F64X2, flags, max_ptr, off);
+                    let s = builder.ins().load(types::F64X2, load_flags, src_ptr, off);
+                    let mn = builder.ins().load(types::F64X2, load_flags, min_ptr, off);
+                    let mx = builder.ins().load(types::F64X2, load_flags, max_ptr, off);
                     let gt_max = builder.ins().fcmp(FloatCC::GreaterThan, s, mx);
                     let gt_max_f = builder.ins().bitcast(types::F64X2, MemFlags::new(), gt_max);
                     let inner = builder.ins().bitselect(gt_max_f, mx, s);
@@ -5941,6 +6192,7 @@ fn lower_instruction_mem(
                     jit_module,
                     &mut br_vm,
                     &mut br_tm,
+                    HashMap::new(),
                 )?;
 
                 if let Some(ret_ir) = branch
@@ -5981,7 +6233,7 @@ fn lower_instruction_mem(
             // Elision-aware SIMD Rsqrt for F64 on ptr-ABI.
             // `1.0 / sqrt(x)` — two Cranelift IR ops per lane,
             // polymorphic over F64 and F64X2.
-            if rt.element_type == ElementType::F64 && n >= 2 {
+            if rt.element_type == ElementType::F64 && (2..=MAX_UNROLLED_LANES).contains(&n) {
                 let out = emit_ptr_unop_f64(
                     builder,
                     jit_module,
@@ -6030,7 +6282,7 @@ fn lower_instruction_mem(
         }
         Instruction::Ceil { operand } => {
             // Elision-aware SIMD ceil for F64 on ptr-ABI.
-            if rt.element_type == ElementType::F64 && n >= 2 {
+            if rt.element_type == ElementType::F64 && (2..=MAX_UNROLLED_LANES).contains(&n) {
                 let out = emit_ptr_unop_f64(
                     builder,
                     jit_module,
@@ -6270,7 +6522,7 @@ fn lower_instruction_mem(
             let n_val = builder.ins().iconst(types::I64, n as i64);
             let eps_val = builder.ins().f64const(*epsilon);
             let fi_val = builder.ins().iconst(types::I64, *feature_index);
-            let shape_ptr = store_i64_array(builder, &src_ty.shape);
+            let shape_ptr = store_i64_array(builder, jit_module, &src_ty.shape);
             let rank_val = builder.ins().iconst(types::I64, src_ty.rank() as i64);
             let pt = ptr_type();
             lapack_call(
@@ -6316,7 +6568,7 @@ fn lower_instruction_mem(
             let src_ty = type_map.get(operand).cloned().unwrap_or(rt.clone());
             let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
             let n_dst_v = builder.ins().iconst(types::I64, n as i64);
-            let shape_ptr = store_i64_array(builder, &src_ty.shape);
+            let shape_ptr = store_i64_array(builder, jit_module, &src_ty.shape);
             let rank_val = builder.ins().iconst(types::I64, src_ty.rank() as i64);
             let esz = builder.ins().iconst(types::I64, elem_sz as i64);
             let pt = ptr_type();
@@ -6460,26 +6712,38 @@ fn lower_instruction_mem(
                 dimension_numbers.output_batch_dimension,
                 dimension_numbers.output_feature_dimension,
             ];
-            let dn_ptr = store_i64_array(builder, &dn_vals);
-            let in_sp_ptr = store_i64_array(builder, &dimension_numbers.input_spatial_dimensions);
-            let k_sp_ptr = store_i64_array(builder, &dimension_numbers.kernel_spatial_dimensions);
-            let o_sp_ptr = store_i64_array(builder, &dimension_numbers.output_spatial_dimensions);
+            let dn_ptr = store_i64_array(builder, jit_module, &dn_vals);
+            let in_sp_ptr = store_i64_array(
+                builder,
+                jit_module,
+                &dimension_numbers.input_spatial_dimensions,
+            );
+            let k_sp_ptr = store_i64_array(
+                builder,
+                jit_module,
+                &dimension_numbers.kernel_spatial_dimensions,
+            );
+            let o_sp_ptr = store_i64_array(
+                builder,
+                jit_module,
+                &dimension_numbers.output_spatial_dimensions,
+            );
             let n_spatial = builder.ins().iconst(
                 types::I64,
                 dimension_numbers.input_spatial_dimensions.len() as i64,
             );
-            let lhs_shape_ptr = store_i64_array(builder, &lhs_ty.shape);
-            let rhs_shape_ptr = store_i64_array(builder, &rhs_ty.shape);
+            let lhs_shape_ptr = store_i64_array(builder, jit_module, &lhs_ty.shape);
+            let rhs_shape_ptr = store_i64_array(builder, jit_module, &rhs_ty.shape);
             let lhs_rank_val = builder.ins().iconst(types::I64, lhs_ty.rank() as i64);
-            let ws_ptr = store_i64_array(builder, window_strides);
+            let ws_ptr = store_i64_array(builder, jit_module, window_strides);
             let pad_flat: Vec<i64> = padding.iter().flat_map(|&(l, h)| [l, h]).collect();
-            let pad_ptr = store_i64_array(builder, &pad_flat);
-            let ld_ptr = store_i64_array(builder, lhs_dilation);
-            let rd_ptr = store_i64_array(builder, rhs_dilation);
+            let pad_ptr = store_i64_array(builder, jit_module, &pad_flat);
+            let ld_ptr = store_i64_array(builder, jit_module, lhs_dilation);
+            let rd_ptr = store_i64_array(builder, jit_module, rhs_dilation);
             let fgc = builder.ins().iconst(types::I64, *feature_group_count);
             let bgc = builder.ins().iconst(types::I64, *batch_group_count);
             let n_out_val = builder.ins().iconst(types::I64, n as i64);
-            let out_shape_ptr = store_i64_array(builder, &rt.shape);
+            let out_shape_ptr = store_i64_array(builder, jit_module, &rt.shape);
             let pt = ptr_type();
             lapack_call(
                 builder,
@@ -9957,7 +10221,7 @@ fn lower_gather(
     }
     let axes = gather_axes(src_ty, idx_ty, out_ty, dims, slice_sizes)?;
     let (ct, elem_sz) = (cranelift_type_for(et), et.byte_size() as i64);
-    let base = spill_lanes(builder, operand, elem_sz as usize);
+    let base = spill_lanes_shared(builder, operand, elem_sz as usize);
     let mut out = Vec::with_capacity(n);
     for p in 0..(n as i64 / axes.inner) {
         let (mut from, mut idx, mut rem) = (0, 0, p);
@@ -10044,19 +10308,7 @@ fn lower_dynamic_slice(
     let et = src_ty.element_type;
     let ct = cranelift_type_for(et);
     let elem_sz = et.byte_size();
-
-    let total_bytes = vals.len() * elem_sz;
-    let ss = builder.create_sized_stack_slot(StackSlotData::new(
-        StackSlotKind::ExplicitSlot,
-        total_bytes as u32,
-        SLOT_ALIGN,
-    ));
-    let base = builder.ins().stack_addr(ptr_type(), ss, 0);
-    for (i, &v) in vals.iter().enumerate() {
-        builder
-            .ins()
-            .store(MemFlags::trusted(), v, base, (i * elem_sz) as i32);
-    }
+    let base = spill_lanes_shared(builder, vals, elem_sz);
 
     let rank = src_ty.shape.len();
     let mut strides = vec![1usize; rank];
@@ -10851,21 +11103,39 @@ fn lower_svd_custom_call(
     Ok(result_groups)
 }
 
+/// `(batch, rows, cols)` of a stack of matrices: the last two dims of `ty` and the product of the rest.
+fn matrix_stack(name: &str, ty: &TensorType) -> Result<(usize, usize, usize), String> {
+    match ty.shape.as_slice() {
+        [batch @ .., rows, cols] => Ok((
+            batch.iter().product::<i64>() as usize,
+            *rows as usize,
+            *cols as usize,
+        )),
+        _ => Err(format!("{name}: expected a stack of matrices, got {ty}")),
+    }
+}
+
 fn lower_lu_custom_call(
     builder: &mut FunctionBuilder,
     operands: &[ValueId],
-    _result_types: &[TensorType],
+    result_types: &[TensorType],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     _type_map: &HashMap<ValueId, TensorType>,
     jit_module: &mut JITModule,
 ) -> Result<Vec<LaneRepr>, String> {
     let a_vals = get_vals(builder, value_map, &operands[0])?;
-    let n = require_square("LU", a_vals)?;
-    let (m, f8) = (n, 8);
+    let (batch, m, n) = matrix_stack("LU", &result_types[0])?;
+    if a_vals.len() != batch * m * n {
+        return Err(format!(
+            "LU: operand has {} elements, expected {}",
+            a_vals.len(),
+            result_types[0]
+        ));
+    }
+    let f8 = 8;
 
     let (lu_b, ipiv_b, info_b) = (m * n * f8, m.min(n) * 4, 4);
     let (_, base) = lapack_slot(builder, lu_b + lu_b + ipiv_b + info_b);
-    store_f64_vals(builder, a_vals, base, 0);
 
     let lu_off = lu_b as i32;
     let ipiv_off = (lu_b + lu_b) as i32;
@@ -10877,18 +11147,25 @@ fn lower_lu_custom_call(
     let m_val = builder.ins().iconst(types::I64, m as i64);
     let n_val = builder.ins().iconst(types::I64, n as i64);
     let pt = ptr_type();
-    lapack_call(
-        builder,
-        jit_module,
-        "__cranelift_lu",
-        &[pt, types::I64, types::I64, pt, pt, pt],
-        &[base, m_val, n_val, lu_ptr, ipiv_ptr, info_ptr],
-    )?;
+    let (mut lu, mut ipiv, mut info) = (Vec::new(), Vec::new(), Vec::new());
+    for b in 0..batch {
+        store_f64_vals(builder, &a_vals[b * m * n..(b + 1) * m * n], base, 0);
+        lapack_call(
+            builder,
+            jit_module,
+            "__cranelift_lu",
+            &[pt, types::I64, types::I64, pt, pt, pt],
+            &[base, m_val, n_val, lu_ptr, ipiv_ptr, info_ptr],
+        )?;
+        lu.extend(load_f64_vals(builder, m * n, base, lu_off));
+        ipiv.extend(load_i32_vals(builder, m.min(n), base, ipiv_off));
+        info.push(load_info_i32(builder, base, info_off));
+    }
 
     Ok(vec![
-        load_f64_scalar_lane(builder, m * n, base, lu_off),
-        LaneRepr::scalar(load_i32_vals(builder, m.min(n), base, ipiv_off)),
-        LaneRepr::scalar(vec![load_info_i32(builder, base, info_off)]),
+        LaneRepr::scalar(lu),
+        LaneRepr::scalar(ipiv),
+        LaneRepr::scalar(info),
     ])
 }
 
@@ -10904,20 +11181,22 @@ fn lower_trsm_custom_call(
     let a_vals = get_vals(builder, value_map, &operands[0])?.to_vec();
     let b_vals = get_vals(builder, value_map, &operands[1])?.to_vec();
 
-    let rt = &result_types[0];
-    let (m, nrhs) = if rt.shape.len() == 2 {
-        (rt.shape[0] as usize, rt.shape[1] as usize)
-    } else {
-        return Err("TRSM: expected 2D result".to_string());
-    };
-    let n = (a_vals.len() as f64).sqrt() as usize;
+    let (batch, m, nrhs) = matrix_stack("TRSM", &result_types[0])?;
+    let (a_len, b_len) = (a_vals.len() / batch.max(1), m * nrhs);
+    if a_vals.len() != batch * a_len || b_vals.len() != batch * b_len {
+        return Err(format!(
+            "TRSM: operands of {} and {} elements do not batch to {}",
+            a_vals.len(),
+            b_vals.len(),
+            result_types[0]
+        ));
+    }
+    let n = (a_len as f64).sqrt() as usize;
     let f8 = 8;
 
-    let (a_b, b_b, out_b) = (a_vals.len() * f8, b_vals.len() * f8, m * nrhs * f8);
-    let (_, base) = lapack_slot(builder, a_b + b_b + out_b);
-    store_f64_vals(builder, &a_vals, base, 0);
+    let (a_b, b_b) = (a_len * f8, b_len * f8);
+    let (_, base) = lapack_slot(builder, a_b + b_b + b_b);
     let b_off = a_b as i32;
-    store_f64_vals(builder, &b_vals, base, b_off);
     let out_off = (a_b + b_b) as i32;
     let b_ptr = builder.ins().iadd_imm(base, b_off as i64);
     let out_ptr = builder.ins().iadd_imm(base, out_off as i64);
@@ -10930,26 +11209,32 @@ fn lower_trsm_custom_call(
     let uplo_val = builder.ins().iconst(types::I8, uplo as i64);
     let diag_val = builder.ins().iconst(types::I8, diag as i64);
     let pt = ptr_type();
-    lapack_call(
-        builder,
-        jit_module,
-        "__cranelift_trsm",
-        &[
-            pt,
-            pt,
-            types::I64,
-            types::I64,
-            types::I64,
-            types::I8,
-            types::I8,
-            pt,
-        ],
-        &[
-            base, b_ptr, m_val, n_imm, nrhs_val, uplo_val, diag_val, out_ptr,
-        ],
-    )?;
+    let mut out = Vec::with_capacity(batch * b_len);
+    for b in 0..batch {
+        store_f64_vals(builder, &a_vals[b * a_len..(b + 1) * a_len], base, 0);
+        store_f64_vals(builder, &b_vals[b * b_len..(b + 1) * b_len], base, b_off);
+        lapack_call(
+            builder,
+            jit_module,
+            "__cranelift_trsm",
+            &[
+                pt,
+                pt,
+                types::I64,
+                types::I64,
+                types::I64,
+                types::I8,
+                types::I8,
+                pt,
+            ],
+            &[
+                base, b_ptr, m_val, n_imm, nrhs_val, uplo_val, diag_val, out_ptr,
+            ],
+        )?;
+        out.extend(load_f64_vals(builder, b_len, base, out_off));
+    }
 
-    Ok(vec![load_f64_scalar_lane(builder, m * nrhs, base, out_off)])
+    Ok(vec![LaneRepr::scalar(out)])
 }
 
 fn lower_cholesky_custom_call(

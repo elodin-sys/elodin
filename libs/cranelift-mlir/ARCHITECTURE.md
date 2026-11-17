@@ -80,8 +80,9 @@ sequenceDiagram
     Compile->>Compile: Extract shapes, dtypes, MLIR text
     Compile->>Parser: StableHLO MLIR text
     Parser->>IR: Module with FuncDefs + Instructions
-    IR->>Fold: Rewrite-in-place (fold + DCE)
-    Fold->>Lower: Classify functions (Scalar vs Pointer ABI)
+    IR->>Fold: Rewrite-in-place (fold + CSE + DCE)
+    Fold->>Lower: Inline tiny and single-caller callees
+    Lower->>Lower: Classify functions (Scalar vs Pointer ABI)
     Lower->>Lower: Declare functions, register JIT symbols
     Lower->>Lower: Build Cranelift IR per function (serial)<br/>large stablehlo.case branches split into their own fns
     Lower->>Rayon: Dispatch (FuncId, Context) per worker
@@ -94,7 +95,7 @@ sequenceDiagram
     loop Every simulation tick
         World->>Exec: input buffer pointers
         Exec->>Exec: tick_fn(inputs, outputs)
-        Exec->>World: output buffer pointers (zero-copy)
+        Exec->>World: swap output buffers into the world columns
     end
 ```
 
@@ -112,7 +113,7 @@ The `keep_unused=True` flag is critical: it preserves all input/output slots eve
 determines some are unused, maintaining stable positional mapping between the simulation's
 world columns and the function's arguments.
 
-### Stage 2: Parsing (`parser.rs`, ~3,500 lines)
+### Stage 2: Parsing (`parser.rs`, ~3,600 lines)
 
 A Winnow-based parser converts StableHLO MLIR text into the internal IR. Key design
 decisions:
@@ -125,16 +126,23 @@ decisions:
   unique per function (see [While Loop Scoping](#while-loop-scoping))
 - **`backend_config` extraction**: LAPACK custom calls carry parameters like
   `{uplo = 76 : ui8, diag = 85 : ui8}` which are parsed into a `HashMap<String, i64>`
+- **Dense constants**: a `dense<...>` literal becomes a scalar, splat or array constant. Hex
+  blobs are decoded two characters at a time, and one over 1 MB goes to the constant cache
+  (see [Constants live in the data section](#constants-live-in-the-data-section)). For a
+  module that embeds a large lookup table this decoding is most of the compile time (see
+  [Opportunities](#opportunities))
 
-### Stage 3: Internal IR (`ir.rs`, ~600 lines)
+### Stage 3: Internal IR (`ir.rs`, ~780 lines)
 
 A lightweight representation with these key types:
 
 - **`Module`**: collection of `FuncDef`s
 - **`FuncDef`**: name, parameters (with types), result types, body (list of `InstrResult`)
-- **`Instruction`**: 35+ variants covering arithmetic, comparison, shape manipulation,
+- **`Instruction`**: about 80 variants covering arithmetic, comparison, shape manipulation,
   control flow, indexing, LAPACK custom calls, and type conversion
 - **`TensorType`**: shape (Vec of i64) + element type (F64, F32, I64, I32, UI32, I1, etc.)
+- **`ConstantValue`**: `DenseScalar`, `DenseSplat`, `DenseArray`, or `DenseExternal`, a
+  memory-mapped blob from the constant cache
 - **`GatherDims`**: offset_dims, collapsed_slice_dims, start_index_map, index_vector_dim
 - **`ScatterDims`**: update_window_dims, inserted_window_dims, the two batching dim lists, scatter_dims_to_operand_dims, index_vector_dim; `ScatterCombiner` is Set, Add, Multiply, Minimum or Maximum
 - **`DotDims`**: contracting and batching dimension lists for `dot_general`
@@ -158,9 +166,32 @@ families cooperate under a bounded cascade loop per function:
    `Slice` / `Pad` / `Concatenate` / `DynamicSlice` on `DenseArray` /
    `DenseSplat` constants — each gated by a 1 KB byte-size cap so folding
    cannot explode compile-time memory. Identities (`x*1`, `x+0`, `x-0`,
-   `x/1`, constant-cond `Select`, no-op `Convert` / `Reshape` /
-   `BroadcastInDim`) rewrite downstream operand references through a
-   `ValueId` alias table; the now-unused instruction is removed by DCE.
+   `x/1`, constant-cond `Select`, `select(c, x, x)`, no-op `Convert` /
+   `Reshape` / `BroadcastInDim`) rewrite downstream operand references
+   through a `ValueId` alias table; the now-unused instruction is removed
+   by DCE.
+
+After the identities, a `gather` whose operand is a `broadcast_in_dim` that
+only inserts the gather's `operand_batching_dims` reads the broadcast's
+source instead, with the batching dims dropped and the other operand dims
+renumbered. `jax.vmap` emits that pattern for a lookup table shared by every
+entity, usually behind the `select(pred, x, x)` of a vmapped `lax.cond`;
+without the rewrite the pointer ABI would build one copy of the table per
+entity. Two more rewrites remove layout work that joins across archetypes
+emit: a `broadcast_in_dim` that only adds unit dims becomes a `reshape`, and a
+row `gather` with constant, consecutive indices becomes a `slice` (a slice of
+the whole operand is then an alias).
+
+Common subexpressions are aliased to the first identical pure instruction in
+scope. Instructions are bucketed by a hash of their kind, operands after
+aliases, constant bits and result types; a match is confirmed bit for bit for
+constants and by the full instruction otherwise. A `case` branch sees its
+enclosing scope but not its siblings. `while`, `map`, `sort` and window bodies
+start empty: the scalar ABI lowers a `while` body with only its iteration
+arguments, and both ABIs compile the other regions as separate functions, so a
+value from outside would not be reachable there. JAX emits StableHLO before any
+optimizer has run, so duplicates are common: on a two-vehicle customer model 40%
+of the instructions repeat an earlier one in scope.
 
 A conservative DCE pass runs after each fold iteration, removing pure
 instructions whose result `ValueId`s are no longer referenced anywhere in
@@ -173,7 +204,14 @@ Every invocation of `fold_module` emits a one-line summary
 mode additionally prints a per-rule histogram and the scalar-vs-pointer
 ABI classification, for sizing the impact of future work.
 
-### Stage 4: Lowering (`lower.rs`, ~11,160 lines)
+Before lowering, `compile_module_with_config` inlines callees of at most 12
+instructions, without regions or calls, at every call site in scalar-ABI
+functions, including sites inside `case` and `while` bodies, when the callee is
+scalar-ABI too. It folds the changed callers again, then inlines callees that
+have a single call site at the top level of their caller (callee under 200
+instructions, caller under 1,200).
+
+### Stage 4: Lowering (`lower.rs`, ~12,000 lines)
 
 The largest and most complex file. Transforms the internal IR into Cranelift IR and
 produces a native function pointer. Codegen is organized into a three-phase pipeline
@@ -207,7 +245,9 @@ code emission) can be parallelized across a rayon thread pool:
 
 Per-phase millisecond timings are captured on `CompiledModule::timings` and surfaced
 on stderr (`[elodin-cranelift] lower=… parse=… fold=… ir_build=… codegen=… link=… total=…`)
-so compile-time regressions are trivially attributable to a specific phase. Under
+so compile-time regressions are trivially attributable to a specific phase. `lower` is the
+time JAX takes to trace the simulation and emit StableHLO, which is most of the total for
+small modules; the banner also confirms that a run used this backend. Under
 `ELODIN_CRANELIFT_DEBUG_DIR` the driver additionally prints a per-function codegen
 breakdown (`codegen fid=… …ms bytes=…`) that directly surfaces the largest functions
 — this is the tool used to find and fix Amdahl-bound functions like the customer's
@@ -220,18 +260,26 @@ type TickFn = unsafe extern "C" fn(*const *const u8, *mut *mut u8);
 ```
 
 Where `inputs[i]` points to the i-th input tensor's raw bytes and `outputs[i]` points
-to the i-th output tensor's pre-allocated buffer.
+to the i-th output tensor's pre-allocated buffer. Output buffers must not overlap each
+other or any input: a pointer-ABI `main` computes returned values directly into them
+while it is still reading its inputs.
 
 ### Stage 5: Execution (`cranelift_exec.rs`)
 
 `CraneliftExec::invoke_batch` is called every simulation tick:
 
-1. Collects pointers to the world's host buffers (zero-copy)
-2. Calls `tick_fn(input_ptrs, output_ptrs)` -- a single native function call
-3. No copies, no staging, no VM dispatch
+1. Points each input at the world's host column
+2. Points each output at a buffer the executor owns; a component returned in more than
+   one slot gets a separate scratch buffer for each extra slot
+3. Calls `tick_fn(input_ptrs, output_ptrs)` -- a single native function call
+4. Swaps each output buffer with its world column, so no bytes are copied. A batch of
+   several ticks copies the outputs into the columns between its ticks
 
 This is the source of the massive speedup: the entire simulation tick is a single
 function call into optimized native code operating directly on the simulation's memory.
+The tick is one phase of the simulation loop; `nox-py` also exchanges components with the
+database before and after it (`DbSync` in `libs/nox-py/src/impeller_server.rs`), and for a
+model with hundreds of components those phases can cost as much as the tick.
 
 ---
 
@@ -264,8 +312,8 @@ flowchart TD
 
     subgraph PointerPath [Pointer ABI Path]
         StackAlloc["Stack slot allocation"]
-        TrtCall["tensor_rt function calls"]
-        MemCopy["memcpy results to output"]
+        TrtCall["tensor_rt function calls\nor inline lane code"]
+        MemCopy["Results in the output buffer\n(in place, else memcpy)"]
         StackAlloc --> TrtCall --> MemCopy
     end
 
@@ -306,8 +354,11 @@ When a scalar-ABI function calls a pointer-ABI callee:
 
 When a pointer-ABI function calls a scalar-ABI callee, the reverse happens.
 
-The `main` function always uses pointer ABI (it receives raw byte pointers from the
-simulation runtime), so calls from `main` to scalar callees always marshal.
+`main` always has the `TickFn` signature, since it receives raw byte pointers from the
+simulation runtime, but its body follows the same classification. A scalar-ABI `main`
+(`lower_main_body`) loads its inputs into SSA lanes and stores its results; a pointer-ABI
+`main` (`lower_main_body_mem`) works on the buffers directly and marshals at each call to
+a scalar-ABI callee.
 
 ### Pointer-ABI element types
 
@@ -321,6 +372,35 @@ Float `reduce` and f64 `dot_general` take the scalar-ABI route whenever their te
 the scalar ABI, although kernels exist: the kernels sum in a different order, and the
 same `jnp.dot` must round identically in a pointer-ABI function and in a scalar-ABI
 callee such as a `fori_loop` body, or a comparison between the two can flip a branch.
+
+Data movement (`slice`, `concatenate`, `broadcast_in_dim`, `transpose`, `reverse`, `pad`,
+`select`) over tensors of at most 32 elements takes the same route (`is_small_move`):
+loading and storing each lane costs less than a kernel's call and index arithmetic.
+Conversely, f64 elementwise ops above 128 lanes call their kernels, which round
+identically, instead of unrolling `F64X2` chunks whose code and register-allocation
+time grow with the tensor (`MAX_UNROLLED_LANES`). Both limits come from sweeps on a
+large customer model, the second also on cube-sat. `maximum`, `minimum`, `clamp`, `sign`
+and f64 `compare` are still unrolled at every size, as is any op that takes the lane
+route for lack of a kernel (see [Opportunities](#opportunities)).
+
+### Views and in-place writes
+
+A `slice` that is one contiguous run of its operand returns a pointer into the operand
+(`contiguous_slice_offset`), and the slot pool keeps the operand's slot alive as long as
+the view (`share_owner`). Views are only element-aligned, so `F64X2` operand loads do not
+claim 16-byte alignment. No pointer-ABI op writes through an operand pointer, so views
+and data-section constants are shared freely. The exception is the `while` back-edge,
+which copies each carry into its slot in order: a carry that may still point into an
+earlier slot (an iteration argument or a view of one, see `carry_aliases`) is staged
+first, and a carry handed back unchanged is not copied at all.
+
+A value that a pointer-ABI function returns is computed straight into its destination:
+the caller's result buffer, or the tick's output buffer in `main`. `returned_in_place`
+maps each returned value that the body computes to its destination, and the op that
+allocates that value's result with the destination's exact size writes there instead of
+to a slot (`SlotPool::take_destination`). The epilogue copies only what was not placed: a
+parameter passed through, a constant, a view, the result of a call, `case` or `while`,
+and the second return of one value. This is why outputs must not overlap inputs.
 
 ---
 
@@ -354,8 +434,9 @@ enum LaneRepr {
 The value map stores `HashMap<ValueId, LaneRepr>`. Producers opt into
 `PackedF64` for scalar-ABI F64 tensors with 2+ lanes; ptr-ABI F64 producers
 emit `PtrChunksF64` when the single-use + elision-friendly-consumer gate
-fires (see [`src/useinfo.rs`](src/useinfo.rs) and the
-`ELISION_FRIENDLY_SET` in `lower.rs`) so back-to-back elementwise ops
+fires (see [`src/useinfo.rs`](src/useinfo.rs) and
+`ELISION_FRIENDLY_USER_KINDS` in `lower.rs`) and the tensor has at most
+`MAX_UNROLLED_LANES` lanes, so back-to-back elementwise ops
 chain through SSA registers instead of round-tripping through stack slots.
 The rest stay `Scalar`. `get_vals(builder, value_map, vid)` auto-unpacks
 `PackedF64` on demand via `extractlane`; a defensive pre-spill in
@@ -375,6 +456,9 @@ All on `ElementType::F64` with `num_elements >= 2`:
 | `negate` / `sqrt` / `abs` / `floor` / `ceil` / `nearest` / `rsqrt` | polymorphic Cranelift IR instruction per chunk |
 | Rank-1·rank-1 dot / matvec / standard matmul with k ≥ 4 | `fmul.F64X2` + F64X2 accumulator + horizontal reduce |
 | `sin` / `cos` / `tan` / `sinh` / `cosh` / `tanh` / `asin` / `acos` / `atan` / `atan2` / `exp` / `expm1` / `log` / `log1p` / `powf` / `cbrt` | stack-buffer marshal → call `tensor_rt` SIMD helper (uses the [`wide`](https://docs.rs/wide) crate's `f64x2`) |
+
+In pointer-ABI functions the arithmetic, `negate`-family and splat rows apply up to
+`MAX_UNROLLED_LANES` (128) lanes; larger tensors call the `tensor_rt` kernel instead.
 
 Ops that are not in the table unpack their operands back to `Scalar` on
 access and run the existing scalar path. The `Scalar` variant stays
@@ -425,52 +509,73 @@ contiguous arena (`ArenaMemoryProvider` in [`src/lower.rs`](src/lower.rs), 2 GB
 by default). Every function and every data blob the JIT emits comes out of this
 arena, so relocations always fit.
 
-### Large constants live in the data section
+### Constants live in the data section
 
-Small `stablehlo.constant` values are memcpy'd into a fresh stack slot at
-function entry — convenient, but quadratic in memory if a constant is large.
-A single 8D aerospace lookup table can easily reach hundreds of
-megabytes; allocating that as a stack slot overflows the thread
-stack on function entry regardless of how the stack is sized.
+A pointer-ABI function copies nothing to the stack for a constant array:
 
-The lowering therefore special-cases `stablehlo.constant` with payload above a
-size threshold (~1 MB): instead of emitting a stack buffer + memcpy, we declare
-the bytes as anonymous JIT data and hand downstream ops an SSA pointer to them
-via `declare_data_in_func`. Reads become zero-copy, and the tensor runtime
-treats the data-section pointer identically to a stack-slot pointer.
+- **Array constants** (`DenseArray`) are declared as anonymous, 16-byte-aligned JIT
+  data, and downstream ops get an SSA pointer to them via `declare_data_in_func`. A
+  vehicle model carries thousands of these, which would otherwise be copied on every
+  call.
+- **Hex blobs over 1 MB** (`DenseExternal`) never enter the JIT arena. The parser hands
+  the decoded bytes to the constant cache ([`src/const_cache.rs`](src/const_cache.rs)),
+  which stores them under their BLAKE3 hash in `~/.cache/elodin/const-cache` (or
+  `ELODIN_CACHE_DIR`) and memory-maps the file; the JIT imports the mapping as a data
+  symbol. A single 8D aerospace lookup table can reach hundreds of megabytes, more than
+  any thread stack. The cache saves memory, not time: the blob is decoded on every
+  compile to compute its hash.
+
+Scalar and splat constants are written into a slot, inline up to 128 lanes and through
+a broadcast kernel above.
+
+The tensor runtime treats a data pointer like a stack-slot pointer, which is safe
+because no op writes through an operand
+([Views and in-place writes](#views-and-in-place-writes)). The shape, stride and window
+tables that pointer-ABI kernels read are JIT data too (`store_i64_array`) instead of
+being stored to the stack before every call.
 
 ---
 
 ## Tensor Runtime
 
-The tensor runtime (`tensor_rt.rs`, ~1,130 lines) provides `extern "C"` functions for
+The tensor runtime (`tensor_rt.rs`, ~2,460 lines) provides `extern "C"` functions for
 N-dimensional tensor operations. These are called by pointer-ABI code when operations
 can't be expressed as simple Cranelift instructions on individual SSA values.
 
 All functions operate on raw `*mut u8` / `*const u8` pointers with explicit element
-counts and shapes passed as parameters. They are registered as JIT symbols during
-compilation:
+counts and shapes passed as parameters. One table in `lower.rs` declares each kernel's
+JIT symbol and signature:
 
 ```rust
-jit_builder.symbol("tensor_add_f64", tensor_add_f64 as *const u8);
-jit_builder.symbol("tensor_broadcast_nd_f64", tensor_broadcast_nd_f64 as *const u8);
-// ... ~40 registered symbols
+define_trt! {
+    // field, JIT symbol, kernel, parameter types
+    add_f64, "__trt_add_f64", tensor_rt::tensor_add_f64, [ptr_type(), ptr_type(), ptr_type(), types::I64];
+    // ... 153 entries
+}
 ```
+
+A kernel call costs a call, the kernel's own index arithmetic, and whatever its loop
+does per element, so its speed matters as much as the JIT's: after a change that moves
+work into a kernel, measure the tick, not just the code size.
 
 ### Categories
 
 | Category | Functions | Notes |
 |----------|-----------|-------|
-| Elementwise | add, sub, mul, div, negate, sqrt, abs, ... | f64, i64, i32 variants |
-| Broadcast | broadcast_f64, broadcast_nd_f64, broadcast_i32 | N-D shape-aware |
-| Shape | transpose_f64, transpose_nd_f64, concat_nd_f64 | Element-size-aware concat |
+| Elementwise f64 | add, sub, mul, div; rem, max, min, neg, abs, sqrt, rsqrt, floor, ceil, round, sign, clamp | add, sub, mul and div are `wide::f64x2` chunk loops; the rest are plain loops. max and min follow IEEE 754-2019, as XLA does, which `wide`'s do not |
+| Transcendental f64 | sin, cos, tan, sinh, cosh, tanh, asin, acos, atan, atan2, exp, expm1, log, log1p, cbrt, pow, erfc, erf_inv | `wide::f64x2` bodies except erfc and erf_inv; see [Transcendental marshaling](#transcendental-marshaling) |
+| Integer | add, sub, mul, div, rem, max, min, neg, abs, and, or, xor, not, shifts | i64 and i32, with ui32 and i8 variants where signedness or width matters |
+| Compare, select, convert | cmp_{eq,ne,lt,le,gt,ge}_{i64,i32}, select_{f64,i64,i32,i8}, convert_*_to_*, widen_i32_to_i64 | f64 compares are inline |
+| Broadcast | broadcast_{f64,i64,i32,i8}, broadcast_nd_generic | Splat, and byte-generic N-D; trailing repeated dims fill in one run |
+| Layout | slice_generic, transpose_f64, transpose_nd_generic, concat_nd_f64, pad_f64, reverse_f64, memcpy | Byte-generic kernels copy contiguous runs |
 | Matrix | matmul_f64, dot_general | `matmul_f64` for row-major layouts; `dot_general` for any other dims in f64, f32 or wrapping integers |
 | Reduce | reduce_{sum,prod,max,min}_{f64,f32,i64,i32}, reduce_{max,min}_{u64,u32}, reduce_{and,or}_i1 | One axis per call, viewed as outer x axis x after |
 | Argmin/argmax | argminmax | One axis, any value type, i32 or i64 indices; the first NaN wins, ties keep the smaller index |
 | Sort | sort | Stable, any element types, lexicographic over the comparator's keys, NaN last |
 | Indexing | gather, gather_rows, scatter | Any element type; gather and scatter read a stride table built at compile time, gather_rows copies whole rows |
-| Dynamic | dynamic_slice_f64, dynamic_update_slice_f64 | Runtime index values |
-| Utility | memcpy, select_f64, iota_nd_f64 | |
+| Dynamic | dynamic_slice_generic, dynamic_update_slice_generic, real_dynamic_slice | Runtime index values, any element type. `dynamic_update_slice` copies the whole operand before writing the update |
+| Iota | iota_nd_f64, iota_nd_i64 | Recomputed at run time when the result is over the 1 KB fold cap |
+| Regions and whole-op kernels | map_f64, conv_f64, batch_norm_inference_f64, fft_f64, rng_f64 | f64 only |
 
 ### Element-Size Awareness
 
@@ -571,6 +676,10 @@ Each LAPACK handler follows the same pattern:
 4. **Emit** a call to the registered host function symbol
 5. **Load** output values from the stack slot back into SSA values
 
+Cholesky, LU (`dgetrf`) and triangular solve (`dtrsm`) also take a stack of
+matrices, as `jax.vmap` emits them (`num_batch_dims = "1"`): steps 3–5 repeat
+for each matrix through the same slot.
+
 The host functions (`extern "C"`) handle:
 - Row-major (IR convention) to column-major (faer convention) conversion
 - Calling the appropriate faer API
@@ -667,8 +776,11 @@ run that is contiguous in both the source and the output becomes one copy, so a 
 lookup walks one dimension and a row select copies whole rows. The pointer ABI passes the
 table to `tensor_gather`, except that lookups and row selects, whose consecutive indices
 each pick one whole row, call the leaner `tensor_gather_rows`. The scalar ABI emits the same
-walk as loads, with only the index values computed at run time. Start indices clamp to
-`[0, dim - slice_size]`, as in XLA.
+walk as loads, with only the index values computed at run time, from a stack slot holding
+the operand's lanes; `gather` and `dynamic_slice` on the same lanes in one block share that
+slot (`spill_lanes_shared`). The pointer-ABI kernel advances its position through the walked
+dimensions incrementally and recomputes the start offset only when the index position
+changes. Start indices clamp to `[0, dim - slice_size]`, as in XLA.
 
 ---
 
@@ -706,6 +818,16 @@ which clones the parent's `name_to_id` mappings. The `iter_arg_ids` assigned by 
 parser are stored in the `Instruction::While` variant and used by both the scalar and
 pointer-ABI lowering handlers.
 
+### What a loop body can read
+
+The two ABIs lower loop bodies differently. A pointer-ABI body is lowered with the
+enclosing value map, so it can read outer values. The scalar ABI gives a body only its
+iteration arguments, and a body that reads an outer value fails to compile there
+(`missing value`). JAX passes what a loop captures as extra carries, so its output does
+not hit this; hand-written MLIR can. The fold pass relies on the stricter rule and never
+makes a loop body refer to an outer value. How carries are copied on the back-edge is
+covered in [Views and in-place writes](#views-and-in-place-writes).
+
 ---
 
 ## Checkpoint Diagnostic Tool
@@ -734,12 +856,19 @@ This captures on the first tick (flat under `$ELODIN_CRANELIFT_DEBUG_DIR`):
 
 ```bash
 ELODIN_CRANELIFT_DEBUG_DIR=/tmp/ckpt \
-  cargo test -p cranelift-mlir --test checkpoint_test --release -- --ignored --nocapture
+  cargo test -p cranelift-mlir --test checkpoint_test --release \
+  -- verify_checkpoint --ignored --nocapture
 ```
 
 The verifier compiles the MLIR with Cranelift, feeds the checkpoint inputs, and compares
 each output element against the XLA reference. It reports the first mismatching element
-with its index, expected value, and actual value.
+with its index, expected value, and actual value. Name the test: the binary's other
+ignored tests (bisection helpers and the `bench_checkpoint` replay) need their own inputs.
+
+Large models can carry a few outputs that differ from XLA in the last bits through
+cancellation (a two-vehicle customer model has two 72-element covariances at 2e-6
+absolute). Record that baseline before a compiler change; the change must leave it
+exactly as it was.
 
 ### MLIR Bisection
 
@@ -758,12 +887,12 @@ that was corrupting i32 index data.
 
 ### Environment variables
 
-Two variables, total:
-
 | Variable | Purpose |
 |----------|---------|
-| `ELODIN_BACKEND=cranelift` | Select the cranelift backend (default). |
+| `ELODIN_BACKEND=cranelift` | Select the cranelift backend. It overrides the `backend=` a script passes to `World.run` or `World.build`. Cranelift is the SDK default, but a script can ask for another backend (`examples/cube-sat` asks for `jax-cpu`), so set it whenever a run must exercise this crate, and look for the `[elodin-cranelift]` compile banner. |
 | `ELODIN_CRANELIFT_DEBUG_DIR=<path>` | Enable the full debug suite — profile probes, op-category sampling, tick waveform, IR instruction reports, const-fold histogram, inliner and slot-pool traces, StableHLO MLIR dump, first-tick XLA-reference checkpoint. Every file artifact lands flat under `<path>`. Zero overhead when unset. See [`PERFORMANCE.md`](PERFORMANCE.md) for the full list of outputs and workflows. |
+| `ELODIN_CACHE_DIR=<path>` | Where constants over 1 MB are cached and memory-mapped; defaults to `~/.cache/elodin/const-cache`. |
+| `ELODIN_BENCH_DIR`, `ELODIN_BENCH_TICKS`, `ELODIN_BENCH_THRASH_MB` | Inputs of the uninstrumented `bench_checkpoint` replay; see [`PERFORMANCE.md`](PERFORMANCE.md#9-measuring-a-change-without-instrumentation). |
 
 The ignored integration tests (`checkpoint_test`, `external_mlir`) read
 from `ELODIN_CRANELIFT_DEBUG_DIR` as well, so a single run generates a
@@ -780,7 +909,7 @@ XLA without any other configuration.
 |-------------|---------|
 | `ops.rs` | Per-op golden-value tests across scalar + pointer ABI paths for every supported op |
 | `e2e.rs`, `three_body_e2e.rs`, `cube_sat_e2e.rs` | Parse + compile + execute full example MLIRs |
-| `checkpoint_test.rs` | Checkpoint verifier: compile arbitrary MLIR, feed saved inputs, compare every output against XLA reference. Ignored; needs `ELODIN_CRANELIFT_DEBUG_DIR` pointing at a previously-generated checkpoint |
+| `checkpoint_test.rs` | Checkpoint verifier: compile arbitrary MLIR, feed saved inputs, compare every output against XLA reference. Ignored; needs `ELODIN_CRANELIFT_DEBUG_DIR` pointing at a previously-generated checkpoint. Also holds `bench_checkpoint`, which replays a checkpoint closed-loop to time ticks without probes and to check that two builds produce the same bits (ignored; needs `ELODIN_BENCH_DIR`) |
 | `external_mlir.rs` | Parse + compile customer-provided MLIR. Ignored; reads `$ELODIN_CRANELIFT_DEBUG_DIR/stablehlo.mlir` |
 | `test_threefry*`, `test_sret_large`, `test_closed_call`, `test_uniform_pipeline`, `test_dynamic_ops_3body`, `test_gather_3body`, `test_while_dyn_slice` | Targeted coverage of specific lowering patterns |
 
@@ -807,7 +936,10 @@ binaries that call `compile_module` directly stay JIT-only.
   and lowering regressions surface before they reach customer sims.
 - **Regression suite** (`scripts/ci/regress.sh --all`) runs every example
   end-to-end and diffs CSV telemetry against committed baselines with per-file
-  tolerances, then runs it again on jax-cpu against the same baseline.
+  tolerances, then runs it again on jax-cpu against the same baseline. Run it with
+  `ELODIN_BACKEND=cranelift`: the first run uses whatever backend each script asks
+  for, and cube-sat's asks for `jax-cpu`, so without the variable the example with
+  the largest tensors never reaches this backend.
 - **Checkpoint verifier** is the authoritative correctness gate for customer
   MLIRs: it compares every Cranelift output element against the XLA reference
   bit-for-bit (or within a tight tolerance). Always run it on new customer
@@ -944,7 +1076,7 @@ lane ([Pointer-ABI element types](#pointer-abi-element-types)).
 ### Control Flow
 | Op | Tested | Notes |
 |----|--------|-------|
-| stablehlo.while | yes | outer-scope access, cross-ABI calls, nested |
+| stablehlo.while | yes | cross-ABI calls, nested; a body reads outer values on the pointer ABI only ([details](#what-a-loop-body-can-read)) |
 | stablehlo.case | yes | multi-branch dispatch |
 | stablehlo.sort | yes | stable, any element types and axis, lexicographic over the comparator's keys, ascending/descending; NaN last and -0 equal to 0, as JAX's comparators order them |
 | stablehlo.map | yes | arbitrary compiled region body, variadic operands |
@@ -1000,14 +1132,22 @@ improvement ideas live in [Opportunities](#opportunities).
   unconditionally spawns a 256 MB-stack worker thread to run `tick_fn`, and
   [`tests/checkpoint_test.rs`](tests/checkpoint_test.rs)'s `verify_checkpoint`
   uses the same 256 MB for parity. Bisection helpers run on 64 MB, adequate for
-  their scope.
+  their scope. Lowering rejects any pointer-ABI result over `MAX_SLOT_BYTES`
+  (64 MB, a quarter of that stack), so an oversized intermediate is a compile
+  error instead of an out-of-memory compile or a stack overflow.
 
 - **Pointer-ABI threshold sensitivity.** Any single tensor > 64 elements
   classifies the whole function to pointer ABI. Simulations with many entities
   (e.g. `WorldPos` as `[N×7]` once `N ≥ 10`) therefore exercise the pointer
   paths for ops like `dot_general` and `concatenate` even when most per-entity
   math is small. Regress with `run_mlir_mem` / `_mem` golden tests when touching
-  those lowerings.
+  those lowerings. An `@el.map_seq` system avoids this: on Cranelift its function
+  is lowered once with per-entity shapes and called for each entity.
+
+- **Scalar-ABI loop bodies cannot read outer values.** A `while` body in a
+  scalar-ABI function sees only its iteration arguments and fails to compile if it
+  reads a value defined outside the loop ([details](#what-a-loop-body-can-read)).
+  JAX's output passes captures as carries, so this only concerns hand-written MLIR.
 
 - **CPU-only by design.** There is no GPU execution path. Elodin simulations are
   single-threaded, small-tensor physics ticks where kernel launch and
@@ -1037,15 +1177,106 @@ improvements with predicted benefit.
 
 ### Performance
 
-The two concrete follow-ons below target the current memory bottleneck:
-load + store still account for ~15% of raw wall / ~20% of corrected
-wall, with a memory-to-arithmetic ratio of ~5×. Result-write elision
-and slot pooling already removed the easy wins; what's left is
-*non-trivially elidable* traffic, which these two items attack
-directly.
+Where the time goes now, measured in November 2026 on an Intel Core Ultra 7 155H with
+the uninstrumented replay of
+[`PERFORMANCE.md`](PERFORMANCE.md#9-measuring-a-change-without-instrumentation):
+
+- **A two-vehicle customer model** (276 components at 1 kHz, 338 functions). A
+  cold-cache tick, which is what production runs, takes 162 µs: `memmove` is about 20%
+  of it and `main` itself 18%. The JIT code is 2.23 MB, of which one `case` branch,
+  split into its own function, is 1.19 MB.
+- **cube-sat** (66×66 gravity recursion). The tick takes 0.88 ms and 48% of it is
+  `memmove`. jax-cpu runs the same tick in 0.44 ms; the example's script asks for it.
+
+Both are bound by moving data, not by arithmetic. The candidates are ordered by how
+much measured time or code each one addresses.
+
+- **In-place `dynamic_update_slice` and `scatter`.** `x.at[i].set(v)` lowers to a
+  `dynamic_update_slice` whose kernel copies the whole operand and then writes the
+  update. When the operand is dead after the update (the slot pool already knows each
+  value's last use), the update can be written into the operand's buffer; for a loop
+  carry returned to its own position that also removes the back-edge copy. In cube-sat's
+  gravity function these whole-array copies, mostly of 66×66 carries, are 24% of the
+  tick.
+
+- **Loop carries without copies.** A pointer-ABI `while` copies every initial value
+  into a slot on entry and every changed carry back into its slot after each iteration.
+  Computing the new value straight into the carry's slot once the body has finished
+  reading the old one, or alternating between two slots otherwise, removes those copies;
+  the destinations of [Views and in-place writes](#views-and-in-place-writes) already
+  let a producer write into a buffer its consumer chose. The copies that cube-sat's
+  gravity function emits itself (loop entry, back-edge and call results) are another 21%
+  of its tick.
+
+- **Fold index math over large `iota`s.** Folding stops at 1 KB
+  (`FOLD_ARRAY_BYTE_CAP`), a limit from when constants were copied to the stack.
+  cube-sat's `_diag` builds two 66×66 `iota`s and compares them on every call to make
+  a constant diagonal mask: `iota_nd_i64` alone is 5% of the tick, and i64 compare,
+  add, multiply and convert kernels over index tensors another 8%, though how much of
+  that is constant has not been measured. Constants are static data now, so the cap
+  for `iota` and integer folds can rise.
+
+- **Compose transposes.** cube-sat's gravity function transposes a 66×66 array and
+  immediately transposes it back, three times; `tensor_transpose_f64` as a whole is 5%
+  of its tick. A fold that composes permutations and aliases the identity removes the
+  pairs.
+
+- **Forward results through calls, `case` and `while`, and skip pass-through outputs.**
+  Values produced by ordinary ops are computed in their output buffer, but a call
+  result, a `case` result and a loop result are still produced in a slot and copied, and
+  an output that is just an input is copied every tick. In the customer model `main`
+  emits 44% of the cold tick's `memmove` and a function returning a 22 KB `case` result
+  another 15%; 30 of `main`'s 276 outputs (35 of 72 KB) are inputs passed through.
+  Skipping those needs compile metadata that names them, so that the executor leaves
+  their columns alone.
+
+- **Kernels for the f64 ops that still unroll.** `maximum`, `minimum`, `clamp`, `sign`
+  and f64 `compare` are unrolled at every size. Sending `maximum` and `minimum` above
+  128 lanes to their kernels shrinks the customer model's JIT code from 2.23 to 1.21 MB
+  (that one branch from 1.19 to 0.21 MB) and its compile time by 5%, with identical
+  outputs, but the cold tick gets 3.5% slower: those kernels are plain loops, because
+  `wide`'s max and min drop NaNs. The step is worth taking once they are vectorized with
+  IEEE 754-2019 semantics. NaN payload bits may then differ from the inline form;
+  values do not.
+
+- **Fused broadcast and elementwise for vmapped interpolation.** N-D table
+  interpolation under `jax.vmap` broadcasts a per-entity weight up one dimension at a
+  time and multiplies, seven levels from 24 to 1,536 elements in the customer model. On
+  its warm tick the broadcast kernel is 5% and the f64 add, subtract and multiply
+  kernels 9%, all called from that one function. A multiply that takes the unbroadcast
+  operand and a run length would skip materializing each broadcast.
+
+- **Gathers from tables larger than the cache.** The same interpolation gathers
+  scattered rows from a 775 MB table, 14% of the cold tick's `memmove`. The row
+  addresses are known before the copy starts, so software prefetch is cheap to try.
+  Huge pages would need the constant cache's file-backed mapping copied into anonymous
+  memory.
+
+- **`sincos` pairs.** After CSE, each radar function of the customer model still calls
+  `sin` and `cos` on the same 50 arguments. One `sincos` per pair would halve those
+  calls, provided it returns the same bits as the separate calls on every supported
+  libm.
+
+- **Hex constant decoding.** For the customer module (1.5 GB of MLIR, most of it one
+  hex-encoded table) parsing is at least three quarters of a 7 s compile:
+  `parse_dense_value` decodes two characters at a time through `u8::from_str_radix`,
+  after winnow scans for the closing quote. A table-driven decoder and `memchr` should
+  remove most of that. The constant cache does not help, because its key is a hash of
+  the decoded bytes.
+
+- **Per-call allocations in kernels.** The broadcast and gather kernels build a small
+  `Vec` per call (5% of the broadcast kernel's time), and other layout kernels allocate
+  their stride tables the same way. `malloc` and `free` together are about 3% of the
+  customer model's cold tick; fixed-size stack arrays would remove them.
+
+- **Fold cost on small modules.** The fold cascade repeats whole-function passes to a
+  fixed point, and CSE hashes every pure instruction on each pass. That adds 3 to 4 ms
+  of fold time to each small example (ball's whole compile went from 31 to 37 ms).
+  Running CSE once after the cascade settles, or a worklist, would recover most of it.
 
 - **Partial / extended result-write elision.** Today elision requires
-  `use_counts == 1 && user_kind ∈ ELISION_FRIENDLY_SET && chain_depth < 6`.
+  `use_counts == 1 && user_kind ∈ ELISION_FRIENDLY_USER_KINDS && chain_depth < 6`
+  on a tensor of at most `MAX_UNROLLED_LANES` lanes.
   Any multi-use ptr-ABI F64 value, any consumer outside the friendly set,
   and any chain deeper than 6 back-to-back ops spills to a stack slot.
   Two extensions relax this:
@@ -1055,7 +1286,7 @@ directly.
      then spill once and fan out from the slot. Current code spills eagerly
      on the producer side. For values with one elision-friendly use plus
      one distant non-elision-friendly use this halves the store traffic.
-  2. **Expand `ELISION_FRIENDLY_SET`**: audit the non-friendly ops that
+  2. **Expand `ELISION_FRIENDLY_USER_KINDS`**: audit the non-friendly ops that
      currently force a spill. Candidates include element-wise integer ops
      (when the result type is still F64 post-convert), the `Convert` arm
      when src and dst types differ but both are scalar-per-element, and the
@@ -1078,9 +1309,13 @@ directly.
   elision: elision keeps intermediates in SSA across a single chain;
   mixed-ABI keeps them in SSA for a value's full lifetime.
   `lower_mem_lanes` is a per-op version of this today: ops without a
-  pointer-ABI kernel for their type, and float dots and sums small enough
-  for the scalar ABI, already run the scalar-ABI code inside pointer-ABI
-  functions, but load and store their lanes around every op.
+  pointer-ABI kernel for their type, data movement over small tensors, and
+  float dots and sums small enough for the scalar ABI, already run the
+  scalar-ABI code inside pointer-ABI functions, but load and store their
+  lanes around every op. Keeping those lanes in SSA between such ops was
+  measured and gained too little on its own
+  (see [Measured and set aside](#measured-and-set-aside)); the f64 elementwise
+  arms would have to take lanes too.
 
 - **Adaptive SIMD lane width.** The packed-f64 lowering uses `F64X2`
   uniformly because it's the only native lane width on every deployment
@@ -1110,6 +1345,12 @@ directly.
   current `F64X2` on the elementwise and short-dot hot paths, roughly
   squaring the SIMD benefit on large-enough tensors.
 
+  The runtime kernels are a smaller first step. Elementwise f64 ops above 128
+  lanes now run in `tensor_rt`, whose add, sub, mul and div are fixed
+  `wide::f64x2` loops; an AVX2 body chosen once at startup would speed up
+  exactly the large tensors without touching codegen, and those four ops give
+  the same bits at any lane width.
+
 - **FFT runtime.** `tensor_rt`'s FFT/IFFT/RFFT/IRFFT are naive DFT (O(N²)).
   Swap to `rustfft` for O(N log N) with a one-file change. No current
   workload is FFT-bound, so this is deferred.
@@ -1128,8 +1369,27 @@ directly.
 
 - **Persistent fold cache.** Hash the input MLIR + compiler version stamp
   and cache the folded IR to disk. Skips parse + fold on unchanged MLIR
-  between runs. Only worth building once fold times become a visible
-  fraction of startup (not the case today).
+  between runs. Folding is not a visible fraction of startup, but parsing
+  is for a module with a large embedded table (see hex constant decoding
+  above), and hashing the text is much cheaper than decoding it.
+
+#### Measured and set aside
+
+Experiments on the two-vehicle customer model that did not earn their complexity,
+recorded so that they are not repeated without a new idea:
+
+- **Small results kept in SSA between ops.** Keeping `lower_mem_lanes` results as
+  lanes until a kernel needs memory, a first step toward a per-value representation:
+  −0.6% tick time, −1.3% instructions. 249 values were still spilled at compile time,
+  135 of them into f64 `multiply` kernels.
+- **Inlining callees into `while` bodies** (threefry rounds, `searchsorted` steps):
+  −0.2%. Call and loop overhead is not what those loops cost, so unrolling
+  constant-trip loops was not tried.
+- **Applying identities inside nested bodies**: no change in instructions per tick.
+- **Other limits.** Inline data movement at 8 and 16 elements gives 9% and 22% on the
+  warm tick against 26% at 32; 64 is within noise of 32. A kernel cut-over at 64 lanes
+  slows cube-sat by 2.6%; 256 and 512 only grow the code.
+- **`maximum` and `minimum` through today's kernels**: see above.
 
 ### Coverage
 
