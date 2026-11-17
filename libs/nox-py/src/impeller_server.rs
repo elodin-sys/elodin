@@ -919,6 +919,12 @@ fn reanchored_deadline(now: Instant, pacing_lead: Duration) -> Instant {
     now.checked_add(pacing_lead).unwrap_or(now)
 }
 
+fn initial_deadline(now: Instant, pacing_lead: Duration, period: Duration) -> Instant {
+    reanchored_deadline(now, pacing_lead)
+        .checked_add(period)
+        .unwrap_or(now)
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn tick(
     db: Arc<DB>,
@@ -1064,7 +1070,11 @@ async fn tick(
         let effective_batch_time_step =
             Duration::from_secs_f64(time_step.as_secs_f64() * effective_batch as f64);
         if generate_real_time {
-            next_tick_deadline.get_or_insert(start + effective_batch_time_step);
+            next_tick_deadline.get_or_insert(initial_deadline(
+                start,
+                pacing_lead,
+                effective_batch_time_step,
+            ));
         }
         let end_tick = tick.saturating_add(effective_batch.saturating_sub(1));
         let end_tick_nanos = time_step.as_nanos() * (end_tick as u128);
@@ -1382,6 +1392,14 @@ mod pacing_tests {
         let now = Instant::now();
         let lead = Duration::from_millis(20);
         assert_eq!(reanchored_deadline(now, lead), now + lead);
+    }
+
+    #[test]
+    fn initial_pacing_preserves_the_lead_without_sprinting() {
+        let now = Instant::now();
+        let lead = Duration::from_millis(20);
+        let period = Duration::from_millis(1);
+        assert_eq!(initial_deadline(now, lead, period) - lead, now + period);
     }
 }
 
