@@ -1340,7 +1340,20 @@ fn normalized_focus_eql(eql: &str) -> Option<&str> {
 }
 
 fn is_focus_object_eql(focus_eqls: &HashSet<String>, object_eql: &str) -> bool {
-    normalized_focus_eql(object_eql).is_some_and(|eql| focus_eqls.contains(eql))
+    let Some(object_eql) = normalized_focus_eql(object_eql) else {
+        return false;
+    };
+    focus_eqls.iter().any(|focus| {
+        focus == object_eql
+            || focus.strip_prefix(object_eql).is_some_and(|suffix| {
+                // Chase views commonly aim at an offset on the vehicle. The
+                // vehicle mesh still supplies the depth for grab-to-pan; without
+                // its picking marker the controller reuses an unrelated depth.
+                let suffix = suffix.trim_start();
+                (suffix.starts_with(".translate(") || suffix.starts_with(".translate_world("))
+                    && suffix.trim_end().ends_with(')')
+            })
+    })
 }
 
 fn collect_mesh_descendants(
@@ -2473,6 +2486,46 @@ mod tests {
         assert!(is_focus_object_eql(&focus_eqls, " lander.world_pos "));
         assert!(!is_focus_object_eql(&focus_eqls, "lander_truth.world_pos"));
         assert!(!is_focus_object_eql(&focus_eqls, ""));
+    }
+
+    #[test]
+    fn offset_chase_view_keeps_vehicle_pickable() {
+        let mut app = App::new();
+        app.add_systems(Update, sync_viewport_focus_pick_targets);
+        let rocket = app
+            .world_mut()
+            .spawn(focus_object_state("booster.world_pos"))
+            .id();
+        let mesh = app
+            .world_mut()
+            .spawn((Mesh3d(Handle::default()), ChildOf(rocket)))
+            .id();
+        let other = app
+            .world_mut()
+            .spawn((
+                focus_object_state("booster_truth.world_pos"),
+                Mesh3d(Handle::default()),
+            ))
+            .id();
+        let viewport = app
+            .world_mut()
+            .spawn(focus_viewport(
+                "booster.world_pos.translate_world(1.433, -8.661, 4.788)",
+                Entity::PLACEHOLDER,
+            ))
+            .id();
+        app.update();
+        assert!(app.world().get::<Pickable>(mesh).is_some());
+        assert!(app.world().get::<Pickable>(other).is_none());
+
+        app.world_mut()
+            .get_mut::<Viewport>(viewport)
+            .unwrap()
+            .look_at
+            .eql = "booster_truth.world_pos.translate(0, 0, 1, true)".to_string();
+        app.update();
+        assert!(app.world().get::<Pickable>(mesh).is_none());
+        assert!(app.world().get::<Pickable>(other).is_some());
     }
     #[test]
     fn test_from_mat3() {
