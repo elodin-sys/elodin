@@ -17,7 +17,9 @@ def test_45_seconds_counts_and_bounded_phase(rate, expected):
         # Integer proof of ceil quantization: 0 <= actual-ideal < 1 tick.
         assert 0 <= tick * rate - ordinal * 8000 < rate
     if rate != 8000:
-        assert {b - a for a, b in pairwise(ticks)} == {60: {133, 134}, 100: {80}, 120: {66, 67}}[rate]
+        assert {b - a for a, b in pairwise(ticks)} == {60: {133, 134}, 100: {80}, 120: {66, 67}}[
+            rate
+        ]
     assert cadence.due(360000)  # Closed endpoint adds one, outside 45s callbacks.
 
 
@@ -66,7 +68,6 @@ def test_rate_is_rejected_outside_truth(mode):
 
 @pytest.mark.parametrize("value", ["60", "120", "8000", " 120 ", "1e2", "0.01"])
 def test_positive_finite_rate_values(value):
-    assert (
-        guidance_rate_from_env("truth", 8000, {"RACE_GUIDANCE_HZ": value}, default_hz=100)
-        == Fraction(value)
-    )
+    assert guidance_rate_from_env(
+        "truth", 8000, {"RACE_GUIDANCE_HZ": value}, default_hz=100
+    ) == Fraction(value)

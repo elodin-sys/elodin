@@ -38,7 +38,10 @@ MAIN = Path(__file__).parents[1] / "main.py"
         ({"RACE_GUIDANCE": "manual", "RACE_COURSE": "c1_straight"}, 8000),
         ({"RACE_GUIDANCE": "truth", "RACE_COURSE": "c1_straight"}, 100),
         ({"RACE_GUIDANCE": "truth", "RACE_COURSE": "c1_straight", "RACE_GUIDANCE_HZ": "60"}, 60),
-        ({"RACE_GUIDANCE": "truth", "RACE_COURSE": "c1_straight", "RACE_GUIDANCE_HZ": "8000"}, 8000),
+        (
+            {"RACE_GUIDANCE": "truth", "RACE_COURSE": "c1_straight", "RACE_GUIDANCE_HZ": "8000"},
+            8000,
+        ),
     ],
 )
 def test_actual_startup_selects_scenario_default_and_explicit_override(environ, expected_hz):
