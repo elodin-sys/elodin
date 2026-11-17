@@ -1,7 +1,6 @@
 """Tests for the Betaflight SITL editor schematic variants."""
 
 import pytest
-
 from course import course_from_name
 from schematic import build_schematic
 
@@ -22,7 +21,8 @@ def test_default_schematic_keeps_chase_camera_and_sensor_graphs() -> None:
     assert "name=Gyroscope" in schematic
     assert "drone.guidance_mode" in schematic
     assert "drone.rc_command" in schematic
-    assert "object_3d gate_" not in schematic
+    assert "box " not in schematic
+    assert "gate_" not in schematic
     assert "last_gate_passed" not in schematic
     assert "show_frustums" not in schematic
 
@@ -34,7 +34,8 @@ def test_course_schematic_frames_gate_without_changing_sensor_graphs() -> None:
     assert 'look_at="(10,0,1.8)"' in schematic
     assert "name=Accelerometer" in schematic
     assert "name=Gyroscope" in schematic
-    assert schematic.count("object_3d gate_0_") == 4
+    assert schematic.count("box ") == 4
+    assert "gate_0_top.world_pos" not in schematic
     assert "drone.guidance_mode" in schematic
     assert "drone.rc_command" in schematic
 
@@ -50,7 +51,7 @@ def test_audit_schematic_uses_oblique_camera_and_referee_graphs() -> None:
     assert "name=Gyroscope" not in schematic
     assert "drone.guidance_mode" in schematic
     assert "drone.rc_command" in schematic
-    assert schematic.count("object_3d gate_0_") == 4
+    assert schematic.count("box ") == 4
 
 
 def test_camera_schematic_injects_only_the_fpv_fragments() -> None:
@@ -75,7 +76,7 @@ def test_camera_and_course_schematic_combine() -> None:
     schematic = _kdl("single", audit_enabled=False, camera_enabled=True)
 
     assert "sensor_view drone.fpv" in schematic
-    assert schematic.count("object_3d gate_0_") == 4
+    assert schematic.count("box ") == 4
     assert "sensor_visible=#false" in schematic
     assert schematic.count("sensor_visible=#false") == 1
     assert 'pos="(0,0,0,1, 4,-2,3)"' in schematic
@@ -101,7 +102,7 @@ def test_b_fpv_and_e_guidance_graphs_coexist_without_duplicates(
     assert schematic.count("sensor_view drone.fpv") == int(camera_enabled)
     assert schematic.count("sensor_visible=#false") == int(camera_enabled)
     assert schematic.count("plane ") == int(camera_enabled)
-    assert schematic.count("object_3d gate_0_") == (4 if course_name == "single" else 0)
+    assert schematic.count("box ") == (4 if course_name == "single" else 0)
     assert schematic.count("drone.last_gate_passed") == int(audit_enabled)
     assert schematic.count("drone.gate_pass_times") == int(audit_enabled)
     assert schematic.count("drone.accel") == int(not audit_enabled)
