@@ -30,6 +30,7 @@ atlases, Monte Carlo campaigns). A few are headless checks, not editor scenes:
   - [Editor scenes & visualization](#editor-scenes--visualization)
   - [Telemetry & external clients](#telemetry--external-clients)
   - [Compiler & numerics](#compiler--numerics)
+  - [Performance & scaling](#performance--scaling)
 - [By Elodin object](#by-elodin-object)
   - [World, Body, six_dof](#world-body-six_dof)
   - [Component / Archetype](#component--archetype)
@@ -157,6 +158,12 @@ An external flight-software process driven over UDP, alongside the sim.
 | [linalg](./linalg) | LAPACK-backed `jnp.linalg` through Cranelift |
 | [stablehlo](./stablehlo) | StableHLO / CHLO op coverage through the JIT |
 
+### Performance & scaling
+
+| Example | Description |
+| --- | --- |
+| [many-agent-lockstep](./many-agent-lockstep) | One-world 1 kHz scaling contract with controlled agents, observed objects, supervised controller processes, receipts, and acceptance gates |
+
 ---
 
 ## By Elodin object
@@ -211,6 +218,7 @@ Custom `el.Component` + `@el.dataclass` archetypes beyond `el.Body`.
 | [monte-carlo](./monte-carlo) | Plant ↔ controller over UDP, campaign ports |
 | [voyager](./voyager) | SPICE kernel updates each tick |
 | [n-body](./n-body) | Truth-index advance in `post_step` |
+| [many-agent-lockstep](./many-agent-lockstep) | Batched state exchange and ordered command application across a configurable agent count |
 
 ### s10 recipes
 
@@ -225,6 +233,7 @@ Custom `el.Component` + `@el.dataclass` archetypes beyond `el.Body`.
 | [video-stream](./video-stream) | GStreamer + OBS / RTSP receivers |
 | [logstream](./logstream) | C++ `log-client` into the DB |
 | [monte-carlo](./monte-carlo) | `world.recipe(...)` + campaign worker ports |
+| [many-agent-lockstep](./many-agent-lockstep) | One supervised compiled controller process per agent |
 
 ### Monte Carlo
 

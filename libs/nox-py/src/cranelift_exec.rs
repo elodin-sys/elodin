@@ -6,6 +6,7 @@ use impeller::types::ComponentId;
 use crate::error::Error;
 use crate::exec::ExecMetadata;
 use crate::profile::{BatchTimings, Profiler, TickTimings};
+use crate::tick_metrics::{BackendReport, CompileReport};
 use crate::world::World;
 
 type TickFn = unsafe extern "C" fn(*const *const u8, *mut *mut u8);
@@ -26,6 +27,9 @@ pub struct CraneliftExec {
     output_ptrs: Vec<*mut u8>,
     _compiled: cranelift_mlir::lower::CompiledModule,
     checkpoint_done: bool,
+    input_bytes: u64,
+    workers: usize,
+    pub compile_ms: CompileReport,
 }
 
 // Safety: `CraneliftExec` is wrapped by `WorldExec` which is stored in
@@ -111,6 +115,10 @@ impl CraneliftExec {
 
         let input_ptrs = vec![std::ptr::null(); input_ids.len()];
         let output_ptrs = vec![std::ptr::null_mut(); output_keep_mask.len()];
+        let input_bytes = input_ids
+            .iter()
+            .map(|id| buffer(id).map(|b| b.len() as u64))
+            .sum::<Result<_, _>>()?;
 
         Ok(Self {
             metadata,
@@ -125,7 +133,27 @@ impl CraneliftExec {
             output_ptrs,
             _compiled: compiled,
             checkpoint_done: false,
+            input_bytes,
+            workers: world.metadata.workers,
+            compile_ms: CompileReport::default(),
         })
+    }
+
+    pub fn backend_report(&self) -> BackendReport {
+        let output_bytes = self
+            .output_buffers
+            .iter()
+            .chain(&self.dup_scratch)
+            .map(|b| b.len() as u64)
+            .sum();
+        BackendReport {
+            name: "cranelift",
+            workers: self.workers,
+            input_bytes_per_invocation: self.input_bytes,
+            output_bytes_per_invocation: output_bytes,
+            compile_ms: Some(self.compile_ms),
+            ..Default::default()
+        }
     }
 
     pub fn invoke_batch(

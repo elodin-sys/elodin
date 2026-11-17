@@ -4,8 +4,11 @@ use crate::entity::EntityId;
 use crate::error::Error;
 use crate::exec::{PyExec, WorldExec};
 use crate::jax_exec::{JaxExec, JaxWorldExec};
+use crate::native_hook::NativeStepHook;
+use crate::prepared::{BatchHandle, CallbackCounters, ComponentHandle, PreCommit, PythonPreCommit};
 use crate::step_context::StepContext;
 use crate::system::{CompiledSystemExt, PySystem};
+use crate::tick_metrics::Timing;
 use crate::{
     ComponentSchema, TimeStep, World, globals::increment_sim_tick, system::IntoSystem,
     system::System as _,
@@ -18,7 +21,7 @@ use impeller_kdl::FromKdl;
 use impeller_wkt::{BloomConfig, ComponentMetadata, EntityMetadata, EnvironmentConfig, Schematic};
 use miette::miette;
 use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyRuntimeError, PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::{
     IntoPyObjectExt, Py, PyAny,
@@ -30,7 +33,7 @@ use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
     str::FromStr,
-    sync::Arc,
+    sync::{Arc, atomic},
     time,
 };
 use stellarator::util::CancelToken;
@@ -138,6 +141,11 @@ pub struct WorldBuilder {
     pub world: World,
     pub recipes: HashMap<String, ::s10::Recipe>,
     pub terrain_preparation: Option<serde_json::Value>,
+    /// Bumped by every insert, which can move a column's rows under a prepared handle.
+    topology_generation: u64,
+    prepared: Vec<Py<ComponentHandle>>,
+    /// Handles and batches that failed to prepare.
+    validation_failures: u64,
 }
 
 fn py_json_value(obj: &Bound<'_, PyAny>) -> Result<serde_json::Value, Error> {
@@ -419,6 +427,7 @@ impl WorldBuilder {
     }
 
     pub fn insert(&mut self, entity_id: EntityId, spawnable: Spawnable) -> Result<(), Error> {
+        self.topology_generation += 1;
         match spawnable {
             Spawnable::Archetypes(archetypes) => {
                 for archetype in &archetypes {
@@ -455,6 +464,40 @@ impl WorldBuilder {
                 Ok(())
             }
         }
+    }
+
+    /// Resolves the rows of component `name` for `entities`, in that order, once, for
+    /// `pre_commit` callbacks to view. Spawning afterwards invalidates the handle.
+    #[pyo3(signature = (name, entities, access = "read"))]
+    fn prepare_component(
+        &mut self,
+        py: Python<'_>,
+        name: &str,
+        entities: Vec<EntityId>,
+        access: &str,
+    ) -> PyResult<Py<ComponentHandle>> {
+        let handle = ComponentHandle::prepare(
+            py,
+            &self.world,
+            name,
+            entities,
+            access,
+            self.topology_generation,
+        )
+        .and_then(|handle| Py::new(py, handle))
+        .inspect_err(|_| self.validation_failures += 1)?;
+        self.prepared.push(handle.clone_ref(py));
+        Ok(handle)
+    }
+
+    /// Groups handles over the same number of rows, viewed together by `WorldStepContext.batch`.
+    fn prepare_batch(&mut self, fields: &Bound<'_, PyDict>) -> PyResult<BatchHandle> {
+        fields
+            .iter()
+            .map(|(name, handle)| Ok((name.extract()?, handle.extract()?)))
+            .collect::<PyResult<Vec<_>>>()
+            .and_then(BatchHandle::new)
+            .inspect_err(|_| self.validation_failures += 1)
     }
 
     fn recipe(&mut self, py: Python<'_>, recipe_obj: PyObject) -> PyResult<()> {
@@ -857,6 +900,10 @@ impl WorldBuilder {
         log_level = None,
         backend = "cranelift",
         simulation_source_entrypoint = None,
+        on_receipt = None,
+        workers = 1,
+        pre_commit = None,
+        timing = None,
     ))]
     pub fn run(
         &mut self,
@@ -877,6 +924,10 @@ impl WorldBuilder {
         log_level: Option<String>,
         backend: &str,
         simulation_source_entrypoint: Option<String>,
+        on_receipt: Option<PyObject>,
+        workers: usize,
+        pre_commit: Option<PyObject>,
+        timing: Option<Timing>,
     ) -> Result<Option<String>, Error> {
         let log_level = log_level.as_deref().map(normalize_log_level).transpose()?;
         let filter = if std::env::var("RUST_LOG").is_ok() {
@@ -918,6 +969,7 @@ impl WorldBuilder {
                 }
                 let cancel_token = CancelToken::new();
                 install_signal_handlers(cancel_token.clone());
+                self.validate_prepared()?;
                 let mut exec = self.build_with_backend(
                     py,
                     sys,
@@ -927,7 +979,12 @@ impl WorldBuilder {
                     default_playback_speed,
                     max_ticks,
                     backend,
+                    workers,
+                    timing.unwrap_or_default(),
                 )?;
+                if pre_commit.is_some() {
+                    self.reject_shared_writes(&exec)?;
+                }
                 // Safety: set before the sim runtime thread starts; see note above.
                 unsafe {
                     std::env::set_var("ELODIN_SIM_COMPILE_DONE_UNIX_NS", unix_now_ns().to_string());
@@ -978,6 +1035,39 @@ impl WorldBuilder {
                 // Clone cancel tokens for each closure that needs it
                 let pre_step_cancel_token = recipe_cancel_token.clone();
                 let post_step_cancel_token = recipe_cancel_token.clone();
+                let counters = Arc::new(CallbackCounters::default());
+                counters
+                    .prepared_handles
+                    .store(self.prepared.len() as u64, atomic::Ordering::Relaxed);
+                counters
+                    .validation_failures
+                    .store(self.validation_failures, atomic::Ordering::Relaxed);
+                let hooks: Vec<PyObject> = match pre_commit {
+                    Some(hooks) if hooks.bind(py).is_instance_of::<PyList>() => {
+                        hooks.extract(py)?
+                    }
+                    hooks => hooks.into_iter().collect(),
+                };
+                let pre_commit = hooks
+                    .into_iter()
+                    .map(|hook| -> PyResult<Box<dyn PreCommit + Send>> {
+                        if let Ok(native) = hook.downcast_bound::<NativeStepHook>(py) {
+                            return Ok(native.get().runner());
+                        }
+                        if !hook.bind(py).is_callable() {
+                            return Err(PyTypeError::new_err(
+                                "pre_commit takes a callable, a NativeStepHook, or a list of them",
+                            ));
+                        }
+                        Ok(Box::new(PythonPreCommit {
+                            func: hook,
+                            counters: counters.clone(),
+                            recipe_cancel_token: recipe_cancel_token.clone(),
+                        }))
+                    })
+                    .collect::<PyResult<Vec<_>>>()?;
+                let (pre_step_counters, post_step_counters) = (counters.clone(), counters.clone());
+                let step_callbacks = pre_step.is_some() || post_step.is_some();
                 let db_server = elodin_db::Server::new(&db_path, addr)
                     .map_err(|e| {
                         if matches!(&e, elodin_db::Error::Io(io) if io.kind() == std::io::ErrorKind::AddrInUse) {
@@ -1065,6 +1155,7 @@ impl WorldBuilder {
                                                         tick_count,
                                                         start_timestamp,
                                                         pre_step_cancel_token.clone(),
+                                                        pre_step_counters.clone(),
                                                     );
                                                     match Py::new(py, ctx) {
                                                         Ok(ctx_py) => {
@@ -1104,6 +1195,7 @@ impl WorldBuilder {
                                                         tick_count,
                                                         start_timestamp,
                                                         post_step_cancel_token.clone(),
+                                                        post_step_counters.clone(),
                                                     );
                                                     match Py::new(py, ctx) {
                                                         Ok(ctx_py) => {
@@ -1124,6 +1216,9 @@ impl WorldBuilder {
                                                 });
                                             }
                                         },
+                                        step_callbacks,
+                                        pre_commit,
+                                        counters,
                                         interactive,
                                         start_timestamp.map(Timestamp),
                                         cancel_token,
@@ -1154,15 +1249,19 @@ impl WorldBuilder {
                         }
                     }
 
-                    result?;
-                    Ok(None)
+                    result
                 });
-                match run_result {
-                    Ok(value) => {
-                        capture_simulation_source(py, &db_path, source_capture_entrypoint)?;
-                        Ok(value)
-                    }
-                    Err(err) => Err(err),
+                let receipt = run_result?;
+                capture_simulation_source(py, &db_path, source_capture_entrypoint)?;
+                let Some(receipt) = receipt else {
+                    return Ok(None);
+                };
+                if let Some(on_receipt) = on_receipt {
+                    on_receipt.call1(py, (receipt.to_py(py)?,))?;
+                }
+                match receipt.failure() {
+                    Some(failure) => Err(PyRuntimeError::new_err(failure.to_string()).into()),
+                    None => Ok(None),
                 }
             }
             Args::TerrainPrepare { output } => {
@@ -1211,6 +1310,8 @@ impl WorldBuilder {
                         db_path.clone(),
                         backend,
                         start_timestamp,
+                        workers,
+                        None,
                     )?;
                     exec.exec.profiler_mut().detailed_timing = enable_detail;
                     exec.run(py, ticks, true, None)?;
@@ -1294,6 +1395,8 @@ impl WorldBuilder {
                         default_playback_speed,
                         max_ticks,
                         backend,
+                        workers,
+                        Timing::Summary,
                     )?;
 
                     let build_time_ms = exec.profiler_mut().build.mean();
@@ -1800,6 +1903,8 @@ impl WorldBuilder {
         db_path = None,
         backend = "cranelift",
         start_timestamp = None,
+        workers = 1,
+        timing = None,
     ))]
     pub fn build(
         &mut self,
@@ -1814,6 +1919,8 @@ impl WorldBuilder {
         db_path: Option<String>,
         backend: &str,
         start_timestamp: Option<i64>,
+        workers: usize,
+        timing: Option<Timing>,
     ) -> Result<PyExec, Error> {
         let mut exec = self.build_with_backend(
             py,
@@ -1824,6 +1931,8 @@ impl WorldBuilder {
             default_playback_speed,
             max_ticks,
             backend,
+            workers,
+            timing.unwrap_or_default(),
         )?;
         let db_path = match db_path {
             Some(p) => PathBuf::from(p),
@@ -2097,6 +2206,63 @@ impl WorldBuilder {
 }
 
 impl WorldBuilder {
+    fn validate_prepared(&self) -> PyResult<()> {
+        let stale = self
+            .prepared
+            .iter()
+            .map(|handle| handle.get())
+            .find(|handle| handle.topology_generation() != self.topology_generation);
+        match stale {
+            Some(handle) => Err(PyValueError::new_err(format!(
+                "the handle for {:?} was prepared before an entity was spawned; prepare it again",
+                handle.name()
+            ))),
+            None => Ok(()),
+        }
+    }
+
+    /// A component written by both a system and a `pre_commit` hook has no single owner.
+    fn reject_shared_writes(&self, exec: &WorldExec) -> PyResult<()> {
+        let system_writes = &exec.metadata().ret_ids;
+        for handle in self.prepared.iter().map(|handle| handle.get()) {
+            if handle.writes() && system_writes.contains(&handle.component_id()) {
+                return Err(PyValueError::new_err(format!(
+                    "a system writes {:?}, so a pre_commit handle cannot write it",
+                    handle.name()
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    /// Rejects writers that a component's typed owner rules out.
+    fn validate_owners(&self, world: &World, system_writes: &[ComponentId]) -> PyResult<()> {
+        let handle_writes: HashSet<ComponentId> = self
+            .prepared
+            .iter()
+            .map(|handle| handle.get())
+            .filter(|handle| handle.writes())
+            .map(|handle| handle.component_id())
+            .collect();
+        for (id, (_, metadata)) in &world.metadata.component_map {
+            let Some(owner) = metadata.metadata.get("owner") else {
+                continue;
+            };
+            let writer = if system_writes.contains(id) && owner != "system" {
+                "a system"
+            } else if handle_writes.contains(id) && owner != "pre_commit" {
+                "a pre_commit handle"
+            } else {
+                continue;
+            };
+            return Err(PyValueError::new_err(format!(
+                "{writer} writes {:?}, which is owned by {owner}",
+                metadata.name
+            )));
+        }
+        Ok(())
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn build_with_backend(
         &mut self,
@@ -2108,6 +2274,8 @@ impl WorldBuilder {
         default_playback_speed: f64,
         max_ticks: Option<u64>,
         backend: &str,
+        workers: usize,
+        timing: Timing,
     ) -> Result<WorldExec, Error> {
         let (engine, _device, jax_gpu) = parse_backend_config(backend)?;
         let mut start = time::Instant::now();
@@ -2117,6 +2285,8 @@ impl WorldBuilder {
         self.world.metadata.ticks_per_telemetry = ticks_per_telemetry;
         self.world.metadata.default_playback_speed = default_playback_speed;
         self.world.metadata.cranelift = matches!(engine, BackendEngine::Cranelift);
+        self.world.metadata.workers = workers.max(1);
+        self.world.metadata.timing = timing;
         if let Some(max_ticks) = max_ticks {
             self.world.metadata.max_tick = max_ticks;
         }
@@ -2125,6 +2295,7 @@ impl WorldBuilder {
 
         let world = std::mem::take(&mut self.world);
         let compiled_sys = increment_sim_tick.pipe(sys).compile(&world)?;
+        self.validate_owners(&world, &compiled_sys.outputs)?;
 
         match engine {
             BackendEngine::Jax => {

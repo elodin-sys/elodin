@@ -6,6 +6,7 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 use std::sync::Arc;
 
 use cranelift_codegen::ir::condcodes::{FloatCC, IntCC};
@@ -91,6 +92,10 @@ pub struct CompileConfig {
     /// tensors that would otherwise be classified scalar-ABI.
     /// Always `false` in production configs (including `from_env`).
     pub force_pointer_abi_main: bool,
+    /// Threads that run groups of independent calls, the caller included. Above 1, calls that
+    /// do not depend on each other in a pointer-ABI function run on [`crate::pool`]; profiling
+    /// keeps them serial.
+    pub workers: usize,
 }
 
 impl CompileConfig {
@@ -103,6 +108,7 @@ impl CompileConfig {
             profile_enabled: debug,
             profile_op_times: debug,
             force_pointer_abi_main: false,
+            workers: 1,
         }
     }
 }
@@ -1507,6 +1513,8 @@ define_trt! {
     sort, "__trt_sort", tensor_rt::tensor_sort, [ptr_type(), ptr_type()];
     // memory
     memcpy, "__trt_memcpy", tensor_rt::tensor_memcpy, [ptr_type(), ptr_type(), types::I64];
+    // fn(estimate, tasks, n): runs a group of independent calls
+    parallel, "__elodin_parallel", crate::pool::run, [ptr_type(), ptr_type(), types::I64];
     // layout / shape
     transpose_f64,    "__trt_transpose_f64",    tensor_rt::tensor_transpose_f64,    [ptr_type(), ptr_type(), types::I64, types::I64];
     // (transpose_nd, broadcast_nd, slice -- replaced by generic variants below)
@@ -1569,6 +1577,7 @@ pub fn compile_module_with_config(
     // the module because the public API takes `&Module`; one extra
     // Vec clone is negligible next to Cranelift codegen.
     let ir_module_storage;
+    let mut parallel_groups = HashMap::new();
     let ir_module = {
         let mut mut_module = ir_module.clone();
         let changed = crate::inliner::inline_tiny_callees(&mut mut_module, |f| {
@@ -1581,6 +1590,12 @@ pub fn compile_module_with_config(
                 "[elodin-cranelift] inliner: inlined {} single-caller callee(s)",
                 inlined
             );
+        }
+        if config.workers > 1 && !config.profile_enabled {
+            parallel_groups = crate::parallel::group_module_calls(&mut mut_module, |f| {
+                classify_function(f) == FuncAbi::Pointer
+            });
+            crate::pool::ensure_workers(config.workers - 1);
         }
         ir_module_storage = mut_module;
         &ir_module_storage
@@ -1741,6 +1756,8 @@ pub fn compile_module_with_config(
     let libm_ids = declare_libm_functions(&mut jit_module, call_conv)?;
     let trt_ids = declare_tensor_rt_functions(&mut jit_module, call_conv)?;
     let profile_ids = declare_profile_functions(&mut jit_module, call_conv)?;
+    let trampolines =
+        declare_task_trampolines(ir_module, &parallel_groups, &mut jit_module, call_conv)?;
 
     // Expose ProfileIds via a thread-local so deep-in-the-stack emission
     // helpers (`emit_marshal_probe`, `emit_xcend_probe`) can look them up
@@ -1785,6 +1802,10 @@ pub fn compile_module_with_config(
             .get(&func_def.name)
             .copied()
             .unwrap_or(FuncAbi::Scalar);
+        let groups = parallel_groups.get(&func_def.name).map(|runs| CallGroups {
+            runs,
+            trampolines: &trampolines,
+        });
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             build_function_ir(
                 &mut jit_module,
@@ -1799,6 +1820,7 @@ pub fn compile_module_with_config(
                 abi,
                 fid,
                 &config,
+                groups,
             )
         }));
         match result {
@@ -1815,6 +1837,19 @@ pub fn compile_module_with_config(
                 return Err(format!("panic compiling {}: {msg}", func_def.name));
             }
         }
+    }
+    for (callee, &fid) in &trampolines {
+        let callee_def = ir_module
+            .get_func(callee)
+            .ok_or_else(|| format!("task trampoline: no func def for {callee}"))?;
+        let ctx = build_task_trampoline(
+            &mut jit_module,
+            callee_def,
+            func_ids[callee],
+            func_abis[callee],
+            fid,
+        );
+        pending.push((fid, ctx));
     }
 
     // Drain any case-branch (or future Phase-1 splitter) functions that
@@ -1981,6 +2016,119 @@ fn declare_all_functions(
     Ok(ids)
 }
 
+/// The runs of independent calls in one function's top-level body, and the trampoline that
+/// runs each callee as a pool task.
+#[derive(Clone, Copy)]
+struct CallGroups<'a> {
+    runs: &'a [Range<usize>],
+    trampolines: &'a HashMap<String, FuncId>,
+}
+
+/// Declares one `fn(task)` trampoline per callee in `groups` (see [`build_task_trampoline`]).
+fn declare_task_trampolines(
+    ir_module: &crate::ir::Module,
+    groups: &HashMap<String, Vec<Range<usize>>>,
+    jit_module: &mut JITModule,
+    call_conv: CallConv,
+) -> Result<HashMap<String, FuncId>, String> {
+    let mut trampolines = HashMap::new();
+    for (func, runs) in groups {
+        let body = &ir_module
+            .get_func(func)
+            .ok_or_else(|| format!("call group in unknown function {func}"))?
+            .body;
+        for ir in runs.iter().flat_map(|run| &body[run.clone()]) {
+            let Instruction::Call { callee, .. } = &ir.instr else {
+                continue;
+            };
+            if trampolines.contains_key(callee) {
+                continue;
+            }
+            let mut sig = jit_module.make_signature();
+            sig.call_conv = call_conv;
+            sig.params.push(AbiParam::new(ptr_type()));
+            let fid = jit_module
+                .declare_function(&format!("__task_{callee}"), Linkage::Local, &sig)
+                .map_err(|e| format!("declare task trampoline for {callee}: {e}"))?;
+            trampolines.insert(callee.clone(), fid);
+        }
+    }
+    Ok(trampolines)
+}
+
+/// `fn(task)`: calls `callee` with the argument pointers and result buffer that
+/// [`lower_call_group`] stored in `task`, marshalling a scalar-ABI callee's lanes the way a
+/// pointer-ABI call does.
+fn build_task_trampoline(
+    jit_module: &mut JITModule,
+    callee: &FuncDef,
+    callee_fid: FuncId,
+    callee_abi: FuncAbi,
+    fid: FuncId,
+) -> cranelift_codegen::Context {
+    let mut ctx = jit_module.make_context();
+    ctx.func.signature = jit_module
+        .declarations()
+        .get_function_decl(fid)
+        .signature
+        .clone();
+    ctx.func.name = cranelift_codegen::ir::UserFuncName::user(0, fid.as_u32());
+    let mut func_ctx = FunctionBuilderContext::new();
+    let mut builder = FunctionBuilder::new(&mut ctx.func, &mut func_ctx);
+    let entry = builder.create_block();
+    builder.append_block_params_for_function_params(entry);
+    builder.switch_to_block(entry);
+    builder.seal_block(entry);
+    let task = builder.block_params(entry)[0];
+    let mut pointers: Vec<Value> = (0..=callee.params.len())
+        .map(|i| {
+            builder
+                .ins()
+                .load(ptr_type(), MemFlags::trusted(), task, (8 * i) as i32)
+        })
+        .collect();
+    let ret = *pointers
+        .last()
+        .expect("the result buffer follows the arguments");
+    let callee_ref = jit_module.declare_func_in_func(callee_fid, builder.func);
+    if callee_abi == FuncAbi::Pointer {
+        builder.ins().call(callee_ref, &pointers);
+    } else {
+        pointers.pop();
+        let mut args = Vec::new();
+        for (&ptr, (_, ty)) in pointers.iter().zip(&callee.params) {
+            let ct = cranelift_type_for(ty.element_type);
+            let esz = ty.element_type.byte_size();
+            for j in 0..ty.num_elements() {
+                let lane = builder
+                    .ins()
+                    .load(ct, MemFlags::trusted(), ptr, (j * esz) as i32);
+                args.push(lane);
+            }
+        }
+        if needs_sret(&callee.result_types) {
+            args.push(ret);
+            builder.ins().call(callee_ref, &args);
+        } else {
+            let call = builder.ins().call(callee_ref, &args);
+            let mut results = builder.inst_results(call).to_vec().into_iter();
+            let mut offset = 0;
+            for ty in &callee.result_types {
+                let esz = ty.element_type.byte_size();
+                for (j, lane) in results.by_ref().take(ty.num_elements()).enumerate() {
+                    builder
+                        .ins()
+                        .store(MemFlags::trusted(), lane, ret, (offset + j * esz) as i32);
+                }
+                offset += ty.byte_size();
+            }
+        }
+    }
+    builder.ins().return_(&[]);
+    builder.finalize();
+    ctx
+}
+
 // ---------------------------------------------------------------------------
 // Region compilation: compile an embedded StableHLO region body into a
 // standalone callable JIT function (used by map, reduce_window,
@@ -2050,7 +2198,7 @@ fn drain_pending_functions() -> Vec<PendingExtraFn> {
 ///
 /// Returned `Vec` is sorted by `ValueId::0` so call-site argument order
 /// is deterministic between caller and callee.
-fn collect_captured_vids(body: &[InstrResult]) -> Vec<ValueId> {
+pub(crate) fn collect_captured_vids(body: &[InstrResult]) -> Vec<ValueId> {
     use std::collections::HashSet;
     let mut defined: HashSet<ValueId> = HashSet::new();
     let mut referenced: HashSet<ValueId> = HashSet::new();
@@ -2221,6 +2369,7 @@ fn compile_case_branch_as_function_mem(
             &mut value_map,
             &mut type_map,
             HashMap::new(),
+            None,
         )?;
 
         // Memcpy each Return operand's slot into the caller-provided
@@ -2393,6 +2542,7 @@ fn build_function_ir(
     abi: FuncAbi,
     fid: FuncId,
     config: &CompileConfig,
+    groups: Option<CallGroups>,
 ) -> Result<(FuncId, cranelift_codegen::Context), String> {
     let mut ctx = jit_module.make_context();
     let mut func_ctx = FunctionBuilderContext::new();
@@ -2434,6 +2584,7 @@ fn build_function_ir(
                 &block_params,
                 &mut value_map,
                 &mut type_map,
+                groups,
             )?;
         } else if func_def.name == "main" {
             lower_main_body(
@@ -2464,6 +2615,7 @@ fn build_function_ir(
                 &block_params,
                 &mut value_map,
                 &mut type_map,
+                groups,
             )?;
         } else {
             lower_callee_body(
@@ -3999,6 +4151,7 @@ fn lower_pointer_body(
     block_params: &[Value],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &mut HashMap<ValueId, TensorType>,
+    groups: Option<CallGroups>,
 ) -> Result<(), String> {
     for (i, (vid, ty)) in func_def.params.iter().enumerate() {
         let param_ptr = block_params[i];
@@ -4034,6 +4187,7 @@ fn lower_pointer_body(
         value_map,
         type_map,
         destinations,
+        groups,
     )?;
 
     if let Some(ret_instr) = func_def.body.last()
@@ -4079,6 +4233,7 @@ fn lower_main_body_mem(
     block_params: &[Value],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &mut HashMap<ValueId, TensorType>,
+    groups: Option<CallGroups>,
 ) -> Result<(), String> {
     let inputs_ptr = block_params[0];
     let outputs_ptr = block_params[1];
@@ -4108,6 +4263,7 @@ fn lower_main_body_mem(
         value_map,
         type_map,
         destinations,
+        groups,
     )?;
 
     if let Some(ret_instr) = func_def.body.last()
@@ -4152,6 +4308,7 @@ fn lower_body_mem(
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &mut HashMap<ValueId, TensorType>,
     destinations: HashMap<ValueId, crate::slot_pool::Destination>,
+    groups: Option<CallGroups>,
 ) -> Result<HashMap<ValueId, (Value, usize)>, String> {
     // Use-info pass so producers can query single-use + consumer-kind
     // to decide between elision (`PtrChunksF64`) and spill
@@ -4161,33 +4318,56 @@ fn lower_body_mem(
     // nested While/Case recursions get their own pool because the
     // recursive call allocates a fresh `SlotPool::default()`.
     let mut pool = crate::slot_pool::SlotPool::with_destinations(destinations);
+    // Instructions before this position were lowered with their call group.
+    let mut grouped_until = 0;
     for (pos, ir) in body.iter().enumerate() {
         if matches!(ir.instr, Instruction::Return { .. }) {
             break;
         }
-        let result_types: Vec<TensorType> = ir.values.iter().map(|(_, t)| t.clone()).collect();
-        let result_vid = ir.values.first().map(|(vid, _)| *vid);
-        let result_vals = lower_instruction_mem(
-            builder,
-            &ir.instr,
-            &result_types,
-            ir_module,
-            func_ids,
-            libm_ids,
-            trt_ids,
-            func_abis,
-            external_data_ids,
-            jit_module,
-            value_map,
-            type_map,
-            Some(&use_info),
-            result_vid,
-            &mut pool,
-        )?;
-        for (i, (vid, ty)) in ir.values.iter().enumerate() {
-            if i < result_vals.len() {
-                value_map.insert(*vid, result_vals[i].clone());
-                type_map.insert(*vid, ty.clone());
+        let run = groups.and_then(|g| g.runs.iter().find(|run| run.start == pos));
+        if let (Some(groups), Some(run)) = (groups, run) {
+            let calls = &body[run.clone()];
+            let results = lower_call_group(
+                builder,
+                calls,
+                ir_module,
+                trt_ids,
+                groups.trampolines,
+                jit_module,
+                value_map,
+            )?;
+            for (call, call_results) in calls.iter().zip(results) {
+                for ((vid, ty), lanes) in call.values.iter().zip(call_results) {
+                    value_map.insert(*vid, lanes);
+                    type_map.insert(*vid, ty.clone());
+                }
+            }
+            grouped_until = run.end;
+        } else if pos >= grouped_until {
+            let result_types: Vec<TensorType> = ir.values.iter().map(|(_, t)| t.clone()).collect();
+            let result_vid = ir.values.first().map(|(vid, _)| *vid);
+            let result_vals = lower_instruction_mem(
+                builder,
+                &ir.instr,
+                &result_types,
+                ir_module,
+                func_ids,
+                libm_ids,
+                trt_ids,
+                func_abis,
+                external_data_ids,
+                jit_module,
+                value_map,
+                type_map,
+                Some(&use_info),
+                result_vid,
+                &mut pool,
+            )?;
+            for (i, (vid, ty)) in ir.values.iter().enumerate() {
+                if i < result_vals.len() {
+                    value_map.insert(*vid, result_vals[i].clone());
+                    type_map.insert(*vid, ty.clone());
+                }
             }
         }
         // Release pool-owned slots whose last operand use was this
@@ -4211,6 +4391,76 @@ fn lower_body_mem(
         );
     }
     Ok(pool.into_placed())
+}
+
+/// Runs `calls`, none of which reads another's results, as one task table on [`crate::pool`].
+/// Each task holds its call's argument pointers followed by its result buffer, for the callee's
+/// trampoline to read.
+fn lower_call_group(
+    builder: &mut FunctionBuilder,
+    calls: &[InstrResult],
+    ir_module: &crate::ir::Module,
+    trt_ids: &TensorRtIds,
+    trampolines: &HashMap<String, FuncId>,
+    jit_module: &mut JITModule,
+    value_map: &mut HashMap<ValueId, LaneRepr>,
+) -> Result<Vec<Vec<LaneRepr>>, String> {
+    let tasks = alloc_slot(builder, 16 * calls.len());
+    let mut results = Vec::with_capacity(calls.len());
+    for (i, ir) in calls.iter().enumerate() {
+        let Instruction::Call { callee, args } = &ir.instr else {
+            return Err("call group holds a non-call".into());
+        };
+        let callee_def = ir_module
+            .get_func(callee)
+            .ok_or_else(|| format!("call group: no func def for {callee}"))?;
+        let task = alloc_slot(builder, 8 * (args.len() + 1));
+        for (j, vid) in args.iter().enumerate() {
+            let lanes = value_map
+                .get_mut(vid)
+                .ok_or_else(|| format!("call group: missing value {vid:?}"))?;
+            let arg = lanes.as_scalar_or_spill(builder)[0];
+            builder
+                .ins()
+                .store(MemFlags::trusted(), arg, task, (8 * j) as i32);
+        }
+        let ret_bytes: usize = callee_def.result_types.iter().map(|t| t.byte_size()).sum();
+        let ret = alloc_slot(builder, ret_bytes.max(MIN_RETURN_SLOT));
+        builder
+            .ins()
+            .store(MemFlags::trusted(), ret, task, (8 * args.len()) as i32);
+        let trampoline = jit_module.declare_func_in_func(trampolines[callee], builder.func);
+        let func = builder.ins().func_addr(ptr_type(), trampoline);
+        builder
+            .ins()
+            .store(MemFlags::trusted(), func, tasks, (16 * i) as i32);
+        builder
+            .ins()
+            .store(MemFlags::trusted(), task, tasks, (16 * i + 8) as i32);
+        let mut offset = 0;
+        let mut call_results = Vec::with_capacity(callee_def.result_types.len());
+        for ty in &callee_def.result_types {
+            let addr = builder.ins().iadd_imm(ret, offset as i64);
+            call_results.push(LaneRepr::scalar(vec![addr]));
+            offset += ty.byte_size();
+        }
+        results.push(call_results);
+    }
+    let estimate_id = jit_module
+        .declare_anonymous_data(true, false)
+        .map_err(|e| format!("declare call group estimate: {e}"))?;
+    let mut estimate_data = DataDescription::new();
+    estimate_data.define_zeroinit(8);
+    estimate_data.set_align(8);
+    jit_module
+        .define_data(estimate_id, &estimate_data)
+        .map_err(|e| format!("define call group estimate: {e}"))?;
+    let estimate_gv = jit_module.declare_data_in_func(estimate_id, builder.func);
+    let estimate = builder.ins().global_value(ptr_type(), estimate_gv);
+    let len = builder.ins().iconst(types::I64, calls.len() as i64);
+    let run = jit_module.declare_func_in_func(trt_ids.parallel, builder.func);
+    builder.ins().call(run, &[estimate, tasks, len]);
+    Ok(results)
 }
 
 fn lower_instruction_mem(
@@ -5665,6 +5915,7 @@ fn lower_instruction_mem(
                 &mut cond_vm,
                 &mut cond_tm,
                 HashMap::new(),
+                None,
             )?;
 
             let cond_val = {
@@ -5709,6 +5960,7 @@ fn lower_instruction_mem(
                 &mut body_vm,
                 &mut body_tm,
                 HashMap::new(),
+                None,
             )?;
 
             if let Some(ret_ir) = loop_body
@@ -6193,6 +6445,7 @@ fn lower_instruction_mem(
                     &mut br_vm,
                     &mut br_tm,
                     HashMap::new(),
+                    None,
                 )?;
 
                 if let Some(ret_ir) = branch

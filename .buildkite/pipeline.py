@@ -228,6 +228,15 @@ test_steps = [
                 command="python3 -m pytest examples/betaflight-sitl/tests -q",
             ),
             nix_step(
+                label=":python: many-agent lockstep contract",
+                flake=".#run",
+                command="""
+python3 examples/many-agent-lockstep/controller/build.py
+python3 -m pytest examples/many-agent-lockstep/tests -q
+python3 examples/many-agent-lockstep/benchmark.py --sizes 2 --modes runtime,local,lockstep --warmup-ticks 10 --measured-ticks 50 --repeats 1 --no-paced --output /tmp/many-agent-lockstep-ci
+""",
+            ),
+            nix_step(
                 label=":python: frames",
                 flake=".#run",
                 command="python3 examples/frames/main.py",
@@ -315,6 +324,22 @@ test_steps = [
         ],
     ),
 ]
+
+if os.getenv("CI_AGENT_BENCHMARK") == "1":
+    test_steps.append(
+        nix_step(
+            emoji=":racehorse:",
+            label="many-agent lockstep acceptance",
+            flake=".#run",
+            command="python3 examples/many-agent-lockstep/benchmark.py --sizes 24 --modes lockstep --warmup-ticks 2000 --measured-ticks 60000 --repeats 5 --require-pass --output profile_output/many-agent-lockstep-acceptance",
+            agents={
+                "queue": os.getenv(
+                    "CI_AGENT_BENCHMARK_QUEUE",
+                    "nixos-x86-aws",
+                )
+            },
+        )
+    )
 
 
 pipeline_steps = [

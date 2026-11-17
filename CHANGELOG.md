@@ -1,6 +1,15 @@
 # Changelog
 
 ## unreleased
+- **(feat:examples)** Add a one-world many-agent lockstep scaling example with controller processes exchanged through a native `pre_commit` hook, phase receipts, parity checks, forecasts, and an x86 Linux VM acceptance contract.
+- **(feat)** Add `pre_commit` hooks to `World.run`. With handles from `World.prepare_component` and `World.prepare_batch`, a hook reads each tick's result and writes into the world before the commit, without going through the DB.
+- **(feat)** Add `el.NativeStepHook`, a `pre_commit` hook in a shared library that runs without the GIL and can split its rows across worker threads.
+- **(feat)** Add `workers=` to `World.run` and `World.build`: on Cranelift, entity chunks of `@el.map` systems and the calls of `@el.map_seq` run on that many threads, with results that do not depend on the count above one.
+- **(feat)** Add run receipts with exact phase percentiles, DB sync counters, and backend and hook statistics, through `on_receipt=`, `Exec.last_receipt()` and `ELODIN_SIM_SUMMARY_JSON`. `timing=el.Timing.systems()` adds the time of each compiled system without debug artifacts.
+- **(feat)** Add `recording=` and `owner=` to `el.Component`: record every `n`th commit, on request, or once, and reject writers other than the owner when the world is built.
+- **(feat)** Name systems with `@el.system(name=...)`, `@el.map(name=...)` and `@el.map_seq(name=...)`. By default a system carries its module-qualified function name in compiled code and timing.
+- **(perf)** Synchronize the simulation with its database by change. A tick reads only what other writers appended and commits only the components systems or hooks wrote; commits are appended on a writer thread when no `pre_step` or `post_step` reads them back; `wait_for_write` wakes on the write instead of polling every millisecond.
+- **(perf)** Compute `sin` and `cos` of large tensors with AVX2 on x86 hosts that have it, with the same results.
 - **(perf)** Run Cranelift simulations faster and compile large ones sooner: repeated expressions, tiny helper functions and redundant copies are removed at compile time, small data moves run inline, and large elementwise operations, gathers and broadcasts use faster kernels.
 - **(perf)** Cut the per-tick cost of exchanging components between the simulation and its database, which grew with the number of components per entity: components that did not change are no longer copied or compared, and tick outputs are no longer copied into the world.
 - **(perf)** Speed up multi-entity Cranelift simulations by copying slices, broadcasts and concatenations in contiguous runs, without allocating.

@@ -1,0 +1,38 @@
+{
+  "schema": "elodin.many_agent.acceptance.v1",
+  "workload": {
+    "agents": 24,
+    "objects": 24,
+    "rate_hz": 1000,
+    "warmup_ticks": 2000,
+    "measured_ticks": 60000,
+    "repeats": 5,
+    "mode": "lockstep",
+    "io_mode": "native",
+    "workers": 8,
+    "hook_workers": 2,
+    "aux_components": 32,
+    "compute_rounds": 64
+  },
+  "host": {
+    "class": "exclusive x86_64 Linux VM",
+    "public_reference": "AWS c7i.8xlarge or a documented equivalent",
+    "concurrent_jobs": 1
+  },
+  "limits": {
+    "effective_hz_min": 995.0,
+    "cycle_mean_ms_max": 1.1,
+    "world_run_mean_us_max": 400.0,
+    "world_run_p95_us_max": 400.0,
+    "callback_mean_us_max": 600.0,
+    "callback_p95_us_max": 1000.0,
+    "late_fraction_max": 0.001,
+    "pacing_resets_max": 0
+  },
+  "policy": {
+    "every_repeat_must_pass": true,
+    "profiling_run_cannot_certify": true,
+    "missing_metric_fails": true,
+    "output_parity_required": true
+  }
+}

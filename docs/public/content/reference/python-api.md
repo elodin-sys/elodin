@@ -111,7 +111,7 @@ The Elodin simulation world.
     )
     ```
 
-- `run(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp, log_level, backend)` -> None
+- `run(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp, log_level, backend, on_receipt, workers, pre_commit, timing)` -> None
 
     Run the simulation.
     - `system` : [elodin.System], the systems to run, can be supplied as a list of systems delineated by pipes.
@@ -129,8 +129,14 @@ The Elodin simulation world.
     - `start_timestamp` : `int`, optional, the starting timestamp for the simulation in microseconds. If `None` (default), uses the current system time (epoch-based). Set to `0` for zero-based timing where the simulation starts at `t=0`.
     - `log_level` : `str`, optional, log level for the embedded Elodin-DB instance (`error`, `warn`, `info`, `debug`, `trace`). Defaults to `info` unless `RUST_LOG` is set.
     - `backend` : `str`, optional, execution backend. Defaults to `"cranelift"`. Supported values are `"cranelift"` (CPU), `"jax-cpu"`, and `"jax-gpu"`.
+    - `on_receipt` : `Callable[[dict], None]`, optional, called with the run's [receipt](#run-receipts) when it stops.
+    - `workers` : `int`, optional, threads the Cranelift backend runs independent calls on, the simulation thread included: entity chunks of `@el.map` systems and the per-entity calls of `@el.map_seq`. Defaults to `1`. Results do not depend on the count once it is above `1`; going from `1` to more can change the last bits of reductions.
+    - `pre_commit` : a callable `(tick, WorldStepContext)`, an [elodin.NativeStepHook], or a list of them run in order, called after each tick and before its DB commit. See [pre-commit hooks](#pre-commit-hooks).
+    - `timing` : [elodin.Timing], optional, what the receipt measures. Defaults to `Timing.summary()`.
 
-- `build(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, db_path, backend, start_timestamp)` -> `elodin.Exec`
+    When neither `pre_step` nor `post_step` is given and no component sets `wait_for_write`, a writer thread appends each commit to the DB, so DB stalls stay off the simulation thread. Clients then see a commit, and `last_updated` move past it, up to a few cycles later.
+
+- `build(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, db_path, backend, start_timestamp, workers, timing)` -> `elodin.Exec`
 
     Build and compile the simulation executor without starting the runtime loop. `Exec.run(ticks)` advances it and records each tick at its simulation time, so repeated calls continue one history.
     - `system` : [elodin.System], the systems to compile.
@@ -143,6 +149,15 @@ The Elodin simulation world.
     - `db_path` : `string`, optional, the path to the database directory.
     - `backend` : `str`, optional, execution backend. Defaults to `"cranelift"`.
     - `start_timestamp` : `int`, optional, the timestamp of the initial state in microseconds; tick `n` is recorded at `start_timestamp + n / simulation_rate`. If `None` (default), uses the current system time. Set to `0` for zero-based timing.
+    - `workers`, `timing` : as for `run`. `Exec.last_receipt()` returns the receipt of the latest `Exec.run`.
+
+- `prepare_component(name, entities, access="read")` -> `elodin.ComponentHandle`
+
+    Resolve once the rows of component `name` for `entities`, in that order, for [pre-commit hooks](#pre-commit-hooks). `access="write"` lets hooks write them; building the world fails if a system also writes the component. Spawning afterwards invalidates the handle.
+
+- `prepare_batch(fields)` -> `elodin.BatchHandle`
+
+    Group handles over the same number of rows, keyed by field name, so a hook views them together.
 
 ### Backend Selection
 
@@ -379,6 +394,91 @@ def log_with_timestamps(tick: int, ctx: el.StepContext):
         }
     )
 ```
+
+### Pre-commit hooks
+
+A `pre_commit` hook runs after each tick and before its DB commit, on world columns resolved once with `World.prepare_component` and `World.prepare_batch`. Unlike `post_step`, it does not go through the DB: what it reads is the tick's result, and what it writes reaches the world, the same commit, and the systems on the next tick.
+
+```python
+exchange = world.prepare_batch({
+    "position": world.prepare_component("position", agents),
+    "target": world.prepare_component("object_position", targets),
+    "command": world.prepare_component("command", agents, access="write"),
+})
+
+def exchange_step(tick: int, ctx: el.WorldStepContext) -> None:
+    with ctx.batch(exchange) as view:
+        view.command[...] = controller(view.position, view.target)
+
+world.run(system, pre_commit=exchange_step, workers=8)
+```
+
+An exception in a hook stops the run, and the receipt records why.
+
+### _class_ `elodin.WorldStepContext`
+
+Passed to `pre_commit` callbacks.
+
+- `tick`, `timestamp` : the tick just run and its time in microseconds.
+- `view(handle)` -> `numpy.ndarray` : the handle's rows, read-only for a read handle. Writes to a write handle's view reach the world when the callback returns. Views are copies and end with the callback.
+- `batch(batch)` -> `BatchView` : views every field of a batch, as attributes or items.
+- `record(handle)` -> None : records the handle's component, which must use `Recording.manual()`, at this commit.
+- `stop_recipes()` -> None : stops the s10 recipes, as `StepContext.stop_recipes`.
+
+### _class_ `elodin.NativeStepHook`
+
+A `pre_commit` hook in a shared library. It runs without the GIL, and can split the batch's rows across the `workers` threads.
+
+- `NativeStepHook.load(path, input, symbol, workers=1)` -> [elodin.NativeStepHook]
+
+    Load `symbol`, and `{symbol}_init` and `{symbol}_destroy` if present, from the library at `path`. Each tick calls `symbol` once per worker, concurrently, each on a contiguous share of `input`'s rows. `input` is an `elodin.BatchHandle`.
+
+The library exports C functions over these types, ABI version 1:
+
+```c
+#include <stdint.h>
+
+typedef struct {
+    const char *name;     /* the batch field */
+    uint8_t *data;        /* every row of the batch, back to back */
+    uint64_t row_bytes;
+    uint32_t writable;    /* nonzero for a write field */
+} ElodinColumn;
+
+typedef struct {
+    uint32_t abi_version;
+    uint64_t tick;
+    int64_t timestamp;    /* microseconds */
+    uint64_t rows;
+    uint64_t row_start;   /* this call owns rows [row_start, row_end) */
+    uint64_t row_end;
+    const ElodinColumn *columns;
+    uint64_t column_count;
+    void *state;          /* what init stored, or NULL */
+    char *error;          /* a failing call writes a NUL-terminated message here */
+    uint64_t error_capacity;
+} ElodinStep;
+
+int32_t my_step(const ElodinStep *step);                    /* 0 on success */
+int32_t my_step_init(const ElodinStep *step, void **state); /* optional; once, over every row */
+void my_step_destroy(void *state);                          /* optional; after the run */
+```
+
+A call may write only writable columns, and only its own rows. A nonzero return stops the run with the call's message in the receipt. The receipt's `callbacks.hooks` reports each hook's queue time, slowest-partition time and worker occupancy.
+
+### Run receipts
+
+Every run builds a versioned receipt (`elodin.run_receipt.v1`), passed to `on_receipt`, returned by `Exec.last_receipt()`, and written to `$ELODIN_SIM_SUMMARY_JSON` when set. It covers the cycles after warmup: count, sum, min, exact p50/p95/p99, and max of every phase (`copy_db_to_world`, `world_run`, `pre_commit`, `commit`, `post_step`, their `callback` sum, pacing, and `total_cycle`); pacing lateness and resets; DB `sync` counters, including rows scanned, drained and committed and the writer thread's lag and queue depth; backend bytes and compile times; hook timings; and the sections it did not collect under `unavailable`.
+
+### _class_ `elodin.Timing`
+
+What a receipt measures, from least to most perturbing.
+
+- `Timing.summary()` : phase times of every cycle; always on.
+- `Timing.systems()` : also the inclusive and exclusive time of each compiled function on the Cranelift backend, so of each system under its [name](#elodin-system). A system small enough to inline counts toward its caller. Probes cost `systems.probe_pair_ns` per call and keep calls on one thread.
+- `Timing.operations()` : also sampled time per kind of operation.
+
+Neither level writes debug artifacts; `ELODIN_CRANELIFT_DEBUG_DIR` stays separate.
 
 ### _class_ `elodin.Panel`
 A configuration object for creating a panel view in the Elodin Client UI.
@@ -679,13 +779,14 @@ Wind = typing.Annotated[
 
 A container of component metadata.
 
-- `__init__(name, type = None, asset = False, metadata = {})` -> [elodin.Component]
+- `__init__(name, type = None, asset = False, metadata = {}, recording = None, owner = None)` -> [elodin.Component]
 
     Create a new component with:
     - Unique name (e.g. "world_pos, "inertia").
     - Component type information (via [elodin.ComponentType]). This is optional if the base class already provides component type information as part of `__metadata__`, which is the case for [elodin.Quaternion], [elodin.Edge], and all [spatial vector algebra](#spatial-vector-algebra) classes.
     - Flag indicating whether the component is an asset (e.g. a mesh, texture, etc.).
     - Other metadata that is optional (e.g. description, units, labels, etc.).
+    - When its values are recorded (`elodin.Recording`) and who writes them (`elodin.Owner`), described below.
 
     ```python
     import elodin as el
@@ -720,6 +821,35 @@ A container of component metadata.
     change streams with per-component row counts.
 
     `transient` is a simulation-runtime storage contract, not an export filter. A transient component cannot also set `external_control`, `wait_for_write`, or `record_every_tick`, and DB-backed APIs such as `StepContext.read_component`, `StepContext.write_component`, and `Exec.history` cannot access it. Direct database writers are unaffected by this key.
+
+    #### Recording and owner
+
+    `recording=` sets when a commit records the component, counting telemetry commits:
+
+    | `elodin.Recording` | Records |
+    |---|---|
+    | `on_change()` | when its bytes differ from the last recorded value; the default |
+    | `every_commit()` | at every commit; same as `record_every_tick="true"` |
+    | `every(n)` | at every `n`th commit, changed or not |
+    | `manual()` | at the commits a `pre_commit` hook asks for with `ctx.record(handle)` |
+    | `initial_only()` | once, when the run starts |
+    | `transient()` | never; same as `transient="true"` |
+
+    `owner=` sets which writers may change it: `elodin.Owner.system()` (compiled systems), `.external()` (DB and Impeller clients; same as `external_control="true"`), `.pre_commit()` (write handles of `pre_commit` hooks), or `.static()` (nobody). Building the world fails when another kind of writer writes it.
+
+    Both are stored in the reserved metadata keys above, plus `recording` and `owner`, so the DB, editor and followers keep working. A `metadata` value that contradicts them is an error.
+
+    ```python
+    Command = ty.Annotated[
+        jax.Array,
+        el.Component(
+            "command",
+            el.ComponentType(el.PrimitiveType.F64, (3,)),
+            owner=el.Owner.pre_commit(),
+            recording=el.Recording.every(10),
+        ),
+    ]
+    ```
 
     Example combining a label hint with the export-skip flag:
 
@@ -825,6 +955,8 @@ def apply_wind(
     w: el.Query[Wind], q: el.Query[el.Force, el.WorldVel]
 ) -> el.Query[el.Force]: ...
 ```
+
+A system's name identifies it in compiled code and in `Timing.systems()` receipts. It defaults to the function's module and qualified name, such as `sim.apply_wind`; `@el.system(name="wind")`, `@el.map(name=...)` and `@el.map_seq(name=...)` set it.
 
 ### `@elodin.map`
 
@@ -1585,6 +1717,8 @@ viewport pos="aircraft.world_pos.translate(1, 0, 0.5).translate_world(0, 0, 10)"
 [elodin.World]: #class-elodin-world
 [elodin.EntityId]: #class-elodin-entityid
 [elodin.StepContext]: #class-elodin-stepcontext
+[elodin.NativeStepHook]: #class-elodin-nativestephook
+[elodin.Timing]: #class-elodin-timing
 [elodin.Panel]: #class-elodin-panel
 [elodin.GraphEntity]: #class-elodin-graphentity
 [elodin.Mesh]: #class-elodin-mesh

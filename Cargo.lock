@@ -10305,6 +10305,7 @@ dependencies = [
  "impeller-stellar",
  "impeller-wkt",
  "indicatif 0.17.11",
+ "libloading",
  "miette 7.6.0",
  "ndarray 0.16.1",
  "nox",

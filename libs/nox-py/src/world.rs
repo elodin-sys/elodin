@@ -71,6 +71,11 @@ pub struct WorldMetadata {
     /// The systems are being compiled for the Cranelift backend.
     #[serde(skip)]
     pub cranelift: bool,
+    /// Threads the Cranelift backend runs independent calls on, the simulation thread included.
+    #[serde(skip)]
+    pub workers: usize,
+    #[serde(skip)]
+    pub timing: crate::tick_metrics::Timing,
 }
 
 impl MetadataExt for World {}
@@ -92,6 +97,8 @@ impl Default for WorldMetadata {
             sensor_cameras: Vec::new(),
             thermal_tags: Vec::new(),
             cranelift: false,
+            workers: 1,
+            timing: Default::default(),
         }
     }
 }

@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://elodin.systems/schemas/many-agent-receipt-v1.json",
+  "title": "Elodin many-agent benchmark receipt",
+  "type": "object",
+  "required": [
+    "schema",
+    "source_revision",
+    "configuration",
+    "metrics",
+    "acceptance",
+    "output_digest"
+  ],
+  "properties": {
+    "schema": {
+      "const": "elodin.many_agent.receipt.v1"
+    },
+    "source_revision": {
+      "type": "string"
+    },
+    "configuration": {
+      "type": "object",
+      "required": [
+        "agents",
+        "objects",
+        "mode",
+        "rate_hz",
+        "warmup_ticks",
+        "measured_ticks",
+        "paced"
+      ]
+    },
+    "metrics": {
+      "type": "object",
+      "required": [
+        "effective_hz",
+        "cycle_mean_ms",
+        "world_run_mean_us",
+        "world_run_p95_us",
+        "callback_mean_us",
+        "callback_p95_us",
+        "late_fraction",
+        "pacing_resets"
+      ]
+    },
+    "acceptance": {
+      "type": "object",
+      "required": [
+        "limits",
+        "failures",
+        "passed",
+        "p95_source"
+      ]
+    },
+    "output_digest": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "artifacts": {
+      "type": "object"
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,21 +1,22 @@
 //! Always-on, customer-facing per-phase simulation-cycle timing summary.
 //!
 //! The `run` / `serve` simulation loop in
-//! [`crate::impeller_server::tick`] walks through seven distinct
+//! [`crate::impeller_server::tick`] walks through eight distinct
 //! phases on every iteration (pre_step → db read → kernel →
-//! commit → write-barrier → post_step → real-time pacing). One
-//! iteration is one **simulation cycle** — one pass from pre_step
-//! through pacing, running `ticks_per_telemetry` simulation steps
-//! inside `world.run()` and committing once to the DB. At
+//! pre_commit → commit → write-barrier → post_step → real-time
+//! pacing). One iteration is one **simulation cycle** — one pass from
+//! pre_step through pacing, running `ticks_per_telemetry` simulation
+//! steps inside `world.run()` and committing once to the DB. At
 //! simulation shutdown we show the customer a one-block stdout
 //! summary with mean / p95 / max wall time per phase, so they can
 //! see where their cycles are spending time without needing a
-//! debug flag.
+//! debug flag, and build a [`Receipt`] for `on_receipt`,
+//! `Exec.last_receipt()` and `ELODIN_SIM_SUMMARY_JSON`.
 //!
 //! Design goals:
 //!
-//! - **Zero runtime allocation.** Fixed-size histograms, no
-//!   `Vec` growth during the loop.
+//! - **Zero runtime allocation.** Fixed-size histograms, and a
+//!   per-cycle sample buffer sized before the loop starts.
 //! - **Zero I/O during the loop.** Only the final summary prints,
 //!   via a `Drop` impl on [`TickMetrics`].
 //! - **~300 ns per-cycle overhead.** Seven `Instant::now` + seven
@@ -60,28 +61,114 @@ pub struct PhaseStatsSnapshot {
     min_ns: u64,
     max_ns: u64,
     buckets: [u32; BUCKETS],
+    p50_ns: u64,
+    p95_ns: u64,
+    p99_ns: u64,
 }
 
-impl From<&PhaseStats> for PhaseStatsSnapshot {
-    fn from(stats: &PhaseStats) -> Self {
+impl PhaseStatsSnapshot {
+    /// Percentiles are nearest-rank over `samples` when given, else estimated from the histogram.
+    pub(crate) fn new(stats: &PhaseStats, samples: Option<Vec<u32>>) -> Self {
+        let [p50_ns, p95_ns, p99_ns] = match samples {
+            Some(mut samples) => {
+                samples.sort_unstable();
+                [0.50, 0.95, 0.99].map(|q| nearest_rank(&samples, q))
+            }
+            None => [0.50, 0.95, 0.99].map(|q| stats.percentile_ns(q)),
+        };
         Self {
             sum_ns: stats.sum_ns,
             count: stats.count,
             min_ns: stats.min_ns,
             max_ns: stats.max_ns,
             buckets: stats.buckets,
+            p50_ns,
+            p95_ns,
+            p99_ns,
         }
     }
 }
 
+fn nearest_rank(sorted: &[u32], q: f64) -> u64 {
+    if sorted.is_empty() {
+        return 0;
+    }
+    let rank = (q * sorted.len() as f64).ceil().max(1.0) as usize;
+    u64::from(sorted[rank.min(sorted.len()) - 1])
+}
+
+/// The compiled tick function and what it did over the measured cycles.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct BackendReport {
+    pub name: &'static str,
+    pub workers: usize,
+    pub invocations: u64,
+    pub input_bytes_per_invocation: u64,
+    pub output_bytes_per_invocation: u64,
+    pub compile_ms: Option<CompileReport>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+pub struct CompileReport {
+    pub lower: f64,
+    pub parse: f64,
+    pub fold: f64,
+    pub ir_build: f64,
+    pub codegen: f64,
+    pub link: f64,
+}
+
+/// How much a run measures, from least to most perturbing.
+#[pyo3::pyclass(frozen, eq, eq_int)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Timing {
+    #[default]
+    Summary,
+    Systems,
+    Operations,
+}
+
+#[pyo3::pymethods]
+impl Timing {
+    /// Phase times of every cycle; always on.
+    #[staticmethod]
+    fn summary() -> Self {
+        Self::Summary
+    }
+
+    /// Also the time in each compiled function, so each named system, on the Cranelift
+    /// backend; a system small enough to inline counts toward its caller. Its probes cost
+    /// `systems.probe_pair_ns` per call and keep calls serial.
+    #[staticmethod]
+    fn systems() -> Self {
+        Self::Systems
+    }
+
+    /// Also sampled time per kind of operation.
+    #[staticmethod]
+    fn operations() -> Self {
+        Self::Operations
+    }
+}
+
+/// Versioned record of one run, written to `ELODIN_SIM_SUMMARY_JSON` and passed to
+/// `on_receipt`. Phase times cover the cycles after warmup.
 #[derive(Debug, Clone, Serialize)]
-pub struct TickSummaryJson {
+pub struct Receipt {
+    schema: &'static str,
+    timing: Timing,
+    /// `exact` when every measured cycle was sampled, else `histogram`.
+    percentile_source: &'static str,
     pre_step: PhaseStatsSnapshot,
     copy_db_to_world: PhaseStatsSnapshot,
     world_run: PhaseStatsSnapshot,
+    pre_commit: PhaseStatsSnapshot,
     commit: PhaseStatsSnapshot,
     wait_for_write: PhaseStatsSnapshot,
     post_step: PhaseStatsSnapshot,
+    /// pre_step + pre_commit + post_step of each cycle.
+    callback: PhaseStatsSnapshot,
     real_time_pacing: PhaseStatsSnapshot,
     real_time_oversleep: PhaseStatsSnapshot,
     real_time_behind: PhaseStatsSnapshot,
@@ -91,15 +178,43 @@ pub struct TickSummaryJson {
     total_cycle: PhaseStatsSnapshot,
     cycles: u64,
     steps: u64,
+    requested_ticks: Option<u64>,
     warmup_excluded_ticks: u64,
     simulation_rate_hz: f64,
     telemetry_rate_hz: f64,
     wall_ns: u64,
+    /// Estimated cost of taking this receipt's timestamps, per cycle.
+    timing_overhead_ns: u64,
+    backend: Option<BackendReport>,
+    sync: Option<crate::impeller_server::SyncCounters>,
+    callbacks: Option<crate::prepared::CallbackReport>,
+    systems: Option<cranelift_mlir::profile::Timings>,
+    failure: Option<String>,
+    /// Sections this run did not collect.
+    unavailable: Vec<&'static str>,
     entry_unix_ns: Option<u64>,
     compile_done_unix_ns: Option<u64>,
     loop_start_unix_ns: u64,
     loop_end_unix_ns: u64,
     summary_written_unix_ns: u64,
+}
+
+impl Receipt {
+    pub fn to_json(&self) -> String {
+        serde_json::to_string_pretty(self).expect("receipt serializes")
+    }
+
+    pub fn failure(&self) -> Option<&str> {
+        self.failure.as_deref()
+    }
+
+    pub fn to_py<'py>(
+        &self,
+        py: pyo3::Python<'py>,
+    ) -> pyo3::PyResult<pyo3::Bound<'py, pyo3::PyAny>> {
+        use pyo3::types::PyAnyMethods;
+        py.import("json")?.call_method1("loads", (self.to_json(),))
+    }
 }
 
 impl PhaseStats {
@@ -190,76 +305,87 @@ impl PhaseStats {
     }
 }
 
-/// One row of the optional per-cycle pacing trace. Compact (40 bytes)
-/// so a long run's worth fits comfortably in the pre-sized buffer.
-#[derive(Clone, Copy)]
-struct PacingSample {
-    /// Compute time for the cycle (loop-top to pacing-block entry):
-    /// pre_step + read + tick + commit + wait_for_write + post_step.
-    work_ns: u64,
-    /// Sleep duration we *asked* for (`deadline - now`), 0 if behind.
-    requested_sleep_ns: u64,
-    /// Sleep duration that actually elapsed on the wall clock.
-    actual_sleep_ns: u64,
-    /// Signed deadline error at the pacing check: `now - deadline`.
-    /// Negative = ahead of schedule (good), positive = behind.
-    deadline_err_ns: i64,
-    /// Whether the drift cap reset the deadline forward this cycle.
+/// Most cycles [`TickMetrics::record_cycles`] keeps (56 bytes each).
+const MAX_SAMPLES: usize = 2_000_000;
+
+/// Timestamps the simulation loop takes per cycle, for the overhead estimate.
+const TIMESTAMPS_PER_CYCLE: u64 = 16;
+
+/// Phase times of one simulation cycle in nanoseconds, saturating at about 4.3 s.
+#[derive(Clone, Copy, Default)]
+struct CycleSample {
+    pre_step: u32,
+    copy_db_to_world: u32,
+    world_run: u32,
+    pre_commit: u32,
+    commit: u32,
+    wait_for_write: u32,
+    post_step: u32,
+    real_time_pacing: u32,
+    total_cycle: u32,
+    /// Compute time, from the top of the loop to the pacing block.
+    work: u32,
+    /// Sleep asked for; 0 when the lead target or the deadline had passed.
+    requested_sleep: u32,
+    actual_sleep: u32,
+    /// `now - deadline` at the pacing check; negative is ahead of schedule.
+    deadline_err: i32,
+    /// The drift cap moved the deadline forward.
     reset: bool,
 }
 
-/// Pre-allocated ring of pacing samples plus the CSV destination.
-struct PacingTrace {
-    path: PathBuf,
-    samples: Vec<PacingSample>,
-    /// Cap so unbounded (interactive) runs can't grow without limit.
-    max: usize,
+impl CycleSample {
+    fn callback(&self) -> u32 {
+        self.pre_step
+            .saturating_add(self.pre_commit)
+            .saturating_add(self.post_step)
+    }
 }
 
-impl PacingTrace {
-    fn from_env() -> Option<Self> {
-        let path = std::env::var("ELODIN_PACING_TRACE").ok()?;
-        let max = std::env::var("ELODIN_PACING_TRACE_MAX")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(2_000_000usize);
-        Some(Self {
-            path: PathBuf::from(path),
-            samples: Vec::with_capacity(max.min(1_000_000)),
-            max,
-        })
-    }
+fn ns32(d: Duration) -> u32 {
+    u32::try_from(d.as_nanos()).unwrap_or(u32::MAX)
+}
 
-    #[inline]
-    fn push(&mut self, sample: PacingSample) {
-        if self.samples.len() < self.max {
-            self.samples.push(sample);
-        }
+fn instant_now_cost_ns() -> u64 {
+    const CALLS: u32 = 1024;
+    let start = Instant::now();
+    for _ in 0..CALLS {
+        std::hint::black_box(Instant::now());
     }
+    u64::try_from(start.elapsed().as_nanos() / u128::from(CALLS)).unwrap_or(u64::MAX)
+}
 
-    fn flush(&self) {
-        if let Some(parent) = self.path.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-        let mut out = String::with_capacity(self.samples.len() * 48 + 64);
-        out.push_str(
-            "cycle,work_ns,requested_sleep_ns,actual_sleep_ns,oversleep_ns,deadline_err_ns,reset\n",
-        );
-        for (i, s) in self.samples.iter().enumerate() {
-            let oversleep = s.actual_sleep_ns.saturating_sub(s.requested_sleep_ns);
-            out.push_str(&format!(
-                "{},{},{},{},{},{},{}\n",
-                i,
-                s.work_ns,
-                s.requested_sleep_ns,
-                s.actual_sleep_ns,
-                oversleep,
-                s.deadline_err_ns,
-                s.reset as u8,
-            ));
-        }
-        let _ = fs::write(&self.path, out);
+fn write_trace(path: &PathBuf, samples: &[CycleSample]) {
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
     }
+    let mut out = String::with_capacity(samples.len() * 96 + 256);
+    out.push_str(
+        "cycle,work_ns,requested_sleep_ns,actual_sleep_ns,oversleep_ns,deadline_err_ns,reset,\
+         pre_step_ns,copy_db_to_world_ns,world_run_ns,pre_commit_ns,commit_ns,\
+         wait_for_write_ns,post_step_ns,real_time_pacing_ns,total_cycle_ns\n",
+    );
+    for (i, s) in samples.iter().enumerate() {
+        out.push_str(&format!(
+            "{i},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
+            s.work,
+            s.requested_sleep,
+            s.actual_sleep,
+            s.actual_sleep.saturating_sub(s.requested_sleep),
+            s.deadline_err,
+            s.reset as u8,
+            s.pre_step,
+            s.copy_db_to_world,
+            s.world_run,
+            s.pre_commit,
+            s.commit,
+            s.wait_for_write,
+            s.post_step,
+            s.real_time_pacing,
+            s.total_cycle,
+        ));
+    }
+    let _ = fs::write(path, out);
 }
 
 /// Owner of one simulation loop's per-phase statistics. Dropping
@@ -271,9 +397,12 @@ pub struct TickMetrics {
     pub pre_step: PhaseStats,
     pub copy_db_to_world: PhaseStats,
     pub world_run: PhaseStats,
+    pub pre_commit: PhaseStats,
     pub commit: PhaseStats,
     pub wait_for_write: PhaseStats,
     pub post_step: PhaseStats,
+    /// pre_step + pre_commit + post_step of each cycle.
+    pub callback: PhaseStats,
     pub real_time_pacing: PhaseStats,
     /// Real-time pacing diagnostics (only populated when
     /// `generate_real_time` is on). `real_time_oversleep` is the
@@ -296,11 +425,24 @@ pub struct TickMetrics {
     /// cycles that only consumed the lead buffer (`deadline - lead` target in
     /// the past while the real deadline is still in the future).
     pub pacing_no_sleep: u64,
-    /// Optional per-cycle pacing trace. Allocated up front (capacity from
-    /// `ELODIN_PACING_TRACE_MAX`) and flushed to the CSV path in
-    /// `ELODIN_PACING_TRACE` on drop. `None` unless the env var is set, so
-    /// default runs allocate nothing and stay on the zero-I/O hot path.
-    pacing_trace: Option<PacingTrace>,
+    /// Every cycle's phase times, warmup included, sized by [`Self::record_cycles`].
+    /// `None` when the run has no known length and no trace was requested.
+    samples: Option<Vec<CycleSample>>,
+    /// Index in `samples` of the first cycle after warmup.
+    measured_from: usize,
+    /// `ELODIN_PACING_TRACE`: the CSV that `samples` is written to on drop.
+    trace_path: Option<PathBuf>,
+    /// Phase times of the cycle in progress.
+    cycle: CycleSample,
+    instant_now_ns: u64,
+    pub requested_ticks: Option<u64>,
+    pub backend: Option<BackendReport>,
+    pub sync: Option<crate::impeller_server::SyncCounters>,
+    pub callbacks: Option<crate::prepared::CallbackReport>,
+    pub timing: Timing,
+    pub systems: Option<cranelift_mlir::profile::Timings>,
+    /// Why the run stopped early, when a callback failed.
+    pub failure: Option<String>,
     /// Wall-clock duration of one simulation cycle (from immediately
     /// after the cancel / paused checks down to just before the next
     /// iteration starts). Feeds the "mean cycle" header and
@@ -341,16 +483,29 @@ impl TickMetrics {
             pre_step: PhaseStats::default(),
             copy_db_to_world: PhaseStats::default(),
             world_run: PhaseStats::default(),
+            pre_commit: PhaseStats::default(),
             commit: PhaseStats::default(),
             wait_for_write: PhaseStats::default(),
             post_step: PhaseStats::default(),
+            callback: PhaseStats::default(),
             real_time_pacing: PhaseStats::default(),
             real_time_oversleep: PhaseStats::default(),
             real_time_behind: PhaseStats::default(),
             pacing_behind_events: 0,
             pacing_resets: 0,
             pacing_no_sleep: 0,
-            pacing_trace: PacingTrace::from_env(),
+            samples: None,
+            measured_from: 0,
+            trace_path: std::env::var_os("ELODIN_PACING_TRACE").map(PathBuf::from),
+            cycle: CycleSample::default(),
+            instant_now_ns: instant_now_cost_ns(),
+            requested_ticks: None,
+            backend: None,
+            sync: None,
+            callbacks: None,
+            timing: Timing::Summary,
+            systems: None,
+            failure: None,
             total_cycle: PhaseStats::default(),
             cycles: 0,
             steps: 0,
@@ -373,15 +528,17 @@ impl TickMetrics {
     /// spin-up (the first cycle can stall for seconds while a flight controller
     /// boots, which otherwise poisons mean cycle / post_step / lateness). Called
     /// once by the loop after the warmup tick threshold is crossed. The
-    /// per-cycle pacing trace (if enabled) is intentionally kept intact so the
-    /// boot is still visible for offline debugging.
+    /// per-cycle samples are kept so the trace still shows the boot; only
+    /// the ones after this point feed the receipt.
     pub fn reset_after_warmup(&mut self, excluded_ticks: u64) {
         self.pre_step = PhaseStats::default();
         self.copy_db_to_world = PhaseStats::default();
         self.world_run = PhaseStats::default();
+        self.pre_commit = PhaseStats::default();
         self.commit = PhaseStats::default();
         self.wait_for_write = PhaseStats::default();
         self.post_step = PhaseStats::default();
+        self.callback = PhaseStats::default();
         self.real_time_pacing = PhaseStats::default();
         self.real_time_oversleep = PhaseStats::default();
         self.real_time_behind = PhaseStats::default();
@@ -394,6 +551,8 @@ impl TickMetrics {
         self.started_at = Instant::now();
         self.started_unix_ns = unix_now_ns();
         self.warmup_excluded_ticks = excluded_ticks;
+        self.measured_from = self.samples.as_ref().map_or(0, Vec::len);
+        self.cycle = CycleSample::default();
     }
 
     /// Feed the configured rates so `print_summary` can show the
@@ -405,37 +564,76 @@ impl TickMetrics {
         self.telemetry_rate_hz = telemetry_rate_hz;
     }
 
+    /// Sample every cycle, so the receipt has exact percentiles, when the run's length is known
+    /// or a trace was requested. Call before the loop: the buffer never grows, and cycles past
+    /// its capacity leave the receipt with histogram estimates.
+    pub fn record_cycles(&mut self, expected_cycles: Option<u64>) {
+        let trace_max = self.trace_path.as_ref().map(|_| {
+            std::env::var("ELODIN_PACING_TRACE_MAX")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(MAX_SAMPLES as u64)
+        });
+        let Some(capacity) = trace_max.max(expected_cycles) else {
+            return;
+        };
+        let capacity = usize::try_from(capacity).unwrap_or(MAX_SAMPLES);
+        self.samples = Some(Vec::with_capacity(capacity.min(MAX_SAMPLES)));
+    }
+
     #[inline]
     pub fn observe_pre_step(&mut self, d: Duration) {
         self.pre_step.observe(d);
+        self.cycle.pre_step = ns32(d);
     }
     #[inline]
     pub fn observe_copy_db_to_world(&mut self, d: Duration) {
         self.copy_db_to_world.observe(d);
+        self.cycle.copy_db_to_world = ns32(d);
     }
     #[inline]
     pub fn observe_world_run(&mut self, d: Duration) {
         self.world_run.observe(d);
+        self.cycle.world_run = ns32(d);
+    }
+    #[inline]
+    pub fn observe_pre_commit(&mut self, d: Duration) {
+        self.pre_commit.observe(d);
+        self.cycle.pre_commit = ns32(d);
     }
     #[inline]
     pub fn observe_commit(&mut self, d: Duration) {
         self.commit.observe(d);
+        self.cycle.commit = ns32(d);
     }
     #[inline]
     pub fn observe_wait_for_write(&mut self, d: Duration) {
         self.wait_for_write.observe(d);
+        self.cycle.wait_for_write = ns32(d);
     }
     #[inline]
     pub fn observe_post_step(&mut self, d: Duration) {
         self.post_step.observe(d);
+        self.cycle.post_step = ns32(d);
     }
     #[inline]
     pub fn observe_real_time_pacing(&mut self, d: Duration) {
         self.real_time_pacing.observe(d);
+        self.cycle.real_time_pacing = ns32(d);
     }
+    /// Ends the cycle in progress.
     #[inline]
     pub fn observe_total_cycle(&mut self, d: Duration) {
         self.total_cycle.observe(d);
+        self.cycle.total_cycle = ns32(d);
+        self.callback
+            .observe(Duration::from_nanos(self.cycle.callback().into()));
+        if let Some(samples) = self.samples.as_mut()
+            && samples.len() < samples.capacity()
+        {
+            samples.push(self.cycle);
+        }
+        self.cycle = CycleSample::default();
     }
 
     /// Record one real-time pacing cycle. `work` is the cycle's compute time,
@@ -467,15 +665,11 @@ impl TickMetrics {
             self.real_time_oversleep
                 .observe(actual.saturating_sub(requested));
         }
-        if let Some(trace) = self.pacing_trace.as_mut() {
-            trace.push(PacingSample {
-                work_ns: u64::try_from(work.as_nanos()).unwrap_or(u64::MAX),
-                requested_sleep_ns: u64::try_from(requested.as_nanos()).unwrap_or(u64::MAX),
-                actual_sleep_ns: u64::try_from(actual.as_nanos()).unwrap_or(u64::MAX),
-                deadline_err_ns,
-                reset,
-            });
-        }
+        self.cycle.work = ns32(work);
+        self.cycle.requested_sleep = ns32(requested);
+        self.cycle.actual_sleep = ns32(actual);
+        self.cycle.deadline_err = deadline_err_ns.clamp(i32::MIN.into(), i32::MAX.into()) as i32;
+        self.cycle.reset = reset;
     }
 
     /// Format a ns duration into a compact human-readable cell
@@ -577,6 +771,9 @@ impl TickMetrics {
             Self::fmt_row("read (db → world)", &self.copy_db_to_world)
         );
         println!("{}", Self::fmt_row("tick function", &self.world_run));
+        if self.pre_commit.count > 0 {
+            println!("{}", Self::fmt_row("pre_commit", &self.pre_commit));
+        }
         println!("{}", Self::fmt_row("commit world", &self.commit));
         println!("{}", Self::fmt_row("wait_for_write", &self.wait_for_write));
         println!("{}", Self::fmt_row("post_step", &self.post_step));
@@ -623,28 +820,76 @@ impl TickMetrics {
         );
     }
 
-    pub fn summary_json(&self) -> TickSummaryJson {
+    pub fn receipt(&self) -> Receipt {
         let summary_written_unix_ns = unix_now_ns();
-        TickSummaryJson {
-            pre_step: (&self.pre_step).into(),
-            copy_db_to_world: (&self.copy_db_to_world).into(),
-            world_run: (&self.world_run).into(),
-            commit: (&self.commit).into(),
-            wait_for_write: (&self.wait_for_write).into(),
-            post_step: (&self.post_step).into(),
-            real_time_pacing: (&self.real_time_pacing).into(),
-            real_time_oversleep: (&self.real_time_oversleep).into(),
-            real_time_behind: (&self.real_time_behind).into(),
+        let measured = self
+            .samples
+            .as_deref()
+            .map(|samples| &samples[self.measured_from..])
+            .filter(|measured| measured.len() as u64 == self.cycles);
+        let phase = |stats: &PhaseStats, field: fn(&CycleSample) -> u32| {
+            PhaseStatsSnapshot::new(stats, measured.map(|m| m.iter().map(field).collect()))
+        };
+        let mut unavailable = Vec::new();
+        if self.systems.is_none() {
+            unavailable.push("systems");
+        }
+        if self
+            .systems
+            .as_ref()
+            .is_none_or(|systems| systems.ops.is_empty())
+        {
+            unavailable.push("operations");
+        }
+        if self.backend.is_none() {
+            unavailable.push("backend");
+        }
+        if self.sync.is_none() {
+            unavailable.push("sync");
+        }
+        if self.callbacks.is_none() {
+            unavailable.push("callbacks");
+        }
+        Receipt {
+            schema: "elodin.run_receipt.v1",
+            timing: self.timing,
+            percentile_source: if measured.is_some() {
+                "exact"
+            } else {
+                "histogram"
+            },
+            pre_step: phase(&self.pre_step, |s| s.pre_step),
+            copy_db_to_world: phase(&self.copy_db_to_world, |s| s.copy_db_to_world),
+            world_run: phase(&self.world_run, |s| s.world_run),
+            pre_commit: phase(&self.pre_commit, |s| s.pre_commit),
+            commit: phase(&self.commit, |s| s.commit),
+            wait_for_write: phase(&self.wait_for_write, |s| s.wait_for_write),
+            post_step: phase(&self.post_step, |s| s.post_step),
+            callback: phase(&self.callback, CycleSample::callback),
+            real_time_pacing: phase(&self.real_time_pacing, |s| s.real_time_pacing),
+            real_time_oversleep: PhaseStatsSnapshot::new(&self.real_time_oversleep, None),
+            real_time_behind: PhaseStatsSnapshot::new(&self.real_time_behind, None),
             pacing_behind_events: self.pacing_behind_events,
             pacing_resets: self.pacing_resets,
             pacing_no_sleep: self.pacing_no_sleep,
-            total_cycle: (&self.total_cycle).into(),
+            total_cycle: phase(&self.total_cycle, |s| s.total_cycle),
             cycles: self.cycles,
             steps: self.steps,
+            requested_ticks: self.requested_ticks,
             warmup_excluded_ticks: self.warmup_excluded_ticks,
             simulation_rate_hz: self.simulation_rate_hz,
             telemetry_rate_hz: self.telemetry_rate_hz,
             wall_ns: u64::try_from(self.started_at.elapsed().as_nanos()).unwrap_or(u64::MAX),
+            timing_overhead_ns: TIMESTAMPS_PER_CYCLE * self.instant_now_ns,
+            backend: self.backend.clone().map(|backend| BackendReport {
+                invocations: self.steps,
+                ..backend
+            }),
+            sync: self.sync.clone(),
+            callbacks: self.callbacks.clone(),
+            systems: self.systems.clone(),
+            failure: self.failure.clone(),
+            unavailable,
             entry_unix_ns: read_env_u64("ELODIN_SIM_ENTRY_UNIX_NS"),
             compile_done_unix_ns: read_env_u64("ELODIN_SIM_COMPILE_DONE_UNIX_NS"),
             loop_start_unix_ns: self.started_unix_ns,
@@ -664,9 +909,7 @@ impl TickMetrics {
         if let Some(parent) = path.parent() {
             let _ = fs::create_dir_all(parent);
         }
-        if let Ok(json) = serde_json::to_string_pretty(&self.summary_json()) {
-            let _ = fs::write(path, json);
-        }
+        let _ = fs::write(path, self.receipt().to_json());
     }
 }
 
@@ -706,8 +949,8 @@ impl Drop for TickMetrics {
         self.mark_loop_end();
         self.print_summary();
         self.write_summary_json_from_env();
-        if let Some(trace) = self.pacing_trace.as_ref() {
-            trace.flush();
+        if let (Some(path), Some(samples)) = (&self.trace_path, &self.samples) {
+            write_trace(path, samples);
         }
     }
 }
@@ -861,5 +1104,41 @@ mod tests {
             false,
         );
         assert_eq!(m.pacing_no_sleep, 1);
+    }
+
+    fn cycle(m: &mut TickMetrics, post_step_us: u64) {
+        m.observe_pre_commit(Duration::from_micros(1));
+        m.observe_post_step(Duration::from_micros(post_step_us));
+        m.observe_total_cycle(Duration::from_micros(post_step_us + 1));
+        m.cycles += 1;
+    }
+
+    #[test]
+    fn receipt_percentiles_are_exact_over_measured_cycles() {
+        let mut m = TickMetrics::new();
+        m.silent = true;
+        m.record_cycles(Some(101));
+        cycle(&mut m, 50_000);
+        m.reset_after_warmup(1);
+        for us in 1..=100 {
+            cycle(&mut m, us);
+        }
+        let receipt = m.receipt();
+        assert_eq!(receipt.percentile_source, "exact");
+        assert_eq!(receipt.post_step.p95_ns, 95_000);
+        assert_eq!(receipt.post_step.p99_ns, 99_000);
+        assert_eq!(receipt.callback.p50_ns, 51_000);
+        assert_eq!(receipt.world_run.p95_ns, 0);
+    }
+
+    #[test]
+    fn receipt_estimates_percentiles_once_samples_overflow() {
+        let mut m = TickMetrics::new();
+        m.silent = true;
+        m.record_cycles(Some(10));
+        for us in 1..=20 {
+            cycle(&mut m, us);
+        }
+        assert_eq!(m.receipt().percentile_source, "histogram");
     }
 }

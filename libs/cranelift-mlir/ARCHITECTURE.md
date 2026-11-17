@@ -6,7 +6,7 @@ Cranelift, replacing IREE as the CPU execution backend for Elodin simulations.
 ## Table of Contents
 
 1. [Motivation](#motivation)
-2. [End-to-End Compilation Pipeline](#end-to-end-compilation-pipeline)
+2. [End-to-End Compilation Pipeline](#end-to-end-compilation-pipeline), including [parallel call groups](#parallel-call-groups-parallel-rs-pool-rs)
 3. [Dual ABI Architecture](#dual-abi-architecture)
 4. [SIMD: Packed-f64 Lane Representation](#simd-packed-f64-lane-representation)
 5. [JIT Memory Layout](#jit-memory-layout)
@@ -280,6 +280,27 @@ function call into optimized native code operating directly on the simulation's 
 The tick is one phase of the simulation loop; `nox-py` also exchanges components with the
 database before and after it (`DbSync` in `libs/nox-py/src/impeller_server.rs`), and for a
 model with hundreds of components those phases can cost as much as the tick.
+
+### Parallel call groups (`parallel.rs`, `pool.rs`)
+
+With `CompileConfig::workers` above 1 (`World.run(workers=...)`), a pass after the inliner
+groups the top-level calls of each pointer-ABI function that do not depend on each other:
+it levels the calls by their data dependencies, hoists independent instructions out of the
+way, and keeps runs of two or more same-level calls. Lowering turns each group into a task
+table of trampolines, `fn(task)`, and one call to `pool::run`. `Query.map` produces such calls
+when it traces fixed chunks of two entities, and `map_seq` produces one call per entity.
+
+The pool's workers and the calling thread claim tasks from every open group. A task may open
+a group of its own, and whoever opens a group can finish it alone, so nesting cannot
+deadlock. A group whose measured work averages under 20 µs runs on the calling thread, since
+waking workers costs more; idle workers spin for 100 µs, then sleep until the simulation loop
+wakes them before its next tick. Profiling keeps calls serial, because its probes keep
+per-thread state.
+
+Grouping only reorders independent calls, so results do not depend on how many workers run
+them. Chunking can: chunks are fixed and even, so every lane keeps the SIMD pair or scalar
+tail it has in a whole-column call, but a reduction inside a chunk can round differently from
+one over the whole column. `workers=1` therefore keeps the single-call lowering.
 
 ---
 
@@ -1346,10 +1367,10 @@ much measured time or code each one addresses.
   squaring the SIMD benefit on large-enough tensors.
 
   The runtime kernels are a smaller first step. Elementwise f64 ops above 128
-  lanes now run in `tensor_rt`, whose add, sub, mul and div are fixed
-  `wide::f64x2` loops; an AVX2 body chosen once at startup would speed up
-  exactly the large tensors without touching codegen, and those four ops give
-  the same bits at any lane width.
+  lanes run in `tensor_rt`. Its `sin` and `cos` choose an AVX2 body at startup
+  that follows the `wide::f64x2` algorithm operation for operation, so the bits
+  match. Add, sub, mul and div stay on `wide::f64x2`: an AVX2 loop gave the same
+  bits but measured slower on cold caches.
 
 - **FFT runtime.** `tensor_rt`'s FFT/IFFT/RFFT/IRFFT are naive DFT (O(N²)).
   Swap to `rustfft` for O(N log N) with a one-file change. No current

@@ -1,6 +1,6 @@
 use crate::Error;
 use bytemuck;
-use elodin_db::{AtomicTimestampExt, DB, State, handle_conn};
+use elodin_db::{AtomicTimestampExt, DB, State, WatchCursor, handle_conn};
 use impeller::types::{ComponentId, Timestamp};
 use impeller_wkt::{ComponentMetadata, EntityMetadata};
 use std::{
@@ -18,6 +18,8 @@ use tracing::{info, warn};
 
 use crate::World;
 use crate::exec::WorldExec;
+use crate::prepared::{CallbackCounters, HookWrites, PreCommit};
+use crate::tick_metrics::Receipt;
 
 pub struct Server {
     db: elodin_db::Server,
@@ -37,21 +39,31 @@ impl Server {
             |_, _, _, _, _| {},
             |_, _, _, _, _| {},
             false,
+            Vec::new(),
+            Default::default(),
+            false,
             None,
             cancel_token,
         )
         .await
+        .map(drop)
     }
 
+    /// Returns the loop's receipt once it stops. `step_callbacks` says whether `pre_step` or
+    /// `post_step` call user code, which reads the sim's commits back from the DB.
+    #[allow(clippy::too_many_arguments)]
     pub async fn run_with_cancellation(
         self,
         is_cancelled: impl Fn() -> bool + 'static,
         pre_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
         post_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
+        step_callbacks: bool,
+        pre_commit: Vec<Box<dyn PreCommit + Send>>,
+        counters: Arc<CallbackCounters>,
         interactive: bool,
         start_timestamp: Option<Timestamp>,
         cancel_token: CancelToken,
-    ) -> Result<(), Error> {
+    ) -> Result<Option<Receipt>, Error> {
         tracing::info!("running server with cancellation");
         let Self { db, mut world } = self;
         let elodin_db::Server { listener, db } = db;
@@ -78,15 +90,22 @@ impl Server {
             is_cancelled,
             pre_step,
             post_step,
+            step_callbacks,
+            pre_commit,
+            counters,
             start_time,
             interactive,
             cancel_token,
         ));
-        futures_lite::future::race(async { stream.join().await.unwrap().unwrap() }, async {
-            tick.await
-                .map_err(|_| stellarator::Error::JoinFailed)
-                .map_err(Error::from)
-        })
+        futures_lite::future::race(
+            async { stream.join().await.unwrap().unwrap().map(|()| None) },
+            async {
+                tick.await
+                    .map(Some)
+                    .map_err(|_| stellarator::Error::JoinFailed)
+                    .map_err(Error::from)
+            },
+        )
         .await
     }
 }
@@ -357,23 +376,103 @@ pub fn init_db(
 }
 
 /// The DB component behind each (entity, component) pair of the world, resolved once after
-/// `init_db`, with a copy of each pair's latest DB sample. A pair's sample count tells whether
-/// anyone appended since that copy was taken, so the per-cycle copy and commit only read the DB
-/// for pairs that changed.
+/// `init_db`, with a copy of each pair's latest DB sample. A watch cursor on every pair says
+/// which ones others appended to, so a pull reads only those, and a commit compares only the
+/// columns the cycle can have changed.
 pub struct DbSync {
     /// One entry per `world.host` column, in its order.
     columns: Vec<SyncColumn>,
-    /// `DB::vtable_gen` when the shadows were last checked; truncating the DB bumps it.
+    /// Marked by every append to a pair but this sync's own; rows take slots in column order.
+    cursor: Arc<WatchCursor>,
+    /// `DB::vtable_gen` when the shadows were last read; truncating the DB bumps it.
     vtable_gen: u64,
+    /// Set by a full rescan so the next commit compares every column.
+    compare_all: bool,
+    /// Commits so far, which `Cadence::Every` counts.
+    commits: u64,
+    writer: Option<WriteBehind>,
+    pub counters: SyncCounters,
+}
+
+/// What [`DbSync`] did, for the run receipt.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct SyncCounters {
+    /// (entity, component) pairs mirrored between the world and the DB.
+    pub rows_registered: u64,
+    /// Rows whose latest DB sample a pull or commit read.
+    pub rows_scanned: u64,
+    /// Pulls or commits that read every row, as the first does and those after a truncate.
+    pub full_scans: u64,
+    /// Rows a pull drained from the watch cursor, each appended to by another writer.
+    pub rows_drained: u64,
+    /// Pulls that found rows to drain.
+    pub cursor_wakeups: u64,
+    /// Appends to rows already awaiting a pull, which applies only the newest.
+    pub writes_coalesced: u64,
+    /// Rows a pull copied into the world.
+    pub rows_pulled: u64,
+    /// Rows a commit compared with their latest DB sample.
+    pub rows_compared: u64,
+    pub rows_committed: u64,
+    /// Compared rows equal to their latest DB sample, so not appended.
+    pub writes_suppressed: u64,
+    pub bytes_pulled: u64,
+    pub bytes_committed: u64,
+    /// Present when a writer thread appends the commits.
+    pub writer: Option<WriterStats>,
+}
+
+/// What the DB writer thread did with the commits it was handed.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct WriterStats {
+    pub batches: u64,
+    /// Time spent appending.
+    pub write_ns: u64,
+    pub max_write_ns: u64,
+    /// From a commit queuing its rows to the writer finishing them.
+    pub max_lag_ns: u64,
+    /// Most commits queued or being written at once.
+    pub queue_high_water: u64,
+    /// Commits that found the queue full and waited for room.
+    pub backpressure_events: u64,
+    pub backpressure_ns: u64,
+}
+
+/// When a commit records a column, from its `recording` and `record_every_tick` metadata.
+#[derive(Clone, Copy, PartialEq)]
+enum Cadence {
+    OnChange,
+    EveryCommit,
+    Every(u64),
+    Manual,
+    InitialOnly,
+}
+
+impl Cadence {
+    fn of(metadata: &ComponentMetadata) -> Self {
+        let recording = metadata.metadata.get("recording").map(String::as_str);
+        match recording {
+            Some("manual") => Self::Manual,
+            Some("initial_only") => Self::InitialOnly,
+            _ if metadata.record_every_tick() => Self::EveryCommit,
+            _ => recording
+                .and_then(|r| r.strip_prefix("every:")?.parse().ok())
+                .map_or(Self::OnChange, Self::Every),
+        }
+    }
 }
 
 struct SyncColumn {
     component_id: ComponentId,
     size: usize,
-    record_every_tick: bool,
+    cadence: Cadence,
     excluded: bool,
+    /// A system writes it, so a commit compares it every cycle.
+    written: bool,
+    /// The cursor slot of `rows[0]`.
+    first_slot: usize,
     rows: Vec<SyncRow>,
-    /// Each row's latest DB sample as of `SyncRow::samples`, laid out like the world column.
+    /// Each row's latest DB sample, laid out like the world column.
     shadow: Vec<u8>,
 }
 
@@ -381,30 +480,32 @@ struct SyncRow {
     /// Byte offset of the entity's row in the column.
     offset: usize,
     component: elodin_db::Component,
-    /// The pair's sample count when its shadow was last read or written; `usize::MAX` if never.
-    samples: usize,
+    /// Whether the pair had a sample when its shadow was last read or written.
+    has_sample: bool,
 }
 
 impl SyncRow {
-    /// Re-reads `shadow` if the pair gained samples since; false if the pair has none.
-    fn refresh(&mut self, shadow: &mut [u8]) -> bool {
-        let samples = self.component.time_series.sample_count();
-        if samples != self.samples {
-            self.samples = match self.component.time_series.latest() {
-                Some((_, head)) => {
-                    shadow.copy_from_slice(head);
-                    samples
-                }
-                None => 0,
-            };
-        }
-        self.samples > 0
+    fn read(&mut self, shadow: &mut [u8]) {
+        self.has_sample = match self.component.time_series.latest() {
+            Some((_, head)) => {
+                shadow.copy_from_slice(head);
+                true
+            }
+            None => false,
+        };
     }
 }
 
 impl DbSync {
-    /// Transient components get no rows; `exclusions` are copied in but never committed.
-    pub fn new(state: &State, world: &World, exclusions: &HashSet<ComponentId>) -> Self {
+    /// Transient components get no rows. Systems write the `written` components; `exclusions`
+    /// are copied in but never committed.
+    pub fn new(
+        state: &State,
+        world: &World,
+        written: &[ComponentId],
+        exclusions: &HashSet<ComponentId>,
+    ) -> Self {
+        let mut slots = 0;
         let columns = world
             .host
             .iter()
@@ -412,8 +513,10 @@ impl DbSync {
                 let mut sync = SyncColumn {
                     component_id: *component_id,
                     size: 0,
-                    record_every_tick: false,
+                    cadence: Cadence::OnChange,
                     excluded: exclusions.contains(component_id),
+                    written: written.contains(component_id),
+                    first_slot: slots,
                     rows: Vec::new(),
                     shadow: column.buffer.clone(),
                 };
@@ -437,74 +540,343 @@ impl DbSync {
                         Some(SyncRow {
                             offset: i * size,
                             component: state.get_component(pair_id)?.clone(),
-                            samples: usize::MAX,
+                            has_sample: false,
                         })
                     })
                     .collect();
                 sync.size = size;
-                sync.record_every_tick = metadata.record_every_tick();
+                sync.cadence = Cadence::of(metadata);
+                slots += sync.rows.len();
                 sync
             })
-            .collect();
+            .collect::<Vec<_>>();
+        let cursor = Arc::new(WatchCursor::new(slots));
+        for (slot, row) in columns.iter().flat_map(|c| &c.rows).enumerate() {
+            row.component.time_series.watch(&cursor, slot);
+        }
+        let counters = SyncCounters {
+            rows_registered: slots as u64,
+            ..Default::default()
+        };
         Self {
             columns,
+            cursor,
             vtable_gen: u64::MAX,
+            compare_all: false,
+            commits: 0,
+            writer: None,
+            counters,
         }
     }
 
-    /// Forgets every shadow when `vtable_gen` moved, since a truncate can leave a pair with as
-    /// many samples as before but different values.
-    fn check_vtable_gen(&mut self, vtable_gen: u64) {
-        if vtable_gen != self.vtable_gen {
-            self.vtable_gen = vtable_gen;
-            for row in self.columns.iter_mut().flat_map(|c| &mut c.rows) {
-                row.samples = usize::MAX;
-            }
+    /// Hands commits to a writer thread from now on. Their rows reach the DB, and
+    /// `last_updated` moves past them, up to a few cycles later.
+    pub fn write_behind(&mut self, db: Arc<DB>) {
+        let series = self.columns.iter().flat_map(|c| &c.rows);
+        let series = series.map(|row| row.component.clone()).collect();
+        self.writer = Some(WriteBehind::spawn(db, series, self.cursor.clone()));
+        self.counters.writer = Some(WriterStats::default());
+    }
+
+    pub fn writes_behind(&self) -> bool {
+        self.writer.is_some()
+    }
+
+    /// Waits for the writer thread to append every queued commit.
+    pub fn finish_writes(&mut self) {
+        if let (Some(writer), Some(stats)) = (self.writer.take(), &mut self.counters.writer) {
+            writer.finish(stats);
         }
     }
 
-    /// Copies each pair's latest DB sample into the world.
-    pub fn copy_db_to_world(&mut self, world: &mut World, vtable_gen: u64) {
-        self.check_vtable_gen(vtable_gen);
-        for ((id, column), sync) in world.host.iter_mut().zip(&mut self.columns) {
-            debug_assert_eq!(*id, sync.component_id);
+    /// Restarts the counters, as the loop does when warmup ends.
+    pub fn reset_counters(&mut self) {
+        self.counters = SyncCounters {
+            rows_registered: self.counters.rows_registered,
+            writer: self
+                .counters
+                .writer
+                .as_ref()
+                .map(|_| WriterStats::default()),
+            ..Default::default()
+        };
+    }
+
+    /// Rereads every row when `vtable_gen` moved, since a truncate can leave a pair with as
+    /// many samples as before but different values; the first call always does.
+    fn rescan(&mut self, vtable_gen: u64) -> bool {
+        if vtable_gen == self.vtable_gen {
+            return false;
+        }
+        self.vtable_gen = vtable_gen;
+        self.compare_all = true;
+        self.cursor.drain(|_| {});
+        for sync in &mut self.columns {
             for row in &mut sync.rows {
+                row.read(&mut sync.shadow[row.offset..row.offset + sync.size]);
+            }
+            self.counters.rows_scanned += sync.rows.len() as u64;
+        }
+        self.counters.full_scans += 1;
+        true
+    }
+
+    /// Copies into the world the latest DB sample of each pair another writer appended to.
+    /// Excluded columns that systems write are restored every pull, as commits never record
+    /// them.
+    pub fn copy_db_to_world(&mut self, world: &mut World, vtable_gen: u64) {
+        let full = self.rescan(vtable_gen);
+        let Self {
+            columns,
+            cursor,
+            counters,
+            ..
+        } = self;
+        if !full {
+            let drained = cursor.drain(|slot| {
+                let column = columns.partition_point(|c| c.first_slot <= slot) - 1;
+                let sync = &mut columns[column];
+                let row = &mut sync.rows[slot - sync.first_slot];
                 let range = row.offset..row.offset + sync.size;
-                if row.refresh(&mut sync.shadow[range.clone()]) {
+                row.read(&mut sync.shadow[range.clone()]);
+                counters.rows_scanned += 1;
+                if row.has_sample {
+                    let column = world.host.get_mut(&sync.component_id).unwrap();
                     column.buffer[range.clone()].copy_from_slice(&sync.shadow[range]);
+                    counters.rows_pulled += 1;
+                    counters.bytes_pulled += sync.size as u64;
                 }
+            });
+            counters.rows_drained += drained as u64;
+            counters.cursor_wakeups += u64::from(drained > 0);
+            counters.writes_coalesced += cursor.take_coalesced();
+        }
+        for ((id, column), sync) in world.host.iter_mut().zip(columns.iter()) {
+            debug_assert_eq!(*id, sync.component_id);
+            if !full && !(sync.excluded && sync.written) {
+                continue;
+            }
+            for row in sync.rows.iter().filter(|row| row.has_sample) {
+                let range = row.offset..row.offset + sync.size;
+                column.buffer[range.clone()].copy_from_slice(&sync.shadow[range]);
+                counters.rows_pulled += 1;
+                counters.bytes_pulled += sync.size as u64;
             }
         }
     }
 
-    /// Appends every pair whose world value differs from its latest DB sample, or that records
-    /// every tick.
+    /// Appends the pairs each column's cadence says are due. On-change columns are due when
+    /// systems or the `pre_commit` hook wrote them, or after a rescan, and append the pairs whose
+    /// world value differs from their latest DB sample. Excluded columns are skipped unless the
+    /// hook wrote them.
     pub fn commit_world(
         &mut self,
         world: &World,
         timestamp: Timestamp,
         vtable_gen: u64,
+        hook_writes: &HookWrites,
     ) -> Result<(), Error> {
-        self.check_vtable_gen(vtable_gen);
-        for ((id, column), sync) in world.host.iter().zip(&mut self.columns) {
+        self.rescan(vtable_gen);
+        let compare_all = std::mem::take(&mut self.compare_all);
+        let commit = self.commits;
+        self.commits += 1;
+        let Self {
+            columns,
+            cursor,
+            writer,
+            counters,
+            ..
+        } = self;
+        for ((id, column), sync) in world.host.iter().zip(columns) {
             debug_assert_eq!(*id, sync.component_id);
-            if sync.excluded {
+            let hook_wrote = hook_writes.written.contains(id);
+            let due = match sync.cadence {
+                Cadence::OnChange => compare_all || hook_wrote || sync.written,
+                Cadence::EveryCommit => true,
+                Cadence::Every(n) => commit.is_multiple_of(n),
+                Cadence::Manual => hook_writes.recorded.contains(id),
+                Cadence::InitialOnly => compare_all,
+            };
+            if !due || (sync.excluded && !hook_wrote) {
                 continue;
             }
-            for row in &mut sync.rows {
+            for (slot, row) in (sync.first_slot..).zip(&mut sync.rows) {
                 let range = row.offset..row.offset + sync.size;
-                let has_sample = row.refresh(&mut sync.shadow[range.clone()]);
+                // Another writer appended since the pull; compare with its value.
+                if cursor.is_marked(slot) {
+                    row.read(&mut sync.shadow[range.clone()]);
+                    counters.rows_scanned += 1;
+                }
                 let buf = &column.buffer[range.clone()];
-                let latest = has_sample.then_some(&sync.shadow[range.clone()]);
-                if should_record_component(sync.record_every_tick, latest, buf) {
-                    row.component.time_series.push_buf(timestamp, buf)?;
+                let latest = row.has_sample.then_some(&sync.shadow[range.clone()]);
+                counters.rows_compared += 1;
+                if should_record(sync.cadence, latest, buf) {
+                    match writer {
+                        Some(writer) => writer.batch.push(slot, buf),
+                        None => {
+                            row.component
+                                .time_series
+                                .push_buf_from(Some(cursor), timestamp, buf)?
+                        }
+                    }
                     sync.shadow[range].copy_from_slice(buf);
-                    row.samples += 1;
+                    row.has_sample = true;
+                    counters.rows_committed += 1;
+                    counters.bytes_committed += sync.size as u64;
+                } else {
+                    counters.writes_suppressed += 1;
                 }
             }
         }
+        if let (Some(writer), Some(stats)) = (writer, &mut counters.writer) {
+            writer.send(timestamp, self.vtable_gen, stats)?;
+        }
         Ok(())
     }
+}
+
+/// The rows one commit recorded, for the writer thread to append.
+#[derive(Default)]
+struct CommitBatch {
+    timestamp: Timestamp,
+    vtable_gen: u64,
+    /// Cursor slot of each row and the end of its value in `bytes`.
+    rows: Vec<(usize, usize)>,
+    bytes: Vec<u8>,
+    queued: Option<Instant>,
+    /// Set by the writer: how long the appends took, and when they finished.
+    written: Option<(Duration, Instant)>,
+}
+
+impl CommitBatch {
+    fn push(&mut self, slot: usize, value: &[u8]) {
+        self.bytes.extend_from_slice(value);
+        self.rows.push((slot, self.bytes.len()));
+    }
+
+    fn account(&self, stats: &mut WriterStats) {
+        if let (Some(queued), Some((took, end))) = (self.queued, self.written) {
+            stats.batches += 1;
+            stats.write_ns += took.as_nanos() as u64;
+            stats.max_write_ns = stats.max_write_ns.max(took.as_nanos() as u64);
+            stats.max_lag_ns = stats.max_lag_ns.max((end - queued).as_nanos() as u64);
+        }
+    }
+}
+
+/// Appends commits on a thread of its own, so DB stalls such as page faults and writeback
+/// throttling stay off the sim thread. Written batches come back for reuse.
+struct WriteBehind {
+    queue: std::sync::mpsc::SyncSender<CommitBatch>,
+    written: Arc<std::sync::Mutex<Vec<CommitBatch>>>,
+    thread: std::thread::JoinHandle<()>,
+    batch: CommitBatch,
+    spare: Vec<CommitBatch>,
+    in_flight: u64,
+}
+
+impl WriteBehind {
+    /// Commits that can wait before the sim thread blocks on the writer: enough at 1 kHz to
+    /// ride out writeback stalls of hundreds of milliseconds.
+    const QUEUE: usize = 1024;
+
+    /// `series[slot]` is the pair behind each cursor slot.
+    fn spawn(db: Arc<DB>, series: Vec<elodin_db::Component>, cursor: Arc<WatchCursor>) -> Self {
+        let (queue, queued) = std::sync::mpsc::sync_channel::<CommitBatch>(Self::QUEUE);
+        let written = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let written_by_thread = written.clone();
+        let thread = std::thread::Builder::new()
+            .name("elodin-db-writer".into())
+            .spawn(move || {
+                for mut batch in queued {
+                    let start = Instant::now();
+                    // A truncate since the commit discards it, as it would have a written one.
+                    if batch.vtable_gen == db.vtable_gen.latest() {
+                        db.with_state(|_| {
+                            let mut from = 0;
+                            for &(slot, to) in &batch.rows {
+                                let value = &batch.bytes[from..to];
+                                let time_series = &series[slot].time_series;
+                                if let Err(err) =
+                                    time_series.push_buf_from(Some(&cursor), batch.timestamp, value)
+                                {
+                                    warn!(?err, "error committing head");
+                                    break;
+                                }
+                                from = to;
+                            }
+                        });
+                        db.last_updated.update_max(batch.timestamp);
+                    }
+                    let end = Instant::now();
+                    batch.written = Some((end - start, end));
+                    written_by_thread.lock().unwrap().push(batch);
+                }
+            })
+            .expect("failed to spawn the DB writer thread");
+        Self {
+            queue,
+            written,
+            thread,
+            batch: CommitBatch::default(),
+            spare: Vec::new(),
+            in_flight: 0,
+        }
+    }
+
+    /// Queues the rows pushed since the last call, as a commit at `timestamp`.
+    fn send(
+        &mut self,
+        timestamp: Timestamp,
+        vtable_gen: u64,
+        stats: &mut WriterStats,
+    ) -> Result<(), Error> {
+        for mut batch in self.written.lock().unwrap().drain(..) {
+            self.in_flight -= 1;
+            batch.account(stats);
+            batch.rows.clear();
+            batch.bytes.clear();
+            self.spare.push(batch);
+        }
+        let next = self.spare.pop().unwrap_or_default();
+        let mut batch = std::mem::replace(&mut self.batch, next);
+        batch.timestamp = timestamp;
+        batch.vtable_gen = vtable_gen;
+        batch.queued = Some(Instant::now());
+        self.in_flight += 1;
+        stats.queue_high_water = stats.queue_high_water.max(self.in_flight);
+        let exited = || std::io::Error::other("the DB writer thread exited");
+        match self.queue.try_send(batch) {
+            Ok(()) => Ok(()),
+            Err(std::sync::mpsc::TrySendError::Full(batch)) => {
+                let wait = Instant::now();
+                self.queue.send(batch).map_err(|_| exited())?;
+                stats.backpressure_events += 1;
+                stats.backpressure_ns += wait.elapsed().as_nanos() as u64;
+                Ok(())
+            }
+            Err(std::sync::mpsc::TrySendError::Disconnected(_)) => Err(exited().into()),
+        }
+    }
+
+    fn finish(self, stats: &mut WriterStats) {
+        drop(self.queue);
+        let _ = self.thread.join();
+        for batch in self.written.lock().unwrap().iter() {
+            batch.account(stats);
+        }
+    }
+}
+
+/// A cursor every append to `pairs` marks, slot by slot.
+fn watch_pairs(state: &State, pairs: &[PairId]) -> Arc<WatchCursor> {
+    let cursor = Arc::new(WatchCursor::new(pairs.len()));
+    for (slot, pair) in pairs.iter().enumerate() {
+        if let Some(component) = state.get_component(*pair) {
+            component.time_series.watch(&cursor, slot);
+        }
+    }
+    cursor
 }
 
 pub type PairId = ComponentId;
@@ -533,8 +905,14 @@ pub fn get_pair_ids(world: &WorldExec, components: &[ComponentId]) -> Result<Vec
     Ok(results)
 }
 
-fn should_record_component(record_every_tick: bool, latest: Option<&[u8]>, value: &[u8]) -> bool {
-    record_every_tick || latest != Some(value)
+/// Whether a due row is appended: on-change rows only when changed, initial-only rows only when
+/// the DB lost their sample.
+fn should_record(cadence: Cadence, latest: Option<&[u8]>, value: &[u8]) -> bool {
+    match cadence {
+        Cadence::OnChange => latest != Some(value),
+        Cadence::InitialOnly => latest.is_none(),
+        Cadence::EveryCommit | Cadence::Every(_) | Cadence::Manual => true,
+    }
 }
 
 fn reanchored_deadline(now: Instant, pacing_lead: Duration) -> Instant {
@@ -549,15 +927,30 @@ async fn tick(
     is_cancelled: impl Fn() -> bool + 'static,
     pre_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
     post_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
+    step_callbacks: bool,
+    mut pre_commit: Vec<Box<dyn PreCommit + Send>>,
+    counters: Arc<CallbackCounters>,
     start_timestamp: Timestamp,
     interactive: bool,
     cancel_token: CancelToken,
-) {
+) -> Receipt {
     let external_controls: HashSet<ComponentId> = external_controls(&world).collect();
-    let mut sync = db.with_state(|state| DbSync::new(state, world.world(), &external_controls));
+    let mut sync = db.with_state(|state| {
+        DbSync::new(
+            state,
+            world.world(),
+            &world.metadata().ret_ids,
+            &external_controls,
+        )
+    });
     let wait_for_write: Vec<ComponentId> = wait_for_write(&world).collect();
     let wait_for_write_pair_ids: Vec<PairId> = get_pair_ids(&world, &wait_for_write).unwrap();
-    let mut wait_for_write_pair_ids = collect_timestamps(&db, &wait_for_write_pair_ids);
+    let write_barrier = (!wait_for_write_pair_ids.is_empty())
+        .then(|| db.with_state(|state| watch_pairs(state, &wait_for_write_pair_ids)));
+    // Callbacks and barrier writers read the sim's commits from the DB, so those wait for them.
+    if !step_callbacks && write_barrier.is_none() {
+        sync.write_behind(db.clone());
+    }
     let generate_real_time = world.world().metadata.generate_real_time;
     let configured_ticks_per_telemetry = world.world().ticks_per_telemetry();
     let time_step = world.world().sim_time_step().0;
@@ -628,10 +1021,17 @@ async fn tick(
         let telemetry_rate_hz = simulation_rate_hz / (configured_ticks_per_telemetry.max(1) as f64);
         metrics.set_rates(simulation_rate_hz, telemetry_rate_hz);
     }
-    loop {
+    let max_tick = world.world().max_tick();
+    if max_tick != u64::MAX {
+        metrics.requested_ticks = Some(max_tick);
+        metrics.record_cycles(Some(max_tick.div_ceil(configured_ticks_per_telemetry)));
+    } else {
+        metrics.record_cycles(None);
+    }
+    metrics.backend = Some(world.backend_report());
+    'cycles: loop {
         if should_cancel() {
-            metrics.mark_loop_end();
-            return;
+            break;
         }
         if !db.recording_cell.is_playing() {
             next_tick_deadline = None;
@@ -646,8 +1046,7 @@ async fn tick(
             })
             .await;
             if should_cancel() {
-                metrics.mark_loop_end();
-                return;
+                break;
             }
             continue;
         }
@@ -675,8 +1074,7 @@ async fn tick(
             db.recording_cell.set_playing(false);
             world.world_mut().metadata.max_tick = u64::MAX;
             if !interactive {
-                metrics.mark_loop_end();
-                return;
+                break;
             } else {
                 info!(
                     "Simulation stopped; it reached its max_tick {}.",
@@ -700,6 +1098,12 @@ async fn tick(
         // about to restart from tick 0.
         if !warmup_done && tick >= warmup_ticks {
             metrics.reset_after_warmup(tick);
+            sync.reset_counters();
+            counters.reset_activity();
+            pre_commit.iter_mut().for_each(|hook| hook.reset_report());
+            if world.probed() {
+                cranelift_mlir::profile::reset_timings();
+            }
             warmup_done = true;
             last_behind_warning = None;
             first_pacing_at = None;
@@ -708,6 +1112,9 @@ async fn tick(
             pacing_cycles = 0;
         }
 
+        if world.world().metadata.workers > 1 {
+            cranelift_mlir::pool::wake();
+        }
         let copy_in_start = Instant::now();
         // Holding the state lock keeps rows that gRPC ingest applies under the write lock whole.
         db.with_state(|_| sync.copy_db_to_world(world.world_mut(), db.vtable_gen.latest()));
@@ -732,11 +1139,29 @@ async fn tick(
             0.0
         };
         world.world_mut().metadata.ticks_per_telemetry = configured_ticks_per_telemetry;
+        let mut hook_writes = HookWrites::default();
+        if !pre_commit.is_empty() {
+            let pre_commit_start = Instant::now();
+            let step = pre_commit.iter_mut().try_for_each(|hook| {
+                let writes = hook.step(end_tick, batch_end_timestamp, world.world_mut())?;
+                hook_writes.written.extend(writes.written);
+                hook_writes.recorded.extend(writes.recorded);
+                Ok(())
+            });
+            metrics.observe_pre_commit(pre_commit_start.elapsed());
+            if let Err(failure) = step {
+                metrics.failure = Some(failure);
+                break;
+            }
+        }
         let commit_start = Instant::now();
         db.with_state(|_| {
-            if let Err(err) =
-                sync.commit_world(world.world(), batch_end_timestamp, db.vtable_gen.latest())
-            {
+            if let Err(err) = sync.commit_world(
+                world.world(),
+                batch_end_timestamp,
+                db.vtable_gen.latest(),
+                &hook_writes,
+            ) {
                 warn!(?err, "error committing head");
             }
         });
@@ -747,26 +1172,28 @@ async fn tick(
         } else {
             0.0
         };
-        db.last_updated.update_max(batch_end_timestamp);
+        if !sync.writes_behind() {
+            db.last_updated.update_max(batch_end_timestamp);
+        }
         if detailed_timing {
             let wall_ms = start.elapsed().as_secs_f64() * 1000.0;
             tracing::trace!(wall_ms, copy_in_ms, run_ms, commit_ms, "server tick phases",);
         }
         let wait_for_write_start = Instant::now();
-        while !wait_for_write_pair_ids.is_empty()
-            && !timestamps_changed(&db, &mut wait_for_write_pair_ids).unwrap_or(false)
+        while let Some(barrier) = &write_barrier
+            && barrier.drain(|_| {}) == 0
         {
-            stellarator::sleep(Duration::from_millis(1)).await;
+            // The timeout only bounds how long a cancel goes unnoticed.
+            let timeout = stellarator::sleep(Duration::from_millis(1));
+            futures_lite::future::race(barrier.changed(), timeout).await;
             if should_cancel() {
                 metrics.observe_wait_for_write(wait_for_write_start.elapsed());
-                metrics.mark_loop_end();
-                return;
+                break 'cycles;
             }
         }
         metrics.observe_wait_for_write(wait_for_write_start.elapsed());
         if should_cancel() {
-            metrics.mark_loop_end();
-            return;
+            break;
         }
         // Called with end_tick (not batch start) because the world state now
         // reflects the last tick of the batch.
@@ -902,6 +1329,16 @@ async fn tick(
         // in the summary header.
         metrics.observe_total_cycle(start.elapsed());
     }
+    sync.finish_writes();
+    metrics.sync = Some(sync.counters.clone());
+    metrics.timing = world.world().metadata.timing;
+    metrics.systems = world.probed().then(cranelift_mlir::profile::timings);
+    metrics.callbacks = Some(crate::prepared::CallbackReport {
+        hooks: pre_commit.iter().filter_map(|hook| hook.report()).collect(),
+        ..counters.report()
+    });
+    metrics.mark_loop_end();
+    metrics.receipt()
 }
 
 pub fn external_controls(world: &WorldExec) -> impl Iterator<Item = ComponentId> + '_ {
@@ -936,46 +1373,6 @@ pub fn wait_for_write(world: &WorldExec) -> impl Iterator<Item = ComponentId> + 
         .map(|(component_id, _)| *component_id)
 }
 
-pub fn collect_timestamps(db: &DB, components: &[ComponentId]) -> Vec<(ComponentId, Timestamp)> {
-    db.with_state(|state| {
-        let mut timestamps = vec![];
-        for component_id in components.iter() {
-            if let Some(component) = state.get_component(*component_id) {
-                if let Some((timestamp, _)) = component.time_series.latest() {
-                    timestamps.push((*component_id, *timestamp));
-                } else {
-                    timestamps.push((*component_id, Timestamp(i64::MIN)));
-                }
-            } else {
-                timestamps.push((*component_id, Timestamp(i64::MIN)));
-            }
-        }
-        timestamps
-    })
-}
-
-pub fn timestamps_changed(db: &DB, components: &mut [(PairId, Timestamp)]) -> Option<bool> {
-    if components.is_empty() {
-        return None;
-    }
-    db.with_state(|state| {
-        let mut changed = None;
-        for (component_id, timestamp) in components.iter_mut() {
-            if let Some(component) = state.get_component(*component_id)
-                && let Some((curr_timestamp, _)) = component.time_series.latest()
-            {
-                if *timestamp != *curr_timestamp {
-                    changed = Some(true);
-                    *timestamp = *curr_timestamp;
-                } else if changed.is_none() {
-                    changed = Some(false);
-                }
-            }
-        }
-        changed
-    })
-}
-
 #[cfg(test)]
 mod pacing_tests {
     use super::*;
@@ -998,10 +1395,46 @@ mod commit_tests {
     fn sparse_by_default_with_dense_opt_in() {
         let value = [1, 2, 3];
         let changed = [1, 2, 4];
-        assert!(!should_record_component(false, Some(&value), &value));
-        assert!(should_record_component(false, Some(&value), &changed));
-        assert!(should_record_component(false, None, &value));
-        assert!(should_record_component(true, Some(&value), &value));
+        assert!(!should_record(Cadence::OnChange, Some(&value), &value));
+        assert!(should_record(Cadence::OnChange, Some(&value), &changed));
+        assert!(should_record(Cadence::OnChange, None, &value));
+        assert!(should_record(Cadence::EveryCommit, Some(&value), &value));
+    }
+
+    #[test]
+    fn db_sync_records_each_cadence_when_due() {
+        let temp = tempdir().unwrap();
+        let names = ["every", "manual", "initial"];
+        let components = names.map(|name| (name, None));
+        let (db, mut world) = scalar_world(&temp.path().join("db"), &components);
+        for (name, recording) in names.into_iter().zip(["every:2", "manual", "initial_only"]) {
+            let (_, metadata) = world
+                .metadata
+                .component_map
+                .get_mut(&ComponentId::new(name))
+                .unwrap();
+            metadata
+                .metadata
+                .insert("recording".into(), recording.into());
+        }
+        let written = names.map(ComponentId::new);
+        let mut sync = db.with_state(|state| DbSync::new(state, &world, &written, &HashSet::new()));
+        for commit in 0..4 {
+            for name in names {
+                set(&mut world, name, commit as f64 + 1.0);
+            }
+            let recorded = HashSet::from_iter((commit == 3).then(|| ComponentId::new("manual")));
+            let hook = HookWrites {
+                recorded,
+                ..Default::default()
+            };
+            let at = Timestamp(1000 * (commit + 1));
+            sync.commit_world(&world, at, db.vtable_gen.latest(), &hook)
+                .unwrap();
+        }
+        // Each has init_db's sample; `every` adds commits 0 and 2, `manual` the one it asked for.
+        let samples = names.map(|name| series(&db, name).time_series.sample_count());
+        assert_eq!(samples, [3, 2, 1]);
     }
 
     #[test]
@@ -1063,7 +1496,7 @@ mod commit_tests {
         );
 
         db.with_state(|state| {
-            DbSync::new(state, &world, &HashSet::new()).copy_db_to_world(&mut world, 0)
+            DbSync::new(state, &world, &[], &HashSet::new()).copy_db_to_world(&mut world, 0)
         });
 
         assert_eq!(
@@ -1165,8 +1598,9 @@ mod commit_tests {
             &temp.path().join("db"),
             &[("a", None), ("b", Some("external_control"))],
         );
+        let written = [ComponentId::new("a"), ComponentId::new("b")];
         let exclusions = HashSet::from([ComponentId::new("b")]);
-        let mut sync = db.with_state(|state| DbSync::new(state, &world, &exclusions));
+        let mut sync = db.with_state(|state| DbSync::new(state, &world, &written, &exclusions));
 
         push(&db, "a", 500, 5.0);
         sync.copy_db_to_world(&mut world, db.vtable_gen.latest());
@@ -1175,15 +1609,25 @@ mod commit_tests {
         // A write landing after the copy is what the world's unchanged value is compared to.
         push(&db, "a", 800, 7.0);
         set(&mut world, "b", 3.0);
-        sync.commit_world(&world, Timestamp(1000), db.vtable_gen.latest())
-            .unwrap();
+        sync.commit_world(
+            &world,
+            Timestamp(1000),
+            db.vtable_gen.latest(),
+            &HookWrites::default(),
+        )
+        .unwrap();
         assert_eq!(latest(&db, "a"), 5.0);
         assert_eq!(series(&db, "b").time_series.sample_count(), 1);
 
         sync.copy_db_to_world(&mut world, db.vtable_gen.latest());
         assert_eq!(value(&world, "b"), 0.0);
-        sync.commit_world(&world, Timestamp(2000), db.vtable_gen.latest())
-            .unwrap();
+        sync.commit_world(
+            &world,
+            Timestamp(2000),
+            db.vtable_gen.latest(),
+            &HookWrites::default(),
+        )
+        .unwrap();
         assert_eq!(series(&db, "a").time_series.sample_count(), 4);
     }
 
@@ -1191,7 +1635,7 @@ mod commit_tests {
     fn db_sync_rereads_every_pair_after_truncate() {
         let temp = tempdir().unwrap();
         let (db, mut world) = scalar_world(&temp.path().join("db"), &[("a", None), ("c", None)]);
-        let mut sync = db.with_state(|state| DbSync::new(state, &world, &HashSet::new()));
+        let mut sync = db.with_state(|state| DbSync::new(state, &world, &[], &HashSet::new()));
         sync.copy_db_to_world(&mut world, db.vtable_gen.latest());
 
         // As many samples as before the truncate, but a different value.
@@ -1202,14 +1646,48 @@ mod commit_tests {
         assert_eq!(value(&world, "a"), 9.0);
         assert_eq!(value(&world, "c"), 2.0);
 
-        sync.commit_world(&world, Timestamp(1000), db.vtable_gen.latest())
-            .unwrap();
+        sync.commit_world(
+            &world,
+            Timestamp(1000),
+            db.vtable_gen.latest(),
+            &HookWrites::default(),
+        )
+        .unwrap();
         assert_eq!(series(&db, "a").time_series.sample_count(), 1);
         assert_eq!(latest(&db, "c"), 2.0);
     }
 
-    /// Times both DB sync phases on a two-entity world of 276 components, a fifth of which change
-    /// each cycle, with two external writes per cycle. Prints one `DBBENCH {json}` line per cache
+    #[test]
+    fn db_sync_reads_only_rows_others_appended_to() {
+        let temp = tempdir().unwrap();
+        let (db, mut world) = scalar_world(&temp.path().join("db"), &[("a", None), ("c", None)]);
+        let written = [ComponentId::new("c")];
+        let mut sync = db.with_state(|state| DbSync::new(state, &world, &written, &HashSet::new()));
+        let vtable_gen = db.vtable_gen.latest();
+        sync.copy_db_to_world(&mut world, vtable_gen);
+        sync.reset_counters();
+
+        set(&mut world, "c", 2.0);
+        sync.commit_world(&world, Timestamp(1000), vtable_gen, &HookWrites::default())
+            .unwrap();
+        sync.copy_db_to_world(&mut world, vtable_gen);
+        push(&db, "a", 1500, 4.0);
+        push(&db, "a", 1600, 5.0);
+        sync.copy_db_to_world(&mut world, vtable_gen);
+        sync.commit_world(&world, Timestamp(2000), vtable_gen, &HookWrites::default())
+            .unwrap();
+
+        assert_eq!(value(&world, "a"), 5.0);
+        let c = &sync.counters;
+        assert_eq!((c.full_scans, c.rows_scanned, c.rows_drained), (0, 1, 1));
+        assert_eq!((c.cursor_wakeups, c.writes_coalesced), (1, 1));
+        // The first commit after the initial scan compares every row; later ones only `c`.
+        assert_eq!(c.rows_compared, c.rows_registered + 1);
+        assert_eq!(c.rows_committed, 1);
+    }
+
+    /// Times both DB sync phases on a two-entity world of 276 components, a fifth of which systems
+    /// write each cycle, with two external writes per cycle. Prints one `DBBENCH {json}` line per cache
     /// mode, with 32 MB written between phases in the cold mode.
     #[test]
     #[ignore = "benchmark"]
@@ -1262,8 +1740,8 @@ mod commit_tests {
         let external: Vec<ComponentId> = (0..COMPONENTS)
             .map(|c| ComponentId::from_pair("vehicle_1", &format!("component_{c}")))
             .collect();
-        let ids: Vec<ComponentId> = world.host.keys().copied().collect();
-        let mut sync = db.with_state(|state| DbSync::new(state, &world, &HashSet::new()));
+        let written: Vec<ComponentId> = world.host.keys().copied().step_by(5).collect();
+        let mut sync = db.with_state(|state| DbSync::new(state, &world, &written, &HashSet::new()));
 
         let mut cycle = 0i64;
         for thrash_mb in [0usize, 32] {
@@ -1282,14 +1760,19 @@ mod commit_tests {
                 db.with_state(|_| sync.copy_db_to_world(&mut world, db.vtable_gen.latest()));
                 copy_ns.push(t0.elapsed().as_nanos() as u64);
 
-                for id in ids.iter().skip(cycle as usize % 5).step_by(5) {
+                for id in &written {
                     let buffer = &mut world.host.get_mut(id).unwrap().buffer;
                     buffer[0] = buffer[0].wrapping_add(1);
                 }
                 evict(&mut thrash);
                 let t0 = Instant::now();
                 db.with_state(|_| {
-                    sync.commit_world(&world, Timestamp(cycle * 1000), db.vtable_gen.latest())
+                    sync.commit_world(
+                        &world,
+                        Timestamp(cycle * 1000),
+                        db.vtable_gen.latest(),
+                        &HookWrites::default(),
+                    )
                 })
                 .unwrap();
                 commit_ns.push(t0.elapsed().as_nanos() as u64);

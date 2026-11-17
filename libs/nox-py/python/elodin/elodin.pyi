@@ -4,15 +4,95 @@ from collections.abc import Callable, Sequence
 from typing import (
     Any,
     ClassVar,
+    Literal,
     Optional,
     Tuple,
     overload,
 )
 
 import jax
+import numpy
 import polars as pl
 
 from elodin import Archetype
+
+class ComponentHandle:
+    """One component of a fixed list of entities, resolved by `World.prepare_component`."""
+
+    component_id: int
+    name: str
+    access: Literal["read", "write"]
+    dtype: numpy.dtype
+    shape: tuple[int, ...]
+    rows: list[EntityId]
+    topology_generation: int
+
+class BatchHandle:
+    """Handles over the same number of rows, from `World.prepare_batch`."""
+
+    fields: dict[str, ComponentHandle]
+
+class BatchView:
+    """A batch's arrays by field name, as attributes or items; also a context manager."""
+
+    def __getattr__(self, name: str) -> numpy.ndarray: ...
+    def __getitem__(self, name: str) -> numpy.ndarray: ...
+    def __enter__(self) -> BatchView: ...
+    def __exit__(self, *exc: object) -> bool: ...
+
+class WorldStepContext:
+    """Passed to a `pre_commit` callback, which runs after the tick and before the commit.
+
+    Views read the world's current values. Writes to a write handle's view reach the world, and
+    the same commit, when the callback returns; the systems read them on the next tick. Views
+    are copies and end with the callback.
+    """
+
+    tick: int
+    timestamp: int
+    def view(self, handle: ComponentHandle) -> numpy.ndarray:
+        """The handle's rows, read-only for a read handle."""
+        ...
+    def batch(self, batch: BatchHandle) -> BatchView:
+        """Views every field of `batch`."""
+        ...
+    def record(self, handle: ComponentHandle) -> None:
+        """Records the handle's component, recorded with `Recording.manual()`, at this commit."""
+        ...
+    def stop_recipes(self) -> None:
+        """Gracefully terminate all s10-managed recipes; see `StepContext.stop_recipes`."""
+        ...
+
+class Timing:
+    """How much a run measures, from least to most perturbing; the receipt reports it."""
+
+    @staticmethod
+    def summary() -> Timing:
+        """Phase times of every cycle; always on."""
+        ...
+    @staticmethod
+    def systems() -> Timing:
+        """Also the time in each compiled function, so each named system, on the Cranelift
+        backend; a system small enough to inline counts toward its caller. Its probes cost
+        `systems.probe_pair_ns` per call and keep calls serial."""
+        ...
+    @staticmethod
+    def operations() -> Timing:
+        """Also sampled time per kind of operation."""
+        ...
+
+class NativeStepHook:
+    """A `pre_commit` hook in a shared library, over the rows of a prepared batch."""
+
+    @staticmethod
+    def load(path: str, input: BatchHandle, symbol: str, workers: int = 1) -> NativeStepHook:
+        """Loads `symbol`, and `{symbol}_init` and `{symbol}_destroy` if present, from the
+        shared library at `path`. Each tick calls `symbol` once per worker, without the GIL,
+        each on a share of the rows."""
+        ...
+
+PreCommit = Callable[[int, WorldStepContext], None] | NativeStepHook
+"""A `pre_commit` hook; a list of them runs in order."""
 
 class PrimitiveType:
     F64: PrimitiveType
@@ -199,6 +279,7 @@ class ComponentType:
 
 class SystemBuilder:
     cranelift: bool
+    workers: int
     def init_var(self, name: str, ty: ComponentType): ...
     def var_arrays(self) -> list[jax.typing.ArrayLike]: ...
 
@@ -320,7 +401,24 @@ class WorldBuilder:
         start_timestamp: Optional[int] = None,
         log_level: Optional[str] = None,
         backend: str = "cranelift",
+        on_receipt: Optional[Callable[[dict], None]] = None,
+        workers: int = 1,
+        pre_commit: Optional[PreCommit | list[PreCommit]] = None,
+        timing: Optional[Timing] = None,
     ): ...
+    def prepare_component(
+        self,
+        name: str,
+        entities: Sequence[EntityId],
+        access: Literal["read", "write"] = "read",
+    ) -> ComponentHandle:
+        """Resolve the rows of component `name` for `entities`, in that order, for
+        `pre_commit` callbacks to view. Spawning afterwards invalidates the handle."""
+        ...
+    def prepare_batch(self, fields: dict[str, ComponentHandle]) -> BatchHandle:
+        """Group handles over the same number of rows, viewed together by
+        `WorldStepContext.batch`."""
+        ...
     def serve(
         self,
         system: System,
@@ -344,6 +442,8 @@ class WorldBuilder:
         db_path: Optional[str] = None,
         backend: str = "cranelift",
         start_timestamp: Optional[int] = None,
+        workers: int = 1,
+        timing: Optional[Timing] = None,
     ) -> Exec: ...
     def to_jax_func(
         self,
@@ -495,6 +595,54 @@ class Edge:
     @staticmethod
     def unflatten(aux: Any, jax: Any) -> Any: ...
 
+class Recording:
+    """When a component's values reach the DB, counted in commits."""
+
+    @staticmethod
+    def on_change() -> Recording:
+        """When its bytes differ from the last recorded value; the default."""
+        ...
+    @staticmethod
+    def every_commit() -> Recording:
+        """At every commit, changed or not."""
+        ...
+    @staticmethod
+    def every(n: int) -> Recording:
+        """At every `n`th commit, changed or not."""
+        ...
+    @staticmethod
+    def manual() -> Recording:
+        """At the commits a `pre_commit` callback asks for with `WorldStepContext.record`."""
+        ...
+    @staticmethod
+    def initial_only() -> Recording:
+        """Once, when the run starts."""
+        ...
+    @staticmethod
+    def transient() -> Recording:
+        """Never: the component stays out of the DB, its history, replication and the editor."""
+        ...
+
+class Owner:
+    """Which kind of writer may set a component's values; others fail at build."""
+
+    @staticmethod
+    def system() -> Owner:
+        """Compiled systems."""
+        ...
+    @staticmethod
+    def external() -> Owner:
+        """DB and Impeller clients outside the simulation."""
+        ...
+    @staticmethod
+    def pre_commit() -> Owner:
+        """`pre_commit` hooks, through write handles."""
+        ...
+    @staticmethod
+    def static() -> Owner:
+        """Nobody: the initial values never change."""
+        ...
+
 class Component:
     asset: bool
     def __init__(
@@ -503,6 +651,8 @@ class Component:
         ty: Optional[ComponentType] = None,
         asset: bool = False,
         metadata: dict[str, str | bool | int] = {},
+        recording: Optional[Recording] = None,
+        owner: Optional[Owner] = None,
     ): ...
     @staticmethod
     def id(component: Any) -> str:
@@ -526,6 +676,9 @@ class Exec:
         show_progress: bool = True,
         is_canceled: Optional[Callable[[], bool]] = None,
     ): ...
+    def last_receipt(self) -> Optional[dict]:
+        """Phase timings, DB sync counters and backend facts of the latest `run`."""
+        ...
     def profile(self) -> dict[str, float]: ...
     def save_archive(self, path: str, format: str): ...
     def history(self, components: str | list[str]) -> pl.DataFrame: ...

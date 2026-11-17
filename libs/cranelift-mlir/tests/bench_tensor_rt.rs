@@ -7,7 +7,7 @@
 use std::hint::black_box;
 use std::time::Instant;
 
-use cranelift_mlir::tensor_rt::{tensor_matmul_f64, tensor_reduce_sum_f64};
+use cranelift_mlir::tensor_rt::{tensor_matmul_f64, tensor_reduce_sum_f64, tensor_sin_f64};
 
 fn time_iters(name: &str, iters: u32, mut body: impl FnMut()) {
     for _ in 0..5 {
@@ -31,6 +31,18 @@ fn bench_matmul_65() {
     let mut dst = vec![0.0f64; N * N];
     time_iters("tensor_matmul_f64 65x65x65", 2_000, || {
         tensor_matmul_f64(dst.as_mut_ptr(), a.as_ptr(), b.as_ptr(), N, N, N);
+        black_box(&dst);
+    });
+}
+
+#[test]
+#[ignore]
+fn bench_sin_24x32() {
+    const N: usize = 24 * 32;
+    let a: Vec<f64> = (0..N).map(|i| i as f64 * 0.01 - 3.0).collect();
+    let mut dst = vec![0.0f64; N];
+    time_iters("tensor_sin_f64 24x32", 20_000, || {
+        tensor_sin_f64(dst.as_mut_ptr(), a.as_ptr(), N);
         black_box(&dst);
     });
 }

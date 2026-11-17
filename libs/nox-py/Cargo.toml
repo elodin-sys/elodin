@@ -27,6 +27,9 @@ crate-type = ["cdylib", "rlib"]
 pyo3 = "0.23.0"
 numpy.version = "0.23"
 
+# native pre_commit hooks
+libloading = "0.8"
+
 # nox
 nox.path = "../nox"
 nox.features = ["noxpr", "jax"]
