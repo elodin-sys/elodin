@@ -758,7 +758,7 @@ impl Fsw {
                 // Continuous hoverslam vertical (WHITEAPER 11.5): T_min/W > 1
                 // so we never coast mid-burn — the rate loop keeps vdown on the
                 // suicide curve. ZEM/ZEV only shapes the thrust *direction*.
-                let v_des = (2.0 * a_land * h).sqrt() + ZEM_V_TD_MPS;
+                let v_des = (2.0 * a_land * h_agl.max(0.0) + ZEM_V_TD_MPS * ZEM_V_TD_MPS).sqrt();
                 let kv = if h_agl < 15.0 {
                     6.5
                 } else if h_agl < 50.0 {
@@ -782,7 +782,11 @@ impl Fsw {
                 let a_up_zem = dot(a_zem, up_here);
                 let a_lat = sub(a_zem, scale(up_here, a_up_zem));
                 let lat_mag = norm(a_lat);
-                let max_lat = (a_up.max(9.81)) * ZEM_TILT_CAP_RAD.tan();
+                // Progressively stand up over the last 50 m while retaining
+                // a small lateral correction authority.
+                let tilt_cap = 3.0_f64.to_radians()
+                    + (ZEM_TILT_CAP_RAD - 3.0_f64.to_radians()) * (h_agl / 50.0).clamp(0.0, 1.0);
+                let max_lat = (a_up.max(9.81)) * tilt_cap.tan();
                 let a_lat = if lat_mag > max_lat && lat_mag > 1e-6 {
                     scale(normalize(a_lat), max_lat)
                 } else {

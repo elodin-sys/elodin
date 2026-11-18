@@ -2958,18 +2958,34 @@ fn floats_to_cholesky_6(values: &[f64]) -> Option<[f32; 6]> {
 
 pub struct Object3DPlugin;
 
-impl Plugin for Object3DPlugin {
+/// Scene-joint animations shared by editor viewports and headless sensor cameras.
+pub struct Object3DAnimationPlugin;
+
+impl Plugin for Object3DAnimationPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<IconTextureCache>().add_systems(
+        app.add_systems(
             Update,
             (
                 on_scene_ready.pipe(attach_joint_animations),
                 update_joint_animations,
-                warn_imported_cameras,
-                update_object_3d_billboard_system,
-                apply_glb_material_overrides,
-            ),
+            )
+                .chain(),
         );
+    }
+}
+
+impl Plugin for Object3DPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins(Object3DAnimationPlugin)
+            .init_resource::<IconTextureCache>()
+            .add_systems(
+                Update,
+                (
+                    warn_imported_cameras,
+                    update_object_3d_billboard_system,
+                    apply_glb_material_overrides,
+                ),
+            );
     }
 }
 
@@ -3104,6 +3120,60 @@ mod joint_eql_cast_tests {
 
     use super::compile_eql_expr;
     use crate::ui::widgets::SystemStateExt;
+
+    #[test]
+    fn grid_fin_deployment_uses_recorded_angles_without_accumulating_rotation() {
+        use bevy::prelude::{Quat, Transform, Vec3};
+        let id = ComponentId::new("booster.fin_deploy");
+        let component = Arc::new(eql::Component::new(
+            "booster.fin_deploy".into(),
+            id,
+            Schema::new(PrimType::F64, [1usize]).unwrap(),
+        ));
+        let ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+        let expr = compile_eql_expr(
+            ctx.parse_str("(booster.fin_deploy[0] * -57.29577951308232, 0, 0)")
+                .unwrap(),
+        )
+        .unwrap();
+        let mut world = World::new();
+        let telemetry = world
+            .spawn(ComponentValue::F64(nox::array![0.0f64].to_dyn()))
+            .id();
+        world.insert_resource(EntityMap(HashMap::from([(id, telemetry)])));
+        let original = Transform::from_xyz(1.0, 2.0, 3.0)
+            .with_rotation(Quat::from_rotation_z(0.7))
+            .with_scale(Vec3::splat(2.0));
+        let joint = world
+            .spawn((
+                original,
+                super::JointAnimationComponent {
+                    compiled_expr: expr,
+                    original_transform: original,
+                },
+            ))
+            .id();
+        for angle in [
+            0.0,
+            std::f64::consts::FRAC_PI_4,
+            std::f64::consts::FRAC_PI_2,
+            std::f64::consts::FRAC_PI_4,
+            0.0,
+        ] {
+            *world.get_mut::<ComponentValue>(telemetry).unwrap() =
+                ComponentValue::F64(nox::array![angle].to_dyn());
+            world
+                .run_system_cached(super::update_joint_animations)
+                .unwrap();
+            let actual = world.get::<Transform>(joint).unwrap();
+            assert!(actual.rotation.abs_diff_eq(
+                original.rotation * Quat::from_rotation_x(-angle as f32),
+                1e-6
+            ));
+            assert_eq!(actual.translation, original.translation);
+            assert_eq!(actual.scale, original.scale);
+        }
+    }
 
     #[test]
     fn joint_rotation_vector_string_with_cast_evaluates_like_kdl_example() {

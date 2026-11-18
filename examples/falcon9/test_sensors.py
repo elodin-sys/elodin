@@ -241,6 +241,52 @@ def test_touchdown_metrics_latch_first_impact():
     assert 2.5 < v_up < 8.0
 
 
+def test_settling_preserves_first_contact_tilt_and_rate():
+    import frames
+    from sim import (
+        CgStation,
+        DeckMetrics,
+        Landed,
+        Lifted,
+        TouchdownMetrics,
+        TvcState,
+        ground_contact,
+    )
+
+    @el.dataclass
+    class ContactState(el.Archetype):
+        world_pos: el.WorldPos
+        world_vel: el.WorldVel
+        landed: Landed
+        touchdown_metrics: TouchdownMetrics
+        deck_metrics: DeckMetrics
+        lifted: Lifted
+        tvc_state: TvcState
+        cg_station: CgStation
+
+    up = frames.ellipsoid_up(math.radians(LZ1_LAT_DEG), math.radians(LZ1_LON_DEG))
+    metrics = jnp.array([3.0, 1.0, 4.0, math.sqrt(10.0), 0.03, 0.01])
+    world = el.World()
+    world.spawn(
+        ContactState(
+            world_pos=el.SpatialTransform(
+                angular=_attitude_along_up(up), linear=lz1_ecef() + up * 19.9
+            ),
+            world_vel=el.SpatialMotion(),
+            landed=jnp.zeros(1),
+            touchdown_metrics=metrics,
+            deck_metrics=jnp.zeros(5),
+            lifted=jnp.ones(1),
+            tvc_state=jnp.zeros(2),
+            cg_station=jnp.array([20.0]),
+        ),
+        name="booster",
+    )
+    get = _run(world, ground_contact, 1)
+    assert get("landed")[0] == 1.0
+    np.testing.assert_array_equal(get("touchdown_metrics"), np.asarray(metrics))
+
+
 def test_mission_scoring_gates_on_liftoff():
     """Scoring is liftoff-referenced: zero samples while clamped, accumulating
     once the clamp releases (recorded t=0 is liftoff, not sim start)."""

@@ -11,6 +11,7 @@ import shutil
 import struct
 import sys
 import tempfile
+import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
@@ -46,7 +47,7 @@ def read_json(path):
     return value
 
 
-def validate_package(directory, request):
+def validate_package(directory, request, *, exact=False):
     """Verify declared coverage and every prepared file before an offline run."""
     manifest = read_json(directory / "prepared-region.json")
     from .terrain import TerrainRegion
@@ -67,6 +68,8 @@ def validate_package(directory, request):
     except (KeyError, TypeError) as error:
         raise ValueError("Malformed terrain package manifest") from error
     regions = json.loads(json.dumps(request["regions"]))
+    if exact and previous_regions != regions:
+        raise ValueError("Prepared terrain regions changed; prepare the requested coverage")
     if manifest.get("version") != 1 or manifest.get("asset_id") != request["asset_id"]:
         raise ValueError("Terrain package provider/version mismatch")
     for region in regions:
@@ -245,17 +248,21 @@ class GoogleSource:
         self.cache.mkdir(parents=True, exist_ok=True)
 
     def download(self, request):
-        try:
-            with urlopen(request, timeout=60) as response:
-                data = response.read(MAX_RESOURCE_BYTES + 1)
-        except HTTPError as error:
-            raise ValueError(
-                f"Terrain download failed (HTTP {error.code}); rerun preparation to retry"
-            ) from None
-        except (URLError, TimeoutError):
-            raise ValueError(
-                "Terrain download failed or timed out; rerun preparation to retry"
-            ) from None
+        for attempt in range(3):
+            try:
+                with urlopen(request, timeout=60) as response:
+                    data = response.read(MAX_RESOURCE_BYTES + 1)
+                break
+            except HTTPError as error:
+                message = f"Terrain download failed (HTTP {error.code}); rerun preparation to retry"
+                if error.code not in {408, 429, 500, 502, 503, 504}:
+                    raise ValueError(message) from None
+            except (URLError, TimeoutError, ConnectionError):
+                message = "Terrain download failed or timed out; rerun preparation to retry"
+            if attempt == 2:
+                raise ValueError(message) from None
+            print("Temporary terrain download failure; retrying…", flush=True)
+            time.sleep(2**attempt)
         if len(data) > MAX_RESOURCE_BYTES:
             raise ValueError("Terrain resource exceeds the preparation size limit")
         self.bytes += len(data)
@@ -466,7 +473,7 @@ def prepare(request, source):
         raise ValueError("Terrain output must not be a symbolic link")
     if output.exists():
         try:
-            result = validate_package(output, request)
+            result = validate_package(output, request, exact=True)
             print(
                 f"Terrain ready: {result['tiles']} tiles, {result['bytes'] / 1e6:.1f} MB (reused)",
                 flush=True,
@@ -577,7 +584,7 @@ def main():
     request = read_json(Path(sys.argv[1]))
     # A valid package is usable without any provider connection or credentials.
     try:
-        report = validate_package(Path(request["output"]), request)
+        report = validate_package(Path(request["output"]), request, exact=True)
     except (FileNotFoundError, ValueError):
         cache = (
             Path(os.environ.get("XDG_CACHE_HOME", str(Path.home() / ".cache")))
