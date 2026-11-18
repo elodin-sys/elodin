@@ -1,7 +1,7 @@
 # Changelog
 
 ## unreleased
-- **(feat:examples)** Add a many-agent lockstep example: one world steps 24 agents at 1 kHz, each with its own controller process, through prepared batches and a native `pre_commit` hook.
+- **(feat:examples)** Add a many-agents example: one world steps 24 agents at 1 kHz, each with its own controller process, through prepared batches and a native `pre_commit` hook, while a sensor camera watches from above.
 - **(feat)** Add `pre_commit` hooks to `World.run`. With handles from `World.prepare_component` and `World.prepare_batch`, a hook reads each tick's result and writes into the world before the commit, without going through the DB.
 - **(feat)** Add `el.NativeStepHook`, a `pre_commit` hook in a shared library that runs without the GIL and can split its rows across worker threads.
 - **(feat)** Let `pre_commit` hooks read committed DB history and queue writes for after the commit: `World.prepare_component_history` and `World.prepare_message_history` with `WorldStepContext.read_at` (exact or at-or-before), and `World.prepare_timestamped_writer` with `WorldStepContext.defer_write`. A failing hook stops later hooks and its cycle's commit, and the receipt names it.
@@ -20,6 +20,7 @@
 - **(fix)** Compile multi-entity Cranelift simulations that use `lax.cond` around a large lookup table, which exhausted memory, or `jnp.linalg.solve`, which failed to compile. An intermediate too large for the simulation thread's stack is now a compile error.
 - **(fix)** Compile Cranelift systems whose helper returns the same value for more than one output.
 - **(fix)** Real-time simulations with a pacing lead start at wall-clock speed instead of sprinting through the lead interval.
+- **(fix)** The render server no longer warns every second that a sensor camera that does not move has a stale pose. Its pose is recorded only when it changes, so its last sample stays current.
 - **(fix)** Recording looks for assets in `./assets`, then the simulation's own `assets/`, then the nearest `assets/` above it, so assets such as the Falcon 9 map overlays load when the simulation runs from the repository root. Earlier folders win when a file exists in several.
 
 ## v0.21

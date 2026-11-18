@@ -8,7 +8,7 @@ def rows(frame, name: str) -> np.ndarray:
 
 
 def test_two_by_two_world_runs_real_compiled_path():
-    world, system, _, _ = build(2, 2)
+    world, system, *_ = build(2, 2)
     execution = world.build(system, simulation_rate=RATE_HZ)
 
     execution.run(20, show_progress=False)
@@ -32,7 +32,7 @@ def test_two_by_two_world_runs_real_compiled_path():
 
 
 def test_cranelift_and_jax_cpu_agree():
-    world, system, _, _ = build(2, 2)
+    world, system, *_ = build(2, 2)
     execution = world.build(system, simulation_rate=RATE_HZ)
     execution.run(20, show_progress=False)
     frame = execution.history(["agent_000.position", "agent_001.position"])
@@ -43,7 +43,7 @@ def test_cranelift_and_jax_cpu_agree():
         ]
     )
 
-    jax_world, jax_system, _, _ = build(2, 2)
+    jax_world, jax_system, *_ = build(2, 2)
     simulation = jax_world.to_jax(jax_system, simulation_rate=RATE_HZ)
     simulation.step(20)
     jax_cpu = np.asarray(simulation.get_state("position")).reshape(2, 3)

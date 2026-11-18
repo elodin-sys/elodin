@@ -49,11 +49,15 @@ ObjectRate = component("object_rate", (1,))
 ObjectSignal = component("object_signal", (16,))
 AUX_COMPONENTS = tuple(component(f"aux_{index:02d}", (4,)) for index in range(AUX_COMPONENT_COUNT))
 
-# Capture evidence that the history hook of `main.py` appends after each commit.
-CAPTURE_FIELDS = ("frame", "time", "disposition")
+# The overhead camera rig, and the capture evidence that the history hook of `main.py` appends
+# after each commit: frame number, capture time, 0 found or 1 missing, and agent 0's position.
+CAMERA_HEIGHT = 80.0
+CAMERA_BOB_M = 12.0
+CAMERA_BOB_PERIOD_S = 20.0
+CAPTURE_SHAPES = {"frame": (1,), "time": (1,), "disposition": (1,), "truth": (3,)}
 CAPTURE = tuple(
-    component(f"capture_{field}", (1,), metadata={"external_control": "true"})
-    for field in CAPTURE_FIELDS
+    component(f"capture_{field}", shape, metadata={"external_control": "true"})
+    for field, shape in CAPTURE_SHAPES.items()
 )
 
 
@@ -144,6 +148,19 @@ def step_object(
     return next_position, next_velocity, signal
 
 
+@el.system
+def bob_camera(
+    tick: el.Query[el.SimulationTick],
+    pose: el.Query[el.WorldPos],
+) -> el.Query[el.WorldPos]:
+    """Moves the camera rig slowly up and down, so the overhead view zooms in and out."""
+    phase = 2.0 * jnp.pi * tick[0] * DT / CAMERA_BOB_PERIOD_S
+    height = CAMERA_HEIGHT + CAMERA_BOB_M * jnp.sin(phase)
+    return pose.map(
+        el.WorldPos, lambda _: el.SpatialTransform(linear=jnp.array([0.0, 0.0, height]))
+    )
+
+
 def _ring(index: int, count: int, radius: float) -> tuple[jax.Array, jax.Array]:
     angle = 2.0 * math.pi * index / max(count, LAYOUT_SLOTS)
     position = jnp.array(
@@ -159,7 +176,7 @@ def _ring(index: int, count: int, radius: float) -> tuple[jax.Array, jax.Array]:
 
 def build(
     agent_count: int, object_count: int
-) -> tuple[el.World, el.System, list[el.EntityId], list[el.EntityId]]:
+) -> tuple[el.World, el.System, list[el.EntityId], list[el.EntityId], el.EntityId]:
     if agent_count < 1 or object_count < 1:
         raise ValueError("agent and object counts must be positive")
     world = el.World()
@@ -204,5 +221,14 @@ def build(
             name=f"object_{index:03d}",
         )
         objects.append(observed)
-    world.spawn([el.C(field, jnp.zeros(1, dtype=jnp.float64)) for field in CAPTURE], name="camera")
-    return world, step_agent | step_object, agents, objects
+    camera = world.spawn(
+        [
+            el.C(el.WorldPos, el.SpatialTransform(linear=jnp.array([0.0, 0.0, CAMERA_HEIGHT]))),
+            *(
+                el.C(field, jnp.zeros(shape, dtype=jnp.float64))
+                for field, shape in zip(CAPTURE, CAPTURE_SHAPES.values())
+            ),
+        ],
+        name="camera",
+    )
+    return world, step_agent | step_object | bob_camera, agents, objects, camera

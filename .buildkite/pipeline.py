@@ -228,12 +228,12 @@ test_steps = [
                 command="python3 -m pytest examples/betaflight-sitl/tests -q",
             ),
             nix_step(
-                label=":python: many-agent lockstep",
+                label=":python: many-agents",
                 flake=".#run",
                 command="""
-python3 examples/many-agent-lockstep/controller/build.py
-python3 -m pytest examples/many-agent-lockstep/tests -q
-python3 examples/many-agent-lockstep/benchmark.py --sizes 2 --modes runtime,local,lockstep,lockstep-history --warmup-ticks 10 --measured-ticks 50 --repeats 1 --no-paced --output /tmp/many-agent-lockstep-ci
+python3 examples/many-agents/controller/build.py
+python3 -m pytest examples/many-agents/tests -q
+python3 examples/many-agents/benchmark.py --sizes 2 --modes runtime,local,lockstep,lockstep-history --warmup-ticks 10 --measured-ticks 50 --repeats 1 --no-paced --output /tmp/many-agents-ci
 """,
             ),
             nix_step(

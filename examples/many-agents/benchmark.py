@@ -53,7 +53,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path("profile_output/many-agent-lockstep"),
+        default=Path("profile_output/many-agents"),
     )
     return parser.parse_args()
 
@@ -174,7 +174,6 @@ def run_case(
         "callbacks": summary.get("callbacks"),
         "wall_s": wall_s,
         "output_digest": result.get("sha256"),
-        "evidence_digest": result.get("evidence_sha256"),
         "frames": result.get("frames"),
     }
     (case_dir / "run.json").write_text(json.dumps(run, indent=2) + "\n")
@@ -182,19 +181,17 @@ def run_case(
 
 
 def mismatched_sizes(runs: list[dict]) -> list[int]:
-    """Returns the agent counts whose runs disagree.
+    """Returns the agent counts whose runs ended in different states.
 
     Every repeat of the `local`, `lockstep` and `lockstep-history` modes must end in the same
-    state, because the controllers compute the same commands as the Python hook, and every
-    repeat of `lockstep-history` must record the same capture evidence.
+    state, because the controllers compute the same commands as the Python hook, and the camera
+    only watches.
     """
-    digests: dict[tuple[int, str], set[str]] = {}
+    digests: dict[int, set[str]] = {}
     for run in runs:
-        size = run["configuration"]["agents"]
-        for kind in ("output_digest", "evidence_digest"):
-            if run.get(kind):
-                digests.setdefault((size, kind), set()).add(run[kind])
-    return sorted({size for (size, _), found in digests.items() if len(found) > 1})
+        if run["output_digest"]:
+            digests.setdefault(run["configuration"]["agents"], set()).add(run["output_digest"])
+    return sorted(size for size, found in digests.items() if len(found) > 1)
 
 
 def main() -> int:

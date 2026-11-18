@@ -162,7 +162,7 @@ An external flight-software process driven over UDP, alongside the sim.
 
 | Example | Description |
 | --- | --- |
-| [many-agent-lockstep](./many-agent-lockstep) | 24 agents at 1 kHz, each with its own controller process: `workers=`, prepared batches, `pre_commit` and native hooks, run receipts |
+| [many-agents](./many-agents) | 24 agents at 1 kHz, each with its own controller process, watched by an overhead sensor camera: `workers=`, prepared batches, `pre_commit` and native hooks, history reads, run receipts |
 
 ---
 
@@ -232,7 +232,7 @@ Custom `el.Component` + `@el.dataclass` archetypes beyond `el.Body`.
 | [video-stream](./video-stream) | GStreamer + OBS / RTSP receivers |
 | [logstream](./logstream) | C++ `log-client` into the DB |
 | [monte-carlo](./monte-carlo) | `world.recipe(...)` + campaign worker ports |
-| [many-agent-lockstep](./many-agent-lockstep) | One supervised compiled controller process per agent |
+| [many-agents](./many-agents) | One supervised compiled controller process per agent |
 
 ### Monte Carlo
 
@@ -359,6 +359,7 @@ Alternatives to the default `World.run(...)` on the Cranelift backend.
 | [sensor-camera](./sensor-camera) | Onboard camera, FPS / latency knobs |
 | [ellipsoid](./ellipsoid) | Frustum creation + `sensor_view` next to 3D |
 | [rc-jet](./rc-jet) | FPV camera (`create_frustum=False`) |
+| [many-agents](./many-agents) | Overhead camera whose frames a `pre_commit` hook reads back by capture time |
 
 ### Gauges / monitors
 
