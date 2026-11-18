@@ -12,7 +12,7 @@ import math
 from dataclasses import dataclass, replace
 from types import MappingProxyType
 
-from controls import SemanticControl, TruthGuidanceUpdate
+from controls import SemanticControl, TruthGuidanceUpdate, TruthState
 
 Vec3 = tuple[float, float, float]
 
@@ -869,6 +869,64 @@ class TruthGuidance:
 
     def __init__(self, config: TruthGuidanceConfig | None = None):
         self.controller = MissionController(config)
+        # Owned callback arrays, not immutable guidance objects. Only the
+        # reduced-rate host calls the fast guard; full-rate updates are unchanged.
+        self._last_fast_truth = None
+
+    def fast_update_required(self, world_pos, world_vel, gyro, *, last_gate_passed=-1) -> bool:
+        """Check invalid truth/gyro and crossing at physics rate without PD work.
+
+        On rejection, materialize the previous healthy physics sample so the
+        latched fault target and current-gyro fallback do not become stale since
+        the last guidance frame. The caller must run the normal adapter now and
+        every FAULT tick, through the original one-tick command latch.
+        Bridge/motor health is intentionally not a new controller input.
+        """
+        if self.phase is GuidancePhase.FAULT:
+            return True
+        try:
+            valid = (
+                len(world_pos) >= 7
+                and len(world_vel) >= 6
+                and all(math.isfinite(float(value)) for value in world_pos[:7])
+                and all(math.isfinite(float(value)) for value in world_vel[3:6])
+                and math.hypot(*world_pos[:4]) > 1.0e-12
+                and math.isfinite(math.hypot(*world_pos[:4]))
+                and getattr(gyro, "shape", None) == (3,)
+                and all(math.isfinite(float(value)) for value in gyro)
+            )
+        except (TypeError, ValueError, IndexError):
+            valid = False
+        previous = self._last_fast_truth
+        if not valid:
+            if previous is not None:
+                pos, vel, rate = previous
+                truth = TruthState(tuple(pos[4:7]), tuple(vel[3:6]), tuple(pos[:4]))
+                self.controller._last_valid_state = NavState(
+                    truth.position_enu,
+                    truth.velocity_enu,
+                    _yaw_from_xyzw(truth.orientation_xyzw),
+                    float(rate[2]),
+                )
+            return True
+
+        self._last_fast_truth = (world_pos, world_vel, gyro)
+        if self.config.profile == "hold" and last_gate_passed >= 0:
+            return True
+        gate = self.controller.gate_target
+        if gate is not None and previous is not None:
+            previous_x = gate.to_local(previous[0][4:7])[0]
+            current_x = gate.to_local(world_pos[4:7])[0]
+            if self.controller._crossed_forward_plane(previous_x, current_x) and (
+                self.config.profile == "hold"
+                or self.phase not in (GuidancePhase.COMMIT, GuidancePhase.FINISH)
+            ):
+                # The normal controller, not this guard, owns fault ingress and
+                # its current-state target. Supply the consecutive physics plane
+                # sample so even a brief out-and-back crossing cannot be hidden.
+                self.controller._previous_gate_local_x = previous_x
+                return True
+        return False
 
     @property
     def config(self) -> TruthGuidanceConfig:

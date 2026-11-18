@@ -1,10 +1,13 @@
+import ast
 import math
+import shlex
 
 import pytest
 from course import (
     GATE_BAR_THICKNESS_M,
     SATURATED_ORANGE_RGB,
     SINGLE_GATE_INNER_SIZE_M,
+    Course,
     Gate,
     course_bars,
     course_from_env,
@@ -94,14 +97,28 @@ def test_gate_render_geometry_is_four_static_box_poses_with_exact_opening():
 
 
 def test_gate_objects_are_four_saturated_orange_matte_boxes():
-    import elodin.ui as ui
+    import elodin.ui as ui  # noqa: PLR0402 - Python ui.pose wrapper
 
-    schematic = ui.schematic(*gate_objects(course_from_name("single"))).emit_kdl()
+    course = Course("yawed", (Gate(0, (-3.5, 2.25, 4.0), 0.713, 3.25),))
+    objects = gate_objects(course)
+    schematic = ui.schematic(*objects).emit_kdl()
 
-    assert schematic.count("object_3d gate_0_") == 4
+    assert schematic.count("object_3d ") == 4
+    assert "world_pos" not in schematic
+    assert schematic.count("frame=ENU") == 4
     assert schematic.count("orientation=absolute") == 4
+    assert "sensor_visible=#false" not in schematic
     assert schematic.count("box ") == 4
     # 255,128,0 rounds to the editor's named orange, rgb(1, 0.5, 0).
     assert schematic.count("color orange") == 4
     assert SATURATED_ORANGE_RGB == (255, 128, 0)
     assert "emissivity" not in schematic
+    for obj, bar in zip(objects, course_bars(course), strict=True):
+        lines = ui.schematic(obj).emit_kdl().splitlines()
+        object_line = next(line for line in lines if line.startswith("object_3d "))
+        pose = ast.literal_eval(shlex.split(object_line)[1])
+        assert len(pose) == 7
+        assert pose == (*bar.quaternion_xyzw, *bar.center)
+        box = next(line for line in lines if line.strip().startswith("box "))
+        dimensions = dict(field.split("=") for field in box.split()[1:4])
+        assert tuple(float(dimensions[axis]) for axis in "xyz") == bar.size

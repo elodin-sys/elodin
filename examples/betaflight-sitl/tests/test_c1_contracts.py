@@ -4,13 +4,14 @@
 # ruff: noqa: S102
 
 import ast
+import shlex
 import sys
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 from controls import RcCommand
-from course import course_from_name
+from course import course_bars, course_from_name
 from course_referee import TruthCourseReferee
 from exit_status import CallbackExecution, scenario_exit_code
 from referee import Referee
@@ -37,9 +38,15 @@ def test_phase_telemetry_metadata_matches_shared_controller_codes():
 def test_c1_schematic_has_twelve_distinct_static_bars_and_phase_rc_graphs():
     course = course_from_name("c1_straight")
     kdl = build_schematic(course, audit_enabled=False, camera_enabled=False).emit_kdl()
-    assert kdl.count("object_3d gate_") == 12
-    for i in range(3):
-        assert kdl.count(f"object_3d gate_{i}_") == 4
+    assert kdl.count("box ") == 12
+    assert "gate_0_top.world_pos" not in kdl
+    assert kdl.count("orientation=absolute") == 12
+    poses = [
+        ast.literal_eval(shlex.split(line)[1])
+        for line in kdl.splitlines()
+        if line.startswith('object_3d "(')
+    ]
+    assert poses == [(*bar.quaternion_xyzw, *bar.center) for bar in course_bars(course)]
     assert kdl.count("drone.guidance_mode") == 1
     assert kdl.count("drone.rc_command") == 1
     assert "sensor_view" not in kdl
@@ -58,25 +65,6 @@ def test_c1_camera_plane_extends_past_last_gate_and_remains_camera_only():
             course_from_name(name), audit_enabled=False, camera_enabled=True
         ).emit_kdl()
         assert "plane width=40.0 depth=40.0" in kdl
-
-
-def test_spawned_c1_bars_have_world_pose_only_never_body_inertia_or_force():
-    from race_runtime import spawn_course
-
-    class World:
-        def __init__(self):
-            self.entities = []
-
-        def spawn(self, value, name):
-            self.entities.append((name, value))
-            return len(self.entities)
-
-    world = World()
-    assert len(spawn_course(world, course_from_name("c1_straight"))) == 12
-    assert len({name for name, _ in world.entities}) == 12
-    for _, entity in world.entities:
-        assert tuple(entity.__dataclass_fields__) == ("world_pos",)
-        assert not any(hasattr(entity, field) for field in ("inertia", "force", "world_vel"))
 
 
 def test_c1_ordered_crossings_and_all_intermediate_fixed_width_telemetry():
