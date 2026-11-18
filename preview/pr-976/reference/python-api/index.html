@@ -384,6 +384,14 @@
             <li>
                 <a
                     class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-976/reference/sitl-hitl/"
+                    >SITL &amp; HITL</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
                     href="https://docs.elodin.systems/preview/pr-976/reference/schematic/"
                     >Schematic KDL</a
                 >
@@ -1107,7 +1115,7 @@ are returned so the same simulation still runs normally.</p>
 <p>Integer reference identifier for entities in Elodin.</p>
 <h3 id="class-elodin-stepcontext"><em>class</em> <code>elodin.StepContext</code></h3>
 <p>Context object passed to <code>pre_step</code> and <code>post_step</code> callbacks, providing direct database read/write access. This enables Software-In-The-Loop (SITL) and Hardware-In-The-Loop (HITL) workflows where external systems need to exchange data with the simulation at each tick.</p>
-<p><code>StepContext</code> provides direct database access within the same process, avoiding the overhead of a separate TCP connection. This is essential for high-frequency lockstep synchronization with external flight controllers or sensor systems.</p>
+<p><code>StepContext</code> provides direct database access within the same process, avoiding the overhead of a separate TCP connection. This is essential for high-frequency lockstep synchronization with external flight controllers or sensor systems. <a href="/reference/sitl-hitl">SITL &amp; HITL</a> compares it with <code>pre_commit</code> hooks.</p>
 <h4 id="properties">Properties</h4>
 <ul>
 <li>
@@ -1290,7 +1298,7 @@ are returned so the same simulation still runs normally.</p>
 <span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">            #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> data_a uses current simulation timestamp</span></span>
 <span class="giallo-l"><span>        }</span></span>
 <span class="giallo-l"><span>    )</span></span></code></pre><h3 id="pre-commit-hooks">Pre-commit hooks</h3>
-<p>A <code>pre_commit</code> hook runs after each tick and before its DB commit, on world columns resolved once with <code>World.prepare_component</code> and <code>World.prepare_batch</code>. Unlike <code>post_step</code>, it does not go through the DB: what it reads is the tick's result, and what it writes reaches the world, the same commit, and the systems on the next tick.</p>
+<p>A <code>pre_commit</code> hook runs after each tick and before its DB commit, on world columns resolved once with <code>World.prepare_component</code> and <code>World.prepare_batch</code>. Unlike <code>post_step</code>, it does not go through the DB: what it reads is the tick's result, and what it writes reaches the world, the same commit, and the systems on the next tick. <a href="/reference/sitl-hitl">SITL &amp; HITL</a> explains when to use each.</p>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>exchange</span><span style="color: light-dark(#859900, #859900);"> =</span><span> world</span><span>.</span><span>prepare_batch</span><span>(</span><span>{</span></span>
 <span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">    &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">position</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> world</span><span>.</span><span>prepare_component</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">position</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> agents</span><span>)</span><span>,</span></span>
 <span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">    &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">target</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> world</span><span>.</span><span>prepare_component</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">object_position</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> targets</span><span>)</span><span>,</span></span>
