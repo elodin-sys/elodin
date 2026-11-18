@@ -36,6 +36,7 @@ atlases, Monte Carlo campaigns). A few are headless checks, not editor scenes:
   - [Component / Archetype](#component--archetype)
   - [GraphQuery / Edge](#graphquery--edge)
   - [StepContext](#stepcontext)
+  - [Pre-commit hooks](#pre-commit-hooks)
   - [s10 recipes](#s10-recipes)
   - [Monte Carlo](#monte-carlo)
   - [Coordinate frames](#coordinate-frames)
@@ -132,6 +133,7 @@ An external flight-software process driven over UDP, alongside the sim.
 | [falcon9](./falcon9) | Rust FSW flying the full RTLS mission |
 | [rc-jet](./rc-jet) | External RC / autopilot controller |
 | [monte-carlo](./monte-carlo) | Minimal plant ↔ controller campaign with per-run scoring |
+| [many-agents](./many-agents) | 24 controller processes in lockstep at 1 kHz through `pre_commit` hooks |
 
 ### Editor scenes & visualization
 
@@ -218,6 +220,14 @@ Custom `el.Component` + `@el.dataclass` archetypes beyond `el.Body`.
 | [monte-carlo](./monte-carlo) | Plant ↔ controller over UDP, campaign ports |
 | [voyager](./voyager) | SPICE kernel updates each tick |
 | [n-body](./n-body) | Truth-index advance in `post_step` |
+
+### Pre-commit hooks
+
+`pre_commit` hooks with `el.WorldStepContext` and `el.NativeStepHook` (prepared rows, written before the commit).
+
+| Example | Description |
+| --- | --- |
+| [many-agents](./many-agents) | Native exchange hook, camera history reads, deferred writes |
 
 ### s10 recipes
 

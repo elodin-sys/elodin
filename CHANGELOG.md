@@ -1,6 +1,7 @@
 # Changelog
 
 ## unreleased
+- **(docs)** Add a SITL & HITL reference page: the post-step and pre-commit bridge styles, when to use each, measured costs, and SITL and HITL layouts with examples.
 - **(feat:examples)** Add a many-agents example: one world steps 24 agents at 1 kHz, each with its own controller process, through prepared batches and a native `pre_commit` hook, while a sensor camera watches from above.
 - **(feat)** Add `pre_commit` hooks to `World.run`. With handles from `World.prepare_component` and `World.prepare_batch`, a hook reads each tick's result and writes into the world before the commit, without going through the DB.
 - **(feat)** Add `el.NativeStepHook`, a `pre_commit` hook in a shared library that runs without the GIL and can split its rows across worker threads.

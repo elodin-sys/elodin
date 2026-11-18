@@ -236,7 +236,7 @@ Integer reference identifier for entities in Elodin.
 
 Context object passed to `pre_step` and `post_step` callbacks, providing direct database read/write access. This enables Software-In-The-Loop (SITL) and Hardware-In-The-Loop (HITL) workflows where external systems need to exchange data with the simulation at each tick.
 
-`StepContext` provides direct database access within the same process, avoiding the overhead of a separate TCP connection. This is essential for high-frequency lockstep synchronization with external flight controllers or sensor systems.
+`StepContext` provides direct database access within the same process, avoiding the overhead of a separate TCP connection. This is essential for high-frequency lockstep synchronization with external flight controllers or sensor systems. [SITL & HITL](/reference/sitl-hitl) compares it with `pre_commit` hooks.
 
 #### Properties
 
@@ -410,7 +410,7 @@ def log_with_timestamps(tick: int, ctx: el.StepContext):
 
 ### Pre-commit hooks
 
-A `pre_commit` hook runs after each tick and before its DB commit, on world columns resolved once with `World.prepare_component` and `World.prepare_batch`. Unlike `post_step`, it does not go through the DB: what it reads is the tick's result, and what it writes reaches the world, the same commit, and the systems on the next tick.
+A `pre_commit` hook runs after each tick and before its DB commit, on world columns resolved once with `World.prepare_component` and `World.prepare_batch`. Unlike `post_step`, it does not go through the DB: what it reads is the tick's result, and what it writes reaches the world, the same commit, and the systems on the next tick. [SITL & HITL](/reference/sitl-hitl) explains when to use each.
 
 ```python
 exchange = world.prepare_batch({
