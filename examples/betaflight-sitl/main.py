@@ -54,6 +54,7 @@ from exit_status import CallbackExecution, scenario_exit_code
 from schematic import build_schematic
 from referee import Referee, world_position_from_transform
 from guidance import GuidancePhase, TruthGuidance, TruthGuidanceConfig
+from guidance_cadence import GuidanceCadence, guidance_rate_from_env
 from course_referee import CourseQualification, TruthCourseReferee
 from hold_referee import (
     E_HOLD_RMS_LIMIT_M,
@@ -70,7 +71,7 @@ from referee_audit import (
     evaluate_referee_audit,
     referee_audit_from_env,
 )
-from race_runtime import RaceTelemetry, spawn_course
+from race_runtime import RaceTelemetry
 from fpv_camera import (
     FAR,
     FOCAL_PX,
@@ -107,6 +108,12 @@ try:
     RECORD_DIR = race_options.record_dir
     truth_course_requested = (
         guidance_mode is GuidanceMode.TRUTH and race_course.name == "c1_straight"
+    )
+    guidance_cadence = GuidanceCadence(
+        config.pid_rate,
+        guidance_rate_from_env(
+            guidance_mode.value, config.pid_rate, default_hz=100 if truth_course_requested else None
+        ),
     )
     truth_guidance_config = TruthGuidanceConfig.for_course(race_course.name)
     if guidance_mode is GuidanceMode.TRUTH:
@@ -215,9 +222,6 @@ drone = world.spawn(
     name="drone",
 )
 
-# Gate bars are kinematic scene entities with WorldPos only. They deliberately
-# have no Body/Inertia/Force components and never enter rigid-body integration.
-gate_entities = spawn_course(world, race_course)
 truth_gate_poses = (
     tuple(
         GatePose(
@@ -249,7 +253,7 @@ if CAMERA_ENABLED:
     )
 
 # Editor schematic for visualization. Procedural gate boxes use the editor's
-# standard non-emissive material; their entity poses supply the gate yaw.
+# standard non-emissive material; their constant poses supply the gate yaw.
 # The FPV pane, hidden drone mesh, and ground plane are injected only when enabled.
 world.schematic(
     build_schematic(
@@ -314,6 +318,8 @@ if guidance_mode is GuidanceMode.MANUAL and not audit_requested:
 
 print(f"Betaflight SITL: {BETAFLIGHT_PATH.name}")
 print(f"Guidance: {'audit (simulation time)' if audit_requested else guidance_mode.value}")
+if guidance_mode is GuidanceMode.TRUTH:
+    print(f"Truth guidance cadence: {float(guidance_cadence.hz):g}Hz (simulation ticks)")
 if referee_audit_requested:
     print(
         "Referee audit: controlled ballistic fixture "
@@ -357,6 +363,7 @@ class SITLState:
     lockstep_response: bool = False
     motor_response: bool = False
     guidance_phase_code: int = 0
+    last_gate_passed: int = -1
     max_altitude: float = float(config.initial_position[2])
 
     def __post_init__(self):
@@ -711,60 +718,78 @@ def _sitl_post_step(tick: int, ctx: el.StepContext):
                 frame_fresh=frame_fresh,
             )
 
-    progress = referee.progress()
-    update_values = {
-        "sim_time": t,
-        "tick": tick,
-        "gyro": gyro,
-        "accel": accel,
-        "barometer": barometer,
-        "barometer_fresh": barometer_fresh and sensor_read_succeeded,
-        "magnetometer": magnetometer,
-        "magnetometer_fresh": magnetometer_fresh and sensor_read_succeeded,
-        "frame": frame,
-        "frame_time": frame_time,
-        "frame_fresh": frame_fresh,
-        "last_gate_passed": progress.last_gate_passed,
-        "next_gate_index": progress.next_gate_index,
-        "gate_count": progress.gate_count,
-        "gate_inner_size": progress.gate_inner_size,
-    }
-    if guidance_mode is GuidanceMode.TRUTH:
-        truth_state = None
-        if sensor_read_succeeded and world_pos is not None and world_vel is not None:
-            try:
-                truth_state = TruthState(
-                    position_enu=tuple(float(value) for value in world_pos[4:7]),
-                    velocity_enu=tuple(float(value) for value in world_vel[3:6]),
-                    orientation_xyzw=tuple(float(value) for value in world_pos[:4]),
-                )
-            except (TypeError, ValueError, IndexError):
-                truth_state = None
-        truth_update = TruthGuidanceUpdate(
-            **update_values,
-            truth_state=truth_state,
-            gate_poses=truth_gate_poses,
+    # Healthy held truth ticks do not build public progress, immutable guidance
+    # inputs, or run navigation/PD. The cheap raw guard preserves physics-rate
+    # invalid-input/crossing rejection; persistent FAULT feedback stays full-rate.
+    scheduled = guidance_cadence.due(tick) if guidance_mode is GuidanceMode.TRUTH else True
+    forced = (
+        guidance_mode is GuidanceMode.TRUTH
+        and not guidance_cadence.full_rate
+        and command_source.fast_update_required(
+            world_pos if sensor_read_succeeded else None,
+            world_vel if sensor_read_succeeded else None,
+            gyro,
+            last_gate_passed=s.last_gate_passed,
         )
-        next_control = command_source.update(truth_update)
-        s.phase = command_source.phase.name.lower()
-        phase_code = command_source.phase_code
-        if phase_code != s.guidance_phase_code:
-            print(
-                f"[GUIDANCE] t={t:.6f} phase={command_source.phase.name} "
-                f"next_gate={progress.next_gate_index} "
-                f"reason={command_source.failure_reason or 'none'}"
+    )
+    next_control = s.selected_control
+    if scheduled or forced:
+        if forced and not scheduled:
+            guidance_cadence.forced_updates += 1
+        progress = referee.progress()
+        update_values = {
+            "sim_time": t,
+            "tick": tick,
+            "gyro": gyro,
+            "accel": accel,
+            "barometer": barometer,
+            "barometer_fresh": barometer_fresh and sensor_read_succeeded,
+            "magnetometer": magnetometer,
+            "magnetometer_fresh": magnetometer_fresh and sensor_read_succeeded,
+            "frame": frame,
+            "frame_time": frame_time,
+            "frame_fresh": frame_fresh,
+            "last_gate_passed": progress.last_gate_passed,
+            "next_gate_index": progress.next_gate_index,
+            "gate_count": progress.gate_count,
+            "gate_inner_size": progress.gate_inner_size,
+        }
+        if guidance_mode is GuidanceMode.TRUTH:
+            truth_state = None
+            if sensor_read_succeeded and world_pos is not None and world_vel is not None:
+                try:
+                    truth_state = TruthState(
+                        position_enu=tuple(float(value) for value in world_pos[4:7]),
+                        velocity_enu=tuple(float(value) for value in world_vel[3:6]),
+                        orientation_xyzw=tuple(float(value) for value in world_pos[:4]),
+                    )
+                except (TypeError, ValueError, IndexError):
+                    truth_state = None
+            truth_update = TruthGuidanceUpdate(
+                **update_values,
+                truth_state=truth_state,
+                gate_poses=truth_gate_poses,
             )
-            ctx.write_component("drone.guidance_mode", np.array([phase_code], dtype=np.int64))
-            s.guidance_phase_code = phase_code
-    else:
-        update = GuidanceUpdate(**update_values)
-        if isinstance(command_source, (ScriptedGuidance, AuditGuidance)):
-            next_control = command_source.update(update)
-            s.phase = command_source.phase
+            next_control = command_source.update(truth_update)
+            s.phase = command_source.phase.name.lower()
+            phase_code = command_source.phase_code
+            if phase_code != s.guidance_phase_code:
+                print(
+                    f"[GUIDANCE] t={t:.6f} phase={command_source.phase.name} "
+                    f"next_gate={progress.next_gate_index} "
+                    f"reason={command_source.failure_reason or 'none'}"
+                )
+                ctx.write_component("drone.guidance_mode", np.array([phase_code], dtype=np.int64))
+                s.guidance_phase_code = phase_code
         else:
-            command_source.accept_input(manual_values, time.monotonic())
-            next_control = command_source.update(update)
-            s.phase = "manual" if command_source.fresh else "failsafe"
+            update = GuidanceUpdate(**update_values)
+            if isinstance(command_source, (ScriptedGuidance, AuditGuidance)):
+                next_control = command_source.update(update)
+                s.phase = command_source.phase
+            else:
+                command_source.accept_input(manual_values, time.monotonic())
+                next_control = command_source.update(update)
+                s.phase = "manual" if command_source.fresh else "failsafe"
 
     # Most guidance ticks select the same command (manual input arrives at
     # about 100 Hz). Preserve the one-tick latch while avoiding an 8 kHz stream
@@ -788,6 +813,7 @@ def _sitl_post_step(tick: int, ctx: el.StepContext):
         if referee_audit_collector is not None:
             referee_audit_collector.record_scoring_tick(current_truth_position, tick, gate_event)
         if gate_event is not None:
+            s.last_gate_passed = gate_event.gate_index
             ctx.component_batch_operation(
                 writes={
                     "drone.last_gate_passed": np.array([gate_event.gate_index], dtype=np.int64),
@@ -892,6 +918,16 @@ def _sitl_post_step(tick: int, ctx: el.StepContext):
         )
         print(f"  Total ticks: {s.tick}")
         print(f"  Sync steps: {b.step_count}")
+        if guidance_mode is GuidanceMode.TRUTH:
+            updates = guidance_cadence.scheduled_updates + guidance_cadence.forced_updates
+            duration = (tick + 1) * config.dt
+            print(
+                f"[GUIDANCE_RATE] hz={float(guidance_cadence.hz):g} "
+                f"scheduled={guidance_cadence.scheduled_updates} "
+                f"forced={guidance_cadence.forced_updates} updates={updates} "
+                f"ticks={tick + 1} duration_s={duration:.6f} "
+                f"effective_hz={updates / duration:.6f}"
+            )
         print(f"  Max motor: {s.max_motor:.3f}")
         print(f"  Final position: z={final_z:.2f}m, vz={final_vz:.2f}m/s")
         print()

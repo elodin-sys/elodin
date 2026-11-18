@@ -198,23 +198,24 @@ def course_bars(course: Course) -> tuple[GateBar, ...]:
 
 
 def gate_objects(course: Course) -> list:
-    """Saturated-orange matte gate bars for the editor schematic.
+    """Saturated-orange matte gate bars for editor and sensor-camera scenes.
 
     The editor's procedural boxes use a non-emissive, non-metallic standard
     material with default surface roughness. ``orientation="absolute"`` aligns
     each box's local XYZ dimensions with ENU at yaw zero and then applies the
-    entity's world-pose yaw.
+    constant pose's yaw. No gate pose is simulation state or telemetry.
     """
 
-    import elodin.ui as ui
+    import elodin.ui as ui  # noqa: PLR0402 - use the Python ui.pose wrapper
 
     color = ui.color(*SATURATED_ORANGE_RGB)
     return [
         ui.object_3d(
-            f"{bar.name}.world_pos",
+            ui.pose(quat=bar.quaternion_xyzw, pos=bar.center),
             mesh=ui.box(x=bar.size[0], y=bar.size[1], z=bar.size[2], color=color),
             frame="ENU",
             orientation="absolute",
+            sensor_visible=True,
         )
         for bar in course_bars(course)
     ]

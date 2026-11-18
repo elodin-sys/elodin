@@ -16,6 +16,7 @@ The simulation provides:
 - **Multi-Rate Sensors**: Requested sensor rates are capped by the simulation rate
 - **Opt-in FPV**: `RACE_CAMERA=1` records a 640×360 forward camera independently of guidance
 - **Opt-in Truth Hold**: `RACE_GUIDANCE=truth RACE_COURSE=single` holds 4 m before one gate
+- **Truth Guidance Cadence**: The truth three-gate course defaults to 100 Hz outer guidance; physics/IMU/Betaflight stay at 8 kHz
 - **Opt-in Truth Course**: `RACE_GUIDANCE=truth RACE_COURSE=c1_straight` runs the qualified headless three-gate race profile
 
 ```
@@ -28,6 +29,46 @@ The simulation provides:
 │  • 3D Visualization │   Port 9001: RAW  │  • Motor Mixing     │
 └─────────────────────┘                   └─────────────────────┘
 ```
+
+## Truth guidance cadence
+
+```bash
+# Three-gate C1: 100 Hz outer guidance by default, 8 kHz physics/IMU/Betaflight.
+RACE_GUIDANCE=truth RACE_COURSE=c1_straight RACE_CAMERA=0 \
+  elodin run examples/betaflight-sitl/main.py
+# Set RACE_GUIDANCE_HZ=8000 for the full-rate comparison, or e.g. 60 / 120.
+```
+
+The normal scripted takeoff and truth `single` hold keep full-rate guidance.
+Only `RACE_GUIDANCE=truth RACE_COURSE=c1_straight` defaults to 100 Hz.
+An explicit `RACE_GUIDANCE_HZ` always overrides that default, including `8000`.
+It is truth-only; positive finite rates up to the physics rate are accepted.
+Malformed, zero, negative, excessive, or non-truth uses fail before recipes start.
+
+Only outer truth input construction, navigation/mission/PD updates, and resulting
+command changes are scheduled. Tick 0 is due; 100 Hz at 8 kHz is exactly every
+80 ticks. Other rates use integer ceil deadlines with less than one physics tick
+of phase delay and no drift. Missed deadlines sample current state once, never a
+stale backlog. RC commands are held between updates and new commands retain the
+existing one-physics-tick latch.
+
+Physics, IMU, Betaflight gyro/PID, telemetry, packet timestamps/exchanges, motor
+writes, referee crossings, grading and its sample-gap limits stay unchanged.
+Invalid raw truth/gyro and hold/uncommitted gate crossings force FAULT handling
+at physics rate, including persistent FAULT feedback. The existing potentially
+**armed position-hold fault policy** is preserved, not changed into disarm;
+invalid samples use the latest healthy physics state for the fault target.
+Bridge timeout/motor evidence keeps its existing per-tick handling/grader policy.
+Ordinary phases/timeouts and PD/braking react on guidance ticks using actual
+simulation timestamps; gains and safety limits are unchanged, but trajectories
+and qualification can differ at reduced rates.
+
+Camera polling, recorder observation and shutdown remain independent of guidance.
+The opt-in camera keeps its default 30 FPS; this cadence does not simulate camera
+latency, inference, noise or dropped observations. A final `[GUIDANCE_RATE]` line
+reports scheduled updates, additional off-grid forced FAULT updates, their sum,
+callback ticks, duration and effective Hz. Healthy 60 s C1 runs at 100 Hz have
+6000 scheduled updates; persistent faults can raise the effective rate.
 
 ## Quick Start
 
@@ -334,8 +375,9 @@ The single gate is centered at ENU `(10, 0, 1.8)` metres with yaw `0` and an
 exact `2.5 m` square inner opening. Yaw is about world +Z; yaw zero gives a
 plane normal along world +X. A pass approaches from negative gate-local X and
 crosses toward positive local X. Four static `0.2 m` saturated-orange matte
-bars render the frame; they carry only `WorldPos` and do not participate in
-rigid-body integration or collision physics. `c1_straight` uses three gates
+bars render the frame as constant-pose schematic boxes generated from the same
+immutable `Course` used by the referee and truth guidance. They add no simulation
+entities or `WorldPos` rows and have no collision physics. `c1_straight` uses three gates
 at `(10, 0, 1.8)`, `(20, 0, 1.8)`, and `(30, 0, 1.8)` m with that same yaw
 and opening. With the camera enabled, its observational ground plane is
 80 × 80 m so the ground extends past the last gate; other courses keep 40 × 40 m.

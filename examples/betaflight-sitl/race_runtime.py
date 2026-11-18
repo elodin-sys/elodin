@@ -1,4 +1,4 @@
-"""Elodin adapters for course scene entities and referee telemetry.
+"""Elodin adapters for referee telemetry.
 
 The course/referee domain logic remains in dependency-light modules so geometry
 and scoring tests do not need Elodin, Betaflight, an editor, or a GPU.
@@ -10,7 +10,6 @@ from dataclasses import dataclass, field
 import elodin as el
 import jax
 import jax.numpy as jnp
-from course import Course, course_bars
 from referee import (
     CORE_COURSE_GATE_CAPACITY,
     LAST_GATE_UNSET,
@@ -58,29 +57,3 @@ class RaceTelemetry(el.Archetype):
             CORE_COURSE_GATE_CAPACITY, PASS_TIME_UNSET_S, dtype=jnp.float64
         )
     )
-
-
-@el.dataclass
-class StaticSceneObject(el.Archetype):
-    """A kinematic scene pose intentionally excluded from six-DOF integration."""
-
-    world_pos: el.WorldPos
-
-
-def spawn_course(world: el.World, course: Course) -> tuple[el.EntityId, ...]:
-    """Spawn exactly four static bar entities for each selected gate."""
-
-    entities = []
-    for bar in course_bars(course):
-        entities.append(
-            world.spawn(
-                StaticSceneObject(
-                    el.WorldPos(
-                        angular=el.Quaternion(jnp.array(bar.quaternion_xyzw)),
-                        linear=jnp.array(bar.center),
-                    )
-                ),
-                name=bar.name,
-            )
-        )
-    return tuple(entities)
