@@ -632,7 +632,7 @@
                                 </li>
                                 
                                 <li>
-                                    <a href="https://docs.elodin.systems/preview/pr-976/reference/python-api/#recording-and-owner">Recording and owner</a>
+                                    <a href="https://docs.elodin.systems/preview/pr-976/reference/python-api/#recording">Recording</a>
                                 </li>
                                 
                             </ul>
@@ -1636,14 +1636,14 @@ height-grid preparation and JAX height queries.</p>
 <p>A container of component metadata.</p>
 <ul>
 <li>
-<p><code>__init__(name, type = None, asset = False, metadata = {}, recording = None, owner = None)</code> -&gt; <a href="https://docs.elodin.systems/preview/pr-976/reference/python-api/#class-elodin-component">elodin.Component</a></p>
+<p><code>__init__(name, type = None, asset = False, metadata = {}, recording = None)</code> -&gt; <a href="https://docs.elodin.systems/preview/pr-976/reference/python-api/#class-elodin-component">elodin.Component</a></p>
 <p>Create a new component with:</p>
 <ul>
 <li>Unique name (e.g. "world_pos, "inertia").</li>
 <li>Component type information (via <a href="https://docs.elodin.systems/preview/pr-976/reference/python-api/#class-elodin-componenttype">elodin.ComponentType</a>). This is optional if the base class already provides component type information as part of <code>__metadata__</code>, which is the case for <a href="https://docs.elodin.systems/preview/pr-976/reference/python-api/#class-elodin-quaternion">elodin.Quaternion</a>, <a href="https://docs.elodin.systems/preview/pr-976/reference/python-api/#class-elodin-edge">elodin.Edge</a>, and all <a href="https://docs.elodin.systems/preview/pr-976/reference/python-api/#spatial-vector-algebra">spatial vector algebra</a> classes.</li>
 <li>Flag indicating whether the component is an asset (e.g. a mesh, texture, etc.).</li>
 <li>Other metadata that is optional (e.g. description, units, labels, etc.).</li>
-<li>When its values are recorded (<code>elodin.Recording</code>) and who writes them (<code>elodin.Owner</code>), described below.</li>
+<li>When its values are recorded (<code>elodin.Recording</code>), described below.</li>
 </ul>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> elodin</span><span style="color: light-dark(#859900, #859900);"> as</span><span> el</span></span>
 <span class="giallo-l"></span>
@@ -1659,7 +1659,7 @@ height-grid preparation and JAX height queries.</p>
 <tr><td><code>element_names</code></td><td>comma-separated string (e.g. <code>"x,y,z"</code>, <code>"q0,q1,q2,q3"</code>)</td><td>Labels for each element of a vector or matrix component. Used by the component inspector and as column suffixes when exporting with <code>elodin-db export --flatten</code>.</td></tr>
 <tr><td><code>private</code></td><td><code>"true"</code></td><td>Component is omitted from <code>elodin-db export</code> by default (pass <code>--include-private</code> to include it). Useful for marking internal scratch state (e.g. large covariance matrices) that downstream consumers shouldn't see.</td></tr>
 <tr><td><code>transient</code></td><td><code>"true"</code></td><td>Simulation component remains available to systems in memory but is never registered with or recorded to Elodin DB. It is absent from DB schemas, the editor, replication, and exports.</td></tr>
-<tr><td><code>external_control</code></td><td><code>"true"</code></td><td>Component is writable from external clients (e.g. Betaflight or a HITL bridge) over the Impeller protocol. The simulation will not overwrite values written externally.</td></tr>
+<tr><td><code>external_control</code></td><td><code>"true"</code></td><td>Component is writable from external clients (e.g. Betaflight or a HITL bridge) over the Impeller protocol, and from <code>pre_commit</code> hooks. The simulation will not overwrite values written externally.</td></tr>
 <tr><td><code>record_every_tick</code></td><td><code>"true"</code></td><td>Opt out of sparse recording and write a sample at every telemetry commit even when its bytes are unchanged.</td></tr>
 </tbody></table>
 <p>Component recording is sparse by default: the simulation writes a sample
@@ -1670,7 +1670,7 @@ Editor line plots and <code>Exec.history()</code> carry sparse values forward. P
 and bar plots show recorded samples only; raw database exports remain
 change streams with per-component row counts.</p>
 <p><code>transient</code> is a simulation-runtime storage contract, not an export filter. A transient component cannot also set <code>external_control</code>, <code>wait_for_write</code>, or <code>record_every_tick</code>, and DB-backed APIs such as <code>StepContext.read_component</code>, <code>StepContext.write_component</code>, and <code>Exec.history</code> cannot access it. Direct database writers are unaffected by this key.</p>
-<h4 id="recording-and-owner">Recording and owner</h4>
+<h4 id="recording">Recording</h4>
 <p><code>recording=</code> sets when a commit records the component, counting telemetry commits:</p>
 <table><thead><tr><th><code>elodin.Recording</code></th><th>Records</th></tr></thead><tbody>
 <tr><td><code>on_change()</code></td><td>when its bytes differ from the last recorded value; the default</td></tr>
@@ -1680,14 +1680,13 @@ change streams with per-component row counts.</p>
 <tr><td><code>initial_only()</code></td><td>once, when the run starts</td></tr>
 <tr><td><code>transient()</code></td><td>never; same as <code>transient="true"</code></td></tr>
 </tbody></table>
-<p><code>owner=</code> sets which writers may change it: <code>elodin.Owner.system()</code> (compiled systems), <code>.external()</code> (DB and Impeller clients; same as <code>external_control="true"</code>), <code>.pre_commit()</code> (write handles of <code>pre_commit</code> hooks), or <code>.static()</code> (nobody). Building the world fails when a system or a <code>pre_commit</code> write handle writes a component owned by another kind of writer. Writes from DB clients, such as the editor or <code>StepContext</code>, are not checked.</p>
-<p>Both are stored in the reserved metadata keys above, plus <code>recording</code> and <code>owner</code>, so the DB, editor and followers keep working. A <code>metadata</code> value that contradicts them is an error.</p>
+<p>It is stored in the reserved metadata keys above, plus <code>recording</code>, so the DB, editor and followers keep working. A <code>metadata</code> value that contradicts it is an error.</p>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>Command</span><span style="color: light-dark(#859900, #859900);"> =</span><span> ty</span><span>.</span><span>Annotated</span><span>[</span></span>
 <span class="giallo-l"><span>    jax</span><span>.</span><span>Array</span><span>,</span></span>
 <span class="giallo-l"><span>    el</span><span>.</span><span>Component</span><span>(</span></span>
 <span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">        &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">command</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
 <span class="giallo-l"><span>        el</span><span>.</span><span>ComponentType</span><span>(</span><span>el</span><span>.</span><span>PrimitiveType</span><span>.</span><span>F64</span><span>,</span><span> (</span><span style="color: light-dark(#D33682, #D33682);">3</span><span>,</span><span>)</span><span>)</span><span>,</span></span>
-<span class="giallo-l"><span>        owner</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>Owner</span><span>.</span><span>pre_commit</span><span>(</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>        metadata</span><span style="color: light-dark(#859900, #859900);">=</span><span>{</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">external_control</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">true</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>}</span><span>,</span></span>
 <span class="giallo-l"><span>        recording</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>Recording</span><span>.</span><span>every</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">10</span><span>)</span><span>,</span></span>
 <span class="giallo-l"><span>    )</span><span>,</span></span>
 <span class="giallo-l"><span>]</span></span></code></pre>
