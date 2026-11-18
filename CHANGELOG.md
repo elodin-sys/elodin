@@ -4,6 +4,8 @@
 - **(feat:examples)** Add a many-agent lockstep example: one world steps 24 agents at 1 kHz, each with its own controller process, through prepared batches and a native `pre_commit` hook.
 - **(feat)** Add `pre_commit` hooks to `World.run`. With handles from `World.prepare_component` and `World.prepare_batch`, a hook reads each tick's result and writes into the world before the commit, without going through the DB.
 - **(feat)** Add `el.NativeStepHook`, a `pre_commit` hook in a shared library that runs without the GIL and can split its rows across worker threads.
+- **(feat)** Let `pre_commit` hooks read committed DB history and queue writes for after the commit: `World.prepare_component_history` and `World.prepare_message_history` with `WorldStepContext.read_at` (exact or at-or-before), and `World.prepare_timestamped_writer` with `WorldStepContext.defer_write`. A failing hook stops later hooks and its cycle's commit, and the receipt names it.
+- **(feat)** Add `synchronous_commits=` to `World.run`, to have each commit in the DB before the next cycle without a `post_step`.
 - **(feat)** Add `workers=` to `World.run` and `World.build`: on Cranelift, entity chunks of `@el.map` systems and the calls of `@el.map_seq` run on that many threads, with results that do not depend on the count above one.
 - **(feat)** Add run receipts with exact phase percentiles, DB sync counters, and backend and hook statistics, through `on_receipt=`, `Exec.last_receipt()` and `ELODIN_SIM_SUMMARY_JSON`. `timing=el.Timing.systems()` adds the time of each compiled system without debug artifacts.
 - **(feat)** Add `recording=` to `el.Component`: record every `n`th commit, on request, or once.

@@ -775,6 +775,7 @@ class World(WorldBuilder):
         workers: int = 1,
         pre_commit: Optional[PreCommit | list[PreCommit]] = None,
         timing: Optional[Timing] = None,
+        synchronous_commits: bool = False,
     ):
         current_frame = inspect.currentframe()
         if current_frame is None:
@@ -805,6 +806,7 @@ class World(WorldBuilder):
             workers,
             pre_commit,
             timing,
+            synchronous_commits,
         )
         locals = frame.f_locals
         if not interactive and addr is not None:

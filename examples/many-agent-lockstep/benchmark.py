@@ -17,7 +17,18 @@ ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE = Path(__file__).resolve().parent
 CONTROLLER_BINARY = EXAMPLE / "controller/build/release/many-agent-controller"
 HOOK_LIBRARY = EXAMPLE / "hook/build/release/libmany_agent_hook.so"
-PHASES = ("copy_db_to_world", "world_run", "pre_commit", "commit", "total_cycle")
+PHASES = (
+    "copy_db_to_world",
+    "world_run",
+    "pre_commit",
+    "commit",
+    "deferred_writes",
+    "callback",
+    "total_cycle",
+)
+MODES = ("runtime", "local", "lockstep", "lockstep-history")
+# Receipt counters of the history mode's reads and deferred writes.
+COUNTERS = ("history_queries", "history_misses", "deferred_rows")
 
 
 def csv_values(value: str) -> list[str]:
@@ -27,7 +38,7 @@ def csv_values(value: str) -> list[str]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sizes", default="1,2,4,8,10,12,16,20,24")
-    parser.add_argument("--modes", default="runtime,local,lockstep")
+    parser.add_argument("--modes", default=",".join(MODES))
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--warmup-ticks", type=int, default=2000)
     parser.add_argument("--measured-ticks", type=int, default=10000)
@@ -60,6 +71,8 @@ def metrics(summary: dict) -> dict[str, float | int]:
         values[f"{phase}_mean_us"] = stats["sum_ns"] / max(stats["count"], 1) / 1000.0
         values[f"{phase}_p95_us"] = stats["p95_ns"] / 1000.0
         values[f"{phase}_max_us"] = stats["max_ns"] / 1000.0
+    for counter in COUNTERS:
+        values[counter] = (summary.get("callbacks") or {}).get(counter, 0)
     return values
 
 
@@ -139,6 +152,7 @@ def run_case(
     if process.returncode != 0 or not summary_path.is_file():
         raise RuntimeError(f"case failed: {case_dir}; see {log_path}")
     summary = json.loads(summary_path.read_text())
+    result = json.loads(result_path.read_text()) if result_path.is_file() else {}
     run = {
         "configuration": {
             "agents": size,
@@ -159,25 +173,28 @@ def run_case(
         "backend": summary.get("backend"),
         "callbacks": summary.get("callbacks"),
         "wall_s": wall_s,
-        "output_digest": (
-            json.loads(result_path.read_text())["sha256"] if result_path.is_file() else None
-        ),
+        "output_digest": result.get("sha256"),
+        "evidence_digest": result.get("evidence_sha256"),
+        "frames": result.get("frames"),
     }
     (case_dir / "run.json").write_text(json.dumps(run, indent=2) + "\n")
     return run
 
 
 def mismatched_sizes(runs: list[dict]) -> list[int]:
-    """Returns the agent counts whose runs ended in different states.
+    """Returns the agent counts whose runs disagree.
 
-    Every repeat of the `local` and `lockstep` modes must end in the same state, because the
-    controllers compute the same commands as the Python hook.
+    Every repeat of the `local`, `lockstep` and `lockstep-history` modes must end in the same
+    state, because the controllers compute the same commands as the Python hook, and every
+    repeat of `lockstep-history` must record the same capture evidence.
     """
-    digests: dict[int, set[str]] = {}
+    digests: dict[tuple[int, str], set[str]] = {}
     for run in runs:
-        if run["output_digest"]:
-            digests.setdefault(run["configuration"]["agents"], set()).add(run["output_digest"])
-    return sorted(size for size, found in digests.items() if len(found) > 1)
+        size = run["configuration"]["agents"]
+        for kind in ("output_digest", "evidence_digest"):
+            if run.get(kind):
+                digests.setdefault((size, kind), set()).add(run[kind])
+    return sorted({size for (size, _), found in digests.items() if len(found) > 1})
 
 
 def main() -> int:
@@ -186,11 +203,11 @@ def main() -> int:
     modes = csv_values(args.modes)
     if not sizes or any(size < 1 for size in sizes):
         raise ValueError("sizes must be positive")
-    if not modes or any(mode not in {"runtime", "local", "lockstep"} for mode in modes):
+    if not modes or any(mode not in MODES for mode in modes):
         raise ValueError("invalid mode")
     args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=True)
-    if "lockstep" in modes:
+    if any(mode.startswith("lockstep") for mode in modes):
         build_crate(CONTROLLER_BINARY)
         if args.hook == "native":
             build_crate(HOOK_LIBRARY)

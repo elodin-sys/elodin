@@ -5,9 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import select
 import shutil
 import socket
+import sys
+import time
 from pathlib import Path
 
 import elodin as el
@@ -16,12 +19,13 @@ import numpy as np
 from protocol import (
     COMMAND_DTYPE,
     COMMAND_SIZE,
+    FRAME_DTYPE,
     STATE_SIZE,
     decode_commands,
     encode_states,
     state_frames,
 )
-from sim import RATE_HZ, build
+from sim import CAPTURE_FIELDS, RATE_HZ, build
 
 
 ROOT = Path(__file__).resolve().parent
@@ -37,10 +41,21 @@ WORKERS = int(os.environ.get("ELODIN_MANY_AGENT_WORKERS", "8"))
 HOOK_WORKERS = int(os.environ.get("ELODIN_MANY_AGENT_HOOK_WORKERS", "2"))
 DB_PATH = Path(os.environ.get("ELODIN_DB_PATH", "dbs/many-agent-lockstep"))
 RESULT_PATH = os.environ.get("ELODIN_MANY_AGENT_RESULT_JSON")
+PRODUCER_TIMEOUT_S = float(os.environ.get("ELODIN_MANY_AGENT_PRODUCER_TIMEOUT_S", "10"))
 LOCALHOST = socket.gethostbyname("localhost")
+# The port of this simulation's DB: the address `elodin run` passes, if any.
+DB_PORT = next(
+    (arg.rsplit(":", 1)[1] for arg in sys.argv[2:] if re.fullmatch(r"\S+:\d+", arg)), "2240"
+)
+TICK_US = round(1e6 / RATE_HZ)
+# The producer captures a frame every CAPTURE_PERIOD ticks; it is due LATENCY ticks later.
+CAPTURE_PERIOD = 10
+LATENCY = 10
 
-if MODE not in {"runtime", "local", "lockstep"}:
-    raise ValueError("ELODIN_MANY_AGENT_MODE must be runtime, local, or lockstep")
+if MODE not in {"runtime", "local", "lockstep", "lockstep-history"}:
+    raise ValueError("ELODIN_MANY_AGENT_MODE must be runtime, local, lockstep or lockstep-history")
+LOCKSTEP = MODE in {"lockstep", "lockstep-history"}
+HISTORY = MODE == "lockstep-history"
 if HOOK not in {"native", "python"}:
     raise ValueError("ELODIN_MANY_AGENT_HOOK must be native or python")
 if PORT_BASE < 1024 or PORT_BASE + AGENT_COUNT * 2 > 65535:
@@ -59,7 +74,7 @@ AGENT_FIELDS = ("position", "velocity", "sensor_frame", "diagnostic_bank")
 OBJECT_FIELDS = ("object_position", "object_velocity", "object_signal")
 
 
-def write_result(tick: int, values: dict[str, np.ndarray], commands: np.ndarray) -> None:
+def write_result(tick: int, values: dict[str, np.ndarray], commands: np.ndarray, **extra) -> None:
     if not RESULT_PATH:
         return
     digest = hashlib.sha256()
@@ -76,6 +91,7 @@ def write_result(tick: int, values: dict[str, np.ndarray], commands: np.ndarray)
                 "agent_count": AGENT_COUNT,
                 "object_count": OBJECT_COUNT,
                 "sha256": digest.hexdigest(),
+                **extra,
             },
             indent=2,
         )
@@ -137,7 +153,7 @@ class ControllerBridge:
 world, system, agents, objects = build(AGENT_COUNT, OBJECT_COUNT)
 bridge: ControllerBridge | None = None
 
-if MODE == "lockstep":
+if LOCKSTEP:
     controller_binary = Path(
         os.environ.get(
             "ELODIN_MANY_AGENT_CONTROLLER_BIN",
@@ -162,6 +178,20 @@ if MODE == "lockstep":
                 ready_timeout="30s",
             )
         )
+if HISTORY:
+    world.recipe(
+        el.s10.PyRecipe.process(
+            name="history-producer",
+            cmd=sys.executable,
+            args=[
+                str(ROOT / "producer.py"),
+                f"127.0.0.1:{DB_PORT}",
+                str(CAPTURE_PERIOD * TICK_US),
+            ],
+            cwd=str(ROOT),
+            ready=el.s10.Ready.delay(100),
+        )
+    )
 
 
 observed = [objects[index % OBJECT_COUNT] for index in range(AGENT_COUNT)]
@@ -175,6 +205,58 @@ exchange = world.prepare_batch(
 objects_state = world.prepare_batch(
     {field: world.prepare_component(field, objects) for field in OBJECT_FIELDS}
 )
+if HISTORY:
+    frames = world.prepare_message_history("camera.frame")
+    progress = world.prepare_message_history("camera.progress")
+    agent_truth = world.prepare_component_history("agent_000.position")
+    object_truth = world.prepare_component_history("object_000.object_position")
+    capture = world.prepare_timestamped_writer(
+        {field: f"camera.capture_{field}" for field in CAPTURE_FIELDS}
+    )
+evidence = hashlib.sha256()
+frame_counts = {"found": 0, "missing": 0, "late": 0}
+
+
+def wait_for_producer(ctx: el.WorldStepContext, source: int) -> None:
+    """Waits until the producer has handled `source`, so that an exact miss is a dropped frame."""
+    deadline = time.monotonic() + PRODUCER_TIMEOUT_S
+    late = False
+    while True:
+        handled = ctx.read_at(progress, ctx.timestamp, "at_or_before")
+        if handled is not None and handled[0] >= source:
+            break
+        if time.monotonic() > deadline:
+            raise RuntimeError(f"the history producer never handled source time {source}")
+        late = True
+        time.sleep(0.0001)
+    frame_counts["late"] += late
+
+
+def history_step(tick: int, ctx: el.WorldStepContext) -> None:
+    """Checks the frame due at this tick against the truth at its source time, and appends
+    evidence of it after the commit."""
+    source_tick = tick - LATENCY
+    if source_tick <= 0 or source_tick % CAPTURE_PERIOD:
+        return
+    source = source_tick * TICK_US
+    wait_for_producer(ctx, source)
+    found = ctx.read_at(frames, source, "exact")
+    if found is not None:
+        frame = np.frombuffer(found[1], dtype=FRAME_DTYPE)[0]
+        for truth, seen in (
+            (agent_truth, frame["agent_position"]),
+            (object_truth, frame["object_position"]),
+        ):
+            if not np.array_equal(ctx.read_at(truth, source, "at_or_before")[1], seen):
+                raise ValueError(f"the frame at {source} does not match the truth at that time")
+    frame_counts["missing" if found is None else "found"] += 1
+    values = {
+        "frame": source_tick // CAPTURE_PERIOD,
+        "time": source,
+        "disposition": 1.0 if found is None else 0.0,
+    }
+    ctx.defer_write(capture, ctx.timestamp + 1, values)
+    evidence.update(np.array(list(values.values()), dtype="<f8").tobytes())
 
 
 def finish(tick: int, ctx: el.WorldStepContext, view, commands: np.ndarray) -> None:
@@ -192,7 +274,8 @@ def finish(tick: int, ctx: el.WorldStepContext, view, commands: np.ndarray) -> N
         for field in OBJECT_FIELDS
         for index in range(OBJECT_COUNT)
     }
-    write_result(tick, values, commands)
+    extra = {"evidence_sha256": evidence.hexdigest(), "frames": frame_counts} if HISTORY else {}
+    write_result(tick, values, commands, **extra)
     ctx.stop_recipes()
 
 
@@ -200,7 +283,7 @@ def exchange_step(tick: int, ctx: el.WorldStepContext) -> None:
     """The Python hook: gets this tick's commands and writes them into the world."""
     global bridge
     with ctx.batch(exchange) as view:
-        if MODE == "lockstep":
+        if LOCKSTEP:
             if bridge is None:
                 bridge = ControllerBridge()
             commands = bridge.exchange(tick, view)
@@ -212,11 +295,10 @@ def exchange_step(tick: int, ctx: el.WorldStepContext) -> None:
                 12.0,
             )
         view.command[...] = commands
-        finish(tick, ctx, view, commands)
 
 
 def finish_step(tick: int, ctx: el.WorldStepContext) -> None:
-    """Runs `finish` after the native hook has written the commands."""
+    """Runs `finish` with the commands an earlier hook wrote."""
     if tick >= MAX_TICKS - 1:
         with ctx.batch(exchange) as view:
             finish(tick, ctx, view, view.command)
@@ -224,21 +306,23 @@ def finish_step(tick: int, ctx: el.WorldStepContext) -> None:
 
 if MODE == "runtime":
     pre_commit = None
-elif MODE == "lockstep" and HOOK == "native":
-    hook_library = Path(
-        os.environ.get(
-            "ELODIN_MANY_AGENT_HOOK_LIB",
-            ROOT / "hook/build/release/libmany_agent_hook.so",
-        )
-    ).resolve()
-    if not hook_library.is_file():
-        raise RuntimeError("hook library missing; build examples/many-agent-lockstep/hook")
-    hook = el.NativeStepHook.load(
-        str(hook_library), input=exchange, symbol="many_agent_step", workers=HOOK_WORKERS
-    )
-    pre_commit = [hook, finish_step]
 else:
-    pre_commit = exchange_step
+    if LOCKSTEP and HOOK == "native":
+        hook_library = Path(
+            os.environ.get(
+                "ELODIN_MANY_AGENT_HOOK_LIB",
+                ROOT / "hook/build/release/libmany_agent_hook.so",
+            )
+        ).resolve()
+        if not hook_library.is_file():
+            raise RuntimeError("hook library missing; build examples/many-agent-lockstep/hook")
+        exchange_hook = el.NativeStepHook.load(
+            str(hook_library), input=exchange, symbol="many_agent_step", workers=HOOK_WORKERS
+        )
+    else:
+        exchange_hook = exchange_step
+    # One ordered boundary: each hook sees the world writes of those before it.
+    pre_commit = [exchange_hook, *([history_step] if HISTORY else []), finish_step]
 
 
 if DB_PATH.exists():

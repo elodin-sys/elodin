@@ -40,12 +40,22 @@ class BatchView:
     def __enter__(self) -> BatchView: ...
     def __exit__(self, *exc: object) -> bool: ...
 
+class HistoryHandle:
+    """The committed DB history of an entity's component or of a message log, from
+    `World.prepare_component_history` or `World.prepare_message_history`."""
+
+    name: str
+
+class TimestampedWriter:
+    """Components marked `external_control`, from `World.prepare_timestamped_writer`."""
+
 class WorldStepContext:
     """Passed to a `pre_commit` callback, which runs after the tick and before the commit.
 
     Views read the world's current values. Writes to a write handle's view reach the world, and
     the same commit, when the callback returns; the systems read them on the next tick. Views
-    are copies and end with the callback.
+    are copies and end with the callback. History reads see only committed DB samples, and
+    deferred writes land after the commit.
     """
 
     tick: int
@@ -58,6 +68,21 @@ class WorldStepContext:
         ...
     def record(self, handle: ComponentHandle) -> None:
         """Records the handle's component, recorded with `Recording.manual()`, at this commit."""
+        ...
+    def read_at(
+        self,
+        history: HistoryHandle,
+        timestamp: int,
+        selection: Literal["exact", "at_or_before"],
+    ) -> Optional[tuple[int, numpy.ndarray]]:
+        """The committed sample that `selection` picks at `timestamp`: its timestamp and a copy
+        of its value, or `None`. A message's value is its bytes as `uint8`."""
+        ...
+    def defer_write(
+        self, writer: TimestampedWriter, timestamp: int, values: dict[str, jax.typing.ArrayLike]
+    ) -> None:
+        """Appends `values`, one per key of `writer`, at `timestamp` once this cycle's world
+        commit lands. Writes keep their call order, across callbacks too."""
         ...
     def stop_recipes(self) -> None:
         """Gracefully terminate all s10-managed recipes; see `StepContext.stop_recipes`."""
@@ -405,6 +430,7 @@ class WorldBuilder:
         workers: int = 1,
         pre_commit: Optional[PreCommit | list[PreCommit]] = None,
         timing: Optional[Timing] = None,
+        synchronous_commits: bool = False,
     ): ...
     def prepare_component(
         self,
@@ -418,6 +444,17 @@ class WorldBuilder:
     def prepare_batch(self, fields: dict[str, ComponentHandle]) -> BatchHandle:
         """Group handles over the same number of rows, viewed together by
         `WorldStepContext.batch`."""
+        ...
+    def prepare_component_history(self, name: str) -> HistoryHandle:
+        """The committed history of the `entity.component` pair `name`, for
+        `WorldStepContext.read_at`."""
+        ...
+    def prepare_message_history(self, name: str) -> HistoryHandle:
+        """The committed history of the message log `name`, for `WorldStepContext.read_at`."""
+        ...
+    def prepare_timestamped_writer(self, fields: dict[str, str]) -> TimestampedWriter:
+        """Components that `WorldStepContext.defer_write` appends to: `fields` maps each value's
+        key to an `entity.component` pair marked `external_control`."""
         ...
     def serve(
         self,

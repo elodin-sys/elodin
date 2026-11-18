@@ -233,7 +233,7 @@ test_steps = [
                 command="""
 python3 examples/many-agent-lockstep/controller/build.py
 python3 -m pytest examples/many-agent-lockstep/tests -q
-python3 examples/many-agent-lockstep/benchmark.py --sizes 2 --modes runtime,local,lockstep --warmup-ticks 10 --measured-ticks 50 --repeats 1 --no-paced --output /tmp/many-agent-lockstep-ci
+python3 examples/many-agent-lockstep/benchmark.py --sizes 2 --modes runtime,local,lockstep,lockstep-history --warmup-ticks 10 --measured-ticks 50 --repeats 1 --no-paced --output /tmp/many-agent-lockstep-ci
 """,
             ),
             nix_step(

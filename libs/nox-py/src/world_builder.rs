@@ -5,7 +5,10 @@ use crate::error::Error;
 use crate::exec::{PyExec, WorldExec};
 use crate::jax_exec::{JaxExec, JaxWorldExec};
 use crate::native_hook::NativeStepHook;
-use crate::prepared::{BatchHandle, CallbackCounters, ComponentHandle, PreCommit, PythonPreCommit};
+use crate::prepared::{
+    BatchHandle, CallbackCounters, ComponentHandle, HistoryHandle, PreCommit, PythonPreCommit,
+    TimestampedWriter,
+};
 use crate::step_context::StepContext;
 use crate::system::{CompiledSystemExt, PySystem};
 use crate::tick_metrics::Timing;
@@ -146,6 +149,8 @@ pub struct WorldBuilder {
     prepared: Vec<Py<ComponentHandle>>,
     /// Handles and batches that failed to prepare.
     validation_failures: u64,
+    /// History handles or timestamped writers were prepared, so commits must land each cycle.
+    uses_history: bool,
 }
 
 fn py_json_value(obj: &Bound<'_, PyAny>) -> Result<serde_json::Value, Error> {
@@ -501,6 +506,37 @@ impl WorldBuilder {
             .collect::<PyResult<Vec<_>>>()
             .and_then(BatchHandle::new)
             .inspect_err(|_| self.validation_failures += 1)
+    }
+
+    /// The committed history of the `entity.component` pair `name`, for
+    /// `WorldStepContext.read_at`.
+    fn prepare_component_history(&mut self, name: &str) -> PyResult<HistoryHandle> {
+        let handle = HistoryHandle::component(&self.world, name)
+            .inspect_err(|_| self.validation_failures += 1)?;
+        self.uses_history = true;
+        Ok(handle)
+    }
+
+    /// The committed history of the message log `name`, for `WorldStepContext.read_at`.
+    fn prepare_message_history(&mut self, name: &str) -> HistoryHandle {
+        self.uses_history = true;
+        HistoryHandle::message(name)
+    }
+
+    /// Components that `WorldStepContext.defer_write` appends to: `fields` maps each value's key
+    /// to an `entity.component` pair marked `external_control`.
+    fn prepare_timestamped_writer(
+        &mut self,
+        fields: &Bound<'_, PyDict>,
+    ) -> PyResult<TimestampedWriter> {
+        let writer = fields
+            .iter()
+            .map(|(key, name)| Ok((key.extract()?, name.extract()?)))
+            .collect::<PyResult<Vec<_>>>()
+            .and_then(|fields| TimestampedWriter::new(&self.world, fields))
+            .inspect_err(|_| self.validation_failures += 1)?;
+        self.uses_history = true;
+        Ok(writer)
     }
 
     fn recipe(&mut self, py: Python<'_>, recipe_obj: PyObject) -> PyResult<()> {
@@ -907,6 +943,7 @@ impl WorldBuilder {
         workers = 1,
         pre_commit = None,
         timing = None,
+        synchronous_commits = false,
     ))]
     pub fn run(
         &mut self,
@@ -931,6 +968,7 @@ impl WorldBuilder {
         workers: usize,
         pre_commit: Option<PyObject>,
         timing: Option<Timing>,
+        synchronous_commits: bool,
     ) -> Result<Option<String>, Error> {
         let log_level = log_level.as_deref().map(normalize_log_level).transpose()?;
         let filter = if std::env::var("RUST_LOG").is_ok() {
@@ -1051,26 +1089,18 @@ impl WorldBuilder {
                     }
                     hooks => hooks.into_iter().collect(),
                 };
-                let pre_commit = hooks
-                    .into_iter()
-                    .map(|hook| -> PyResult<Box<dyn PreCommit + Send>> {
-                        if let Ok(native) = hook.downcast_bound::<NativeStepHook>(py) {
-                            return Ok(native.get().runner());
-                        }
-                        if !hook.bind(py).is_callable() {
-                            return Err(PyTypeError::new_err(
-                                "pre_commit takes a callable, a NativeStepHook, or a list of them",
-                            ));
-                        }
-                        Ok(Box::new(PythonPreCommit {
-                            func: hook,
-                            counters: counters.clone(),
-                            recipe_cancel_token: recipe_cancel_token.clone(),
-                        }))
-                    })
-                    .collect::<PyResult<Vec<_>>>()?;
+                if hooks.iter().any(|hook| {
+                    let hook = hook.bind(py);
+                    !hook.is_instance_of::<NativeStepHook>() && !hook.is_callable()
+                }) {
+                    return Err(PyTypeError::new_err(
+                        "pre_commit takes a callable, a NativeStepHook, or a list of them",
+                    )
+                    .into());
+                }
                 let (pre_step_counters, post_step_counters) = (counters.clone(), counters.clone());
                 let step_callbacks = pre_step.is_some() || post_step.is_some();
+                let synchronous_commits = synchronous_commits || self.uses_history;
                 let db_server = elodin_db::Server::new(&db_path, addr)
                     .map_err(|e| {
                         if matches!(&e, elodin_db::Error::Io(io) if io.kind() == std::io::ErrorKind::AddrInUse) {
@@ -1082,6 +1112,26 @@ impl WorldBuilder {
                             crate::Error::DB(e)
                         }
                     })?;
+                let pre_commit = hooks
+                    .into_iter()
+                    .map(|hook| -> Box<dyn PreCommit + Send> {
+                        if let Ok(native) = hook.downcast_bound::<NativeStepHook>(py) {
+                            return native.get().runner();
+                        }
+                        let name = hook
+                            .bind(py)
+                            .getattr("__qualname__")
+                            .and_then(|name| name.extract())
+                            .unwrap_or_else(|_| hook.to_string());
+                        Box::new(PythonPreCommit {
+                            func: hook,
+                            name,
+                            db: db_server.db.clone(),
+                            counters: counters.clone(),
+                            recipe_cancel_token: recipe_cancel_token.clone(),
+                        })
+                    })
+                    .collect::<Vec<_>>();
                 let grpc_addr = elodin_db::grpc::grpc_addr(addr);
                 let grpc_db = db_server.db.clone();
                 let listener = std::net::TcpListener::bind(grpc_addr).map_err(|e| {
@@ -1220,6 +1270,7 @@ impl WorldBuilder {
                                             }
                                         },
                                         step_callbacks,
+                                        synchronous_commits,
                                         pre_commit,
                                         counters,
                                         interactive,

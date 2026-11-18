@@ -111,7 +111,7 @@ The Elodin simulation world.
     )
     ```
 
-- `run(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp, log_level, backend, on_receipt, workers, pre_commit, timing)` -> None
+- `run(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp, log_level, backend, on_receipt, workers, pre_commit, timing, synchronous_commits)` -> None
 
     Run the simulation.
     - `system` : [elodin.System], the systems to run, can be supplied as a list of systems delineated by pipes.
@@ -133,8 +133,9 @@ The Elodin simulation world.
     - `workers` : `int`, optional, threads the Cranelift backend runs independent calls on, the simulation thread included: entity chunks of `@el.map` systems and the per-entity calls of `@el.map_seq`. Defaults to `1`. Results do not depend on the count once it is above `1`; going from `1` to more can change the last bits of reductions.
     - `pre_commit` : a callable `(tick, WorldStepContext)`, an [elodin.NativeStepHook], or a list of them run in order, called after each tick and before its DB commit. See [pre-commit hooks](#pre-commit-hooks).
     - `timing` : [elodin.Timing], optional, what the receipt measures. Defaults to `Timing.summary()`.
+    - `synchronous_commits` : `bool`, optional, has each commit in the DB, and `last_updated` past it, before the next cycle's `pre_commit` hooks run, so at most one commit is ever in flight. The writer thread still appends it, during the pacing and the next systems step, and the next cycle waits for it before its hooks; the receipt counts that wait in `commit`. The loop then also waits out DB write stalls, so keep the DB on storage that does not stall. Defaults to `False`.
 
-    When neither `pre_step` nor `post_step` is given and no component sets `wait_for_write`, a writer thread appends each commit to the DB, so DB stalls stay off the simulation thread. Clients then see a commit, and `last_updated` move past it, up to a few cycles later.
+    When neither `pre_step` nor `post_step` is given, no component sets `wait_for_write`, no history handle or timestamped writer was prepared, and `synchronous_commits` is `False`, a writer thread appends each commit to the DB, so DB stalls stay off the simulation thread. Clients then see a commit, and `last_updated` move past it, up to a few cycles later. The receipt's `sync.commits` says which way the run committed: `write_behind` or `synchronous`.
 
 - `build(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, db_path, backend, start_timestamp, workers, timing)` -> `elodin.Exec`
 
@@ -158,6 +159,18 @@ The Elodin simulation world.
 - `prepare_batch(fields)` -> `elodin.BatchHandle`
 
     Group handles over the same number of rows, keyed by field name, so a hook views them together.
+
+- `prepare_component_history(name)` -> `elodin.HistoryHandle`
+
+    Resolve once the `entity.component` pair `name` (e.g. `"drone.world_pos"`), for hooks to read its committed DB history with `WorldStepContext.read_at`. Transient components have no history and are rejected.
+
+- `prepare_message_history(name)` -> `elodin.HistoryHandle`
+
+    The same for the message log `name` (e.g. `"drone.scene_cam"`), which may not exist yet when it is prepared.
+
+- `prepare_timestamped_writer(fields)` -> `elodin.TimestampedWriter`
+
+    Resolve once the components that `WorldStepContext.defer_write` appends to: `fields` maps each value's key to an `entity.component` pair, which must be marked `external_control` so the simulation never writes it.
 
 ### Backend Selection
 
@@ -413,7 +426,30 @@ def exchange_step(tick: int, ctx: el.WorldStepContext) -> None:
 world.run(system, pre_commit=exchange_step, workers=8)
 ```
 
-An exception in a hook stops the run, and the receipt records why.
+A hook can also read committed DB history, such as camera frames another process recorded, and queue timestamped writes that land after the commit:
+
+```python
+frames = world.prepare_message_history("drone.scene_cam")
+truth = world.prepare_component_history("drone.world_pos")
+evidence = world.prepare_timestamped_writer({"frame": "drone.capture_frame"})
+
+def history_step(tick: int, ctx: el.WorldStepContext) -> None:
+    found = ctx.read_at(frames, capture_time, "exact")       # (timestamp, bytes) or None
+    pose = ctx.read_at(truth, capture_time, "at_or_before")  # (timestamp, value) or None
+    ctx.defer_write(evidence, ctx.timestamp + 1, {"frame": frame_id})
+
+world.run(system, pre_commit=[exchange_step, history_step])
+```
+
+A list of hooks is one ordered boundary:
+
+1. Hooks run in list order, Python and native alike.
+2. A hook sees the world writes of the hooks before it.
+3. History reads see committed DB samples only, not the world of the current tick, whose commit comes after the hooks.
+4. Deferred writes are appended after the commit, in hook and call order, equal timestamps included. They do not move `last_updated`.
+5. A hook that raises, or a native hook that returns nonzero, stops the later hooks, the cycle's commit and the run. Its queued writes are dropped.
+
+A deferred write that fails, for example with a timestamp older than its component's last sample, stops the run after the commit. The receipt's `failed_hook` names the hook (`index` and `name`) and says whether the cycle's commit had landed (`committed`). Preparing a history handle or a timestamped writer makes commits synchronous, so the hooks read every earlier commit and deferred writes follow theirs; with the writer thread, a cycle's deferred writes land just before the next cycle's hooks.
 
 ### _class_ `elodin.WorldStepContext`
 
@@ -423,7 +459,11 @@ Passed to `pre_commit` callbacks.
 - `view(handle)` -> `numpy.ndarray` : the handle's rows, read-only for a read handle. Writes to a write handle's view reach the world when the callback returns. Views are copies and end with the callback.
 - `batch(batch)` -> `BatchView` : views every field of a batch, as attributes or items.
 - `record(handle)` -> None : records the handle's component, which must use `Recording.manual()`, at this commit.
+- `read_at(history, timestamp, selection)` -> `(int, numpy.ndarray) | None` : the committed sample of an `elodin.HistoryHandle` at `timestamp`. `selection="exact"` takes only a sample at that timestamp and never falls back to an older one; `"at_or_before"` takes the newest sample at or before it. Returns the sample's own timestamp and a copy of its value (a message as `uint8` bytes), or `None` when nothing matches.
+- `defer_write(writer, timestamp, values)` -> None : queues `values`, one per key of an `elodin.TimestampedWriter`, to append at `timestamp` after this cycle's commit.
 - `stop_recipes()` -> None : stops the s10 recipes, as `StepContext.stop_recipes`.
+
+All but `tick` and `timestamp` raise once the callback returns.
 
 ### _class_ `elodin.NativeStepHook`
 
@@ -468,7 +508,7 @@ A call may write only writable columns, and only its own rows. A nonzero return 
 
 ### Run receipts
 
-Every run builds a versioned receipt (`elodin.run_receipt.v1`), passed to `on_receipt`, returned by `Exec.last_receipt()`, and written to `$ELODIN_SIM_SUMMARY_JSON` when set. It covers the cycles after warmup: count, sum, min, exact p50/p95/p99, and max of every phase (`copy_db_to_world`, `world_run`, `pre_commit`, `commit`, `post_step`, their `callback` sum, pacing, and `total_cycle`); pacing lateness and resets; DB `sync` counters, including rows scanned, drained and committed and the writer thread's lag and queue depth; backend bytes and compile times; hook timings; and the sections it did not collect under `unavailable`.
+Every run builds a versioned receipt (`elodin.run_receipt.v1`), passed to `on_receipt`, returned by `Exec.last_receipt()`, and written to `$ELODIN_SIM_SUMMARY_JSON` when set. It covers the cycles after warmup: count, sum, min, exact p50/p95/p99, and max of every phase (`copy_db_to_world`, `world_run`, `pre_commit`, `commit`, `deferred_writes`, `post_step`, their `callback` sum, pacing, and `total_cycle`); pacing lateness and resets; DB `sync` counters, including whether commits were `synchronous` or `write_behind`, rows scanned, drained and committed, and the writer thread's lag and queue depth; backend bytes and compile times; hook timings, history queries, misses and bytes, and deferred-write batches, rows, bytes and failures under `callbacks`; the `failure` and `failed_hook` of a run a hook stopped; and the sections it did not collect under `unavailable`.
 
 ### _class_ `elodin.Timing`
 
@@ -809,7 +849,7 @@ A container of component metadata.
     | `element_names` | comma-separated string (e.g. `"x,y,z"`, `"q0,q1,q2,q3"`) | Labels for each element of a vector or matrix component. Used by the component inspector and as column suffixes when exporting with `elodin-db export --flatten`. |
     | `private` | `"true"` | Component is omitted from `elodin-db export` by default (pass `--include-private` to include it). Useful for marking internal scratch state (e.g. large covariance matrices) that downstream consumers shouldn't see. |
     | `transient` | `"true"` | Simulation component remains available to systems in memory but is never registered with or recorded to Elodin DB. It is absent from DB schemas, the editor, replication, and exports. |
-    | `external_control` | `"true"` | Component is writable from external clients (e.g. Betaflight or a HITL bridge) over the Impeller protocol, and from `pre_commit` hooks. The simulation will not overwrite values written externally. |
+    | `external_control` | `"true"` | Component is writable from external clients (e.g. Betaflight or a HITL bridge) over the Impeller protocol, and from `pre_commit` hooks, including their deferred writes. The simulation will not overwrite values written externally. |
     | `record_every_tick` | `"true"` | Opt out of sparse recording and write a sample at every telemetry commit even when its bytes are unchanged. |
 
     Component recording is sparse by default: the simulation writes a sample

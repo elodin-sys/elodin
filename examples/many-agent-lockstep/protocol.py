@@ -1,4 +1,4 @@
-"""Fixed-size UDP packets exchanged with the controller processes."""
+"""Fixed-size packets exchanged with the controller processes and the history producer."""
 
 from __future__ import annotations
 
@@ -16,6 +16,15 @@ STATE_DTYPE = np.dtype(HEADER_FIELDS + [("values", "<f8", (STATE_DOUBLES,))])
 COMMAND_DTYPE = np.dtype(HEADER_FIELDS + [("values", "<f8", (COMMAND_DOUBLES,))])
 STATE_SIZE = STATE_DTYPE.itemsize
 COMMAND_SIZE = COMMAND_DTYPE.itemsize
+# A history-producer frame: what it saw of agent 0 and its object at the frame's source time.
+FRAME_DTYPE = np.dtype(
+    [
+        ("frame", "<f8"),
+        ("source_time", "<f8"),
+        ("agent_position", "<f8", (3,)),
+        ("object_position", "<f8", (3,)),
+    ]
+)
 
 
 def state_frames(count: int) -> np.ndarray:

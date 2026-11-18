@@ -18,7 +18,7 @@ use tracing::{info, warn};
 
 use crate::World;
 use crate::exec::WorldExec;
-use crate::prepared::{CallbackCounters, HookWrites, PreCommit};
+use crate::prepared::{CallbackCounters, DeferredWrite, HookWrites, PreCommit};
 use crate::tick_metrics::Receipt;
 
 pub struct Server {
@@ -39,6 +39,7 @@ impl Server {
             |_, _, _, _, _| {},
             |_, _, _, _, _| {},
             false,
+            false,
             Vec::new(),
             Default::default(),
             false,
@@ -50,7 +51,9 @@ impl Server {
     }
 
     /// Returns the loop's receipt once it stops. `step_callbacks` says whether `pre_step` or
-    /// `post_step` call user code, which reads the sim's commits back from the DB.
+    /// `post_step` call user code, which reads the sim's commits back from the DB within the
+    /// cycle. `synchronous_commits` says whether each commit must be in the DB before the next
+    /// cycle begins.
     #[allow(clippy::too_many_arguments)]
     pub async fn run_with_cancellation(
         self,
@@ -58,6 +61,7 @@ impl Server {
         pre_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
         post_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
         step_callbacks: bool,
+        synchronous_commits: bool,
         pre_commit: Vec<Box<dyn PreCommit + Send>>,
         counters: Arc<CallbackCounters>,
         interactive: bool,
@@ -91,6 +95,7 @@ impl Server {
             pre_step,
             post_step,
             step_callbacks,
+            synchronous_commits,
             pre_commit,
             counters,
             start_time,
@@ -397,6 +402,8 @@ pub struct DbSync {
 /// What [`DbSync`] did, for the run receipt.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct SyncCounters {
+    /// `synchronous` when each commit is in the DB before the next cycle, else `write_behind`.
+    pub commits: &'static str,
     /// (entity, component) pairs mirrored between the world and the DB.
     pub rows_registered: u64,
     /// Rows whose latest DB sample a pull or commit read.
@@ -555,6 +562,7 @@ impl DbSync {
             row.component.time_series.watch(&cursor, slot);
         }
         let counters = SyncCounters {
+            commits: "synchronous",
             rows_registered: slots as u64,
             ..Default::default()
         };
@@ -576,10 +584,18 @@ impl DbSync {
         let series = series.map(|row| row.component.clone()).collect();
         self.writer = Some(WriteBehind::spawn(db, series, self.cursor.clone()));
         self.counters.writer = Some(WriterStats::default());
+        self.counters.commits = "write_behind";
     }
 
     pub fn writes_behind(&self) -> bool {
         self.writer.is_some()
+    }
+
+    /// Waits for the writer thread, if any, to append every queued commit, and keeps it running.
+    pub fn wait_for_writes(&mut self) {
+        if let (Some(writer), Some(stats)) = (&mut self.writer, &mut self.counters.writer) {
+            writer.wait(stats);
+        }
     }
 
     /// Waits for the writer thread to append every queued commit.
@@ -592,6 +608,7 @@ impl DbSync {
     /// Restarts the counters, as the loop does when warmup ends.
     pub fn reset_counters(&mut self) {
         self.counters = SyncCounters {
+            commits: self.counters.commits,
             rows_registered: self.counters.rows_registered,
             writer: self
                 .counters
@@ -768,7 +785,8 @@ impl CommitBatch {
 /// throttling stay off the sim thread. Written batches come back for reuse.
 struct WriteBehind {
     queue: std::sync::mpsc::SyncSender<CommitBatch>,
-    written: Arc<std::sync::Mutex<Vec<CommitBatch>>>,
+    /// Batches the thread finished, and the signal it gives for each.
+    written: Arc<(std::sync::Mutex<Vec<CommitBatch>>, std::sync::Condvar)>,
     thread: std::thread::JoinHandle<()>,
     batch: CommitBatch,
     spare: Vec<CommitBatch>,
@@ -783,7 +801,7 @@ impl WriteBehind {
     /// `series[slot]` is the pair behind each cursor slot.
     fn spawn(db: Arc<DB>, series: Vec<elodin_db::Component>, cursor: Arc<WatchCursor>) -> Self {
         let (queue, queued) = std::sync::mpsc::sync_channel::<CommitBatch>(Self::QUEUE);
-        let written = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let written = Arc::new((std::sync::Mutex::new(Vec::new()), std::sync::Condvar::new()));
         let written_by_thread = written.clone();
         let thread = std::thread::Builder::new()
             .name("elodin-db-writer".into())
@@ -810,7 +828,9 @@ impl WriteBehind {
                     }
                     let end = Instant::now();
                     batch.written = Some((end - start, end));
-                    written_by_thread.lock().unwrap().push(batch);
+                    let (written, signal) = &*written_by_thread;
+                    written.lock().unwrap().push(batch);
+                    signal.notify_one();
                 }
             })
             .expect("failed to spawn the DB writer thread");
@@ -831,13 +851,7 @@ impl WriteBehind {
         vtable_gen: u64,
         stats: &mut WriterStats,
     ) -> Result<(), Error> {
-        for mut batch in self.written.lock().unwrap().drain(..) {
-            self.in_flight -= 1;
-            batch.account(stats);
-            batch.rows.clear();
-            batch.bytes.clear();
-            self.spare.push(batch);
-        }
+        self.reclaim(stats);
         let next = self.spare.pop().unwrap_or_default();
         let mut batch = std::mem::replace(&mut self.batch, next);
         batch.timestamp = timestamp;
@@ -859,10 +873,30 @@ impl WriteBehind {
         }
     }
 
+    /// Takes back the batches the thread finished, for reuse.
+    fn reclaim(&mut self, stats: &mut WriterStats) {
+        for mut batch in self.written.0.lock().unwrap().drain(..) {
+            self.in_flight -= 1;
+            batch.account(stats);
+            batch.rows.clear();
+            batch.bytes.clear();
+            self.spare.push(batch);
+        }
+    }
+
+    /// Waits until the thread has appended every queued commit.
+    fn wait(&mut self, stats: &mut WriterStats) {
+        let (written, signal) = &*self.written;
+        let finished = written.lock().unwrap();
+        let in_flight = self.in_flight as usize;
+        drop(signal.wait_while(finished, |finished| finished.len() < in_flight));
+        self.reclaim(stats);
+    }
+
     fn finish(self, stats: &mut WriterStats) {
         drop(self.queue);
         let _ = self.thread.join();
-        for batch in self.written.lock().unwrap().iter() {
+        for batch in self.written.0.lock().unwrap().iter() {
             batch.account(stats);
         }
     }
@@ -934,6 +968,7 @@ async fn tick(
     pre_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
     post_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
     step_callbacks: bool,
+    synchronous_commits: bool,
     mut pre_commit: Vec<Box<dyn PreCommit + Send>>,
     counters: Arc<CallbackCounters>,
     start_timestamp: Timestamp,
@@ -957,6 +992,13 @@ async fn tick(
     if !step_callbacks && write_barrier.is_none() {
         sync.write_behind(db.clone());
     }
+    // Synchronous commits then land while the loop paces: each cycle waits for the last one's.
+    let wait_for_commits = synchronous_commits && sync.writes_behind();
+    if synchronous_commits {
+        sync.counters.commits = "synchronous";
+    }
+    // Deferred writes wait for their cycle's commit to land, with the tick they were made at.
+    let mut pending: Option<(u64, Vec<(usize, DeferredWrite)>)> = None;
     let generate_real_time = world.world().metadata.generate_real_time;
     let configured_ticks_per_telemetry = world.world().ticks_per_telemetry();
     let time_step = world.world().sim_time_step().0;
@@ -1149,18 +1191,40 @@ async fn tick(
             0.0
         };
         world.world_mut().metadata.ticks_per_telemetry = configured_ticks_per_telemetry;
+        // The writer had the systems' step, and the pacing before it, to land the last commit.
+        let mut commit_wait = Duration::ZERO;
+        if wait_for_commits {
+            let wait_start = Instant::now();
+            sync.wait_for_writes();
+            commit_wait = wait_start.elapsed();
+            let landing = Instant::now();
+            if let Some(cycle) = pending.take()
+                && !land_deferred(&db, cycle, &counters, &pre_commit, &mut metrics)
+            {
+                break;
+            }
+            metrics.observe_deferred_writes(landing.elapsed());
+        }
         let mut hook_writes = HookWrites::default();
+        let mut deferred = Vec::new();
         if !pre_commit.is_empty() {
             let pre_commit_start = Instant::now();
-            let step = pre_commit.iter_mut().try_for_each(|hook| {
-                let writes = hook.step(end_tick, batch_end_timestamp, world.world_mut())?;
-                hook_writes.written.extend(writes.written);
-                hook_writes.recorded.extend(writes.recorded);
-                Ok(())
-            });
+            let step = pre_commit
+                .iter_mut()
+                .enumerate()
+                .try_for_each(|(index, hook)| {
+                    let writes = hook
+                        .step(end_tick, batch_end_timestamp, world.world_mut())
+                        .map_err(|cause| (index, cause))?;
+                    hook_writes.written.extend(writes.written);
+                    hook_writes.recorded.extend(writes.recorded);
+                    deferred.extend(writes.deferred.into_iter().map(|write| (index, write)));
+                    Ok(())
+                });
             metrics.observe_pre_commit(pre_commit_start.elapsed());
-            if let Err(failure) = step {
-                metrics.failure = Some(failure);
+            if let Err((index, cause)) = step {
+                let when = format!("at tick {end_tick}");
+                metrics.fail(index, pre_commit[index].name(), &when, &cause, false);
                 break;
             }
         }
@@ -1176,7 +1240,8 @@ async fn tick(
             }
         });
         let commit_elapsed = commit_start.elapsed();
-        metrics.observe_commit(commit_elapsed);
+        // A cycle's commit time includes waiting for the previous commit to land.
+        metrics.observe_commit(commit_wait + commit_elapsed);
         let commit_ms = if detailed_timing {
             commit_elapsed.as_secs_f64() * 1000.0
         } else {
@@ -1184,6 +1249,16 @@ async fn tick(
         };
         if !sync.writes_behind() {
             db.last_updated.update_max(batch_end_timestamp);
+        }
+        let cycle = (end_tick, deferred);
+        if wait_for_commits {
+            pending = Some(cycle);
+        } else {
+            let landing = Instant::now();
+            if !land_deferred(&db, cycle, &counters, &pre_commit, &mut metrics) {
+                break;
+            }
+            metrics.observe_deferred_writes(landing.elapsed());
         }
         if detailed_timing {
             let wall_ms = start.elapsed().as_secs_f64() * 1000.0;
@@ -1340,6 +1415,9 @@ async fn tick(
         metrics.observe_total_cycle(start.elapsed());
     }
     sync.finish_writes();
+    if let Some(cycle) = pending.take() {
+        land_deferred(&db, cycle, &counters, &pre_commit, &mut metrics);
+    }
     metrics.sync = Some(sync.counters.clone());
     metrics.timing = world.world().metadata.timing;
     metrics.systems = world.probed().then(cranelift_mlir::profile::timings);
@@ -1349,6 +1427,56 @@ async fn tick(
     });
     metrics.mark_loop_end();
     metrics.receipt()
+}
+
+/// Appends the deferred writes made at `tick`, now that its commit landed. On a failure, records
+/// in `metrics` which hook made the write, and returns false.
+fn land_deferred(
+    db: &DB,
+    (tick, writes): (u64, Vec<(usize, DeferredWrite)>),
+    counters: &CallbackCounters,
+    hooks: &[Box<dyn PreCommit + Send>],
+    metrics: &mut crate::tick_metrics::TickMetrics,
+) -> bool {
+    let Err((index, cause)) = apply_deferred(db, &writes, counters) else {
+        return true;
+    };
+    let when = format!("after the commit at tick {tick}");
+    metrics.fail(index, hooks[index].name(), &when, &cause, true);
+    false
+}
+
+/// Appends the cycle's deferred writes, each tagged with the hook that made it, in order.
+/// Appending does not move `last_updated`. Fails with the hook of the write that failed.
+fn apply_deferred(
+    db: &DB,
+    deferred: &[(usize, DeferredWrite)],
+    counters: &CallbackCounters,
+) -> Result<(), (usize, String)> {
+    if deferred.is_empty() {
+        return Ok(());
+    }
+    db.with_state(|state| {
+        for (hook, write) in deferred {
+            for (name, id, value) in &write.rows {
+                let appended = match state.get_component(*id) {
+                    Some(component) => component.time_series.push_buf(write.timestamp, value),
+                    None => Err(elodin_db::Error::ComponentNotFound(*id)),
+                };
+                if let Err(err) = appended {
+                    counters.deferred_failures.fetch_add(1, Ordering::Relaxed);
+                    let at = write.timestamp.0;
+                    return Err((*hook, format!("cannot append {name:?} at {at}: {err}")));
+                }
+                counters.deferred_rows.fetch_add(1, Ordering::Relaxed);
+                counters
+                    .deferred_bytes
+                    .fetch_add(value.len() as u64, Ordering::Relaxed);
+            }
+            counters.deferred_batches.fetch_add(1, Ordering::Relaxed);
+        }
+        Ok(())
+    })
 }
 
 pub fn external_controls(world: &WorldExec) -> impl Iterator<Item = ComponentId> + '_ {
@@ -1647,6 +1775,46 @@ mod commit_tests {
         )
         .unwrap();
         assert_eq!(series(&db, "a").time_series.sample_count(), 4);
+    }
+
+    #[test]
+    fn deferred_writes_append_in_order_without_moving_last_updated() {
+        let temp = tempdir().unwrap();
+        let (db, _) = scalar_world(&temp.path().join("db"), &[("x", Some("external_control"))]);
+        db.last_updated.store(Timestamp(1000));
+        let write = |at: i64, value: f64| DeferredWrite {
+            timestamp: Timestamp(at),
+            rows: vec![(
+                "e.x".into(),
+                ComponentId::from_pair("e", "x"),
+                value.to_le_bytes().to_vec(),
+            )],
+        };
+        let counters = CallbackCounters::default();
+
+        apply_deferred(
+            &db,
+            &[(0, write(1001, 1.0)), (1, write(1001, 2.0))],
+            &counters,
+        )
+        .unwrap();
+        let series = series(&db, "x");
+        let (timestamps, values) = series
+            .time_series
+            .get_range(&(Timestamp(1001)..Timestamp(1001)))
+            .unwrap();
+        assert_eq!(timestamps, [Timestamp(1001), Timestamp(1001)]);
+        assert_eq!(
+            values,
+            [1.0f64.to_le_bytes(), 2.0f64.to_le_bytes()].concat()
+        );
+        assert_eq!(db.last_updated.latest(), Timestamp(1000));
+
+        let (hook, err) = apply_deferred(&db, &[(1, write(500, 3.0))], &counters).unwrap_err();
+        assert_eq!(hook, 1);
+        assert!(err.contains("time travel"), "{err}");
+        assert_eq!(counters.deferred_batches.load(Ordering::Relaxed), 2);
+        assert_eq!(counters.deferred_failures.load(Ordering::Relaxed), 1);
     }
 
     #[test]

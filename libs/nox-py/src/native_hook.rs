@@ -1,7 +1,6 @@
 //! Native `pre_commit` hooks: a C function that gets a prepared batch's rows as plain arrays,
 //! runs without the GIL, and can split the rows across pool workers.
 
-use std::collections::HashSet;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
@@ -288,6 +287,10 @@ impl NativeRunner {
 }
 
 impl PreCommit for NativeRunner {
+    fn name(&self) -> &str {
+        &self.symbol
+    }
+
     fn step(
         &mut self,
         tick: u64,
@@ -318,12 +321,7 @@ impl PreCommit for NativeRunner {
         }
         let state = match self.state {
             Some(state) => state,
-            None => {
-                let state = self
-                    .init(tick, timestamp)
-                    .map_err(|err| format!("pre_commit failed at tick {tick}: {err}"))?;
-                *self.state.insert(state)
-            }
+            None => *self.state.insert(self.init(tick, timestamp)?),
         };
         for call in &mut self.calls {
             call.step.tick = tick;
@@ -341,7 +339,7 @@ impl PreCommit for NativeRunner {
             .observe(dispatched, dispatched.elapsed(), &self.calls);
         if let Some(call) = self.calls.iter().find(|call| call.status != 0) {
             return Err(format!(
-                "pre_commit failed at tick {tick}: {} returned {}: {}",
+                "{} returned {}: {}",
                 self.symbol,
                 call.status,
                 message(&call.error[..])
@@ -364,7 +362,7 @@ impl PreCommit for NativeRunner {
         let written = self.fields.iter().filter(|field| field.writes);
         Ok(HookWrites {
             written: written.map(|field| field.component_id).collect(),
-            recorded: HashSet::new(),
+            ..HookWrites::default()
         })
     }
 
@@ -440,6 +438,8 @@ pub struct HookReport {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
 
     /// Writes twice each `input` row into the same `output` row; fails at tick 3.

@@ -6,11 +6,12 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use impeller::types::{ComponentId, PrimType, Timestamp};
-use numpy::{PyUntypedArray, PyUntypedArrayMethods};
+use elodin_db::DB;
+use impeller::types::{ComponentId, PacketId, PrimType, Timestamp};
+use numpy::{PyArray1, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::exceptions::{PyAttributeError, PyKeyError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
-use pyo3::types::{IntoPyDict, PyDict};
+use pyo3::types::{IntoPyDict, PyBytes, PyDict};
 use stellarator::util::CancelToken;
 
 use crate::World;
@@ -292,8 +293,174 @@ impl BatchView {
     }
 }
 
+/// How `WorldStepContext.read_at` picks a sample.
+#[derive(Clone, Copy, PartialEq)]
+enum Selection {
+    /// Only a sample at the requested timestamp.
+    Exact,
+    /// The newest sample at or before it.
+    AtOrBefore,
+}
+
+impl Selection {
+    fn parse(selection: &str) -> PyResult<Self> {
+        match selection {
+            "exact" => Ok(Self::Exact),
+            "at_or_before" => Ok(Self::AtOrBefore),
+            _ => Err(PyValueError::new_err(
+                "selection must be 'exact' or 'at_or_before'",
+            )),
+        }
+    }
+
+    fn accepts(self, selected: Timestamp, requested: Timestamp) -> bool {
+        self == Self::AtOrBefore || selected == requested
+    }
+}
+
+/// An `entity.component` pair of the world, which has DB history unless it is transient.
+struct Pair {
+    id: ComponentId,
+    dtype: &'static str,
+    shape: Vec<usize>,
+    size: usize,
+    external_control: bool,
+}
+
+impl Pair {
+    fn resolve(world: &World, name: &str) -> PyResult<Self> {
+        let found = world.host.iter().find_map(|(component_id, column)| {
+            let (schema, metadata) = world.metadata.component_map.get(component_id)?;
+            let entity = name
+                .strip_suffix(metadata.name.as_str())?
+                .strip_suffix('.')?;
+            let mut ids = column.entity_ids.as_chunks::<8>().0.iter();
+            ids.any(|id| {
+                let id = impeller::types::EntityId(u64::from_le_bytes(*id));
+                world
+                    .metadata
+                    .entity_metadata
+                    .get(&id)
+                    .is_some_and(|entity_metadata| entity_metadata.name == entity)
+            })
+            .then_some((schema, metadata))
+        });
+        let Some((schema, metadata)) = found else {
+            return Err(PyValueError::new_err(format!(
+                "no entity component named {name:?}"
+            )));
+        };
+        if metadata.is_transient() {
+            return Err(PyValueError::new_err(format!(
+                "{name:?} is transient, so it has no DB history"
+            )));
+        }
+        Ok(Self {
+            id: ComponentId::new(name),
+            dtype: numpy_dtype(schema.prim_type),
+            shape: schema.shape().iter().map(|&dim| dim as usize).collect(),
+            size: schema.size(),
+            external_control: metadata
+                .metadata
+                .get("external_control")
+                .is_some_and(|value| value == "true"),
+        })
+    }
+}
+
+enum HistorySource {
+    Component(Pair),
+    Message(PacketId),
+}
+
+/// The committed DB history of an entity's component or of a message log, resolved once, which
+/// `pre_commit` callbacks read with `WorldStepContext.read_at`.
+#[pyclass(frozen)]
+pub struct HistoryHandle {
+    #[pyo3(get)]
+    name: String,
+    source: HistorySource,
+}
+
+impl HistoryHandle {
+    pub fn component(world: &World, name: &str) -> PyResult<Self> {
+        Ok(Self {
+            name: name.to_string(),
+            source: HistorySource::Component(Pair::resolve(world, name)?),
+        })
+    }
+
+    pub fn message(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            source: HistorySource::Message(impeller::types::msg_id(name)),
+        }
+    }
+
+    /// The committed sample `selection` picks at `timestamp`, with its own timestamp.
+    fn select(
+        &self,
+        db: &DB,
+        timestamp: Timestamp,
+        selection: Selection,
+    ) -> Option<(Timestamp, Vec<u8>)> {
+        db.with_state(|state| match &self.source {
+            HistorySource::Component(pair) => {
+                let series = &state.get_component(pair.id)?.time_series;
+                let (selected, value) = series.get_at_or_before(timestamp)?;
+                selection
+                    .accepts(selected, timestamp)
+                    .then(|| (selected, value.to_vec()))
+            }
+            HistorySource::Message(id) => {
+                let log = state.get_msg_log(*id)?;
+                let index = log.timestamps().partition_point(|&t| t <= timestamp);
+                let (selected, value) = log.get_index(index.checked_sub(1)?)?;
+                selection
+                    .accepts(selected, timestamp)
+                    .then(|| (selected, value.into_owned()))
+            }
+        })
+    }
+}
+
+/// Components, each marked `external_control`, that `pre_commit` callbacks append to at their
+/// own timestamps with `WorldStepContext.defer_write`.
+#[pyclass(frozen)]
+pub struct TimestampedWriter {
+    /// Each value's key, and the name and pair it is appended to.
+    fields: Vec<(String, Arc<str>, Pair)>,
+}
+
+impl TimestampedWriter {
+    pub fn new(world: &World, fields: Vec<(String, String)>) -> PyResult<Self> {
+        let fields = fields
+            .into_iter()
+            .map(|(key, name)| {
+                let pair = Pair::resolve(world, &name)?;
+                if !pair.external_control {
+                    return Err(PyValueError::new_err(format!(
+                        "{name:?} must be marked external_control=\"true\", so the simulation never writes it"
+                    )));
+                }
+                Ok((key, Arc::from(name), pair))
+            })
+            .collect::<PyResult<_>>()?;
+        Ok(Self { fields })
+    }
+}
+
+/// Values a `pre_commit` callback appends at `timestamp` once the cycle's world commit landed.
+#[derive(Debug)]
+pub struct DeferredWrite {
+    pub timestamp: Timestamp,
+    /// The name, pair and value of each component written.
+    pub rows: Vec<(Arc<str>, ComponentId, Vec<u8>)>,
+}
+
 /// Passed to a `pre_commit` callback. Views read the world's current values, and writes to a
-/// write handle's view reach the world, and the same commit, when the callback returns.
+/// write handle's view reach the world, and the same commit, when the callback returns. History
+/// reads see only committed DB samples, and deferred writes land after the commit.
 #[pyclass(unsendable)]
 pub struct WorldStepContext {
     #[pyo3(get)]
@@ -304,6 +471,8 @@ pub struct WorldStepContext {
     world: Cell<*mut World>,
     viewed: RefCell<Vec<Py<ComponentHandle>>>,
     recorded: RefCell<HashSet<ComponentId>>,
+    deferred: RefCell<Vec<DeferredWrite>>,
+    db: Arc<DB>,
     counters: Arc<CallbackCounters>,
     recipe_cancel_token: Option<CancelToken>,
 }
@@ -366,6 +535,81 @@ impl WorldStepContext {
         Ok(())
     }
 
+    /// The committed sample of `history` that `selection` picks at `timestamp`: its timestamp and
+    /// a copy of its value, or `None`.
+    fn read_at(
+        &self,
+        py: Python<'_>,
+        history: &HistoryHandle,
+        timestamp: i64,
+        selection: &str,
+    ) -> PyResult<Option<(i64, PyObject)>> {
+        self.ensure_open("history reads")?;
+        let selection = Selection::parse(selection)?;
+        self.counters
+            .history_queries
+            .fetch_add(1, Ordering::Relaxed);
+        let Some((selected, value)) = history.select(&self.db, Timestamp(timestamp), selection)
+        else {
+            self.counters.history_misses.fetch_add(1, Ordering::Relaxed);
+            return Ok(None);
+        };
+        self.counters
+            .history_bytes
+            .fetch_add(value.len() as u64, Ordering::Relaxed);
+        let array = PyArray1::from_vec(py, value).into_any();
+        let array = match &history.source {
+            HistorySource::Component(pair) => array
+                .call_method1("view", (pair.dtype,))?
+                .call_method1("reshape", (pair.shape.clone(),))?,
+            HistorySource::Message(_) => array,
+        };
+        Ok(Some((selected.0, array.unbind())))
+    }
+
+    /// Appends `values`, one per key of `writer`, at `timestamp` once this cycle's world commit
+    /// lands. Writes keep their call order, across callbacks too.
+    fn defer_write(
+        &self,
+        py: Python<'_>,
+        writer: &TimestampedWriter,
+        timestamp: i64,
+        values: &Bound<'_, PyDict>,
+    ) -> PyResult<()> {
+        self.ensure_open("deferred writes")?;
+        if values.len() != writer.fields.len() {
+            let keys: Vec<&str> = writer.fields.iter().map(|(key, ..)| key.as_str()).collect();
+            return Err(PyValueError::new_err(format!(
+                "values must have exactly the keys {keys:?}"
+            )));
+        }
+        let numpy = py.import("numpy")?;
+        let rows = writer
+            .fields
+            .iter()
+            .map(|(key, name, pair)| {
+                let value = values
+                    .get_item(key)?
+                    .ok_or_else(|| PyKeyError::new_err(key.clone()))?;
+                let array = numpy.call_method1("ascontiguousarray", (value, pair.dtype))?;
+                let bytes = array.call_method0("tobytes")?;
+                let bytes = bytes.downcast::<PyBytes>()?.as_bytes();
+                if bytes.len() != pair.size {
+                    return Err(PyValueError::new_err(format!(
+                        "{key:?} must have the shape {:?}",
+                        pair.shape
+                    )));
+                }
+                Ok((name.clone(), pair.id, bytes.to_vec()))
+            })
+            .collect::<PyResult<_>>()?;
+        self.deferred.borrow_mut().push(DeferredWrite {
+            timestamp: Timestamp(timestamp),
+            rows,
+        });
+        Ok(())
+    }
+
     /// Gracefully terminate all s10-managed recipes; see `StepContext.stop_recipes`.
     fn stop_recipes(&self) {
         if let Some(token) = &self.recipe_cancel_token {
@@ -375,6 +619,15 @@ impl WorldStepContext {
 }
 
 impl WorldStepContext {
+    fn ensure_open(&self, what: &str) -> PyResult<()> {
+        if self.world.get().is_null() {
+            return Err(PyRuntimeError::new_err(format!(
+                "{what} end when the pre_commit callback returns"
+            )));
+        }
+        Ok(())
+    }
+
     /// Ends the callback: copies the written views into `world`.
     fn finish(&self, py: Python<'_>, world: &mut World) -> HookWrites {
         self.world.set(std::ptr::null_mut());
@@ -392,6 +645,7 @@ impl WorldStepContext {
         HookWrites {
             written,
             recorded: self.recorded.take(),
+            deferred: self.deferred.take(),
         }
     }
 }
@@ -403,10 +657,15 @@ pub struct HookWrites {
     pub written: HashSet<ComponentId>,
     /// Manually recorded components it asked the commit to record.
     pub recorded: HashSet<ComponentId>,
+    /// Writes to append after the commit, in call order.
+    pub deferred: Vec<DeferredWrite>,
 }
 
 /// Runs after the tick and before the commit.
 pub trait PreCommit {
+    /// Names the hook in failures.
+    fn name(&self) -> &str;
+
     fn step(
         &mut self,
         tick: u64,
@@ -426,11 +685,17 @@ pub trait PreCommit {
 /// A Python `pre_commit(tick, ctx: WorldStepContext)` callback.
 pub struct PythonPreCommit {
     pub func: PyObject,
+    pub name: String,
+    pub db: Arc<DB>,
     pub counters: Arc<CallbackCounters>,
     pub recipe_cancel_token: Option<CancelToken>,
 }
 
 impl PreCommit for PythonPreCommit {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
     fn step(
         &mut self,
         tick: u64,
@@ -444,6 +709,8 @@ impl PreCommit for PythonPreCommit {
                 world: Cell::new(world),
                 viewed: RefCell::default(),
                 recorded: RefCell::default(),
+                deferred: RefCell::default(),
+                db: self.db.clone(),
                 counters: self.counters.clone(),
                 recipe_cancel_token: self.recipe_cancel_token.clone(),
             };
@@ -452,7 +719,7 @@ impl PreCommit for PythonPreCommit {
             let written = ctx.borrow(py).finish(py, world);
             result.map(|_| written).map_err(|err| {
                 err.print(py);
-                format!("pre_commit failed at tick {tick}: {err}")
+                err.to_string()
             })
         })
     }
@@ -467,6 +734,16 @@ pub struct CallbackCounters {
     pub bytes_copied: AtomicU64,
     /// Calls on a `StepContext`, which goes through the DB.
     pub legacy_operations: AtomicU64,
+    pub history_queries: AtomicU64,
+    /// Queries that selected no sample.
+    pub history_misses: AtomicU64,
+    pub history_bytes: AtomicU64,
+    /// `defer_write` calls appended.
+    pub deferred_batches: AtomicU64,
+    /// Component values appended, one per writer key.
+    pub deferred_rows: AtomicU64,
+    pub deferred_bytes: AtomicU64,
+    pub deferred_failures: AtomicU64,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -477,25 +754,80 @@ pub struct CallbackReport {
     /// Every view is a copy: rows into it when viewed and, for writes, back out.
     pub bytes_copied: u64,
     pub legacy_operations: u64,
+    pub history_queries: u64,
+    pub history_misses: u64,
+    pub history_bytes: u64,
+    pub deferred_batches: u64,
+    pub deferred_rows: u64,
+    pub deferred_bytes: u64,
+    pub deferred_failures: u64,
     pub hooks: Vec<HookReport>,
 }
 
 impl CallbackCounters {
     pub fn report(&self) -> CallbackReport {
+        let load = |counter: &AtomicU64| counter.load(Ordering::Relaxed);
         CallbackReport {
-            prepared_handles: self.prepared_handles.load(Ordering::Relaxed),
-            validation_failures: self.validation_failures.load(Ordering::Relaxed),
-            views: self.views.load(Ordering::Relaxed),
-            bytes_copied: self.bytes_copied.load(Ordering::Relaxed),
-            legacy_operations: self.legacy_operations.load(Ordering::Relaxed),
+            prepared_handles: load(&self.prepared_handles),
+            validation_failures: load(&self.validation_failures),
+            views: load(&self.views),
+            bytes_copied: load(&self.bytes_copied),
+            legacy_operations: load(&self.legacy_operations),
+            history_queries: load(&self.history_queries),
+            history_misses: load(&self.history_misses),
+            history_bytes: load(&self.history_bytes),
+            deferred_batches: load(&self.deferred_batches),
+            deferred_rows: load(&self.deferred_rows),
+            deferred_bytes: load(&self.deferred_bytes),
+            deferred_failures: load(&self.deferred_failures),
             hooks: Vec::new(),
         }
     }
 
     /// Restarts the per-cycle counts, as the loop does when warmup ends.
     pub fn reset_activity(&self) {
-        self.views.store(0, Ordering::Relaxed);
-        self.bytes_copied.store(0, Ordering::Relaxed);
-        self.legacy_operations.store(0, Ordering::Relaxed);
+        for counter in [
+            &self.views,
+            &self.bytes_copied,
+            &self.legacy_operations,
+            &self.history_queries,
+            &self.history_misses,
+            &self.history_bytes,
+            &self.deferred_batches,
+            &self.deferred_rows,
+            &self.deferred_bytes,
+        ] {
+            counter.store(0, Ordering::Relaxed);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn message_history_selects_exact_or_at_or_before() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        for (at, value) in [(32, 1u8), (48, 2)] {
+            let id = impeller::types::msg_id("camera.frame");
+            db.push_msg(Timestamp(at), id, &[value]).unwrap();
+        }
+        let history = HistoryHandle::message("camera.frame");
+        let select = |at, selection| history.select(&db, Timestamp(at), selection);
+
+        assert_eq!(select(48, Selection::Exact), Some((Timestamp(48), vec![2])));
+        assert_eq!(select(40, Selection::Exact), None);
+        assert_eq!(
+            select(40, Selection::AtOrBefore),
+            Some((Timestamp(32), vec![1]))
+        );
+        assert_eq!(select(31, Selection::AtOrBefore), None);
+        let missing = HistoryHandle::message("camera.depth");
+        assert_eq!(
+            missing.select(&db, Timestamp(48), Selection::AtOrBefore),
+            None
+        );
     }
 }

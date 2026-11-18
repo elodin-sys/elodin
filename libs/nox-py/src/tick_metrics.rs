@@ -165,9 +165,11 @@ pub struct Receipt {
     world_run: PhaseStatsSnapshot,
     pre_commit: PhaseStatsSnapshot,
     commit: PhaseStatsSnapshot,
+    /// Appending the `pre_commit` hooks' deferred writes, after the commit.
+    deferred_writes: PhaseStatsSnapshot,
     wait_for_write: PhaseStatsSnapshot,
     post_step: PhaseStatsSnapshot,
-    /// pre_step + pre_commit + post_step of each cycle.
+    /// pre_step + pre_commit + deferred_writes + post_step of each cycle.
     callback: PhaseStatsSnapshot,
     real_time_pacing: PhaseStatsSnapshot,
     real_time_oversleep: PhaseStatsSnapshot,
@@ -190,6 +192,7 @@ pub struct Receipt {
     callbacks: Option<crate::prepared::CallbackReport>,
     systems: Option<cranelift_mlir::profile::Timings>,
     failure: Option<String>,
+    failed_hook: Option<FailedHook>,
     /// Sections this run did not collect.
     unavailable: Vec<&'static str>,
     entry_unix_ns: Option<u64>,
@@ -197,6 +200,16 @@ pub struct Receipt {
     loop_start_unix_ns: u64,
     loop_end_unix_ns: u64,
     summary_written_unix_ns: u64,
+}
+
+/// The `pre_commit` hook that stopped a run.
+#[derive(Debug, Clone, Serialize)]
+pub struct FailedHook {
+    /// Its position in the `pre_commit` list.
+    pub index: usize,
+    pub name: String,
+    /// Whether the cycle's world commit landed before the failure, as it has for a deferred write.
+    pub committed: bool,
 }
 
 impl Receipt {
@@ -309,7 +322,7 @@ impl PhaseStats {
 const MAX_SAMPLES: usize = 2_000_000;
 
 /// Timestamps the simulation loop takes per cycle, for the overhead estimate.
-const TIMESTAMPS_PER_CYCLE: u64 = 16;
+const TIMESTAMPS_PER_CYCLE: u64 = 18;
 
 /// Phase times of one simulation cycle in nanoseconds, saturating at about 4.3 s.
 #[derive(Clone, Copy, Default)]
@@ -319,6 +332,7 @@ struct CycleSample {
     world_run: u32,
     pre_commit: u32,
     commit: u32,
+    deferred_writes: u32,
     wait_for_write: u32,
     post_step: u32,
     real_time_pacing: u32,
@@ -338,6 +352,7 @@ impl CycleSample {
     fn callback(&self) -> u32 {
         self.pre_step
             .saturating_add(self.pre_commit)
+            .saturating_add(self.deferred_writes)
             .saturating_add(self.post_step)
     }
 }
@@ -363,11 +378,11 @@ fn write_trace(path: &PathBuf, samples: &[CycleSample]) {
     out.push_str(
         "cycle,work_ns,requested_sleep_ns,actual_sleep_ns,oversleep_ns,deadline_err_ns,reset,\
          pre_step_ns,copy_db_to_world_ns,world_run_ns,pre_commit_ns,commit_ns,\
-         wait_for_write_ns,post_step_ns,real_time_pacing_ns,total_cycle_ns\n",
+         deferred_writes_ns,wait_for_write_ns,post_step_ns,real_time_pacing_ns,total_cycle_ns\n",
     );
     for (i, s) in samples.iter().enumerate() {
         out.push_str(&format!(
-            "{i},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
+            "{i},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
             s.work,
             s.requested_sleep,
             s.actual_sleep,
@@ -379,6 +394,7 @@ fn write_trace(path: &PathBuf, samples: &[CycleSample]) {
             s.world_run,
             s.pre_commit,
             s.commit,
+            s.deferred_writes,
             s.wait_for_write,
             s.post_step,
             s.real_time_pacing,
@@ -399,9 +415,10 @@ pub struct TickMetrics {
     pub world_run: PhaseStats,
     pub pre_commit: PhaseStats,
     pub commit: PhaseStats,
+    pub deferred_writes: PhaseStats,
     pub wait_for_write: PhaseStats,
     pub post_step: PhaseStats,
-    /// pre_step + pre_commit + post_step of each cycle.
+    /// pre_step + pre_commit + deferred_writes + post_step of each cycle.
     pub callback: PhaseStats,
     pub real_time_pacing: PhaseStats,
     /// Real-time pacing diagnostics (only populated when
@@ -443,6 +460,7 @@ pub struct TickMetrics {
     pub systems: Option<cranelift_mlir::profile::Timings>,
     /// Why the run stopped early, when a callback failed.
     pub failure: Option<String>,
+    pub failed_hook: Option<FailedHook>,
     /// Wall-clock duration of one simulation cycle (from immediately
     /// after the cancel / paused checks down to just before the next
     /// iteration starts). Feeds the "mean cycle" header and
@@ -485,6 +503,7 @@ impl TickMetrics {
             world_run: PhaseStats::default(),
             pre_commit: PhaseStats::default(),
             commit: PhaseStats::default(),
+            deferred_writes: PhaseStats::default(),
             wait_for_write: PhaseStats::default(),
             post_step: PhaseStats::default(),
             callback: PhaseStats::default(),
@@ -506,6 +525,7 @@ impl TickMetrics {
             timing: Timing::Summary,
             systems: None,
             failure: None,
+            failed_hook: None,
             total_cycle: PhaseStats::default(),
             cycles: 0,
             steps: 0,
@@ -523,6 +543,22 @@ impl TickMetrics {
         self.loop_end_unix_ns.get_or_insert_with(unix_now_ns);
     }
 
+    /// Records that `pre_commit` hook `index`, named `name`, stopped the run `when`, unless an
+    /// earlier failure did.
+    pub fn fail(&mut self, index: usize, name: &str, when: &str, cause: &str, committed: bool) {
+        if self.failure.is_some() {
+            return;
+        }
+        self.failure = Some(format!(
+            "pre_commit hook {index} ({name}) failed {when}: {cause}"
+        ));
+        self.failed_hook = Some(FailedHook {
+            index,
+            name: name.to_string(),
+            committed,
+        });
+    }
+
     /// Discard everything accumulated so far and restart the clock, so the
     /// final summary reflects steady state rather than the simulator/SITL
     /// spin-up (the first cycle can stall for seconds while a flight controller
@@ -536,6 +572,7 @@ impl TickMetrics {
         self.world_run = PhaseStats::default();
         self.pre_commit = PhaseStats::default();
         self.commit = PhaseStats::default();
+        self.deferred_writes = PhaseStats::default();
         self.wait_for_write = PhaseStats::default();
         self.post_step = PhaseStats::default();
         self.callback = PhaseStats::default();
@@ -605,6 +642,11 @@ impl TickMetrics {
     pub fn observe_commit(&mut self, d: Duration) {
         self.commit.observe(d);
         self.cycle.commit = ns32(d);
+    }
+    #[inline]
+    pub fn observe_deferred_writes(&mut self, d: Duration) {
+        self.deferred_writes.observe(d);
+        self.cycle.deferred_writes = ns32(d);
     }
     #[inline]
     pub fn observe_wait_for_write(&mut self, d: Duration) {
@@ -775,6 +817,16 @@ impl TickMetrics {
             println!("{}", Self::fmt_row("pre_commit", &self.pre_commit));
         }
         println!("{}", Self::fmt_row("commit world", &self.commit));
+        if self
+            .callbacks
+            .as_ref()
+            .is_some_and(|c| c.deferred_batches > 0)
+        {
+            println!(
+                "{}",
+                Self::fmt_row("deferred writes", &self.deferred_writes)
+            );
+        }
         println!("{}", Self::fmt_row("wait_for_write", &self.wait_for_write));
         println!("{}", Self::fmt_row("post_step", &self.post_step));
         println!(
@@ -863,6 +915,7 @@ impl TickMetrics {
             world_run: phase(&self.world_run, |s| s.world_run),
             pre_commit: phase(&self.pre_commit, |s| s.pre_commit),
             commit: phase(&self.commit, |s| s.commit),
+            deferred_writes: phase(&self.deferred_writes, |s| s.deferred_writes),
             wait_for_write: phase(&self.wait_for_write, |s| s.wait_for_write),
             post_step: phase(&self.post_step, |s| s.post_step),
             callback: phase(&self.callback, CycleSample::callback),
@@ -889,6 +942,7 @@ impl TickMetrics {
             callbacks: self.callbacks.clone(),
             systems: self.systems.clone(),
             failure: self.failure.clone(),
+            failed_hook: self.failed_hook.clone(),
             unavailable,
             entry_unix_ns: read_env_u64("ELODIN_SIM_ENTRY_UNIX_NS"),
             compile_done_unix_ns: read_env_u64("ELODIN_SIM_COMPILE_DONE_UNIX_NS"),

@@ -49,6 +49,13 @@ ObjectRate = component("object_rate", (1,))
 ObjectSignal = component("object_signal", (16,))
 AUX_COMPONENTS = tuple(component(f"aux_{index:02d}", (4,)) for index in range(AUX_COMPONENT_COUNT))
 
+# Capture evidence that the history hook of `main.py` appends after each commit.
+CAPTURE_FIELDS = ("frame", "time", "disposition")
+CAPTURE = tuple(
+    component(f"capture_{field}", (1,), metadata={"external_control": "true"})
+    for field in CAPTURE_FIELDS
+)
+
 
 def compute_bank(seed: jax.Array) -> jax.Array:
     def compute_round(index, value):
@@ -197,4 +204,5 @@ def build(
             name=f"object_{index:03d}",
         )
         objects.append(observed)
+    world.spawn([el.C(field, jnp.zeros(1, dtype=jnp.float64)) for field in CAPTURE], name="camera")
     return world, step_agent | step_object, agents, objects

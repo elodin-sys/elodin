@@ -191,6 +191,8 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySystem>()?;
     m.add_class::<StepContext>()?;
     m.add_class::<prepared::WorldStepContext>()?;
+    m.add_class::<prepared::HistoryHandle>()?;
+    m.add_class::<prepared::TimestampedWriter>()?;
     m.add_class::<prepared::ComponentHandle>()?;
     m.add_class::<prepared::BatchHandle>()?;
     m.add_class::<prepared::BatchView>()?;
