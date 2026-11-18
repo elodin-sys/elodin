@@ -998,7 +998,7 @@ and running the simulation. The <code>World</code> object also provides helper m
 <span class="giallo-l"><span>    }</span><span>,</span></span>
 <span class="giallo-l"><span>)</span></span></code></pre></li>
 <li>
-<p><code>run(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp, log_level, backend, on_receipt, workers, pre_commit, timing)</code> -&gt; None</p>
+<p><code>run(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp, log_level, backend, on_receipt, workers, pre_commit, timing, synchronous_commits)</code> -&gt; None</p>
 <p>Run the simulation.</p>
 <ul>
 <li><code>system</code> : <a href="https://docs.elodin.systems/preview/pr-976/reference/python-api/#elodin-system">elodin.System</a>, the systems to run, can be supplied as a list of systems delineated by pipes.</li>
@@ -1020,8 +1020,9 @@ and running the simulation. The <code>World</code> object also provides helper m
 <li><code>workers</code> : <code>int</code>, optional, threads the Cranelift backend runs independent calls on, the simulation thread included: entity chunks of <code>@el.map</code> systems and the per-entity calls of <code>@el.map_seq</code>. Defaults to <code>1</code>. Results do not depend on the count once it is above <code>1</code>; going from <code>1</code> to more can change the last bits of reductions.</li>
 <li><code>pre_commit</code> : a callable <code>(tick, WorldStepContext)</code>, an <a href="https://docs.elodin.systems/preview/pr-976/reference/python-api/#class-elodin-nativestephook">elodin.NativeStepHook</a>, or a list of them run in order, called after each tick and before its DB commit. See <a href="https://docs.elodin.systems/preview/pr-976/reference/python-api/#pre-commit-hooks">pre-commit hooks</a>.</li>
 <li><code>timing</code> : <a href="https://docs.elodin.systems/preview/pr-976/reference/python-api/#class-elodin-timing">elodin.Timing</a>, optional, what the receipt measures. Defaults to <code>Timing.summary()</code>.</li>
+<li><code>synchronous_commits</code> : <code>bool</code>, optional, has each commit in the DB, and <code>last_updated</code> past it, before the next cycle's <code>pre_commit</code> hooks run, so at most one commit is ever in flight. The writer thread still appends it, during the pacing and the next systems step, and the next cycle waits for it before its hooks; the receipt counts that wait in <code>commit</code>. The loop then also waits out DB write stalls, so keep the DB on storage that does not stall. Defaults to <code>False</code>.</li>
 </ul>
-<p>When neither <code>pre_step</code> nor <code>post_step</code> is given and no component sets <code>wait_for_write</code>, a writer thread appends each commit to the DB, so DB stalls stay off the simulation thread. Clients then see a commit, and <code>last_updated</code> move past it, up to a few cycles later.</p>
+<p>When neither <code>pre_step</code> nor <code>post_step</code> is given, no component sets <code>wait_for_write</code>, no history handle or timestamped writer was prepared, and <code>synchronous_commits</code> is <code>False</code>, a writer thread appends each commit to the DB, so DB stalls stay off the simulation thread. Clients then see a commit, and <code>last_updated</code> move past it, up to a few cycles later. The receipt's <code>sync.commits</code> says which way the run committed: <code>write_behind</code> or <code>synchronous</code>.</p>
 </li>
 <li>
 <p><code>build(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, db_path, backend, start_timestamp, workers, timing)</code> -&gt; <code>elodin.Exec</code></p>
@@ -1047,6 +1048,18 @@ and running the simulation. The <code>World</code> object also provides helper m
 <li>
 <p><code>prepare_batch(fields)</code> -&gt; <code>elodin.BatchHandle</code></p>
 <p>Group handles over the same number of rows, keyed by field name, so a hook views them together.</p>
+</li>
+<li>
+<p><code>prepare_component_history(name)</code> -&gt; <code>elodin.HistoryHandle</code></p>
+<p>Resolve once the <code>entity.component</code> pair <code>name</code> (e.g. <code>"drone.world_pos"</code>), for hooks to read its committed DB history with <code>WorldStepContext.read_at</code>. Transient components have no history and are rejected.</p>
+</li>
+<li>
+<p><code>prepare_message_history(name)</code> -&gt; <code>elodin.HistoryHandle</code></p>
+<p>The same for the message log <code>name</code> (e.g. <code>"drone.scene_cam"</code>), which may not exist yet when it is prepared.</p>
+</li>
+<li>
+<p><code>prepare_timestamped_writer(fields)</code> -&gt; <code>elodin.TimestampedWriter</code></p>
+<p>Resolve once the components that <code>WorldStepContext.defer_write</code> appends to: <code>fields</code> maps each value's key to an <code>entity.component</code> pair, which must be marked <code>external_control</code> so the simulation never writes it.</p>
 </li>
 </ul>
 <h3 id="backend-selection">Backend Selection</h3>
@@ -1289,7 +1302,26 @@ are returned so the same simulation still runs normally.</p>
 <span class="giallo-l"><span>        view</span><span>.</span><span>command</span><span>[</span><span style="color: light-dark(#CB4B16, #CB4B16);">...</span><span>]</span><span style="color: light-dark(#859900, #859900);"> =</span><span> controller</span><span>(</span><span>view</span><span>.</span><span>position</span><span>,</span><span> view</span><span>.</span><span>target</span><span>)</span></span>
 <span class="giallo-l"></span>
 <span class="giallo-l"><span>world</span><span>.</span><span>run</span><span>(</span><span>system</span><span>,</span><span> pre_commit</span><span style="color: light-dark(#859900, #859900);">=</span><span>exchange_step</span><span>,</span><span> workers</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">8</span><span>)</span></span></code></pre>
-<p>An exception in a hook stops the run, and the receipt records why.</p>
+<p>A hook can also read committed DB history, such as camera frames another process recorded, and queue timestamped writes that land after the commit:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>frames</span><span style="color: light-dark(#859900, #859900);"> =</span><span> world</span><span>.</span><span>prepare_message_history</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.scene_cam</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span></span>
+<span class="giallo-l"><span>truth</span><span style="color: light-dark(#859900, #859900);"> =</span><span> world</span><span>.</span><span>prepare_component_history</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.world_pos</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span></span>
+<span class="giallo-l"><span>evidence</span><span style="color: light-dark(#859900, #859900);"> =</span><span> world</span><span>.</span><span>prepare_timestamped_writer</span><span>(</span><span>{</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">frame</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.capture_frame</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>}</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">def</span><span style="color: light-dark(#268BD2, #268BD2);"> history_step</span><span>(</span><span>tick</span><span>:</span><span style="color: light-dark(#859900, #859900);"> int</span><span>,</span><span> ctx</span><span>:</span><span> el</span><span>.</span><span>WorldStepContext</span><span>)</span><span> -&gt;</span><span style="color: light-dark(#B58900, #B58900);"> None</span><span>:</span></span>
+<span class="giallo-l"><span>    found</span><span style="color: light-dark(#859900, #859900);"> =</span><span> ctx</span><span>.</span><span>read_at</span><span>(</span><span>frames</span><span>,</span><span> capture_time</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">exact</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">       #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> (timestamp, bytes) or None</span></span>
+<span class="giallo-l"><span>    pose</span><span style="color: light-dark(#859900, #859900);"> =</span><span> ctx</span><span>.</span><span>read_at</span><span>(</span><span>truth</span><span>,</span><span> capture_time</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">at_or_before</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">  #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> (timestamp, value) or None</span></span>
+<span class="giallo-l"><span>    ctx</span><span>.</span><span>defer_write</span><span>(</span><span>evidence</span><span>,</span><span> ctx</span><span>.</span><span>timestamp</span><span style="color: light-dark(#859900, #859900);"> +</span><span style="color: light-dark(#D33682, #D33682);"> 1</span><span>,</span><span> {</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">frame</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> frame_id</span><span>}</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>world</span><span>.</span><span>run</span><span>(</span><span>system</span><span>,</span><span> pre_commit</span><span style="color: light-dark(#859900, #859900);">=</span><span>[</span><span>exchange_step</span><span>,</span><span> history_step</span><span>]</span><span>)</span></span></code></pre>
+<p>A list of hooks is one ordered boundary:</p>
+<ol>
+<li>Hooks run in list order, Python and native alike.</li>
+<li>A hook sees the world writes of the hooks before it.</li>
+<li>History reads see committed DB samples only, not the world of the current tick, whose commit comes after the hooks.</li>
+<li>Deferred writes are appended after the commit, in hook and call order, equal timestamps included. They do not move <code>last_updated</code>.</li>
+<li>A hook that raises, or a native hook that returns nonzero, stops the later hooks, the cycle's commit and the run. Its queued writes are dropped.</li>
+</ol>
+<p>A deferred write that fails, for example with a timestamp older than its component's last sample, stops the run after the commit. The receipt's <code>failed_hook</code> names the hook (<code>index</code> and <code>name</code>) and says whether the cycle's commit had landed (<code>committed</code>). Preparing a history handle or a timestamped writer makes commits synchronous, so the hooks read every earlier commit and deferred writes follow theirs; with the writer thread, a cycle's deferred writes land just before the next cycle's hooks.</p>
 <h3 id="class-elodin-worldstepcontext"><em>class</em> <code>elodin.WorldStepContext</code></h3>
 <p>Passed to <code>pre_commit</code> callbacks.</p>
 <ul>
@@ -1297,8 +1329,11 @@ are returned so the same simulation still runs normally.</p>
 <li><code>view(handle)</code> -&gt; <code>numpy.ndarray</code> : the handle's rows, read-only for a read handle. Writes to a write handle's view reach the world when the callback returns. Views are copies and end with the callback.</li>
 <li><code>batch(batch)</code> -&gt; <code>BatchView</code> : views every field of a batch, as attributes or items.</li>
 <li><code>record(handle)</code> -&gt; None : records the handle's component, which must use <code>Recording.manual()</code>, at this commit.</li>
+<li><code>read_at(history, timestamp, selection)</code> -&gt; <code>(int, numpy.ndarray) | None</code> : the committed sample of an <code>elodin.HistoryHandle</code> at <code>timestamp</code>. <code>selection="exact"</code> takes only a sample at that timestamp and never falls back to an older one; <code>"at_or_before"</code> takes the newest sample at or before it. Returns the sample's own timestamp and a copy of its value (a message as <code>uint8</code> bytes), or <code>None</code> when nothing matches.</li>
+<li><code>defer_write(writer, timestamp, values)</code> -&gt; None : queues <code>values</code>, one per key of an <code>elodin.TimestampedWriter</code>, to append at <code>timestamp</code> after this cycle's commit.</li>
 <li><code>stop_recipes()</code> -&gt; None : stops the s10 recipes, as <code>StepContext.stop_recipes</code>.</li>
 </ul>
+<p>All but <code>tick</code> and <code>timestamp</code> raise once the callback returns.</p>
 <h3 id="class-elodin-nativestephook"><em>class</em> <code>elodin.NativeStepHook</code></h3>
 <p>A <code>pre_commit</code> hook in a shared library. It runs without the GIL, and can split the batch's rows across the <code>workers</code> threads.</p>
 <ul>
@@ -1336,7 +1371,7 @@ are returned so the same simulation still runs normally.</p>
 <span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">void</span><span style="color: light-dark(#268BD2, #268BD2);"> my_step_destroy</span><span>(</span><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">void</span><span style="color: light-dark(#859900, #859900);"> *</span><span>state</span><span>)</span><span>;</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">                          /*</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> optional; after the run </span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">*/</span></span></code></pre>
 <p>A call may write only writable columns, and only its own rows. A nonzero return stops the run with the call's message in the receipt. The receipt's <code>callbacks.hooks</code> reports each hook's queue time, slowest-partition time and worker occupancy.</p>
 <h3 id="run-receipts">Run receipts</h3>
-<p>Every run builds a versioned receipt (<code>elodin.run_receipt.v1</code>), passed to <code>on_receipt</code>, returned by <code>Exec.last_receipt()</code>, and written to <code>$ELODIN_SIM_SUMMARY_JSON</code> when set. It covers the cycles after warmup: count, sum, min, exact p50/p95/p99, and max of every phase (<code>copy_db_to_world</code>, <code>world_run</code>, <code>pre_commit</code>, <code>commit</code>, <code>post_step</code>, their <code>callback</code> sum, pacing, and <code>total_cycle</code>); pacing lateness and resets; DB <code>sync</code> counters, including rows scanned, drained and committed and the writer thread's lag and queue depth; backend bytes and compile times; hook timings; and the sections it did not collect under <code>unavailable</code>.</p>
+<p>Every run builds a versioned receipt (<code>elodin.run_receipt.v1</code>), passed to <code>on_receipt</code>, returned by <code>Exec.last_receipt()</code>, and written to <code>$ELODIN_SIM_SUMMARY_JSON</code> when set. It covers the cycles after warmup: count, sum, min, exact p50/p95/p99, and max of every phase (<code>copy_db_to_world</code>, <code>world_run</code>, <code>pre_commit</code>, <code>commit</code>, <code>deferred_writes</code>, <code>post_step</code>, their <code>callback</code> sum, pacing, and <code>total_cycle</code>); pacing lateness and resets; DB <code>sync</code> counters, including whether commits were <code>synchronous</code> or <code>write_behind</code>, rows scanned, drained and committed, and the writer thread's lag and queue depth; backend bytes and compile times; hook timings, history queries, misses and bytes, and deferred-write batches, rows, bytes and failures under <code>callbacks</code>; the <code>failure</code> and <code>failed_hook</code> of a run a hook stopped; and the sections it did not collect under <code>unavailable</code>.</p>
 <h3 id="class-elodin-timing"><em>class</em> <code>elodin.Timing</code></h3>
 <p>What a receipt measures, from least to most perturbing.</p>
 <ul>
@@ -1659,7 +1694,7 @@ height-grid preparation and JAX height queries.</p>
 <tr><td><code>element_names</code></td><td>comma-separated string (e.g. <code>"x,y,z"</code>, <code>"q0,q1,q2,q3"</code>)</td><td>Labels for each element of a vector or matrix component. Used by the component inspector and as column suffixes when exporting with <code>elodin-db export --flatten</code>.</td></tr>
 <tr><td><code>private</code></td><td><code>"true"</code></td><td>Component is omitted from <code>elodin-db export</code> by default (pass <code>--include-private</code> to include it). Useful for marking internal scratch state (e.g. large covariance matrices) that downstream consumers shouldn't see.</td></tr>
 <tr><td><code>transient</code></td><td><code>"true"</code></td><td>Simulation component remains available to systems in memory but is never registered with or recorded to Elodin DB. It is absent from DB schemas, the editor, replication, and exports.</td></tr>
-<tr><td><code>external_control</code></td><td><code>"true"</code></td><td>Component is writable from external clients (e.g. Betaflight or a HITL bridge) over the Impeller protocol, and from <code>pre_commit</code> hooks. The simulation will not overwrite values written externally.</td></tr>
+<tr><td><code>external_control</code></td><td><code>"true"</code></td><td>Component is writable from external clients (e.g. Betaflight or a HITL bridge) over the Impeller protocol, and from <code>pre_commit</code> hooks, including their deferred writes. The simulation will not overwrite values written externally.</td></tr>
 <tr><td><code>record_every_tick</code></td><td><code>"true"</code></td><td>Opt out of sparse recording and write a sample at every telemetry commit even when its bytes are unchanged.</td></tr>
 </tbody></table>
 <p>Component recording is sparse by default: the simulation writes a sample
