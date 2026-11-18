@@ -1664,7 +1664,8 @@ def build_powered(
         ],
         name="booster",
     )
-    # Body-mounted IR camera looks aft along the booster toward its engines.
+    # Look aft from above the grid fins, with the two near-side fins framing
+    # the booster. Roll the image so their steering motion reads left/right.
     # The local preview shares the scene's particles and terrain.
     world.sensor_camera(
         entity=booster,
@@ -1674,16 +1675,17 @@ def build_powered(
         fov=75.0,
         near=0.1,
         far=1_000_000.0,
-        pos_offset=[12.0, 2.05, 0.0],
-        rot_offset=[0.0, 0.0, 170.0],
+        pos_offset=[30.0, 4.0, 0.0],
+        rot_offset=[-90.0, -35.0, 180.0],
         fps=20.0,
         cinematic=True,
         render_local=True,
         effect="thermal",
         effect_params={
             "palette": "white_hot",
-            "contrast": 1.3,
-            "noise_sigma": 0.008,
+            # Preserve the shaded fin's lattice instead of clipping it to black.
+            "contrast": 0.85,
+            "noise_sigma": 0.003,
         },
     )
     effectors = gravity_and_frame_forces | apply_body_wrenches
