@@ -89,8 +89,11 @@ impl NativeStepHook {
     #[staticmethod]
     #[pyo3(signature = (path, input, symbol, workers = 1))]
     fn load(path: &str, input: &BatchHandle, symbol: &str, workers: usize) -> PyResult<Self> {
+        // Safety: loading runs the library's initializers; the caller chose to trust it.
         let library = unsafe { libloading::Library::new(path) }
             .map_err(|err| PyValueError::new_err(format!("cannot load {path:?}: {err}")))?;
+        // Safety: the symbols are taken to have the documented hook ABI. The copied pointers stay
+        // valid because this hook and each of its runners keep the library loaded.
         let step = unsafe { library.get::<StepFn>(symbol.as_bytes()) }
             .map_err(|err| PyValueError::new_err(format!("{path:?} has no {symbol:?}: {err}")))?;
         let symbols = Symbols {
@@ -153,6 +156,8 @@ struct Call {
 }
 
 extern "C" fn run_call(ctx: *mut u8) {
+    // Safety: `ctx` is one of the dispatching runner's `calls`, which only this task touches
+    // until the dispatch returns; the hook follows the documented ABI.
     let call = unsafe { &mut *ctx.cast::<Call>() };
     call.started = Instant::now();
     call.status = unsafe { (call.func)(&call.step) };
@@ -160,6 +165,7 @@ extern "C" fn run_call(ctx: *mut u8) {
 }
 
 fn message(error: &[c_char]) -> String {
+    // Safety: `c_char` and `u8` have the same size and alignment.
     let bytes = unsafe { std::slice::from_raw_parts(error.as_ptr().cast::<u8>(), error.len()) };
     match CStr::from_bytes_until_nul(bytes) {
         Ok(message) if !message.is_empty() => message.to_string_lossy().into_owned(),
@@ -273,6 +279,7 @@ impl NativeRunner {
             ..self.calls[0].step
         };
         step.row_end = step.rows;
+        // Safety: `step` and `state` outlive the call; the hook follows the documented ABI.
         match unsafe { init(&step, &mut state) } {
             0 => Ok(state),
             _ => Err(format!("{}_init failed: {}", self.symbol, message(&error))),
@@ -327,6 +334,7 @@ impl PreCommit for NativeRunner {
         let dispatched = Instant::now();
         match self.calls.as_mut_slice() {
             [call] => run_call((call as *mut Call).cast()),
+            // Safety: the tasks point into `self.calls`, which outlive the dispatch.
             _ => unsafe { pool::run(&self.estimate, self.tasks.as_ptr(), self.tasks.len()) },
         }
         self.stats
@@ -372,6 +380,7 @@ impl PreCommit for NativeRunner {
 impl Drop for NativeRunner {
     fn drop(&mut self) {
         if let (Some(state), Some(destroy)) = (self.state, self.symbols.destroy) {
+            // Safety: `state` came from init, and a runner is dropped once.
             unsafe { destroy(state) };
         }
     }

@@ -88,6 +88,7 @@ fn numpy_dtype(prim_type: PrimType) -> &'static str {
 }
 
 fn array_data(array: &Bound<'_, PyUntypedArray>) -> *mut u8 {
+    // Safety: a bound array's object is alive and initialized.
     unsafe { (*array.as_array_ptr()).data.cast() }
 }
 
@@ -176,12 +177,21 @@ impl ComponentHandle {
         self.access == Access::Write
     }
 
+    /// Whether `self` resolves the same rows of the same component as `other`, with the same
+    /// access.
+    pub fn replaces(&self, other: &ComponentHandle) -> bool {
+        self.component_id == other.component_id
+            && self.rows == other.rows
+            && self.access == other.access
+    }
+
     /// Copies the rows from the world into the array; returns the bytes copied.
     fn fill(&self, py: Python<'_>, world: &World) -> usize {
         let column = &world.host[&self.component_id].buffer;
         let array = array_data(self.array.bind(py));
         for (i, &row) in self.rows.iter().enumerate() {
             let src = &column[row * self.row_bytes..][..self.row_bytes];
+            // Safety: the array was created with one `row_bytes` row per entry of `rows`.
             unsafe {
                 std::ptr::copy_nonoverlapping(
                     src.as_ptr(),
@@ -203,6 +213,7 @@ impl ComponentHandle {
         let array = array_data(self.array.bind(py));
         for (i, &row) in self.rows.iter().enumerate() {
             let dst = &mut column[row * self.row_bytes..][..self.row_bytes];
+            // Safety: the array was created with one `row_bytes` row per entry of `rows`.
             unsafe {
                 std::ptr::copy_nonoverlapping(
                     array.add(i * self.row_bytes),
@@ -309,6 +320,7 @@ impl WorldStepContext {
         }
         let mut viewed = self.viewed.borrow_mut();
         if !viewed.iter().any(|seen| seen.is(&handle)) {
+            // Safety: `world` is non-null only while the tick loop lends it to this callback.
             let bytes = handle.get().fill(py, unsafe { &*world });
             self.counters.views.fetch_add(1, Ordering::Relaxed);
             self.counters
@@ -338,6 +350,7 @@ impl WorldStepContext {
                 "records end when the pre_commit callback returns",
             ));
         }
+        // Safety: as in `view`.
         let metadata = &unsafe { &*world }.metadata.component_map[&handle.component_id].1;
         if metadata
             .metadata

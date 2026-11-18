@@ -37,8 +37,9 @@ def _step(x: X, c: C) -> X:
 def _scenario(name, result_path, db_path):
     world, ids = _world()
     result = {}
-    if name == "stale":
-        world.prepare_component("pc_x", ids)
+    if name in ("stale", "replaced"):
+        # "replaced" prepares these same rows again below.
+        world.prepare_component("pc_x", ids if name == "stale" else list(reversed(ids)))
         world.spawn([el.C(X, jnp.zeros(2)), el.C(C, jnp.zeros(2))], name="late")
     exchange = world.prepare_batch(
         {
@@ -128,6 +129,10 @@ def test_a_failing_hook_stops_the_run_with_a_failed_receipt(tmp_path):
 
 def test_spawning_after_prepare_invalidates_the_handle(tmp_path):
     assert "prepared before an entity was spawned" in _run(tmp_path, "stale")["error"]
+
+
+def test_preparing_again_after_a_spawn_replaces_the_stale_handle(tmp_path):
+    assert "error" not in _run(tmp_path, "replaced")
 
 
 def test_only_manually_recorded_components_take_record_requests(tmp_path):

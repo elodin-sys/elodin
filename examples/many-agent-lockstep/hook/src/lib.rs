@@ -58,12 +58,16 @@ struct Hook {
 
 impl Hook {
     fn new(step: &ElodinStep) -> Result<Self, String> {
-        let columns = unsafe { std::slice::from_raw_parts(step.columns, step.column_count as usize) };
+        // Safety: Elodin passes `column_count` columns, each with a NUL-terminated name.
+        let columns =
+            unsafe { std::slice::from_raw_parts(step.columns, step.column_count as usize) };
         let mut indices = [0; FIELDS.len()];
         for (index, (name, row_bytes)) in indices.iter_mut().zip(FIELDS) {
             *index = columns
                 .iter()
-                .position(|column| unsafe { CStr::from_ptr(column.name) }.to_bytes() == name.as_bytes())
+                .position(|column| {
+                    unsafe { CStr::from_ptr(column.name) }.to_bytes() == name.as_bytes()
+                })
                 .ok_or(format!("the batch has no {name:?} field"))?;
             if columns[*index].row_bytes as usize != row_bytes {
                 return Err(format!("{name:?} rows must be {row_bytes} bytes"));
@@ -93,7 +97,10 @@ impl Hook {
 
     /// `PreparedBridge.exchange` for rows `row_start..row_end`.
     fn exchange(&self, step: &ElodinStep) -> Result<(), String> {
-        let columns = unsafe { std::slice::from_raw_parts(step.columns, step.column_count as usize) };
+        // Safety: each column holds `step.rows` rows of `row_bytes` bytes, and this call touches
+        // only rows `row_start..row_end`, which no other call owns.
+        let columns =
+            unsafe { std::slice::from_raw_parts(step.columns, step.column_count as usize) };
         let rows = |field: usize, row: usize| {
             let column = &columns[self.columns[field]];
             let size = column.row_bytes as usize;
@@ -136,13 +143,16 @@ impl Hook {
 
 fn env_or<T: std::str::FromStr>(name: &str, default: T) -> Result<T, String> {
     match std::env::var(name) {
-        Ok(value) => value.parse().map_err(|_| format!("{name} is not valid: {value:?}")),
+        Ok(value) => value
+            .parse()
+            .map_err(|_| format!("{name} is not valid: {value:?}")),
         Err(_) => Ok(default),
     }
 }
 
 fn fail(step: &ElodinStep, message: &str) -> i32 {
     let len = message.len().min(step.error_capacity as usize - 1);
+    // Safety: `error` holds `error_capacity` bytes, and `len` leaves room for the NUL.
     unsafe {
         std::ptr::copy_nonoverlapping(message.as_ptr(), step.error.cast(), len);
         *step.error.add(len) = 0;
@@ -154,7 +164,10 @@ fn fail(step: &ElodinStep, message: &str) -> i32 {
 ///
 /// Called by `el.NativeStepHook` with a valid step and state slot.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn many_agent_step_init(step: *const ElodinStep, state: *mut *mut c_void) -> i32 {
+pub unsafe extern "C" fn many_agent_step_init(
+    step: *const ElodinStep,
+    state: *mut *mut c_void,
+) -> i32 {
     let step = unsafe { &*step };
     match Hook::new(step) {
         Ok(hook) => {

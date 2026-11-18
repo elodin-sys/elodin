@@ -835,7 +835,7 @@ A container of component metadata.
     | `initial_only()` | once, when the run starts |
     | `transient()` | never; same as `transient="true"` |
 
-    `owner=` sets which writers may change it: `elodin.Owner.system()` (compiled systems), `.external()` (DB and Impeller clients; same as `external_control="true"`), `.pre_commit()` (write handles of `pre_commit` hooks), or `.static()` (nobody). Building the world fails when another kind of writer writes it.
+    `owner=` sets which writers may change it: `elodin.Owner.system()` (compiled systems), `.external()` (DB and Impeller clients; same as `external_control="true"`), `.pre_commit()` (write handles of `pre_commit` hooks), or `.static()` (nobody). Building the world fails when a system or a `pre_commit` write handle writes a component owned by another kind of writer. Writes from DB clients, such as the editor or `StepContext`, are not checked.
 
     Both are stored in the reserved metadata keys above, plus `recording` and `owner`, so the DB, editor and followers keep working. A `metadata` value that contradicts them is an error.
 

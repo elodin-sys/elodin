@@ -2905,16 +2905,30 @@ fn is_elision_aware_mem(instr: &Instruction) -> bool {
 }
 
 /// Pointer-ABI arms that may hand back an operand's or a constant's memory instead of a new slot.
-fn may_reuse_memory(instr: &Instruction) -> bool {
-    matches!(
-        instr,
-        Instruction::Reshape { .. }
-            | Instruction::Convert { .. }
-            | Instruction::BitcastConvert { .. }
-            | Instruction::Constant {
-                value: ConstantValue::DenseArray(_) | ConstantValue::DenseExternal { .. },
-            }
-    )
+fn may_reuse_memory(
+    instr: &Instruction,
+    type_map: &HashMap<ValueId, TensorType>,
+    rt: &TensorType,
+) -> bool {
+    match instr {
+        Instruction::Convert { operand } => type_map
+            .get(operand)
+            .is_some_and(|src| same_layout(src.element_type, rt.element_type)),
+        _ => matches!(
+            instr,
+            Instruction::Reshape { .. }
+                | Instruction::BitcastConvert { .. }
+                | Instruction::Constant {
+                    value: ConstantValue::DenseArray(_) | ConstantValue::DenseExternal { .. },
+                }
+        ),
+    }
+}
+
+/// Whether a `Convert` from `a` to `b` keeps every bit, so its result can share the operand's memory.
+fn same_layout(a: ElementType, b: ElementType) -> bool {
+    use ElementType::*;
+    a == b || matches!((a, b), (I32 | UI32, I32 | UI32) | (I64 | UI64, I64 | UI64))
 }
 
 /// Whether the pointer-ABI arm for `instr` has a kernel for its element types and
@@ -4487,7 +4501,7 @@ fn lower_instruction_mem(
     let n = rt.num_elements();
     let elem_sz = rt.element_type.byte_size();
 
-    if !may_reuse_memory(instr)
+    if !may_reuse_memory(instr, type_map, &rt)
         && let Some(ty) = result_types
             .iter()
             .find(|ty| ty.byte_size() > MAX_SLOT_BYTES)
@@ -5153,12 +5167,7 @@ fn lower_instruction_mem(
                 .get(operand)
                 .cloned()
                 .unwrap_or(TensorType::scalar(ElementType::F64));
-            if src_ty.element_type == rt.element_type
-                || (matches!(src_ty.element_type, ElementType::I32 | ElementType::UI32)
-                    && matches!(rt.element_type, ElementType::I32 | ElementType::UI32))
-                || (matches!(src_ty.element_type, ElementType::I64 | ElementType::UI64)
-                    && matches!(rt.element_type, ElementType::I64 | ElementType::UI64))
-            {
+            if same_layout(src_ty.element_type, rt.element_type) {
                 // No-op Convert forwards the operand ptr; share pool
                 // ownership so the slot stays live for both vids.
                 if let Some(rv) = result_vid {

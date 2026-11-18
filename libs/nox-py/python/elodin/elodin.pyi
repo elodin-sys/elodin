@@ -624,7 +624,8 @@ class Recording:
         ...
 
 class Owner:
-    """Which kind of writer may set a component's values; others fail at build."""
+    """Which kind of writer may set a component's values. Systems and `pre_commit` write handles
+    it rules out fail at build; writes from DB clients are not checked."""
 
     @staticmethod
     def system() -> Owner:

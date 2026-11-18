@@ -49,6 +49,7 @@ impl Region {
             if i >= self.len {
                 return;
             }
+            // Safety: `i < len`, and the table outlives every claimed task, as noted on `Region`.
             let task = unsafe { &*self.tasks.add(i) };
             let start = Instant::now();
             (task.func)(task.ctx);
@@ -160,6 +161,7 @@ pub fn wake() {
 /// `estimate` and `tasks[..len]` must be valid for the whole call, and each task's function must
 /// be safe to call with its context from any thread.
 pub unsafe extern "C" fn run(estimate: *const AtomicU64, tasks: *const Task, len: usize) {
+    // Safety: the caller keeps `estimate` valid for the call.
     let estimate = unsafe { &*estimate };
     let previous = estimate.load(Ordering::Relaxed);
     let region = Region {

@@ -61,6 +61,7 @@ mod avx2 {
         if !available() {
             return 0;
         }
+        // Safety: `available()` found AVX2 on this CPU.
         unsafe { sin_cos_lanes::<true>(dst, a) }
     }
 
@@ -69,13 +70,15 @@ mod avx2 {
         if !available() {
             return 0;
         }
+        // Safety: `available()` found AVX2 on this CPU.
         unsafe { sin_cos_lanes::<false>(dst, a) }
     }
 
     #[target_feature(enable = "avx2")]
     fn sin_cos_lanes<const SIN: bool>(dst: &mut [f64], a: &[f64]) -> usize {
-        let lanes = a.len() / 4 * 4;
+        let lanes = a.len().min(dst.len()) / 4 * 4;
         for i in (0..lanes).step_by(4) {
+            // Safety: `i + 4 <= lanes`, which fits both slices.
             let (s, c) = sin_cos(unsafe { _mm256_loadu_pd(a.as_ptr().add(i)) });
             unsafe { _mm256_storeu_pd(dst.as_mut_ptr().add(i), if SIN { s } else { c }) };
         }
@@ -142,6 +145,7 @@ mod avx2 {
             )
         } else {
             let mut lanes = [0.0f64; 4];
+            // Safety: four lanes to and from four-element arrays.
             unsafe { _mm256_storeu_pd(lanes.as_mut_ptr(), y) };
             let ints = lanes.map(|v| v as i64);
             unsafe { _mm256_loadu_si256(ints.as_ptr().cast()) }

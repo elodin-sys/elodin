@@ -486,6 +486,9 @@ impl WorldBuilder {
         )
         .and_then(|handle| Py::new(py, handle))
         .inspect_err(|_| self.validation_failures += 1)?;
+        // Preparing a handle again after a spawn retires its stale registration.
+        self.prepared
+            .retain(|old| !handle.get().replaces(old.get()));
         self.prepared.push(handle.clone_ref(py));
         Ok(handle)
     }
