@@ -1,7 +1,7 @@
 # Changelog
 
 ## unreleased
-- **(feat:examples)** Add a one-world many-agent lockstep scaling example with controller processes exchanged through a native `pre_commit` hook, phase receipts, parity checks, forecasts, and an x86 Linux VM acceptance contract.
+- **(feat:examples)** Add a many-agent lockstep example: one world steps 24 agents at 1 kHz, each with its own controller process, through prepared batches and a native `pre_commit` hook.
 - **(feat)** Add `pre_commit` hooks to `World.run`. With handles from `World.prepare_component` and `World.prepare_batch`, a hook reads each tick's result and writes into the world before the commit, without going through the DB.
 - **(feat)** Add `el.NativeStepHook`, a `pre_commit` hook in a shared library that runs without the GIL and can split its rows across worker threads.
 - **(feat)** Add `workers=` to `World.run` and `World.build`: on Cranelift, entity chunks of `@el.map` systems and the calls of `@el.map_seq` run on that many threads, with results that do not depend on the count above one.

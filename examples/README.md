@@ -162,7 +162,7 @@ An external flight-software process driven over UDP, alongside the sim.
 
 | Example | Description |
 | --- | --- |
-| [many-agent-lockstep](./many-agent-lockstep) | One-world 1 kHz scaling contract with controlled agents, observed objects, supervised controller processes, receipts, and acceptance gates |
+| [many-agent-lockstep](./many-agent-lockstep) | 24 agents at 1 kHz, each with its own controller process: `workers=`, prepared batches, `pre_commit` and native hooks, run receipts |
 
 ---
 
@@ -218,7 +218,6 @@ Custom `el.Component` + `@el.dataclass` archetypes beyond `el.Body`.
 | [monte-carlo](./monte-carlo) | Plant ↔ controller over UDP, campaign ports |
 | [voyager](./voyager) | SPICE kernel updates each tick |
 | [n-body](./n-body) | Truth-index advance in `post_step` |
-| [many-agent-lockstep](./many-agent-lockstep) | Batched state exchange and ordered command application across a configurable agent count |
 
 ### s10 recipes
 

@@ -95,7 +95,7 @@ impl Hook {
         })
     }
 
-    /// `PreparedBridge.exchange` for rows `row_start..row_end`.
+    /// `ControllerBridge.exchange` of `main.py` for rows `row_start..row_end`.
     fn exchange(&self, step: &ElodinStep) -> Result<(), String> {
         // Safety: each column holds `step.rows` rows of `row_bytes` bytes, and this call touches
         // only rows `row_start..row_end`, which no other call owns.

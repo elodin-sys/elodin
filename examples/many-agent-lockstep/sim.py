@@ -1,4 +1,4 @@
-"""Deterministic many-agent workload used by the scaling benchmark."""
+"""The world: agents that follow moving objects, stepped at 1 kHz."""
 
 import math
 import os
@@ -12,24 +12,25 @@ import jax.numpy as jnp
 RATE_HZ = 1000.0
 DT = 1.0 / RATE_HZ
 LAYOUT_SLOTS = 24
+# Extra components and compute rounds give each entity the size and cost of a real vehicle model.
 AUX_COMPONENT_COUNT = int(os.environ.get("ELODIN_MANY_AGENT_AUX_COMPONENTS", "32"))
 COMPUTE_ROUNDS = int(os.environ.get("ELODIN_MANY_AGENT_COMPUTE_ROUNDS", "64"))
 
 
-def component(name: str, shape: tuple[int, ...] = (3,), metadata=None):
+def component(name: str, shape: tuple[int, ...] = (3,), owner=None):
     return ty.Annotated[
         jax.Array,
         el.Component(
             name,
             el.ComponentType(el.PrimitiveType.F64, shape),
-            metadata=metadata or {},
+            owner=owner,
         ),
     ]
 
 
 Position = component("position")
 Velocity = component("velocity")
-Command = component("command", metadata={"external_control": "true"})
+Command = component("command", owner=el.Owner.pre_commit())
 Acceleration = component("acceleration")
 SensorFrame = component("sensor_frame", (16,))
 DiagnosticBank = component("diagnostic_bank", (32,))
