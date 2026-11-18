@@ -94,6 +94,12 @@ class MeasurementTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.measure()
 
+    def test_accepts_c0_pass_without_regrading_rounded_values(self):
+        log = self.log.replace("max_motor=0.200", "max_motor=0.060").replace(
+            "takeoff_delta_m=0.500", "takeoff_delta_m=0.100"
+        )
+        self.assertEqual(self.measure(log=log)["lockstep_steps"], 119995)
+
     def test_rejects_swallowed_sensor_read_failure(self):
         with self.assertRaisesRegex(ValueError, "runtime/callback error"):
             self.measure(
