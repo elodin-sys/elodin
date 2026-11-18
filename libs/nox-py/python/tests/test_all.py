@@ -546,20 +546,13 @@ def test_systems_carry_their_names_into_compiled_code(tmp_path):
     assert "@__main__.drift" in mlir and "@custom" in mlir
 
 
-def test_typed_recording_and_owner_reject_conflicting_metadata():
+def test_typed_recording_rejects_conflicting_metadata():
     with pytest.raises(ValueError, match="record_every_tick"):
         el.Component(
             "typed",
             el.ComponentType.F64,
             metadata={"record_every_tick": "true"},
             recording=el.Recording.on_change(),
-        )
-    with pytest.raises(ValueError, match="external_control"):
-        el.Component(
-            "typed",
-            el.ComponentType.F64,
-            metadata={"external_control": "true"},
-            owner=el.Owner.pre_commit(),
         )
     with pytest.raises(ValueError, match="at least 1"):
         el.Recording.every(0)
@@ -568,37 +561,7 @@ def test_typed_recording_and_owner_reject_conflicting_metadata():
         el.ComponentType.F64,
         metadata={"record_every_tick": "true"},
         recording=el.Recording.every_commit(),
-        owner=el.Owner.system(),
     )
-
-
-def test_typed_owners_reject_other_writers():
-    Frozen = ty.Annotated[
-        jax.Array, el.Component("frozen", el.ComponentType.F64, owner=el.Owner.static())
-    ]
-    Mine = ty.Annotated[
-        jax.Array, el.Component("mine", el.ComponentType.F64, owner=el.Owner.system())
-    ]
-
-    @el.map
-    def thaw(x: Frozen) -> Frozen:
-        return x + 1.0
-
-    @el.map
-    def keep(x: Mine) -> Mine:
-        return x
-
-    world = el.World()
-    world.spawn(el.C(Frozen, np.array(0.0)), "e1")
-    with pytest.raises(ValueError, match='a system writes "frozen", which is owned by static'):
-        world.build(thaw)
-    world = el.World()
-    entity = world.spawn(el.C(Mine, np.array(0.0)), "e1")
-    world.prepare_component("mine", [entity], access="write")
-    with pytest.raises(
-        ValueError, match='a pre_commit handle writes "mine", which is owned by system'
-    ):
-        world.build(keep)
 
 
 def test_rejected_transient_metadata_does_not_mutate_world():

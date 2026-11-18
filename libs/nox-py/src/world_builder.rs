@@ -2238,34 +2238,6 @@ impl WorldBuilder {
         Ok(())
     }
 
-    /// Rejects writers that a component's typed owner rules out.
-    fn validate_owners(&self, world: &World, system_writes: &[ComponentId]) -> PyResult<()> {
-        let handle_writes: HashSet<ComponentId> = self
-            .prepared
-            .iter()
-            .map(|handle| handle.get())
-            .filter(|handle| handle.writes())
-            .map(|handle| handle.component_id())
-            .collect();
-        for (id, (_, metadata)) in &world.metadata.component_map {
-            let Some(owner) = metadata.metadata.get("owner") else {
-                continue;
-            };
-            let writer = if system_writes.contains(id) && owner != "system" {
-                "a system"
-            } else if handle_writes.contains(id) && owner != "pre_commit" {
-                "a pre_commit handle"
-            } else {
-                continue;
-            };
-            return Err(PyValueError::new_err(format!(
-                "{writer} writes {:?}, which is owned by {owner}",
-                metadata.name
-            )));
-        }
-        Ok(())
-    }
-
     #[allow(clippy::too_many_arguments)]
     fn build_with_backend(
         &mut self,
@@ -2298,7 +2270,6 @@ impl WorldBuilder {
 
         let world = std::mem::take(&mut self.world);
         let compiled_sys = increment_sim_tick.pipe(sys).compile(&world)?;
-        self.validate_owners(&world, &compiled_sys.outputs)?;
 
         match engine {
             BackendEngine::Jax => {

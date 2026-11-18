@@ -184,7 +184,6 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyEdge>()?;
     m.add_class::<PyComponent>()?;
     m.add_class::<Recording>()?;
-    m.add_class::<Owner>()?;
     m.add_class::<Integrator>()?;
     m.add_class::<PyFnSystem>()?;
     m.add_class::<QueryMetadata>()?;

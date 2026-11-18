@@ -6,7 +6,7 @@
 - **(feat)** Add `el.NativeStepHook`, a `pre_commit` hook in a shared library that runs without the GIL and can split its rows across worker threads.
 - **(feat)** Add `workers=` to `World.run` and `World.build`: on Cranelift, entity chunks of `@el.map` systems and the calls of `@el.map_seq` run on that many threads, with results that do not depend on the count above one.
 - **(feat)** Add run receipts with exact phase percentiles, DB sync counters, and backend and hook statistics, through `on_receipt=`, `Exec.last_receipt()` and `ELODIN_SIM_SUMMARY_JSON`. `timing=el.Timing.systems()` adds the time of each compiled system without debug artifacts.
-- **(feat)** Add `recording=` and `owner=` to `el.Component`: record every `n`th commit, on request, or once, and reject writers other than the owner when the world is built.
+- **(feat)** Add `recording=` to `el.Component`: record every `n`th commit, on request, or once.
 - **(feat)** Name systems with `@el.system(name=...)`, `@el.map(name=...)` and `@el.map_seq(name=...)`. By default a system carries its module-qualified function name in compiled code and timing.
 - **(perf)** Synchronize the simulation with its database by change. A tick reads only what other writers appended and commits only the components systems or hooks wrote; commits are appended on a writer thread when no `pre_step` or `post_step` reads them back; `wait_for_write` wakes on the write instead of polling every millisecond.
 - **(perf)** Compute `sin` and `cos` of large tensors with AVX2 on x86 hosts that have it, with the same results.

@@ -623,27 +623,6 @@ class Recording:
         """Never: the component stays out of the DB, its history, replication and the editor."""
         ...
 
-class Owner:
-    """Which kind of writer may set a component's values. Systems and `pre_commit` write handles
-    it rules out fail at build; writes from DB clients are not checked."""
-
-    @staticmethod
-    def system() -> Owner:
-        """Compiled systems."""
-        ...
-    @staticmethod
-    def external() -> Owner:
-        """DB and Impeller clients outside the simulation."""
-        ...
-    @staticmethod
-    def pre_commit() -> Owner:
-        """`pre_commit` hooks, through write handles."""
-        ...
-    @staticmethod
-    def static() -> Owner:
-        """Nobody: the initial values never change."""
-        ...
-
 class Component:
     asset: bool
     def __init__(
@@ -653,7 +632,6 @@ class Component:
         asset: bool = False,
         metadata: dict[str, str | bool | int] = {},
         recording: Optional[Recording] = None,
-        owner: Optional[Owner] = None,
     ): ...
     @staticmethod
     def id(component: Any) -> str:

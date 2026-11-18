@@ -22,8 +22,9 @@ inside a 1 ms tick.
 - **Native hooks.** `el.NativeStepHook` loads the Rust library in `hook/` and
   calls it every tick without holding Python's global lock. It can split the
   agents across threads.
-- **Owners.** `sim.py` declares `command` with `owner=el.Owner.pre_commit()`,
-  so building the world fails if a system writes it.
+- **External control.** `sim.py` marks `command` with `external_control="true"`
+  because its value comes from the controllers, not from the systems. The
+  simulation never overwrites it.
 - **Run receipts.** Set `ELODIN_SIM_SUMMARY_JSON` to save how long each phase of
   the tick took. The benchmark does this for every run.
 

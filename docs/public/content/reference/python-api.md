@@ -779,14 +779,14 @@ Wind = typing.Annotated[
 
 A container of component metadata.
 
-- `__init__(name, type = None, asset = False, metadata = {}, recording = None, owner = None)` -> [elodin.Component]
+- `__init__(name, type = None, asset = False, metadata = {}, recording = None)` -> [elodin.Component]
 
     Create a new component with:
     - Unique name (e.g. "world_pos, "inertia").
     - Component type information (via [elodin.ComponentType]). This is optional if the base class already provides component type information as part of `__metadata__`, which is the case for [elodin.Quaternion], [elodin.Edge], and all [spatial vector algebra](#spatial-vector-algebra) classes.
     - Flag indicating whether the component is an asset (e.g. a mesh, texture, etc.).
     - Other metadata that is optional (e.g. description, units, labels, etc.).
-    - When its values are recorded (`elodin.Recording`) and who writes them (`elodin.Owner`), described below.
+    - When its values are recorded (`elodin.Recording`), described below.
 
     ```python
     import elodin as el
@@ -809,7 +809,7 @@ A container of component metadata.
     | `element_names` | comma-separated string (e.g. `"x,y,z"`, `"q0,q1,q2,q3"`) | Labels for each element of a vector or matrix component. Used by the component inspector and as column suffixes when exporting with `elodin-db export --flatten`. |
     | `private` | `"true"` | Component is omitted from `elodin-db export` by default (pass `--include-private` to include it). Useful for marking internal scratch state (e.g. large covariance matrices) that downstream consumers shouldn't see. |
     | `transient` | `"true"` | Simulation component remains available to systems in memory but is never registered with or recorded to Elodin DB. It is absent from DB schemas, the editor, replication, and exports. |
-    | `external_control` | `"true"` | Component is writable from external clients (e.g. Betaflight or a HITL bridge) over the Impeller protocol. The simulation will not overwrite values written externally. |
+    | `external_control` | `"true"` | Component is writable from external clients (e.g. Betaflight or a HITL bridge) over the Impeller protocol, and from `pre_commit` hooks. The simulation will not overwrite values written externally. |
     | `record_every_tick` | `"true"` | Opt out of sparse recording and write a sample at every telemetry commit even when its bytes are unchanged. |
 
     Component recording is sparse by default: the simulation writes a sample
@@ -822,7 +822,7 @@ A container of component metadata.
 
     `transient` is a simulation-runtime storage contract, not an export filter. A transient component cannot also set `external_control`, `wait_for_write`, or `record_every_tick`, and DB-backed APIs such as `StepContext.read_component`, `StepContext.write_component`, and `Exec.history` cannot access it. Direct database writers are unaffected by this key.
 
-    #### Recording and owner
+    #### Recording
 
     `recording=` sets when a commit records the component, counting telemetry commits:
 
@@ -835,9 +835,7 @@ A container of component metadata.
     | `initial_only()` | once, when the run starts |
     | `transient()` | never; same as `transient="true"` |
 
-    `owner=` sets which writers may change it: `elodin.Owner.system()` (compiled systems), `.external()` (DB and Impeller clients; same as `external_control="true"`), `.pre_commit()` (write handles of `pre_commit` hooks), or `.static()` (nobody). Building the world fails when a system or a `pre_commit` write handle writes a component owned by another kind of writer. Writes from DB clients, such as the editor or `StepContext`, are not checked.
-
-    Both are stored in the reserved metadata keys above, plus `recording` and `owner`, so the DB, editor and followers keep working. A `metadata` value that contradicts them is an error.
+    It is stored in the reserved metadata keys above, plus `recording`, so the DB, editor and followers keep working. A `metadata` value that contradicts it is an error.
 
     ```python
     Command = ty.Annotated[
@@ -845,7 +843,7 @@ A container of component metadata.
         el.Component(
             "command",
             el.ComponentType(el.PrimitiveType.F64, (3,)),
-            owner=el.Owner.pre_commit(),
+            metadata={"external_control": "true"},
             recording=el.Recording.every(10),
         ),
     ]

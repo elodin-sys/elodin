@@ -119,44 +119,6 @@ impl Recording {
     }
 }
 
-/// Which kind of writer may set a component's values. Systems and `pre_commit` write handles it
-/// rules out fail at build; writes from DB clients are not checked.
-#[pyclass(frozen)]
-#[derive(Clone)]
-pub struct Owner(String);
-
-#[pymethods]
-impl Owner {
-    /// Compiled systems.
-    #[staticmethod]
-    fn system() -> Self {
-        Self("system".into())
-    }
-
-    /// DB and Impeller clients outside the simulation.
-    #[staticmethod]
-    fn external() -> Self {
-        Self("external".into())
-    }
-
-    /// `pre_commit` hooks, through write handles.
-    #[staticmethod]
-    fn pre_commit() -> Self {
-        Self("pre_commit".into())
-    }
-
-    /// Nobody: the initial values never change.
-    #[staticmethod]
-    #[pyo3(name = "static")]
-    fn static_() -> Self {
-        Self("static".into())
-    }
-
-    fn __repr__(&self) -> String {
-        format!("Owner({:?})", self.0)
-    }
-}
-
 /// Sets `key` to `value`, unless `metadata` already gives it another value.
 fn set_policy(
     name: &str,
@@ -166,7 +128,7 @@ fn set_policy(
 ) -> Result<(), Error> {
     match metadata.get(key) {
         Some(given) if given != value => Err(PyValueError::new_err(format!(
-            "component {name:?}: metadata {key}={given:?} conflicts with its recording or owner"
+            "component {name:?}: metadata {key}={given:?} conflicts with its recording"
         ))
         .into()),
         _ => {
@@ -179,14 +141,13 @@ fn set_policy(
 #[pymethods]
 impl PyComponent {
     #[new]
-    #[pyo3(signature = (name, ty = None, metadata = HashMap::default(), recording = None, owner = None))]
+    #[pyo3(signature = (name, ty = None, metadata = HashMap::default(), recording = None))]
     pub fn new(
         py: Python<'_>,
         name: String,
         ty: Option<ComponentType>,
         metadata: HashMap<String, PyObject>,
         recording: Option<Recording>,
-        owner: Option<Owner>,
     ) -> Result<Self, Error> {
         let mut metadata = metadata
             .into_iter()
@@ -214,11 +175,6 @@ impl PyComponent {
             set_policy(&name, &mut metadata, "record_every_tick", &every_commit)?;
             let transient = (recording == "transient").to_string();
             set_policy(&name, &mut metadata, "transient", &transient)?;
-        }
-        if let Some(Owner(owner)) = &owner {
-            set_policy(&name, &mut metadata, "owner", owner)?;
-            let external = (owner == "external").to_string();
-            set_policy(&name, &mut metadata, "external_control", &external)?;
         }
 
         Ok(Self { name, ty, metadata })
@@ -564,13 +520,13 @@ mod tests {
 
         pyo3::prepare_freethreaded_python();
         Python::with_gil(|py| {
-            let err = PyComponent::new(py, "fuel mass".into(), None, HashMap::new(), None, None)
+            let err = PyComponent::new(py, "fuel mass".into(), None, HashMap::new(), None)
                 .expect_err("whitespace is rejected");
             assert!(
                 err.to_string().contains("whitespace"),
                 "unexpected error: {err}"
             );
-            PyComponent::new(py, "fuel_mass".into(), None, HashMap::new(), None, None)
+            PyComponent::new(py, "fuel_mass".into(), None, HashMap::new(), None)
                 .expect("snake_case names are accepted");
         });
     }

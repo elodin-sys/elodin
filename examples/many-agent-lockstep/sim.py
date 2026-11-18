@@ -17,20 +17,20 @@ AUX_COMPONENT_COUNT = int(os.environ.get("ELODIN_MANY_AGENT_AUX_COMPONENTS", "32
 COMPUTE_ROUNDS = int(os.environ.get("ELODIN_MANY_AGENT_COMPUTE_ROUNDS", "64"))
 
 
-def component(name: str, shape: tuple[int, ...] = (3,), owner=None):
+def component(name: str, shape: tuple[int, ...] = (3,), metadata=None):
     return ty.Annotated[
         jax.Array,
         el.Component(
             name,
             el.ComponentType(el.PrimitiveType.F64, shape),
-            owner=owner,
+            metadata=metadata or {},
         ),
     ]
 
 
 Position = component("position")
 Velocity = component("velocity")
-Command = component("command", owner=el.Owner.pre_commit())
+Command = component("command", metadata={"external_control": "true"})
 Acceleration = component("acceleration")
 SensorFrame = component("sensor_frame", (16,))
 DiagnosticBank = component("diagnostic_bank", (32,))
