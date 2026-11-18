@@ -27,9 +27,9 @@ inside a 1 ms tick.
 - **Run receipts.** Set `ELODIN_SIM_SUMMARY_JSON` to save how long each phase of
   the tick took. The benchmark does this for every run.
 
-Recording is also cheaper without any code: Elodin saves a component only when
-a system or hook wrote a new value, and since the example has no `pre_step` or
-`post_step`, a background thread writes each tick to the database.
+Two more speedups need no code. Elodin saves a component only when a system or
+hook wrote a new value. And since the example has no `pre_step` or `post_step`,
+a background thread writes each tick to the database.
 
 ## How one tick works
 
