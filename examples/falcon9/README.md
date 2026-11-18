@@ -233,13 +233,22 @@ recorded flight is reproduced within thresholds.
 - Engine transient model (ignition ramp, shutdown, throttle response)
 - Flight-computer interface definition (message set, rates, units)
 - Launch-day atmosphere (standard atmosphere vs. sounding data)
-- Second-stage representation after separation (mass event vs. ghost entity —
-  the booster GLB renders as a full stack throughout; a visual split at MECO
-  is future work)
+- Independent second-stage trajectory after separation
 - Touchdown envelope thresholds (derive from truth-data uncertainty)
 - Booster GLB is included; Cesium provides the launch and landing scenery.
 
 ## Cinematic Visuals (pyrotechnique port)
+
+The upper stage detaches visually with a 1 m/s axial push and follows a simple
+ballistic drift, retaining its orientation. Gravity and rotating-frame terms
+keep the motion continuous; propulsion and drag are not modeled. This is scenery,
+not reconstructed second-stage telemetry. Its pose is recorded for replay;
+chase and infrared views stay attached to the booster.
+At separation the booster CoM reference is rebased to preserve the positions
+and velocities of its material points when the attached upper-stage mass is removed.
+Grid fins open over two seconds after boostback (a visual timing assumption),
+then follow the simulated actuator positions. Deployment is recorded as
+`booster.fin_deploy`; the aerodynamic model is unchanged.
 
 The scene renders the pyrotechnique-authored falcon9 effects live from sim
 telemetry (design record: `docs/design-thruster-effects-port.md` §10):
@@ -382,9 +391,13 @@ elodin editor --offline dbs/f9
 - `editor --offline` opens that recording without terrain-provider requests.
 
 [`terrain_coverage.py`](terrain_coverage.py) declares the full nominal corridor
-with a 40 km margin and finer detail around launch and landing. The package is
-written to `assets/terrain/Falcon9/` and selected automatically. Provider detail
-limits are reported during preparation.
+with a 20 km margin and finer detail around launch and landing. Large zoom-outs
+can show gaps outside the prepared region. Assets are written to
+`examples/falcon9/assets/terrain/Falcon9/` and selected automatically.
+
+Unchanged coverage is reused; changed coverage replaces the package. Record to
+a new DB after preparation. Temporary download failures are retried; rerunning
+the command reuses cached geometry. Provider detail limits are reported.
 
 The same DB assets are used by native and WASM editors. Ground heights still
 follow `TERRAIN_MODE`; preparing scenery does not change the flight model.

@@ -179,6 +179,18 @@ VisualPos = ty.Annotated[
         metadata={"element_names": "q0,q1,q2,q3,x,y,z"},
     ),
 ]
+UpperStageVisualPos = ty.Annotated[
+    el.SpatialTransform,
+    el.Component("upper_stage_visual_pos", el.ComponentType.SpatialPosF64),
+]
+UpperStageVisualVelocity = ty.Annotated[
+    jax.Array,
+    el.Component("upper_stage_visual_velocity", el.ComponentType(el.PrimitiveType.F64, (3,))),
+]
+UpperStageDetached = ty.Annotated[
+    jax.Array,
+    el.Component("upper_stage_detached", el.ComponentType(el.PrimitiveType.F64, (1,))),
+]
 AxialSpecificForce = ty.Annotated[
     jax.Array,
     el.Component("axial_specific_force", el.ComponentType(el.PrimitiveType.F64, (1,))),
@@ -228,6 +240,14 @@ FinState = ty.Annotated[
     jax.Array,
     el.Component("fin_state", el.ComponentType(el.PrimitiveType.F64, (4,))),
 ]
+FinDeploy = ty.Annotated[
+    jax.Array,
+    el.Component("fin_deploy", el.ComponentType(el.PrimitiveType.F64, (1,))),
+]
+# Visual deployment prior, not a measured actuator history. Coast follows boostback.
+FIN_DEPLOY_DURATION_S = 2.0
+
+
 # Desired body torque for the RCS (from the in-sim attitude loop).
 RcsTorqueCmd = ty.Annotated[
     jax.Array,
@@ -306,6 +326,10 @@ UpperMass = ty.Annotated[
         el.ComponentType(el.PrimitiveType.F64, (1,)),
         metadata={"external_control": "true"},
     ),
+]
+PreviousUpperMass = ty.Annotated[
+    jax.Array,
+    el.Component("previous_upper_mass", el.ComponentType(el.PrimitiveType.F64, (1,))),
 ]
 # Launch clamp latch: 0 until cluster thrust first exceeds weight, then 1.
 Lifted = ty.Annotated[
@@ -457,7 +481,20 @@ def mass_props(
     rp1: PropellantRp1,
     thrust: ThrustTotal,
     upper: UpperMass,
-) -> tuple[PropellantLox, PropellantRp1, el.Inertia, CgStation, AxialSpecificForce]:
+    previous_upper: PreviousUpperMass,
+    previous_cg: CgStation,
+    pos: el.WorldPos,
+    vel: el.WorldVel,
+) -> tuple[
+    PropellantLox,
+    PropellantRp1,
+    el.Inertia,
+    CgStation,
+    AxialSpecificForce,
+    PreviousUpperMass,
+    el.WorldPos,
+    el.WorldVel,
+]:
     """Deplete propellant and rebuild mass/CG/inertia from the cylinder stack
     (including the attached stage 2 + payload until separation)."""
     mdot_lox, mdot_rp1 = propulsion.split_mdot(mdot[0])
@@ -466,12 +503,28 @@ def mass_props(
     mass, cg, inertia_diag = propulsion.stack_mass_props(
         lox_next, rp1_next, jnp.maximum(upper[0], 0.0)
     )
+    separating = (previous_upper[0] > 0.0) & (upper[0] <= 0.0)
+    pos, vel = rebase_separation_center(pos, vel, previous_cg[0], cg, separating)
     return (
         jnp.array([lox_next]),
         jnp.array([rp1_next]),
         el.SpatialInertia(mass, inertia_diag),
         jnp.array([cg]),
         jnp.array([thrust[0] / mass]),
+        upper,
+        pos,
+        vel,
+    )
+
+
+def rebase_separation_center(pos, vel, old_cg, new_cg, separating):
+    """Changing the CoM reference must not teleport rigid-body material points."""
+    shift = pos.angular() @ jnp.array([jnp.where(separating, new_cg - old_cg, 0.0), 0.0, 0.0])
+    return (
+        el.SpatialTransform(angular=pos.angular(), linear=pos.linear() + shift),
+        el.SpatialMotion(
+            angular=vel.angular(), linear=vel.linear() + jnp.cross(vel.angular(), shift)
+        ),
     )
 
 
@@ -548,6 +601,19 @@ def tvc_actuators(tvc_state: TvcState, tvc_cmd: TvcCmd) -> TvcState:
         lo=-TVC_MAX_RAD,
         hi=TVC_MAX_RAD,
     )
+
+
+def fin_deployment_step(angle, phase):
+    return jnp.minimum(
+        jnp.pi / 2.0,
+        angle
+        + jnp.where(phase[0] >= 7.0, SIM_TIME_STEP * jnp.pi / (2.0 * FIN_DEPLOY_DURATION_S), 0.0),
+    )
+
+
+@el.map
+def fin_deployment(angle: FinDeploy, phase: FswPhase) -> FinDeploy:
+    return fin_deployment_step(angle, phase)
 
 
 @el.map
@@ -930,13 +996,7 @@ def ground_contact(
         jnp.array([jnp.abs(v_up), v_lat, tilt_deg, impact, omega, tvc_mag]),
         metrics,
     )
-    # After the legs absorb the slap, the settled pin is upright and still —
-    # score tilt/rate at settle, not the first-pad strike transient.
-    latched = jnp.where(
-        settle & ~was_landed,
-        latched.at[2].set(0.0).at[4].set(0.0),
-        latched,
-    )
+    # Preserve first-contact tilt/rate even after the settled body is pinned.
 
     x = jnp.array([1.0, 0.0, 0.0])
     axis = jnp.cross(x, up)
@@ -965,6 +1025,53 @@ def booster_visual_pose(pos: el.WorldPos, cg: CgStation) -> VisualPos:
     q = pos.angular()
     offset = q @ jnp.array([GLB_ORIGIN_STATION_M - cg[0], 0.0, 0.0])
     return el.SpatialTransform(angular=q, linear=r + offset)
+
+
+def upper_stage_visual_step(pose, velocity, upper_mass, previous, drift, detached):
+    """Scenery only: ballistic drift with a 1 m/s axial separation push.
+
+    This is not second-stage flight dynamics or reconstructed telemetry.
+    Freeze the last attached orientation; never follow the booster flip.
+    """
+    attached = upper_mass[0] > 0.0
+    first = (~attached) & (detached[0] < 0.5)
+    push = previous.angular() @ jnp.array([1.0, 0.0, 0.0])
+    released_drift = drift + jnp.where(first, push, 0.0)
+    acceleration = gravity_accel(previous.linear()) + frame_accel(previous.linear(), released_drift)
+    drift_next = jnp.where(
+        attached, velocity.linear(), released_drift + acceleration * SIM_TIME_STEP
+    )
+    position = jnp.where(
+        attached,
+        pose.linear(),
+        previous.linear() + 0.5 * (released_drift + drift_next) * SIM_TIME_STEP,
+    )
+    attitude = el.Quaternion.from_array(
+        jnp.where(attached, pose.angular().vector(), previous.angular().vector())
+    )
+    return (
+        el.SpatialTransform(angular=attitude, linear=position),
+        drift_next,
+        jnp.where(attached, jnp.zeros(1), jnp.ones(1)),
+    )
+
+
+@el.map
+def upper_stage_visual_pose(
+    pose: VisualPos,
+    world_pos: el.WorldPos,
+    velocity: el.WorldVel,
+    upper_mass: UpperMass,
+    previous: UpperStageVisualPos,
+    drift: UpperStageVisualVelocity,
+    detached: UpperStageDetached,
+) -> tuple[UpperStageVisualPos, UpperStageVisualVelocity, UpperStageDetached]:
+    origin_velocity = el.SpatialMotion(
+        angular=velocity.angular(),
+        linear=velocity.linear()
+        + jnp.cross(velocity.angular(), pose.linear() - world_pos.linear()),
+    )
+    return upper_stage_visual_step(pose, origin_velocity, upper_mass, previous, drift, detached)
 
 
 @el.map
@@ -1442,6 +1549,7 @@ def booster_propulsion_components(lox_kg: float = LOX_LOAD_KG, rp1_kg: float = R
         el.C(TvcState, jnp.zeros(2)),
         el.C(FinCmd, jnp.zeros(3)),
         el.C(FinState, jnp.zeros(4)),
+        el.C(FinDeploy, jnp.zeros(1)),
         el.C(RcsTorqueCmd, jnp.zeros(3)),
         el.C(RcsLevels, jnp.zeros(rcs.N_RCS)),
         el.C(NitrogenKg, jnp.array([N2_INITIAL_KG])),
@@ -1481,6 +1589,7 @@ def propulsion_systems(
         | valve_dynamics
         | tvc_actuators
         | fin_actuators
+        | fin_deployment
         | make_engine_dynamics(thrust_scale, isp_scale)
         | mass_props
         | tank_dynamics
@@ -1524,6 +1633,13 @@ def build_powered(
     on_pad = float(jnp.linalg.norm(jnp.asarray(init_pos_ecef) - pad_ecef())) < 100.0
     vis_off = init_attitude @ jnp.array([GLB_ORIGIN_STATION_M - float(cg0), 0.0, 0.0])
     vis_lin = jnp.asarray(init_pos_ecef, dtype=jnp.float64) + vis_off
+    upper_stage_visual_components = []
+    if upper_kg > 0.0:
+        upper_stage_visual_components = [
+            el.C(UpperStageVisualPos, el.SpatialTransform(angular=init_attitude, linear=vis_lin)),
+            el.C(UpperStageVisualVelocity, jnp.asarray(init_vel_ecef, dtype=jnp.float64)),
+            el.C(UpperStageDetached, jnp.zeros(1)),
+        ]
     booster = world.spawn(
         [
             el.Body(
@@ -1534,10 +1650,12 @@ def build_powered(
                 inertia=el.SpatialInertia(float(mass0), inertia0),
             ),
             el.C(VisualPos, el.SpatialTransform(angular=init_attitude, linear=vis_lin)),
+            *upper_stage_visual_components,
             el.C(AltitudeGeodetic, jnp.array([0.0])),
             el.C(GroundSpeed, jnp.array([0.0])),
             el.C(ScoreState, jnp.zeros(3)),
             el.C(UpperMass, jnp.array([upper_kg])),
+            el.C(PreviousUpperMass, jnp.array([upper_kg])),
             el.C(Lifted, jnp.array([0.0 if on_pad else 1.0])),
             el.C(LiftoffTime, jnp.array([0.0])),
             el.C(TouchdownMetrics, jnp.zeros(6)),
@@ -1546,7 +1664,8 @@ def build_powered(
         ],
         name="booster",
     )
-    # Body-mounted IR camera looks aft along the booster toward its engines.
+    # Look aft from above the grid fins, with the two near-side fins framing
+    # the booster. Roll the image so their steering motion reads left/right.
     # The local preview shares the scene's particles and terrain.
     world.sensor_camera(
         entity=booster,
@@ -1556,16 +1675,17 @@ def build_powered(
         fov=75.0,
         near=0.1,
         far=1_000_000.0,
-        pos_offset=[12.0, 2.05, 0.0],
-        rot_offset=[0.0, 0.0, 170.0],
+        pos_offset=[30.0, 4.0, 0.0],
+        rot_offset=[-90.0, -35.0, 180.0],
         fps=20.0,
         cinematic=True,
         render_local=True,
         effect="thermal",
         effect_params={
             "palette": "white_hot",
-            "contrast": 1.3,
-            "noise_sigma": 0.008,
+            # Preserve the shaded fin's lattice instead of clipping it to black.
+            "contrast": 0.85,
+            "noise_sigma": 0.003,
         },
     )
     effectors = gravity_and_frame_forces | apply_body_wrenches
@@ -1584,8 +1704,10 @@ def build_powered(
         | pad_clamp
         | ground_contact
         | booster_visual_pose
-        | descent_metrics_latch
     )
+    if upper_kg > 0.0:
+        plant = plant | upper_stage_visual_pose
+    plant = plant | descent_metrics_latch
     system = (extra_systems | plant) if extra_systems is not None else plant
     return world, system | derive_geodetic_telemetry | effect_visualization | sensor_systems()
 
@@ -1644,7 +1766,7 @@ def build_mission(
         StaticSceneObject(el.WorldPos(angular=lz1_att, linear=lz1_ecef())),
         name="lz1",
     )
-    world.schematic(build_schematic(), "falcon9.kdl")
+    world.schematic(build_schematic(include_upper_stage=upper_kg > 0.0), "falcon9.kdl")
     return world, system | make_truth_playback(ref, display_lag_s) | make_display_scoring(
         ref, display_lag_s
     )
