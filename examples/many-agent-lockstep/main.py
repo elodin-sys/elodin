@@ -43,9 +43,12 @@ DB_PATH = Path(os.environ.get("ELODIN_DB_PATH", "dbs/many-agent-lockstep"))
 RESULT_PATH = os.environ.get("ELODIN_MANY_AGENT_RESULT_JSON")
 PRODUCER_TIMEOUT_S = float(os.environ.get("ELODIN_MANY_AGENT_PRODUCER_TIMEOUT_S", "10"))
 LOCALHOST = socket.gethostbyname("localhost")
-# The port of this simulation's DB: the address `elodin run` passes, if any.
-DB_PORT = next(
-    (arg.rsplit(":", 1)[1] for arg in sys.argv[2:] if re.fullmatch(r"\S+:\d+", arg)), "2240"
+# Where this simulation's DB listens, from the address `elodin run` passes; a wildcard host is
+# reached through the loopback of its family.
+DB_ADDRESS = (
+    next((arg for arg in sys.argv[2:] if re.fullmatch(r"\S+:\d+", arg)), "[::]:2240")
+    .replace("[::]", "[::1]")
+    .replace("0.0.0.0", "127.0.0.1")
 )
 TICK_US = round(1e6 / RATE_HZ)
 # The producer captures a frame every CAPTURE_PERIOD ticks; it is due LATENCY ticks later.
@@ -185,7 +188,7 @@ if HISTORY:
             cmd=sys.executable,
             args=[
                 str(ROOT / "producer.py"),
-                f"127.0.0.1:{DB_PORT}",
+                DB_ADDRESS,
                 str(CAPTURE_PERIOD * TICK_US),
             ],
             cwd=str(ROOT),
