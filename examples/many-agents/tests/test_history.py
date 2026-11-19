@@ -10,6 +10,7 @@ from pathlib import Path
 
 import elodin.db as edb
 import numpy as np
+import pytest
 
 EXAMPLE = Path(__file__).resolve().parents[1]
 
@@ -72,8 +73,9 @@ def test_camera_frames_are_paired_with_the_truth_at_their_capture_time(tmp_path)
             np.testing.assert_array_equal(position[0], truth)
 
 
+@pytest.mark.skipif(not Path("/proc").is_dir(), reason="finds the render server through /proc")
 def test_a_camera_that_stops_fails_the_run(tmp_path):
-    process, address = start(tmp_path, 60_000, ELODIN_MANY_AGENT_CAMERA_TIMEOUT_S="3")
+    process, address = start(tmp_path, 60_000)
     try:
         deadline = time.monotonic() + 120
         while not has_frames(address):
