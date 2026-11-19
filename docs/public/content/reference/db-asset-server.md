@@ -94,6 +94,15 @@ Persistence runs during simulation DB initialization (`init_db`), when the world
 
 The active schematic is stored as an asset (default `schematics/main.kdl`) and pointed to by `schematic.active` metadata. Consumers fetch it over the DB Asset Server; there is no inline KDL mirror in DB metadata.
 
+### Which files are copied
+
+A new database records its source `assets/` folders (`$ELODIN_ASSETS` or `--assets`, otherwise `./assets`, the simulation's `assets/`, then the nearest `assets/` above it) and copies only what its schematics use:
+
+- every `.kdl` schematic in the source folders
+- each file a stored schematic references: meshes, icons, map overlays, effect files and their sprite textures, the skybox manifest plus the active skybox's cubemap, and the whole directory of a `terrain path=` tileset
+
+Any schematic stored later (the simulation's, an editor save, `StoreAsset`, an asset `PUT`) copies the references the database is still missing from the recorded source folders. Files already in the database are never overwritten, and files no schematic references stay in the source folder. A file the source folders don't have keeps its local path.
+
 ## Simulation source snapshot
 
 When a Python simulation records to an explicit database path, Elodin also writes a source snapshot to `{db}/simulation_source/`:
@@ -141,9 +150,10 @@ See [Elodin CLI](/reference/elodin-cli) for `editor --replay` and `elodin-db --f
 On the Aleph flight computer, the `elodin-db` NixOS service passes
 `--assets /var/lib/elodin/assets` (the shared `ELODIN_ASSETS` root,
 configurable via `services.elodin-db.assetsDir`) so each fresh boot database
-ingests the asset tree on creation. A HITL recording copied off the vehicle is
-therefore a complete, portable record: serve it anywhere with `elodin-db run`
-and the editor loads schematic and meshes from the DB itself.
+records that tree as its asset source and copies in whatever the schematics
+pushed to it reference. A HITL recording copied off the vehicle is therefore a
+complete, portable record: serve it anywhere with `elodin-db run` and the
+editor loads schematic and meshes from the DB itself.
 
 ### Follow mode and assets
 
