@@ -8,6 +8,7 @@
 - **(fix)** Correct Cranelift loops in functions that use a tensor of more than 64 elements when the body passes one loop variable on to a later one, as in `x, x_prev = f(x), x`: `x_prev` received the updated `x`.
 - **(fix)** Compile multi-entity Cranelift simulations that use `lax.cond` around a large lookup table, which exhausted memory, or `jnp.linalg.solve`, which failed to compile. An intermediate too large for the simulation thread's stack is now a compile error.
 - **(fix)** Recording looks for assets in `./assets`, then the simulation's own `assets/`, then the nearest `assets/` above it, so assets such as the Falcon 9 map overlays load when the simulation runs from the repository root. Earlier folders win when a file exists in several.
+- **(doc)** Note in the quickstart that the macOS CLI needs Homebrew's `ffmpeg@8` at runtime.
 
 ## v0.21
 
