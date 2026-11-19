@@ -56,12 +56,12 @@ async fn browser_flow(
     );
 
     if args.no_browser {
-        println!("Open this URL to log in:\n  {auth_url}");
+        println!("Open this URL to log in:\n{auth_url}");
     } else {
-        println!("Opening your browser to log in...");
-        if opener::open(&auth_url).is_err() {
-            println!("Could not open a browser automatically. Open this URL:\n  {auth_url}");
-        }
+        println!("Opening browser to log in\n{auth_url}");
+        opener::open_browser(&auth_url).map_err(|err| {
+            miette::miette!("failed to open a browser ({err}); re-run with --no-browser")
+        })?;
     }
 
     let (code, returned_state) = tokio::time::timeout(BROWSER_TIMEOUT, wait_for_callback(listener))
@@ -225,7 +225,9 @@ async fn device_flow(
         device.verification_uri, device.user_code
     );
     if !no_browser && let Some(complete) = &device.verification_uri_complete {
-        let _ = opener::open(complete);
+        opener::open_browser(complete).map_err(|err| {
+            miette::miette!("failed to open a browser ({err}); re-run with --no-browser")
+        })?;
     }
     println!("Waiting for authorization...");
 
