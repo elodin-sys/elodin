@@ -497,6 +497,15 @@
                 <li>
                     <a href="https://docs.elodin.systems/preview/pr-976/reference/sitl-hitl/#sitl-in-practice">SITL in practice</a>
                     
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-976/reference/sitl-hitl/#proving-a-run-repeats">Proving a run repeats</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
                 </li>
                 
                 <li>
@@ -717,6 +726,15 @@
 </tbody></table>
 <p><strong>Feed sensors, not truth.</strong> Model sensors in systems, with their noise, bias, rate, and delay, and send the flight software those values. For cameras, a <a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/sensor-camera">sensor camera</a> renders frames into the database as messages. Read a frame by the time it was captured: <code>ctx.read_at(frames, t, "exact")</code> in a hook, or <code>ctx.read_msg(name, timestamp=t)</code> in <code>post_step</code>. To model the camera's delay, read the frame from <code>latency</code> microseconds before the current tick.</p>
 <p><strong>Scale out.</strong> The same SITL runs headless under <a href="/reference/elodin-cli#elodin-monte-carlo"><code>elodin monte-carlo</code></a>, with one simulation and flight software stack per worker.</p>
+<h3 id="proving-a-run-repeats">Proving a run repeats</h3>
+<p>A lockstep run with fixed seeds and <code>start_timestamp</code> should repeat bit for bit. When two runs end in different states, a <a href="/reference/python-api#deterministic-witnesses">deterministic witness</a> shows where they first parted: in the world after the systems, in what a hook sent or got back, in what it wrote, or in what the commit recorded.</p>
+<ol>
+<li>Prepare a witness over the batches your hooks use. Give each hook a channel for what it sends, another for the part of each reply the flight software decided, and an external channel for the whole reply.</li>
+<li>Record a baseline with <code>raw=True</code>, and pass it as <code>reference</code> to the runs you check. The receipt names the first mismatch, and the witness keeps the exact bytes around it.</li>
+<li>Compare any two witnesses with <a href="/reference/elodin-cli#elodin-determinism"><code>elodin determinism compare</code></a>.</li>
+<li>Replay a hook from a witness, without the simulation or the flight software, with <code>world.replay_pre_commit</code> or <code>elodin determinism replay-hook</code>. If the replay reproduces every byte, the difference came from outside the hook.</li>
+</ol>
+<p>Keep host-only fields, such as a reply's service time, out of the compared channels: the external channel keeps the whole reply for replay, and is never compared. <a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/many-agents">many-agents</a> walks through a one-bit fault, a controller race, and its fix.</p>
 <h2 id="hitl-in-practice">HITL in practice</h2>
 <p>In HITL the flight software runs on the flight computer and keeps its own clock. Run the simulation in real time, put timestamps on what crosses the link, and expect some jitter between the two clocks. Keep the same boundary as in SITL, so the flight software cannot tell the difference. Three layouts work well.</p>
 <h3 id="the-database-as-the-boundary">The database as the boundary</h3>
@@ -758,7 +776,7 @@
 <ul>
 <li><strong>Draw the boundary first.</strong> List what the flight software reads and writes before writing the bridge, and mark every write <code>external_control</code>.</li>
 <li><strong>Use one schema for simulation and hardware.</strong> Then the same flight software, schematic, and scripts work on both.</li>
-<li><strong>Seed every random number and fix <code>start_timestamp</code>,</strong> so a lockstep run repeats exactly.</li>
+<li><strong>Seed every random number and fix <code>start_timestamp</code>,</strong> so a lockstep run repeats exactly. Record a witness to prove it.</li>
 <li><strong>Watch the tick budget.</strong> Set <code>ELODIN_SIM_SUMMARY_JSON</code> to write the receipt, and compare <code>callback</code>, <code>commit</code>, and <code>total_cycle</code> with the tick period.</li>
 <li><strong>Compare runs with flight data.</strong> Merge a SITL run with a flight log and plot them together.</li>
 </ul>
@@ -772,6 +790,7 @@
 <tr><td>Preparing a write handle fails</td><td>The component must be marked <code>external_control = "true"</code>.</td></tr>
 <tr><td>The flight software sees the wrong attitude or motion</td><td>Check frames (ENU or NED, FLU or FRD), units, and quaternion order on both sides of the link.</td></tr>
 <tr><td>A camera frame is missing</td><td>The render server skipped it to catch up. <code>read_at(..., "exact")</code> returns <code>None</code> for it instead of an older frame.</td></tr>
+<tr><td>Two lockstep runs end in different states</td><td>Record both with a witness, the second with the first as <code>reference</code>, and read <code>witness.first_mismatch</code> in the receipt. A differing response after an equal ingress points at the flight software; a mismatch in <code>after_systems</code> points at the simulation.</td></tr>
 </tbody></table>
 <h2 id="examples">Examples</h2>
 <table><thead><tr><th>Example</th><th>Style</th><th>Loop</th><th>Shows</th></tr></thead><tbody>

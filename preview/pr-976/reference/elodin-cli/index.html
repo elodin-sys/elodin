@@ -542,6 +542,23 @@
                         </li>
                         
                         <li>
+                            <a href="https://docs.elodin.systems/preview/pr-976/reference/elodin-cli/#elodin-determinism">elodin determinism</a>
+                            
+                            <ul>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-976/reference/elodin-cli/#elodin-determinism-compare">elodin determinism compare</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-976/reference/elodin-cli/#elodin-determinism-replay-hook">elodin determinism replay-hook</a>
+                                </li>
+                                
+                            </ul>
+                            
+                        </li>
+                        
+                        <li>
                             <a href="https://docs.elodin.systems/preview/pr-976/reference/elodin-cli/#python-simulation-subcommands">Python Simulation Subcommands</a>
                             
                             <ul>
@@ -973,6 +990,7 @@
 <li><code>editor</code> — Launch the Elodin editor (default)</li>
 <li><code>run</code> — Run an Elodin simulation in headless mode</li>
 <li><code>monte-carlo</code> — Run Monte Carlo campaigns</li>
+<li><code>determinism</code> — Compare deterministic witnesses and replay pre_commit hooks from them</li>
 <li><code>login</code> — Log in to Elodin Cloud through your browser</li>
 <li><code>upload</code> — Upload a stopped TelemetryDB directory, compacting transmitted logs</li>
 </ul>
@@ -1246,6 +1264,34 @@ Setup-only failures (a run whose port preflight failed, so no process ever
 spawned) skip the <code>post_run</code> hook entirely — there is no run database to score.
 Real-time-paced runs also record <code>behind_deadline_frac</code>, <code>real_time_factor</code>,
 and <code>drift_resets</code>, with worst-run callouts in the campaign summary.</p>
+<h2 id="elodin-determinism"><code>elodin determinism</code></h2>
+<p>Compare <a href="/reference/python-api#deterministic-witnesses">deterministic witnesses</a>
+and replay <code>pre_commit</code> hooks from them (not available on Windows). Both
+subcommands exit 0 when everything matches, 1 at a mismatch, and 2 on an error,
+such as an unreadable file or witnesses with different schemas.</p>
+<p><strong>Usage:</strong> <code>elodin determinism &lt;COMMAND&gt;</code></p>
+<h3 id="elodin-determinism-compare"><code>elodin determinism compare</code></h3>
+<p><strong>Usage:</strong> <code>elodin determinism compare [--stop-at-first] &lt;LEFT&gt; &lt;RIGHT&gt;</code></p>
+<p>Compares two witness files tick by tick and prints the first mismatch: the
+tick, stage, hook, record, and when both files kept that tick's exact bytes,
+the entity, row, byte and both values. Without <code>--stop-at-first</code>, it reads both
+files to the end and also prints how many ticks differ.</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> determinism</span><span style="color: light-dark(#2AA198, #2AA198);"> compare</span><span style="color: light-dark(#2AA198, #2AA198);"> baseline/run.witness</span><span style="color: light-dark(#2AA198, #2AA198);"> faulted/run.witness</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-stop-at-first</span></span></code></pre><pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>first mismatch</span></span>
+<span class="giallo-l"><span>  tick: 4096</span></span>
+<span class="giallo-l"><span>  stage: after_hook:0</span></span>
+<span class="giallo-l"><span>  hook: many_agent_step</span></span>
+<span class="giallo-l"><span>  channel: controller.response</span></span>
+<span class="giallo-l"><span>  entity: agent_007</span></span>
+<span class="giallo-l"><span>  row: 7</span></span>
+<span class="giallo-l"><span>  byte: 3</span></span>
+<span class="giallo-l"><span>  left: 0x84</span></span>
+<span class="giallo-l"><span>  right: 0x85</span></span></code></pre><h3 id="elodin-determinism-replay-hook"><code>elodin determinism replay-hook</code></h3>
+<p><strong>Usage:</strong> <code>elodin determinism replay-hook --library &lt;LIB&gt; --symbol &lt;SYMBOL&gt; [--live] &lt;TRACE&gt;</code></p>
+<p>Loads the native hook <code>SYMBOL</code> from the shared library <code>LIB</code>, runs it on every
+tick <code>TRACE</code> kept exactly, with the rows and external channels it saw in the
+run, and compares what it writes with the recording. It needs neither the
+simulation nor the processes the hook talks to. <code>--live</code> leaves the external
+channels to the hook, so it does its own I/O.</p>
 <h2 id="python-simulation-subcommands">Python Simulation Subcommands</h2>
 <p>When you run a simulation Python file directly (for example <code>python examples/drone/main.py ...</code>), the embedded simulation CLI supports additional subcommands:</p>
 <ul>
