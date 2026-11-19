@@ -35,6 +35,7 @@ pub mod system;
 pub mod tick_metrics;
 pub mod ui;
 pub mod utils;
+pub mod witness;
 pub mod world;
 pub mod world_builder;
 
@@ -209,6 +210,7 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     monte_carlo::register(m)?;
     db::register(m)?;
     ui::register(m)?;
+    witness::register(m)?;
     // try_init: the db module may have installed a tracing subscriber (which
     // claims the global `log` logger) when ELODIN_DB_LOG is set.
     let _ = env_logger::try_init();

@@ -191,6 +191,7 @@ pub struct Receipt {
     sync: Option<crate::impeller_server::SyncCounters>,
     callbacks: Option<crate::prepared::CallbackReport>,
     systems: Option<cranelift_mlir::profile::Timings>,
+    witness: Option<crate::witness::WitnessReport>,
     failure: Option<String>,
     failed_hook: Option<FailedHook>,
     /// Sections this run did not collect.
@@ -458,7 +459,8 @@ pub struct TickMetrics {
     pub callbacks: Option<crate::prepared::CallbackReport>,
     pub timing: Timing,
     pub systems: Option<cranelift_mlir::profile::Timings>,
-    /// Why the run stopped early, when a callback failed.
+    pub witness: Option<crate::witness::WitnessReport>,
+    /// Why the run stopped early, when a callback or the witness failed.
     pub failure: Option<String>,
     pub failed_hook: Option<FailedHook>,
     /// Wall-clock duration of one simulation cycle (from immediately
@@ -524,6 +526,7 @@ impl TickMetrics {
             callbacks: None,
             timing: Timing::Summary,
             systems: None,
+            witness: None,
             failure: None,
             failed_hook: None,
             total_cycle: PhaseStats::default(),
@@ -557,6 +560,12 @@ impl TickMetrics {
             name: name.to_string(),
             committed,
         });
+    }
+
+    /// Records that the witness stopped the run, unless an earlier failure did.
+    pub fn fail_witness(&mut self, cause: &str) {
+        self.failure
+            .get_or_insert_with(|| format!("witness: {cause}"));
     }
 
     /// Discard everything accumulated so far and restart the clock, so the
@@ -902,6 +911,9 @@ impl TickMetrics {
         if self.callbacks.is_none() {
             unavailable.push("callbacks");
         }
+        if self.witness.is_none() {
+            unavailable.push("witness");
+        }
         Receipt {
             schema: "elodin.run_receipt.v1",
             timing: self.timing,
@@ -941,6 +953,7 @@ impl TickMetrics {
             sync: self.sync.clone(),
             callbacks: self.callbacks.clone(),
             systems: self.systems.clone(),
+            witness: self.witness.clone(),
             failure: self.failure.clone(),
             failed_hook: self.failed_hook.clone(),
             unavailable,

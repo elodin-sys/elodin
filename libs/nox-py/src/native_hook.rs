@@ -14,6 +14,7 @@ use pyo3::prelude::*;
 use crate::World;
 use crate::prepared::{BatchHandle, HookWrites, PreCommit};
 use crate::tick_metrics::{PhaseStats, PhaseStatsSnapshot};
+use crate::witness::Channels;
 
 /// The version of the layout below, which a hook can check in `ElodinStep::abi_version`.
 pub const ABI_VERSION: u32 = 1;
@@ -61,7 +62,7 @@ struct Symbols {
 
 /// A batch field's rows in its component's column.
 #[derive(Clone)]
-struct Field {
+pub(crate) struct Field {
     name: CString,
     component_id: ComponentId,
     rows: Vec<usize>,
@@ -71,6 +72,26 @@ struct Field {
     first_row: Option<usize>,
 }
 
+impl Field {
+    pub(crate) fn new(
+        name: &str,
+        component_id: ComponentId,
+        rows: Vec<usize>,
+        row_bytes: usize,
+        writes: bool,
+    ) -> PyResult<Self> {
+        let consecutive = rows.windows(2).all(|pair| pair[1] == pair[0] + 1);
+        Ok(Self {
+            name: CString::new(name).map_err(|err| PyValueError::new_err(err.to_string()))?,
+            component_id,
+            first_row: rows.first().copied().filter(|_| consecutive),
+            rows,
+            row_bytes,
+            writes,
+        })
+    }
+}
+
 /// A `pre_commit` hook in a shared library, over the rows of a prepared batch.
 #[pyclass(frozen)]
 pub struct NativeStepHook {
@@ -78,6 +99,8 @@ pub struct NativeStepHook {
     symbol: String,
     symbols: Symbols,
     fields: Vec<Field>,
+    /// `BatchHandle::id` of the input batch, whose witness channels the hook gets as columns.
+    batch: u64,
     workers: usize,
 }
 
@@ -88,6 +111,27 @@ impl NativeStepHook {
     #[staticmethod]
     #[pyo3(signature = (path, input, symbol, workers = 1))]
     fn load(path: &str, input: &BatchHandle, symbol: &str, workers: usize) -> PyResult<Self> {
+        let fields = input
+            .fields
+            .iter()
+            .map(|(name, handle)| {
+                let handle = handle.get();
+                let (id, rows) = (handle.component_id(), handle.rows.clone());
+                Field::new(name, id, rows, handle.row_bytes, handle.writes())
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+        Self::open(path, symbol, fields, input.id, workers)
+    }
+}
+
+impl NativeStepHook {
+    pub(crate) fn open(
+        path: &str,
+        symbol: &str,
+        fields: Vec<Field>,
+        batch: u64,
+        workers: usize,
+    ) -> PyResult<Self> {
         // Safety: loading runs the library's initializers; the caller chose to trust it.
         let library = unsafe { libloading::Library::new(path) }
             .map_err(|err| PyValueError::new_err(format!("cannot load {path:?}: {err}")))?;
@@ -104,42 +148,32 @@ impl NativeStepHook {
                 .ok()
                 .map(|destroy| *destroy),
         };
-        let fields = input
-            .fields
-            .iter()
-            .map(|(name, handle)| {
-                let handle = handle.get();
-                let consecutive = handle.rows.windows(2).all(|pair| pair[1] == pair[0] + 1);
-                Ok(Field {
-                    name: CString::new(name.as_str())?,
-                    component_id: handle.component_id(),
-                    rows: handle.rows.clone(),
-                    row_bytes: handle.row_bytes,
-                    writes: handle.writes(),
-                    first_row: handle.rows.first().copied().filter(|_| consecutive),
-                })
-            })
-            .collect::<Result<Vec<_>, std::ffi::NulError>>()
-            .map_err(|err| PyValueError::new_err(err.to_string()))?;
         Ok(Self {
             library: Arc::new(library),
             symbol: symbol.to_string(),
             symbols,
             fields,
+            batch,
             workers: workers.max(1),
         })
     }
-}
 
-impl NativeStepHook {
-    /// The hook as one run's `pre_commit`.
-    pub fn runner(&self) -> Box<dyn PreCommit + Send> {
+    pub fn batch(&self) -> u64 {
+        self.batch
+    }
+
+    /// The hook as one run's `pre_commit`, with a column for each of `channels` on its batch.
+    pub fn runner(&self, channels: &Channels) -> Box<dyn PreCommit + Send> {
+        let own = channels.defs().iter().enumerate();
+        let own = own.filter(|(_, channel)| channel.batch == self.batch);
         Box::new(NativeRunner::new(
             self.symbol.clone(),
             Some(self.library.clone()),
             self.symbols,
             self.fields.clone(),
             self.workers,
+            own.map(|(index, channel)| (index, channel.name.clone(), channel.row_bytes))
+                .collect(),
         ))
     }
 }
@@ -177,6 +211,9 @@ struct NativeRunner {
     _library: Option<Arc<libloading::Library>>,
     symbols: Symbols,
     fields: Vec<Field>,
+    /// Index in the run's `Channels` of each witness channel, whose columns follow the fields'.
+    channels: Vec<usize>,
+    _channel_names: Vec<CString>,
     columns: Vec<ElodinColumn>,
     /// The gathered rows of each field whose rows are not consecutive.
     staging: Vec<Vec<u8>>,
@@ -199,8 +236,13 @@ impl NativeRunner {
         symbols: Symbols,
         fields: Vec<Field>,
         workers: usize,
+        channels: Vec<(usize, String, usize)>,
     ) -> Self {
         let rows = fields.first().map_or(0, |field| field.rows.len());
+        let channel_names = channels
+            .iter()
+            .map(|(_, name, _)| CString::new(name.as_str()).expect("channel names have no NUL"))
+            .collect::<Vec<_>>();
         let columns = fields
             .iter()
             .map(|field| ElodinColumn {
@@ -209,6 +251,17 @@ impl NativeRunner {
                 row_bytes: field.row_bytes as u64,
                 writable: field.writes.into(),
             })
+            .chain(
+                channels
+                    .iter()
+                    .zip(&channel_names)
+                    .map(|((_, _, row_bytes), name)| ElodinColumn {
+                        name: name.as_ptr(),
+                        data: std::ptr::null_mut(),
+                        row_bytes: *row_bytes as u64,
+                        writable: 1,
+                    }),
+            )
             .collect::<Vec<_>>();
         let staging = fields
             .iter()
@@ -253,6 +306,8 @@ impl NativeRunner {
             _library: library,
             symbols,
             fields,
+            channels: channels.into_iter().map(|(index, ..)| index).collect(),
+            _channel_names: channel_names,
             columns,
             staging,
             calls,
@@ -296,7 +351,13 @@ impl PreCommit for NativeRunner {
         tick: u64,
         timestamp: Timestamp,
         world: &mut World,
+        channels: &mut Channels,
     ) -> Result<HookWrites, String> {
+        let channel_columns = &mut self.columns[self.fields.len()..];
+        for (column, &index) in channel_columns.iter_mut().zip(&self.channels) {
+            column.writable = channels.writable(index).into();
+            column.data = channels.column(index);
+        }
         for ((field, column), staging) in self
             .fields
             .iter()
@@ -359,11 +420,23 @@ impl PreCommit for NativeRunner {
                 buffer[row * size..][..size].copy_from_slice(&staging[i * size..][..size]);
             }
         }
+        for &index in &self.channels {
+            if channels.writable(index) {
+                channels.set_filled(index);
+            }
+        }
         let written = self.fields.iter().filter(|field| field.writes);
         Ok(HookWrites {
             written: written.map(|field| field.component_id).collect(),
             ..HookWrites::default()
         })
+    }
+
+    fn partitions(&self) -> Vec<(u64, u64)> {
+        let calls = self.calls.iter();
+        calls
+            .map(|call| (call.step.row_start, call.step.row_end))
+            .collect()
     }
 
     fn report(&self) -> Option<HookReport> {
@@ -441,8 +514,10 @@ mod tests {
     use std::collections::HashSet;
 
     use super::*;
+    use crate::witness::ChannelDef;
 
-    /// Writes twice each `input` row into the same `output` row; fails at tick 3.
+    /// Writes twice each `input` row into the same `output` row, and into the witness channel
+    /// after them; fails at tick 3.
     unsafe extern "C" fn double(step: *const ElodinStep) -> i32 {
         let step = unsafe { &*step };
         if step.tick == 3 {
@@ -450,10 +525,14 @@ mod tests {
             unsafe { std::ptr::copy_nonoverlapping(message.as_ptr(), step.error, 7) };
             return 7;
         }
-        let columns = unsafe { std::slice::from_raw_parts(step.columns, 2) };
+        let columns = unsafe { std::slice::from_raw_parts(step.columns, 3) };
         let (input, output) = (columns[0].data.cast::<f64>(), columns[1].data.cast::<f64>());
+        let witness = columns[2].data.cast::<f64>();
         for row in step.row_start as usize..step.row_end as usize {
-            unsafe { *output.add(row) = 2.0 * *input.add(row) };
+            unsafe {
+                *output.add(row) = 2.0 * *input.add(row);
+                *witness.add(row) = *output.add(row);
+            }
         }
         0
     }
@@ -502,9 +581,21 @@ mod tests {
                 init: None,
                 destroy: None,
             };
-            let mut hook = NativeRunner::new("double".into(), None, symbols, fields, workers);
+            let channel = ChannelDef {
+                name: "doubled".into(),
+                batch: 1,
+                rows: 3,
+                row_bytes: 8,
+                external: false,
+            };
+            let mut channels = Channels::new(vec![channel], false);
+            let witness = vec![(0, "doubled".to_string(), 8)];
+            let mut hook =
+                NativeRunner::new("double".into(), None, symbols, fields, workers, witness);
 
-            let writes = hook.step(1, Timestamp(0), &mut world).unwrap();
+            let writes = hook
+                .step(1, Timestamp(0), &mut world, &mut channels)
+                .unwrap();
             assert_eq!(writes.written, HashSet::from([ComponentId::new("output")]));
             let output = column(&world, "output");
             let doubled: Vec<f64> = output_rows.iter().map(|&row| output[row]).collect();
@@ -513,8 +604,12 @@ mod tests {
                 [28.0, 20.0, 24.0],
                 "rows {output_rows:?}, {workers} workers"
             );
+            let witnessed = [28.0f64, 20.0, 24.0].map(f64::to_le_bytes).concat();
+            assert_eq!(channels.bytes(0), Some(witnessed.as_slice()));
 
-            let err = hook.step(3, Timestamp(0), &mut world).unwrap_err();
+            let err = hook
+                .step(3, Timestamp(0), &mut world, &mut channels)
+                .unwrap_err();
             assert!(err.ends_with("double returned 7: tick 3"), "{err}");
         }
     }

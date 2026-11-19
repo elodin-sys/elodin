@@ -232,8 +232,9 @@ test_steps = [
                 flake=".#run",
                 command="""
 python3 examples/many-agents/controller/build.py
+python3 examples/many-agents/hook/build.py
 python3 -m pytest examples/many-agents/tests -q
-python3 examples/many-agents/benchmark.py --sizes 2 --modes runtime,local,lockstep,lockstep-history --warmup-ticks 10 --measured-ticks 50 --repeats 1 --no-paced --output /tmp/many-agents-ci
+python3 examples/many-agents/benchmark.py --sizes 2 --modes runtime,local,lockstep,lockstep-history --warmup-ticks 10 --measured-ticks 50 --repeats 1 --no-paced --witness raw --replay-witness --output /tmp/many-agents-ci
 """,
             ),
             nix_step(

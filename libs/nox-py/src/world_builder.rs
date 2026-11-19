@@ -12,6 +12,7 @@ use crate::prepared::{
 use crate::step_context::StepContext;
 use crate::system::{CompiledSystemExt, PySystem};
 use crate::tick_metrics::Timing;
+use crate::witness::{Channels, DeterminismTrace, Witness};
 use crate::{
     ComponentSchema, TimeStep, World, globals::increment_sim_tick, system::IntoSystem,
     system::System as _,
@@ -151,6 +152,8 @@ pub struct WorldBuilder {
     validation_failures: u64,
     /// History handles or timestamped writers were prepared, so commits must land each cycle.
     uses_history: bool,
+    /// The last witness prepared, which `replay_pre_commit` replays.
+    witness: Option<Py<Witness>>,
 }
 
 fn py_json_value(obj: &Bound<'_, PyAny>) -> Result<serde_json::Value, Error> {
@@ -537,6 +540,61 @@ impl WorldBuilder {
             .inspect_err(|_| self.validation_failures += 1)?;
         self.uses_history = true;
         Ok(writer)
+    }
+
+    /// The batches and hook channels a run's deterministic witness records. `channels` and
+    /// `external` map each channel name to `(batch, row_bytes)`: one row per row of one of the
+    /// batches. External channels hold what came from outside the simulation; a replay feeds
+    /// them back, and no comparison looks at them. `stages` keeps only the stages it names.
+    #[pyo3(signature = (batches, channels = None, external = None, stages = None))]
+    fn prepare_witness(
+        &mut self,
+        py: Python<'_>,
+        batches: &Bound<'_, PyDict>,
+        channels: Option<&Bound<'_, PyDict>>,
+        external: Option<&Bound<'_, PyDict>>,
+        stages: Option<Vec<String>>,
+    ) -> PyResult<Py<Witness>> {
+        let witness = Witness::new(batches, channels, external, stages)
+            .and_then(|witness| Py::new(py, witness))
+            .inspect_err(|_| self.validation_failures += 1)?;
+        self.witness = Some(witness.clone_ref(py));
+        Ok(witness)
+    }
+
+    /// Runs `pre_commit`, the hooks of the run that recorded `trace`, on the rows its witness
+    /// kept exactly, without the systems or the DB, and compares what each hook writes with the
+    /// recording. The hooks read the recorded external channels unless `live`.
+    #[pyo3(signature = (trace, pre_commit, live = false))]
+    fn replay_pre_commit(
+        &mut self,
+        py: Python<'_>,
+        trace: PathBuf,
+        pre_commit: Option<PyObject>,
+        live: bool,
+    ) -> PyResult<PyObject> {
+        self.validate_prepared()?;
+        let witness = self
+            .witness
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("prepare_witness first"))?
+            .clone_ref(py);
+        let witness = witness.get();
+        let channels = witness.channels(!live);
+        let counters = Arc::new(CallbackCounters::default());
+        let hooks = hook_list(py, pre_commit)?
+            .iter()
+            .map(|hook| Some(hook_runner(py, hook, &channels, None, &counters, None)))
+            .collect();
+        let mut world = World {
+            host: self.world.host.clone(),
+            dirty_components: HashSet::new(),
+            metadata: self.world.metadata.clone(),
+        };
+        let report = crate::witness::replay_world(&trace, witness, &mut world, hooks, channels)
+            .map_err(PyRuntimeError::new_err)?;
+        let json = serde_json::to_string(&report).expect("replay report serializes");
+        Ok(py.import("json")?.call_method1("loads", (json,))?.unbind())
     }
 
     fn recipe(&mut self, py: Python<'_>, recipe_obj: PyObject) -> PyResult<()> {
@@ -944,6 +1002,7 @@ impl WorldBuilder {
         pre_commit = None,
         timing = None,
         synchronous_commits = false,
+        determinism_trace = None,
     ))]
     pub fn run(
         &mut self,
@@ -969,6 +1028,7 @@ impl WorldBuilder {
         pre_commit: Option<PyObject>,
         timing: Option<Timing>,
         synchronous_commits: bool,
+        determinism_trace: Option<Py<DeterminismTrace>>,
     ) -> Result<Option<String>, Error> {
         let log_level = log_level.as_deref().map(normalize_log_level).transpose()?;
         let filter = if std::env::var("RUST_LOG").is_ok() {
@@ -1083,21 +1143,7 @@ impl WorldBuilder {
                 counters
                     .validation_failures
                     .store(self.validation_failures, atomic::Ordering::Relaxed);
-                let hooks: Vec<PyObject> = match pre_commit {
-                    Some(hooks) if hooks.bind(py).is_instance_of::<PyList>() => {
-                        hooks.extract(py)?
-                    }
-                    hooks => hooks.into_iter().collect(),
-                };
-                if hooks.iter().any(|hook| {
-                    let hook = hook.bind(py);
-                    !hook.is_instance_of::<NativeStepHook>() && !hook.is_callable()
-                }) {
-                    return Err(PyTypeError::new_err(
-                        "pre_commit takes a callable, a NativeStepHook, or a list of them",
-                    )
-                    .into());
-                }
+                let hooks = hook_list(py, pre_commit)?;
                 let (pre_step_counters, post_step_counters) = (counters.clone(), counters.clone());
                 let step_callbacks = pre_step.is_some() || post_step.is_some();
                 let synchronous_commits = synchronous_commits || self.uses_history;
@@ -1112,26 +1158,30 @@ impl WorldBuilder {
                             crate::Error::DB(e)
                         }
                     })?;
+                let trace = determinism_trace.as_ref().map(|trace| trace.get());
+                let channels =
+                    trace.map_or_else(Channels::default, |t| t.witness().channels(false));
                 let pre_commit = hooks
-                    .into_iter()
-                    .map(|hook| -> Box<dyn PreCommit + Send> {
-                        if let Ok(native) = hook.downcast_bound::<NativeStepHook>(py) {
-                            return native.get().runner();
-                        }
-                        let name = hook
-                            .bind(py)
-                            .getattr("__qualname__")
-                            .and_then(|name| name.extract())
-                            .unwrap_or_else(|_| hook.to_string());
-                        Box::new(PythonPreCommit {
-                            func: hook,
-                            name,
-                            db: db_server.db.clone(),
-                            counters: counters.clone(),
-                            recipe_cancel_token: recipe_cancel_token.clone(),
-                        })
+                    .iter()
+                    .map(|hook| {
+                        let db = Some(db_server.db.clone());
+                        hook_runner(
+                            py,
+                            hook,
+                            &channels,
+                            db,
+                            &counters,
+                            recipe_cancel_token.clone(),
+                        )
                     })
                     .collect::<Vec<_>>();
+                let witness = match trace {
+                    Some(trace) => {
+                        let labels = trace.witness().labels(&hooks, &pre_commit);
+                        Some(trace.plan(exec.world(), channels, labels)?)
+                    }
+                    None => None,
+                };
                 let grpc_addr = elodin_db::grpc::grpc_addr(addr);
                 let grpc_db = db_server.db.clone();
                 let listener = std::net::TcpListener::bind(grpc_addr).map_err(|e| {
@@ -1273,6 +1323,7 @@ impl WorldBuilder {
                                         synchronous_commits,
                                         pre_commit,
                                         counters,
+                                        witness,
                                         interactive,
                                         start_timestamp.map(Timestamp),
                                         cancel_token,
@@ -2257,6 +2308,49 @@ impl WorldBuilder {
 
         Ok(result.into_py_any(py)?)
     }
+}
+
+/// `pre_commit` as a list of hooks, each a callable or a `NativeStepHook`.
+fn hook_list(py: Python<'_>, pre_commit: Option<PyObject>) -> PyResult<Vec<PyObject>> {
+    let hooks: Vec<PyObject> = match pre_commit {
+        Some(hooks) if hooks.bind(py).is_instance_of::<PyList>() => hooks.extract(py)?,
+        hooks => hooks.into_iter().collect(),
+    };
+    if hooks.iter().any(|hook| {
+        let hook = hook.bind(py);
+        !hook.is_instance_of::<NativeStepHook>() && !hook.is_callable()
+    }) {
+        return Err(PyTypeError::new_err(
+            "pre_commit takes a callable, a NativeStepHook, or a list of them",
+        ));
+    }
+    Ok(hooks)
+}
+
+/// One run's runner of `hook`; a native hook gets a column for each of `channels` on its batch.
+fn hook_runner(
+    py: Python<'_>,
+    hook: &PyObject,
+    channels: &Channels,
+    db: Option<Arc<elodin_db::DB>>,
+    counters: &Arc<CallbackCounters>,
+    recipe_cancel_token: Option<CancelToken>,
+) -> Box<dyn PreCommit + Send> {
+    if let Ok(native) = hook.downcast_bound::<NativeStepHook>(py) {
+        return native.get().runner(channels);
+    }
+    let name = hook
+        .bind(py)
+        .getattr("__qualname__")
+        .and_then(|name| name.extract())
+        .unwrap_or_else(|_| hook.to_string());
+    Box::new(PythonPreCommit {
+        func: hook.clone_ref(py),
+        name,
+        db,
+        counters: counters.clone(),
+        recipe_cancel_token,
+    })
 }
 
 impl WorldBuilder {

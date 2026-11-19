@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use elodin_db::DB;
 use impeller::types::{ComponentId, PacketId, PrimType, Timestamp};
-use numpy::{PyArray1, PyUntypedArray, PyUntypedArrayMethods};
+use numpy::{PyArray1, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::exceptions::{PyAttributeError, PyKeyError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{IntoPyDict, PyBytes, PyDict};
@@ -17,6 +17,7 @@ use stellarator::util::CancelToken;
 use crate::World;
 use crate::entity::EntityId;
 use crate::native_hook::HookReport;
+use crate::witness::Channels;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Access {
@@ -72,7 +73,7 @@ impl ComponentHandle {
     }
 }
 
-fn numpy_dtype(prim_type: PrimType) -> &'static str {
+pub(crate) fn numpy_dtype(prim_type: PrimType) -> &'static str {
     match prim_type {
         PrimType::U8 => "uint8",
         PrimType::U16 => "uint16",
@@ -170,6 +171,10 @@ impl ComponentHandle {
         &self.name
     }
 
+    pub fn entities(&self) -> &[EntityId] {
+        &self.entities
+    }
+
     pub fn topology_generation(&self) -> u64 {
         self.topology_generation
     }
@@ -230,10 +235,16 @@ impl ComponentHandle {
 /// Handles over the same number of rows, viewed together.
 #[pyclass(frozen)]
 pub struct BatchHandle {
+    /// Unique per process, so witness channels and native hooks can name the batch.
+    pub(crate) id: u64,
     pub(crate) fields: Vec<(String, Py<ComponentHandle>)>,
 }
 
 impl BatchHandle {
+    pub fn rows(&self) -> usize {
+        self.fields.first().map_or(0, |(_, h)| h.get().rows.len())
+    }
+
     pub fn new(fields: Vec<(String, Py<ComponentHandle>)>) -> PyResult<Self> {
         let rows: HashSet<usize> = fields.iter().map(|(_, h)| h.get().rows.len()).collect();
         if rows.len() > 1 {
@@ -246,7 +257,10 @@ impl BatchHandle {
                 counts.join(", ")
             )));
         }
-        Ok(Self { fields })
+        Ok(Self {
+            id: crate::witness::next_batch_id(),
+            fields,
+        })
     }
 }
 
@@ -469,10 +483,12 @@ pub struct WorldStepContext {
     timestamp: i64,
     /// Null once the callback returns.
     world: Cell<*mut World>,
+    channels: Cell<*mut Channels>,
     viewed: RefCell<Vec<Py<ComponentHandle>>>,
     recorded: RefCell<HashSet<ComponentId>>,
     deferred: RefCell<Vec<DeferredWrite>>,
-    db: Arc<DB>,
+    /// None in a replay.
+    db: Option<Arc<DB>>,
     counters: Arc<CallbackCounters>,
     recipe_cancel_token: Option<CancelToken>,
 }
@@ -546,11 +562,15 @@ impl WorldStepContext {
     ) -> PyResult<Option<(i64, PyObject)>> {
         self.ensure_open("history reads")?;
         let selection = Selection::parse(selection)?;
+        let Some(db) = &self.db else {
+            return Err(PyRuntimeError::new_err(
+                "history reads need the DB, which a replay does not have",
+            ));
+        };
         self.counters
             .history_queries
             .fetch_add(1, Ordering::Relaxed);
-        let Some((selected, value)) = history.select(&self.db, Timestamp(timestamp), selection)
-        else {
+        let Some((selected, value)) = history.select(db, Timestamp(timestamp), selection) else {
             self.counters.history_misses.fetch_add(1, Ordering::Relaxed);
             return Ok(None);
         };
@@ -610,6 +630,42 @@ impl WorldStepContext {
         Ok(())
     }
 
+    /// Fills witness channel `name` with the bytes of `data`: every row of its batch, in order.
+    /// Does nothing when the run records no witness.
+    fn witness_bytes(&self, py: Python<'_>, name: &str, data: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.ensure_open("witness channels")?;
+        // Safety: `channels` is non-null while the world is, only while the tick loop lends it.
+        let channels = unsafe { &mut *self.channels.get() };
+        let Some(index) = channels.find(name).map_err(PyKeyError::new_err)? else {
+            return Ok(());
+        };
+        let numpy = py.import("numpy")?;
+        let array = numpy.call_method1("ascontiguousarray", (data,))?;
+        let array = array.downcast_into::<PyUntypedArray>()?;
+        let len = array.shape().iter().product::<usize>() * array.dtype().itemsize();
+        // Safety: a C-contiguous array holds `len` bytes at its data pointer.
+        let bytes = unsafe { std::slice::from_raw_parts(array_data(&array), len) };
+        channels.write(index, bytes).map_err(PyValueError::new_err)
+    }
+
+    /// The recorded bytes of external channel `name`, as `uint8` rows, in a replay that has them;
+    /// otherwise `None`.
+    fn witness_replay(&self, py: Python<'_>, name: &str) -> PyResult<Option<PyObject>> {
+        self.ensure_open("witness channels")?;
+        // Safety: as in `witness_bytes`.
+        let channels = unsafe { &*self.channels.get() };
+        let Some(index) = channels.find(name).map_err(PyKeyError::new_err)? else {
+            return Ok(None);
+        };
+        let Some(bytes) = channels.replayed(index) else {
+            return Ok(None);
+        };
+        let def = &channels.defs()[index];
+        let array = PyArray1::from_slice(py, bytes)
+            .call_method1("reshape", ((def.rows, def.row_bytes),))?;
+        Ok(Some(array.unbind()))
+    }
+
     /// Gracefully terminate all s10-managed recipes; see `StepContext.stop_recipes`.
     fn stop_recipes(&self) {
         if let Some(token) = &self.recipe_cancel_token {
@@ -631,6 +687,7 @@ impl WorldStepContext {
     /// Ends the callback: copies the written views into `world`.
     fn finish(&self, py: Python<'_>, world: &mut World) -> HookWrites {
         self.world.set(std::ptr::null_mut());
+        self.channels.set(std::ptr::null_mut());
         let mut written = HashSet::new();
         for handle in self.viewed.borrow_mut().drain(..) {
             let handle = handle.get();
@@ -666,12 +723,19 @@ pub trait PreCommit {
     /// Names the hook in failures.
     fn name(&self) -> &str;
 
+    /// Runs the hook for the cycle ending at `tick`. It may fill `channels`.
     fn step(
         &mut self,
         tick: u64,
         timestamp: Timestamp,
         world: &mut World,
+        channels: &mut Channels,
     ) -> Result<HookWrites, String>;
+
+    /// The rows each call owns, for a hook that splits its rows across calls.
+    fn partitions(&self) -> Vec<(u64, u64)> {
+        Vec::new()
+    }
 
     /// What the hook measured, for the run receipt.
     fn report(&self) -> Option<HookReport> {
@@ -686,7 +750,8 @@ pub trait PreCommit {
 pub struct PythonPreCommit {
     pub func: PyObject,
     pub name: String,
-    pub db: Arc<DB>,
+    /// None in a replay.
+    pub db: Option<Arc<DB>>,
     pub counters: Arc<CallbackCounters>,
     pub recipe_cancel_token: Option<CancelToken>,
 }
@@ -701,12 +766,14 @@ impl PreCommit for PythonPreCommit {
         tick: u64,
         timestamp: Timestamp,
         world: &mut World,
+        channels: &mut Channels,
     ) -> Result<HookWrites, String> {
         Python::with_gil(|py| {
             let ctx = WorldStepContext {
                 tick,
                 timestamp: timestamp.0,
                 world: Cell::new(world),
+                channels: Cell::new(channels),
                 viewed: RefCell::default(),
                 recorded: RefCell::default(),
                 deferred: RefCell::default(),

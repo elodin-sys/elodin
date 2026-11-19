@@ -29,6 +29,8 @@ numpy.version = "0.23"
 
 # native pre_commit hooks
 libloading = "0.8"
+# deterministic witnesses
+blake3 = "1.8"
 
 # nox
 nox.path = "../nox"

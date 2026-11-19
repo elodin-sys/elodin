@@ -18,8 +18,9 @@ import schematic
 from protocol import (
     COMMAND_DTYPE,
     COMMAND_SIZE,
+    RESPONSE_SIZE,
     STATE_SIZE,
-    decode_commands,
+    decode_responses,
     encode_states,
     state_frames,
 )
@@ -40,6 +41,15 @@ HOOK_WORKERS = int(os.environ.get("ELODIN_MANY_AGENT_HOOK_WORKERS", "2"))
 DB_PATH = Path(os.environ.get("ELODIN_DB_PATH", "dbs/many-agents"))
 RESULT_PATH = os.environ.get("ELODIN_MANY_AGENT_RESULT_JSON")
 CAMERA_TIMEOUT_S = float(os.environ.get("ELODIN_MANY_AGENT_CAMERA_TIMEOUT_S", "10"))
+WITNESS_PATH = os.environ.get("ELODIN_MANY_AGENT_WITNESS_PATH")
+WITNESS_RAW = os.environ.get("ELODIN_MANY_AGENT_WITNESS_RAW", "0")
+WITNESS_REFERENCE = os.environ.get("ELODIN_MANY_AGENT_WITNESS_REFERENCE")
+REPLAY = os.environ.get("ELODIN_MANY_AGENT_REPLAY")
+FAULT_MODE = os.environ.get("ELODIN_MANY_AGENT_FAULT_MODE", "")
+FAULT_TICK = int(os.environ.get("ELODIN_MANY_AGENT_FAULT_TICK", "4096"))
+FAULT_AGENT = int(os.environ.get("ELODIN_MANY_AGENT_FAULT_AGENT", "7"))
+FAULT_BYTE = int(os.environ.get("ELODIN_MANY_AGENT_FAULT_BYTE", "3"))
+FAULT_MASK = int(os.environ.get("ELODIN_MANY_AGENT_FAULT_MASK", "1"))
 LOCALHOST = socket.gethostbyname("localhost")
 TICK_US = round(1e6 / RATE_HZ)
 CAMERA_FPS = 25
@@ -55,6 +65,10 @@ if HOOK not in {"native", "python"}:
     raise ValueError("ELODIN_MANY_AGENT_HOOK must be native or python")
 if PORT_BASE < 1024 or PORT_BASE + AGENT_COUNT * 2 > 65535:
     raise ValueError("configured port range is invalid")
+if FAULT_MODE not in {"", "bit-flip", "completion-race", "causal-token"}:
+    raise ValueError(
+        "ELODIN_MANY_AGENT_FAULT_MODE must be bit-flip, completion-race or causal-token"
+    )
 
 
 def agent_name(index: int) -> str:
@@ -96,13 +110,12 @@ def write_result(tick: int, values: dict[str, np.ndarray], commands: np.ndarray,
 
 
 class ControllerBridge:
-    """Sends every agent's state to its controller and waits for all of their commands."""
+    """Sends every agent's state to its controller and waits for all of their replies."""
 
-    def __init__(self) -> None:
+    def __init__(self, states: np.ndarray) -> None:
         self.state_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.frames = state_frames(AGENT_COUNT)
         self.replies = np.zeros(AGENT_COUNT, dtype=COMMAND_DTYPE)
-        packets = memoryview(self.frames.view(np.uint8))
+        packets = memoryview(states.view(np.uint8))
         replies = memoryview(self.replies.view(np.uint8))
         self.sends = [
             (packets[index * STATE_SIZE :][:STATE_SIZE], (LOCALHOST, PORT_BASE + index * 2))
@@ -118,18 +131,7 @@ class ControllerBridge:
             self.receives[command_socket.fileno()] = (index, command_socket, reply)
             self.poll.register(command_socket, select.EPOLLIN)
 
-    def exchange(self, tick: int, view) -> np.ndarray:
-        encode_states(
-            self.frames,
-            tick=tick,
-            agent_position=view.position,
-            agent_velocity=view.velocity,
-            object_position=view.object_position,
-            object_velocity=view.object_velocity,
-            diagnostics=np.concatenate(
-                [view.sensor_frame, view.diagnostic_bank, view.object_signal], axis=1
-            ),
-        )
+    def exchange(self) -> np.ndarray:
         sendto = self.state_socket.sendto
         for packet, address in self.sends:
             sendto(packet, address)
@@ -142,14 +144,16 @@ class ControllerBridge:
                 index, command_socket, reply = self.receives[fd]
                 command_socket.recv_into(reply)
                 pending.discard(index)
-        return decode_commands(self.replies, tick)
+        return self.replies
 
 
 world, system, agents, objects, camera = build(AGENT_COUNT, OBJECT_COUNT)
 world.schematic(schematic.build(AGENT_COUNT, OBJECT_COUNT, camera=HISTORY))
 bridge: ControllerBridge | None = None
+states = state_frames(AGENT_COUNT)
 
-if LOCKSTEP:
+# A replay reads the recorded replies, so it needs no controllers.
+if LOCKSTEP and not REPLAY:
     controller_binary = Path(
         os.environ.get(
             "ELODIN_MANY_AGENT_CONTROLLER_BIN",
@@ -166,6 +170,7 @@ if LOCKSTEP:
                 args=[
                     str(PORT_BASE + index * 2),
                     str(PORT_BASE + index * 2 + 1),
+                    str(index),
                 ],
                 cwd=str(ROOT),
                 ready=el.s10.Ready.delay(100),
@@ -198,6 +203,17 @@ exchange = world.prepare_batch(
 )
 objects_state = world.prepare_batch(
     {field: world.prepare_component(field, objects) for field in OBJECT_FIELDS}
+)
+witness = world.prepare_witness(
+    {"exchange": exchange, "objects": objects_state},
+    channels={
+        "controller.ingress": (exchange, STATE_SIZE),
+        "controller.response": (exchange, RESPONSE_SIZE),
+    },
+    # The replies carry the controllers' service times, so they are kept for replay, not compared.
+    external={"controller.reply": (exchange, COMMAND_SIZE)},
+    # The history hook's evidence depends on when the render server delivers frames.
+    stages=["after_systems", "after_hook:0", "after_hook:2", "after_commit"] if HISTORY else None,
 )
 if HISTORY:
     frames = world.prepare_message_history(schematic.CAMERA)
@@ -276,21 +292,43 @@ def finish(tick: int, ctx: el.WorldStepContext, view, commands: np.ndarray) -> N
 
 
 def exchange_step(tick: int, ctx: el.WorldStepContext) -> None:
-    """The Python hook: gets this tick's commands and writes them into the world."""
+    """The Python hook: gets this tick's commands and writes them into the world. It witnesses
+    the state it sends, the replies, and the responses it takes from them; a replay supplies the
+    recorded replies."""
     global bridge
     with ctx.batch(exchange) as view:
-        if LOCKSTEP:
-            if bridge is None:
-                bridge = ControllerBridge()
-            commands = bridge.exchange(tick, view)
-        else:
-            commands = np.clip(
+        if not LOCKSTEP:
+            view.command[...] = np.clip(
                 1.4 * (view.object_position - view.position)
                 + 0.45 * (view.object_velocity - view.velocity),
                 -12.0,
                 12.0,
             )
-        view.command[...] = commands
+            return
+        encode_states(
+            states,
+            tick=tick,
+            agent_position=view.position,
+            agent_velocity=view.velocity,
+            object_position=view.object_position,
+            object_velocity=view.object_velocity,
+            diagnostics=np.concatenate(
+                [view.sensor_frame, view.diagnostic_bank, view.object_signal], axis=1
+            ),
+        )
+        ctx.witness_bytes("controller.ingress", states)
+        replies = ctx.witness_replay("controller.reply")
+        if replies is None:
+            bridge = bridge or ControllerBridge(states)
+            replies = bridge.exchange()
+            ctx.witness_bytes("controller.reply", replies)
+        else:
+            replies = replies.view(COMMAND_DTYPE)[:, 0]
+        responses = decode_responses(replies, tick)
+        if FAULT_MODE == "bit-flip" and tick == FAULT_TICK:
+            responses.view(np.uint8)[FAULT_AGENT, FAULT_BYTE] ^= FAULT_MASK
+        ctx.witness_bytes("controller.response", responses)
+        view.command[...] = responses[:, :3]
 
 
 def finish_step(tick: int, ctx: el.WorldStepContext) -> None:
@@ -321,6 +359,23 @@ else:
     pre_commit = [exchange_hook, *([history_step] if HISTORY else []), finish_step]
 
 
+if REPLAY:
+    replay = world.replay_pre_commit(REPLAY, pre_commit)
+    if RESULT_PATH:
+        Path(RESULT_PATH).write_text(json.dumps(replay, indent=2) + "\n", encoding="utf-8")
+    mismatch = replay["first_mismatch"]
+    print(el.determinism.describe(mismatch) if mismatch else f"reproduced {replay['ticks']} ticks")
+    raise SystemExit(1 if mismatch else 0)
+
+
+def witness_raw(value: str) -> bool | tuple[int, int]:
+    """`1` keeps every tick's exact bytes, `START:STOP` those ticks', `0` none."""
+    if ":" in value:
+        start, stop = value.split(":")
+        return int(start), int(stop)
+    return value == "1"
+
+
 if DB_PATH.exists():
     if DB_PATH.is_dir():
         shutil.rmtree(DB_PATH)
@@ -338,4 +393,9 @@ world.run(
     interactive=False,
     start_timestamp=0,
     workers=WORKERS,
+    determinism_trace=el.DeterminismTrace(
+        WITNESS_PATH, witness, raw=witness_raw(WITNESS_RAW), reference=WITNESS_REFERENCE
+    )
+    if WITNESS_PATH
+    else None,
 )

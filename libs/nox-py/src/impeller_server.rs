@@ -20,6 +20,7 @@ use crate::World;
 use crate::exec::WorldExec;
 use crate::prepared::{CallbackCounters, DeferredWrite, HookWrites, PreCommit};
 use crate::tick_metrics::Receipt;
+use crate::witness::{Channels, Plan};
 
 pub struct Server {
     db: elodin_db::Server,
@@ -42,6 +43,7 @@ impl Server {
             false,
             Vec::new(),
             Default::default(),
+            None,
             false,
             None,
             cancel_token,
@@ -53,7 +55,7 @@ impl Server {
     /// Returns the loop's receipt once it stops. `step_callbacks` says whether `pre_step` or
     /// `post_step` call user code, which reads the sim's commits back from the DB within the
     /// cycle. `synchronous_commits` says whether each commit must be in the DB before the next
-    /// cycle begins.
+    /// cycle begins. `witness` records the run's deterministic witness.
     #[allow(clippy::too_many_arguments)]
     pub async fn run_with_cancellation(
         self,
@@ -64,6 +66,7 @@ impl Server {
         synchronous_commits: bool,
         pre_commit: Vec<Box<dyn PreCommit + Send>>,
         counters: Arc<CallbackCounters>,
+        witness: Option<Plan>,
         interactive: bool,
         start_timestamp: Option<Timestamp>,
         cancel_token: CancelToken,
@@ -98,6 +101,7 @@ impl Server {
             synchronous_commits,
             pre_commit,
             counters,
+            witness,
             start_time,
             interactive,
             cancel_token,
@@ -396,6 +400,8 @@ pub struct DbSync {
     /// Commits so far, which `Cadence::Every` counts.
     commits: u64,
     writer: Option<WriteBehind>,
+    /// The slots the last commit recorded, once a witness asks for them.
+    recorded: Option<Vec<usize>>,
     pub counters: SyncCounters,
 }
 
@@ -573,8 +579,28 @@ impl DbSync {
             compare_all: false,
             commits: 0,
             writer: None,
+            recorded: None,
             counters,
         }
+    }
+
+    /// The cursor slot of row `row` of `component_id`'s column, if it has DB history.
+    pub fn slot_of(&self, component_id: ComponentId, row: usize) -> Option<usize> {
+        let sync = self
+            .columns
+            .iter()
+            .find(|c| c.component_id == component_id)?;
+        let index = sync.rows.iter().position(|r| r.offset == row * sync.size)?;
+        Some(sync.first_slot + index)
+    }
+
+    /// Keeps the slots each commit records, for `recorded_slots`.
+    pub fn track_recorded(&mut self) {
+        self.recorded = Some(Vec::new());
+    }
+
+    pub fn recorded_slots(&self) -> &[usize] {
+        self.recorded.as_deref().unwrap_or_default()
     }
 
     /// Hands commits to a writer thread from now on. Their rows reach the DB, and
@@ -701,9 +727,13 @@ impl DbSync {
             columns,
             cursor,
             writer,
+            recorded,
             counters,
             ..
         } = self;
+        if let Some(recorded) = recorded {
+            recorded.clear();
+        }
         for ((id, column), sync) in world.host.iter().zip(columns) {
             debug_assert_eq!(*id, sync.component_id);
             let hook_wrote = hook_writes.written.contains(id);
@@ -738,6 +768,9 @@ impl DbSync {
                     }
                     sync.shadow[range].copy_from_slice(buf);
                     row.has_sample = true;
+                    if let Some(recorded) = recorded {
+                        recorded.push(slot);
+                    }
                     counters.rows_committed += 1;
                     counters.bytes_committed += sync.size as u64;
                 } else {
@@ -971,6 +1004,7 @@ async fn tick(
     synchronous_commits: bool,
     mut pre_commit: Vec<Box<dyn PreCommit + Send>>,
     counters: Arc<CallbackCounters>,
+    witness: Option<Plan>,
     start_timestamp: Timestamp,
     interactive: bool,
     cancel_token: CancelToken,
@@ -984,6 +1018,12 @@ async fn tick(
             &external_controls,
         )
     });
+    if witness.is_some() {
+        sync.track_recorded();
+    }
+    let mut witness =
+        witness.map(|plan| plan.start(start_timestamp, |id, row| sync.slot_of(id, row)));
+    let mut no_channels = Channels::default();
     let wait_for_write: Vec<ComponentId> = wait_for_write(&world).collect();
     let wait_for_write_pair_ids: Vec<PairId> = get_pair_ids(&world, &wait_for_write).unwrap();
     let write_barrier = (!wait_for_write_pair_ids.is_empty())
@@ -1153,6 +1193,9 @@ async fn tick(
             sync.reset_counters();
             counters.reset_activity();
             pre_commit.iter_mut().for_each(|hook| hook.reset_report());
+            if let Some(witness) = &mut witness {
+                witness.reset_report();
+            }
             if world.probed() {
                 cranelift_mlir::profile::reset_timings();
             }
@@ -1191,6 +1234,9 @@ async fn tick(
             0.0
         };
         world.world_mut().metadata.ticks_per_telemetry = configured_ticks_per_telemetry;
+        if let Some(witness) = &mut witness {
+            witness.after_systems(end_tick, batch_end_timestamp, world.world());
+        }
         // The writer had the systems' step, and the pacing before it, to land the last commit.
         let mut commit_wait = Duration::ZERO;
         if wait_for_commits {
@@ -1213,9 +1259,15 @@ async fn tick(
                 .iter_mut()
                 .enumerate()
                 .try_for_each(|(index, hook)| {
+                    let channels = witness
+                        .as_mut()
+                        .map_or(&mut no_channels, |w| &mut w.channels);
                     let writes = hook
-                        .step(end_tick, batch_end_timestamp, world.world_mut())
+                        .step(end_tick, batch_end_timestamp, world.world_mut(), channels)
                         .map_err(|cause| (index, cause))?;
+                    if let Some(witness) = &mut witness {
+                        witness.after_hook(index, world.world(), &writes);
+                    }
                     hook_writes.written.extend(writes.written);
                     hook_writes.recorded.extend(writes.recorded);
                     deferred.extend(writes.deferred.into_iter().map(|write| (index, write)));
@@ -1259,6 +1311,11 @@ async fn tick(
                 break;
             }
             metrics.observe_deferred_writes(landing.elapsed());
+        }
+        if let Some(witness) = &mut witness
+            && (witness.after_commit(sync.recorded_slots()).is_err() || witness.should_stop())
+        {
+            break;
         }
         if detailed_timing {
             let wall_ms = start.elapsed().as_secs_f64() * 1000.0;
@@ -1417,6 +1474,13 @@ async fn tick(
     sync.finish_writes();
     if let Some(cycle) = pending.take() {
         land_deferred(&db, cycle, &counters, &pre_commit, &mut metrics);
+    }
+    if let Some(witness) = witness {
+        let report = witness.finish(metrics.failure.clone());
+        if let Some(failure) = &report.failure {
+            metrics.fail_witness(failure);
+        }
+        metrics.witness = Some(report);
     }
     metrics.sync = Some(sync.counters.clone());
     metrics.timing = world.world().metadata.timing;

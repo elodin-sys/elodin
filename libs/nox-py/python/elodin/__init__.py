@@ -38,6 +38,7 @@ from typing_extensions import TypeVarTuple, Unpack
 import elodin.jaxsim
 
 from .elodin import *
+from . import determinism as determinism
 from . import monte_carlo as monte_carlo
 from . import ui as ui
 from .terrain import (
@@ -776,6 +777,7 @@ class World(WorldBuilder):
         pre_commit: Optional[PreCommit | list[PreCommit]] = None,
         timing: Optional[Timing] = None,
         synchronous_commits: bool = False,
+        determinism_trace: Optional[DeterminismTrace] = None,
     ):
         current_frame = inspect.currentframe()
         if current_frame is None:
@@ -807,6 +809,7 @@ class World(WorldBuilder):
             pre_commit,
             timing,
             synchronous_commits,
+            determinism_trace,
         )
         locals = frame.f_locals
         if not interactive and addr is not None:

@@ -10289,6 +10289,7 @@ dependencies = [
  "approx",
  "arrow",
  "bevy_geo_frames",
+ "blake3",
  "bytemuck",
  "byteorder",
  "bytes",

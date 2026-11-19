@@ -2,6 +2,8 @@ use clap::{Parser, Subcommand};
 use tracing_subscriber::{EnvFilter, fmt::time::ChronoLocal, prelude::*};
 mod cloud;
 mod db;
+#[cfg(not(target_os = "windows"))]
+mod determinism;
 mod editor;
 #[cfg(not(target_os = "windows"))]
 mod monte_carlo;
@@ -68,6 +70,9 @@ enum Commands {
     /// Run and manage Monte Carlo campaigns
     #[cfg(not(target_os = "windows"))]
     MonteCarlo(monte_carlo::Args),
+    /// Compare deterministic witnesses and replay pre_commit hooks from them
+    #[cfg(not(target_os = "windows"))]
+    Determinism(determinism::Args),
     /// Start the headless sensor camera render server (managed by s10)
     #[cfg(not(target_os = "windows"))]
     RenderServer(editor::RenderServerArgs),
@@ -155,6 +160,8 @@ impl Cli {
             Some(Commands::Run(args)) => self.clone().run_headless(args.clone(), rt),
             #[cfg(not(target_os = "windows"))]
             Some(Commands::MonteCarlo(args)) => self.clone().monte_carlo(args.clone(), rt),
+            #[cfg(not(target_os = "windows"))]
+            Some(Commands::Determinism(args)) => self.clone().determinism(args.clone()),
             #[cfg(not(target_os = "windows"))]
             Some(Commands::RenderServer(args)) => self.clone().render_server(args.clone()),
             #[cfg(not(target_os = "windows"))]

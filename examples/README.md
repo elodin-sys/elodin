@@ -164,7 +164,7 @@ An external flight-software process driven over UDP, alongside the sim.
 
 | Example | Description |
 | --- | --- |
-| [many-agents](./many-agents) | 24 agents at 1 kHz, each with its own controller process, watched by an overhead sensor camera: `workers=`, prepared batches, `pre_commit` and native hooks, history reads, run receipts |
+| [many-agents](./many-agents) | 24 agents at 1 kHz, each with its own controller process, watched by an overhead sensor camera: `workers=`, prepared batches, `pre_commit` and native hooks, history reads, run receipts, deterministic witnesses and hook replay |
 
 ---
 
@@ -227,7 +227,7 @@ Custom `el.Component` + `@el.dataclass` archetypes beyond `el.Body`.
 
 | Example | Description |
 | --- | --- |
-| [many-agents](./many-agents) | Native exchange hook, camera history reads, deferred writes |
+| [many-agents](./many-agents) | Native exchange hook, camera history reads, deferred writes, witness channels and replay |
 
 ### s10 recipes
 

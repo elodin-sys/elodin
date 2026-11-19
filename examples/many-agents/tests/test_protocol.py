@@ -7,7 +7,7 @@ from protocol import (
     COMMAND_SIZE,
     STATE_SIZE,
     VERSION,
-    decode_commands,
+    decode_responses,
     encode_states,
     state_frames,
 )
@@ -45,7 +45,7 @@ def test_commands_must_answer_the_current_tick():
 
     assert COMMAND_SIZE == 104
     np.testing.assert_array_equal(
-        decode_commands(replies, 23), [[1.5, -2.5, 3.5], [4.0, 5.0, -6.0]]
+        decode_responses(replies, 23)[:, :3], [[1.5, -2.5, 3.5], [4.0, 5.0, -6.0]]
     )
     with pytest.raises(ValueError, match="header"):
-        decode_commands(replies, 24)
+        decode_responses(replies, 24)

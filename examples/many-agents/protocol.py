@@ -9,13 +9,18 @@ STATE_MAGIC = b"MALS"
 COMMAND_MAGIC = b"MALC"
 VERSION = 1
 STATE_DOUBLES = 126
-COMMAND_DOUBLES = 11
+COMMAND_DOUBLES = 10
 HEADER_FIELDS = [("magic", "S4"), ("version", "<u2"), ("flags", "<u2"), ("tick", "<u8")]
-# One packet per row: the 16-byte header, then the doubles.
+# One packet per row: the 16-byte header, then the doubles. A reply ends with the time the
+# controller took to answer, which describes the host, not the simulation.
 STATE_DTYPE = np.dtype(HEADER_FIELDS + [("values", "<f8", (STATE_DOUBLES,))])
-COMMAND_DTYPE = np.dtype(HEADER_FIELDS + [("values", "<f8", (COMMAND_DOUBLES,))])
+COMMAND_DTYPE = np.dtype(
+    HEADER_FIELDS + [("values", "<f8", (COMMAND_DOUBLES,)), ("service_ns", "<u8")]
+)
 STATE_SIZE = STATE_DTYPE.itemsize
 COMMAND_SIZE = COMMAND_DTYPE.itemsize
+# The reply's values: everything the controller decided.
+RESPONSE_SIZE = COMMAND_DOUBLES * 8
 
 
 def state_frames(count: int) -> np.ndarray:
@@ -47,8 +52,9 @@ def encode_states(
     values[:, end:] = 0.0
 
 
-def decode_commands(replies: np.ndarray, expected_tick: int) -> np.ndarray:
-    """Returns the command in every reply, after checking that each answers `expected_tick`."""
+def decode_responses(replies: np.ndarray, expected_tick: int) -> np.ndarray:
+    """Returns the values of every reply, after checking that each answers `expected_tick`. The
+    first three are the command."""
     if (
         np.any(replies["magic"] != COMMAND_MAGIC)
         or np.any(replies["version"] != VERSION)
@@ -56,4 +62,4 @@ def decode_commands(replies: np.ndarray, expected_tick: int) -> np.ndarray:
         or np.any(replies["tick"] != expected_tick)
     ):
         raise ValueError("invalid command packet header")
-    return replies["values"][:, :3].copy()
+    return replies["values"].copy()

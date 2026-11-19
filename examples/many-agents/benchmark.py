@@ -9,6 +9,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -49,6 +50,28 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--hook", choices=("native", "python"), default="native")
     parser.add_argument("--paced", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--trace", action="store_true")
+    parser.add_argument(
+        "--witness",
+        nargs="?",
+        const="digest",
+        metavar="raw|START:STOP",
+        help="record each run's witness; raw keeps every tick's exact bytes, START:STOP those ticks'",
+    )
+    parser.add_argument(
+        "--compare-witness", type=Path, help="compare each run with this witness as it runs"
+    )
+    parser.add_argument(
+        "--replay-witness",
+        action="store_true",
+        help="replay each run's hook from its witness, which needs exact bytes",
+    )
+    parser.add_argument("--fault-mode", choices=("bit-flip", "completion-race", "causal-token"))
+    parser.add_argument(
+        "--assert-bitwise",
+        action="store_true",
+        help="fail unless every repeat of a mode and size records the same witness; the first "
+        "keeps every tick's exact bytes, and later repeats compare with it as they run",
+    )
     parser.add_argument("--elodin-bin", default="elodin")
     parser.add_argument(
         "--output",
@@ -97,12 +120,35 @@ def build_crate(artifact: Path) -> None:
         raise RuntimeError(f"{crate.name} build failed")
 
 
+def replay(case_dir: Path, env: dict[str, str]) -> dict:
+    """Replays the run's hooks from its witness, without the simulation or the controllers."""
+    env = {
+        **env,
+        "ELODIN_MANY_AGENT_REPLAY": str(case_dir / "run.witness"),
+        "ELODIN_MANY_AGENT_RESULT_JSON": str(case_dir / "replay.json"),
+    }
+    with (case_dir / "replay.log").open("w", encoding="utf-8") as log:
+        process = subprocess.run(
+            [sys.executable, str(EXAMPLE / "main.py")],
+            cwd=ROOT,
+            env=env,
+            stdout=log,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+    result = case_dir / "replay.json"
+    if process.returncode not in (0, 1) or not result.is_file():
+        raise RuntimeError(f"replay failed: {case_dir}; see replay.log")
+    return json.loads(result.read_text())
+
+
 def run_case(
     args: argparse.Namespace,
     *,
     size: int,
     mode: str,
     repeat: int,
+    reference: Path | None = None,
 ) -> dict:
     case_dir = args.output / f"{mode}-{size:02d}-run-{repeat:02d}"
     shutil.rmtree(case_dir, ignore_errors=True)
@@ -137,6 +183,18 @@ def run_case(
         env["ELODIN_DETAILED_TIMING"] = "1"
         env["ELODIN_PACING_TRACE"] = str(case_dir / "pacing.csv")
         env["ELODIN_PACING_TRACE_MAX"] = str(args.warmup_ticks + args.measured_ticks + 100)
+    if args.witness:
+        env["ELODIN_MANY_AGENT_WITNESS_PATH"] = str(case_dir / "run.witness")
+        env["ELODIN_MANY_AGENT_WITNESS_RAW"] = {"digest": "0", "raw": "1"}.get(
+            args.witness, args.witness
+        )
+        if reference:
+            env["ELODIN_MANY_AGENT_WITNESS_REFERENCE"] = str(reference)
+        elif args.assert_bitwise:
+            # The reference of later repeats keeps exact bytes, so they can name the byte.
+            env["ELODIN_MANY_AGENT_WITNESS_RAW"] = "1"
+    if args.fault_mode:
+        env["ELODIN_MANY_AGENT_FAULT_MODE"] = args.fault_mode
     started = time.perf_counter()
     with log_path.open("w", encoding="utf-8") as log:
         process = subprocess.run(
@@ -175,7 +233,10 @@ def run_case(
         "wall_s": wall_s,
         "output_digest": result.get("sha256"),
         "frames": result.get("frames"),
+        "witness": summary.get("witness"),
     }
+    if args.replay_witness:
+        run["replay"] = replay(case_dir, env)
     (case_dir / "run.json").write_text(json.dumps(run, indent=2) + "\n")
     return run
 
@@ -194,6 +255,16 @@ def mismatched_sizes(runs: list[dict]) -> list[int]:
     return sorted(size for size, found in digests.items() if len(found) > 1)
 
 
+def mismatched_witnesses(runs: list[dict]) -> list[tuple[str, int]]:
+    """Returns the modes and agent counts whose repeats recorded different witnesses."""
+    roots: dict[tuple[str, int], set[str | None]] = {}
+    for run in runs:
+        if run["witness"]:
+            key = (run["configuration"]["mode"], run["configuration"]["agents"])
+            roots.setdefault(key, set()).add(run["witness"]["root"])
+    return sorted(key for key, found in roots.items() if len(found) > 1)
+
+
 def main() -> int:
     args = parse_args()
     sizes = [int(item) for item in csv_values(args.sizes)]
@@ -202,6 +273,8 @@ def main() -> int:
         raise ValueError("sizes must be positive")
     if not modes or any(mode not in MODES for mode in modes):
         raise ValueError("invalid mode")
+    if (args.assert_bitwise or args.replay_witness or args.compare_witness) and not args.witness:
+        raise ValueError("--assert-bitwise, --replay-witness and --compare-witness need --witness")
     args.output = args.output.resolve()
     args.output.mkdir(parents=True, exist_ok=True)
     if any(mode.startswith("lockstep") for mode in modes):
@@ -209,20 +282,34 @@ def main() -> int:
         if args.hook == "native":
             build_crate(HOOK_LIBRARY)
     runs = []
+    # The first repeat's witness of each mode and size, which later repeats compare with.
+    references: dict[tuple[str, int], Path] = {}
     for repeat in range(1, args.repeats + 1):
         ordered_sizes = sizes if repeat % 2 else list(reversed(sizes))
         for mode in modes:
             for size in ordered_sizes:
-                run = run_case(args, size=size, mode=mode, repeat=repeat)
+                reference = args.compare_witness or references.get((mode, size))
+                run = run_case(args, size=size, mode=mode, repeat=repeat, reference=reference)
                 runs.append(run)
+                if args.assert_bitwise and run["witness"]:
+                    references.setdefault((mode, size), Path(run["witness"]["path"]))
+                witness = run["witness"] or {}
                 print(
                     mode,
                     size,
                     f"{run['metrics']['effective_hz']:.1f} Hz",
                     f"{run['metrics']['total_cycle_mean_us']:.1f} us/cycle",
+                    *([f"witness {witness['root'][:16]}"] if witness.get("root") else []),
+                    *(
+                        [f"first mismatch at tick {witness['first_mismatch']['tick']}"]
+                        if witness.get("first_mismatch")
+                        else []
+                    ),
                     flush=True,
                 )
     mismatches = mismatched_sizes(runs)
+    witness_mismatches = mismatched_witnesses(runs) if args.assert_bitwise else []
+    replay_mismatches = [run for run in runs if (run.get("replay") or {}).get("first_mismatch")]
     matrix = {
         "host": {
             "architecture": platform.machine(),
@@ -230,12 +317,30 @@ def main() -> int:
             "cpu_count": os.cpu_count(),
         },
         "mismatched_sizes": mismatches,
+        "witness_mismatches": witness_mismatches,
         "runs": runs,
     }
     (args.output / "matrix.json").write_text(json.dumps(matrix, indent=2) + "\n")
     for size in mismatches:
         print(f"runs with {size} agents ended in different states")
-    return 1 if mismatches else 0
+    if witness_mismatches or replay_mismatches:
+        from elodin.determinism import describe
+
+        for mode, size in witness_mismatches:
+            print(f"{mode} runs with {size} agents recorded different witnesses")
+            group = [
+                run
+                for run in runs
+                if (run["configuration"]["mode"], run["configuration"]["agents"]) == (mode, size)
+            ]
+            for run in group:
+                if run["witness"]["first_mismatch"]:
+                    print(f"repeat {run['configuration']['repeat']}:")
+                    print(describe(run["witness"]["first_mismatch"]))
+        for run in replay_mismatches:
+            print(f"the replay of {run['witness']['path']} differs from the run:")
+            print(describe(run["replay"]["first_mismatch"]))
+    return 1 if mismatches or witness_mismatches or replay_mismatches else 0
 
 
 if __name__ == "__main__":

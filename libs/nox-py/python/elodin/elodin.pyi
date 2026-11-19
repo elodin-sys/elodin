@@ -84,6 +84,14 @@ class WorldStepContext:
         """Appends `values`, one per key of `writer`, at `timestamp` once this cycle's world
         commit lands. Writes keep their call order, across callbacks too."""
         ...
+    def witness_bytes(self, name: str, data: jax.typing.ArrayLike) -> None:
+        """Fills witness channel `name` with the bytes of `data`: every row of its batch, in
+        order. Does nothing when the run records no witness."""
+        ...
+    def witness_replay(self, name: str) -> Optional[numpy.ndarray]:
+        """The recorded bytes of external channel `name`, as `uint8` rows, in a replay that has
+        them; otherwise `None`."""
+        ...
     def stop_recipes(self) -> None:
         """Gracefully terminate all s10-managed recipes; see `StepContext.stop_recipes`."""
         ...
@@ -118,6 +126,27 @@ class NativeStepHook:
 
 PreCommit = Callable[[int, WorldStepContext], None] | NativeStepHook
 """A `pre_commit` hook; a list of them runs in order."""
+
+class Witness:
+    """Batches and hook channels to witness, from `World.prepare_witness`."""
+
+class DeterminismTrace:
+    """Where and how a run records its witness, for `World.run(determinism_trace=...)`."""
+
+    path: str
+    reference: Optional[str]
+    stop_after_first_mismatch: bool
+    def __init__(
+        self,
+        path: str,
+        witness: Witness,
+        raw: bool | tuple[int, int] = False,
+        reference: Optional[str] = None,
+        stop_after_first_mismatch: bool = False,
+    ) -> None:
+        """`raw` keeps the exact bytes of every tick, or of ticks `start..stop`, besides the 16
+        ticks on either side of the first mismatch with `reference`."""
+        ...
 
 class PrimitiveType:
     F64: PrimitiveType
@@ -431,6 +460,7 @@ class WorldBuilder:
         pre_commit: Optional[PreCommit | list[PreCommit]] = None,
         timing: Optional[Timing] = None,
         synchronous_commits: bool = False,
+        determinism_trace: Optional[DeterminismTrace] = None,
     ): ...
     def prepare_component(
         self,
@@ -455,6 +485,25 @@ class WorldBuilder:
     def prepare_timestamped_writer(self, fields: dict[str, str]) -> TimestampedWriter:
         """Components that `WorldStepContext.defer_write` appends to: `fields` maps each value's
         key to an `entity.component` pair marked `external_control`."""
+        ...
+    def prepare_witness(
+        self,
+        batches: dict[str, BatchHandle],
+        channels: Optional[dict[str, tuple[BatchHandle, int]]] = None,
+        external: Optional[dict[str, tuple[BatchHandle, int]]] = None,
+        stages: Optional[list[str]] = None,
+    ) -> Witness:
+        """The batches and hook channels a run's deterministic witness records. `channels` and
+        `external` map each channel name to `(batch, row_bytes)`: one row per row of one of the
+        batches. External channels hold what came from outside the simulation; a replay feeds
+        them back, and no comparison looks at them. `stages` keeps only the stages it names."""
+        ...
+    def replay_pre_commit(
+        self, trace: str, pre_commit: Optional[PreCommit | list[PreCommit]], live: bool = False
+    ) -> dict:
+        """Runs `pre_commit`, the hooks of the run that recorded `trace`, on the rows its witness
+        kept exactly, without the systems or the DB, and compares what each hook writes with the
+        recording. The hooks read the recorded external channels unless `live`."""
         ...
     def serve(
         self,

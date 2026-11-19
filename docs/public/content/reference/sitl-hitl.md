@@ -227,6 +227,17 @@ Most of the native hook's 325 µs is spent waiting for the 24 controllers to rep
 
 **Scale out.** The same SITL runs headless under [`elodin monte-carlo`](/reference/elodin-cli#elodin-monte-carlo), with one simulation and flight software stack per worker.
 
+### Proving a run repeats
+
+A lockstep run with fixed seeds and `start_timestamp` should repeat bit for bit. When two runs end in different states, a [deterministic witness](/reference/python-api#deterministic-witnesses) shows where they first parted: in the world after the systems, in what a hook sent or got back, in what it wrote, or in what the commit recorded.
+
+1. Prepare a witness over the batches your hooks use. Give each hook a channel for what it sends, another for the part of each reply the flight software decided, and an external channel for the whole reply.
+2. Record a baseline with `raw=True`, and pass it as `reference` to the runs you check. The receipt names the first mismatch, and the witness keeps the exact bytes around it.
+3. Compare any two witnesses with [`elodin determinism compare`](/reference/elodin-cli#elodin-determinism).
+4. Replay a hook from a witness, without the simulation or the flight software, with `world.replay_pre_commit` or `elodin determinism replay-hook`. If the replay reproduces every byte, the difference came from outside the hook.
+
+Keep host-only fields, such as a reply's service time, out of the compared channels: the external channel keeps the whole reply for replay, and is never compared. [many-agents](https://github.com/elodin-sys/elodin/tree/main/examples/many-agents) walks through a one-bit fault, a controller race, and its fix.
+
 ## HITL in practice
 
 In HITL the flight software runs on the flight computer and keeps its own clock. Run the simulation in real time, put timestamps on what crosses the link, and expect some jitter between the two clocks. Keep the same boundary as in SITL, so the flight software cannot tell the difference. Three layouts work well.
@@ -284,7 +295,7 @@ elodin editor examples/crazyflie-edu/main.py --hitl
 
 - **Draw the boundary first.** List what the flight software reads and writes before writing the bridge, and mark every write `external_control`.
 - **Use one schema for simulation and hardware.** Then the same flight software, schematic, and scripts work on both.
-- **Seed every random number and fix `start_timestamp`,** so a lockstep run repeats exactly.
+- **Seed every random number and fix `start_timestamp`,** so a lockstep run repeats exactly. Record a witness to prove it.
 - **Watch the tick budget.** Set `ELODIN_SIM_SUMMARY_JSON` to write the receipt, and compare `callback`, `commit`, and `total_cycle` with the tick period.
 - **Compare runs with flight data.** Merge a SITL run with a flight log and plot them together.
 
@@ -300,6 +311,7 @@ elodin editor examples/crazyflie-edu/main.py --hitl
 | Preparing a write handle fails | The component must be marked `external_control = "true"`. |
 | The flight software sees the wrong attitude or motion | Check frames (ENU or NED, FLU or FRD), units, and quaternion order on both sides of the link. |
 | A camera frame is missing | The render server skipped it to catch up. `read_at(..., "exact")` returns `None` for it instead of an older frame. |
+| Two lockstep runs end in different states | Record both with a witness, the second with the first as `reference`, and read `witness.first_mismatch` in the receipt. A differing response after an equal ingress points at the flight software; a mismatch in `after_systems` points at the simulation. |
 
 ## Examples
 

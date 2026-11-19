@@ -111,7 +111,7 @@ The Elodin simulation world.
     )
     ```
 
-- `run(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp, log_level, backend, on_receipt, workers, pre_commit, timing, synchronous_commits)` -> None
+- `run(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp, log_level, backend, on_receipt, workers, pre_commit, timing, synchronous_commits, determinism_trace)` -> None
 
     Run the simulation.
     - `system` : [elodin.System], the systems to run, can be supplied as a list of systems delineated by pipes.
@@ -134,6 +134,7 @@ The Elodin simulation world.
     - `pre_commit` : a callable `(tick, WorldStepContext)`, an [elodin.NativeStepHook], or a list of them run in order, called after each tick and before its DB commit. See [pre-commit hooks](#pre-commit-hooks).
     - `timing` : [elodin.Timing], optional, what the receipt measures. Defaults to `Timing.summary()`.
     - `synchronous_commits` : `bool`, optional, has each commit in the DB, and `last_updated` past it, before the next cycle's `pre_commit` hooks run, so at most one commit is ever in flight. The writer thread still appends it, during the pacing and the next systems step, and the next cycle waits for it before its hooks; the receipt counts that wait in `commit`. The loop then also waits out DB write stalls, so keep the DB on storage that does not stall. Defaults to `False`.
+    - `determinism_trace` : [elodin.DeterminismTrace], optional, records the run's [deterministic witness](#deterministic-witnesses).
 
     When neither `pre_step` nor `post_step` is given, no component sets `wait_for_write`, no history handle or timestamped writer was prepared, and `synchronous_commits` is `False`, a writer thread appends each commit to the DB, so DB stalls stay off the simulation thread. Clients then see a commit, and `last_updated` move past it, up to a few cycles later. The receipt's `sync.commits` says which way the run committed: `write_behind` or `synchronous`.
 
@@ -171,6 +172,14 @@ The Elodin simulation world.
 - `prepare_timestamped_writer(fields)` -> `elodin.TimestampedWriter`
 
     Resolve once the components that `WorldStepContext.defer_write` appends to: `fields` maps each value's key to an `entity.component` pair, which must be marked `external_control` so the simulation never writes it.
+
+- `prepare_witness(batches, channels=None, external=None, stages=None)` -> `elodin.Witness`
+
+    Choose what a run's [deterministic witness](#deterministic-witnesses) records: `batches` maps names to `elodin.BatchHandle`s. `channels` and `external` map channel names to `(batch, row_bytes)`, one row per row of one of those batches, which hooks fill with `WorldStepContext.witness_bytes` or as native-hook columns. External channels hold what came from outside the simulation: a replay feeds them back to the hooks, and no comparison looks at them. `stages` keeps only the stages it names.
+
+- `replay_pre_commit(trace, pre_commit, live=False)` -> `dict`
+
+    Run `pre_commit`, the same list of hooks as the run that recorded the witness file `trace`, on the rows it kept exactly, without the systems, recipes or DB, and compare what each hook writes with the recording. Uses the witness last prepared on this world. Before each hook, the world holds the rows that hook saw in the run, and its external channels hold the recorded bytes unless `live`. Hooks whose stage the witness leaves out are not run. Stops at the first mismatch. Returns `ticks` replayed, `skipped_ticks` that kept only digests, `records` and `bytes` compared, and `first_mismatch` or `None`.
 
 ### Backend Selection
 
@@ -461,6 +470,8 @@ Passed to `pre_commit` callbacks.
 - `record(handle)` -> None : records the handle's component, which must use `Recording.manual()`, at this commit.
 - `read_at(history, timestamp, selection)` -> `(int, numpy.ndarray) | None` : the committed sample of an `elodin.HistoryHandle` at `timestamp`. `selection="exact"` takes only a sample at that timestamp and never falls back to an older one; `"at_or_before"` takes the newest sample at or before it. Returns the sample's own timestamp and a copy of its value (a message as `uint8` bytes), or `None` when nothing matches.
 - `defer_write(writer, timestamp, values)` -> None : queues `values`, one per key of an `elodin.TimestampedWriter`, to append at `timestamp` after this cycle's commit.
+- `witness_bytes(name, data)` -> None : fills witness channel `name` with the bytes of `data`, an array of any dtype holding every row of the channel's batch. Raises `ValueError` on any other size, and `KeyError` for an unknown channel. Does nothing when the run records no witness.
+- `witness_replay(name)` -> `numpy.ndarray | None` : in a replay, the recorded bytes of external channel `name` as `uint8` rows; otherwise `None`. A hook that does I/O does it only when this returns `None`.
 - `stop_recipes()` -> None : stops the s10 recipes, as `StepContext.stop_recipes`.
 
 All but `tick` and `timestamp` raise once the callback returns.
@@ -506,9 +517,71 @@ void my_step_destroy(void *state);                          /* optional; after t
 
 A call may write only writable columns, and only its own rows. A nonzero return stops the run with the call's message in the receipt. The receipt's `callbacks.hooks` reports each hook's queue time, slowest-partition time and worker occupancy.
 
+When the run records a witness, each witness channel on the hook's `input` batch is one more column after the batch fields, named after the channel, with the channel's `row_bytes`. It is zeroed before each tick, and writable, except an external channel in a replay, which holds the recorded bytes and has `writable == 0`. A hook can look its channels up by name at init and treat a read-only external channel as the sign that it is replayed.
+
+### Deterministic witnesses
+
+A witness records the exact bytes a run produces at fixed points of each tick, and digests them into a tree, so two runs that should be identical can be compared byte for byte and the first difference named. It is meant for lockstep runs with external controllers, where a run must repeat exactly.
+
+```python
+witness = world.prepare_witness(
+    {"exchange": exchange, "objects": objects_state},
+    channels={"controller.ingress": (exchange, 1024),    # what the hook sent
+              "controller.response": (exchange, 80)},    # what it took from each reply
+    external={"controller.reply": (exchange, 104)},      # the replies themselves
+)
+
+def exchange_step(tick: int, ctx: el.WorldStepContext) -> None:
+    ctx.witness_bytes("controller.ingress", frames)
+    replies = ctx.witness_replay("controller.reply")     # recorded bytes in a replay, else None
+    if replies is None:
+        replies = send_and_receive(frames)
+        ctx.witness_bytes("controller.reply", replies)
+    ...
+
+world.run(system, pre_commit=[exchange_step],
+          determinism_trace=el.DeterminismTrace("run.witness", witness, raw=True))
+```
+
+Each tick, the witness takes these stages, in order:
+
+| Stage | Records |
+| --- | --- |
+| `after_systems` | every row of every field of every batch |
+| `after_hook:N` | the channels hook `N` filled, every write field, and the deferred writes hook `N` queued; then the external channels |
+| `after_commit` | for every row of every field, whether the commit recorded it |
+
+The commit decides what it records on the simulation thread, so the DB writer's timing cannot change a witness. A channel no hook filled is recorded as absent.
+
+Each record is hashed with BLAKE3-256 over its little-endian bytes, rows in batch order whatever the hook's partitioning. A stage's digest hashes its records' digests, a tick's digest hashes the tick, its simulation time and its stages' digests, and the root hashes the schema and every tick. External channels are never hashed. Labels are stored but not hashed either: the build, the hook names, a native hook's partitions and the start timestamp. A Python hook and a native hook that fill the same channels give the same root.
+
+#### _class_ `elodin.DeterminismTrace`
+
+- `DeterminismTrace(path, witness, raw=False, reference=None, stop_after_first_mismatch=False)`
+
+    - `path` : where to write the witness file.
+    - `witness` : an `elodin.Witness` from `World.prepare_witness`.
+    - `raw` : `True` keeps the exact bytes of every tick, and a `(start, stop)` pair those of ticks `start` to `stop - 1`. Otherwise the file keeps only digests, about 1 KB per tick for a few dozen records. Raw bytes do not change the root.
+    - `reference` : a witness file to compare with as the run goes. Its schema must match. The first tick that differs is the receipt's `witness.first_mismatch`, and the 16 ticks on either side of it keep their exact bytes. A run stays successful when it differs from its reference.
+    - `stop_after_first_mismatch` : ends the run a few ticks after the first mismatch.
+
+    A witness thread hashes, compares and writes each tick from a block the simulation thread fills; if it falls 1,024 ticks behind, the run fails. Nothing is ever dropped.
+
+#### _module_ `elodin.determinism`
+
+- `compare(left, right, stop_at_first=False)` -> `dict` : compares two witness files tick by tick, and below the first differing digest, the bytes when both files kept them. Returns `identical`, `first_mismatch` or `None`, the numbers of `ticks` compared and `mismatched_ticks`, and a summary of each file. Ticks missing from one file are a mismatch; files with different schemas, such as another entity order or stage list, raise `ValueError` naming the difference.
+- `replay_hook(trace, library, symbol, live=False)` -> `dict` : replays the native hook `symbol` of the shared library `library` on the rows `trace` kept, like `World.replay_pre_commit` but without the simulation's source: the batch is rebuilt from the file.
+- `describe(mismatch)` -> `str` : the lines `elodin determinism` prints.
+
+A mismatch names the `tick`, the `stage`, the `hook`, the record by its `kind` (`field`, `channel`, `deferred` or `recorded`) and name, and when both sides have the bytes, the `entity`, `row` and `byte` within the row, with each side's byte as `left` and `right`. A channel row takes the entity of its batch's first field. In a run with a reference and in a replay, `left` is the reference or the recording.
+
+#### Witness files
+
+A file is the magic `ELWITNES`, the format version (`1`) and a JSON header with the schema, its digest and the labels; then one frame per tick, with the tick, its timestamp, a digest per hashed record and, when kept, every record's bytes; then a JSON trailer with the tick count, the root and the run's failure, if any. A version other than `1` is refused. Comparison never looks at the labels.
+
 ### Run receipts
 
-Every run builds a versioned receipt (`elodin.run_receipt.v1`), passed to `on_receipt`, returned by `Exec.last_receipt()`, and written to `$ELODIN_SIM_SUMMARY_JSON` when set. It covers the cycles after warmup: count, sum, min, exact p50/p95/p99, and max of every phase (`copy_db_to_world`, `world_run`, `pre_commit`, `commit`, `deferred_writes`, `post_step`, their `callback` sum, pacing, and `total_cycle`); pacing lateness and resets; DB `sync` counters, including whether commits were `synchronous` or `write_behind`, rows scanned, drained and committed, and the writer thread's lag and queue depth; backend bytes and compile times; hook timings, history queries, misses and bytes, and deferred-write batches, rows, bytes and failures under `callbacks`; the `failure` and `failed_hook` of a run a hook stopped; and the sections it did not collect under `unavailable`.
+Every run builds a versioned receipt (`elodin.run_receipt.v1`), passed to `on_receipt`, returned by `Exec.last_receipt()`, and written to `$ELODIN_SIM_SUMMARY_JSON` when set. It covers the cycles after warmup: count, sum, min, exact p50/p95/p99, and max of every phase (`copy_db_to_world`, `world_run`, `pre_commit`, `commit`, `deferred_writes`, `post_step`, their `callback` sum, pacing, and `total_cycle`); pacing lateness and resets; DB `sync` counters, including whether commits were `synchronous` or `write_behind`, rows scanned, drained and committed, and the writer thread's lag and queue depth; backend bytes and compile times; hook timings, history queries, misses and bytes, and deferred-write batches, rows, bytes and failures under `callbacks`; under `witness`, the witness file's `path`, `root`, `ticks`, `raw_ticks` and `bytes_written`, the simulation thread's `capture` time per cycle, the witness thread's `writer_ns`, its `queue_high_water`, the `first_mismatch` with the reference and the witness's `failure`; the `failure` and `failed_hook` of a run a hook or the witness stopped; and the sections it did not collect under `unavailable`.
 
 ### _class_ `elodin.Timing`
 
