@@ -26,6 +26,7 @@ collapsed and the remaining change rows are compared in order.
 - `compare_baseline_csv.py` - tolerance-based CSV comparator
 - `compare_profile_metrics.py` - compares median profile metrics of candidate vs base runs
 - `extract_profile_metrics.py` - run-log parser for profile metrics
+- `betaflight_perf.sh` / `betaflight_perf.py` - real headless Betaflight C0 performance gate
 - `baseline/tolerances.json` - default and per-example tolerances
 - `baseline/<example>/...` or `baseline/<example>-csv/...` - known-good CSV exports
 
@@ -125,6 +126,39 @@ Absolute numbers swing by tens of percent with load on the shared CI host, so
 The A/B is skipped with a `WARN` line, while the CSV comparison still runs, when
 the base commit cannot be resolved or its wheel is not in the cache (for example,
 its CI build has not finished). `--update` never runs it.
+
+## Betaflight headless performance gate
+
+A separate job runs the real 15-second, 8 kHz scripted SITL flight without an
+editor or camera. It compares **non-pacing work time**, not total flight duration:
+real-time pacing can hide a slowdown while the flight still achieves ~1x RTF.
+The gate allows a **10% paired median work-time increase**, using five adjacent
+A/B pairs by default. Shared-host load can still add
+noise; a measured regression gets one confirmation comparison. Functional/setup
+failures do not retry.
+
+Baseline selection and cache-only SDK lookup follow `regress.sh`. Each side runs
+its matching example source and SDK; firmware, initial EEPROM and assets are held
+fixed to isolate Elodin changes. If the base is unavailable, CI validates the
+candidate flight but explicitly skips performance comparison. The entire job is
+serialized across builds; other CI tests remain parallel.
+
+From repository root:
+
+```bash
+nix develop .#run --command bash scripts/ci/betaflight_perf.sh
+```
+
+For local checks, `BETAFLIGHT_PERF_RUNS=1` shortens the comparison;
+`REGRESSION_BASE` selects a revision and `BETAFLIGHT_PERF_THRESHOLD` changes the
+allowed increase. Without Nix, `BETAFLIGHT_PERF_BASE_SITE` can point to an already
+installed SDK matching that revision. Do not run alongside another Betaflight
+process on the same host: its ports and stale-process cleanup are global.
+
+Logs, timing summaries and comparison reports are uploaded from
+`profile_output/betaflight-perf-ci/run.*`; DBs are cleaned up rather than uploaded.
+This gate measures steady-state headless Elodin work, not startup, compilation,
+rendering or firmware performance.
 
 ## Tolerance config
 

@@ -262,6 +262,19 @@ test_steps = [
     group(
         name=":racehorse: performance",
         steps=[
+            {
+                **nix_step(
+                    emoji=":racehorse:",
+                    label="betaflight-sitl headless",
+                    flake=".#run",
+                    command="python3 scripts/ci/test_betaflight_perf.py && timeout --signal=TERM --kill-after=10s 40m bash scripts/ci/betaflight_perf.sh",
+                ),
+                # Constant across builds/PRs: fixed firmware ports and every A/B
+                # repetition, confirmation, EEPROM init and cleanup share this lock.
+                "concurrency_group": "betaflight-sitl-performance",
+                "concurrency": 1,
+                "timeout_in_minutes": 45,
+            },
             nix_step(
                 emoji=":racehorse:",
                 label="perf-elodin-db",

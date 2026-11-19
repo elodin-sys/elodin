@@ -41,6 +41,8 @@ __pycache__
 
 # examples
 betaflight_*
+!scripts/ci/betaflight_perf.py
+!scripts/ci/betaflight_perf.sh
 eeprom.bin
 nasa_spice_data/
 
