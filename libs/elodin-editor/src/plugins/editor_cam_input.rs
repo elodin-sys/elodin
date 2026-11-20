@@ -14,7 +14,7 @@ use bevy_editor_cam::{
     controller::component::EditorCam,
     input::{CameraPointerMap, EditorCamInputMessage, MotionKind},
 };
-use bevy_picking::pointer::{PointerAction, PointerId, PointerInput};
+use bevy_picking::pointer::{PointerAction, PointerButton, PointerId, PointerInput};
 
 use crate::ui::{input_owner::UiInputOwners, inspector::viewport::Viewport};
 
@@ -226,13 +226,15 @@ pub fn send_gated_pointer_inputs(
         let screenspace_input: Vec2 = moves_list
             .iter()
             .filter(|m| m.pointer_id.eq(&pointer))
-            .filter_map(|m| match m.action {
-                PointerAction::Move { delta } => Some(delta),
-                PointerAction::Press { .. } => None,
-                PointerAction::Cancel => None,
-                _ => None,
-            })
-            .sum();
+            .fold(Vec2::ZERO, |input, m| match m.action {
+                // A frame can contain motion from before the drag started.
+                // Only forward movement following the camera button press.
+                PointerAction::Press(PointerButton::Primary | PointerButton::Secondary) => {
+                    Vec2::ZERO
+                }
+                PointerAction::Move { delta } => input + delta,
+                _ => input,
+            });
 
         let zoom_amount = match pointer {
             PointerId::Mouse => wheel_by_window
@@ -300,13 +302,14 @@ mod tests {
     use bevy_picking::{
         backend::HitData,
         hover::{HoverMap, PreviousHoverMap, update_interactions},
-        pointer::{PointerMap, update_pointer_map},
+        pointer::{Location, PointerButton, PointerMap, update_pointer_map},
     };
 
-    fn gesture_depths(follow: bool, button: MouseButton) -> Vec<f64> {
+    fn camera_input_app(follow: bool) -> (App, Entity, Entity, Entity) {
         let mut app = App::new();
         app.add_plugins(EditorCamInputPlugin)
             .add_message::<MouseWheel>()
+            .add_message::<PointerInput>()
             .init_resource::<ButtonInput<MouseButton>>()
             .init_resource::<UiInputOwners>()
             .init_resource::<PointerMap>()
@@ -319,6 +322,7 @@ mod tests {
                     update_interactions,
                     gated_camera_inputs,
                     EditorCamInputMessage::receive_messages,
+                    send_gated_pointer_inputs,
                 )
                     .chain(),
             );
@@ -375,6 +379,11 @@ mod tests {
                 ),
                 PointerOwner::Viewport { camera },
             );
+        (app, camera, subject, window)
+    }
+
+    fn gesture_depths(follow: bool, button: MouseButton) -> Vec<f64> {
+        let (mut app, camera, subject, _) = camera_input_app(follow);
         let mut depths = Vec::new();
         for depth in [200., 10_000.] {
             app.world_mut().resource_mut::<HoverMap>().insert(
@@ -421,6 +430,81 @@ mod tests {
     fn free_pan_and_orbit_still_use_the_picked_surface() {
         assert_eq!(gesture_depths(false, MouseButton::Left), [-200., -10_000.]);
         assert_eq!(gesture_depths(true, MouseButton::Right), [-200., -10_000.]);
+    }
+
+    #[test]
+    fn camera_drag_excludes_pointer_motion_before_each_press() {
+        use bevy_editor_cam::controller::inputs::MotionInputs;
+
+        fn latest_drag(app: &App, camera: Entity) -> Vec2 {
+            let controller = app.world().get::<EditorCam>(camera).unwrap();
+            let queue = match controller.current_motion.inputs().unwrap() {
+                MotionInputs::PanZoom {
+                    screenspace_inputs, ..
+                }
+                | MotionInputs::OrbitZoom {
+                    screenspace_inputs, ..
+                } => screenspace_inputs,
+                _ => panic!("expected a drag"),
+            };
+            queue.iter_unsmoothed().next().unwrap().1
+        }
+
+        for (button, pointer_button) in [
+            (MouseButton::Left, PointerButton::Primary),
+            (MouseButton::Right, PointerButton::Secondary),
+        ] {
+            let (mut app, camera, _, window) = camera_input_app(true);
+            let location = Location {
+                target: RenderTarget::Window(bevy::window::WindowRef::Entity(window))
+                    .normalize(Some(window))
+                    .unwrap(),
+                position: Vec2::new(640., 360.),
+            };
+            for _ in 0..2 {
+                app.world_mut()
+                    .resource_mut::<ButtonInput<MouseButton>>()
+                    .press(button);
+                for action in [
+                    PointerAction::Move {
+                        delta: Vec2::new(-800., 300.),
+                    },
+                    PointerAction::Press(pointer_button),
+                    PointerAction::Move {
+                        delta: Vec2::new(12., -4.),
+                    },
+                ] {
+                    app.world_mut().write_message(PointerInput::new(
+                        PointerId::Mouse,
+                        location.clone(),
+                        action,
+                    ));
+                }
+                app.update();
+                assert_eq!(latest_drag(&app, camera), Vec2::new(12., -4.));
+
+                // Subsequent frames have no press: retain all held-button motion.
+                app.world_mut()
+                    .resource_mut::<ButtonInput<MouseButton>>()
+                    .clear();
+                for delta in [Vec2::new(-5., 2.), Vec2::new(-3., 1.)] {
+                    app.world_mut().write_message(PointerInput::new(
+                        PointerId::Mouse,
+                        location.clone(),
+                        PointerAction::Move { delta },
+                    ));
+                }
+                app.update();
+                assert_eq!(latest_drag(&app, camera), Vec2::new(-8., 3.));
+                let mut buttons = app.world_mut().resource_mut::<ButtonInput<MouseButton>>();
+                buttons.clear();
+                buttons.release(button);
+                app.update();
+                app.world_mut()
+                    .resource_mut::<ButtonInput<MouseButton>>()
+                    .clear();
+            }
+        }
     }
 
     #[test]
