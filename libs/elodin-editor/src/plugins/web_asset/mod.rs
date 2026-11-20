@@ -233,10 +233,10 @@ impl Client {
         let key = db_asset_key(path.to_str()?, endpoint)?;
         let file = self.local_root.as_ref()?.join(key);
         let bytes = std::fs::read(&file).ok()?;
-        tracing::info!(
+        tracing::warn!(
             url = %url,
             file = %file.display(),
-            "db asset unavailable; serving local file"
+            "missing db asset; serving local file"
         );
         Some(Box::new(VecReader::new(bytes)) as Box<dyn Reader>)
     }
@@ -293,6 +293,7 @@ impl AssetReader for Client {
                     if let Some(reader) = self.local_fallback(path, &url) {
                         return Ok(reader);
                     }
+                    tracing::warn!(url = %url, "missing db asset");
                     return Err(err);
                 }
                 // Stale-while-error: if the DB asset HTTP port is already down

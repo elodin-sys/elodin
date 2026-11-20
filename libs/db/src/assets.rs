@@ -299,10 +299,14 @@ fn pull_referenced_assets(
         let manifest = std::fs::read_to_string(assets_dir.join(manifest_key))
             .ok()
             .or_else(|| std::fs::read_to_string(source_file(source_roots, manifest_key)?).ok());
-        if let Some(cubemap) = manifest.and_then(|manifest| {
+        match manifest.and_then(|manifest| {
             impeller_kdl::skybox_manifest_cubemap_asset_name(&manifest, &skybox.name).ok()?
         }) {
-            keys.push(cubemap);
+            Some(cubemap) => keys.push(cubemap),
+            None => tracing::warn!(
+                skybox = %skybox.name,
+                "skybox cubemap missing from source roots"
+            ),
         }
     }
     if let Some(impeller_wkt::TerrainConfig::Asset { path }) = &schematic.terrain
@@ -321,6 +325,11 @@ fn pull_referenced_assets(
         }
         if let Some(source) = source_file(source_roots, &key) {
             write_asset_file(assets_dir, &key, &std::fs::read(source)?)?;
+        } else {
+            tracing::warn!(
+                asset = %key,
+                "referenced asset missing from source roots"
+            );
         }
     }
     Ok(())
