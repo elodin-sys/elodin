@@ -107,7 +107,7 @@
 
         devShells =
           (with shells; {
-            inherit elodin;
+            inherit elodin web;
             default = shells.elodin;
             run = pkgs.callPackage ./nix/run.nix {inherit rustToolchain;};
           })
