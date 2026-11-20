@@ -477,6 +477,15 @@
                 <li>
                     <a href="https://docs.elodin.systems/preview/pr-987/reference/db-asset-server/#when-assets-are-persisted">When assets are persisted</a>
                     
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-987/reference/db-asset-server/#which-files-are-copied">Which files are copied</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
                 </li>
                 
                 <li>
@@ -647,6 +656,13 @@
 <li><strong><code>ELODIN_DB_PATH</code></strong> environment variable (Python SDK)</li>
 </ul>
 <p>The active schematic is stored as an asset (default <code>schematics/main.kdl</code>) and pointed to by <code>schematic.active</code> metadata. Consumers fetch it over the DB Asset Server; there is no inline KDL mirror in DB metadata.</p>
+<h3 id="which-files-are-copied">Which files are copied</h3>
+<p>A new database records its source <code>assets/</code> folders (<code>$ELODIN_ASSETS</code> or <code>--assets</code>, otherwise <code>./assets</code>, the simulation's <code>assets/</code>, then the nearest <code>assets/</code> above it) and copies only what its schematics use:</p>
+<ul>
+<li>every <code>.kdl</code> schematic in the source folders</li>
+<li>each file a stored schematic references: meshes, icons, map overlays, effect files and their sprite textures, the skybox manifest plus the active skybox's cubemap, and the whole directory of a <code>terrain path=</code> tileset</li>
+</ul>
+<p>Any schematic stored later (the simulation's, an editor save, <code>StoreAsset</code>, an asset <code>PUT</code>) copies the references the database is still missing from the recorded source folders. Files already in the database are never overwritten, and files no schematic references stay in the source folder. A file the source folders don't have keeps its local path.</p>
 <h2 id="simulation-source-snapshot">Simulation source snapshot</h2>
 <p>When a Python simulation records to an explicit database path, Elodin also writes a source snapshot to <code>{db}/simulation_source/</code>:</p>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>{db}/simulation_source/manifest.json</span></span>
@@ -679,9 +695,10 @@
 <p>On the Aleph flight computer, the <code>elodin-db</code> NixOS service passes
 <code>--assets /var/lib/elodin/assets</code> (the shared <code>ELODIN_ASSETS</code> root,
 configurable via <code>services.elodin-db.assetsDir</code>) so each fresh boot database
-ingests the asset tree on creation. A HITL recording copied off the vehicle is
-therefore a complete, portable record: serve it anywhere with <code>elodin-db run</code>
-and the editor loads schematic and meshes from the DB itself.</p>
+records that tree as its asset source and copies in whatever the schematics
+pushed to it reference. A HITL recording copied off the vehicle is therefore a
+complete, portable record: serve it anywhere with <code>elodin-db run</code> and the
+editor loads schematic and meshes from the DB itself.</p>
 <h3 id="follow-mode-and-assets">Follow mode and assets</h3>
 <p>When a follower connects to a source <code>elodin-db</code> on port <code>N</code>, it replicates telemetry over Impeller TCP. Schematic assets are <strong>not</strong> streamed on that socket — they are fetched separately from the source <strong>DB Asset Server</strong> on port <code>N+1</code>.</p>
 <p>On connect (and when DB config updates), the follower:</p>
