@@ -21,6 +21,7 @@ pub const INGEST_MARKER: &str = ".elodin-ingested";
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IngestReport {
     /// Source trees later schematic stores pull references from, highest precedence first.
+    /// Absolute paths, resolved when the marker is written.
     pub source_roots: Vec<PathBuf>,
     /// Number of files stored at ingest (0 when skipped).
     pub file_count: usize,
@@ -92,8 +93,9 @@ fn candidate_assets_roots(cwd: Option<&Path>, entry: Option<&Path>) -> Vec<PathB
 /// Copy every schematic (`.kdl`) under `source_roots` into `{db}/assets/`, plus
 /// the assets those schematics reference, preserving relative paths; a key
 /// present in several roots is taken from the first. Unreferenced files stay in
-/// the source tree. The roots are recorded in the ingest marker so schematics
-/// stored later pull their own references (see [`write_uploaded_asset`]). Path
+/// the source tree. The roots are recorded in the ingest marker as absolute
+/// paths so schematics stored later pull their own references (see
+/// [`write_uploaded_asset`]) after a restart from another directory. Path
 /// traversal is rejected by the shared `write_asset_file` sanitizer.
 ///
 /// Ingest is a *one-time bootstrap into an empty DB*, not a per-run sync: it
@@ -139,17 +141,13 @@ pub fn ingest_asset_dirs(db_path: &Path, source_roots: &[PathBuf]) -> io::Result
         return skipped();
     }
 
+    // Resolve before recording. `source_file` canonicalizes whatever the marker
+    // stored against the process cwd, so a relative root would miss the original
+    // tree after a restart from another directory.
+    let source_roots = canonical_source_roots(source_roots)?;
+
     let mut sources: HashMap<String, &Path> = HashMap::new();
-    for source_root in source_roots {
-        if !source_root.is_dir() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!(
-                    "assets source root does not exist: {}",
-                    source_root.display()
-                ),
-            ));
-        }
+    for source_root in &source_roots {
         let mut keys = Vec::new();
         collect_relative_keys(source_root, source_root, &mut keys)?;
         // Skip keys reserved by the asset layer (the `.elodin-ingested` marker and
@@ -193,11 +191,12 @@ pub fn ingest_asset_dirs(db_path: &Path, source_roots: &[PathBuf]) -> io::Result
     // committing copy-once. The partial tree it leaves behind is then preserved
     // (not wiped) by the "already populated" guard on the next run; recover with
     // `--reset`.
-    rewrite_stored_schematics(&dest, &sources, source_roots)?;
+    rewrite_stored_schematics(&dest, &sources, &source_roots)?;
+    drop(sources);
 
     let stored = index_assets_in(&dest, None)?;
     let report = IngestReport {
-        source_roots: source_roots.to_vec(),
+        source_roots,
         file_count: stored.len(),
         byte_count: stored.iter().map(|entry| entry.size).sum(),
         skipped: false,
@@ -258,6 +257,30 @@ fn write_asset_with_sources(
         }
     }
     write_asset_file(assets_dir, key, bytes)
+}
+
+/// Absolute form of each source root, resolved against the ingest-time cwd.
+fn canonical_source_roots(source_roots: &[PathBuf]) -> io::Result<Vec<PathBuf>> {
+    source_roots
+        .iter()
+        .map(|root| {
+            if !root.is_dir() {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("assets source root does not exist: {}", root.display()),
+                ));
+            }
+            root.canonicalize().map_err(|err| {
+                io::Error::new(
+                    err.kind(),
+                    format!(
+                        "assets source root does not exist: {}: {err}",
+                        root.display()
+                    ),
+                )
+            })
+        })
+        .collect()
 }
 
 fn recorded_source_roots(assets_dir: &Path) -> Vec<PathBuf> {
@@ -933,7 +956,7 @@ mod tests {
         let report = ingest_asset_dir(&db, &src).unwrap();
         assert!(!report.skipped);
         assert_eq!(report.file_count, 2);
-        assert_eq!(report.source_roots, vec![src.clone()]);
+        assert_eq!(report.source_roots, vec![src.canonicalize().unwrap()]);
 
         let assets = assets_dir(&db);
         assert_eq!(
@@ -944,6 +967,60 @@ mod tests {
         assert!(main.contains("db:meshes/rocket.glb"), "got:\n{main}");
         assert!(!assets.join("meshes/unused.glb").exists());
         assert!(!assets.join("terrains").exists());
+    }
+
+    #[test]
+    fn relative_source_roots_survive_a_later_cwd_change() {
+        let dir = tempdir().unwrap();
+        let project = dir.path().join("project");
+        let cwd_assets = project.join("assets");
+        let entry_assets = project.join("examples/sim/assets");
+        write(&cwd_assets.join("meshes/from_cwd.glb"), b"cwd");
+        write(&entry_assets.join("meshes/from_entry.glb"), b"entry");
+        let db = dir.path().join("db");
+
+        // `--assets ./assets` and an entry-relative `assets/` folder.
+        with_cwd(&project, || {
+            ingest_asset_dirs(
+                &db,
+                &[
+                    PathBuf::from("./assets"),
+                    PathBuf::from("examples/sim/assets"),
+                ],
+            )
+            .unwrap();
+        });
+
+        let report = ingest_report(&db).unwrap();
+        assert_eq!(
+            report.source_roots,
+            vec![
+                cwd_assets.canonicalize().unwrap(),
+                entry_assets.canonicalize().unwrap(),
+            ]
+        );
+
+        let elsewhere = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let kdl = "\
+object_3d \"a.world_pos\" {\n    glb path=\"meshes/from_cwd.glb\"\n}\n\
+object_3d \"b.world_pos\" {\n    glb path=\"meshes/from_entry.glb\"\n}\n";
+        with_cwd(&elsewhere, || {
+            write_uploaded_asset(&assets_dir(&db), "schematics/main.kdl", kdl.as_bytes()).unwrap();
+        });
+
+        let assets = assets_dir(&db);
+        assert_eq!(
+            std::fs::read(assets.join("meshes/from_cwd.glb")).unwrap(),
+            b"cwd"
+        );
+        assert_eq!(
+            std::fs::read(assets.join("meshes/from_entry.glb")).unwrap(),
+            b"entry"
+        );
+        let main = std::fs::read_to_string(assets.join("schematics/main.kdl")).unwrap();
+        assert!(main.contains("db:meshes/from_cwd.glb"), "{main}");
+        assert!(main.contains("db:meshes/from_entry.glb"), "{main}");
     }
 
     #[test]
@@ -1739,6 +1816,23 @@ mod tests {
             dirs.iter().any(|d| d == dir.path()),
             "ancestors of the entry dir must be searched (repo-root-relative refs)"
         );
+    }
+
+    /// Run `body` with the process cwd set to `path`, then restore it.
+    fn with_cwd<T>(path: &Path, body: impl FnOnce() -> T) -> T {
+        use std::sync::Mutex;
+        static LOCK: Mutex<()> = Mutex::new(());
+        let _lock = LOCK.lock().unwrap_or_else(|err| err.into_inner());
+        let previous = std::env::current_dir().unwrap();
+        std::env::set_current_dir(path).unwrap();
+        struct Restore(PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::env::set_current_dir(&self.0);
+            }
+        }
+        let _restore = Restore(previous);
+        body()
     }
 
     /// Serialize env access for the two tests that read `ELODIN_ASSETS`.
