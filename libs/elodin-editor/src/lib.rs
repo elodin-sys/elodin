@@ -737,6 +737,8 @@ impl Plugin for EditorPlugin {
         app.add_plugins(plugins::cinematic_earth::CinematicEarthPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::screenshot::EnvScreenshotPlugin);
+        #[cfg(target_family = "wasm")]
+        app.add_plugins(plugins::web_screenshot::WebScreenshotPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(plugins::fps_log::EnvFpsLogPlugin);
         app.add_plugins(ui::UiPlugin)

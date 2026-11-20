@@ -33,6 +33,8 @@ pub mod view_cube;
 #[cfg(any(target_arch = "wasm32", test))]
 pub(crate) mod wasm_shadows;
 mod web_asset;
+#[cfg(target_family = "wasm")]
+pub(crate) mod web_screenshot;
 pub(crate) mod world_mesh;
 
 pub use logical_key::{LogicalKeyPlugin, LogicalKeyState};
