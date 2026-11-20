@@ -222,15 +222,21 @@ def exercise_admin(channel, call_metadata):
         raise RuntimeError("WatchDb did not push the config mutation")
     events.cancel()
 
-    f22 = stub.ListAssets(
-        admin_pb2.ListAssetsRequest(prefix="f22.glb"), metadata=call_metadata
+    # Selective ingest copies only what the RC-jet schematic references.
+    # mojave_rc_field.glb is one of those, and it is larger than one gRPC chunk.
+    recorded_key = "mojave_rc_field.glb"
+    recorded = stub.ListAssets(
+        admin_pb2.ListAssetsRequest(prefix=recorded_key), metadata=call_metadata
     ).assets
-    if len(f22) != 1 or f22[0].key != "f22.glb":
-        raise RuntimeError("recorded f22.glb asset was not listed")
-    f22_chunks = list(
-        stub.GetAsset(admin_pb2.GetAssetRequest(key="f22.glb"), metadata=call_metadata)
+    if len(recorded) != 1 or recorded[0].key != recorded_key:
+        raise RuntimeError(f"recorded {recorded_key} asset was not listed")
+    recorded_chunks = list(
+        stub.GetAsset(admin_pb2.GetAssetRequest(key=recorded_key), metadata=call_metadata)
     )
-    if len(f22_chunks) <= 1 or sum(len(chunk.data) for chunk in f22_chunks) != f22[0].size:
+    if (
+        len(recorded_chunks) <= 1
+        or sum(len(chunk.data) for chunk in recorded_chunks) != recorded[0].size
+    ):
         raise RuntimeError("recorded asset did not exercise chunked reads")
 
     asset_size = 2 * 1024 * 1024 + 123
@@ -272,7 +278,7 @@ def exercise_admin(channel, call_metadata):
         admin_pb2.SetDbConfigRequest(metadata={"grpc.demo": ""}),
         metadata=call_metadata,
     )
-    return stored.assets_revision, len(f22_chunks), len(asset)
+    return stored.assets_revision, len(recorded_chunks), len(asset)
 
 
 def exercise_numeric_sql(query, call_metadata, expected_rows):
