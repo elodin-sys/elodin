@@ -194,7 +194,8 @@ benchmark. The steps below run 24 agents in real time from the repository root.
    Without `--stop-at-first`, it also counts the ticks that differ: here 1,404,
    every tick from 4096 on.
 
-5. Replay only the hook, without the simulation or the controllers:
+5. Replay only the hook, without the simulation or the controllers. On macOS,
+   the library is `libmany_agent_hook.dylib`:
 
    ```sh
    elodin determinism replay-hook /tmp/many-agents-baseline/lockstep-24-run-01/run.witness \

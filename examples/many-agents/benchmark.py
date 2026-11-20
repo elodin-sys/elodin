@@ -17,7 +17,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE = Path(__file__).resolve().parent
 CONTROLLER_BINARY = EXAMPLE / "controller/build/release/many-agent-controller"
-HOOK_LIBRARY = EXAMPLE / "hook/build/release/libmany_agent_hook.so"
+HOOK_LIBRARY = (
+    EXAMPLE
+    / "hook/build/release"
+    / ("libmany_agent_hook.dylib" if sys.platform == "darwin" else "libmany_agent_hook.so")
+)
 PHASES = (
     "copy_db_to_world",
     "world_run",

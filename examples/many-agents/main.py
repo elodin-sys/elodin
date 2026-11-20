@@ -5,9 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import select
+import selectors
 import shutil
 import socket
+import sys
 import time
 from pathlib import Path
 
@@ -28,6 +29,11 @@ from sim import CAPTURE_SHAPES, RATE_HZ, build
 
 
 ROOT = Path(__file__).resolve().parent
+HOOK_LIBRARY = (
+    ROOT
+    / "hook/build/release"
+    / ("libmany_agent_hook.dylib" if sys.platform == "darwin" else "libmany_agent_hook.so")
+)
 AGENT_COUNT = int(os.environ.get("ELODIN_MANY_AGENT_AGENTS", "24"))
 OBJECT_COUNT = int(os.environ.get("ELODIN_MANY_AGENT_OBJECTS", str(AGENT_COUNT)))
 MAX_TICKS = int(os.environ.get("ELODIN_MANY_AGENT_MAX_TICKS", "60000"))
@@ -121,15 +127,14 @@ class ControllerBridge:
             (packets[index * STATE_SIZE :][:STATE_SIZE], (LOCALHOST, PORT_BASE + index * 2))
             for index in range(AGENT_COUNT)
         ]
-        self.receives = {}
-        self.poll = select.epoll()
+        # epoll on Linux, kqueue on macOS.
+        self.poll = selectors.DefaultSelector()
         for index in range(AGENT_COUNT):
             command_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             command_socket.bind((LOCALHOST, PORT_BASE + index * 2 + 1))
             command_socket.setblocking(False)
             reply = replies[index * COMMAND_SIZE :][:COMMAND_SIZE]
-            self.receives[command_socket.fileno()] = (index, command_socket, reply)
-            self.poll.register(command_socket, select.EPOLLIN)
+            self.poll.register(command_socket, selectors.EVENT_READ, (index, reply))
 
     def exchange(self) -> np.ndarray:
         sendto = self.state_socket.sendto
@@ -137,12 +142,12 @@ class ControllerBridge:
             sendto(packet, address)
         pending = set(range(AGENT_COUNT))
         while pending:
-            events = self.poll.poll(TIMEOUT_S)
+            events = self.poll.select(TIMEOUT_S)
             if not events:
                 raise RuntimeError("controller response timeout")
-            for fd, _ in events:
-                index, command_socket, reply = self.receives[fd]
-                command_socket.recv_into(reply)
+            for key, _ in events:
+                index, reply = key.data
+                key.fileobj.recv_into(reply)
                 pending.discard(index)
         return self.replies
 
@@ -345,7 +350,7 @@ else:
         hook_library = Path(
             os.environ.get(
                 "ELODIN_MANY_AGENT_HOOK_LIB",
-                ROOT / "hook/build/release/libmany_agent_hook.so",
+                HOOK_LIBRARY,
             )
         ).resolve()
         if not hook_library.is_file():

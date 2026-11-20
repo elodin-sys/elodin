@@ -120,7 +120,7 @@ exchange_hook = el.NativeStepHook.load(
 )
 ```
 
-The library exports C functions. The [`NativeStepHook` reference](/reference/python-api/#class-elodin-nativestephook) gives the ABI, and many-agents implements one in Rust.
+On macOS, Cargo names the library `libmany_agent_hook.dylib`. The library exports C functions. The [`NativeStepHook` reference](/reference/python-api/#class-elodin-nativestephook) gives the ABI, and many-agents implements one in Rust.
 
 **Several hooks in order.** `pre_commit` also takes a list. Hooks run in list order, Python and native alike, and each one sees the world writes of the hooks before it. many-agents runs its exchange, then a hook that reads camera frames, then one that writes the result on the last tick:
 
