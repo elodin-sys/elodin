@@ -609,7 +609,7 @@ for deployment and database URL configuration.</p>
 <li>No terrain loading screen. The editor stays interactive while tiles load.</li>
 <li>Available tiles render after decoding and GPU upload; missing detail streams
 in the background. Hybrid mode preserves prepared detail during provider outages.</li>
-<li>A provider error does not remove available terrain or stop replay.
+<li>Provider errors stay in the logs, without an error window. They do not remove available terrain or stop replay.
 Reload the schematic to restart a failed source.</li>
 <li>Simulations launched by <code>elodin editor</code> stay at t=0 until initial terrain is
 ready or fails, protecting recorded sensor output. The editor remains usable.</li>
