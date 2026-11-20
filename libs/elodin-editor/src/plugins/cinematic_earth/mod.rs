@@ -1239,8 +1239,39 @@ mod tests {
         app.update();
         app.update();
         assert_eq!(globe_count(&mut app), 1);
+        // Local geometry can arrive after the provider error. Once it does,
+        // camera visibility changes must not tear down and recreate the rig.
+        app.world_mut()
+            .resource_mut::<super::super::cesium::TerrainStartup>()
+            .update(&bevy_cesium::CesiumStatus {
+                visible_tiles: 1,
+                load_failed: true,
+                ..default()
+            });
+        app.update();
+        app.update();
+        assert_eq!(globe_count(&mut app), 0);
+        let rig = app
+            .world_mut()
+            .query_filtered::<Entity, With<CinematicEarthRoot>>()
+            .single(app.world())
+            .unwrap();
+        for visible_tiles in [0, 1, 0, 2] {
+            app.world_mut()
+                .resource_mut::<super::super::cesium::TerrainStartup>()
+                .update(&bevy_cesium::CesiumStatus {
+                    visible_tiles,
+                    load_failed: true,
+                    ..default()
+                });
+            app.update();
+            app.update();
+            assert_eq!(globe_count(&mut app), 0);
+            assert!(app.world().get::<CinematicEarthRoot>(rig).is_some());
+        }
         app.world_mut()
             .remove_resource::<super::super::cesium::TerrainStartup>();
+        app.update();
         app.update();
         assert_eq!(globe_count(&mut app), 1);
     }
