@@ -1,11 +1,17 @@
 # Browser editor
 
-From the repository root, inside `nix develop`:
+From the repository root:
 
 ```sh
+nix develop .#web
 just install web
 just web
 ```
+
+- `.#web` skips Cesium Native and the native GStreamer plugin.
+- Cargo fetches the Bevy-Cesium Git revision pinned in `Cargo.toml`.
+- No crates.io release or separate Bevy-Cesium checkout is required.
+- Use the default `nix develop` shell for native Elodin development.
 
 Open the URL printed by Trunk. An empty `<meta name="elodin-web-db">` opens the
 connect screen. A value names the database to open on load. That value is the

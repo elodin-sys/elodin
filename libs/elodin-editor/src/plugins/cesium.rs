@@ -102,14 +102,14 @@ impl TerrainCapture {
     }
 }
 
-/// Interactive streaming needs one complete initial selection too. Afterwards,
-/// normal flight can refine terrain without repeatedly stopping sensor output.
+/// Capture readiness is separate from interactive terrain rendering.
+/// The editor remains usable while tiles arrive; sensor output still waits.
 #[derive(Resource)]
 pub(crate) struct TerrainStartup {
     started: web_time::Instant,
     ready: bool,
     error: Option<&'static str>,
-    prepared: bool,
+    has_tiles: bool,
 }
 
 impl TerrainStartup {
@@ -118,16 +118,15 @@ impl TerrainStartup {
             started: web_time::Instant::now(),
             ready: false,
             error: None,
-            prepared: false,
+            has_tiles: false,
         }
     }
 
-    // Prepared replay may stream while playing, but that is not evidence that
+    // Interactive replay may stream while playing, but that is not evidence that
     // terrain is ready for a held simulation or a sensor capture. Read the gate
     // from the current DB config: it can arrive after the schematic.
     fn replay_can_stream(&self, config: Option<&impeller_wkt::DbConfig>, headless: bool) -> bool {
-        self.prepared
-            && !headless
+        !headless
             && !config.is_some_and(|config| {
                 config
                     .metadata
@@ -136,10 +135,11 @@ impl TerrainStartup {
     }
 
     pub(crate) fn owns_surface(&self) -> bool {
-        self.error.is_none()
+        self.error.is_none() || self.has_tiles
     }
 
     pub(crate) fn update(&mut self, status: &CesiumStatus) {
+        self.has_tiles = status.visible_tiles > 0;
         if self.ready || self.error.is_some() {
             return;
         }
@@ -226,7 +226,6 @@ impl Plugin for CesiumPlugin {
         app.add_plugins(
             StreamingPlugin::deferred()
                 .with_external_coordinates()
-                .with_initial_load_wait()
                 .with_lod_retention_margin(if cfg!(target_family = "wasm") {
                     0.0
                 } else {
@@ -358,7 +357,6 @@ fn configure_terrain(world: &mut World, mut previous: Local<Option<TerrainConfig
             }),
         }
     };
-    startup.prepared = matches!(source, Some(CesiumSource::Prepared { .. }));
     world.insert_resource(CesiumSourceUpdate(source));
     world.insert_resource(startup);
 }
@@ -382,11 +380,7 @@ fn update_startup(
     status: Res<CesiumStatus>,
     mut startup: ResMut<TerrainStartup>,
     mut updates: Local<u32>,
-    mut commands: Commands,
 ) {
-    if startup.ready || startup.error.is_some() {
-        return;
-    }
     if (*updates).is_multiple_of(120) {
         debug!(
             pending = status.pending,
@@ -400,11 +394,10 @@ fn update_startup(
         );
     }
     *updates = updates.wrapping_add(1);
+    let was_ready = startup.ready;
     startup.update(&status);
-    if startup.error.is_some() {
-        commands.insert_resource(CesiumSourceUpdate(None));
-    }
-    if startup.ready {
+    // A missing remote tile must not discard the cached surface or stop retries.
+    if startup.ready && !was_ready {
         info!(
             seconds = startup.started.elapsed().as_secs_f64(),
             "Initial terrain ready"
@@ -412,37 +405,18 @@ fn update_startup(
     }
 }
 
-fn show_startup(
-    startup: Res<TerrainStartup>,
-    config: Option<Res<impeller_wkt::DbConfig>>,
-    headless: Option<Res<crate::sensor_camera::HeadlessMode>>,
-    mut contexts: Query<&mut bevy_egui::EguiContext>,
-) {
-    if startup.error.is_none()
-        && (startup.ready || startup.replay_can_stream(config.as_deref(), headless.is_some()))
-    {
+fn show_startup(startup: Res<TerrainStartup>, mut contexts: Query<&mut bevy_egui::EguiContext>) {
+    let Some(error) = startup.error else {
         return;
-    }
+    };
     for mut context in &mut contexts {
-        let context = context.get_mut();
-        if let Some(error) = startup.error {
-            egui::Window::new("Terrain unavailable")
-                .collapsible(false)
-                .resizable(false)
-                .show(context, |ui| {
-                    ui.label(error);
-                    ui.label("Continuing without streamed terrain. Reload the schematic to retry.");
-                });
-        } else {
-            egui::Modal::new(egui::Id::new("cesium_startup"))
-                .backdrop_color(context.global_style().visuals.panel_fill.to_opaque())
-                .show(context, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.spinner();
-                        ui.label("Loading terrain and aerial images…");
-                    });
-                });
-        }
+        egui::Window::new("Terrain unavailable")
+            .collapsible(false)
+            .resizable(false)
+            .show(context.get_mut(), |ui| {
+                ui.label(error);
+                ui.label("Available terrain remains visible. Reload the schematic to retry.");
+            });
     }
 }
 
@@ -614,7 +588,7 @@ mod coordinate_tests {
         ))
         .add_systems(Update, configure_terrain);
         app.update();
-        assert!(!playback_ready(app.world()));
+        assert!(playback_ready(app.world()));
         assert!(app.world().resource::<CesiumSourceUpdate>().0.is_none());
 
         for (address, expected) in [
@@ -868,7 +842,7 @@ mod coordinate_tests {
     fn failed_terrain_releases_playback_but_keeps_captures_failed() {
         let mut world = World::new();
         world.insert_resource(TerrainStartup::waiting());
-        assert!(!playback_ready(&world));
+        assert!(playback_ready(&world));
         world
             .resource_mut::<TerrainStartup>()
             .update(&CesiumStatus {
@@ -986,7 +960,7 @@ mod coordinate_tests {
             started: web_time::Instant::now(),
             ready: false,
             error: None,
-            prepared: false,
+            has_tiles: false,
         });
         // Interactive streaming has no fixed-path TerrainCapture resource.
         assert!(!world.contains_resource::<TerrainCapture>());
@@ -1006,20 +980,46 @@ mod coordinate_tests {
     }
 
     #[test]
-    fn playback_waits_only_for_the_initial_terrain() {
+    fn interactive_playback_does_not_wait_for_terrain() {
         let mut world = World::new();
         assert!(playback_ready(&world));
         world.insert_resource(TerrainStartup {
             started: web_time::Instant::now(),
             ready: false,
             error: None,
-            prepared: false,
+            has_tiles: false,
         });
-        assert!(!playback_ready(&world));
+        assert!(playback_ready(&world));
+        assert_eq!(capture_ready(&world), Ok(false));
         world.resource_mut::<TerrainStartup>().ready = true;
         assert!(playback_ready(&world));
         world.insert_resource(CesiumStatus::default());
         assert!(playback_ready(&world));
+    }
+
+    #[test]
+    fn missing_remote_tile_keeps_cached_surface_and_streaming_alive() {
+        let mut app = App::new();
+        app.insert_resource(TerrainStartup::waiting())
+            .insert_resource(CesiumStatus {
+                visible_tiles: 2,
+                load_failed: true,
+                error: Some("HTTP request failed"),
+                ..default()
+            })
+            .add_systems(Update, update_startup);
+        app.update();
+        assert!(app.world().resource::<TerrainStartup>().owns_surface());
+        assert!(playback_ready(app.world()));
+        assert!(!app.world().contains_resource::<CesiumSourceUpdate>());
+        assert_eq!(capture_ready(app.world()), Err("HTTP request failed"));
+        // A delayed local tile may arrive after the failed remote request.
+        app.world_mut().resource_mut::<CesiumStatus>().visible_tiles = 0;
+        app.update();
+        assert!(!app.world().resource::<TerrainStartup>().owns_surface());
+        app.world_mut().resource_mut::<CesiumStatus>().visible_tiles = 1;
+        app.update();
+        assert!(app.world().resource::<TerrainStartup>().owns_surface());
     }
 
     #[test]
@@ -1028,7 +1028,7 @@ mod coordinate_tests {
             started: web_time::Instant::now() - std::time::Duration::from_secs(3600),
             ready: false,
             error: None,
-            prepared: false,
+            has_tiles: false,
         };
         startup.update(&CesiumStatus::default());
         assert_eq!(startup.result(), Ok(false));
@@ -1116,7 +1116,7 @@ mod coordinate_tests {
             started: web_time::Instant::now(),
             ready: false,
             error: None,
-            prepared: false,
+            has_tiles: false,
         })
         .init_resource::<CesiumViews>()
         .add_systems(Update, collect_views);

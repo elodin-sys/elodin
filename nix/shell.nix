@@ -311,4 +311,10 @@ with pkgs; let
 in {
   # Unified shell that combines all development environments
   elodin = mkShell (shellAttrs // linuxShellAttrs);
+  # Browser builds need neither Cesium Native nor the native GStreamer plugin.
+  web = mkShell (
+    builtins.removeAttrs shellAttrs ["CESIUM_NATIVE_DIR" "GST_PLUGIN_PATH"]
+    // linuxShellAttrs
+    // {buildInputs = lib.remove config.packages.elodinsink shellAttrs.buildInputs;}
+  );
 }
