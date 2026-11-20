@@ -2,6 +2,7 @@
 
 import json
 import os
+import random
 import signal
 import socket
 import subprocess
@@ -10,15 +11,22 @@ from pathlib import Path
 
 import elodin.db as edb
 import numpy as np
-import pytest
 
 EXAMPLE = Path(__file__).resolve().parents[1]
 
 
 def free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
+    """A free port P with P + 1 and P + 2 free for the DB's asset and gRPC servers. It is below
+    every OS's ephemeral range, which macOS hands out in order, starting next to the last one."""
+    while True:
+        port = random.randrange(20000, 32000)
+        try:
+            for offset in range(3):
+                with socket.socket() as probe:
+                    probe.bind(("127.0.0.1", port + offset))
+        except OSError:
+            continue
+        return port
 
 
 def start(path: Path, ticks: int, **env: str) -> tuple[subprocess.Popen, str]:
@@ -41,6 +49,21 @@ def start(path: Path, ticks: int, **env: str) -> tuple[subprocess.Popen, str]:
         stderr=subprocess.DEVNULL,
     )
     return process, address
+
+
+def render_servers(address: str) -> list[int]:
+    """The render servers that follow the simulation at `address`."""
+    listing = subprocess.run(
+        ["ps", "-A", "-ww", "-o", "pid=", "-o", "args="],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return [
+        int(line.split()[0])
+        for line in listing.splitlines()
+        if {"render-server", address} <= set(line.split())
+    ]
 
 
 def has_frames(address: str) -> bool:
@@ -73,7 +96,6 @@ def test_camera_frames_are_paired_with_the_truth_at_their_capture_time(tmp_path)
             np.testing.assert_array_equal(position[0], truth)
 
 
-@pytest.mark.skipif(not Path("/proc").is_dir(), reason="finds the render server through /proc")
 def test_a_camera_that_stops_fails_the_run(tmp_path):
     process, address = start(tmp_path, 60_000)
     try:
@@ -81,13 +103,10 @@ def test_a_camera_that_stops_fails_the_run(tmp_path):
         while not has_frames(address):
             assert time.monotonic() < deadline, "the camera never sent a frame"
             time.sleep(0.5)
-        for cmdline in Path("/proc").glob("[0-9]*/cmdline"):
-            try:
-                args = cmdline.read_bytes().split(b"\0")
-            except OSError:
-                continue
-            if b"render-server" in args and address.encode() in args:
-                os.kill(int(cmdline.parent.name), signal.SIGKILL)
+        servers = render_servers(address)
+        assert servers, "no render server follows the run"
+        for pid in servers:
+            os.kill(pid, signal.SIGKILL)
         assert process.wait(timeout=120) != 0
     finally:
         process.kill()

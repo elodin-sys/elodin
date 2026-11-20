@@ -3,15 +3,16 @@ completion race with its causal-token fix."""
 
 import json
 import os
+import random
 import socket
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+from benchmark import HOOK_LIBRARY
 
 EXAMPLE = Path(__file__).resolve().parents[1]
-HOOK_LIBRARY = EXAMPLE / "hook/build/release/libmany_agent_hook.so"
 FAULT = {"ELODIN_MANY_AGENT_FAULT_TICK": "300", "ELODIN_MANY_AGENT_FAULT_AGENT": "1"}
 
 
@@ -22,9 +23,17 @@ def built():
 
 
 def free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
+    """A free port P with P + 1 and P + 2 free for the DB's asset and gRPC servers. It is below
+    every OS's ephemeral range, which macOS hands out in order, starting next to the last one."""
+    while True:
+        port = random.randrange(20000, 32000)
+        try:
+            for offset in range(3):
+                with socket.socket() as probe:
+                    probe.bind(("127.0.0.1", port + offset))
+        except OSError:
+            continue
+        return port
 
 
 def env(path: Path, **extra: str) -> dict[str, str]:
