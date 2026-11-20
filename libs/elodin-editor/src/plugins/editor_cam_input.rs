@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use bevy::{
     app::{App, Plugin},
-    camera::{Camera, RenderTarget},
+    camera::{Camera, Projection, RenderTarget},
     input::{
         ButtonInput,
         mouse::{MouseButton, MouseScrollUnit, MouseWheel},
@@ -16,7 +16,7 @@ use bevy_editor_cam::{
 };
 use bevy_picking::pointer::{PointerAction, PointerId, PointerInput};
 
-use crate::ui::input_owner::UiInputOwners;
+use crate::ui::{input_owner::UiInputOwners, inspector::viewport::Viewport};
 
 /// Registers message/resources only. Input systems run in [`crate::ui`] after
 /// [`crate::ui::set_camera_viewport`] so hit tests use the current viewport rect.
@@ -36,13 +36,20 @@ fn cursor_in_camera_view(camera: &Camera, cursor: Vec2) -> bool {
             .is_some_and(|rect| rect.contains(cursor))
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn gated_camera_inputs(
-    pointer_map: Res<CameraPointerMap>,
+    mut pointer_map: ResMut<CameraPointerMap>,
     mut controller: MessageWriter<EditorCamInputMessage>,
     mut mouse_wheel: MessageReader<MouseWheel>,
     mouse_input: Res<ButtonInput<MouseButton>>,
-    cameras: Query<(Entity, &Camera, &RenderTarget, &EditorCam)>,
+    mut cameras: Query<(
+        Entity,
+        &Camera,
+        &RenderTarget,
+        &Projection,
+        &mut EditorCam,
+        Option<&Viewport>,
+    )>,
     primary_window: Query<(Entity, &Window), With<PrimaryWindow>>,
     input_owners: Res<UiInputOwners>,
 ) {
@@ -63,10 +70,10 @@ pub fn gated_camera_inputs(
             .unwrap_or_default();
         let camera_query = cameras.get(camera).ok();
         let is_in_zoom_mode = camera_query
-            .map(|(_, _, _, editor_cam)| editor_cam.current_motion.is_zooming_only())
+            .map(|(_, _, _, _, editor_cam, _)| editor_cam.current_motion.is_zooming_only())
             .unwrap_or_default();
         let zoom_amount_abs = camera_query
-            .and_then(|(_, _, _, editor_cam)| {
+            .and_then(|(_, _, _, _, editor_cam, _)| {
                 editor_cam
                     .current_motion
                     .inputs()
@@ -83,7 +90,12 @@ pub fn gated_camera_inputs(
             || mouse_input.any_just_released([orbit_start, pan_start])
             || should_zoom_end
         {
-            controller.write(EditorCamInputMessage::End { camera });
+            // End before starting another gesture in this frame. Follow-view
+            // pans start directly below instead of using the picked surface.
+            if let Ok((_, _, _, _, mut editor_cam, _)) = cameras.get_mut(camera) {
+                editor_cam.end_move();
+            }
+            pointer_map.remove(&PointerId::Mouse);
         }
     }
 
@@ -92,8 +104,8 @@ pub fn gated_camera_inputs(
     };
     let pointer_pos = bevy_egui::egui::pos2(cursor.x, cursor.y);
 
-    let Some((camera, _camera_component, render_target, editor_cam)) =
-        cameras.iter().find(|(entity, camera, _, _)| {
+    let Some((camera, camera_component, render_target, projection, mut editor_cam, viewport)) =
+        cameras.iter_mut().find(|(entity, camera, _, _, _, _)| {
             cursor_in_camera_view(camera, cursor)
                 && input_owners.permits_viewport_at(window_entity, *entity, pointer_pos)
         })
@@ -114,11 +126,27 @@ pub fn gated_camera_inputs(
             pointer,
         });
     } else if mouse_input.just_pressed(pan_start) {
-        controller.write(EditorCamInputMessage::Start {
-            kind: MotionKind::PanZoom,
-            camera,
-            pointer,
-        });
+        if viewport.is_some_and(|viewport| !viewport.look_at.eql.trim().is_empty()) {
+            if !editor_cam.is_actively_controlled() {
+                // A second drag can hit terrain kilometres behind the followed
+                // subject. Keep the existing depth so pan sensitivity does not
+                // jump, while retaining the cursor's position on that plane.
+                let anchor = pan_anchor(
+                    camera_component,
+                    projection,
+                    cursor,
+                    editor_cam.last_anchor_depth,
+                );
+                editor_cam.start_pan(anchor);
+                pointer_map.insert(pointer, camera);
+            }
+        } else {
+            controller.write(EditorCamInputMessage::Start {
+                kind: MotionKind::PanZoom,
+                camera,
+                pointer,
+            });
+        }
     } else if wheel_windows.contains_key(&render_window_entity)
         && !editor_cam.current_motion.is_zooming_only()
     {
@@ -128,6 +156,26 @@ pub fn gated_camera_inputs(
             pointer,
         });
     }
+}
+
+fn pan_anchor(
+    camera: &Camera,
+    projection: &Projection,
+    cursor: Vec2,
+    depth: f64,
+) -> Option<bevy::math::DVec3> {
+    let rect = camera.logical_viewport_rect()?;
+    let ndc = ((cursor - rect.min) / rect.size() * 2.0 - Vec2::ONE) * Vec2::new(1.0, -1.0);
+    let near = projection
+        .get_clip_from_view()
+        .as_dmat4()
+        .inverse()
+        .project_point3(ndc.extend(1.0).as_dvec3());
+    let anchor = match projection {
+        Projection::Orthographic(_) => bevy::math::DVec3::new(near.x, near.y, depth),
+        _ => near * (depth / near.z),
+    };
+    anchor.is_finite().then_some(anchor)
 }
 
 pub fn send_gated_pointer_inputs(
@@ -236,4 +284,177 @@ fn mouse_wheel_offsets_by_window(
             .or_insert(ev.y * scroll_multiplier);
     }
     offsets
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        object_3d::EditableEQL,
+        ui::{input_owner::PointerOwner, inspector::viewport::Viewport},
+    };
+    use bevy::{
+        camera::{ComputedCameraValues, Projection, RenderTargetInfo},
+        prelude::*,
+    };
+    use bevy_picking::{
+        backend::HitData,
+        hover::{HoverMap, PreviousHoverMap, update_interactions},
+        pointer::{PointerMap, update_pointer_map},
+    };
+
+    fn gesture_depths(follow: bool, button: MouseButton) -> Vec<f64> {
+        let mut app = App::new();
+        app.add_plugins(EditorCamInputPlugin)
+            .add_message::<MouseWheel>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<UiInputOwners>()
+            .init_resource::<PointerMap>()
+            .init_resource::<HoverMap>()
+            .init_resource::<PreviousHoverMap>()
+            .add_systems(
+                Update,
+                (
+                    update_pointer_map,
+                    update_interactions,
+                    gated_camera_inputs,
+                    EditorCamInputMessage::receive_messages,
+                )
+                    .chain(),
+            );
+        let mut window = Window::default();
+        window.resolution.set(1280., 720.);
+        window.set_cursor_position(Some(Vec2::new(640., 360.)));
+        let window = app.world_mut().spawn((window, PrimaryWindow)).id();
+        app.world_mut().spawn(PointerId::Mouse);
+        let subject = app.world_mut().spawn_empty().id();
+        let camera = app
+            .world_mut()
+            .spawn((
+                Camera {
+                    computed: ComputedCameraValues {
+                        target_info: Some(RenderTargetInfo {
+                            physical_size: UVec2::new(1280, 720),
+                            scale_factor: 1.,
+                        }),
+                        ..default()
+                    },
+                    ..default()
+                },
+                Projection::default(),
+                GlobalTransform::IDENTITY,
+                EditorCam {
+                    last_anchor_depth: -200.,
+                    input_debounce: std::time::Duration::ZERO,
+                    ..default()
+                },
+                Viewport::new(
+                    subject,
+                    EditableEQL::default(),
+                    EditableEQL {
+                        eql: if follow {
+                            "booster.world_pos".into()
+                        } else {
+                            String::new()
+                        },
+                        compiled_expr: None,
+                    },
+                    EditableEQL::default(),
+                    None,
+                    0.,
+                ),
+            ))
+            .id();
+        app.world_mut()
+            .resource_mut::<UiInputOwners>()
+            .register_content_rect(
+                window,
+                bevy_egui::egui::Rect::from_min_max(
+                    bevy_egui::egui::pos2(0., 0.),
+                    bevy_egui::egui::pos2(1280., 720.),
+                ),
+                PointerOwner::Viewport { camera },
+            );
+        let mut depths = Vec::new();
+        for depth in [200., 10_000.] {
+            app.world_mut().resource_mut::<HoverMap>().insert(
+                PointerId::Mouse,
+                [(
+                    subject,
+                    HitData::new(camera, depth, Some(Vec3::new(0., 0., -depth)), None),
+                )]
+                .into_iter()
+                .collect(),
+            );
+            app.world_mut()
+                .resource_mut::<ButtonInput<MouseButton>>()
+                .press(button);
+            app.update();
+            depths.push(
+                app.world()
+                    .get::<EditorCam>(camera)
+                    .unwrap()
+                    .anchor_view_space()
+                    .unwrap()
+                    .z,
+            );
+            {
+                let mut buttons = app.world_mut().resource_mut::<ButtonInput<MouseButton>>();
+                buttons.clear();
+                buttons.release(button);
+            }
+            app.update();
+            assert!(app.world().resource::<CameraPointerMap>().is_empty());
+            app.world_mut()
+                .resource_mut::<ButtonInput<MouseButton>>()
+                .clear();
+        }
+        depths
+    }
+
+    #[test]
+    fn second_follow_pan_keeps_subject_depth_when_pointer_hits_distant_terrain() {
+        assert_eq!(gesture_depths(true, MouseButton::Left), [-200., -200.]);
+    }
+
+    #[test]
+    fn free_pan_and_orbit_still_use_the_picked_surface() {
+        assert_eq!(gesture_depths(false, MouseButton::Left), [-200., -10_000.]);
+        assert_eq!(gesture_depths(true, MouseButton::Right), [-200., -10_000.]);
+    }
+
+    #[test]
+    fn pan_anchor_stays_under_cursor_in_an_offset_scaled_viewport() {
+        let camera = Camera {
+            viewport: Some(bevy::camera::Viewport {
+                physical_position: UVec2::new(100, 50),
+                physical_size: UVec2::new(800, 500),
+                ..default()
+            }),
+            computed: ComputedCameraValues {
+                target_info: Some(RenderTargetInfo {
+                    physical_size: UVec2::new(1280, 720),
+                    scale_factor: 2.0,
+                }),
+                ..default()
+            },
+            ..default()
+        };
+        let rect = camera.logical_viewport_rect().unwrap();
+        let cursor = rect.center() + Vec2::new(70., -40.);
+        for projection in [
+            Projection::default(),
+            Projection::Orthographic(OrthographicProjection::default_3d()),
+        ] {
+            let anchor = pan_anchor(&camera, &projection, cursor, -200.).unwrap();
+            let ndc = projection
+                .get_clip_from_view()
+                .as_dmat4()
+                .project_point3(anchor);
+            let projected_cursor = rect.min
+                + (ndc.truncate().as_vec2() * Vec2::new(1., -1.) + Vec2::ONE) * rect.size() / 2.;
+            assert!(projected_cursor.distance(cursor) < 0.001);
+            assert!((anchor.z + 200.).abs() < 1e-9);
+        }
+    }
 }
