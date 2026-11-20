@@ -255,13 +255,6 @@ impl Plugin for CesiumPlugin {
                 .after(configure_terrain)
                 .after(update_startup)
                 .run_if(resource_exists::<Messages<crate::ui::schematic::DocumentLoaded>>),
-        )
-        .add_systems(
-            Update,
-            show_startup
-                .run_if(resource_exists::<TerrainStartup>)
-                .after(update_startup)
-                .after(crate::ui::render_layout),
         );
         app.add_systems(Update, log_streaming_status.after(CesiumSet::Publish));
     }
@@ -405,21 +398,6 @@ fn update_startup(
     }
 }
 
-fn show_startup(startup: Res<TerrainStartup>, mut contexts: Query<&mut bevy_egui::EguiContext>) {
-    let Some(error) = startup.error else {
-        return;
-    };
-    for mut context in &mut contexts {
-        egui::Window::new("Terrain unavailable")
-            .collapsible(false)
-            .resizable(false)
-            .show(context.get_mut(), |ui| {
-                ui.label(error);
-                ui.label("Available terrain remains visible. Reload the schematic to retry.");
-            });
-    }
-}
-
 #[allow(clippy::type_complexity)]
 fn collect_views(
     geo: Res<GeoContext>,
@@ -552,7 +530,26 @@ fn place_tiles(
     }
 }
 
-fn log_streaming_status(status: Res<CesiumStatus>, time: Res<Time>, mut last: Local<f64>) {
+fn log_streaming_status(
+    status: Res<CesiumStatus>,
+    startup: Option<Res<TerrainStartup>>,
+    time: Res<Time>,
+    mut last: Local<f64>,
+    mut last_error: Local<Option<&'static str>>,
+) {
+    let error = status
+        .error
+        .or_else(|| startup.as_ref().and_then(|startup| startup.error));
+    if error != *last_error {
+        if let Some(error) = error {
+            warn!(
+                error,
+                visible = status.visible_tiles,
+                "Terrain streaming error"
+            );
+        }
+        *last_error = error;
+    }
     let now = time.elapsed_secs_f64();
     if now - *last < 10.0 {
         return;

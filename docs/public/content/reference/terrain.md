@@ -141,7 +141,7 @@ for deployment and database URL configuration.
 - No terrain loading screen. The editor stays interactive while tiles load.
 - Available tiles render after decoding and GPU upload; missing detail streams
   in the background. Hybrid mode preserves prepared detail during provider outages.
-- A provider error does not remove available terrain or stop replay.
+- Provider errors stay in the logs, without an error window. They do not remove available terrain or stop replay.
   Reload the schematic to restart a failed source.
 - Simulations launched by `elodin editor` stay at t=0 until initial terrain is
   ready or fails, protecting recorded sensor output. The editor remains usable.
