@@ -1,9 +1,11 @@
 //! DB-centric asset ingest (RFD #724, Phase 0).
 //!
-//! A single boundary copies a source `assets/` tree into `{db}/assets/` exactly
-//! once, at DB creation. Downstream the simulation and editor are pure network
-//! consumers of the DB Asset Server. This replaces the selective, type-aware copy
-//! that previously lived in `nox-py`.
+//! At DB creation the source `assets/` trees are recorded as the DB's asset
+//! sources, and their schematics are copied into `{db}/assets/` together with
+//! the assets those schematics reference. Every schematic stored later pulls its
+//! own missing references from the recorded sources, so the DB holds what its
+//! schematics use rather than the whole source tree. Downstream the simulation
+//! and editor are pure network consumers of the DB Asset Server.
 
 use std::collections::{HashMap, HashSet};
 use std::io;
@@ -18,11 +20,12 @@ pub const INGEST_MARKER: &str = ".elodin-ingested";
 /// Result of an [`ingest_asset_dirs`] call.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct IngestReport {
-    /// Source trees that were copied in, highest precedence first.
+    /// Source trees later schematic stores pull references from, highest precedence first.
+    /// Absolute paths, resolved when the marker is written.
     pub source_roots: Vec<PathBuf>,
-    /// Number of files copied (0 when skipped).
+    /// Number of files stored at ingest (0 when skipped).
     pub file_count: usize,
-    /// Total bytes copied (0 when skipped).
+    /// Total bytes stored at ingest (0 when skipped).
     pub byte_count: u64,
     /// True when nothing was copied: the copy-once guard tripped, or the
     /// source tree carried no real assets to seed from.
@@ -87,9 +90,13 @@ fn candidate_assets_roots(cwd: Option<&Path>, entry: Option<&Path>) -> Vec<PathB
     roots
 }
 
-/// Copy every file under `source_roots` into `{db}/assets/`, preserving relative
-/// paths; a key present in several roots is taken from the first. Path traversal
-/// is rejected by the shared `write_asset_file` sanitizer.
+/// Copy every schematic (`.kdl`) under `source_roots` into `{db}/assets/`, plus
+/// the assets those schematics reference, preserving relative paths; a key
+/// present in several roots is taken from the first. Unreferenced files stay in
+/// the source tree. The roots are recorded in the ingest marker as absolute
+/// paths so schematics stored later pull their own references (see
+/// [`write_uploaded_asset`]) after a restart from another directory. Path
+/// traversal is rejected by the shared `write_asset_file` sanitizer.
 ///
 /// Ingest is a *one-time bootstrap into an empty DB*, not a per-run sync: it
 /// seeds a brand-new DB from a local `assets/` tree and is then a no-op forever.
@@ -134,17 +141,13 @@ pub fn ingest_asset_dirs(db_path: &Path, source_roots: &[PathBuf]) -> io::Result
         return skipped();
     }
 
+    // Resolve before recording. `source_file` canonicalizes whatever the marker
+    // stored against the process cwd, so a relative root would miss the original
+    // tree after a restart from another directory.
+    let source_roots = canonical_source_roots(source_roots)?;
+
     let mut sources: HashMap<String, &Path> = HashMap::new();
-    for source_root in source_roots {
-        if !source_root.is_dir() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!(
-                    "assets source root does not exist: {}",
-                    source_root.display()
-                ),
-            ));
-        }
+    for source_root in &source_roots {
         let mut keys = Vec::new();
         collect_relative_keys(source_root, source_root, &mut keys)?;
         // Skip keys reserved by the asset layer (the `.elodin-ingested` marker and
@@ -175,25 +178,27 @@ pub fn ingest_asset_dirs(db_path: &Path, source_roots: &[PathBuf]) -> io::Result
     }
     std::fs::create_dir_all(&dest)?;
 
-    let mut byte_count = 0u64;
     for (key, source_root) in &sources {
-        let data = std::fs::read(source_root.join(key))?;
-        byte_count += data.len() as u64;
-        write_asset_file(&dest, key, &data)?;
+        if key.ends_with(".kdl") {
+            write_asset_file(&dest, key, &std::fs::read(source_root.join(key))?)?;
+        }
     }
 
-    // Every schematic now lives in the DB, so rewrite the local asset paths
-    // inside each stored `.kdl` (window sub-schematics included) to `db:` refs,
-    // pulling in windows that live outside the source tree along the way.
-    // Done before the marker so a genuine I/O failure aborts without committing
-    // copy-once. The partial tree it leaves behind is then preserved (not wiped)
-    // by the "already populated" guard on the next run; recover with `--reset`.
-    rewrite_stored_schematics(&dest, &sources, source_roots)?;
+    // Every schematic now lives in the DB: pull in the assets each references,
+    // then rewrite its local asset paths (window sub-schematics included) to
+    // `db:` refs, pulling in windows that live outside the source tree along the
+    // way. Done before the marker so a genuine I/O failure aborts without
+    // committing copy-once. The partial tree it leaves behind is then preserved
+    // (not wiped) by the "already populated" guard on the next run; recover with
+    // `--reset`.
+    rewrite_stored_schematics(&dest, &sources, &source_roots)?;
+    drop(sources);
 
+    let stored = index_assets_in(&dest, None)?;
     let report = IngestReport {
-        source_roots: source_roots.to_vec(),
-        file_count: sources.len(),
-        byte_count,
+        source_roots,
+        file_count: stored.len(),
+        byte_count: stored.iter().map(|entry| entry.size).sum(),
         skipped: false,
     };
     write_ingest_marker(&dest.join(INGEST_MARKER), &report)?;
@@ -224,15 +229,142 @@ pub fn rewrite_schematic_kdl_to_db(assets_dir: &Path, content: &str) -> Option<S
 /// network uploads (Impeller `StoreAsset` and asset HTTP `PUT`), so a schematic
 /// gets its local asset paths rewritten to `db:` no matter which transport
 /// delivered it. Unparsable or non-schematic `.kdl` is stored verbatim.
+///
+/// A schematic first pulls the assets it references, and the DB lacks, from the
+/// source roots recorded at ingest, so a schematic pushed after creation (Aleph,
+/// `elodin ui push`, an editor edit) still carries its meshes and textures.
 pub fn write_uploaded_asset(assets_dir: &Path, key: &str, bytes: &[u8]) -> io::Result<()> {
+    let source_roots = recorded_source_roots(assets_dir);
+    write_asset_with_sources(assets_dir, key, bytes, &source_roots)
+}
+
+fn write_asset_with_sources(
+    assets_dir: &Path,
+    key: &str,
+    bytes: &[u8],
+    source_roots: &[PathBuf],
+) -> io::Result<()> {
     if key.ends_with(".kdl")
         && let Ok(content) = std::str::from_utf8(bytes)
-        && let Some(rewritten) = rewrite_schematic_kdl_to_db(assets_dir, content)
     {
-        write_asset_file(assets_dir, key, rewritten.as_bytes())
-    } else {
-        write_asset_file(assets_dir, key, bytes)
+        // A source read failure must not reject the schematic itself; its
+        // unresolved paths simply stay local.
+        if let Err(err) = pull_referenced_assets(assets_dir, content, source_roots) {
+            tracing::warn!(asset = %key, ?err, "failed to pull referenced assets");
+        }
+        if let Some(rewritten) = rewrite_schematic_kdl_to_db(assets_dir, content) {
+            return write_asset_file(assets_dir, key, rewritten.as_bytes());
+        }
     }
+    write_asset_file(assets_dir, key, bytes)
+}
+
+/// Absolute form of each source root, resolved against the ingest-time cwd.
+fn canonical_source_roots(source_roots: &[PathBuf]) -> io::Result<Vec<PathBuf>> {
+    source_roots
+        .iter()
+        .map(|root| {
+            if !root.is_dir() {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("assets source root does not exist: {}", root.display()),
+                ));
+            }
+            root.canonicalize().map_err(|err| {
+                io::Error::new(
+                    err.kind(),
+                    format!(
+                        "assets source root does not exist: {}: {err}",
+                        root.display()
+                    ),
+                )
+            })
+        })
+        .collect()
+}
+
+fn recorded_source_roots(assets_dir: &Path) -> Vec<PathBuf> {
+    std::fs::read(assets_dir.join(INGEST_MARKER))
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<IngestReport>(&bytes).ok())
+        .map(|report| report.source_roots)
+        .unwrap_or_default()
+}
+
+/// Copy the assets `content` references from `source_roots` into `assets_dir`,
+/// skipping keys already stored (existing assets are never overwritten). Window
+/// `.kdl` references are left to window ingest. Besides direct paths this
+/// covers the active skybox's cubemap, the sprite textures file effects bind by
+/// convention, and a terrain tileset's whole directory (its tiles are relative
+/// children). Unparsable content references nothing.
+fn pull_referenced_assets(
+    assets_dir: &Path,
+    content: &str,
+    source_roots: &[PathBuf],
+) -> io::Result<()> {
+    if source_roots.is_empty() {
+        return Ok(());
+    }
+    let Ok(schematic) = impeller_kdl::parse_schematic(content) else {
+        return Ok(());
+    };
+    let mut keys: Vec<String> = impeller_kdl::collect_local_asset_paths(&schematic)
+        .iter()
+        .filter_map(|path| impeller_kdl::local_asset_name(path))
+        .chain(impeller_kdl::collect_db_asset_names(&schematic))
+        .filter(|key| !key.ends_with(".kdl"))
+        .collect();
+    if keys.iter().any(|key| key.ends_with(".effect")) {
+        keys.extend(impeller_kdl::EFFECT_TEXTURE_ASSET_NAMES.map(str::to_string));
+    }
+    if let Some(skybox) = &schematic.skybox {
+        let manifest_key = impeller_kdl::SKYBOX_MANIFEST_ASSET_NAME;
+        let manifest = std::fs::read_to_string(assets_dir.join(manifest_key))
+            .ok()
+            .or_else(|| std::fs::read_to_string(source_file(source_roots, manifest_key)?).ok());
+        match manifest.and_then(|manifest| {
+            impeller_kdl::skybox_manifest_cubemap_asset_name(&manifest, &skybox.name).ok()?
+        }) {
+            Some(cubemap) => keys.push(cubemap),
+            None => tracing::warn!(
+                skybox = %skybox.name,
+                "skybox cubemap missing from source roots"
+            ),
+        }
+    }
+    if let Some(impeller_wkt::TerrainConfig::Asset { path }) = &schematic.terrain
+        && let Some(key) = impeller_kdl::local_asset_name(path)
+            .or_else(|| impeller_kdl::db_asset_name(path))
+            .and_then(|key| impeller_kdl::local_asset_name(&key))
+        && let Some((dir, _)) = key.rsplit_once('/')
+        && let Some(root) = source_roots.iter().find(|root| root.join(&key).is_file())
+    {
+        collect_relative_keys(root, &root.join(dir), &mut keys)?;
+    }
+
+    for key in keys {
+        if crate::assets_http::is_reserved_asset_key(&key) || assets_dir.join(&key).is_file() {
+            continue;
+        }
+        if let Some(source) = source_file(source_roots, &key) {
+            write_asset_file(assets_dir, &key, &std::fs::read(source)?)?;
+        } else {
+            tracing::warn!(
+                asset = %key,
+                "referenced asset missing from source roots"
+            );
+        }
+    }
+    Ok(())
+}
+
+/// The first source root's regular file for `key`, refusing symlinks that
+/// resolve outside that root.
+fn source_file(source_roots: &[PathBuf], key: &str) -> Option<PathBuf> {
+    source_roots.iter().find_map(|root| {
+        let path = root.join(key).canonicalize().ok()?;
+        (path.is_file() && path.starts_with(root.canonicalize().ok()?)).then_some(path)
+    })
 }
 
 /// Resolve the stored asset key for a local path referenced by a schematic to
@@ -295,6 +427,7 @@ fn rewrite_stored_schematics(
     let mut ingest = WindowIngest {
         assets_dir: dir,
         search_dirs: &search_dirs,
+        source_roots,
         file_keys: HashMap::new(),
         reserved_inline_keys: HashSet::new(),
     };
@@ -313,6 +446,7 @@ fn rewrite_stored_schematics(
             content = pulled;
             changed = true;
         }
+        pull_referenced_assets(dir, &content, source_roots)?;
         if let Some(serialized) = rewrite_schematic_kdl_to_db(dir, &content) {
             content = serialized;
             changed = true;
@@ -371,17 +505,19 @@ pub fn schematic_window_search_dirs(entry: Option<&Path>) -> Vec<PathBuf> {
 ///
 /// Windows are followed transitively (a window may reference further windows,
 /// resolved relative to the referencing file first, then `search_dirs`). Each
-/// ingested `.kdl` is written through [`write_uploaded_asset`] so its own
-/// mesh/icon paths get the same local → `db:` rewrite. Producer-only: network
+/// ingested `.kdl` takes the [`write_uploaded_asset`] path so its own mesh/icon
+/// assets are pulled and their paths get the same local → `db:` rewrite. Producer-only: network
 /// uploads never reach this path (a server has no filesystem to read from).
 pub fn ingest_window_schematics(
     assets_dir: &Path,
     content: &str,
     search_dirs: &[PathBuf],
 ) -> io::Result<Option<String>> {
+    let source_roots = recorded_source_roots(assets_dir);
     let mut ingest = WindowIngest {
         assets_dir,
         search_dirs,
+        source_roots: &source_roots,
         file_keys: HashMap::new(),
         reserved_inline_keys: HashSet::new(),
     };
@@ -409,6 +545,8 @@ fn inline_window_stem(title: &str) -> String {
 struct WindowIngest<'a> {
     assets_dir: &'a Path,
     search_dirs: &'a [PathBuf],
+    /// Where ingested windows pull their referenced assets from.
+    source_roots: &'a [PathBuf],
     /// Canonical source file → assigned asset key. Doubles as the cycle guard:
     /// a key is recorded *before* the file's own references are followed, so
     /// mutually referencing windows terminate with each other's key.
@@ -482,7 +620,7 @@ impl WindowIngest<'_> {
                 });
             }
             let bytes = impeller_kdl::serialize_schematic(&stored);
-            write_uploaded_asset(self.assets_dir, &key, bytes.as_bytes())?;
+            write_asset_with_sources(self.assets_dir, &key, bytes.as_bytes(), self.source_roots)?;
             tracing::info!(
                 key = %key,
                 title = ?window.title,
@@ -561,7 +699,7 @@ impl WindowIngest<'_> {
             bytes = rewritten.into_bytes();
         }
 
-        write_uploaded_asset(self.assets_dir, &key, &bytes)?;
+        write_asset_with_sources(self.assets_dir, &key, &bytes, self.source_roots)?;
         tracing::info!(
             source = %canonical.display(),
             key = %key,
@@ -751,11 +889,15 @@ mod tests {
         write(&cwd_assets.join("meshes/rocket.glb"), b"cwd");
         write(&sim_assets.join("meshes/rocket.glb"), b"sim");
         write(&sim_assets.join("overlays/sites.json"), b"{}");
+        write(
+            &sim_assets.join("schematics/main.kdl"),
+            format!("{ROCKET_KDL}map_overlay path=\"overlays/sites.json\"\n").as_bytes(),
+        );
 
         let db = dir.path().join("db");
         let report = ingest_asset_dirs(&db, &[cwd_assets, sim_assets]).unwrap();
 
-        assert_eq!(report.file_count, 2);
+        assert_eq!(report.file_count, 3);
         let assets = assets_dir(&db);
         assert_eq!(
             std::fs::read(assets.join("meshes/rocket.glb")).unwrap(),
@@ -798,36 +940,163 @@ mod tests {
         );
     }
 
+    const ROCKET_KDL: &str =
+        "object_3d \"rocket.world_pos\" {\n    glb path=\"meshes/rocket.glb\"\n}\n";
+
     #[test]
-    fn ingest_copies_whole_tree_preserving_paths() {
+    fn ingest_copies_schematics_and_referenced_assets_only() {
         let dir = tempdir().unwrap();
         let src = dir.path().join("src_assets");
         write(&src.join("meshes/rocket.glb"), b"glb");
-        write(&src.join("schematics/main.kdl"), b"kdl");
+        write(&src.join("meshes/unused.glb"), b"unused");
+        write(&src.join("schematics/main.kdl"), ROCKET_KDL.as_bytes());
         write(&src.join("terrains/planar/region.toml"), b"toml");
 
         let db = dir.path().join("db");
         let report = ingest_asset_dir(&db, &src).unwrap();
         assert!(!report.skipped);
-        assert_eq!(report.file_count, 3);
-        assert_eq!(
-            report.byte_count,
-            (b"glb".len() + b"kdl".len() + b"toml".len()) as u64
-        );
+        assert_eq!(report.file_count, 2);
+        assert_eq!(report.source_roots, vec![src.canonicalize().unwrap()]);
 
         let assets = assets_dir(&db);
         assert_eq!(
             std::fs::read(assets.join("meshes/rocket.glb")).unwrap(),
             b"glb"
         );
+        let main = std::fs::read_to_string(assets.join("schematics/main.kdl")).unwrap();
+        assert!(main.contains("db:meshes/rocket.glb"), "got:\n{main}");
+        assert!(!assets.join("meshes/unused.glb").exists());
+        assert!(!assets.join("terrains").exists());
+    }
+
+    #[test]
+    fn relative_source_roots_survive_a_later_cwd_change() {
+        let dir = tempdir().unwrap();
+        let project = dir.path().join("project");
+        let cwd_assets = project.join("assets");
+        let entry_assets = project.join("examples/sim/assets");
+        write(&cwd_assets.join("meshes/from_cwd.glb"), b"cwd");
+        write(&entry_assets.join("meshes/from_entry.glb"), b"entry");
+        let db = dir.path().join("db");
+
+        // `--assets ./assets` and an entry-relative `assets/` folder.
+        with_cwd(&project, || {
+            ingest_asset_dirs(
+                &db,
+                &[
+                    PathBuf::from("./assets"),
+                    PathBuf::from("examples/sim/assets"),
+                ],
+            )
+            .unwrap();
+        });
+
+        let report = ingest_report(&db).unwrap();
         assert_eq!(
-            std::fs::read(assets.join("schematics/main.kdl")).unwrap(),
-            b"kdl"
+            report.source_roots,
+            vec![
+                cwd_assets.canonicalize().unwrap(),
+                entry_assets.canonicalize().unwrap(),
+            ]
+        );
+
+        let elsewhere = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let kdl = "\
+object_3d \"a.world_pos\" {\n    glb path=\"meshes/from_cwd.glb\"\n}\n\
+object_3d \"b.world_pos\" {\n    glb path=\"meshes/from_entry.glb\"\n}\n";
+        with_cwd(&elsewhere, || {
+            write_uploaded_asset(&assets_dir(&db), "schematics/main.kdl", kdl.as_bytes()).unwrap();
+        });
+
+        let assets = assets_dir(&db);
+        assert_eq!(
+            std::fs::read(assets.join("meshes/from_cwd.glb")).unwrap(),
+            b"cwd"
         );
         assert_eq!(
-            std::fs::read(assets.join("terrains/planar/region.toml")).unwrap(),
-            b"toml"
+            std::fs::read(assets.join("meshes/from_entry.glb")).unwrap(),
+            b"entry"
         );
+        let main = std::fs::read_to_string(assets.join("schematics/main.kdl")).unwrap();
+        assert!(main.contains("db:meshes/from_cwd.glb"), "{main}");
+        assert!(main.contains("db:meshes/from_entry.glb"), "{main}");
+    }
+
+    #[test]
+    fn schematic_stored_after_ingest_pulls_its_assets_from_recorded_sources() {
+        let dir = tempdir().unwrap();
+        // Aleph: the seeded tree has no schematics; one arrives over the network later.
+        let src = dir.path().join("src_assets");
+        write(&src.join("meshes/rocket.glb"), b"glb");
+        write(&src.join("meshes/unused.glb"), b"unused");
+        let db = dir.path().join("db");
+        let report = ingest_asset_dir(&db, &src).unwrap();
+        assert!(!report.skipped);
+        assert_eq!(report.file_count, 0);
+        assert!(assets_ingested(&db));
+
+        let assets = assets_dir(&db);
+        write_uploaded_asset(&assets, "schematics/main.kdl", ROCKET_KDL.as_bytes()).unwrap();
+
+        assert_eq!(
+            std::fs::read(assets.join("meshes/rocket.glb")).unwrap(),
+            b"glb"
+        );
+        assert!(!assets.join("meshes/unused.glb").exists());
+        let main = std::fs::read_to_string(assets.join("schematics/main.kdl")).unwrap();
+        assert!(main.contains("db:meshes/rocket.glb"), "got:\n{main}");
+
+        // A stored asset is never overwritten by a changed source.
+        write(&src.join("meshes/rocket.glb"), b"changed");
+        write_uploaded_asset(&assets, "schematics/alt.kdl", ROCKET_KDL.as_bytes()).unwrap();
+        assert_eq!(
+            std::fs::read(assets.join("meshes/rocket.glb")).unwrap(),
+            b"glb"
+        );
+    }
+
+    #[test]
+    fn ingest_pulls_active_skybox_cubemap_only() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src_assets");
+        let manifest = r#"(
+    entries: [
+        (name: "desert_night", cubemap_file: "desert_night.cubemap.ktx2"),
+        (name: "ocean", cubemap_file: "ocean.cubemap.ktx2"),
+    ],
+)"#;
+        write(&src.join("skyboxes/manifest.ron"), manifest.as_bytes());
+        write(&src.join("skyboxes/desert_night.cubemap.ktx2"), b"ktx2");
+        write(&src.join("skyboxes/ocean.cubemap.ktx2"), b"ktx2");
+        write(
+            &src.join("schematics/main.kdl"),
+            b"skybox name=\"desert_night\"\n",
+        );
+
+        let db = dir.path().join("db");
+        ingest_asset_dir(&db, &src).unwrap();
+
+        let assets = assets_dir(&db);
+        assert!(assets.join("skyboxes/manifest.ron").is_file());
+        assert!(assets.join("skyboxes/desert_night.cubemap.ktx2").is_file());
+        assert!(!assets.join("skyboxes/ocean.cubemap.ktx2").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn pull_refuses_symlinks_escaping_the_source_root() {
+        let dir = tempdir().unwrap();
+        let src = dir.path().join("src_assets");
+        write(&dir.path().join("secret.glb"), b"secret");
+        std::fs::create_dir_all(&src).unwrap();
+        std::os::unix::fs::symlink(dir.path().join("secret.glb"), src.join("link.glb")).unwrap();
+        let assets = dir.path().join("db/assets");
+        std::fs::create_dir_all(&assets).unwrap();
+
+        let kdl = "object_3d \"a.world_pos\" {\n    glb path=\"link.glb\"\n}\n";
+        pull_referenced_assets(&assets, kdl, &[src]).unwrap();
+        assert!(!assets.join("link.glb").exists());
     }
 
     #[test]
@@ -835,6 +1104,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let src = dir.path().join("src_assets");
         write(&src.join("meshes/rocket.glb"), b"glb");
+        write(&src.join("schematics/main.kdl"), ROCKET_KDL.as_bytes());
         let db = dir.path().join("db");
 
         let first = ingest_asset_dir(&db, &src).unwrap();
@@ -895,12 +1165,13 @@ mod tests {
         assert!(!assets_ingested(&db));
 
         let src = dir.path().join("src_assets");
-        write(&src.join("meshes/new.glb"), b"new");
+        write(&src.join("meshes/rocket.glb"), b"new");
+        write(&src.join("schematics/main.kdl"), ROCKET_KDL.as_bytes());
         let report = ingest_asset_dir(&db, &src).unwrap();
 
         assert!(!report.skipped);
-        assert_eq!(report.file_count, 1);
-        assert!(dest.join("meshes/new.glb").is_file());
+        assert_eq!(report.file_count, 2);
+        assert!(dest.join("meshes/rocket.glb").is_file());
         assert!(
             !dest.join(".leftover").exists(),
             "dotfile-only leftovers are cleared by a clean seed"
@@ -928,9 +1199,10 @@ mod tests {
         // The host tree is populated later (e.g. Aleph seed): the next run
         // must ingest for real.
         write(&src.join("meshes/rocket.glb"), b"glb");
+        write(&src.join("schematics/main.kdl"), ROCKET_KDL.as_bytes());
         let second = ingest_asset_dir(&db, &src).unwrap();
         assert!(!second.skipped, "populated source must now be ingested");
-        assert_eq!(second.file_count, 1);
+        assert_eq!(second.file_count, 2);
         assert!(assets_ingested(&db));
         assert_eq!(
             std::fs::read(assets_dir(&db).join("meshes/rocket.glb")).unwrap(),
@@ -957,18 +1229,19 @@ mod tests {
         let src = dir.path().join("src_assets");
         // A source tree that happens to contain a file with the marker's name.
         write(&src.join(INGEST_MARKER), b"not-our-marker");
-        write(&src.join("meshes/a.glb"), b"a");
+        write(&src.join("meshes/rocket.glb"), b"a");
+        write(&src.join("schematics/main.kdl"), ROCKET_KDL.as_bytes());
 
         let db = dir.path().join("db");
         let report = ingest_asset_dir(&db, &src).unwrap();
         assert!(!report.skipped);
         // The marker-named source file is excluded from the copy.
-        assert_eq!(report.file_count, 1);
-        assert!(assets_dir(&db).join("meshes/a.glb").is_file());
+        assert_eq!(report.file_count, 2);
+        assert!(assets_dir(&db).join("meshes/rocket.glb").is_file());
 
         // The committed marker is our report, not the source file's content.
         let stored = ingest_report(&db).expect("marker should parse as our report");
-        assert_eq!(stored.file_count, 1);
+        assert_eq!(stored.file_count, 2);
 
         // And copy-once still holds afterwards.
         let second = ingest_asset_dir(&db, &src).unwrap();
@@ -982,14 +1255,21 @@ mod tests {
         // A source file under the `__index__` listing namespace would be shadowed
         // by the index route, so it must be dropped rather than stored.
         write(&src.join("__index__/foo.glb"), b"shadow");
-        write(&src.join("meshes/a.glb"), b"a");
+        write(&src.join("meshes/rocket.glb"), b"a");
+        write(
+            &src.join("schematics/main.kdl"),
+            format!(
+                "{ROCKET_KDL}object_3d \"b.world_pos\" {{\n    glb path=\"__index__/foo.glb\"\n}}\n"
+            )
+            .as_bytes(),
+        );
 
         let db = dir.path().join("db");
         let report = ingest_asset_dir(&db, &src).unwrap();
         assert!(!report.skipped);
         // Only the real asset is copied; the reserved key is dropped.
-        assert_eq!(report.file_count, 1);
-        assert!(assets_dir(&db).join("meshes/a.glb").is_file());
+        assert_eq!(report.file_count, 2);
+        assert!(assets_dir(&db).join("meshes/rocket.glb").is_file());
         assert!(!assets_dir(&db).join("__index__/foo.glb").exists());
     }
 
@@ -1187,7 +1467,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let src = dir.path().join("src_assets");
         write(&src.join("meshes/rocket.glb"), b"glb");
-        write(&src.join("schematics/main.kdl"), b"kdl");
+        write(&src.join("schematics/main.kdl"), ROCKET_KDL.as_bytes());
         write(&src.join("schematics/overview.kdl"), b"kdl2");
         let db = dir.path().join("db");
         ingest_asset_dir(&db, &src).unwrap();
@@ -1332,6 +1612,7 @@ mod tests {
                 let mut ingest = WindowIngest {
                     assets_dir: &assets,
                     search_dirs: &[],
+                    source_roots: &[],
                     file_keys: HashMap::new(),
                     reserved_inline_keys: HashSet::new(),
                 };
@@ -1535,6 +1816,23 @@ mod tests {
             dirs.iter().any(|d| d == dir.path()),
             "ancestors of the entry dir must be searched (repo-root-relative refs)"
         );
+    }
+
+    /// Run `body` with the process cwd set to `path`, then restore it.
+    fn with_cwd<T>(path: &Path, body: impl FnOnce() -> T) -> T {
+        use std::sync::Mutex;
+        static LOCK: Mutex<()> = Mutex::new(());
+        let _lock = LOCK.lock().unwrap_or_else(|err| err.into_inner());
+        let previous = std::env::current_dir().unwrap();
+        std::env::set_current_dir(path).unwrap();
+        struct Restore(PathBuf);
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                let _ = std::env::set_current_dir(&self.0);
+            }
+        }
+        let _restore = Restore(previous);
+        body()
     }
 
     /// Serialize env access for the two tests that read `ELODIN_ASSETS`.

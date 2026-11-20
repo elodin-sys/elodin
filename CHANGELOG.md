@@ -24,6 +24,7 @@
 - **(fix)** Compile Cranelift systems whose helper returns the same value for more than one output.
 - **(fix)** Real-time simulations with a pacing lead start at wall-clock speed instead of sprinting through the lead interval.
 - **(fix)** The render server no longer warns every second that a sensor camera that does not move has a stale pose. Its pose is recorded only when it changes, so its last sample stays current.
+- **(feat)** A new database copies only its source `assets/` folder's schematics and the files they reference, and later schematic stores copy their own missing references, instead of copying the whole folder. A recording from the repository root no longer carries 3 GB of unused terrain.
 - **(fix)** Recording looks for assets in `./assets`, then the simulation's own `assets/`, then the nearest `assets/` above it, so assets such as the Falcon 9 map overlays load when the simulation runs from the repository root. Earlier folders win when a file exists in several.
 - **(doc)** Note in the quickstart that the macOS CLI needs Homebrew's `ffmpeg@8` at runtime.
 

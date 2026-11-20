@@ -136,9 +136,10 @@ const ACTIVE_SCHEMATIC_KEY: &str = "schematics/main.kdl";
 /// Ingest the source `assets/` trees into `{db}/assets/` once and register the
 /// generated schematic as a stored asset (RFD #724).
 ///
-/// The DB owns all KDL handling: `ingest_asset_dirs` copies the trees and
-/// rewrites local asset paths to `db:`, and `store_asset` rewrites the active
-/// schematic the same way. This producer does no KDL parsing or rewriting and
+/// The DB owns all KDL handling: `ingest_asset_dirs` copies the trees'
+/// schematics and the assets they reference, rewriting local asset paths to
+/// `db:`, and `store_asset` pulls and rewrites the active schematic's assets the
+/// same way. This producer does no KDL parsing or rewriting and
 /// never mutates `world.metadata.schematic`. Call once before starting the DB
 /// Asset Server so early HTTP requests do not 404.
 ///
@@ -2114,7 +2115,7 @@ mod asset_tests {
         let _guard = EnvVarGuard::set("ELODIN_ASSETS", assets.to_str().unwrap());
         prime_schematic_assets(&db, &world, None).unwrap();
 
-        // The whole source tree is copied into the DB once.
+        // The referenced asset is copied into the DB.
         let stored = elodin_db::assets_http::assets_dir(&db.path);
         assert_eq!(
             std::fs::read(stored.join("meshes/rocket.glb")).unwrap(),
@@ -2197,7 +2198,9 @@ mod asset_tests {
         std::fs::write(assets.join("rocket.glb"), b"v1").unwrap();
 
         let db = elodin_db::DB::create(dir.path().join("db")).unwrap();
-        let world = World::default();
+        let mut world = World::default();
+        world.metadata.schematic =
+            Some("object_3d \"rocket.world_pos\" {\n    glb path=\"rocket.glb\"\n}\n".to_string());
 
         let _guard = EnvVarGuard::set("ELODIN_ASSETS", assets.to_str().unwrap());
         prime_schematic_assets(&db, &world, None).unwrap();
@@ -2462,7 +2465,10 @@ mod asset_tests {
         std::fs::write(&entry, b"# sim").unwrap();
 
         let db = elodin_db::DB::create(dir.path().join("db")).unwrap();
-        let world = World::default();
+        let mut world = World::default();
+        world.metadata.schematic = Some(
+            "object_3d \"rocket.world_pos\" {\n    glb path=\"meshes/rocket.glb\"\n}\n".to_string(),
+        );
         prime_schematic_assets(&db, &world, Some(&entry)).unwrap();
 
         let stored = elodin_db::assets_http::assets_dir(&db.path);

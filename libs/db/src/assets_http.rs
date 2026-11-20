@@ -640,9 +640,10 @@ async fn get_asset(
             res
         }
         Ok(Err(err)) if err.kind() == io::ErrorKind::NotFound => {
-            // A 404 is a routine client outcome (e.g. a mirror polling for an
-            // asset still being uploaded), not a server fault — log at info.
-            tracing::info!(asset = %path, "asset http 404 (not found)");
+            // Followers poll for an asset that is still uploading, so this is
+            // not a server fault. It is still a missing asset: keep it at warn
+            // so a playback log shows the key that was not collected.
+            tracing::warn!(asset = %path, "missing asset: asset http 404");
             StatusCode::NOT_FOUND.into_response()
         }
         Ok(Err(err)) => {

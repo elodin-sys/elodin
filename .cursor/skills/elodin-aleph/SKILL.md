@@ -169,7 +169,7 @@ Built by Nix (`aleph/pkgs/c-blinky.nix`) using `arm-none-eabi-gcc`. Produces `fi
 
 The `elodin-db.nix` module defaults to `dbUniqueOnBoot = true`, creating a fresh timestamped elodin-db instance on each deploy/boot at `/db/default-YYYYMMDD-HHMMSS` on port 2240. The `elodin-db-default` oneshot manages the lifecycle: it stops any old `elodin-db@*` template instances and waits for port 2240 to be free before starting the new one. The template service has `stopIfChanged = false; restartIfChanged = false` so NixOS activation never races with it. Set `dbUniqueOnBoot = false` for a single persistent `/db/default` instance.
 
-Each fresh database ingests the shared asset root (`services.elodin-db.assetsDir`, default `/var/lib/elodin/assets` — the `ELODIN_ASSETS` tree seeded by the `elodin` module) via `elodin-db run --assets`, so a HITL recording carries its schematic assets under `{db}/assets/` and is a complete, portable record: copy the `/db/default-*` directory off the vehicle and serve it anywhere with `elodin-db run`. Set `assetsDir = null` to disable ingest.
+Each fresh database records the shared asset root (`services.elodin-db.assetsDir`, default `/var/lib/elodin/assets` — the `ELODIN_ASSETS` tree seeded by the `elodin` module) as its asset source via `elodin-db run --assets` and copies in the files its schematics reference, so a HITL recording carries its schematic assets under `{db}/assets/` and is a complete, portable record: copy the `/db/default-*` directory off the vehicle and serve it anywhere with `elodin-db run`. Set `assetsDir = null` to disable ingest.
 
 Connect from a development machine: `elodin editor <aleph-ip>:2240`
 

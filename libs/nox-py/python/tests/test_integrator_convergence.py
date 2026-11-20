@@ -293,7 +293,7 @@ def observed_orders(method: str, case: str, metric: str) -> list[float | None]:
 
 @pytest.fixture(autouse=True)
 def _skip_asset_ingest(monkeypatch, tmp_path):
-    # Each built world would otherwise copy the repository's ~1 GB assets/ into its database.
+    # Keep each built world's database from scanning the repository's large assets/ tree.
     monkeypatch.setenv("ELODIN_ASSETS", str(tmp_path))
 
 
