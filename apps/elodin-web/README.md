@@ -72,6 +72,28 @@ just web http://127.0.0.1:3241
 Stop `elodin run` before starting a different example, and reload the page.
 The editor keeps the connection it opened with the document until then.
 
+## Screenshots
+
+After the editor dispatches `elodin-ready`, a host page can capture the window:
+
+```ts
+interface Elodin {
+  captureScreenshot(): Promise<Blob>; // image/png of the full editor canvas
+}
+declare var elodin: Elodin;
+```
+
+`elodin.captureScreenshot()` resolves to an `image/png` blob of the editor canvas,
+including the 3D view and panels. A failed readback or encode rejects with an
+`Error`.
+
+[`screenshot.html`](screenshot.html) is a button and a thumbnail strip that call
+this. Serve it with the database asset URL:
+
+```sh
+just web-screenshot http://127.0.0.1:2241
+```
+
 ## Platform boundary
 
 The editor adapts Bevy's shadow comparison sampling for WebGPU while keeping
