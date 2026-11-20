@@ -139,7 +139,10 @@ impl TerrainStartup {
     }
 
     pub(crate) fn update(&mut self, status: &CesiumStatus) {
-        self.has_tiles = status.visible_tiles > 0;
+        // Surface ownership belongs to this source, not the current camera view.
+        // Looking away or swapping LODs must not rebuild the Earth rig after an
+        // unrelated provider error. A new source gets a fresh TerrainStartup.
+        self.has_tiles |= status.visible_tiles > 0;
         if self.ready || self.error.is_some() {
             return;
         }
@@ -1010,10 +1013,10 @@ mod coordinate_tests {
         assert!(playback_ready(app.world()));
         assert!(!app.world().contains_resource::<CesiumSourceUpdate>());
         assert_eq!(capture_ready(app.world()), Err("HTTP request failed"));
-        // A delayed local tile may arrive after the failed remote request.
+        // Looking away or swapping LODs must not relinquish the surface.
         app.world_mut().resource_mut::<CesiumStatus>().visible_tiles = 0;
         app.update();
-        assert!(!app.world().resource::<TerrainStartup>().owns_surface());
+        assert!(app.world().resource::<TerrainStartup>().owns_surface());
         app.world_mut().resource_mut::<CesiumStatus>().visible_tiles = 1;
         app.update();
         assert!(app.world().resource::<TerrainStartup>().owns_surface());
