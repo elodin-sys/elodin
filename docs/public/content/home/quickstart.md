@@ -30,6 +30,14 @@ curl --proto '=https' --tlsv1.2 -LsSf https://github.com/elodin-sys/elodin/relea
 curl --proto '=https' --tlsv1.2 -LsSf https://github.com/elodin-sys/elodin/releases/latest/download/elodin-db-installer.sh | sh
 ```
 
+{% alert(kind="info") %}
+On macOS, the `elodin` CLI also needs FFmpeg 8 from Homebrew. Without it, `elodin` exits at launch with `Library not loaded: /opt/homebrew/opt/ffmpeg@8/lib/libavutil.60.dylib`. Install it with:
+{% end %}
+
+```sh
+brew install ffmpeg@8
+```
+
 On Windows, download and run the latest `elodin-x86_64-pc-windows-msvc.msi` from the [releases page](https://github.com/elodin-sys/elodin/releases/latest).
 
 Verify the install:

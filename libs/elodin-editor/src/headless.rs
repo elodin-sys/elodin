@@ -130,6 +130,7 @@ impl Plugin for HeadlessEditorPlugin {
             .add_plugins(crate::plugins::world_mesh::EditorWorldMeshPlugin)
             .add_plugins(crate::rim_glow_material::RimGlowMaterialPlugin);
         app.add_plugins(crate::plugins::cesium::CesiumPlugin);
+        app.add_plugins(crate::object_3d::Object3DAnimationPlugin);
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(crate::plugins::display_kernel::DisplayKernelPlugin);
         app.add_plugins(crate::plugins::scene_environment::SceneEnvironmentPlugin);

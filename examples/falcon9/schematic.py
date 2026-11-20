@@ -23,6 +23,27 @@ from constants import PAD_ALT_M, PAD_LAT_DEG, PAD_LON_DEG, TERRAIN_MODE
 from elodin import ui
 from terrain_coverage import regions as terrain_regions
 
+
+def grid_fin_animations():
+    # GLB azimuth order is 315, 225, 135, 45 degrees; aero order is reversed.
+    # Negative local X opens each hinge outward. Local Y is the radial steering axis.
+    joints = []
+    for suffix, index in [("", 3), (".001", 2), (".002", 1), (".003", 0)]:
+        joints.extend(
+            [
+                ui.joint(
+                    f"grid_fin_deploy{suffix}_f9-v1.2_rig",
+                    "(booster.fin_deploy[0] * -57.29577951308232, 0, 0)",
+                ),
+                ui.joint(
+                    f"grid_fin_tilt{suffix}_f9-v1.2_rig",
+                    f"(0, booster.fin_state[{index}] * 57.29577951308232, 0)",
+                ),
+            ]
+        )
+    return joints
+
+
 TERRAIN = {
     "legacy": None,
     "aerial": el.Terrain.aerial(),
@@ -32,7 +53,16 @@ if terrain_asset := os.environ.get("FALCON9_TERRAIN_ASSET"):
     TERRAIN = el.Terrain.from_asset(terrain_asset)
 
 
-def build() -> ui.Schematic:
+def build(*, include_upper_stage: bool = True) -> ui.Schematic:
+    upper_stage_objects = []
+    if include_upper_stage:
+        upper_stage_objects.append(
+            ui.object_3d(
+                "booster.upper_stage_visual_pos",
+                mesh=ui.glb("falcon9-upper-stage.glb", scale=0.9944, rotate=(0.0, 0.0, -90.0)),
+                orientation="absolute",
+            )
+        )
     return ui.schematic(
         ui.vsplit(
             ui.hsplit(
@@ -166,7 +196,7 @@ def build() -> ui.Schematic:
         ui.object_3d(
             "booster.visual_pos",
             mesh=ui.glb(
-                "falcon9.glb",
+                "falcon9-booster.glb",
                 scale=0.9944,
                 translate=(0.0, 0.0, 0.0),
                 rotate=(0.0, 0.0, -90.0),
@@ -174,6 +204,7 @@ def build() -> ui.Schematic:
                 glow=0.0,
             ),
             orientation="absolute",
+            animate=grid_fin_animations(),
             icon=ui.icon(
                 builtin="rocket_launch",
                 color=ui.color(
@@ -335,6 +366,9 @@ def build() -> ui.Schematic:
                 ),
             ],
         ),
+        # The booster remains the camera/effects anchor throughout the flight.
+        # The upper stage has its own recorded visual pose after separation.
+        *upper_stage_objects,
         ui.object_3d(
             "booster_truth.world_pos",
             mesh=ui.sphere(
