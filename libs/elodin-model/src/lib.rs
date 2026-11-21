@@ -6,12 +6,13 @@
 use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::ptr;
+use std::sync::Mutex;
 
-use cranelift_mlir::lower::CompiledModule;
+use cranelift_mlir::display_kernel::DisplayKernelExec;
 use serde::Deserialize;
 
-/// The exported step: one buffer per component in, the next state's buffers out.
-type StepFn = unsafe extern "C" fn(*const *const u8, *mut *mut u8);
+/// One tick: a buffer per component in, the next state's buffers out, never overlapping.
+type Step = Box<dyn Fn(&[&[u8]], &mut [&mut [u8]]) -> Result<(), String>>;
 
 #[derive(Deserialize)]
 struct Schema {
@@ -34,9 +35,7 @@ struct Component {
 pub struct Program {
     components: Vec<Component>,
     initial: Vec<Vec<u8>>,
-    step: StepFn,
-    /// Owns the JIT code `step` points into.
-    _jit: Option<CompiledModule>,
+    step: Step,
 }
 
 /// The components `schema` describes, each with its initial value from `state`.
@@ -76,25 +75,19 @@ fn dtype_size(dtype: &str) -> Result<usize, String> {
 
 impl Program {
     /// A program whose `step` handles the components `schema` describes.
-    fn new(
-        schema: &str,
-        state: &[u8],
-        step: StepFn,
-        jit: Option<CompiledModule>,
-    ) -> Result<Self, String> {
+    fn new(schema: &str, state: &[u8], step: Step) -> Result<Self, String> {
         let (components, initial) = layout(schema, state)?;
         Ok(Self {
             components,
             initial,
             step,
-            _jit: jit,
         })
     }
 
     /// Compiles `mlir`, whose `main` must map the state `schema` describes to its next value.
     fn jit(mlir: &str, schema: &str, state: &[u8]) -> Result<Self, String> {
         let (components, _) = layout(schema, state)?;
-        let mut module = cranelift_mlir::parser::parse_module(mlir)
+        let module = cranelift_mlir::parser::parse_module(mlir)
             .map_err(|e| format!("StableHLO parse failed: {e}"))?;
         let main = module.main_func().ok_or("the StableHLO has no main")?;
         let sizes: Vec<usize> = components.iter().map(|c| c.size).collect();
@@ -105,12 +98,12 @@ impl Program {
                 "main does not map the state schema.json describes to its next value".into(),
             );
         }
-        cranelift_mlir::const_fold::fold_module(&mut module);
-        let compiled = cranelift_mlir::lower::compile_module(&module)
-            .map_err(|e| format!("Cranelift compile failed: {e}"))?;
-        // Safety: Cranelift compiles `main` to `StepFn`, and `_jit` keeps its code alive.
-        let step = unsafe { std::mem::transmute::<*const u8, StepFn>(compiled.get_main_fn()) };
-        Self::new(schema, state, step, Some(compiled))
+        let exec = Mutex::new(DisplayKernelExec::compile(mlir, &sizes, &sizes)?);
+        let step = move |inputs: &[&[u8]], outputs: &mut [&mut [u8]]| {
+            let mut exec = exec.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            exec.invoke(inputs, outputs).map_err(|e| e.to_string())
+        };
+        Self::new(schema, state, Box::new(step))
     }
 
     fn index(&self, name: &CStr) -> Option<usize> {
@@ -126,19 +119,14 @@ pub struct Instance<'a> {
     state: Vec<Vec<u8>>,
     /// Where the step writes, since its outputs must not overlap its inputs.
     next: Vec<Vec<u8>>,
-    inputs: Vec<*const u8>,
-    outputs: Vec<*mut u8>,
 }
 
 impl<'a> Instance<'a> {
     fn new(program: &'a Program) -> Self {
-        let count = program.components.len();
         Self {
             program,
             state: program.initial.clone(),
             next: program.initial.clone(),
-            inputs: vec![ptr::null(); count],
-            outputs: vec![ptr::null_mut(); count],
         }
     }
 
@@ -146,17 +134,12 @@ impl<'a> Instance<'a> {
         self.state.clone_from(&self.program.initial);
     }
 
-    fn step(&mut self) {
-        for (input, buffer) in self.inputs.iter_mut().zip(&self.state) {
-            *input = buffer.as_ptr();
-        }
-        for (output, buffer) in self.outputs.iter_mut().zip(&mut self.next) {
-            *output = buffer.as_mut_ptr();
-        }
-        // Safety: the step reads one buffer per component, of the sizes the program's schema
-        // gives, and writes the next state into separate buffers of the same sizes.
-        unsafe { (self.program.step)(self.inputs.as_ptr(), self.outputs.as_mut_ptr()) };
+    fn step(&mut self) -> Result<(), String> {
+        let inputs: Vec<&[u8]> = self.state.iter().map(Vec::as_slice).collect();
+        let mut outputs: Vec<&mut [u8]> = self.next.iter_mut().map(Vec::as_mut_slice).collect();
+        (self.program.step)(&inputs, &mut outputs)?;
         std::mem::swap(&mut self.state, &mut self.next);
+        Ok(())
     }
 
     fn component(&self, component: usize, size: usize) -> Result<usize, String> {
@@ -194,7 +177,7 @@ const STATE: &[u8] = include_bytes!(concat!(env!("ELODIN_MODEL_DIR"), "/state.bi
 
 #[cfg(elodin_model = "aot")]
 fn open() -> Result<Program, String> {
-    Program::new(SCHEMA, STATE, aot::step()?, None)
+    Program::new(SCHEMA, STATE, aot::step()?)
 }
 
 #[cfg(elodin_model = "jit")]
@@ -215,7 +198,7 @@ mod aot {
     use std::ffi::{CStr, c_char};
     use std::sync::OnceLock;
 
-    use super::StepFn;
+    use super::Step;
 
     unsafe extern "C" {
         fn elodin_model_kernel_step(inputs: *const *const u8, outputs: *mut *mut u8);
@@ -224,12 +207,19 @@ mod aot {
         static mut elodin_model_kernel_imports: *const u8;
     }
 
-    pub fn step() -> Result<StepFn, String> {
+    pub fn step() -> Result<Step, String> {
         static BOUND: OnceLock<Result<(), String>> = OnceLock::new();
         // Safety: the table and names are the object's, and `OnceLock` writes the table once,
         // before any step can read it.
         BOUND.get_or_init(|| unsafe { bind() }).clone()?;
-        Ok(elodin_model_kernel_step)
+        Ok(Box::new(|inputs: &[&[u8]], outputs: &mut [&mut [u8]]| {
+            let inputs: Vec<*const u8> = inputs.iter().map(|b| b.as_ptr()).collect();
+            let mut outputs: Vec<*mut u8> = outputs.iter_mut().map(|b| b.as_mut_ptr()).collect();
+            // Safety: `Program` passes a buffer per component of the schema `step.o` was
+            // exported with, sized by it, and outputs separate from the inputs.
+            unsafe { elodin_model_kernel_step(inputs.as_ptr(), outputs.as_mut_ptr()) };
+            Ok(())
+        }))
     }
 
     /// # Safety
@@ -386,8 +376,8 @@ pub unsafe extern "C" fn elodin_model_reset(instance: *mut Instance<'static>) {
 ///
 /// `instance` is from `elodin_model_create`, and no other thread uses it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn elodin_model_step(instance: *mut Instance<'static>) {
-    unsafe { &mut *instance }.step();
+pub unsafe extern "C" fn elodin_model_step(instance: *mut Instance<'static>) -> c_int {
+    status(unsafe { &mut *instance }.step())
 }
 
 /// # Safety
@@ -490,9 +480,9 @@ module @module {
     fn steps_carry_state_and_inputs() {
         let program = rooms();
         let mut a = Instance::new(&program);
-        a.step();
+        a.step().unwrap();
         assert_eq!(f64s(&a, 1), [22.0, 26.0]);
-        a.step();
+        a.step().unwrap();
         assert_eq!(f64s(&a, 1), [23.5, 24.5]);
         assert_eq!(f64s(&a, 2), [28.0, 20.0]);
 
@@ -501,7 +491,7 @@ module @module {
             .flat_map(|v| v.to_le_bytes())
             .collect();
         a.write(2, &ambient).unwrap();
-        a.step();
+        a.step().unwrap();
         assert_eq!(f64s(&a, 1), [25.125, 23.875]);
         assert_eq!(tick(&a), 3);
     }
@@ -510,16 +500,16 @@ module @module {
     fn instances_are_independent_and_reset() {
         let program = rooms();
         let mut a = Instance::new(&program);
-        a.step();
-        a.step();
+        a.step().unwrap();
+        a.step().unwrap();
         let mut b = Instance::new(&program);
-        b.step();
+        b.step().unwrap();
         assert_eq!(f64s(&b, 1), [22.0, 26.0]);
         assert_eq!(tick(&a), 2);
 
         a.reset();
         assert_eq!(tick(&a), 0);
-        a.step();
+        a.step().unwrap();
         assert_eq!(f64s(&a, 1), [22.0, 26.0]);
     }
 

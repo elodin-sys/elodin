@@ -24,7 +24,8 @@ typedef struct ElodinModelInstance ElodinModelInstance;
 /* Why the last failing call on this thread failed. Valid until the next failure. */
 const char *elodin_model_error(void);
 
-/* "aot" when the model's code was compiled before delivery, "jit" when compiled at open. */
+/* "aot" when the model's code was compiled before delivery, "jit" when compiled at open, "none"
+ * when the library was built without a model. */
 const char *elodin_model_backend(void);
 
 /* NULL on failure. */
@@ -44,8 +45,8 @@ ElodinModelInstance *elodin_model_create(const ElodinModelProgram *program);
 void elodin_model_destroy(ElodinModelInstance *instance);
 /* Back to the initial state. */
 void elodin_model_reset(ElodinModelInstance *instance);
-/* Advances the run by one tick. */
-void elodin_model_step(ElodinModelInstance *instance);
+/* Advances the run by one tick. 0 on success. */
+int elodin_model_step(ElodinModelInstance *instance);
 
 /* 0 on success; nonzero, with nothing copied, if `component` or `size` does not match. */
 int elodin_model_read(const ElodinModelInstance *instance, size_t component, void *dst, size_t size);

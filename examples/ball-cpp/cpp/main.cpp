@@ -81,7 +81,8 @@ int main(int argc, char** argv)
         std::fprintf(out, "\n");
         if (tick == ticks)
             break;
-        elodin_model_step(ball.get());
+        if (elodin_model_step(ball.get()))
+            fail("step");
     }
     std::fclose(out);
 

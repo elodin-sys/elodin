@@ -48,15 +48,15 @@ for path, values in native.items():
     if values.shape != (ticks + 1, 14):
         sys.exit(f"{path} holds {values.shape} values, expected {(ticks + 1, 14)}")
     difference = np.abs(values[:, 1:] - elodin)
-    largest = difference.max()
-    worst = np.unravel_index(difference.argmax(), difference.shape)
+    worst = np.unravel_index(np.nanargmax(np.nan_to_num(difference, nan=np.inf)), difference.shape)
     exact = np.array_equal(values[:, 1:], elodin)
     print(
-        f"{path}: {ticks} ticks, largest difference {largest:.3g} "
+        f"{path}: {ticks} ticks, largest difference {difference[worst]:.3g} "
         f"(tick {worst[0]}, column {worst[1]}), "
         f"{'bit for bit equal' if exact else 'not bit for bit equal'} to Elodin"
     )
-    failed |= largest > args.atol
+    # Any NaN fails, and at the default atol of 0 so does any difference at all.
+    failed |= not np.allclose(values[:, 1:], elodin, rtol=0.0, atol=args.atol)
 
 time = np.arange(ticks + 1) * SIM_TIME_STEP
 figure, (height, error) = plt.subplots(2, 1, sharex=True, figsize=(9, 6))
