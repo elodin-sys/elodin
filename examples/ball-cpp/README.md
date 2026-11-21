@@ -26,8 +26,8 @@ From the repository root, inside `nix develop` after `just install`:
 bash examples/ball-cpp/run.sh
 ```
 
-That runs every step below, for both backends, and ends with the parity check. Generated
-files go to `examples/ball-cpp/build/`.
+That runs every step below, for both backends and for a `generic` CPU, and ends with the
+parity check. Generated files go to `examples/ball-cpp/build/`.
 
 ### 1. Test the simulation in Elodin
 
@@ -52,8 +52,8 @@ writes `build/model/`:
 | `step.stablehlo.mlir` | One whole tick, from every component's value to its next value |
 | `step.o` | The same tick compiled ahead of time by Elodin's Cranelift backend, for this machine |
 | `state.bin` | The initial value of every component, as raw little-endian bytes |
-| `schema.json` | Versioned model/time/target metadata and typed components/entities |
-| `model-manifest.json` | Export target and SHA-256/size inventory |
+| `schema.json` | The model's layout: its time step, and each component's type, shape and entities |
+| `model-manifest.json` | The target `step.o` was compiled for, and each file's SHA-256 and size |
 
 The step is `JaxSim.step_fn`, not just the systems: it carries forward components no system
 writes and puts each output back in its component's slot, so the native side only swaps buffers.
@@ -74,7 +74,7 @@ ElodinModel/
   schema/state/step artifacts, build manifests, runtime SBOM
 ```
 
-The CMake targets are `ElodinModel::model` / `::shared` and `ElodinModel::static`.
+The CMake targets are `ElodinModel::shared` and `ElodinModel::static`.
 
 `--backend` picks how the model's code gets into the library:
 
@@ -84,6 +84,11 @@ The CMake targets are `ElodinModel::model` / `::shared` and `ElodinModel::static
   the program is opened.
 
 Both run the same Cranelift code, so they produce identical results.
+
+`--cpu generic` compiles `step.o` again from the StableHLO, on the machine that packages, for
+any CPU of its architecture instead of the exporting CPU's own features. That is the library to
+build on a delivery machine, which needs Rust and Python 3.11 but not Elodin's Python SDK.
+`run.sh` builds it too and holds it to the same check against Elodin.
 
 ### 4. Build the C++ host
 
@@ -97,7 +102,7 @@ cmake --build examples/ball-cpp/build/cpp
 
 ```cmake
 find_package(ElodinModel CONFIG REQUIRED)
-target_link_libraries(ball_cpp PRIVATE ElodinModel::model)
+target_link_libraries(ball_cpp PRIVATE ElodinModel::shared)
 ```
 
 `cmake --install` copies `bin/ball_cpp` and `lib/libelodin_model.*` with a relative runpath,
@@ -154,8 +159,9 @@ from the linker except the C library.
 
 ## Limits
 
-- `step.o` targets the machine that exported it: its CPU architecture, OS and instruction-set
-  extensions. Export on a machine like the one the program will run on.
+- `step.o` is compiled for one OS and CPU architecture, and as exported for this CPU's
+  instruction-set extensions. Package with `--cpu generic` on a machine with the target's OS
+  and architecture for a library that runs on any CPU there.
 - The library and its C symbols have fixed names, so a process holds one model.
 - A step runs on the caller's stack. The ball needs nothing special; large models can need
   more stack than a default thread has, as Elodin's own simulation thread does.

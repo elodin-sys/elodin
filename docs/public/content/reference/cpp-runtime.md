@@ -22,7 +22,7 @@ You may not need this. To put flight software in the loop with an Elodin simulat
 ## The Elodin way
 
 - **One model, one compiled step.** The library holds the same Cranelift code Elodin runs in `World.run`, compiled from the same Python. You do not port the physics by hand.
-- **A narrow C boundary.** Your program sees components as arrays of bytes, by name, and three verbs: read, write, step. Nothing else crosses it.
+- **A narrow C boundary.** Your program sees components as arrays of bytes, by name, and three verbs: read, write, step. The rest of the interface only describes the model.
 - **Your loop, your rules.** Scheduling, I/O, threads and logging belong to your program. The library does no I/O and starts no threads except, if you ask, the step's own workers.
 - **Proof, not trust.** Your program can write Elodin's deterministic witness format, so `elodin determinism compare` checks it against the Elodin run tick by tick and names the first byte that differs.
 
@@ -72,17 +72,16 @@ world.export_model(
     simulation_rate=RATE_HZ,
     workers=8,
     interfaces={"fsw.exchange": exchange},
-    cpu="generic",
 )
 ```
 
 | File | Contents |
 |---|---|
 | `step.stablehlo.mlir` | One whole tick, from every component's value to its next value |
-| `step.o` | The same tick compiled ahead of time by the Cranelift backend, for native or generic CPU features |
+| `step.o` | The same tick compiled ahead of time by the Cranelift backend, for the exporting machine |
 | `state.bin` | The initial value of every component, as raw little-endian bytes |
-| `schema.json` | Model ABI, time and target metadata, typed components/entities, and optional named row interfaces |
-| `model-manifest.json` | SHA-256 and size of every exported artifact |
+| `schema.json` | The model's layout: its time step and tick, typed components and their entities, and optional named row interfaces |
+| `model-manifest.json` | The target `step.o` was compiled for, and the SHA-256 and size of each file |
 
 One step is a whole tick, not just the systems: it advances `tick`, carries forward the components no system writes, and puts each output back in its component's place. Your program only swaps buffers.
 
@@ -94,7 +93,7 @@ One step is a whole tick, not just the systems: it advances `tick`, carries forw
 python3 libs/elodin-model/package.py build/model build/ElodinModel
 ```
 
-[`package.py`](https://github.com/elodin-sys/elodin/blob/main/libs/elodin-model/package.py) builds `libs/elodin-model` around the model with Cargo and lays out a CMake package. It needs a checkout of the Elodin repository and its pinned Rust toolchain; it is not part of the `elodin` pip package. Package with the same checkout that exported the model.
+[`package.py`](https://github.com/elodin-sys/elodin/blob/main/libs/elodin-model/package.py) builds `libs/elodin-model` around the model with Cargo and lays out a CMake package. It needs a checkout of the Elodin repository, its pinned Rust toolchain and Python 3.11; it is not part of the `elodin` pip package, and does not need it. Package with the same checkout that exported the model.
 
 ```text
 ElodinModel/
@@ -113,10 +112,18 @@ ElodinModel/
 | What the library holds | `step.o`, linked in, and the small runtime its calls need | The StableHLO and Elodin's Cranelift compiler |
 | When code is generated | When you export | Once, in `elodin_model_open` |
 | Size, many-agents model | 1.9 MB | 6.2 MB |
-| CPU | The exporting machine's architecture and instruction set | The machine that opens it |
+| CPU | The one `step.o` was compiled for, or with `--cpu generic` any of its architecture | The machine that opens it |
 | Worker threads | Yes | No; the step runs on the calling thread |
 
-Both run the same Cranelift code and give identical results; the many-agents witness has the same root on either. Choose `aot` when nothing may compile at run time, `jit` when the program runs on a different CPU than the one that exported it.
+Both run the same Cranelift code and give identical results; the many-agents witness has the same root on either. Choose `aot` when nothing may compile at run time, and `jit` to compile for whichever CPU opens the library.
+
+The machine that packages need not be the one that exported. `step.o` is compiled for one OS and architecture, so for a target unlike your workstation, copy the model directory there and compile the step again from its StableHLO:
+
+```sh
+python3 libs/elodin-model/package.py build/model build/ElodinModel --cpu generic
+```
+
+`--cpu generic` makes the library run on any CPU of that machine's architecture; `--cpu native` uses that machine's own instruction-set extensions. ball-cpp packages a `generic` library as well, and holds it to the same bit-for-bit check against Elodin.
 
 ## Build your program
 
@@ -124,14 +131,19 @@ Both run the same Cranelift code and give identical results; the many-agents wit
 
 ```cmake
 find_package(ElodinModel CONFIG REQUIRED)
-target_link_libraries(ball_cpp PRIVATE ElodinModel::model)
+target_link_libraries(ball_cpp PRIVATE ElodinModel::shared)
 ```
 
-`ElodinModel::model` and `ElodinModel::shared` are the shared library;
-`ElodinModel::static` supports a customer executable that must link the runtime directly.
-`elodin_model.hpp` is a header-only RAII wrapper designed for composition, not inheritance.
+`ElodinModel::shared` is the shared library; `ElodinModel::static` supports a customer
+executable that must link the runtime directly.
+Without CMake, link either one yourself:
 
-Configure with `-DElodinModel_DIR=<package>`. The library's install name is `@rpath/libelodin_model.dylib` on macOS and its soname `libelodin_model.so` on Linux, so give the executable a relative runpath, `@loader_path/../lib` or `$ORIGIN/../lib`, and `install(IMPORTED_RUNTIME_ARTIFACTS ElodinModel::model)` copies the library next to it. The installed directory can then move.
+```sh
+g++ -std=c++17 main.cpp -I ElodinModel/include ElodinModel/lib/libelodin_model.a -lpthread -ldl -lm
+g++ -std=c++17 main.cpp -I ElodinModel/include -L ElodinModel/lib -lelodin_model
+```
+
+Configure with `-DElodinModel_DIR=<package>`. The library's install name is `@rpath/libelodin_model.dylib` on macOS and its soname `libelodin_model.so` on Linux, so give the executable a relative runpath, `@loader_path/../lib` or `$ORIGIN/../lib`, and `install(IMPORTED_RUNTIME_ARTIFACTS ElodinModel::shared)` copies the library next to it. The installed directory can then move.
 
 The core of ball-cpp's `main.cpp`:
 
@@ -162,17 +174,51 @@ elodin_model_close(program);
 | Entities | `elodin_model_component_rows`, `elodin_model_entity_name`, `elodin_model_entity_id` |
 | Named interfaces | `elodin_model_interface_count`, `_name`, `_field`, `_read`, `_write` |
 | Stepping | `elodin_model_step`, `elodin_model_read`, `elodin_model_write` |
-| Threads | `elodin_model_configure_workers`, `_effective_workers`, `_recommended_stack` |
+| Threads | `elodin_model_set_workers`, `_effective_workers`, `_recommended_stack` |
 | Errors and build | `elodin_model_error`, `elodin_model_backend` |
 
-- **Components** are addressed by index, in `schema.json` order. Each holds every entity's value as one little-endian array; read and write it whole, with exactly `elodin_model_component_size` bytes. A wrong size fails and copies nothing.
+- **Components** are addressed by index, in `schema.json` order. Each holds every entity's value as one little-endian array; read and write it whole, with exactly `elodin_model_component_size` bytes, or by rows. A wrong size fails and copies nothing.
 - **Rows** are entities. Row `r` of a component belongs to `elodin_model_entity_id(program, c, r)`, the same id the entity has in Elodin. Use it to find an agent's row instead of assuming an order.
 - **Writes** take effect at the next step, like an `external_control` write in Elodin. Write commands after a step and before the next.
 - **Named interfaces** are optional prepared batches exported by the model author. They gather selected entity rows under stable aliases and access directions; they do not run callbacks or choose when a caller uses them.
-- **Time belongs to the caller.** The schema reports nominal dt and tick semantics. `elodin_model_step` advances one model transition synchronously; it does not sleep or read wall time. `elodin_model_set_time_step` changes the model's dt component without stepping.
+- **Time belongs to the caller.** `elodin_model_step` advances one model transition synchronously; it does not sleep or read wall time. `elodin_model_nominal_time_step` is the step the model starts with, which Elodin keeps in whole nanoseconds: a 120 Hz model reports 0.008333333 s. A model whose systems read the time step at run time, as `el.six_dof` does, has a time-step component that `elodin_model_set_time_step` writes; other models keep the step they were built with, and the call fails. `elodin_model_current_tick` likewise needs a model with a tick component.
 - **Reset** restores the embedded initial state. A long-lived application can reset, write case parameters and initial conditions, and run another case without reopening the program.
-- **Errors.** Functions return `NULL` or nonzero on failure, and `elodin_model_error()` says why. The message is per thread and lasts until that thread's next failure.
-- **Threads.** Use each instance from one thread at a time. `elodin_model_set_workers(n)`, before the first `elodin_model_open`, sets how many threads, the caller included, run an `aot` step's parallel groups; 0 uses the count the model was exported for.
+- **Errors.** Functions return `NULL`, `-1` or nonzero on failure, and `elodin_model_error()` says why. The message is per thread and lasts until that thread's next failure; successful calls leave it alone.
+- **Threads.** Use each instance from one thread at a time. Different instances can step on different threads at once. `elodin_model_set_workers(n)`, before the first `elodin_model_open`, sets how many threads, the caller included, run an `aot` step's parallel groups; 0 uses the count the model was exported for.
+
+### From C++
+
+[`elodin_model.hpp`](https://github.com/elodin-sys/elodin/blob/main/libs/elodin-model/include/elodin_model.hpp) wraps the same calls for C++17. Your class holds the model as a member: there is no base class to derive from, and nothing calls back. Failures throw `std::runtime_error` with the library's message, and the typed reads and writes check the component's type and allocate nothing.
+
+```cpp
+#include "elodin_model.hpp"
+
+class Interceptors {
+public:
+    // Many cases run in one process: reset, then write this case's inputs.
+    void begin_case(const std::vector<double>& positions)
+    {
+        run_.reset();
+        run_.write(position_, positions);
+    }
+
+    void update()
+    {
+        run_.write_interface(agents_, command_, commands_.data(), commands_.size());
+        run_.step();
+        run_.read(position_, positions_.data(), positions_.size());
+    }
+
+private:
+    elodin::Program model_;                          // opens the model once
+    elodin::Instance run_ { model_ };                // the state of one run
+    std::size_t position_ = model_.component("position");
+    std::size_t agents_ = model_.interface("agents");
+    std::size_t command_ = model_.field(agents_, "command");
+    std::vector<double> commands_ = std::vector<double>(3 * model_.rows(position_));
+    std::vector<double> positions_ = commands_;
+};
+```
 
 ## Run the loop yourself
 
@@ -188,7 +234,7 @@ A command written at tick N is used by the step at tick N+1, as in Elodin. The h
 
 ```cpp
 for (uint64_t tick = 0; tick < ticks; ++tick) {
-    model.step();
+    simulation.step();
     const Column position = column(c.position, 3), velocity = column(c.velocity, 3);
     // ... the other components the flight software reads
 
@@ -197,7 +243,7 @@ for (uint64_t tick = 0; tick < ticks; ++tick) {
     exchange->run(states.data(), replies.data());   // in-process, or UDP to processes
     for (size_t agent = 0; agent < agents; ++agent)
         take_command(replies, agent, tick, command);  // checks magic, version and tick
-    model.write(c.command, command);
+    simulation.write_interface(agent_interface, command_field, command);
 
     if (witness)
         record_tick(*witness, tick /* ... */);
@@ -293,11 +339,11 @@ The step is the same compiled code in both, so it costs the same. Calling the fl
 
 ## Shipping it
 
-- **`step.o` targets the machine that exported it**, its architecture, OS and instruction-set extensions. Export on a machine like the target, or ship the `jit` backend.
-- **Build the library outside the Nix shell for delivery.** Built in Elodin's Nix shell, the macOS library links `libiconv` and `libintl` from the Nix store, and the Linux library has a Nix store runpath and Nix's glibc. Built with the system toolchain, the macOS library needs only `libSystem` and `libiconv` from `/usr/lib`, and the Linux library needs only `libc`, `libm`, `libgcc_s` and the loader. Build on the oldest Linux you support, since glibc is backward compatible only.
+- **`step.o` is compiled for one OS and architecture**, and as exported for the exporting CPU's instruction-set extensions too. Package on the target OS and architecture with `--cpu generic` for a library that runs on any CPU there, or ship the `jit` backend.
+- **Build the library outside the Nix shell for delivery.** Built in Elodin's Nix shell, the macOS library links `libiconv` and `libintl` from the Nix store, and the Linux library has a Nix store runpath and Nix's glibc. Built with the system toolchain, the macOS library needs only `libSystem` and `libiconv` from `/usr/lib`, and the Linux library needs only `libc`, `libm`, `libgcc_s` and the loader. Build on the oldest Linux you support, since glibc is backward compatible only. [`scripts/ci/elodin_model_rhel8.sh`](https://github.com/elodin-sys/elodin/blob/main/scripts/ci/elodin_model_rhel8.sh) does this for RHEL 8 in a container: it packages a small model with the system toolchain, runs the library's C and C++ tests against it, and rejects a library that needs a glibc newer than 2.28.
 - **One model per process.** The library and its C symbols have fixed names.
 - **The entity count is fixed** at export. Export again for another number of agents.
-- **The step runs on the caller's stack.** The examples need nothing special, but a large model can need more stack than a default thread has; Elodin runs its own simulation thread and step workers with 256 MB stacks.
+- **The step runs on the caller's stack.** The examples use under 20 KiB of it, but a large model can need more stack than a default thread has; Elodin runs its own simulation thread and step workers with 256 MB stacks. [`stack_probe`](https://github.com/elodin-sys/elodin/blob/main/libs/elodin-model/tests/cpp/stack_probe.cpp) measures what a packaged model's steps use.
 - **What is not reproduced:** the database, telemetry, the editor, sensor cameras, and history reads and deferred writes in hooks. many-agents-cpp's witness covers its `lockstep` mode: the step, the exchange and the commits.
 
 ## Troubleshooting
@@ -312,6 +358,7 @@ The step is the same compiled code in both, so it costs the same. Calling the fl
 | `replay-hook` says the witness has no native hook | The hook's label needs the hook's name, its batch and a non-empty partition list. |
 | The installed program cannot find the library | Give it a relative runpath and install the library with it; see [Build your program](#build-your-program). |
 | The Linux library fails on another machine with a glibc version error | Build it outside the Nix shell, on the oldest distribution you support. |
+| `package.py` says `step.o` is missing or compiled for another machine | Pass `--cpu native` or `--cpu generic` to compile the step where you package. |
 | macOS `ld` warns "no platform load command found in step.o" | Harmless: Cranelift's object has no platform command, and the linker assumes macOS. |
 | The program crashes inside the step on a worker thread of its own | Give that thread a larger stack. |
 

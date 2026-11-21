@@ -52,7 +52,10 @@ run it end to end.
 
 Object export accepts `cpu="native"` or `"generic"`. Native enables detected host features;
 generic keeps the target architecture's baseline for delivery to another CPU of that
-architecture. The target OS and architecture remain those of the export process.
+architecture. The target OS and architecture remain those of the export process, so for another
+platform the object is compiled there: [`examples/compile-object.rs`](examples/compile-object.rs)
+turns a StableHLO file into an object with Cargo alone, and `libs/elodin-model/package.py --cpu`
+runs it.
 
 ## Adding a New Op
 

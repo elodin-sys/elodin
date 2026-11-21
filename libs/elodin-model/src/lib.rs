@@ -20,6 +20,9 @@ use serde::Deserialize;
 /// One tick: a buffer per component in, the next state's buffers out, never overlapping.
 type Step = Box<dyn Fn(&[&[u8]], &mut [&mut [u8]]) -> Result<(), String>>;
 
+/// The `schema.json` `abi_version` this library opens.
+const ABI_VERSION: u32 = 1;
+
 const ELODIN_MODEL_OK: c_int = 0;
 const ELODIN_MODEL_ERR_ARGUMENT: c_int = 1;
 const ELODIN_MODEL_ERR_STATE: c_int = 2;
@@ -32,53 +35,24 @@ const ELODIN_MODEL_COMPONENT_PRIVATE: u32 = 1 << 3;
 const ELODIN_MODEL_COMPONENT_TICK: u32 = 1 << 4;
 const ELODIN_MODEL_COMPONENT_TIME_STEP: u32 = 1 << 5;
 
+/// What this library reads of `schema.json`, as `JaxSim.export_model` writes it.
 #[derive(Deserialize)]
 struct Schema {
-    #[serde(default = "model_format")]
     format: String,
-    #[serde(default = "abi_v1")]
     abi_version: u32,
-    #[serde(default = "little_endian")]
     endianness: String,
     /// The worker count the step's parallel groups were compiled for; only `step.o` has groups.
-    #[serde(default = "one")]
-    #[cfg_attr(not(elodin_model = "aot"), allow(dead_code))]
     workers: usize,
-    #[serde(default)]
     simulation: SimulationSchema,
     components: Vec<ComponentSchema>,
-    #[serde(default)]
     interfaces: Vec<InterfaceSchema>,
 }
 
-fn one() -> usize {
-    1
-}
-
-fn abi_v1() -> u32 {
-    1
-}
-
-fn model_format() -> String {
-    "elodin.model".into()
-}
-
-fn little_endian() -> String {
-    "little".into()
-}
-
-#[derive(Default, Deserialize)]
+#[derive(Deserialize)]
 struct SimulationSchema {
-    #[serde(default)]
-    rate_hz: f64,
-    #[serde(default)]
     time_step_s: f64,
-    #[serde(default)]
     tick_component: Option<String>,
-    #[serde(default)]
     time_step_component: Option<String>,
-    #[serde(default)]
-    tick_advanced_by_step: bool,
 }
 
 #[derive(Deserialize)]
@@ -86,33 +60,19 @@ struct ComponentSchema {
     name: String,
     dtype: String,
     shape: Vec<usize>,
-    #[serde(default)]
     element_shape: Vec<usize>,
-    #[serde(default)]
     entity_axis: String,
-    /// The entity of each row.
-    #[serde(default)]
+    /// The entity of each row, and its id.
     entities: Vec<String>,
-    /// Absent from models exported before entity ids were.
-    #[serde(default)]
-    entity_ids: Option<Vec<u64>>,
-    #[serde(default)]
-    rows: usize,
-    #[serde(default)]
+    entity_ids: Vec<u64>,
     row_bytes: usize,
-    #[serde(default)]
-    size: usize,
-    #[serde(default)]
     written_by_step: bool,
-    #[serde(default)]
     metadata: HashMap<String, String>,
 }
 
 #[derive(Deserialize)]
 struct InterfaceSchema {
     name: String,
-    #[serde(default)]
-    rows: usize,
     fields: Vec<InterfaceFieldSchema>,
 }
 
@@ -122,7 +82,6 @@ struct InterfaceFieldSchema {
     component: String,
     access: String,
     entity_ids: Vec<u64>,
-    row_bytes: usize,
 }
 
 struct Component {
@@ -156,7 +115,12 @@ struct Layout {
     format: CString,
     abi_version: u32,
     endianness: CString,
-    simulation: SimulationSchema,
+    /// Seconds one step integrates when the caller changes nothing.
+    time_step_s: f64,
+    /// The component each step adds one to, a `uint64`.
+    tick: Option<usize>,
+    /// The component holding the step's time step in seconds, a `float64`.
+    time_step: Option<usize>,
     workers: usize,
     components: Vec<Component>,
     interfaces: Vec<Interface>,
@@ -168,7 +132,9 @@ pub struct Program {
     format: CString,
     abi_version: u32,
     endianness: CString,
-    simulation: SimulationSchema,
+    time_step_s: f64,
+    tick: Option<usize>,
+    time_step: Option<usize>,
     workers: usize,
     components: Vec<Component>,
     interfaces: Vec<Interface>,
@@ -176,10 +142,49 @@ pub struct Program {
     step: Step,
 }
 
+/// The component the schema names, which must hold one `dtype` value.
+fn scalar_component(
+    components: &[Component],
+    name: Option<&str>,
+    dtype: &str,
+) -> Result<Option<usize>, String> {
+    let Some(name) = name else {
+        return Ok(None);
+    };
+    let scalar = components.iter().position(|c| {
+        c.name.to_bytes() == name.as_bytes()
+            && c.dtype.to_bytes() == dtype.as_bytes()
+            && Ok(c.size) == dtype_size(dtype)
+    });
+    match scalar {
+        Some(index) => Ok(Some(index)),
+        None => Err(format!(
+            "schema.json names {name}, which is not one {dtype} of this model"
+        )),
+    }
+}
+
+/// The bytes of a component `scalar_component` chose.
+fn word(bytes: &[u8]) -> [u8; 8] {
+    bytes.try_into().expect("checked to be eight bytes at open")
+}
+
 /// The components `schema` describes, each with its initial value from `state`.
 fn layout(schema: &str, state: &[u8]) -> Result<Layout, String> {
     let schema: Schema =
         serde_json::from_str(schema).map_err(|e| format!("invalid schema.json: {e}"))?;
+    if schema.format != "elodin.model" {
+        return Err(format!(
+            "schema.json format must be elodin.model, not {:?}",
+            schema.format
+        ));
+    }
+    if schema.abi_version != ABI_VERSION {
+        return Err(format!(
+            "schema.json has model ABI {}; this library opens {ABI_VERSION}",
+            schema.abi_version
+        ));
+    }
     if schema.endianness != "little" {
         return Err(format!(
             "schema.json endianness must be little, not {:?}",
@@ -190,69 +195,24 @@ fn layout(schema: &str, state: &[u8]) -> Result<Layout, String> {
     let mut initial = Vec::new();
     let mut rest = state;
     for component in schema.components {
-        let calculated_size =
-            dtype_size(&component.dtype)? * component.shape.iter().product::<usize>();
-        let size = if component.size == 0 {
-            calculated_size
-        } else if component.size == calculated_size {
-            component.size
-        } else {
-            return Err(format!(
-                "{} says it is {} bytes but its dtype and shape describe {calculated_size}",
-                component.name, component.size
-            ));
-        };
+        let size = dtype_size(&component.dtype)? * component.shape.iter().product::<usize>();
         let (value, tail) = rest
             .split_at_checked(size)
             .ok_or("state.bin is shorter than schema.json describes")?;
         initial.push(value.to_vec());
         rest = tail;
-        let ids = component
-            .entity_ids
-            .unwrap_or_else(|| vec![u64::MAX; component.entities.len()]);
-        if component.entities.len() != ids.len() {
+        let rows = component.entities.len();
+        if component.entity_ids.len() != rows || component.row_bytes * rows != size {
             return Err(format!(
-                "{} has {} entity names and {} entity ids",
-                component.name,
-                component.entities.len(),
-                ids.len()
+                "{} is {size} bytes, not {rows} rows of {} bytes with an id each",
+                component.name, component.row_bytes
             ));
         }
-        let entities = ids.into_iter().zip(component.entities);
+        let entities = component.entity_ids.into_iter().zip(component.entities);
         let entities = entities
             .map(|(id, name)| Ok((id, CString::new(name).map_err(|e| e.to_string())?)))
             .collect::<Result<Vec<_>, String>>()?;
-        let rows = entities.len();
-        if component.rows != 0 && component.rows != rows {
-            return Err(format!(
-                "{} says it has {} rows but lists {rows} entities",
-                component.name, component.rows
-            ));
-        }
-        let row_bytes = if component.row_bytes == 0 {
-            size.checked_div(rows)
-                .filter(|row| row * rows == size)
-                .ok_or_else(|| format!("{} cannot be divided into {rows} rows", component.name))?
-        } else {
-            component.row_bytes
-        };
-        if row_bytes * rows != size {
-            return Err(format!(
-                "{} has {rows} rows of {row_bytes} bytes but is {size} bytes",
-                component.name
-            ));
-        }
-        let element_shape = if component.element_shape.is_empty() {
-            if rows > 1 {
-                component.shape.get(1..).unwrap_or_default().to_vec()
-            } else {
-                component.shape.clone()
-            }
-        } else {
-            component.element_shape
-        };
         let entity_axis = match component.entity_axis.as_str() {
-            "" => u32::from(rows > 1),
             "none" => 0,
             "leading" => 1,
             other => {
@@ -266,40 +226,22 @@ fn layout(schema: &str, state: &[u8]) -> Result<Layout, String> {
         if component.written_by_step {
             flags |= ELODIN_MODEL_COMPONENT_WRITTEN_BY_STEP;
         }
-        if component
-            .metadata
-            .get("external_control")
-            .is_some_and(|value| value == "true")
-        {
-            flags |= ELODIN_MODEL_COMPONENT_EXTERNAL_CONTROL;
-        }
-        if component
-            .metadata
-            .get("transient")
-            .is_some_and(|value| value == "true")
-        {
-            flags |= ELODIN_MODEL_COMPONENT_TRANSIENT;
-        }
-        if component
-            .metadata
-            .get("private")
-            .is_some_and(|value| value == "true")
-        {
-            flags |= ELODIN_MODEL_COMPONENT_PRIVATE;
-        }
-        if component.name == "tick" {
-            flags |= ELODIN_MODEL_COMPONENT_TICK;
-        }
-        if component.name == "simulation_time_step" {
-            flags |= ELODIN_MODEL_COMPONENT_TIME_STEP;
+        for (key, flag) in [
+            ("external_control", ELODIN_MODEL_COMPONENT_EXTERNAL_CONTROL),
+            ("transient", ELODIN_MODEL_COMPONENT_TRANSIENT),
+            ("private", ELODIN_MODEL_COMPONENT_PRIVATE),
+        ] {
+            if component.metadata.get(key).is_some_and(|v| v == "true") {
+                flags |= flag;
+            }
         }
         components.push(Component {
             name: CString::new(component.name).map_err(|e| e.to_string())?,
             dtype: CString::new(component.dtype).map_err(|e| e.to_string())?,
             size,
             shape: component.shape,
-            element_shape,
-            row_bytes,
+            element_shape: component.element_shape,
+            row_bytes: component.row_bytes,
             flags,
             entity_axis,
             entities,
@@ -307,6 +249,19 @@ fn layout(schema: &str, state: &[u8]) -> Result<Layout, String> {
     }
     if !rest.is_empty() {
         return Err("state.bin is longer than schema.json describes".into());
+    }
+    let simulation = schema.simulation;
+    let tick = scalar_component(&components, simulation.tick_component.as_deref(), "uint64")?;
+    let time_step = scalar_component(
+        &components,
+        simulation.time_step_component.as_deref(),
+        "float64",
+    )?;
+    if let Some(tick) = tick {
+        components[tick].flags |= ELODIN_MODEL_COMPONENT_TICK;
+    }
+    if let Some(time_step) = time_step {
+        components[time_step].flags |= ELODIN_MODEL_COMPONENT_TIME_STEP;
     }
     let component_index: HashMap<String, usize> = components
         .iter()
@@ -324,12 +279,6 @@ fn layout(schema: &str, state: &[u8]) -> Result<Layout, String> {
                 )
             })?;
             let column = &components[component];
-            if field.row_bytes != column.row_bytes {
-                return Err(format!(
-                    "interface {:?} field {:?} row is {} bytes, not {}",
-                    interface.name, field.name, field.row_bytes, column.row_bytes
-                ));
-            }
             let row_of: HashMap<u64, usize> = column
                 .entities
                 .iter()
@@ -362,15 +311,15 @@ fn layout(schema: &str, state: &[u8]) -> Result<Layout, String> {
                 name: CString::new(field.name).map_err(|e| e.to_string())?,
                 component,
                 rows,
-                row_bytes: field.row_bytes,
+                row_bytes: column.row_bytes,
                 writable,
             });
         }
         let rows = fields.first().map_or(0, |field| field.rows.len());
-        if interface.rows != rows || fields.iter().any(|field| field.rows.len() != rows) {
+        if fields.iter().any(|field| field.rows.len() != rows) {
             return Err(format!(
-                "interface {:?} fields do not all have {} rows",
-                interface.name, interface.rows
+                "interface {:?} fields do not all have {rows} rows",
+                interface.name
             ));
         }
         interfaces.push(Interface {
@@ -383,7 +332,9 @@ fn layout(schema: &str, state: &[u8]) -> Result<Layout, String> {
         format: CString::new(schema.format).map_err(|e| e.to_string())?,
         abi_version: schema.abi_version,
         endianness: CString::new(schema.endianness).map_err(|e| e.to_string())?,
-        simulation: schema.simulation,
+        time_step_s: simulation.time_step_s,
+        tick,
+        time_step,
         workers: schema.workers.max(1),
         components,
         interfaces,
@@ -409,7 +360,9 @@ impl Program {
             format: layout.format,
             abi_version: layout.abi_version,
             endianness: layout.endianness,
-            simulation: layout.simulation,
+            time_step_s: layout.time_step_s,
+            tick: layout.tick,
+            time_step: layout.time_step,
             workers: layout.workers,
             components: layout.components,
             interfaces: layout.interfaces,
@@ -524,12 +477,7 @@ impl<'a> Instance<'a> {
         let stop = first
             .checked_add(count)
             .filter(|stop| *stop <= column.entities.len())
-            .ok_or_else(|| {
-                format!(
-                    "component {component} has no rows {first}..{}",
-                    first + count
-                )
-            })?;
+            .ok_or_else(|| format!("component {component} has no {count} rows from row {first}"))?;
         let bytes = count
             .checked_mul(column.row_bytes)
             .ok_or("row byte count overflows")?;
@@ -557,12 +505,7 @@ impl<'a> Instance<'a> {
         let stop = first
             .checked_add(count)
             .filter(|stop| *stop <= column.entities.len())
-            .ok_or_else(|| {
-                format!(
-                    "component {component} has no rows {first}..{}",
-                    first + count
-                )
-            })?;
+            .ok_or_else(|| format!("component {component} has no {count} rows from row {first}"))?;
         let bytes = count
             .checked_mul(column.row_bytes)
             .ok_or("row byte count overflows")?;
@@ -784,13 +727,10 @@ thread_local! {
     static ERROR: RefCell<CString> = RefCell::default();
 }
 
+/// Records why a call failed. Only failures replace the message, so it outlives later successes.
 fn fail(message: impl Into<Vec<u8>>) {
     let message = CString::new(message).unwrap_or_default();
     ERROR.with(|error| *error.borrow_mut() = message);
-}
-
-fn clear_error() {
-    ERROR.with(|error| *error.borrow_mut() = CString::default());
 }
 
 fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
@@ -804,7 +744,6 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
 }
 
 fn ffi_status(error_code: c_int, operation: impl FnOnce() -> Result<(), String>) -> c_int {
-    clear_error();
     match catch_unwind(AssertUnwindSafe(operation)) {
         Ok(Ok(())) => ELODIN_MODEL_OK,
         Ok(Err(error)) => {
@@ -845,7 +784,7 @@ pub extern "C" fn elodin_model_error() -> *const c_char {
 
 #[unsafe(no_mangle)]
 pub extern "C" fn elodin_model_abi_version() -> u32 {
-    2
+    ABI_VERSION
 }
 
 #[unsafe(no_mangle)]
@@ -874,10 +813,10 @@ pub extern "C" fn elodin_model_build_info() -> *const c_char {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn elodin_model_configure_workers(workers: usize) -> c_int {
+pub extern "C" fn elodin_model_set_workers(workers: usize) -> c_int {
     ffi_status(ELODIN_MODEL_ERR_STATE, || {
         if OPEN_PROGRAMS.load(Ordering::Acquire) != 0 {
-            return Err("configure workers before opening a model".into());
+            return Err("set workers before opening a model".into());
         }
         if workers == 0 {
             WORKERS.store(0, Ordering::Release);
@@ -895,13 +834,7 @@ pub extern "C" fn elodin_model_configure_workers(workers: usize) -> c_int {
 }
 
 #[unsafe(no_mangle)]
-pub extern "C" fn elodin_model_set_workers(workers: usize) {
-    let _ = elodin_model_configure_workers(workers);
-}
-
-#[unsafe(no_mangle)]
 pub extern "C" fn elodin_model_open() -> *mut Program {
-    clear_error();
     match catch_unwind(AssertUnwindSafe(open)) {
         Ok(Ok(program)) => {
             OPEN_PROGRAMS.fetch_add(1, Ordering::AcqRel);
@@ -937,7 +870,7 @@ pub unsafe extern "C" fn elodin_model_component_count(program: *const Program) -
     unsafe { program.as_ref() }.map_or(0, |program| program.components.len())
 }
 
-/// Model artifact schema ABI; 1 for directories exported before versioning.
+/// The `abi_version` of the model's schema.json.
 ///
 /// # Safety
 /// `program` is null or from `elodin_model_open` and still open.
@@ -967,15 +900,13 @@ pub unsafe extern "C" fn elodin_model_effective_workers(program: *const Program)
     unsafe { program.as_ref() }.map_or(0, |program| program.workers)
 }
 
-/// Whether one model step advances its tick component.
+/// Whether the model has a tick component, which every step adds one to.
 ///
 /// # Safety
 /// `program` is null or from `elodin_model_open` and still open.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn elodin_model_tick_advanced_by_step(program: *const Program) -> u32 {
-    unsafe { program.as_ref() }.map_or(0, |program| {
-        u32::from(program.simulation.tick_advanced_by_step)
-    })
+    unsafe { program.as_ref() }.map_or(0, |program| u32::from(program.tick.is_some()))
 }
 
 #[unsafe(no_mangle)]
@@ -993,21 +924,7 @@ pub unsafe extern "C" fn elodin_model_nominal_time_step(
     ffi_status(ELODIN_MODEL_ERR_ARGUMENT, || {
         let program = unsafe { program.as_ref() }.ok_or("program is null")?;
         let seconds = unsafe { seconds.as_mut() }.ok_or("seconds is null")?;
-        let value = if program.simulation.time_step_s > 0.0 {
-            program.simulation.time_step_s
-        } else if program.simulation.rate_hz > 0.0 {
-            1.0 / program.simulation.rate_hz
-        } else {
-            let index = program
-                .index(c"simulation_time_step")
-                .ok_or("model has no nominal time-step metadata")?;
-            let bytes: [u8; 8] = program.initial[index]
-                .as_slice()
-                .try_into()
-                .map_err(|_| "simulation_time_step is not one f64")?;
-            f64::from_le_bytes(bytes)
-        };
-        *seconds = value;
+        *seconds = program.time_step_s;
         Ok(())
     })
 }
@@ -1139,7 +1056,13 @@ pub unsafe extern "C" fn elodin_model_component_index(
         return -1;
     }
     let name = unsafe { CStr::from_ptr(name) };
-    program.index(name).map_or(-1, |index| index as i64)
+    program.index(name).map_or_else(
+        || {
+            fail(format!("no component named {}", name.to_string_lossy()));
+            -1
+        },
+        |index| index as i64,
+    )
 }
 
 /// # Safety
@@ -1181,7 +1104,13 @@ pub unsafe extern "C" fn elodin_model_interface_index(
         .interfaces
         .iter()
         .position(|interface| interface.name.as_c_str() == name)
-        .map_or(-1, |index| index as i64)
+        .map_or_else(
+            || {
+                fail(format!("no interface named {}", name.to_string_lossy()));
+                -1
+            },
+            |index| index as i64,
+        )
 }
 
 /// # Safety
@@ -1251,7 +1180,6 @@ pub unsafe extern "C" fn elodin_model_interface_field(
 /// `program` is from `elodin_model_open`, and stays open while the instance lives.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn elodin_model_create(program: *const Program) -> *mut Instance<'static> {
-    clear_error();
     match catch_unwind(AssertUnwindSafe(|| {
         unsafe { program.as_ref() }
             .map(Instance::new)
@@ -1283,15 +1211,7 @@ pub unsafe extern "C" fn elodin_model_destroy(instance: *mut Instance<'static>) 
 ///
 /// `instance` is from `elodin_model_create`, and no other thread uses it.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn elodin_model_reset(instance: *mut Instance<'static>) {
-    let _ = unsafe { elodin_model_reset_checked(instance) };
-}
-
-/// # Safety
-///
-/// `instance` is from `elodin_model_create`, and no other thread uses it.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn elodin_model_reset_checked(instance: *mut Instance<'static>) -> c_int {
+pub unsafe extern "C" fn elodin_model_reset(instance: *mut Instance<'static>) -> c_int {
     ffi_status(ELODIN_MODEL_ERR_ARGUMENT, || {
         unsafe { instance.as_mut() }
             .ok_or("instance is null")?
@@ -1334,21 +1254,8 @@ pub unsafe extern "C" fn elodin_model_current_tick(
     ffi_status(ELODIN_MODEL_ERR_ARGUMENT, || {
         let instance = unsafe { instance.as_ref() }.ok_or("instance is null")?;
         let tick = unsafe { tick.as_mut() }.ok_or("tick is null")?;
-        let name = instance
-            .program
-            .simulation
-            .tick_component
-            .as_deref()
-            .unwrap_or("tick");
-        let component = instance
-            .program
-            .index(CString::new(name).map_err(|e| e.to_string())?.as_c_str())
-            .ok_or("model has no tick component")?;
-        let bytes: [u8; 8] = instance.state[component]
-            .as_slice()
-            .try_into()
-            .map_err(|_| "tick component is not one u64")?;
-        *tick = u64::from_le_bytes(bytes);
+        let component = instance.program.tick.ok_or("model has no tick component")?;
+        *tick = u64::from_le_bytes(word(&instance.state[component]));
         Ok(())
     })
 }
@@ -1365,16 +1272,10 @@ pub unsafe extern "C" fn elodin_model_set_time_step(
             return Err("time step must be finite and positive".into());
         }
         let instance = unsafe { instance.as_mut() }.ok_or("instance is null")?;
-        let name = instance
-            .program
-            .simulation
-            .time_step_component
-            .as_deref()
-            .unwrap_or("simulation_time_step");
         let component = instance
             .program
-            .index(CString::new(name).map_err(|e| e.to_string())?.as_c_str())
-            .ok_or("model has no simulation_time_step component")?;
+            .time_step
+            .ok_or("model has no time-step component")?;
         instance.write(component, &seconds.to_le_bytes())
     })
 }
@@ -1488,111 +1389,25 @@ pub unsafe extern "C" fn elodin_model_interface_write(
 mod tests {
     use super::*;
 
-    /// Each step moves each room a quarter of the way to its ambient temperature.
-    const ROOMS: &str = r#"
-module @module {
-  func.func public @main(%arg0: tensor<ui64>, %arg1: tensor<2xf64>, %arg2: tensor<2xf64>, %arg3: tensor<f64>) -> (tensor<ui64>, tensor<2xf64>, tensor<2xf64>, tensor<f64>) {
-    %c = stablehlo.constant dense<1> : tensor<ui64>
-    %0 = stablehlo.add %arg0, %c : tensor<ui64>
-    %1 = stablehlo.subtract %arg2, %arg1 : tensor<2xf64>
-    %dt = stablehlo.broadcast_in_dim %arg3, dims = [] : (tensor<f64>) -> tensor<2xf64>
-    %2 = stablehlo.multiply %1, %dt : tensor<2xf64>
-    %3 = stablehlo.add %arg1, %2 : tensor<2xf64>
-    return %0, %3, %arg2, %arg3 : tensor<ui64>, tensor<2xf64>, tensor<2xf64>, tensor<f64>
-  }
-}
-"#;
-
-    fn schema(rooms: usize) -> String {
-        let names: Vec<String> = (0..rooms).map(|i| format!(r#""room_{i}""#)).collect();
-        let ids: Vec<String> = (1..=rooms).map(|i| i.to_string()).collect();
-        let room = format!(
-            r#""dtype": "float64", "shape": [{rooms}], "entities": [{}], "entity_ids": [{}]"#,
-            names.join(", "),
-            ids.join(", ")
-        );
-        format!(
-            r#"{{"components": [
-                {{"name": "tick", "dtype": "uint64", "shape": [], "entities": ["house"], "entity_ids": [0]}},
-                {{"name": "temperature", {room}}},
-                {{"name": "ambient", {room}}},
-                {{"name": "simulation_time_step", "dtype": "float64", "shape": [], "entities": ["house"], "entity_ids": [0]}}
-            ]}}"#
-        )
-    }
-
-    fn schema_v2() -> String {
-        r#"{
-            "format": "elodin.model",
-            "abi_version": 2,
-            "endianness": "little",
-            "workers": 3,
-            "simulation": {
-                "rate_hz": 4.0,
-                "time_step_s": 0.25,
-                "tick_component": "tick",
-                "time_step_component": "simulation_time_step",
-                "tick_advanced_by_step": true
-            },
-            "components": [
-                {
-                    "name": "tick", "dtype": "uint64", "shape": [],
-                    "element_shape": [], "entity_axis": "none",
-                    "entities": ["house"], "entity_ids": [0], "rows": 1,
-                    "row_bytes": 8, "size": 8, "written_by_step": true,
-                    "metadata": {}
-                },
-                {
-                    "name": "temperature", "dtype": "float64", "shape": [2],
-                    "element_shape": [], "entity_axis": "leading",
-                    "entities": ["room_0", "room_1"], "entity_ids": [1, 2], "rows": 2,
-                    "row_bytes": 8, "size": 16, "written_by_step": true,
-                    "metadata": {"element_names": "temperature"}
-                },
-                {
-                    "name": "ambient", "dtype": "float64", "shape": [2],
-                    "element_shape": [], "entity_axis": "leading",
-                    "entities": ["room_0", "room_1"], "entity_ids": [1, 2], "rows": 2,
-                    "row_bytes": 8, "size": 16, "written_by_step": false,
-                    "metadata": {"external_control": "true"}
-                },
-                {
-                    "name": "simulation_time_step", "dtype": "float64", "shape": [],
-                    "element_shape": [], "entity_axis": "none",
-                    "entities": ["house"], "entity_ids": [0], "rows": 1,
-                    "row_bytes": 8, "size": 8, "written_by_step": false,
-                    "metadata": {}
-                }
-            ],
-            "interfaces": [{
-                "name": "rooms.exchange",
-                "rows": 2,
-                "fields": [
-                    {
-                        "name": "measured", "component": "temperature", "access": "read",
-                        "entity_ids": [2, 1], "row_bytes": 8
-                    },
-                    {
-                        "name": "command", "component": "ambient", "access": "write",
-                        "entity_ids": [1, 2], "row_bytes": 8
-                    }
-                ]
-            }]
-        }"#
-        .into()
-    }
-
-    fn state() -> Vec<u8> {
-        let mut state = 0u64.to_le_bytes().to_vec();
-        for value in [20.0f64, 28.0, 28.0, 20.0] {
-            state.extend(value.to_le_bytes());
-        }
-        state.extend(0.25f64.to_le_bytes());
-        state
-    }
+    /// Each step moves each room a quarter of the way to its ambient temperature. The C and C++
+    /// tests package the same files.
+    const ROOMS: &str = include_str!("../tests/fixtures/rooms/step.stablehlo.mlir");
+    const ROOMS_SCHEMA: &str = include_str!("../tests/fixtures/rooms/schema.json");
+    const ROOMS_STATE: &[u8] = include_bytes!("../tests/fixtures/rooms/state.bin");
 
     fn rooms() -> Program {
-        Program::jit(ROOMS, &schema(2), &state()).unwrap()
+        Program::jit(ROOMS, ROOMS_SCHEMA, ROOMS_STATE).unwrap()
+    }
+
+    /// The rooms' schema without the tick and time step: the 32 bytes of state between them.
+    fn schema_without_time() -> String {
+        let mut schema: serde_json::Value = serde_json::from_str(ROOMS_SCHEMA).unwrap();
+        schema["simulation"]["tick_component"] = serde_json::Value::Null;
+        schema["simulation"]["time_step_component"] = serde_json::Value::Null;
+        let components = schema["components"].as_array_mut().unwrap();
+        components.remove(3);
+        components.remove(0);
+        schema.to_string()
     }
 
     fn f64s(instance: &Instance, component: usize) -> Vec<f64> {
@@ -1668,19 +1483,20 @@ module @module {
     }
 
     #[test]
-    fn versioned_schema_exposes_types_interfaces_and_caller_time() {
-        let program = Program::jit(ROOMS, &schema_v2(), &state()).unwrap();
+    fn the_schema_exposes_types_interfaces_and_caller_time() {
+        let program = rooms();
         let program_ptr = &raw const program;
         let instance_ptr = unsafe { elodin_model_create(program_ptr) };
         assert!(!instance_ptr.is_null());
         // Safety: the program and instance stay live for every call.
         unsafe {
-            assert_eq!(elodin_model_schema_abi(program_ptr), 2);
+            assert_eq!(elodin_model_schema_abi(program_ptr), 1);
             assert_eq!(
                 CStr::from_ptr(elodin_model_format(program_ptr)),
                 c"elodin.model"
             );
-            assert_eq!(elodin_model_effective_workers(program_ptr), 3);
+            assert_eq!(elodin_model_effective_workers(program_ptr), 2);
+            assert_eq!(elodin_model_tick_advanced_by_step(program_ptr), 1);
             let mut dt = 0.0;
             assert_eq!(
                 elodin_model_nominal_time_step(program_ptr, &raw mut dt),
@@ -1783,26 +1599,109 @@ module @module {
 
     #[test]
     fn reset_repeats_cases_in_one_process() {
-        let program = Program::jit(ROOMS, &schema_v2(), &state()).unwrap();
+        let program = rooms();
         let mut instance = Instance::new(&program);
-        let expected = (0..100)
-            .map(|_| {
-                instance.reset();
-                instance
-                    .write(2, &[30.0f64.to_le_bytes(), 22.0f64.to_le_bytes()].concat())
-                    .unwrap();
-                instance.step().unwrap();
-                (tick(&instance), f64s(&instance, 1))
-            })
-            .next()
-            .unwrap();
+        let ambient = [30.0f64.to_le_bytes(), 22.0f64.to_le_bytes()].concat();
         for _ in 0..100 {
             instance.reset();
-            instance
-                .write(2, &[30.0f64.to_le_bytes(), 22.0f64.to_le_bytes()].concat())
-                .unwrap();
+            instance.write(2, &ambient).unwrap();
             instance.step().unwrap();
-            assert_eq!((tick(&instance), f64s(&instance, 1)), expected);
+            assert_eq!(tick(&instance), 1);
+            assert_eq!(f64s(&instance, 1), [22.5, 26.5]);
+        }
+    }
+
+    #[test]
+    fn an_error_outlives_later_successes() {
+        let program = rooms();
+        let program = &raw const program;
+        // Safety: `program` is a live program, and `instance` one of its runs.
+        unsafe {
+            let instance = elodin_model_create(program);
+            assert_eq!(
+                elodin_model_read(instance, 9, ptr::null_mut(), 0),
+                ELODIN_MODEL_ERR_ARGUMENT
+            );
+            let message = elodin_model_error();
+            assert_eq!(CStr::from_ptr(message), c"no component 9");
+            assert_eq!(elodin_model_step(instance), ELODIN_MODEL_OK);
+            assert_eq!(elodin_model_reset(instance), ELODIN_MODEL_OK);
+            assert_eq!(elodin_model_error(), message);
+            assert_eq!(CStr::from_ptr(message), c"no component 9");
+
+            assert_eq!(
+                elodin_model_component_index(program, c"humidity".as_ptr()),
+                -1
+            );
+            assert_eq!(
+                CStr::from_ptr(elodin_model_error()),
+                c"no component named humidity"
+            );
+            assert_eq!(elodin_model_interface_index(program, c"attic".as_ptr()), -1);
+            assert_eq!(
+                CStr::from_ptr(elodin_model_error()),
+                c"no interface named attic"
+            );
+            elodin_model_destroy(instance);
+        }
+    }
+
+    #[test]
+    fn open_refuses_other_formats_and_versions() {
+        let other = ROOMS_SCHEMA.replace("elodin.model", "elodin.other");
+        let error = layout(&other, ROOMS_STATE).err().unwrap();
+        assert!(error.contains("format must be elodin.model"), "{error}");
+        let newer = ROOMS_SCHEMA.replace(r#""abi_version": 1"#, r#""abi_version": 2"#);
+        let error = layout(&newer, ROOMS_STATE).err().unwrap();
+        assert!(error.contains("model ABI 2"), "{error}");
+    }
+
+    #[test]
+    fn tick_and_time_step_are_the_components_the_schema_names() {
+        let model = layout(ROOMS_SCHEMA, ROOMS_STATE).ok().unwrap();
+        assert_eq!((model.tick, model.time_step), (Some(0), Some(3)));
+        let flags: Vec<u32> = model.components.iter().map(|c| c.flags).collect();
+        assert_ne!(flags[0] & ELODIN_MODEL_COMPONENT_TICK, 0);
+        assert_ne!(flags[3] & ELODIN_MODEL_COMPONENT_TIME_STEP, 0);
+        assert_eq!(flags[1] & ELODIN_MODEL_COMPONENT_TICK, 0);
+
+        let named = ROOMS_SCHEMA.replace(
+            r#""tick_component": "tick""#,
+            r#""tick_component": "ambient""#,
+        );
+        let error = layout(&named, ROOMS_STATE).err().unwrap();
+        assert!(error.contains("ambient"), "{error}");
+    }
+
+    #[test]
+    fn a_model_without_tick_or_time_step_says_so() {
+        let step = |_: &[&[u8]], _: &mut [&mut [u8]]| Ok(());
+        let state = &ROOMS_STATE[8..40];
+        let program = Program::new(&schema_without_time(), state, Box::new(step)).unwrap();
+        let program = &raw const program;
+        let (mut tick, mut dt) = (0, 0.0);
+        // Safety: `program` is a live program, and `instance` one of its runs.
+        unsafe {
+            let instance = elodin_model_create(program);
+            assert_eq!(elodin_model_tick_advanced_by_step(program), 0);
+            assert_eq!(
+                elodin_model_current_tick(instance, &raw mut tick),
+                ELODIN_MODEL_ERR_ARGUMENT
+            );
+            assert_eq!(
+                elodin_model_set_time_step(instance, 0.5),
+                ELODIN_MODEL_ERR_ARGUMENT
+            );
+            assert_eq!(
+                CStr::from_ptr(elodin_model_error()),
+                c"model has no time-step component"
+            );
+            assert_eq!(
+                elodin_model_nominal_time_step(program, &raw mut dt),
+                ELODIN_MODEL_OK
+            );
+            assert_eq!(dt, 0.25);
+            elodin_model_destroy(instance);
         }
     }
 
@@ -1814,7 +1713,7 @@ module @module {
                 ELODIN_MODEL_ERR_ARGUMENT
             );
             assert_eq!(
-                elodin_model_reset_checked(ptr::null_mut()),
+                elodin_model_reset(ptr::null_mut()),
                 ELODIN_MODEL_ERR_ARGUMENT
             );
             assert_eq!(
@@ -1825,30 +1724,14 @@ module @module {
     }
 
     #[test]
-    fn models_exported_without_entity_ids_still_open() {
-        let schema = schema(2).replace(r#", "entity_ids": [1, 2]"#, "");
-        let program = Program::jit(ROOMS, &schema, &state()).unwrap();
-        let program = &raw const program;
-        // Safety: `program` is a live program.
-        unsafe {
-            assert_eq!(elodin_model_component_rows(program, 1), 2);
-            assert_eq!(elodin_model_entity_id(program, 1, 0), u64::MAX);
-            assert_eq!(
-                CStr::from_ptr(elodin_model_entity_name(program, 1, 0)),
-                c"room_0"
-            );
-        }
-    }
-
-    #[test]
     fn mismatched_buffers_are_rejected() {
         let program = rooms();
         let mut a = Instance::new(&program);
         assert!(a.write(1, &[0; 8]).is_err());
         assert!(a.read(4, &mut [0; 8]).is_err());
-        assert!(Program::jit(ROOMS, &schema(2), &state()[..32]).is_err());
-        let three_rooms = [state(), vec![0; 16]].concat();
-        assert!(Program::jit(ROOMS, &schema(3), &three_rooms).is_err());
+        assert!(Program::jit(ROOMS, ROOMS_SCHEMA, &ROOMS_STATE[..32]).is_err());
+        // A schema of other components than the step's.
+        assert!(Program::jit(ROOMS, &schema_without_time(), &ROOMS_STATE[8..40]).is_err());
     }
 
     #[test]

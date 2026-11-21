@@ -8,8 +8,8 @@
 //
 // With --witness it records the same deterministic witness Elodin records for the `lockstep`
 // mode of examples/many-agents, so `elodin determinism compare` checks the two runs byte for byte.
+#include "elodin_model.hpp"
 #include "exchange.hpp"
-#include "model.hpp"
 #include "pacing.hpp"
 #include "protocol.hpp"
 #include "witness.hpp"
@@ -125,7 +125,7 @@ struct Components {
     size_t position, velocity, sensor_frame, diagnostic_bank, command;
     size_t object_position, object_velocity, object_signal;
 
-    explicit Components(const Model& model)
+    explicit Components(const elodin::Program& model)
         : position(model.component("position"))
         , velocity(model.component("velocity"))
         , sensor_frame(model.component("sensor_frame"))
@@ -200,15 +200,20 @@ void add(witness::Writer& writer, const std::vector<T>& values)
 
 int run(const Options& options)
 {
-    Model model(options.workers);
+    elodin::set_workers(options.workers);
+    const elodin::Program model;
+    elodin::Instance simulation(model);
     const Components c(model);
+    // The export named the agents' rows as an interface; commands go in through it.
+    const size_t agent_interface = model.interface("agents");
+    const size_t command_field = model.field(agent_interface, "command");
     const size_t agents = model.rows(c.position);
     const size_t objects = model.rows(c.object_position);
     if (options.fault_tick && (options.fault_agent >= agents || options.fault_byte >= protocol::RESPONSE_SIZE))
         throw std::runtime_error("the fault needs an agent below " + std::to_string(agents)
             + " and a byte below " + std::to_string(protocol::RESPONSE_SIZE));
     auto column = [&](size_t component, size_t width) {
-        return Column { width, model.read(component) };
+        return Column { width, simulation.read<double>(component) };
     };
 
     // The rows of each batch Elodin's example witnesses: `exchange` has a row per agent with the
@@ -304,7 +309,7 @@ int run(const Options& options)
     const auto started = Clock::now();
     for (uint64_t tick = 0; tick < options.ticks; ++tick) {
         const auto cycle_start = Clock::now();
-        model.step();
+        simulation.step();
         const auto stepped = Clock::now();
 
         const Column position = column(c.position, 3), velocity = column(c.velocity, 3);
@@ -360,7 +365,7 @@ int run(const Options& options)
         for (size_t agent = 0; agent < agents; ++agent)
             std::memcpy(command.data() + agent * 3, responses.data() + agent * protocol::RESPONSE_SIZE,
                 3 * sizeof(double));
-        model.write(c.command, command);
+        simulation.write_interface(agent_interface, command_field, command);
         const auto exchanged = Clock::now();
 
         if (witness) {

@@ -1,5 +1,5 @@
-# Imports shared and static passive-model targets from the package laid out around this file.
-if(NOT TARGET ElodinModel::model)
+# Imports ElodinModel::shared and ElodinModel::static from the package laid out around this file.
+if(NOT TARGET ElodinModel::shared)
   get_filename_component(_elodin_model_root "${CMAKE_CURRENT_LIST_DIR}" ABSOLUTE)
   if(APPLE)
     set(_elodin_model_shared "libelodin_model.dylib")
@@ -10,14 +10,11 @@ if(NOT TARGET ElodinModel::model)
   endif()
   set(_elodin_model_static "libelodin_model.a")
 
-  # Keep the historical name as the concrete imported target: CMake's
-  # install(IMPORTED_RUNTIME_ARTIFACTS) rejects aliases.
-  add_library(ElodinModel::model SHARED IMPORTED)
-  set_target_properties(ElodinModel::model PROPERTIES
+  add_library(ElodinModel::shared SHARED IMPORTED)
+  set_target_properties(ElodinModel::shared PROPERTIES
     IMPORTED_LOCATION "${_elodin_model_root}/lib/${_elodin_model_shared}"
     IMPORTED_SONAME "${_elodin_model_soname}"
     INTERFACE_INCLUDE_DIRECTORIES "${_elodin_model_root}/include")
-  add_library(ElodinModel::shared ALIAS ElodinModel::model)
 
   find_package(Threads REQUIRED)
   add_library(ElodinModel::static STATIC IMPORTED)

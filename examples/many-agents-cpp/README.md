@@ -80,9 +80,9 @@ python3 examples/many-agents-cpp/export.py --agents 24 --workers 8
 ```
 
 `export.py` imports [`examples/many-agents/sim.py`](../many-agents/sim.py) unchanged and calls
-`world.export_model(system, workers=8, interfaces={"agents": ...})`. The optional passive
-interface retains the position, velocity, and writable command rows without prescribing this
-host's loop. `workers` matters for bits, not only for speed. With more than one worker, Elodin
+`world.export_model(system, workers=8, interfaces={"agents": ...})`. The `agents` interface
+names each agent's position, velocity and writable command rows, and the host writes its
+commands through it. `workers` matters for bits, not only for speed. With more than one worker, Elodin
 traces each `@el.map` system in chunks of two entities so the chunks can run in parallel, and a
 chunked sum can round differently from a whole-column one. Exporting with `workers=8` therefore
 matches `World.run(workers=8)`.
@@ -100,9 +100,11 @@ cmake -S examples/many-agents-cpp/cpp -B examples/many-agents-cpp/build/cpp \
 cmake --build examples/many-agents-cpp/build/cpp
 ```
 
-The packaging is the same as in [ball-cpp](../ball-cpp). The host finds components by name and
-each row's entity with `elodin_model_component_rows`, `elodin_model_entity_id` and
-`elodin_model_entity_name`.
+The packaging is the same as in [ball-cpp](../ball-cpp). The host holds the model through the
+C++ wrapper, [`elodin_model.hpp`](../../libs/elodin-model/include/elodin_model.hpp): an
+`elodin::Program` finds components by name and each row's entity with `rows`, `entity_id` and
+`entity_name`, and an `elodin::Instance` steps, reads components as `double`s and writes the
+commands through the `agents` interface.
 
 ### 4. Run it
 
@@ -188,7 +190,8 @@ in-process removes the UDP round trips, which are most of a tick when it runs as
 
 ## Limits
 
-- `step.o` targets the machine that exported it, as in [ball-cpp](../ball-cpp).
+- `step.o` is compiled for the machine that exported it; [ball-cpp](../ball-cpp) also packages
+  it with `--cpu generic`, for any CPU of the architecture.
 - The witness proof covers the `lockstep` mode: the step, the exchange and the commits. The
   camera history and deferred writes of `lockstep-history` and the DB are not reproduced.
 - The model has the agent count it was exported with; re-export for another.

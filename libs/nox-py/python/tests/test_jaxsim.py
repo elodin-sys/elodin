@@ -98,9 +98,24 @@ def test_export_records_tick_semantics_when_systems_read_tick(tmp_path):
 
     sim = bodies(1).to_jax(reads_tick | el.six_dof(), simulation_rate=100.0)
     sim.export_model(tmp_path)
-    simulation = json.loads((tmp_path / "schema.json").read_text())["simulation"]
-    assert simulation["tick_component"] == "tick"
-    assert simulation["tick_advanced_by_step"]
+    schema = json.loads((tmp_path / "schema.json").read_text())
+    assert schema["simulation"]["tick_component"] == "tick"
+    written = {c["name"]: c["written_by_step"] for c in schema["components"]}
+    assert written["tick"]
+    assert not written["simulation_time_step"]
+
+
+def test_export_takes_the_nominal_time_step_from_the_state(tmp_path):
+    sim = bodies(1).to_jax(el.six_dof(), simulation_rate=120.0)
+    sim.export_model(tmp_path / "built")
+    built = json.loads((tmp_path / "built" / "schema.json").read_text())["simulation"]
+    # Elodin keeps the step in whole nanoseconds, so 120 Hz is not exactly 1/120 s.
+    assert built["time_step_s"] == float(sim.get_state("simulation_time_step")) == 0.008333333
+
+    sim.set_state("simulation_time_step", "Globals", jnp.asarray(0.02))
+    sim.export_model(tmp_path / "changed")
+    changed = json.loads((tmp_path / "changed" / "schema.json").read_text())["simulation"]
+    assert changed["time_step_s"] == 0.02
 
 
 def test_print_dictionary_single_entity(capsys):
@@ -169,16 +184,14 @@ def test_export_model_writes_step_state_and_schema(tmp_path):
     assert pos["metadata"]["element_names"] == "q0,q1,q2,q3,x,y,z"
     schema = json.loads((tmp_path / "schema.json").read_text())
     assert schema["format"] == "elodin.model"
-    assert schema["abi_version"] == 2
+    assert schema["abi_version"] == 1
     assert schema["endianness"] == "little"
     assert schema["simulation"] == {
-        "rate_hz": 100.0,
         "time_step_s": 0.01,
         "tick_component": None,
         "time_step_component": "simulation_time_step",
-        "tick_advanced_by_step": False,
     }
-    assert schema["target"]["cpu"] == "native"
+    assert "target" not in schema
     assert schema["interfaces"] == []
     state = b"".join(np.asarray(value).tobytes() for value in sim.state)
     assert (tmp_path / "state.bin").read_bytes() == state
@@ -186,6 +199,7 @@ def test_export_model_writes_step_state_and_schema(tmp_path):
     assert (tmp_path / "step.o").stat().st_size > 0
     manifest = json.loads((tmp_path / "model-manifest.json").read_text())
     assert manifest["format"] == "elodin.model-export"
+    assert manifest["target"]["cpu"] == "native"
     assert set(manifest["files"]) == {
         "step.stablehlo.mlir",
         "step.o",
@@ -222,7 +236,8 @@ def test_world_export_model_writes_named_data_interfaces(tmp_path):
     )
     schema = json.loads((tmp_path / "schema.json").read_text())
     assert sim.simulation_rate == 100.0
-    assert schema["target"]["cpu"] == "generic"
+    manifest = json.loads((tmp_path / "model-manifest.json").read_text())
+    assert manifest["target"]["cpu"] == "generic"
     assert schema["interfaces"] == [
         {
             "name": "vehicle.exchange",

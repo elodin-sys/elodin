@@ -4,9 +4,7 @@ use std::ptr;
 
 use libloading::Library;
 
-use super::{
-    ELODIN_MODEL_ERR_STATE, ELODIN_MODEL_ERR_STEP, clear_error, fail, ffi_status, panic_message,
-};
+use super::{ELODIN_MODEL_ERR_STATE, ELODIN_MODEL_ERR_STEP, fail, ffi_status, panic_message};
 
 const HOOK_ABI_VERSION: u32 = 1;
 const ERROR_CAPACITY: usize = 512;
@@ -98,7 +96,6 @@ pub unsafe extern "C" fn elodin_hook_open(
     library: *const c_char,
     symbol: *const c_char,
 ) -> *mut ElodinHook {
-    clear_error();
     let opened = catch_unwind(AssertUnwindSafe(|| -> Result<ElodinHook, String> {
         if library.is_null() || symbol.is_null() {
             return Err("hook library and symbol are required".into());
@@ -145,12 +142,16 @@ pub unsafe extern "C" fn elodin_hook_open(
     }
 }
 
+/// Runs the hook's init symbol with the tick and timestamp of the first call, as Elodin does.
+///
 /// # Safety
 /// `hook` is live; `columns` and their data remain valid for this synchronous call.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn elodin_hook_initialize(
     hook: *mut ElodinHook,
     rows: u64,
+    tick: u64,
+    timestamp: i64,
     columns: *const ElodinColumn,
     column_count: u64,
 ) -> c_int {
@@ -170,8 +171,8 @@ pub unsafe extern "C" fn elodin_hook_initialize(
             let mut error = [0u8; ERROR_CAPACITY];
             let step = ElodinStep {
                 abi_version: HOOK_ABI_VERSION,
-                tick: 0,
-                timestamp: 0,
+                tick,
+                timestamp,
                 rows,
                 row_start: 0,
                 row_end: rows,
@@ -236,7 +237,7 @@ mod tests {
     fn null_hook_calls_fail_without_panicking() {
         unsafe {
             assert_eq!(
-                elodin_hook_initialize(ptr::null_mut(), 1, ptr::null(), 0),
+                elodin_hook_initialize(ptr::null_mut(), 1, 0, 0, ptr::null(), 0),
                 ELODIN_MODEL_ERR_STATE
             );
             assert_eq!(
@@ -245,13 +246,5 @@ mod tests {
             );
             elodin_hook_close(ptr::null_mut());
         }
-    }
-
-    #[test]
-    fn argument_error_constant_stays_distinct() {
-        assert_ne!(
-            super::super::ELODIN_MODEL_ERR_ARGUMENT,
-            ELODIN_MODEL_ERR_STATE
-        );
     }
 }

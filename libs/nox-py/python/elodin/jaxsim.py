@@ -143,8 +143,8 @@ class JaxSim:
         The directory holds `step.stablehlo.mlir`, one tick from state to next state as
         `step_fn` defines it; `step.o`, the same tick compiled ahead of time; `state.bin`,
         `self.state` as raw bytes in state order; `schema.json`, a versioned description of the
-        model and optional named row interfaces; and `model-manifest.json`, hashes and target
-        information for the exported artifacts.
+        model and optional named row interfaces; and `model-manifest.json`, the hashes of those
+        files and the target `step.o` was compiled for.
 
         Parameters:
         path : str or os.PathLike
@@ -187,7 +187,8 @@ class JaxSim:
                     "rows": rows,
                     "row_bytes": array.nbytes // rows,
                     "size": array.nbytes,
-                    "written_by_step": output is not None,
+                    # `step_fn` advances the tick itself; no system writes it.
+                    "written_by_step": output is not None or slot == self._tick_index,
                     "metadata": dict(self.component_metadata.get(name, {})),
                 }
             )
@@ -234,24 +235,25 @@ class JaxSim:
                 }
             )
 
-        time_step = 1.0 / self.simulation_rate
+        time_step_slot = next(
+            (slot for _, slot, name in self.map if name == "simulation_time_step"), None
+        )
         schema = {
             "format": "elodin.model",
-            "abi_version": 2,
+            "abi_version": 1,
             "endianness": "little",
             "workers": self.workers,
             "simulation": {
-                "rate_hz": self.simulation_rate,
-                "time_step_s": time_step,
-                "tick_component": "tick" if self._tick_index is not None else None,
-                "time_step_component": (
-                    "simulation_time_step"
-                    if any(component["name"] == "simulation_time_step" for component in components)
-                    else None
+                # The step a model with a time-step component starts with is the one in its
+                # state, which Elodin keeps in whole nanoseconds.
+                "time_step_s": (
+                    1.0 / self.simulation_rate
+                    if time_step_slot is None
+                    else float(self.state[time_step_slot])
                 ),
-                "tick_advanced_by_step": self._tick_index is not None,
+                "tick_component": "tick" if self._tick_index is not None else None,
+                "time_step_component": (None if time_step_slot is None else "simulation_time_step"),
             },
-            "target": object_target(cpu),
             "components": components,
             "interfaces": native_interfaces,
         }
@@ -272,7 +274,7 @@ class JaxSim:
             "format": "elodin.model-export",
             "version": 1,
             "elodin_version": version,
-            "target": schema["target"],
+            "target": object_target(cpu),
             "files": {
                 name: {"bytes": len(contents), "sha256": hashlib.sha256(contents).hexdigest()}
                 for name, contents in files.items()

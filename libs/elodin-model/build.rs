@@ -41,22 +41,26 @@ fn main() {
         assert!(path.is_file(), "{} is missing", path.display());
         println!("cargo::rerun-if-changed={}", path.display());
     }
-    let supplied_manifest = env::var_os("ELODIN_MODEL_BUILD_INFO_PATH").map(PathBuf::from);
-    let manifest = supplied_manifest.unwrap_or_else(|| dir.join("model-manifest.json"));
-    let manifest = if manifest.is_file() {
-        println!("cargo::rerun-if-changed={}", manifest.display());
-        manifest
-    } else {
-        let fallback =
-            PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR")).join("model-manifest.json");
-        fs::write(&fallback, "{}").expect("write model-manifest fallback");
-        fallback
+    // What `elodin_model_build_info` returns: package.py's record of the build, or `{}`.
+    let build_info = match env::var_os("ELODIN_MODEL_BUILD_INFO_PATH") {
+        Some(path) => {
+            let path = PathBuf::from(path);
+            assert!(path.is_file(), "{} is missing", path.display());
+            println!("cargo::rerun-if-changed={}", path.display());
+            path
+        }
+        None => {
+            let empty =
+                PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR")).join("build-info.json");
+            fs::write(&empty, "{}").expect("write the empty build info");
+            empty
+        }
     };
 
     println!("cargo::rustc-env=ELODIN_MODEL_DIR={}", dir.display());
     println!(
         "cargo::rustc-env=ELODIN_MODEL_BUILD_INFO={}",
-        manifest.display()
+        build_info.display()
     );
     println!("cargo::rustc-cfg=elodin_model=\"{backend}\"");
     if backend == "aot" {
