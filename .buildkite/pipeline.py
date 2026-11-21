@@ -238,6 +238,11 @@ python3 examples/many-agents/benchmark.py --sizes 2 --modes runtime,local,lockst
 """,
             ),
             nix_step(
+                label=":python: ball-cpp",
+                flake=".#run",
+                command="bash examples/ball-cpp/run.sh",
+            ),
+            nix_step(
                 label=":python: frames",
                 flake=".#run",
                 command="python3 examples/frames/main.py",

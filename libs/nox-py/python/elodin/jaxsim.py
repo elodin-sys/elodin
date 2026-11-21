@@ -124,6 +124,49 @@ class JaxSim:
         out = self.py_sim(*state)
         return [state[d_p] if c_p is None else out[c_p] for c_p, d_p, _ in self.map]
 
+    def export_model(self, path):
+        """
+        Writes this simulation's step to a directory, for a native host to run without Python.
+
+        The directory holds `step.stablehlo.mlir`, one tick from state to next state as
+        `step_fn` defines it; `step.o`, the same tick compiled ahead of time for this machine;
+        `state.bin`, `self.state` as raw bytes in state order; and `schema.json`, the name,
+        dtype, shape and entities of each component in that order. `libs/elodin-model` builds
+        a shared library with a C interface from it.
+
+        Parameters:
+        path : str or os.PathLike
+            The directory to write; created if missing.
+        """
+        import json
+        import os
+
+        import numpy
+
+        from elodin.stablehlo import compile_object, lower_to_stablehlo
+
+        os.makedirs(path, exist_ok=True)
+        mlir = lower_to_stablehlo(lambda *state: tuple(self.step_fn(state)), self.state)
+        entity_names = {id: name for name, id in self.entity_dict.items()}
+        components = [
+            {
+                "name": name,
+                "dtype": str(numpy.asarray(value).dtype),
+                "shape": list(numpy.shape(value)),
+                "entities": [entity_names[id] for id in self.component_entity_dict[name]],
+            }
+            for (_, _, name), value in zip(self.map, self.state)
+        ]
+        files = {
+            "step.stablehlo.mlir": mlir.encode(),
+            "step.o": compile_object(mlir, "elodin_model_kernel"),
+            "state.bin": b"".join(numpy.asarray(value).tobytes() for value in self.state),
+            "schema.json": json.dumps({"components": components}, indent=2).encode(),
+        }
+        for name, contents in files.items():
+            with open(os.path.join(path, name), "wb") as handle:
+                handle.write(contents)
+
     def step(self, max_steps):
         """
         Advances the simulation by a specified number of steps.
