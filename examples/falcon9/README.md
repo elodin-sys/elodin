@@ -255,8 +255,9 @@ telemetry (design record: `docs/design-thruster-effects-port.md` §10):
 
 - **Merlin cluster plume** — `merlin_core` + `merlin_flame` layers on one
   `thruster` node (bell-exit emitter at −1.2 m), intensity from
-  `booster.thrust_viz`. Tuned in pyrotechnique against `ascent.jpeg` for a
-  near-parallel body-aligned column.
+  `booster.plume_viz`. Tuned in pyrotechnique against `ascent.jpeg` for a
+  near-parallel body-aligned column. Particle births are distributed within
+  each frame to avoid a gap at the nozzle at low frame rates.
 - **Persistent exhaust trail** — `exhaust_smoke` uses the anchored-trail
   contract (`spawn_origin`/`spawn_axis` on a world-fixed anchor).
 - **Pad + landing clouds** — world-fixed `pad_smoke` at LC-39A / LZ-1.

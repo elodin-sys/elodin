@@ -31,7 +31,7 @@
     {
       "bevy_hanabi::modifier::attr::SetAttributeModifier": (
         attribute: "age",
-        value: "#18",
+        value: "#35",
       ),
     },
     {
@@ -51,6 +51,12 @@
     {
       "bevy_hanabi::modifier::force::LinearDragModifier": (
         drag: "#31",
+      ),
+    },
+    {
+      "bevy_hanabi::modifier::attr::SetAttributeModifier": (
+        attribute: "position",
+        value: "#42",
       ),
     },
   ],
@@ -115,7 +121,8 @@
       ),
     },
   ],
-  motion_integration: PostUpdate,
+  // The first update advances only the time since each particle was born.
+  motion_integration: None,
   module: (
     expressions: [
       Literal(Scalar(Float(1.5))),
@@ -203,6 +210,19 @@
       ),
       Literal(Scalar(Float(1.0))),
       Literal(Scalar(Uint(0))),
+      // Spread births across the frame, rather than moving every new
+      // particle a full frame away from the nozzle before it is visible.
+      BuiltIn((operator: DeltaTime)),
+      Binary(op: Sub, left: "#18", right: "#33"),
+      Binary(op: Mul, left: "#34", right: "#43"),
+      Attribute((attr: "age")),
+      Binary(op: Max, left: "#36", right: "#18"),
+      Binary(op: Min, left: "#33", right: "#37"),
+      Attribute((attr: "velocity")),
+      Binary(op: Mul, left: "#39", right: "#38"),
+      Attribute((attr: "position")),
+      Binary(op: Add, left: "#41", right: "#40"),
+      BuiltIn((operator: Rand(Scalar(Float)))),
     ],
     properties: [
       (
