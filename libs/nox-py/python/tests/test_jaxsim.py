@@ -136,11 +136,37 @@ def test_export_model_writes_step_state_and_schema(tmp_path):
         "dtype": "float64",
         "shape": [2, 7],
         "entities": ["b0", "b1"],
+        "entity_ids": [sim.entity_dict["b0"], sim.entity_dict["b1"]],
     }
     state = b"".join(np.asarray(value).tobytes() for value in sim.state)
     assert (tmp_path / "state.bin").read_bytes() == state
     assert "func.func public @main" in (tmp_path / "step.stablehlo.mlir").read_text()
     assert (tmp_path / "step.o").stat().st_size > 0
+
+
+def test_workers_trace_maps_in_chunks_and_export_records_them(tmp_path):
+    @el.map
+    def slow(v: el.WorldVel) -> el.WorldVel:
+        return el.SpatialMotion(linear=v.linear() * 0.5)
+
+    system = slow | el.six_dof()
+    whole = bodies(6).to_jax(system, simulation_rate=100.0)
+    chunked = bodies(6).to_jax(system, simulation_rate=100.0, workers=4)
+    assert (whole.workers, chunked.workers) == (1, 4)
+    calls = [sim.step_fn(sim.state) for sim in (whole, chunked)]
+    for a, b in zip(*calls):
+        np.testing.assert_allclose(a, b, rtol=1e-12)
+    lowered = [
+        str(jax.jit(lambda *s, sim=sim: tuple(sim.step_fn(s))).lower(*sim.state).as_text())
+        for sim in (whole, chunked)
+    ]
+    assert lowered[1].count("call @") > lowered[0].count("call @")
+
+    chunked.export_model(tmp_path)
+    schema = json.loads((tmp_path / "schema.json").read_text())
+    assert schema["workers"] == 4
+    pos = next(c for c in schema["components"] if c["name"] == "world_pos")
+    assert pos["entity_ids"] == [chunked.entity_dict[f"b{i}"] for i in range(6)]
 
 
 def test_set_without_entity_writes_every_entity():

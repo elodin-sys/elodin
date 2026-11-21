@@ -12,7 +12,8 @@ elodin run examples/<name>/main.py      # headless
 
 Some folders have their own `README.md` with extra setup (SITL binaries, terrain
 atlases, Monte Carlo campaigns). A few are headless checks, not editor scenes:
-`frames`, `linalg`, `stablehlo`, `cube-sat-pysim`. `ball-cpp` also builds a C++ program.
+`frames`, `linalg`, `stablehlo`, `cube-sat-pysim`. `ball-cpp` and `many-agents-cpp` also build
+C++ programs.
 
 ---
 
@@ -166,6 +167,7 @@ An external flight-software process driven over UDP, alongside the sim.
 | Example | Description |
 | --- | --- |
 | [many-agents](./many-agents) | 24 agents at 1 kHz, each with its own controller process, watched by an overhead sensor camera: `workers=`, prepared batches, `pre_commit` and native hooks, history reads, run receipts, deterministic witnesses and hook replay |
+| [many-agents-cpp](./many-agents-cpp) | many-agents as one C++ program with C++ flight software, proven identical to the Elodin run by its deterministic witness |
 
 ---
 
@@ -284,6 +286,7 @@ Alternatives to the default `World.run(...)` on the Cranelift backend.
 | --- | --- |
 | [cube-sat-pysim](./cube-sat-pysim) | `World.to_jax` — pure JAX step loop + Matplotlib (RL-friendly) |
 | [ball-cpp](./ball-cpp) | `JaxSim.export_model` — a native library with a C header and CMake package, stepped by a C++ host |
+| [many-agents-cpp](./many-agents-cpp) | `World.to_jax(workers=)` and `export_model` — a multi-threaded step in a C++ SITL host that writes Elodin's witness format |
 | [db-client](./db-client) | Standalone `elodin.db`: embedded server, `table_writer`, no tick loop |
 | [n-body](./n-body) | `ELODIN_BACKEND` switch: `cranelift` / `jax-cpu` / `jax-gpu` |
 
@@ -405,4 +408,5 @@ Kinematic entity (often no `el.Body`) driven by recorded / ephemeris data.
 | [stablehlo](./stablehlo) | Every implemented StableHLO/CHLO op through the JIT |
 | [linalg](./linalg) | Cholesky, solve, SVD, eigh, … on Cranelift |
 | [ball-cpp](./ball-cpp) | Cranelift object emission (AOT) and the JIT behind one C interface |
+| [many-agents-cpp](./many-agents-cpp) | An AOT object whose parallel call groups run on the loader's worker pool |
 | [f32-quant-repro](./f32-quant-repro) | Display-path f32 cast at ECEF magnitude |

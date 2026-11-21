@@ -2060,6 +2060,7 @@ impl WorldBuilder {
         simulation_rate = 120.0,
         default_playback_speed = 1.0,
         max_ticks = None,
+        workers = None,
     ))]
     pub fn to_jax_func(
         &mut self,
@@ -2068,6 +2069,7 @@ impl WorldBuilder {
         simulation_rate: f64,
         default_playback_speed: f64,
         max_ticks: Option<u64>,
+        workers: Option<usize>,
     ) -> Result<
         (
             Py<PyAny>,
@@ -2087,6 +2089,7 @@ impl WorldBuilder {
                 simulation_rate,
                 default_playback_speed,
                 max_ticks,
+                workers,
             )?;
         Ok((
             python,
@@ -2441,6 +2444,7 @@ impl WorldBuilder {
         simulation_rate: f64,
         default_playback_speed: f64,
         max_ticks: Option<u64>,
+        workers: Option<usize>,
     ) -> Result<
         (
             Py<PyAny>,
@@ -2454,6 +2458,11 @@ impl WorldBuilder {
         Error,
     > {
         let (ts, _) = validate_rates(simulation_rate, None)?;
+        // Systems trace as the Cranelift backend with this many workers runs them.
+        if let Some(workers) = workers {
+            self.world.metadata.cranelift = true;
+            self.world.metadata.workers = workers.max(1);
+        }
         self.world.metadata.sim_time_step = TimeStep(ts);
         self.world.metadata.generate_real_time = false;
         self.world.metadata.ticks_per_telemetry = 1;

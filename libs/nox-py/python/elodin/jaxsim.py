@@ -40,6 +40,7 @@ class JaxSim:
         entity_dict,
         component_entity_dict,
         map=None,
+        workers=1,
     ):
         """
         Initializes the JaxSim class with a world, a system, and a simulation time step.
@@ -61,6 +62,8 @@ class JaxSim:
             A dictionary mapping component names to a list of their entity IDs.
         map : list, optional
             An index map for ordering inputs and outputs.
+        workers : int, optional
+            The `World.run(workers=...)` count the systems were traced for.
         """
 
         self.py_sim = sim_obj
@@ -70,6 +73,7 @@ class JaxSim:
         self.dictionary = dictionary
         self.entity_dict = entity_dict
         self.component_entity_dict = component_entity_dict
+        self.workers = workers
         if map is None:
             self.map = self.generate_index_map(self.inputs, self.outputs)
         else:
@@ -131,8 +135,9 @@ class JaxSim:
         The directory holds `step.stablehlo.mlir`, one tick from state to next state as
         `step_fn` defines it; `step.o`, the same tick compiled ahead of time for this machine;
         `state.bin`, `self.state` as raw bytes in state order; and `schema.json`, the name,
-        dtype, shape and entities of each component in that order. `libs/elodin-model` builds
-        a shared library with a C interface from it.
+        dtype, shape and entities of each component in that order, and the worker count the
+        object runs its parallel groups for. `libs/elodin-model` builds a shared library with a
+        C interface from it.
 
         Parameters:
         path : str or os.PathLike
@@ -154,14 +159,17 @@ class JaxSim:
                 "dtype": str(numpy.asarray(value).dtype),
                 "shape": list(numpy.shape(value)),
                 "entities": [entity_names[id] for id in self.component_entity_dict[name]],
+                "entity_ids": list(self.component_entity_dict[name]),
             }
             for (_, _, name), value in zip(self.map, self.state)
         ]
         files = {
             "step.stablehlo.mlir": mlir.encode(),
-            "step.o": compile_object(mlir, "elodin_model_kernel"),
+            "step.o": compile_object(mlir, "elodin_model_kernel", self.workers),
             "state.bin": b"".join(numpy.asarray(value).tobytes() for value in self.state),
-            "schema.json": json.dumps({"components": components}, indent=2).encode(),
+            "schema.json": json.dumps(
+                {"workers": self.workers, "components": components}, indent=2
+            ).encode(),
         }
         for name, contents in files.items():
             with open(os.path.join(path, name), "wb") as handle:
@@ -317,6 +325,7 @@ class JaxSim:
             self.entity_dict,
             self.component_entity_dict,
             self.map,
+            self.workers,
         )
 
         return (state, aux_data)
@@ -331,7 +340,9 @@ class JaxSim:
         Returns:
             A new JaxSim instance
         """
-        py_sim, inputs, outputs, dictionary, entity_dict, component_entity_dict, map = aux_data
+        py_sim, inputs, outputs, dictionary, entity_dict, component_entity_dict, map, workers = (
+            aux_data
+        )
 
         return JaxSim(
             py_sim,
@@ -342,6 +353,7 @@ class JaxSim:
             entity_dict,
             component_entity_dict,
             map,
+            workers,
         )
 
 

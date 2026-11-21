@@ -856,11 +856,14 @@ class World(WorldBuilder):
         simulation_rate: float = 120.0,
         default_playback_speed: float = 1.0,
         max_ticks: Optional[int] = None,
+        workers: Optional[int] = None,
     ) -> jaxsim.JaxSim:
+        """With `workers`, systems trace as `World.run(workers=...)` runs them on the Cranelift
+        backend, so the step reproduces its bits; `export_model` compiles for that count."""
         obj, ins, outs, state, dictionary, entity_dict, component_entity_dict = super().to_jax_func(
-            system, simulation_rate, default_playback_speed, max_ticks
+            system, simulation_rate, default_playback_speed, max_ticks, workers
         )
-        sim_object = jaxsim.JaxSim(
+        return jaxsim.JaxSim(
             obj,
             ins,
             outs,
@@ -868,5 +871,5 @@ class World(WorldBuilder):
             dictionary,
             entity_dict,
             component_entity_dict,
+            workers=workers or 1,
         )
-        return sim_object
