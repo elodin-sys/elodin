@@ -11,7 +11,7 @@ use bevy::{
     window::{PrimaryWindow, Window},
 };
 use bevy_editor_cam::{
-    controller::component::EditorCam,
+    controller::{component::EditorCam, motion::CurrentMotion},
     input::{CameraPointerMap, EditorCamInputMessage, MotionKind},
 };
 use bevy_picking::pointer::{PointerAction, PointerButton, PointerId, PointerInput};
@@ -118,14 +118,26 @@ pub fn gated_camera_inputs(
     };
 
     let pointer = PointerId::Mouse;
+    // Press and release can both arrive in one frame. Do not start a drag
+    // that has already ended: there would be no later release to stop it.
+    let start_orbit = mouse_input.just_pressed(orbit_start) && mouse_input.pressed(orbit_start);
+    let start_pan = mouse_input.just_pressed(pan_start) && mouse_input.pressed(pan_start);
 
-    if mouse_input.just_pressed(orbit_start) {
+    // A new mouse press must take control immediately, even during the
+    // previous drag's momentum debounce. Keep its depth, discard its velocity.
+    if (start_orbit || start_pan)
+        && matches!(editor_cam.current_motion, CurrentMotion::Momentum { .. })
+    {
+        editor_cam.current_motion = CurrentMotion::Stationary;
+    }
+
+    if start_orbit {
         controller.write(EditorCamInputMessage::Start {
             kind: MotionKind::OrbitZoom,
             camera,
             pointer,
         });
-    } else if mouse_input.just_pressed(pan_start) {
+    } else if start_pan {
         if viewport.is_some_and(|viewport| !viewport.look_at.eql.trim().is_empty()) {
             if !editor_cam.is_actively_controlled() {
                 // A second drag can hit terrain kilometres behind the followed
@@ -503,6 +515,98 @@ mod tests {
                 app.world_mut()
                     .resource_mut::<ButtonInput<MouseButton>>()
                     .clear();
+            }
+        }
+    }
+
+    #[test]
+    fn explicit_mouse_press_restarts_pan_and_orbit_during_momentum_debounce() {
+        for follow in [false, true] {
+            for button in [MouseButton::Left, MouseButton::Right] {
+                let (mut app, camera, _, _) = camera_input_app(follow);
+                // Keep the debounce active regardless of test runner speed.
+                app.world_mut()
+                    .get_mut::<EditorCam>(camera)
+                    .unwrap()
+                    .input_debounce = std::time::Duration::from_secs(60);
+                app.world_mut()
+                    .resource_mut::<ButtonInput<MouseButton>>()
+                    .press(button);
+                app.update();
+                assert_eq!(
+                    app.world()
+                        .resource::<CameraPointerMap>()
+                        .get(&PointerId::Mouse),
+                    Some(&camera)
+                );
+                {
+                    let mut buttons = app.world_mut().resource_mut::<ButtonInput<MouseButton>>();
+                    buttons.clear();
+                    buttons.release(button);
+                }
+                app.update();
+                assert!(app.world().resource::<CameraPointerMap>().is_empty());
+                assert!(
+                    app.world()
+                        .get::<EditorCam>(camera)
+                        .unwrap()
+                        .is_actively_controlled()
+                );
+                {
+                    let mut buttons = app.world_mut().resource_mut::<ButtonInput<MouseButton>>();
+                    buttons.clear();
+                    buttons.press(button);
+                }
+                app.update();
+                assert_eq!(
+                    app.world()
+                        .resource::<CameraPointerMap>()
+                        .get(&PointerId::Mouse),
+                    Some(&camera)
+                );
+                assert!(
+                    app.world()
+                        .get::<EditorCam>(camera)
+                        .unwrap()
+                        .current_motion
+                        .is_user_controlled()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn click_released_in_one_frame_does_not_leave_a_drag_active() {
+        for follow in [false, true] {
+            for button in [MouseButton::Left, MouseButton::Right] {
+                let (mut app, camera, _, _) = camera_input_app(follow);
+                {
+                    let mut buttons = app.world_mut().resource_mut::<ButtonInput<MouseButton>>();
+                    buttons.press(button);
+                    buttons.release(button);
+                }
+                app.update();
+                assert!(app.world().resource::<CameraPointerMap>().is_empty());
+                assert!(
+                    !app.world()
+                        .get::<EditorCam>(camera)
+                        .unwrap()
+                        .current_motion
+                        .is_user_controlled()
+                );
+
+                {
+                    let mut buttons = app.world_mut().resource_mut::<ButtonInput<MouseButton>>();
+                    buttons.clear();
+                    buttons.press(button);
+                }
+                app.update();
+                assert_eq!(
+                    app.world()
+                        .resource::<CameraPointerMap>()
+                        .get(&PointerId::Mouse),
+                    Some(&camera)
+                );
             }
         }
     }
