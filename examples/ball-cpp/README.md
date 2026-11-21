@@ -1,8 +1,8 @@
 # Ball in C++
 
 The [ball](../ball) simulation, written in Elodin's Python/JAX API, run from a standalone C++
-program. Elodin compiles the simulation's step to native code and packages it as a shared
-library with a C header and a CMake package. The C++ program links that library, owns the
+program. Elodin compiles the simulation's step to native code and packages it as a library
+with C and C++ headers and a CMake package. The C++ program links that library, owns the
 loop, and runs without Python, JAX or Elodin installed. `verify.py` then checks that every tick
 matches the original ball example run in Elodin.
 
@@ -11,8 +11,8 @@ the workflow in general, with [many-agents-cpp](../many-agents-cpp) as the full 
 
 ```mermaid
 flowchart LR
-    sim["sim.py"] -->|"export.py"| model["build/model: step.o, step.stablehlo.mlir, state.bin, schema.json"]
-    model -->|"package.py"| pkg["ElodinModel package: elodin_model.h, libelodin_model, CMake config"]
+    sim["sim.py"] -->|"export.py"| model["build/model: the step, initial state and schema"]
+    model -->|"package.py"| pkg["ElodinModel package: libelodin_model, headers, CMake config"]
     pkg -->|"find_package"| host["cpp/main.cpp built with CMake"]
     host --> csv["ball_cpp.csv"]
     csv --> verify["verify.py vs examples/ball in Elodin"]
@@ -26,8 +26,10 @@ From the repository root, inside `nix develop` after `just install`:
 bash examples/ball-cpp/run.sh
 ```
 
-That runs every step below, for both backends and for a `generic` CPU, and ends with the
-parity check. Generated files go to `examples/ball-cpp/build/`.
+That runs every step below three times, for both backends and for a `generic` CPU, runs each
+installed program after moving it, and ends with the parity check. Generated files go to
+`examples/ball-cpp/build/`, with the variant in their names: `ball_cpp_aot.csv`,
+`ball_cpp_jit.csv` and `ball_cpp_generic.csv`.
 
 ### 1. Test the simulation in Elodin
 
@@ -70,11 +72,14 @@ This builds `libs/elodin-model` around the model and lays out a CMake package:
 ElodinModel/
   ElodinModelConfig.cmake
   include/elodin_model.h, elodin_model.hpp, elodin_step_hook.h
-  lib/libelodin_model.so, libelodin_model.a
-  schema/state/step artifacts, build manifests, runtime SBOM
+  lib/libelodin_model.so   (libelodin_model.dylib on macOS)
+  lib/libelodin_model.a
+  schema.json, state.bin, step.o, step.stablehlo.mlir
+  model-manifest.json, build-manifest.json, runtime-sbom.json
 ```
 
-The CMake targets are `ElodinModel::shared` and `ElodinModel::static`.
+The CMake targets are `ElodinModel::shared` and `ElodinModel::static`. The model's files are
+copies for the record: the library already holds what it needs of them.
 
 `--backend` picks how the model's code gets into the library:
 
@@ -87,8 +92,9 @@ Both run the same Cranelift code, so they produce identical results.
 
 `--cpu generic` compiles `step.o` again from the StableHLO, on the machine that packages, for
 any CPU of its architecture instead of the exporting CPU's own features. That is the library to
-build on a delivery machine, which needs Rust and Python 3.11 but not Elodin's Python SDK.
-`run.sh` builds it too and holds it to the same check against Elodin.
+build on a delivery machine, which needs a checkout of this repository, Rust and Python 3.11,
+but not Elodin's Python SDK. `run.sh` builds it too and holds it to the same check against
+Elodin.
 
 ### 4. Build the C++ host
 
@@ -146,8 +152,10 @@ elodin_model_close(program);
 ```
 
 `elodin_model_write` sets a component between steps, `elodin_model_reset` returns an instance
-to the initial state, and failures return `NULL` or nonzero with the reason in
+to the initial state, and failures return `NULL`, `-1` or nonzero with the reason in
 `elodin_model_error()`. Instances of one program are independent of each other.
+[`elodin_model.hpp`](../../libs/elodin-model/include/elodin_model.hpp) wraps the same calls for
+C++17, as [many-agents-cpp](../many-agents-cpp) uses them.
 
 ## How the ahead-of-time library works
 
@@ -163,5 +171,5 @@ from the linker except the C library.
   instruction-set extensions. Package with `--cpu generic` on a machine with the target's OS
   and architecture for a library that runs on any CPU there.
 - The library and its C symbols have fixed names, so a process holds one model.
-- A step runs on the caller's stack. The ball needs nothing special; large models can need
-  more stack than a default thread has, as Elodin's own simulation thread does.
+- A step runs on the caller's stack. The ball uses about 4 KiB of it; large models can need
+  more stack than a default thread has, up to `elodin_model_recommended_stack()`.

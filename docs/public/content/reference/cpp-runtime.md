@@ -23,19 +23,16 @@ You may not need this. To put flight software in the loop with an Elodin simulat
 
 - **One model, one compiled step.** The library holds the same Cranelift code Elodin runs in `World.run`, compiled from the same Python. You do not port the physics by hand.
 - **A narrow C boundary.** Your program sees components as arrays of bytes, by name, and three verbs: read, write, step. The rest of the interface only describes the model.
-- **Your loop, your rules.** Scheduling, I/O, threads and logging belong to your program. The library does no I/O and starts no threads except, if you ask, the step's own workers.
+- **Your loop, your rules.** Scheduling, I/O, threads and logging belong to your program. The library opens no files or sockets, and its only threads are the step's own workers, when the model was exported with them.
 - **Proof, not trust.** Your program can write Elodin's deterministic witness format, so `elodin determinism compare` checks it against the Elodin run tick by tick and names the first byte that differs.
 
-The library is a passive component. It does not require your class to inherit from an Elodin
-type, and it does not own a scheduler, wall clock, files, callbacks, hooks, or processes. A
-customer framework can contain an `elodin::Instance`, write its inputs, call one synchronous
-`step`, and read its outputs whenever that framework's contract requires.
+The library is passive. Your class does not inherit from an Elodin type, and the library has no scheduler, clock, callbacks or processes of its own. A class in your framework holds an `elodin::Instance`, writes its inputs, calls one synchronous `step`, and reads its outputs whenever the framework's contract says to.
 
 ## What moves and what stays
 
 ```mermaid
 flowchart LR
-  sim["Simulation in Python"] -->|"World.to_jax and export_model"| model["Model directory"]
+  sim["Simulation in Python"] -->|"World.export_model"| model["Model directory"]
   model -->|"package.py"| pkg["ElodinModel package"]
   pkg -->|"find_package"| host["Your C++ program"]
   fsw["Your flight software"] --> host
@@ -58,11 +55,11 @@ The database and editor are not part of the library. To keep watching runs in th
 
 ## Export the step
 
-`World.to_jax` builds the world for JAX instead of running it, and `JaxSim.export_model` writes one tick of it to a directory. `World.export_model` is the direct form and can retain prepared batches as optional native interfaces:
+`World.export_model` builds the world for JAX instead of running it, as [`World.to_jax`](/reference/python-api/#class-elodin-jaxsim-jaxsim) does, and writes one tick of it to a directory. The batches you pass as `interfaces` are optional: each becomes a named group of rows that your program reads and writes together.
 
 ```python
 world, system, agents = build()
-exchange = world.prepare_batch({
+agent_rows = world.prepare_batch({
     "position": world.prepare_component("position", agents),
     "command": world.prepare_component("command", agents, access="write"),
 })
@@ -71,7 +68,7 @@ world.export_model(
     "build/model",
     simulation_rate=RATE_HZ,
     workers=8,
-    interfaces={"fsw.exchange": exchange},
+    interfaces={"agents": agent_rows},
 )
 ```
 
@@ -85,7 +82,7 @@ world.export_model(
 
 One step is a whole tick, not just the systems: it advances `tick`, carries forward the components no system writes, and puts each output back in its component's place. Your program only swaps buffers.
 
-**Match `workers` to the run you reproduce.** With more than one worker, Elodin traces each `@el.map` system in chunks of two entities so the chunks can run in parallel, and a chunked sum can round differently from a whole-column sum. `to_jax(workers=8)` traces the same way, so its step reproduces `World.run(workers=8)`; pass `workers=1` to reproduce a run without `workers`. Once the step is exported, the number of threads that runs it does not change its results.
+**Match `workers` to the run you reproduce.** With more than one worker, Elodin traces each `@el.map` system in chunks of two entities so the chunks can run in parallel, and a chunked sum can round differently from a whole-column sum. An export with `workers=8` traces the same way, so its step reproduces `World.run(workers=8)`; pass `workers=1` to reproduce a run without `workers`. Once the step is exported, the number of threads that runs it does not change its results.
 
 ## Package the library
 
@@ -105,15 +102,18 @@ ElodinModel/
   model-manifest.json, build-manifest.json, runtime-sbom.json
 ```
 
+The library holds the model, so a program needs only the library at run time. The model's files and the manifests beside it record what was built, from which Elodin revision and toolchain, with a list of the Rust crates in the library.
+
 `--backend` decides how the model's code gets into the library:
 
 | | `aot` (default) | `jit` |
 |---|---|---|
 | What the library holds | `step.o`, linked in, and the small runtime its calls need | The StableHLO and Elodin's Cranelift compiler |
-| When code is generated | When you export | Once, in `elodin_model_open` |
-| Size, many-agents model | 1.9 MB | 6.2 MB |
+| When code is generated | When you export, or package with `--cpu` | Once, in `elodin_model_open` |
+| Shared library, many-agents model | About 2 MB | About 6 MB |
 | CPU | The one `step.o` was compiled for, or with `--cpu generic` any of its architecture | The machine that opens it |
 | Worker threads | Yes | No; the step runs on the calling thread |
+| Output | None | One line of compiler statistics on stderr at open |
 
 Both run the same Cranelift code and give identical results; the many-agents witness has the same root on either. Choose `aot` when nothing may compile at run time, and `jit` to compile for whichever CPU opens the library.
 
@@ -134,24 +134,25 @@ find_package(ElodinModel CONFIG REQUIRED)
 target_link_libraries(ball_cpp PRIVATE ElodinModel::shared)
 ```
 
-`ElodinModel::shared` is the shared library; `ElodinModel::static` supports a customer
-executable that must link the runtime directly.
-Without CMake, link either one yourself:
+Configure with `-DElodinModel_DIR=<package>`. `ElodinModel::shared` is the shared library; `ElodinModel::static` links the model and its runtime into your executable instead.
+
+The shared library's install name is `@rpath/libelodin_model.dylib` on macOS and its soname `libelodin_model.so` on Linux, so give the executable a relative runpath, `@loader_path/../lib` or `$ORIGIN/../lib`, and `install(IMPORTED_RUNTIME_ARTIFACTS ElodinModel::shared)` copies the library next to it. The installed directory can then move.
+
+Without CMake, link the static or the shared library yourself:
 
 ```sh
 g++ -std=c++17 main.cpp -I ElodinModel/include ElodinModel/lib/libelodin_model.a -lpthread -ldl -lm
-g++ -std=c++17 main.cpp -I ElodinModel/include -L ElodinModel/lib -lelodin_model
+g++ -std=c++17 main.cpp -I ElodinModel/include -L ElodinModel/lib -lelodin_model -Wl,-rpath,ElodinModel/lib
 ```
 
-Configure with `-DElodinModel_DIR=<package>`. The library's install name is `@rpath/libelodin_model.dylib` on macOS and its soname `libelodin_model.so` on Linux, so give the executable a relative runpath, `@loader_path/../lib` or `$ORIGIN/../lib`, and `install(IMPORTED_RUNTIME_ARTIFACTS ElodinModel::shared)` copies the library next to it. The installed directory can then move.
-
-The core of ball-cpp's `main.cpp`:
+The core of ball-cpp's `main.cpp`, without its error checks:
 
 ```cpp
 ElodinModelProgram* program = elodin_model_open();
 ElodinModelInstance* ball = elodin_model_create(program);
 
-const size_t world_pos = elodin_model_component_index(program, "world_pos");
+// -1 when the model has no such component
+const auto world_pos = static_cast<size_t>(elodin_model_component_index(program, "world_pos"));
 double pos[7];
 for (long tick = 0; tick < ticks; ++tick) {
     elodin_model_step(ball);
@@ -166,16 +167,19 @@ elodin_model_close(program);
 
 [`elodin_model.h`](https://github.com/elodin-sys/elodin/blob/main/libs/elodin-model/include/elodin_model.h) separates a **program**, the model's code and initial state, from **instances**, one run each. Instances of one program are independent, and a program must outlive its instances.
 
+Every function's name starts with `elodin_model_`, left out of this table, and the header documents each one:
+
 | Group | Functions |
 |---|---|
-| Lifecycle | `elodin_model_open`, `elodin_model_close`, `elodin_model_create`, `elodin_model_destroy`, `elodin_model_reset` |
-| Model contract | `elodin_model_abi_version`, `_schema_abi`, `_build_info`, `_nominal_time_step`, `_tick_advanced_by_step` |
-| Components | `elodin_model_component_count`, `_name`, `_size`, `_index`, `_type`, `_read_rows`, `_write_rows` |
-| Entities | `elodin_model_component_rows`, `elodin_model_entity_name`, `elodin_model_entity_id` |
-| Named interfaces | `elodin_model_interface_count`, `_name`, `_field`, `_read`, `_write` |
-| Stepping | `elodin_model_step`, `elodin_model_read`, `elodin_model_write` |
-| Threads | `elodin_model_set_workers`, `_effective_workers`, `_recommended_stack` |
-| Errors and build | `elodin_model_error`, `elodin_model_backend` |
+| Lifecycle | `open`, `close`, `create`, `destroy`, `reset` |
+| The model | `abi_version`, `schema_abi`, `format`, `endianness`, `backend`, `build_info`, `nominal_time_step`, `tick_advanced_by_step` |
+| Components | `component_count`, `component_index`, `component_name`, `component_size`, `component_type` |
+| Entities | `component_rows`, `entity_id`, `entity_name` |
+| Stepping | `step`, `set_time_step`, `current_tick`, `generation` |
+| Reading and writing | `read`, `write`, `read_rows`, `write_rows` |
+| Named interfaces | `interface_count`, `interface_index`, `interface_name`, `interface_rows`, `interface_field_count`, `interface_field`, `interface_read`, `interface_write` |
+| Threads | `set_workers`, `effective_workers`, `recommended_stack` |
+| Errors | `error` |
 
 - **Components** are addressed by index, in `schema.json` order. Each holds every entity's value as one little-endian array; read and write it whole, with exactly `elodin_model_component_size` bytes, or by rows. A wrong size fails and copies nothing.
 - **Rows** are entities. Row `r` of a component belongs to `elodin_model_entity_id(program, c, r)`, the same id the entity has in Elodin. Use it to find an agent's row instead of assuming an order.
@@ -184,7 +188,7 @@ elodin_model_close(program);
 - **Time belongs to the caller.** `elodin_model_step` advances one model transition synchronously; it does not sleep or read wall time. `elodin_model_nominal_time_step` is the step the model starts with, which Elodin keeps in whole nanoseconds: a 120 Hz model reports 0.008333333 s. A model whose systems read the time step at run time, as `el.six_dof` does, has a time-step component that `elodin_model_set_time_step` writes; other models keep the step they were built with, and the call fails. `elodin_model_current_tick` likewise needs a model with a tick component.
 - **Reset** restores the embedded initial state. A long-lived application can reset, write case parameters and initial conditions, and run another case without reopening the program.
 - **Errors.** Functions return `NULL`, `-1` or nonzero on failure, and `elodin_model_error()` says why. The message is per thread and lasts until that thread's next failure; successful calls leave it alone.
-- **Threads.** Use each instance from one thread at a time. Different instances can step on different threads at once. `elodin_model_set_workers(n)`, before the first `elodin_model_open`, sets how many threads, the caller included, run an `aot` step's parallel groups; 0 uses the count the model was exported for.
+- **Threads.** Use each instance from one thread at a time. Different instances can step on different threads at once; with `jit`, their steps take turns. `elodin_model_set_workers(n)`, before the first `elodin_model_open`, sets how many threads, the caller included, run an `aot` step's parallel groups; 0 uses the count the model was exported for.
 
 ### From C++
 
@@ -238,15 +242,12 @@ for (uint64_t tick = 0; tick < ticks; ++tick) {
     const Column position = column(c.position, 3), velocity = column(c.velocity, 3);
     // ... the other components the flight software reads
 
-    for (size_t agent = 0; agent < agents; ++agent)
-        write_state_packet(states, agent, tick, position, velocity /* ... */);
+    // ... pack each agent's state packet into `states`
     exchange->run(states.data(), replies.data());   // in-process, or UDP to processes
-    for (size_t agent = 0; agent < agents; ++agent)
-        take_command(replies, agent, tick, command);  // checks magic, version and tick
+    // ... check each reply's magic, version and tick, and copy its command into `command`
     simulation.write_interface(agent_interface, command_field, command);
 
-    if (witness)
-        record_tick(*witness, tick /* ... */);
+    // ... record the tick in the witness and the CSV
     pacer.wait();   // sleep to the next 1 ms deadline when real time
 }
 ```
@@ -304,6 +305,7 @@ first mismatch
   byte: 3
   left: 0x00
   right: 0x01
+2 of 600 ticks differ
 ```
 
 ### Writing a witness from C++
@@ -343,7 +345,7 @@ The step is the same compiled code in both, so it costs the same. Calling the fl
 - **Build the library outside the Nix shell for delivery.** Built in Elodin's Nix shell, the macOS library links `libiconv` and `libintl` from the Nix store, and the Linux library has a Nix store runpath and Nix's glibc. Built with the system toolchain, the macOS library needs only `libSystem` and `libiconv` from `/usr/lib`, and the Linux library needs only `libc`, `libm`, `libgcc_s` and the loader. Build on the oldest Linux you support, since glibc is backward compatible only. [`scripts/ci/elodin_model_rhel8.sh`](https://github.com/elodin-sys/elodin/blob/main/scripts/ci/elodin_model_rhel8.sh) does this for RHEL 8 in a container: it packages a small model with the system toolchain, runs the library's C and C++ tests against it, and rejects a library that needs a glibc newer than 2.28.
 - **One model per process.** The library and its C symbols have fixed names.
 - **The entity count is fixed** at export. Export again for another number of agents.
-- **The step runs on the caller's stack.** The examples use under 20 KiB of it, but a large model can need more stack than a default thread has; Elodin runs its own simulation thread and step workers with 256 MB stacks. [`stack_probe`](https://github.com/elodin-sys/elodin/blob/main/libs/elodin-model/tests/cpp/stack_probe.cpp) measures what a packaged model's steps use.
+- **The step runs on the caller's stack.** The ball uses about 4 KiB of it and the 24-agent model about 48 KiB, but a large model can need more stack than a default thread has, up to `elodin_model_recommended_stack()`: the 256 MB Elodin gives its own simulation thread and step workers. [`stack_probe`](https://github.com/elodin-sys/elodin/blob/main/libs/elodin-model/tests/cpp/stack_probe.cpp) measures what a packaged model's steps use.
 - **What is not reproduced:** the database, telemetry, the editor, sensor cameras, and history reads and deferred writes in hooks. many-agents-cpp's witness covers its `lockstep` mode: the step, the exchange and the commits.
 
 ## Troubleshooting
@@ -352,8 +354,9 @@ The step is the same compiled code in both, so it costs the same. Calling the fl
 |---|---|
 | `elodin_model_open` fails with "this library holds no model" | The library was built without `ELODIN_MODEL_DIR`. Build it with `package.py`. |
 | Open fails with "this library has no runtime function" | The model was exported by a different Elodin than the library was built from. Export and package with one checkout. |
-| `elodin_model_read` or `_write` returns nonzero | The size must equal `elodin_model_component_size` for that component. |
-| Results differ from Elodin in the last bits | Check that `to_jax(workers=)` matches the Elodin run, that C++ is compiled with `-ffp-contract=off`, and that both ran on the same machine. The witness names the first byte that differs. |
+| `elodin_model_read` or `elodin_model_write` returns nonzero | The size must equal `elodin_model_component_size` for that component. |
+| `elodin_model_set_workers` returns nonzero | Call it before the first `elodin_model_open`. |
+| Results differ from Elodin in the last bits | Check that the export's `workers` matches the Elodin run, that C++ is compiled with `-ffp-contract=off`, and that both ran on the same machine. The witness names the first byte that differs. |
 | `elodin determinism compare` reports different schemas | Entity ids or order, batch fields or channels differ from the baseline; the error names the first difference. |
 | `replay-hook` says the witness has no native hook | The hook's label needs the hook's name, its batch and a non-empty partition list. |
 | The installed program cannot find the library | Give it a relative runpath and install the library with it; see [Build your program](#build-your-program). |
@@ -366,7 +369,7 @@ The step is the same compiled code in both, so it costs the same. Calling the fl
 
 | Example | Shows |
 |---|---|
-| [ball-cpp](https://github.com/elodin-sys/elodin/tree/main/examples/ball-cpp) | The whole path for one body: export, package with both backends, a CMake program, relocation, and a CSV that equals Elodin bit for bit |
+| [ball-cpp](https://github.com/elodin-sys/elodin/tree/main/examples/ball-cpp) | The whole path for one body: export, package with both backends and for a generic CPU, a CMake program, relocation, and a CSV that equals Elodin bit for bit |
 | [many-agents-cpp](https://github.com/elodin-sys/elodin/tree/main/examples/many-agents-cpp) | A 24-agent SITL in C++: flight software in-process or as processes, worker threads, pacing, a witness writer, and every check on this page |
 
 ## Related docs

@@ -80,16 +80,18 @@ python3 examples/many-agents-cpp/export.py --agents 24 --workers 8
 ```
 
 `export.py` imports [`examples/many-agents/sim.py`](../many-agents/sim.py) unchanged and calls
-`world.export_model(system, workers=8, interfaces={"agents": ...})`. The `agents` interface
-names each agent's position, velocity and writable command rows, and the host writes its
-commands through it. `workers` matters for bits, not only for speed. With more than one worker, Elodin
-traces each `@el.map` system in chunks of two entities so the chunks can run in parallel, and a
-chunked sum can round differently from a whole-column one. Exporting with `workers=8` therefore
-matches `World.run(workers=8)`.
+`world.export_model(system, path, workers=8, interfaces={"agents": ...})`. The `agents`
+interface names each agent's position, velocity and writable command rows, and the host writes
+its commands through it.
+
+`workers` matters for bits, not only for speed. With more than one worker, Elodin traces each
+`@el.map` system in chunks of two entities so the chunks can run in parallel, and a chunked sum
+can round differently from a whole-column one. Exporting with `workers=8` therefore matches
+`World.run(workers=8)`.
 
 The object `export_model` compiles keeps those chunks as groups of independent calls. The
-library runs them on a pool of worker threads; `--workers` sets the thread count, and the
-results do not depend on it.
+library runs them on a pool of worker threads; the host's own `--workers` sets the thread
+count, and the results do not depend on it.
 
 ### 3. Package and build
 

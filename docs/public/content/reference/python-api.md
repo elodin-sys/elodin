@@ -529,7 +529,7 @@ A `pre_commit` hook in a shared library. It runs without the GIL, and can split 
 
     Load `symbol`, and `{symbol}_init` and `{symbol}_destroy` if present, from the library at `path`. Each tick calls `symbol` once per worker, concurrently, each on a contiguous share of `input`'s rows. `input` is an `elodin.BatchHandle`.
 
-The library exports C functions over these types, ABI version 1:
+The library exports C functions over these types, ABI version 1, which [`elodin_step_hook.h`](https://github.com/elodin-sys/elodin/blob/main/libs/elodin-model/include/elodin_step_hook.h) declares:
 
 ```c
 #include <stdint.h>

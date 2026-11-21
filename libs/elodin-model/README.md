@@ -177,8 +177,8 @@ stages and external channels.
 - The AOT worker threads are shared by the process and only grow in number. Configure them
   before the first open.
 - Runtime worker count does not change results. Export worker mode can change tracing and bits.
-- A step keeps its temporaries on the calling thread's stack. The examples use under 20 KiB;
-  measure a model with `stack_probe`. `elodin_model_recommended_stack` is the 256 MiB Elodin
+- A step keeps its temporaries on the calling thread's stack. The ball uses about 4 KiB and
+  the 24-agent model about 48 KiB; measure a model with `stack_probe`. `elodin_model_recommended_stack` is the 256 MiB Elodin
   gives its own threads, which fits any model.
 - An error message lasts until the same thread's next failed call. Successful calls keep it.
 - Components and entity counts are fixed at export, and a process holds one model.
