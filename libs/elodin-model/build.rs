@@ -3,12 +3,14 @@
 //! the library is opened. Without `ELODIN_MODEL_DIR` the library holds no model.
 
 use std::env;
+use std::fs;
 use std::path::PathBuf;
 
 fn main() {
     println!("cargo::rustc-check-cfg=cfg(elodin_model, values(\"aot\", \"jit\"))");
     println!("cargo::rerun-if-env-changed=ELODIN_MODEL_DIR");
     println!("cargo::rerun-if-env-changed=ELODIN_MODEL_BACKEND");
+    println!("cargo::rerun-if-env-changed=ELODIN_MODEL_BUILD_INFO_PATH");
     // Otherwise executables record the library's absolute build path.
     match env::var("CARGO_CFG_TARGET_OS").as_deref() {
         Ok("linux") => println!("cargo::rustc-cdylib-link-arg=-Wl,-soname,libelodin_model.so"),
@@ -39,10 +41,28 @@ fn main() {
         assert!(path.is_file(), "{} is missing", path.display());
         println!("cargo::rerun-if-changed={}", path.display());
     }
+    let supplied_manifest = env::var_os("ELODIN_MODEL_BUILD_INFO_PATH").map(PathBuf::from);
+    let manifest = supplied_manifest.unwrap_or_else(|| dir.join("model-manifest.json"));
+    let manifest = if manifest.is_file() {
+        println!("cargo::rerun-if-changed={}", manifest.display());
+        manifest
+    } else {
+        let fallback =
+            PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR")).join("model-manifest.json");
+        fs::write(&fallback, "{}").expect("write model-manifest fallback");
+        fallback
+    };
 
     println!("cargo::rustc-env=ELODIN_MODEL_DIR={}", dir.display());
+    println!(
+        "cargo::rustc-env=ELODIN_MODEL_BUILD_INFO={}",
+        manifest.display()
+    );
     println!("cargo::rustc-cfg=elodin_model=\"{backend}\"");
     if backend == "aot" {
-        println!("cargo::rustc-link-arg={}", dir.join(code).display());
+        cc::Build::new()
+            .object(dir.join(code))
+            .cargo_metadata(true)
+            .compile("elodin_model_step");
     }
 }

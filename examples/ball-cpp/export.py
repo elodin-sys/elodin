@@ -6,12 +6,21 @@ Writes the step as StableHLO and as a precompiled object, the initial state and 
 `model_dir`, by default `examples/ball-cpp/build/model`.
 """
 
-import sys
+import argparse
 from pathlib import Path
 
 from sim import SIM_TIME_STEP, system, world
 
-model = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).parent / "build" / "model"
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "model",
+    nargs="?",
+    type=Path,
+    default=Path(__file__).parent / "build" / "model",
+)
+parser.add_argument("--cpu", choices=["native", "generic"], default="native")
+args = parser.parse_args()
+
 sim = world().to_jax(system(), simulation_rate=1.0 / SIM_TIME_STEP)
-sim.export_model(model)
-print(f"exported the ball model to {model}")
+sim.export_model(args.model, cpu=args.cpu)
+print(f"exported the ball model to {args.model} for {args.cpu} CPU features")

@@ -2079,18 +2079,27 @@ impl WorldBuilder {
             Py<PyAny>,
             Py<PyAny>,
             Py<PyAny>,
+            Py<PyAny>,
         ),
         Error,
     > {
-        let (python, in_id, out_id, state, dict, entity_dict, component_entity_dict) = self
-            .build_jited(
-                py,
-                system,
-                simulation_rate,
-                default_playback_speed,
-                max_ticks,
-                workers,
-            )?;
+        let (
+            python,
+            in_id,
+            out_id,
+            state,
+            dict,
+            entity_dict,
+            component_entity_dict,
+            component_metadata_dict,
+        ) = self.build_jited(
+            py,
+            system,
+            simulation_rate,
+            default_playback_speed,
+            max_ticks,
+            workers,
+        )?;
         Ok((
             python,
             in_id,
@@ -2099,6 +2108,7 @@ impl WorldBuilder {
             dict,
             entity_dict,
             component_entity_dict,
+            component_metadata_dict,
         ))
     }
 
@@ -2454,6 +2464,7 @@ impl WorldBuilder {
             Py<PyAny>,
             Py<PyAny>,
             Py<PyAny>,
+            Py<PyAny>,
         ),
         Error,
     > {
@@ -2477,6 +2488,7 @@ impl WorldBuilder {
         let dict = PyDict::new(py);
         let entity_dict = PyDict::new(py);
         let component_entity_dict = PyDict::new(py);
+        let component_metadata_dict = PyDict::new(py);
         self.world.set_globals();
 
         let world = std::mem::take(&mut self.world);
@@ -2509,6 +2521,7 @@ impl WorldBuilder {
 
             let comp_name = component.metadata.name.clone();
             dict.set_item(id.0, &comp_name)?;
+            component_metadata_dict.set_item(&comp_name, &component.metadata.metadata)?;
 
             let mut entity_vec = Vec::<u64>::new();
             for entity_id in component.entity_ids() {
@@ -2613,6 +2626,7 @@ impl WorldBuilder {
         let dictionary = dict.into_py_any(py)?;
         let entity_dict = entity_dict.into_py_any(py)?;
         let component_entity_dict = component_entity_dict.into_py_any(py)?;
+        let component_metadata_dict = component_metadata_dict.into_py_any(py)?;
 
         Ok((
             jax_exec,
@@ -2622,6 +2636,7 @@ impl WorldBuilder {
             dictionary,
             entity_dict,
             component_entity_dict,
+            component_metadata_dict,
         ))
     }
 }

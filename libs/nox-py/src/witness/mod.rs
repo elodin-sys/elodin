@@ -815,6 +815,27 @@ fn py_compare(
     Ok(serde_json::to_string(&comparison).expect("comparison serializes"))
 }
 
+/// `elodin.determinism.inspect`: validated header, trailer and tick inventory as JSON.
+#[pyfunction]
+#[pyo3(name = "_witness_inspect")]
+fn py_inspect(py: Python<'_>, trace: PathBuf) -> PyResult<String> {
+    let inspected = py.allow_threads(|| {
+        let mut reader = Reader::open(&trace)?;
+        let mut tick = format::Tick::default();
+        while reader.next(&mut tick)? {}
+        Ok::<_, String>(serde_json::json!({
+            "path": trace,
+            "header": reader.header,
+            "trailer": reader.trailer,
+            "ticks": reader.ticks,
+            "raw_ticks": reader.raw_ticks,
+        }))
+    });
+    inspected
+        .map(|value| serde_json::to_string(&value).expect("inspection serializes"))
+        .map_err(PyValueError::new_err)
+}
+
 /// `elodin.determinism.replay_hook`: replays the native hook `symbol` of `library` from `trace`
 /// on the recorded rows alone, as JSON.
 #[pyfunction]
@@ -908,6 +929,7 @@ pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Witness>()?;
     m.add_class::<DeterminismTrace>()?;
     m.add_function(wrap_pyfunction!(py_compare, m)?)?;
+    m.add_function(wrap_pyfunction!(py_inspect, m)?)?;
     m.add_function(wrap_pyfunction!(py_replay_hook, m)?)?;
     Ok(())
 }

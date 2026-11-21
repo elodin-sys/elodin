@@ -248,6 +248,39 @@ python3 examples/many-agents/benchmark.py --sizes 2 --modes runtime,local,lockst
                 command="bash examples/many-agents-cpp/run.sh",
             ),
             nix_step(
+                label=":linux: elodin-model RHEL 8",
+                flake=".#run",
+                command="""
+rm -rf target/elodin-model-rhel8
+python3 examples/ball-cpp/export.py target/elodin-model-rhel8/model --cpu generic
+bash scripts/ci/elodin_model_rhel8.sh
+""",
+            ),
+            nix_step(
+                label=":c: passive model ABI",
+                flake=".#run",
+                command="""
+set -e
+root=/tmp/elodin-model-abi
+rm -rf "$root"
+python3 examples/ball-cpp/export.py "$root/ball-model"
+python3 libs/elodin-model/package.py "$root/ball-model" "$root/ball-package"
+cmake -S libs/elodin-model/tests/cpp -B "$root/ball-cpp" \
+  -DElodinModel_DIR="$root/ball-package"
+cmake --build "$root/ball-cpp"
+"$root/ball-cpp/passive_shared"
+"$root/ball-cpp/passive_static"
+"$root/ball-cpp/hook_smoke" "$root/ball-cpp/libtest_step_hook.so"
+
+python3 examples/many-agents-cpp/export.py "$root/agents-model" --agents 2 --workers 2
+python3 libs/elodin-model/package.py "$root/agents-model" "$root/agents-package"
+cmake -S libs/elodin-model/tests/cpp -B "$root/agents-cpp" \
+  -DElodinModel_DIR="$root/agents-package"
+cmake --build "$root/agents-cpp"
+"$root/agents-cpp/interface_smoke"
+""",
+            ),
+            nix_step(
                 label=":python: frames",
                 flake=".#run",
                 command="python3 examples/frames/main.py",

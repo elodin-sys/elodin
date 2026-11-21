@@ -242,6 +242,22 @@ def test_stages_and_references_are_checked(tmp_path):
     assert "has a different schema: the stages are" in error
 
 
+def test_inspect_returns_validated_schema_and_inventory(tmp_path, capsys):
+    _record(tmp_path, "baseline.witness", raw=True)
+    path = tmp_path / "baseline.witness"
+    inspected = el.determinism.inspect(path)
+    assert inspected["ticks"] == 40
+    assert inspected["raw_ticks"] == 40
+    assert inspected["header"]["format"] == "elodin.witness"
+    assert inspected["header"]["schema"]["batches"][0]["name"] == "pair"
+    assert inspected["trailer"]["root"]
+
+    schema_path = tmp_path / "schema.json"
+    assert el.determinism.main(["inspect", str(path), "--schema", str(schema_path)]) == 0
+    assert json.loads(schema_path.read_text()) == inspected["header"]["schema"]
+    assert "40 ticks (40 raw), root" in capsys.readouterr().out
+
+
 def test_prepare_witness_checks_its_channels_and_stages():
     world, batch = _world()
     other = world.prepare_batch({"x": world.prepare_component("wx", [])})

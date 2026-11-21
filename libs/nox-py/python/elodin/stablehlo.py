@@ -37,17 +37,27 @@ def lower_to_stablehlo(func: Any, input_arrays: list[Any]) -> str:
     return stablehlo_mlir
 
 
-def compile_object(stablehlo_mlir: str, prefix: str, workers: int = 1) -> bytes:
+def compile_object(
+    stablehlo_mlir: str, prefix: str, workers: int = 1, cpu: str = "native"
+) -> bytes:
     """Compile StableHLO text ahead of time into a relocatable object file for this machine.
 
     The object defines `{prefix}_step`, which steps `main` like the Cranelift backend, and the
     import table a loader binds; `libs/elodin-model` is that loader. With `workers` above 1, it
     runs independent calls as groups on the loader's worker pool, as `World.run(workers=...)`
-    does.
+    does. `cpu="native"` enables this CPU's features; `"generic"` selects the target
+    architecture baseline.
     """
     from elodin.elodin import _compile_stablehlo_object
 
-    return _compile_stablehlo_object(stablehlo_mlir, prefix, workers)
+    return _compile_stablehlo_object(stablehlo_mlir, prefix, workers, cpu)
+
+
+def object_target(cpu: str = "native") -> dict[str, Any]:
+    """Target triple and ISA feature values of an ahead-of-time object."""
+    from elodin.elodin import _stablehlo_object_target
+
+    return json.loads(_stablehlo_object_target(cpu))
 
 
 def run_xla_reference(func: Any, real_input_arrays: list[Any], debug_dir: str) -> None:

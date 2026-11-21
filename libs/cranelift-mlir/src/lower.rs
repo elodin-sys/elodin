@@ -1569,8 +1569,10 @@ pub fn compile_module_with_config(
         crate::pool::ensure_workers(config.workers - 1);
     }
 
-    let mut jit_builder =
-        JITBuilder::with_isa(build_isa(false)?, cranelift_module::default_libcall_names());
+    let mut jit_builder = JITBuilder::with_isa(
+        build_isa(false, "native")?,
+        cranelift_module::default_libcall_names(),
+    );
 
     const JIT_ARENA_SIZE: usize = 2 * 1024 * 1024 * 1024;
     let arena = ArenaMemoryProvider::new_with_size(JIT_ARENA_SIZE)
@@ -1657,6 +1659,7 @@ pub fn compile_module_to_object(
     ir_module: &crate::ir::Module,
     prefix: &str,
     workers: usize,
+    cpu: &str,
 ) -> Result<Vec<u8>, String> {
     // Profiling probes keep process-local state.
     let config = CompileConfig {
@@ -1667,7 +1670,7 @@ pub fn compile_module_to_object(
     let ir_module = &ir_module;
 
     let builder = ObjectBuilder::new(
-        build_isa(true)?,
+        build_isa(true, cpu)?,
         prefix,
         cranelift_module::default_libcall_names(),
     )
@@ -1895,13 +1898,29 @@ pub fn runtime_symbol(name: &str) -> Option<*const u8> {
         .map(|(_, ptr)| ptr)
 }
 
-fn build_isa(pic: bool) -> Result<cranelift_codegen::isa::OwnedTargetIsa, String> {
+/// Target triple and enabled ISA-specific flags for an AOT object.
+pub fn object_target(cpu: &str) -> Result<(String, Vec<(String, String)>), String> {
+    let isa = build_isa(true, cpu)?;
+    let flags = isa
+        .isa_flags()
+        .into_iter()
+        .map(|flag| (flag.name.to_string(), flag.value_string()))
+        .collect();
+    Ok((isa.triple().to_string(), flags))
+}
+
+fn build_isa(pic: bool, cpu: &str) -> Result<cranelift_codegen::isa::OwnedTargetIsa, String> {
     let mut flag_builder = settings::builder();
     flag_builder.set("opt_level", "speed").unwrap();
     flag_builder
         .set("is_pic", if pic { "true" } else { "false" })
         .unwrap();
-    let isa_builder = cranelift_native::builder().map_err(|e| format!("native ISA: {e}"))?;
+    let isa_builder = match cpu {
+        "native" => cranelift_native::builder(),
+        "generic" => cranelift_native::builder_with_options(false),
+        other => return Err(format!("CPU must be native or generic, not {other:?}")),
+    }
+    .map_err(|e| format!("{cpu} ISA: {e}"))?;
     isa_builder
         .finish(settings::Flags::new(flag_builder))
         .map_err(|e| format!("ISA finish: {e}"))

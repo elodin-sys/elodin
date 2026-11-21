@@ -52,7 +52,8 @@ writes `build/model/`:
 | `step.stablehlo.mlir` | One whole tick, from every component's value to its next value |
 | `step.o` | The same tick compiled ahead of time by Elodin's Cranelift backend, for this machine |
 | `state.bin` | The initial value of every component, as raw little-endian bytes |
-| `schema.json` | Each component's name, dtype, shape and entities, in state order |
+| `schema.json` | Versioned model/time/target metadata and typed components/entities |
+| `model-manifest.json` | Export target and SHA-256/size inventory |
 
 The step is `JaxSim.step_fn`, not just the systems: it carries forward components no system
 writes and puts each output back in its component's slot, so the native side only swaps buffers.
@@ -68,10 +69,12 @@ This builds `libs/elodin-model` around the model and lays out a CMake package:
 ```text
 ElodinModel/
   ElodinModelConfig.cmake
-  include/elodin_model.h
-  lib/libelodin_model.so   (libelodin_model.dylib on macOS)
-  schema.json
+  include/elodin_model.h, elodin_model.hpp, elodin_step_hook.h
+  lib/libelodin_model.so, libelodin_model.a
+  schema/state/step artifacts, build manifests, runtime SBOM
 ```
+
+The CMake targets are `ElodinModel::model` / `::shared` and `ElodinModel::static`.
 
 `--backend` picks how the model's code gets into the library:
 

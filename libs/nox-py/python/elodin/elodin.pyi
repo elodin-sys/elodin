@@ -25,6 +25,8 @@ class ComponentHandle:
     dtype: numpy.dtype
     shape: tuple[int, ...]
     rows: list[EntityId]
+    entity_ids: list[int]
+    row_bytes: int
     topology_generation: int
 
 class BatchHandle:
@@ -538,7 +540,7 @@ class WorldBuilder:
         default_playback_speed: float = 1.0,
         max_ticks: Optional[int] = None,
         workers: Optional[int] = None,
-    ) -> Tuple[object, list, list, object, dict, dict, dict]: ...
+    ) -> Tuple[object, list, list, object, dict, dict, dict, dict]: ...
 
 class EntityId:
     def __init__(self, id: int): ...

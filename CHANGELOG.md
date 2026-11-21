@@ -1,6 +1,7 @@
 # Changelog
 
 ## unreleased
+- **(feat)** Export a versioned passive model ABI for customer-owned C++ orchestration: typed component metadata, named row interfaces, caller-owned time/reset, static and shared CMake targets, generic-CPU AOT objects, build provenance and runtime SBOM, a composition-only C++ wrapper, and an optional caller-driven native-hook adapter. `elodin determinism inspect` exposes validated witness schemas to outside runtimes.
 - **(feat)** Run a simulation from C or C++ without Python: `JaxSim.export_model` writes its step as StableHLO and as an object compiled ahead of time by the Cranelift backend, and `libs/elodin-model` packages it as a shared library with a C header and a CMake package, linking the precompiled step (`aot`) or compiling it when opened (`jit`).
 - **(feat:examples)** Add a ball-cpp example: the ball simulation stepped by a standalone C++ program built with CMake, verified tick for tick against the ball example run in Elodin.
 - **(feat)** `World.to_jax(workers=)` traces systems as `World.run(workers=)` runs them on the Cranelift backend, and `export_model` then compiles the step's independent calls to run on worker threads; `libs/elodin-model` starts them, with `elodin_model_set_workers` to choose the count and `elodin_model_component_rows`, `elodin_model_entity_name` and `elodin_model_entity_id` to find each row's entity.

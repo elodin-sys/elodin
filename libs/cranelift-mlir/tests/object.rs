@@ -7,10 +7,10 @@ use cranelift_mlir::parser::parse_module;
 use object::{BinaryFormat, Object, ObjectSymbol};
 
 /// Each symbol of the object `mlir` compiles to, and whether it is undefined.
-fn symbols(mlir: &str, prefix: &str, workers: usize) -> Vec<(String, bool)> {
+fn symbols_for_cpu(mlir: &str, prefix: &str, workers: usize, cpu: &str) -> Vec<(String, bool)> {
     let mut module = parse_module(mlir).unwrap();
     fold_module(&mut module);
-    let bytes = compile_module_to_object(&module, prefix, workers).unwrap();
+    let bytes = compile_module_to_object(&module, prefix, workers, cpu).unwrap();
     let file = object::File::parse(&*bytes).unwrap();
     let macho = file.format() == BinaryFormat::MachO;
     file.symbols()
@@ -25,6 +25,10 @@ fn symbols(mlir: &str, prefix: &str, workers: usize) -> Vec<(String, bool)> {
             Some((name.to_string(), s.is_undefined()))
         })
         .collect()
+}
+
+fn symbols(mlir: &str, prefix: &str, workers: usize) -> Vec<(String, bool)> {
+    symbols_for_cpu(mlir, prefix, workers, "native")
 }
 
 fn assert_bound_through_the_table(symbols: &[(String, bool)], prefix: &str) {
@@ -47,6 +51,17 @@ fn assert_bound_through_the_table(symbols: &[(String, bool)], prefix: &str) {
 fn ball_object_defines_its_entry_and_binds_imports_through_the_table() {
     let symbols = symbols(include_str!("../testdata/ball.stablehlo.mlir"), "ball", 1);
     assert_bound_through_the_table(&symbols, "ball");
+}
+
+#[test]
+fn ball_object_compiles_for_the_generic_host_architecture() {
+    let symbols = symbols_for_cpu(
+        include_str!("../testdata/ball.stablehlo.mlir"),
+        "generic_ball",
+        1,
+        "generic",
+    );
+    assert_bound_through_the_table(&symbols, "generic_ball");
 }
 
 #[test]

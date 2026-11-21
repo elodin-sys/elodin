@@ -23,7 +23,19 @@ parser.add_argument("--objects", type=int, help="moving objects (default: as man
 parser.add_argument("--workers", type=int, default=8)
 args = parser.parse_args()
 
-world, system, *_ = build(args.agents, args.objects or args.agents)
-sim = world.to_jax(system, simulation_rate=RATE_HZ, workers=args.workers)
-sim.export_model(args.model)
+world, system, agents, _, _ = build(args.agents, args.objects or args.agents)
+agent_interface = world.prepare_batch(
+    {
+        "position": world.prepare_component("position", agents),
+        "velocity": world.prepare_component("velocity", agents),
+        "command": world.prepare_component("command", agents, access="write"),
+    }
+)
+world.export_model(
+    system,
+    args.model,
+    simulation_rate=RATE_HZ,
+    workers=args.workers,
+    interfaces={"agents": agent_interface},
+)
 print(f"exported {args.agents} agents for {args.workers} workers to {args.model}")

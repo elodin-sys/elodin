@@ -26,6 +26,11 @@ You may not need this. To put flight software in the loop with an Elodin simulat
 - **Your loop, your rules.** Scheduling, I/O, threads and logging belong to your program. The library does no I/O and starts no threads except, if you ask, the step's own workers.
 - **Proof, not trust.** Your program can write Elodin's deterministic witness format, so `elodin determinism compare` checks it against the Elodin run tick by tick and names the first byte that differs.
 
+The library is a passive component. It does not require your class to inherit from an Elodin
+type, and it does not own a scheduler, wall clock, files, callbacks, hooks, or processes. A
+customer framework can contain an `elodin::Instance`, write its inputs, call one synchronous
+`step`, and read its outputs whenever that framework's contract requires.
+
 ## What moves and what stays
 
 ```mermaid
@@ -53,20 +58,31 @@ The database and editor are not part of the library. To keep watching runs in th
 
 ## Export the step
 
-`World.to_jax` builds the world for JAX instead of running it, and `JaxSim.export_model` writes one tick of it to a directory. This is all of [many-agents-cpp's `export.py`](https://github.com/elodin-sys/elodin/blob/main/examples/many-agents-cpp/export.py), with the unchanged many-agents `build()`:
+`World.to_jax` builds the world for JAX instead of running it, and `JaxSim.export_model` writes one tick of it to a directory. `World.export_model` is the direct form and can retain prepared batches as optional native interfaces:
 
 ```python
-world, system, *_ = build(agents, objects)
-sim = world.to_jax(system, simulation_rate=RATE_HZ, workers=8)
-sim.export_model("build/model")
+world, system, agents = build()
+exchange = world.prepare_batch({
+    "position": world.prepare_component("position", agents),
+    "command": world.prepare_component("command", agents, access="write"),
+})
+world.export_model(
+    system,
+    "build/model",
+    simulation_rate=RATE_HZ,
+    workers=8,
+    interfaces={"fsw.exchange": exchange},
+    cpu="generic",
+)
 ```
 
 | File | Contents |
 |---|---|
 | `step.stablehlo.mlir` | One whole tick, from every component's value to its next value |
-| `step.o` | The same tick compiled ahead of time by the Cranelift backend, for this machine |
+| `step.o` | The same tick compiled ahead of time by the Cranelift backend, for native or generic CPU features |
 | `state.bin` | The initial value of every component, as raw little-endian bytes |
-| `schema.json` | Each component's name, dtype, shape and entities, in state order, and `workers` |
+| `schema.json` | Model ABI, time and target metadata, typed components/entities, and optional named row interfaces |
+| `model-manifest.json` | SHA-256 and size of every exported artifact |
 
 One step is a whole tick, not just the systems: it advances `tick`, carries forward the components no system writes, and puts each output back in its component's place. Your program only swaps buffers.
 
@@ -83,9 +99,11 @@ python3 libs/elodin-model/package.py build/model build/ElodinModel
 ```text
 ElodinModel/
   ElodinModelConfig.cmake
-  include/elodin_model.h
+  include/elodin_model.h, elodin_model.hpp, elodin_step_hook.h
   lib/libelodin_model.so   (libelodin_model.dylib on macOS)
-  schema.json
+  lib/libelodin_model.a
+  schema.json, state.bin, step.o, step.stablehlo.mlir
+  model-manifest.json, build-manifest.json, runtime-sbom.json
 ```
 
 `--backend` decides how the model's code gets into the library:
@@ -108,6 +126,10 @@ Both run the same Cranelift code and give identical results; the many-agents wit
 find_package(ElodinModel CONFIG REQUIRED)
 target_link_libraries(ball_cpp PRIVATE ElodinModel::model)
 ```
+
+`ElodinModel::model` and `ElodinModel::shared` are the shared library;
+`ElodinModel::static` supports a customer executable that must link the runtime directly.
+`elodin_model.hpp` is a header-only RAII wrapper designed for composition, not inheritance.
 
 Configure with `-DElodinModel_DIR=<package>`. The library's install name is `@rpath/libelodin_model.dylib` on macOS and its soname `libelodin_model.so` on Linux, so give the executable a relative runpath, `@loader_path/../lib` or `$ORIGIN/../lib`, and `install(IMPORTED_RUNTIME_ARTIFACTS ElodinModel::model)` copies the library next to it. The installed directory can then move.
 
@@ -135,15 +157,20 @@ elodin_model_close(program);
 | Group | Functions |
 |---|---|
 | Lifecycle | `elodin_model_open`, `elodin_model_close`, `elodin_model_create`, `elodin_model_destroy`, `elodin_model_reset` |
-| Components | `elodin_model_component_count`, `_name`, `_size`, `_index` |
+| Model contract | `elodin_model_abi_version`, `_schema_abi`, `_build_info`, `_nominal_time_step`, `_tick_advanced_by_step` |
+| Components | `elodin_model_component_count`, `_name`, `_size`, `_index`, `_type`, `_read_rows`, `_write_rows` |
 | Entities | `elodin_model_component_rows`, `elodin_model_entity_name`, `elodin_model_entity_id` |
+| Named interfaces | `elodin_model_interface_count`, `_name`, `_field`, `_read`, `_write` |
 | Stepping | `elodin_model_step`, `elodin_model_read`, `elodin_model_write` |
-| Threads | `elodin_model_set_workers` |
+| Threads | `elodin_model_configure_workers`, `_effective_workers`, `_recommended_stack` |
 | Errors and build | `elodin_model_error`, `elodin_model_backend` |
 
 - **Components** are addressed by index, in `schema.json` order. Each holds every entity's value as one little-endian array; read and write it whole, with exactly `elodin_model_component_size` bytes. A wrong size fails and copies nothing.
 - **Rows** are entities. Row `r` of a component belongs to `elodin_model_entity_id(program, c, r)`, the same id the entity has in Elodin. Use it to find an agent's row instead of assuming an order.
 - **Writes** take effect at the next step, like an `external_control` write in Elodin. Write commands after a step and before the next.
+- **Named interfaces** are optional prepared batches exported by the model author. They gather selected entity rows under stable aliases and access directions; they do not run callbacks or choose when a caller uses them.
+- **Time belongs to the caller.** The schema reports nominal dt and tick semantics. `elodin_model_step` advances one model transition synchronously; it does not sleep or read wall time. `elodin_model_set_time_step` changes the model's dt component without stepping.
+- **Reset** restores the embedded initial state. A long-lived application can reset, write case parameters and initial conditions, and run another case without reopening the program.
 - **Errors.** Functions return `NULL` or nonzero on failure, and `elodin_model_error()` says why. The message is per thread and lasts until that thread's next failure.
 - **Threads.** Use each instance from one thread at a time. `elodin_model_set_workers(n)`, before the first `elodin_model_open`, sets how many threads, the caller included, run an `aot` step's parallel groups; 0 uses the count the model was exported for.
 

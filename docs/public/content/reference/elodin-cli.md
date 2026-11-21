@@ -380,6 +380,15 @@ check a program outside Elodin against an Elodin run; see
 
 **Usage:** `elodin determinism <COMMAND>`
 
+### `elodin determinism inspect`
+
+**Usage:** `elodin determinism inspect [--json] [--schema <PATH>] <TRACE>`
+
+Validates the witness, including its schema digest, tick digests and root, then prints its tick
+and raw-byte inventory. `--json` prints the complete header, labels, schema, trailer and counts.
+`--schema` writes the validated schema alone, so an outside orchestrator can reproduce the record
+layout without a private reader.
+
 ### `elodin determinism compare`
 
 **Usage:** `elodin determinism compare [--stop-at-first] <LEFT> <RIGHT>`

@@ -80,10 +80,12 @@ python3 examples/many-agents-cpp/export.py --agents 24 --workers 8
 ```
 
 `export.py` imports [`examples/many-agents/sim.py`](../many-agents/sim.py) unchanged and calls
-`world.to_jax(system, workers=8).export_model(...)`. `workers` matters for bits, not only for
-speed. With more than one worker, Elodin traces each `@el.map` system in chunks of two entities
-so the chunks can run in parallel, and a chunked sum can round differently from a whole-column
-one. `to_jax(workers=8)` traces the same way, so the export matches `World.run(workers=8)`.
+`world.export_model(system, workers=8, interfaces={"agents": ...})`. The optional passive
+interface retains the position, velocity, and writable command rows without prescribing this
+host's loop. `workers` matters for bits, not only for speed. With more than one worker, Elodin
+traces each `@el.map` system in chunks of two entities so the chunks can run in parallel, and a
+chunked sum can round differently from a whole-column one. Exporting with `workers=8` therefore
+matches `World.run(workers=8)`.
 
 The object `export_model` compiles keeps those chunks as groups of independent calls. The
 library runs them on a pool of worker threads; `--workers` sets the thread count, and the

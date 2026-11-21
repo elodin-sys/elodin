@@ -206,6 +206,10 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
         cranelift_compile::_compile_stablehlo_object,
         m
     )?)?;
+    m.add_function(wrap_pyfunction!(
+        cranelift_compile::_stablehlo_object_target,
+        m
+    )?)?;
     m.add(
         "__version__",
         concat!(env!("CARGO_PKG_VERSION"), "+", env!("GIT_HASH")),
