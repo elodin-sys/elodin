@@ -392,6 +392,14 @@
             <li>
                 <a
                     class="docs-link "
+                    href="/reference/cpp-runtime/"
+                    >Custom C++ Runtimes</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
                     href="/reference/schematic/"
                     >Schematic KDL</a
                 >
@@ -966,6 +974,8 @@
 <li><a href="/reference/elodin-cli/#elodin-upload"><code>elodin upload</code>↴</a></li>
 <li><a href="/reference/elodin-cli/#elodin-editor"><code>elodin editor</code>↴</a></li>
 <li><a href="/reference/elodin-cli/#elodin-run"><code>elodin run</code>↴</a></li>
+<li><a href="/reference/elodin-cli/#elodin-monte-carlo"><code>elodin monte-carlo</code>↴</a></li>
+<li><a href="/reference/elodin-cli/#elodin-determinism"><code>elodin determinism</code>↴</a></li>
 <li><a href="/reference/elodin-cli/#elodin-db"><code>elodin-db</code>↴</a></li>
 <li><a href="/reference/elodin-cli/#elodin-db-run"><code>elodin-db run</code>↴</a></li>
 <li><a href="/reference/elodin-cli/#elodin-db-lua"><code>elodin-db lua</code>↴</a></li>
@@ -1269,6 +1279,10 @@ and <code>drift_resets</code>, with worst-run callouts in the campaign summary.<
 and replay <code>pre_commit</code> hooks from them (not available on Windows). Both
 subcommands exit 0 when everything matches, 1 at a mismatch, and 2 on an error,
 such as an unreadable file or witnesses with different schemas.</p>
+<p>A witness can come from any program that writes the
+<a href="/reference/python-api#witness-files">file format</a>, so these commands also
+check a program outside Elodin against an Elodin run; see
+<a href="/reference/cpp-runtime#prove-it-matches">Custom C++ Runtimes</a>.</p>
 <p><strong>Usage:</strong> <code>elodin determinism &lt;COMMAND&gt;</code></p>
 <h3 id="elodin-determinism-compare"><code>elodin determinism compare</code></h3>
 <p><strong>Usage:</strong> <code>elodin determinism compare [--stop-at-first] &lt;LEFT&gt; &lt;RIGHT&gt;</code></p>
@@ -1276,7 +1290,7 @@ such as an unreadable file or witnesses with different schemas.</p>
 tick, stage, hook, record, and when both files kept that tick's exact bytes,
 the entity, row, byte and both values. Without <code>--stop-at-first</code>, it reads both
 files to the end and also prints how many ticks differ.</p>
-<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> determinism</span><span style="color: light-dark(#2AA198, #2AA198);"> compare</span><span style="color: light-dark(#2AA198, #2AA198);"> baseline/run.witness</span><span style="color: light-dark(#2AA198, #2AA198);"> faulted/run.witness</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-stop-at-first</span></span></code></pre><pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>first mismatch</span></span>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> determinism</span><span style="color: light-dark(#2AA198, #2AA198);"> compare</span><span style="color: light-dark(#2AA198, #2AA198);"> baseline/run.witness</span><span style="color: light-dark(#2AA198, #2AA198);"> candidate/run.witness</span></span></code></pre><pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>identical: 600 ticks, root 72885022e2689c9a53c9fcadae417195f632599bdac6229bfa7c52b609fdb78a</span></span></code></pre><pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> determinism</span><span style="color: light-dark(#2AA198, #2AA198);"> compare</span><span style="color: light-dark(#2AA198, #2AA198);"> baseline/run.witness</span><span style="color: light-dark(#2AA198, #2AA198);"> faulted/run.witness</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-stop-at-first</span></span></code></pre><pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>first mismatch</span></span>
 <span class="giallo-l"><span>  tick: 4096</span></span>
 <span class="giallo-l"><span>  stage: after_hook:0</span></span>
 <span class="giallo-l"><span>  hook: many_agent_step</span></span>
@@ -1291,8 +1305,10 @@ files to the end and also prints how many ticks differ.</p>
 tick <code>TRACE</code> kept exactly, with the rows and external channels it saw in the
 run, and compares what it writes with the recording. It needs neither the
 simulation nor the processes the hook talks to. <code>--live</code> leaves the external
-channels to the hook, so it does its own I/O.</p>
-<h2 id="python-simulation-subcommands">Python Simulation Subcommands</h2>
+channels to the hook, so it does its own I/O. It finds the hook by the name,
+batch and partitions in the witness's labels.</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> determinism</span><span style="color: light-dark(#2AA198, #2AA198);"> replay-hook</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-library</span><span style="color: light-dark(#2AA198, #2AA198);"> hook/build/release/libmany_agent_hook.so</span><span style="color: light-dark(#CB4B16, #CB4B16);"> \</span></span>
+<span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">  -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-symbol</span><span style="color: light-dark(#2AA198, #2AA198);"> many_agent_step</span><span style="color: light-dark(#2AA198, #2AA198);"> run.witness</span></span></code></pre><pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>reproduced: 600 ticks, 2400 records, 2707200 bytes; 0 ticks had digests only</span></span></code></pre><h2 id="python-simulation-subcommands">Python Simulation Subcommands</h2>
 <p>When you run a simulation Python file directly (for example <code>python examples/drone/main.py ...</code>), the embedded simulation CLI supports additional subcommands:</p>
 <ul>
 <li><code>run</code> (default): run the simulation normally.</li>

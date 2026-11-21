@@ -392,6 +392,14 @@
             <li>
                 <a
                     class="docs-link "
+                    href="/reference/cpp-runtime/"
+                    >Custom C++ Runtimes</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
                     href="/reference/schematic/"
                     >Schematic KDL</a
                 >
@@ -735,6 +743,7 @@
 <li>Replay a hook from a witness, without the simulation or the flight software, with <code>world.replay_pre_commit</code> or <code>elodin determinism replay-hook</code>. If the replay reproduces every byte, the difference came from outside the hook.</li>
 </ol>
 <p>Keep host-only fields, such as a reply's service time, out of the compared channels: the external channel keeps the whole reply for replay, and is never compared. <a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/many-agents">many-agents</a> walks through a one-bit fault, a controller race, and its fix.</p>
+<p>A witness can also come from outside Elodin. When the SITL must move into your own C++ runtime, <a href="/reference/cpp-runtime">Custom C++ Runtimes</a> exports the simulation as a library and proves the C++ program reproduces the Elodin run with these same comparisons.</p>
 <h2 id="hitl-in-practice">HITL in practice</h2>
 <p>In HITL the flight software runs on the flight computer and keeps its own clock. Run the simulation in real time, put timestamps on what crosses the link, and expect some jitter between the two clocks. Keep the same boundary as in SITL, so the flight software cannot tell the difference. Three layouts work well.</p>
 <h3 id="the-database-as-the-boundary">The database as the boundary</h3>
@@ -862,6 +871,27 @@
     </div>
     <div class="el-cardlink-subtext"
         <p><p>Prepared handles, <code>WorldStepContext</code>, native hooks, and run receipts.</p>
+</p>
+    </div>
+</a>
+<!-- title="Double Pendulum Tutorial", icon="tornado", href="tutorial/double-pend" -->
+
+<a class="el-cardlink" href="&#x2F;reference&#x2F;cpp-runtime">
+    <div class="el-cardlink-text">
+        <p>
+            <i
+                class="bx bxs-cog"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+            Custom C++ Runtimes
+            <i
+                class="bx bxs-right-arrow-alt"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+        </p>
+    </div>
+    <div class="el-cardlink-subtext"
+        <p><p>Run the simulation and flight software in your own C++ program, and prove it matches Elodin.</p>
 </p>
     </div>
 </a>

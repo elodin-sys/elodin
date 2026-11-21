@@ -82,6 +82,9 @@
         <loc>/reference/coords/</loc>
     </url>
     <url>
+        <loc>/reference/cpp-runtime/</loc>
+    </url>
+    <url>
         <loc>/reference/db-asset-server/</loc>
     </url>
     <url>

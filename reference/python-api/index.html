@@ -392,6 +392,14 @@
             <li>
                 <a
                     class="docs-link "
+                    href="/reference/cpp-runtime/"
+                    >Custom C++ Runtimes</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
                     href="/reference/schematic/"
                     >Schematic KDL</a
                 >
@@ -462,6 +470,11 @@
                         
                         <li>
                             <a href="/reference/python-api/#backend-selection">Backend Selection</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="/reference/python-api/#class-elodin-jaxsim-jaxsim">class elodin.jaxsim.JaxSim</a>
                             
                         </li>
                         
@@ -1046,7 +1059,7 @@ and running the simulation. The <code>World</code> object also provides helper m
 <li><code>log_level</code> : <code>str</code>, optional, log level for the embedded Elodin-DB instance (<code>error</code>, <code>warn</code>, <code>info</code>, <code>debug</code>, <code>trace</code>). Defaults to <code>info</code> unless <code>RUST_LOG</code> is set.</li>
 <li><code>backend</code> : <code>str</code>, optional, execution backend. Defaults to <code>"cranelift"</code>. Supported values are <code>"cranelift"</code> (CPU), <code>"jax-cpu"</code>, and <code>"jax-gpu"</code>.</li>
 <li><code>on_receipt</code> : <code>Callable[[dict], None]</code>, optional, called with the run's <a href="/reference/python-api/#run-receipts">receipt</a> when it stops.</li>
-<li><code>workers</code> : <code>int</code>, optional, threads the Cranelift backend runs independent calls on, the simulation thread included: entity chunks of <code>@el.map</code> systems and the per-entity calls of <code>@el.map_seq</code>. Defaults to <code>1</code>. Results do not depend on the count once it is above <code>1</code>; going from <code>1</code> to more can change the last bits of reductions.</li>
+<li><code>workers</code> : <code>int</code>, optional, threads the Cranelift backend runs independent calls on, the simulation thread included: entity chunks of <code>@el.map</code> systems and the per-entity calls of <code>@el.map_seq</code>. Defaults to <code>1</code>. Results do not depend on the count once it is above <code>1</code>; going from <code>1</code> to more can change the last bits of reductions. <code>to_jax(workers=...)</code> traces systems the same way.</li>
 <li><code>pre_commit</code> : a callable <code>(tick, WorldStepContext)</code>, an <a href="/reference/python-api/#class-elodin-nativestephook">elodin.NativeStepHook</a>, or a list of them run in order, called after each tick and before its DB commit. See <a href="/reference/python-api/#pre-commit-hooks">pre-commit hooks</a>.</li>
 <li><code>timing</code> : <a href="/reference/python-api/#class-elodin-timing">elodin.Timing</a>, optional, what the receipt measures. Defaults to <code>Timing.summary()</code>.</li>
 <li><code>synchronous_commits</code> : <code>bool</code>, optional, has each commit in the DB, and <code>last_updated</code> past it, before the next cycle's <code>pre_commit</code> hooks run, so at most one commit is ever in flight. The writer thread still appends it, during the pacing and the next systems step, and the next cycle waits for it before its hooks; the receipt counts that wait in <code>commit</code>. The loop then also waits out DB write stalls, so keep the DB on storage that does not stall. Defaults to <code>False</code>.</li>
@@ -1069,6 +1082,14 @@ and running the simulation. The <code>World</code> object also provides helper m
 <li><code>backend</code> : <code>str</code>, optional, execution backend. Defaults to <code>"cranelift"</code>.</li>
 <li><code>start_timestamp</code> : <code>int</code>, optional, the timestamp of the initial state in microseconds; tick <code>n</code> is recorded at <code>start_timestamp + n / simulation_rate</code>. If <code>None</code> (default), uses the current system time. Set to <code>0</code> for zero-based timing.</li>
 <li><code>workers</code>, <code>timing</code> : as for <code>run</code>. <code>Exec.last_receipt()</code> returns the receipt of the latest <code>Exec.run</code>.</li>
+</ul>
+</li>
+<li>
+<p><code>to_jax(system, simulation_rate=120.0, default_playback_speed=1.0, max_ticks=None, workers=None)</code> -&gt; <a href="/reference/python-api/#class-elodin-jaxsim-jaxsim">elodin.jaxsim.JaxSim</a></p>
+<p>Build the world for JAX instead of running it: no runtime loop, database or recipes. The result steps the simulation as pure JAX functions, and exports it for a <a href="/reference/cpp-runtime">native C++ host</a>.</p>
+<ul>
+<li><code>system</code>, <code>simulation_rate</code>, <code>default_playback_speed</code>, <code>max_ticks</code> : as for <code>build</code>.</li>
+<li><code>workers</code> : <code>int | None</code>, trace the systems as <code>run(workers=...)</code> runs them on the Cranelift backend: <code>@el.map</code> systems in chunks of two entities when above <code>1</code>, and <code>@el.map_seq</code> once per entity. The step then reproduces that run bit for bit, and <code>JaxSim.export_model</code> compiles its independent calls to run on that many threads; pass <code>1</code> for a run without <code>workers</code>. <code>None</code> traces as the JAX backends do: whole columns for <code>@el.map</code>, and <code>jax.lax.scan</code> for <code>@el.map_seq</code>.</li>
 </ul>
 </li>
 <li>
@@ -1109,7 +1130,45 @@ and running the simulation. The <code>World</code> object also provides helper m
 <tr><td><code>jax-gpu</code></td><td>JAX</td><td><code>gpu</code></td><td>JAX GPU target</td></tr>
 </tbody></table>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">#</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Force GPU backend regardless of backend= passed in Python</span></span>
-<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">ELODIN_BACKEND</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">j</span><span style="color: light-dark(#2AA198, #2AA198);">a</span><span style="color: light-dark(#2AA198, #2AA198);">x</span><span style="color: light-dark(#2AA198, #2AA198);">-</span><span style="color: light-dark(#2AA198, #2AA198);">g</span><span style="color: light-dark(#2AA198, #2AA198);">p</span><span style="color: light-dark(#2AA198, #2AA198);">u</span><span style="color: light-dark(#268BD2, #268BD2);"> python</span><span style="color: light-dark(#2AA198, #2AA198);"> main.py</span></span></code></pre><h3 id="monte-carlo-campaign-api">Monte Carlo Campaign API</h3>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">ELODIN_BACKEND</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">j</span><span style="color: light-dark(#2AA198, #2AA198);">a</span><span style="color: light-dark(#2AA198, #2AA198);">x</span><span style="color: light-dark(#2AA198, #2AA198);">-</span><span style="color: light-dark(#2AA198, #2AA198);">g</span><span style="color: light-dark(#2AA198, #2AA198);">p</span><span style="color: light-dark(#2AA198, #2AA198);">u</span><span style="color: light-dark(#268BD2, #268BD2);"> python</span><span style="color: light-dark(#2AA198, #2AA198);"> main.py</span></span></code></pre><h3 id="class-elodin-jaxsim-jaxsim"><em>class</em> <code>elodin.jaxsim.JaxSim</code></h3>
+<p>A world built for JAX by <code>World.to_jax</code>. Its state is a list of arrays, one per component, each holding every entity's value; a component held by one entity has no entity axis.</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>sim</span><span style="color: light-dark(#859900, #859900);"> =</span><span> world</span><span>.</span><span>to_jax</span><span>(</span><span>system</span><span>,</span><span> simulation_rate</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">120.0</span><span>)</span></span>
+<span class="giallo-l"><span>state</span><span style="color: light-dark(#859900, #859900);"> =</span><span> sim</span><span>.</span><span>set</span><span>(</span><span>sim</span><span>.</span><span>state</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">world_vel</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">ball</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> [</span><span style="color: light-dark(#D33682, #D33682);">0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 1</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 0</span><span>]</span><span>)</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">for</span><span> _</span><span style="color: light-dark(#859900, #859900);"> in</span><span style="color: light-dark(#268BD2, #268BD2);"> range</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">100</span><span>)</span><span>:</span></span>
+<span class="giallo-l"><span>    state</span><span style="color: light-dark(#859900, #859900);"> =</span><span> sim</span><span>.</span><span>step_fn</span><span>(</span><span>state</span><span>)</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">print</span><span>(</span><span>sim</span><span>.</span><span>get</span><span>(</span><span>state</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">world_pos</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">ball</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>)</span></span></code></pre>
+<ul>
+<li>
+<p><code>state</code> : the current state, which <code>step</code>, <code>get_state</code> and <code>set_state</code> use.</p>
+</li>
+<li>
+<p><code>workers</code> : the <code>workers</code> the systems were traced for; <code>1</code> without it.</p>
+</li>
+<li>
+<p><code>step_fn(state)</code> -&gt; <code>list</code> : the state after one tick. Pure, so it composes with <code>jax.jit</code>, <code>jax.vmap</code> and <code>jax.lax.scan</code>. It advances <code>tick</code>, and carries over the components no system writes.</p>
+</li>
+<li>
+<p><code>get(state, component_name, entity_name=None)</code> -&gt; array : a component's value for one entity, or for every entity.</p>
+</li>
+<li>
+<p><code>set(state, component_name, entity_name, value)</code> -&gt; <code>list</code> : a copy of <code>state</code> with the value written; <code>entity_name=None</code> writes every entity's value at once.</p>
+</li>
+<li>
+<p><code>step(max_steps)</code> -&gt; None, <code>get_state(component_name=None, entity_name=None)</code>, <code>set_state(component_name, entity_name, value)</code> -&gt; None : the same on <code>state</code>, in place.</p>
+</li>
+<li>
+<p><code>export_model(path)</code> -&gt; None</p>
+<p>Write one tick, for a program to run without Python. See <a href="/reference/cpp-runtime">Custom C++ Runtimes</a>.</p>
+<table><thead><tr><th>File</th><th>Contents</th></tr></thead><tbody>
+<tr><td><code>step.stablehlo.mlir</code></td><td><code>step_fn</code> as StableHLO, from every component's value to its next value</td></tr>
+<tr><td><code>step.o</code></td><td>The same tick compiled ahead of time by the Cranelift backend for this machine, defining <code>elodin_model_kernel_step</code>; with <code>workers</code> above <code>1</code>, its independent calls run on the loader's worker threads</td></tr>
+<tr><td><code>state.bin</code></td><td><code>state</code> as raw little-endian bytes, in state order</td></tr>
+<tr><td><code>schema.json</code></td><td><code>workers</code>, and for each component in state order its <code>name</code>, <code>dtype</code>, <code>shape</code>, and the <code>entities</code> and <code>entity_ids</code> of its rows</td></tr>
+</tbody></table>
+<p><code>libs/elodin-model/package.py</code> builds a shared library with a C header and a CMake package from the directory.</p>
+</li>
+</ul>
+<h3 id="monte-carlo-campaign-api">Monte Carlo Campaign API</h3>
 <p>The <code>el.monte_carlo</code> submodule lets a simulation declare tunable parameters and
 read the current campaign row. Outside <code>elodin monte-carlo</code>, declared defaults
 are returned so the same simulation still runs normally.</p>
@@ -1461,6 +1520,16 @@ are returned so the same simulation still runs normally.</p>
 <p>A mismatch names the <code>tick</code>, the <code>stage</code>, the <code>hook</code>, the record by its <code>kind</code> (<code>field</code>, <code>channel</code>, <code>deferred</code> or <code>recorded</code>) and name, and when both sides have the bytes, the <code>entity</code>, <code>row</code> and <code>byte</code> within the row, with each side's byte as <code>left</code> and <code>right</code>. A channel row takes the entity of its batch's first field. In a run with a reference and in a replay, <code>left</code> is the reference or the recording.</p>
 <h4 id="witness-files">Witness files</h4>
 <p>A file is the magic <code>ELWITNES</code>, the format version (<code>1</code>) and a JSON header with the schema, its digest and the labels; then one frame per tick, with the tick, its timestamp, a digest per hashed record and, when kept, every record's bytes; then a JSON trailer with the tick count, the root and the run's failure, if any. A version other than <code>1</code> is refused. Comparison never looks at the labels.</p>
+<p>Any program can write one; <a rel="external" href="https://github.com/elodin-sys/elodin/blob/main/examples/many-agents-cpp/cpp/witness.cpp">many-agents-cpp</a> does from C++. All integers are little-endian:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="plain"><span class="giallo-l"><span>file    := &quot;ELWITNES&quot; version:u32 header_len:u32 header_json frame* trailer</span></span>
+<span class="giallo-l"><span>frame   := 0x01 tick:u64 timestamp:i64 digest:[u8; 32]* raw:u8 (len:u32 bytes)*</span></span>
+<span class="giallo-l"><span>trailer := 0x02 json_len:u32 trailer_json</span></span></code></pre>
+<ul>
+<li><strong>Header.</strong> <code>{"format":"elodin.witness","version":1,"hash":"blake3-256 over little-endian bytes","schema_digest":…,"schema":…,"labels":…}</code>. The schema has <code>entities</code> (<code>[id, name]</code> pairs, by id), <code>batches</code> (each <code>name</code> and <code>fields</code>: <code>name</code>, <code>component</code>, <code>dtype</code>, <code>shape</code>, <code>row_bytes</code>, <code>access</code>, <code>entities</code>), <code>channels</code> (<code>name</code>, <code>batch</code>, <code>row_bytes</code>, <code>external</code>), <code>stages</code>, and <code>records</code> (<code>stage</code>, <code>kind</code>, <code>name</code>, <code>batch</code> or <code>null</code>, <code>index</code>, <code>row_bytes</code>), keys in that order. <code>schema_digest</code> is the hex BLAKE3 of the schema as compact JSON with keys in that order; a reader recomputes it and refuses a file whose digest differs. The labels are <code>build</code>, <code>start_timestamp</code> and <code>hooks</code> (<code>name</code>, <code>batch</code> or <code>null</code>, <code>partitions</code>); <code>elodin determinism replay-hook</code> finds a native hook by its label's name, batch and non-empty partitions.</li>
+<li><strong>Records</strong> come in the order of <code>records</code>, which lists stage by stage: for <code>after_systems</code>, every field of every batch; for <code>after_hook:N</code>, the channels that are not external, the write fields, one <code>deferred</code> record, then the external channels; for <code>after_commit</code>, a <code>recorded</code> record per field with one byte per row, <code>1</code> when the commit recorded that row.</li>
+<li><strong>Frames</strong> hold one digest per record that is not <code>external</code>, in record order. A record's digest is the BLAKE3 of its bytes, rows in batch order, except a channel no hook filled, which is 32 zero bytes. With <code>raw</code> set to <code>1</code>, every record follows as its length and bytes, external ones included and an unfilled channel as length 0.</li>
+<li><strong>Digests.</strong> A stage's digest is the BLAKE3 of its records' digests back to back. A tick's is the BLAKE3 of the tick (<code>u64</code>), its simulation time (<code>i64</code>, the timestamp minus <code>start_timestamp</code>) and its stages' digests. The root, in the trailer <code>{"ticks":…,"root":…,"failure":null}</code>, is the BLAKE3 of the schema digest followed by every tick's digest.</li>
+</ul>
 <h3 id="run-receipts">Run receipts</h3>
 <p>Every run builds a versioned receipt (<code>elodin.run_receipt.v1</code>), passed to <code>on_receipt</code>, returned by <code>Exec.last_receipt()</code>, and written to <code>$ELODIN_SIM_SUMMARY_JSON</code> when set. It covers the cycles after warmup: count, sum, min, exact p50/p95/p99, and max of every phase (<code>copy_db_to_world</code>, <code>world_run</code>, <code>pre_commit</code>, <code>commit</code>, <code>deferred_writes</code>, <code>post_step</code>, their <code>callback</code> sum, pacing, and <code>total_cycle</code>); pacing lateness and resets; DB <code>sync</code> counters, including whether commits were <code>synchronous</code> or <code>write_behind</code>, rows scanned, drained and committed, and the writer thread's lag and queue depth; backend bytes and compile times; hook timings, history queries, misses and bytes, and deferred-write batches, rows, bytes and failures under <code>callbacks</code>; under <code>witness</code>, the witness file's <code>path</code>, <code>root</code>, <code>ticks</code>, <code>raw_ticks</code> and <code>bytes_written</code>, the simulation thread's <code>capture</code> time per cycle, the witness thread's <code>writer_ns</code>, its <code>queue_high_water</code>, the <code>first_mismatch</code> with the reference and the witness's <code>failure</code>; the <code>failure</code> and <code>failed_hook</code> of a run a hook or the witness stopped; and the sections it did not collect under <code>unavailable</code>.</p>
 <h3 id="class-elodin-timing"><em>class</em> <code>elodin.Timing</code></h3>
