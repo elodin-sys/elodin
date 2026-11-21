@@ -1451,7 +1451,7 @@ are returned so the same simulation still runs normally.</p>
 <p>Load <code>symbol</code>, and <code>{symbol}_init</code> and <code>{symbol}_destroy</code> if present, from the library at <code>path</code>. Each tick calls <code>symbol</code> once per worker, concurrently, each on a contiguous share of <code>input</code>'s rows. <code>input</code> is an <code>elodin.BatchHandle</code>.</p>
 </li>
 </ul>
-<p>The library exports C functions over these types, ABI version 1:</p>
+<p>The library exports C functions over these types, ABI version 1, which <a rel="external" href="https://github.com/elodin-sys/elodin/blob/main/libs/elodin-model/include/elodin_step_hook.h"><code>elodin_step_hook.h</code></a> declares:</p>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="c"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">#</span><span style="color: light-dark(#859900, #859900);">include</span><span style="color: light-dark(#2AA198, #2AA198);"> &lt;</span><span style="color: light-dark(#2AA198, #2AA198);">stdint.h</span><span style="color: light-dark(#2AA198, #2AA198);">&gt;</span></span>
 <span class="giallo-l"></span>
 <span class="giallo-l"><span style="color: light-dark(#859900, #859900);">typedef</span><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;"> struct</span><span> {</span></span>
