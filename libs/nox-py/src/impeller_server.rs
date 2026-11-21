@@ -721,9 +721,10 @@ impl DbSync {
         hook_writes: &HookWrites,
     ) -> Result<(), Error> {
         // The writer dropped rows whose shadows were already updated; reread them all so they
-        // are compared with the DB again, as the synchronous path's failed rows are.
+        // are compared with the DB again, as the synchronous path's failed rows are. Waiting for
+        // the writer here would hold the state lock it needs; a batch still in flight is at
+        // worst recorded twice.
         if self.writer.as_ref().is_some_and(WriteBehind::take_failure) {
-            self.wait_for_writes();
             self.vtable_gen = u64::MAX;
         }
         self.rescan(vtable_gen);
