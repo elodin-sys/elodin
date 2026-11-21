@@ -13,12 +13,18 @@ for backend in aot jit; do
   cmake --build "$build/cpp-$backend"
   rm -rf "$build/install-$backend"
   cmake --install "$build/cpp-$backend" --prefix "$build/install-$backend"
-  installed="$build/install-$backend/bin/ball_cpp"
-  if [[ "$(uname)" == Darwin ]]; then links="$(otool -L "$installed")"; else links="$(readelf -d "$installed")"; fi
-  if grep -qF "$PWD" <<<"$links"; then
-    printf 'the installed ball_cpp depends on the build tree, so it cannot move:\n%s\n' "$links" >&2
+  # The installed tree must find the library through its runpath, so it runs after a move.
+  if [[ "$(uname)" == Darwin ]]; then
+    links="$(otool -L "$build/install-$backend/bin/ball_cpp")" library="@rpath/libelodin_model.dylib"
+  else
+    links="$(readelf -d "$build/install-$backend/bin/ball_cpp")" library="[libelodin_model.so]"
+  fi
+  if ! grep -qF "$library" <<<"$links"; then
+    printf 'ball_cpp does not load %s through its runpath:\n%s\n' "$library" "$links" >&2
     exit 1
   fi
-  "$installed" "$build/ball_cpp_$backend.csv"
+  rm -rf "$build/moved-$backend"
+  mv "$build/install-$backend" "$build/moved-$backend"
+  "$build/moved-$backend/bin/ball_cpp" "$build/ball_cpp_$backend.csv"
 done
 python3 examples/ball-cpp/verify.py "$build/ball_cpp_aot.csv" "$build/ball_cpp_jit.csv"
