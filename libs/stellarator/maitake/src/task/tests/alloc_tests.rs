@@ -276,18 +276,12 @@ fn drop_join_handle() {
 #[test]
 fn cell_miri() {
     use super::Cell;
-    use alloc::{string::String, sync::Arc, task::Wake};
+    use alloc::string::String;
     use core::{
         future::Future,
         pin::Pin,
-        task::{Context, Poll},
+        task::{Context, Poll, Waker},
     };
-
-    struct DummyWaker;
-
-    impl Wake for DummyWaker {
-        fn wake(self: Arc<Self>) {}
-    }
 
     struct ThingAdder<'a> {
         thing: &'a mut String,
@@ -312,8 +306,7 @@ fn cell_miri() {
 
     let mut fut = Cell::Pending(fut);
 
-    let waker = Arc::new(DummyWaker).into();
-    let mut ctx = Context::from_waker(&waker);
+    let mut ctx = Context::from_waker(Waker::noop());
     assert_eq!(fut.poll(&mut ctx), Poll::Pending);
     assert_eq!(fut.poll(&mut ctx), Poll::Pending);
 }

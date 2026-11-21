@@ -19,6 +19,7 @@ use super::AuthCtx;
 use super::auth::{random_token, tokens};
 
 const PART_UPLOAD_CONCURRENCY: usize = 4;
+const _: () = assert!(PART_UPLOAD_CONCURRENCY * 64 * 1024 * 1024 <= 256 * 1024 * 1024);
 const ARCHIVE_CACHE_VERSION: u32 = 1;
 const ZSTD_LEVEL: i32 = 3;
 const ZSTD_THREADS: u32 = 4;
@@ -1238,11 +1239,6 @@ impl Cli {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn upload_concurrency_caps_part_memory() {
-        assert!(PART_UPLOAD_CONCURRENCY * 64 * 1024 * 1024 <= 256 * 1024 * 1024);
-    }
 
     #[test]
     fn archive_is_deterministic_compressed_and_detects_changed_sources() {
