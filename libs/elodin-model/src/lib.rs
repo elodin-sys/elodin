@@ -36,8 +36,9 @@ struct ComponentSchema {
     /// The entity of each row.
     #[serde(default)]
     entities: Vec<String>,
+    /// Absent from models exported before entity ids were.
     #[serde(default)]
-    entity_ids: Vec<u64>,
+    entity_ids: Option<Vec<u64>>,
 }
 
 struct Component {
@@ -68,15 +69,18 @@ fn layout(schema: &str, state: &[u8]) -> Result<(Vec<Component>, Vec<Vec<u8>>), 
             .ok_or("state.bin is shorter than schema.json describes")?;
         initial.push(value.to_vec());
         rest = tail;
-        if component.entities.len() != component.entity_ids.len() {
+        let ids = component
+            .entity_ids
+            .unwrap_or_else(|| vec![u64::MAX; component.entities.len()]);
+        if component.entities.len() != ids.len() {
             return Err(format!(
                 "{} has {} entity names and {} entity ids",
                 component.name,
                 component.entities.len(),
-                component.entity_ids.len()
+                ids.len()
             ));
         }
-        let entities = component.entity_ids.into_iter().zip(component.entities);
+        let entities = ids.into_iter().zip(component.entities);
         let entities = entities
             .map(|(id, name)| Ok((id, CString::new(name).map_err(|e| e.to_string())?)))
             .collect::<Result<_, String>>()?;
@@ -630,6 +634,22 @@ module @module {
             assert_eq!(elodin_model_entity_id(program, 0, 0), 0);
             assert!(elodin_model_entity_name(program, 2, 2).is_null());
             assert_eq!(elodin_model_entity_id(program, 3, 0), u64::MAX);
+        }
+    }
+
+    #[test]
+    fn models_exported_without_entity_ids_still_open() {
+        let schema = schema(2).replace(r#", "entity_ids": [1, 2]"#, "");
+        let program = Program::jit(ROOMS, &schema, &state()).unwrap();
+        let program = &raw const program;
+        // Safety: `program` is a live program.
+        unsafe {
+            assert_eq!(elodin_model_component_rows(program, 1), 2);
+            assert_eq!(elodin_model_entity_id(program, 1, 0), u64::MAX);
+            assert_eq!(
+                CStr::from_ptr(elodin_model_entity_name(program, 1, 0)),
+                c"room_0"
+            );
         }
     }
 

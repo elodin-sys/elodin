@@ -44,7 +44,8 @@ const char *elodin_model_component_name(const ElodinModelProgram *program, size_
 size_t elodin_model_component_size(const ElodinModelProgram *program, size_t component);
 /* Rows of the component: one per entity that has it; 0 when `component` is out of range. */
 size_t elodin_model_component_rows(const ElodinModelProgram *program, size_t component);
-/* The entity of a row: its name, or NULL, and its id, or UINT64_MAX, when out of range. */
+/* The entity of a row: its name, or NULL, and its id, or UINT64_MAX, when out of range or when
+ * the model was exported without entity ids. */
 const char *elodin_model_entity_name(const ElodinModelProgram *program, size_t component, size_t row);
 uint64_t elodin_model_entity_id(const ElodinModelProgram *program, size_t component, size_t row);
 /* -1 when the model has no component `name`. */

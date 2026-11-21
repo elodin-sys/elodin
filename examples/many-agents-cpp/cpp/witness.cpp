@@ -205,8 +205,10 @@ void Writer::begin(uint64_t tick, int64_t timestamp)
 
 void Writer::add(const void* bytes, size_t size)
 {
-    const uint8_t* data = static_cast<const uint8_t*>(bytes);
-    bytes_.insert(bytes_.end(), data, data + size);
+    if (size) {
+        const uint8_t* data = static_cast<const uint8_t*>(bytes);
+        bytes_.insert(bytes_.end(), data, data + size);
+    }
     ends_.push_back(bytes_.size());
 }
 

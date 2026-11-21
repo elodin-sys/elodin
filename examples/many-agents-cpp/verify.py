@@ -81,15 +81,14 @@ def elodin(name: str, controller: Path, port_base: int) -> dict:
         "ELODIN_MANY_AGENT_MAX_TICKS": str(args.ticks),
         "ELODIN_MANY_AGENT_REALTIME": "0",
         "ELODIN_MANY_AGENT_PORT_BASE": str(port_base),
-        # The run starts as the controllers do; this only waits longer for their first replies.
-        "ELODIN_MANY_AGENT_TIMEOUT_S": "10",
         "ELODIN_MANY_AGENT_CONTROLLER_BIN": str(controller),
         "ELODIN_DB_PATH": str(path.with_suffix(".db")),
         "ELODIN_SIM_SUMMARY_JSON": str(path.with_suffix(".json")),
         "ELODIN_MANY_AGENT_WITNESS_PATH": str(path.with_suffix(".witness")),
         "ELODIN_MANY_AGENT_WITNESS_RAW": "1",
     }
-    command = [sys.executable, str(ORIGINAL / "main.py"), "run", f"127.0.0.1:{free_port()}"]
+    # `elodin run` holds the first tick until every controller recipe is ready.
+    command = ["elodin", "run", str(ORIGINAL / "main.py"), "--addr", f"127.0.0.1:{free_port()}"]
     with path.with_suffix(".log").open("w") as log:
         result = subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
     if result.returncode != 0:

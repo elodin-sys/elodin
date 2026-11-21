@@ -69,10 +69,12 @@ ProcessExchange::ProcessExchange(const std::string& binary, size_t agents, uint1
         for (size_t agent = 0; agent < agents; ++agent) {
             // Bound before the process starts, so no reply can arrive unheard.
             const int receiver = socket(AF_INET, SOCK_DGRAM, 0);
-            const sockaddr_in address = localhost(static_cast<uint16_t>(port_base + 2 * agent + 1));
-            if (receiver < 0 || bind(receiver, reinterpret_cast<const sockaddr*>(&address), sizeof address) != 0)
-                fail("bind the reply port of agent " + std::to_string(agent));
+            if (receiver < 0)
+                fail("socket");
             receivers_.push_back(receiver);
+            const sockaddr_in address = localhost(static_cast<uint16_t>(port_base + 2 * agent + 1));
+            if (bind(receiver, reinterpret_cast<const sockaddr*>(&address), sizeof address) != 0)
+                fail("bind the reply port of agent " + std::to_string(agent));
 
             int out[2];
             if (pipe(out) != 0)
