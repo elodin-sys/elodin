@@ -130,7 +130,7 @@ The Elodin simulation world.
     - `log_level` : `str`, optional, log level for the embedded Elodin-DB instance (`error`, `warn`, `info`, `debug`, `trace`). Defaults to `info` unless `RUST_LOG` is set.
     - `backend` : `str`, optional, execution backend. Defaults to `"cranelift"`. Supported values are `"cranelift"` (CPU), `"jax-cpu"`, and `"jax-gpu"`.
     - `on_receipt` : `Callable[[dict], None]`, optional, called with the run's [receipt](#run-receipts) when it stops.
-    - `workers` : `int`, optional, threads the Cranelift backend runs independent calls on, the simulation thread included: entity chunks of `@el.map` systems and the per-entity calls of `@el.map_seq`. Defaults to `1`. Results do not depend on the count once it is above `1`; going from `1` to more can change the last bits of reductions.
+    - `workers` : `int`, optional, threads the Cranelift backend runs independent calls on, the simulation thread included: entity chunks of `@el.map` systems and the per-entity calls of `@el.map_seq`. Defaults to `1`. Results do not depend on the count once it is above `1`; going from `1` to more can change the last bits of reductions. `to_jax(workers=...)` traces systems the same way.
     - `pre_commit` : a callable `(tick, WorldStepContext)`, an [elodin.NativeStepHook], or a list of them run in order, called after each tick and before its DB commit. See [pre-commit hooks](#pre-commit-hooks).
     - `timing` : [elodin.Timing], optional, what the receipt measures. Defaults to `Timing.summary()`.
     - `synchronous_commits` : `bool`, optional, has each commit in the DB, and `last_updated` past it, before the next cycle's `pre_commit` hooks run, so at most one commit is ever in flight. The writer thread still appends it, during the pacing and the next systems step, and the next cycle waits for it before its hooks; the receipt counts that wait in `commit`. The loop then also waits out DB write stalls, so keep the DB on storage that does not stall. Defaults to `False`.
@@ -152,6 +152,12 @@ The Elodin simulation world.
     - `backend` : `str`, optional, execution backend. Defaults to `"cranelift"`.
     - `start_timestamp` : `int`, optional, the timestamp of the initial state in microseconds; tick `n` is recorded at `start_timestamp + n / simulation_rate`. If `None` (default), uses the current system time. Set to `0` for zero-based timing.
     - `workers`, `timing` : as for `run`. `Exec.last_receipt()` returns the receipt of the latest `Exec.run`.
+
+- `to_jax(system, simulation_rate=120.0, default_playback_speed=1.0, max_ticks=None, workers=None)` -> [elodin.jaxsim.JaxSim](#class-elodin-jaxsim-jaxsim)
+
+    Build the world for JAX instead of running it: no runtime loop, database or recipes. The result steps the simulation as pure JAX functions, and exports it for a [native C++ host](/reference/cpp-runtime).
+    - `system`, `simulation_rate`, `default_playback_speed`, `max_ticks` : as for `build`.
+    - `workers` : `int | None`, trace the systems as `run(workers=...)` runs them on the Cranelift backend: `@el.map` systems in chunks of two entities when above `1`, and `@el.map_seq` once per entity. The step then reproduces that run bit for bit, and `JaxSim.export_model` compiles its independent calls to run on that many threads; pass `1` for a run without `workers`. `None` traces as the JAX backends do: whole columns for `@el.map`, and `jax.lax.scan` for `@el.map_seq`.
 
 - `prepare_component(name, entities, access="read")` -> `elodin.ComponentHandle`
 
@@ -197,6 +203,37 @@ If `ELODIN_BACKEND` is set, it takes precedence over the `backend=` argument pas
 # Force GPU backend regardless of backend= passed in Python
 ELODIN_BACKEND=jax-gpu python main.py
 ```
+
+### _class_ `elodin.jaxsim.JaxSim`
+
+A world built for JAX by `World.to_jax`. Its state is a list of arrays, one per component, each holding every entity's value; a component held by one entity has no entity axis.
+
+```python
+sim = world.to_jax(system, simulation_rate=120.0)
+state = sim.set(sim.state, "world_vel", "ball", [0, 0, 0, 1, 0, 0])
+for _ in range(100):
+    state = sim.step_fn(state)
+print(sim.get(state, "world_pos", "ball"))
+```
+
+- `state` : the current state, which `step`, `get_state` and `set_state` use.
+- `workers` : the `workers` the systems were traced for; `1` without it.
+- `step_fn(state)` -> `list` : the state after one tick. Pure, so it composes with `jax.jit`, `jax.vmap` and `jax.lax.scan`. It advances `tick`, and carries over the components no system writes.
+- `get(state, component_name, entity_name=None)` -> array : a component's value for one entity, or for every entity.
+- `set(state, component_name, entity_name, value)` -> `list` : a copy of `state` with the value written; `entity_name=None` writes every entity's value at once.
+- `step(max_steps)` -> None, `get_state(component_name=None, entity_name=None)`, `set_state(component_name, entity_name, value)` -> None : the same on `state`, in place.
+- `export_model(path)` -> None
+
+    Write one tick, for a program to run without Python. See [Custom C++ Runtimes](/reference/cpp-runtime).
+
+    | File | Contents |
+    |---|---|
+    | `step.stablehlo.mlir` | `step_fn` as StableHLO, from every component's value to its next value |
+    | `step.o` | The same tick compiled ahead of time by the Cranelift backend for this machine, defining `elodin_model_kernel_step`; with `workers` above `1`, its independent calls run on the loader's worker threads |
+    | `state.bin` | `state` as raw little-endian bytes, in state order |
+    | `schema.json` | `workers`, and for each component in state order its `name`, `dtype`, `shape`, and the `entities` and `entity_ids` of its rows |
+
+    `libs/elodin-model/package.py` builds a shared library with a C header and a CMake package from the directory.
 
 ### Monte Carlo Campaign API
 
@@ -578,6 +615,19 @@ A mismatch names the `tick`, the `stage`, the `hook`, the record by its `kind` (
 #### Witness files
 
 A file is the magic `ELWITNES`, the format version (`1`) and a JSON header with the schema, its digest and the labels; then one frame per tick, with the tick, its timestamp, a digest per hashed record and, when kept, every record's bytes; then a JSON trailer with the tick count, the root and the run's failure, if any. A version other than `1` is refused. Comparison never looks at the labels.
+
+Any program can write one; [many-agents-cpp](https://github.com/elodin-sys/elodin/blob/main/examples/many-agents-cpp/cpp/witness.cpp) does from C++. All integers are little-endian:
+
+```text
+file    := "ELWITNES" version:u32 header_len:u32 header_json frame* trailer
+frame   := 0x01 tick:u64 timestamp:i64 digest:[u8; 32]* raw:u8 (len:u32 bytes)*
+trailer := 0x02 json_len:u32 trailer_json
+```
+
+- **Header.** `{"format":"elodin.witness","version":1,"hash":"blake3-256 over little-endian bytes","schema_digest":…,"schema":…,"labels":…}`. The schema has `entities` (`[id, name]` pairs, by id), `batches` (each `name` and `fields`: `name`, `component`, `dtype`, `shape`, `row_bytes`, `access`, `entities`), `channels` (`name`, `batch`, `row_bytes`, `external`), `stages`, and `records` (`stage`, `kind`, `name`, `batch` or `null`, `index`, `row_bytes`), keys in that order. `schema_digest` is the hex BLAKE3 of the schema as compact JSON with keys in that order; a reader recomputes it and refuses a file whose digest differs. The labels are `build`, `start_timestamp` and `hooks` (`name`, `batch` or `null`, `partitions`); `elodin determinism replay-hook` finds a native hook by its label's name, batch and non-empty partitions.
+- **Records** come in the order of `records`, which lists stage by stage: for `after_systems`, every field of every batch; for `after_hook:N`, the channels that are not external, the write fields, one `deferred` record, then the external channels; for `after_commit`, a `recorded` record per field with one byte per row, `1` when the commit recorded that row.
+- **Frames** hold one digest per record that is not `external`, in record order. A record's digest is the BLAKE3 of its bytes, rows in batch order, except a channel no hook filled, which is 32 zero bytes. With `raw` set to `1`, every record follows as its length and bytes, external ones included and an unfilled channel as length 0.
+- **Digests.** A stage's digest is the BLAKE3 of its records' digests back to back. A tick's is the BLAKE3 of the tick (`u64`), its simulation time (`i64`, the timestamp minus `start_timestamp`) and its stages' digests. The root, in the trailer `{"ticks":…,"root":…,"failure":null}`, is the BLAKE3 of the schema digest followed by every tick's digest.
 
 ### Run receipts
 

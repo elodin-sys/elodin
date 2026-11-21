@@ -537,6 +537,7 @@ class WorldBuilder:
         simulation_rate: float = 120.0,
         default_playback_speed: float = 1.0,
         max_ticks: Optional[int] = None,
+        workers: Optional[int] = None,
     ) -> Tuple[object, list, list, object, dict, dict, dict]: ...
 
 class EntityId:

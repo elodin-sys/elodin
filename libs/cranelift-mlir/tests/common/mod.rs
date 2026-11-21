@@ -332,3 +332,35 @@ pub fn assert_f64s_close(actual: &[f64], expected: &[f64]) {
         );
     }
 }
+
+/// Four row chunks through a scalar-ABI callee and two whole-tensor calls through a pointer-ABI
+/// one, none reading another's result: the shape `jax.vmap` per entity chunk lowers to.
+pub const CHUNKED: &str = r#"
+module @module {
+  func.func public @main(%arg0: tensor<8x16xf64>) -> (tensor<8x16xf64>, tensor<8x16xf64>, tensor<8x16xf64>) {
+    %0 = stablehlo.slice %arg0 [0:2, 0:16] : (tensor<8x16xf64>) -> tensor<2x16xf64>
+    %1 = call @chunk(%0) : (tensor<2x16xf64>) -> tensor<2x16xf64>
+    %2 = stablehlo.slice %arg0 [2:4, 0:16] : (tensor<8x16xf64>) -> tensor<2x16xf64>
+    %3 = call @chunk(%2) : (tensor<2x16xf64>) -> tensor<2x16xf64>
+    %4 = stablehlo.slice %arg0 [4:6, 0:16] : (tensor<8x16xf64>) -> tensor<2x16xf64>
+    %5 = call @chunk(%4) : (tensor<2x16xf64>) -> tensor<2x16xf64>
+    %6 = stablehlo.slice %arg0 [6:8, 0:16] : (tensor<8x16xf64>) -> tensor<2x16xf64>
+    %7 = call @chunk(%6) : (tensor<2x16xf64>) -> tensor<2x16xf64>
+    %8 = stablehlo.concatenate %1, %3, %5, %7, dim = 0 : (tensor<2x16xf64>, tensor<2x16xf64>, tensor<2x16xf64>, tensor<2x16xf64>) -> tensor<8x16xf64>
+    %9 = call @whole(%arg0) : (tensor<8x16xf64>) -> tensor<8x16xf64>
+    %10 = stablehlo.negate %arg0 : tensor<8x16xf64>
+    %11 = call @whole(%10) : (tensor<8x16xf64>) -> tensor<8x16xf64>
+    return %8, %9, %11 : tensor<8x16xf64>, tensor<8x16xf64>, tensor<8x16xf64>
+  }
+  func.func private @chunk(%arg0: tensor<2x16xf64>) -> tensor<2x16xf64> {
+    %0 = stablehlo.sine %arg0 : tensor<2x16xf64>
+    %1 = stablehlo.multiply %0, %arg0 : tensor<2x16xf64>
+    return %1 : tensor<2x16xf64>
+  }
+  func.func private @whole(%arg0: tensor<8x16xf64>) -> tensor<8x16xf64> {
+    %0 = stablehlo.cosine %arg0 : tensor<8x16xf64>
+    %1 = stablehlo.add %0, %arg0 : tensor<8x16xf64>
+    return %1 : tensor<8x16xf64>
+  }
+}
+"#;

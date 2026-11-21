@@ -44,8 +44,11 @@ every stderr report all land flat under `/tmp/dbg/`. See
 `lower::compile_module_to_object` runs the same lowering into a position-independent object
 file instead of JIT memory. The object defines `{prefix}_step` with the JIT `main`'s signature;
 its calls into the runtime (libm shims, `tensor_rt`, LAPACK) go through a table it exports
-alongside their names, which the loader fills from `lower::runtime_symbol`. `libs/elodin-model`
-is that loader; [examples/ball-cpp](../../examples/ball-cpp) runs it end to end.
+alongside their names, which the loader fills from `lower::runtime_symbol`. With `workers` above
+1, independent calls form groups as in the JIT and run through `pool::run` on whatever pool
+threads the loader starts; the compiler starts none. `libs/elodin-model` is that loader;
+[examples/ball-cpp](../../examples/ball-cpp) and [examples/many-agents-cpp](../../examples/many-agents-cpp)
+run it end to end.
 
 ## Adding a New Op
 

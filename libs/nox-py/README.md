@@ -736,7 +736,10 @@ shared library with a C header and a CMake package, which a C++ program steps wi
 sim = world.to_jax(system, simulation_rate=120.0)
 sim.export_model("build/model")
 ```
-See [examples/ball-cpp](../../examples/ball-cpp) for the whole workflow.
+With `world.to_jax(..., workers=8)`, the systems trace as `World.run(workers=8)` runs them, so
+the exported step reproduces that run bit for bit, and runs its independent calls on worker
+threads. See [examples/ball-cpp](../../examples/ball-cpp) for the whole workflow and
+[examples/many-agents-cpp](../../examples/many-agents-cpp) for a SITL with flight software.
 
 ## Performance Tips
 

@@ -57,7 +57,7 @@ Python but with near-C++ performance.
 Third, it can easily run your computations on GPUs and TPUs by compiling to [XLA](https://openxla.org/xla), without you having to manage
 all that complexity. You just write Python code, and JAX handles sending it to the GPU in the background.
 
-In Elodin, JAX code is compiled to native machine code via our [Cranelift](https://cranelift.dev/)-based JIT backend by default for Python-free execution each tick, or can target XLA via `backend="jax-cpu"` or `backend="jax-gpu"` for full compatibility and GPU acceleration.
+In Elodin, JAX code is compiled to native machine code via our [Cranelift](https://cranelift.dev/)-based JIT backend by default for Python-free execution each tick, or can target XLA via `backend="jax-cpu"` or `backend="jax-gpu"` for full compatibility and GPU acceleration. The same compiled step can also be exported as a native library and run from your own C++ program; see [Custom C++ Runtimes](/reference/cpp-runtime).
 
 JAX is like NumPy, but optimized for high-performance computing, like running massive monte-carlo simulations.
 

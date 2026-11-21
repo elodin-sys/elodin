@@ -13,15 +13,17 @@ use crate::world::World;
 /// StableHLO text compiled ahead of time into an object file for this host; see
 /// `cranelift_mlir::lower::compile_module_to_object`.
 #[pyfunction]
+#[pyo3(signature = (mlir, prefix, workers = 1))]
 pub fn _compile_stablehlo_object<'py>(
     py: Python<'py>,
     mlir: &str,
     prefix: &str,
+    workers: usize,
 ) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
     let mut ir_module = cranelift_mlir::parser::parse_module(mlir)
         .map_err(|e| Error::CraneliftBackend(format!("MLIR parse failed: {e}")))?;
     cranelift_mlir::const_fold::fold_module(&mut ir_module);
-    let object = cranelift_mlir::lower::compile_module_to_object(&ir_module, prefix)
+    let object = cranelift_mlir::lower::compile_module_to_object(&ir_module, prefix, workers)
         .map_err(|e| Error::CraneliftBackend(format!("Cranelift compile failed: {e}")))?;
     Ok(pyo3::types::PyBytes::new(py, &object))
 }

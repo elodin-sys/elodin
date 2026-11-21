@@ -28,6 +28,11 @@ const char *elodin_model_error(void);
  * when the library was built without a model. */
 const char *elodin_model_backend(void);
 
+/* Threads a precompiled step runs its parallel groups on, the caller included; call before the
+ * first open. 0, the default, uses the count the model was exported for. Results do not depend
+ * on it. */
+void elodin_model_set_workers(size_t workers);
+
 /* NULL on failure. */
 ElodinModelProgram *elodin_model_open(void);
 void elodin_model_close(ElodinModelProgram *program);
@@ -37,6 +42,12 @@ size_t elodin_model_component_count(const ElodinModelProgram *program);
 const char *elodin_model_component_name(const ElodinModelProgram *program, size_t component);
 /* Size in bytes; 0 when `component` is out of range. */
 size_t elodin_model_component_size(const ElodinModelProgram *program, size_t component);
+/* Rows of the component: one per entity that has it; 0 when `component` is out of range. */
+size_t elodin_model_component_rows(const ElodinModelProgram *program, size_t component);
+/* The entity of a row: its name, or NULL, and its id, or UINT64_MAX, when out of range or when
+ * the model was exported without entity ids. */
+const char *elodin_model_entity_name(const ElodinModelProgram *program, size_t component, size_t row);
+uint64_t elodin_model_entity_id(const ElodinModelProgram *program, size_t component, size_t row);
 /* -1 when the model has no component `name`. */
 int64_t elodin_model_component_index(const ElodinModelProgram *program, const char *name);
 

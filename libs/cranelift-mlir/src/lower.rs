@@ -1565,6 +1565,9 @@ pub fn compile_module_with_config(
 ) -> Result<CompiledModule, String> {
     let (ir_module, parallel_groups) = prepare_module(ir_module, &config);
     let ir_module = &ir_module;
+    if config.workers > 1 && !config.profile_enabled {
+        crate::pool::ensure_workers(config.workers - 1);
+    }
 
     let mut jit_builder =
         JITBuilder::with_isa(build_isa(false)?, cranelift_module::default_libcall_names());
@@ -1648,14 +1651,16 @@ pub fn compile_module_with_config(
 /// function by name: each call goes through a slot of `{prefix}_imports`, which the loader fills
 /// with [`runtime_symbol`] of the `{prefix}_import_count` NUL-terminated names in
 /// `{prefix}_import_names` before the first step. All four symbols are hidden, for linking into
-/// one shared library.
+/// one shared library. With `workers` above 1, groups of independent calls run through the
+/// runtime's `pool::run`, on as many pool threads as the loader starts.
 pub fn compile_module_to_object(
     ir_module: &crate::ir::Module,
     prefix: &str,
+    workers: usize,
 ) -> Result<Vec<u8>, String> {
-    // Profiling probes and the worker pool keep process-local state.
+    // Profiling probes keep process-local state.
     let config = CompileConfig {
-        workers: 1,
+        workers: workers.max(1),
         ..CompileConfig::default()
     };
     let (ir_module, parallel_groups) = prepare_module(ir_module, &config);
@@ -1930,7 +1935,6 @@ fn prepare_module(
         parallel_groups = crate::parallel::group_module_calls(&mut mut_module, |f| {
             classify_function(f) == FuncAbi::Pointer
         });
-        crate::pool::ensure_workers(config.workers - 1);
     }
     (mut_module, parallel_groups)
 }

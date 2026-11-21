@@ -6,6 +6,9 @@ library with a C header and a CMake package. The C++ program links that library,
 loop, and runs without Python, JAX or Elodin installed. `verify.py` then checks that every tick
 matches the original ball example run in Elodin.
 
+The [Custom C++ Runtimes](https://docs.elodin.systems/reference/cpp-runtime/) reference covers
+the workflow in general, with [many-agents-cpp](../many-agents-cpp) as the full SITL.
+
 ```mermaid
 flowchart LR
     sim["sim.py"] -->|"export.py"| model["build/model: step.o, step.stablehlo.mlir, state.bin, schema.json"]

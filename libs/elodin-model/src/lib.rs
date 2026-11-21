@@ -7,6 +7,7 @@ use std::cell::RefCell;
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::ptr;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use cranelift_mlir::display_kernel::DisplayKernelExec;
 use serde::Deserialize;
@@ -16,7 +17,15 @@ type Step = Box<dyn Fn(&[&[u8]], &mut [&mut [u8]]) -> Result<(), String>>;
 
 #[derive(Deserialize)]
 struct Schema {
+    /// The worker count the step's parallel groups were compiled for; only `step.o` has groups.
+    #[serde(default = "one")]
+    #[cfg_attr(not(elodin_model = "aot"), allow(dead_code))]
+    workers: usize,
     components: Vec<ComponentSchema>,
+}
+
+fn one() -> usize {
+    1
 }
 
 #[derive(Deserialize)]
@@ -24,11 +33,19 @@ struct ComponentSchema {
     name: String,
     dtype: String,
     shape: Vec<usize>,
+    /// The entity of each row.
+    #[serde(default)]
+    entities: Vec<String>,
+    /// Absent from models exported before entity ids were.
+    #[serde(default)]
+    entity_ids: Option<Vec<u64>>,
 }
 
 struct Component {
     name: CString,
     size: usize,
+    /// Each row's entity id and name.
+    entities: Vec<(u64, CString)>,
 }
 
 /// A model's code, its components and their initial values.
@@ -52,9 +69,25 @@ fn layout(schema: &str, state: &[u8]) -> Result<(Vec<Component>, Vec<Vec<u8>>), 
             .ok_or("state.bin is shorter than schema.json describes")?;
         initial.push(value.to_vec());
         rest = tail;
+        let ids = component
+            .entity_ids
+            .unwrap_or_else(|| vec![u64::MAX; component.entities.len()]);
+        if component.entities.len() != ids.len() {
+            return Err(format!(
+                "{} has {} entity names and {} entity ids",
+                component.name,
+                component.entities.len(),
+                ids.len()
+            ));
+        }
+        let entities = ids.into_iter().zip(component.entities);
+        let entities = entities
+            .map(|(id, name)| Ok((id, CString::new(name).map_err(|e| e.to_string())?)))
+            .collect::<Result<_, String>>()?;
         components.push(Component {
             name: CString::new(component.name).map_err(|e| e.to_string())?,
             size,
+            entities,
         });
     }
     if !rest.is_empty() {
@@ -85,6 +118,7 @@ impl Program {
     }
 
     /// Compiles `mlir`, whose `main` must map the state `schema` describes to its next value.
+    #[cfg_attr(elodin_model = "aot", allow(dead_code))]
     fn jit(mlir: &str, schema: &str, state: &[u8]) -> Result<Self, String> {
         let (components, _) = layout(schema, state)?;
         let module = cranelift_mlir::parser::parse_module(mlir)
@@ -175,8 +209,20 @@ const SCHEMA: &str = include_str!(concat!(env!("ELODIN_MODEL_DIR"), "/schema.jso
 #[cfg(any(elodin_model = "aot", elodin_model = "jit"))]
 const STATE: &[u8] = include_bytes!(concat!(env!("ELODIN_MODEL_DIR"), "/state.bin"));
 
+/// Worker threads `elodin_model_set_workers` asked for; 0 for the exported count.
+static WORKERS: AtomicUsize = AtomicUsize::new(0);
+
 #[cfg(elodin_model = "aot")]
 fn open() -> Result<Program, String> {
+    let exported = serde_json::from_str::<Schema>(SCHEMA)
+        .map_err(|e| format!("invalid schema.json: {e}"))?
+        .workers;
+    let workers = match WORKERS.load(Ordering::Relaxed) {
+        0 => exported,
+        requested => requested,
+    };
+    // The calling thread works alongside the pool, and one worker runs every group itself.
+    cranelift_mlir::pool::ensure_workers(workers.max(1) - 1);
     Program::new(SCHEMA, STATE, aot::step()?)
 }
 
@@ -215,6 +261,7 @@ mod aot {
         Ok(Box::new(|inputs: &[&[u8]], outputs: &mut [&mut [u8]]| {
             let inputs: Vec<*const u8> = inputs.iter().map(|b| b.as_ptr()).collect();
             let mut outputs: Vec<*mut u8> = outputs.iter_mut().map(|b| b.as_mut_ptr()).collect();
+            cranelift_mlir::pool::wake();
             // Safety: `Program` passes a buffer per component of the schema `step.o` was
             // exported with, sized by it, and outputs separate from the inputs.
             unsafe { elodin_model_kernel_step(inputs.as_ptr(), outputs.as_mut_ptr()) };
@@ -267,6 +314,11 @@ pub extern "C" fn elodin_model_backend() -> *const c_char {
     } else {
         c"none".as_ptr()
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn elodin_model_set_workers(workers: usize) {
+    WORKERS.store(workers, Ordering::Relaxed);
 }
 
 #[unsafe(no_mangle)]
@@ -324,6 +376,52 @@ pub unsafe extern "C" fn elodin_model_component_size(
         .components
         .get(component)
         .map_or(0, |c| c.size)
+}
+
+/// # Safety
+///
+/// `program` is from `elodin_model_open` and still open.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn elodin_model_component_rows(
+    program: *const Program,
+    component: usize,
+) -> usize {
+    unsafe { &*program }
+        .components
+        .get(component)
+        .map_or(0, |c| c.entities.len())
+}
+
+/// # Safety
+///
+/// `program` is from `elodin_model_open` and still open.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn elodin_model_entity_name(
+    program: *const Program,
+    component: usize,
+    row: usize,
+) -> *const c_char {
+    unsafe { &*program }
+        .components
+        .get(component)
+        .and_then(|c| c.entities.get(row))
+        .map_or(ptr::null(), |(_, name)| name.as_ptr())
+}
+
+/// # Safety
+///
+/// `program` is from `elodin_model_open` and still open.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn elodin_model_entity_id(
+    program: *const Program,
+    component: usize,
+    row: usize,
+) -> u64 {
+    unsafe { &*program }
+        .components
+        .get(component)
+        .and_then(|c| c.entities.get(row))
+        .map_or(u64::MAX, |(id, _)| *id)
 }
 
 /// # Safety
@@ -439,10 +537,16 @@ module @module {
 "#;
 
     fn schema(rooms: usize) -> String {
-        let room = format!(r#""dtype": "float64", "shape": [{rooms}]"#);
+        let names: Vec<String> = (0..rooms).map(|i| format!(r#""room_{i}""#)).collect();
+        let ids: Vec<String> = (1..=rooms).map(|i| i.to_string()).collect();
+        let room = format!(
+            r#""dtype": "float64", "shape": [{rooms}], "entities": [{}], "entity_ids": [{}]"#,
+            names.join(", "),
+            ids.join(", ")
+        );
         format!(
             r#"{{"components": [
-                {{"name": "tick", "dtype": "uint64", "shape": []}},
+                {{"name": "tick", "dtype": "uint64", "shape": [], "entities": ["house"], "entity_ids": [0]}},
                 {{"name": "temperature", {room}}},
                 {{"name": "ambient", {room}}}
             ]}}"#
@@ -514,10 +618,39 @@ module @module {
     }
 
     #[test]
-    fn names_index_components() {
+    fn names_index_components_and_rows() {
         let program = rooms();
         assert_eq!(program.index(c"ambient"), Some(2));
         assert_eq!(program.index(c"humidity"), None);
+        let program = &raw const program;
+        // Safety: `program` is a live program.
+        unsafe {
+            assert_eq!(elodin_model_component_rows(program, 2), 2);
+            assert_eq!(elodin_model_entity_id(program, 2, 1), 2);
+            assert_eq!(
+                CStr::from_ptr(elodin_model_entity_name(program, 2, 1)),
+                c"room_1"
+            );
+            assert_eq!(elodin_model_entity_id(program, 0, 0), 0);
+            assert!(elodin_model_entity_name(program, 2, 2).is_null());
+            assert_eq!(elodin_model_entity_id(program, 3, 0), u64::MAX);
+        }
+    }
+
+    #[test]
+    fn models_exported_without_entity_ids_still_open() {
+        let schema = schema(2).replace(r#", "entity_ids": [1, 2]"#, "");
+        let program = Program::jit(ROOMS, &schema, &state()).unwrap();
+        let program = &raw const program;
+        // Safety: `program` is a live program.
+        unsafe {
+            assert_eq!(elodin_model_component_rows(program, 1), 2);
+            assert_eq!(elodin_model_entity_id(program, 1, 0), u64::MAX);
+            assert_eq!(
+                CStr::from_ptr(elodin_model_entity_name(program, 1, 0)),
+                c"room_0"
+            );
+        }
     }
 
     #[test]
