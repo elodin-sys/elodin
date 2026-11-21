@@ -138,15 +138,17 @@ for deployment and database URL configuration.
 
 ## Startup and outages
 
-When `elodin editor` launches a simulation with streamed terrain, the simulation
-stays at t=0 until the initial terrain is ready. Loading has no interactive
-deadline. If Cesium reports an error, the editor disables streamed terrain,
-restores the schematic's fallback scenery, and starts the simulation. Reload the
-schematic to retry.
-
-Live connections are never paused. Automated fixed-view captures remain strict:
-`ELODIN_CESIUM_CAPTURE_TIMEOUT` bounds terrain loading, and an error or timeout
-exits without writing a terrain screenshot.
+- No terrain loading screen. The editor stays interactive while tiles load.
+- Available tiles render after decoding and GPU upload; missing detail streams
+  in the background. Hybrid mode preserves prepared detail during provider outages.
+- Provider errors stay in the logs, without an error window. They do not remove available terrain or stop replay.
+  Reload the schematic to restart a failed source.
+- Simulations launched by `elodin editor` stay at t=0 until initial terrain is
+  ready or fails, protecting recorded sensor output. The editor remains usable.
+- Live connections are never paused.
+- Automated fixed-view captures wait for complete terrain.
+  `ELODIN_CESIUM_CAPTURE_TIMEOUT` bounds the wait; errors and timeouts exit
+  without writing a terrain screenshot.
 
 ```python
 import elodin as el
