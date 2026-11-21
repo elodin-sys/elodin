@@ -1097,7 +1097,7 @@ and running the simulation. The <code>World</code> object also provides helper m
 <p>Build and export a passive synchronous model, then return its <code>JaxSim</code>. The native caller owns invocation order, logical- and wall-time policy, files, I/O, hooks, and processes.</p>
 <ul>
 <li><code>interfaces</code> : <code>dict[str, elodin.BatchHandle] | None</code>, optional named row views. Each field keeps its batch alias, component, entity order, row size, and <code>read</code> or <code>write</code> access. Interfaces describe data only; they do not prescribe callbacks or hook order.</li>
-<li><code>cpu</code> : <code>"native"</code> enables this CPU's features; <code>"generic"</code> uses the baseline of this target architecture.</li>
+<li><code>cpu</code> : <code>"native"</code> enables this CPU's features in <code>step.o</code>; <code>"generic"</code> uses the baseline of this machine's architecture. For a machine with another OS or architecture, compile the step there with <code>package.py --cpu</code>.</li>
 <li>Other arguments are as for <code>to_jax</code>.</li>
 </ul>
 </li>
@@ -1172,10 +1172,10 @@ and running the simulation. The <code>World</code> object also provides helper m
 <tr><td><code>step.stablehlo.mlir</code></td><td><code>step_fn</code> as StableHLO, from every component's value to its next value</td></tr>
 <tr><td><code>step.o</code></td><td>The same tick compiled ahead of time by the Cranelift backend for <code>cpu</code>, defining <code>elodin_model_kernel_step</code>; with <code>workers</code> above <code>1</code>, its independent calls run on the loader's worker threads</td></tr>
 <tr><td><code>state.bin</code></td><td><code>state</code> as raw little-endian bytes, in state order</td></tr>
-<tr><td><code>schema.json</code></td><td>Versioned model/time/target metadata, typed component and entity-row layouts, and optional named interfaces</td></tr>
-<tr><td><code>model-manifest.json</code></td><td>Target and SHA-256/size inventory of the export files</td></tr>
+<tr><td><code>schema.json</code></td><td>The versioned layout of the model: its time step and tick, typed components with their entity rows, and optional named interfaces</td></tr>
+<tr><td><code>model-manifest.json</code></td><td>The target <code>step.o</code> was compiled for, and the SHA-256 and size of each file</td></tr>
 </tbody></table>
-<p>Model schema ABI 2 includes nominal rate and time step, tick semantics, export workers, target CPU policy, component dtype/shape/row bytes/metadata and <code>written_by_step</code>. Old unversioned directories remain ABI 1. <code>libs/elodin-model/package.py</code> produces static and shared CMake targets, C and C++ headers, provenance, and a runtime SBOM.</p>
+<p>Model schema ABI 1 records the nominal time step, the tick and time-step components, the export workers, and each component's dtype, shape, row bytes, metadata and <code>written_by_step</code>, which is true for every system output and for the tick. The nominal time step is the <code>simulation_time_step</code> the state holds, which Elodin keeps in whole nanoseconds: 0.008333333 s at 120 Hz. <code>libs/elodin-model/package.py</code> produces static and shared CMake targets, C and C++ headers, provenance, and a runtime SBOM, and with <code>--cpu</code> compiles <code>step.o</code> again on the machine that packages.</p>
 </li>
 </ul>
 <h3 id="monte-carlo-campaign-api">Monte Carlo Campaign API</h3>
