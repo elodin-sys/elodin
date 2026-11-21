@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 CRATE = Path(__file__).resolve().parent
@@ -48,13 +49,18 @@ build = subprocess.run(
     check=True,
 )
 library = next(
-    Path(path)
-    for line in build.stdout.splitlines()
-    if (message := json.loads(line)).get("reason") == "compiler-artifact"
-    and message["target"]["name"] == "elodin_model"
-    for path in message["filenames"]
-    if Path(path).suffix in (".so", ".dylib")
+    (
+        Path(path)
+        for line in build.stdout.splitlines()
+        if (message := json.loads(line)).get("reason") == "compiler-artifact"
+        and message["target"]["name"] == "elodin_model"
+        for path in message["filenames"]
+        if Path(path).suffix in (".so", ".dylib")
+    ),
+    None,
 )
+if library is None:
+    sys.exit("cargo built no libelodin_model shared library")
 
 shutil.rmtree(args.package, ignore_errors=True)
 (args.package / "include").mkdir(parents=True)

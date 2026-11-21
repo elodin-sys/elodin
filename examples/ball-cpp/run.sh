@@ -23,8 +23,11 @@ for backend in aot jit; do
     printf 'ball_cpp does not load %s through its runpath:\n%s\n' "$library" "$links" >&2
     exit 1
   fi
-  rm -rf "$build/moved-$backend"
+  # Run it moved, with the package out of reach too, so no runpath into either can load it.
+  rm -rf "$build/moved-$backend" "$build/away"
   mv "$build/install-$backend" "$build/moved-$backend"
+  mv "$build/ElodinModel-$backend" "$build/away"
   "$build/moved-$backend/bin/ball_cpp" "$build/ball_cpp_$backend.csv"
+  mv "$build/away" "$build/ElodinModel-$backend"
 done
 python3 examples/ball-cpp/verify.py "$build/ball_cpp_aot.csv" "$build/ball_cpp_jit.csv"
