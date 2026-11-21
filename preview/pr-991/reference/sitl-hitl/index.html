@@ -1,0 +1,985 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="x-ua-compatible" content="ie=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    
+<link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css" media="print" onload="this.media='all'; this.onload = null">
+<noscript><link rel="stylesheet" href="https:&#x2F;&#x2F;unpkg.com&#x2F;boxicons@2.1.4&#x2F;css&#x2F;boxicons.min.css"></noscript>
+
+    
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-991/fonts/spacegrotesk.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-991/fonts/ibm-plex-sans-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-991/fonts/ibm-plex-sans-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-991/fonts/ibm-plex-sans-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-991/fonts/ibm-plex-sans-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-991/fonts/ibm-plex-sans-700.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-991/fonts/ibm-plex-mono-300.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-991/fonts/ibm-plex-mono-400.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-991/fonts/ibm-plex-mono-500.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-991/fonts/ibm-plex-mono-600.woff2" type="font/woff2" crossorigin>
+  <link rel="preload" as="font" href="https://docs.elodin.systems/preview/pr-991/fonts/ibm-plex-mono-700.woff2" type="font/woff2" crossorigin>
+
+    
+<link rel="stylesheet" href="https://docs.elodin.systems/preview/pr-991/main.css">
+
+    
+  <meta name="theme-color" content="#fff">
+  <link rel="apple-touch-icon" sizes="180x180" href="https://docs.elodin.systems/preview/pr-991/apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="https://docs.elodin.systems/preview/pr-991/favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="https://docs.elodin.systems/preview/pr-991/favicon-16x16.png">
+  
+    <link rel="manifest" href="https://docs.elodin.systems/preview/pr-991/site.webmanifest" crossorigin>
+  
+
+
+  
+  
+    
+  
+
+  
+  
+    
+    
+  
+
+  
+    
+  
+  
+  
+  
+    
+  
+
+  
+
+
+  <meta name="robots" content="index, follow">
+  <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+  <meta name="bingbot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+
+
+	
+
+
+	
+
+<title>SITL & HITL | Elodin</title>
+<meta name="description" content="Put your flight software, and then your flight hardware, in the loop with an Elodin simulation, and choose between the post-step and pre-commit bridge styles">
+<link rel="canonical" href="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/">
+
+
+  <meta name="twitter:card" content="summary_large_image">
+  
+    <meta name="twitter:image" content="https://docs.elodin.systems/preview/pr-991/logo.png">
+  
+  <meta name="twitter:title" content="SITL &amp; HITL">
+  <meta name="twitter:description" content="Put your flight software, and then your flight hardware, in the loop with an Elodin simulation, and choose between the post-step and pre-commit bridge styles">
+  <meta name="twitter:site" content="@elodinsystems">
+  <meta name="twitter:creator" content="@elodinsystems">
+
+  <meta property="og:title" content="SITL &amp; HITL">
+  <meta property="og:description" content="Put your flight software, and then your flight hardware, in the loop with an Elodin simulation, and choose between the post-step and pre-commit bridge styles">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/">
+
+  
+    <meta property="og:image" content="https://docs.elodin.systems/preview/pr-991/logo.png">
+  
+
+  <meta property="og:updated_time" content="">
+  <meta property="og:site_name" content="SITL &amp; HITL">
+
+  
+
+  
+
+  
+  <meta property="og:locale" content="en_US">
+
+
+
+
+
+  
+
+
+
+
+
+<script type="application/ld+json">
+  {
+    "@context": "http://schema.org",
+    "@type": "BreadcrumbList",
+    
+      
+      
+        
+        
+        
+        
+        
+        
+        
+        
+          {
+            "@type": "ListItem",
+            "position":  1 ,
+            "name": "Home",
+            "item": "https://docs.elodin.systems/preview/pr-991/"
+          },
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  2 ,
+            "name": "Reference",
+            "item": "https://docs.elodin.systems/preview/pr-991/reference/"
+          },
+        
+      
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+          
+          
+          {
+            "@type": "ListItem",
+            "position":  3 ,
+            "name": "Sitl Hitl",
+            "item": "https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/"
+          },
+        
+      
+    
+  }
+</script>
+
+
+
+
+</head>
+
+<body class="docs single">
+  
+    
+    
+    
+  
+  
+    
+<header class="navbar fixed-top navbar-expand-md navbar-light">
+    <div class="container">
+        <div class="col-2" style="display: flex; gap: 20px">
+            <a
+                href="https://elodin.systems"
+                class="nav-link-icon"
+                target="_blank"
+                rel="noopener noreferrer"
+                ><svg
+                    width="20"
+                    height="25"
+                    viewBox="0 0 20 25"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                >
+                    <path
+                        d="M10 0H15C17.7615 0 20 2.23858 20 5V20.0001C20 22.7615 17.7615 25.0001 15 25.0001H5C2.23853 25.0001 0 22.7615 0 20V5C0 2.23858 2.23853 1.90735e-06 5 1.90735e-06V5V20.0001H15V5L5 5C5 2.23858 7.23853 0 10 0Z"
+                        fill="currentColor"
+                    />
+                </svg>
+            </a>
+            <span>
+                <select name="version" class="version-select" disabled>
+                    <option value="v0.21.0" selected>
+                        v0.21.0
+                    </option>
+                </select>
+            </span>
+        </div>
+
+        <div
+            class="col-2 d-none d-lg-block"
+            style="margin-left: 56px"
+        >
+            <form style="width: 264px">
+                <input
+                    id="userinput"
+                    class="form-control is-search"
+                    type="search"
+                    placeholder="Search"
+                    aria-label="Search"
+                    autocomplete="off"
+                />
+                <div id="suggestions" class="shadow bg-white rounded"></div>
+            </form>
+        </div>
+        <div class="col-2 d-none d-md-block"></div>
+        <div class="col-2" style="margin-left: 35px">
+            <ul class="navbar-nav main-nav me-auto">
+                      
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-991/home/quickstart"
+                        >HOME</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item reference active"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-991/reference/overview"
+                        >Reference</a
+                    >
+                </li>
+                  
+                <li
+                    class="nav-item"
+                >
+                    <a
+                        class="nav-link"
+                        href="https://docs.elodin.systems/preview/pr-991/releases/changelog"
+                        >Releases</a
+                    >
+                </li>
+                  
+            </ul>
+        </div>
+        <div class="col-1"></div>
+        <div
+            class="col-2 d-none d-xl-block"
+            style="margin-right: 63px"
+        >
+            <ul class="navbar-nav">
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://github.com/elodin-sys/elodin">
+                        <i class="bx bxl-github"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link nav-link-icon" href="https://discord.gg/2XymNRBjfA">
+                        <i class="bx bxl-discord-alt"></i>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a id="mode-1" class="nav-link nav-link-icon toggle-dark">
+                        <i class='bx bxs-sun'></i>
+                    </a>
+                    <a id="mode-2" class="nav-link nav-link-icon toggle-light">
+                        <i class='bx bxs-moon'></i>
+                    </a>
+                </li>
+            </ul>
+        </div>
+    </div>
+</header>
+
+  
+  <div class="wrap container tom-blue" role="document">
+      <div class="content">
+          <div class="row flex-xxl-nowrap justify-content-center">
+              
+<div class="col-lg-5 col-xl-4 docs-sidebar d-none d-lg-block">
+    <nav class="docs-links" aria-label="Main navigation">
+          
+        <h3>Reference</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-991/reference/overview/"
+                    >Overview</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-991/reference/coords/"
+                    >Coordinate Systems</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-991/reference/db-asset-server/"
+                    >DB Asset Server</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-991/reference/python-api/"
+                    >Python API</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-991/reference/elodin-cli/"
+                    >Elodin CLI</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-991/reference/grpc-client/"
+                    >gRPC API</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-991/reference/terrain/"
+                    >Terrain</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-991/reference/map-overlays/"
+                    >Geographic overlays</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-991/reference/replays/"
+                    >Replays</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-991/reference/s10/"
+                    >Process Orchestration (s10)</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link active"
+                    href="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/"
+                    >SITL &amp; HITL</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-991/reference/cpp-runtime/"
+                    >Custom C++ Runtimes</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-991/reference/schematic/"
+                    >Schematic KDL</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-991/reference/color-schemes/"
+                    >Color Schemes</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
+                    href="https://docs.elodin.systems/preview/pr-991/reference/command-palette/"
+                    >Command Palette</a
+                >
+            </li>
+            
+        </ul>
+          
+         
+        <h3>Migration Guides</h3>
+        <ul class="list-unstyled">
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-991/reference/migration/to-0-15/"
+                    >v0.14 to v0.15</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class=" docs-link"
+                    href="https://docs.elodin.systems/preview/pr-991/reference/migration/kdl-to-python/"
+                    >Migrate KDL schematics to Python</a
+                >
+            </li>
+            
+        </ul>
+          
+    </nav>
+</div>
+
+               
+<nav
+    class="docs-toc d-none d-xxl-block col-xl-3"
+    aria-label="Secondary navigation"
+>
+    <div class="page-links">
+        <h3>On this page</h3>
+        <nav id="TableOfContents">
+            <ul>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/#the-elodin-way">The Elodin way</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/#inside-one-tick">Inside one tick</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/#post-step-style">Post-step style</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/#pre-commit-style">Pre-commit style</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/#choosing-a-style">Choosing a style</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/#measured">Measured</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/#moving-a-bridge-from-post-step-to-pre-commit">Moving a bridge from post-step to pre-commit</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/#using-both">Using both</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/#sitl-in-practice">SITL in practice</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/#proving-a-run-repeats">Proving a run repeats</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/#hitl-in-practice">HITL in practice</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/#the-database-as-the-boundary">The database as the boundary</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/#a-link-bridge-on-the-host">A link bridge on the host</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/#hardware-as-the-source-of-truth">Hardware as the source of truth</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/#safety">Safety</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/#good-habits">Good habits</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/#troubleshooting">Troubleshooting</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/#examples">Examples</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/#related-docs">Related docs</a>
+                    
+                </li>
+                
+            </ul>
+        </nav>
+    </div>
+</nav>
+ 
+              <main class="docs-content col-lg-11 col-xxl-10">
+                  <h1>SITL &amp; HITL</h1>
+                  
+                  <p class="lead">Fly your real flight software against an Elodin simulation, then move it onto the flight computer, and pick the bridge style that fits your vehicles, rates, and tick budget.</p>
+                   <p>Software-in-the-loop (SITL) testing runs your real flight software build on a computer, against simulated sensors and actuators. Hardware-in-the-loop (HITL) testing runs it on the flight computer, with some or all of its inputs and outputs simulated. In both, the flight software reads sensors and commands actuators, and the simulation turns those commands into motion and new sensor readings.</p>
+<p>Work up to it in three steps. Write the controller as an Elodin system to design and tune it, fly the real flight software in SITL, then fly it on the hardware in HITL. Each step finds bugs the one before cannot. SITL finds message framing errors, numerical edge cases, and timing assumptions in the real code. HITL finds what only the real processor, buses, and drivers do.</p>
+<h2 id="the-elodin-way">The Elodin way</h2>
+<ul>
+<li><strong>One world from model to flight.</strong> The model, the SITL run, the HITL run, and the flight log share one database schema, so the same schematic, graphs, and analysis scripts work on all of them.</li>
+<li><strong>A narrow boundary.</strong> The flight software sees only sensor values and commands only actuators. It never reads the simulation's truth state. Every component set from outside the systems is marked <code>external_control = "true"</code>, and the simulation never writes it.</li>
+<li><strong>Lockstep for repeatable runs, real time for people and hardware.</strong> In lockstep the simulation waits for each reply, so a run gives the same answer every time.</li>
+<li><strong>The simulation launches the flight software.</strong> <a href="/reference/s10">s10 recipes</a> start the flight software processes with the simulation, hold the first tick until they are ready, and stop them at the end.</li>
+<li><strong>Every run is recorded.</strong> Replay it in the editor, run it as a Monte Carlo campaign, or merge it with a flight log using <a href="/reference/elodin-cli#elodin-db-merge"><code>elodin-db merge</code></a>.</li>
+</ul>
+<h2 id="inside-one-tick">Inside one tick</h2>
+<p>Every tick runs the same phases in order. The two bridge styles attach at different points:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="mermaid"><span class="giallo-l"><span>flowchart TB</span></span>
+<span class="giallo-l"><span>  pre[&quot;pre_step&quot;] --&gt; read[&quot;Read outside writes&quot;]</span></span>
+<span class="giallo-l"><span>  read --&gt; systems[&quot;Systems&quot;]</span></span>
+<span class="giallo-l"><span>  systems --&gt; hooks[&quot;pre_commit hooks&quot;]</span></span>
+<span class="giallo-l"><span>  hooks --&gt; commit[&quot;Commit to the DB&quot;]</span></span>
+<span class="giallo-l"><span>  commit --&gt; post[&quot;post_step&quot;]</span></span>
+<span class="giallo-l"><span>  post --&gt; pace[&quot;Pacing&quot;]</span></span>
+<span class="giallo-l"><span>  pace --&gt;|next tick| pre</span></span>
+<span class="giallo-l"><span>  classDef postStep stroke:#e8a33d,stroke-width:3px</span></span>
+<span class="giallo-l"><span>  classDef preCommit stroke:#4a90e2,stroke-width:3px</span></span>
+<span class="giallo-l"><span>  class pre,post postStep</span></span>
+<span class="giallo-l"><span>  class hooks preCommit</span></span></code></pre>
+<ul>
+<li><code>pre_step</code> and <code>post_step</code> (orange) are the <strong>post-step style</strong>. They get an <a href="/reference/python-api/#class-elodin-stepcontext"><code>el.StepContext</code></a> and work through the database.</li>
+<li><code>pre_commit</code> hooks (blue) are the <strong>pre-commit style</strong>. They get an <a href="/reference/python-api/#class-elodin-worldstepcontext"><code>el.WorldStepContext</code></a> and work on the world's arrays before the commit.</li>
+<li>"Read outside writes" copies into the world what a bridge or a database client wrote to the database since the last tick, such as commands in <code>external_control</code> components.</li>
+</ul>
+<p>In both styles, a command written at tick N is recorded at tick N and used by the systems at tick N+1. The <a href="/reference/python-api/#run-receipts">run receipt</a> times each phase: <code>pre_step</code>, <code>copy_db_to_world</code>, <code>world_run</code>, <code>pre_commit</code>, <code>commit</code>, and <code>post_step</code>.</p>
+<h2 id="post-step-style">Post-step style</h2>
+<p>In <code>post_step</code>, a bridge reads the tick's sensor values from the database by name, sends them to the flight software, waits for the reply, and writes the commands back. This is the <a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/falcon9">falcon9</a> bridge, abridged. It exchanges packets with the Rust flight software over UDP at 100 Hz, on every tenth tick of the 1 kHz simulation:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">READS</span><span style="color: light-dark(#859900, #859900);"> =</span><span> [</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">booster.imu_accel</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">booster.imu_gyro</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">booster.gps_pos</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">booster.gps_vel</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>]</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">def</span><span style="color: light-dark(#268BD2, #268BD2);"> post_step</span><span>(</span><span>tick</span><span>:</span><span style="color: light-dark(#859900, #859900);"> int</span><span>,</span><span> ctx</span><span>:</span><span> el</span><span>.</span><span>StepContext</span><span>)</span><span> -&gt;</span><span style="color: light-dark(#B58900, #B58900);"> None</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">    if</span><span> tick</span><span style="color: light-dark(#859900, #859900);"> %</span><span> guidance_period_ticks</span><span style="color: light-dark(#859900, #859900);"> !=</span><span style="color: light-dark(#D33682, #D33682);"> 0</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">        return</span></span>
+<span class="giallo-l"><span>    reads</span><span style="color: light-dark(#859900, #859900);"> =</span><span> ctx</span><span>.</span><span>component_batch_operation</span><span>(</span><span>reads</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#CB4B16, #CB4B16);">READS</span><span>)</span></span>
+<span class="giallo-l"><span>    state</span><span style="color: light-dark(#859900, #859900);"> =</span><span> np</span><span>.</span><span>concatenate</span><span>(</span><span>[</span><span>reads</span><span>[</span><span>name</span><span>]</span><span style="color: light-dark(#859900, #859900);"> for</span><span> name</span><span style="color: light-dark(#859900, #859900);"> in</span><span style="color: light-dark(#CB4B16, #CB4B16);"> READS</span><span>]</span><span>)</span></span>
+<span class="giallo-l"><span>    cmd</span><span style="color: light-dark(#859900, #859900);"> =</span><span> bridge</span><span>.</span><span>exchange</span><span>(</span><span>state</span><span>)</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">  #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> send the state, wait up to 1 s for the reply</span></span>
+<span class="giallo-l"><span>    ctx</span><span>.</span><span>component_batch_operation</span><span>(</span></span>
+<span class="giallo-l"><span>        writes</span><span style="color: light-dark(#859900, #859900);">=</span><span>{</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">booster.engine_cmd</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> cmd</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">0</span><span>:</span><span style="color: light-dark(#D33682, #D33682);">9</span><span>]</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">booster.fin_cmd</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> cmd</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">23</span><span>:</span><span style="color: light-dark(#D33682, #D33682);">26</span><span>]</span><span>}</span></span>
+<span class="giallo-l"><span>    )</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>world</span><span>.</span><span>run</span><span>(</span><span>system</span><span>,</span><span> simulation_rate</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">1000.0</span><span>,</span><span> post_step</span><span style="color: light-dark(#859900, #859900);">=</span><span>post_step</span><span>)</span></span></code></pre>
+<p><code>component_batch_operation</code> takes the database lock once for all its reads, or all its writes. When a reply does not arrive in time, falcon9 keeps the previous command. Choose this policy on purpose: holding the last command keeps a demo flying, but in CI a timeout usually means the run failed.</p>
+<p><strong>Use it when:</strong></p>
+<ul>
+<li>you have one or a few vehicles;</li>
+<li>the bridge needs the database: any component or message by name, values from an earlier time (<code>read_component(name, timestamp=...)</code> and <code>read_msg(name, timestamp=...)</code>), or writes at chosen timestamps;</li>
+<li>the flight software runs slower than the physics, so the bridge exchanges only every few ticks;</li>
+<li>you are getting started. It is one function.</li>
+</ul>
+<p><strong>Costs and cautions:</strong></p>
+<ul>
+<li>Every read and write goes through the database by name, so the cost grows with the number of components and vehicles.</li>
+<li>With a <code>pre_step</code> or <code>post_step</code>, the simulation thread writes each commit to the database itself, and that time counts against the tick.</li>
+<li>An exception in <code>pre_step</code> or <code>post_step</code> is logged as a warning, and the simulation keeps running. To make a bridge failure fail the run, record it in the run's result, or use pre-commit hooks.</li>
+</ul>
+<p><a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/betaflight-sitl">betaflight-sitl</a> uses this style at 8 kHz, exchanging with Betaflight's SITL firmware on every tick. <a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/crazyflie-edu">crazyflie-edu</a> and <a href="https://docs.elodin.systems/preview/pr-991/reference/sitl-hitl/#the-database-as-the-boundary">aleph-ardupilot</a> use it for HITL.</p>
+<h2 id="pre-commit-style">Pre-commit style</h2>
+<p>A <code>pre_commit</code> hook runs after the systems and before the commit. Instead of looking components up by name on every tick, you choose the rows once, after spawning, with <code>world.prepare_component</code>, and group them with <code>world.prepare_batch</code>. On each tick, the hook gets those rows as NumPy arrays holding the tick's result, and writes its commands in place. The commands go into the same commit.</p>
+<p>This is the <a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/many-agents">many-agents</a> exchange, abridged. One hook talks to 24 controller processes, one per agent, at 1 kHz. <code>agents</code> and <code>objects</code> are the spawned entities:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>exchange</span><span style="color: light-dark(#859900, #859900);"> =</span><span> world</span><span>.</span><span>prepare_batch</span><span>(</span><span>{</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">    &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">position</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> world</span><span>.</span><span>prepare_component</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">position</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> agents</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">    &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">velocity</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> world</span><span>.</span><span>prepare_component</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">velocity</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> agents</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">    &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">object_position</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> world</span><span>.</span><span>prepare_component</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">object_position</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> objects</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">    &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">command</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> world</span><span>.</span><span>prepare_component</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">command</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> agents</span><span>,</span><span> access</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">write</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>}</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">def</span><span style="color: light-dark(#268BD2, #268BD2);"> exchange_step</span><span>(</span><span>tick</span><span>:</span><span style="color: light-dark(#859900, #859900);"> int</span><span>,</span><span> ctx</span><span>:</span><span> el</span><span>.</span><span>WorldStepContext</span><span>)</span><span> -&gt;</span><span style="color: light-dark(#B58900, #B58900);"> None</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">    with</span><span> ctx</span><span>.</span><span>batch</span><span>(</span><span>exchange</span><span>)</span><span style="color: light-dark(#859900, #859900);"> as</span><span> view</span><span>:</span></span>
+<span class="giallo-l"><span>        view</span><span>.</span><span>command</span><span>[</span><span style="color: light-dark(#CB4B16, #CB4B16);">...</span><span>]</span><span style="color: light-dark(#859900, #859900);"> =</span><span> bridge</span><span>.</span><span>exchange</span><span>(</span><span>tick</span><span>,</span><span> view</span><span>)</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">  #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> every state out, every command back</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>world</span><span>.</span><span>run</span><span>(</span><span>system</span><span>,</span><span> simulation_rate</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">1000.0</span><span>,</span><span> generate_real_time</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#B58900, #B58900);">True</span><span>,</span></span>
+<span class="giallo-l"><span>          pre_commit</span><span style="color: light-dark(#859900, #859900);">=</span><span>exchange_step</span><span>,</span><span> workers</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">8</span><span>)</span></span></code></pre>
+<p><strong>Native hooks.</strong> When a Python hook is too slow, move it into a shared library and load it with <code>el.NativeStepHook</code>. It runs without the GIL and can split the rows across threads:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>exchange_hook</span><span style="color: light-dark(#859900, #859900);"> =</span><span> el</span><span>.</span><span>NativeStepHook</span><span>.</span><span>load</span><span>(</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">    &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">hook/build/release/libmany_agent_hook.so</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>    input</span><span style="color: light-dark(#859900, #859900);">=</span><span>exchange</span><span>,</span></span>
+<span class="giallo-l"><span>    symbol</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">many_agent_step</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>    workers</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">2</span><span>,</span></span>
+<span class="giallo-l"><span>)</span></span></code></pre>
+<p>On macOS, Cargo names the library <code>libmany_agent_hook.dylib</code>. The library exports C functions. The <a href="/reference/python-api/#class-elodin-nativestephook"><code>NativeStepHook</code> reference</a> gives the ABI, and many-agents implements one in Rust.</p>
+<p><strong>Several hooks in order.</strong> <code>pre_commit</code> also takes a list. Hooks run in list order, Python and native alike, and each one sees the world writes of the hooks before it. many-agents runs its exchange, then a hook that reads camera frames, then one that writes the result on the last tick:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>world</span><span>.</span><span>run</span><span>(</span><span>system</span><span>,</span><span> pre_commit</span><span style="color: light-dark(#859900, #859900);">=</span><span>[</span><span>exchange_hook</span><span>,</span><span> history_step</span><span>,</span><span> finish_step</span><span>]</span><span>,</span><span style="color: light-dark(#CB4B16, #CB4B16);"> ...</span><span>)</span></span></code></pre>
+<p><strong>History and timestamped writes.</strong> A hook can read committed database history through prepared handles, and queue writes at chosen timestamps that land after the commit. many-agents pairs each frame of its sensor camera with an agent's position at the moment the frame was captured:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>frames</span><span style="color: light-dark(#859900, #859900);"> =</span><span> world</span><span>.</span><span>prepare_message_history</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">camera.overhead</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span></span>
+<span class="giallo-l"><span>truth</span><span style="color: light-dark(#859900, #859900);"> =</span><span> world</span><span>.</span><span>prepare_component_history</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">agent_000.position</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span></span>
+<span class="giallo-l"><span>capture</span><span style="color: light-dark(#859900, #859900);"> =</span><span> world</span><span>.</span><span>prepare_timestamped_writer</span><span>(</span></span>
+<span class="giallo-l"><span>    {</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">frame</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">camera.capture_frame</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">truth</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">camera.capture_truth</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>}</span></span>
+<span class="giallo-l"><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">def</span><span style="color: light-dark(#268BD2, #268BD2);"> history_step</span><span>(</span><span>tick</span><span>:</span><span style="color: light-dark(#859900, #859900);"> int</span><span>,</span><span> ctx</span><span>:</span><span> el</span><span>.</span><span>WorldStepContext</span><span>)</span><span> -&gt;</span><span style="color: light-dark(#B58900, #B58900);"> None</span><span>:</span></span>
+<span class="giallo-l"><span>    found</span><span style="color: light-dark(#859900, #859900);"> =</span><span> ctx</span><span>.</span><span>read_at</span><span>(</span><span>frames</span><span>,</span><span> capture_time</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">exact</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">       #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> (timestamp, bytes) or None</span></span>
+<span class="giallo-l"><span>    pose</span><span style="color: light-dark(#859900, #859900);"> =</span><span> ctx</span><span>.</span><span>read_at</span><span>(</span><span>truth</span><span>,</span><span> capture_time</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">at_or_before</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">  #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> (timestamp, value) or None</span></span>
+<span class="giallo-l"><span>    ctx</span><span>.</span><span>defer_write</span><span>(</span><span>capture</span><span>,</span><span> ctx</span><span>.</span><span>timestamp</span><span style="color: light-dark(#859900, #859900);"> +</span><span style="color: light-dark(#D33682, #D33682);"> 1</span><span>,</span><span> {</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">frame</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> frame_index</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">truth</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> pose</span><span>[</span><span style="color: light-dark(#D33682, #D33682);">1</span><span>]</span><span>}</span><span>)</span></span></code></pre>
+<p><code>"exact"</code> never falls back to an older sample, so a frame the camera skipped comes back as <code>None</code> instead of a stale image.</p>
+<p><strong>Failing fast.</strong> If a hook raises, or a native hook returns nonzero, the later hooks are skipped, the tick is not committed, and the run stops. The receipt's <code>failed_hook</code> names the hook. A lost controller fails the run instead of logging a warning, which is what you want in CI.</p>
+<p><strong>Use it when:</strong></p>
+<ul>
+<li>you have many vehicles, or many components per vehicle;</li>
+<li>the exchange must fit a tight tick budget;</li>
+<li>you want the bridge in native code, off the GIL;</li>
+<li>a broken link should stop the run.</li>
+</ul>
+<p><strong>Costs and cautions:</strong></p>
+<ul>
+<li>Prepare handles after spawning the entities and before <code>world.run</code>.</li>
+<li>A hook can only write components marked <code>external_control = "true"</code>. Preparing a write handle on any other component raises an error.</li>
+<li>A native hook runs inside the simulation's process, so a crash in it takes the simulation down.</li>
+<li>Without step callbacks, a writer thread appends each commit to the database while the next tick runs. History handles, timestamped writers, and <code>synchronous_commits=True</code> make commits synchronous instead, so history reads see every earlier commit.</li>
+</ul>
+<h2 id="choosing-a-style">Choosing a style</h2>
+<table><thead><tr><th></th><th>Post-step</th><th>Pre-commit</th></tr></thead><tbody>
+<tr><td>Callback</td><td><code>pre_step</code> or <code>post_step</code>, with <code>el.StepContext</code></td><td><code>pre_commit</code> hooks, with <code>el.WorldStepContext</code>, or <code>el.NativeStepHook</code></td></tr>
+<tr><td>Data access</td><td>Any component or message, by name, through the database</td><td>Rows prepared once, as arrays; database history through prepared handles</td></tr>
+<tr><td>Commands recorded</td><td>By the bridge's own write, after the tick's commit</td><td>In the tick's commit</td></tr>
+<tr><td>Commits</td><td>Written on the simulation thread</td><td>On a writer thread, unless the run needs them synchronous</td></tr>
+<tr><td>A callback that fails</td><td>Logs a warning; the run continues</td><td>Stops the run; the receipt names the hook</td></tr>
+<tr><td>Native code</td><td>No</td><td>Yes, without the GIL, across threads</td></tr>
+<tr><td>Good fit</td><td>One or a few vehicles, exchanges slower than the physics, HITL through the database, a first SITL</td><td>Many vehicles, tight tick budgets, CI runs that must fail fast</td></tr>
+</tbody></table>
+<p><strong>How much work each takes.</strong> A post-step bridge is the least work: one function, a socket, and the component names you already have. A Python pre-commit hook needs a little planning, because you decide up front which rows the bridge touches, and history reads and timestamped writes need their own handles. A native hook is the most work: a shared library with a C ABI, built before the simulation starts.</p>
+<h3 id="measured">Measured</h3>
+<p>These numbers come from run receipts on one host (Linux, 16 cores and 22 threads, 32 GB RAM), leaving out the first 2,000 ticks as warm-up. "Callback" is the time spent in <code>post_step</code> or in the hooks, including the wait for the flight software's reply.</p>
+<table><thead><tr><th>Example</th><th>Style and loop</th><th>Callback, mean / p95</th><th>Commit, mean</th><th>Result</th></tr></thead><tbody>
+<tr><td>falcon9</td><td>Post-step; one exchange every 10 ticks at 1 kHz; as fast as possible</td><td>32 / 204 µs</td><td>6.8 µs</td><td>520 s of flight in 44 s, 11.8× real time</td></tr>
+<tr><td>betaflight-sitl</td><td>Post-step; one exchange every tick at 8 kHz; real time</td><td>102 / 152 µs</td><td>2.7 µs</td><td>0.96× real time</td></tr>
+<tr><td>many-agents (<code>lockstep</code>)</td><td>Pre-commit, native hook; 24 controllers at 1 kHz; real time</td><td>329 / 441 µs</td><td>24 µs</td><td>998 ticks per second</td></tr>
+</tbody></table>
+<p>falcon9's mean is low because nine ticks in ten skip the exchange, and its p95 is roughly the cost of one exchange. betaflight-sitl shows the limit of exchanging on every tick: the bridge takes 102 µs of each 125 µs tick, a whole tick averages 130 µs, and the run falls slightly behind real time. In its <code>lockstep-history</code> mode, with history reads and deferred writes, many-agents commits synchronously: commits average 38 µs instead of 24 µs, and the run still holds 990 ticks per second.</p>
+<p>To compare the styles on identical work, we also wrote the many-agents exchange as a post-step bridge, with the same 24 controllers, rate, and pacing:</p>
+<table><thead><tr><th>Bridge</th><th>Callback, mean / p95</th><th>Commit, mean</th><th>Late ticks, of 10,000</th><th>Ticks per second</th></tr></thead><tbody>
+<tr><td>Post-step, <code>component_batch_operation</code></td><td>740 / 971 µs</td><td>106 µs</td><td>4,359</td><td>894</td></tr>
+<tr><td>Pre-commit, Python hook</td><td>344 / 612 µs</td><td>17 µs</td><td>104</td><td>997</td></tr>
+<tr><td>Pre-commit, native hook</td><td>325 / 419 µs</td><td>23 µs</td><td>65</td><td>999</td></tr>
+</tbody></table>
+<p>Most of the native hook's 325 µs is spent waiting for the 24 controllers to reply. The post-step bridge needs about 400 µs more per tick to read and write the agents' components through the database, and it writes its commits on the simulation thread, so it cannot keep up with a 1 ms tick. Both hooks keep up. The native hook mostly shortens the slow tail.</p>
+<h3 id="moving-a-bridge-from-post-step-to-pre-commit">Moving a bridge from post-step to pre-commit</h3>
+<ol>
+<li>Check that every component the bridge writes is marked <code>external_control = "true"</code>. A post-step bridge usually has this already.</li>
+<li>After spawning, prepare the components the bridge reads and writes, and group them in a batch.</li>
+<li>Move the exchange from <code>post_step</code> into a <code>pre_commit</code> hook that uses <code>ctx.batch(...)</code> views instead of names.</li>
+<li>Replace reads at a timestamp with history handles and <code>ctx.read_at</code>, and writes at chosen timestamps with a timestamped writer and <code>ctx.defer_write</code>.</li>
+<li>Raise on a lost link instead of logging it, and check the receipt's <code>failed_hook</code> when a run stops.</li>
+<li>If the hook is still too slow, port it to a native hook.</li>
+</ol>
+<h3 id="using-both">Using both</h3>
+<p><code>world.run</code> accepts <code>post_step</code> and <code>pre_commit</code> together, so a <code>post_step</code> can do occasional database work next to a pre-commit exchange. With a <code>post_step</code> present, the simulation thread writes the commits again, so drop it if you don't need it.</p>
+<h2 id="sitl-in-practice">SITL in practice</h2>
+<p><strong>Launch the flight software with the simulation.</strong> Register it as an s10 recipe. Build it from source in the editor and use a prebuilt binary in campaigns, give each campaign worker its own ports, and hold the first tick until the flight software is ready. <a href="/reference/s10#sitl-patterns">Process Orchestration (s10)</a> covers each of these.</p>
+<p><strong>Agree on a packet format.</strong> Fixed-size, little-endian packets that carry a version and the tick number make a stale or out-of-order reply easy to spot. Decide what a timeout means before you need to: hold the last command, or fail the run.</p>
+<p><strong>Choose lockstep or free-running, and real time or as fast as possible.</strong></p>
+<table><thead><tr><th></th><th>As fast as possible</th><th>Real time (<code>generate_real_time=True</code>)</th></tr></thead><tbody>
+<tr><td><strong>Lockstep:</strong> the simulation waits for each reply</td><td>Repeatable and fast: campaigns and CI (falcon9)</td><td>Repeatable and watchable, with people or tools attached (betaflight-sitl, many-agents)</td></tr>
+<tr><td><strong>Free-running:</strong> each side keeps its own clock</td><td>Rarely useful: the flight software sees time jump</td><td>Flight software or hardware that keeps its own clock (aleph-ardupilot)</td></tr>
+</tbody></table>
+<p><strong>Feed sensors, not truth.</strong> Model sensors in systems, with their noise, bias, rate, and delay, and send the flight software those values. For cameras, a <a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/sensor-camera">sensor camera</a> renders frames into the database as messages. Read a frame by the time it was captured: <code>ctx.read_at(frames, t, "exact")</code> in a hook, or <code>ctx.read_msg(name, timestamp=t)</code> in <code>post_step</code>. To model the camera's delay, read the frame from <code>latency</code> microseconds before the current tick.</p>
+<p><strong>Scale out.</strong> The same SITL runs headless under <a href="/reference/elodin-cli#elodin-monte-carlo"><code>elodin monte-carlo</code></a>, with one simulation and flight software stack per worker.</p>
+<h3 id="proving-a-run-repeats">Proving a run repeats</h3>
+<p>A lockstep run with fixed seeds and <code>start_timestamp</code> should repeat bit for bit. When two runs end in different states, a <a href="/reference/python-api#deterministic-witnesses">deterministic witness</a> shows where they first parted: in the world after the systems, in what a hook sent or got back, in what it wrote, or in what the commit recorded.</p>
+<ol>
+<li>Prepare a witness over the batches your hooks use. Give each hook a channel for what it sends, another for the part of each reply the flight software decided, and an external channel for the whole reply.</li>
+<li>Record a baseline with <code>raw=True</code>, and pass it as <code>reference</code> to the runs you check. The receipt names the first mismatch, and the witness keeps the exact bytes around it.</li>
+<li>Compare any two witnesses with <a href="/reference/elodin-cli#elodin-determinism"><code>elodin determinism compare</code></a>.</li>
+<li>Replay a hook from a witness, without the simulation or the flight software, with <code>world.replay_pre_commit</code> or <code>elodin determinism replay-hook</code>. If the replay reproduces every byte, the difference came from outside the hook.</li>
+</ol>
+<p>Keep host-only fields, such as a reply's service time, out of the compared channels: the external channel keeps the whole reply for replay, and is never compared. <a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/many-agents">many-agents</a> walks through a one-bit fault, a controller race, and its fix.</p>
+<p>A witness can also come from outside Elodin. When the SITL must move into your own C++ runtime, <a href="/reference/cpp-runtime">Custom C++ Runtimes</a> exports the simulation as a library and proves the C++ program reproduces the Elodin run with these same comparisons.</p>
+<h2 id="hitl-in-practice">HITL in practice</h2>
+<p>In HITL the flight software runs on the flight computer and keeps its own clock. Run the simulation in real time, put timestamps on what crosses the link, and expect some jitter between the two clocks. Keep the same boundary as in SITL, so the flight software cannot tell the difference. Three layouts work well.</p>
+<h3 id="the-database-as-the-boundary">The database as the boundary</h3>
+<p><a rel="external" href="https://github.com/elodin-sys/aleph-ardupilot">aleph-ardupilot</a> runs ArduCopter on the <a href="/home/aleph/setup">Aleph</a> flight computer. A Rust bridge on the Aleph subscribes to sensor entities in Elodin-DB, converts them into ArduPilot's sensor packets, and writes ArduPilot's motor commands back to the database and to the CAN motor controllers. In normal operation, the Aleph's own sensors feed a database on the Aleph. In sim-HITL mode, the bridge connects to the database of a simulation running on a laptop instead:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="mermaid"><span class="giallo-l"><span>flowchart LR</span></span>
+<span class="giallo-l"><span>  subgraph laptop [&quot;Laptop&quot;]</span></span>
+<span class="giallo-l"><span>    sim[&quot;Elodin simulation&lt;br/&gt;physics and post_step&quot;] &lt;--&gt; db[(&quot;Elodin-DB&quot;)]</span></span>
+<span class="giallo-l"><span>    editor[&quot;Elodin Editor&quot;] --- db</span></span>
+<span class="giallo-l"><span>  end</span></span>
+<span class="giallo-l"><span>  subgraph aleph [&quot;Aleph flight computer&quot;]</span></span>
+<span class="giallo-l"><span>    bridge[&quot;ardupilot-bridge&quot;] &lt;--&gt; copter[&quot;ArduCopter&quot;]</span></span>
+<span class="giallo-l"><span>  end</span></span>
+<span class="giallo-l"><span>  db -- &quot;imu, ublox, aleph&quot; --&gt; bridge</span></span>
+<span class="giallo-l"><span>  bridge -- &quot;ardupilot.motor_command&quot; --&gt; db</span></span></code></pre>
+<p>The simulation runs at 760 Hz in real time. Its <code>post_step</code> writes simulated sensors into the same <code>imu</code>, <code>ublox</code>, and <code>aleph</code> entities the real sensors use, in the same formats, down to GPS fixes as UBX integers with seeded noise. It also copies the motor commands the bridge wrote, <code>external_control</code> components, into the physics. The bridge cannot tell the simulation from the real sensors, so the same flight software and bridge fly in both modes:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">./deploy.sh</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">c</span><span style="color: light-dark(#2AA198, #2AA198);"> sim-hitl</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">h</span><span style="color: light-dark(#859900, #859900);"> &lt;</span><span style="color: light-dark(#2AA198, #2AA198);">aleph-i</span><span>p</span><span style="color: light-dark(#859900, #859900);">&gt;</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">u</span><span style="color: light-dark(#2AA198, #2AA198);"> root</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">   #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> point the Aleph&#39;s bridge at the laptop</span></span>
+<span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> run</span><span style="color: light-dark(#2AA198, #2AA198);"> sim/sim-hitl/main.py</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">                 #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> on the laptop</span></span></code></pre><div class="el-notice warning container-fluid">
+    <div class="row g-0 align-items-center">
+        <div class="col-1" style="padding: 4px">
+            <i class="bx bx-error-circle" style="font-size: 1.5rem"></i>
+        </div>
+        <div class="col-15"><p>aleph-ardupilot was built against an earlier Elodin release. Its pattern is current, but expect to update the Elodin version its flake pins.</p>
+</div>
+    </div>
+</div>
+<p>The same layout works for SITL. Any program that talks to Elodin-DB over <a href="/reference/grpc-client">Impeller or gRPC</a> can read sensor components and write <code>external_control</code> commands, with no bridge inside the simulation.</p>
+<h3 id="a-link-bridge-on-the-host">A link bridge on the host</h3>
+<p>When the flight computer talks over a radio, a serial line, or UDP, run a bridge on the host as an s10 recipe, and hold the first tick until the link is up. The simulation exchanges with the bridge the way it would with SITL flight software. <a href="/reference/s10#hitl-patterns">s10's HITL patterns</a> cover readiness checks, timeouts, and restart policies.</p>
+<h3 id="hardware-as-the-source-of-truth">Hardware as the source of truth</h3>
+<p>crazyflie-edu's <code>--hitl</code> mode turns the physics off. The student's code runs on the Crazyflie, keyboard commands reach it over the Crazyradio, and its real IMU data streams into the editor. The controls and graphs are the same as in SITL, where the same C code runs against the simulation:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#2AA198, #2AA198);"> examples/crazyflie-edu/main.py</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-hitl</span></span></code></pre><h3 id="safety">Safety</h3>
+<ul>
+<li>Take the propellers off for bench HITL, or tie the vehicle down.</li>
+<li>Keep a hardware kill switch, and require a deliberate action to arm. crazyflie-edu runs its motors only while a dead man switch is held.</li>
+<li>Give the flight software a failsafe for a lost link, and test it by stopping the simulation in flight.</li>
+<li>Check that stopping the simulation stops every companion process. <code>elodin run</code> stops all recipes when the simulation exits.</li>
+</ul>
+<h2 id="good-habits">Good habits</h2>
+<ul>
+<li><strong>Draw the boundary first.</strong> List what the flight software reads and writes before writing the bridge, and mark every write <code>external_control</code>.</li>
+<li><strong>Use one schema for simulation and hardware.</strong> Then the same flight software, schematic, and scripts work on both.</li>
+<li><strong>Seed every random number and fix <code>start_timestamp</code>,</strong> so a lockstep run repeats exactly. Record a witness to prove it.</li>
+<li><strong>Watch the tick budget.</strong> Set <code>ELODIN_SIM_SUMMARY_JSON</code> to write the receipt, and compare <code>callback</code>, <code>commit</code>, and <code>total_cycle</code> with the tick period.</li>
+<li><strong>Compare runs with flight data.</strong> Merge a SITL run with a flight log and plot them together.</li>
+</ul>
+<h2 id="troubleshooting">Troubleshooting</h2>
+<table><thead><tr><th>Symptom</th><th>What to check</th></tr></thead><tbody>
+<tr><td>The simulation keeps running after the flight software crashed</td><td>Outside campaigns, a recipe that exits does not stop the simulation. Detect the lost link in the bridge, or raise in a <code>pre_commit</code> hook to stop the run.</td></tr>
+<tr><td>Commands act one tick late</td><td>This is expected: a command written at tick N is used at tick N+1, in both styles.</td></tr>
+<tr><td>The run falls behind real time</td><td>Compare <code>callback</code>, <code>commit</code>, and <code>world_run</code> in the receipt with the tick period. Exchange less often, move to pre-commit hooks, or use a native hook.</td></tr>
+<tr><td><code>Ready.tcp</code> is rejected</td><td>It needs an IP address, such as <code>127.0.0.1:9000</code>, not <code>localhost:9000</code>.</td></tr>
+<tr><td>A write fails with <code>TimeTravel</code></td><td>Its timestamp is older than the component's last sample. A failed deferred write stops the run, and <code>failed_hook</code> names the hook.</td></tr>
+<tr><td>Preparing a write handle fails</td><td>The component must be marked <code>external_control = "true"</code>.</td></tr>
+<tr><td>The flight software sees the wrong attitude or motion</td><td>Check frames (ENU or NED, FLU or FRD), units, and quaternion order on both sides of the link.</td></tr>
+<tr><td>A camera frame is missing</td><td>The render server skipped it to catch up. <code>read_at(..., "exact")</code> returns <code>None</code> for it instead of an older frame.</td></tr>
+<tr><td>Two lockstep runs end in different states</td><td>Record both with a witness, the second with the first as <code>reference</code>, and read <code>witness.first_mismatch</code> in the receipt. A differing response after an equal ingress points at the flight software; a mismatch in <code>after_systems</code> points at the simulation.</td></tr>
+</tbody></table>
+<h2 id="examples">Examples</h2>
+<table><thead><tr><th>Example</th><th>Style</th><th>Loop</th><th>Shows</th></tr></thead><tbody>
+<tr><td><a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/falcon9">falcon9</a></td><td>Post-step</td><td>SITL, lockstep, as fast as possible</td><td>Rust flight software over UDP at 100 Hz in a 1 kHz simulation, and Monte Carlo campaigns</td></tr>
+<tr><td><a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/betaflight-sitl">betaflight-sitl</a></td><td>Post-step</td><td>SITL, lockstep, real time</td><td>Betaflight's SITL firmware, exchanging on every tick at 8 kHz</td></tr>
+<tr><td><a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/crazyflie-edu">crazyflie-edu</a></td><td>Post-step</td><td>SITL and HITL</td><td>The same C code in SITL and on a Crazyflie, and HITL with the physics off</td></tr>
+<tr><td><a rel="external" href="https://github.com/elodin-sys/aleph-ardupilot">aleph-ardupilot</a></td><td>Post-step</td><td>HITL, free-running, real time</td><td>ArduCopter on Aleph, with the simulation and the hardware writing the same database entities</td></tr>
+<tr><td><a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/many-agents">many-agents</a></td><td>Pre-commit</td><td>SITL, lockstep, real time</td><td>24 controllers at 1 kHz: prepared batches, a native hook, history reads, deferred writes, and receipts</td></tr>
+<tr><td><a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/apollo-lander">apollo-lander</a></td><td>Post-step</td><td>SITL, lockstep, campaigns</td><td>A complete Monte Carlo campaign around real flight software (<a href="/home/apollo-lander">tutorial</a>)</td></tr>
+</tbody></table>
+<h2 id="related-docs">Related docs</h2>
+<!-- title="Double Pendulum Tutorial", icon="tornado", href="tutorial/double-pend" -->
+
+<a class="el-cardlink" href="&#x2F;reference&#x2F;s10">
+    <div class="el-cardlink-text">
+        <p>
+            <i
+                class="bx bxs-cog"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+            Process Orchestration (s10)
+            <i
+                class="bx bxs-right-arrow-alt"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+        </p>
+    </div>
+    <div class="el-cardlink-subtext"
+        <p><p>Launch, order, and stop flight software and link bridges with the simulation.</p>
+</p>
+    </div>
+</a>
+<!-- title="Double Pendulum Tutorial", icon="tornado", href="tutorial/double-pend" -->
+
+<a class="el-cardlink" href="&#x2F;reference&#x2F;python-api&#x2F;#class-elodin-stepcontext">
+    <div class="el-cardlink-text">
+        <p>
+            <i
+                class="bx bxs-book"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+            Python API: StepContext
+            <i
+                class="bx bxs-right-arrow-alt"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+        </p>
+    </div>
+    <div class="el-cardlink-subtext"
+        <p><p>The <code>pre_step</code> and <code>post_step</code> API: reads, writes, history, and messages.</p>
+</p>
+    </div>
+</a>
+<!-- title="Double Pendulum Tutorial", icon="tornado", href="tutorial/double-pend" -->
+
+<a class="el-cardlink" href="&#x2F;reference&#x2F;python-api&#x2F;#pre-commit-hooks">
+    <div class="el-cardlink-text">
+        <p>
+            <i
+                class="bx bxs-book"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+            Python API: Pre-commit hooks
+            <i
+                class="bx bxs-right-arrow-alt"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+        </p>
+    </div>
+    <div class="el-cardlink-subtext"
+        <p><p>Prepared handles, <code>WorldStepContext</code>, native hooks, and run receipts.</p>
+</p>
+    </div>
+</a>
+<!-- title="Double Pendulum Tutorial", icon="tornado", href="tutorial/double-pend" -->
+
+<a class="el-cardlink" href="&#x2F;reference&#x2F;cpp-runtime">
+    <div class="el-cardlink-text">
+        <p>
+            <i
+                class="bx bxs-cog"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+            Custom C++ Runtimes
+            <i
+                class="bx bxs-right-arrow-alt"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+        </p>
+    </div>
+    <div class="el-cardlink-subtext"
+        <p><p>Run the simulation and flight software in your own C++ program, and prove it matches Elodin.</p>
+</p>
+    </div>
+</a>
+<!-- title="Double Pendulum Tutorial", icon="tornado", href="tutorial/double-pend" -->
+
+<a class="el-cardlink" href="&#x2F;home&#x2F;apollo-lander">
+    <div class="el-cardlink-text">
+        <p>
+            <i
+                class="bx bxs-rocket"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+            Apollo Lander Tutorial
+            <i
+                class="bx bxs-right-arrow-alt"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+        </p>
+    </div>
+    <div class="el-cardlink-subtext"
+        <p><p>A SITL Monte Carlo campaign built step by step.</p>
+</p>
+    </div>
+</a>
+
+                  
+<div class="footer-line-padding"></div>
+<div class="footer-line"></div>
+<div class="docs-navigation d-flex justify-content-between">
+                   
+</div>
+
+              </main>
+          </div>
+      </div>
+  </div>
+  
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-991/js/main.js"></script>
+<script>
+    // https://mathjax.github.io/MathJax-demos-web/convert-configuration/convert-configuration.html
+    window.MathJax = {
+        tex: {
+            inlineMath: [
+                ["$", "$"],
+                ["\\(", "\\)"],
+            ],
+            displayMath: [
+                ["$$", "$$"],
+                ["\[\[", "\]\]"],
+            ],
+            processEscapes: true,
+            processEnvironments: true,
+        },
+        options: {
+            skipHtmlTags: ["script", "noscript", "style", "textarea", "pre"],
+        },
+    };
+</script>
+<script type="text/javascript" src="https://docs.elodin.systems/preview/pr-991/js/tex-mml-chtml.js"></script>
+<script type="module">
+    // Zola < 0.22 emits class="language-mermaid"; 0.22+ (giallo) emits data-lang="mermaid".
+    const blocks = document.querySelectorAll('pre > code.language-mermaid, pre > code[data-lang="mermaid"]');
+    if (blocks.length) {
+        const { default: mermaid } = await import("https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs");
+        mermaid.initialize({
+            startOnLoad: false,
+            theme: document.body.classList.contains("dark") ? "dark" : "default",
+            securityLevel: "loose",
+        });
+        const nodes = [...blocks].map((code) => {
+            const div = document.createElement("div");
+            div.className = "mermaid";
+            div.style.margin = "2rem 0";
+            div.style.overflowX = "auto";
+            div.style.textAlign = "center";
+            div.textContent = code.textContent;
+            code.parentElement.replaceWith(div);
+            return div;
+        });
+        await mermaid.run({ nodes });
+    }
+</script>
+
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-991/js/elasticlunr.min.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-991/search_index.en.js"></script>
+  <script type="text/javascript" src="https://docs.elodin.systems/preview/pr-991/js/search.js"></script>
+
+
+</body>
+
+</html>
