@@ -370,8 +370,9 @@ public:
     }
 
 private:
+    // GCC 8 warns that the `std::byte` instantiation leaves both parameters unused.
     template <typename T>
-    void expect_field(std::size_t interface_index, std::size_t field_index) const
+    void expect_field([[maybe_unused]] std::size_t interface_index, [[maybe_unused]] std::size_t field_index) const
     {
         if constexpr (!std::is_same_v<T, std::byte>)
             program_.expect<T>(program_.raw_field(interface_index, field_index).component);

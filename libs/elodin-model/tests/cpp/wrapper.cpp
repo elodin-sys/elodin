@@ -193,6 +193,10 @@ void reads_and_writes_typed_values(const elodin::Program& model)
     std::array<std::byte, 16> bytes {};
     run.read(temperature, bytes.data(), bytes.size());
     expect(std::memcmp(bytes.data(), values.data(), bytes.size()) == 0, "the same bytes");
+    const std::size_t command = model.field(exchange, "command");
+    run.read_interface(exchange, command, bytes.data(), bytes.size());
+    run.write_interface(exchange, command, bytes.data(), bytes.size());
+    expect(run.read<double>(ambient) == std::vector<double> { 20.0, 20.0 }, "an interface field as bytes");
     std::uint64_t tick = 0;
     run.read(model.component("tick"), &tick, 1);
     expect(tick == 1, "the tick as uint64");
