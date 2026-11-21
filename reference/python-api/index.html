@@ -384,6 +384,14 @@
             <li>
                 <a
                     class="docs-link "
+                    href="/reference/sitl-hitl/"
+                    >SITL &amp; HITL</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
                     href="/reference/schematic/"
                     >Schematic KDL</a
                 >
@@ -490,6 +498,52 @@
                                 </li>
                                 
                             </ul>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="/reference/python-api/#pre-commit-hooks">Pre-commit hooks</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="/reference/python-api/#class-elodin-worldstepcontext">class elodin.WorldStepContext</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="/reference/python-api/#class-elodin-nativestephook">class elodin.NativeStepHook</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="/reference/python-api/#deterministic-witnesses">Deterministic witnesses</a>
+                            
+                            <ul>
+                                
+                                <li>
+                                    <a href="/reference/python-api/#class-elodin-determinismtrace">class elodin.DeterminismTrace</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="/reference/python-api/#module-elodin-determinism">module elodin.determinism</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="/reference/python-api/#witness-files">Witness files</a>
+                                </li>
+                                
+                            </ul>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="/reference/python-api/#run-receipts">Run receipts</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="/reference/python-api/#class-elodin-timing">class elodin.Timing</a>
                             
                         </li>
                         
@@ -604,6 +658,10 @@
                                 
                                 <li>
                                     <a href="/reference/python-api/#reserved-metadata-keys">Reserved metadata keys</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="/reference/python-api/#recording">Recording</a>
                                 </li>
                                 
                             </ul>
@@ -969,7 +1027,7 @@ and running the simulation. The <code>World</code> object also provides helper m
 <span class="giallo-l"><span>    }</span><span>,</span></span>
 <span class="giallo-l"><span>)</span></span></code></pre></li>
 <li>
-<p><code>run(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp, log_level, backend)</code> -&gt; None</p>
+<p><code>run(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp, log_level, backend, on_receipt, workers, pre_commit, timing, synchronous_commits, determinism_trace)</code> -&gt; None</p>
 <p>Run the simulation.</p>
 <ul>
 <li><code>system</code> : <a href="/reference/python-api/#elodin-system">elodin.System</a>, the systems to run, can be supplied as a list of systems delineated by pipes.</li>
@@ -987,10 +1045,17 @@ and running the simulation. The <code>World</code> object also provides helper m
 <li><code>start_timestamp</code> : <code>int</code>, optional, the starting timestamp for the simulation in microseconds. If <code>None</code> (default), uses the current system time (epoch-based). Set to <code>0</code> for zero-based timing where the simulation starts at <code>t=0</code>.</li>
 <li><code>log_level</code> : <code>str</code>, optional, log level for the embedded Elodin-DB instance (<code>error</code>, <code>warn</code>, <code>info</code>, <code>debug</code>, <code>trace</code>). Defaults to <code>info</code> unless <code>RUST_LOG</code> is set.</li>
 <li><code>backend</code> : <code>str</code>, optional, execution backend. Defaults to <code>"cranelift"</code>. Supported values are <code>"cranelift"</code> (CPU), <code>"jax-cpu"</code>, and <code>"jax-gpu"</code>.</li>
+<li><code>on_receipt</code> : <code>Callable[[dict], None]</code>, optional, called with the run's <a href="/reference/python-api/#run-receipts">receipt</a> when it stops.</li>
+<li><code>workers</code> : <code>int</code>, optional, threads the Cranelift backend runs independent calls on, the simulation thread included: entity chunks of <code>@el.map</code> systems and the per-entity calls of <code>@el.map_seq</code>. Defaults to <code>1</code>. Results do not depend on the count once it is above <code>1</code>; going from <code>1</code> to more can change the last bits of reductions.</li>
+<li><code>pre_commit</code> : a callable <code>(tick, WorldStepContext)</code>, an <a href="/reference/python-api/#class-elodin-nativestephook">elodin.NativeStepHook</a>, or a list of them run in order, called after each tick and before its DB commit. See <a href="/reference/python-api/#pre-commit-hooks">pre-commit hooks</a>.</li>
+<li><code>timing</code> : <a href="/reference/python-api/#class-elodin-timing">elodin.Timing</a>, optional, what the receipt measures. Defaults to <code>Timing.summary()</code>.</li>
+<li><code>synchronous_commits</code> : <code>bool</code>, optional, has each commit in the DB, and <code>last_updated</code> past it, before the next cycle's <code>pre_commit</code> hooks run, so at most one commit is ever in flight. The writer thread still appends it, during the pacing and the next systems step, and the next cycle waits for it before its hooks; the receipt counts that wait in <code>commit</code>. The loop then also waits out DB write stalls, so keep the DB on storage that does not stall. Defaults to <code>False</code>.</li>
+<li><code>determinism_trace</code> : [elodin.DeterminismTrace], optional, records the run's <a href="/reference/python-api/#deterministic-witnesses">deterministic witness</a>.</li>
 </ul>
+<p>When neither <code>pre_step</code> nor <code>post_step</code> is given, no component sets <code>wait_for_write</code>, no history handle or timestamped writer was prepared, and <code>synchronous_commits</code> is <code>False</code>, a writer thread appends each commit to the DB, so DB stalls stay off the simulation thread. Clients then see a commit, and <code>last_updated</code> move past it, up to a few cycles later. The receipt's <code>sync.commits</code> says which way the run committed: <code>write_behind</code> or <code>synchronous</code>.</p>
 </li>
 <li>
-<p><code>build(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, db_path, backend, start_timestamp)</code> -&gt; <code>elodin.Exec</code></p>
+<p><code>build(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, db_path, backend, start_timestamp, workers, timing)</code> -&gt; <code>elodin.Exec</code></p>
 <p>Build and compile the simulation executor without starting the runtime loop. <code>Exec.run(ticks)</code> advances it and records each tick at its simulation time, so repeated calls continue one history.</p>
 <ul>
 <li><code>system</code> : <a href="/reference/python-api/#elodin-system">elodin.System</a>, the systems to compile.</li>
@@ -1003,7 +1068,36 @@ and running the simulation. The <code>World</code> object also provides helper m
 <li><code>db_path</code> : <code>string</code>, optional, the path to the database directory.</li>
 <li><code>backend</code> : <code>str</code>, optional, execution backend. Defaults to <code>"cranelift"</code>.</li>
 <li><code>start_timestamp</code> : <code>int</code>, optional, the timestamp of the initial state in microseconds; tick <code>n</code> is recorded at <code>start_timestamp + n / simulation_rate</code>. If <code>None</code> (default), uses the current system time. Set to <code>0</code> for zero-based timing.</li>
+<li><code>workers</code>, <code>timing</code> : as for <code>run</code>. <code>Exec.last_receipt()</code> returns the receipt of the latest <code>Exec.run</code>.</li>
 </ul>
+</li>
+<li>
+<p><code>prepare_component(name, entities, access="read")</code> -&gt; <code>elodin.ComponentHandle</code></p>
+<p>Resolve once the rows of component <code>name</code> for <code>entities</code>, in that order, for <a href="/reference/python-api/#pre-commit-hooks">pre-commit hooks</a>. <code>access="write"</code> lets hooks write them; building the world fails if a system also writes the component. Spawning afterwards invalidates the handle.</p>
+</li>
+<li>
+<p><code>prepare_batch(fields)</code> -&gt; <code>elodin.BatchHandle</code></p>
+<p>Group handles over the same number of rows, keyed by field name, so a hook views them together.</p>
+</li>
+<li>
+<p><code>prepare_component_history(name)</code> -&gt; <code>elodin.HistoryHandle</code></p>
+<p>Resolve once the <code>entity.component</code> pair <code>name</code> (e.g. <code>"drone.world_pos"</code>), for hooks to read its committed DB history with <code>WorldStepContext.read_at</code>. Transient components have no history and are rejected.</p>
+</li>
+<li>
+<p><code>prepare_message_history(name)</code> -&gt; <code>elodin.HistoryHandle</code></p>
+<p>The same for the message log <code>name</code> (e.g. <code>"drone.scene_cam"</code>), which may not exist yet when it is prepared.</p>
+</li>
+<li>
+<p><code>prepare_timestamped_writer(fields)</code> -&gt; <code>elodin.TimestampedWriter</code></p>
+<p>Resolve once the components that <code>WorldStepContext.defer_write</code> appends to: <code>fields</code> maps each value's key to an <code>entity.component</code> pair, which must be marked <code>external_control</code> so the simulation never writes it.</p>
+</li>
+<li>
+<p><code>prepare_witness(batches, channels=None, external=None, stages=None)</code> -&gt; <code>elodin.Witness</code></p>
+<p>Choose what a run's <a href="/reference/python-api/#deterministic-witnesses">deterministic witness</a> records: <code>batches</code> maps names to <code>elodin.BatchHandle</code>s. <code>channels</code> and <code>external</code> map channel names to <code>(batch, row_bytes)</code>, one row per row of one of those batches, which hooks fill with <code>WorldStepContext.witness_bytes</code> or as native-hook columns. External channels hold what came from outside the simulation: a replay feeds them back to the hooks, and no comparison looks at them. <code>stages</code> keeps only the stages it names.</p>
+</li>
+<li>
+<p><code>replay_pre_commit(trace, pre_commit, live=False)</code> -&gt; <code>dict</code></p>
+<p>Run <code>pre_commit</code>, the same list of hooks as the run that recorded the witness file <code>trace</code>, on the rows it kept exactly, without the systems, recipes or DB, and compare what each hook writes with the recording. Uses the witness last prepared on this world. Before each hook, the world holds the rows that hook saw in the run, and its external channels hold the recorded bytes unless <code>live</code>. Hooks whose stage the witness leaves out are not run. Stops at the first mismatch. Returns <code>ticks</code> replayed, <code>skipped_ticks</code> that kept only digests, <code>records</code> and <code>bytes</code> compared, and <code>first_mismatch</code> or <code>None</code>.</p>
 </li>
 </ul>
 <h3 id="backend-selection">Backend Selection</h3>
@@ -1051,7 +1145,7 @@ are returned so the same simulation still runs normally.</p>
 <p>Integer reference identifier for entities in Elodin.</p>
 <h3 id="class-elodin-stepcontext"><em>class</em> <code>elodin.StepContext</code></h3>
 <p>Context object passed to <code>pre_step</code> and <code>post_step</code> callbacks, providing direct database read/write access. This enables Software-In-The-Loop (SITL) and Hardware-In-The-Loop (HITL) workflows where external systems need to exchange data with the simulation at each tick.</p>
-<p><code>StepContext</code> provides direct database access within the same process, avoiding the overhead of a separate TCP connection. This is essential for high-frequency lockstep synchronization with external flight controllers or sensor systems.</p>
+<p><code>StepContext</code> provides direct database access within the same process, avoiding the overhead of a separate TCP connection. This is essential for high-frequency lockstep synchronization with external flight controllers or sensor systems. <a href="/reference/sitl-hitl">SITL &amp; HITL</a> compares it with <code>pre_commit</code> hooks.</p>
 <h4 id="properties">Properties</h4>
 <ul>
 <li>
@@ -1233,7 +1327,151 @@ are returned so the same simulation still runs normally.</p>
 <span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">            &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.data_b</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> custom_timestamp</span><span>,</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">  #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> Custom timestamp for data_b</span></span>
 <span class="giallo-l"><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">            #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> data_a uses current simulation timestamp</span></span>
 <span class="giallo-l"><span>        }</span></span>
-<span class="giallo-l"><span>    )</span></span></code></pre><h3 id="class-elodin-panel"><em>class</em> <code>elodin.Panel</code></h3>
+<span class="giallo-l"><span>    )</span></span></code></pre><h3 id="pre-commit-hooks">Pre-commit hooks</h3>
+<p>A <code>pre_commit</code> hook runs after each tick and before its DB commit, on world columns resolved once with <code>World.prepare_component</code> and <code>World.prepare_batch</code>. Unlike <code>post_step</code>, it does not go through the DB: what it reads is the tick's result, and what it writes reaches the world, the same commit, and the systems on the next tick. <a href="/reference/sitl-hitl">SITL &amp; HITL</a> explains when to use each.</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>exchange</span><span style="color: light-dark(#859900, #859900);"> =</span><span> world</span><span>.</span><span>prepare_batch</span><span>(</span><span>{</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">    &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">position</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> world</span><span>.</span><span>prepare_component</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">position</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> agents</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">    &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">target</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> world</span><span>.</span><span>prepare_component</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">object_position</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> targets</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">    &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">command</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> world</span><span>.</span><span>prepare_component</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">command</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> agents</span><span>,</span><span> access</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">write</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>}</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">def</span><span style="color: light-dark(#268BD2, #268BD2);"> exchange_step</span><span>(</span><span>tick</span><span>:</span><span style="color: light-dark(#859900, #859900);"> int</span><span>,</span><span> ctx</span><span>:</span><span> el</span><span>.</span><span>WorldStepContext</span><span>)</span><span> -&gt;</span><span style="color: light-dark(#B58900, #B58900);"> None</span><span>:</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">    with</span><span> ctx</span><span>.</span><span>batch</span><span>(</span><span>exchange</span><span>)</span><span style="color: light-dark(#859900, #859900);"> as</span><span> view</span><span>:</span></span>
+<span class="giallo-l"><span>        view</span><span>.</span><span>command</span><span>[</span><span style="color: light-dark(#CB4B16, #CB4B16);">...</span><span>]</span><span style="color: light-dark(#859900, #859900);"> =</span><span> controller</span><span>(</span><span>view</span><span>.</span><span>position</span><span>,</span><span> view</span><span>.</span><span>target</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>world</span><span>.</span><span>run</span><span>(</span><span>system</span><span>,</span><span> pre_commit</span><span style="color: light-dark(#859900, #859900);">=</span><span>exchange_step</span><span>,</span><span> workers</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#D33682, #D33682);">8</span><span>)</span></span></code></pre>
+<p>A hook can also read committed DB history, such as camera frames another process recorded, and queue timestamped writes that land after the commit:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>frames</span><span style="color: light-dark(#859900, #859900);"> =</span><span> world</span><span>.</span><span>prepare_message_history</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.scene_cam</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span></span>
+<span class="giallo-l"><span>truth</span><span style="color: light-dark(#859900, #859900);"> =</span><span> world</span><span>.</span><span>prepare_component_history</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.world_pos</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span></span>
+<span class="giallo-l"><span>evidence</span><span style="color: light-dark(#859900, #859900);"> =</span><span> world</span><span>.</span><span>prepare_timestamped_writer</span><span>(</span><span>{</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">frame</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">drone.capture_frame</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>}</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">def</span><span style="color: light-dark(#268BD2, #268BD2);"> history_step</span><span>(</span><span>tick</span><span>:</span><span style="color: light-dark(#859900, #859900);"> int</span><span>,</span><span> ctx</span><span>:</span><span> el</span><span>.</span><span>WorldStepContext</span><span>)</span><span> -&gt;</span><span style="color: light-dark(#B58900, #B58900);"> None</span><span>:</span></span>
+<span class="giallo-l"><span>    found</span><span style="color: light-dark(#859900, #859900);"> =</span><span> ctx</span><span>.</span><span>read_at</span><span>(</span><span>frames</span><span>,</span><span> capture_time</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">exact</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">       #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> (timestamp, bytes) or None</span></span>
+<span class="giallo-l"><span>    pose</span><span style="color: light-dark(#859900, #859900);"> =</span><span> ctx</span><span>.</span><span>read_at</span><span>(</span><span>truth</span><span>,</span><span> capture_time</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">at_or_before</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">  #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> (timestamp, value) or None</span></span>
+<span class="giallo-l"><span>    ctx</span><span>.</span><span>defer_write</span><span>(</span><span>evidence</span><span>,</span><span> ctx</span><span>.</span><span>timestamp</span><span style="color: light-dark(#859900, #859900);"> +</span><span style="color: light-dark(#D33682, #D33682);"> 1</span><span>,</span><span> {</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">frame</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> frame_id</span><span>}</span><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>world</span><span>.</span><span>run</span><span>(</span><span>system</span><span>,</span><span> pre_commit</span><span style="color: light-dark(#859900, #859900);">=</span><span>[</span><span>exchange_step</span><span>,</span><span> history_step</span><span>]</span><span>)</span></span></code></pre>
+<p>A list of hooks is one ordered boundary:</p>
+<ol>
+<li>Hooks run in list order, Python and native alike.</li>
+<li>A hook sees the world writes of the hooks before it.</li>
+<li>History reads see committed DB samples only, not the world of the current tick, whose commit comes after the hooks.</li>
+<li>Deferred writes are appended after the commit, in hook and call order, equal timestamps included. They do not move <code>last_updated</code>.</li>
+<li>A hook that raises, or a native hook that returns nonzero, stops the later hooks, the cycle's commit and the run. Its queued writes are dropped.</li>
+</ol>
+<p>A deferred write that fails, for example with a timestamp older than its component's last sample, stops the run after the commit. The receipt's <code>failed_hook</code> names the hook (<code>index</code> and <code>name</code>) and says whether the cycle's commit had landed (<code>committed</code>). Preparing a history handle or a timestamped writer makes commits synchronous, so the hooks read every earlier commit and deferred writes follow theirs; with the writer thread, a cycle's deferred writes land just before the next cycle's hooks.</p>
+<h3 id="class-elodin-worldstepcontext"><em>class</em> <code>elodin.WorldStepContext</code></h3>
+<p>Passed to <code>pre_commit</code> callbacks.</p>
+<ul>
+<li><code>tick</code>, <code>timestamp</code> : the tick just run and its time in microseconds.</li>
+<li><code>view(handle)</code> -&gt; <code>numpy.ndarray</code> : the handle's rows, read-only for a read handle. Writes to a write handle's view reach the world when the callback returns. Views are copies and end with the callback.</li>
+<li><code>batch(batch)</code> -&gt; <code>BatchView</code> : views every field of a batch, as attributes or items.</li>
+<li><code>record(handle)</code> -&gt; None : records the handle's component, which must use <code>Recording.manual()</code>, at this commit.</li>
+<li><code>read_at(history, timestamp, selection)</code> -&gt; <code>(int, numpy.ndarray) | None</code> : the committed sample of an <code>elodin.HistoryHandle</code> at <code>timestamp</code>. <code>selection="exact"</code> takes only a sample at that timestamp and never falls back to an older one; <code>"at_or_before"</code> takes the newest sample at or before it. Returns the sample's own timestamp and a copy of its value (a message as <code>uint8</code> bytes), or <code>None</code> when nothing matches.</li>
+<li><code>defer_write(writer, timestamp, values)</code> -&gt; None : queues <code>values</code>, one per key of an <code>elodin.TimestampedWriter</code>, to append at <code>timestamp</code> after this cycle's commit.</li>
+<li><code>witness_bytes(name, data)</code> -&gt; None : fills witness channel <code>name</code> with the bytes of <code>data</code>, an array of any dtype holding every row of the channel's batch. Raises <code>ValueError</code> on any other size, and <code>KeyError</code> for an unknown channel. Does nothing when the run records no witness.</li>
+<li><code>witness_replay(name)</code> -&gt; <code>numpy.ndarray | None</code> : in a replay, the recorded bytes of external channel <code>name</code> as <code>uint8</code> rows; otherwise <code>None</code>. A hook that does I/O does it only when this returns <code>None</code>.</li>
+<li><code>stop_recipes()</code> -&gt; None : stops the s10 recipes, as <code>StepContext.stop_recipes</code>.</li>
+</ul>
+<p>All but <code>tick</code> and <code>timestamp</code> raise once the callback returns.</p>
+<h3 id="class-elodin-nativestephook"><em>class</em> <code>elodin.NativeStepHook</code></h3>
+<p>A <code>pre_commit</code> hook in a shared library. It runs without the GIL, and can split the batch's rows across the <code>workers</code> threads.</p>
+<ul>
+<li>
+<p><code>NativeStepHook.load(path, input, symbol, workers=1)</code> -&gt; <a href="/reference/python-api/#class-elodin-nativestephook">elodin.NativeStepHook</a></p>
+<p>Load <code>symbol</code>, and <code>{symbol}_init</code> and <code>{symbol}_destroy</code> if present, from the library at <code>path</code>. Each tick calls <code>symbol</code> once per worker, concurrently, each on a contiguous share of <code>input</code>'s rows. <code>input</code> is an <code>elodin.BatchHandle</code>.</p>
+</li>
+</ul>
+<p>The library exports C functions over these types, ABI version 1:</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="c"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">#</span><span style="color: light-dark(#859900, #859900);">include</span><span style="color: light-dark(#2AA198, #2AA198);"> &lt;</span><span style="color: light-dark(#2AA198, #2AA198);">stdint.h</span><span style="color: light-dark(#2AA198, #2AA198);">&gt;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">typedef</span><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;"> struct</span><span> {</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">    const</span><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;"> char</span><span style="color: light-dark(#859900, #859900);"> *</span><span>name</span><span>;</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">     /*</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> the batch field </span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">*/</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">    uint8_t</span><span style="color: light-dark(#859900, #859900);"> *</span><span>data</span><span>;</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">        /*</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> every row of the batch, back to back </span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">*/</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">    uint64_t</span><span> row_bytes</span><span>;</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">    uint32_t</span><span> writable</span><span>;</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">    /*</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> nonzero for a write field </span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">*/</span></span>
+<span class="giallo-l"><span>}</span><span> ElodinColumn</span><span>;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">typedef</span><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;"> struct</span><span> {</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">    uint32_t</span><span> abi_version</span><span>;</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">    uint64_t</span><span> tick</span><span>;</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">    int64_t</span><span> timestamp</span><span>;</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">    /*</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> microseconds </span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">*/</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">    uint64_t</span><span> rows</span><span>;</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">    uint64_t</span><span> row_start</span><span>;</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">   /*</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> this call owns rows [row_start, row_end) </span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">*/</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">    uint64_t</span><span> row_end</span><span>;</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">    const</span><span> ElodinColumn </span><span style="color: light-dark(#859900, #859900);">*</span><span>columns</span><span>;</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">    uint64_t</span><span> column_count</span><span>;</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">    void</span><span style="color: light-dark(#859900, #859900);"> *</span><span>state</span><span>;</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">          /*</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> what init stored, or NULL </span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">*/</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">    char</span><span style="color: light-dark(#859900, #859900);"> *</span><span>error</span><span>;</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">          /*</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> a failing call writes a NUL-terminated message here </span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">*/</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">    uint64_t</span><span> error_capacity</span><span>;</span></span>
+<span class="giallo-l"><span>}</span><span> ElodinStep</span><span>;</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">int32_t</span><span style="color: light-dark(#268BD2, #268BD2);"> my_step</span><span>(</span><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">const</span><span> ElodinStep </span><span style="color: light-dark(#859900, #859900);">*</span><span>step</span><span>)</span><span>;</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">                    /*</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> 0 on success </span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">*/</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">int32_t</span><span style="color: light-dark(#268BD2, #268BD2);"> my_step_init</span><span>(</span><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">const</span><span> ElodinStep </span><span style="color: light-dark(#859900, #859900);">*</span><span>step</span><span>,</span><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;"> void</span><span style="color: light-dark(#859900, #859900);"> *</span><span style="color: light-dark(#859900, #859900);">*</span><span>state</span><span>)</span><span>;</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> /*</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> optional; once, over every row </span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">*/</span></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">void</span><span style="color: light-dark(#268BD2, #268BD2);"> my_step_destroy</span><span>(</span><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">void</span><span style="color: light-dark(#859900, #859900);"> *</span><span>state</span><span>)</span><span>;</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">                          /*</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> optional; after the run </span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">*/</span></span></code></pre>
+<p>A call may write only writable columns, and only its own rows. A nonzero return stops the run with the call's message in the receipt. The receipt's <code>callbacks.hooks</code> reports each hook's queue time, slowest-partition time and worker occupancy.</p>
+<p>When the run records a witness, each witness channel on the hook's <code>input</code> batch is one more column after the batch fields, named after the channel, with the channel's <code>row_bytes</code>. It is zeroed before each tick, and writable, except an external channel in a replay, which holds the recorded bytes and has <code>writable == 0</code>. A hook can look its channels up by name at init and treat a read-only external channel as the sign that it is replayed.</p>
+<h3 id="deterministic-witnesses">Deterministic witnesses</h3>
+<p>A witness records the exact bytes a run produces at fixed points of each tick, and digests them into a tree, so two runs that should be identical can be compared byte for byte and the first difference named. It is meant for lockstep runs with external controllers, where a run must repeat exactly.</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>witness</span><span style="color: light-dark(#859900, #859900);"> =</span><span> world</span><span>.</span><span>prepare_witness</span><span>(</span></span>
+<span class="giallo-l"><span>    {</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">exchange</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> exchange</span><span>,</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">objects</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> objects_state</span><span>}</span><span>,</span></span>
+<span class="giallo-l"><span>    channels</span><span style="color: light-dark(#859900, #859900);">=</span><span>{</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">controller.ingress</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> (</span><span>exchange</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 1024</span><span>)</span><span>,</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">    #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> what the hook sent</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">              &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">controller.response</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> (</span><span>exchange</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 80</span><span>)</span><span>}</span><span>,</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">    #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> what it took from each reply</span></span>
+<span class="giallo-l"><span>    external</span><span style="color: light-dark(#859900, #859900);">=</span><span>{</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">controller.reply</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span> (</span><span>exchange</span><span>,</span><span style="color: light-dark(#D33682, #D33682);"> 104</span><span>)</span><span>}</span><span>,</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">      #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> the replies themselves</span></span>
+<span class="giallo-l"><span>)</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">def</span><span style="color: light-dark(#268BD2, #268BD2);"> exchange_step</span><span>(</span><span>tick</span><span>:</span><span style="color: light-dark(#859900, #859900);"> int</span><span>,</span><span> ctx</span><span>:</span><span> el</span><span>.</span><span>WorldStepContext</span><span>)</span><span> -&gt;</span><span style="color: light-dark(#B58900, #B58900);"> None</span><span>:</span></span>
+<span class="giallo-l"><span>    ctx</span><span>.</span><span>witness_bytes</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">controller.ingress</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> frames</span><span>)</span></span>
+<span class="giallo-l"><span>    replies</span><span style="color: light-dark(#859900, #859900);"> =</span><span> ctx</span><span>.</span><span>witness_replay</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">controller.reply</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>)</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;">     #</span><span style="color: light-dark(#93A1A1, #586E75);font-style: italic;"> recorded bytes in a replay, else None</span></span>
+<span class="giallo-l"><span style="color: light-dark(#859900, #859900);">    if</span><span> replies</span><span style="color: light-dark(#859900, #859900);"> is</span><span style="color: light-dark(#B58900, #B58900);"> None</span><span>:</span></span>
+<span class="giallo-l"><span>        replies</span><span style="color: light-dark(#859900, #859900);"> =</span><span> send_and_receive</span><span>(</span><span>frames</span><span>)</span></span>
+<span class="giallo-l"><span>        ctx</span><span>.</span><span>witness_bytes</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">controller.reply</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> replies</span><span>)</span></span>
+<span class="giallo-l"><span style="color: light-dark(#CB4B16, #CB4B16);">    ...</span></span>
+<span class="giallo-l"></span>
+<span class="giallo-l"><span>world</span><span>.</span><span>run</span><span>(</span><span>system</span><span>,</span><span> pre_commit</span><span style="color: light-dark(#859900, #859900);">=</span><span>[</span><span>exchange_step</span><span>]</span><span>,</span></span>
+<span class="giallo-l"><span>          determinism_trace</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>DeterminismTrace</span><span>(</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">run.witness</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span><span> witness</span><span>,</span><span> raw</span><span style="color: light-dark(#859900, #859900);">=</span><span style="color: light-dark(#B58900, #B58900);">True</span><span>)</span><span>)</span></span></code></pre>
+<p>Each tick, the witness takes these stages, in order:</p>
+<table><thead><tr><th>Stage</th><th>Records</th></tr></thead><tbody>
+<tr><td><code>after_systems</code></td><td>every row of every field of every batch</td></tr>
+<tr><td><code>after_hook:N</code></td><td>the channels hook <code>N</code> filled, every write field, and the deferred writes hook <code>N</code> queued; then the external channels</td></tr>
+<tr><td><code>after_commit</code></td><td>for every row of every field, whether the commit recorded it</td></tr>
+</tbody></table>
+<p>The commit decides what it records on the simulation thread, so the DB writer's timing cannot change a witness. A channel no hook filled is recorded as absent.</p>
+<p>Each record is hashed with BLAKE3-256 over its little-endian bytes, rows in batch order whatever the hook's partitioning. A stage's digest hashes its records' digests, a tick's digest hashes the tick, its simulation time and its stages' digests, and the root hashes the schema and every tick. External channels are never hashed. Labels are stored but not hashed either: the build, the hook names, a native hook's partitions and the start timestamp. A Python hook and a native hook that fill the same channels give the same root.</p>
+<h4 id="class-elodin-determinismtrace"><em>class</em> <code>elodin.DeterminismTrace</code></h4>
+<ul>
+<li>
+<p><code>DeterminismTrace(path, witness, raw=False, reference=None, stop_after_first_mismatch=False)</code></p>
+<ul>
+<li><code>path</code> : where to write the witness file.</li>
+<li><code>witness</code> : an <code>elodin.Witness</code> from <code>World.prepare_witness</code>.</li>
+<li><code>raw</code> : <code>True</code> keeps the exact bytes of every tick, and a <code>(start, stop)</code> pair those of ticks <code>start</code> to <code>stop - 1</code>. Otherwise the file keeps only digests, about 1 KB per tick for a few dozen records. Raw bytes do not change the root.</li>
+<li><code>reference</code> : a witness file to compare with as the run goes. Its schema must match. The first tick that differs is the receipt's <code>witness.first_mismatch</code>, and the 16 ticks on either side of it keep their exact bytes. A run stays successful when it differs from its reference.</li>
+<li><code>stop_after_first_mismatch</code> : ends the run a few ticks after the first mismatch.</li>
+</ul>
+<p>A witness thread hashes, compares and writes each tick from a block the simulation thread fills; if it falls 1,024 ticks behind, the run fails. Nothing is ever dropped.</p>
+</li>
+</ul>
+<h4 id="module-elodin-determinism"><em>module</em> <code>elodin.determinism</code></h4>
+<ul>
+<li><code>compare(left, right, stop_at_first=False)</code> -&gt; <code>dict</code> : compares two witness files tick by tick, and below the first differing digest, the bytes when both files kept them. Returns <code>identical</code>, <code>first_mismatch</code> or <code>None</code>, the numbers of <code>ticks</code> compared and <code>mismatched_ticks</code>, and a summary of each file. Ticks missing from one file are a mismatch; files with different schemas, such as another entity order or stage list, raise <code>ValueError</code> naming the difference.</li>
+<li><code>replay_hook(trace, library, symbol, live=False)</code> -&gt; <code>dict</code> : replays the native hook <code>symbol</code> of the shared library <code>library</code> on the rows <code>trace</code> kept, like <code>World.replay_pre_commit</code> but without the simulation's source: the batch is rebuilt from the file.</li>
+<li><code>describe(mismatch)</code> -&gt; <code>str</code> : the lines <code>elodin determinism</code> prints.</li>
+</ul>
+<p>A mismatch names the <code>tick</code>, the <code>stage</code>, the <code>hook</code>, the record by its <code>kind</code> (<code>field</code>, <code>channel</code>, <code>deferred</code> or <code>recorded</code>) and name, and when both sides have the bytes, the <code>entity</code>, <code>row</code> and <code>byte</code> within the row, with each side's byte as <code>left</code> and <code>right</code>. A channel row takes the entity of its batch's first field. In a run with a reference and in a replay, <code>left</code> is the reference or the recording.</p>
+<h4 id="witness-files">Witness files</h4>
+<p>A file is the magic <code>ELWITNES</code>, the format version (<code>1</code>) and a JSON header with the schema, its digest and the labels; then one frame per tick, with the tick, its timestamp, a digest per hashed record and, when kept, every record's bytes; then a JSON trailer with the tick count, the root and the run's failure, if any. A version other than <code>1</code> is refused. Comparison never looks at the labels.</p>
+<h3 id="run-receipts">Run receipts</h3>
+<p>Every run builds a versioned receipt (<code>elodin.run_receipt.v1</code>), passed to <code>on_receipt</code>, returned by <code>Exec.last_receipt()</code>, and written to <code>$ELODIN_SIM_SUMMARY_JSON</code> when set. It covers the cycles after warmup: count, sum, min, exact p50/p95/p99, and max of every phase (<code>copy_db_to_world</code>, <code>world_run</code>, <code>pre_commit</code>, <code>commit</code>, <code>deferred_writes</code>, <code>post_step</code>, their <code>callback</code> sum, pacing, and <code>total_cycle</code>); pacing lateness and resets; DB <code>sync</code> counters, including whether commits were <code>synchronous</code> or <code>write_behind</code>, rows scanned, drained and committed, and the writer thread's lag and queue depth; backend bytes and compile times; hook timings, history queries, misses and bytes, and deferred-write batches, rows, bytes and failures under <code>callbacks</code>; under <code>witness</code>, the witness file's <code>path</code>, <code>root</code>, <code>ticks</code>, <code>raw_ticks</code> and <code>bytes_written</code>, the simulation thread's <code>capture</code> time per cycle, the witness thread's <code>writer_ns</code>, its <code>queue_high_water</code>, the <code>first_mismatch</code> with the reference and the witness's <code>failure</code>; the <code>failure</code> and <code>failed_hook</code> of a run a hook or the witness stopped; and the sections it did not collect under <code>unavailable</code>.</p>
+<h3 id="class-elodin-timing"><em>class</em> <code>elodin.Timing</code></h3>
+<p>What a receipt measures, from least to most perturbing.</p>
+<ul>
+<li><code>Timing.summary()</code> : phase times of every cycle; always on.</li>
+<li><code>Timing.systems()</code> : also the inclusive and exclusive time of each compiled function on the Cranelift backend, so of each system under its <a href="/reference/python-api/#elodin-system">name</a>. A system small enough to inline counts toward its caller. Probes cost <code>systems.probe_pair_ns</code> per call and keep calls on one thread.</li>
+<li><code>Timing.operations()</code> : also sampled time per kind of operation.</li>
+</ul>
+<p>Neither level writes debug artifacts; <code>ELODIN_CRANELIFT_DEBUG_DIR</code> stays separate.</p>
+<h3 id="class-elodin-panel"><em>class</em> <code>elodin.Panel</code></h3>
 <p>A configuration object for creating a panel view in the Elodin Client UI.</p>
 <ul>
 <li>
@@ -1524,13 +1762,14 @@ height-grid preparation and JAX height queries.</p>
 <p>A container of component metadata.</p>
 <ul>
 <li>
-<p><code>__init__(name, type = None, asset = False, metadata = {})</code> -&gt; <a href="/reference/python-api/#class-elodin-component">elodin.Component</a></p>
+<p><code>__init__(name, type = None, asset = False, metadata = {}, recording = None)</code> -&gt; <a href="/reference/python-api/#class-elodin-component">elodin.Component</a></p>
 <p>Create a new component with:</p>
 <ul>
 <li>Unique name (e.g. "world_pos, "inertia").</li>
 <li>Component type information (via <a href="/reference/python-api/#class-elodin-componenttype">elodin.ComponentType</a>). This is optional if the base class already provides component type information as part of <code>__metadata__</code>, which is the case for <a href="/reference/python-api/#class-elodin-quaternion">elodin.Quaternion</a>, <a href="/reference/python-api/#class-elodin-edge">elodin.Edge</a>, and all <a href="/reference/python-api/#spatial-vector-algebra">spatial vector algebra</a> classes.</li>
 <li>Flag indicating whether the component is an asset (e.g. a mesh, texture, etc.).</li>
 <li>Other metadata that is optional (e.g. description, units, labels, etc.).</li>
+<li>When its values are recorded (<code>elodin.Recording</code>), described below.</li>
 </ul>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> elodin</span><span style="color: light-dark(#859900, #859900);"> as</span><span> el</span></span>
 <span class="giallo-l"></span>
@@ -1546,7 +1785,7 @@ height-grid preparation and JAX height queries.</p>
 <tr><td><code>element_names</code></td><td>comma-separated string (e.g. <code>"x,y,z"</code>, <code>"q0,q1,q2,q3"</code>)</td><td>Labels for each element of a vector or matrix component. Used by the component inspector and as column suffixes when exporting with <code>elodin-db export --flatten</code>.</td></tr>
 <tr><td><code>private</code></td><td><code>"true"</code></td><td>Component is omitted from <code>elodin-db export</code> by default (pass <code>--include-private</code> to include it). Useful for marking internal scratch state (e.g. large covariance matrices) that downstream consumers shouldn't see.</td></tr>
 <tr><td><code>transient</code></td><td><code>"true"</code></td><td>Simulation component remains available to systems in memory but is never registered with or recorded to Elodin DB. It is absent from DB schemas, the editor, replication, and exports.</td></tr>
-<tr><td><code>external_control</code></td><td><code>"true"</code></td><td>Component is writable from external clients (e.g. Betaflight or a HITL bridge) over the Impeller protocol. The simulation will not overwrite values written externally.</td></tr>
+<tr><td><code>external_control</code></td><td><code>"true"</code></td><td>Component is writable from external clients (e.g. Betaflight or a HITL bridge) over the Impeller protocol, and from <code>pre_commit</code> hooks, including their deferred writes. The simulation will not overwrite values written externally.</td></tr>
 <tr><td><code>record_every_tick</code></td><td><code>"true"</code></td><td>Opt out of sparse recording and write a sample at every telemetry commit even when its bytes are unchanged.</td></tr>
 </tbody></table>
 <p>Component recording is sparse by default: the simulation writes a sample
@@ -1557,6 +1796,26 @@ Editor line plots and <code>Exec.history()</code> carry sparse values forward. P
 and bar plots show recorded samples only; raw database exports remain
 change streams with per-component row counts.</p>
 <p><code>transient</code> is a simulation-runtime storage contract, not an export filter. A transient component cannot also set <code>external_control</code>, <code>wait_for_write</code>, or <code>record_every_tick</code>, and DB-backed APIs such as <code>StepContext.read_component</code>, <code>StepContext.write_component</code>, and <code>Exec.history</code> cannot access it. Direct database writers are unaffected by this key.</p>
+<h4 id="recording">Recording</h4>
+<p><code>recording=</code> sets when a commit records the component, counting telemetry commits:</p>
+<table><thead><tr><th><code>elodin.Recording</code></th><th>Records</th></tr></thead><tbody>
+<tr><td><code>on_change()</code></td><td>when its bytes differ from the last recorded value; the default</td></tr>
+<tr><td><code>every_commit()</code></td><td>at every commit; same as <code>record_every_tick="true"</code></td></tr>
+<tr><td><code>every(n)</code></td><td>at every <code>n</code>th commit, changed or not</td></tr>
+<tr><td><code>manual()</code></td><td>at the commits a <code>pre_commit</code> hook asks for with <code>ctx.record(handle)</code></td></tr>
+<tr><td><code>initial_only()</code></td><td>once, when the run starts</td></tr>
+<tr><td><code>transient()</code></td><td>never; same as <code>transient="true"</code></td></tr>
+</tbody></table>
+<p>It is stored in the reserved metadata keys above, plus <code>recording</code>, so the DB, editor and followers keep working. A <code>metadata</code> value that contradicts it is an error.</p>
+<pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span>Command</span><span style="color: light-dark(#859900, #859900);"> =</span><span> ty</span><span>.</span><span>Annotated</span><span>[</span></span>
+<span class="giallo-l"><span>    jax</span><span>.</span><span>Array</span><span>,</span></span>
+<span class="giallo-l"><span>    el</span><span>.</span><span>Component</span><span>(</span></span>
+<span class="giallo-l"><span style="color: light-dark(#2AA198, #2AA198);">        &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">command</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>,</span></span>
+<span class="giallo-l"><span>        el</span><span>.</span><span>ComponentType</span><span>(</span><span>el</span><span>.</span><span>PrimitiveType</span><span>.</span><span>F64</span><span>,</span><span> (</span><span style="color: light-dark(#D33682, #D33682);">3</span><span>,</span><span>)</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>        metadata</span><span style="color: light-dark(#859900, #859900);">=</span><span>{</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span style="color: light-dark(#2AA198, #2AA198);">external_control</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>:</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">true</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span><span>}</span><span>,</span></span>
+<span class="giallo-l"><span>        recording</span><span style="color: light-dark(#859900, #859900);">=</span><span>el</span><span>.</span><span>Recording</span><span>.</span><span>every</span><span>(</span><span style="color: light-dark(#D33682, #D33682);">10</span><span>)</span><span>,</span></span>
+<span class="giallo-l"><span>    )</span><span>,</span></span>
+<span class="giallo-l"><span>]</span></span></code></pre>
 <p>Example combining a label hint with the export-skip flag:</p>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> elodin</span><span style="color: light-dark(#859900, #859900);"> as</span><span> el</span></span>
 <span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> jax</span></span>
@@ -1651,7 +1910,9 @@ change streams with per-component row counts.</p>
 <span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">@</span><span style="color: light-dark(#268BD2, #268BD2);">el</span><span style="color: light-dark(#268BD2, #268BD2);">.</span><span style="color: light-dark(#268BD2, #268BD2);">system</span></span>
 <span class="giallo-l"><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;">def</span><span style="color: light-dark(#268BD2, #268BD2);"> apply_wind</span><span>(</span></span>
 <span class="giallo-l"><span>    w</span><span>:</span><span> el</span><span>.</span><span>Query</span><span>[</span><span>Wind</span><span>]</span><span>,</span><span> q</span><span>:</span><span> el</span><span>.</span><span>Query</span><span>[</span><span>el</span><span>.</span><span>Force</span><span>,</span><span> el</span><span>.</span><span>WorldVel</span><span>]</span></span>
-<span class="giallo-l"><span>)</span><span> -&gt;</span><span> el</span><span>.</span><span>Query</span><span>[</span><span>el</span><span>.</span><span>Force</span><span>]</span><span>:</span><span style="color: light-dark(#CB4B16, #CB4B16);"> ...</span></span></code></pre><h3 id="elodin-map"><code>@elodin.map</code></h3>
+<span class="giallo-l"><span>)</span><span> -&gt;</span><span> el</span><span>.</span><span>Query</span><span>[</span><span>el</span><span>.</span><span>Force</span><span>]</span><span>:</span><span style="color: light-dark(#CB4B16, #CB4B16);"> ...</span></span></code></pre>
+<p>A system's name identifies it in compiled code and in <code>Timing.systems()</code> receipts. It defaults to the function's module and qualified name, such as <code>sim.apply_wind</code>; <code>@el.system(name="wind")</code>, <code>@el.map(name=...)</code> and <code>@el.map_seq(name=...)</code> set it.</p>
+<h3 id="elodin-map"><code>@elodin.map</code></h3>
 <div class="el-notice warning container-fluid">
     <div class="row g-0 align-items-center">
         <div class="col-1" style="padding: 4px">

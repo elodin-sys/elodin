@@ -381,6 +381,14 @@
             <li>
                 <a
                     class="docs-link "
+                    href="/reference/sitl-hitl/"
+                    >SITL &amp; HITL</a
+                >
+            </li>
+            
+            <li>
+                <a
+                    class="docs-link "
                     href="/reference/schematic/"
                     >Schematic KDL</a
                 >
@@ -566,7 +574,7 @@
 <span class="giallo-l"><span>  Ready --&gt; Sim[&quot;Simulation starts&quot;]</span></span>
 <span class="giallo-l"><span>  Sim --&gt; Teardown[&quot;Simulation exits: SIGTERM, 2 s, SIGKILL&quot;]</span></span></code></pre><h3 id="when-to-use-a-recipe">When to use a recipe</h3>
 <table><thead><tr><th>You want to…</th><th>Use</th></tr></thead><tbody>
-<tr><td>Exchange data with external code in lockstep every tick</td><td>An in-process bridge in <code>pre_step</code> / <code>post_step</code> with <a href="/reference/python-api/#class-elodin-stepcontext"><code>StepContext</code></a></td></tr>
+<tr><td>Exchange data with external code in lockstep every tick</td><td>An in-process bridge in <code>pre_step</code> / <code>post_step</code> with <a href="/reference/python-api/#class-elodin-stepcontext"><code>StepContext</code></a>, or in <a href="/reference/python-api/#pre-commit-hooks"><code>pre_commit</code> hooks</a>; see <a href="/reference/sitl-hitl">SITL &amp; HITL</a></td></tr>
 <tr><td>Have Elodin <strong>launch and clean up</strong> an external binary next to the sim</td><td>An s10 recipe (this page)</td></tr>
 <tr><td>Connect a separately managed program or a hardware rig over the network</td><td>An Impeller2 / <a href="/reference/grpc-client">gRPC</a> client talking to Elodin DB</td></tr>
 </tbody></table>
@@ -780,6 +788,27 @@
 <tr><td><a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/examples/logstream">logstream</a></td><td>A C++ client built and run by a script recipe</td></tr>
 </tbody></table>
 <h2 id="related-docs">Related docs</h2>
+<!-- title="Double Pendulum Tutorial", icon="tornado", href="tutorial/double-pend" -->
+
+<a class="el-cardlink" href="&#x2F;reference&#x2F;sitl-hitl">
+    <div class="el-cardlink-text">
+        <p>
+            <i
+                class="bx bxs-rocket"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+            SITL &amp; HITL
+            <i
+                class="bx bxs-right-arrow-alt"
+                style="font-size: 1rem; vertical-align: top;"
+            ></i>
+        </p>
+    </div>
+    <div class="el-cardlink-subtext"
+        <p><p>Bridge styles, measured costs, and layouts for flight software and hardware in the loop.</p>
+</p>
+    </div>
+</a>
 <!-- title="Double Pendulum Tutorial", icon="tornado", href="tutorial/double-pend" -->
 
 <a class="el-cardlink" href="&#x2F;reference&#x2F;python-api&#x2F;#s10-recipe-api">
