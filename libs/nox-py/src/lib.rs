@@ -202,6 +202,10 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py_six_dof, m)?)?;
     m.add_function(wrap_pyfunction!(skew, m)?)?;
     m.add_function(wrap_pyfunction!(_get_cache_dir, m)?)?;
+    m.add_function(wrap_pyfunction!(
+        cranelift_compile::_compile_stablehlo_object,
+        m
+    )?)?;
     m.add(
         "__version__",
         concat!(env!("CARGO_PKG_VERSION"), "+", env!("GIT_HASH")),

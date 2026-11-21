@@ -39,6 +39,14 @@ Lowered MLIR, first-tick checkpoint, structured profile JSON, and
 every stderr report all land flat under `/tmp/dbg/`. See
 [`PERFORMANCE.md`](PERFORMANCE.md) for the full list of outputs.
 
+## Ahead-of-Time Objects
+
+`lower::compile_module_to_object` runs the same lowering into a position-independent object
+file instead of JIT memory. The object defines `{prefix}_step` with the JIT `main`'s signature;
+its calls into the runtime (libm shims, `tensor_rt`, LAPACK) go through a table it exports
+alongside their names, which the loader fills from `lower::runtime_symbol`. `libs/elodin-model`
+is that loader; [examples/ball-cpp](../../examples/ball-cpp) runs it end to end.
+
 ## Adding a New Op
 
 1. Add the `Instruction` variant in `src/ir.rs`

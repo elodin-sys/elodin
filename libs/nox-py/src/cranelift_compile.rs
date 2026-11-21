@@ -10,6 +10,22 @@ use crate::tick_metrics::{CompileReport, Timing};
 use crate::utils::PrimTypeExt;
 use crate::world::World;
 
+/// StableHLO text compiled ahead of time into an object file for this host; see
+/// `cranelift_mlir::lower::compile_module_to_object`.
+#[pyfunction]
+pub fn _compile_stablehlo_object<'py>(
+    py: Python<'py>,
+    mlir: &str,
+    prefix: &str,
+) -> PyResult<Bound<'py, pyo3::types::PyBytes>> {
+    let mut ir_module = cranelift_mlir::parser::parse_module(mlir)
+        .map_err(|e| Error::CraneliftBackend(format!("MLIR parse failed: {e}")))?;
+    cranelift_mlir::const_fold::fold_module(&mut ir_module);
+    let object = cranelift_mlir::lower::compile_module_to_object(&ir_module, prefix)
+        .map_err(|e| Error::CraneliftBackend(format!("Cranelift compile failed: {e}")))?;
+    Ok(pyo3::types::PyBytes::new(py, &object))
+}
+
 pub fn compile_cranelift_module(
     py: Python<'_>,
     compiled_system: &CompiledSystem,

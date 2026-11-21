@@ -12,7 +12,7 @@ elodin run examples/<name>/main.py      # headless
 
 Some folders have their own `README.md` with extra setup (SITL binaries, terrain
 atlases, Monte Carlo campaigns). A few are headless checks, not editor scenes:
-`frames`, `linalg`, `stablehlo`, `cube-sat-pysim`.
+`frames`, `linalg`, `stablehlo`, `cube-sat-pysim`. `ball-cpp` also builds a C++ program.
 
 ---
 
@@ -159,6 +159,7 @@ An external flight-software process driven over UDP, alongside the sim.
 | --- | --- |
 | [linalg](./linalg) | LAPACK-backed `jnp.linalg` through Cranelift |
 | [stablehlo](./stablehlo) | StableHLO / CHLO op coverage through the JIT |
+| [ball-cpp](./ball-cpp) | The ball compiled ahead of time into a shared library and stepped from C++ |
 
 ### Performance & scaling
 
@@ -282,6 +283,7 @@ Alternatives to the default `World.run(...)` on the Cranelift backend.
 | Example | Description |
 | --- | --- |
 | [cube-sat-pysim](./cube-sat-pysim) | `World.to_jax` — pure JAX step loop + Matplotlib (RL-friendly) |
+| [ball-cpp](./ball-cpp) | `JaxSim.export_model` — a native library with a C header and CMake package, stepped by a C++ host |
 | [db-client](./db-client) | Standalone `elodin.db`: embedded server, `table_writer`, no tick loop |
 | [n-body](./n-body) | `ELODIN_BACKEND` switch: `cranelift` / `jax-cpu` / `jax-gpu` |
 
@@ -402,4 +404,5 @@ Kinematic entity (often no `el.Body`) driven by recorded / ephemeris data.
 | --- | --- |
 | [stablehlo](./stablehlo) | Every implemented StableHLO/CHLO op through the JIT |
 | [linalg](./linalg) | Cholesky, solve, SVD, eigh, … on Cranelift |
+| [ball-cpp](./ball-cpp) | Cranelift object emission (AOT) and the JIT behind one C interface |
 | [f32-quant-repro](./f32-quant-repro) | Display-path f32 cast at ECEF magnitude |
