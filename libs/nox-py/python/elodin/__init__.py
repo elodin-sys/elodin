@@ -38,6 +38,7 @@ from typing_extensions import TypeVarTuple, Unpack
 import elodin.jaxsim
 
 from .elodin import *
+from . import determinism as determinism
 from . import monte_carlo as monte_carlo
 from . import ui as ui
 from .terrain import (
@@ -165,7 +166,16 @@ def _capture_simulation_source(db_path: str, entrypoint: str) -> None:
     )
 
 
-def system(func) -> System:
+def _system_name(func) -> str:
+    return f"{func.__module__}.{func.__qualname__}"
+
+
+def system(func=None, *, name: Optional[str] = None) -> System:
+    """`name` identifies the system in compiled code and timing; it defaults to the function's
+    module and qualified name."""
+    if func is None:
+        return lambda func: system(func, name=name)
+    name = name or _system_name(func)
     sig = inspect.signature(func)
     # TODO(sphw): use varadict function
     params = sig.parameters
@@ -188,15 +198,23 @@ def system(func) -> System:
             output = func(*new_args)
             return output.output(builder, args)
 
+        inner.__name__ = inner.__qualname__ = name
         return inner
 
-    return PyFnSystem(outer, input_ids, output_ids, edge_ids, func.__repr__()).system()
+    return PyFnSystem(outer, input_ids, output_ids, edge_ids, name).system()
 
 
 T = TypeVar("T")
 S = TypeVarTuple("S")
 A = TypeVarTuple("A")
 B = TypeVarTuple("B")
+
+PreCommit = Callable[[int, WorldStepContext], None] | NativeStepHook
+"""A `pre_commit` hook; a list of them runs in order."""
+
+# Entities per traced call of `Query.map` when the Cranelift backend has workers. Even, so the
+# kernels pair lanes as in one whole-column call and outputs keep their bits.
+MAP_CHUNK = 2
 
 
 class Query(Generic[Unpack[A]]):
@@ -211,6 +229,7 @@ class Query(Generic[Unpack[A]]):
         component_data: list[Component],
         component_classes: list[type[Any]],
         cranelift: bool = False,
+        workers: int = 1,
     ):
         self.bufs = inner.arrays()
         self.inner = inner
@@ -218,6 +237,7 @@ class Query(Generic[Unpack[A]]):
         self.component_classes = component_classes
         self.batch1 = getattr(inner, "batch1", False)
         self.cranelift = cranelift
+        self.workers = workers
 
     def map(
         self,
@@ -229,24 +249,31 @@ class Query(Generic[Unpack[A]]):
         It will convert `jax.lax.cond` which only evaluates one consequent to
         `jax.lax.select` which always evaluates both consequents. If one of the
         consequents is seldom needed and expensive, or `f` is large, consider
-        using `map_seq`.
+        using `map_seq`. With workers on Cranelift, chunks of entities run in
+        parallel.
         """
         out_tps_tuple: Tuple[Annotated[Any, Component], ...] = (
             (out_tps,) if not isinstance(out_tps, tuple) else out_tps
         )
 
+        def per_entity(b):
+            return f(*[from_array(cls, x) for (x, cls) in zip(b, self.component_classes)])  # type: ignore
+
         if self.batch1:
             buf = f(
                 *[from_array(cls, x) for (x, cls) in zip(self.bufs, self.component_classes)]  # type: ignore
             )
+        elif self.cranelift and self.workers > 1 and self.bufs and len(self.bufs[0]) > MAP_CHUNK:
+            # Names the compiled chunk function after `f` in profiles.
+            per_entity.__name__ = getattr(f, "__name__", "map")
+            chunk = jax.jit(jax.vmap(per_entity))
+            parts = [
+                chunk([b[i : i + MAP_CHUNK] for b in self.bufs])
+                for i in range(0, len(self.bufs[0]), MAP_CHUNK)
+            ]
+            buf = jax.tree_util.tree_map(lambda *xs: jax.numpy.concatenate(xs), *parts)
         else:
-            buf = jax.vmap(
-                lambda b: f(
-                    *[from_array(cls, x) for (x, cls) in zip(b, self.component_classes)]  # type: ignore
-                ),
-                in_axes=0,
-                out_axes=0,
-            )(self.bufs)
+            buf = jax.vmap(per_entity, in_axes=0, out_axes=0)(self.bufs)
         (bufs, _) = tree_flatten(buf)
         inner = None
         component_data = []
@@ -261,7 +288,7 @@ class Query(Generic[Unpack[A]]):
             component_classes += [out_tp]
         if inner is None:
             raise Exception("query returned no components")
-        return Query(inner, component_data, component_classes, self.cranelift)
+        return Query(inner, component_data, component_classes, self.cranelift, self.workers)
 
     def map_seq(
         self,
@@ -340,7 +367,7 @@ class Query(Generic[Unpack[A]]):
             component_classes += [out_tp]
         if inner is None:
             raise Exception("query returned no components")
-        return Query(inner, component_data, component_classes, self.cranelift)
+        return Query(inner, component_data, component_classes, self.cranelift, self.workers)
 
     def join(self, other: "Query[Unpack[A]]") -> "Query[Any]":
         return Query(
@@ -348,6 +375,7 @@ class Query(Generic[Unpack[A]]):
             self.component_data + other.component_data,
             self.component_classes + other.component_classes,
             self.cranelift,
+            self.workers,
         )
 
     @staticmethod
@@ -373,6 +401,7 @@ class Query(Generic[Unpack[A]]):
             component_data,
             component_classes,
             builder.cranelift,
+            builder.workers,
         )
 
     def output(self, builder: SystemBuilder, args: list[Any]) -> Any:
@@ -389,8 +418,15 @@ class Query(Generic[Unpack[A]]):
 
 
 def map(
-    func: Callable[..., Union[Tuple[Annotated[Any, Component], ...], Annotated[Any, Component]]],
+    func: Optional[
+        Callable[..., Union[Tuple[Annotated[Any, Component], ...], Annotated[Any, Component]]]
+    ] = None,
+    *,
+    name: Optional[str] = None,
 ) -> System:
+    """Runs `func` for each entity; `name` is as for `system`."""
+    if func is None:
+        return lambda func: map(func, name=name)
     sig = inspect.signature(func)
     tys = list(sig.parameters.values())
     query = Query[tuple(ty.annotation for ty in tys)]  # type: ignore
@@ -398,15 +434,18 @@ def map(
     if isinstance(return_ty, types.GenericAlias):
         return_ty = tuple(return_ty.__args__)
 
-    @system
     def inner(q: query) -> Query[return_ty]:  # type: ignore
         return q.map(return_ty, func)
 
-    return inner
+    return system(inner, name=name or _system_name(func))
 
 
 def map_seq(
-    func: Callable[..., Union[Tuple[Annotated[Any, Component], ...], Annotated[Any, Component]]],
+    func: Optional[
+        Callable[..., Union[Tuple[Annotated[Any, Component], ...], Annotated[Any, Component]]]
+    ] = None,
+    *,
+    name: Optional[str] = None,
 ) -> System:
     """Like @map but uses sequential execution instead of vmap.
 
@@ -415,6 +454,8 @@ def map_seq(
     when the function is large: on Cranelift it compiles once and runs for
     each entity.
     """
+    if func is None:
+        return lambda func: map_seq(func, name=name)
     sig = inspect.signature(func)
     tys = list(sig.parameters.values())
     query = Query[tuple(ty.annotation for ty in tys)]  # type: ignore
@@ -422,11 +463,10 @@ def map_seq(
     if isinstance(return_ty, types.GenericAlias):
         return_ty = tuple(return_ty.__args__)
 
-    @system
     def inner(q: query) -> Query[return_ty]:  # type: ignore
         return q.map_seq(return_ty, func)
 
-    return inner
+    return system(inner, name=name or _system_name(func))
 
 
 def from_array(cls, arr):
@@ -732,6 +772,12 @@ class World(WorldBuilder):
         start_timestamp: Optional[int] = None,
         log_level: Optional[str] = None,
         backend: str = "cranelift",
+        on_receipt: Optional[Callable[[dict], None]] = None,
+        workers: int = 1,
+        pre_commit: Optional[PreCommit | list[PreCommit]] = None,
+        timing: Optional[Timing] = None,
+        synchronous_commits: bool = False,
+        determinism_trace: Optional[DeterminismTrace] = None,
     ):
         current_frame = inspect.currentframe()
         if current_frame is None:
@@ -758,6 +804,12 @@ class World(WorldBuilder):
             log_level,
             backend,
             simulation_source_entrypoint,
+            on_receipt,
+            workers,
+            pre_commit,
+            timing,
+            synchronous_commits,
+            determinism_trace,
         )
         locals = frame.f_locals
         if not interactive and addr is not None:
@@ -780,6 +832,8 @@ class World(WorldBuilder):
         db_path: Optional[str] = None,
         backend: str = "cranelift",
         start_timestamp: Optional[int] = None,
+        workers: int = 1,
+        timing: Optional[Timing] = None,
     ) -> Exec:
         return super().build(
             system,
@@ -792,6 +846,8 @@ class World(WorldBuilder):
             db_path,
             backend,
             start_timestamp,
+            workers,
+            timing,
         )
 
     def to_jax(

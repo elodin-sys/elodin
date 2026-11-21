@@ -13,6 +13,7 @@ use pyo3::types::PyDict;
 use stellarator::util::CancelToken;
 
 use crate::Error;
+use crate::prepared::CallbackCounters;
 
 /// Helper function to convert a byte buffer to a numpy array based on primitive type.
 fn buf_to_numpy_array<'py>(py: Python<'py>, buf: &[u8], prim_type: PrimType) -> Bound<'py, PyAny> {
@@ -121,6 +122,7 @@ pub struct StepContext {
     start_timestamp: Timestamp,
     /// Optional cancel token to gracefully terminate s10-managed recipes
     recipe_cancel_token: Option<CancelToken>,
+    counters: Arc<CallbackCounters>,
 }
 
 impl StepContext {
@@ -131,6 +133,7 @@ impl StepContext {
         tick: u64,
         start_timestamp: Timestamp,
         recipe_cancel_token: Option<CancelToken>,
+        counters: Arc<CallbackCounters>,
     ) -> Self {
         Self {
             db,
@@ -139,7 +142,14 @@ impl StepContext {
             tick_counter,
             start_timestamp,
             recipe_cancel_token,
+            counters,
         }
+    }
+
+    fn count_operation(&self) {
+        self.counters
+            .legacy_operations
+            .fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -162,6 +172,7 @@ mod tests {
             0,
             Timestamp::EPOCH,
             None,
+            Default::default(),
         );
 
         Python::with_gil(|py| {
@@ -194,6 +205,7 @@ mod tests {
             0,
             Timestamp::EPOCH,
             None,
+            Default::default(),
         );
 
         Python::with_gil(|py| {
@@ -250,6 +262,7 @@ impl StepContext {
         data: &Bound<'_, PyUntypedArray>,
         timestamp: Option<i64>,
     ) -> Result<(), Error> {
+        self.count_operation();
         let pair_id = ComponentId::new(pair_name);
 
         // Use provided timestamp or fall back to current simulation timestamp
@@ -322,6 +335,7 @@ impl StepContext {
         pair_name: &str,
         timestamp: Option<i64>,
     ) -> Result<Bound<'py, PyAny>, Error> {
+        self.count_operation();
         let pair_id = ComponentId::new(pair_name);
 
         self.db.with_state(|state| {
@@ -386,6 +400,7 @@ impl StepContext {
         msg_name: &str,
         timestamp: Option<i64>,
     ) -> Result<Option<Bound<'py, PyAny>>, Error> {
+        self.count_operation();
         let msg_id = impeller::types::msg_id(msg_name);
 
         self.db.with_state(|state| {
@@ -423,6 +438,7 @@ impl StepContext {
         msg_name: &str,
         timestamp: i64,
     ) -> Result<Option<(i64, Bound<'py, PyAny>)>, Error> {
+        self.count_operation();
         let msg_id = impeller::types::msg_id(msg_name);
         self.db.with_state(|state| {
             let Some(msg_log) = state.get_msg_log(msg_id) else {
@@ -450,6 +466,7 @@ impl StepContext {
         py: Python<'py>,
         msg_name: &str,
     ) -> Result<Option<(i64, Bound<'py, PyAny>)>, Error> {
+        self.count_operation();
         let msg_id = impeller::types::msg_id(msg_name);
         self.db.with_state(|state| {
             let Some(msg_log) = state.get_msg_log(msg_id) else {
@@ -555,6 +572,7 @@ impl StepContext {
         write_timestamps: Option<&Bound<'py, PyDict>>,
         read_timestamps: Option<&Bound<'py, PyDict>>,
     ) -> Result<Bound<'py, PyDict>, Error> {
+        self.count_operation();
         // Pre-parse all component IDs outside the lock
         let read_ids: Vec<(String, ComponentId)> = reads
             .iter()

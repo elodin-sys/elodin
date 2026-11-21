@@ -19,6 +19,10 @@ pub mod lower;
 #[cfg(feature = "jit")]
 pub mod op_sampler;
 #[cfg(feature = "jit")]
+pub mod parallel;
+#[cfg(feature = "jit")]
+pub mod pool;
+#[cfg(feature = "jit")]
 pub mod profile;
 #[cfg(feature = "jit")]
 pub mod slot_pool;

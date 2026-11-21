@@ -1,3 +1,7 @@
+import os
+import subprocess
+import sys
+import textwrap
 import typing as ty
 from dataclasses import dataclass
 
@@ -447,6 +451,44 @@ def test_transient_component_not_recorded(tmp_path):
     assert not (tmp_path / "e1.s.csv").exists()
 
 
+def test_last_receipt_covers_the_latest_run():
+    @el.map
+    def double(x: X) -> X:
+        return x * 2
+
+    w = el.World()
+    w.spawn(el.C(X, np.array(1.0)), "e1")
+    exec = w.build(double)
+    assert exec.last_receipt() is None
+    exec.run(5)
+    receipt = exec.last_receipt()
+    assert receipt["schema"] == "elodin.run_receipt.v1"
+    assert receipt["percentile_source"] == "exact"
+    assert receipt["cycles"] == 5
+    assert receipt["world_run"]["count"] == 5
+    assert receipt["world_run"]["p50_ns"] <= receipt["world_run"]["max_ns"]
+    assert receipt["backend"]["invocations"] == 5
+    assert receipt["sync"]["rows_committed"] >= 5
+    assert receipt["timing"] == "summary" and "systems" in receipt["unavailable"]
+
+
+def test_systems_timing_reports_compiled_function_times():
+    X = ty.Annotated[jax.Array, el.Component("timed", el.ComponentType.F64)]
+
+    @el.map
+    def double(x: X) -> X:
+        return x * 2.0
+
+    w = el.World()
+    w.spawn(el.C(X, np.array(1.0)), "e1")
+    exec = w.build(double, timing=el.Timing.systems())
+    exec.run(5)
+    receipt = exec.last_receipt()
+    assert receipt["timing"] == "systems" and "systems" not in receipt["unavailable"]
+    main = next(f for f in receipt["systems"]["functions"] if f["name"] == "main")
+    assert main["calls"] == 5 and receipt["systems"]["probe_pair_ns"] > 0
+
+
 @pytest.mark.parametrize(
     "conflicting_key", ["external_control", "wait_for_write", "record_every_tick"]
 )
@@ -470,6 +512,56 @@ def test_transient_rejects_incompatible_metadata(conflicting_key):
         match=f"component 'invalid' cannot be both transient and {conflicting_key}",
     ):
         world.spawn(InvalidState(np.array(0.0)), "e1")
+
+
+def test_systems_carry_their_names_into_compiled_code(tmp_path):
+    script = tmp_path / "named.py"
+    script.write_text(
+        textwrap.dedent(
+            """\
+            import typing as ty
+            import elodin as el
+            import jax
+            import numpy as np
+
+            X = ty.Annotated[jax.Array, el.Component("nx", el.ComponentType.F64)]
+
+            @el.map
+            def drift(x: X) -> X:
+                return x * 1.5
+
+            @el.map(name="custom")
+            def wobble(x: X) -> X:
+                return x - 0.1
+
+            world = el.World()
+            world.spawn(el.C(X, np.array(1.0)), "e1")
+            world.build(drift.pipe(wobble)).run(1)
+            """
+        )
+    )
+    env = {**os.environ, "ELODIN_CRANELIFT_DEBUG_DIR": str(tmp_path / "debug")}
+    subprocess.run([sys.executable, str(script)], env=env, check=True, capture_output=True)
+    mlir = (tmp_path / "debug" / "stablehlo.mlir").read_text()
+    assert "@__main__.drift" in mlir and "@custom" in mlir
+
+
+def test_typed_recording_rejects_conflicting_metadata():
+    with pytest.raises(ValueError, match="record_every_tick"):
+        el.Component(
+            "typed",
+            el.ComponentType.F64,
+            metadata={"record_every_tick": "true"},
+            recording=el.Recording.on_change(),
+        )
+    with pytest.raises(ValueError, match="at least 1"):
+        el.Recording.every(0)
+    el.Component(
+        "typed",
+        el.ComponentType.F64,
+        metadata={"record_every_tick": "true"},
+        recording=el.Recording.every_commit(),
+    )
 
 
 def test_rejected_transient_metadata_does_not_mutate_world():

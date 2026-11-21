@@ -213,7 +213,7 @@ def window_lookup(x):
     return jnp.concatenate(windows)
 
 
-def history(fn, backend: str, entities: int = 1, mapper=el.map) -> np.ndarray:
+def history(fn, backend: str, entities: int = 1, mapper=el.map, workers: int = 1) -> np.ndarray:
     @mapper
     def step(x: X) -> tuple[X, Y]:
         return jnp.array([-1.3, -0.9, -0.6, 1.2]) * jnp.roll(x, 1), fn(x)
@@ -223,7 +223,7 @@ def history(fn, backend: str, entities: int = 1, mapper=el.map) -> np.ndarray:
     for i, name in enumerate(names):
         x = jnp.array([0.3, 0.7, 0.2, 0.9]) * (1.0 - 0.4 * i)
         w.spawn(Body(x=x, y=jnp.zeros(4)), name)
-    exec = w.build(step, backend=backend)
+    exec = w.build(step, backend=backend, workers=workers)
     exec.run(6, show_progress=False)
     col = [f"{name}.parity_y" for name in names]
     return np.stack([np.stack(exec.history(c)[c].to_numpy()) for c in col])
@@ -286,6 +286,19 @@ def test_cranelift_matches_jax_cpu_map_seq(fn):
     np.testing.assert_allclose(
         history(fn, "cranelift", entities=3, mapper=el.map_seq), expected, rtol=1e-12, atol=1e-12
     )
+
+
+# With workers, `map` traces fixed chunks of entities, so the bits do not depend on the worker
+# count. A sum over a chunk can round differently from one over the whole column.
+@pytest.mark.parametrize("mapper", [el.map, el.map_seq], ids=["map", "map_seq"])
+@pytest.mark.parametrize("fn", CASES, ids=lambda fn: fn.__name__)
+def test_results_do_not_depend_on_the_worker_count(fn, mapper):
+    two = history(fn, "cranelift", entities=7, mapper=mapper, workers=2)
+    np.testing.assert_array_equal(
+        history(fn, "cranelift", entities=7, mapper=mapper, workers=5), two
+    )
+    expected = history(fn, "jax-cpu", entities=7, mapper=mapper)
+    np.testing.assert_allclose(two, expected, rtol=1e-12, atol=1e-12)
 
 
 def test_matvec_on_the_pointer_abi():

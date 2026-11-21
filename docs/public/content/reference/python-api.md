@@ -111,7 +111,7 @@ The Elodin simulation world.
     )
     ```
 
-- `run(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp, log_level, backend)` -> None
+- `run(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp, log_level, backend, on_receipt, workers, pre_commit, timing, synchronous_commits, determinism_trace)` -> None
 
     Run the simulation.
     - `system` : [elodin.System], the systems to run, can be supplied as a list of systems delineated by pipes.
@@ -129,8 +129,16 @@ The Elodin simulation world.
     - `start_timestamp` : `int`, optional, the starting timestamp for the simulation in microseconds. If `None` (default), uses the current system time (epoch-based). Set to `0` for zero-based timing where the simulation starts at `t=0`.
     - `log_level` : `str`, optional, log level for the embedded Elodin-DB instance (`error`, `warn`, `info`, `debug`, `trace`). Defaults to `info` unless `RUST_LOG` is set.
     - `backend` : `str`, optional, execution backend. Defaults to `"cranelift"`. Supported values are `"cranelift"` (CPU), `"jax-cpu"`, and `"jax-gpu"`.
+    - `on_receipt` : `Callable[[dict], None]`, optional, called with the run's [receipt](#run-receipts) when it stops.
+    - `workers` : `int`, optional, threads the Cranelift backend runs independent calls on, the simulation thread included: entity chunks of `@el.map` systems and the per-entity calls of `@el.map_seq`. Defaults to `1`. Results do not depend on the count once it is above `1`; going from `1` to more can change the last bits of reductions.
+    - `pre_commit` : a callable `(tick, WorldStepContext)`, an [elodin.NativeStepHook], or a list of them run in order, called after each tick and before its DB commit. See [pre-commit hooks](#pre-commit-hooks).
+    - `timing` : [elodin.Timing], optional, what the receipt measures. Defaults to `Timing.summary()`.
+    - `synchronous_commits` : `bool`, optional, has each commit in the DB, and `last_updated` past it, before the next cycle's `pre_commit` hooks run, so at most one commit is ever in flight. The writer thread still appends it, during the pacing and the next systems step, and the next cycle waits for it before its hooks; the receipt counts that wait in `commit`. The loop then also waits out DB write stalls, so keep the DB on storage that does not stall. Defaults to `False`.
+    - `determinism_trace` : [elodin.DeterminismTrace], optional, records the run's [deterministic witness](#deterministic-witnesses).
 
-- `build(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, db_path, backend, start_timestamp)` -> `elodin.Exec`
+    When neither `pre_step` nor `post_step` is given, no component sets `wait_for_write`, no history handle or timestamped writer was prepared, and `synchronous_commits` is `False`, a writer thread appends each commit to the DB, so DB stalls stay off the simulation thread. Clients then see a commit, and `last_updated` move past it, up to a few cycles later. The receipt's `sync.commits` says which way the run committed: `write_behind` or `synchronous`.
+
+- `build(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, db_path, backend, start_timestamp, workers, timing)` -> `elodin.Exec`
 
     Build and compile the simulation executor without starting the runtime loop. `Exec.run(ticks)` advances it and records each tick at its simulation time, so repeated calls continue one history.
     - `system` : [elodin.System], the systems to compile.
@@ -143,6 +151,35 @@ The Elodin simulation world.
     - `db_path` : `string`, optional, the path to the database directory.
     - `backend` : `str`, optional, execution backend. Defaults to `"cranelift"`.
     - `start_timestamp` : `int`, optional, the timestamp of the initial state in microseconds; tick `n` is recorded at `start_timestamp + n / simulation_rate`. If `None` (default), uses the current system time. Set to `0` for zero-based timing.
+    - `workers`, `timing` : as for `run`. `Exec.last_receipt()` returns the receipt of the latest `Exec.run`.
+
+- `prepare_component(name, entities, access="read")` -> `elodin.ComponentHandle`
+
+    Resolve once the rows of component `name` for `entities`, in that order, for [pre-commit hooks](#pre-commit-hooks). `access="write"` lets hooks write them; building the world fails if a system also writes the component. Spawning afterwards invalidates the handle.
+
+- `prepare_batch(fields)` -> `elodin.BatchHandle`
+
+    Group handles over the same number of rows, keyed by field name, so a hook views them together.
+
+- `prepare_component_history(name)` -> `elodin.HistoryHandle`
+
+    Resolve once the `entity.component` pair `name` (e.g. `"drone.world_pos"`), for hooks to read its committed DB history with `WorldStepContext.read_at`. Transient components have no history and are rejected.
+
+- `prepare_message_history(name)` -> `elodin.HistoryHandle`
+
+    The same for the message log `name` (e.g. `"drone.scene_cam"`), which may not exist yet when it is prepared.
+
+- `prepare_timestamped_writer(fields)` -> `elodin.TimestampedWriter`
+
+    Resolve once the components that `WorldStepContext.defer_write` appends to: `fields` maps each value's key to an `entity.component` pair, which must be marked `external_control` so the simulation never writes it.
+
+- `prepare_witness(batches, channels=None, external=None, stages=None)` -> `elodin.Witness`
+
+    Choose what a run's [deterministic witness](#deterministic-witnesses) records: `batches` maps names to `elodin.BatchHandle`s. `channels` and `external` map channel names to `(batch, row_bytes)`, one row per row of one of those batches, which hooks fill with `WorldStepContext.witness_bytes` or as native-hook columns. External channels hold what came from outside the simulation: a replay feeds them back to the hooks, and no comparison looks at them. `stages` keeps only the stages it names.
+
+- `replay_pre_commit(trace, pre_commit, live=False)` -> `dict`
+
+    Run `pre_commit`, the same list of hooks as the run that recorded the witness file `trace`, on the rows it kept exactly, without the systems, recipes or DB, and compare what each hook writes with the recording. Uses the witness last prepared on this world. Before each hook, the world holds the rows that hook saw in the run, and its external channels hold the recorded bytes unless `live`. Hooks whose stage the witness leaves out are not run. Stops at the first mismatch. Returns `ticks` replayed, `skipped_ticks` that kept only digests, `records` and `bytes` compared, and `first_mismatch` or `None`.
 
 ### Backend Selection
 
@@ -208,7 +245,7 @@ Integer reference identifier for entities in Elodin.
 
 Context object passed to `pre_step` and `post_step` callbacks, providing direct database read/write access. This enables Software-In-The-Loop (SITL) and Hardware-In-The-Loop (HITL) workflows where external systems need to exchange data with the simulation at each tick.
 
-`StepContext` provides direct database access within the same process, avoiding the overhead of a separate TCP connection. This is essential for high-frequency lockstep synchronization with external flight controllers or sensor systems.
+`StepContext` provides direct database access within the same process, avoiding the overhead of a separate TCP connection. This is essential for high-frequency lockstep synchronization with external flight controllers or sensor systems. [SITL & HITL](/reference/sitl-hitl) compares it with `pre_commit` hooks.
 
 #### Properties
 
@@ -379,6 +416,182 @@ def log_with_timestamps(tick: int, ctx: el.StepContext):
         }
     )
 ```
+
+### Pre-commit hooks
+
+A `pre_commit` hook runs after each tick and before its DB commit, on world columns resolved once with `World.prepare_component` and `World.prepare_batch`. Unlike `post_step`, it does not go through the DB: what it reads is the tick's result, and what it writes reaches the world, the same commit, and the systems on the next tick. [SITL & HITL](/reference/sitl-hitl) explains when to use each.
+
+```python
+exchange = world.prepare_batch({
+    "position": world.prepare_component("position", agents),
+    "target": world.prepare_component("object_position", targets),
+    "command": world.prepare_component("command", agents, access="write"),
+})
+
+def exchange_step(tick: int, ctx: el.WorldStepContext) -> None:
+    with ctx.batch(exchange) as view:
+        view.command[...] = controller(view.position, view.target)
+
+world.run(system, pre_commit=exchange_step, workers=8)
+```
+
+A hook can also read committed DB history, such as camera frames another process recorded, and queue timestamped writes that land after the commit:
+
+```python
+frames = world.prepare_message_history("drone.scene_cam")
+truth = world.prepare_component_history("drone.world_pos")
+evidence = world.prepare_timestamped_writer({"frame": "drone.capture_frame"})
+
+def history_step(tick: int, ctx: el.WorldStepContext) -> None:
+    found = ctx.read_at(frames, capture_time, "exact")       # (timestamp, bytes) or None
+    pose = ctx.read_at(truth, capture_time, "at_or_before")  # (timestamp, value) or None
+    ctx.defer_write(evidence, ctx.timestamp + 1, {"frame": frame_id})
+
+world.run(system, pre_commit=[exchange_step, history_step])
+```
+
+A list of hooks is one ordered boundary:
+
+1. Hooks run in list order, Python and native alike.
+2. A hook sees the world writes of the hooks before it.
+3. History reads see committed DB samples only, not the world of the current tick, whose commit comes after the hooks.
+4. Deferred writes are appended after the commit, in hook and call order, equal timestamps included. They do not move `last_updated`.
+5. A hook that raises, or a native hook that returns nonzero, stops the later hooks, the cycle's commit and the run. Its queued writes are dropped.
+
+A deferred write that fails, for example with a timestamp older than its component's last sample, stops the run after the commit. The receipt's `failed_hook` names the hook (`index` and `name`) and says whether the cycle's commit had landed (`committed`). Preparing a history handle or a timestamped writer makes commits synchronous, so the hooks read every earlier commit and deferred writes follow theirs; with the writer thread, a cycle's deferred writes land just before the next cycle's hooks.
+
+### _class_ `elodin.WorldStepContext`
+
+Passed to `pre_commit` callbacks.
+
+- `tick`, `timestamp` : the tick just run and its time in microseconds.
+- `view(handle)` -> `numpy.ndarray` : the handle's rows, read-only for a read handle. Writes to a write handle's view reach the world when the callback returns. Views are copies and end with the callback.
+- `batch(batch)` -> `BatchView` : views every field of a batch, as attributes or items.
+- `record(handle)` -> None : records the handle's component, which must use `Recording.manual()`, at this commit.
+- `read_at(history, timestamp, selection)` -> `(int, numpy.ndarray) | None` : the committed sample of an `elodin.HistoryHandle` at `timestamp`. `selection="exact"` takes only a sample at that timestamp and never falls back to an older one; `"at_or_before"` takes the newest sample at or before it. Returns the sample's own timestamp and a copy of its value (a message as `uint8` bytes), or `None` when nothing matches.
+- `defer_write(writer, timestamp, values)` -> None : queues `values`, one per key of an `elodin.TimestampedWriter`, to append at `timestamp` after this cycle's commit.
+- `witness_bytes(name, data)` -> None : fills witness channel `name` with the bytes of `data`, an array of any dtype holding every row of the channel's batch. Raises `ValueError` on any other size, and `KeyError` for an unknown channel. Does nothing when the run records no witness.
+- `witness_replay(name)` -> `numpy.ndarray | None` : in a replay, the recorded bytes of external channel `name` as `uint8` rows; otherwise `None`. A hook that does I/O does it only when this returns `None`.
+- `stop_recipes()` -> None : stops the s10 recipes, as `StepContext.stop_recipes`.
+
+All but `tick` and `timestamp` raise once the callback returns.
+
+### _class_ `elodin.NativeStepHook`
+
+A `pre_commit` hook in a shared library. It runs without the GIL, and can split the batch's rows across the `workers` threads.
+
+- `NativeStepHook.load(path, input, symbol, workers=1)` -> [elodin.NativeStepHook]
+
+    Load `symbol`, and `{symbol}_init` and `{symbol}_destroy` if present, from the library at `path`. Each tick calls `symbol` once per worker, concurrently, each on a contiguous share of `input`'s rows. `input` is an `elodin.BatchHandle`.
+
+The library exports C functions over these types, ABI version 1:
+
+```c
+#include <stdint.h>
+
+typedef struct {
+    const char *name;     /* the batch field */
+    uint8_t *data;        /* every row of the batch, back to back */
+    uint64_t row_bytes;
+    uint32_t writable;    /* nonzero for a write field */
+} ElodinColumn;
+
+typedef struct {
+    uint32_t abi_version;
+    uint64_t tick;
+    int64_t timestamp;    /* microseconds */
+    uint64_t rows;
+    uint64_t row_start;   /* this call owns rows [row_start, row_end) */
+    uint64_t row_end;
+    const ElodinColumn *columns;
+    uint64_t column_count;
+    void *state;          /* what init stored, or NULL */
+    char *error;          /* a failing call writes a NUL-terminated message here */
+    uint64_t error_capacity;
+} ElodinStep;
+
+int32_t my_step(const ElodinStep *step);                    /* 0 on success */
+int32_t my_step_init(const ElodinStep *step, void **state); /* optional; once, over every row */
+void my_step_destroy(void *state);                          /* optional; after the run */
+```
+
+A call may write only writable columns, and only its own rows. A nonzero return stops the run with the call's message in the receipt. The receipt's `callbacks.hooks` reports each hook's queue time, slowest-partition time and worker occupancy.
+
+When the run records a witness, each witness channel on the hook's `input` batch is one more column after the batch fields, named after the channel, with the channel's `row_bytes`. It is zeroed before each tick, and writable, except an external channel in a replay, which holds the recorded bytes and has `writable == 0`. A hook can look its channels up by name at init and treat a read-only external channel as the sign that it is replayed.
+
+### Deterministic witnesses
+
+A witness records the exact bytes a run produces at fixed points of each tick, and digests them into a tree, so two runs that should be identical can be compared byte for byte and the first difference named. It is meant for lockstep runs with external controllers, where a run must repeat exactly.
+
+```python
+witness = world.prepare_witness(
+    {"exchange": exchange, "objects": objects_state},
+    channels={"controller.ingress": (exchange, 1024),    # what the hook sent
+              "controller.response": (exchange, 80)},    # what it took from each reply
+    external={"controller.reply": (exchange, 104)},      # the replies themselves
+)
+
+def exchange_step(tick: int, ctx: el.WorldStepContext) -> None:
+    ctx.witness_bytes("controller.ingress", frames)
+    replies = ctx.witness_replay("controller.reply")     # recorded bytes in a replay, else None
+    if replies is None:
+        replies = send_and_receive(frames)
+        ctx.witness_bytes("controller.reply", replies)
+    ...
+
+world.run(system, pre_commit=[exchange_step],
+          determinism_trace=el.DeterminismTrace("run.witness", witness, raw=True))
+```
+
+Each tick, the witness takes these stages, in order:
+
+| Stage | Records |
+| --- | --- |
+| `after_systems` | every row of every field of every batch |
+| `after_hook:N` | the channels hook `N` filled, every write field, and the deferred writes hook `N` queued; then the external channels |
+| `after_commit` | for every row of every field, whether the commit recorded it |
+
+The commit decides what it records on the simulation thread, so the DB writer's timing cannot change a witness. A channel no hook filled is recorded as absent.
+
+Each record is hashed with BLAKE3-256 over its little-endian bytes, rows in batch order whatever the hook's partitioning. A stage's digest hashes its records' digests, a tick's digest hashes the tick, its simulation time and its stages' digests, and the root hashes the schema and every tick. External channels are never hashed. Labels are stored but not hashed either: the build, the hook names, a native hook's partitions and the start timestamp. A Python hook and a native hook that fill the same channels give the same root.
+
+#### _class_ `elodin.DeterminismTrace`
+
+- `DeterminismTrace(path, witness, raw=False, reference=None, stop_after_first_mismatch=False)`
+
+    - `path` : where to write the witness file.
+    - `witness` : an `elodin.Witness` from `World.prepare_witness`.
+    - `raw` : `True` keeps the exact bytes of every tick, and a `(start, stop)` pair those of ticks `start` to `stop - 1`. Otherwise the file keeps only digests, about 1 KB per tick for a few dozen records. Raw bytes do not change the root.
+    - `reference` : a witness file to compare with as the run goes. Its schema must match. The first tick that differs is the receipt's `witness.first_mismatch`, and the 16 ticks on either side of it keep their exact bytes. A run stays successful when it differs from its reference.
+    - `stop_after_first_mismatch` : ends the run a few ticks after the first mismatch.
+
+    A witness thread hashes, compares and writes each tick from a block the simulation thread fills; if it falls 1,024 ticks behind, the run fails. Nothing is ever dropped.
+
+#### _module_ `elodin.determinism`
+
+- `compare(left, right, stop_at_first=False)` -> `dict` : compares two witness files tick by tick, and below the first differing digest, the bytes when both files kept them. Returns `identical`, `first_mismatch` or `None`, the numbers of `ticks` compared and `mismatched_ticks`, and a summary of each file. Ticks missing from one file are a mismatch; files with different schemas, such as another entity order or stage list, raise `ValueError` naming the difference.
+- `replay_hook(trace, library, symbol, live=False)` -> `dict` : replays the native hook `symbol` of the shared library `library` on the rows `trace` kept, like `World.replay_pre_commit` but without the simulation's source: the batch is rebuilt from the file.
+- `describe(mismatch)` -> `str` : the lines `elodin determinism` prints.
+
+A mismatch names the `tick`, the `stage`, the `hook`, the record by its `kind` (`field`, `channel`, `deferred` or `recorded`) and name, and when both sides have the bytes, the `entity`, `row` and `byte` within the row, with each side's byte as `left` and `right`. A channel row takes the entity of its batch's first field. In a run with a reference and in a replay, `left` is the reference or the recording.
+
+#### Witness files
+
+A file is the magic `ELWITNES`, the format version (`1`) and a JSON header with the schema, its digest and the labels; then one frame per tick, with the tick, its timestamp, a digest per hashed record and, when kept, every record's bytes; then a JSON trailer with the tick count, the root and the run's failure, if any. A version other than `1` is refused. Comparison never looks at the labels.
+
+### Run receipts
+
+Every run builds a versioned receipt (`elodin.run_receipt.v1`), passed to `on_receipt`, returned by `Exec.last_receipt()`, and written to `$ELODIN_SIM_SUMMARY_JSON` when set. It covers the cycles after warmup: count, sum, min, exact p50/p95/p99, and max of every phase (`copy_db_to_world`, `world_run`, `pre_commit`, `commit`, `deferred_writes`, `post_step`, their `callback` sum, pacing, and `total_cycle`); pacing lateness and resets; DB `sync` counters, including whether commits were `synchronous` or `write_behind`, rows scanned, drained and committed, and the writer thread's lag and queue depth; backend bytes and compile times; hook timings, history queries, misses and bytes, and deferred-write batches, rows, bytes and failures under `callbacks`; under `witness`, the witness file's `path`, `root`, `ticks`, `raw_ticks` and `bytes_written`, the simulation thread's `capture` time per cycle, the witness thread's `writer_ns`, its `queue_high_water`, the `first_mismatch` with the reference and the witness's `failure`; the `failure` and `failed_hook` of a run a hook or the witness stopped; and the sections it did not collect under `unavailable`.
+
+### _class_ `elodin.Timing`
+
+What a receipt measures, from least to most perturbing.
+
+- `Timing.summary()` : phase times of every cycle; always on.
+- `Timing.systems()` : also the inclusive and exclusive time of each compiled function on the Cranelift backend, so of each system under its [name](#elodin-system). A system small enough to inline counts toward its caller. Probes cost `systems.probe_pair_ns` per call and keep calls on one thread.
+- `Timing.operations()` : also sampled time per kind of operation.
+
+Neither level writes debug artifacts; `ELODIN_CRANELIFT_DEBUG_DIR` stays separate.
 
 ### _class_ `elodin.Panel`
 A configuration object for creating a panel view in the Elodin Client UI.
@@ -679,13 +892,14 @@ Wind = typing.Annotated[
 
 A container of component metadata.
 
-- `__init__(name, type = None, asset = False, metadata = {})` -> [elodin.Component]
+- `__init__(name, type = None, asset = False, metadata = {}, recording = None)` -> [elodin.Component]
 
     Create a new component with:
     - Unique name (e.g. "world_pos, "inertia").
     - Component type information (via [elodin.ComponentType]). This is optional if the base class already provides component type information as part of `__metadata__`, which is the case for [elodin.Quaternion], [elodin.Edge], and all [spatial vector algebra](#spatial-vector-algebra) classes.
     - Flag indicating whether the component is an asset (e.g. a mesh, texture, etc.).
     - Other metadata that is optional (e.g. description, units, labels, etc.).
+    - When its values are recorded (`elodin.Recording`), described below.
 
     ```python
     import elodin as el
@@ -708,7 +922,7 @@ A container of component metadata.
     | `element_names` | comma-separated string (e.g. `"x,y,z"`, `"q0,q1,q2,q3"`) | Labels for each element of a vector or matrix component. Used by the component inspector and as column suffixes when exporting with `elodin-db export --flatten`. |
     | `private` | `"true"` | Component is omitted from `elodin-db export` by default (pass `--include-private` to include it). Useful for marking internal scratch state (e.g. large covariance matrices) that downstream consumers shouldn't see. |
     | `transient` | `"true"` | Simulation component remains available to systems in memory but is never registered with or recorded to Elodin DB. It is absent from DB schemas, the editor, replication, and exports. |
-    | `external_control` | `"true"` | Component is writable from external clients (e.g. Betaflight or a HITL bridge) over the Impeller protocol. The simulation will not overwrite values written externally. |
+    | `external_control` | `"true"` | Component is writable from external clients (e.g. Betaflight or a HITL bridge) over the Impeller protocol, and from `pre_commit` hooks, including their deferred writes. The simulation will not overwrite values written externally. |
     | `record_every_tick` | `"true"` | Opt out of sparse recording and write a sample at every telemetry commit even when its bytes are unchanged. |
 
     Component recording is sparse by default: the simulation writes a sample
@@ -720,6 +934,33 @@ A container of component metadata.
     change streams with per-component row counts.
 
     `transient` is a simulation-runtime storage contract, not an export filter. A transient component cannot also set `external_control`, `wait_for_write`, or `record_every_tick`, and DB-backed APIs such as `StepContext.read_component`, `StepContext.write_component`, and `Exec.history` cannot access it. Direct database writers are unaffected by this key.
+
+    #### Recording
+
+    `recording=` sets when a commit records the component, counting telemetry commits:
+
+    | `elodin.Recording` | Records |
+    |---|---|
+    | `on_change()` | when its bytes differ from the last recorded value; the default |
+    | `every_commit()` | at every commit; same as `record_every_tick="true"` |
+    | `every(n)` | at every `n`th commit, changed or not |
+    | `manual()` | at the commits a `pre_commit` hook asks for with `ctx.record(handle)` |
+    | `initial_only()` | once, when the run starts |
+    | `transient()` | never; same as `transient="true"` |
+
+    It is stored in the reserved metadata keys above, plus `recording`, so the DB, editor and followers keep working. A `metadata` value that contradicts it is an error.
+
+    ```python
+    Command = ty.Annotated[
+        jax.Array,
+        el.Component(
+            "command",
+            el.ComponentType(el.PrimitiveType.F64, (3,)),
+            metadata={"external_control": "true"},
+            recording=el.Recording.every(10),
+        ),
+    ]
+    ```
 
     Example combining a label hint with the export-skip flag:
 
@@ -825,6 +1066,8 @@ def apply_wind(
     w: el.Query[Wind], q: el.Query[el.Force, el.WorldVel]
 ) -> el.Query[el.Force]: ...
 ```
+
+A system's name identifies it in compiled code and in `Timing.systems()` receipts. It defaults to the function's module and qualified name, such as `sim.apply_wind`; `@el.system(name="wind")`, `@el.map(name=...)` and `@el.map_seq(name=...)` set it.
 
 ### `@elodin.map`
 
@@ -1585,6 +1828,8 @@ viewport pos="aircraft.world_pos.translate(1, 0, 0.5).translate_world(0, 0, 10)"
 [elodin.World]: #class-elodin-world
 [elodin.EntityId]: #class-elodin-entityid
 [elodin.StepContext]: #class-elodin-stepcontext
+[elodin.NativeStepHook]: #class-elodin-nativestephook
+[elodin.Timing]: #class-elodin-timing
 [elodin.Panel]: #class-elodin-panel
 [elodin.GraphEntity]: #class-elodin-graphentity
 [elodin.Mesh]: #class-elodin-mesh

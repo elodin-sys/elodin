@@ -50,6 +50,7 @@ use vtable_stream::handle_vtable_stream;
 use zerocopy::IntoBytes;
 
 pub use error::Error;
+pub use watch::WatchCursor;
 
 pub(crate) const COMPONENT_CREATION_INDEX_METADATA_KEY: &str = "_creation_index";
 pub const TX_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -91,6 +92,7 @@ pub mod trim;
 pub mod truncate;
 pub mod utils;
 mod vtable_stream;
+mod watch;
 
 /// Analyzes a VTable to find byte ranges that are used as timestamp sources.
 /// Returns a vector of (offset, end) tuples representing the byte ranges.

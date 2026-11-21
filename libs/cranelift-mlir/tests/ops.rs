@@ -710,6 +710,26 @@ module @module {
 }
 
 #[test]
+fn test_oversized_convert_is_a_compile_error() {
+    // 2^23 + 1 f64s are one element over the 64 MiB stack-slot limit.
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<8388609xf32>) -> tensor<1xf64> {
+    %0 = stablehlo.convert %arg0 : (tensor<8388609xf32>) -> tensor<8388609xf64>
+    %1 = stablehlo.slice %0 [0:1] : (tensor<8388609xf64>) -> tensor<1xf64>
+    return %1 : tensor<1xf64>
+  }
+}
+"#;
+    let module = cranelift_mlir::parser::parse_module(mlir).unwrap();
+    let err = cranelift_mlir::lower::compile_module(&module).err();
+    assert!(
+        err.as_deref().is_some_and(|err| err.contains("stack slot")),
+        "{err:?}"
+    );
+}
+
+#[test]
 fn test_iota() {
     let mlir = r#"
 module @module {

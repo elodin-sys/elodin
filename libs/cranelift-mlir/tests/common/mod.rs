@@ -38,6 +38,20 @@ pub fn run_mlir_folded(
     run_mlir_with(mlir, inputs, output_sizes, config, true)
 }
 
+/// `run_mlir` with independent calls run on `workers` threads.
+pub fn run_mlir_workers(
+    mlir: &str,
+    inputs: &[&[u8]],
+    output_sizes: &[usize],
+    workers: usize,
+) -> Vec<Vec<u8>> {
+    let config = CompileConfig {
+        workers,
+        ..CompileConfig::from_env()
+    };
+    run_mlir_with(mlir, inputs, output_sizes, config, false)
+}
+
 /// Parse once, run the interpreter and the JIT, and require their outputs to
 /// match. Returns the JIT bytes so existing golden assertions stay on the
 /// compiled path. Ops the interpreter does not implement are skipped (logged)

@@ -46,6 +46,163 @@ pub(crate) fn float_min(a: f64, b: f64) -> f64 {
 // Macro-generated elementwise operations
 // ---------------------------------------------------------------------------
 
+/// Four-lane AVX2 sine and cosine. Every lane goes through the same IEEE operations as on the
+/// `wide::f64x2` path, with no fused multiply-add, so outputs keep their bits.
+#[cfg(target_arch = "x86_64")]
+mod avx2 {
+    use std::arch::x86_64::*;
+
+    fn available() -> bool {
+        std::arch::is_x86_feature_detected!("avx2")
+    }
+
+    /// Writes the sine of the leading multiple of four elements of `a`; returns how many.
+    pub fn sin(dst: &mut [f64], a: &[f64]) -> usize {
+        if !available() {
+            return 0;
+        }
+        // Safety: `available()` found AVX2 on this CPU.
+        unsafe { sin_cos_lanes::<true>(dst, a) }
+    }
+
+    /// Writes the cosine of the leading multiple of four elements of `a`; returns how many.
+    pub fn cos(dst: &mut [f64], a: &[f64]) -> usize {
+        if !available() {
+            return 0;
+        }
+        // Safety: `available()` found AVX2 on this CPU.
+        unsafe { sin_cos_lanes::<false>(dst, a) }
+    }
+
+    #[target_feature(enable = "avx2")]
+    fn sin_cos_lanes<const SIN: bool>(dst: &mut [f64], a: &[f64]) -> usize {
+        let lanes = a.len().min(dst.len()) / 4 * 4;
+        for i in (0..lanes).step_by(4) {
+            // Safety: `i + 4 <= lanes`, which fits both slices.
+            let (s, c) = sin_cos(unsafe { _mm256_loadu_pd(a.as_ptr().add(i)) });
+            unsafe { _mm256_storeu_pd(dst.as_mut_ptr().add(i), if SIN { s } else { c }) };
+        }
+        lanes
+    }
+
+    #[target_feature(enable = "avx2")]
+    fn poly5(z: __m256d, c: [f64; 6]) -> __m256d {
+        let c = c.map(|v| _mm256_set1_pd(v));
+        let z2 = _mm256_mul_pd(z, z);
+        let z4 = _mm256_mul_pd(z2, z2);
+        let high = _mm256_add_pd(_mm256_mul_pd(c[3], z), c[2]);
+        let top = _mm256_add_pd(_mm256_mul_pd(c[5], z), c[4]);
+        let low = _mm256_add_pd(_mm256_mul_pd(c[1], z), c[0]);
+        _mm256_add_pd(
+            _mm256_mul_pd(high, z2),
+            _mm256_add_pd(_mm256_mul_pd(top, z4), low),
+        )
+    }
+
+    #[target_feature(enable = "avx2")]
+    fn is_finite(v: __m256d) -> __m256i {
+        let exponent = _mm256_set1_epi64x(0xFFE0_0000_0000_0000u64 as i64);
+        let shifted = _mm256_slli_epi64::<1>(_mm256_castpd_si256(v));
+        let inf_or_nan = _mm256_cmpeq_epi64(_mm256_and_si256(shifted, exponent), exponent);
+        _mm256_xor_si256(inf_or_nan, _mm256_set1_epi64x(-1))
+    }
+
+    /// `wide::f64x2::sin_cos` as compiled without SSE4.1, FMA or AVX-512, four lanes at a time.
+    #[allow(clippy::excessive_precision)] // wide's constants, digit for digit
+    #[target_feature(enable = "avx2")]
+    fn sin_cos(x: __m256d) -> (__m256d, __m256d) {
+        const SIN: [f64; 6] = [
+            -1.66666666666666307295E-1,
+            8.33333333332211858878E-3,
+            -1.98412698295895385996E-4,
+            2.75573136213857245213E-6,
+            -2.50507477628578072866E-8,
+            1.58962301576546568060E-10,
+        ];
+        const COS: [f64; 6] = [
+            4.16666666666665929218E-2,
+            -1.38888888888730564116E-3,
+            2.48015872888517045348E-5,
+            -2.75573141792967388112E-7,
+            2.08757008419747316778E-9,
+            -1.13585365213876817300E-11,
+        ];
+        let splat = |v: f64| _mm256_set1_pd(v);
+        let sign_bit = splat(-0.0);
+        let xa = _mm256_andnot_pd(sign_bit, x);
+        // `y` is non-negative or NaN, where rounding to nearest matches wide's 2^52 trick.
+        let y = _mm256_round_pd::<{ _MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC }>(
+            _mm256_mul_pd(xa, splat(2.0 / core::f64::consts::PI)),
+        );
+        // Below 2^51, adding 1.5 * 2^52 puts the integer in the mantissa; else `as i64` per lane.
+        let magic = splat(6755399441055744.0);
+        let q = if _mm256_movemask_pd(_mm256_cmp_pd::<_CMP_LT_OQ>(y, splat(2251799813685248.0)))
+            == 0b1111
+        {
+            _mm256_sub_epi64(
+                _mm256_castpd_si256(_mm256_add_pd(y, magic)),
+                _mm256_castpd_si256(magic),
+            )
+        } else {
+            let mut lanes = [0.0f64; 4];
+            // Safety: four lanes to and from four-element arrays.
+            unsafe { _mm256_storeu_pd(lanes.as_mut_ptr(), y) };
+            let ints = lanes.map(|v| v as i64);
+            unsafe { _mm256_loadu_si256(ints.as_ptr().cast()) }
+        };
+        let r = _mm256_sub_pd(
+            xa,
+            _mm256_mul_pd(y, splat(7.853981554508209228515625E-1 * 2.)),
+        );
+        let r = _mm256_sub_pd(r, _mm256_mul_pd(y, splat(7.94662735614792836714E-9 * 2.)));
+        let r = _mm256_sub_pd(r, _mm256_mul_pd(y, splat(3.06161699786838294307E-17 * 2.)));
+        let r2 = _mm256_mul_pd(r, r);
+        let s = _mm256_add_pd(_mm256_mul_pd(_mm256_mul_pd(r, r2), poly5(r2, SIN)), r);
+        let c = _mm256_add_pd(
+            _mm256_mul_pd(_mm256_mul_pd(r2, r2), poly5(r2, COS)),
+            _mm256_sub_pd(splat(1.0), _mm256_mul_pd(r2, splat(0.5))),
+        );
+        let one = _mm256_set1_epi64x(1);
+        let overflow = _mm256_castsi256_pd(_mm256_and_si256(
+            _mm256_cmpgt_epi64(q, _mm256_set1_epi64x(0x80000000000000)),
+            is_finite(xa),
+        ));
+        let s = _mm256_blendv_pd(s, splat(0.0), overflow);
+        let c = _mm256_blendv_pd(c, splat(1.0), overflow);
+        let even = _mm256_castsi256_pd(_mm256_cmpeq_epi64(
+            _mm256_and_si256(q, one),
+            _mm256_setzero_si256(),
+        ));
+        let sin_sign = _mm256_xor_si256(_mm256_slli_epi64::<62>(q), _mm256_castpd_si256(x));
+        let sin = _mm256_xor_pd(
+            _mm256_blendv_pd(c, s, even),
+            _mm256_and_pd(_mm256_castsi256_pd(sin_sign), sign_bit),
+        );
+        let cos_sign = _mm256_slli_epi64::<62>(_mm256_and_si256(
+            _mm256_add_epi64(q, one),
+            _mm256_set1_epi64x(2),
+        ));
+        let cos = _mm256_xor_pd(_mm256_blendv_pd(s, c, even), _mm256_castsi256_pd(cos_sign));
+        let finite = _mm256_castsi256_pd(is_finite(x));
+        let nan = splat(f64::NAN);
+        (
+            _mm256_blendv_pd(nan, sin, finite),
+            _mm256_blendv_pd(nan, cos, finite),
+        )
+    }
+}
+
+#[cfg(not(target_arch = "x86_64"))]
+mod avx2 {
+    pub fn sin(_: &mut [f64], _: &[f64]) -> usize {
+        0
+    }
+
+    pub fn cos(_: &mut [f64], _: &[f64]) -> usize {
+        0
+    }
+}
+
 /// Binary f64 elementwise op with a SIMD chunk loop + scalar tail.
 /// Processes `wide::f64x2` chunks for the common n ≥ 2 case so
 /// ptr-ABI callers routed through the tensor_rt dispatch still get
@@ -269,9 +426,13 @@ unary_f64_op!(tensor_erfc_f64, libm::erfc);
 
 macro_rules! unary_f64_simd_op {
     ($name:ident, $vec_op:expr, $scalar_op:expr) => {
+        unary_f64_simd_op!($name, |_: &mut [f64], _: &[f64]| 0, $vec_op, $scalar_op);
+    };
+    // `$leading` writes a prefix of the result four lanes at a time and returns its length.
+    ($name:ident, $leading:expr, $vec_op:expr, $scalar_op:expr) => {
         pub extern "C" fn $name(dst: *mut f64, a: *const f64, n: usize) {
             let (dst, a) = unsafe { f64_unary(dst, a, n) };
-            let mut i = 0;
+            let mut i = ($leading)(&mut *dst, a);
             while i + 2 <= n {
                 let v = wide::f64x2::new([a[i], a[i + 1]]);
                 let r = ($vec_op)(v);
@@ -288,8 +449,18 @@ macro_rules! unary_f64_simd_op {
     };
 }
 
-unary_f64_simd_op!(tensor_sin_f64, |v: wide::f64x2| v.sin(), f64::sin);
-unary_f64_simd_op!(tensor_cos_f64, |v: wide::f64x2| v.cos(), f64::cos);
+unary_f64_simd_op!(
+    tensor_sin_f64,
+    avx2::sin,
+    |v: wide::f64x2| v.sin(),
+    f64::sin
+);
+unary_f64_simd_op!(
+    tensor_cos_f64,
+    avx2::cos,
+    |v: wide::f64x2| v.cos(),
+    f64::cos
+);
 unary_f64_simd_op!(tensor_tan_f64, |v: wide::f64x2| v.tan(), f64::tan);
 unary_f64_simd_op!(
     tensor_sinh_f64,
@@ -2326,6 +2497,47 @@ pub extern "C" fn tensor_sort(data: *const *mut u8, meta: *const i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The AVX2 sine and cosine against `wide::f64x2::sin_cos`, bit for bit, over special
+    /// values, quadrant boundaries and random bit patterns.
+    #[test]
+    fn avx2_sin_cos_match_wide() {
+        let mut inputs = vec![
+            0.0,
+            -0.0,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NAN,
+            5e-324,
+            f64::MIN_POSITIVE,
+            f64::MAX,
+            -f64::MAX,
+            2f64.powi(51),
+            2f64.powi(52),
+            2f64.powi(55) * 3.0,
+            1e300,
+        ];
+        inputs.extend((-4000..4000).map(|i| f64::from(i) * std::f64::consts::FRAC_PI_4 / 8.0));
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        inputs.extend((0..20_000).map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            f64::from_bits(state)
+        }));
+        inputs.truncate(inputs.len() / 4 * 4);
+        let mut sin = vec![0.0; inputs.len()];
+        let mut cos = vec![0.0; inputs.len()];
+        if avx2::sin(&mut sin, &inputs) == 0 {
+            return;
+        }
+        avx2::cos(&mut cos, &inputs);
+        for ((x, s), c) in inputs.iter().zip(&sin).zip(&cos) {
+            let (ws, wc) = wide::f64x2::splat(*x).sin_cos();
+            assert_eq!(s.to_bits(), ws.to_array()[0].to_bits(), "sin({x:e})");
+            assert_eq!(c.to_bits(), wc.to_array()[0].to_bits(), "cos({x:e})");
+        }
+    }
 
     fn unravel(mut i: usize, shape: &[i64]) -> Vec<usize> {
         let mut idx = vec![0; shape.len()];

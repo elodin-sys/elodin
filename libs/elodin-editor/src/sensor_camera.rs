@@ -1077,8 +1077,6 @@ fn place_on_grid(
     transform.translation = local_translation;
 }
 
-const WORLD_POS_STALE_US: i64 = 1_000_000;
-
 #[derive(Default)]
 struct WorldPosLog {
     missing_since: Vec<Option<Instant>>,
@@ -1130,14 +1128,16 @@ fn log_world_pos(
         log.last_emit.resize(index + 1, None);
     }
     let now = Instant::now();
-    let stale = match cached.sample_ts {
+    // An old sample is still the pose: recording is sparse, so a camera that does not move
+    // has no newer one.
+    let missing = match cached.sample_ts {
         None => {
             let since = *log.missing_since[index].get_or_insert(now);
             now.duration_since(since) >= Duration::from_secs(1)
         }
-        Some(sample_ts) => {
+        Some(_) => {
             log.missing_since[index] = None;
-            render_ts.saturating_sub(sample_ts.0) >= WORLD_POS_STALE_US
+            false
         }
     };
     let due =
@@ -1156,14 +1156,14 @@ fn log_world_pos(
         let [x, y, z, w] = world_pos.att.parts().map(nox::Tensor::into_buf);
         (x, y, z, w)
     });
-    if stale {
+    if missing {
         tracing::warn!(
             camera,
             series_len = cached.len,
             sample_age_ms,
             newest_age_ms,
             ?quat,
-            "sensor camera world_pos is missing or more than 1s behind the render time"
+            "sensor camera world_pos is missing at the render time"
         );
     } else {
         tracing::debug!(

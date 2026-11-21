@@ -5,6 +5,7 @@ use stellarator::sync::WaitQueue;
 use tracing::warn;
 use zerocopy::FromBytes;
 
+use crate::watch::{WatchCursor, Watchers};
 use crate::{Error, append_log::AppendLog};
 
 #[derive(Clone)]
@@ -13,6 +14,7 @@ pub struct TimeSeries {
     index: AppendLog<Timestamp>,
     data: AppendLog<u64>,
     data_waker: Arc<WaitQueue>,
+    watchers: Watchers,
 }
 
 impl TimeSeries {
@@ -32,6 +34,7 @@ impl TimeSeries {
             index,
             data,
             data_waker: data_waker.clone(),
+            watchers: Watchers::default(),
         };
         Ok(time_series)
     }
@@ -46,6 +49,7 @@ impl TimeSeries {
             index,
             data,
             data_waker: data_waker.clone(),
+            watchers: Watchers::default(),
         };
         Ok(time_series)
     }
@@ -208,7 +212,22 @@ impl TimeSeries {
         self.data.truncate();
     }
 
+    /// Marks `slot` of `cursor` on every append, until the cursor is dropped.
+    pub fn watch(&self, cursor: &Arc<WatchCursor>, slot: usize) {
+        self.watchers.add(cursor, slot);
+    }
+
     pub fn push_buf(&self, timestamp: Timestamp, buf: &[u8]) -> Result<(), Error> {
+        self.push_buf_from(None, timestamp, buf)
+    }
+
+    /// Appends like [`Self::push_buf`] without marking `writer`, the appender's own cursor.
+    pub fn push_buf_from(
+        &self,
+        writer: Option<&WatchCursor>,
+        timestamp: Timestamp,
+        buf: &[u8],
+    ) -> Result<(), Error> {
         let _span = tracing::trace_span!("push_buf").entered();
         let len = self.index.len() as usize;
 
@@ -237,6 +256,7 @@ impl TimeSeries {
         // always write index last so we get consistent reads
         self.index.write(&timestamp.to_le_bytes())?;
 
+        self.watchers.mark(writer);
         self.data_waker.wake_all();
         Ok(())
     }

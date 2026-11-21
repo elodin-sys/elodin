@@ -30,11 +30,13 @@ atlases, Monte Carlo campaigns). A few are headless checks, not editor scenes:
   - [Editor scenes & visualization](#editor-scenes--visualization)
   - [Telemetry & external clients](#telemetry--external-clients)
   - [Compiler & numerics](#compiler--numerics)
+  - [Performance & scaling](#performance--scaling)
 - [By Elodin object](#by-elodin-object)
   - [World, Body, six_dof](#world-body-six_dof)
   - [Component / Archetype](#component--archetype)
   - [GraphQuery / Edge](#graphquery--edge)
   - [StepContext](#stepcontext)
+  - [Pre-commit hooks](#pre-commit-hooks)
   - [s10 recipes](#s10-recipes)
   - [Monte Carlo](#monte-carlo)
   - [Coordinate frames](#coordinate-frames)
@@ -131,6 +133,7 @@ An external flight-software process driven over UDP, alongside the sim.
 | [falcon9](./falcon9) | Rust FSW flying the full RTLS mission |
 | [rc-jet](./rc-jet) | External RC / autopilot controller |
 | [monte-carlo](./monte-carlo) | Minimal plant ↔ controller campaign with per-run scoring |
+| [many-agents](./many-agents) | 24 controller processes in lockstep at 1 kHz through `pre_commit` hooks |
 
 ### Editor scenes & visualization
 
@@ -156,6 +159,12 @@ An external flight-software process driven over UDP, alongside the sim.
 | --- | --- |
 | [linalg](./linalg) | LAPACK-backed `jnp.linalg` through Cranelift |
 | [stablehlo](./stablehlo) | StableHLO / CHLO op coverage through the JIT |
+
+### Performance & scaling
+
+| Example | Description |
+| --- | --- |
+| [many-agents](./many-agents) | 24 agents at 1 kHz, each with its own controller process, watched by an overhead sensor camera: `workers=`, prepared batches, `pre_commit` and native hooks, history reads, run receipts, deterministic witnesses and hook replay |
 
 ---
 
@@ -212,6 +221,14 @@ Custom `el.Component` + `@el.dataclass` archetypes beyond `el.Body`.
 | [voyager](./voyager) | SPICE kernel updates each tick |
 | [n-body](./n-body) | Truth-index advance in `post_step` |
 
+### Pre-commit hooks
+
+`pre_commit` hooks with `el.WorldStepContext` and `el.NativeStepHook` (prepared rows, written before the commit).
+
+| Example | Description |
+| --- | --- |
+| [many-agents](./many-agents) | Native exchange hook, camera history reads, deferred writes, witness channels and replay |
+
 ### s10 recipes
 
 `el.s10.PyRecipe` — spawn an external process next to the sim.
@@ -225,6 +242,7 @@ Custom `el.Component` + `@el.dataclass` archetypes beyond `el.Body`.
 | [video-stream](./video-stream) | GStreamer + OBS / RTSP receivers |
 | [logstream](./logstream) | C++ `log-client` into the DB |
 | [monte-carlo](./monte-carlo) | `world.recipe(...)` + campaign worker ports |
+| [many-agents](./many-agents) | One supervised compiled controller process per agent |
 
 ### Monte Carlo
 
@@ -351,6 +369,7 @@ Alternatives to the default `World.run(...)` on the Cranelift backend.
 | [sensor-camera](./sensor-camera) | Onboard camera, FPS / latency knobs |
 | [ellipsoid](./ellipsoid) | Frustum creation + `sensor_view` next to 3D |
 | [rc-jet](./rc-jet) | FPV camera (`create_frustum=False`) |
+| [many-agents](./many-agents) | Overhead camera whose frames a `pre_commit` hook reads back by capture time |
 
 ### Gauges / monitors
 

@@ -1719,6 +1719,84 @@ fn write_json_report(
     }
 }
 
+/// One compiled function's probe totals.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct FunctionTime {
+    pub name: String,
+    pub calls: u64,
+    /// Inclusive of the functions it calls.
+    pub total_ns: u64,
+    pub exclusive_ns: u64,
+}
+
+/// One sampled op category, scaled up by its sample rate.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct OpTime {
+    pub category: &'static str,
+    pub samples: u64,
+    pub estimated_ns: u64,
+}
+
+/// What the probes measured since the last [`reset_timings`].
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Timings {
+    /// Longest first.
+    pub functions: Vec<FunctionTime>,
+    /// Empty unless op sampling was compiled in.
+    pub ops: Vec<OpTime>,
+    /// The calibrated cost of one enter/exit probe pair.
+    pub probe_pair_ns: u64,
+}
+
+/// The probe totals of the calling thread and of threads that flushed theirs, by function.
+pub fn timings() -> Timings {
+    let probe_pair_ns = calibrate_probe_overhead();
+    let mut merged: HashMap<u32, FunctionStats> = TL_STATS.with(|m| m.borrow().clone());
+    if let Ok(global) = global_stats().lock() {
+        for (fid, stats) in global.iter() {
+            merge_stats_into(merged.entry(*fid).or_default(), stats);
+        }
+    }
+    let reg = registry().lock().expect("profile registry poisoned");
+    let mut functions: Vec<FunctionTime> = merged
+        .into_iter()
+        .filter(|(_, stats)| stats.calls > 0)
+        .map(|(fid, stats)| FunctionTime {
+            name: reg
+                .names
+                .get(&fid)
+                .cloned()
+                .unwrap_or_else(|| format!("fn{fid}")),
+            calls: stats.calls,
+            total_ns: stats.total_ns,
+            exclusive_ns: stats.exclusive_ns,
+        })
+        .collect();
+    functions.sort_by_key(|function| std::cmp::Reverse(function.total_ns));
+    let ops = crate::op_sampler::OpCategory::all()
+        .iter()
+        .filter(|_| crate::op_sampler::op_times_enabled())
+        .map(|&cat| OpTime {
+            category: cat.name(),
+            samples: OP_CATEGORY_SAMPLES[cat.as_u32() as usize].load(Ordering::Relaxed),
+            estimated_ns: OP_CATEGORY_NS[cat.as_u32() as usize]
+                .load(Ordering::Relaxed)
+                .saturating_mul(crate::op_sampler::sample_rate_for(cat)),
+        })
+        .filter(|op| op.samples > 0)
+        .collect();
+    Timings {
+        functions,
+        ops,
+        probe_pair_ns,
+    }
+}
+
+/// Forgets what the probes measured so far, as a run does when its warmup ends.
+pub fn reset_timings() {
+    reset();
+}
+
 /// Clear the thread-local stats store and the process-global marshal /
 /// transcendental / loop counters. Called by `dump_report` after
 /// formatting. Exposed for tests.
