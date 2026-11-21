@@ -728,6 +728,16 @@ class ElodinEnv(gym.Env):
 ```
 *JAXSim implementation: [python/elodin/jaxsim.py](python/elodin/jaxsim.py)*
 
+### Native C and C++ hosts
+`sim.export_model(path)` writes one simulation step, compiled ahead of time for this machine,
+with the initial state and a schema. `libs/elodin-model/package.py` turns that directory into a
+shared library with a C header and a CMake package, which a C++ program steps without Python:
+```python
+sim = world.to_jax(system, simulation_rate=120.0)
+sim.export_model("build/model")
+```
+See [examples/ball-cpp](../../examples/ball-cpp) for the whole workflow.
+
 ## Performance Tips
 
 1. **Use cranelift backend** for production: `w.build(system)` (default)

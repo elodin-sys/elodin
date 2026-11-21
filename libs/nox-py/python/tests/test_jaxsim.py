@@ -1,3 +1,4 @@
+import json
 import typing as ty
 from dataclasses import dataclass, field
 
@@ -121,6 +122,25 @@ def test_step_fn_under_jit_vmap_and_scan():
     sim.step(10)
     for a, b in zip(scanned, sim.state):
         np.testing.assert_allclose(a, b, rtol=1e-12)
+
+
+def test_export_model_writes_step_state_and_schema(tmp_path):
+    sim = bodies(2).to_jax(el.six_dof(), simulation_rate=100.0)
+    sim.export_model(tmp_path)
+
+    components = json.loads((tmp_path / "schema.json").read_text())["components"]
+    assert [c["name"] for c in components] == [name for _, _, name in sim.map]
+    pos = next(c for c in components if c["name"] == "world_pos")
+    assert pos == {
+        "name": "world_pos",
+        "dtype": "float64",
+        "shape": [2, 7],
+        "entities": ["b0", "b1"],
+    }
+    state = b"".join(np.asarray(value).tobytes() for value in sim.state)
+    assert (tmp_path / "state.bin").read_bytes() == state
+    assert "func.func public @main" in (tmp_path / "step.stablehlo.mlir").read_text()
+    assert (tmp_path / "step.o").stat().st_size > 0
 
 
 def test_set_without_entity_writes_every_entity():

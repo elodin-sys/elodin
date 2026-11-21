@@ -15,6 +15,7 @@ jit = [
     "dep:cranelift-jit",
     "dep:cranelift-module",
     "dep:cranelift-native",
+    "dep:cranelift-object",
     "dep:faer",
     "dep:rayon",
 ]
@@ -30,6 +31,7 @@ cranelift-frontend = { version = "0.130", optional = true }
 cranelift-jit = { version = "0.130", optional = true }
 cranelift-module = { version = "0.130", optional = true }
 cranelift-native = { version = "0.130", optional = true }
+cranelift-object = { version = "0.130", optional = true }
 winnow = "0.7"
 libm = "0.2.8"
 serde = { version = "1.0", features = ["derive"] }
@@ -48,3 +50,4 @@ memmap2 = "0.9.10"
 
 [dev-dependencies]
 bytemuck = "1.21"
+object = { version = "0.38", default-features = false, features = ["read", "std"] }

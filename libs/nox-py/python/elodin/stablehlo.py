@@ -37,6 +37,17 @@ def lower_to_stablehlo(func: Any, input_arrays: list[Any]) -> str:
     return stablehlo_mlir
 
 
+def compile_object(stablehlo_mlir: str, prefix: str) -> bytes:
+    """Compile StableHLO text ahead of time into a relocatable object file for this machine.
+
+    The object defines `{prefix}_step`, which steps `main` like the Cranelift backend, and the
+    import table a loader binds; `libs/elodin-model` is that loader.
+    """
+    from elodin.elodin import _compile_stablehlo_object
+
+    return _compile_stablehlo_object(stablehlo_mlir, prefix)
+
+
 def run_xla_reference(func: Any, real_input_arrays: list[Any], debug_dir: str) -> None:
     """Run the function with XLA and save reference outputs."""
     import sys
