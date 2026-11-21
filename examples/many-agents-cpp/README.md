@@ -6,6 +6,9 @@ small C++ host recreates the parts of Elodin's tick loop the SITL needs. The hos
 deterministic witness format, so Elodin's own tools prove that it reproduces the Elodin run
 byte for byte, every tick, and that it repeats exactly.
 
+The [Custom C++ Runtimes](https://docs.elodin.systems/reference/cpp-runtime/) reference covers
+the workflow in general, with [ball-cpp](../ball-cpp) as the smallest case.
+
 ```mermaid
 flowchart LR
     sim["examples/many-agents/sim.py"] -->|"export.py (workers=8)"| model["build/model"]

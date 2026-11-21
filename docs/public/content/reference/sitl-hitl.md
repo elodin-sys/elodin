@@ -238,6 +238,8 @@ A lockstep run with fixed seeds and `start_timestamp` should repeat bit for bit.
 
 Keep host-only fields, such as a reply's service time, out of the compared channels: the external channel keeps the whole reply for replay, and is never compared. [many-agents](https://github.com/elodin-sys/elodin/tree/main/examples/many-agents) walks through a one-bit fault, a controller race, and its fix.
 
+A witness can also come from outside Elodin. When the SITL must move into your own C++ runtime, [Custom C++ Runtimes](/reference/cpp-runtime) exports the simulation as a library and proves the C++ program reproduces the Elodin run with these same comparisons.
+
 ## HITL in practice
 
 In HITL the flight software runs on the flight computer and keeps its own clock. Run the simulation in real time, put timestamps on what crosses the link, and expect some jitter between the two clocks. Keep the same boundary as in SITL, so the flight software cannot tell the difference. Three layouts work well.
@@ -336,6 +338,10 @@ The `pre_step` and `post_step` API: reads, writes, history, and messages.
 
 {% cardlink(title="Python API: Pre-commit hooks", icon="book", href="/reference/python-api/#pre-commit-hooks") %}
 Prepared handles, `WorldStepContext`, native hooks, and run receipts.
+{% end %}
+
+{% cardlink(title="Custom C++ Runtimes", icon="cog", href="/reference/cpp-runtime") %}
+Run the simulation and flight software in your own C++ program, and prove it matches Elodin.
 {% end %}
 
 {% cardlink(title="Apollo Lander Tutorial", icon="rocket", href="/home/apollo-lander") %}
