@@ -8,7 +8,7 @@ use std::{
     path::Path,
     sync::{
         Arc,
-        atomic::{self, AtomicU64, Ordering},
+        atomic::{self, AtomicBool, AtomicU64, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -720,6 +720,12 @@ impl DbSync {
         vtable_gen: u64,
         hook_writes: &HookWrites,
     ) -> Result<(), Error> {
+        // The writer dropped rows whose shadows were already updated; reread them all so they
+        // are compared with the DB again, as the synchronous path's failed rows are.
+        if self.writer.as_ref().is_some_and(WriteBehind::take_failure) {
+            self.wait_for_writes();
+            self.vtable_gen = u64::MAX;
+        }
         self.rescan(vtable_gen);
         let compare_all = std::mem::take(&mut self.compare_all);
         let commit = self.commits;
@@ -822,6 +828,8 @@ struct WriteBehind {
     /// Batches the thread finished, and the signal it gives for each.
     written: Arc<(std::sync::Mutex<Vec<CommitBatch>>, std::sync::Condvar)>,
     thread: std::thread::JoinHandle<()>,
+    /// Set by the thread when an append fails and the rest of its batch is dropped.
+    failed: Arc<AtomicBool>,
     batch: CommitBatch,
     spare: Vec<CommitBatch>,
     in_flight: u64,
@@ -837,6 +845,8 @@ impl WriteBehind {
         let (queue, queued) = std::sync::mpsc::sync_channel::<CommitBatch>(Self::QUEUE);
         let written = Arc::new((std::sync::Mutex::new(Vec::new()), std::sync::Condvar::new()));
         let written_by_thread = written.clone();
+        let failed = Arc::new(AtomicBool::new(false));
+        let failed_by_thread = failed.clone();
         let thread = std::thread::Builder::new()
             .name("elodin-db-writer".into())
             .spawn(move || {
@@ -853,6 +863,7 @@ impl WriteBehind {
                                     time_series.push_buf_from(Some(&cursor), batch.timestamp, value)
                                 {
                                     warn!(?err, "error committing head");
+                                    failed_by_thread.store(true, Ordering::Release);
                                     break;
                                 }
                                 from = to;
@@ -872,6 +883,7 @@ impl WriteBehind {
             queue,
             written,
             thread,
+            failed,
             batch: CommitBatch::default(),
             spare: Vec::new(),
             in_flight: 0,
@@ -905,6 +917,11 @@ impl WriteBehind {
             }
             Err(std::sync::mpsc::TrySendError::Disconnected(_)) => Err(exited().into()),
         }
+    }
+
+    /// Whether an append failed since the last call.
+    fn take_failure(&self) -> bool {
+        self.failed.swap(false, Ordering::AcqRel)
     }
 
     /// Takes back the batches the thread finished, for reuse.
@@ -1935,6 +1952,39 @@ mod commit_tests {
         // The first commit after the initial scan compares every row; later ones only `c`.
         assert_eq!(c.rows_compared, c.rows_registered + 1);
         assert_eq!(c.rows_committed, 1);
+    }
+
+    #[test]
+    fn rows_the_writer_thread_drops_are_committed_again() {
+        let temp = tempdir().unwrap();
+        let (db, mut world) = scalar_world(&temp.path().join("db"), &[("a", None), ("c", None)]);
+        let db = Arc::new(db);
+        // Batches follow column order, so a failed first row drops the second.
+        let mut names = ["a", "c"];
+        names.sort_by_key(|name| ComponentId::new(name));
+        let [first, second] = names;
+        let written = names.map(ComponentId::new);
+        let mut sync = db.with_state(|state| DbSync::new(state, &world, &written, &HashSet::new()));
+        sync.write_behind(db.clone());
+        let vtable_gen = db.vtable_gen.latest();
+        let mut commit = |world: &World, at: i64| {
+            sync.commit_world(world, Timestamp(at), vtable_gen, &HookWrites::default())
+                .unwrap();
+            sync.wait_for_writes();
+        };
+
+        set(&mut world, first, 1.0);
+        set(&mut world, second, 1.0);
+        commit(&world, 1000);
+        // A later sample from another writer makes the next commit of `first` time travel.
+        push(&db, first, 5000, 9.0);
+        set(&mut world, first, 2.0);
+        set(&mut world, second, 2.0);
+        commit(&world, 2000);
+        assert_eq!(latest(&db, second), 1.0);
+
+        commit(&world, 6000);
+        assert_eq!((latest(&db, first), latest(&db, second)), (2.0, 2.0));
     }
 
     /// Times both DB sync phases on a two-entity world of 276 components, a fifth of which systems
