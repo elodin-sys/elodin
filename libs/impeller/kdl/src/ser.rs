@@ -2185,19 +2185,19 @@ viewport name="main" cinematic=#true ev100=13.5
         };
 
         assert!(!viewport_line(FrustumUpMarker::None).contains("frustums_up_marker"));
-        for (marker, expected) in [(FrustumUpMarker::Highlight, "highlight")] {
-            let serialized = viewport_line(marker);
-            assert!(
-                serialized.contains(&format!("frustums_up_marker={expected}"))
-                    || serialized.contains(&format!(r#"frustums_up_marker="{expected}""#)),
-                "expected frustums_up_marker={expected}, got:\n{serialized}"
-            );
-            let reparsed = parse_schematic(&serialized).unwrap();
-            let SchematicElem::Panel(Panel::Viewport(viewport)) = &reparsed.elems[0] else {
-                panic!("Expected viewport panel");
-            };
-            assert_eq!(viewport.frustums_up_marker, marker);
-        }
+        let marker = FrustumUpMarker::Highlight;
+        let expected = "highlight";
+        let serialized = viewport_line(marker);
+        assert!(
+            serialized.contains(&format!("frustums_up_marker={expected}"))
+                || serialized.contains(&format!(r#"frustums_up_marker="{expected}""#)),
+            "expected frustums_up_marker={expected}, got:\n{serialized}"
+        );
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &reparsed.elems[0] else {
+            panic!("Expected viewport panel");
+        };
+        assert_eq!(viewport.frustums_up_marker, marker);
     }
 
     #[test]

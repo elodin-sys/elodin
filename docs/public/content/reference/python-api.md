@@ -159,6 +159,13 @@ The Elodin simulation world.
     - `system`, `simulation_rate`, `default_playback_speed`, `max_ticks` : as for `build`.
     - `workers` : `int | None`, trace the systems as `run(workers=...)` runs them on the Cranelift backend: `@el.map` systems in chunks of two entities when above `1`, and `@el.map_seq` once per entity. The step then reproduces that run bit for bit, and `JaxSim.export_model` compiles its independent calls to run on that many threads; pass `1` for a run without `workers`. `None` traces as the JAX backends do: whole columns for `@el.map`, and `jax.lax.scan` for `@el.map_seq`.
 
+- `export_model(system, path, simulation_rate=120.0, default_playback_speed=1.0, max_ticks=None, workers=None, interfaces=None, cpu="native")` -> [elodin.jaxsim.JaxSim](#class-elodin-jaxsim-jaxsim)
+
+    Build and export a passive synchronous model, then return its `JaxSim`. The native caller owns invocation order, logical- and wall-time policy, files, I/O, hooks, and processes.
+    - `interfaces` : `dict[str, elodin.BatchHandle] | None`, optional named row views. Each field keeps its batch alias, component, entity order, row size, and `read` or `write` access. Interfaces describe data only; they do not prescribe callbacks or hook order.
+    - `cpu` : `"native"` enables this CPU's features in `step.o`; `"generic"` uses the baseline of this machine's architecture. For a machine with another OS or architecture, compile the step there with `package.py --cpu`.
+    - Other arguments are as for `to_jax`.
+
 - `prepare_component(name, entities, access="read")` -> `elodin.ComponentHandle`
 
     Resolve once the rows of component `name` for `entities`, in that order, for [pre-commit hooks](#pre-commit-hooks). `access="write"` lets hooks write them; building the world fails if a system also writes the component. Spawning afterwards invalidates the handle.
@@ -222,18 +229,19 @@ print(sim.get(state, "world_pos", "ball"))
 - `get(state, component_name, entity_name=None)` -> array : a component's value for one entity, or for every entity.
 - `set(state, component_name, entity_name, value)` -> `list` : a copy of `state` with the value written; `entity_name=None` writes every entity's value at once.
 - `step(max_steps)` -> None, `get_state(component_name=None, entity_name=None)`, `set_state(component_name, entity_name, value)` -> None : the same on `state`, in place.
-- `export_model(path)` -> None
+- `export_model(path, interfaces=None, cpu="native")` -> None
 
-    Write one tick, for a program to run without Python. See [Custom C++ Runtimes](/reference/cpp-runtime).
+    Write one passive state transition for a caller-owned C or C++ runtime. See [Custom C++ Runtimes](/reference/cpp-runtime).
 
     | File | Contents |
     |---|---|
     | `step.stablehlo.mlir` | `step_fn` as StableHLO, from every component's value to its next value |
-    | `step.o` | The same tick compiled ahead of time by the Cranelift backend for this machine, defining `elodin_model_kernel_step`; with `workers` above `1`, its independent calls run on the loader's worker threads |
+    | `step.o` | The same tick compiled ahead of time by the Cranelift backend for `cpu`, defining `elodin_model_kernel_step`; with `workers` above `1`, its independent calls run on the loader's worker threads |
     | `state.bin` | `state` as raw little-endian bytes, in state order |
-    | `schema.json` | `workers`, and for each component in state order its `name`, `dtype`, `shape`, and the `entities` and `entity_ids` of its rows |
+    | `schema.json` | The versioned layout of the model: its time step and tick, typed components with their entity rows, and optional named interfaces |
+    | `model-manifest.json` | The target `step.o` was compiled for, and the SHA-256 and size of each file |
 
-    `libs/elodin-model/package.py` builds a shared library with a C header and a CMake package from the directory.
+    Model schema ABI 1 records the nominal time step, the tick and time-step components, the export workers, and each component's dtype, shape, row bytes, metadata and `written_by_step`, which is true for every system output and for the tick. The nominal time step is the `simulation_time_step` the state holds, which Elodin keeps in whole nanoseconds: 0.008333333 s at 120 Hz. `libs/elodin-model/package.py` produces static and shared CMake targets, C and C++ headers, provenance, and a runtime SBOM, and with `--cpu` compiles `step.o` again on the machine that packages.
 
 ### Monte Carlo Campaign API
 
@@ -521,7 +529,7 @@ A `pre_commit` hook in a shared library. It runs without the GIL, and can split 
 
     Load `symbol`, and `{symbol}_init` and `{symbol}_destroy` if present, from the library at `path`. Each tick calls `symbol` once per worker, concurrently, each on a contiguous share of `input`'s rows. `input` is an `elodin.BatchHandle`.
 
-The library exports C functions over these types, ABI version 1:
+The library exports C functions over these types, ABI version 1, which [`elodin_step_hook.h`](https://github.com/elodin-sys/elodin/blob/main/libs/elodin-model/include/elodin_step_hook.h) declares:
 
 ```c
 #include <stdint.h>

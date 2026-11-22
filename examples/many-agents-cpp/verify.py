@@ -58,20 +58,32 @@ def check(name: str, ok: bool, detail: str = "") -> None:
         failures.append(name)
 
 
-def free_port() -> int:
-    """A free port P with P + 1 and P + 2 free for the DB's asset and gRPC servers."""
+def free_ports(count: int, kind: int = socket.SOCK_STREAM) -> int:
+    """A port P with P up to P + count - 1 free on localhost, for TCP or `socket.SOCK_DGRAM`. A DB
+    takes three TCP ports in a row, for itself and its asset and gRPC servers."""
     while True:
         port = random.randrange(20000, 32000)
         try:
-            for offset in range(3):
-                with socket.socket() as probe:
+            for offset in range(count):
+                with socket.socket(type=kind) as probe:
                     probe.bind(("127.0.0.1", port + offset))
         except OSError:
             continue
         return port
 
 
-def elodin(name: str, controller: Path, port_base: int) -> dict:
+def agent_ports() -> str:
+    """A free port base for the agents' UDP ports, two each. No port here is fixed, so the runs of
+    several jobs on one machine cannot meet."""
+    return str(free_ports(2 * args.agents, socket.SOCK_DGRAM))
+
+
+def failed(what: str, log: Path) -> str:
+    """The failure with the end of the run's log, which a CI job would otherwise not show."""
+    return f"{what} failed; the end of {log}:\n" + "\n".join(log.read_text().splitlines()[-40:])
+
+
+def elodin(name: str, controller: Path) -> dict:
     """Runs examples/many-agents in lockstep with a raw witness; returns its receipt's witness."""
     path = args.out / name
     env = {
@@ -80,7 +92,7 @@ def elodin(name: str, controller: Path, port_base: int) -> dict:
         "ELODIN_MANY_AGENT_AGENTS": str(args.agents),
         "ELODIN_MANY_AGENT_MAX_TICKS": str(args.ticks),
         "ELODIN_MANY_AGENT_REALTIME": "0",
-        "ELODIN_MANY_AGENT_PORT_BASE": str(port_base),
+        "ELODIN_MANY_AGENT_PORT_BASE": agent_ports(),
         "ELODIN_MANY_AGENT_CONTROLLER_BIN": str(controller),
         "ELODIN_DB_PATH": str(path.with_suffix(".db")),
         "ELODIN_SIM_SUMMARY_JSON": str(path.with_suffix(".json")),
@@ -88,11 +100,11 @@ def elodin(name: str, controller: Path, port_base: int) -> dict:
         "ELODIN_MANY_AGENT_WITNESS_RAW": "1",
     }
     # `elodin run` holds the first tick until every controller recipe is ready.
-    command = ["elodin", "run", str(ORIGINAL / "main.py"), "--addr", f"127.0.0.1:{free_port()}"]
+    command = ["elodin", "run", str(ORIGINAL / "main.py"), "--addr", f"127.0.0.1:{free_ports(3)}"]
     with path.with_suffix(".log").open("w") as log:
         result = subprocess.run(command, cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
     if result.returncode != 0:
-        sys.exit(f"the Elodin run {name} failed; see {path.with_suffix('.log')}")
+        sys.exit(failed(f"the Elodin run {name}", path.with_suffix(".log")))
     return json.loads(path.with_suffix(".json").read_text())["witness"]
 
 
@@ -115,7 +127,7 @@ def cpp(name: str, *options: str) -> Path:
     with (args.out / f"{name}.log").open("w") as log:
         result = subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT)
     if result.returncode != 0:
-        sys.exit(f"the C++ run {name} failed; see {args.out / name}.log")
+        sys.exit(failed(f"the C++ run {name}", args.out / f"{name}.log"))
     return witness
 
 
@@ -167,10 +179,10 @@ def series(path: Path, stage: str, name: str, width: int) -> np.ndarray:
 
 
 print(f"many-agents, lockstep, {args.agents} agents, {args.ticks} ticks, 8 workers")
-baseline_receipt = elodin("elodin", CONTROLLER, 17000)
+baseline_receipt = elodin("elodin", CONTROLLER)
 baseline = Path(baseline_receipt["path"])
 
-fsw = elodin("elodin-cpp-fsw", args.bin / "many_agents_fsw", 17100)
+fsw = elodin("elodin-cpp-fsw", args.bin / "many_agents_fsw")
 check(
     "Elodin with the C++ flight software records the root of Elodin with the Rust controllers",
     fsw["root"] == baseline_receipt["root"],
@@ -179,7 +191,7 @@ check(
 
 in_process = cpp("cpp-in-process", "--csv", str(args.out / "cpp.csv"))
 same("C++ host, flight software in-process, against Elodin", baseline, in_process)
-processes = cpp("cpp-processes", "--fsw", "processes", "--port-base", "17200")
+processes = cpp("cpp-processes", "--fsw", "processes", "--port-base", agent_ports())
 same("C++ host, flight software as processes, against Elodin", baseline, processes)
 
 repeat = cpp("cpp-repeat")

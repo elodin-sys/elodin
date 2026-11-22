@@ -41,6 +41,8 @@ class JaxSim:
         component_entity_dict,
         map=None,
         workers=1,
+        simulation_rate=120.0,
+        component_metadata=None,
     ):
         """
         Initializes the JaxSim class with a world, a system, and a simulation time step.
@@ -64,6 +66,10 @@ class JaxSim:
             An index map for ordering inputs and outputs.
         workers : int, optional
             The `World.run(workers=...)` count the systems were traced for.
+        simulation_rate : float, optional
+            Nominal model steps per second. The native caller still owns invocation timing.
+        component_metadata : dict, optional
+            Component metadata retained for native model introspection.
         """
 
         self.py_sim = sim_obj
@@ -74,6 +80,8 @@ class JaxSim:
         self.entity_dict = entity_dict
         self.component_entity_dict = component_entity_dict
         self.workers = workers
+        self.simulation_rate = simulation_rate
+        self.component_metadata = component_metadata or {}
         if map is None:
             self.map = self.generate_index_map(self.inputs, self.outputs)
         else:
@@ -128,52 +136,152 @@ class JaxSim:
         out = self.py_sim(*state)
         return [state[d_p] if c_p is None else out[c_p] for c_p, d_p, _ in self.map]
 
-    def export_model(self, path):
+    def export_model(self, path, interfaces=None, cpu="native"):
         """
-        Writes this simulation's step to a directory, for a native host to run without Python.
+        Write this passive simulation step and its native interface metadata.
 
         The directory holds `step.stablehlo.mlir`, one tick from state to next state as
-        `step_fn` defines it; `step.o`, the same tick compiled ahead of time for this machine;
-        `state.bin`, `self.state` as raw bytes in state order; and `schema.json`, the name,
-        dtype, shape and entities of each component in that order, and the worker count the
-        object runs its parallel groups for. `libs/elodin-model` builds a shared library with a
-        C interface from it.
+        `step_fn` defines it; `step.o`, the same tick compiled ahead of time; `state.bin`,
+        `self.state` as raw bytes in state order; `schema.json`, a versioned description of the
+        model and optional named row interfaces; and `model-manifest.json`, the hashes of those
+        files and the target `step.o` was compiled for.
 
         Parameters:
         path : str or os.PathLike
             The directory to write; created if missing.
+        interfaces : dict[str, elodin.BatchHandle], optional
+            Named data views for a native caller. They describe rows and access only; they do
+            not prescribe callbacks, hook order, pacing or orchestration.
+        cpu : str, optional
+            `native` uses this CPU's features; `generic` uses the target architecture baseline.
         """
+        import hashlib
+        import importlib.metadata
         import json
         import os
 
         import numpy
 
-        from elodin.stablehlo import compile_object, lower_to_stablehlo
+        from elodin.stablehlo import compile_object, lower_to_stablehlo, object_target
 
+        if cpu not in ("native", "generic"):
+            raise ValueError("cpu must be 'native' or 'generic'")
         os.makedirs(path, exist_ok=True)
         mlir = lower_to_stablehlo(lambda *state: tuple(self.step_fn(state)), self.state)
         entity_names = {id: name for name, id in self.entity_dict.items()}
-        components = [
-            {
-                "name": name,
-                "dtype": str(numpy.asarray(value).dtype),
-                "shape": list(numpy.shape(value)),
-                "entities": [entity_names[id] for id in self.component_entity_dict[name]],
-                "entity_ids": list(self.component_entity_dict[name]),
-            }
-            for (_, _, name), value in zip(self.map, self.state)
-        ]
+        components = []
+        for (output, slot, name), value in zip(self.map, self.state):
+            array = numpy.asarray(value)
+            entity_ids = list(self.component_entity_dict[name])
+            rows = len(entity_ids)
+            element_shape = list(array.shape[1:] if rows > 1 else array.shape)
+            components.append(
+                {
+                    "name": name,
+                    "dtype": str(array.dtype),
+                    "shape": list(array.shape),
+                    "element_shape": element_shape,
+                    "entity_axis": "leading" if rows > 1 else "none",
+                    "entities": [entity_names[id] for id in entity_ids],
+                    "entity_ids": entity_ids,
+                    "rows": rows,
+                    "row_bytes": array.nbytes // rows,
+                    "size": array.nbytes,
+                    # `step_fn` advances the tick itself; no system writes it.
+                    "written_by_step": output is not None or slot == self._tick_index,
+                    "metadata": dict(self.component_metadata.get(name, {})),
+                }
+            )
+
+        native_interfaces = []
+        component_by_name = {component["name"]: component for component in components}
+        for interface_name, batch in (interfaces or {}).items():
+            fields = []
+            for field_name, handle in batch.fields.items():
+                component = component_by_name.get(handle.name)
+                if component is None:
+                    raise ValueError(
+                        f"interface {interface_name!r} field {field_name!r} has no "
+                        f"component {handle.name!r} in this model"
+                    )
+                unknown = set(handle.entity_ids) - set(component["entity_ids"])
+                if unknown:
+                    raise ValueError(
+                        f"interface {interface_name!r} field {field_name!r} has "
+                        f"unknown entity ids {sorted(unknown)}"
+                    )
+                if handle.row_bytes != component["row_bytes"]:
+                    raise ValueError(
+                        f"interface {interface_name!r} field {field_name!r} row is "
+                        f"{handle.row_bytes} bytes, not {component['row_bytes']}"
+                    )
+                fields.append(
+                    {
+                        "name": field_name,
+                        "component": handle.name,
+                        "access": handle.access,
+                        "entity_ids": list(handle.entity_ids),
+                        "row_bytes": handle.row_bytes,
+                    }
+                )
+            row_counts = {len(field["entity_ids"]) for field in fields}
+            if len(row_counts) > 1:
+                raise ValueError(f"interface {interface_name!r} fields have different row counts")
+            native_interfaces.append(
+                {
+                    "name": interface_name,
+                    "rows": next(iter(row_counts), 0),
+                    "fields": fields,
+                }
+            )
+
+        time_step_slot = next(
+            (slot for _, slot, name in self.map if name == "simulation_time_step"), None
+        )
+        schema = {
+            "format": "elodin.model",
+            "abi_version": 1,
+            "endianness": "little",
+            "workers": self.workers,
+            "simulation": {
+                # The step a model with a time-step component starts with is the one in its
+                # state, which Elodin keeps in whole nanoseconds.
+                "time_step_s": (
+                    1.0 / self.simulation_rate
+                    if time_step_slot is None
+                    else float(self.state[time_step_slot])
+                ),
+                "tick_component": "tick" if self._tick_index is not None else None,
+                "time_step_component": (None if time_step_slot is None else "simulation_time_step"),
+            },
+            "components": components,
+            "interfaces": native_interfaces,
+        }
         files = {
             "step.stablehlo.mlir": mlir.encode(),
-            "step.o": compile_object(mlir, "elodin_model_kernel", self.workers),
-            "state.bin": b"".join(numpy.asarray(value).tobytes() for value in self.state),
-            "schema.json": json.dumps(
-                {"workers": self.workers, "components": components}, indent=2
-            ).encode(),
+            "step.o": compile_object(mlir, "elodin_model_kernel", self.workers, cpu),
+            "state.bin": b"".join(numpy.asarray(value).tobytes(order="C") for value in self.state),
+            "schema.json": json.dumps(schema, indent=2).encode(),
         }
         for name, contents in files.items():
             with open(os.path.join(path, name), "wb") as handle:
                 handle.write(contents)
+        try:
+            version = importlib.metadata.version("elodin")
+        except importlib.metadata.PackageNotFoundError:
+            version = "unknown"
+        manifest = {
+            "format": "elodin.model-export",
+            "version": 1,
+            "elodin_version": version,
+            "target": object_target(cpu),
+            "files": {
+                name: {"bytes": len(contents), "sha256": hashlib.sha256(contents).hexdigest()}
+                for name, contents in files.items()
+            },
+        }
+        with open(os.path.join(path, "model-manifest.json"), "w") as handle:
+            json.dump(manifest, handle, indent=2)
 
     def step(self, max_steps):
         """
@@ -326,6 +434,8 @@ class JaxSim:
             self.component_entity_dict,
             self.map,
             self.workers,
+            self.simulation_rate,
+            self.component_metadata,
         )
 
         return (state, aux_data)
@@ -340,9 +450,18 @@ class JaxSim:
         Returns:
             A new JaxSim instance
         """
-        py_sim, inputs, outputs, dictionary, entity_dict, component_entity_dict, map, workers = (
-            aux_data
-        )
+        (
+            py_sim,
+            inputs,
+            outputs,
+            dictionary,
+            entity_dict,
+            component_entity_dict,
+            map,
+            workers,
+            simulation_rate,
+            component_metadata,
+        ) = aux_data
 
         return JaxSim(
             py_sim,
@@ -354,6 +473,8 @@ class JaxSim:
             component_entity_dict,
             map,
             workers,
+            simulation_rate,
+            component_metadata,
         )
 
 

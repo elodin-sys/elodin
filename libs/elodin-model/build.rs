@@ -3,12 +3,14 @@
 //! the library is opened. Without `ELODIN_MODEL_DIR` the library holds no model.
 
 use std::env;
+use std::fs;
 use std::path::PathBuf;
 
 fn main() {
     println!("cargo::rustc-check-cfg=cfg(elodin_model, values(\"aot\", \"jit\"))");
     println!("cargo::rerun-if-env-changed=ELODIN_MODEL_DIR");
     println!("cargo::rerun-if-env-changed=ELODIN_MODEL_BACKEND");
+    println!("cargo::rerun-if-env-changed=ELODIN_MODEL_BUILD_INFO_PATH");
     // Otherwise executables record the library's absolute build path.
     match env::var("CARGO_CFG_TARGET_OS").as_deref() {
         Ok("linux") => println!("cargo::rustc-cdylib-link-arg=-Wl,-soname,libelodin_model.so"),
@@ -39,10 +41,32 @@ fn main() {
         assert!(path.is_file(), "{} is missing", path.display());
         println!("cargo::rerun-if-changed={}", path.display());
     }
+    // What `elodin_model_build_info` returns: package.py's record of the build, or `{}`.
+    let build_info = match env::var_os("ELODIN_MODEL_BUILD_INFO_PATH") {
+        Some(path) => {
+            let path = PathBuf::from(path);
+            assert!(path.is_file(), "{} is missing", path.display());
+            println!("cargo::rerun-if-changed={}", path.display());
+            path
+        }
+        None => {
+            let empty =
+                PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR")).join("build-info.json");
+            fs::write(&empty, "{}").expect("write the empty build info");
+            empty
+        }
+    };
 
     println!("cargo::rustc-env=ELODIN_MODEL_DIR={}", dir.display());
+    println!(
+        "cargo::rustc-env=ELODIN_MODEL_BUILD_INFO={}",
+        build_info.display()
+    );
     println!("cargo::rustc-cfg=elodin_model=\"{backend}\"");
     if backend == "aot" {
-        println!("cargo::rustc-link-arg={}", dir.join(code).display());
+        cc::Build::new()
+            .object(dir.join(code))
+            .cargo_metadata(true)
+            .compile("elodin_model_step");
     }
 }

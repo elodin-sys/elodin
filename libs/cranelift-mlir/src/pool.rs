@@ -146,6 +146,11 @@ pub fn ensure_workers(count: usize) {
     }
 }
 
+/// Worker threads already started. The calling thread is not included.
+pub fn worker_count() -> usize {
+    POOL.workers.load(Ordering::Acquire)
+}
+
 /// Wakes sleeping workers ahead of a group that is about to run.
 pub fn wake() {
     if POOL.parked.load(Ordering::Relaxed) > 0 {

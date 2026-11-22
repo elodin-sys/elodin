@@ -1,0 +1,48 @@
+# Builds the passive model library on RHEL 8 userland (glibc 2.28, GCC 8) with neither the
+# Python SDK nor Nix, and runs its C and C++ consumer tests there. This runs here because the
+# Buildkite agents have no Docker.
+
+name: Model RHEL 8
+
+on:
+  pull_request:
+    paths:
+      - "libs/elodin-model/**"
+      - "libs/cranelift-mlir/**"
+      - "scripts/ci/elodin_model_abi.sh"
+      - "scripts/ci/elodin_model_rhel8.sh"
+      - "scripts/ci/check_elodin_model_elf.py"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/model-rhel8.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "libs/elodin-model/**"
+      - "libs/cranelift-mlir/**"
+      - "scripts/ci/elodin_model_abi.sh"
+      - "scripts/ci/elodin_model_rhel8.sh"
+      - "scripts/ci/check_elodin_model_elf.py"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".github/workflows/model-rhel8.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: model-rhel8-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rhel8:
+    name: build and test (rockylinux:8)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build, test and check the model library
+        run: bash scripts/ci/elodin_model_rhel8.sh

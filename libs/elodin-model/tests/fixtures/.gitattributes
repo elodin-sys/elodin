@@ -1,0 +1,2 @@
+# Small hand-written models, kept out of LFS so a plain checkout can build and test them.
+*.mlir !filter !diff !merge !text

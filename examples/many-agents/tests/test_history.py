@@ -2,7 +2,6 @@
 
 import json
 import os
-import random
 import signal
 import socket
 import subprocess
@@ -11,33 +10,21 @@ from pathlib import Path
 
 import elodin.db as edb
 import numpy as np
+from benchmark import free_ports
 
 EXAMPLE = Path(__file__).resolve().parents[1]
 
 
-def free_port() -> int:
-    """A free port P with P + 1 and P + 2 free for the DB's asset and gRPC servers. It is below
-    every OS's ephemeral range, which macOS hands out in order, starting next to the last one."""
-    while True:
-        port = random.randrange(20000, 32000)
-        try:
-            for offset in range(3):
-                with socket.socket() as probe:
-                    probe.bind(("127.0.0.1", port + offset))
-        except OSError:
-            continue
-        return port
-
-
 def start(path: Path, ticks: int, **env: str) -> tuple[subprocess.Popen, str]:
     """Starts a paced run of 2 agents on a DB address of its own; returns it and the address."""
-    address = f"127.0.0.1:{free_port()}"
+    address = f"127.0.0.1:{free_ports(3)}"
     process = subprocess.Popen(
         ["elodin", "run", str(EXAMPLE / "main.py"), "--addr", address],
         env={
             **os.environ,
             "ELODIN_MANY_AGENT_HOOK": "python",
             "ELODIN_MANY_AGENT_AGENTS": "2",
+            "ELODIN_MANY_AGENT_PORT_BASE": str(free_ports(4, socket.SOCK_DGRAM)),
             "ELODIN_MANY_AGENT_MAX_TICKS": str(ticks),
             "ELODIN_SIM_WARMUP_TICKS": "0",
             "ELODIN_DB_PATH": str(path / "db"),
@@ -84,7 +71,7 @@ def test_camera_frames_are_paired_with_the_truth_at_their_capture_time(tmp_path)
     assert receipt["callbacks"]["deferred_batches"] == frames["found"] + frames["missing"]
 
     with (
-        edb.Server.start(str(tmp_path / "db"), f"127.0.0.1:{free_port()}") as server,
+        edb.Server.start(str(tmp_path / "db"), f"127.0.0.1:{free_ports(3)}") as server,
         edb.Client.connect(server.addr) as client,
     ):
         # Skip each component's initial sample, recorded at time 0.

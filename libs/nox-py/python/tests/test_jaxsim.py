@@ -79,6 +79,45 @@ def test_step_keeps_tick_dtype():
     assert int(tick) == 3
 
 
+def test_exported_time_step_remains_a_runtime_input():
+    slow = bodies(1).to_jax(el.six_dof(), simulation_rate=100.0)
+    fast = bodies(1).to_jax(el.six_dof(), simulation_rate=100.0)
+    fast.set_state("simulation_time_step", "Globals", jnp.asarray(0.02))
+    slow.step(1)
+    fast.step(1)
+    assert float(slow.get_state("world_pos", "b0")[6]) == pytest.approx(10.01)
+    assert float(fast.get_state("world_pos", "b0")[6]) == pytest.approx(10.02)
+
+
+def test_export_records_tick_semantics_when_systems_read_tick(tmp_path):
+    @el.system
+    def reads_tick(
+        tick: el.Query[el.SimulationTick], pos: el.Query[el.WorldPos]
+    ) -> el.Query[el.WorldPos]:
+        return pos
+
+    sim = bodies(1).to_jax(reads_tick | el.six_dof(), simulation_rate=100.0)
+    sim.export_model(tmp_path)
+    schema = json.loads((tmp_path / "schema.json").read_text())
+    assert schema["simulation"]["tick_component"] == "tick"
+    written = {c["name"]: c["written_by_step"] for c in schema["components"]}
+    assert written["tick"]
+    assert not written["simulation_time_step"]
+
+
+def test_export_takes_the_nominal_time_step_from_the_state(tmp_path):
+    sim = bodies(1).to_jax(el.six_dof(), simulation_rate=120.0)
+    sim.export_model(tmp_path / "built")
+    built = json.loads((tmp_path / "built" / "schema.json").read_text())["simulation"]
+    # Elodin keeps the step in whole nanoseconds, so 120 Hz is not exactly 1/120 s.
+    assert built["time_step_s"] == float(sim.get_state("simulation_time_step")) == 0.008333333
+
+    sim.set_state("simulation_time_step", "Globals", jnp.asarray(0.02))
+    sim.export_model(tmp_path / "changed")
+    changed = json.loads((tmp_path / "changed" / "schema.json").read_text())["simulation"]
+    assert changed["time_step_s"] == 0.02
+
+
 def test_print_dictionary_single_entity(capsys):
     sim = bodies(1).to_jax(el.six_dof(), simulation_rate=100.0)
     sim.print_dictionary()
@@ -131,17 +170,96 @@ def test_export_model_writes_step_state_and_schema(tmp_path):
     components = json.loads((tmp_path / "schema.json").read_text())["components"]
     assert [c["name"] for c in components] == [name for _, _, name in sim.map]
     pos = next(c for c in components if c["name"] == "world_pos")
-    assert pos == {
-        "name": "world_pos",
-        "dtype": "float64",
-        "shape": [2, 7],
-        "entities": ["b0", "b1"],
-        "entity_ids": [sim.entity_dict["b0"], sim.entity_dict["b1"]],
+    assert pos["name"] == "world_pos"
+    assert pos["dtype"] == "float64"
+    assert pos["shape"] == [2, 7]
+    assert pos["element_shape"] == [7]
+    assert pos["entity_axis"] == "leading"
+    assert pos["entities"] == ["b0", "b1"]
+    assert pos["entity_ids"] == [sim.entity_dict["b0"], sim.entity_dict["b1"]]
+    assert pos["rows"] == 2
+    assert pos["row_bytes"] == 7 * 8
+    assert pos["size"] == 2 * 7 * 8
+    assert pos["written_by_step"]
+    assert pos["metadata"]["element_names"] == "q0,q1,q2,q3,x,y,z"
+    schema = json.loads((tmp_path / "schema.json").read_text())
+    assert schema["format"] == "elodin.model"
+    assert schema["abi_version"] == 1
+    assert schema["endianness"] == "little"
+    assert schema["simulation"] == {
+        "time_step_s": 0.01,
+        "tick_component": None,
+        "time_step_component": "simulation_time_step",
     }
+    assert "target" not in schema
+    assert schema["interfaces"] == []
     state = b"".join(np.asarray(value).tobytes() for value in sim.state)
     assert (tmp_path / "state.bin").read_bytes() == state
     assert "func.func public @main" in (tmp_path / "step.stablehlo.mlir").read_text()
     assert (tmp_path / "step.o").stat().st_size > 0
+    manifest = json.loads((tmp_path / "model-manifest.json").read_text())
+    assert manifest["format"] == "elodin.model-export"
+    assert manifest["target"]["cpu"] == "native"
+    assert set(manifest["files"]) == {
+        "step.stablehlo.mlir",
+        "step.o",
+        "state.bin",
+        "schema.json",
+    }
+
+
+def test_world_export_model_writes_named_data_interfaces(tmp_path):
+    world = el.World()
+    entities = [
+        world.spawn(
+            el.Body(
+                world_pos=el.SpatialTransform(linear=jnp.array([float(i), 0.0, 10.0])),
+                world_vel=el.SpatialMotion(linear=jnp.array([0.0, 0.0, 1.0])),
+            ),
+            name=f"b{i}",
+        )
+        for i in range(2)
+    ]
+    exchange = world.prepare_batch(
+        {
+            "position": world.prepare_component("world_pos", entities),
+            "command": world.prepare_component("world_vel", entities, access="write"),
+        }
+    )
+    sim = world.export_model(
+        el.six_dof(),
+        tmp_path,
+        simulation_rate=100.0,
+        workers=1,
+        interfaces={"vehicle.exchange": exchange},
+        cpu="generic",
+    )
+    schema = json.loads((tmp_path / "schema.json").read_text())
+    assert sim.simulation_rate == 100.0
+    manifest = json.loads((tmp_path / "model-manifest.json").read_text())
+    assert manifest["target"]["cpu"] == "generic"
+    assert schema["interfaces"] == [
+        {
+            "name": "vehicle.exchange",
+            "rows": 2,
+            "fields": [
+                {
+                    "name": "position",
+                    "component": "world_pos",
+                    "access": "read",
+                    "entity_ids": [sim.entity_dict["b0"], sim.entity_dict["b1"]],
+                    "row_bytes": 56,
+                },
+                {
+                    "name": "command",
+                    "component": "world_vel",
+                    "access": "write",
+                    "entity_ids": [sim.entity_dict["b0"], sim.entity_dict["b1"]],
+                    "row_bytes": 48,
+                },
+            ],
+        }
+    ]
 
 
 def test_workers_trace_maps_in_chunks_and_export_records_them(tmp_path):

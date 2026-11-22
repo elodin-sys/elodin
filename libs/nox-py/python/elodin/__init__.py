@@ -860,9 +860,16 @@ class World(WorldBuilder):
     ) -> jaxsim.JaxSim:
         """With `workers`, systems trace as `World.run(workers=...)` runs them on the Cranelift
         backend, so the step reproduces its bits; `export_model` compiles for that count."""
-        obj, ins, outs, state, dictionary, entity_dict, component_entity_dict = super().to_jax_func(
-            system, simulation_rate, default_playback_speed, max_ticks, workers
-        )
+        (
+            obj,
+            ins,
+            outs,
+            state,
+            dictionary,
+            entity_dict,
+            component_entity_dict,
+            component_metadata_dict,
+        ) = super().to_jax_func(system, simulation_rate, default_playback_speed, max_ticks, workers)
         return jaxsim.JaxSim(
             obj,
             ins,
@@ -872,4 +879,28 @@ class World(WorldBuilder):
             entity_dict,
             component_entity_dict,
             workers=workers or 1,
+            simulation_rate=simulation_rate,
+            component_metadata=component_metadata_dict,
         )
+
+    def export_model(
+        self,
+        system: System,
+        path: str | os.PathLike,
+        simulation_rate: float = 120.0,
+        default_playback_speed: float = 1.0,
+        max_ticks: Optional[int] = None,
+        workers: Optional[int] = None,
+        interfaces: Optional[dict[str, BatchHandle]] = None,
+        cpu: str = "native",
+    ) -> jaxsim.JaxSim:
+        """Build and export a passive native model; the caller owns its schedule and I/O."""
+        sim = self.to_jax(
+            system,
+            simulation_rate=simulation_rate,
+            default_playback_speed=default_playback_speed,
+            max_ticks=max_ticks,
+            workers=workers,
+        )
+        sim.export_model(path, interfaces=interfaces, cpu=cpu)
+        return sim

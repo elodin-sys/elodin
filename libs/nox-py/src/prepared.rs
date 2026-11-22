@@ -71,6 +71,18 @@ impl ComponentHandle {
     fn rows(&self) -> Vec<EntityId> {
         self.entities.clone()
     }
+
+    /// Entity ids in prepared-row order, for native model-interface manifests.
+    #[getter]
+    fn entity_ids(&self) -> Vec<u64> {
+        self.entities.iter().map(|entity| entity.inner.0).collect()
+    }
+
+    /// Bytes in one prepared row.
+    #[getter]
+    fn row_bytes(&self) -> usize {
+        self.row_bytes
+    }
 }
 
 pub(crate) fn numpy_dtype(prim_type: PrimType) -> &'static str {

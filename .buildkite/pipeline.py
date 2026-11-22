@@ -248,6 +248,11 @@ python3 examples/many-agents/benchmark.py --sizes 2 --modes runtime,local,lockst
                 command="bash examples/many-agents-cpp/run.sh",
             ),
             nix_step(
+                label=":c: passive model ABI",
+                flake=".#run",
+                command="bash scripts/ci/elodin_model_abi.sh",
+            ),
+            nix_step(
                 label=":python: frames",
                 flake=".#run",
                 command="python3 examples/frames/main.py",

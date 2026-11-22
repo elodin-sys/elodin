@@ -1,0 +1,91 @@
+{
+  "format": "elodin.model",
+  "abi_version": 1,
+  "endianness": "little",
+  "workers": 2,
+  "simulation": {
+    "time_step_s": 0.25,
+    "tick_component": "tick",
+    "time_step_component": "simulation_time_step"
+  },
+  "components": [
+    {
+      "name": "tick",
+      "dtype": "uint64",
+      "shape": [],
+      "element_shape": [],
+      "entity_axis": "none",
+      "entities": ["house"],
+      "entity_ids": [0],
+      "rows": 1,
+      "row_bytes": 8,
+      "size": 8,
+      "written_by_step": true,
+      "metadata": {}
+    },
+    {
+      "name": "temperature",
+      "dtype": "float64",
+      "shape": [2],
+      "element_shape": [],
+      "entity_axis": "leading",
+      "entities": ["room_0", "room_1"],
+      "entity_ids": [1, 2],
+      "rows": 2,
+      "row_bytes": 8,
+      "size": 16,
+      "written_by_step": true,
+      "metadata": {"element_names": "temperature"}
+    },
+    {
+      "name": "ambient",
+      "dtype": "float64",
+      "shape": [2],
+      "element_shape": [],
+      "entity_axis": "leading",
+      "entities": ["room_0", "room_1"],
+      "entity_ids": [1, 2],
+      "rows": 2,
+      "row_bytes": 8,
+      "size": 16,
+      "written_by_step": false,
+      "metadata": {"external_control": "true"}
+    },
+    {
+      "name": "simulation_time_step",
+      "dtype": "float64",
+      "shape": [],
+      "element_shape": [],
+      "entity_axis": "none",
+      "entities": ["house"],
+      "entity_ids": [0],
+      "rows": 1,
+      "row_bytes": 8,
+      "size": 8,
+      "written_by_step": false,
+      "metadata": {}
+    }
+  ],
+  "interfaces": [
+    {
+      "name": "rooms.exchange",
+      "rows": 2,
+      "fields": [
+        {
+          "name": "measured",
+          "component": "temperature",
+          "access": "read",
+          "entity_ids": [2, 1],
+          "row_bytes": 8
+        },
+        {
+          "name": "command",
+          "component": "ambient",
+          "access": "write",
+          "entity_ids": [1, 2],
+          "row_bytes": 8
+        }
+      ]
+    }
+  ]
+}

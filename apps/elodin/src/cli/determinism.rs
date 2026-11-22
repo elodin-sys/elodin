@@ -13,6 +13,16 @@ pub struct Args {
 
 #[derive(Subcommand, Clone)]
 enum Command {
+    /// Validate a witness and print its schema, labels, trailer and tick inventory.
+    Inspect {
+        trace: PathBuf,
+        /// Print the complete inspection as JSON.
+        #[arg(long)]
+        json: bool,
+        /// Write the validated witness schema to this path.
+        #[arg(long)]
+        schema: Option<PathBuf>,
+    },
     /// Report the first tick, stage, hook, record, entity and byte where two witnesses differ.
     /// Exits 1 at a mismatch.
     Compare {
@@ -46,6 +56,19 @@ impl Cli {
             "from elodin.determinism import main; raise SystemExit(main())",
         ]);
         match args.command {
+            Command::Inspect {
+                trace,
+                json,
+                schema,
+            } => {
+                command.arg("inspect").arg(trace);
+                if json {
+                    command.arg("--json");
+                }
+                if let Some(schema) = schema {
+                    command.arg("--schema").arg(schema);
+                }
+            }
             Command::Compare {
                 left,
                 right,
