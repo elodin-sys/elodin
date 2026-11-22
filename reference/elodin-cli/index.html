@@ -555,6 +555,10 @@
                             <ul>
                                 
                                 <li>
+                                    <a href="/reference/elodin-cli/#elodin-determinism-inspect">elodin determinism inspect</a>
+                                </li>
+                                
+                                <li>
                                     <a href="/reference/elodin-cli/#elodin-determinism-compare">elodin determinism compare</a>
                                 </li>
                                 
@@ -1284,6 +1288,12 @@ such as an unreadable file or witnesses with different schemas.</p>
 check a program outside Elodin against an Elodin run; see
 <a href="/reference/cpp-runtime#prove-it-matches">Custom C++ Runtimes</a>.</p>
 <p><strong>Usage:</strong> <code>elodin determinism &lt;COMMAND&gt;</code></p>
+<h3 id="elodin-determinism-inspect"><code>elodin determinism inspect</code></h3>
+<p><strong>Usage:</strong> <code>elodin determinism inspect [--json] [--schema &lt;PATH&gt;] &lt;TRACE&gt;</code></p>
+<p>Validates the witness, including its schema digest, tick digests and root, then prints its tick
+and raw-byte inventory. <code>--json</code> prints the complete header, labels, schema, trailer and counts.
+<code>--schema</code> writes the validated schema alone, so another program can reproduce the record
+layout without a private reader.</p>
 <h3 id="elodin-determinism-compare"><code>elodin determinism compare</code></h3>
 <p><strong>Usage:</strong> <code>elodin determinism compare [--stop-at-first] &lt;LEFT&gt; &lt;RIGHT&gt;</code></p>
 <p>Compares two witness files tick by tick and prints the first mismatch: the

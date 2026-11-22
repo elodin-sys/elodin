@@ -1093,6 +1093,15 @@ and running the simulation. The <code>World</code> object also provides helper m
 </ul>
 </li>
 <li>
+<p><code>export_model(system, path, simulation_rate=120.0, default_playback_speed=1.0, max_ticks=None, workers=None, interfaces=None, cpu="native")</code> -&gt; <a href="/reference/python-api/#class-elodin-jaxsim-jaxsim">elodin.jaxsim.JaxSim</a></p>
+<p>Build and export a passive synchronous model, then return its <code>JaxSim</code>. The native caller owns invocation order, logical- and wall-time policy, files, I/O, hooks, and processes.</p>
+<ul>
+<li><code>interfaces</code> : <code>dict[str, elodin.BatchHandle] | None</code>, optional named row views. Each field keeps its batch alias, component, entity order, row size, and <code>read</code> or <code>write</code> access. Interfaces describe data only; they do not prescribe callbacks or hook order.</li>
+<li><code>cpu</code> : <code>"native"</code> enables this CPU's features in <code>step.o</code>; <code>"generic"</code> uses the baseline of this machine's architecture. For a machine with another OS or architecture, compile the step there with <code>package.py --cpu</code>.</li>
+<li>Other arguments are as for <code>to_jax</code>.</li>
+</ul>
+</li>
+<li>
 <p><code>prepare_component(name, entities, access="read")</code> -&gt; <code>elodin.ComponentHandle</code></p>
 <p>Resolve once the rows of component <code>name</code> for <code>entities</code>, in that order, for <a href="/reference/python-api/#pre-commit-hooks">pre-commit hooks</a>. <code>access="write"</code> lets hooks write them; building the world fails if a system also writes the component. Spawning afterwards invalidates the handle.</p>
 </li>
@@ -1157,15 +1166,16 @@ and running the simulation. The <code>World</code> object also provides helper m
 <p><code>step(max_steps)</code> -&gt; None, <code>get_state(component_name=None, entity_name=None)</code>, <code>set_state(component_name, entity_name, value)</code> -&gt; None : the same on <code>state</code>, in place.</p>
 </li>
 <li>
-<p><code>export_model(path)</code> -&gt; None</p>
-<p>Write one tick, for a program to run without Python. See <a href="/reference/cpp-runtime">Custom C++ Runtimes</a>.</p>
+<p><code>export_model(path, interfaces=None, cpu="native")</code> -&gt; None</p>
+<p>Write one passive state transition for a caller-owned C or C++ runtime. See <a href="/reference/cpp-runtime">Custom C++ Runtimes</a>.</p>
 <table><thead><tr><th>File</th><th>Contents</th></tr></thead><tbody>
 <tr><td><code>step.stablehlo.mlir</code></td><td><code>step_fn</code> as StableHLO, from every component's value to its next value</td></tr>
-<tr><td><code>step.o</code></td><td>The same tick compiled ahead of time by the Cranelift backend for this machine, defining <code>elodin_model_kernel_step</code>; with <code>workers</code> above <code>1</code>, its independent calls run on the loader's worker threads</td></tr>
+<tr><td><code>step.o</code></td><td>The same tick compiled ahead of time by the Cranelift backend for <code>cpu</code>, defining <code>elodin_model_kernel_step</code>; with <code>workers</code> above <code>1</code>, its independent calls run on the loader's worker threads</td></tr>
 <tr><td><code>state.bin</code></td><td><code>state</code> as raw little-endian bytes, in state order</td></tr>
-<tr><td><code>schema.json</code></td><td><code>workers</code>, and for each component in state order its <code>name</code>, <code>dtype</code>, <code>shape</code>, and the <code>entities</code> and <code>entity_ids</code> of its rows</td></tr>
+<tr><td><code>schema.json</code></td><td>The versioned layout of the model: its time step and tick, typed components with their entity rows, and optional named interfaces</td></tr>
+<tr><td><code>model-manifest.json</code></td><td>The target <code>step.o</code> was compiled for, and the SHA-256 and size of each file</td></tr>
 </tbody></table>
-<p><code>libs/elodin-model/package.py</code> builds a shared library with a C header and a CMake package from the directory.</p>
+<p>Model schema ABI 1 records the nominal time step, the tick and time-step components, the export workers, and each component's dtype, shape, row bytes, metadata and <code>written_by_step</code>, which is true for every system output and for the tick. The nominal time step is the <code>simulation_time_step</code> the state holds, which Elodin keeps in whole nanoseconds: 0.008333333 s at 120 Hz. <code>libs/elodin-model/package.py</code> produces static and shared CMake targets, C and C++ headers, provenance, and a runtime SBOM, and with <code>--cpu</code> compiles <code>step.o</code> again on the machine that packages.</p>
 </li>
 </ul>
 <h3 id="monte-carlo-campaign-api">Monte Carlo Campaign API</h3>
@@ -1441,7 +1451,7 @@ are returned so the same simulation still runs normally.</p>
 <p>Load <code>symbol</code>, and <code>{symbol}_init</code> and <code>{symbol}_destroy</code> if present, from the library at <code>path</code>. Each tick calls <code>symbol</code> once per worker, concurrently, each on a contiguous share of <code>input</code>'s rows. <code>input</code> is an <code>elodin.BatchHandle</code>.</p>
 </li>
 </ul>
-<p>The library exports C functions over these types, ABI version 1:</p>
+<p>The library exports C functions over these types, ABI version 1, which <a rel="external" href="https://github.com/elodin-sys/elodin/blob/main/libs/elodin-model/include/elodin_step_hook.h"><code>elodin_step_hook.h</code></a> declares:</p>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="c"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">#</span><span style="color: light-dark(#859900, #859900);">include</span><span style="color: light-dark(#2AA198, #2AA198);"> &lt;</span><span style="color: light-dark(#2AA198, #2AA198);">stdint.h</span><span style="color: light-dark(#2AA198, #2AA198);">&gt;</span></span>
 <span class="giallo-l"></span>
 <span class="giallo-l"><span style="color: light-dark(#859900, #859900);">typedef</span><span style="color: light-dark(#586E75, #93A1A1);font-weight: bold;"> struct</span><span> {</span></span>
