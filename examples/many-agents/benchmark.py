@@ -7,7 +7,9 @@ import argparse
 import json
 import os
 import platform
+import random
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -34,6 +36,22 @@ PHASES = (
 MODES = ("runtime", "local", "lockstep", "lockstep-history")
 # Receipt counters of the history mode's reads and deferred writes.
 COUNTERS = ("history_queries", "history_misses", "deferred_rows")
+
+
+def free_ports(count: int, kind: int = socket.SOCK_STREAM) -> int:
+    """A port P with P up to P + count - 1 free on localhost, for TCP or `socket.SOCK_DGRAM`. A DB
+    takes three TCP ports in a row, for itself and its asset and gRPC servers, and the agents two
+    UDP ports each. The ports are below every OS's ephemeral range, which macOS hands out in
+    order, starting next to the last one."""
+    while True:
+        port = random.randrange(20000, 32000)
+        try:
+            for offset in range(count):
+                with socket.socket(type=kind) as probe:
+                    probe.bind(("127.0.0.1", port + offset))
+        except OSError:
+            continue
+        return port
 
 
 def csv_values(value: str) -> list[str]:
@@ -174,7 +192,7 @@ def run_case(
             "ELODIN_MANY_AGENT_RESULT_JSON": str(result_path),
             "ELODIN_MANY_AGENT_CONTROLLER_BIN": str(CONTROLLER_BINARY),
             "ELODIN_MANY_AGENT_HOOK_LIB": str(HOOK_LIBRARY),
-            "ELODIN_MANY_AGENT_PORT_BASE": str(13000 + repeat * 256),
+            "ELODIN_MANY_AGENT_PORT_BASE": str(free_ports(2 * size, socket.SOCK_DGRAM)),
             "ELODIN_SIM_WARMUP_TICKS": str(args.warmup_ticks),
             "ELODIN_SIM_SUMMARY_JSON": str(summary_path),
             "ELODIN_MANY_AGENT_AUX_COMPONENTS": str(args.aux_components),

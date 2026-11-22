@@ -3,14 +3,13 @@ completion race with its causal-token fix."""
 
 import json
 import os
-import random
 import socket
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
-from benchmark import HOOK_LIBRARY
+from benchmark import HOOK_LIBRARY, free_ports
 
 EXAMPLE = Path(__file__).resolve().parents[1]
 FAULT = {"ELODIN_MANY_AGENT_FAULT_TICK": "300", "ELODIN_MANY_AGENT_FAULT_AGENT": "1"}
@@ -22,20 +21,6 @@ def built():
         subprocess.run([sys.executable, str(EXAMPLE / crate / "build.py")], check=True)
 
 
-def free_port() -> int:
-    """A free port P with P + 1 and P + 2 free for the DB's asset and gRPC servers. It is below
-    every OS's ephemeral range, which macOS hands out in order, starting next to the last one."""
-    while True:
-        port = random.randrange(20000, 32000)
-        try:
-            for offset in range(3):
-                with socket.socket() as probe:
-                    probe.bind(("127.0.0.1", port + offset))
-        except OSError:
-            continue
-        return port
-
-
 def env(path: Path, **extra: str) -> dict[str, str]:
     return {
         **os.environ,
@@ -43,7 +28,7 @@ def env(path: Path, **extra: str) -> dict[str, str]:
         "ELODIN_MANY_AGENT_AGENTS": "2",
         "ELODIN_MANY_AGENT_MAX_TICKS": "600",
         "ELODIN_MANY_AGENT_REALTIME": "0",
-        "ELODIN_MANY_AGENT_PORT_BASE": "17000",
+        "ELODIN_MANY_AGENT_PORT_BASE": str(free_ports(4, socket.SOCK_DGRAM)),
         "ELODIN_DB_PATH": str(path / "db"),
         "ELODIN_SIM_SUMMARY_JSON": str(path / "summary.json"),
         "ELODIN_MANY_AGENT_RESULT_JSON": str(path / "result.json"),
@@ -56,7 +41,7 @@ def run(tmp_path: Path, name: str, **extra: str) -> dict:
     """Runs the example; returns the receipt's witness section and the final-state digest."""
     path = tmp_path / name
     path.mkdir()
-    address = f"127.0.0.1:{free_port()}"
+    address = f"127.0.0.1:{free_ports(3)}"
     process = subprocess.run(
         ["elodin", "run", str(EXAMPLE / "main.py"), "--addr", address],
         env=env(path, **extra),
