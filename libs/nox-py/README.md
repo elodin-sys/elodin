@@ -732,15 +732,15 @@ class ElodinEnv(gym.Env):
 `sim.export_model(path)` writes one passive, synchronous simulation step with its initial state,
 versioned schema and build manifest. `World.export_model` can also retain named prepared batches
 as caller-facing row interfaces. `libs/elodin-model/package.py` turns that directory into static
-and shared CMake targets with C and header-only C++ APIs, which a customer-owned class steps
-without Python:
+and shared CMake targets with C and header-only C++ APIs, which a class of the caller's own
+steps without Python:
 ```python
 sim = world.to_jax(system, simulation_rate=120.0)
 sim.export_model("build/model")
 ```
 The library does not own a loop, wall clock, files, callbacks, hooks or processes. A caller can
 open once, reset and write new case inputs repeatedly in the same process, then invoke one model
-transition whenever its own orchestration contract requires it.
+transition whenever its own schedule calls for it.
 With `world.to_jax(..., workers=8)`, the systems trace as `World.run(workers=8)` runs them, so
 the exported step reproduces that run bit for bit, and runs its independent calls on worker
 threads. See [examples/ball-cpp](../../examples/ball-cpp) for the whole workflow and

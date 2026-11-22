@@ -15,7 +15,7 @@ class decides when each call happens:
 ```cpp
 #include "elodin_model.hpp"
 
-class Interceptors {
+class Agents {
 public:
     // Many cases run in one process: reset, then write this case's inputs.
     void begin_case(const std::vector<double>& positions)
@@ -166,9 +166,7 @@ The caller decides where that call belongs. `elodin_model_step` never invokes it
 
 `elodin determinism inspect --json TRACE` validates a witness and prints its schema, labels,
 trailer, and exact-byte inventory; `--schema PATH` extracts the validated schema for an outside
-runtime. [WITNESS_C_API.md](WITNESS_C_API.md) defines the planned caller-driven C writer/reader.
-It remains separate from model stepping so a customer orchestrator chooses its own evidence
-stages and external channels.
+runtime.
 
 ## Constraints
 

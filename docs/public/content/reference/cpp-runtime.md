@@ -197,7 +197,7 @@ Every function's name starts with `elodin_model_`, left out of this table, and t
 ```cpp
 #include "elodin_model.hpp"
 
-class Interceptors {
+class Agents {
 public:
     // Many cases run in one process: reset, then write this case's inputs.
     void begin_case(const std::vector<double>& positions)
