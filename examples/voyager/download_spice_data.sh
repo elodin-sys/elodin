@@ -16,3 +16,16 @@ curl -fL https://naif.jpl.nasa.gov/pub/naif/VOYAGER/kernels/spk/Voyager_1.a54206
     -o ./nasa_spice_data/Voyager_1.a54206u_V0.2_merged.bsp
 curl -fL https://naif.jpl.nasa.gov/pub/naif/VOYAGER/kernels/spk/Voyager_2.m05016u.merged.bsp \
     -o ./nasa_spice_data/Voyager_2.m05016u.merged.bsp
+
+if [[ "${1:-}" == "--validation" ]]; then
+    curl -fL https://naif.jpl.nasa.gov/pub/naif/generic_kernels/pck/pck00011.tpc \
+        -o ./nasa_spice_data/pck00011.tpc
+    for kernel in jup365.bsp sat441.bsp; do
+        curl -fL "https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/satellites/$kernel" \
+            -o "./nasa_spice_data/$kernel"
+    done
+    for kernel in vgr2_jup230.bsp vgr1_sat337.bsp vgr2_sat337.bsp; do
+        curl -fL "https://naif.jpl.nasa.gov/pub/naif/VOYAGER/kernels/spk/$kernel" \
+            -o "./nasa_spice_data/$kernel"
+    done
+fi

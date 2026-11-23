@@ -122,3 +122,17 @@ python chapter2.py run
 
 The remaining error against SPICE, about 1 km, comes from the model
 (only the Sun and Jupiter), not the integration.
+
+## Flyby validation
+
+From `examples/voyager`:
+
+```bash
+bash download_spice_data.sh --validation
+uv run --no-project --with numpy --with scipy --with spiceypy python validation/compare.py v1_jupiter
+```
+
+Other cases are `v2_jupiter`, `v1_saturn`, `v2_saturn`, and `v1_cruise`.
+These checks use a standalone Python integrator. The cruise correction
+is estimated from SPICE, so the result measures agreement with that reference.
+Set `VOYAGER_SPICE_DIR` to reuse downloaded kernels (about 2 GB).
