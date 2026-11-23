@@ -123,16 +123,20 @@ python chapter2.py run
 The remaining error against SPICE, about 1 km, comes from the model
 (only the Sun and Jupiter), not the integration.
 
-## Flyby validation
+## Jupiter flyby check
+
+Compare point-mass Jupiter, Jupiter with its four Galilean moons, and
+the same model with Jupiter's J2 term. For each probe, the script starts
+from SPICE 8 and 3 days before closest approach and reports position
+and velocity error at closest approach and 3 days later.
 
 From `examples/voyager`:
 
 ```bash
 bash download_spice_data.sh --validation
-uv run --no-project --with numpy --with scipy --with spiceypy python validation/compare.py v1_jupiter
+uv run --no-project --with numpy --with scipy --with spiceypy python validate_jupiter.py
 ```
 
-Other cases are `v2_jupiter`, `v1_saturn`, `v2_saturn`, and `v1_cruise`.
-These checks use a standalone Python integrator. The cruise correction
-is estimated from SPICE, so the result measures agreement with that reference.
-Set `VOYAGER_SPICE_DIR` to reuse downloaded kernels (about 2 GB).
+The script uses SciPy for the integration. Add `--max-step 150` to check
+step sensitivity. Set `VOYAGER_SPICE_DIR` to reuse downloaded kernels
+(about 1.3 GB).
