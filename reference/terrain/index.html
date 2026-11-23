@@ -621,14 +621,19 @@ terrain-provider requests while retaining access to the DB and its assets.</p>
 <a rel="external" href="https://github.com/elodin-sys/elodin/tree/main/apps/elodin-web">browser editor README</a>
 for deployment and database URL configuration.</p>
 <h2 id="startup-and-outages">Startup and outages</h2>
-<p>When <code>elodin editor</code> launches a simulation with streamed terrain, the simulation
-stays at t=0 until the initial terrain is ready. Loading has no interactive
-deadline. If Cesium reports an error, the editor disables streamed terrain,
-restores the schematic's fallback scenery, and starts the simulation. Reload the
-schematic to retry.</p>
-<p>Live connections are never paused. Automated fixed-view captures remain strict:
-<code>ELODIN_CESIUM_CAPTURE_TIMEOUT</code> bounds terrain loading, and an error or timeout
-exits without writing a terrain screenshot.</p>
+<ul>
+<li>No terrain loading screen. The editor stays interactive while tiles load.</li>
+<li>Available tiles render after decoding and GPU upload; missing detail streams
+in the background. Hybrid mode preserves prepared detail during provider outages.</li>
+<li>Provider errors stay in the logs, without an error window. They do not remove available terrain or stop replay.
+Reload the schematic to restart a failed source.</li>
+<li>Simulations launched by <code>elodin editor</code> stay at t=0 until initial terrain is
+ready or fails, protecting recorded sensor output. The editor remains usable.</li>
+<li>Live connections are never paused.</li>
+<li>Automated fixed-view captures wait for complete terrain.
+<code>ELODIN_CESIUM_CAPTURE_TIMEOUT</code> bounds the wait; errors and timeouts exit
+without writing a terrain screenshot.</li>
+</ul>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="python"><span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> elodin</span><span style="color: light-dark(#859900, #859900);"> as</span><span> el</span></span>
 <span class="giallo-l"><span style="color: light-dark(#859900, #859900);">import</span><span> elodin</span><span>.</span><span>ui</span><span style="color: light-dark(#859900, #859900);"> as</span><span> ui</span></span>
 <span class="giallo-l"></span>
