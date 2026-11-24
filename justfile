@@ -181,11 +181,15 @@ install target="all":
   esac
 
 # Serve the wasm editor locally (Trunk, wasm-dev). Requires `nix develop`.
-# Some agent shells set NO_COLOR=1; Trunk 0.21 treats that as --no-color=1 and exits.
+# Some agent shells set NO_COLOR=1; Trunk 0.21 treats that as --no-color=1 and exits, so drop it.
 # `db_url` is the asset server (`tcp_port + 1`), written into `<meta name="elodin-web-db">`.
 # An omitted argument keeps a pre-set `ELODIN_WEB_DB`.
 web db_url="":
-  if [ -n "{{db_url}}" ]; then export ELODIN_WEB_DB="{{db_url}}"; fi; TRUNK_COLOR=never trunk serve --config apps/elodin-web/Trunk.toml --cargo-profile wasm-dev
+  if [ -n "{{db_url}}" ]; then export ELODIN_WEB_DB="{{db_url}}"; fi; env -u NO_COLOR TRUNK_COLOR=never trunk serve --config apps/elodin-web/Trunk.toml --cargo-profile wasm-dev
+
+# Same as `web`, serving the screenshot button page.
+web-screenshot db_url="":
+  if [ -n "{{db_url}}" ]; then export ELODIN_WEB_DB="{{db_url}}"; fi; env -u NO_COLOR TRUNK_COLOR=never trunk serve screenshot.html --config apps/elodin-web/Trunk.toml --cargo-profile wasm-dev
 
 # Build the wasm editor into apps/elodin-web/dist. Same `db_url` as `just web`.
 web-release db_url="":
