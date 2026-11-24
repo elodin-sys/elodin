@@ -1,8 +1,11 @@
-//! `globalThis.elodin.captureScreenshot()` resolves to a PNG `Blob` of the editor window.
+//! `globalThis.elodin.captureScreenshot()` resolves to a PNG `Blob` of the editor window,
+//! or rejects with an `Error` when readback or encoding fails.
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use bevy::prelude::*;
 use bevy::render::view::window::screenshot::{Screenshot, ScreenshotCaptured};
@@ -11,6 +14,10 @@ use js_sys::{Function, Promise};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
+
+/// Readback normally finishes within a few frames. After this, the screenshot
+/// entity is still sitting there with no [`ScreenshotCaptured`].
+const READBACK_TIMEOUT_SECS: f32 = 5.0;
 
 pub struct WebScreenshotPlugin;
 
@@ -21,8 +28,16 @@ impl Plugin for WebScreenshotPlugin {
     }
 }
 
+struct Inflight {
+    reject: Function,
+    settled: Arc<AtomicBool>,
+    entity: Entity,
+    deadline: f32,
+}
+
 struct Bridge {
     queue: Rc<RefCell<VecDeque<(Function, Function)>>>,
+    inflight: RefCell<Option<Inflight>>,
     _capture: Closure<dyn FnMut() -> Promise>,
 }
 
@@ -40,6 +55,7 @@ fn install(world: &mut World) {
     }
     world.insert_non_send(Bridge {
         queue,
+        inflight: RefCell::new(None),
         _capture: capture,
     });
 }
@@ -63,19 +79,99 @@ fn dispatch(
     mut commands: Commands,
     bridge: NonSend<Bridge>,
     windows: Query<(), With<PrimaryWindow>>,
+    screenshots: Query<(), With<Screenshot>>,
+    time: Res<Time>,
 ) {
+    // One primary-window capture at a time. Bevy despawns a second screenshot of
+    // the same target without `ScreenshotCaptured`, and a skipped readback never
+    // emits that event. Either way the popped promise has to reject.
+    if !ready_for_capture(&mut commands, &bridge, &screenshots, &time) {
+        return;
+    }
     if windows.is_empty() {
         return;
     }
-    // Bevy drops a second screenshot of the same window spawned in one frame.
     let Some((resolve, reject)) = bridge.queue.borrow_mut().pop_front() else {
         return;
     };
-    commands.spawn(Screenshot::primary_window()).observe(
-        move |captured: On<ScreenshotCaptured>| {
-            deliver(&captured.image, resolve.clone(), reject.clone());
-        },
-    );
+    let settled = Arc::new(AtomicBool::new(false));
+    let mut screenshot = commands.spawn(Screenshot::primary_window());
+    let entity = screenshot.id();
+    let on_capture = Arc::clone(&settled);
+    let reject_capture = reject.clone();
+    screenshot.observe(move |captured: On<ScreenshotCaptured>| {
+        if on_capture.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        deliver(&captured.image, resolve.clone(), reject_capture.clone());
+    });
+    let on_remove = Arc::clone(&settled);
+    let reject_remove = reject.clone();
+    screenshot.observe(move |_remove: On<Remove, Screenshot>| {
+        reject_lost(&reject_remove, &on_remove);
+    });
+    *bridge.inflight.borrow_mut() = Some(Inflight {
+        reject,
+        settled,
+        entity,
+        deadline: time.elapsed_secs() + READBACK_TIMEOUT_SECS,
+    });
+}
+
+/// Settles a finished or lost capture. `true` when another capture may start.
+fn ready_for_capture(
+    commands: &mut Commands,
+    bridge: &Bridge,
+    screenshots: &Query<(), With<Screenshot>>,
+    time: &Time,
+) -> bool {
+    enum Hold {
+        Idle,
+        Wait,
+        Done,
+        Lost { despawn: bool },
+    }
+    let hold = {
+        let inflight = bridge.inflight.borrow();
+        match inflight.as_ref() {
+            None => Hold::Idle,
+            Some(capture) if capture.settled.load(Ordering::Acquire) => Hold::Done,
+            Some(capture) => {
+                let alive = screenshots.contains(capture.entity);
+                let timed_out = time.elapsed_secs() >= capture.deadline;
+                if alive && !timed_out {
+                    Hold::Wait
+                } else {
+                    Hold::Lost { despawn: alive }
+                }
+            }
+        }
+    };
+    match hold {
+        Hold::Idle => true,
+        Hold::Wait => false,
+        Hold::Done => {
+            bridge.inflight.borrow_mut().take();
+            true
+        }
+        Hold::Lost { despawn } => {
+            if let Some(capture) = bridge.inflight.borrow_mut().take() {
+                if despawn {
+                    commands.entity(capture.entity).try_despawn();
+                }
+                reject_lost(&capture.reject, &capture.settled);
+            }
+            true
+        }
+    }
+}
+
+fn reject_lost(reject: &Function, settled: &AtomicBool) {
+    if settled.swap(true, Ordering::AcqRel) {
+        return;
+    }
+    warn!("screenshot readback lost");
+    reject_with(reject, "screenshot readback lost");
 }
 
 fn deliver(image: &Image, resolve: Function, reject: Function) {
