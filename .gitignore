@@ -63,3 +63,4 @@ assets/terrains/*
 
 # Compiled native libraries (macOS/Linux)
 *.dylib
+.local/

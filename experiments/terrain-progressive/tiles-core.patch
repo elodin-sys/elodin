@@ -1,0 +1,328 @@
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -107,6 +107,8 @@
+     pub pending: u32,
+     pub load_failed: bool,
+     pub error: Option<&'static str>,
++    /// Desired detail is loaded and ready for selection, including render feedback.
++    pub selection_complete: bool,
+ }
+ #[derive(Default, Debug)]
+ pub struct Statistics {
+@@ -136,6 +138,9 @@
+     retry_after: HashMap<usize, f64>,
+     elapsed: f64,
+     resident: HashMap<usize, (usize, u64)>,
++    render_ready: Option<HashSet<u64>>,
++    /// The host has prepared a separate backdrop that covers missing regions.
++    pub partial_coverage: bool,
+     tile_credits: HashMap<usize, Vec<String>>,
+     clock: u64,
+     root_pending: bool,
+@@ -190,6 +195,8 @@
+             retry_after: HashMap::new(),
+             elapsed: 0.0,
+             resident: HashMap::new(),
++            render_ready: None,
++            partial_coverage: false,
+             tile_credits: HashMap::new(),
+             clock: 0,
+             root_pending: true,
+@@ -206,6 +213,11 @@
+             None,
+         )
+     }
++    /// Render feedback lets each subtree keep its covering parent until its children are prepared.
++    pub fn set_render_ready(&mut self, tiles: impl IntoIterator<Item = u64>) {
++        self.render_ready = Some(tiles.into_iter().collect());
++    }
++
+     pub fn update(&mut self, views: &[View], seconds: f32) -> Result<Frame> {
+         if !seconds.is_finite()
+             || seconds < 0.
+@@ -325,12 +337,7 @@
+         }
+         // Prepared reads take priority. Reserve a slot for them even while
+         // provider requests hang, including on later camera movements.
+-        wanted.sort_by_key(|id| {
+-            self.nodes[*id]
+-                .url
+-                .as_ref()
+-                .is_some_and(|url| self.client.requires_provider(url))
+-        });
++        self.prioritize_requests(&mut wanted, views);
+         let mut provider_pending = self
+             .pending
+             .iter()
+@@ -341,6 +348,7 @@
+                     .is_some_and(|url| self.client.requires_provider(url))
+             })
+             .count();
++        let detail_ready = wanted.is_empty();
+         for id in wanted {
+             if self.pending.len() >= 4 {
+                 break;
+@@ -394,6 +402,8 @@
+         self.stats.resident_bytes = bytes;
+         frame.pending = self.pending.len() as u32 + u32::from(self.root_pending);
+         frame.load_failed = self.root_failed || !self.failed.is_empty();
++        frame.selection_complete =
++            detail_ready && frame.pending == 0 && !frame.load_failed && !frame.visible.is_empty();
+         let mut credits = HashMap::<&str, usize>::new();
+         for id in &frame.visible {
+             if let Some(items) = self.tile_credits.get(&(*id as usize)) {
+@@ -407,8 +417,85 @@
+         frame
+             .credits
+             .extend(credits.into_iter().map(|(c, _)| html_escape(c)));
++        #[cfg(target_arch = "wasm32")]
++        self.trace_frame(&frame);
+         Ok(frame)
+     }
++
++    #[cfg(target_arch = "wasm32")]
++    fn trace_frame(&self, frame: &Frame) {
++        use wasm_bindgen::{JsCast, JsValue};
++        let Some(window) = web_sys::window() else {
++            return;
++        };
++        let Ok(value) = js_sys::Reflect::get(&window, &JsValue::from_str("__elodinTerrainFrames"))
++        else {
++            return;
++        };
++        let Ok(entries) = value.dyn_into::<js_sys::Array>() else {
++            return;
++        };
++        if entries.length() >= 6000 {
++            return;
++        }
++        let row = js_sys::Array::new();
++        for value in [
++            js_sys::Date::now(),
++            frame.visible.len() as f64,
++            frame.pending as f64,
++            self.resident.len() as f64,
++            self.render_ready.as_ref().map_or(0, |tiles| tiles.len()) as f64,
++            u8::from(self.partial_coverage) as f64,
++            u8::from(frame.selection_complete) as f64,
++            self.stats.decoded_tiles as f64,
++            self.stats.requests as f64,
++        ] {
++            row.push(&JsValue::from_f64(value));
++        }
++        entries.push(&row);
++    }
++    fn prioritize_requests(&self, wanted: &mut [usize], views: &[View]) {
++        let priority = |id: usize| {
++            let node = &self.nodes[id];
++            let distance = views
++                .iter()
++                .filter(|view| node.screen_error(view).is_some())
++                .map(|view| {
++                    let offset = node.center - DVec3::from_array(view.position);
++                    let center_distance = offset.length();
++                    (
++                        (center_distance - node.radius).max(0.0),
++                        1.0 - offset
++                            .normalize_or_zero()
++                            .dot(DVec3::from_array(view.direction).normalize())
++                            .clamp(-1.0, 1.0),
++                        center_distance,
++                    )
++                })
++                .min_by(|a, b| {
++                    a.0.total_cmp(&b.0)
++                        .then(a.1.total_cmp(&b.1))
++                        .then(a.2.total_cmp(&b.2))
++                })
++                .unwrap_or((f64::INFINITY, f64::INFINITY, f64::INFINITY));
++            let provider = node
++                .url
++                .as_ref()
++                .is_some_and(|url| self.client.requires_provider(url));
++            (provider, distance)
++        };
++        let mut ranked: Vec<_> = wanted.iter().map(|&id| (id, priority(id))).collect();
++        ranked.sort_by(|(_, (ap, a)), (_, (bp, b))| {
++            ap.cmp(bp)
++                .then(a.0.total_cmp(&b.0))
++                .then(a.1.total_cmp(&b.1))
++                .then(a.2.total_cmp(&b.2))
++        });
++        for (target, (id, _)) in wanted.iter_mut().zip(ranked) {
++            *target = id;
++        }
++    }
++
+     fn select(
+         &self,
+         id: usize,
+@@ -432,7 +519,16 @@
+             .fold(None, |s: Option<f64>, e| Some(s.unwrap_or(0.).max(e)));
+         let Some(error) = score else { return true };
+         let has = n.url.is_some();
+-        let ready = self.resident.contains_key(&id);
++        let loaded = self.resident.contains_key(&id);
++        let ready = loaded
++            && self
++                .render_ready
++                .as_ref()
++                .is_none_or(|tiles| tiles.contains(&(id as u64)));
++        // Keep decoded tiles alive while the renderer prepares them.
++        if loaded && !ready {
++            required.insert(id);
++        }
+         let request_start = wanted.len();
+         if !n.children.is_empty() && (!has || error > self.maximum_screen_error) {
+             let before = visible.len();
+@@ -452,6 +548,9 @@
+             if all_ready && (!prepared_only || visible.len() > before || !has) {
+                 return true;
+             }
++            if self.partial_coverage && visible.len() > before {
++                return false;
++            }
+             if ready {
+                 // Keep ready descendants while this fallback covers siblings
+                 // still loading; evicting them here causes repeated downloads.
+--- a/src/tests.rs
++++ b/src/tests.rs
+@@ -211,6 +211,8 @@
+         retry_after: HashMap::new(),
+         elapsed: 0.0,
+         resident: HashMap::new(),
++        render_ready: None,
++        partial_coverage: false,
+         tile_credits: HashMap::new(),
+         clock: 0,
+         root_pending: false,
+@@ -220,6 +222,129 @@
+         maximum_screen_error: 16.,
+         cache_bytes: 1024,
+     }
++}
++
++#[test]
++fn requests_load_nearest_bounds_first_and_reorder_when_the_camera_moves() {
++    let mut s = session();
++    s.nodes = (0..3).map(|_| node()).collect();
++    s.nodes[0].center.z = -100.;
++    s.nodes[1].center.z = 0.;
++    s.nodes[2].center.z = -30.;
++    s.nodes[2].radius = 49.;
++    let mut wanted = vec![0, 1, 2];
++    s.prioritize_requests(&mut wanted, &[view()]);
++    assert_eq!(wanted, vec![2, 1, 0]);
++
++    let mut reverse = view();
++    reverse.position[2] = -120.;
++    reverse.direction[2] = 1.;
++    s.prioritize_requests(&mut wanted, &[reverse]);
++    assert_eq!(wanted, vec![0, 2, 1]);
++}
++
++#[test]
++fn equal_distance_requests_prefer_screen_center_and_keep_stable_ties() {
++    let mut s = session();
++    s.nodes = (0..3).map(|_| node()).collect();
++    s.nodes[0].center = DVec3::new(12., 0., 4.);
++    let mut wanted = vec![0, 2, 1];
++    let mut wide = view();
++    wide.horizontal_fov = 2.;
++    assert!(s.nodes[0].screen_error(&wide).is_some());
++    s.prioritize_requests(&mut wanted, &[wide]);
++    assert_eq!(wanted, vec![2, 1, 0]);
++}
++
++#[test]
++fn backdrop_allows_a_ready_child_before_its_sibling_without_overlapping_the_parent() {
++    let mut s = session();
++    s.nodes = (0..4).map(|_| node()).collect();
++    s.nodes[0].children = vec![1];
++    s.nodes[1].children = vec![2, 3];
++    for id in 0..4 {
++        s.resident.insert(id, (16, 0));
++    }
++    s.set_render_ready([0, 1, 2]);
++    assert_eq!(s.update(&[view()], 0.).unwrap().visible, vec![1]);
++
++    s.partial_coverage = true;
++    let frame = s.update(&[view()], 0.).unwrap();
++    assert_eq!(frame.visible, vec![2]);
++    assert!(!frame.selection_complete);
++    assert_eq!(s.stats.requests, 0);
++
++    s.partial_coverage = false;
++    assert_eq!(s.update(&[view()], 0.).unwrap().visible, vec![1]);
++    s.partial_coverage = true;
++    s.set_render_ready(0..4);
++    let frame = s.update(&[view()], 0.).unwrap();
++    assert_eq!(frame.visible, vec![2, 3]);
++    assert!(frame.selection_complete);
++}
++
++#[test]
++fn independent_regions_refine_without_waiting_for_unprepared_siblings() {
++    let mut s = session();
++    s.nodes = (0..7).map(|_| node()).collect();
++    s.nodes[0].url = None;
++    s.nodes[0].children = vec![1, 4];
++    s.nodes[1].children = vec![2, 3];
++    s.nodes[4].children = vec![5, 6];
++    for id in 1..7 {
++        s.resident.insert(id, (16, 0));
++    }
++    s.cache_bytes = 0;
++    s.set_render_ready([1, 2, 3, 4, 5]);
++
++    let frame = s.update(&[view()], 0.).unwrap();
++    assert_eq!(frame.visible, vec![2, 3, 4]);
++    assert!(!frame.selection_complete);
++    assert_eq!(frame.pending, 0);
++    assert_eq!(s.stats.requests, 0);
++    assert!(s.resident.contains_key(&6));
++
++    s.set_render_ready(1..7);
++    let frame = s.update(&[view()], 0.).unwrap();
++    assert_eq!(frame.visible, vec![2, 3, 5, 6]);
++    assert!(frame.selection_complete);
++    assert_eq!(s.stats.requests, 0);
++}
++
++#[test]
++fn covering_parent_stays_until_all_its_children_are_prepared() {
++    let mut s = session();
++    s.nodes = (0..3).map(|_| node()).collect();
++    s.nodes[0].children = vec![1, 2];
++    for id in 0..3 {
++        s.resident.insert(id, (16, 0));
++    }
++    s.set_render_ready([0, 1]);
++    let frame = s.update(&[view()], 0.).unwrap();
++    assert_eq!(frame.visible, vec![0]);
++    assert!(!frame.selection_complete);
++
++    s.set_render_ready([0, 1, 2]);
++    let frame = s.update(&[view()], 0.).unwrap();
++    assert_eq!(frame.visible, vec![1, 2]);
++    assert!(frame.selection_complete);
++}
++
++#[test]
++fn cpu_completion_does_not_certify_render_completion_or_restart_a_download() {
++    let mut s = session();
++    s.resident.insert(0, (16, 0));
++    s.set_render_ready([]);
++    let frame = s.update(&[view()], 0.).unwrap();
++    assert!(frame.visible.is_empty());
++    assert!(!frame.selection_complete);
++    assert_eq!(frame.pending, 0);
++    assert_eq!(s.stats.requests, 0);
++
++    s.set_render_ready([0]);
++    let frame = s.update(&[view()], 0.).unwrap();
++    assert_eq!(frame.visible, vec![0]);
++    assert!(frame.selection_complete);
+ }
+ #[test]
+ fn prepared_tiles_progress_while_provider_slots_are_busy() {
