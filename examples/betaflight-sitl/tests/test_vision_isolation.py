@@ -7,7 +7,7 @@ import pytest
 from controls import GuidanceUpdate
 
 _EXAMPLE = Path(__file__).resolve().parents[1]
-_VISION_MODULES = ("vision.py", "gate_detector.py")
+_VISION_MODULES = ("vision.py", "gate_detector.py", "navigation.py")
 _FORBIDDEN_FOR_VISION = {
     "course",
     "referee",
@@ -18,7 +18,11 @@ _FORBIDDEN_FOR_VISION = {
     "synthetic_vision",
     "replay",
 }
-_SYNTHETIC_IMPORTERS = {"synthetic_vision.py", "evaluate_detector.py"}
+_SYNTHETIC_IMPORTERS = {
+    "synthetic_vision.py",
+    "evaluate_detector.py",
+    "nav_trajectory.py",
+}
 _TRUTH_FIELDS = {
     "world_pos",
     "world_vel",

@@ -2,7 +2,7 @@
 
 **Document status:** Authoritative living specification  
 **Last verified against repository:** 2026-11-02 (F headless qualification PASS; prior G1 qualification preserved)
-**Current resume point:** E1, G1, F and H are complete. I is ready; L's truth-mode CI work may proceed, while vision qualification still waits for J/K.
+**Current resume point:** E1, G1, F, H and I are complete. J is next. L's truth-mode CI work may proceed, while vision qualification still waits for J/K.
 
 ## 1. Purpose and authority
 
@@ -1816,7 +1816,7 @@ main `95f53257` (after F) on 2026-11-06:**
 - `evaluate_detector.py` may import `synthetic_vision`. `gate_detector.py` and
   `replay.py` may not.
 
-### [ ] I — Gate navigator, offline
+### [x] I — Gate navigator, offline
 
 **Objective:** Produce a stable vehicle-motion and gate-relative target estimate
 through depth noise, outliers, and short close-range detector loss.
@@ -1878,6 +1878,39 @@ produces no NaNs or unbounded values under any fixture.
 
 **Handoff:** Record state definition, noise assumptions, staleness limits, final
 parameters, replay metrics if available, and all test commands.
+
+**Verification (2026-11-18):**
+
+- `navigation.py` is the complementary attitude filter plus the 12-state Joseph
+  filter `[p, v, b, g]` in frame L. A scalar filter estimates gate yaw. The
+  navigator consumes IMU, barometer, magnetometer, `GateCandidate` values,
+  `on_pad`, and `next_gate_index`. It does not import pixels, truth, or
+  `synthetic_vision`.
+- Vision updates observe `g − p` at `GateCandidate.sample_time`, using the 0.5 s
+  ring of `(t, p, R_LB)`. Samples outside that ring are dropped and counted.
+  Association uses the predicted-gate covariance and accepts `d² < 16.3`.
+- Final noise, retuned on the seeded synthetic fixtures (the Section 7.10
+  starting values were not consistent): bearing σ `0.08°` (was `0.3°`); depth
+  σ `0.012 · (range / 4 m)²`, floored at `0.01 m` and capped at `8 m`. At 10 m
+  that is about 7 cm along the line of sight, which matches 0.7 px PnP
+  residuals. `vision_noise_scale` stays 1. Attitude gains stay `1/30` and
+  `1/5 s⁻¹`. Barometer σ `0.1 m`. Zero-velocity σ `0.02 m/s`, applied only
+  while the caller sets `on_pad`.
+- Lifecycle is unchanged from the brief: 3 hits within 0.5 s confirm; freshness
+  0.25 s then COASTING; coast limit 2.5 s then LOST; 10 rejected in-view frames
+  reset; range under 2 m or outside the 40°/25° field does not count. The
+  passed flag is the estimated gate plane behind the vehicle.
+- `pytest examples/betaflight-sitl/tests/test_navigation.py` — 13 passed,
+  including the computed χ² 95% intervals for NIS and for relative NEES.
+  `test_vision_isolation.py` — 7 passed, with `navigation.py` on the vision
+  list and `nav_trajectory.py` allowed to import `synthetic_vision`.
+- Full `pytest examples/betaflight-sitl/tests -q`: 530 passed. Three course
+  tests and `test_c1_contracts.py` / `test_schematic.py` still fail collection
+  because the installed native `elodin.ui` has no `MapOverlay`. That is the
+  host binding, not the navigator. Guidance-cadence tests stayed green.
+- `evaluate_navigator.py` with no bundle exits 0 and prints that acceptance is
+  the synthetic suite. This host still faults the E hold and `nix develop`
+  does not open, so no fresh `RACE_RECORD` bundle was scored.
 
 ### [ ] J — Vision-guided single-gate hold
 
@@ -2046,19 +2079,19 @@ branch for later resumption.
 | G | Complete | `vision.py` owns intrinsics, corner order, the camera-to-body helper, and NumPy planar PnP. Positive tilt is nose-up and is registered as negative renderer pitch. `corner_order_ambiguous` flags labellings within 10°. `synthetic_vision.py` is the only truth-projection path. 222 pure tests pass, including centered, translated, yawed, and ranged round trips. |
 | G1 | Complete; integrated | GitHub-only base `8742b411`, source `30d2c307`; fresh matching artifacts, 270 Python tests, 754 editor tests, 5 controller tests, 17 s10 tests and eight first-attempt ordinary live gates PASS. Integrated in the current main base; see G1 brief for historical evidence/guard/framing caveats; strict alignment historical FAIL/deferred/non-gating. |
 | H | Complete | `gate_detector.py`, `replay.py`, and `evaluate_detector.py`. Pure suite passes, including synthetic 45/45 detection and the 10-frame recorded fixture. OpenCV is confined to `gate_detector.py` and added to the `.#run` shell. |
-| I | Ready | G and G1 are integrated and qualified; the navigator can proceed in parallel with H. |
-| J | Blocked by H, I | E1's shared mission controller is complete; detector, navigator, and vision guidance remain. |
+| I | Complete | `navigation.py`, synthetic χ² NIS/NEES suite, and `evaluate_navigator.py`. 13 navigator tests and the vision-isolation extension pass. No replay bundle on this host; see the I brief. |
+| J | Ready | H and I are complete. E1's mission controller is in place; vision guidance remains. |
 | K | Blocked by J | F is qualified; no vision race |
 | L | Truth CI ready; vision work waits for K | No race CI or final release cleanup |
 
 ### Resume point
 
-Packages E1, G1, F and H are complete. G1's historical
+Packages E1, G1, F, H and I are complete. G1's historical
 ordinary-operation qualification on `g1-clean` source `30d2c307` is preserved
 above; F's current powered-touchdown qualification is recorded in its brief.
-I is ready with the accepted approximate-alignment contract and can consume H's
-detector and `RACE_RECORD` bundles. L may add truth-mode CI; vision work still
-depends on I/J/K.
+I's navigator is offline-only and can score H's `RACE_RECORD` bundles through
+`evaluate_navigator.py`. J is next. L may add truth-mode CI; vision qualification
+still depends on J/K.
 
 - **E1, mission controller extraction:** the initial 2026-10-23 qualification
   preserved exact original-controller replay and three passing E holds (details
