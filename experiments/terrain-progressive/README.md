@@ -76,6 +76,29 @@ Texture resolution, decoding, shader compilation, and the unused-cache budget
 also remain unchanged. Active tiles and render preparation still use memory
 outside the unused-cache budget.
 
+## Delivery and coverage-first experiment
+
+The default remains closest-first. Add `terrain_order=coverage` to the browser
+page URL to request visible tiles in shallow-to-deep order, with the existing
+distance score within each depth. This gives broad coarse terrain priority
+over nearby fine detail. It preserves the covering-parent and prepared-backdrop
+rules. A caller that owns a `tiles_core::Session` can set `coverage_first`
+directly. Neither ordering changes the number of jobs in flight.
+
+For prepared package files, the browser transport uses the optional host
+function `window.__elodinFetchPackage(Request)`. The host returns a standard
+`Response`, with the requested file's bytes and status. This allows authenticated
+batch delivery and verified local caching without changing package URLs in the
+recording. The normal browser fetch remains the default when no host supplies
+the function. Provider requests always bypass this hook. Existing redirect,
+timeout, body-size, offline, and provider-origin restrictions remain in place.
+
+Concurrent first provider misses share one in-flight credential and root
+bootstrap. Concurrent refreshes also share it; a late failure from an older
+grant reuses the newer grant instead of refreshing again. A failed bootstrap
+clears the in-flight state so a later request can retry. Offline packages never
+start provider authorization.
+
 ## Patch layout
 
 The terrain dependency remains pinned to `bevy-cesium` at

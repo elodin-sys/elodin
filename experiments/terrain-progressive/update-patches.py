@@ -9,7 +9,11 @@ base = Path(sys.argv[1])
 edited = Path(".local/terrain-progressive/bevy-cesium")
 output = Path("experiments/terrain-progressive")
 groups = {
-    "tiles-core": ["crates/tiles-core/src/lib.rs", "crates/tiles-core/src/tests.rs"],
+    "tiles-core": [
+        "crates/tiles-core/src/lib.rs",
+        "crates/tiles-core/src/tests.rs",
+        "crates/tiles-core/src/transport/web.rs",
+    ],
     "bevy-cesium": [
         "src/render/contract.rs",
         "src/browser.rs",
@@ -30,4 +34,4 @@ for package, files in groups.items():
                 tofile=f"b/{relative}",
             )
         )
-    (output / f"{package}.patch").write_text("".join(chunks))
+    (output / f"{package}.patch").write_text("".join(chunks).replace("\n \n", "\n\n"))

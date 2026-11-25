@@ -9,26 +9,29 @@
  }
  #[derive(Default, Debug)]
  pub struct Statistics {
-@@ -136,6 +138,9 @@
+@@ -136,6 +138,11 @@
      retry_after: HashMap<usize, f64>,
      elapsed: f64,
      resident: HashMap<usize, (usize, u64)>,
 +    render_ready: Option<HashSet<u64>>,
 +    /// The host has prepared a separate backdrop that covers missing regions.
 +    pub partial_coverage: bool,
++    /// Load broad, shallow coverage before nearby fine detail.
++    pub coverage_first: bool,
      tile_credits: HashMap<usize, Vec<String>>,
      clock: u64,
      root_pending: bool,
-@@ -190,6 +195,8 @@
+@@ -190,6 +197,9 @@
              retry_after: HashMap::new(),
              elapsed: 0.0,
              resident: HashMap::new(),
 +            render_ready: None,
 +            partial_coverage: false,
++            coverage_first: coverage_first_requested(),
              tile_credits: HashMap::new(),
              clock: 0,
              root_pending: true,
-@@ -206,6 +213,11 @@
+@@ -206,6 +216,11 @@
              None,
          )
      }
@@ -40,7 +43,7 @@
      pub fn update(&mut self, views: &[View], seconds: f32) -> Result<Frame> {
          if !seconds.is_finite()
              || seconds < 0.
-@@ -325,12 +337,7 @@
+@@ -325,12 +340,7 @@
          }
          // Prepared reads take priority. Reserve a slot for them even while
          // provider requests hang, including on later camera movements.
@@ -54,7 +57,7 @@
          let mut provider_pending = self
              .pending
              .iter()
-@@ -341,6 +348,7 @@
+@@ -341,6 +351,7 @@
                      .is_some_and(|url| self.client.requires_provider(url))
              })
              .count();
@@ -62,7 +65,7 @@
          for id in wanted {
              if self.pending.len() >= 4 {
                  break;
-@@ -394,6 +402,8 @@
+@@ -394,6 +405,8 @@
          self.stats.resident_bytes = bytes;
          frame.pending = self.pending.len() as u32 + u32::from(self.root_pending);
          frame.load_failed = self.root_failed || !self.failed.is_empty();
@@ -71,7 +74,7 @@
          let mut credits = HashMap::<&str, usize>::new();
          for id in &frame.visible {
              if let Some(items) = self.tile_credits.get(&(*id as usize)) {
-@@ -407,8 +417,85 @@
+@@ -407,8 +420,90 @@
          frame
              .credits
              .extend(credits.into_iter().map(|(c, _)| html_escape(c)));
@@ -140,11 +143,16 @@
 +                .url
 +                .as_ref()
 +                .is_some_and(|url| self.client.requires_provider(url));
-+            (provider, distance)
++            (
++                if self.coverage_first { node.depth } else { 0 },
++                provider,
++                distance,
++            )
 +        };
 +        let mut ranked: Vec<_> = wanted.iter().map(|&id| (id, priority(id))).collect();
-+        ranked.sort_by(|(_, (ap, a)), (_, (bp, b))| {
-+            ap.cmp(bp)
++        ranked.sort_by(|(_, (ad, ap, a)), (_, (bd, bp, b))| {
++            ad.cmp(bd)
++                .then(ap.cmp(bp))
 +                .then(a.0.total_cmp(&b.0))
 +                .then(a.1.total_cmp(&b.1))
 +                .then(a.2.total_cmp(&b.2))
@@ -157,7 +165,7 @@
      fn select(
          &self,
          id: usize,
-@@ -432,7 +519,16 @@
+@@ -432,7 +527,16 @@
              .fold(None, |s: Option<f64>, e| Some(s.unwrap_or(0.).max(e)));
          let Some(error) = score else { return true };
          let has = n.url.is_some();
@@ -175,7 +183,7 @@
          let request_start = wanted.len();
          if !n.children.is_empty() && (!has || error > self.maximum_screen_error) {
              let before = visible.len();
-@@ -452,6 +548,9 @@
+@@ -452,6 +556,9 @@
              if all_ready && (!prepared_only || visible.len() > before || !has) {
                  return true;
              }
@@ -185,18 +193,48 @@
              if ready {
                  // Keep ready descendants while this fallback covers siblings
                  // still loading; evicting them here causes repeated downloads.
+@@ -472,6 +579,28 @@
+             wanted.push(id);
+         }
+         ready || !has
++    }
++}
++
++fn coverage_first_requested() -> bool {
++    #[cfg(target_arch = "wasm32")]
++    {
++        use js_sys::Reflect;
++        use wasm_bindgen::JsValue;
++        let Some(window) = web_sys::window() else {
++            return false;
++        };
++        let search = Reflect::get(&window, &JsValue::from_str("location"))
++            .and_then(|location| Reflect::get(&location, &JsValue::from_str("search")))
++            .ok()
++            .and_then(|value| value.as_string())
++            .unwrap_or_default();
++        url::form_urlencoded::parse(search.trim_start_matches('?').as_bytes())
++            .any(|(key, value)| key == "terrain_order" && value == "coverage")
++    }
++    #[cfg(not(target_arch = "wasm32"))]
++    {
++        false
+     }
+ }
+
 --- a/src/tests.rs
 +++ b/src/tests.rs
-@@ -211,6 +211,8 @@
+@@ -211,6 +211,9 @@
          retry_after: HashMap::new(),
          elapsed: 0.0,
          resident: HashMap::new(),
 +        render_ready: None,
 +        partial_coverage: false,
++        coverage_first: false,
          tile_credits: HashMap::new(),
          clock: 0,
          root_pending: false,
-@@ -220,6 +222,129 @@
+@@ -220,6 +223,149 @@
          maximum_screen_error: 16.,
          cache_bytes: 1024,
      }
@@ -231,6 +269,26 @@
 +    wide.horizontal_fov = 2.;
 +    assert!(s.nodes[0].screen_error(&wide).is_some());
 +    s.prioritize_requests(&mut wanted, &[wide]);
++    assert_eq!(wanted, vec![2, 1, 0]);
++}
++
++#[test]
++fn coverage_first_loads_shallow_visible_tiles_before_nearby_detail() {
++    let mut s = session();
++    s.nodes = (0..3).map(|_| node()).collect();
++    s.nodes[0].center.z = -100.;
++    s.nodes[0].depth = 4;
++    s.nodes[1].center.z = 0.;
++    s.nodes[1].depth = 8;
++    s.nodes[2].center.z = -30.;
++    s.nodes[2].radius = 49.;
++    s.nodes[2].depth = 4;
++    let mut wanted = vec![1, 0, 2];
++    s.coverage_first = true;
++    s.prioritize_requests(&mut wanted, &[view()]);
++    assert_eq!(wanted, vec![2, 0, 1]);
++    s.coverage_first = false;
++    s.prioritize_requests(&mut wanted, &[view()]);
 +    assert_eq!(wanted, vec![2, 1, 0]);
 +}
 +
@@ -326,3 +384,184 @@
  }
  #[test]
  fn prepared_tiles_progress_while_provider_slots_are_busy() {
+--- a/src/transport/web.rs
++++ b/src/transport/web.rs
+@@ -2,7 +2,10 @@
+ use crate::{Completion, Error, Payload, Result, Tile, content, parse_root};
+ use glam::DMat4;
+ use js_sys::{Reflect, Uint8Array};
+-use std::{cell::RefCell, rc::Rc};
++use std::{
++    cell::{Cell, RefCell},
++    rc::Rc,
++};
+ use std::{collections::HashMap, sync::mpsc::SyncSender};
+ use url::Url;
+ use wasm_bindgen::{JsCast, JsValue};
+@@ -17,6 +20,8 @@
+     Rc<RefCell<Vec<String>>>,
+     Rc<Option<crate::terrain::Imagery>>,
+     Rc<RefCell<Option<crate::package::Package>>>,
++    Rc<RefCell<Option<js_sys::Promise>>>,
++    Rc<Cell<u64>>,
+ );
+
+ impl Loader {
+@@ -46,20 +51,53 @@
+         let Some(manifest_url) = manifest_url else {
+             return Ok(url);
+         };
+-        let bytes = fetch_restricted(&manifest_url, None, true).await?;
++        let bytes = fetch_package(&manifest_url).await?;
+         self.3
+             .borrow_mut()
+             .as_mut()
+             .ok_or(Error("Package unavailable"))?
+             .install(&bytes)
+     }
+-    async fn provider_url(&self, url: &Url, refresh: bool) -> Result<Url> {
++    async fn provider_url(&self, url: &Url, failed_generation: Option<u64>) -> Result<Url> {
++        {
++            let state = self.3.borrow();
++            let package = state.as_ref().ok_or(Error("Package unavailable"))?;
++            if let Some(credentials) = &package.credentials {
++                let authorized = credentials.authorize(url)?;
++                if failed_generation.is_none_or(|generation| generation != self.5.get()) {
++                    return Ok(authorized);
++                }
++            }
++        }
++        let existing = self.4.borrow().clone();
++        let pending = if let Some(pending) = existing {
++            pending
++        } else {
++            let loader = self.clone();
++            let pending = wasm_bindgen_futures::future_to_promise(async move {
++                let result = loader.bootstrap_provider().await;
++                loader.4.borrow_mut().take();
++                result
++                    .map(|()| JsValue::UNDEFINED)
++                    .map_err(|error| JsValue::from_str(error.0))
++            });
++            *self.4.borrow_mut() = Some(pending.clone());
++            pending
++        };
++        JsFuture::from(pending)
++            .await
++            .map_err(|_| Error("Provider bootstrap failed"))?;
++        self.3
++            .borrow()
++            .as_ref()
++            .and_then(|p| p.credentials.as_ref())
++            .ok_or(Error("Provider unavailable"))?
++            .authorize(url)
++    }
++    async fn bootstrap_provider(&self) -> Result<()> {
+         let ion = {
+             let state = self.3.borrow();
+             let package = state.as_ref().ok_or(Error("Package unavailable"))?;
+-            if !refresh && let Some(credentials) = &package.credentials {
+-                return credentials.authorize(url);
+-            }
+             let manifest = package
+                 .manifest
+                 .as_ref()
+@@ -73,14 +111,14 @@
+         crate::package::canonical(&grant.url)?;
+         let bytes = fetch_restricted(&grant.url, None, true).await?;
+         let credentials = crate::package::GoogleSession::from_root(&grant.url, &bytes)?;
+-        let authorized = credentials.authorize(url)?;
+         self.3
+             .borrow_mut()
+             .as_mut()
+             .ok_or(Error("Package unavailable"))?
+             .credentials = Some(credentials);
+         self.1.borrow_mut().extend(grant.credits);
+-        Ok(authorized)
++        self.5.set(self.5.get().wrapping_add(1));
++        Ok(())
+     }
+
+     pub(crate) fn with_imagery(mut self, imagery: Option<crate::terrain::Imagery>) -> Self {
+@@ -90,6 +128,8 @@
+     pub(crate) fn ion(ion: Ion) -> Self {
+         Self(
+             Rc::new(RefCell::new(Some(ion))),
++            Rc::default(),
++            Rc::default(),
+             Rc::default(),
+             Rc::default(),
+             Rc::default(),
+@@ -133,10 +173,10 @@
+         if let Some(request) = request {
+             let remote = match request {
+                 crate::package::Request::Local(local) => {
+-                    return fetch_restricted(&local, None, true).await;
++                    return fetch_package(&local).await;
+                 }
+                 crate::package::Request::Cached { local, remote } => {
+-                    match fetch_restricted(&local, None, true).await {
++                    match fetch_package(&local).await {
+                         Ok(bytes) => return Ok(bytes),
+                         Err(Error("HTTP not found")) => remote,
+                         Err(error) => return Err(error),
+@@ -144,13 +184,14 @@
+                 }
+                 crate::package::Request::Provider(remote) => remote,
+             };
+-            let authorized = self.provider_url(&remote, false).await?;
++            let authorized = self.provider_url(&remote, None).await?;
++            let generation = self.5.get();
+             let result = fetch_restricted(&authorized, None, true).await;
+             if matches!(
+                 result,
+                 Err(Error("HTTP unauthorized" | "HTTP access denied"))
+             ) {
+-                let refreshed = self.provider_url(&remote, true).await?;
++                let refreshed = self.provider_url(&remote, Some(generation)).await?;
+                 return fetch_restricted(&refreshed, None, true).await;
+             } else {
+                 return result;
+@@ -312,7 +353,18 @@
+ async fn fetch_authorized(url: &Url, token: Option<&str>) -> Result<Vec<u8>> {
+     fetch_restricted(url, token, false).await
+ }
++async fn fetch_package(url: &Url) -> Result<Vec<u8>> {
++    fetch_response(url, None, true, true).await
++}
+ async fn fetch_restricted(url: &Url, token: Option<&str>, strict: bool) -> Result<Vec<u8>> {
++    fetch_response(url, token, strict, false).await
++}
++async fn fetch_response(
++    url: &Url,
++    token: Option<&str>,
++    strict: bool,
++    package: bool,
++) -> Result<Vec<u8>> {
+     const MAX: usize = 32 * 1024 * 1024;
+     if !matches!(url.scheme(), "https" | "http") {
+         return Err(Error("Browser sources must use HTTP or HTTPS"));
+@@ -345,7 +397,22 @@
+             .map_err(|_| Error("Invalid access token"))?;
+     }
+     let window = web_sys::window().ok_or(Error("Browser window unavailable"))?;
+-    let response: Response = JsFuture::from(window.fetch_with_request(&request))
++    // Hosts may deliver immutable package files through an authenticated batch/cache transport.
++    // Provider requests never enter this hook or receive the host's session credentials.
++    let hook = Reflect::get(&window, &JsValue::from_str("__elodinFetchPackage"))
++        .ok()
++        .and_then(|value| value.dyn_into::<js_sys::Function>().ok())
++        .filter(|_| package);
++    let promise = if let Some(hook) = hook {
++        js_sys::Promise::resolve(
++            &hook
++                .call1(&window, &request)
++                .map_err(|_| Error("Package transport failed"))?,
++        )
++    } else {
++        window.fetch_with_request(&request)
++    };
++    let response: Response = JsFuture::from(promise)
+         .await
+         .map_err(|_| Error("HTTP request failed (network, CORS or timeout)"))?
+         .dyn_into()
