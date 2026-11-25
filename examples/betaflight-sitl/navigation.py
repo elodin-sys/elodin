@@ -290,7 +290,10 @@ class GateNavigator:
             horizontal = np.array([mag_l[0], mag_l[1], 0.0])
             if float(np.linalg.norm(horizontal)) > 1e-9:
                 yaw_error = math.atan2(-horizontal[0], horizontal[1])
-                corrected[2] -= self.params.mag_gain * yaw_error
+                # The error is about local up. Express it in the body frame so a
+                # banked vehicle is not pitched or rolled by the heading correction.
+                yaw_rate_l = np.array([0.0, 0.0, -self.params.mag_gain * yaw_error])
+                corrected = corrected + _rotation_body_from_local(self._q) @ yaw_rate_l
         self._q = _integrate_quaternion(self._q, corrected, self.params.step_s)
 
     def _predict(self) -> None:
@@ -397,14 +400,12 @@ class GateNavigator:
             chosen = min(
                 usable, key=lambda item: item[0].pose.range_m if item[0].pose else math.inf
             )
-            self._initialize_gate(chosen)
+            self._initialize_gate(chosen, sim_time)
             return
         best: tuple[GateCandidate, np.ndarray, np.ndarray, np.ndarray, float] | None = None
         best_d2 = math.inf
-        for candidate, _measured, covariance, sample_position, relative in usable:
-            residual, measurement = self._relative_measurement(
-                candidate.sample_time, sample_position, relative
-            )
+        for candidate, _measured, covariance, _sample_position, relative in usable:
+            residual, measurement = self._relative_measurement(candidate.sample_time, relative)
             innovation = measurement @ self._P @ measurement.T + covariance
             try:
                 solved = np.linalg.solve(innovation, residual)
@@ -453,24 +454,21 @@ class GateNavigator:
         return candidate, measured, covariance, position, relative
 
     def _relative_measurement(
-        self, sample_time: float, sample_position: np.ndarray, relative: np.ndarray
+        self, sample_time: float, relative: np.ndarray
     ) -> tuple[np.ndarray, np.ndarray]:
-        """PnP observes ``g - p`` at the image time, not an absolute gate position.
+        """PnP observes ``g - p`` at the image time.
 
-        The ring buffer supplies the pose that produced the candidate. The
-        measurement matrix accounts for the position change since that pose.
+        Position at exposure is the current state rewound by the delay. The
+        residual uses that same rewind, so the position and velocity gains match
+        the innovation.
         """
 
         delay = max(0.0, self._history[-1][0] - float(sample_time)) if self._history else 0.0
         measurement = np.zeros((3, _STATE))
-        # Rewind position with the current velocity so a late frame still observes g - p(sample).
         measurement[:, 0:3] = -np.eye(3)
         measurement[:, 3:6] = delay * np.eye(3)
         measurement[:, 9:12] = np.eye(3)
-        residual = relative - measurement @ self._x
-        rewound = self._x[0:3] - self._x[3:6] * delay
-        # The buffer is the pose that was current at the exposure, including updates since.
-        return residual + (sample_position - rewound), measurement
+        return relative - measurement @ self._x, measurement
 
     def _pose_at(self, sample_time: float) -> tuple[float, np.ndarray, np.ndarray] | None:
         if not self._history or not math.isfinite(sample_time):
@@ -482,7 +480,9 @@ class GateNavigator:
         return min(self._history, key=lambda item: abs(item[0] - sample_time))
 
     def _initialize_gate(
-        self, located: tuple[GateCandidate, np.ndarray, np.ndarray, np.ndarray]
+        self,
+        located: tuple[GateCandidate, np.ndarray, np.ndarray, np.ndarray, np.ndarray],
+        sim_time: float,
     ) -> None:
         candidate, measured, covariance, _sample_position, _relative = located
         self._x[9:12] = measured
@@ -492,9 +492,12 @@ class GateNavigator:
         self._P[9:12, 0:3] = self._P[0:3, 0:3]
         self._P[0:3, 9:12] = self._P[0:3, 0:3]
         self._track = TrackCode.TENTATIVE
-        self._last_update = candidate.sample_time
+        # Age from when the update is applied. The image time can be up to the
+        # buffer length earlier, which would mark a new track as already coasting.
+        self._last_update = sim_time
+        self._last_nis = 0.0
         self._rejection_streak = 0
-        self._hit_times = [candidate.sample_time]
+        self._hit_times = [sim_time]
         self._update_yaw(candidate)
         self._passed = False
 
@@ -550,6 +553,7 @@ class GateNavigator:
         self._P[9:12, 9:12] = 25.0 * np.eye(3)
         self._track = TrackCode.EMPTY
         self._last_update = None
+        self._last_nis = 0.0
         self._rejection_streak = 0
         self._hit_times.clear()
         self._passed = False
