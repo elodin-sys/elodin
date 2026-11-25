@@ -586,6 +586,7 @@ impl WidgetSystem for TimelineSlider<'_> {
             if target_timestamp <= earliest_timestamp.0 {
                 tick_origin.request_rebase();
             }
+            impeller_bevy::cancel_queued_series_requests(world);
         }
     }
 }
