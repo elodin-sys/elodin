@@ -578,8 +578,8 @@ east and north in degrees; <code>max_error</code> is the target geometric error 
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> run</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-offline</span><span style="color: light-dark(#2AA198, #2AA198);"> sim.py</span></span>
 <span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">elodin</span><span style="color: light-dark(#2AA198, #2AA198);"> editor</span><span style="color: light-dark(#CB4B16, #CB4B16);"> -</span><span style="color: light-dark(#CB4B16, #CB4B16);">-offline</span><span style="color: light-dark(#2AA198, #2AA198);"> sim.py</span></span></code></pre>
 <p>The first command runs without the editor; the second opens it. Recorded sensor
-cameras wait for initial terrain loading before emitting images; their frames remain
-asynchronous. Preparation does not add simulation lockstep.</p>
+cameras emit asynchronously while terrain streams into the scene. Preparation does
+not add simulation lockstep.</p>
 <p>After validation, version the package with the simulation:</p>
 <pre class="giallo" style="color-scheme: light dark; color: light-dark(#657B83, #839496); background-color: light-dark(#FDF6E3, #002B36);"><code data-lang="shellscript"><span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">git</span><span style="color: light-dark(#2AA198, #2AA198);"> lfs</span><span style="color: light-dark(#2AA198, #2AA198);"> track</span><span style="color: light-dark(#2AA198, #2AA198);"> &quot;</span><span style="color: light-dark(#2AA198, #2AA198);">assets/terrain/**</span><span style="color: light-dark(#2AA198, #2AA198);">&quot;</span></span>
 <span class="giallo-l"><span style="color: light-dark(#268BD2, #268BD2);">git</span><span style="color: light-dark(#2AA198, #2AA198);"> add</span><span style="color: light-dark(#2AA198, #2AA198);"> .gitattributes</span><span style="color: light-dark(#2AA198, #2AA198);"> assets/terrain</span></span>
@@ -627,9 +627,8 @@ for deployment and database URL configuration.</p>
 in the background. Hybrid mode preserves prepared detail during provider outages.</li>
 <li>Provider errors stay in the logs, without an error window. They do not remove available terrain or stop replay.
 Reload the schematic to restart a failed source.</li>
-<li>Simulations launched by <code>elodin editor</code> stay at t=0 until initial terrain is
-ready or fails, protecting recorded sensor output. The editor remains usable.</li>
-<li>Live connections are never paused.</li>
+<li>Simulations, replay, live connections, and normal sensor cameras never wait
+for terrain. Early frames can contain coarse or missing scenery.</li>
 <li>Automated fixed-view captures wait for complete terrain.
 <code>ELODIN_CESIUM_CAPTURE_TIMEOUT</code> bounds the wait; errors and timeouts exit
 without writing a terrain screenshot.</li>
