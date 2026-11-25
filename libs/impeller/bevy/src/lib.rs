@@ -995,6 +995,7 @@ pub fn series_store_backfill_candidates(
 #[allow(clippy::too_many_arguments)]
 pub fn backfill_cache(
     schema_reg: bevy::prelude::Res<ComponentSchemaRegistry>,
+    last_updated: Res<LastUpdated>,
     msg_request_handlers: bevy::prelude::Res<MsgRequestIdHandlers>,
     mut backfill: ResMut<BackfillState>,
     priority: bevy::prelude::Res<SeriesFetchPriority>,
@@ -1022,6 +1023,9 @@ pub fn backfill_cache(
     if msg_request_handlers.len() >= BACKFILL_MAX_CONCURRENT {
         return;
     }
+    if last_updated.0 == Timestamp(i64::MIN) {
+        return;
+    }
     let mut dispatched = 0usize;
     let available = BACKFILL_MAX_CONCURRENT - msg_request_handlers.len();
 
@@ -1043,7 +1047,12 @@ pub fn backfill_cache(
         load_state.components_started = backfill.requested.len();
         // Always stream from the series start so jump-to-beginning / early
         // windows become usable as soon as the first pages arrive.
-        send_backfill_page(&mut commands, component_id, Timestamp(i64::MIN));
+        send_backfill_page(
+            &mut commands,
+            component_id,
+            Timestamp(i64::MIN),
+            last_updated.0,
+        );
         dispatched += 1;
     }
 }
@@ -1055,15 +1064,27 @@ pub fn backfill_cache(
 /// the previous `last_ts + 1`, chaining these spans leaves no unvouched seam —
 /// otherwise frame stepping would stall at every chunk boundary for sparse
 /// series (see [`TelemetryCache::next_sample_after`]).
-fn backfill_page_coverage(page_start: Timestamp, last_ts: Timestamp) -> (Timestamp, Timestamp) {
-    (page_start, Timestamp(last_ts.0.saturating_add(1)))
+/// A completed finite query also proves its empty tail, including an empty series.
+fn backfill_page_coverage(
+    page_start: Timestamp,
+    last_ts: Timestamp,
+    query_end: Timestamp,
+    complete: bool,
+) -> (Timestamp, Timestamp) {
+    let through = if complete { query_end } else { last_ts };
+    (page_start, Timestamp(through.0.saturating_add(1)))
 }
 
-fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start: Timestamp) {
+fn send_backfill_page(
+    commands: &mut Commands,
+    component_id: ComponentId,
+    start: Timestamp,
+    end: Timestamp,
+) {
     let page_start = start;
     let msg = GetTimeSeries {
         id: PacketId::default(),
-        range: start..Timestamp(i64::MAX),
+        range: start..end,
         component_id,
         limit: Some(BACKFILL_CHUNK_SIZE),
     };
@@ -1098,6 +1119,7 @@ fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start:
             let elem_size = schema.size();
             let count = timestamps.len();
             let mut last_ts = start;
+            let mut decoded = 0;
 
             for (i, &timestamp) in timestamps.iter().enumerate() {
                 let offset = i * elem_size;
@@ -1113,12 +1135,15 @@ fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start:
                     let value = ComponentValue::from_view(view);
                     cache.insert(component_id, timestamp, value);
                     last_ts = timestamp;
+                    decoded += 1;
                 }
             }
 
-            if count > 0 {
-                let (cover_start, cover_end) = backfill_page_coverage(page_start, last_ts);
-                cache.mark_covered(component_id, cover_start, cover_end);
+            let complete = count < BACKFILL_CHUNK_SIZE || last_ts >= end;
+            if decoded == count && (count > 0 || complete) {
+                let (cover_start, cover_end) =
+                    backfill_page_coverage(page_start, last_ts, end, complete);
+                cache.mark_page_covered(component_id, cover_start, cover_end, timestamps);
                 load_state.samples_loaded = load_state.samples_loaded.saturating_add(count as u64);
             }
 
@@ -1128,9 +1153,9 @@ fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start:
                 return true;
             }
 
-            if count >= BACKFILL_CHUNK_SIZE {
+            if !complete {
                 // Continue from the beginning forward — usable incrementally.
-                send_backfill_page(&mut cmds, component_id, Timestamp(last_ts.0 + 1));
+                send_backfill_page(&mut cmds, component_id, Timestamp(last_ts.0 + 1), end);
             } else {
                 backfill.complete.insert(component_id);
                 load_state.components_complete = backfill.complete.len();
@@ -3144,7 +3169,8 @@ mod series_store_allowlist_tests {
         for micros in [0i64, 1000, 2000] {
             sample(&mut cache, id, micros);
         }
-        let (start, end) = backfill_page_coverage(Timestamp(i64::MIN), Timestamp(2000));
+        let (start, end) =
+            backfill_page_coverage(Timestamp(i64::MIN), Timestamp(2000), Timestamp(5000), false);
         cache.mark_covered(id, start, end);
 
         // Page 2: requested from the previous page's last_ts + 1 (2001), even
@@ -3152,7 +3178,8 @@ mod series_store_allowlist_tests {
         for micros in [3000i64, 4000] {
             sample(&mut cache, id, micros);
         }
-        let (start, end) = backfill_page_coverage(Timestamp(2001), Timestamp(4000));
+        let (start, end) =
+            backfill_page_coverage(Timestamp(2001), Timestamp(4000), Timestamp(5000), false);
         cache.mark_covered(id, start, end);
 
         // Stepping crosses the page boundary: 2000 (end of page 1) -> 3000
@@ -3169,6 +3196,32 @@ mod series_store_allowlist_tests {
         assert_eq!(
             cache.next_sample_after(&id, Timestamp(3000)),
             Some(Timestamp(4000))
+        );
+    }
+
+    #[test]
+    fn completed_backfill_proves_empty_tails_only_through_its_query_end() {
+        let id = ComponentId(1);
+        let mut cache = TelemetryCache::default();
+        let (start, end) = backfill_page_coverage(
+            Timestamp(i64::MIN),
+            Timestamp(0),
+            Timestamp(500_000_000),
+            true,
+        );
+        cache.mark_covered(id, start, end);
+        assert!(cache.is_covered(&id, &(Timestamp(0)..Timestamp(500_000_001))));
+        assert!(!cache.is_covered(&id, &(Timestamp(0)..Timestamp(500_000_002))));
+        assert!(
+            !cache.has_series(&id),
+            "an empty successful query still establishes coverage"
+        );
+        let (_, partial_end) =
+            backfill_page_coverage(Timestamp(0), Timestamp(1000), Timestamp(500_000_000), false);
+        assert_eq!(
+            partial_end,
+            Timestamp(1001),
+            "a full page cannot prove its unread tail"
         );
     }
 
