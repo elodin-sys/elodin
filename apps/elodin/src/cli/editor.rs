@@ -64,10 +64,6 @@ pub struct Args {
     /// Compatibility with earlier terrain previews. Cache-first streaming is the default.
     #[arg(long, hide = true, conflicts_with = "offline")]
     pub terrain_mode: Option<elodin_editor::plugins::terrain_playback::TerrainMode>,
-
-    /// Override the automatic global background with a georeferenced GLB (path relative to DB assets).
-    #[arg(long, hide = true)]
-    pub terrain_basemap: Option<String>,
 }
 
 #[derive(clap::Args, Clone)]
@@ -98,7 +94,6 @@ impl Default for Args {
             replay: false,
             offline: false,
             terrain_mode: None,
-            terrain_basemap: None,
         }
     }
 }
@@ -468,15 +463,12 @@ impl Cli {
 
     #[cfg_attr(target_os = "windows", allow(unused_mut))]
     pub fn editor(self, mut args: Args, rt: Runtime) -> miette::Result<()> {
-        let mut policy = elodin_editor::plugins::terrain_playback::TerrainPlayback::parse(
-            None,
-            args.terrain_basemap.as_deref(),
-        )
-        .into_diagnostic()?;
-        policy.mode = if args.offline {
-            Some(elodin_editor::plugins::terrain_playback::TerrainMode::Offline)
-        } else {
-            args.terrain_mode
+        let policy = elodin_editor::plugins::terrain_playback::TerrainPlayback {
+            mode: if args.offline {
+                Some(elodin_editor::plugins::terrain_playback::TerrainMode::Offline)
+            } else {
+                args.terrain_mode
+            },
         };
         #[cfg(not(target_os = "windows"))]
         use_plan_addr(&mut args)?;

@@ -146,11 +146,17 @@ impl TerrainStartup {
         if self.ready || self.error.is_some() {
             return;
         }
+        // A hierarchy cap or a missed tile still leaves the published scenery
+        // usable. Keep waiting while nothing is on screen.
         if status.load_failed {
-            self.error = Some(status.error.unwrap_or("Terrain capture failed to load"));
-        } else {
-            self.ready = status.ready_for_capture();
+            if self.has_tiles {
+                self.ready = true;
+            } else {
+                self.error = Some(status.error.unwrap_or("Terrain capture failed to load"));
+            }
+            return;
         }
+        self.ready = status.ready_for_capture();
     }
 
     pub(super) fn result(&self) -> Result<bool, &'static str> {
@@ -376,6 +382,7 @@ fn update_startup(
     status: Res<CesiumStatus>,
     mut startup: ResMut<TerrainStartup>,
     mut updates: Local<u32>,
+    headless: Option<Res<crate::sensor_camera::HeadlessMode>>,
 ) {
     if (*updates).is_multiple_of(120) {
         debug!(
@@ -392,6 +399,16 @@ fn update_startup(
     *updates = updates.wrapping_add(1);
     let was_ready = startup.ready;
     startup.update(&status);
+    // The sensor renderer emits from the first settled tiles. The editor keeps
+    // the vehicle parked until the pad scenery itself is ready.
+    if headless.is_some()
+        && !startup.ready
+        && startup.error.is_none()
+        && status.visible_tiles > 0
+        && status.pending_render_tiles == 0
+    {
+        startup.ready = true;
+    }
     // A missing remote tile must not discard the cached surface or stop retries.
     if startup.ready && !was_ready {
         info!(
@@ -774,10 +791,7 @@ mod coordinate_tests {
         ))
         .add_systems(Update, configure_terrain);
         for mode in [None, Some(TerrainMode::Offline), Some(TerrainMode::Hybrid)] {
-            app.insert_resource(TerrainPlayback {
-                mode,
-                basemap: None,
-            });
+            app.insert_resource(TerrainPlayback { mode });
             app.update();
             let Some(CesiumSource::Prepared {
                 ion_access_token, ..
@@ -798,7 +812,6 @@ mod coordinate_tests {
         let mut app = App::new();
         app.insert_resource(TerrainPlayback {
             mode: Some(TerrainMode::Offline),
-            basemap: None,
         })
         .insert_resource(crate::ui::schematic::CurrentSchematic(
             impeller_wkt::Schematic {
@@ -1012,7 +1025,7 @@ mod coordinate_tests {
         assert!(app.world().resource::<TerrainStartup>().owns_surface());
         assert!(playback_ready(app.world()));
         assert!(!app.world().contains_resource::<CesiumSourceUpdate>());
-        assert_eq!(capture_ready(app.world()), Err("HTTP request failed"));
+        assert_eq!(capture_ready(app.world()), Ok(true));
         // Looking away or swapping LODs must not relinquish the surface.
         app.world_mut().resource_mut::<CesiumStatus>().visible_tiles = 0;
         app.update();
