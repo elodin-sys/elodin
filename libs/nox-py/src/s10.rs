@@ -158,7 +158,8 @@ impl Recipe {
                     depends_on: depends_on.clone(),
                     ready: ready.as_ref().map(|ready| ready.inner.clone()),
                     ready_timeout: ready_timeout.clone(),
-                    own_process_group: false,
+                    // This recipe's group only. killpg cannot reach another sim.
+                    own_process_group: true,
                 },
                 destination: s10::Destination::Local,
             })),
@@ -362,4 +363,50 @@ pub fn register(parent_module: &Bound<'_, PyModule>) -> PyResult<()> {
     child.add_class::<RestartPolicy>()?;
     child.add_class::<Ready>()?;
     parent_module.add_submodule(&child)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cargo_recipe_reaps_its_own_process_group() {
+        let recipe = Recipe::Cargo {
+            name: "sidecar".into(),
+            path: PathBuf::from("fsw"),
+            package: None,
+            bin: None,
+            features: Vec::new(),
+            args: Vec::new(),
+            cwd: None,
+            env: HashMap::new(),
+            restart_policy: RestartPolicy::Never,
+            depends_on: Vec::new(),
+            ready: None,
+            ready_timeout: None,
+            silence: false,
+        };
+        let RustRecipe::Cargo(cargo) = recipe.to_rust().unwrap() else {
+            panic!("expected cargo recipe");
+        };
+        assert!(cargo.process_args.own_process_group);
+
+        let process = Recipe::Process {
+            name: "helper".into(),
+            cmd: "true".into(),
+            args: Vec::new(),
+            cwd: None,
+            env: HashMap::new(),
+            restart_policy: RestartPolicy::Never,
+            no_watch: true,
+            depends_on: Vec::new(),
+            ready: None,
+            ready_timeout: None,
+            silence: true,
+        };
+        let RustRecipe::Process(process) = process.to_rust().unwrap() else {
+            panic!("expected process recipe");
+        };
+        assert!(!process.process_args.own_process_group);
+    }
 }

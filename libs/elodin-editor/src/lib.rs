@@ -772,8 +772,8 @@ impl Plugin for EditorPlugin {
                 PreUpdate,
                 (
                     clamp_current_time,
-                    advance_playback.run_if(plugins::cesium::playback_ready),
-                    follow_latest.run_if(plugins::cesium::playback_ready),
+                    advance_playback,
+                    follow_latest,
                     // Update selection after playback advances to keep line_3d and object_3d in sync.
                     set_selected_range,
                     impeller_bevy::apply_cached_data,

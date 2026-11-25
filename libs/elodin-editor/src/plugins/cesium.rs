@@ -86,6 +86,17 @@ pub(crate) struct TerrainCapture {
     timeout: std::time::Duration,
 }
 impl TerrainCapture {
+    pub(super) fn from_env() -> Self {
+        Self {
+            started: web_time::Instant::now(),
+            timeout: std::time::Duration::from_secs_f64(env_positive(
+                "ELODIN_CESIUM_CAPTURE_TIMEOUT",
+                120.0,
+                false,
+            )),
+        }
+    }
+
     pub(crate) fn ready(&self, status: Option<&CesiumStatus>) -> Result<bool, &'static str> {
         if status.is_some_and(|s| s.load_failed) {
             return Err(status
@@ -125,6 +136,7 @@ impl TerrainStartup {
     // Interactive replay may stream while playing, but that is not evidence that
     // terrain is ready for a held simulation or a sensor capture. Read the gate
     // from the current DB config: it can arrive after the schematic.
+    #[cfg(test)]
     fn replay_can_stream(&self, config: Option<&impeller_wkt::DbConfig>, headless: bool) -> bool {
         !headless
             && !config.is_some_and(|config| {
@@ -146,11 +158,17 @@ impl TerrainStartup {
         if self.ready || self.error.is_some() {
             return;
         }
+        // A hierarchy cap or a missed tile still leaves the published scenery
+        // usable. Keep waiting while nothing is on screen.
         if status.load_failed {
-            self.error = Some(status.error.unwrap_or("Terrain capture failed to load"));
-        } else {
-            self.ready = status.ready_for_capture();
+            if self.has_tiles {
+                self.ready = true;
+            } else {
+                self.error = Some(status.error.unwrap_or("Terrain capture failed to load"));
+            }
+            return;
         }
+        self.ready = status.ready_for_capture();
     }
 
     pub(super) fn result(&self) -> Result<bool, &'static str> {
@@ -171,17 +189,23 @@ pub(crate) fn capture_readiness(
     capture: Option<&TerrainCapture>,
     status: Option<&CesiumStatus>,
 ) -> Result<bool, &'static str> {
-    if let Some(startup) = startup
-        && let Err(error) = startup.result()
+    // Schematics without terrain never insert startup. A screenshot gate must
+    // not time out waiting for a Cesium status that will not arrive.
+    let Some(startup) = startup else {
+        return Ok(true);
+    };
+    startup.result()?;
+    if startup.ready || status.is_some_and(|status| status.load_failed && status.visible_tiles > 0)
     {
-        return Err(error);
+        return Ok(true);
     }
     if let Some(capture) = capture {
         return capture.ready(status);
     }
-    Ok(startup.is_none_or(|startup| startup.ready))
+    Ok(false)
 }
 
+#[cfg(test)]
 pub(crate) fn playback_ready(world: &World) -> bool {
     world
         .get_resource::<TerrainStartup>()
@@ -217,14 +241,7 @@ impl Plugin for CesiumPlugin {
             );
             app.insert_resource(CesiumDetailViews(views))
                 .insert_resource(CesiumSelectionMode::Fixed)
-                .insert_resource(TerrainCapture {
-                    started: web_time::Instant::now(),
-                    timeout: std::time::Duration::from_secs_f64(env_positive(
-                        "ELODIN_CESIUM_CAPTURE_TIMEOUT",
-                        120.0,
-                        false,
-                    )),
-                });
+                .insert_resource(TerrainCapture::from_env());
         }
         app.add_plugins(
             StreamingPlugin::deferred()
@@ -660,7 +677,7 @@ mod coordinate_tests {
     }
 
     #[test]
-    fn prepared_terrain_holds_simulation_even_when_gate_metadata_arrives_late() {
+    fn gate_metadata_releases_simulation_without_waiting_for_terrain() {
         for gate_present_initially in [false, true] {
             let (packet_tx, _packet_rx, outgoing, _incoming) = impeller_bevy::channels::channels();
             let mut config = impeller_wkt::DbConfig::default();
@@ -692,7 +709,11 @@ mod coordinate_tests {
                 );
             app.update();
             assert_eq!(playback_ready(app.world()), !gate_present_initially);
-            assert!(outgoing.try_recv().is_err());
+            if gate_present_initially {
+                assert!(matches!(outgoing.try_recv(), Ok(Some(_))));
+            } else {
+                assert!(outgoing.try_recv().is_err());
+            }
 
             // The schematic and endpoint stay unchanged when the DB config arrives.
             app.world_mut()
@@ -705,8 +726,8 @@ mod coordinate_tests {
             app.world_mut().remove_resource::<CesiumSourceUpdate>();
             app.update();
             assert!(
-                outgoing.try_recv().is_err(),
-                "simulation released before terrain loaded"
+                matches!(outgoing.try_recv(), Ok(Some(_))),
+                "simulation stayed held until terrain loaded"
             );
             assert!(!playback_ready(app.world()));
             assert!(
@@ -774,10 +795,7 @@ mod coordinate_tests {
         ))
         .add_systems(Update, configure_terrain);
         for mode in [None, Some(TerrainMode::Offline), Some(TerrainMode::Hybrid)] {
-            app.insert_resource(TerrainPlayback {
-                mode,
-                basemap: None,
-            });
+            app.insert_resource(TerrainPlayback { mode });
             app.update();
             let Some(CesiumSource::Prepared {
                 ion_access_token, ..
@@ -798,7 +816,6 @@ mod coordinate_tests {
         let mut app = App::new();
         app.insert_resource(TerrainPlayback {
             mode: Some(TerrainMode::Offline),
-            basemap: None,
         })
         .insert_resource(crate::ui::schematic::CurrentSchematic(
             impeller_wkt::Schematic {
@@ -856,7 +873,7 @@ mod coordinate_tests {
     }
 
     #[test]
-    fn terrain_failure_releases_held_simulation() {
+    fn held_simulation_releases_before_terrain_failure() {
         let (packet_tx, _packet_rx, outgoing, _incoming) = impeller_bevy::channels::channels();
         let mut config = impeller_wkt::DbConfig::default();
         config.metadata.insert(
@@ -870,7 +887,8 @@ mod coordinate_tests {
             .insert_resource(packet_tx)
             .add_systems(Update, release_simulation);
         app.update();
-        assert!(outgoing.try_recv().is_err());
+        assert!(matches!(outgoing.try_recv(), Ok(Some(_))));
+        assert_eq!(app.world().resource::<TerrainStartup>().result(), Ok(false));
 
         app.world_mut()
             .resource_mut::<TerrainStartup>()
@@ -879,7 +897,7 @@ mod coordinate_tests {
                 ..default()
             });
         app.update();
-        assert!(matches!(outgoing.try_recv(), Ok(Some(_))));
+        assert!(app.world().resource::<TerrainStartup>().result().is_err());
     }
 
     #[test]
@@ -977,6 +995,43 @@ mod coordinate_tests {
             capture_ready(&world),
             Err("Terrain capture warm-up timed out")
         );
+
+        let mut unconfigured = World::new();
+        unconfigured.insert_resource(TerrainCapture {
+            started: web_time::Instant::now() - std::time::Duration::from_secs(1_000),
+            timeout: std::time::Duration::from_secs(1),
+        });
+        assert_eq!(capture_ready(&unconfigured), Ok(true));
+
+        let mut missed = World::new();
+        missed.insert_resource(TerrainStartup::waiting());
+        missed.insert_resource(TerrainCapture {
+            started: web_time::Instant::now(),
+            timeout: std::time::Duration::ZERO,
+        });
+        missed.insert_resource(CesiumStatus {
+            visible_tiles: 2,
+            load_failed: true,
+            error: Some("HTTP request failed"),
+            ..default()
+        });
+        assert_eq!(capture_ready(&missed), Ok(true));
+
+        world
+            .resource_mut::<TerrainStartup>()
+            .update(&CesiumStatus {
+                visible_tiles: 2,
+                load_failed: true,
+                error: Some("HTTP request failed"),
+                ..default()
+            });
+        world.insert_resource(CesiumStatus {
+            visible_tiles: 2,
+            load_failed: true,
+            error: Some("HTTP request failed"),
+            ..default()
+        });
+        assert_eq!(capture_ready(&world), Ok(true));
     }
 
     #[test]
@@ -1012,7 +1067,7 @@ mod coordinate_tests {
         assert!(app.world().resource::<TerrainStartup>().owns_surface());
         assert!(playback_ready(app.world()));
         assert!(!app.world().contains_resource::<CesiumSourceUpdate>());
-        assert_eq!(capture_ready(app.world()), Err("HTTP request failed"));
+        assert_eq!(capture_ready(app.world()), Ok(true));
         // Looking away or swapping LODs must not relinquish the surface.
         app.world_mut().resource_mut::<CesiumStatus>().visible_tiles = 0;
         app.update();
