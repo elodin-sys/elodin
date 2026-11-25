@@ -9,8 +9,6 @@ use std::net::{Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread::JoinHandle;
-#[cfg(not(target_os = "windows"))]
-use std::time::Duration;
 use stellarator::util::CancelToken;
 use tokio::runtime::Runtime;
 
@@ -386,19 +384,15 @@ impl Cli {
         let cache_dir = dirs.cache_dir().to_owned();
         let thread = std::thread::spawn(move || {
             rt.block_on(async move {
-                let cancel_on_ctrl_c = {
-                    let cancel_token = cancel_token.clone();
-                    async move {
-                        match tokio::signal::ctrl_c().await {
-                            Ok(()) => {
-                                info!("Received Ctrl-C, shutting down");
-                                cancel_token.cancel();
-                                tokio::time::sleep(Duration::from_millis(2000)).await;
-                                std::process::exit(130);
-                            }
-                            Err(err) => {
-                                warn!(?err, "failed to listen for Ctrl-C");
-                            }
+                let ctrl_c = async {
+                    match tokio::signal::ctrl_c().await {
+                        Ok(()) => {
+                            info!("Received Ctrl-C, shutting down");
+                            true
+                        }
+                        Err(err) => {
+                            warn!(?err, "failed to listen for Ctrl-C");
+                            false
                         }
                     }
                 };
@@ -416,11 +410,21 @@ impl Cli {
                                 hold_for_editor,
                                 terrain_offline,
                             ));
+                        let mut interrupted = false;
                         tokio::select! {
                             r = &mut recipe_fut => res = Some(r),
-                            _ = cancel_on_ctrl_c => {
-                                cancel_token.cancel();
+                            signalled = ctrl_c => {
+                                interrupted = signalled;
+                                if signalled {
+                                    cancel_token.cancel();
+                                }
                             }
+                        }
+                        // The recipe future is what sends SIGTERM. Exit only after it runs.
+                        if interrupted {
+                            let _ = recipe_fut.await;
+                            cancel_token.cancel();
+                            std::process::exit(130);
                         }
                         if res.is_none() {
                             res = Some(recipe_fut.await);
@@ -430,7 +434,12 @@ impl Cli {
                     }
                     _ => {
                         tokio::select! {
-                            _ = cancel_on_ctrl_c => Ok(()),
+                            signalled = ctrl_c => {
+                                if signalled {
+                                    std::process::exit(130);
+                                }
+                                Ok(())
+                            }
                             _ = cancel_token.wait() => Ok(()),
                         }
                     }

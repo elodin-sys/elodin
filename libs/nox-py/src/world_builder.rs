@@ -275,7 +275,8 @@ impl WorldBuilder {
                         depends_on: Vec::new(),
                         ready: None,
                         ready_timeout: None,
-                        own_process_group: false,
+                        // nice is the leader; the group sweep reaps the render server.
+                        own_process_group: true,
                     },
                     no_watch: true,
                 }),
