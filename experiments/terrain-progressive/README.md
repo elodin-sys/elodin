@@ -71,7 +71,8 @@ see its bounds. The order changes when the camera moves. Requests already
 downloading continue. Concurrent requests can finish in a different order
 because download, decode, and render preparation costs differ.
 
-The four-request limit and reserved prepared-file slot remain unchanged.
+The experimental loader allows eight jobs, with at most six provider jobs.
+Two slots remain available for prepared files when provider work is busy.
 Texture resolution, decoding, shader compilation, and the unused-cache budget
 also remain unchanged. Active tiles and render preparation still use memory
 outside the unused-cache budget.
@@ -130,8 +131,8 @@ ground without waiting for every shallower mesh. Known `.json` content URLs
 receive this discovery priority. Other content keeps its normal mesh priority.
 When a mesh is waiting, at most two hierarchy requests can be in flight, so
 discovery leaves capacity for terrain that can actually be drawn, including a
-provider mesh under the existing three-provider-request limit. When no mesh
-is waiting, hierarchy discovery can use all four slots. The existing provider
+provider mesh under the six-provider-request limit. When no mesh
+is waiting, hierarchy discovery can use all eight slots. The provider
 limit still applies. Fine hierarchy discovery cannot outrank a missing
 coarse-target mesh solely because it is a document. Default mode retains
 prepared-file priority. Requests

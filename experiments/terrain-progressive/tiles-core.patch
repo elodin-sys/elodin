@@ -16,7 +16,8 @@
 +const PROGRESSIVE_RESOLUTION_HEIGHT_FRACTION: f64 = 0.3;
 +
  /// The cache budget covers unused tiles, excluding the current visible and
- /// refining working set. Work in flight is capped at four tiles; each response
+-/// refining working set. Work in flight is capped at four tiles; each response
++/// refining working set. Work in flight is capped at eight tiles; each response
  /// is limited to 32 MiB. This is not a hard cap on total CPU/GPU memory.
  pub struct Session {
      nodes: Vec<Node>,
@@ -99,9 +100,12 @@
                  // A missing provider sibling must not hide prepared detail behind
                  // a coarse ancestor. Select the available package as an offline
                  // fallback while continuing to request the full hierarchy.
-@@ -325,12 +349,7 @@
+@@ -323,14 +347,9 @@
+                 r.1 = self.clock;
+             }
          }
-         // Prepared reads take priority. Reserve a slot for them even while
+-        // Prepared reads take priority. Reserve a slot for them even while
++        // Prepared reads take priority. Reserve two slots for them even while
          // provider requests hang, including on later camera movements.
 -        wanted.sort_by_key(|id| {
 -            self.nodes[*id]
@@ -113,7 +117,7 @@
          let mut provider_pending = self
              .pending
              .iter()
-@@ -341,6 +360,19 @@
+@@ -341,8 +360,21 @@
                      .is_some_and(|url| self.client.requires_provider(url))
              })
              .count();
@@ -131,20 +135,24 @@
 +            .filter(|&&id| self.is_hierarchy_request(id))
 +            .count();
          for id in wanted {
-             if self.pending.len() >= 4 {
+-            if self.pending.len() >= 4 {
++            if self.pending.len() >= 8 {
                  break;
+             }
+             if self.resident.contains_key(&id)
 @@ -354,14 +386,23 @@
              let Some(url) = self.nodes[id].url.clone() else {
                  continue;
              };
 +            let hierarchy = self.is_hierarchy_request(id);
-+            // Leave capacity for a provider mesh under the three-provider-job
-+            // limit, as well as prepared meshes under the four-job total limit.
++            // Leave capacity for meshes under the six-provider-job limit
++            // and the eight-job total limit.
 +            if self.coverage_first && mesh_waiting && hierarchy && hierarchy_pending >= 2 {
 +                continue;
 +            }
              if self.client.requires_provider(&url) {
-                 if provider_pending >= 3 {
+-                if provider_pending >= 3 {
++                if provider_pending >= 6 {
                      continue;
                  }
                  provider_pending += 1;
@@ -494,11 +502,10 @@
          tile_credits: HashMap::new(),
          clock: 0,
          root_pending: false,
-@@ -220,6 +224,372 @@
-         maximum_screen_error: 16.,
+@@ -221,6 +225,387 @@
          cache_bytes: 1024,
      }
-+}
+ }
 +
 +#[test]
 +fn requests_load_nearest_bounds_first_and_reorder_when_the_camera_moves() {
@@ -864,9 +871,66 @@
 +    let frame = s.update(&[view()], 0.).unwrap();
 +    assert_eq!(frame.visible, vec![0]);
 +    assert!(frame.selection_complete);
- }
++}
++#[test]
++fn terrain_admits_eight_jobs_but_no_more() {
++    let mut s = session();
++    s.nodes = (0..11).map(|_| node()).collect();
++    s.nodes[0].url = None;
++    s.nodes[0].children = (1..11).collect();
++    for child in &mut s.nodes[1..] {
++        child.url = Some(Url::parse("file:///missing-terrain-mesh.glb").unwrap());
++    }
++    s.pending.extend(1..8);
++    s.update(&[view()], 0.).unwrap();
++    assert_eq!(s.pending.len(), 8);
++    assert_eq!(s.stats.requests, 1);
++}
++
  #[test]
  fn prepared_tiles_progress_while_provider_slots_are_busy() {
+     let root = Url::from_file_path(
+@@ -241,10 +626,10 @@
+     let mut s = session();
+     s.client = transport::Loader::prepared(package);
+     s.nodes[0].url = None;
+-    s.nodes[0].children = (1..=5).collect();
+-    for index in 1..=5 {
++    s.nodes[0].children = (1..=8).collect();
++    for index in 1..=8 {
+         let mut child = node();
+-        child.url = Some(if index == 5 {
++        child.url = Some(if index == 8 {
+             root.join("triangle.gltf").unwrap()
+         } else {
+             Url::parse(&format!(
+@@ -254,21 +639,21 @@
+         });
+         s.nodes.push(child);
+     }
+-    // Model three outstanding provider requests, without any external traffic.
+-    s.pending.extend([1, 2, 3]);
++    // Model six outstanding provider requests, without any external traffic.
++    s.pending.extend(1..=6);
+     s.update(&[view()], 0.).unwrap();
+     assert!(
+-        s.pending.contains(&5),
++        s.pending.contains(&8),
+         "local tile was starved by provider work"
+     );
+     assert!(
+-        !s.pending.contains(&4),
++        !s.pending.contains(&7),
+         "provider work consumed the reserved slot"
+     );
+     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+     loop {
+         let frame = s.update(&[view()], 0.01).unwrap();
+-        if frame.visible.contains(&5) {
++        if frame.visible.contains(&8) {
+             break;
+         }
+         assert!(
 --- a/src/transport/web.rs
 +++ b/src/transport/web.rs
 @@ -2,7 +2,10 @@
