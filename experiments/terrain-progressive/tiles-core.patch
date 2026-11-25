@@ -9,19 +9,42 @@
  }
  #[derive(Default, Debug)]
  pub struct Statistics {
-@@ -136,6 +138,11 @@
+@@ -124,11 +126,14 @@
+     Mesh(Tile, Vec<String>),
+     Hierarchy(Vec<Node>),
+ }
++const PROGRESSIVE_RESOLUTION_HEIGHT_FRACTION: f64 = 0.3;
++
+ /// The cache budget covers unused tiles, excluding the current visible and
+ /// refining working set. Work in flight is capped at four tiles; each response
+ /// is limited to 32 MiB. This is not a hard cap on total CPU/GPU memory.
+ pub struct Session {
+     nodes: Vec<Node>,
++    request_parents: Vec<Option<usize>>,
+     tx: mpsc::SyncSender<Completion>,
+     rx: mpsc::Receiver<Completion>,
+     pending: HashSet<usize>,
+@@ -136,6 +141,11 @@
      retry_after: HashMap<usize, f64>,
      elapsed: f64,
      resident: HashMap<usize, (usize, u64)>,
 +    render_ready: Option<HashSet<u64>>,
 +    /// The host has prepared a separate backdrop that covers missing regions.
 +    pub partial_coverage: bool,
-+    /// Load broad, shallow coverage before nearby fine detail.
++    /// Prioritize a reduced-resolution visible cover before finer detail.
 +    pub coverage_first: bool,
      tile_credits: HashMap<usize, Vec<String>>,
      clock: u64,
      root_pending: bool,
-@@ -190,6 +197,9 @@
+@@ -183,6 +193,7 @@
+         client.load_root(url, tx.clone());
+         Ok(Self {
+             nodes: vec![],
++            request_parents: vec![],
+             tx,
+             rx,
+             pending: HashSet::new(),
+@@ -190,6 +201,9 @@
              retry_after: HashMap::new(),
              elapsed: 0.0,
              resident: HashMap::new(),
@@ -31,7 +54,7 @@
              tile_credits: HashMap::new(),
              clock: 0,
              root_pending: true,
-@@ -206,6 +216,11 @@
+@@ -206,6 +220,11 @@
              None,
          )
      }
@@ -43,7 +66,40 @@
      pub fn update(&mut self, views: &[View], seconds: f32) -> Result<Frame> {
          if !seconds.is_finite()
              || seconds < 0.
-@@ -325,12 +340,7 @@
+@@ -234,7 +253,10 @@
+                 Completion::Root(result) => {
+                     self.root_pending = false;
+                     match result {
+-                        Ok(nodes) => self.nodes = nodes,
++                        Ok(nodes) => {
++                            self.nodes = nodes;
++                            self.request_parents.clear();
++                        }
+                         Err(e) => {
+                             frame.error = Some(e.0);
+                             eprintln!("3D Tiles: {e}");
+@@ -292,12 +314,14 @@
+                 &mut required,
+                 false,
+             );
+-            if wanted.iter().any(|id| {
+-                self.nodes[*id]
+-                    .url
+-                    .as_ref()
+-                    .is_some_and(|url| self.client.requires_provider(url))
+-            }) {
++            if !self.coverage_first
++                && wanted.iter().any(|id| {
++                    self.nodes[*id]
++                        .url
++                        .as_ref()
++                        .is_some_and(|url| self.client.requires_provider(url))
++                })
++            {
+                 // A missing provider sibling must not hide prepared detail behind
+                 // a coarse ancestor. Select the available package as an offline
+                 // fallback while continuing to request the full hierarchy.
+@@ -325,12 +349,7 @@
          }
          // Prepared reads take priority. Reserve a slot for them even while
          // provider requests hang, including on later camera movements.
@@ -57,15 +113,51 @@
          let mut provider_pending = self
              .pending
              .iter()
-@@ -341,6 +351,7 @@
+@@ -341,6 +360,19 @@
                      .is_some_and(|url| self.client.requires_provider(url))
              })
              .count();
 +        let detail_ready = wanted.is_empty();
++        let mesh_waiting = wanted.iter().any(|&id| {
++            !self.is_hierarchy_request(id)
++                && self.nodes[id].url.is_some()
++                && !self.resident.contains_key(&id)
++                && !self.pending.contains(&id)
++                && !self.failed.contains(&id)
++        });
++        let mut hierarchy_pending = self
++            .pending
++            .iter()
++            .filter(|&&id| self.is_hierarchy_request(id))
++            .count();
          for id in wanted {
              if self.pending.len() >= 4 {
                  break;
-@@ -394,6 +405,8 @@
+@@ -354,14 +386,23 @@
+             let Some(url) = self.nodes[id].url.clone() else {
+                 continue;
+             };
++            let hierarchy = self.is_hierarchy_request(id);
++            // Leave capacity for a provider mesh under the three-provider-job
++            // limit, as well as prepared meshes under the four-job total limit.
++            if self.coverage_first && mesh_waiting && hierarchy && hierarchy_pending >= 2 {
++                continue;
++            }
+             if self.client.requires_provider(&url) {
+                 if provider_pending >= 3 {
+                     continue;
+                 }
+                 provider_pending += 1;
+             }
++            hierarchy_pending += usize::from(hierarchy);
+             self.pending.insert(id);
+             self.stats.requests += 1;
++            #[cfg(target_arch = "wasm32")]
++            self.trace_request(id, views);
+             self.client.load_tile(
+                 id,
+                 url,
+@@ -394,6 +435,8 @@
          self.stats.resident_bytes = bytes;
          frame.pending = self.pending.len() as u32 + u32::from(self.root_pending);
          frame.load_failed = self.root_failed || !self.failed.is_empty();
@@ -74,14 +166,108 @@
          let mut credits = HashMap::<&str, usize>::new();
          for id in &frame.visible {
              if let Some(items) = self.tile_credits.get(&(*id as usize)) {
-@@ -407,8 +420,90 @@
+@@ -407,8 +450,231 @@
          frame
              .credits
              .extend(credits.into_iter().map(|(c, _)| html_escape(c)));
 +        #[cfg(target_arch = "wasm32")]
-+        self.trace_frame(&frame);
++        {
++            self.trace_frame(&frame);
++            self.trace_selection(&frame, views);
++        }
          Ok(frame)
      }
++
++    #[cfg(target_arch = "wasm32")]
++    fn audit_callback() -> Option<js_sys::Function> {
++        use wasm_bindgen::{JsCast, JsValue};
++        let window = web_sys::window()?;
++        js_sys::Reflect::get(window.as_ref(), &JsValue::from_str("__elodinTerrainAudit"))
++            .ok()?
++            .dyn_into()
++            .ok()
++    }
++
++    #[cfg(target_arch = "wasm32")]
++    fn trace_request(&self, id: usize, views: &[View]) {
++        use wasm_bindgen::JsValue;
++        let Some(callback) = Self::audit_callback() else {
++            return;
++        };
++        let node = &self.nodes[id];
++        let error = views
++            .iter()
++            .filter_map(|view| node.screen_error(view))
++            .reduce(f64::max);
++        let row = js_sys::Array::new();
++        for value in [
++            id as f64,
++            self.request_parents
++                .get(id)
++                .copied()
++                .flatten()
++                .map_or(-1., |id| id as f64),
++            node.depth as f64,
++            node.error,
++            error.unwrap_or(-1.),
++            error.map_or(-1., |value| value * PROGRESSIVE_RESOLUTION_HEIGHT_FRACTION),
++            u8::from(self.coverage_first && self.progressive_priority(id, views)) as f64,
++            u8::from(self.is_hierarchy_request(id)) as f64,
++            u8::from(
++                node.url
++                    .as_ref()
++                    .is_some_and(|url| self.client.requires_provider(url)),
++            ) as f64,
++            node.radius,
++            self.maximum_screen_error,
++            PROGRESSIVE_RESOLUTION_HEIGHT_FRACTION,
++        ] {
++            row.push(&JsValue::from_f64(value));
++        }
++        row.push(&JsValue::from_str(
++            node.url
++                .as_ref()
++                .map_or("", |url| &url[..url::Position::AfterPath]),
++        ));
++        let _ = callback.call3(
++            &JsValue::NULL,
++            &JsValue::from_str("request"),
++            &JsValue::from_f64(js_sys::Date::now()),
++            &row,
++        );
++    }
++
++    #[cfg(target_arch = "wasm32")]
++    fn trace_selection(&self, frame: &Frame, views: &[View]) {
++        use wasm_bindgen::JsValue;
++        let Some(callback) = Self::audit_callback() else {
++            return;
++        };
++        let ids: Vec<u32> = frame.visible.iter().map(|&id| id as u32).collect();
++        let row = js_sys::Array::new();
++        row.push(&js_sys::Uint32Array::from(ids.as_slice()));
++        let cameras = js_sys::Array::new();
++        for view in views {
++            let camera = js_sys::Array::new();
++            for value in view
++                .position
++                .into_iter()
++                .chain(view.direction)
++                .chain([view.height])
++            {
++                camera.push(&JsValue::from_f64(value));
++            }
++            cameras.push(&camera);
++        }
++        row.push(&cameras);
++        row.push(&JsValue::from_bool(frame.selection_complete));
++        let _ = callback.call3(
++            &JsValue::NULL,
++            &JsValue::from_str("selection"),
++            &JsValue::from_f64(js_sys::Date::now()),
++            &row,
++        );
++    }
 +
 +    #[cfg(target_arch = "wasm32")]
 +    fn trace_frame(&self, frame: &Frame) {
@@ -115,9 +301,44 @@
 +        }
 +        entries.push(&row);
 +    }
-+    fn prioritize_requests(&self, wanted: &mut [usize], views: &[View]) {
++    fn is_hierarchy_request(&self, id: usize) -> bool {
++        let node = &self.nodes[id];
++        node.terrain.is_none()
++            && node
++                .url
++                .as_ref()
++                .is_some_and(|url| url.path().ends_with(".json"))
++    }
++
++    fn progressive_priority(&self, id: usize, views: &[View]) -> bool {
++        // CesiumJS isPriorityProgressiveResolution: promote ancestors above
++        // the coarse target and the boundary tile that first meets it.
++        views.iter().any(|view| {
++            let Some(error) = self.nodes[id].screen_error(view) else {
++                return false;
++            };
++            error * PROGRESSIVE_RESOLUTION_HEIGHT_FRACTION > self.maximum_screen_error
++                || self.request_parents[id].is_some_and(|parent| {
++                    self.nodes[parent].screen_error(view).is_some_and(|error| {
++                        error * PROGRESSIVE_RESOLUTION_HEIGHT_FRACTION > self.maximum_screen_error
++                    })
++                })
++        })
++    }
++
++    fn prioritize_requests(&mut self, wanted: &mut [usize], views: &[View]) {
++        if self.coverage_first && self.request_parents.len() != self.nodes.len() {
++            // Rebuild only when the hierarchy grows, not on every camera frame.
++            self.request_parents = vec![None; self.nodes.len()];
++            for (parent, node) in self.nodes.iter().enumerate() {
++                for &child in &node.children {
++                    self.request_parents[child] = Some(parent);
++                }
++            }
++        }
 +        let priority = |id: usize| {
 +            let node = &self.nodes[id];
++            let discovery = self.coverage_first && self.is_hierarchy_request(id);
 +            let distance = views
 +                .iter()
 +                .filter(|view| node.screen_error(view).is_some())
@@ -144,19 +365,31 @@
 +                .as_ref()
 +                .is_some_and(|url| self.client.requires_provider(url));
 +            (
-+                if self.coverage_first { node.depth } else { 0 },
-+                provider,
-+                distance,
++                self.coverage_first && !self.progressive_priority(id, views),
++                self.coverage_first && !discovery,
++                provider && !self.coverage_first,
++                if self.coverage_first && !discovery {
++                    node.depth
++                } else {
++                    0
++                },
++                distance.0,
++                distance.1,
++                distance.2,
 +            )
 +        };
 +        let mut ranked: Vec<_> = wanted.iter().map(|&id| (id, priority(id))).collect();
-+        ranked.sort_by(|(_, (ad, ap, a)), (_, (bd, bp, b))| {
-+            ad.cmp(bd)
-+                .then(ap.cmp(bp))
-+                .then(a.0.total_cmp(&b.0))
-+                .then(a.1.total_cmp(&b.1))
-+                .then(a.2.total_cmp(&b.2))
-+        });
++        ranked.sort_by(
++            |(_, (ag, ah, ap, ad, ar, aa, ac)), (_, (bg, bh, bp, bd, br, ba, bc))| {
++                ag.cmp(bg)
++                    .then(ah.cmp(bh))
++                    .then(ap.cmp(bp))
++                    .then(ad.cmp(bd))
++                    .then(ar.total_cmp(br))
++                    .then(aa.total_cmp(ba))
++                    .then(ac.total_cmp(bc))
++            },
++        );
 +        for (target, (id, _)) in wanted.iter_mut().zip(ranked) {
 +            *target = id;
 +        }
@@ -165,7 +398,7 @@
      fn select(
          &self,
          id: usize,
-@@ -432,7 +527,16 @@
+@@ -432,13 +698,34 @@
              .fold(None, |s: Option<f64>, e| Some(s.unwrap_or(0.).max(e)));
          let Some(error) = score else { return true };
          let has = n.url.is_some();
@@ -183,17 +416,36 @@
          let request_start = wanted.len();
          if !n.children.is_empty() && (!has || error > self.maximum_screen_error) {
              let before = visible.len();
-@@ -452,6 +556,9 @@
+             let mut all_ready = true;
++            let mut refinement_requests = Vec::new();
+             for child in &n.children {
+-                all_ready &= self.select(*child, views, wanted, visible, required, prepared_only);
++                let child_start = wanted.len();
++                let child_ready =
++                    self.select(*child, views, wanted, visible, required, prepared_only);
++                all_ready &= child_ready;
++                if self.coverage_first && ready && !n.add && child_ready {
++                    // While this parent covers a missing region, spend jobs on
++                    // that region instead of finer detail hidden behind it.
++                    refinement_requests.extend(wanted.drain(child_start..));
++                }
++            }
++            if all_ready {
++                wanted.extend(refinement_requests);
+             }
+             if n.add {
+                 if ready {
+@@ -452,6 +739,9 @@
              if all_ready && (!prepared_only || visible.len() > before || !has) {
                  return true;
              }
-+            if self.partial_coverage && visible.len() > before {
++            if self.partial_coverage && !self.coverage_first && visible.len() > before {
 +                return false;
 +            }
              if ready {
                  // Keep ready descendants while this fallback covers siblings
                  // still loading; evicting them here causes repeated downloads.
-@@ -472,6 +579,28 @@
+@@ -472,6 +762,28 @@
              wanted.push(id);
          }
          ready || !has
@@ -224,7 +476,15 @@
 
 --- a/src/tests.rs
 +++ b/src/tests.rs
-@@ -211,6 +211,9 @@
+@@ -204,6 +204,7 @@
+     let (tx, rx) = mpsc::sync_channel(4);
+     Session {
+         nodes: vec![node()],
++        request_parents: vec![],
+         tx,
+         rx,
+         pending: HashSet::new(),
+@@ -211,6 +212,9 @@
          retry_after: HashMap::new(),
          elapsed: 0.0,
          resident: HashMap::new(),
@@ -234,7 +494,7 @@
          tile_credits: HashMap::new(),
          clock: 0,
          root_pending: false,
-@@ -220,6 +223,149 @@
+@@ -220,6 +224,372 @@
          maximum_screen_error: 16.,
          cache_bytes: 1024,
      }
@@ -273,23 +533,246 @@
 +}
 +
 +#[test]
-+fn coverage_first_loads_shallow_visible_tiles_before_nearby_detail() {
++fn progressive_coverage_prioritizes_coarse_and_frontier_tiles_before_nearby_fine_tiles() {
 +    let mut s = session();
-+    s.nodes = (0..3).map(|_| node()).collect();
-+    s.nodes[0].center.z = -100.;
-+    s.nodes[0].depth = 4;
-+    s.nodes[1].center.z = 0.;
-+    s.nodes[1].depth = 8;
-+    s.nodes[2].center.z = -30.;
-+    s.nodes[2].radius = 49.;
-+    s.nodes[2].depth = 4;
-+    let mut wanted = vec![1, 0, 2];
++    s.nodes = (0..4).map(|_| node()).collect();
++    s.nodes[0].children = vec![1, 2];
++    s.nodes[2].children = vec![3];
++    s.nodes[1].center.z = -100.;
++    s.nodes[1].error = 30.;
++    s.nodes[1].depth = 4;
++    s.nodes[2].error = 0.5;
++    s.nodes[2].depth = 8;
++    s.nodes[3].center.z = 1.;
++    s.nodes[3].error = 0.3;
++    s.nodes[3].depth = 9;
++    assert!(s.nodes[1].screen_error(&view()).unwrap() * 0.3 > s.maximum_screen_error);
++    assert!(s.nodes[2].screen_error(&view()).unwrap() * 0.3 < s.maximum_screen_error);
++    assert!(s.nodes[3].screen_error(&view()).unwrap() > s.maximum_screen_error);
++    let mut wanted = vec![3, 2, 1];
 +    s.coverage_first = true;
 +    s.prioritize_requests(&mut wanted, &[view()]);
-+    assert_eq!(wanted, vec![2, 0, 1]);
++    assert_eq!(
++        wanted,
++        vec![1, 2, 3],
++        "a far coarse tile and a coarse-target boundary precede near refinement"
++    );
 +    s.coverage_first = false;
 +    s.prioritize_requests(&mut wanted, &[view()]);
-+    assert_eq!(wanted, vec![2, 1, 0]);
++    assert_eq!(wanted, vec![3, 2, 1]);
++}
++
++#[test]
++fn progressive_coverage_does_not_put_fine_hierarchy_discovery_ahead_of_missing_coarse_meshes() {
++    let mut s = session();
++    s.coverage_first = true;
++    s.nodes = (0..4).map(|_| node()).collect();
++    s.nodes[0].children = vec![1, 2];
++    s.nodes[2].children = vec![3];
++    s.nodes[1].center.z = -100.;
++    s.nodes[1].error = 30.;
++    s.nodes[2].error = 0.5;
++    s.nodes[3].center.z = 1.;
++    s.nodes[3].error = 0.3;
++    s.nodes[3].url = Some(Url::parse("http://localhost/fine.json").unwrap());
++    let mut wanted = vec![3, 1];
++    s.prioritize_requests(&mut wanted, &[view()]);
++    assert_eq!(wanted, vec![1, 3]);
++}
++
++#[test]
++fn progressive_coverage_includes_the_boundary_and_recomputes_for_each_camera() {
++    let mut s = session();
++    s.coverage_first = true;
++    s.nodes = (0..3).map(|_| node()).collect();
++    s.nodes[0].children = vec![1];
++    s.nodes[1].children = vec![2];
++    s.nodes[1].error = 0.5;
++    s.nodes[2].error = 0.3;
++    s.maximum_screen_error = s.nodes[1].screen_error(&view()).unwrap() * 0.3;
++    s.prioritize_requests(&mut [1, 2], &[view()]);
++    assert!(s.progressive_priority(1, &[view()]));
++    assert!(!s.progressive_priority(2, &[view()]));
++    let mut close = view();
++    close.position[2] = 4.;
++    assert!(s.progressive_priority(2, &[view(), close]));
++    assert!(!s.progressive_priority(2, &[view()]));
++
++    s.nodes[1].children.push(3);
++    s.nodes.push(node());
++    s.prioritize_requests(&mut [3], &[view()]);
++    assert_eq!(s.request_parents[3], Some(1));
++}
++
++#[test]
++fn coverage_discovers_nearby_ground_before_world_scale_meshes_and_distant_hierarchies() {
++    let mut s = session();
++    s.nodes = (0..4).map(|_| node()).collect();
++    s.nodes[0].depth = 2;
++    s.nodes[1].depth = 8;
++    s.nodes[1].url = Some(Url::parse("http://localhost/near.json?session=test").unwrap());
++    s.nodes[2].depth = 4;
++    s.nodes[2].center.z = -100.;
++    s.nodes[2].url = Some(Url::parse("http://localhost/far.json").unwrap());
++    s.nodes[3].depth = 11;
++    let mut wanted = vec![0, 2, 3, 1];
++    s.coverage_first = true;
++    s.prioritize_requests(&mut wanted, &[view()]);
++    assert_eq!(wanted, vec![1, 2, 0, 3]);
++    s.coverage_first = false;
++    s.prioritize_requests(&mut wanted, &[view()]);
++    assert_eq!(wanted, vec![1, 0, 3, 2]);
++}
++
++#[test]
++fn coverage_keeps_a_mesh_slot_while_hierarchy_discovery_is_busy() {
++    let mut s = session();
++    s.coverage_first = true;
++    s.nodes = (0..6).map(|_| node()).collect();
++    s.nodes[0].url = None;
++    s.nodes[0].children = (1..6).collect();
++    for id in 1..5 {
++        s.nodes[id].url = Some(Url::parse("file:///missing-terrain-hierarchy.json").unwrap());
++    }
++    s.nodes[5].url = Some(Url::parse("file:///missing-terrain-mesh.glb").unwrap());
++    s.pending.extend([1, 2]);
++    s.update(&[view()], 0.).unwrap();
++    assert_eq!(s.pending.len(), 3);
++    assert!(
++        s.pending.contains(&5),
++        "discovery must leave capacity to draw ground"
++    );
++    assert!(!s.pending.contains(&4));
++    assert!(!s.pending.contains(&3));
++}
++
++#[test]
++fn coverage_keeps_coarse_ground_until_its_visible_replacement_children_are_prepared() {
++    let mut s = session();
++    s.coverage_first = true;
++    s.partial_coverage = true;
++    s.nodes = (0..4).map(|_| node()).collect();
++    s.nodes[0].url = None;
++    s.nodes[0].children = vec![1];
++    s.nodes[1].children = vec![2, 3];
++    for id in 1..4 {
++        s.resident.insert(id, (16, 0));
++    }
++    s.set_render_ready([1, 2]);
++    let frame = s.update(&[view()], 0.).unwrap();
++    assert_eq!(
++        frame.visible,
++        vec![1],
++        "coarse ground must cover the unready sibling"
++    );
++    assert!(!frame.selection_complete);
++    assert_eq!(s.stats.requests, 0);
++
++    s.set_render_ready([1, 2, 3]);
++    let frame = s.update(&[view()], 0.).unwrap();
++    assert_eq!(frame.visible, vec![2, 3]);
++    assert!(frame.selection_complete);
++
++    s.coverage_first = false;
++    s.set_render_ready([1, 2]);
++    assert_eq!(s.update(&[view()], 0.).unwrap().visible, vec![2]);
++}
++
++#[test]
++fn coverage_finishes_uncovered_regions_before_hidden_refinement_then_resumes_detail() {
++    let mut s = session();
++    s.coverage_first = true;
++    s.partial_coverage = true;
++    s.nodes = (0..5).map(|_| node()).collect();
++    s.nodes[0].children = vec![1, 2];
++    s.nodes[1].children = vec![3, 4];
++    s.nodes[2].center.z = -100.;
++    for id in 0..2 {
++        s.resident.insert(id, (16, 0));
++    }
++    s.set_render_ready([0, 1]);
++    let mut wanted = Vec::new();
++    let mut visible = Vec::new();
++    s.select(
++        0,
++        &[view()],
++        &mut wanted,
++        &mut visible,
++        &mut HashSet::new(),
++        false,
++    );
++    assert_eq!(visible, vec![0]);
++    assert_eq!(
++        wanted,
++        vec![2],
++        "load the missing coarse region before hidden finer meshes"
++    );
++
++    s.resident.insert(2, (16, 0));
++    s.set_render_ready([0, 1, 2]);
++    wanted.clear();
++    visible.clear();
++    s.select(
++        0,
++        &[view()],
++        &mut wanted,
++        &mut visible,
++        &mut HashSet::new(),
++        false,
++    );
++    assert_eq!(visible, vec![1, 2]);
++    assert_eq!(
++        wanted,
++        vec![3, 4],
++        "resume detail once coarse replacement coverage is ready"
++    );
++}
++
++#[test]
++fn coverage_does_not_treat_missing_provider_regions_as_complete_prepared_coverage() {
++    let root = Url::parse("file:///prepared/tileset.json").unwrap();
++    let remote_root = "https://tile.googleapis.com/v1/3dtiles/root.json";
++    let mut package = package::Package::new(&root, Some("unused")).unwrap();
++    package
++        .install(
++            &serde_json::to_vec(&serde_json::json!({
++                "version":1,"ion_asset_id":2275207,"root":remote_root,
++                "resources":{remote_root:"source/root.json"}
++            }))
++            .unwrap(),
++        )
++        .unwrap();
++    let mut s = session();
++    s.client = transport::Loader::prepared(package);
++    s.coverage_first = true;
++    s.partial_coverage = true;
++    s.nodes = (0..4).map(|_| node()).collect();
++    s.nodes[0].children = vec![1, 2];
++    s.nodes[1].children = vec![3];
++    s.nodes[2].url =
++        Some(Url::parse("https://tile.googleapis.com/v1/3dtiles/missing.glb").unwrap());
++    s.nodes[3].url = Some(root.join("local-detail.glb").unwrap());
++    for id in 0..2 {
++        s.resident.insert(id, (16, 0));
++    }
++    s.set_render_ready([0, 1]);
++    s.pending.insert(2); // Model provider work without making an external request.
++    let frame = s.update(&[view()], 0.).unwrap();
++    assert_eq!(frame.visible, vec![0]);
++    assert_eq!(
++        s.stats.requests, 0,
++        "hidden detail must wait for missing coarse coverage"
++    );
++    assert!(!frame.selection_complete);
++
++    s.coverage_first = false;
++    let frame = s.update(&[view()], 0.).unwrap();
++    assert_eq!(
++        frame.visible,
++        vec![1],
++        "default mode keeps its prepared-only fallback"
++    );
++    assert!(s.pending.contains(&3));
 +}
 +
 +#[test]

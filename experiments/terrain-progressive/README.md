@@ -17,7 +17,7 @@ Without background coverage, the selector keeps a covering parent until its
 required replacement children are ready. This prevents missing regions.
 
 The editor marks the existing globe primitives with `CesiumCoverageFallback`.
-Once every marked primitive has prepared render assets, the selector can publish
+In default mode, once every marked primitive has prepared render assets, the selector can publish
 ready children independently. The globe covers regions that are still loading.
 A replacement parent does not overlap its selected descendants. Removing the
 background disables partial coverage.
@@ -79,11 +79,87 @@ outside the unused-cache budget.
 ## Delivery and coverage-first experiment
 
 The default remains closest-first. Add `terrain_order=coverage` to the browser
-page URL to request visible tiles in shallow-to-deep order, with the existing
-distance score within each depth. This gives broad coarse terrain priority
-over nearby fine detail. It preserves the covering-parent and prepared-backdrop
+page URL to enable progressive-resolution priority. The coarse target uses the
+existing screen-space error calculation at 30% of each view's height.
+Screen-space error estimates geometric error in pixels.
+
+The priority classification follows CesiumJS's
+[`isPriorityProgressiveResolution`](https://github.com/CesiumGS/cesium/blob/9eb72b69f7e8559a4ac07cddf735e9a2bdae567c/packages/engine/Source/Scene/Cesium3DTile.js):
+prioritize ancestors that exceed the coarse target and the boundary tiles that
+first meet it. Finer descendants come afterward. A tile that is fine enough for
+a distant camera can still need the coarse-priority group for a closer camera.
+Recompute the classification when views change. Parent indices are cached and
+rebuilt when a root is replaced or a hierarchy document adds nodes.
+
+The exact request ranking in coverage mode is:
+
+1. Coarse-target group before finer work.
+2. Known hierarchy documents before meshes within that group.
+3. Shallower mesh depth before deeper mesh depth.
+4. Distance to bounds, screen alignment, then center distance.
+
+Package and provider files share this ranking. This ports CesiumJS's priority
+classification, not its full scheduler. In particular, the within-group
+shallow-first policy, hierarchy handling, and job limits are this experiment's
+choices. It does not implement CesiumJS foveation, dynamic error adjustments,
+or its numeric priority packing. It is a priority policy, not a global barrier
+that prevents every fine request until every coarse tile is rendered.
+
+Coverage mode also retains a prepared coarse parent until all visible
+replacement children can be published together. A single ready detailed child
+must not remove the ground covering its unready siblings. Regions can still
+refine independently when their own replacement coverage is ready. This trades
+some early fine detail for continuous ground coverage and avoids drawing
+overlapping replacement parent and child meshes. Additive refinement keeps its
+existing behavior. The default mode retains independent
+child publication over the globe backdrop.
+While a parent covers a missing region, requests for finer detail in its
+already covered children wait. Those requests resume when coarse replacement
+coverage is ready. Coverage mode also skips the package-only selection pass:
+ignoring absent provider regions there would incorrectly mark them covered
+and remove the parent. Default mode keeps that prepared-detail fallback.
+It preserves the covering-parent and prepared-backdrop
 rules. A caller that owns a `tiles_core::Session` can set `coverage_first`
 directly. Neither ordering changes the number of jobs in flight.
+
+Within each priority group, coverage mode puts visible hierarchy documents
+before mesh requests. A hierarchy document reveals deeper tile addresses; a
+world-scale mesh can look like a flat colour from a camera near the ground.
+Loading nearby hierarchy documents first therefore reaches recognizable local
+ground without waiting for every shallower mesh. Known `.json` content URLs
+receive this discovery priority. Other content keeps its normal mesh priority.
+When a mesh is waiting, at most two hierarchy requests can be in flight, so
+discovery leaves capacity for terrain that can actually be drawn, including a
+provider mesh under the existing three-provider-request limit. When no mesh
+is waiting, hierarchy discovery can use all four slots. The existing provider
+limit still applies. Fine hierarchy discovery cannot outrank a missing
+coarse-target mesh solely because it is a document. Default mode retains
+prepared-file priority. Requests
+already in flight continue. Closest-first mode keeps its existing behavior.
+
+### Optional browser audit
+
+Set `window.__elodinTerrainAudit` to a function before starting the editor to
+observe request admission and selected mesh IDs. The callback receives
+`(kind, timestampMilliseconds, payload)`. With no callback, audit arrays are
+not constructed. The observer should bound its own storage.
+
+For `request`, payload fields are `[id, parentIdOrMinusOne, depth,
+geometricError, screenSpaceError, reducedScreenSpaceError, progressivePriority,
+isHierarchy, isProvider, radius, maximumScreenError, heightFraction, url]`.
+Boolean flags are represented as 0 or 1. URLs exclude queries and fragments.
+The progressive flag is an admission-priority class, not a label for the
+apparent texture detail. A false flag means normal priority.
+The provider flag describes the loader's planned source; a later transport
+fallback can change the actual network origin.
+For `selection`, payload is `[Uint32ArrayOfSelectedIds, cameras,
+selectionComplete]`. Each camera contains position XYZ, direction XYZ, and
+view height. IDs are local to one session; the Falcon 9 capture uses one source.
+
+The request priority flag describes the view at request time. Selected IDs can
+be joined to request depths to identify the selected hierarchy levels. This is
+not an exact pixel-to-tile mapping or a GPU presentation fence. A sharp rocket
+model is independent of these terrain mesh records.
 
 For prepared package files, the browser transport uses the optional host
 function `window.__elodinFetchPackage(Request)`. The host returns a standard
