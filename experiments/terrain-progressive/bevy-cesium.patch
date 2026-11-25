@@ -13,7 +13,7 @@
 +++ b/src/browser.rs
 @@ -9,6 +9,14 @@
  pub struct BrowserBackend(tiles_core::Session);
- 
+
  impl Backend for BrowserBackend {
 +    fn set_partial_coverage(&mut self, enabled: bool) {
 +        self.0.partial_coverage = enabled;
@@ -66,7 +66,7 @@
 +/// Mark visible background mesh primitives that cover gaps during terrain refinement.
 +#[derive(Component)]
 +pub struct CesiumCoverageFallback;
- 
+
  /// ECEF camera poses (meters), viewport dimensions (pixels) and FOV (radians).
  /// External adapters update this resource before CesiumSet::Stream.
 @@ -367,6 +371,8 @@
@@ -221,7 +221,7 @@
 @@ -39,14 +39,37 @@
          .add_systems(Render, report_ready.after(RenderSystems::PrepareAssets));
  }
- 
+
 +type FallbackMeshes<'w, 's> = Query<
 +    'w,
 +    's,
@@ -254,5 +254,5 @@
 +            )
 +        }));
  }
- 
+
  fn report_ready(
