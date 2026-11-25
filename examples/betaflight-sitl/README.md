@@ -352,6 +352,32 @@ detection is that gate; it does not affect `--check`. Processing time is
 printed against a 5 ms target and does not fail the command. `bearing_body` is the direction from the body origin;
 navigation should use `position_body`.
 
+### Gate navigator
+
+`navigation.py` estimates vehicle motion and the target gate in a local frame
+whose origin is the body origin at the end of the pad interval. It reads IMU,
+barometer, magnetometer, detector candidates, the on-pad flag, and
+`next_gate_index`. It does not see pixels, truth, or the simulation context.
+`relative_body()` is the body-FLU gate position and velocity that later
+guidance will fly. Live flight and the `nav_*` database writes stay in a
+later package.
+
+Bearing noise is `0.08°`. Depth noise is `0.012 · (range / 4 m)²` metres,
+floored at 1 cm and capped at 8 m. A candidate is associated when its
+Mahalanobis distance satisfies `d² < 16.3`. The track confirms with 3 hits in
+0.5 s, coasts after 0.25 s without an update, and is LOST after 2.5 s. Ten
+rejected frames reset the track only while the predicted gate is fully in
+view; closer than 2 m does not count.
+
+```bash
+python3 examples/betaflight-sitl/evaluate_navigator.py
+python3 examples/betaflight-sitl/evaluate_navigator.py --bundle /tmp/race-record
+```
+
+With no bundle the command exits 0. A bundle is scored from sensor data and
+detector candidates; truth is used only for the printed position error,
+bearing error, track time, and coast time.
+
 ### Race Course and Referee
 
 Course selection is independent of the command source:
