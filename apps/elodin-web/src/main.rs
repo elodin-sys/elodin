@@ -23,7 +23,6 @@ fn start_app() {
     let plugin = apply_page_db(plugin);
     let mut policy = match elodin_editor::plugins::terrain_playback::TerrainPlayback::parse(
         query_value("terrain-mode").as_deref(),
-        query_value("terrain-basemap").as_deref(),
     ) {
         Ok(policy) => policy,
         Err(error) => {

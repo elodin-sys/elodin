@@ -2,7 +2,6 @@
 use bevy::prelude::*;
 
 pub(crate) fn release_simulation(
-    startup: Option<Res<super::cesium::TerrainStartup>>,
     config: Res<impeller_wkt::DbConfig>,
     packet_tx: Res<impeller_bevy::PacketTx>,
     mut loaded: MessageReader<crate::ui::schematic::DocumentLoaded>,
@@ -16,9 +15,6 @@ pub(crate) fn release_simulation(
         return;
     }
     if config.schematic_active().is_some() && !*document_loaded {
-        return;
-    }
-    if startup.is_some_and(|startup| startup.result() == Ok(false)) {
         return;
     }
     packet_tx.send_msg(impeller_wkt::SetDbConfig {

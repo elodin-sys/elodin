@@ -75,8 +75,8 @@ elodin editor --offline sim.py
 ```
 
 The first command runs without the editor; the second opens it. Recorded sensor
-cameras wait for initial terrain loading before emitting images; their frames remain
-asynchronous. Preparation does not add simulation lockstep.
+cameras emit asynchronously while terrain streams into the scene. Preparation does
+not add simulation lockstep.
 
 After validation, version the package with the simulation:
 
@@ -143,9 +143,8 @@ for deployment and database URL configuration.
   in the background. Hybrid mode preserves prepared detail during provider outages.
 - Provider errors stay in the logs, without an error window. They do not remove available terrain or stop replay.
   Reload the schematic to restart a failed source.
-- Simulations launched by `elodin editor` stay at t=0 until initial terrain is
-  ready or fails, protecting recorded sensor output. The editor remains usable.
-- Live connections are never paused.
+- Simulations, replay, live connections, and normal sensor cameras never wait
+  for terrain. Early frames can contain coarse or missing scenery.
 - Automated fixed-view captures wait for complete terrain.
   `ELODIN_CESIUM_CAPTURE_TIMEOUT` bounds the wait; errors and timeouts exit
   without writing a terrain screenshot.
