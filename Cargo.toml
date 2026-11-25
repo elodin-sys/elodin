@@ -107,8 +107,8 @@ inherits = "release"
 lto = "thin"
 
 [workspace.dependencies]
-# v0.5.2
-bevy-cesium = { git = "https://github.com/elodin-sys/bevy-cesium", rev = "e47cf9ddce4d5678b50b2c89884395923e4a7cd6" }
+# v0.5.4
+bevy-cesium = { git = "https://github.com/elodin-sys/bevy-cesium", rev = "900dfed55870e8f7405b1bbfc1b9d2483504db8f" }
 db-macros.path = "libs/db/macros"
 roci.path = "fsw/roci"
 roci.default-features = false

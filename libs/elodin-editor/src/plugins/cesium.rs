@@ -382,7 +382,6 @@ fn update_startup(
     status: Res<CesiumStatus>,
     mut startup: ResMut<TerrainStartup>,
     mut updates: Local<u32>,
-    headless: Option<Res<crate::sensor_camera::HeadlessMode>>,
 ) {
     if (*updates).is_multiple_of(120) {
         debug!(
@@ -399,16 +398,6 @@ fn update_startup(
     *updates = updates.wrapping_add(1);
     let was_ready = startup.ready;
     startup.update(&status);
-    // The sensor renderer emits from the first settled tiles. The editor keeps
-    // the vehicle parked until the pad scenery itself is ready.
-    if headless.is_some()
-        && !startup.ready
-        && startup.error.is_none()
-        && status.visible_tiles > 0
-        && status.pending_render_tiles == 0
-    {
-        startup.ready = true;
-    }
     // A missing remote tile must not discard the cached surface or stop retries.
     if startup.ready && !was_ready {
         info!(
