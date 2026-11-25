@@ -159,6 +159,55 @@ mod tests {
     use impeller::types::msg_id;
 
     #[test]
+    fn truncate_reports_persistence_failure_before_resetting_simulation_time() {
+        pyo3::prepare_freethreaded_python();
+        let dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(DB::create(dir.path().join("db")).unwrap());
+        let id = msg_id("truncate.failure");
+        db.push_msg(Timestamp(100), id, b"keep").unwrap();
+        let ticks = Arc::new(AtomicU64::new(7));
+        let ctx = StepContext::new(
+            db.clone(),
+            ticks.clone(),
+            Timestamp(100),
+            7,
+            Timestamp(10),
+            None,
+            Default::default(),
+        );
+        let pending = db
+            .path
+            .join("msgs")
+            .join(u16::from_le_bytes(id).to_string())
+            .join("follow_generation.pending");
+        std::fs::create_dir(&pending).unwrap();
+        let error = ctx.truncate().unwrap_err();
+        Python::with_gil(|py| {
+            assert!(error.is_instance_of::<pyo3::exceptions::PyRuntimeError>(py));
+        });
+        assert_eq!(ticks.load(Ordering::SeqCst), 7);
+        assert_eq!(ctx.timestamp.load(Ordering::SeqCst), 100);
+        db.with_state_mut(|state| {
+            let log = state.get_or_insert_msg_log(id, &db.path).unwrap();
+            assert_eq!(log.get_index(0).unwrap().1.as_ref(), b"keep");
+        });
+
+        std::fs::remove_dir(pending).unwrap();
+        ctx.truncate().unwrap();
+        assert_eq!(ticks.load(Ordering::SeqCst), 0);
+        assert_eq!(ctx.timestamp.load(Ordering::SeqCst), 10);
+        db.with_state_mut(|state| {
+            assert!(
+                state
+                    .get_or_insert_msg_log(id, &db.path)
+                    .unwrap()
+                    .timestamps()
+                    .is_empty()
+            );
+        });
+    }
+
+    #[test]
     fn read_msg_latest_returns_timestamp_and_payload() {
         pyo3::prepare_freethreaded_python();
         let dir = tempfile::tempdir().unwrap();
@@ -501,13 +550,16 @@ impl StepContext {
     ///
     /// After truncate(), any subsequent write_component() calls in the same callback will write
     /// at the start timestamp (tick 0), preventing TimeTravel errors on the next tick.
-    fn truncate(&self) {
-        self.db.truncate();
+    fn truncate(&self) -> pyo3::PyResult<()> {
+        self.db
+            .truncate()
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
         self.tick_counter.store(0, Ordering::SeqCst);
         // Reset timestamp to start_timestamp (tick 0) so any subsequent write_component()
         // calls in this callback write at the correct timestamp
         self.timestamp
             .store(self.start_timestamp.0, Ordering::SeqCst);
+        Ok(())
     }
 
     /// Gracefully terminate all s10-managed recipes (external processes).

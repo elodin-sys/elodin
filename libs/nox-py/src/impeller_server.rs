@@ -1908,7 +1908,7 @@ mod commit_tests {
         sync.copy_db_to_world(&mut world, db.vtable_gen.latest());
 
         // As many samples as before the truncate, but a different value.
-        db.truncate();
+        db.truncate().unwrap();
         push(&db, "a", 500, 9.0);
         set(&mut world, "c", 2.0);
         sync.copy_db_to_world(&mut world, db.vtable_gen.latest());

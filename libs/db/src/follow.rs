@@ -81,6 +81,10 @@ pub async fn run_follower(config: FollowConfig, db: Arc<DB>) -> Result<(), Error
                 info!("follow stream ended cleanly");
                 return Ok(());
             }
+            Err(err @ (Error::FollowHistoryChanged { .. } | Error::FollowProtocolUnsupported)) => {
+                tracing::error!(error = %err, "follow replication stopped");
+                return Err(err);
+            }
             Err(err) if err.is_stream_closed() => {
                 warn!(
                     "follow connection closed, reconnecting in {:?}",
@@ -110,6 +114,7 @@ fn mark_assets_read_only(db: &Arc<DB>) {
 struct FollowStreamSession {
     rx: PacketStream<stellarator::io::OwnedReader<stellarator::net::TcpStream>>,
     buf: Vec<u8>,
+    message_logs: Vec<PacketId>,
 }
 
 async fn request_source_snapshot(
@@ -136,8 +141,9 @@ async fn request_source_snapshot(
     tx.send(DumpSchema.with_request_id(schema_req_id)).await.0?;
     if start_stream {
         tx.send(
-            FollowStream {
+            FollowStreamV2 {
                 target_packet_size: config.target_packet_size as u32,
+                version: 2,
             }
             .with_request_id(0),
         )
@@ -151,14 +157,36 @@ async fn request_source_snapshot(
     let mut metadata_resp: Option<DumpMetadataResp> = None;
     let mut schema_resp: Option<DumpSchemaResp> = None;
 
-    while metadata_resp.is_none() || schema_resp.is_none() {
-        let pkt = rx.next(buf).await?;
+    let mut stream_ready = !start_stream;
+    let mut message_logs = Vec::new();
+    while metadata_resp.is_none() || schema_resp.is_none() || !stream_ready {
+        // Only time out the version acknowledgement. Large snapshots may need
+        // much longer on slow links and must not get stuck in a reconnect loop.
+        let pkt = if metadata_resp.is_some() && schema_resp.is_some() && !stream_ready {
+            futures_lite::future::race(async { rx.next(buf).await.map_err(Error::from) }, async {
+                stellarator::sleep(Duration::from_secs(30)).await;
+                Err(Error::FollowProtocolUnsupported)
+            })
+            .await?
+        } else {
+            rx.next(buf).await?
+        };
         match &pkt {
+            Packet::Msg(m) if start_stream && m.id == FollowStreamReady::ID => {
+                message_logs = m.parse::<FollowStreamReady>()?.message_logs;
+                stream_ready = true;
+            }
+            Packet::Msg(m) if start_stream && m.req_id == 0 && m.id == ErrorResponse::ID => {
+                return Err(Error::FollowProtocolUnsupported);
+            }
             Packet::Msg(m) if m.req_id == meta_req_id && m.id == DumpMetadataResp::ID => {
                 metadata_resp = Some(m.parse::<DumpMetadataResp>()?);
             }
             Packet::Msg(m) if m.req_id == schema_req_id && m.id == DumpSchemaResp::ID => {
                 schema_resp = Some(m.parse::<DumpSchemaResp>()?);
+            }
+            _ if metadata_resp.is_some() && schema_resp.is_some() && !stream_ready => {
+                return Err(Error::FollowProtocolUnsupported);
             }
             other => {
                 debug!(
@@ -181,7 +209,11 @@ async fn request_source_snapshot(
     );
 
     let session = if start_stream {
-        Some(FollowStreamSession { rx, buf })
+        Some(FollowStreamSession {
+            rx,
+            buf,
+            message_logs,
+        })
     } else {
         None
     };
@@ -353,6 +385,12 @@ pub(super) fn apply_follow_time_series(
 
 async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), Error> {
     let (session, metadata_resp, schema_resp) = request_source_snapshot(config, true).await?;
+    let FollowStreamSession {
+        mut rx,
+        mut buf,
+        message_logs,
+    } = session.expect("follow stream session");
+    validate_source_message_logs(db, &message_logs)?;
     apply_source_snapshot(
         config,
         db,
@@ -362,34 +400,13 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
     )
     .await?;
 
-    let FollowStreamSession { mut rx, mut buf } = session.expect("follow stream session");
-
     let source_start_ts = metadata_resp
         .db_config
         .time_start_timestamp_micros()
         .map(Timestamp)
         .unwrap_or_else(Timestamp::now);
 
-    // Track message timestamps for dedup.
-    let msg_ids: Vec<PacketId> = metadata_resp
-        .msg_metadata
-        .iter()
-        .map(|m| impeller::types::msg_id(&m.name))
-        .collect();
-    let mut msg_last_ts: std::collections::HashMap<PacketId, Timestamp> =
-        std::collections::HashMap::new();
-    {
-        let db_path = db.path.clone();
-        db.with_state_mut(|state| {
-            for &mid in &msg_ids {
-                if let Ok(log) = state.get_or_insert_msg_log(mid, &db_path)
-                    && let Some((ts, _)) = log.latest()
-                {
-                    msg_last_ts.insert(mid, ts);
-                }
-            }
-        });
-    }
+    let mut message_positions = std::collections::HashMap::new();
 
     info!(
         target_packet_size = config.target_packet_size,
@@ -546,18 +563,11 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                 })?;
             }
 
-            // MsgWithTimestamp – write message with original timestamp,
-            // skipping duplicates already received during previous sessions.
+            Packet::Msg(m) if m.id == FollowMessage::ID => {
+                apply_follow_message(db, &mut message_positions, m.parse()?)?;
+            }
             Packet::Msg(m) if m.timestamp.is_some() => {
-                let timestamp = m.timestamp.unwrap();
-                let last = msg_last_ts
-                    .get(&m.id)
-                    .copied()
-                    .unwrap_or(Timestamp(i64::MIN));
-                if timestamp > last {
-                    db.push_msg(timestamp, m.id, &m.buf)?;
-                    msg_last_ts.insert(m.id, timestamp);
-                }
+                return Err(Error::FollowProtocolUnsupported);
             }
 
             // Other messages – try to store as generic messages.
@@ -570,10 +580,476 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
     }
 }
 
+fn validate_source_message_logs(db: &DB, source_logs: &[PacketId]) -> Result<(), Error> {
+    let source_logs: std::collections::HashSet<_> = source_logs.iter().copied().collect();
+    db.with_state(|state| {
+        for (id, log) in &state.msg_logs {
+            if !source_logs.contains(id) {
+                let binding = db
+                    .path
+                    .join("follow_messages")
+                    .join(format!("{:02x}{:02x}", id[0], id[1]));
+                if read_follow_binding(&binding, log)?.is_some() {
+                    return Err(Error::FollowHistoryChanged { id: *id });
+                }
+            }
+        }
+        Ok(())
+    })
+}
+
+// Bind the source identity to this incarnation of the local log. Truncation
+// rotates the local generation, so an empty, explicitly reset replica can bind
+// again without deleting files after the truncation has already committed.
+fn read_follow_binding(
+    path: &std::path::Path,
+    log: &crate::msg_log::MsgLog,
+) -> Result<Option<[u8; 16]>, Error> {
+    let Some(binding) = crate::follow_identity::read::<32>(path)? else {
+        return Ok(None);
+    };
+    if binding[16..] != *log.follow_generation.lock().unwrap() && log.timestamps().is_empty() {
+        return Ok(None);
+    }
+    let mut source = [0; 16];
+    source.copy_from_slice(&binding[..16]);
+    Ok(Some(source))
+}
+
+/// Replay validates the existing prefix by ordinal, not by timestamp or payload
+/// uniqueness. Identical entries are separate occurrences. The local log itself
+/// is the durable progress record, so no separately committed counter can lag it.
+fn apply_follow_message(
+    db: &Arc<DB>,
+    positions: &mut std::collections::HashMap<PacketId, ([u8; 16], u64)>,
+    message: FollowMessage,
+) -> Result<(), Error> {
+    match message {
+        FollowMessage::Log {
+            id,
+            generation,
+            count,
+        } => {
+            let directory = db.path.join("follow_messages");
+            match std::fs::create_dir(&directory) {
+                Ok(()) => crate::sync_dir(&db.path)?,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error.into()),
+            }
+            let binding = directory.join(format!("{:02x}{:02x}", id[0], id[1]));
+            if positions.contains_key(&id) {
+                return Err(Error::FollowHistoryChanged { id });
+            }
+            db.with_state_mut(|state| {
+                let log = state.get_or_insert_msg_log(id, &db.path)?;
+                let existing = read_follow_binding(&binding, log)?;
+                if existing.is_some_and(|old| old != generation) {
+                    return Err(Error::FollowHistoryChanged { id });
+                }
+                if log.timestamps().len() as u64 > count {
+                    return Err(Error::FollowHistoryChanged { id });
+                }
+                if existing.is_none() {
+                    let mut identity = [0; 32];
+                    identity[..16].copy_from_slice(&generation);
+                    identity[16..].copy_from_slice(&*log.follow_generation.lock().unwrap());
+                    crate::follow_identity::write(&binding, identity)?;
+                }
+                Ok(())
+            })?;
+            positions.insert(id, (generation, 0));
+        }
+        FollowMessage::Entry {
+            id,
+            generation,
+            index,
+            timestamp,
+            payload,
+        } => {
+            if positions.get(&id) != Some(&(generation, index)) {
+                return Err(Error::FollowHistoryChanged { id });
+            }
+            db.with_state_mut(|state| {
+                let log = state.get_or_insert_msg_log(id, &db.path)?;
+                let local_count = log.timestamps().len() as u64;
+                if index < local_count {
+                    let Some((old_ts, old_payload)) = log.get_index(index as usize) else {
+                        return Err(Error::FollowHistoryChanged { id });
+                    };
+                    if old_ts != timestamp || old_payload.as_ref() != payload.as_slice() {
+                        return Err(Error::FollowHistoryChanged { id });
+                    }
+                } else if index == local_count {
+                    log.push(timestamp, &payload)?;
+                } else {
+                    return Err(Error::FollowHistoryChanged { id });
+                }
+                Ok(())
+            })?;
+            db.last_updated.update_max(timestamp);
+            if timestamp.0 != 0 {
+                db.earliest_timestamp.update_min(timestamp);
+            }
+            positions.insert(id, (generation, index + 1));
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    fn indexed_entry(
+        id: PacketId,
+        generation: [u8; 16],
+        index: u64,
+        payload: &[u8],
+    ) -> FollowMessage {
+        FollowMessage::Entry {
+            id,
+            generation,
+            index,
+            timestamp: Timestamp(100),
+            payload: payload.to_vec(),
+        }
+    }
+
+    #[test]
+    fn indexed_replay_preserves_occurrences_and_detects_divergence() {
+        let directory = tempfile::tempdir().unwrap();
+        let db = Arc::new(DB::create(directory.path().join("db")).unwrap());
+        let id = [77, 2];
+        let generation = [3; 16];
+        let mut positions = HashMap::new();
+        apply_follow_message(
+            &db,
+            &mut positions,
+            FollowMessage::Log {
+                id,
+                generation,
+                count: 0,
+            },
+        )
+        .unwrap();
+        for (index, payload) in [b"A", b"B", b"B"].into_iter().enumerate() {
+            apply_follow_message(
+                &db,
+                &mut positions,
+                indexed_entry(id, generation, index as u64, payload),
+            )
+            .unwrap();
+        }
+        // New connection, including a crash after append but before recording an
+        // in-memory cursor. The stored log is the authoritative progress record.
+        positions.clear();
+        apply_follow_message(
+            &db,
+            &mut positions,
+            FollowMessage::Log {
+                id,
+                generation,
+                count: 3,
+            },
+        )
+        .unwrap();
+        for (index, payload) in [b"A", b"B", b"B", b"C"].into_iter().enumerate() {
+            apply_follow_message(
+                &db,
+                &mut positions,
+                indexed_entry(id, generation, index as u64, payload),
+            )
+            .unwrap();
+        }
+        db.with_state(|s| {
+            let log = &s.msg_logs[&id];
+            assert_eq!(log.timestamps(), &[Timestamp(100); 4]);
+            for (index, payload) in [b"A", b"B", b"B", b"C"].into_iter().enumerate() {
+                assert_eq!(log.get_index(index).unwrap().1.as_ref(), payload);
+            }
+        });
+        db.flush_all().unwrap();
+        let path = db.path.clone();
+        drop(db);
+        let db = Arc::new(DB::open(path).unwrap());
+        db.push_msg(Timestamp(100), [77, 8], b"local writer")
+            .unwrap();
+        validate_source_message_logs(&db, &[id]).unwrap();
+        assert!(matches!(
+            validate_source_message_logs(&db, &[]),
+            Err(Error::FollowHistoryChanged { .. })
+        ));
+        positions.clear();
+        assert!(matches!(
+            apply_follow_message(
+                &db,
+                &mut positions,
+                FollowMessage::Log {
+                    id,
+                    generation: [4; 16],
+                    count: 4
+                }
+            ),
+            Err(Error::FollowHistoryChanged { .. })
+        ));
+        assert!(matches!(
+            apply_follow_message(
+                &db,
+                &mut positions,
+                FollowMessage::Log {
+                    id,
+                    generation,
+                    count: 2
+                }
+            ),
+            Err(Error::FollowHistoryChanged { .. })
+        ));
+        apply_follow_message(
+            &db,
+            &mut positions,
+            FollowMessage::Log {
+                id,
+                generation,
+                count: 4,
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            apply_follow_message(
+                &db,
+                &mut positions,
+                indexed_entry(id, generation, 0, b"different")
+            ),
+            Err(Error::FollowHistoryChanged { .. })
+        ));
+        assert!(matches!(
+            apply_follow_message(&db, &mut positions, indexed_entry(id, generation, 2, b"B")),
+            Err(Error::FollowHistoryChanged { .. })
+        ));
+    }
+
+    #[test]
+    fn truncated_follower_can_rebind_after_reopen() {
+        for truncate_all in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let path = directory.path().join("db");
+            let db = Arc::new(DB::create(path.clone()).unwrap());
+            let id = [77, 9];
+            let mut positions = HashMap::new();
+            apply_follow_message(
+                &db,
+                &mut positions,
+                FollowMessage::Log {
+                    id,
+                    generation: [1; 16],
+                    count: 0,
+                },
+            )
+            .unwrap();
+            // An empty log alone is not permission to accept a different source.
+            positions.clear();
+            assert!(matches!(
+                apply_follow_message(
+                    &db,
+                    &mut positions,
+                    FollowMessage::Log {
+                        id,
+                        generation: [2; 16],
+                        count: 0
+                    },
+                ),
+                Err(Error::FollowHistoryChanged { .. })
+            ));
+            apply_follow_message(
+                &db,
+                &mut positions,
+                FollowMessage::Log {
+                    id,
+                    generation: [1; 16],
+                    count: 1,
+                },
+            )
+            .unwrap();
+            apply_follow_message(&db, &mut positions, indexed_entry(id, [1; 16], 0, b"old"))
+                .unwrap();
+
+            if truncate_all {
+                db.truncate().unwrap();
+            } else {
+                db.truncate_msg_log(id).unwrap();
+            }
+            db.flush_all().unwrap();
+            drop(db);
+            let db = Arc::new(DB::open(path.clone()).unwrap());
+            // A removed source log must not be blocked by an obsolete binding.
+            validate_source_message_logs(&db, &[]).unwrap();
+            positions.clear();
+            apply_follow_message(
+                &db,
+                &mut positions,
+                FollowMessage::Log {
+                    id,
+                    generation: [2; 16],
+                    count: 1,
+                },
+            )
+            .unwrap();
+            apply_follow_message(&db, &mut positions, indexed_entry(id, [2; 16], 0, b"new"))
+                .unwrap();
+            db.with_state(|state| {
+                let log = &state.msg_logs[&id];
+                assert_eq!(log.timestamps().len(), 1);
+                assert_eq!(log.get_index(0).unwrap().1.as_ref(), b"new");
+            });
+            db.flush_all().unwrap();
+            drop(db);
+            let db = Arc::new(DB::open(path).unwrap());
+            positions.clear();
+            assert!(matches!(
+                apply_follow_message(
+                    &db,
+                    &mut positions,
+                    FollowMessage::Log {
+                        id,
+                        generation: [1; 16],
+                        count: 1
+                    },
+                ),
+                Err(Error::FollowHistoryChanged { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn prepared_but_uncommitted_truncate_keeps_nonempty_binding() {
+        let directory = tempfile::tempdir().unwrap();
+        let db = Arc::new(DB::create(directory.path().join("db")).unwrap());
+        let id = [77, 10];
+        let mut positions = HashMap::new();
+        apply_follow_message(
+            &db,
+            &mut positions,
+            FollowMessage::Log {
+                id,
+                generation: [1; 16],
+                count: 1,
+            },
+        )
+        .unwrap();
+        apply_follow_message(&db, &mut positions, indexed_entry(id, [1; 16], 0, b"keep")).unwrap();
+        // A later log's preparation can fail during truncate_all. This log's
+        // generation has changed, but its samples and source binding must stay.
+        db.with_state(|state| drop(state.msg_logs[&id].prepare_truncate().unwrap()));
+        positions.clear();
+        assert!(matches!(
+            apply_follow_message(
+                &db,
+                &mut positions,
+                FollowMessage::Log {
+                    id,
+                    generation: [2; 16],
+                    count: 1
+                },
+            ),
+            Err(Error::FollowHistoryChanged { .. })
+        ));
+        assert!(matches!(
+            validate_source_message_logs(&db, &[]),
+            Err(Error::FollowHistoryChanged { .. })
+        ));
+        db.with_state(|state| {
+            assert_eq!(
+                state.msg_logs[&id].get_index(0).unwrap().1.as_ref(),
+                b"keep"
+            )
+        });
+    }
+
+    #[test]
+    fn old_incomplete_replica_is_rejected_instead_of_skipping_by_count() {
+        let directory = tempfile::tempdir().unwrap();
+        let db = Arc::new(DB::create(directory.path().join("db")).unwrap());
+        let id = [77, 3];
+        db.push_msg(Timestamp(100), id, b"A").unwrap();
+        db.push_msg(Timestamp(101), id, b"C").unwrap();
+        let mut positions = HashMap::new();
+        let generation = [7; 16];
+        apply_follow_message(
+            &db,
+            &mut positions,
+            FollowMessage::Log {
+                id,
+                generation,
+                count: 3,
+            },
+        )
+        .unwrap();
+        apply_follow_message(&db, &mut positions, indexed_entry(id, generation, 0, b"A")).unwrap();
+        assert!(matches!(
+            apply_follow_message(&db, &mut positions, indexed_entry(id, generation, 1, b"B")),
+            Err(Error::FollowHistoryChanged { .. })
+        ));
+        assert_eq!(db.with_state(|s| s.msg_logs[&id].timestamps().len()), 2);
+    }
+
+    #[stellarator::test]
+    async fn legacy_source_is_rejected_before_storing_data() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            // Read the complete burst, as an old server would. The extension
+            // must remain a valid legacy FollowStream, not a generic DB write.
+            for request in 0..3 {
+                let mut prefix = [0; 4];
+                socket.read_exact(&mut prefix).unwrap();
+                let mut frame = vec![0; u32::from_le_bytes(prefix) as usize];
+                socket.read_exact(&mut frame).unwrap();
+                if request == 2 {
+                    assert_eq!(&frame[1..3], &FollowStream::ID);
+                    let legacy: FollowStream = postcard::from_bytes(&frame[4..]).unwrap();
+                    assert_eq!(legacy.target_packet_size, 1500);
+                }
+            }
+            let metadata = DumpMetadataResp {
+                component_metadata: Vec::new(),
+                msg_metadata: Vec::new(),
+                db_config: DbConfig::default(),
+            }
+            .with_request_id(1)
+            .into_len_packet();
+            let schemas = DumpSchemaResp {
+                schemas: HashMap::new(),
+                start_timestamps: HashMap::new(),
+            }
+            .with_request_id(2)
+            .into_len_packet();
+            let mut legacy =
+                impeller::types::LenPacket::msg_with_timestamp([77, 9], Timestamp(100), 1);
+            legacy.extend_from_slice(b"A");
+            for packet in [metadata, schemas, legacy] {
+                socket.write_all(&packet.inner).unwrap();
+            }
+        });
+        let directory = tempfile::tempdir().unwrap();
+        let db = Arc::new(DB::create(directory.path().join("follower")).unwrap());
+        let result = run_follower(
+            FollowConfig {
+                source_addr: address,
+                ..Default::default()
+            },
+            db.clone(),
+        )
+        .await;
+        assert!(matches!(result, Err(Error::FollowProtocolUnsupported)));
+        assert!(db.with_state(|s| s.msg_logs.is_empty()));
+        server.join().unwrap();
+    }
 
     #[stellarator::test]
     async fn source_snapshot_replaces_stale_db_metadata() {

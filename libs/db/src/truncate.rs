@@ -90,7 +90,7 @@ pub fn run(db_path: PathBuf, dry_run: bool, auto_confirm: bool) -> Result<(), Er
     }
 
     println!("Truncating database...");
-    db.truncate();
+    db.truncate()?;
 
     println!();
     println!("Done! Database has been truncated.");
