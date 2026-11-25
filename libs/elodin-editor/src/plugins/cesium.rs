@@ -86,6 +86,17 @@ pub(crate) struct TerrainCapture {
     timeout: std::time::Duration,
 }
 impl TerrainCapture {
+    pub(super) fn from_env() -> Self {
+        Self {
+            started: web_time::Instant::now(),
+            timeout: std::time::Duration::from_secs_f64(env_positive(
+                "ELODIN_CESIUM_CAPTURE_TIMEOUT",
+                120.0,
+                false,
+            )),
+        }
+    }
+
     pub(crate) fn ready(&self, status: Option<&CesiumStatus>) -> Result<bool, &'static str> {
         if status.is_some_and(|s| s.load_failed) {
             return Err(status
@@ -223,14 +234,7 @@ impl Plugin for CesiumPlugin {
             );
             app.insert_resource(CesiumDetailViews(views))
                 .insert_resource(CesiumSelectionMode::Fixed)
-                .insert_resource(TerrainCapture {
-                    started: web_time::Instant::now(),
-                    timeout: std::time::Duration::from_secs_f64(env_positive(
-                        "ELODIN_CESIUM_CAPTURE_TIMEOUT",
-                        120.0,
-                        false,
-                    )),
-                });
+                .insert_resource(TerrainCapture::from_env());
         }
         app.add_plugins(
             StreamingPlugin::deferred()
