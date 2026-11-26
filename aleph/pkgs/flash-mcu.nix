@@ -7,6 +7,7 @@ pkgs.writeShellApplication {
     pkgs.lsof
     pkgs.openocd
     pkgs.procps
+    pkgs.python3
     pkgs.stm32flash
     pkgs.systemd
     pkgs.reset-mcu

@@ -33,6 +33,8 @@
     "console=ttyTCU0,115200"
     "nohibernate"
     "loglevel=4"
+    # flash-mcu pokes USB pad registers that the padctl driver owns
+    "iomem=relaxed"
   ];
 
   # Kernel modules to include for the initramfs

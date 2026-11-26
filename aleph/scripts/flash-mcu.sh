@@ -14,10 +14,32 @@ usage() {
   echo "Usage: $0 [--elf|--bin] <firmware file>"
 }
 
+# Expansion board 5.0.0+ wires the Jetson's expansion USB port (Tegra USB2 pad 1) to
+# PB15/PB14. The STM32H747 ROM ignores the UART if PB15 is low after reset, and an idle
+# host port pulls it low. Parking keeps the xHCI awake (a resume rewrites the pad
+# registers), disables the port and replaces its pull-downs with a D+ pull-up. Needs
+# iomem=relaxed.
+mcu_usb_park() {
+  python3 - "$1" << 'PYTHON_EOF'
+import mmap, os, struct, sys
+
+park = sys.argv[1] == "on"
+padctl = mmap.mmap(os.open("/dev/mem", os.O_RDWR | os.O_SYNC), 0x1000, offset=0x03520000)
+with open("/sys/bus/platform/devices/3610000.usb/power/control", "w") as f:
+    f.write("on" if park else "auto")
+# USB2_PORT_CAP pad 1: disabled or host. USB2_BATTERY_CHRG_OTGPAD1_CTL1: pull overrides.
+for reg, mask, value in ((0x08, 0xF0, 0x00 if park else 0x10), (0xC4, 0xFF0000, 0x1D0000 if park else 0)):
+    old = struct.unpack_from("<I", padctl, reg)[0]
+    struct.pack_into("<I", padctl, reg, old & ~mask | value)
+PYTHON_EOF
+}
+
 cleanup() {
   if [ "$bootloader_entered" -eq 1 ]; then
     reset-mcu --app || true
   fi
+
+  [ "$flash_method" != uart ] || mcu_usb_park off || true
 
   if [ "$restarted_bridge" -eq 1 ] && command -v systemctl >/dev/null 2>&1; then
     systemctl start --no-block "$bridge_unit" || true
@@ -144,6 +166,7 @@ case "$flash_method" in
 
     echo "Entering STM32 bootloader on $flash_port (GPIO reset)"
     export ALEPH_NRST_METHOD=gpio
+    mcu_usb_park on || true
     uart_enter_bootloader
     bootloader_entered=1
 
