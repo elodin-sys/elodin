@@ -1,0 +1,101 @@
+name: Cesium Native
+description: Restore or build the Cesium Native SDK pinned by bevy-cesium.
+
+runs:
+  using: composite
+  steps:
+    - name: Locate the pinned Cesium build
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        set -euo pipefail
+        cargo metadata --locked --format-version 1 > "${RUNNER_TEMP}/cargo-metadata.json"
+        info="$(python3 - "${RUNNER_TEMP}/cargo-metadata.json" <<'PY'
+        import hashlib
+        import json
+        import os
+        import sys
+
+        meta = json.load(open(sys.argv[1]))
+        pkg = next(p for p in meta["packages"] if p["name"] == "bevy-cesium")
+        source = pkg.get("source") or ""
+        rev = source.rsplit("#", 1)[-1]
+        if len(rev) != 40 or any(c not in "0123456789abcdef" for c in rev):
+            raise SystemExit(f"expected a pinned Bevy-Cesium Git revision, got {source!r}")
+        root = os.path.dirname(pkg["manifest_path"])
+        script = os.path.join(root, "scripts", "build_cesium_native.sh")
+        digest = hashlib.sha256(open(script, "rb").read()).hexdigest()
+        print(rev)
+        print(root)
+        print(digest)
+        PY
+        )"
+        {
+          read -r rev
+          read -r plugin_dir
+          read -r digest
+        } <<<"${info}"
+        {
+          echo "BEVY_CESIUM_DIR=${plugin_dir}"
+          echo "CESIUM_BUILD_ROOT=${RUNNER_TEMP}/cesium"
+          echo "CESIUM_NATIVE_DIR=${RUNNER_TEMP}/cesium/install"
+          echo "CESIUM_SDK_CACHE_KEY=cesium-native-${RUNNER_OS}-${RUNNER_ARCH}-${rev}-${digest}"
+        } >> "${GITHUB_ENV}"
+
+    - name: Locate the pinned Cesium build
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $metadata = cargo metadata --locked --format-version 1 | ConvertFrom-Json -AsHashtable
+        if ($LASTEXITCODE -ne 0) { throw "cargo metadata failed" }
+        $plugin = $metadata.packages | Where-Object { $_.name -eq "bevy-cesium" }
+        if ($plugin.source -notmatch '#([0-9a-f]{40})$') { throw "Expected a pinned Bevy-Cesium Git revision" }
+        $pluginRevision = $Matches[1]
+        $pluginDir = Split-Path $plugin.manifest_path
+        $sdkScript = Join-Path $pluginDir "scripts/build_cesium_native.ps1"
+        $digest = (Get-FileHash $sdkScript -Algorithm SHA256).Hash
+        "BEVY_CESIUM_DIR=$pluginDir" >> $env:GITHUB_ENV
+        "CESIUM_BUILD_ROOT=$env:RUNNER_TEMP/cesium" >> $env:GITHUB_ENV
+        "CESIUM_NATIVE_DIR=$env:RUNNER_TEMP/cesium/install" >> $env:GITHUB_ENV
+        "CESIUM_SDK_CACHE_KEY=cesium-native-$env:RUNNER_OS-$env:RUNNER_ARCH-$pluginRevision-$digest" >> $env:GITHUB_ENV
+
+    - name: Restore Cesium Native SDK
+      id: cesium-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.temp }}/cesium/install
+        key: ${{ env.CESIUM_SDK_CACHE_KEY }}
+
+    - name: Build Cesium Native SDK
+      if: runner.os != 'Windows' && steps.cesium-cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! command -v uv >/dev/null 2>&1; then
+          curl --proto '=https' --tlsv1.2 -LsSf https://astral.sh/uv/install.sh \
+            | env UV_INSTALL_DIR="${RUNNER_TEMP}/uv" sh
+        fi
+        export PATH="${RUNNER_TEMP}/uv:${PATH}"
+        if [[ "$(uname -s)" == Darwin ]] && ! command -v cmake >/dev/null 2>&1; then
+          brew install cmake
+        fi
+        command -v uv
+        command -v cmake
+        # The plugin script only uses Python for a file lock and a text patch.
+        export UV_PYTHON="$(command -v python3)"
+        bash "${BEVY_CESIUM_DIR}/scripts/build_cesium_native.sh"
+
+    - name: Build Cesium Native SDK
+      if: runner.os == 'Windows' && steps.cesium-cache.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: |
+        & "$env:BEVY_CESIUM_DIR/scripts/build_cesium_native.ps1"
+
+    # Parallel Release jobs can build the same SDK and race the cache save.
+    - name: Save Cesium Native SDK
+      if: steps.cesium-cache.outputs.cache-hit != 'true'
+      continue-on-error: true
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.temp }}/cesium/install
+        key: ${{ env.CESIUM_SDK_CACHE_KEY }}
