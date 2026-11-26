@@ -21,6 +21,7 @@ This document contains the help content for the Elodin command-line programs.
 * [`elodin`↴](#elodin)
 * [`elodin login`↴](#elodin-login)
 * [`elodin upload`↴](#elodin-upload)
+* [`elodin runs`↴](#elodin-runs)
 * [`elodin editor`↴](#elodin-editor)
 * [`elodin run`↴](#elodin-run)
 * [`elodin monte-carlo`↴](#elodin-monte-carlo)
@@ -55,6 +56,7 @@ This document contains the help content for the Elodin command-line programs.
 * `determinism` — Compare deterministic witnesses and replay pre_commit hooks from them
 * `login` — Log in to Elodin Cloud through your browser
 * `upload` — Upload a stopped TelemetryDB directory, compacting transmitted logs
+* `runs` — List, inspect, and rename Elodin Cloud runs
 
 ###### **Options**
 
@@ -80,31 +82,63 @@ to inspect your identity and `elodin logout` to end that issuer's session.
 
 ## `elodin upload`
 
-**Usage:** `elodin upload <DB_PATH> [--project <NAME_OR_UUID>] [--json] [--timeout <SECONDS>]`
+**Usage:** `elodin upload <DB_PATH> [--project <NAME_OR_UUID>] [--name <NAME>] [--json] [--timeout <SECONDS>]`
 
-Only TelemetryDB directories containing `db_state` are supported. Stop the writer
-and keep it stopped until upload finishes. The command automatically sends only
-committed log bytes, excluding sparse preallocation. It does not modify the source database or infer
-simulation/flight provenance from its contents. Symlinks, special files, and
-nonportable paths are rejected.
+Upload a TelemetryDB directory containing `db_state`. Stop its writer and keep it
+stopped until the command finishes.
 
 ```bash
-elodin login
-elodin projects create demo
-elodin upload dbs/ball
-elodin upload dbs/ball --project demo --json
+elodin upload dbs/ball --project demo
+elodin upload dbs/ball --project demo --name "Ball flight 14" --json
 ```
 
-One available project is selected automatically; multiple projects prompt for a
-destination. In scripts, specify `--project` or `ELODIN_PROJECT`. Files stream
-with a manifest of sizes and SHA-256 digests. Success means the server has published
-the run, not merely accepted the upload. `--json` prints the final ticket/run status
-to stdout, with progress on stderr. Publication failures return a nonzero exit code.
+- **Project:** use a name or UUID with `--project` or `ELODIN_PROJECT`. A single
+  available project is selected automatically; otherwise the CLI prompts. Specify
+  the project explicitly in scripts.
+- **Name:** defaults to the directory name (`dbs/ball` → `ball`). `--name` overrides
+  both this default and embedded recording metadata.
+- **Output:** success means the run is published. `--json` writes the final status
+  to stdout; progress goes to stderr. Publication failures return a nonzero exit code.
+- **Resume:** rerun the same snapshot after interruption. `--restart` starts a new
+  upload. After a successful upload, the next invocation also starts a new one.
+  Retries replace the pending name with the current choice; recovery preserves
+  renames and clears made after publication.
+- **Timeout:** `--timeout` limits the publication wait, not transmission. A timed-out
+  upload may still publish; the error includes its ticket and status URL.
 
-`--timeout` bounds the publication wait (default 300 seconds), not transmission.
-On timeout the accepted upload may still publish; the error includes its ticket
-and status URL. Each invocation starts a new upload intent; chunk resumption and
-automatic transmission retries are not supported.
+**Name rules**
+
+- Surrounding whitespace is trimmed. Names allow up to 256 Unicode characters and no control characters.
+- Names must be unique within a project, with case-sensitive comparison.
+- Blank, invalid, or conflicting upload names publish as unnamed. Upload still
+  succeeds, without falling back to embedded metadata. Check the saved name with `elodin runs get`.
+
+Uploads preserve source files and metadata, sending only committed log bytes and
+excluding sparse preallocation. File sizes and SHA-256 checksums are verified.
+Symlinks, special files, and nonportable paths are rejected; simulation/flight provenance is not inferred.
+
+## `elodin runs`
+
+```bash
+elodin runs list --project demo
+elodin runs get "Drop test 14" --project demo --json
+elodin runs rename "Drop test 14" "Drop test 14 corrected" --project demo
+elodin runs rename "Drop test 14 corrected" --clear --project demo
+```
+
+- **Select a run:** `get` and `rename` accept a UUID or an exact, case-sensitive
+  saved name within the selected project. Project selection works as for upload.
+- **ID precedence:** UUID-shaped inputs always mean IDs, for projects and runs.
+  Use the actual ID from `list` for unnamed runs or names that look like UUIDs.
+- **Read:** `list` shows names and IDs, labeling unnamed runs `(unnamed)`. `get`
+  also shows original metadata and uploader details. All commands support `--json`.
+- **Rename:** requires effective member or admin access to the project and follows
+  the name rules above. Invalid edits fail; conflicts return `409 run_name_conflict`.
+  Errors leave the saved name unchanged.
+- **Clear:** use `--clear` without a new name to save a null name. After a rename,
+  use the new name or the unchanged ID. Missing names fail without changing a run.
+
+Edits change only the display name, preserving the run ID, storage, and original metadata.
 
 ## `elodin editor`
 

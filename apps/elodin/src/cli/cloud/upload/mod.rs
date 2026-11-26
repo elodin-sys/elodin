@@ -1,7 +1,7 @@
 //! Resumable zstd-compressed tar uploads of a stopped TelemetryDB, followed by publication polling.
 
 use std::collections::HashSet;
-use std::io::{IsTerminal, Read, Write};
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -15,8 +15,8 @@ use tokio::runtime::Runtime;
 
 use crate::cli::Cli;
 
-use super::AuthCtx;
 use super::auth::{random_token, tokens};
+use super::{AuthCtx, resolve_project, response};
 
 const PART_UPLOAD_CONCURRENCY: usize = 4;
 const _: () = assert!(PART_UPLOAD_CONCURRENCY * 64 * 1024 * 1024 <= 256 * 1024 * 1024);
@@ -31,6 +31,9 @@ pub struct UploadArgs {
     /// Destination project UUID or name; optional when exactly one project is available.
     #[arg(long, env = "ELODIN_PROJECT")]
     pub project: Option<String>,
+    /// Initial display name; defaults to the source directory basename.
+    #[arg(long)]
+    pub name: Option<String>,
     /// Print the final published upload status as JSON.
     #[arg(long)]
     pub json: bool,
@@ -61,6 +64,25 @@ struct Manifest {
     version: u32,
     kind: String,
     files: Vec<UploadFile>,
+}
+
+#[derive(Serialize)]
+struct UploadRequest<'a> {
+    #[serde(flatten)]
+    manifest: &'a Manifest,
+    name: &'a str,
+}
+
+fn upload_name(source: &Path, explicit: Option<&str>) -> miette::Result<String> {
+    if let Some(name) = explicit {
+        return Ok(name.to_owned());
+    }
+    let source = std::fs::canonicalize(source).into_diagnostic()?;
+    source
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_owned)
+        .ok_or_else(|| miette::miette!("source directory has no UTF-8 basename; specify --name"))
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -484,17 +506,6 @@ fn archive_cache_key(
         .collect())
 }
 
-#[derive(Deserialize)]
-struct Project {
-    id: uuid::Uuid,
-    name: String,
-}
-
-#[derive(Deserialize)]
-struct Projects {
-    projects: Vec<Project>,
-}
-
 #[derive(Debug, Deserialize, Serialize)]
 struct Status {
     ticket: uuid::Uuid,
@@ -565,16 +576,8 @@ pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
     }
     let mut creds = tokens::ensure_valid(ctx).await?;
     let base = creds.api_url.trim_end_matches('/').to_owned();
-    let projects: Projects = response(
-        ctx.client
-            .get(format!("{base}/v1/projects"))
-            .bearer_auth(&creds.access_token)
-            .send()
-            .await
-            .into_diagnostic()?,
-    )
-    .await?;
-    let project = select_project(&projects.projects, args.project.as_deref())?;
+    let project = resolve_project(ctx, &creds, args.project.as_deref()).await?;
+    let name = upload_name(&args.db_path, args.name.as_deref())?;
     let url = format!("{base}/v1/projects/{project}/runs");
     let (session_path, idempotency) = upload_key(ctx, &creds, project, &manifest, args.restart)?;
     eprintln!(
@@ -586,7 +589,10 @@ pub async fn run(ctx: &AuthCtx, args: &UploadArgs) -> miette::Result<()> {
         .post(&url)
         .bearer_auth(&creds.access_token)
         .header("Idempotency-Key", &idempotency)
-        .json(&manifest)
+        .json(&UploadRequest {
+            manifest: &manifest,
+            name: &name,
+        })
         .timeout(Duration::from_secs(30))
         .send()
         .await
@@ -1034,64 +1040,6 @@ fn upload_key(
     Ok((path, session.key))
 }
 
-fn select_project(projects: &[Project], requested: Option<&str>) -> miette::Result<uuid::Uuid> {
-    if let Some(value) = requested {
-        // UUIDs are checked by the upload endpoint, including grants and tenant scope.
-        if let Ok(id) = value.parse() {
-            return Ok(id);
-        }
-        let matches: Vec<_> = projects.iter().filter(|p| p.name == value).collect();
-        return match matches.as_slice() {
-            [project] => Ok(project.id),
-            _ => Err(miette::miette!(
-                "project '{value}' not found or ambiguous; use its UUID"
-            )),
-        };
-    }
-    match projects {
-        [] => Err(miette::miette!(
-            "no projects available; run `elodin projects create <name>` first"
-        )),
-        [project] => Ok(project.id),
-        _ if !std::io::stdin().is_terminal() => Err(miette::miette!(
-            "multiple projects available; specify --project <name or UUID> or ELODIN_PROJECT"
-        )),
-        _ => {
-            for (index, project) in projects.iter().enumerate() {
-                eprintln!("  {}. {} ({})", index + 1, project.name, project.id);
-            }
-            eprintln!("Select a destination project by number:");
-            let mut choice = String::new();
-            std::io::stdin().read_line(&mut choice).into_diagnostic()?;
-            choice
-                .trim()
-                .parse::<usize>()
-                .ok()
-                .and_then(|n| n.checked_sub(1))
-                .and_then(|n| projects.get(n))
-                .map(|p| p.id)
-                .ok_or_else(|| miette::miette!("invalid project selection"))
-        }
-    }
-}
-
-async fn response<T: serde::de::DeserializeOwned>(resp: reqwest::Response) -> miette::Result<T> {
-    let status = resp.status();
-    if !status.is_success() {
-        let detail: serde_json::Value = resp.json().await.unwrap_or_default();
-        if status == reqwest::StatusCode::UNAUTHORIZED {
-            return Err(miette::miette!(
-                "the API rejected the token (401); run `elodin login` again"
-            ));
-        }
-        return Err(miette::miette!("API error ({status}): {detail}"));
-    }
-    resp.json()
-        .await
-        .into_diagnostic()
-        .wrap_err("invalid API response")
-}
-
 fn upload_paths(root: &Path) -> miette::Result<Vec<(String, u64)>> {
     if !std::fs::symlink_metadata(root).into_diagnostic()?.is_dir() {
         return Err(miette::miette!(
@@ -1238,6 +1186,7 @@ impl Cli {
 
 #[cfg(test)]
 mod tests {
+    use super::super::{Project, select_project};
     use super::*;
 
     #[test]
@@ -1434,6 +1383,7 @@ mod tests {
             &UploadArgs {
                 db_path: root,
                 project: None,
+                name: None,
                 json: false,
                 restart: false,
                 timeout: 1,
@@ -1463,6 +1413,7 @@ mod tests {
             &UploadArgs {
                 db_path: root,
                 project: None,
+                name: None,
                 json: false,
                 restart: false,
                 timeout: 1,
@@ -1631,6 +1582,7 @@ mod tests {
         state: &str,
         run_id: Option<uuid::Uuid>,
         status_blips: bool,
+        name: Option<&str>,
     ) -> (miette::Result<()>, Vec<Vec<u8>>) {
         use tokio::io::AsyncWriteExt;
 
@@ -1749,6 +1701,7 @@ mod tests {
             &UploadArgs {
                 db_path: root.clone(),
                 project: None,
+                name: name.map(str::to_owned),
                 json: true,
                 restart: false,
                 timeout: if status_blips { 10 } else { 1 },
@@ -1762,12 +1715,78 @@ mod tests {
             std::fs::metadata(root.join("data")).unwrap().len(),
             8 * 1024 * 1024 * 1024
         );
-        (result, server.await.unwrap())
+        let requests = server.await.unwrap();
+        let start = requests[1]
+            .windows(4)
+            .position(|b| b == b"\r\n\r\n")
+            .unwrap()
+            + 4;
+        let request: serde_json::Value = serde_json::from_slice(&requests[1][start..]).unwrap();
+        assert_eq!(request["name"], name.unwrap_or("db"));
+        assert!(request.get("files").is_some());
+        assert!(request.get("manifest").is_none());
+        (result, requests)
+    }
+
+    #[test]
+    fn source_basename_and_explicit_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("drop-14");
+        std::fs::create_dir(&root).unwrap();
+        for source in [
+            root.clone(),
+            root.join("."),
+            root.join("../drop-14"),
+            root.join(""),
+        ] {
+            assert_eq!(upload_name(&source, None).unwrap(), "drop-14");
+        }
+        for name in ["Drop test 14", "", "  ", "bad\nname", "測試"] {
+            assert_eq!(upload_name(&root, Some(name)).unwrap(), name);
+        }
+    }
+
+    #[test]
+    fn upload_name_argument_parsing() {
+        use clap::Parser;
+
+        for name in [None, Some("Drop test 14"), Some(""), Some("測試")] {
+            let mut argv = vec![
+                "elodin",
+                "upload",
+                "recordings/drop-14",
+                "--project",
+                "demo",
+                "--json",
+            ];
+            if let Some(name) = name {
+                argv.extend(["--name", name]);
+            }
+            let cli = Cli::try_parse_from(argv).unwrap();
+            let Some(crate::cli::Commands::Upload(args)) = cli.command else {
+                panic!("expected upload command");
+            };
+            assert_eq!(args.name.as_deref(), name);
+            assert_eq!(args.db_path, Path::new("recordings/drop-14"));
+            assert_eq!(args.project.as_deref(), Some("demo"));
+            assert!(args.json);
+        }
+        assert!(Cli::try_parse_from(["elodin", "upload", "db", "--name"]).is_err());
+    }
+
+    #[tokio::test]
+    async fn explicit_upload_names_are_sent_without_changing_the_manifest() {
+        for name in ["Drop test 14", "", "bad\nname"] {
+            let (result, _) =
+                mock_upload("succeeded", Some(uuid::Uuid::nil()), false, Some(name)).await;
+            result.unwrap();
+        }
     }
 
     #[tokio::test]
     async fn uploads_only_compacted_bytes_to_storage_without_bearer_token() {
-        let (result, requests) = mock_upload("succeeded", Some(uuid::Uuid::nil()), false).await;
+        let (result, requests) =
+            mock_upload("succeeded", Some(uuid::Uuid::nil()), false, None).await;
         result.unwrap();
         let upload = String::from_utf8_lossy(&requests[1]);
         assert!(upload.starts_with("POST /v1/projects/00000000-0000-0000-0000-000000000000/runs "));
@@ -1938,14 +1957,15 @@ mod tests {
             ("succeeded", None, "omitted its run ID"),
             ("queued", None, "timed out waiting"),
         ] {
-            let (result, _) = mock_upload(state, run_id, false).await;
+            let (result, _) = mock_upload(state, run_id, false, None).await;
             assert!(result.unwrap_err().to_string().contains(error));
         }
     }
 
     #[tokio::test]
     async fn status_polling_survives_dropped_connections_and_gateway_errors() {
-        let (result, requests) = mock_upload("succeeded", Some(uuid::Uuid::nil()), true).await;
+        let (result, requests) =
+            mock_upload("succeeded", Some(uuid::Uuid::nil()), true, None).await;
         result.unwrap();
         let polls = requests
             .iter()

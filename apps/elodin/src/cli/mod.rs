@@ -62,6 +62,8 @@ enum Commands {
     Projects(cloud::projects::ProjectsArgs),
     /// Upload a stopped TelemetryDB directory, compacting the transmitted logs
     Upload(cloud::upload::UploadArgs),
+    /// List, inspect, and rename Elodin Cloud runs
+    Runs(cloud::runs::RunsArgs),
     /// Launch the Elodin editor (default)
     Editor(editor::Args),
     /// Run an Elodin simulation in headless mode
@@ -155,6 +157,7 @@ impl Cli {
             Some(Commands::Whoami(args)) => self.clone().whoami(args.clone(), rt),
             Some(Commands::Projects(args)) => self.clone().projects(args.clone(), rt),
             Some(Commands::Upload(args)) => self.clone().upload(args.clone(), rt),
+            Some(Commands::Runs(args)) => self.clone().runs(args.clone(), rt),
             Some(Commands::Editor(args)) => self.clone().editor(args.clone(), rt),
             #[cfg(not(target_os = "windows"))]
             Some(Commands::Run(args)) => self.clone().run_headless(args.clone(), rt),

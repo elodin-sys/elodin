@@ -1,5 +1,7 @@
 //! Elodin Cloud authentication, projects, and recording uploads.
 
+use serde::Deserialize;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use miette::{Context, IntoDiagnostic};
@@ -8,6 +10,7 @@ use crate::cli::Cli;
 
 pub(super) mod auth;
 pub(super) mod projects;
+pub(super) mod runs;
 pub(super) mod upload;
 
 /// Resolved context shared by the cloud subcommands.
@@ -46,4 +49,93 @@ impl Cli {
             creds_path,
         })
     }
+}
+
+#[derive(Deserialize)]
+struct Project {
+    id: uuid::Uuid,
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct Projects {
+    projects: Vec<Project>,
+}
+
+async fn resolve_project(
+    ctx: &AuthCtx,
+    creds: &auth::tokens::Credentials,
+    requested: Option<&str>,
+) -> miette::Result<uuid::Uuid> {
+    let projects: Projects = response(
+        ctx.client
+            .get(format!(
+                "{}/v1/projects",
+                creds.api_url.trim_end_matches('/')
+            ))
+            .bearer_auth(&creds.access_token)
+            .send()
+            .await
+            .into_diagnostic()?,
+    )
+    .await?;
+    select_project(&projects.projects, requested)
+}
+
+fn select_project(projects: &[Project], requested: Option<&str>) -> miette::Result<uuid::Uuid> {
+    if let Some(value) = requested {
+        // UUIDs are checked by the run endpoint, including grants and tenant scope.
+        if let Ok(id) = value.parse() {
+            return Ok(id);
+        }
+        let matches: Vec<_> = projects.iter().filter(|p| p.name == value).collect();
+        return match matches.as_slice() {
+            [project] => Ok(project.id),
+            _ => Err(miette::miette!(
+                "project '{value}' not found or ambiguous; use its UUID"
+            )),
+        };
+    }
+    match projects {
+        [] => Err(miette::miette!(
+            "no projects available; run `elodin projects create <name>` first"
+        )),
+        [project] => Ok(project.id),
+        _ if !std::io::stdin().is_terminal() => Err(miette::miette!(
+            "multiple projects available; specify --project <name or UUID> or ELODIN_PROJECT"
+        )),
+        _ => {
+            for (index, project) in projects.iter().enumerate() {
+                eprintln!("  {}. {} ({})", index + 1, project.name, project.id);
+            }
+            eprintln!("Select a project by number:");
+            let mut choice = String::new();
+            std::io::stdin().read_line(&mut choice).into_diagnostic()?;
+            choice
+                .trim()
+                .parse::<usize>()
+                .ok()
+                .and_then(|n| n.checked_sub(1))
+                .and_then(|n| projects.get(n))
+                .map(|p| p.id)
+                .ok_or_else(|| miette::miette!("invalid project selection"))
+        }
+    }
+}
+
+async fn response<T: serde::de::DeserializeOwned>(resp: reqwest::Response) -> miette::Result<T> {
+    let status = resp.status();
+    if !status.is_success() {
+        let detail: serde_json::Value = resp.json().await.unwrap_or_default();
+        if status == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(miette::miette!(
+                "the API rejected the token (401); run `elodin login` again"
+            ));
+        }
+        return Err(miette::miette!("API error ({status}): {detail}"));
+    }
+    resp.json()
+        .await
+        .into_diagnostic()
+        .wrap_err("invalid API response")
 }
