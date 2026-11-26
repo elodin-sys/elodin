@@ -61,7 +61,7 @@ runs:
         "BEVY_CESIUM_DIR=$pluginDir" >> $env:GITHUB_ENV
         "CESIUM_BUILD_ROOT=$root" >> $env:GITHUB_ENV
         "CESIUM_NATIVE_DIR=$root\install" >> $env:GITHUB_ENV
-        "CESIUM_SDK_CACHE_KEY=cesium-native-$env:RUNNER_OS-$env:RUNNER_ARCH-$pluginRevision-$digest-static-crt" >> $env:GITHUB_ENV
+        "CESIUM_SDK_CACHE_KEY=cesium-native-$env:RUNNER_OS-$env:RUNNER_ARCH-$pluginRevision-$digest-static-runtime" >> $env:GITHUB_ENV
 
     - name: Restore Cesium Native SDK
       id: cesium-cache
@@ -87,7 +87,17 @@ runs:
         command -v cmake
         # The plugin script only uses Python for a file lock and a text patch.
         export UV_PYTHON="$(command -v python3)"
-        bash "${BEVY_CESIUM_DIR}/scripts/build_cesium_native.sh"
+        # macOS /bin/bash is 3.2, which errors on the script's empty array under set -u.
+        bash_bin=bash
+        if [[ "$(uname -s)" == Darwin ]]; then
+          bash_prefix="$(brew --prefix bash 2>/dev/null || true)"
+          if [[ -z "${bash_prefix}" || ! -x "${bash_prefix}/bin/bash" ]]; then
+            brew install bash
+            bash_prefix="$(brew --prefix bash)"
+          fi
+          bash_bin="${bash_prefix}/bin/bash"
+        fi
+        "${bash_bin}" "${BEVY_CESIUM_DIR}/scripts/build_cesium_native.sh"
 
     - name: Build Cesium Native SDK
       if: runner.os == 'Windows' && steps.cesium-cache.outputs.cache-hit != 'true'
@@ -96,6 +106,19 @@ runs:
         if (Test-Path $env:CESIUM_BUILD_ROOT) {
           Remove-Item -Recurse -Force $env:CESIUM_BUILD_ROOT
         }
+        # The plugin script cannot pass -D flags. Cesium stays /MD unless this option is on.
+        $wrap = Join-Path $env:RUNNER_TEMP "cmake-wrap"
+        New-Item -ItemType Directory -Force $wrap | Out-Null
+        $cmake = (Get-Command cmake.exe).Source
+        @"
+@echo off
+if "%~1"=="-S" (
+  "$cmake" %* -DCESIUM_MSVC_STATIC_RUNTIME_ENABLED=ON
+) else (
+  "$cmake" %*
+)
+"@ | Set-Content -Encoding ASCII (Join-Path $wrap "cmake.cmd")
+        $env:PATH = "$wrap;$env:PATH"
         & "$env:BEVY_CESIUM_DIR/scripts/build_cesium_native.ps1"
 
     # Parallel Release jobs can build the same SDK and race the cache save.
