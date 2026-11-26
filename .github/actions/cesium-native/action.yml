@@ -56,10 +56,12 @@ runs:
         $digest = (Get-FileHash $sdkScript -Algorithm SHA256).Hash
         # runner.temp makes Draco's object paths exceed the 260-character limit.
         $root = "C:\cesium"
+        # Rust's MSVC target links the static CRT. static-md is /MD and will not link.
+        "VCPKG_TRIPLET=x64-windows-static" >> $env:GITHUB_ENV
         "BEVY_CESIUM_DIR=$pluginDir" >> $env:GITHUB_ENV
         "CESIUM_BUILD_ROOT=$root" >> $env:GITHUB_ENV
         "CESIUM_NATIVE_DIR=$root\install" >> $env:GITHUB_ENV
-        "CESIUM_SDK_CACHE_KEY=cesium-native-$env:RUNNER_OS-$env:RUNNER_ARCH-$pluginRevision-$digest" >> $env:GITHUB_ENV
+        "CESIUM_SDK_CACHE_KEY=cesium-native-$env:RUNNER_OS-$env:RUNNER_ARCH-$pluginRevision-$digest-static-crt" >> $env:GITHUB_ENV
 
     - name: Restore Cesium Native SDK
       id: cesium-cache
