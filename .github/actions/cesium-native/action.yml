@@ -87,17 +87,15 @@ runs:
         command -v cmake
         # The plugin script only uses Python for a file lock and a text patch.
         export UV_PYTHON="$(command -v python3)"
-        # macOS /bin/bash is 3.2, which errors on the script's empty array under set -u.
-        bash_bin=bash
+        script="${BEVY_CESIUM_DIR}/scripts/build_cesium_native.sh"
+        # macOS bash 3.2 rejects the script's empty array under set -u, and the
+        # ci user cannot brew-install a newer bash.
         if [[ "$(uname -s)" == Darwin ]]; then
-          bash_prefix="$(brew --prefix bash 2>/dev/null || true)"
-          if [[ -z "${bash_prefix}" || ! -x "${bash_prefix}/bin/bash" ]]; then
-            brew install bash
-            bash_prefix="$(brew --prefix bash)"
-          fi
-          bash_bin="${bash_prefix}/bin/bash"
+          script="${RUNNER_TEMP}/build_cesium_native.sh"
+          sed 's/set -euo pipefail/set -eo pipefail/' \
+            "${BEVY_CESIUM_DIR}/scripts/build_cesium_native.sh" > "${script}"
         fi
-        "${bash_bin}" "${BEVY_CESIUM_DIR}/scripts/build_cesium_native.sh"
+        bash "${script}"
 
     - name: Build Cesium Native SDK
       if: runner.os == 'Windows' && steps.cesium-cache.outputs.cache-hit != 'true'
