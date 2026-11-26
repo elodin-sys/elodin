@@ -299,7 +299,9 @@ jobs:
           fi
           echo "--- appended to .cargo/config.toml ---"
           tail -8 .cargo/config.toml
+      # Musl matrix entries build elodin-db only. The editor targets need the SDK.
       - name: Cesium Native SDK
+        if: ${{ !contains(matrix.targets[0], 'musl') }}
         uses: ./.github/actions/cesium-native
       - name: Build artifacts
         run: |

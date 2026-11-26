@@ -54,16 +54,18 @@ runs:
         $pluginDir = Split-Path $plugin.manifest_path
         $sdkScript = Join-Path $pluginDir "scripts/build_cesium_native.ps1"
         $digest = (Get-FileHash $sdkScript -Algorithm SHA256).Hash
+        # runner.temp makes Draco's object paths exceed the 260-character limit.
+        $root = "C:\cesium"
         "BEVY_CESIUM_DIR=$pluginDir" >> $env:GITHUB_ENV
-        "CESIUM_BUILD_ROOT=$env:RUNNER_TEMP/cesium" >> $env:GITHUB_ENV
-        "CESIUM_NATIVE_DIR=$env:RUNNER_TEMP/cesium/install" >> $env:GITHUB_ENV
+        "CESIUM_BUILD_ROOT=$root" >> $env:GITHUB_ENV
+        "CESIUM_NATIVE_DIR=$root\install" >> $env:GITHUB_ENV
         "CESIUM_SDK_CACHE_KEY=cesium-native-$env:RUNNER_OS-$env:RUNNER_ARCH-$pluginRevision-$digest" >> $env:GITHUB_ENV
 
     - name: Restore Cesium Native SDK
       id: cesium-cache
       uses: actions/cache/restore@v4
       with:
-        path: ${{ runner.temp }}/cesium/install
+        path: ${{ env.CESIUM_NATIVE_DIR }}
         key: ${{ env.CESIUM_SDK_CACHE_KEY }}
 
     - name: Build Cesium Native SDK
@@ -89,6 +91,9 @@ runs:
       if: runner.os == 'Windows' && steps.cesium-cache.outputs.cache-hit != 'true'
       shell: pwsh
       run: |
+        if (Test-Path $env:CESIUM_BUILD_ROOT) {
+          Remove-Item -Recurse -Force $env:CESIUM_BUILD_ROOT
+        }
         & "$env:BEVY_CESIUM_DIR/scripts/build_cesium_native.ps1"
 
     # Parallel Release jobs can build the same SDK and race the cache save.
@@ -97,5 +102,5 @@ runs:
       continue-on-error: true
       uses: actions/cache/save@v4
       with:
-        path: ${{ runner.temp }}/cesium/install
+        path: ${{ env.CESIUM_NATIVE_DIR }}
         key: ${{ env.CESIUM_SDK_CACHE_KEY }}
