@@ -23,6 +23,9 @@ ROOT = "https://tile.googleapis.com/v1/3dtiles/root.json"
 IDENTITY = np.eye(4)
 MAX_RESOURCE_BYTES = 256 * 1024 * 1024
 MAX_PACKAGE_BYTES = 4 * 1024**3
+# A degree is about 111 km. This slack covers a JSON round-trip of the bounds
+# without treating a genuinely smaller package as sufficient.
+COVERAGE_TOLERANCE_DEG = 1e-5
 
 
 def canonical(url):
@@ -74,14 +77,7 @@ def validate_package(directory, request, *, exact=False):
         raise ValueError("Terrain package provider/version mismatch")
     for region in regions:
         w, s, e, n = region["bounds"]
-        if not any(
-            old["bounds"][0] <= w
-            and old["bounds"][1] <= s
-            and old["bounds"][2] >= e
-            and old["bounds"][3] >= n
-            and old["max_error"] <= region["max_error"]
-            for old in previous_regions
-        ):
+        if not any(_covers(old, w, s, e, n, region["max_error"]) for old in previous_regions):
             raise ValueError("Prepared terrain does not cover the requested region/detail")
     if "tileset.json" not in files or "package.json" not in files:
         raise ValueError("Terrain package has no verified entrypoint")
@@ -92,6 +88,18 @@ def validate_package(directory, request, *, exact=False):
         if hashlib.sha256(path.read_bytes()).hexdigest() != expected:
             raise ValueError(f"Terrain file changed or is corrupt: {relative}")
     return manifest
+
+
+def _covers(prepared, west, south, east, north, max_error) -> bool:
+    slack = COVERAGE_TOLERANCE_DEG
+    left, bottom, right, top = prepared["bounds"]
+    return (
+        left <= west + slack
+        and bottom <= south + slack
+        and right >= east - slack
+        and top >= north - slack
+        and prepared["max_error"] <= max_error
+    )
 
 
 def trig_interval(lo, hi, cosine=False):
