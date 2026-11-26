@@ -9,11 +9,12 @@
  }
  #[derive(Default, Debug)]
  pub struct Statistics {
-@@ -124,11 +126,14 @@
+@@ -124,11 +126,15 @@
      Mesh(Tile, Vec<String>),
      Hierarchy(Vec<Node>),
  }
 +const PROGRESSIVE_RESOLUTION_HEIGHT_FRACTION: f64 = 0.3;
++const MAX_PENDING_TILE_JOBS: usize = 8;
 +
  /// The cache budget covers unused tiles, excluding the current visible and
 -/// refining working set. Work in flight is capped at four tiles; each response
@@ -25,7 +26,7 @@
      tx: mpsc::SyncSender<Completion>,
      rx: mpsc::Receiver<Completion>,
      pending: HashSet<usize>,
-@@ -136,6 +141,11 @@
+@@ -136,6 +142,11 @@
      retry_after: HashMap<usize, f64>,
      elapsed: f64,
      resident: HashMap<usize, (usize, u64)>,
@@ -37,7 +38,12 @@
      tile_credits: HashMap<usize, Vec<String>>,
      clock: u64,
      root_pending: bool,
-@@ -183,6 +193,7 @@
+@@ -179,10 +190,11 @@
+         Self::start(transport::Loader::default(), Some(url))
+     }
+     fn start(client: transport::Loader, url: Option<Url>) -> Result<Self> {
+-        let (tx, rx) = mpsc::sync_channel(4);
++        let (tx, rx) = mpsc::sync_channel(MAX_PENDING_TILE_JOBS);
          client.load_root(url, tx.clone());
          Ok(Self {
              nodes: vec![],
@@ -45,7 +51,7 @@
              tx,
              rx,
              pending: HashSet::new(),
-@@ -190,6 +201,9 @@
+@@ -190,6 +202,9 @@
              retry_after: HashMap::new(),
              elapsed: 0.0,
              resident: HashMap::new(),
@@ -55,7 +61,7 @@
              tile_credits: HashMap::new(),
              clock: 0,
              root_pending: true,
-@@ -206,6 +220,11 @@
+@@ -206,6 +221,11 @@
              None,
          )
      }
@@ -67,7 +73,7 @@
      pub fn update(&mut self, views: &[View], seconds: f32) -> Result<Frame> {
          if !seconds.is_finite()
              || seconds < 0.
-@@ -234,7 +253,10 @@
+@@ -234,7 +254,10 @@
                  Completion::Root(result) => {
                      self.root_pending = false;
                      match result {
@@ -79,7 +85,7 @@
                          Err(e) => {
                              frame.error = Some(e.0);
                              eprintln!("3D Tiles: {e}");
-@@ -292,12 +314,14 @@
+@@ -292,12 +315,14 @@
                  &mut required,
                  false,
              );
@@ -100,7 +106,7 @@
                  // A missing provider sibling must not hide prepared detail behind
                  // a coarse ancestor. Select the available package as an offline
                  // fallback while continuing to request the full hierarchy.
-@@ -323,14 +347,9 @@
+@@ -323,14 +348,9 @@
                  r.1 = self.clock;
              }
          }
@@ -117,7 +123,7 @@
          let mut provider_pending = self
              .pending
              .iter()
-@@ -341,8 +360,21 @@
+@@ -341,8 +361,21 @@
                      .is_some_and(|url| self.client.requires_provider(url))
              })
              .count();
@@ -136,11 +142,11 @@
 +            .count();
          for id in wanted {
 -            if self.pending.len() >= 4 {
-+            if self.pending.len() >= 8 {
++            if self.pending.len() >= MAX_PENDING_TILE_JOBS {
                  break;
              }
              if self.resident.contains_key(&id)
-@@ -354,14 +386,23 @@
+@@ -354,14 +387,23 @@
              let Some(url) = self.nodes[id].url.clone() else {
                  continue;
              };
@@ -165,7 +171,7 @@
              self.client.load_tile(
                  id,
                  url,
-@@ -394,6 +435,8 @@
+@@ -394,6 +436,8 @@
          self.stats.resident_bytes = bytes;
          frame.pending = self.pending.len() as u32 + u32::from(self.root_pending);
          frame.load_failed = self.root_failed || !self.failed.is_empty();
@@ -174,7 +180,7 @@
          let mut credits = HashMap::<&str, usize>::new();
          for id in &frame.visible {
              if let Some(items) = self.tile_credits.get(&(*id as usize)) {
-@@ -407,8 +450,231 @@
+@@ -407,8 +451,231 @@
          frame
              .credits
              .extend(credits.into_iter().map(|(c, _)| html_escape(c)));
@@ -406,7 +412,7 @@
      fn select(
          &self,
          id: usize,
-@@ -432,13 +698,34 @@
+@@ -432,13 +699,34 @@
              .fold(None, |s: Option<f64>, e| Some(s.unwrap_or(0.).max(e)));
          let Some(error) = score else { return true };
          let has = n.url.is_some();
@@ -443,7 +449,7 @@
              }
              if n.add {
                  if ready {
-@@ -452,6 +739,9 @@
+@@ -452,6 +740,9 @@
              if all_ready && (!prepared_only || visible.len() > before || !has) {
                  return true;
              }
@@ -453,7 +459,7 @@
              if ready {
                  // Keep ready descendants while this fallback covers siblings
                  // still loading; evicting them here causes repeated downloads.
-@@ -472,6 +762,28 @@
+@@ -472,6 +763,28 @@
              wanted.push(id);
          }
          ready || !has
@@ -484,8 +490,12 @@
 
 --- a/src/tests.rs
 +++ b/src/tests.rs
-@@ -204,6 +204,7 @@
-     let (tx, rx) = mpsc::sync_channel(4);
+@@ -201,9 +201,10 @@
+     }
+ }
+ fn session() -> Session {
+-    let (tx, rx) = mpsc::sync_channel(4);
++    let (tx, rx) = mpsc::sync_channel(MAX_PENDING_TILE_JOBS);
      Session {
          nodes: vec![node()],
 +        request_parents: vec![],
@@ -502,7 +512,7 @@
          tile_credits: HashMap::new(),
          clock: 0,
          root_pending: false,
-@@ -221,6 +225,387 @@
+@@ -221,6 +225,426 @@
          cache_bytes: 1024,
      }
  }
@@ -873,6 +883,45 @@
 +    assert!(frame.selection_complete);
 +}
 +#[test]
++fn browser_completion_burst_preserves_every_admitted_job() {
++    let mut s = Session::start(transport::Loader::default(), None).unwrap();
++    // The unconfigured loader fails before any HTTP request. Drain root setup first.
++    assert!(matches!(
++        s.rx.recv_timeout(std::time::Duration::from_secs(1))
++            .unwrap(),
++        Completion::Root(_)
++    ));
++    s.root_pending = false;
++    s.nodes = (0..8)
++        .map(|_| {
++            let mut n = node();
++            n.url = None;
++            n
++        })
++        .collect();
++    s.pending.extend(0..8);
++    // Browser callbacks can all finish before a frame drains the actual session queue.
++    for id in 0..8 {
++        s.tx.try_send(Completion::Content(
++            id,
++            Ok(Payload::Mesh(
++                Tile {
++                    id: id as u64,
++                    primitives: vec![],
++                },
++                vec![],
++            )),
++            0,
++        ))
++        .unwrap_or_else(|_| panic!("completion for tile {id} was lost"));
++    }
++    let frame = s.update(&[], 0.).unwrap();
++    assert_eq!(frame.loaded.len(), 8);
++    assert_eq!(s.stats.decoded_tiles, 8);
++    assert!(s.pending.is_empty());
++}
++
++#[test]
 +fn terrain_admits_eight_jobs_but_no_more() {
 +    let mut s = session();
 +    s.nodes = (0..11).map(|_| node()).collect();
@@ -890,7 +939,7 @@
  #[test]
  fn prepared_tiles_progress_while_provider_slots_are_busy() {
      let root = Url::from_file_path(
-@@ -241,10 +626,10 @@
+@@ -241,10 +665,10 @@
      let mut s = session();
      s.client = transport::Loader::prepared(package);
      s.nodes[0].url = None;
@@ -904,7 +953,7 @@
              root.join("triangle.gltf").unwrap()
          } else {
              Url::parse(&format!(
-@@ -254,21 +639,21 @@
+@@ -254,21 +678,21 @@
          });
          s.nodes.push(child);
      }
@@ -1069,6 +1118,17 @@
                  return fetch_restricted(&refreshed, None, true).await;
              } else {
                  return result;
+@@ -265,8 +306,8 @@
+                 }
+                 Err(error) => Err(error),
+             };
+-            // Session permits at most four outstanding tile jobs; the channel
+-            // has four slots. No blocking synchronization on the browser thread.
++            // Session reserves one completion slot for every admitted job.
++            // Never block the browser thread while delivering a result.
+             let _ = sender.try_send(Completion::Content(id, result, size));
+         });
+     }
 @@ -312,7 +353,18 @@
  async fn fetch_authorized(url: &Url, token: Option<&str>) -> Result<Vec<u8>> {
      fetch_restricted(url, token, false).await

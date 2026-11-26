@@ -73,6 +73,9 @@ because download, decode, and render preparation costs differ.
 
 The experimental loader allows eight jobs, with at most six provider jobs.
 Two slots remain available for prepared files when provider work is busy.
+One shared limit sizes the completion queue and caps admitted tile jobs.
+Every outstanding job can therefore finish before the next frame drains the
+queue, without losing its result. The browser keeps non-blocking delivery.
 Texture resolution, decoding, shader compilation, and the unused-cache budget
 also remain unchanged. Active tiles and render preparation still use memory
 outside the unused-cache budget.
