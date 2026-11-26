@@ -81,7 +81,13 @@ pub async fn run_follower(config: FollowConfig, db: Arc<DB>) -> Result<(), Error
                 info!("follow stream ended cleanly");
                 return Ok(());
             }
-            Err(err @ (Error::FollowHistoryChanged { .. } | Error::FollowProtocolUnsupported)) => {
+            Err(
+                err @ (Error::FollowHistoryChanged { .. }
+                | Error::FollowProtocolUnsupported
+                | Error::Stellar(stellarator::Error::PacketTooLarge { .. })),
+            ) => {
+                // A changed history or unsupported protocol will not heal on
+                // retry, and retrying cannot shrink an oversized packet.
                 tracing::error!(error = %err, "follow replication stopped");
                 return Err(err);
             }
@@ -130,7 +136,7 @@ async fn request_source_snapshot(
 > {
     let stream = TcpStream::connect(config.source_addr).await?;
     let (rx, tx) = stream.split();
-    let mut rx = PacketStream::new(rx);
+    let mut rx = PacketStream::new(rx).with_max_len(crate::MAX_PACKET_LEN);
     let tx = PacketSink::new(tx);
     let mut buf = vec![0u8; 8 * 1024 * 1024];
 
@@ -163,13 +169,16 @@ async fn request_source_snapshot(
         // Only time out the version acknowledgement. Large snapshots may need
         // much longer on slow links and must not get stuck in a reconnect loop.
         let pkt = if metadata_resp.is_some() && schema_resp.is_some() && !stream_ready {
-            futures_lite::future::race(async { rx.next(buf).await.map_err(Error::from) }, async {
-                stellarator::sleep(Duration::from_secs(30)).await;
-                Err(Error::FollowProtocolUnsupported)
-            })
+            futures_lite::future::race(
+                async { rx.next_grow(buf).await.map_err(Error::from) },
+                async {
+                    stellarator::sleep(Duration::from_secs(30)).await;
+                    Err(Error::FollowProtocolUnsupported)
+                },
+            )
             .await?
         } else {
-            rx.next(buf).await?
+            rx.next_grow(buf).await?
         };
         match &pkt {
             Packet::Msg(m) if start_stream && m.id == FollowStreamReady::ID => {
@@ -437,7 +446,7 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
         });
 
     loop {
-        let pkt = rx.next(buf).await?;
+        let pkt = rx.next_grow(buf).await?;
         match &pkt {
             // ComponentMetadata – apply and register as followed.
             Packet::Msg(m) if m.id == ComponentMetadata::ID => {
@@ -1048,6 +1057,84 @@ mod tests {
         .await;
         assert!(matches!(result, Err(Error::FollowProtocolUnsupported)));
         assert!(db.with_state(|s| s.msg_logs.is_empty()));
+        server.join().unwrap();
+    }
+
+    #[stellarator::test]
+    async fn snapshot_larger_than_initial_buffer_is_received() {
+        use stellarator::struc_con::{Joinable, ThreadBuilder};
+        let directory = tempfile::tempdir().unwrap();
+        let listener = stellarator::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server =
+            crate::Server::from_listener(listener, directory.path().join("source")).unwrap();
+        let value = "x".repeat(9 * 1024 * 1024);
+        server
+            .db
+            .apply_set_db_config(SetDbConfig {
+                metadata: HashMap::from([("large".into(), value.clone())]),
+                ..Default::default()
+            })
+            .unwrap();
+        let cancel = stellarator::util::CancelToken::default();
+        let task = ThreadBuilder::default()
+            .cancel_token(cancel.clone())
+            .stellar(move || async { server.run().await });
+        let config = FollowConfig {
+            source_addr: address,
+            ..Default::default()
+        };
+        for start_stream in [false, true] {
+            let (session, metadata, _) = request_source_snapshot(&config, start_stream)
+                .await
+                .unwrap();
+            assert!(
+                metadata.db_config.metadata["large"] == value,
+                "large snapshot was changed"
+            );
+            assert_eq!(session.is_some(), start_stream);
+        }
+        cancel.cancel();
+        assert!(task.join().await.unwrap().is_none());
+    }
+
+    #[stellarator::test]
+    async fn oversized_follow_packet_is_terminal_without_allocating_payload() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            // Drain the three requests before closing, so an unread request
+            // cannot reset the connection and hide the oversized response.
+            for _ in 0..3 {
+                let mut prefix = [0; 4];
+                socket.read_exact(&mut prefix).unwrap();
+                let mut request = vec![0; u32::from_le_bytes(prefix) as usize];
+                socket.read_exact(&mut request).unwrap();
+            }
+            socket
+                .write_all(&((crate::MAX_PACKET_LEN + 1) as u32).to_le_bytes())
+                .unwrap();
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(DB::create(dir.path().join("db")).unwrap());
+        let config = FollowConfig {
+            source_addr: address,
+            ..Default::default()
+        };
+        let result =
+            futures_lite::future::race(async { Some(run_follower(config, db).await) }, async {
+                stellarator::sleep(Duration::from_secs(5)).await;
+                None
+            })
+            .await;
+        assert!(
+            matches!(result, Some(Err(Error::Stellar(stellarator::Error::PacketTooLarge { len, max }))) if len == crate::MAX_PACKET_LEN + 1 && max == crate::MAX_PACKET_LEN)
+        );
         server.join().unwrap();
     }
 
