@@ -2177,6 +2177,26 @@ mod tests {
         Ok((src_addr, src_db, fol_addr, fol_db))
     }
 
+    #[test]
+    async fn test_follow_large_message_and_subsequent_message() {
+        let (_, source, _, follower) = setup_follow_pair(1500).await.unwrap();
+        let id = impeller::types::msg_id("large_follow_message");
+        let payload = vec![0xa5; 32 * 1024 * 1024];
+        source.push_msg(Timestamp(100), id, &payload).unwrap();
+        source
+            .push_msg(Timestamp(101), id, b"after large frame")
+            .unwrap();
+        assert!(wait_for_msg_count(&follower, id, 2, Duration::from_secs(30)).await);
+        follower.with_state_mut(|state| {
+            let log = state.get_or_insert_msg_log(id, &follower.path).unwrap();
+            assert!(
+                log.get_index(0).unwrap().1.as_ref() == payload.as_slice(),
+                "large replicated payload differs from the source"
+            );
+            assert_eq!(log.get_index(1).unwrap().1.as_ref(), b"after large frame");
+        });
+    }
+
     /// Helper: register a VTable and send typed component samples over an
     /// existing client connection.  No per-sample sleeps -- only a short
     /// delay after VTable registration.
