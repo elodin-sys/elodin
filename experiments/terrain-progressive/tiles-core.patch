@@ -14,11 +14,11 @@
      Hierarchy(Vec<Node>),
  }
 +const PROGRESSIVE_RESOLUTION_HEIGHT_FRACTION: f64 = 0.3;
-+const MAX_PENDING_TILE_JOBS: usize = 12;
++const MAX_PENDING_TILE_JOBS: usize = 16;
 +
  /// The cache budget covers unused tiles, excluding the current visible and
 -/// refining working set. Work in flight is capped at four tiles; each response
-+/// refining working set. Work in flight is capped at twelve tiles; each response
++/// refining working set. Work in flight is capped at sixteen tiles; each response
  /// is limited to 32 MiB. This is not a hard cap on total CPU/GPU memory.
  pub struct Session {
      nodes: Vec<Node>,
@@ -151,14 +151,14 @@
                  continue;
              };
 +            let hierarchy = self.is_hierarchy_request(id);
-+            // Leave capacity for meshes under the nine-provider-job limit
-+            // and the twelve-job total limit.
++            // Leave capacity for meshes under the twelve-provider-job limit
++            // and the sixteen-job total limit.
 +            if self.coverage_first && mesh_waiting && hierarchy && hierarchy_pending >= 2 {
 +                continue;
 +            }
              if self.client.requires_provider(&url) {
 -                if provider_pending >= 3 {
-+                if provider_pending >= 9 {
++                if provider_pending >= 12 {
                      continue;
                  }
                  provider_pending += 1;
@@ -892,16 +892,16 @@
 +        Completion::Root(_)
 +    ));
 +    s.root_pending = false;
-+    s.nodes = (0..12)
++    s.nodes = (0..16)
 +        .map(|_| {
 +            let mut n = node();
 +            n.url = None;
 +            n
 +        })
 +        .collect();
-+    s.pending.extend(0..12);
++    s.pending.extend(0..16);
 +    // Browser callbacks can all finish before a frame drains the actual session queue.
-+    for id in 0..12 {
++    for id in 0..16 {
 +        s.tx.try_send(Completion::Content(
 +            id,
 +            Ok(Payload::Mesh(
@@ -916,23 +916,23 @@
 +        .unwrap_or_else(|_| panic!("completion for tile {id} was lost"));
 +    }
 +    let frame = s.update(&[], 0.).unwrap();
-+    assert_eq!(frame.loaded.len(), 12);
-+    assert_eq!(s.stats.decoded_tiles, 12);
++    assert_eq!(frame.loaded.len(), 16);
++    assert_eq!(s.stats.decoded_tiles, 16);
 +    assert!(s.pending.is_empty());
 +}
 +
 +#[test]
-+fn terrain_admits_twelve_jobs_but_no_more() {
++fn terrain_admits_sixteen_jobs_but_no_more() {
 +    let mut s = session();
-+    s.nodes = (0..15).map(|_| node()).collect();
++    s.nodes = (0..19).map(|_| node()).collect();
 +    s.nodes[0].url = None;
-+    s.nodes[0].children = (1..15).collect();
++    s.nodes[0].children = (1..19).collect();
 +    for child in &mut s.nodes[1..] {
 +        child.url = Some(Url::parse("file:///missing-terrain-mesh.glb").unwrap());
 +    }
-+    s.pending.extend(1..12);
++    s.pending.extend(1..16);
 +    s.update(&[view()], 0.).unwrap();
-+    assert_eq!(s.pending.len(), 12);
++    assert_eq!(s.pending.len(), 16);
 +    assert_eq!(s.stats.requests, 1);
 +}
 +
@@ -945,11 +945,11 @@
      s.nodes[0].url = None;
 -    s.nodes[0].children = (1..=5).collect();
 -    for index in 1..=5 {
-+    s.nodes[0].children = (1..=11).collect();
-+    for index in 1..=11 {
++    s.nodes[0].children = (1..=14).collect();
++    for index in 1..=14 {
          let mut child = node();
 -        child.url = Some(if index == 5 {
-+        child.url = Some(if index == 11 {
++        child.url = Some(if index == 14 {
              root.join("triangle.gltf").unwrap()
          } else {
              Url::parse(&format!(
@@ -959,24 +959,24 @@
      }
 -    // Model three outstanding provider requests, without any external traffic.
 -    s.pending.extend([1, 2, 3]);
-+    // Model nine outstanding provider requests, without any external traffic.
-+    s.pending.extend(1..=9);
++    // Model twelve outstanding provider requests, without any external traffic.
++    s.pending.extend(1..=12);
      s.update(&[view()], 0.).unwrap();
      assert!(
 -        s.pending.contains(&5),
-+        s.pending.contains(&11),
++        s.pending.contains(&14),
          "local tile was starved by provider work"
      );
      assert!(
 -        !s.pending.contains(&4),
-+        !s.pending.contains(&10),
++        !s.pending.contains(&13),
          "provider work consumed the reserved slot"
      );
      let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
      loop {
          let frame = s.update(&[view()], 0.01).unwrap();
 -        if frame.visible.contains(&5) {
-+        if frame.visible.contains(&11) {
++        if frame.visible.contains(&14) {
              break;
          }
          assert!(
