@@ -28,6 +28,7 @@ pub mod scene_environment;
 pub(crate) mod screenshot;
 pub(crate) mod simulation_startup;
 pub mod terrain_playback;
+mod terrain_priority;
 pub mod thruster_particles;
 pub mod view_cube;
 #[cfg(any(target_arch = "wasm32", test))]

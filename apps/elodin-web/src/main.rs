@@ -36,6 +36,13 @@ fn start_app() {
     }
     App::new()
         .insert_resource(policy)
+        .insert_resource(
+            if query_value("terrain_order").as_deref() == Some("nearby") {
+                elodin_editor::plugins::cesium::TerrainPriority::nearby()
+            } else {
+                elodin_editor::plugins::cesium::TerrainPriority::default()
+            },
+        )
         .add_plugins(plugin)
         .add_systems(Startup, log_startup)
         .add_systems(Update, log_first_update)

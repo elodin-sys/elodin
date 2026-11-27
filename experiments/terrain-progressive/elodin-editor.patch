@@ -19,3 +19,14 @@
          commands.entity(child).insert((
              bevy::camera::visibility::RenderLayers::default()
                  .with(super::render_layer_alloc::CINEMATIC_EARTH_RENDER_LAYER),
+--- a/libs/elodin-editor/src/plugins/terrain_priority.rs
++++ b/libs/elodin-editor/src/plugins/terrain_priority.rs
+@@ -92,6 +92,8 @@
+     world
+         .resource_mut::<TerrainPriority>()
+         .observe_camera(position);
++    let origin = world.resource::<TerrainPriority>().origin;
++    world.resource_mut::<bevy_cesium::CesiumStartupOrigin>().0 = origin;
+     if world.resource::<TerrainPriority>().released {
+         return;
+     }

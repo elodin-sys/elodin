@@ -13,6 +13,7 @@ use bevy_cesium::{
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 
 pub struct CesiumPlugin;
+pub use super::terrain_priority::TerrainPriority;
 
 #[derive(Resource, Default)]
 struct RetryTerrain(bool);
@@ -207,6 +208,7 @@ fn camera_position_ecef(
 impl Plugin for CesiumPlugin {
     fn build(&self, app: &mut App) {
         super::terrain_playback::install(app);
+        app.init_resource::<TerrainPriority>();
         app.init_resource::<RetryTerrain>();
         if let Ok(path) = std::env::var("ELODIN_CESIUM_CAPTURE_VIEWS") {
             let bytes = std::fs::read(path).expect("Cannot read ELODIN_CESIUM_CAPTURE_VIEWS");
@@ -243,8 +245,14 @@ impl Plugin for CesiumPlugin {
                     .and_then(resource_exists::<Messages<crate::ui::schematic::DocumentReloaded>>),
             ),
         )
-        .add_systems(Update, configure_terrain.before(CesiumSet::Stream))
+        .add_systems(Update, configure_terrain.before(CesiumSet::Views))
         .add_systems(Update, collect_views.in_set(CesiumSet::Views))
+        .add_systems(
+            Update,
+            super::terrain_priority::update
+                .in_set(CesiumSet::Views)
+                .after(collect_views),
+        )
         .add_systems(Update, place_tiles.in_set(CesiumSet::Placement))
         .add_systems(
             Update,
@@ -323,6 +331,9 @@ fn configure_terrain(world: &mut World, mut previous: Local<Option<TerrainConfig
     let terrain = schematic.terrain.clone();
     let endpoint = endpoint.cloned();
     *previous = Some((terrain.clone(), endpoint.clone(), policy.clone()));
+    if let Some(mut priority) = world.get_resource_mut::<TerrainPriority>() {
+        priority.reset();
+    }
     let Some(terrain) = terrain else {
         world.insert_resource(CesiumSourceUpdate(None));
         world.remove_resource::<TerrainStartup>();
@@ -402,6 +413,7 @@ fn update_startup(
 }
 
 #[allow(clippy::type_complexity)]
+#[allow(clippy::too_many_arguments)]
 fn collect_views(
     geo: Res<GeoContext>,
     grid: Res<FloatingOriginSettings>,
@@ -414,72 +426,101 @@ fn collect_views(
             Option<&GridCell>,
             Option<&ChildOf>,
             Option<&SensorCamera>,
+            Option<&crate::ui::inspector::viewport::Viewport>,
+            Has<MainCamera>,
         ),
         Or<(With<MainCamera>, With<SensorCamera>)>,
     >,
     parents: Query<(&Transform, &GridCell)>,
     mut output: ResMut<CesiumViews>,
+    mut priority: Option<ResMut<TerrainPriority>>,
 ) {
+    let nearby = priority.as_ref().is_some_and(|priority| priority.enabled);
+    if let Some(priority) = priority.as_mut() {
+        priority.camera_ready = false;
+    }
     let ecef_from_bevy = GeoFrame::bevy_M_(&GeoFrame::ECEF, &geo).inverse();
-    let views: Vec<_> = cameras
+    let mut views: Vec<_> = cameras
         .iter()
-        .filter_map(|(camera, projection, transform, cell, parent, sensor)| {
-            // Headless scheduling disables sensors between emissions. Their terrain
-            // requirements must survive those gaps and include every sensor.
-            if !camera.is_active && sensor.is_none() {
-                return None;
-            }
-            if let Some(configs) = sensor_configs.as_ref()
-                && let Some(config) = sensor.and_then(|sensor| configs.0.get(sensor.config_index))
-                && has_wider_sensor_view(config, &configs.0)
-            {
-                // Co-located, aligned sensors share the wider view's terrain.
-                // Independent zoom refinement continuously changes the GPU-ready
-                // selection during flight and can strand both streams on old tiles.
-                // This trades zoomed terrain detail for stable preview coverage;
-                // cameras at different poses still contribute their own views.
-                return None;
-            }
-            let Projection::Perspective(p) = projection else {
-                return None;
-            };
-            let size = camera.physical_viewport_size().or_else(|| {
-                let config = sensor_configs.as_ref()?.0.get(sensor?.config_index)?;
-                Some(UVec2::new(config.width, config.height))
-            })?;
-            if size.x == 0 || size.y == 0 {
-                return None;
-            }
-            // Sensor cameras own their grid cell; Editor cameras inherit the
-            // viewport anchor's cell and compose their local transform with it.
-            let (transform, cell) = cell
-                .map(|cell| (*transform, *cell))
-                .or_else(|| {
-                    parent
-                        .and_then(|p| parents.get(p.parent()).ok())
-                        .map(|(t, c)| (t.mul_transform(*transform), *c))
-                })
-                .unwrap_or((*transform, GridCell::default()));
-            Some(CesiumView {
-                position: camera_position_ecef(ecef_from_bevy, &grid, &cell, &transform).to_array(),
-                direction: ecef_from_bevy
-                    .transform_vector3(transform.forward().as_dvec3())
-                    .normalize()
-                    .to_array(),
-                up: ecef_from_bevy
-                    .transform_vector3(transform.up().as_dvec3())
-                    .normalize()
-                    .to_array(),
-                width: f64::from(size.x),
-                height: f64::from(size.y),
-                vertical_fov: f64::from(p.fov),
-                horizontal_fov: 2.0
-                    * ((f64::from(p.fov) * 0.5).tan() * f64::from(size.x) / f64::from(size.y))
-                        .atan(),
-            })
-        })
+        .filter_map(
+            |(camera, projection, transform, cell, parent, sensor, viewport, main)| {
+                // Headless scheduling disables sensors between emissions. Their terrain
+                // requirements must survive those gaps and include every sensor.
+                if !camera.is_active && sensor.is_none() {
+                    return None;
+                }
+                if nearby
+                    && main
+                    && !viewport.is_some_and(|viewport| {
+                        viewport.pose_initialized || viewport.pos.eql.trim().is_empty()
+                    })
+                {
+                    return None;
+                }
+                if let Some(configs) = sensor_configs.as_ref()
+                    && let Some(config) =
+                        sensor.and_then(|sensor| configs.0.get(sensor.config_index))
+                    && has_wider_sensor_view(config, &configs.0)
+                {
+                    // Co-located, aligned sensors share the wider view's terrain.
+                    // Independent zoom refinement continuously changes the GPU-ready
+                    // selection during flight and can strand both streams on old tiles.
+                    // This trades zoomed terrain detail for stable preview coverage;
+                    // cameras at different poses still contribute their own views.
+                    return None;
+                }
+                let Projection::Perspective(p) = projection else {
+                    return None;
+                };
+                let size = camera.physical_viewport_size().or_else(|| {
+                    let config = sensor_configs.as_ref()?.0.get(sensor?.config_index)?;
+                    Some(UVec2::new(config.width, config.height))
+                })?;
+                if size.x == 0 || size.y == 0 {
+                    return None;
+                }
+                // Sensor cameras own their grid cell; Editor cameras inherit the
+                // viewport anchor's cell and compose their local transform with it.
+                let (transform, cell) = cell
+                    .map(|cell| (*transform, *cell))
+                    .or_else(|| {
+                        parent
+                            .and_then(|p| parents.get(p.parent()).ok())
+                            .map(|(t, c)| (t.mul_transform(*transform), *c))
+                    })
+                    .unwrap_or((*transform, GridCell::default()));
+                if main && let Some(priority) = priority.as_mut() {
+                    priority.camera_ready = true;
+                }
+                Some((
+                    main,
+                    CesiumView {
+                        position: camera_position_ecef(ecef_from_bevy, &grid, &cell, &transform)
+                            .to_array(),
+                        direction: ecef_from_bevy
+                            .transform_vector3(transform.forward().as_dvec3())
+                            .normalize()
+                            .to_array(),
+                        up: ecef_from_bevy
+                            .transform_vector3(transform.up().as_dvec3())
+                            .normalize()
+                            .to_array(),
+                        width: f64::from(size.x),
+                        height: f64::from(size.y),
+                        vertical_fov: f64::from(p.fov),
+                        horizontal_fov: 2.0
+                            * ((f64::from(p.fov) * 0.5).tan() * f64::from(size.x)
+                                / f64::from(size.y))
+                            .atan(),
+                    },
+                ))
+            },
+        )
         .collect();
-    output.0 = views;
+    if nearby {
+        views.sort_by_key(|(main, _)| !main);
+    }
+    output.0 = views.into_iter().map(|(_, view)| view).collect();
 }
 
 fn has_wider_sensor_view(config: &SensorCameraConfig, configs: &[SensorCameraConfig]) -> bool {
@@ -1041,6 +1082,78 @@ mod coordinate_tests {
         assert_eq!(startup.result(), Ok(true));
         startup.update(&CesiumStatus::default());
         assert_eq!(startup.result(), Ok(true));
+    }
+
+    #[test]
+    fn nearby_waits_for_a_schematic_pose_and_prefers_the_main_view() {
+        use crate::{object_3d::EditableEQL, ui::inspector::viewport::Viewport};
+        let mut app = App::new();
+        app.insert_resource(GeoContext::from(GeoOrigin::new_from_degrees(
+            35., -117., 500.,
+        )))
+        .insert_resource(FloatingOriginSettings::new(2000., 100.))
+        .insert_resource(TerrainPriority::nearby())
+        .init_resource::<CesiumViews>()
+        .add_systems(Update, collect_views);
+        let camera = Camera {
+            viewport: Some(bevy::camera::Viewport {
+                physical_size: UVec2::new(640, 480),
+                ..default()
+            }),
+            ..default()
+        };
+        app.world_mut().spawn((
+            camera.clone(),
+            Projection::Perspective(default()),
+            Transform::from_xyz(0., 100., 0.),
+            GridCell::default(),
+            SensorCamera { config_index: 0 },
+        ));
+        let viewport = Viewport::new(
+            Entity::PLACEHOLDER,
+            EditableEQL {
+                eql: "vehicle.world_pos".into(),
+                compiled_expr: None,
+            },
+            EditableEQL::default(),
+            EditableEQL::default(),
+            None,
+            0.,
+        );
+        let main = app
+            .world_mut()
+            .spawn((
+                camera,
+                Projection::Perspective(default()),
+                Transform::IDENTITY,
+                MainCamera,
+            ))
+            .id();
+        app.update();
+        assert!(
+            !app.world().resource::<TerrainPriority>().camera_ready,
+            "the temporary main camera must not establish the nearby origin"
+        );
+        app.world_mut().entity_mut(main).insert(viewport);
+        app.update();
+        assert!(!app.world().resource::<TerrainPriority>().camera_ready);
+        app.world_mut()
+            .get_mut::<Viewport>(main)
+            .unwrap()
+            .pose_initialized = true;
+        app.update();
+        assert!(app.world().resource::<TerrainPriority>().camera_ready);
+        let views = &app.world().resource::<CesiumViews>().0;
+        assert_eq!(views.len(), 2);
+        assert_ne!(views[0].position, views[1].position);
+        let first = views[0].position;
+        app.world_mut().entity_mut(main).remove::<MainCamera>();
+        app.update();
+        assert_ne!(
+            app.world().resource::<CesiumViews>().0[0].position,
+            first,
+            "the first published view before removal belonged to the main camera"
+        );
     }
 
     #[test]

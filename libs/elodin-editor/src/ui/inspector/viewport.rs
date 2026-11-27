@@ -75,6 +75,7 @@ pub struct Viewport {
     pub frame: Option<GeoFrame>,
     /// Follow low-pass time constant in seconds; 0 disables smoothing.
     pub smoothing: f32,
+    pub(crate) pose_initialized: bool,
     smoothing_state: Option<FollowSmoothingState>,
 }
 
@@ -125,6 +126,7 @@ impl Viewport {
             up,
             frame,
             smoothing,
+            pose_initialized: false,
             smoothing_state: None,
         }
     }
@@ -1194,6 +1196,8 @@ pub fn set_viewport_pos(
             }
             Ok(val) => {
                 if let Some(world_pos) = val.as_world_pos() {
+                    viewport.pose_initialized |=
+                        world_pos.pos().is_finite() && world_pos.att().is_finite();
                     // Low-pass pos, look_at and attitude together so noisy
                     // telemetry doesn't shake the whole view; the viewing
                     // direction stays intact. With a `look_at` the attitude is
@@ -2648,6 +2652,7 @@ mod tests {
             },
             frame: None,
             smoothing: 0.0,
+            pose_initialized: false,
             smoothing_state: None,
         }
     }

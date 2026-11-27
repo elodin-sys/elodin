@@ -141,6 +141,56 @@ coarse-target mesh solely because it is a document. Default mode retains
 prepared-file priority. Requests
 already in flight continue. Closest-first mode keeps its existing behavior.
 
+### Nearby startup strategy
+
+Add `terrain_order=nearby` to the experimental browser page URL. The default
+and `terrain_order=coverage` retain their existing priorities. Nearby mode
+also retains covering parents while replacement regions prepare. It uses the
+same sixteen-job total cap and twelve-provider cap.
+
+The editor waits for a main viewport with a real position sample, or an
+explicitly unbound manual viewport. It ignores the temporary startup camera.
+It puts the main view before sensor views. The editor records the first
+real camera position before waiting for scene assets. The experimental renderer
+passes that ECEF anchor to the loader independently of view publication. It does not move
+when playback or the camera moves. A new terrain session starts a new anchor.
+
+Requests receive three priority groups:
+
+1. The existing progressive-resolution coverage group, across all visible terrain.
+2. Terrain intersecting the 3 km startup region until it reaches an intermediate quality target.
+3. Remaining detail, including distant terrain and finer nearby terrain.
+
+The region uses tile bounding spheres, including spheres that cross its edge.
+It covers visible requests, not an offscreen preload of the entire surrounding
+disk. The intermediate target is twice the normal maximum screen error.
+The editor's 24-pixel threshold therefore gives a 48-pixel nearby target.
+Ancestors above that target and the boundary tile that first meets it receive
+nearby priority. This is a geometry-based quality estimate, not a promise of
+a fixed texture resolution or tile depth.
+
+Hierarchy discovery, mesh depth, and camera distance retain the coverage
+ordering within each group. This is request priority, not a global barrier.
+Requests already in flight finish normally. Distant terrain still refines to
+the normal full-detail target after higher-priority work. No quality cap or
+distance-based request exclusion is added.
+
+Before publishing the first terrain views, the editor gives scene assets a
+bounded head start. It checks `WorldAssetRoot` handles and their dependencies,
+plus requested particle effect files and sprite textures. Failed assets release
+their wait. A missing smoke texture must not hold terrain indefinitely.
+The gate waits for two idle frames and a 250 ms quiet interval, or releases
+after ten seconds from the first valid camera. A changed terrain source resets
+the gate. The selector sees no views during this wait, so it admits no tile jobs.
+Root/manifest/provider bootstrap can still run. The editor and recording reads
+continue normally.
+
+This gate prioritizes initial download and CPU asset loading. It does not prove
+that every model or particle pipeline reached the GPU before terrain starts.
+After release, new scene asset loads do not pause terrain again. The timeout
+also permits terrain to progress if an asset request never finishes.
+The browser entry point enables this gate only for the nearby URL value.
+
 ### Optional browser audit
 
 Set `window.__elodinTerrainAudit` to a function before starting the editor to
@@ -150,12 +200,18 @@ not constructed. The observer should bound its own storage.
 
 For `request`, payload fields are `[id, parentIdOrMinusOne, depth,
 geometricError, screenSpaceError, reducedScreenSpaceError, progressivePriority,
-isHierarchy, isProvider, radius, maximumScreenError, heightFraction, url]`.
+isHierarchy, isProvider, radius, maximumScreenError, heightFraction, url,
+priorityGroup, nearbyOriginOrNull]`.
 Boolean flags are represented as 0 or 1. URLs exclude queries and fragments.
 The progressive flag is an admission-priority class, not a label for the
 apparent texture detail. A false flag means normal priority.
 The provider flag describes the loader's planned source; a later transport
 fallback can change the actual network origin.
+`priorityGroup` is 0 for coarse coverage, 1 for nearby intermediate detail,
+and 2 for remaining detail. In nearest mode it is always 0. The origin is an
+ECEF XYZ array in nearby mode and null otherwise. These appended fields do not
+change the existing field positions. They let a capture check that the anchor
+stays fixed and distinguish nearby priority from the coarse coverage flag.
 For `selection`, payload is `[Uint32ArrayOfSelectedIds, cameras,
 selectionComplete]`. Each camera contains position XYZ, direction XYZ, and
 view height. IDs are local to one session; the Falcon 9 capture uses one source.
@@ -187,7 +243,7 @@ The experiment applies three patches during its separate Nix build:
 
 - `tiles-core.patch` changes selection, request ordering, and regression tests.
 - `bevy-cesium.patch` connects render readiness and background coverage.
-- `elodin-editor.patch` marks the existing globe primitives as background coverage.
+- `elodin-editor.patch` marks the globe backdrop and passes the fixed startup anchor to the experimental renderer.
 
 `apply.py` patches writable Cargo dependency copies and updates their per-file
 vendor checksums. A checksum is a fingerprint of file content. The Nix package
