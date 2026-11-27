@@ -134,9 +134,10 @@ From `examples/voyager`:
 
 ```bash
 bash download_spice_data.sh --validation
-uv run --no-project --with numpy --with scipy --with spiceypy python validate_jupiter.py
+python validate_jupiter.py
 ```
 
-The script uses SciPy for the integration. Add `--max-step 150` to check
-step sensitivity. Set `VOYAGER_SPICE_DIR` to reuse downloaded kernels
-(about 1.3 GB).
+Run this in the same Elodin Python environment as the chapter scripts.
+It uses Elodin RK4 with SPICE positions at each step's midpoint. Add
+`--max-step 15` to halve the default 30-second step. Set
+`VOYAGER_SPICE_DIR` to reuse downloaded kernels (about 1.3 GB).
