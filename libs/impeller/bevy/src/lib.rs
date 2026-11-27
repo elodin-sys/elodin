@@ -1792,6 +1792,35 @@ impl RequestQueue {
     }
 }
 
+/// A seek makes queued series reads stale. They fail locally so their callers
+/// read the new position instead of waiting behind them; other queued
+/// requests, such as schema and metadata reads, keep their order.
+pub fn cancel_queued_series_requests(world: &mut World) {
+    let Some(mut queue) = world.get_resource_mut::<RequestQueue>() else {
+        return;
+    };
+    let (stale, kept): (VecDeque<_>, VecDeque<_>) = std::mem::take(&mut queue.pending)
+        .into_iter()
+        .partition(|(request, _)| {
+            let id = [request.inner[5], request.inner[6]];
+            id == GetTimeSeries::ID || id == impeller_wkt::GetTimeSeriesPredecessor::ID
+        });
+    queue.pending = kept;
+    queue.bytes -= stale
+        .iter()
+        .map(|(request, _)| request.inner.len())
+        .sum::<usize>();
+    if stale.is_empty() {
+        return;
+    }
+    debug!(count = stale.len(), "seek canceled queued series reads");
+    for (_, handler) in stale {
+        world.commands().queue(move |world: &mut World| {
+            fail_request(world, handler, "queued series request canceled by seek");
+        });
+    }
+}
+
 pub fn cancel_queued_requests(world: &mut World) {
     let Some(mut queue) = world.get_resource_mut::<RequestQueue>() else {
         return;
@@ -3625,6 +3654,51 @@ mod request_queue_tests {
                 .0
                 .iter()
                 .all(|(_, error)| *error)
+        );
+    }
+
+    #[test]
+    fn request_queue_seek_fails_series_reads_and_keeps_other_requests_in_order() {
+        let (mut world, _rx) = world(4096);
+        for tag in 0..255 {
+            submit(&mut world, schema(), tag);
+        }
+        let anchor = |timestamp| {
+            (&impeller_wkt::GetTimeSeriesPredecessor {
+                id: [0, 0],
+                timestamp: Timestamp(timestamp),
+                component_id: ComponentId(1),
+            })
+                .into_len_packet()
+        };
+        submit(&mut world, anchor(20), 255);
+        submit(&mut world, schema(), 256);
+        submit(&mut world, anchor(30), 257);
+        submit(&mut world, schema(), 258);
+        let kept_bytes = 2 * schema().inner.len();
+        cancel_queued_series_requests(&mut world);
+        world.flush();
+        let queue = world.resource::<RequestQueue>();
+        assert_eq!(queue.pending.len(), 2);
+        assert_eq!(queue.bytes, kept_bytes);
+        assert_eq!(
+            world.resource::<Replies>().0,
+            vec![(255, true), (257, true)]
+        );
+
+        let newest = queue.pending[1].1;
+        let id = *world.resource::<RequestIdHandlers>().keys().next().unwrap();
+        let handler = world
+            .resource_mut::<RequestIdHandlers>()
+            .remove(&id)
+            .unwrap();
+        world.unregister_system(handler).unwrap();
+        flush_request_queue(&mut world);
+        let queue = world.resource::<RequestQueue>();
+        assert_eq!(queue.pending.len(), 1);
+        assert_eq!(
+            queue.pending[0].1, newest,
+            "the oldest kept request goes first"
         );
     }
 

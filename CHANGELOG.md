@@ -34,6 +34,7 @@
 - **(fix)** Recording looks for assets in `./assets`, then the simulation's own `assets/`, then the nearest `assets/` above it, so assets such as the Falcon 9 map overlays load when the simulation runs from the repository root. Earlier folders win when a file exists in several.
 - **(doc)** Note in the quickstart that the macOS CLI needs Homebrew's `ffmpeg@8` at runtime.
 - **(fix)** The editor queues database requests while all 255 request IDs are in use instead of dropping them, so a recording opened with many reads in flight no longer stays without vehicle positions or plot data. A request that cannot be sent fails like a refused one and is retried.
+- **(fix)** In the browser editor, a seek drops series reads that are still waiting to be sent, so the reads for the new position go out first.
 
 ## v0.21
 
