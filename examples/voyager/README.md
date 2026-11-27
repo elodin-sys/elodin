@@ -122,3 +122,22 @@ python chapter2.py run
 
 The remaining error against SPICE, about 1 km, comes from the model
 (only the Sun and Jupiter), not the integration.
+
+## Jupiter flyby check
+
+Compare point-mass Jupiter, Jupiter with its four Galilean moons, and
+the same model with Jupiter's J2 term. For each probe, the script starts
+from SPICE 8 and 3 days before closest approach and reports position
+and velocity error at closest approach and 3 days later.
+
+From `examples/voyager`:
+
+```bash
+bash download_spice_data.sh --validation
+python validate_jupiter.py
+```
+
+Run this in the same Elodin Python environment as the chapter scripts.
+It uses Elodin RK4 with SPICE positions at each step's midpoint. Add
+`--max-step 15` to halve the default 30-second step. Set
+`VOYAGER_SPICE_DIR` to reuse downloaded kernels (about 1.3 GB).
