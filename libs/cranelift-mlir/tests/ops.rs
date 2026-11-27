@@ -6349,6 +6349,20 @@ fn test_lapack_batched_matches_each_matrix() {
     }
 }
 
+#[test]
+#[should_panic(expected = "unsupported custom_call target: mystery")]
+fn test_operandless_custom_call_mem() {
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<2xf64>) -> tensor<2xf64> {
+    %0 = stablehlo.custom_call @mystery() {backend_config = ""} -> tensor<2xf64>
+    return %0 : tensor<2xf64>
+  }
+}
+"#;
+    run_mlir_mem(mlir, &[&f64_buf(&[1.0, 2.0])], &[16]);
+}
+
 // ---- Triangular solve tests ----
 
 #[test]

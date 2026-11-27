@@ -9742,7 +9742,7 @@ fn int_div_rem(
     let zero = builder.ins().icmp_imm(IntCC::Equal, d, 0);
     let mut trapping = zero;
     if !unsigned {
-        let min = builder.ins().iconst(ty, 1i64 << (ty.bits() - 1));
+        let min = builder.ins().iconst(ty, (1u64 << (ty.bits() - 1)) as i64);
         let neg_one = builder.ins().iconst(ty, ones);
         let x_min = builder.ins().icmp(IntCC::Equal, x, min);
         let d_neg_one = builder.ins().icmp(IntCC::Equal, d, neg_one);
@@ -10982,8 +10982,11 @@ fn lower_mem_custom_call(
         srcs.push((*vid, ptr, ty));
     }
     // Every operand and result of a batched LAPACK call shares the leading batch dims.
-    let batch_dims = srcs[0].2.rank().saturating_sub(2);
-    let batch = srcs[0].2.shape[..batch_dims].iter().product::<i64>() as usize;
+    let stack = srcs.first().map_or(&[][..], |(_, _, ty)| {
+        &ty.shape[..ty.rank().saturating_sub(2)]
+    });
+    let batch_dims = stack.len();
+    let batch = stack.iter().product::<i64>() as usize;
     let matrix = |ty: &TensorType| TensorType {
         shape: ty.shape[batch_dims..].to_vec(),
         element_type: ty.element_type,
