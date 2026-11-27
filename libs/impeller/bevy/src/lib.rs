@@ -98,6 +98,8 @@ pub struct TelemetryCache {
     pivot: Timestamp,
     /// Block a sparse sample is kept for, and that sample's timestamp.
     predecessors: HashMap<ComponentId, BTreeMap<i64, Timestamp>>,
+    /// Exact query timestamps confirmed by predecessor replies, keyed by retention block.
+    predecessor_confirmations: HashMap<ComponentId, BTreeMap<i64, Timestamp>>,
     /// Bytes charged to each one-second block. A predecessor is charged to its closest claim.
     block_bytes: HashMap<ComponentId, BTreeMap<i64, usize>>,
     components: HashMap<ComponentId, BTreeMap<Timestamp, ComponentValue>>,
@@ -417,9 +419,10 @@ impl TelemetryCache {
         &mut self,
         id: ComponentId,
         time: Timestamp,
-        block: i64,
+        confirmed_through: i64,
         value: ComponentValue,
     ) {
+        let block = block_start(confirmed_through);
         let bytes = if self
             .components
             .get(&id)
@@ -443,11 +446,21 @@ impl TelemetryCache {
         self.insert(id, time, value);
         self.byte_limit = limit;
         self.predecessors.entry(id).or_default().insert(block, time);
+        self.predecessor_confirmations
+            .entry(id)
+            .or_default()
+            .insert(block, Timestamp(confirmed_through));
         let to = self.accounting_block(id, time);
         self.relocate_block_bytes(id, from, to, sample_bytes);
     }
 
     pub fn drop_block(&mut self, id: ComponentId, start: i64) {
+        if let Some(confirmations) = self.predecessor_confirmations.get_mut(&id) {
+            confirmations.remove(&start);
+            if confirmations.is_empty() {
+                self.predecessor_confirmations.remove(&id);
+            }
+        }
         let end = start.saturating_add(1_000_000);
         let dropped_anchor = self
             .predecessors
@@ -604,6 +617,40 @@ impl TelemetryCache {
         series.range(..=ts).next_back().map(|(_, v)| v)
     }
 
+    /// Whether the cached hold is known to be the latest sample at `ts`.
+    /// A best-effort display value alone must not suppress a predecessor fetch.
+    pub fn has_covered_hold(&self, component_id: &ComponentId, ts: Timestamp) -> bool {
+        let Some((&sample, _)) = self
+            .components
+            .get(component_id)
+            .and_then(|series| series.range(..=ts).next_back())
+        else {
+            return false;
+        };
+        if sample == ts {
+            return true;
+        }
+        let confirmed = self
+            .predecessors
+            .get(component_id)
+            .into_iter()
+            .flat_map(|claims| claims.iter())
+            .filter(|(_, time)| **time == sample)
+            .filter_map(|(block, _)| {
+                self.predecessor_confirmations
+                    .get(component_id)?
+                    .get(block)
+                    .map(|time| time.0)
+            })
+            .max()
+            .unwrap_or(sample.0)
+            .max(sample.0);
+        confirmed >= ts.0
+            || ts.0.checked_add(1).is_some_and(|end| {
+                self.is_covered(component_id, &(Timestamp(confirmed + 1)..Timestamp(end)))
+            })
+    }
+
     /// True when any samples have been cached for this component.
     pub fn has_series(&self, component_id: &ComponentId) -> bool {
         self.components.contains_key(component_id)
@@ -642,6 +689,7 @@ impl TelemetryCache {
     /// Drop all samples and coverage for a component (unsubscribe / reclaim RAM).
     pub fn remove_series(&mut self, component_id: &ComponentId) {
         self.predecessors.remove(component_id);
+        self.predecessor_confirmations.remove(component_id);
         self.block_bytes.remove(component_id);
         let removed = self.components.remove(component_id);
         if let Some(series) = &removed {
