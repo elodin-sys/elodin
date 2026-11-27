@@ -58,6 +58,11 @@ runs:
         $root = "C:\cesium"
         # Rust's MSVC target links the static CRT. static-md is /MD and will not link.
         "VCPKG_TRIPLET=x64-windows-static" >> $env:GITHUB_ENV
+        # The bridge includes spdlog headers. Without this, those symbols are
+        # emitted again beside the static library.
+        $spdlog = "/DSPDLOG_COMPILED_LIB"
+        if ($env:CXXFLAGS) { $spdlog = "$env:CXXFLAGS $spdlog" }
+        "CXXFLAGS=$spdlog" >> $env:GITHUB_ENV
         "BEVY_CESIUM_DIR=$pluginDir" >> $env:GITHUB_ENV
         "CESIUM_BUILD_ROOT=$root" >> $env:GITHUB_ENV
         "CESIUM_NATIVE_DIR=$root\install" >> $env:GITHUB_ENV
