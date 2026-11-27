@@ -697,9 +697,11 @@ Each LAPACK handler follows the same pattern:
 4. **Emit** a call to the registered host function symbol
 5. **Load** output values from the stack slot back into SSA values
 
-Cholesky, LU (`dgetrf`) and triangular solve (`dtrsm`) also take a stack of
-matrices, as `jax.vmap` emits them (`num_batch_dims = "1"`): steps 3–5 repeat
-for each matrix through the same slot.
+SVD (`dgesdd`), LU (`dgetrf`), triangular solve (`dtrsm`), Cholesky, QR
+(`dgeqrf`, `dorgqr`) and `dsyevd` also take a stack of matrices, as `jax.vmap`
+emits them (`num_batch_dims = "1"`): steps 3–5 repeat for each matrix through
+the same slot. In a pointer-ABI function the call lowers through this code one
+matrix at a time (`lower_mem_custom_call`).
 
 The host functions (`extern "C"`) handle:
 - Row-major (IR convention) to column-major (faer convention) conversion
@@ -1001,7 +1003,7 @@ lane ([Pointer-ABI element types](#pointer-abi-element-types)).
 | stablehlo.add | yes | yes | yes (f64/i64/i32) | |
 | stablehlo.subtract | yes | yes | yes (f64/i64/i32) | |
 | stablehlo.multiply | yes | yes | yes (f64/i64/i32) | |
-| stablehlo.divide | yes | yes | yes (f64/i64/i32/ui32) | zero-protection on integer paths |
+| stablehlo.divide | yes | yes | yes (f64/i64/i32/ui32) | integers as in XLA: `x / 0` is all ones, signed `MIN / -1` is `MIN` |
 | stablehlo.negate | yes | yes | yes (f64/i64/i32) | |
 | stablehlo.sqrt | yes | yes | yes | inline Cranelift instruction |
 | stablehlo.rsqrt | yes | yes | yes | 1/sqrt(x) |
@@ -1012,7 +1014,7 @@ lane ([Pointer-ABI element types](#pointer-abi-element-types)).
 | stablehlo.floor | yes | yes | yes | |
 | stablehlo.ceil | yes | yes | yes | |
 | stablehlo.sign | yes | yes | yes | |
-| stablehlo.remainder | yes | yes | yes (f64) | |
+| stablehlo.remainder | yes | yes | yes (f64) | integers as in XLA: `x % 0` is `x`, signed `MIN % -1` is 0 |
 | stablehlo.clamp | yes | yes | yes | ternary: min/operand/max |
 | stablehlo.round_nearest_even | yes | yes | yes | banker's rounding |
 | stablehlo.sine | yes | yes | yes | via libm |
@@ -1459,12 +1461,11 @@ every lowering.
   by `map`, `reduce_window`, and `select_and_scatter`) — is straightforward
   when a non-trivial comparator first appears.
 
-- **LAPACK `custom_call` from pointer-ABI functions.** LAPACK lowering is
-  wired on the scalar path only. In practice LAPACK buffers are always small
-  (6x6, 8x8) and stay below the pointer-ABI threshold, so this has never
-  triggered. If a future sim crosses the 64-element threshold with a LAPACK
-  call, follow the dual-path pattern already used by `dot_general` and
-  `gather`.
+- **LAPACK `custom_call` from pointer-ABI functions.** These lower lane by
+  lane through the scalar-ABI code, which loads and stores every element of the
+  stack of matrices. Calling the host functions on the operand buffers
+  directly, as `dot_general` and `gather` do, would remove those copies once a
+  simulation's LAPACK calls are large enough for them to matter.
 
 - **Convolution at scale.** `stablehlo.convolution` is implemented with full
   N-D dimension numbers, strides, padding, dilations, and feature/batch
