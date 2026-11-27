@@ -1771,6 +1771,68 @@ type MsgReplySystemId = SystemId<InRef<'static, OwnedPacket<PacketGrantR>>, bool
 #[derive(Resource, Default, Deref, DerefMut)]
 pub struct MsgRequestQueue(pub VecDeque<(LenPacket, MsgReplySystemId)>);
 
+/// Bounds memory when the DB stops answering; past them a request fails locally.
+const MAX_QUEUED_REQUESTS: usize = 1024;
+const MAX_QUEUED_REQUEST_BYTES: usize = 8 * 1024 * 1024;
+
+/// Main-connection requests waiting for a free request ID or outgoing channel room.
+#[derive(Resource, Default)]
+pub struct RequestQueue {
+    pending: VecDeque<(LenPacket, MsgReplySystemId)>,
+    bytes: usize,
+}
+
+impl RequestQueue {
+    /// Drops every queued request without calling its handler.
+    pub fn cancel(&mut self, commands: &mut Commands) {
+        for (_, handler) in self.pending.drain(..) {
+            commands.unregister_system(handler);
+        }
+        self.bytes = 0;
+    }
+}
+
+/// A seek makes queued series reads stale. They fail locally so their callers
+/// read the new position instead of waiting behind them; other queued
+/// requests, such as schema and metadata reads, keep their order.
+pub fn cancel_queued_series_requests(world: &mut World) {
+    let Some(mut queue) = world.get_resource_mut::<RequestQueue>() else {
+        return;
+    };
+    let (stale, kept): (VecDeque<_>, VecDeque<_>) = std::mem::take(&mut queue.pending)
+        .into_iter()
+        .partition(|(request, _)| {
+            let id = [request.inner[5], request.inner[6]];
+            id == GetTimeSeries::ID || id == impeller_wkt::GetTimeSeriesPredecessor::ID
+        });
+    queue.pending = kept;
+    queue.bytes -= stale
+        .iter()
+        .map(|(request, _)| request.inner.len())
+        .sum::<usize>();
+    if stale.is_empty() {
+        return;
+    }
+    debug!(count = stale.len(), "seek canceled queued series reads");
+    for (_, handler) in stale {
+        world.commands().queue(move |world: &mut World| {
+            fail_request(world, handler, "queued series request canceled by seek");
+        });
+    }
+}
+
+pub fn cancel_queued_requests(world: &mut World) {
+    let Some(mut queue) = world.get_resource_mut::<RequestQueue>() else {
+        return;
+    };
+    queue.bytes = 0;
+    for (_, handler) in std::mem::take(&mut queue.pending) {
+        if let Err(err) = world.unregister_system(handler) {
+            bevy::log::error!(?err, "failed to unregister queued request handler");
+        }
+    }
+}
+
 #[derive(Resource)]
 pub struct MsgRequestIdAlloc(RequestId);
 
@@ -2135,7 +2197,11 @@ impl Plugin for ImpellerPlugin {
             .add_systems(bevy::prelude::Startup, ensure_db_components_root)
             .add_systems(
                 bevy::prelude::Update,
-                (flush_msg_request_queue, fetch_sim_time_step),
+                (
+                    flush_request_queue,
+                    flush_msg_request_queue,
+                    fetch_sim_time_step,
+                ),
             )
             // 0 means "rate not known yet". A non-zero seed would be
             // indistinguishable from a real rate: the previous 1 ms seed made
@@ -2156,6 +2222,7 @@ impl Plugin for ImpellerPlugin {
             .init_resource::<PacketHandlers>()
             .init_resource::<RequestIdHandlers>()
             .init_resource::<RequestIdAlloc>()
+            .init_resource::<RequestQueue>()
             .init_resource::<MsgRequestIdHandlers>()
             .init_resource::<MsgRequestIdAlloc>()
             .init_resource::<MsgRequestQueue>()
@@ -2232,49 +2299,93 @@ where
         let system_id = world.register_system(self.system);
 
         debug!("registered reply handler {system_id:?}");
-        let req_id = {
-            let handlers = world.resource::<RequestIdHandlers>();
-            let occupied: std::collections::HashSet<RequestId> = handlers.keys().copied().collect();
-            let mut alloc = world.resource_mut::<RequestIdAlloc>();
-            alloc.alloc_next_id_avoiding(&occupied)
-        };
-
-        let Some(req_id) = req_id else {
-            bevy::log::warn!(
-                "RequestId space exhausted — all 255 IDs are in use, dropping request"
-            );
-            if let Err(err) = world.unregister_system(system_id) {
-                bevy::log::error!(
-                    ?err,
-                    "failed to unregister system after RequestId exhaustion"
-                );
-            }
-            return;
-        };
-
-        if let Some(old) = world
-            .resource_mut::<RequestIdHandlers>()
-            .insert(req_id, system_id)
+        let mut queue = world.resource_mut::<RequestQueue>();
+        if queue.pending.len() >= MAX_QUEUED_REQUESTS
+            || self.request.inner.len() > MAX_QUEUED_REQUEST_BYTES - queue.bytes
         {
-            bevy::log::warn!(req_id, "RequestId collision — overwriting existing handler");
-            if let Err(err) = world.unregister_system(old) {
-                bevy::log::error!(?err, "failed to unregister collided system");
-            }
+            bevy::log::warn!("main request queue is full; failing the request");
+            fail_request(world, system_id, "main request queue capacity exceeded");
+            return;
         }
+        queue.bytes += self.request.inner.len();
+        queue.pending.push_back((self.request, system_id));
+        flush_request_queue(world);
+    }
+}
 
-        let tx = world
-            .get_resource_mut::<PacketTx>()
-            .expect("missing packet handlers");
-        if let Err(err) = tx.0.try_send(Some(self.request.with_request_id(req_id))) {
-            let mut handlers = world
-                .get_resource_mut::<RequestIdHandlers>()
-                .expect("missing packet handlers");
-            handlers.remove(&req_id);
-            if let Err(unreg) = world.unregister_system(system_id) {
-                bevy::log::error!(?unreg, "failed to unregister system after send failure");
-            }
-            bevy::log::warn!(?err, "failed to send msg");
+/// Answers a request that was never sent with a local [`ErrorResponse`], so its
+/// caller takes the same path as for a refused request.
+fn fail_request(world: &mut World, handler: MsgReplySystemId, description: &str) {
+    use bbqueue::{ArcBBQueue, traits::storage::BoxedSlice};
+    use impeller_bbq::{PacketGrantW, RxExt};
+
+    let error = (&ErrorResponse {
+        description: description.into(),
+    })
+        .into_len_packet();
+    let queue = ArcBBQueue::new_with_storage(BoxedSlice::new(error.inner.len() + 64));
+    let tx = queue.framed_producer_with_header::<usize>();
+    let mut rx = queue.framed_consumer_with_header::<usize>();
+    let grant = tx
+        .grant(error.inner.len() + 8)
+        .expect("local error packet fits");
+    PacketGrantW::new(grant).commit_len_pkt(error);
+    let packet = rx.try_recv_pkt().expect("valid local error packet");
+    if let Err(err) = world.run_system_with(handler, &packet) {
+        bevy::log::error!(?err, "local request error handler failed");
+    }
+    if let Err(err) = world.unregister_system(handler) {
+        bevy::log::error!(?err, "failed to unregister request handler");
+    }
+}
+
+pub fn flush_request_queue(world: &mut World) {
+    loop {
+        if world.resource::<RequestQueue>().pending.is_empty() {
+            break;
         }
+        let req_id = {
+            let occupied = world
+                .resource::<RequestIdHandlers>()
+                .keys()
+                .copied()
+                .collect();
+            world
+                .resource_mut::<RequestIdAlloc>()
+                .alloc_next_id_avoiding(&occupied)
+        };
+        let Some(req_id) = req_id else { break };
+        let (request, handler) = world
+            .resource_mut::<RequestQueue>()
+            .pending
+            .pop_front()
+            .expect("nonempty queue");
+        let bytes = request.inner.len();
+        let packet = request.with_request_id(req_id);
+        let sent = world
+            .get_resource::<PacketTx>()
+            .map(|tx| tx.0.try_send(Some(packet)));
+        match sent {
+            Some(Ok(())) => {
+                world
+                    .resource_mut::<RequestIdHandlers>()
+                    .insert(req_id, handler);
+            }
+            Some(Err(err)) if err.is_full() => {
+                let mut packet = err.into_inner().expect("queued request");
+                packet.inner[7] = 0;
+                world
+                    .resource_mut::<RequestQueue>()
+                    .pending
+                    .push_front((packet, handler));
+                break;
+            }
+            _ => {
+                bevy::log::warn!("main connection is unavailable; failing a queued request");
+                fail_request(world, handler, "main connection is unavailable");
+            }
+        }
+        world.resource_mut::<RequestQueue>().bytes -= bytes;
     }
 }
 
@@ -3362,5 +3473,257 @@ mod db_components_hierarchy_tests {
         assert_eq!(parent_of(app.world(), x), Some(root));
         // Leaf was pre-created, so hierarchy helper must not invent a parent.
         assert_eq!(parent_of(app.world(), y), None);
+    }
+}
+
+#[cfg(test)]
+mod request_queue_tests {
+    use super::*;
+
+    #[derive(Resource, Default)]
+    struct Replies(Vec<(usize, bool)>);
+
+    fn world(capacity: usize) -> (World, thingbuf::mpsc::Receiver<Option<LenPacket>>) {
+        let mut world = World::new();
+        let (tx, rx) = thingbuf::mpsc::channel(capacity);
+        world.insert_resource(PacketTx(tx));
+        world.init_resource::<RequestQueue>();
+        world.init_resource::<RequestIdHandlers>();
+        world.init_resource::<RequestIdAlloc>();
+        world.init_resource::<VisiblePrefetchState>();
+        world.init_resource::<Replies>();
+        (world, rx)
+    }
+
+    fn submit(world: &mut World, request: LenPacket, tag: usize) {
+        ReplyHandlerCommand {
+            request,
+            system: IntoSystem::into_system(
+                move |pkt: InRef<OwnedPacket<PacketGrantR>>, mut replies: ResMut<Replies>| {
+                    replies.0.push((
+                        tag,
+                        matches!(&*pkt, OwnedPacket::Msg(m) if m.id == ErrorResponse::ID),
+                    ));
+                    true
+                },
+            ),
+        }
+        .apply(world);
+    }
+
+    fn schema() -> LenPacket {
+        (&DumpSchema).into_len_packet()
+    }
+
+    #[test]
+    fn request_queue_retains_burst_and_drains_as_replies_release_ids() {
+        let (mut world, rx) = world(4096);
+        for tag in 0..260 {
+            submit(&mut world, schema(), tag);
+        }
+        assert_eq!(world.resource::<RequestIdHandlers>().len(), 255);
+        assert_eq!(world.resource::<RequestQueue>().pending.len(), 5);
+        let mut ids = std::collections::HashSet::new();
+        let mut received = 0;
+        while received < 260 {
+            while let Ok(Some(packet)) = rx.try_recv() {
+                let id = packet.inner[7];
+                assert_ne!(id, 0);
+                assert!(ids.insert(id), "reused an ID before its reply");
+                received += 1;
+            }
+            for id in ids.drain() {
+                let handler = world
+                    .resource_mut::<RequestIdHandlers>()
+                    .remove(&id)
+                    .unwrap();
+                // An error reply also completes a request (as refused SQL does).
+                fail_request(&mut world, handler, "server refused query");
+            }
+            flush_request_queue(&mut world);
+        }
+        assert!(world.resource::<RequestQueue>().pending.is_empty());
+        assert_eq!(world.resource::<RequestQueue>().bytes, 0);
+        assert!(world.resource::<RequestIdHandlers>().is_empty());
+        assert_eq!(world.resource::<Replies>().0.len(), 260);
+        assert_eq!(
+            world
+                .resource::<Replies>()
+                .0
+                .iter()
+                .map(|(tag, _)| *tag)
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            260
+        );
+    }
+
+    #[test]
+    fn request_queue_retries_a_full_outgoing_channel_without_losing_handler() {
+        let (mut world, rx) = world(1);
+        submit(&mut world, schema(), 0);
+        submit(&mut world, schema(), 1);
+        assert_eq!(world.resource::<RequestQueue>().pending.len(), 1);
+        assert_eq!(world.resource::<RequestIdHandlers>().len(), 1);
+        rx.try_recv().unwrap();
+        flush_request_queue(&mut world);
+        assert!(rx.try_recv().is_ok());
+        assert!(world.resource::<RequestQueue>().pending.is_empty());
+        assert_eq!(world.resource::<RequestIdHandlers>().len(), 2);
+        assert!(world.resource::<Replies>().0.is_empty());
+    }
+
+    #[test]
+    fn request_queue_failure_rearms_real_anchor_prefetch() {
+        use bevy::ecs::system::RunSystemOnce;
+
+        let (mut world, rx) = world(1);
+        drop(rx);
+        world.init_resource::<TelemetryCache>();
+        world.init_resource::<ComponentSchemaRegistry>();
+        world.init_resource::<SeriesFetchPriority>();
+        let id = ComponentId(42);
+        world.resource_mut::<SeriesFetchPriority>().high.insert(id);
+        world
+            .run_system_once(
+                move |cache: Res<TelemetryCache>,
+                      mut prefetch: ResMut<VisiblePrefetchState>,
+                      mut commands: Commands| {
+                    assert!(prefetch::prefetch_hold_anchor(
+                        id,
+                        Timestamp(20),
+                        &cache,
+                        &mut prefetch,
+                        &mut commands
+                    ));
+                },
+            )
+            .unwrap();
+        let key = PrefetchKey::Anchor {
+            component_id: id,
+            start: 20,
+        };
+        assert!(matches!(
+            world.resource::<VisiblePrefetchState>().requests.get(&key),
+            Some(PrefetchRequestState::RetryAt(_))
+        ));
+        assert!(world.resource::<RequestIdHandlers>().is_empty());
+        assert!(world.resource::<RequestQueue>().pending.is_empty());
+    }
+
+    #[test]
+    fn request_queue_bounds_packet_bytes() {
+        let (mut world, _rx) = world(1);
+        let mut oversized = schema();
+        oversized.inner.resize(MAX_QUEUED_REQUEST_BYTES + 1, 0);
+        submit(&mut world, oversized, 0);
+        assert_eq!(world.resource::<Replies>().0, vec![(0, true)]);
+        assert_eq!(world.resource::<RequestQueue>().bytes, 0);
+        assert!(world.resource::<RequestIdHandlers>().is_empty());
+    }
+
+    #[test]
+    fn request_queue_reports_closed_channel_and_capacity_errors_to_callers() {
+        let (mut world, rx) = world(4096);
+        for tag in 0..255 + MAX_QUEUED_REQUESTS + 1 {
+            submit(&mut world, schema(), tag);
+        }
+        assert_eq!(
+            world.resource::<RequestQueue>().pending.len(),
+            MAX_QUEUED_REQUESTS
+        );
+        assert_eq!(
+            world.resource::<Replies>().0,
+            vec![(255 + MAX_QUEUED_REQUESTS, true)]
+        );
+        drop(rx);
+        // Release a wire ID, then the disconnected transport must fail every queued callback.
+        let id = *world.resource::<RequestIdHandlers>().keys().next().unwrap();
+        let handler = world
+            .resource_mut::<RequestIdHandlers>()
+            .remove(&id)
+            .unwrap();
+        world.unregister_system(handler).unwrap();
+        flush_request_queue(&mut world);
+        assert!(world.resource::<RequestQueue>().pending.is_empty());
+        assert_eq!(world.resource::<RequestQueue>().bytes, 0);
+        assert_eq!(world.resource::<Replies>().0.len(), MAX_QUEUED_REQUESTS + 1);
+        assert!(
+            world
+                .resource::<Replies>()
+                .0
+                .iter()
+                .all(|(_, error)| *error)
+        );
+    }
+
+    #[test]
+    fn request_queue_seek_fails_series_reads_and_keeps_other_requests_in_order() {
+        let (mut world, _rx) = world(4096);
+        for tag in 0..255 {
+            submit(&mut world, schema(), tag);
+        }
+        let anchor = |timestamp| {
+            (&impeller_wkt::GetTimeSeriesPredecessor {
+                id: [0, 0],
+                timestamp: Timestamp(timestamp),
+                component_id: ComponentId(1),
+            })
+                .into_len_packet()
+        };
+        submit(&mut world, anchor(20), 255);
+        submit(&mut world, schema(), 256);
+        submit(&mut world, anchor(30), 257);
+        submit(&mut world, schema(), 258);
+        let kept_bytes = 2 * schema().inner.len();
+        cancel_queued_series_requests(&mut world);
+        world.flush();
+        let queue = world.resource::<RequestQueue>();
+        assert_eq!(queue.pending.len(), 2);
+        assert_eq!(queue.bytes, kept_bytes);
+        assert_eq!(
+            world.resource::<Replies>().0,
+            vec![(255, true), (257, true)]
+        );
+
+        let newest = queue.pending[1].1;
+        let id = *world.resource::<RequestIdHandlers>().keys().next().unwrap();
+        let handler = world
+            .resource_mut::<RequestIdHandlers>()
+            .remove(&id)
+            .unwrap();
+        world.unregister_system(handler).unwrap();
+        flush_request_queue(&mut world);
+        let queue = world.resource::<RequestQueue>();
+        assert_eq!(queue.pending.len(), 1);
+        assert_eq!(
+            queue.pending[0].1, newest,
+            "the oldest kept request goes first"
+        );
+    }
+
+    #[test]
+    fn request_queue_reconnect_drops_queued_requests_without_replies() {
+        let (mut world, _rx) = world(4096);
+        for tag in 0..257 {
+            submit(&mut world, schema(), tag);
+        }
+        let handlers: Vec<_> = world
+            .resource::<RequestQueue>()
+            .pending
+            .iter()
+            .map(|(_, handler)| *handler)
+            .collect();
+        assert_eq!(handlers.len(), 2);
+        cancel_queued_requests(&mut world);
+        assert!(world.resource::<RequestQueue>().pending.is_empty());
+        assert_eq!(world.resource::<RequestQueue>().bytes, 0);
+        assert!(
+            handlers
+                .iter()
+                .all(|h| world.unregister_system(*h).is_err())
+        );
+        assert!(world.resource::<Replies>().0.is_empty());
+        assert_eq!(world.resource::<RequestIdHandlers>().len(), 255);
     }
 }

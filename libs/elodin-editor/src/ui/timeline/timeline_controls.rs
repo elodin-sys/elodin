@@ -107,6 +107,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
 
         tick_origin.observe_stream(**stream_id);
         tick_origin.observe_tick(tick.0, earliest_timestamp.0);
+        let tick_before_controls = tick.0;
 
         let tick_step_duration = hifitime::Duration::from_seconds(tick_time.0);
         let tick_step_micros_i128 = tick_step_duration.total_nanoseconds() / 1000;
@@ -423,6 +424,10 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                     );
                 });
             });
+        // Browser reads follow the playhead; native reads follow the plot window.
+        if cfg!(target_family = "wasm") && tick.0 != tick_before_controls {
+            impeller_bevy::cancel_queued_series_requests(world);
+        }
     }
 }
 

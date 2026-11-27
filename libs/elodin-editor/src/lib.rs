@@ -2115,6 +2115,7 @@ struct SeriesStoreReconnect<'w> {
     connection_addr: Option<Res<'w, ConnectionAddr>>,
     msg_handlers: ResMut<'w, MsgRequestIdHandlers>,
     req_handlers: ResMut<'w, RequestIdHandlers>,
+    req_queue: Option<ResMut<'w, impeller_bevy::RequestQueue>>,
     packet_id_handlers: ResMut<'w, PacketIdHandlers>,
     telemetry_cache: ResMut<'w, impeller_bevy::TelemetryCache>,
     backfill_state: ResMut<'w, impeller_bevy::BackfillState>,
@@ -2157,6 +2158,9 @@ pub(crate) fn sync_series_store_session_from_db_config(
         &mut series.packet_id_handlers,
         &mut series.visible_prefetch,
     );
+    if let Some(queue) = series.req_queue.as_mut() {
+        queue.cancel(&mut editor_ui.commands);
+    }
     hard_clear_series_store(
         &mut series.telemetry_cache,
         &mut series.backfill_state,
@@ -2198,6 +2202,9 @@ fn clear_state_new_connection(
         &mut series.packet_id_handlers,
         &mut series.visible_prefetch,
     );
+    if let Some(queue) = series.req_queue.as_mut() {
+        queue.cancel(&mut editor_ui.commands);
+    }
 
     let addr = series.connection_addr.as_ref().map(|a| a.socket);
     let soft = series_store_soft_reconnect(&series.session, addr);

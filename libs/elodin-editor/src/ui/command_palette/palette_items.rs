@@ -1140,7 +1140,8 @@ fn goto_tick() -> PaletteItem {
                       mut auto_follow_latest_state: ResMut<AutoFollowLatestState>,
                       earliest_timestamp: Res<EarliestTimestamp>,
                       mut tick_origin: ResMut<StreamTickOrigin>,
-                      tick_time: Res<SimulationTimeStep>| {
+                      tick_time: Res<SimulationTimeStep>,
+                      mut commands: Commands| {
                     let trimmed = tick_str.trim();
                     if trimmed.is_empty() {
                         return PaletteEvent::Error(
@@ -1192,6 +1193,10 @@ fn goto_tick() -> PaletteItem {
                     ui_tick.0 = timestamp.0;
                     if parsed_tick == 0 {
                         tick_origin.request_rebase();
+                    }
+                    // Browser reads follow the playhead; native reads follow the plot window.
+                    if cfg!(target_family = "wasm") {
+                        commands.queue(impeller_bevy::cancel_queued_series_requests);
                     }
 
                     PaletteEvent::Exit
