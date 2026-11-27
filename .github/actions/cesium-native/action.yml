@@ -85,8 +85,18 @@ runs:
             | env UV_INSTALL_DIR="${RUNNER_TEMP}/uv" sh
         fi
         export PATH="${RUNNER_TEMP}/uv:${PATH}"
-        if [[ "$(uname -s)" == Darwin ]] && ! command -v cmake >/dev/null 2>&1; then
-          brew install cmake
+        if [[ "$(uname -s)" == Darwin ]]; then
+          if ! command -v cmake >/dev/null 2>&1; then
+            brew install cmake
+          fi
+          # vcpkg's compiler probe uses Ninja. The ci user cannot brew-install it.
+          if ! command -v ninja >/dev/null 2>&1; then
+            curl --proto '=https' --tlsv1.2 -fsSL --retry 3 \
+              -o "${RUNNER_TEMP}/ninja-mac.zip" \
+              https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-mac.zip
+            unzip -o "${RUNNER_TEMP}/ninja-mac.zip" -d "${RUNNER_TEMP}/ninja"
+            export PATH="${RUNNER_TEMP}/ninja:${PATH}"
+          fi
         fi
         command -v uv
         command -v cmake
