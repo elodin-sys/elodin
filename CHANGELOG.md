@@ -28,6 +28,9 @@
 - **(fix)** Correct Cranelift loops in functions that use a tensor of more than 64 elements when the body passes one loop variable on to a later one, as in `x, x_prev = f(x), x`: `x_prev` received the updated `x`.
 - **(fix)** Compile multi-entity Cranelift simulations that use `lax.cond` around a large lookup table, which exhausted memory, or `jnp.linalg.solve`, which failed to compile. An intermediate too large for the simulation thread's stack is now a compile error.
 - **(fix)** Compile Cranelift systems whose helper returns the same value for more than one output.
+- **(fix)** Cranelift integer division and remainder by zero (`//`, `lax.div`, `lax.rem`) return XLA's values instead of crashing the simulation. With several entities this includes lanes that a `jnp.where` discards.
+- **(fix)** Cranelift compiles linear algebra across entities: `jnp.linalg` SVD, `eigh` and QR, which failed to compile or gave wrong results, and LAPACK-backed calls such as an inverse in systems with tensors over 64 elements, which failed to compile.
+- **(fix)** A Cranelift lowering that produces the wrong number of values for a result is a compile error naming the op, instead of a crash or wrong values further on.
 - **(fix)** Real-time simulations with a pacing lead start at wall-clock speed instead of sprinting through the lead interval.
 - **(fix)** The render server no longer warns every second that a sensor camera that does not move has a stale pose. Its pose is recorded only when it changes, so its last sample stays current.
 - **(feat)** A new database copies only its source `assets/` folder's schematics and the files they reference, and later schematic stores copy their own missing references, instead of copying the whole folder. A recording from the repository root no longer carries 3 GB of unused terrain.

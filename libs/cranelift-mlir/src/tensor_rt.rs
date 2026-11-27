@@ -324,11 +324,16 @@ binary_int_op!(tensor_min_i32, i32, |a: i32, b: i32| a.min(b));
 binary_int_op!(tensor_max_ui32, u32, |a: u32, b: u32| a.max(b));
 binary_int_op!(tensor_min_ui32, u32, |a: u32, b: u32| a.min(b));
 
+// As XLA: `x / 0` is all ones and `x % 0` is `x`; signed `MIN / -1` is `MIN` and `MIN % -1` is 0.
 pub extern "C" fn tensor_div_i64(dst: *mut i64, a: *const i64, b: *const i64, n: usize) {
     let dst = unsafe { slice::from_raw_parts_mut(dst, n) };
     let (a, b) = unsafe { (slice::from_raw_parts(a, n), slice::from_raw_parts(b, n)) };
     for i in 0..n {
-        dst[i] = a[i].checked_div(b[i]).unwrap_or(0);
+        dst[i] = if b[i] == 0 {
+            -1
+        } else {
+            a[i].wrapping_div(b[i])
+        };
     }
 }
 
@@ -336,7 +341,11 @@ pub extern "C" fn tensor_div_i32(dst: *mut i32, a: *const i32, b: *const i32, n:
     let dst = unsafe { slice::from_raw_parts_mut(dst, n) };
     let (a, b) = unsafe { (slice::from_raw_parts(a, n), slice::from_raw_parts(b, n)) };
     for i in 0..n {
-        dst[i] = a[i].checked_div(b[i]).unwrap_or(0);
+        dst[i] = if b[i] == 0 {
+            -1
+        } else {
+            a[i].wrapping_div(b[i])
+        };
     }
 }
 
@@ -344,7 +353,7 @@ pub extern "C" fn tensor_div_ui32(dst: *mut u32, a: *const u32, b: *const u32, n
     let dst = unsafe { slice::from_raw_parts_mut(dst, n) };
     let (a, b) = unsafe { (slice::from_raw_parts(a, n), slice::from_raw_parts(b, n)) };
     for i in 0..n {
-        dst[i] = a[i].checked_div(b[i]).unwrap_or(0);
+        dst[i] = a[i].checked_div(b[i]).unwrap_or(u32::MAX);
     }
 }
 
@@ -352,7 +361,11 @@ pub extern "C" fn tensor_rem_i64(dst: *mut i64, a: *const i64, b: *const i64, n:
     let dst = unsafe { slice::from_raw_parts_mut(dst, n) };
     let (a, b) = unsafe { (slice::from_raw_parts(a, n), slice::from_raw_parts(b, n)) };
     for i in 0..n {
-        dst[i] = if b[i] != 0 { a[i] % b[i] } else { 0 };
+        dst[i] = if b[i] == 0 {
+            a[i]
+        } else {
+            a[i].wrapping_rem(b[i])
+        };
     }
 }
 
@@ -360,7 +373,11 @@ pub extern "C" fn tensor_rem_i32(dst: *mut i32, a: *const i32, b: *const i32, n:
     let dst = unsafe { slice::from_raw_parts_mut(dst, n) };
     let (a, b) = unsafe { (slice::from_raw_parts(a, n), slice::from_raw_parts(b, n)) };
     for i in 0..n {
-        dst[i] = if b[i] != 0 { a[i] % b[i] } else { 0 };
+        dst[i] = if b[i] == 0 {
+            a[i]
+        } else {
+            a[i].wrapping_rem(b[i])
+        };
     }
 }
 
@@ -368,7 +385,7 @@ pub extern "C" fn tensor_rem_ui32(dst: *mut u32, a: *const u32, b: *const u32, n
     let dst = unsafe { slice::from_raw_parts_mut(dst, n) };
     let (a, b) = unsafe { (slice::from_raw_parts(a, n), slice::from_raw_parts(b, n)) };
     for i in 0..n {
-        dst[i] = if b[i] != 0 { a[i] % b[i] } else { 0 };
+        dst[i] = a[i].checked_rem(b[i]).unwrap_or(a[i]);
     }
 }
 

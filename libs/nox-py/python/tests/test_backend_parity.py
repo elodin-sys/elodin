@@ -167,6 +167,27 @@ def solve(x):
     return jnp.linalg.solve(3.0 * jnp.eye(4) + jnp.outer(x, x), x)
 
 
+def decompositions(x):
+    # Products and spectra only: LAPACK and faer may give a factor's columns opposite signs.
+    m = jnp.outer(x, x[::-1]) + jnp.diag(jnp.arange(4.0, 8.0))
+    u, s, vt = jnp.linalg.svd(m)
+    w, v = jnp.linalg.eigh(m + m.T)
+    q, r = jnp.linalg.qr(m)
+    return ((u * s) @ vt + (v * w) @ v.T + q @ r).sum(axis=1) + s + w
+
+
+def swarm_guidance(x):
+    # Per-entity u64 zone arithmetic, a masked argmin and a lookup by its index, as in the
+    # waypoint guidance of a drone swarm. Adding x keeps a history row per tick.
+    table = jnp.asarray(np.stack([np.cos(np.arange(32.0)), np.sin(np.arange(32.0))], axis=1))
+    start, count = (jnp.round(9.0 * jnp.abs(x[:2])) + jnp.array([0.0, 1.0])).astype(jnp.uint64)
+    offsets = (jnp.arange(32, dtype=jnp.uint64) - start) % 32
+    dist = jnp.where(offsets < count, jnp.linalg.norm(table - x[2:], axis=1), jnp.inf)
+    nearest = jnp.argmin(dist).astype(jnp.uint64)
+    index = jnp.where((x[0] > 0) & (x[1] < 0.5), (nearest - start) % count, (nearest + 1) % 32)
+    return jnp.concatenate([table[index], jnp.stack([index, count]).astype(jnp.float64)]) + x
+
+
 def reduce_window(x):
     pairs = jax.lax.reduce_window(outer(x), 0.0, jax.lax.add, (1, 2), (1, 2), "VALID")
     peaks = jax.lax.reduce_window(x, -jnp.inf, jax.lax.max, (3,), (1,), "SAME")
@@ -255,6 +276,8 @@ CASES = [
     motor_thrust,
     matvec,
     solve,
+    decompositions,
+    swarm_guidance,
     reduce_window,
     max_pool_grad,
     table_lookup,
@@ -301,11 +324,12 @@ def test_results_do_not_depend_on_the_worker_count(fn, mapper):
     np.testing.assert_allclose(two, expected, rtol=1e-12, atol=1e-12)
 
 
-def test_matvec_on_the_pointer_abi():
-    # Five entities make the batched matrix 80 elements, past the scalar ABI's 64.
-    expected = history(matvec, "jax-cpu", entities=5)
+@pytest.mark.parametrize("fn", [matvec, solve, decompositions], ids=lambda fn: fn.__name__)
+def test_batched_matrices_on_the_pointer_abi(fn):
+    # Five entities make the batched matrices 80 elements, past the scalar ABI's 64.
+    expected = history(fn, "jax-cpu", entities=5)
     np.testing.assert_allclose(
-        history(matvec, "cranelift", entities=5), expected, rtol=1e-12, atol=1e-12
+        history(fn, "cranelift", entities=5), expected, rtol=1e-12, atol=1e-12
     )
 
 
@@ -398,6 +422,14 @@ def nan_reductions(x, k):
     return jnp.stack([jnp.max(y), jnp.min(y), jnp.max(y[:2]), jnp.min(y[2:])]), Z
 
 
+def int_div_by_zero(x, k):
+    # Lane 0 divides by zero, for which XLA defines the result.
+    d = jnp.roll(k, 1).at[0].set(0)
+    q = k // d + 10 * jax.lax.rem(k, d)
+    u = jax.lax.div(k.astype(jnp.uint64), d.astype(jnp.uint64))
+    return x, q + 100 * u.astype(jnp.int64)
+
+
 def loop_dot_sum(x, k):
     # The loop body is a separate function, which can get the other ABI than its caller.
     w = jnp.array([0.4, -1.1, 0.7, 0.2])
@@ -431,6 +463,7 @@ GIST_CASES = {
     "argmax_nan": argmax_nan_gist,
     "matvec_batched": lambda x, k: ((jnp.stack([M, M.T]) @ x).sum(axis=0), Z),
     "loop_dot_sum": loop_dot_sum,
+    "int_div_by_zero": int_div_by_zero,
     "nan_max_min": nan_max_min,
     "nan_reductions": nan_reductions,
     "cumsum_i64": lambda x, k: (x, jnp.cumsum(k)),

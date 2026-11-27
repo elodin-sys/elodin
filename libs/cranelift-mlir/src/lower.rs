@@ -3328,6 +3328,7 @@ fn lower_mem_lanes(
         &mut lanes,
         type_map,
     )?;
+    check_lane_counts(instr, &outs, result_types)?;
     let mut results = Vec::with_capacity(outs.len());
     for (i, (mut out, ty)) in outs.into_iter().zip(result_types).enumerate() {
         out.unpack_in(builder);
@@ -6692,9 +6693,16 @@ fn lower_instruction_mem(
                 .map(|s| LaneRepr::scalar(vec![s]))
                 .collect())
         }
-        Instruction::CustomCall { call_target, .. } => {
-            Err(format!("mem: custom_call not yet supported: {call_target}"))
-        }
+        Instruction::CustomCall { .. } => lower_mem_custom_call(
+            builder,
+            instr,
+            result_types,
+            jit_module,
+            value_map,
+            type_map,
+            pool,
+            result_vid,
+        ),
 
         Instruction::Return { .. } => Ok(vec![]),
 
@@ -7589,12 +7597,32 @@ fn lower_body(
             value_map,
             type_map,
         )?;
+        check_lane_counts(&ir.instr, &result_vals, &result_types)?;
 
         for (i, (vid, ty)) in ir.values.iter().enumerate() {
             if i < result_vals.len() {
                 value_map.insert(*vid, result_vals[i].clone());
                 type_map.insert(*vid, ty.clone());
             }
+        }
+    }
+    Ok(())
+}
+
+/// Consumers index lanes by their operand's type, so a result short of its type's element
+/// count would be read past or padded silently.
+fn check_lane_counts(
+    instr: &Instruction,
+    results: &[LaneRepr],
+    types: &[TensorType],
+) -> Result<(), String> {
+    for (lanes, ty) in results.iter().zip(types) {
+        if lanes.len() != ty.num_elements() {
+            return Err(format!(
+                "{} produced {} lanes for {ty}",
+                crate::useinfo::instr_kind(instr),
+                lanes.len()
+            ));
         }
     }
     Ok(())
@@ -7748,10 +7776,8 @@ fn lower_instruction(
             let out = elementwise_binop(builder, l, r, |b, a, c| {
                 if is_float(et) {
                     b.ins().fdiv(a, c)
-                } else if is_unsigned(et) {
-                    b.ins().udiv(a, c)
                 } else {
-                    b.ins().sdiv(a, c)
+                    int_div_rem(b, a, c, is_unsigned(et), false)
                 }
             });
             Ok(vec![LaneRepr::scalar(out)])
@@ -8045,19 +8071,10 @@ fn lower_instruction(
             } else {
                 let l = get_vals(builder, value_map, lhs)?.to_vec();
                 let r = get_vals(builder, value_map, rhs)?.to_vec();
-                let n = l.len().max(r.len());
                 let unsigned = is_unsigned(rt.element_type);
-                let out: Vec<Value> = (0..n)
-                    .map(|i| {
-                        let lv = if i < l.len() { l[i] } else { l[0] };
-                        let rv = if i < r.len() { r[i] } else { r[0] };
-                        if unsigned {
-                            builder.ins().urem(lv, rv)
-                        } else {
-                            builder.ins().srem(lv, rv)
-                        }
-                    })
-                    .collect();
+                let out = elementwise_binop(builder, &l, &r, |b, x, d| {
+                    int_div_rem(b, x, d, unsigned, true)
+                });
                 Ok(vec![LaneRepr::scalar(out)])
             }
         }
@@ -8233,20 +8250,7 @@ fn lower_instruction(
         // ----- Shape ops -----
         Instruction::Reshape { operand } => {
             let vals = get_vals(builder, value_map, operand)?.to_vec();
-            let n = rt.num_elements();
-            let out = if vals.len() == n {
-                vals
-            } else if vals.len() > n {
-                vals[..n].to_vec()
-            } else {
-                let mut out = vals;
-                let ct = cranelift_type_for(rt.element_type);
-                while out.len() < n {
-                    out.push(builder.ins().iconst(ct, 0));
-                }
-                out
-            };
-            Ok(vec![LaneRepr::scalar(out)])
+            Ok(vec![LaneRepr::scalar(vals)])
         }
 
         Instruction::BroadcastInDim {
@@ -9719,6 +9723,48 @@ fn scalar_to_cranelift(builder: &mut FunctionBuilder, sv: &ScalarValue, et: Elem
     }
 }
 
+/// Integer `x / d` or `x % d` with XLA's results where the instruction would trap: `x / 0` is
+/// all ones and `x % 0` is `x`; signed `MIN / -1` is `MIN` and `MIN % -1` is 0.
+fn int_div_rem(
+    builder: &mut FunctionBuilder,
+    x: Value,
+    d: Value,
+    unsigned: bool,
+    rem: bool,
+) -> Value {
+    let ty = builder.func.dfg.value_type(x);
+    // `iconst` takes narrow immediates zero-extended.
+    let ones = if ty.bits() == 64 {
+        -1
+    } else {
+        (1i64 << ty.bits()) - 1
+    };
+    let zero = builder.ins().icmp_imm(IntCC::Equal, d, 0);
+    let mut trapping = zero;
+    if !unsigned {
+        let min = builder.ins().iconst(ty, (1u64 << (ty.bits() - 1)) as i64);
+        let neg_one = builder.ins().iconst(ty, ones);
+        let x_min = builder.ins().icmp(IntCC::Equal, x, min);
+        let d_neg_one = builder.ins().icmp(IntCC::Equal, d, neg_one);
+        let overflow = builder.ins().band(x_min, d_neg_one);
+        trapping = builder.ins().bor(zero, overflow);
+    }
+    let one = builder.ins().iconst(ty, 1);
+    let divisor = builder.ins().select(trapping, one, d);
+    let out = match (rem, unsigned) {
+        (false, true) => builder.ins().udiv(x, divisor),
+        (false, false) => builder.ins().sdiv(x, divisor),
+        (true, true) => builder.ins().urem(x, divisor),
+        (true, false) => builder.ins().srem(x, divisor),
+    };
+    let at_zero = if rem {
+        x
+    } else {
+        builder.ins().iconst(ty, ones)
+    };
+    builder.ins().select(zero, at_zero, out)
+}
+
 fn elementwise_binop(
     builder: &mut FunctionBuilder,
     l: &[Value],
@@ -10268,7 +10314,7 @@ fn broadcast_values(
                 src_flat += idx * src_strides[pos];
             }
         }
-        out.push(vals[src_flat.min(vals.len() - 1)]);
+        out.push(vals[src_flat]);
     }
     out
 }
@@ -10370,9 +10416,7 @@ fn slice_tensor(vals: &[Value], src_shape: &[i64], starts: &[i64], limits: &[i64
             let src_coord = coord + starts.get(d).copied().unwrap_or(0) as usize;
             src_flat += src_coord * src_strides[d];
         }
-        if src_flat < vals.len() {
-            out.push(vals[src_flat]);
-        }
+        out.push(vals[src_flat]);
     }
     out
 }
@@ -10732,7 +10776,7 @@ fn lower_transpose(
     permutation: &[i64],
 ) -> TensorVals {
     let n = out_ty.num_elements();
-    if vals.len() != n || src_ty.shape.len() != permutation.len() {
+    if src_ty.shape.len() != permutation.len() {
         return vals.to_vec();
     }
 
@@ -10901,6 +10945,105 @@ fn lower_dynamic_update_slice(
         results.push(v);
     }
     results
+}
+
+/// Lowers a LAPACK call of a pointer-ABI function through its scalar-ABI code one matrix of
+/// the stack at a time, so only that matrix's lanes are live across the host call.
+#[allow(clippy::too_many_arguments)]
+fn lower_mem_custom_call(
+    builder: &mut FunctionBuilder,
+    instr: &Instruction,
+    result_types: &[TensorType],
+    jit_module: &mut dyn Module,
+    value_map: &mut HashMap<ValueId, LaneRepr>,
+    type_map: &HashMap<ValueId, TensorType>,
+    pool: &mut crate::slot_pool::SlotPool,
+    result_vid: Option<ValueId>,
+) -> Result<Vec<LaneRepr>, String> {
+    let Instruction::CustomCall {
+        call_target,
+        operands,
+        backend_config,
+    } = instr
+    else {
+        unreachable!("lower_mem_custom_call on {instr:?}");
+    };
+    let flags = MemFlags::trusted();
+    let mut srcs = Vec::with_capacity(operands.len());
+    for vid in operands {
+        let ty = type_map
+            .get(vid)
+            .cloned()
+            .ok_or_else(|| format!("mem: missing type for {vid:?}"))?;
+        let ptr = value_map
+            .get_mut(vid)
+            .ok_or_else(|| format!("mem: missing value {vid:?}"))?
+            .as_scalar_or_spill(builder)[0];
+        srcs.push((*vid, ptr, ty));
+    }
+    // Every operand and result of a batched LAPACK call shares the leading batch dims.
+    let stack = srcs.first().map_or(&[][..], |(_, _, ty)| {
+        &ty.shape[..ty.rank().saturating_sub(2)]
+    });
+    let batch_dims = stack.len();
+    let batch = stack.iter().product::<i64>() as usize;
+    let matrix = |ty: &TensorType| TensorType {
+        shape: ty.shape[batch_dims..].to_vec(),
+        element_type: ty.element_type,
+    };
+    let matrix_types: HashMap<ValueId, TensorType> =
+        srcs.iter().map(|(vid, _, ty)| (*vid, matrix(ty))).collect();
+    let matrix_results: Vec<TensorType> = result_types.iter().map(matrix).collect();
+    let dsts: Vec<Value> = result_types
+        .iter()
+        .enumerate()
+        .map(|(i, ty)| match i {
+            0 => alloc_slot_for_vid(builder, pool, result_vid, ty.byte_size()),
+            _ => alloc_slot(builder, ty.byte_size()),
+        })
+        .collect();
+    for b in 0..batch {
+        let mut lanes = HashMap::new();
+        for (vid, ptr, ty) in &srcs {
+            let (n, sz) = (
+                matrix_types[vid].num_elements(),
+                ty.element_type.byte_size(),
+            );
+            let ct = cranelift_type_for(ty.element_type);
+            let vals = (0..n)
+                .map(|i| {
+                    builder
+                        .ins()
+                        .load(ct, flags, *ptr, ((b * n + i) * sz) as i32)
+                })
+                .collect();
+            lanes.insert(*vid, LaneRepr::scalar(vals));
+        }
+        let outs = lower_custom_call(
+            builder,
+            call_target,
+            operands,
+            &matrix_results,
+            &mut lanes,
+            &matrix_types,
+            jit_module,
+            backend_config,
+        )?;
+        check_lane_counts(instr, &outs, &matrix_results)?;
+        for ((mut out, ty), dst) in outs.into_iter().zip(&matrix_results).zip(&dsts) {
+            out.unpack_in(builder);
+            let (n, sz) = (ty.num_elements(), ty.element_type.byte_size());
+            for (j, &v) in out.as_scalar().iter().enumerate() {
+                builder
+                    .ins()
+                    .store(flags, v, *dst, ((b * n + j) * sz) as i32);
+            }
+        }
+    }
+    Ok(dsts
+        .into_iter()
+        .map(|dst| LaneRepr::scalar(vec![dst]))
+        .collect())
 }
 
 fn lower_custom_call(
@@ -11528,13 +11671,12 @@ fn lower_svd_custom_call(
     _type_map: &HashMap<ValueId, TensorType>,
     jit_module: &mut dyn Module,
 ) -> Result<Vec<LaneRepr>, String> {
-    let a_vals = get_vals(builder, value_map, &operands[0])?;
-    let n = require_square("SVD", a_vals)?;
+    let a_vals = get_vals(builder, value_map, &operands[0])?.to_vec();
+    let (batch, n) = square_stack("SVD", &result_types[0], a_vals.len())?;
     let f8 = 8;
 
     let (a_b, u_b, s_b, vt_b, info_b) = (n * n * f8, n * n * f8, n * f8, n * n * f8, 4);
     let (_, base) = lapack_slot(builder, a_b + u_b + s_b + vt_b + info_b);
-    store_f64_vals(builder, a_vals, base, 0);
 
     let u_off = a_b as i32;
     let s_off = (a_b + u_b) as i32;
@@ -11547,27 +11689,33 @@ fn lower_svd_custom_call(
 
     let n_val = builder.ins().iconst(types::I64, n as i64);
     let pt = ptr_type();
-    lapack_call(
-        builder,
-        jit_module,
-        "__cranelift_svd",
-        &[pt, types::I64, pt, pt, pt, pt],
-        &[base, n_val, u_ptr, s_ptr, vt_ptr, info_ptr],
-    )?;
+    let (mut u, mut s, mut vt, mut info) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for b in 0..batch {
+        store_f64_vals(builder, &a_vals[b * n * n..(b + 1) * n * n], base, 0);
+        lapack_call(
+            builder,
+            jit_module,
+            "__cranelift_svd",
+            &[pt, types::I64, pt, pt, pt, pt],
+            &[base, n_val, u_ptr, s_ptr, vt_ptr, info_ptr],
+        )?;
+        u.extend(load_f64_vals(builder, n * n, base, u_off));
+        s.extend(load_f64_vals(builder, n, base, s_off));
+        vt.extend(load_f64_vals(builder, n * n, base, vt_off));
+        info.push(load_info_i32(builder, base, info_off));
+    }
 
     // XLA dgesdd_ffi convention: (A_overwritten, sigma, U, VT, info)
     let mut result_groups = vec![
-        load_f64_scalar_lane(builder, n * n, base, u_off),
-        load_f64_scalar_lane(builder, n, base, s_off),
-        load_f64_scalar_lane(builder, n * n, base, u_off),
+        LaneRepr::scalar(u.clone()),
+        LaneRepr::scalar(s),
+        LaneRepr::scalar(u),
     ];
     if result_types.len() > 3 {
-        result_groups.push(load_f64_scalar_lane(builder, n * n, base, vt_off));
+        result_groups.push(LaneRepr::scalar(vt));
     }
     if result_types.len() > 4 {
-        result_groups.push(LaneRepr::scalar(vec![load_info_i32(
-            builder, base, info_off,
-        )]));
+        result_groups.push(LaneRepr::scalar(info));
     }
     Ok(result_groups)
 }
@@ -11581,6 +11729,16 @@ fn matrix_stack(name: &str, ty: &TensorType) -> Result<(usize, usize, usize), St
             *cols as usize,
         )),
         _ => Err(format!("{name}: expected a stack of matrices, got {ty}")),
+    }
+}
+
+/// `(batch, n)` of a stack of `n x n` matrices holding `len` elements.
+fn square_stack(name: &str, ty: &TensorType, len: usize) -> Result<(usize, usize), String> {
+    match matrix_stack(name, ty)? {
+        (batch, rows, n) if rows == n && batch * n * n == len => Ok((batch, n)),
+        _ => Err(format!(
+            "{name}: expected a stack of square matrices, got {ty}"
+        )),
     }
 }
 
@@ -11795,18 +11953,19 @@ fn lower_qr_custom_call(
     _type_map: &HashMap<ValueId, TensorType>,
     jit_module: &mut dyn Module,
 ) -> Result<Vec<LaneRepr>, String> {
-    let a_vals = get_vals(builder, value_map, &operands[0])?;
-    let rt = &result_types[0];
-    let (m, n) = if rt.shape.len() == 2 {
-        (rt.shape[0] as usize, rt.shape[1] as usize)
-    } else {
-        return Err("QR: expected 2D result".to_string());
-    };
+    let a_vals = get_vals(builder, value_map, &operands[0])?.to_vec();
+    let (batch, m, n) = matrix_stack("QR", &result_types[0])?;
+    if a_vals.len() != batch * m * n {
+        return Err(format!(
+            "QR: operand has {} elements, expected {}",
+            a_vals.len(),
+            result_types[0]
+        ));
+    }
     let f8 = 8;
 
     let (a_b, qr_b, tau_b) = (m * n * f8, m * n * f8, m.min(n) * f8);
     let (_, base) = lapack_slot(builder, a_b + qr_b + tau_b);
-    store_f64_vals(builder, a_vals, base, 0);
 
     let qr_off = a_b as i32;
     let tau_off = (a_b + qr_b) as i32;
@@ -11816,18 +11975,21 @@ fn lower_qr_custom_call(
     let m_val = builder.ins().iconst(types::I64, m as i64);
     let n_val = builder.ins().iconst(types::I64, n as i64);
     let pt = ptr_type();
-    lapack_call(
-        builder,
-        jit_module,
-        "__cranelift_qr",
-        &[pt, types::I64, types::I64, pt, pt],
-        &[base, m_val, n_val, qr_ptr, tau_ptr],
-    )?;
+    let (mut qr, mut tau) = (Vec::new(), Vec::new());
+    for b in 0..batch {
+        store_f64_vals(builder, &a_vals[b * m * n..(b + 1) * m * n], base, 0);
+        lapack_call(
+            builder,
+            jit_module,
+            "__cranelift_qr",
+            &[pt, types::I64, types::I64, pt, pt],
+            &[base, m_val, n_val, qr_ptr, tau_ptr],
+        )?;
+        qr.extend(load_f64_vals(builder, m * n, base, qr_off));
+        tau.extend(load_f64_vals(builder, m.min(n), base, tau_off));
+    }
 
-    Ok(vec![
-        load_f64_scalar_lane(builder, m * n, base, qr_off),
-        load_f64_scalar_lane(builder, m.min(n), base, tau_off),
-    ])
+    Ok(vec![LaneRepr::scalar(qr), LaneRepr::scalar(tau)])
 }
 
 fn lower_orgqr_custom_call(
@@ -11841,19 +12003,13 @@ fn lower_orgqr_custom_call(
     let qr_vals = get_vals(builder, value_map, &operands[0])?.to_vec();
     let tau_vals = get_vals(builder, value_map, &operands[1])?.to_vec();
 
-    let rt = &result_types[0];
-    let (m, n) = if rt.shape.len() == 2 {
-        (rt.shape[0] as usize, rt.shape[1] as usize)
-    } else {
-        return Err("ORGQR: expected 2D result".to_string());
-    };
+    let (batch, m, n) = matrix_stack("ORGQR", &result_types[0])?;
+    let (qr_len, tau_len) = (qr_vals.len() / batch.max(1), tau_vals.len() / batch.max(1));
     let f8 = 8;
 
-    let (qr_b, tau_b, q_b) = (qr_vals.len() * f8, tau_vals.len() * f8, m * n * f8);
+    let (qr_b, tau_b, q_b) = (qr_len * f8, tau_len * f8, m * n * f8);
     let (_, base) = lapack_slot(builder, qr_b + tau_b + q_b);
-    store_f64_vals(builder, &qr_vals, base, 0);
     let tau_off = qr_b as i32;
-    store_f64_vals(builder, &tau_vals, base, tau_off);
     let q_off = (qr_b + tau_b) as i32;
     let tau_ptr = builder.ins().iadd_imm(base, tau_off as i64);
     let q_ptr = builder.ins().iadd_imm(base, q_off as i64);
@@ -11861,32 +12017,42 @@ fn lower_orgqr_custom_call(
     let m_val = builder.ins().iconst(types::I64, m as i64);
     let n_val = builder.ins().iconst(types::I64, n as i64);
     let pt = ptr_type();
-    lapack_call(
-        builder,
-        jit_module,
-        "__cranelift_orgqr",
-        &[pt, pt, types::I64, types::I64, pt],
-        &[base, tau_ptr, m_val, n_val, q_ptr],
-    )?;
+    let mut q = Vec::with_capacity(batch * m * n);
+    for b in 0..batch {
+        store_f64_vals(builder, &qr_vals[b * qr_len..(b + 1) * qr_len], base, 0);
+        store_f64_vals(
+            builder,
+            &tau_vals[b * tau_len..(b + 1) * tau_len],
+            base,
+            tau_off,
+        );
+        lapack_call(
+            builder,
+            jit_module,
+            "__cranelift_orgqr",
+            &[pt, pt, types::I64, types::I64, pt],
+            &[base, tau_ptr, m_val, n_val, q_ptr],
+        )?;
+        q.extend(load_f64_vals(builder, m * n, base, q_off));
+    }
 
-    Ok(vec![load_f64_scalar_lane(builder, m * n, base, q_off)])
+    Ok(vec![LaneRepr::scalar(q)])
 }
 
 fn lower_syevd_custom_call(
     builder: &mut FunctionBuilder,
     operands: &[ValueId],
-    _result_types: &[TensorType],
+    result_types: &[TensorType],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     _type_map: &HashMap<ValueId, TensorType>,
     jit_module: &mut dyn Module,
 ) -> Result<Vec<LaneRepr>, String> {
-    let a_vals = get_vals(builder, value_map, &operands[0])?;
-    let n = require_square("SYEVD", a_vals)?;
+    let a_vals = get_vals(builder, value_map, &operands[0])?.to_vec();
+    let (batch, n) = square_stack("SYEVD", &result_types[0], a_vals.len())?;
     let f8 = 8;
 
     let (a_b, ev_b, ew_b, info_b) = (n * n * f8, n * n * f8, n * f8, 4);
     let (_, base) = lapack_slot(builder, a_b + ev_b + ew_b + info_b);
-    store_f64_vals(builder, a_vals, base, 0);
 
     let ev_off = a_b as i32;
     let ew_off = (a_b + ev_b) as i32;
@@ -11897,18 +12063,25 @@ fn lower_syevd_custom_call(
 
     let n_val = builder.ins().iconst(types::I64, n as i64);
     let pt = ptr_type();
-    lapack_call(
-        builder,
-        jit_module,
-        "__cranelift_syevd",
-        &[pt, types::I64, pt, pt, pt],
-        &[base, n_val, ev_ptr, ew_ptr, info_ptr],
-    )?;
+    let (mut ev, mut ew, mut info) = (Vec::new(), Vec::new(), Vec::new());
+    for b in 0..batch {
+        store_f64_vals(builder, &a_vals[b * n * n..(b + 1) * n * n], base, 0);
+        lapack_call(
+            builder,
+            jit_module,
+            "__cranelift_syevd",
+            &[pt, types::I64, pt, pt, pt],
+            &[base, n_val, ev_ptr, ew_ptr, info_ptr],
+        )?;
+        ev.extend(load_f64_vals(builder, n * n, base, ev_off));
+        ew.extend(load_f64_vals(builder, n, base, ew_off));
+        info.push(load_info_i32(builder, base, info_off));
+    }
 
     Ok(vec![
-        load_f64_scalar_lane(builder, n * n, base, ev_off),
-        load_f64_scalar_lane(builder, n, base, ew_off),
-        LaneRepr::scalar(vec![load_info_i32(builder, base, info_off)]),
+        LaneRepr::scalar(ev),
+        LaneRepr::scalar(ew),
+        LaneRepr::scalar(info),
     ])
 }
 

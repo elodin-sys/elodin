@@ -430,7 +430,7 @@ fn full_key(ir: &InstrResult, aliases: &HashMap<ValueId, ValueId>) -> String {
     format!("{instr:?}")
 }
 
-fn nested_bodies(instr: &Instruction) -> Vec<&[InstrResult]> {
+pub(crate) fn nested_bodies(instr: &Instruction) -> Vec<&[InstrResult]> {
     match instr {
         Instruction::While {
             cond_body,
