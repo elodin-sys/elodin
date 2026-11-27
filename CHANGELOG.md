@@ -35,6 +35,7 @@
 - **(doc)** Note in the quickstart that the macOS CLI needs Homebrew's `ffmpeg@8` at runtime.
 - **(fix)** The editor queues database requests while all 255 request IDs are in use instead of dropping them, so a recording opened with many reads in flight no longer stays without vehicle positions or plot data. A request that cannot be sent fails like a refused one and is retried.
 - **(fix)** In the browser editor, a seek drops series reads that are still waiting to be sent, so the reads for the new position go out first.
+- **(fix)** In the browser editor, playback skips a gap only where every series it shows was read and found empty, so opening a recording or clicking the timeline while playing no longer jumps toward the end.
 
 ## v0.21
 

@@ -10,7 +10,9 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 use impeller::types::{ComponentId, Timestamp};
-use impeller_bevy::{CurrentStreamId, SeriesFetchPriority, TelemetryCache};
+use impeller_bevy::{
+    ComponentSchemaRegistry, CurrentStreamId, SeriesFetchPriority, TelemetryCache,
+};
 use impeller_wkt::{CurrentTimestamp, DbConfig, EarliestTimestamp, LastUpdated};
 
 use super::{AutoFollowLatestState, LatestFollow, PlaybackSpeed};
@@ -277,11 +279,18 @@ pub fn skip_discontinuities(
     region: Res<PlaybackRegion>,
     earliest: Res<EarliestTimestamp>,
     last_updated: Res<LastUpdated>,
+    schema: Res<ComponentSchemaRegistry>,
     mut current: ResMut<CurrentTimestamp>,
     mut index: ResMut<PlaybackDiscontinuities>,
 ) {
-    let imminent = imminent_gap(&cache, &priority.high, current.0.0);
+    // Native backfill loads every series from its start; the browser loads
+    // blocks near the playhead, so a span without samples may just be unread.
+    let read = |gap: &(i64, i64)| {
+        !cfg!(target_family = "wasm") || gap_was_read(&cache, &priority.high, &schema, *gap)
+    };
+    let imminent = imminent_gap(&cache, &priority.high, current.0.0).filter(read);
     index.scan(&cache, &priority.high);
+    index.gaps.retain(read);
     if !paused.0
         && !latest_follow.0
         && let Some((gap_start, end)) = imminent
@@ -334,6 +343,19 @@ fn imminent_gap(
         }
         _ => None,
     }
+}
+
+/// Every subscribed series the DB can answer was read over the gap and found
+/// empty there. One unread series is enough to say no.
+fn gap_was_read(
+    cache: &TelemetryCache,
+    ids: &std::collections::HashSet<ComponentId>,
+    schema: &ComponentSchemaRegistry,
+    (start, end): (i64, i64),
+) -> bool {
+    ids.iter()
+        .filter(|id| schema.0.contains_key(*id))
+        .all(|id| cache.is_covered(id, &(Timestamp(start)..Timestamp(end))))
 }
 
 impl PlaybackDiscontinuities {
@@ -618,6 +640,48 @@ mod tests {
             imminent_gap(&cache, &ids, 2_000_000),
             Some((1_000_000, 5_000_000)),
             "once that sample is behind the playhead, the remaining hole is the gap"
+        );
+    }
+
+    #[test]
+    fn a_browser_gap_needs_every_readable_series_read_across_it() {
+        use impeller::schema::Schema;
+        use impeller::types::PrimType;
+        use impeller_bevy::ComponentValue;
+
+        let sample = || ComponentValue::F64(nox::array![0.0f64].to_dyn());
+        let imu = ComponentId::new("imu");
+        let mass = ComponentId::new("mass");
+        let adapter = ComponentId::new("world_pos");
+        let mut cache = TelemetryCache::default();
+        cache.insert(imu, Timestamp(0), sample());
+        cache.insert(imu, Timestamp(500_000_000), sample());
+        let ids = std::collections::HashSet::from([imu, mass, adapter]);
+        let mut schema = ComponentSchemaRegistry::default();
+        for id in [imu, mass] {
+            let scalar = Schema::new(PrimType::F64, Vec::<u64>::new()).expect("valid schema");
+            schema.0.insert(id, scalar);
+        }
+
+        let gap = imminent_gap(&cache, &ids, 1_000_000).expect("samples 500 s apart");
+        assert!(
+            !gap_was_read(&cache, &ids, &schema, gap),
+            "an unread span is not a gap"
+        );
+        cache.mark_covered(imu, Timestamp(0), Timestamp(500_000_000));
+        assert!(
+            !gap_was_read(&cache, &ids, &schema, gap),
+            "a readable series with no samples cached must still be read"
+        );
+        cache.mark_covered(mass, Timestamp(0), Timestamp(500_000_000));
+        assert!(
+            gap_was_read(&cache, &ids, &schema, gap),
+            "an id the DB cannot answer, such as an adapter, does not veto the gap"
+        );
+        cache.remove_series(&mass);
+        assert!(
+            !gap_was_read(&cache, &ids, &schema, gap),
+            "lost coverage hides the gap again"
         );
     }
 
