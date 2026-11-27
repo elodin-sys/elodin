@@ -73,6 +73,7 @@ struct WsAssets(Option<HostOrUrl>);
 struct PendingWsConnect(Option<DbEndpoint>);
 
 fn install_connection(world: &mut World, endpoint: Option<DbEndpoint>, initial: bool) {
+    crate::cancel_queued_requests(world);
     if !initial && let Some(mut cache) = world.get_resource_mut::<crate::TelemetryCache>() {
         cache.reset();
     }
@@ -347,6 +348,7 @@ fn open_sockets(world: &mut World) {
         )
     };
     world.remove_non_send::<WsSockets>();
+    crate::cancel_queued_requests(world);
     world.insert_resource(crate::ReplayCachePolicy::default());
     if let Some(mut prefetch) = world.get_resource_mut::<crate::VisiblePrefetchState>() {
         prefetch.clear_in_flight();
