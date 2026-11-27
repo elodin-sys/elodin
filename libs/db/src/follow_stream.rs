@@ -41,6 +41,7 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
     writer: &W,
     target_packet_size: u32,
     req_id: u8,
+    indexed: bool,
 ) -> Result<(), Error> {
     let _span = tracing::info_span!("follow_stream").entered();
     let target = target_packet_size as usize;
@@ -54,8 +55,14 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
     // Track last-sent timestamp per component so we only send newer data.
     let mut component_last_sent: HashMap<ComponentId, Timestamp> = HashMap::new();
 
-    // Track last-sent timestamp per msg-log so we only send new messages.
-    let mut msg_positions: HashMap<PacketId, Timestamp> = HashMap::new();
+    // Track the next ordinal per message log, including equal-timestamp entries.
+    let mut msg_positions: HashMap<PacketId, ([u8; 16], usize)> = HashMap::new();
+    if indexed {
+        let message_logs = db.with_state(|state| state.msg_logs.keys().copied().collect());
+        sink.send(FollowStreamReady { message_logs }.with_request_id(req_id))
+            .await?;
+        sink.flush().await?;
+    }
 
     let (mut last_db_metadata, mut last_recording) =
         db.with_state(|state| (state.db_config.metadata.clone(), state.db_config.recording));
@@ -170,7 +177,6 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
                 )
                 .await?;
             }
-            msg_positions.insert(msg_id, Timestamp(i64::MIN));
             known_msg_ids.insert(msg_id);
         }
 
@@ -256,30 +262,74 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
 
         // ── 4. New message data ─────────────────────────────────────────
         for &msg_id in &known_msg_ids {
-            let last_ts = msg_positions
-                .get(&msg_id)
-                .copied()
-                .unwrap_or(Timestamp(i64::MIN));
-            let updates: Vec<(Timestamp, Vec<u8>)> = db.with_state(|state| {
-                let Some(log) = state.msg_logs.get(&msg_id) else {
-                    return vec![];
-                };
-                let range = Timestamp(last_ts.0.saturating_add(1))..Timestamp(i64::MAX);
-                log.get_range(&range)
-                    .map(|(ts, buf)| (ts, buf.to_vec()))
-                    .collect()
+            // Bound each log's batch by count and bytes; allow a single large
+            // frame without copying its entire backlog while holding DB state.
+            let previous = msg_positions.get(&msg_id).copied();
+            let batch = db.with_state(|state| {
+                let log = state.msg_logs.get(&msg_id)?;
+                // Keep truncation out of this snapshot: the identity and its
+                // entries must come from the same generation.
+                let generation_guard = log.follow_generation.lock().unwrap();
+                let generation = *generation_guard;
+                let index = previous
+                    .filter(|(g, _)| *g == generation)
+                    .map_or(0, |(_, i)| i);
+                let mut entries = Vec::new();
+                let mut bytes = 0usize;
+                for offset in 0..256 {
+                    let Some((timestamp, payload)) = log.get_index(index + offset) else {
+                        break;
+                    };
+                    if !entries.is_empty()
+                        && payload.len() > (1024 * 1024usize).saturating_sub(bytes)
+                    {
+                        break;
+                    }
+                    bytes = bytes.saturating_add(payload.len());
+                    entries.push((index + offset, timestamp, payload.into_owned()));
+                    if bytes >= 1024 * 1024 {
+                        break;
+                    }
+                }
+                Some((generation, log.timestamps().len(), index, entries))
             });
-
-            if !updates.is_empty() {
-                let new_last = updates.last().unwrap().0;
-                msg_positions.insert(msg_id, new_last);
-
-                for (timestamp, data) in updates {
-                    let mut pkt = LenPacket::msg_with_timestamp(msg_id, timestamp, data.len());
-                    pkt.extend_from_slice(&data);
+            let Some((generation, count, index, entries)) = batch else {
+                continue;
+            };
+            if previous.is_none_or(|(g, _)| g != generation) {
+                if indexed {
+                    sink.send(
+                        FollowMessage::Log {
+                            id: msg_id,
+                            generation,
+                            count: count as u64,
+                        }
+                        .with_request_id(req_id),
+                    )
+                    .await?;
+                }
+                msg_positions.insert(msg_id, (generation, index));
+            }
+            for (index, timestamp, payload) in entries {
+                if indexed {
+                    sink.send(
+                        FollowMessage::Entry {
+                            id: msg_id,
+                            generation,
+                            index: index as u64,
+                            timestamp,
+                            payload,
+                        }
+                        .with_request_id(req_id),
+                    )
+                    .await?;
+                } else {
+                    let mut pkt = LenPacket::msg_with_timestamp(msg_id, timestamp, payload.len());
+                    pkt.extend_from_slice(&payload);
                     pkt.set_request_id(req_id);
                     sink.send(pkt).await?;
                 }
+                msg_positions.insert(msg_id, (generation, index + 1));
             }
         }
 

@@ -2,7 +2,7 @@ use std::{
     borrow::Cow,
     fs::File,
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 use impeller::{buf::UmbraBuf, types::Timestamp};
@@ -21,6 +21,20 @@ pub struct MsgLog {
     waker: Arc<WaitQueue>,
     metadata: Option<MsgMetadata>,
     path: PathBuf,
+    pub(crate) follow_generation: Arc<Mutex<[u8; 16]>>,
+}
+
+/// Holds the generation lock until an already-prepared truncation is applied.
+pub(crate) struct PreparedTruncate<'a> {
+    log: &'a MsgLog,
+    _generation: MutexGuard<'a, [u8; 16]>,
+}
+
+impl PreparedTruncate<'_> {
+    pub(crate) fn commit(self) {
+        self.log.timestamps.truncate();
+        self.log.bufs.truncate();
+    }
 }
 
 impl MsgLog {
@@ -43,6 +57,11 @@ impl MsgLog {
             bufs,
             metadata: None,
             path: path.to_path_buf(),
+            follow_generation: Arc::new(Mutex::new({
+                let generation = fastrand::u128(..).to_le_bytes();
+                crate::follow_identity::write(&path.join("follow_generation"), generation)?;
+                generation
+            })),
         };
         Ok(time_series)
     }
@@ -63,6 +82,9 @@ impl MsgLog {
             timestamps,
             bufs,
             path: path.to_path_buf(),
+            follow_generation: Arc::new(Mutex::new(crate::follow_identity::load_or_create(
+                &path.join("follow_generation"),
+            )?)),
             metadata,
         };
         Ok(time_series)
@@ -154,9 +176,21 @@ impl MsgLog {
     ///
     /// Extra `data_log.N` segments are dropped so the next write starts at
     /// `data_log` again.
-    pub fn truncate(&self) {
-        self.timestamps.truncate();
-        self.bufs.truncate();
+    pub fn truncate(&self) -> Result<(), Error> {
+        self.prepare_truncate()?.commit();
+        Ok(())
+    }
+
+    /// Complete fallible identity writes before any samples are removed.
+    pub(crate) fn prepare_truncate(&self) -> Result<PreparedTruncate<'_>, Error> {
+        let mut generation = self.follow_generation.lock().unwrap();
+        let next = fastrand::u128(..).to_le_bytes();
+        crate::follow_identity::write(&self.path.join("follow_generation"), next)?;
+        *generation = next;
+        Ok(PreparedTruncate {
+            log: self,
+            _generation: generation,
+        })
     }
 
     pub fn set_metadata(&mut self, metadata: MsgMetadata) -> Result<(), Error> {
@@ -379,6 +413,44 @@ fn data_log_path(path: &Path, segment_index: u32) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn failed_generation_write_does_not_truncate_messages() {
+        let directory = tempfile::tempdir().unwrap();
+        let log = super::MsgLog::create(directory.path()).unwrap();
+        log.push(impeller::types::Timestamp(100), b"keep").unwrap();
+        let generation = *log.follow_generation.lock().unwrap();
+        std::fs::create_dir(directory.path().join("follow_generation.pending")).unwrap();
+        assert!(log.truncate().is_err());
+        assert_eq!(*log.follow_generation.lock().unwrap(), generation);
+        assert_eq!(log.get_index(0).unwrap().1.as_ref(), b"keep");
+    }
+
+    #[test]
+    fn replication_generation_survives_reopen_and_changes_on_truncate() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("log");
+        let log = super::MsgLog::create(&path).unwrap();
+        let first = *log.follow_generation.lock().unwrap();
+        log.push(impeller::types::Timestamp(100), b"same").unwrap();
+        log.sync_all().unwrap();
+        drop(log);
+        let log = super::MsgLog::open(&path).unwrap();
+        assert_eq!(*log.follow_generation.lock().unwrap(), first);
+        log.truncate().unwrap();
+        let next = *log.follow_generation.lock().unwrap();
+        assert_ne!(next, first);
+        log.push(impeller::types::Timestamp(100), b"same").unwrap();
+        log.sync_all().unwrap();
+        drop(log);
+        assert_eq!(
+            *super::MsgLog::open(&path)
+                .unwrap()
+                .follow_generation
+                .lock()
+                .unwrap(),
+            next
+        );
+    }
     use super::*;
     use std::sync::Arc;
     use tempfile::TempDir;
@@ -414,7 +486,7 @@ mod tests {
         log.push(Timestamp(2), &[2u8; 20]).unwrap();
         assert!(temp.path().join("data_log.1").exists());
 
-        log.truncate();
+        log.truncate().unwrap();
         assert!(log.timestamps().is_empty());
         assert!(!temp.path().join("data_log.1").exists());
         log.push(Timestamp(3), &[3u8; 20]).unwrap();
@@ -451,7 +523,7 @@ mod tests {
             })
         };
         std::thread::yield_now();
-        log.truncate();
+        log.truncate().unwrap();
         reader.join().unwrap();
         assert!(log.timestamps().is_empty());
         assert!(!temp.path().join("data_log.1").exists());

@@ -21,3 +21,6 @@ zerocopy = "0.8"
 arrow.version = "55"
 postcard-schema = "0.2"
 postcard = "1"
+
+[dev-dependencies]
+tempfile = "3"
