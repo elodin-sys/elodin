@@ -163,3 +163,22 @@ CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
 ```
 
 Use `wasm-bindgen-test-runner` matching `Cargo.lock`, with Chrome and ChromeDriver available.
+
+## Package delivery
+
+A host page can deliver the files of a recording's prepared terrain package itself,
+for example in batches or from its own verified cache, by installing
+`globalThis.elodinFetchPackage`:
+
+```ts
+declare var elodinFetchPackage: (request: Request) => Response | Promise<Response>;
+```
+
+The editor calls it for every package read (manifest, tileset and tile files) with
+the `Request` it would otherwise fetch, and never for terrain-provider requests.
+Return the bytes of exactly `request.url`: status 200 for a file in the package, 404
+for one that is not, which then streams from the provider when the recording allows
+it. Responses get the usual checks: status, a 32 MiB limit, and the request's 20 s
+abort signal. A rejection or a thrown error counts as a network failure and is
+retried. The editor looks the function up at each read, so a host can install or
+remove it at any time. The host is responsible for the bytes it returns.
