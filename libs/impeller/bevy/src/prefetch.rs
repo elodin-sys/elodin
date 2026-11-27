@@ -130,11 +130,6 @@ impl VisiblePrefetchState {
             .retain(|key, _| key.component_id() != component_id);
     }
 
-    fn retain_subscribed(&mut self, ids: &HashSet<ComponentId>) {
-        self.requests
-            .retain(|key, _| ids.contains(&key.component_id()));
-    }
-
     fn remove(&mut self, key: PrefetchKey) {
         self.requests.remove(&key);
     }
@@ -344,7 +339,8 @@ pub fn prefetch_visible_window(
     prefetch: &mut VisiblePrefetchState,
     commands: &mut Commands,
 ) {
-    prefetch.retain_subscribed(fetch_ids);
+    // Playback shares these requests. Subscription removal is handled by
+    // update_series_fetch_priority using the complete set of consumers.
     if fetch_ids.is_empty() {
         return;
     }
@@ -654,6 +650,40 @@ fn send_admitted_page(
 #[cfg(test)]
 mod coverage_tests {
     use super::*;
+
+    #[test]
+    fn plot_refresh_preserves_pending_playback_requests_after_seek() {
+        let playback_id = ComponentId(1);
+        let start = 450 * playback::BLOCK_US;
+        let end = start + playback::BLOCK_US;
+        let mut prefetch = VisiblePrefetchState::default();
+        let window = PrefetchKey::Window {
+            component_id: playback_id,
+            start,
+            end,
+        };
+        let anchor = PrefetchKey::Anchor {
+            component_id: playback_id,
+            start,
+        };
+        let window_attempt = prefetch.begin(window).unwrap();
+        let anchor_attempt = prefetch.begin(anchor).unwrap();
+
+        let mut world = bevy::prelude::World::new();
+        prefetch_visible_window(
+            &(Timestamp(start)..Timestamp(end)),
+            (start, end),
+            &HashSet::from([ComponentId(2)]),
+            &TelemetryCache::default(),
+            &ComponentSchemaRegistry::default(),
+            &mut prefetch,
+            &mut world.commands(),
+        );
+
+        assert!(prefetch.is_current(window, window_attempt));
+        assert!(prefetch.is_current(anchor, anchor_attempt));
+        assert!(prefetch.begin(window).is_none());
+    }
 
     #[test]
     fn rejected_or_inconsistent_hold_replies_keep_retry_delay() {

@@ -226,6 +226,32 @@ mod tests {
     }
 
     #[test]
+    fn evicting_a_dense_block_keeps_other_blocks_and_shared_holds() {
+        let mut cache = TelemetryCache::default();
+        let id = ComponentId(7);
+        let value = ComponentValue::F64(nox::array![1f64].to_dyn());
+        let bytes = TelemetryCache::value_bytes(&value);
+        for i in 0..4096 {
+            cache.insert(id, Timestamp(BLOCK_US + i), value.clone());
+        }
+        cache.insert(id, Timestamp(BLOCK_US - 1), value.clone());
+        cache.insert(id, Timestamp(2 * BLOCK_US), value.clone());
+        cache.insert_predecessor(id, Timestamp(0), BLOCK_US, value.clone());
+        // The next block still needs this sample from inside the evicted block.
+        let held = Timestamp(BLOCK_US + 4095);
+        cache.insert_predecessor(id, held, 2 * BLOCK_US, value);
+        cache.drop_block(id, BLOCK_US);
+        let remaining: Vec<_> = cache.series(&id).unwrap().keys().copied().collect();
+        assert_eq!(
+            remaining,
+            [Timestamp(BLOCK_US - 1), held, Timestamp(2 * BLOCK_US)]
+        );
+        assert_eq!(cache.resident_bytes(), 3 * bytes);
+        cache.drop_block(id, 2 * BLOCK_US);
+        assert_eq!(cache.resident_bytes(), bytes);
+    }
+
+    #[test]
     fn retained_bytes_match_a_recount() {
         let mut cache = TelemetryCache::default();
         let id = ComponentId(7);

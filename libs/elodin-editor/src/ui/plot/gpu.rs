@@ -1460,6 +1460,7 @@ fn plot_vertex_floats(
     data_range: Range<Timestamp>,
     earliest: Timestamp,
     pixel_width: usize,
+    visible_x: (f32, f32),
     graph_type: GraphType,
     zoh: bool,
 ) -> Vec<f32> {
@@ -1483,6 +1484,11 @@ fn plot_vertex_floats(
                 for point in strip.iter_mut() {
                     point.0 *= x_scale;
                 }
+                if graph_type == GraphType::Line {
+                    // Budget against the actual camera, including when the stored
+                    // fallback span is wider than the displayed time window.
+                    *strip = pixel_envelope(strip, visible_x, pixel_width);
+                }
             }
             strips
         }
@@ -1492,6 +1498,57 @@ fn plot_vertex_floats(
         GraphType::Line => line_segments_from_strips(&strips, zoh),
         GraphType::Point | GraphType::Bar => point_instances_from_strips(&strips),
     }
+}
+
+/// Preserve the ordered endpoints and extrema of each occupied pixel column.
+/// Each strip is processed separately so decimation cannot bridge data gaps.
+#[cfg(any(target_family = "wasm", test))]
+fn pixel_envelope(points: &[(f32, f32)], range: (f32, f32), width: usize) -> Vec<(f32, f32)> {
+    let span = f64::from(range.1) - f64::from(range.0);
+    if points.len() <= 4 || !span.is_finite() || span <= 0.0 || width == 0 {
+        return points.to_vec();
+    }
+    let column = |x: f32| {
+        (((f64::from(x) - f64::from(range.0)) / span * width as f64).floor())
+            .clamp(-1.0, width as f64) as i64
+    };
+    let mut out = Vec::with_capacity(points.len().min(width.saturating_add(2).saturating_mul(4)));
+    let mut first = 0;
+    while first < points.len() {
+        if !points[first].0.is_finite() || !points[first].1.is_finite() {
+            out.push(points[first]);
+            first += 1;
+            continue;
+        }
+        let bucket = column(points[first].0);
+        let mut end = first + 1;
+        let mut min = first;
+        let mut max = first;
+        while end < points.len()
+            && points[end].0.is_finite()
+            && points[end].1.is_finite()
+            && column(points[end].0) == bucket
+        {
+            if points[end].1 < points[min].1 {
+                min = end;
+            }
+            if points[end].1 > points[max].1 {
+                max = end;
+            }
+            end += 1;
+        }
+        let mut indices = [first, min, max, end - 1];
+        indices.sort_unstable();
+        let mut previous = None;
+        for index in indices {
+            if previous != Some(index) {
+                out.push(points[index]);
+            }
+            previous = Some(index);
+        }
+        first = end;
+    }
+    out
 }
 
 #[cfg(target_family = "wasm")]
@@ -1620,6 +1677,7 @@ fn extract_plot_lines_wasm(
                         data_range.clone(),
                         earliest.0,
                         width.0,
+                        (area.min.x, area.max.x),
                         *graph_type,
                         zoh,
                     );
@@ -1786,6 +1844,76 @@ mod tests {
     use bevy::prelude::{Commands, World};
     use impeller::types::{ComponentId, Timestamp};
     use impeller_wkt::GraphType;
+
+    #[test]
+    fn pixel_envelope_preserves_spikes_and_temporal_order() {
+        let mut points: Vec<_> = (0..1000).map(|i| (i as f32, 0.0)).collect();
+        points[351].1 = 90.0;
+        points[352].1 = -70.0;
+        let sampled = super::pixel_envelope(&points, (0.0, 1000.0), 10);
+        assert!(sampled.len() <= 40);
+        assert_eq!(sampled.first(), points.first());
+        assert_eq!(sampled.last(), points.last());
+        assert!(sampled.contains(&points[351]));
+        assert!(sampled.contains(&points[352]));
+        assert!(sampled.windows(2).all(|pair| pair[0].0 < pair[1].0));
+    }
+
+    #[test]
+    fn pixel_envelope_uses_displayed_window_for_wider_stored_data() {
+        let points: Vec<_> = (0..5200).map(|i| (i as f32 / 10.0, i as f32)).collect();
+        let sampled = super::pixel_envelope(&points, (420.0, 450.0), 300);
+        // Samples a pixel apart within the view must survive, even if the
+        // fallback data contains the entire recording.
+        for point in &points[4200..4500] {
+            assert!(sampled.contains(point));
+        }
+        assert!(sampled.len() <= 4 * 302);
+        assert!(sampled.contains(&points[4199]));
+        assert!(sampled.contains(&points[4500]));
+    }
+
+    #[test]
+    fn pixel_envelope_keeps_gaps_and_terminal_hold() {
+        let strips = [
+            vec![(0.0, 1.0), (0.1, 5.0), (0.2, 2.0), (0.3, 3.0), (0.4, 4.0)],
+            vec![(5.0, 7.0), (6.0, 8.0)],
+        ];
+        let reduced: Vec<_> = strips
+            .iter()
+            .map(|strip| super::pixel_envelope(strip, (0.0, 10.0), 1))
+            .collect();
+        let segments = super::line_segments_from_strips(&reduced, true);
+        assert!(
+            !segments
+                .as_chunks::<6>()
+                .0
+                .iter()
+                .any(|s| s[0] < 1.0 && s[2] >= 5.0)
+        );
+        assert_eq!(
+            &segments[segments.len() - 6..],
+            &[6.0, 8.0, 6.0, 8.0, 1.0, 0.0]
+        );
+    }
+
+    #[test]
+    fn pixel_envelope_does_not_discard_nonfinite_breaks() {
+        let points = [
+            (0.0, 1.0),
+            (0.1, 1.0),
+            (0.2, f32::NAN),
+            (0.3, 1.0),
+            (0.4, 1.0),
+        ];
+        let sampled = super::pixel_envelope(&points, (0.0, 1.0), 1);
+        assert_eq!(sampled.len(), 5);
+        assert!(sampled[2].1.is_nan());
+        assert_eq!(
+            super::pixel_envelope(&points[..2], (0.0, 1.0), 1),
+            points[..2]
+        );
+    }
 
     fn plot_world() -> World {
         let mut world = World::new();
